@@ -280,7 +280,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.722-manual-ideas-no-cap";
+  const BUILD_ID = "item4-0.6.723-profile-fast-music";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -1077,6 +1077,7 @@
     showOperationsView(parsed.view, parsed.tab, { skipHash: true });
   });
 
+  $("operationsProfilesRefresh")?.addEventListener("click", () => { loadOperationsProfilesPanel().catch(() => {}); });
   $("operationsQueueRefresh")?.addEventListener("click", () => {
     loadOperationsQueue().catch(() => {});
   });
@@ -24605,7 +24606,7 @@ function timedScriptAssetLabel(asset, index) {
         ...operationsMusicOptions,
         ...selectedMusicIds
           .filter((id) => !musicById.has(id))
-          .map((id) => ({ id, display_name: id, name: id })),
+          .map((id) => ({ id, display_name: "Track details unavailable", name: "Track details unavailable", unresolved: true })),
       ];
       const musicChecklist = musicTracks.length
         ? musicTracks.map((track) => {
@@ -24614,7 +24615,7 @@ function timedScriptAssetLabel(asset, index) {
             const checked = selectedMusicSet.has(trackId) ? "checked" : "";
             return `<div class="ops-music-preview-row">
               <label class="ops-music-option"><input type="checkbox" data-ops-music-option value="${escapeHtml(trackId)}" ${checked} ${canEdit ? "" : "disabled"}> <span>${escapeHtml(musicOptionLabel(track))}</span></label>
-              <button type="button" class="secondary-button ops-audio-preview-btn" data-ops-music-preview="${escapeHtml(trackId)}" data-preview-url="${escapeHtml(musicPreviewUrl(track))}" aria-label="Preview music ${escapeHtml(musicOptionLabel(track))}">▶ Preview</button>
+              <button type="button" class="secondary-button ops-audio-preview-btn" data-ops-music-preview="${escapeHtml(trackId)}" data-preview-url="${escapeHtml(musicPreviewUrl(track))}" ${track.unresolved ? "disabled title=\"Track details are loading or unavailable\"" : ""} aria-label="Preview music ${escapeHtml(musicOptionLabel(track))}">▶ Preview</button>
             </div>`;
           }).join("")
         : `<div class="subtle">No music library tracks available.</div>`;
@@ -25569,46 +25570,128 @@ function timedScriptAssetLabel(asset, index) {
     });
   });
 
-  async function loadOperationsProfilesPanel() {
-    const meta = $("operationsIdeaMeta");
-    if (meta && !String(meta.textContent || "").trim()) meta.textContent = "Loading profiles…";
-    try {
-      const [profilesResult, voicesResult, musicResult] = await Promise.all([
-        api("/api/operations/profiles", { timeoutMs: 15000 }),
-        api("/api/voices", { timeoutMs: 20000 }).catch(() => ({ voices: [] })),
-        api("/api/music?limit=100", { timeoutMs: 15000 }).catch(() => ({ records: [] })),
-      ]);
-      loadOperationsScheduleSettings().catch(() => {});
-      operationsVoiceOptions = phase6NormalizeVoices(voicesResult?.voices || voicesResult?.records || voicesResult?.items || []);
-      operationsMusicOptions = sortClientMusic(
-        (Array.isArray(musicResult?.records) ? musicResult.records : []).filter((record) => !record.do_not_use)
-      );
-      operationsCanEditProfiles = Boolean(profilesResult?.can_edit_profiles);
-      const profiles = Array.isArray(profilesResult?.profiles) ? profilesResult.profiles : [];
-      mergeOperationsProfilesIntoStudio(profiles);
-      profileVoicesLoaded = true;
-      if (!$("productionRequestWorkspace")?.hidden) applyResolvedDefaultVoice();
-      const working = studioProfiles.find((item) => item.id === selectedProfileId);
-      if (working) applyStudioBackgroundColor(working);
-      renderOperationsProfiles(profiles, operationsCanEditProfiles);
-      const run = $("operationsRunDailyIdeas");
-      if (run) run.hidden = !operationsCanEditProfiles;
-      if (meta && /Loading (operations|profiles)/i.test(String(meta.textContent || ""))) {
-        meta.textContent = `${profiles.length} profile${profiles.length === 1 ? "" : "s"} loaded. Change default narration voice below.`;
-      }
-    } catch (error) {
-      setOperationsMessage(error.message || "Could not load profiles.", "error-text");
-      if (meta) meta.textContent = "Unable to load profiles.";
+  let operationsProfilesLoadInFlight = null;
+  let operationsProfilesLoadTarget = "";
+
+  function loadOperationsProfilesPanel() {
+    const profileId = String(selectedProfileId || "");
+    if (operationsProfilesLoadInFlight && operationsProfilesLoadTarget === profileId) {
+      return operationsProfilesLoadInFlight;
     }
+    const meta = $("operationsIdeaMeta");
+    if (!/^rec[A-Za-z0-9]{14}$/.test(profileId)) {
+      if (meta) meta.textContent = "Select a Content Profile in the header to load its settings.";
+      return Promise.resolve();
+    }
+    operationsProfilesLoadTarget = profileId;
+    const sameProfile = () => selectedProfileId === profileId && operationsControlTab === "profiles";
+    const pending = (async () => {
+      if (meta) meta.textContent = "Loading selected profile settings…";
+      try {
+        // Only one profile and its linked music are required to paint this tab.
+        // Never block selected-profile controls on the large global operations,
+        // music catalog, or ElevenLabs voice requests.
+        const profilesResult = await api("/api/operations/profiles?selected_only=1", {
+          timeoutMs: 15000, retries: 1,
+        });
+        if (!sameProfile()) return;
+        const profiles = Array.isArray(profilesResult?.profiles) ? profilesResult.profiles : [];
+        if (!profiles.length) throw new Error("The selected profile was not returned");
+        operationsCanEditProfiles = Boolean(profilesResult?.can_edit_profiles);
+        // Show voice/default profile instantly. Music is resolved in a second
+        // targeted request, not by a 100-item global catalog scan.
+        operationsMusicOptions = [];
+
+        mergeOperationsProfilesIntoStudio(profiles);
+        profileVoicesLoaded = true;
+        if (!$("productionRequestWorkspace")?.hidden) applyResolvedDefaultVoice();
+        const working = studioProfiles.find((item) => item.id === profileId);
+        if (working) applyStudioBackgroundColor(working);
+        renderOperationsProfiles(profiles, operationsCanEditProfiles);
+        if (meta) meta.textContent = "Showing " + (profiles[0].name || "selected profile")
+          + ". Loading additional voice and music choices…";
+        const run = $("operationsRunDailyIdeas");
+        if (run) run.hidden = !operationsCanEditProfiles;
+
+        // Load the selected pool's linked track names first; never substitute
+        // GUIDs just because those 10 tracks aren't in the first catalog page.
+        let voiceFailed = false;
+        let musicFailed = false;
+        const linkedIds = (Array.isArray(profiles[0].autonomous_music_asset_ids)
+          ? profiles[0].autonomous_music_asset_ids : [])
+          .filter((id) => /^rec[A-Za-z0-9]{14}$/.test(String(id))).slice(0, 50);
+        const selectedMusicTask = linkedIds.length
+          ? api("/api/music?ids=" + encodeURIComponent(linkedIds.join(",")), {
+            timeoutMs: 15000, retries: 1,
+          }).then((data) => {
+            if (!sameProfile()) return;
+            operationsMusicOptions = sortClientMusic(
+              (Array.isArray(data?.records) ? data.records : []).filter((record) => !record.do_not_use)
+            );
+            renderOperationsProfiles(profiles, operationsCanEditProfiles);
+          }).catch((error) => {
+            musicFailed = true;
+            console.warn("Selected profile music pool lookup", error);
+            if (sameProfile()) setOperationsMessage("Could not resolve the selected music pool; retry below.", "error-text");
+          })
+          : Promise.resolve();
+
+        const voiceTask = api("/api/voices", { timeoutMs: 15000, retries: 1 })
+          .then((data) => {
+            if (!sameProfile()) return;
+            operationsVoiceOptions = phase6NormalizeVoices(data?.voices || data?.records || data?.items || []);
+            if (operationsVoiceOptions.length) renderOperationsProfiles(profiles, operationsCanEditProfiles);
+          }).catch((error) => {
+            voiceFailed = true;
+            console.warn("Profile Admin voice catalog", error);
+          });
+        await Promise.allSettled([selectedMusicTask, voiceTask]);
+        if (!sameProfile()) return;
+        if (meta) {
+          meta.textContent = voiceFailed || musicFailed
+            ? "Showing selected profile. Some voice/music choices were unavailable. Click Refresh profile settings to retry."
+            : "Showing " + (profiles[0].name || "selected profile") + " settings. Loading optional music library…";
+        }
+        // Optional choices extend the pool but may be slow. Do not block this
+        // page's ready state or hold up selected track names and voice samples.
+        api("/api/music?limit=100", { timeoutMs: 12000, retries: 1 })
+          .then((data) => {
+            if (!sameProfile()) return;
+            const records = (Array.isArray(data?.records) ? data.records : []).filter((record) => !record.do_not_use);
+            const byId = new Map(operationsMusicOptions.map((record) => [record.id, record]));
+            records.forEach((record) => { if (!byId.has(record.id)) byId.set(record.id, record); });
+            operationsMusicOptions = sortClientMusic([...byId.values()]);
+            renderOperationsProfiles(profiles, operationsCanEditProfiles);
+            if (meta && !voiceFailed && !musicFailed) {
+              meta.textContent = "Showing " + (profiles[0].name || "selected profile") + " settings.";
+            }
+          }).catch((error) => {
+            console.warn("Optional global music choices unavailable", error);
+            if (sameProfile() && meta && !voiceFailed && !musicFailed) {
+              meta.textContent = "Selected profile is ready. Additional music choices unavailable; Refresh to retry.";
+            }
+          });
+      } catch (error) {
+        if (!sameProfile()) return;
+        setOperationsMessage(error?.message || "Profile settings could not load.", "error-text");
+        if (meta) meta.textContent = "Could not load selected profile settings. Use Refresh profile settings below to retry.";
+      }
+    })();
+    operationsProfilesLoadInFlight = pending;
+    pending.finally(() => {
+      if (operationsProfilesLoadInFlight === pending) operationsProfilesLoadInFlight = null;
+    });
+    return pending;
   }
 
   async function loadOperations() {
     const meta = $("operationsIdeaMeta");
     initOperationsInsightsSeason();
     if (meta) meta.textContent = "Loading operations…";
-    // Profiles tab must not wait on the full Ops inventory / desk / music waterfall.
+    // Profile Admin is a fast, self-contained screen. The heavy operational
+    // inventory below must not start or overwrite this tab's load status.
     if (operationsControlTab === "profiles") {
-      await loadOperationsProfilesPanel();
+      return loadOperationsProfilesPanel();
     }
     const voicesPromise = api("/api/voices", { timeoutMs: 20000 }).catch(() => ({ voices: [] }));
     const musicPromise = api("/api/music?limit=100", { timeoutMs: 15000 }).catch(() => ({ records: [] }));

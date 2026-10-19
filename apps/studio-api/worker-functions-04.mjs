@@ -10927,10 +10927,25 @@ export async function getStudioOperations(request, env, authorization) {
 /*__STUDIO_WORKER_END:getStudioOperations__*/
 
 export async function getStudioOperationsProfiles(request, env, authorization) {
-  const profiles = await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 });
+  const url = new URL(request.url);
+  // Profile Admin never needs all city records. Fetch the one selected record
+  // directly to avoid a slow Airtable table scan and cross-profile data reads.
+  // Other legacy consumers retain the unfiltered list contract.
+  const selectedOnly = url.searchParams.get("selected_only") === "1";
+  const selectedId = String(url.searchParams.get("profile") || "");
+  let profiles;
+  if (selectedOnly) {
+    if (!/^rec[A-Za-z0-9]{14}$/.test(selectedId)) throw new HttpError(400, "Select a valid Content Profile");
+    const profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, selectedId);
+    if (!profile?.id) throw new HttpError(404, "Selected Content Profile was not found");
+    profiles = [profile];
+  } else {
+    profiles = await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 });
+  }
   return respond(request, env, {
     ok: true,
     page: "operations-profiles",
+    selected_only: selectedOnly,
     can_edit_profiles: Boolean(authorization?.permissions?.tenant_admin),
     profiles: (profiles || []).map(mapOperationsProfile),
   });

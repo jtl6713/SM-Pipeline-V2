@@ -443,3 +443,4 @@ Deploy PR 884 Studio Profile Admin / Global Admin UI 0.6.719-creative-guidance.
 Deploy Studio Pages UI 0.6.720 single-profile Admin and inherited Airtable creative prompt editor (PR 886).
 # 2026-10-18 deploy Studio UI 0.6.721 profile-admin voice and autonomous music previews (read-only).
 2026-10-18: Deploy Studio UI 0.6.722-manual-ideas-no-cap. Manual unused-photo runs no longer expose an internal backlog-cap code.
+Release Studio UI 0.6.723: fast Profile Admin voice/music load and playable named music pool.
