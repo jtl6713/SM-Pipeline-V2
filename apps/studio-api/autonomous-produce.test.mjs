@@ -197,17 +197,17 @@ test("slot keys are once per morning and afternoon", () => {
 test("open ideas cap is 100 and hour drain advances asset-ready drafts", () => {
   assert.equal(AUTONOMOUS_OPEN_IDEAS_CAP, 100);
   assert.equal(AUTONOMOUS_HOUR_ASSET_DRAIN, 20);
-  assert.equal(autonomousOpenIdeasRoom(0), 20);
-  assert.equal(autonomousOpenIdeasRoom(19), 1);
-  assert.equal(autonomousOpenIdeasRoom(20), 0);
+  assert.equal(autonomousOpenIdeasRoom(0), 100);
+  assert.equal(autonomousOpenIdeasRoom(19), 81);
+  assert.equal(autonomousOpenIdeasRoom(20), 80);
   assert.equal(autonomousOpenIdeasRoom(200), 0);
   assert.equal(autonomousOpenIdeasAtCap(19), false);
-  assert.equal(autonomousOpenIdeasAtCap(20), true);
-  assert.equal(autonomousOpenIdeasAtCap(74), true);
-  assert.equal(autonomousOpenIdeasCreateBudget(15, 0), 5);
-  assert.equal(autonomousOpenIdeasCreateBudget(15, 5), 0);
-  assert.equal(autonomousOpenIdeasCreateBudget(20, 0), 0);
-  assert.equal(autonomousOpenIdeasCreateBudget(10, 3), 7);
+  assert.equal(autonomousOpenIdeasAtCap(20), false);
+  assert.equal(autonomousOpenIdeasAtCap(74), false);
+  assert.equal(autonomousOpenIdeasCreateBudget(15, 0), 85);
+  assert.equal(autonomousOpenIdeasCreateBudget(15, 5), 80);
+  assert.equal(autonomousOpenIdeasCreateBudget(20, 0), 80);
+  assert.equal(autonomousOpenIdeasCreateBudget(10, 3), 87);
   const drafts = Array.from({ length: 25 }, (_, index) => ({
     notes: "origin=autonomous",
     profile_id: "recChi",
