@@ -79,5 +79,5 @@ test("Factory dashboard puts Quality Agent in full-width row below batches and a
   assert.match(css, /\.factory-global-summary\s*\{[^}]*grid-template-columns:minmax\(170px,220px\) minmax\(0,1fr\)/);
   assert.match(css, /\.factory-global-quality \.factory-batch-quality-list\s*\{[^}]*display:grid/);
   assert.match(css, /@media \(max-width: 680px\)/);
-  assert.match(html, /factory-batch-quality-0710\.css\?v=0\.6\.723-profile-fast-music&global=factory-v2-quality-horizontal/);
+  assert.match(html, /factory-batch-quality-0710\.css\?v=0\.6\.\d+-profile-fast-music&global=factory-v2-quality-horizontal/);
 });

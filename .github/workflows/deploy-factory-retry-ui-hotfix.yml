@@ -1,0 +1,25 @@
+name: Deploy Factory Retry UI Hotfix
+
+# One-time bounded operator UI hotfix: dispatch the existing protected Pages
+# workflow, which performs its normal Cloudflare Access-aware verification.
+# This is NOT a replacement deploy implementation.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/factory-retry-hotfix.txt'
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch controlled Studio Pages deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run deploy-cloudflare-pages-production.yml --repo "$GITHUB_REPOSITORY" --ref main

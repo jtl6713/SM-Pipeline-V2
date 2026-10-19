@@ -871,9 +871,17 @@
   }
 
   async function retryFactoryBatchFailures() {
-    const batch = state.batch?.batches?.find(row => row.job_id === state.inspectedBatchKey)
-      || state.batch?.batches?.[0] || state.batch;
-    if (!batch?.job_id || !batch.can_retry || state.submittingBatch) return;
+    const viewed = state.completedOpen ? state.completedBatch : state.batch;
+    const batches = Array.isArray(viewed?.batches) ? viewed.batches : (viewed?.job_id ? [viewed] : []);
+    const selected = batches.find(row => row.job_id === state.inspectedBatchKey);
+    // The toolbar renders the first visible batch when none is selected. Retry
+    // must use that same visible batch, not the first active-snapshot row.
+    const batch = selected || batches[0] || null;
+    if (state.submittingBatch) return;
+    if (!batch?.job_id || !batch.can_retry) {
+      setStatus("Select the batch showing failed outputs, then retry. No approvals were resubmitted.", true);
+      return;
+    }
     state.submittingBatch = true;
     updateFactoryBatchToolbar();
     try {
