@@ -15,7 +15,7 @@ the Worker awaits a write-through of the records Airtable returned. GET, HEAD, a
 
 Rows are mirrored only when the Airtable body includes an identity field (`Output_ID` / `Platform`, or `Content_ID` / `Content_Title` / `Content_Status`). A partial body cannot blank the Supabase projection. Content rows whose profile uuid is not resolved yet are patched in place and do not clear `content_profile_id`.
 
-Approve, schedule, publish-status, and heal paths already go through `airtableFetch`, so they are covered here. The older schedule and approve write-through calls stay; a second upsert of the same row is safe.
+Approve, schedule, publish-status, and heal paths remain authoritative Airtable writes. For schedule-changing operations (Factory/legacy approve, atomic/legacy regeneration, vacate, and calendar save), the verified Airtable mutation is completed under the scheduling reservation lock, and exactly **one** Supabase mirror is issued **after** release. These callers pass `skipSupabaseWriteThrough: true` to suppress the ordinary `airtableFetch` hook for the in-lock mutation. **Never restore the former second upsert:** it was a production pool-saturation bug. Ordinary Platform Output and Content Item PATCH/POST operations continue using the `airtableFetch` hook.
 
 ## Side-effect outbox
 
@@ -44,4 +44,12 @@ The pipeline runner is the other writer. `AirtableClient` create, update, and at
 
 ## Operator notes
 
-Keep `STUDIO_READ_SOURCE=supabase` with `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` on the Worker. Put the same two secrets on the pipeline runner for its mirror to run. Leave `STUDIO_WRITE_SOURCE=airtable`. Drive remains the media authority.
+Supabase-backed Studio reads are **intentionally paused**. As of Phase 5, `studioReadSource()` always returns `airtable` even if `STUDIO_READ_SOURCE=supabase` is configured. Do **not** rely on the old flag to enable reads; route-by-route activation requires separate implementation, pool-safety proof, and rollback. Keep `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` configured on the Worker and the pipeline runner for mirroring. Leave `STUDIO_WRITE_SOURCE=airtable` on **both** services. Drive remains the media authority.
+
+## Half-hour synchronization safety
+
+Cron at UTC minute 0 and 30 still mirrors Airtable profiles, outputs, content, ideas, and open production requests. A separate R2 conditional-write lease (`studio/state/phase5-sync-lease.json` under `STUDIO_MEDIA`) prevents cron and manual sweeps from overlapping across Worker isolates; absent R2 or an unknown lease state causes a fail-closed skip/error, not an unlocked sweep. The lease uses compare-and-swap renewal and expires after a hung Worker; stale owners cannot release a newer owner's lease. This is unrelated to MAE scheduling reservation locks.
+
+`GET /api/ops/supabase/sync` includes the last run `status`, `duration_ms`, per-table upsert `chunks`, `rows`, and `duration_ms`, circuit snapshot, and per-profile failures. Only `completed` with `ok=true` counts as success. `partial`, `failed`, `circuit_open`, and lease-skipped invocations do **not** prove health. The in-memory two-error / 15-minute Supabase pool circuit remains active; do not weaken it.
+
+**Activation gate:** keep all Supabase reads paused until at least three consecutive half-hour cron executions show completed syncs, production Postgres pool and timeout telemetry are healthy, and mirror fields match Airtable. Restore reads per route with Airtable fallback and fast rollback; **Home last**. Do not begin Phase 6.

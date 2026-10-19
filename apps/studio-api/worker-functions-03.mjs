@@ -1,8 +1,10 @@
+import { withPhase5SyncLease } from "./supabase-sync-lease.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
   studioReadSource,
   studioSupabaseConfigured,
   supabaseCircuitOpen,
+  supabaseCircuitSnapshot,
   listSupabasePipelineOutputs,
   listSupabaseScheduleGrid,
   listSupabaseContentItems,
@@ -1583,46 +1585,76 @@ export async function writeStudioSupabaseSyncLast(env, payload) {
 export async function studioSyncSupabasePipelineReads(env, options = {}) {
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
   if (supabaseCircuitOpen()) return { skipped: true, reason: "supabase_circuit_open" };
-  const profiles = (await listContentProfileRecords(env).catch(() => [])).filter((row) => Boolean(f(row, "Active")));
-  const startedAt = new Date().toISOString();
-  const result = await syncAllProfilesPipelineToSupabase(env, profiles, {
-    listRecords,
-    f,
-    contentProfileFilterFormula,
-    outputFields: OUTPUT_LIST_FIELDS,
-    outputLimit: options.outputLimit,
-    contentLimit: options.contentLimit,
-    // Overview Ideas totals need a deep unpromoted inventory, not newest-200 only.
-    ideaLimit: options.ideaLimit ?? 2000,
-    listOpenOutputs: async (profile) => {
-      const pack = await loadOpenPipelineOutputPack(env, profile);
-      return mergePipelineOutputRecords(pack.open || [], pack.siblings || []);
-    },
+  // Both manual and cron sync share this R2 conditional-write lease. Fail
+  // closed if binding or CAS is unavailable; never silently run unlocked.
+  return withPhase5SyncLease(env.STUDIO_MEDIA, async ({ assertOwned }) => {
+    const startedAt = new Date().toISOString();
+    const clockStart = Date.now();
+    const upserts = {};
+    const onUpsert = (table, rowCount, durationMs) => {
+      const prev = upserts[table] || { chunks: 0, rows: 0, duration_ms: 0 };
+      upserts[table] = {
+        chunks: prev.chunks + 1,
+        rows: prev.rows + rowCount,
+        duration_ms: prev.duration_ms + durationMs,
+      };
+    };
+    let result;
+    try {
+      const profiles = (await listContentProfileRecords(env))
+        .filter((row) => Boolean(f(row, "Active")))
+        .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+      await assertOwned();
+      result = await syncAllProfilesPipelineToSupabase(env, profiles, {
+        listRecords,
+        f,
+        assertLease: assertOwned,
+        onUpsert,
+        contentProfileFilterFormula,
+        outputFields: OUTPUT_LIST_FIELDS,
+        outputLimit: options.outputLimit,
+        contentLimit: options.contentLimit,
+        // Preserve deep unpromoted-idea coverage; do not truncate the mirror.
+        ideaLimit: options.ideaLimit ?? 2000,
+        listOpenOutputs: async (profile) => {
+          const pack = await loadOpenPipelineOutputPack(env, profile);
+          return mergePipelineOutputRecords(pack.open || [], pack.siblings || []);
+        },
+      });
+    } catch (error) {
+      result = { ok: false, status: "failed", results: [],
+        production_requests: null, error: error?.message || String(error) };
+    }
+    const profileResults = Array.isArray(result?.results) ? result.results : [];
+    const ok = result?.ok === true;
+    const stamp = {
+      at: Date.now(),
+      started_at: startedAt,
+      finished_at: new Date().toISOString(),
+      duration_ms: Date.now() - clockStart,
+      ok,
+      status: result?.status || (ok ? "completed" : "failed"),
+      error: result?.error || null,
+      profile_count: profileResults.length,
+      profiles: profileResults.map((row) => ({
+        profile_id: row.profile_id || null,
+        ok: Boolean(row.ok),
+        skipped: Boolean(row.skipped),
+        content_items: row.content_items ?? null,
+        platform_outputs: row.platform_outputs ?? null,
+        newest_outputs: row.newest_outputs ?? null,
+        open_outputs: row.open_outputs ?? null,
+        idea_candidates: row.idea_candidates ?? null,
+        error: row.error || null,
+      })),
+      upserts,
+      circuit: supabaseCircuitSnapshot(),
+      production_requests: result?.production_requests || null,
+      read_source: studioReadSource(env),
+    };
+    await writeStudioSupabaseSyncLast(env, stamp);
+    return { ...result, stamp };
   });
-  const profileResults = Array.isArray(result?.results) ? result.results : [];
-  const ok = profileResults.length > 0 && profileResults.every((row) => row?.ok || row?.skipped);
-  const stamp = {
-    at: Date.now(),
-    started_at: startedAt,
-    finished_at: new Date().toISOString(),
-    ok,
-    profile_count: profileResults.length,
-    profiles: profileResults.map((row) => ({
-      profile_id: row.profile_id || null,
-      ok: Boolean(row.ok),
-      skipped: Boolean(row.skipped),
-      content_items: row.content_items ?? null,
-      platform_outputs: row.platform_outputs ?? null,
-      newest_outputs: row.newest_outputs ?? null,
-      open_outputs: row.open_outputs ?? null,
-      idea_candidates: row.idea_candidates ?? null,
-      error: row.error || null,
-    })),
-    production_requests: result?.production_requests || null,
-    read_source: studioReadSource(env),
-  };
-  await writeStudioSupabaseSyncLast(env, stamp);
-  return { ...result, stamp };
 }
 /*__STUDIO_WORKER_END:studioSyncSupabasePipelineReads__*/
 
@@ -1652,7 +1684,7 @@ export async function postStudioSupabaseSync(request, env) {
   const result = await studioSyncSupabasePipelineReads(env, { outputLimit, contentLimit });
   studioMarkMappedListDirty();
   return respond(request, env, {
-    ok: true,
+    ok: result?.ok === true,
     read_source: studioReadSource(env),
     read_routes: STUDIO_SUPABASE_READ_ROUTES,
     phase4_read_routes: STUDIO_SUPABASE_PHASE4_READ_ROUTES,
