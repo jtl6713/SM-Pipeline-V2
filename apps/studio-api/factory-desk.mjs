@@ -239,7 +239,9 @@ export function isInFlightFactoryState(row) {
 
 function isAutoHigh(row) {
   if (isManualLane(row) || isReadyForReview(row) || isNeedsAssetsCandidate(row)) return false;
-  if (row?.lane === "publish" || row?.lane === "done") return false;
+  // A provisional publish lane must not hide an unapproved output that is
+  // actually still rendering; use authoritative state, not the lane label.
+  if ((row?.lane === "publish" || row?.lane === "done") && isPastEyes(row)) return false;
   const status = String(row?.request_status || "").toLowerCase();
   const state = String(row?.studio_state || "").toLowerCase();
   const produceStep = String(row?.produce_step || "").trim().toLowerCase();
