@@ -4576,6 +4576,16 @@ export function studioOverviewOperationalMetrics(mappedOutputs, ideas) {
   const awaitingApproval = mappedOutputs.filter((o) => {
     const state = String(o.studio_state || "").trim();
     if (state !== "Ready for Review" && state !== "Awaiting Approval") return false;
+    // Only count approvals an operator can act on. A stale Ready for Review
+    // studio_state can coexist with a still-queued Remotion render.
+    const output = String(o.output_status || "").trim().toLowerCase();
+    const render = String(o.render_status || "").trim().toLowerCase();
+    const review = String(o.review_status || "").trim().toLowerCase();
+    const publish = String(o.publish_status || "").trim().toLowerCase();
+    if (["approved", "rejected", "skipped"].includes(review)) return false;
+    if (["in production", "rendering", "ready for render", "approved", "approved for publishing", "published"].includes(output)) return false;
+    if (/ready for render|waiting in render queue|^rendering$|^failed$|^blocked$/.test(render)) return false;
+    if (/^(scheduled|published|uploading|platform processing|draft delivered)$/.test(publish)) return false;
     if (o.do_not_publish) return false;
     const notes = `${o.output_notes || ""}\n${o.production_notes || ""}`;
     if (/origin=az-finished-video/i.test(notes)) return false;
