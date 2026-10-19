@@ -109,6 +109,17 @@ function isAutonomousOrigin(row) {
 }
 
 function isPastEyes(row) {
+  const output = String(row?.output_status || "").trim().toLowerCase();
+  const review = String(row?.review_status || "").trim().toLowerCase();
+  const publish = String(row?.publish_status || "").trim().toLowerCase();
+  // Home / Airtable may hold a provisional schedule or Ready to Schedule label
+  // before a human actually approves. Those labels do not remove a rendered
+  // Ready for Review output from Factory's Needs Eyes lane.
+  if (row?.kind === "output" && output === "ready for review") {
+    const reviewCompleted = ["approved", "rejected", "skipped"].includes(review);
+    const publicationStarted = /^(scheduled|published|uploading|platform processing|draft delivered)$/.test(publish);
+    if (!reviewCompleted && !publicationStarted) return false;
+  }
   if (row?.lane === "publish" || row?.lane === "done") return true;
   const blob = `${row?.studio_state || ""} ${row?.output_status || ""} ${row?.publish_status || ""}`.toLowerCase();
   return /scheduled|ready to schedule|ready to publish|\bpublished\b|draft delivered|approved for publishing|uploading|platform processing/.test(blob);
