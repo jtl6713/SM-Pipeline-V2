@@ -1063,7 +1063,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.666-home-overview-snapshot-fix",
+          version: "0.10.667-photo-match-error-json",
           factory_batch_canary_revision: "chicago-ig-reel-v1",
           factory_batch_phase2a_post_gate_fix_v1: true,
           studio_supabase_pipeline_reads_v1: true,
@@ -1921,7 +1921,10 @@ export default {
       if (isIdeaMatchPhotosRoute) {
         assertWriteRequest(request, env);
         requirePermission(authorization, "production_configure");
-        return matchIdeaPhotosRoute(request, env, url, authorization);
+        // Await the async handler inside this fetch try/catch. Returning its
+        // promise directly lets rejections escape as Cloudflare 1101 HTML,
+        // hiding the matcher exception from Find Images Now.
+        return await matchIdeaPhotosRoute(request, env, url, authorization);
       }
 
       if (isIdeaTimedScriptRoute) {
