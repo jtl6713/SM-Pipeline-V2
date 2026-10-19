@@ -2333,6 +2333,25 @@ export default {
     // Do not run the expensive Studio light/heavy cron sweep for these ticks.
     // Both paths retain their own bounded, per-profile concurrency controls.
     if (String(event?.cron || "").trim() === "* * * * *") {
+      // Start both bounded jobs independently. Factory batch recovery can run
+      // for minutes under load; awaiting it first starves every Ready draft.
+      // Cloudflare tracks both promises, and a failure in either must not
+      // suppress the other.
+      ctx.waitUntil((async () => {
+        try {
+          const outcome = await studioReadyProductionCronResume(env, ctx);
+          if (outcome?.claimed || outcome?.enqueued) {
+            console.info("Ready-to-produce one-minute dispatch", {
+              discovered: outcome.discovered,
+              enqueued: outcome.enqueued,
+              claimed: outcome.claimed,
+              results: outcome.results,
+            });
+          }
+        } catch (error) {
+          console.warn("Ready-to-produce one-minute dispatch failed", error);
+        }
+      })());
       ctx.waitUntil((async () => {
         // Factory recovery must still run while Airtable is cooling. Skipping the
         // whole tick parked Miami's 6 accepted children after the first 20s drain
@@ -2345,11 +2364,6 @@ export default {
           await factoryBatchCronResume(env, ctx);
         } catch (error) {
           console.warn("Factory one-minute recovery failed", error);
-        }
-        try {
-          await studioReadyProductionCronResume(env, ctx);
-        } catch (error) {
-          console.warn("Ready-to-produce one-minute dispatch failed", error);
         }
       })());
       return;
