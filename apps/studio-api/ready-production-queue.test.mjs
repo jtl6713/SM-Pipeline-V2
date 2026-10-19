@@ -202,3 +202,40 @@ test("P0 #907 platform filtering imports PR_PLATFORMS across the Worker split", 
     functions.indexOf("async function monitorReadyProductionRequest("));
   assert.match(planner, /PR_PLATFORMS\.has\(platform\)/);
 });
+
+test("P0 #907 immediately reclaims only the corrected platform-registry ReferenceError", async () => {
+  const bucket = new FakeR2();
+  const ideaId = "recReadyIdea907Fix1";
+  const profileId = "recReadyProfile907";
+  await readyProductionEnqueue(bucket, { ideaId, profileId });
+  const lease = await readyProductionClaim(bucket, ideaId, "owner-a", 1_000, 5_000);
+  const parked = await readyProductionFinishClaim(bucket, lease, {
+    status: "retry_wait",
+    stage: "retry",
+    last_error: "PR_PLATFORMS is not defined",
+    retry_delay_ms: 30 * 60 * 1000,
+  }, 2_000);
+  assert.equal(parked.next_attempt_ms, 1_802_000);
+  const recovered = await readyProductionEnqueue(bucket, { ideaId, profileId });
+  assert.equal(recovered.created, false);
+  assert.equal(recovered.revived, true);
+  assert.equal(recovered.job.status, "queued");
+  assert.equal(recovered.job.next_attempt_ms, 0);
+  assert.equal(recovered.job.last_error, null);
+  const claimed = await readyProductionClaim(bucket, ideaId, "owner-b", Date.now());
+  assert.equal(claimed.job.attempts, 2, "recovery must not erase attempt history");
+  assert.equal((await readyProductionList(bucket)).length, 1, "must not duplicate existing R2 job");
+  assert.notEqual((await readyProductionEnqueue(bucket, { ideaId, profileId })).revived, true,
+    "leased running job must not be reset");
+  const other = "recReadyIdea907Fix2";
+  await readyProductionEnqueue(bucket, { ideaId: other, profileId });
+  const otherLease = await readyProductionClaim(bucket, other, "owner-c", 1_000, 5_000);
+  await readyProductionFinishClaim(bucket, otherLease, {
+    status: "retry_wait", stage: "retry", last_error: "Waiting for variant renderer",
+    retry_delay_ms: 30 * 60 * 1000,
+  }, 2_000);
+  const unchanged = await readyProductionEnqueue(bucket, { ideaId: other, profileId });
+  assert.notEqual(unchanged.revived, true);
+  assert.equal(unchanged.job.status, "retry_wait");
+  assert.equal(unchanged.job.next_attempt_ms, 1_802_000);
+});
