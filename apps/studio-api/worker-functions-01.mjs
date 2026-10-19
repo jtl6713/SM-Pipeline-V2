@@ -7322,7 +7322,7 @@ export function studioOccupiedRowMatchesProfile(row, profile) {
 }
 /*__STUDIO_WORKER_END:studioOccupiedRowMatchesProfile__*/
 
-export function studioOccupiedFilterFormula(now = Date.now(), profile = null) {
+export function studioOccupiedFilterFormula(now = Date.now(), profile = null, platform = "") {
   const lookback = airtableFormulaEscape(new Date(now - STUDIO_OCCUPIED_LOOKBACK_MS - 1000).toISOString());
   const horizon = airtableFormulaEscape(new Date(now + STUDIO_OCCUPIED_HORIZON_MS).toISOString());
   const dates = ["Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At"]
@@ -7334,7 +7334,14 @@ export function studioOccupiedFilterFormula(now = Date.now(), profile = null) {
   // every new stamp piled onto the next morning.
   // Published rows stay in the window: a morning that already went out is still a post.
   // Occupancy is per profile × platform × output type (Stories have their own lane).
-  const base = `AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR(${dates}))`;
+  // A reservation lane is profile × platform. Filtering the authoritative
+  // Airtable read to this platform avoids scanning unrelated schedules while
+  // still including every output type (Story/Reel/etc.) on the shared lane.
+  const platformName = String(platform || "").trim();
+  const platformClause = platformName
+    ? `,{Platform}="${airtableFormulaEscape(platformName)}"`
+    : "";
+  const base = `AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR(${dates})${platformClause})`;
   const profileFormula = contentProfileFilterFormula(profile);
   return profileFormula ? `AND(${profileFormula},${base})` : base;
 }
@@ -7365,13 +7372,13 @@ export function studioOccupiedMsFromRow(row, now = Date.now()) {
 }
 /*__STUDIO_WORKER_END:studioOccupiedMsFromRow__*/
 
-export async function studioLoadOccupiedScheduleRows(env, { profile = null, requireComplete = false } = {}) {
+export async function studioLoadOccupiedScheduleRows(env, { profile = null, requireComplete = false, platform = "" } = {}) {
   const now = Date.now();
   const fetchRows = () => listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
     limit: STUDIO_OCCUPIED_LIST_LIMIT,
     sortField: "Scheduled_Post_Date",
     sortDirection: "asc",
-    filterFormula: studioOccupiedFilterFormula(now, profile),
+    filterFormula: studioOccupiedFilterFormula(now, profile, platform),
     // Platform Outputs has Content_Profile (lookup) but no Brand field.
     // Requesting Brand 422s Airtable and 500s calendar Save Schedule.
     fields: ["Platform", "Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At", "Publish_Status", "Studio_Output_Type", "Format", "Content_Profile"],
@@ -7412,9 +7419,9 @@ export async function studioLoadOccupiedScheduleRows(env, { profile = null, requ
 }
 /*__STUDIO_WORKER_END:studioLoadOccupiedScheduleRows__*/
 
-export async function studioLoadOccupiedSchedules(env, { excludeIds = [], profile = null, requireComplete = false } = {}) {
+export async function studioLoadOccupiedSchedules(env, { excludeIds = [], profile = null, requireComplete = false, platform = "" } = {}) {
   const skip = new Set((excludeIds || []).filter(Boolean));
-  const rows = await studioLoadOccupiedScheduleRows(env, { profile, requireComplete });
+  const rows = await studioLoadOccupiedScheduleRows(env, { profile, requireComplete, platform });
   const now = Date.now();
   const byLane = {};
   for (const row of rows || []) {
