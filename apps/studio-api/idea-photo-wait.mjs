@@ -447,7 +447,7 @@ export function mergeIdeaProductionNotes(existingNotes, userNotes, libraryAssetI
  * Absent `save_production_config` keeps title-only patches unchanged.
  * Production notes never wipe origin= / media_asset_ids= machine lines.
  */
-export function ideaProductionConfigFields(payload, existingNotes = "") {
+export function ideaProductionConfigFields(payload, existingNotes = "", photoWait = {}) {
   if (!payload || payload.save_production_config !== true) return {};
   const fields = {};
 
@@ -538,7 +538,16 @@ export function ideaProductionConfigFields(payload, existingNotes = "") {
       fields.Production_Carousel_Slide_Count_Mode = "Target range";
     }
     if (imageModeRaw === "Wait for matching photos") {
-      fields.Studio_Photo_Wait_Status = "Waiting";
+      // Re-saving an already-ready photo idea must not silently put it back
+      // in Listening for photos. Only re-arm the listener if the current
+      // selected assets no longer satisfy the requested minimum.
+      const requiredMin = fields.Production_Carousel_Slide_Count_Min
+        || Number(photoWait.minimum || 1);
+      const selectedCount = Array.isArray(ideaLibraryAssetIdsFromPayload(payload))
+        ? ideaLibraryAssetIdsFromPayload(payload).length
+        : Number(photoWait.selectedAssetCount || 0);
+      const stillReady = photoWait.status === "Ready" && selectedCount >= requiredMin;
+      if (!stillReady) fields.Studio_Photo_Wait_Status = "Waiting";
     } else if (imageMode === "Make AI Generated" || fields.Production_Carousel_Slide_Count_Mode === "Exact") {
       // Explicit AI/exact choices take control away from the automatic library listener.
       // AI mode also clears automatically matched library stills so requested AI quantity wins.
