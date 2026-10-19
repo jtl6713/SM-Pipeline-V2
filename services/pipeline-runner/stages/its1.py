@@ -22,6 +22,7 @@ def run(request: StageRequest) -> StageResult:
             "location": str(extra.get("location") or extra.get("primary_location") or "").strip(),
             "market": str(extra.get("market") or "Chicago").strip() or "Chicago",
             "catalog": catalog,
+            "creative_guidance": extra.get("creative_guidance") if isinstance(extra.get("creative_guidance"), dict) else {},
             "dry_run": bool(extra.get("dry_run")),
         },
         skip_message="ITS1 did not return a timed script",
