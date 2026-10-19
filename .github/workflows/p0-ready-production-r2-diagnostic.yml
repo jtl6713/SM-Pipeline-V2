@@ -1,0 +1,74 @@
+name: P0 Ready Production R2 Diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/p0-ready-production-r2-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  read-only-queue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Resolve live R2 binding without printing credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api"
+          curl -fsS "$ROOT/deployments" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/deployment.json
+          LIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployment.json)
+          curl -fsS "$ROOT/versions/$LIVE" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/live-version.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('/tmp/live-version.json').read_text())['result']
+          b=next(x for x in r.get('resources',{}).get('bindings',[]) if x.get('name')=='STUDIO_MEDIA')
+          bucket=b.get('bucket_name') or b.get('bucket')
+          if not bucket:
+            raise SystemExit('Live STUDIO_MEDIA R2 binding is missing bucket identifier')
+          Path('/tmp/r2-bucket.txt').write_text(bucket)
+          print('live_r2_binding=available')
+          PY
+      - name: Read representative existing ready-production jobs without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save --prefix /tmp/p0-diagnostic wrangler@4.123.0 >/tmp/wrangler-install.log 2>&1
+          BUCKET=$(cat /tmp/r2-bucket.txt)
+          mkdir -p /tmp/ready-jobs
+          for id in recnviDYIh1G5o4ba rec4k3Jevbal4GphK recDRsvCYnlpGNPZc recjeoGFgKv5GnUrQ; do
+            KEY="studio/state/ready-production/v1/jobs/$id.json"
+            if /tmp/p0-diagnostic/node_modules/.bin/wrangler r2 object get "$BUCKET/$KEY" --remote --file="/tmp/ready-jobs/$id.json" >/tmp/ready-job-command.log 2>&1; then
+              echo "r2_job_read=$id:success"
+            else
+              echo "r2_job_read=$id:unavailable"
+              cat /tmp/ready-job-command.log | tail -c 240 | sed 's/[[:cntrl:]]/ /g'
+            fi
+          done
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for file in sorted(Path('/tmp/ready-jobs').glob('rec*.json')):
+            try:
+              job=json.loads(file.read_text())
+              print(json.dumps({
+                'idea_record_id':file.stem,
+                'status':job.get('status'),
+                'stage':job.get('stage'),
+                'attempts':job.get('attempts'),
+                'last_error':str(job.get('last_error') or '')[:220],
+                'updated_at':job.get('updated_at'),
+                'next_attempt_ms':job.get('next_attempt_ms'),
+                'lease_expires_ms':job.get('lease_expires_ms')
+              }))
+            except Exception as exc:
+              print(f'R2_JOB_PARSE_ERROR {file.stem}: {type(exc).__name__}')
+          PY
