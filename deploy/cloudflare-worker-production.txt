@@ -484,3 +484,5 @@ Release PR 890: selected-only Profile Admin endpoint, exact linked music names, 
 2026-10-19 Deploy PR #891: Idea #1275 Budget Eats Grand Central Production-open 500 prevention via reciprocal candidate draft lookup; preserve valid photo Ready state on save. All 5 PR CI workflows green; Airtable remains authoritative, Supabase read circuit breaker unchanged, no publication or approval triggered.
 
 2026-10-19 PR #895: deploy autonomous five-output per idea refill estimate; per-profile ceil((500 - scheduled - awaiting approval)/5), capped by existing hourly and backlog safety controls; no Supabase read or scheduling authority changes. Seven CI checks green.
+
+2026-10-19 Deploy PR #896 global unpromoted Idea Candidate cap 20 to 100. Preserve 500 eligible-output target, five-output-per-idea deficit planning, Airtable authority, Supabase read circuit breaker and existing production binding safeguards.
