@@ -22,7 +22,7 @@ export const AUTONOMOUS_IDEAS_PER_HOUR = 10;
  * asset-ready drafts through promote / produce instead. Operator-triggered
  * runs must never use this background backlog brake.
  */
-export const AUTONOMOUS_OPEN_IDEAS_CAP = 20;
+export const AUTONOMOUS_OPEN_IDEAS_CAP = 100;
 /** How many asset-ready autonomous drafts the top-of-hour tick may advance toward Ready for Review. */
 export const AUTONOMOUS_HOUR_ASSET_DRAIN = 20;
 /** Create-loop budget per city, starting after the library scan. The old 45s cap included the scan and stopped at one idea. */
