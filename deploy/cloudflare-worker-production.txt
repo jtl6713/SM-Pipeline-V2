@@ -482,3 +482,5 @@ Deploy Worker PR 886 profile-scoped Creative Guidance from inherited Brand/Perso
 Release PR 890: selected-only Profile Admin endpoint, exact linked music names, authenticated Google Drive music preview.
 
 2026-10-19 Deploy PR #891: Idea #1275 Budget Eats Grand Central Production-open 500 prevention via reciprocal candidate draft lookup; preserve valid photo Ready state on save. All 5 PR CI workflows green; Airtable remains authoritative, Supabase read circuit breaker unchanged, no publication or approval triggered.
+
+2026-10-19 PR #895: deploy autonomous five-output per idea refill estimate; per-profile ceil((500 - scheduled - awaiting approval)/5), capped by existing hourly and backlog safety controls; no Supabase read or scheduling authority changes. Seven CI checks green.
