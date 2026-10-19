@@ -10,6 +10,7 @@ import {
   ideaLibraryTokens,
   ideaPhotoWaitApplies,
   ideaManagePhotoPauseActive,
+  prioritizeWaitingIdeaPhotoScans,
   ideaManagePhotoPauseUntil,
   ideaProductionConfigFields,
   mergeIdeaProductionNotes,
@@ -530,4 +531,32 @@ test("NYC Jazz Clubs photo uploads remain discoverable for a Greenwich Village j
     queryTokens: [],
   });
   assert.equal(unrelated, null, "General city photos must not be high-confidence jazz matches");
+});
+
+test("photo matching rotates beyond the first eight waiting ideas instead of starving Vizcaya", () => {
+  const nowMs = Date.parse("2026-10-19T16:30:00Z");
+  const candidates = Array.from({length: 63}, (_, i) => ({
+    id: "rec"+String(i).padStart(14, "0"),
+    createdTime: new Date(Date.parse("2026-10-18T00:00:00Z") + i*1000).toISOString(),
+    fields: {
+      Studio_Photo_Match_JSON: i < 52 ? JSON.stringify({evaluated_at:"2026-10-19T16:00:00Z"}) : "",
+      Production_Config_Notes:"",
+    }
+  }));
+  const selected = prioritizeWaitingIdeaPhotoScans(candidates, {limit:8,nowMs});
+  assert.equal(selected.length,8);
+  assert.ok(selected.every(row=>!row.fields.Studio_Photo_Match_JSON),
+    "unscanned ideas outrank already-evaluated rows");
+  assert.deepEqual(selected.map(row=>row.id), candidates.slice(-8).reverse().map(row=>row.id));
+});
+
+test("photo wait fairness skips Manage Idea pause and picks oldest evaluated first", () => {
+  const nowMs = Date.parse("2026-10-19T16:30:00Z");
+  const items=[
+    {id:"recPaused00000001",fields:{Production_Config_Notes:"ez-photo-manage-pause=2026-10-19T17:00:00Z"}},
+    {id:"recRecentlySeen000",fields:{Studio_Photo_Match_JSON:JSON.stringify({evaluated_at:"2026-10-19T16:20:00Z"})}},
+    {id:"recOldestSeen0000",fields:{Studio_Photo_Match_JSON:JSON.stringify({evaluated_at:"2026-10-18T16:20:00Z"})}},
+  ];
+  const selected=prioritizeWaitingIdeaPhotoScans(items,{limit:2,nowMs});
+  assert.deepEqual(selected.map(row=>row.id),["recOldestSeen0000","recRecentlySeen000"]);
 });
