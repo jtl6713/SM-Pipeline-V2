@@ -194,8 +194,8 @@ test("slot keys are once per morning and afternoon", () => {
   }, "2026-08-30:am"), true);
 });
 
-test("open ideas cap is 20 and hour drain advances asset-ready drafts", () => {
-  assert.equal(AUTONOMOUS_OPEN_IDEAS_CAP, 20);
+test("open ideas cap is 100 and hour drain advances asset-ready drafts", () => {
+  assert.equal(AUTONOMOUS_OPEN_IDEAS_CAP, 100);
   assert.equal(AUTONOMOUS_HOUR_ASSET_DRAIN, 20);
   assert.equal(autonomousOpenIdeasRoom(0), 20);
   assert.equal(autonomousOpenIdeasRoom(19), 1);
