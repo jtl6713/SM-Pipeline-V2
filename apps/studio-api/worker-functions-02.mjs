@@ -3086,13 +3086,14 @@ export function productionRequestDefaultsFromIdea(idea) {
   return {
     content_type: String(f(idea, "Production_Content_Type") || "").trim() || null,
     platforms: (() => {
-      const productionPlatforms = Array.isArray(f(idea, "Production_Target_Platforms"))
-        ? f(idea, "Production_Target_Platforms")
-        : [];
-      if (productionPlatforms.length) return canonicalProductionPlatforms(productionPlatforms);
-      return canonicalProductionPlatforms(
-        Array.isArray(f(idea, "Suggested_Platforms")) ? f(idea, "Suggested_Platforms") : []
-      );
+      // Legacy ideas can still carry retired platform suggestions. Never let
+      // auto-created photo-wait drafts fail validation before matching photos.
+      // This filters only inherited defaults, not explicit operator payloads.
+      const supported = (values) => canonicalProductionPlatforms(values)
+        .filter((platform) => PR_PLATFORMS.has(platform));
+      const productionPlatforms = supported(f(idea, "Production_Target_Platforms"));
+      if (productionPlatforms.length) return productionPlatforms;
+      return supported(f(idea, "Suggested_Platforms"));
     })(),
     voiceover_mode: String(f(idea, "Production_Include_Voiceover") || "Yes").trim() || "Yes",
     background_music_mode: String(f(idea, "Production_Include_Background_Music") || "Yes").trim() || "Yes",
