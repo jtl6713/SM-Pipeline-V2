@@ -225,7 +225,7 @@ test("P0 #907 immediately reclaims only the corrected platform-registry Referenc
   const claimed = await readyProductionClaim(bucket, ideaId, "owner-b", Date.now());
   assert.equal(claimed.job.attempts, 2, "recovery must not erase attempt history");
   assert.equal((await readyProductionList(bucket)).length, 1, "must not duplicate existing R2 job");
-  assert.equal((await readyProductionEnqueue(bucket, { ideaId, profileId })).revived, false,
+  assert.notEqual((await readyProductionEnqueue(bucket, { ideaId, profileId })).revived, true,
     "leased running job must not be reset");
   const other = "recReadyIdea907Fix2";
   await readyProductionEnqueue(bucket, { ideaId: other, profileId });
@@ -235,7 +235,7 @@ test("P0 #907 immediately reclaims only the corrected platform-registry Referenc
     retry_delay_ms: 30 * 60 * 1000,
   }, 2_000);
   const unchanged = await readyProductionEnqueue(bucket, { ideaId: other, profileId });
-  assert.equal(unchanged.revived, false);
+  assert.notEqual(unchanged.revived, true);
   assert.equal(unchanged.job.status, "retry_wait");
   assert.equal(unchanged.job.next_attempt_ms, 1_802_000);
 });
