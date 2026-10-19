@@ -480,3 +480,5 @@ Deploy Worker PR 886 profile-scoped Creative Guidance from inherited Brand/Perso
 2026-10-18: Deploy Worker 0.10.665-manual-ideas-no-cap. Operator-triggered unused-photo ideas bypass the background backlog brake and its extra count request.
 2026-10-19 Factory/Home approval reconciliation | PR #889 | merged d83fd48b19c0 | deploy Worker-only: actionable LA review outputs, queued siblings excluded; preserve Airtable authority, Supabase read circuit breaker and existing Cloudflare bindings; no Phase 6.
 Release PR 890: selected-only Profile Admin endpoint, exact linked music names, authenticated Google Drive music preview.
+
+2026-10-19 Deploy PR #891: Idea #1275 Budget Eats Grand Central Production-open 500 prevention via reciprocal candidate draft lookup; preserve valid photo Ready state on save. All 5 PR CI workflows green; Airtable remains authoritative, Supabase read circuit breaker unchanged, no publication or approval triggered.
