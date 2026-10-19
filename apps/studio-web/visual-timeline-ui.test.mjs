@@ -55,5 +55,5 @@ test("Pipeline lazy-loads the isolated trim editor and stylesheet without changi
   const html = await readFile(path.join(here, "index.html"), "utf8");
   assert.match(html, /visual-timeline-trim\.css/);
   assert.match(html, /"outputs": \[[\s\S]*visual-timeline-trim\.js/);
-  assert.match(html, /0\.6\.719-profile-creative-guidance/);
+  assert.match(html, /0\.6\.720-single-profile-prompts/);
 });
