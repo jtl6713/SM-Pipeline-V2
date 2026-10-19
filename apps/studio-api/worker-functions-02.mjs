@@ -11304,6 +11304,12 @@ export async function matchIdeaPhotosRoute(request, env, url, authorization) {
           evaluated_at: new Date().toISOString(),
           action: "error",
           reason: "manual_match_failed",
+          // Operator-visible diagnostic: preserve the failing service/step
+          // without persisting stacks, headers or authentication credentials.
+          error_detail: String(error?.message || error || "Unexpected photo matching error")
+            .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
+            .slice(0, 350),
+          http_status: Number(error?.status || 500),
         }) } }),
       });
     } catch (diagnosticError) {
