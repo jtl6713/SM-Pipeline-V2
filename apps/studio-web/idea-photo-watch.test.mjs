@@ -36,16 +36,15 @@ test("Photo listening stays in Ideas until enough matches and then surfaces in P
 });
 
 
-test("waiting photo ideas advance on light ticks without interrupting heavy sweeps", () => {
+test("already-listening ideas are matched on heavy Worker ticks only", () => {
   const scheduledStart = worker.indexOf("async scheduled(event, env, ctx)");
   const scheduledBody = worker.slice(scheduledStart, worker.indexOf("class HttpError", scheduledStart));
-  const heavyMarker = "// --- HEAVY (UTC :00 / :30):";
-  const heavyGate = scheduledBody.indexOf(heavyMarker);
-  assert.ok(heavyGate > 0, "heavy sweep marker missing");
+  const heavyGate = scheduledBody.indexOf("if (!cadence.heavy) return;");
+  assert.ok(heavyGate > 0, "burn-kill light early-return missing");
   const beforeHeavy = scheduledBody.slice(0, heavyGate);
   const afterHeavy = scheduledBody.slice(heavyGate);
   assert.doesNotMatch(beforeHeavy, /autoListenOpenPhotoIdeas/);
-  assert.match(beforeHeavy, /runWaitingIdeaPhotoMatches\(env, \{ limit: 1 \}\)/);
+  assert.doesNotMatch(beforeHeavy, /runWaitingIdeaPhotoMatches/);
   assert.match(afterHeavy, /autoListenOpenPhotoIdeas/);
   assert.match(afterHeavy, /runWaitingIdeaPhotoMatches\(env, \{ limit: 12 \}\)/);
 });
