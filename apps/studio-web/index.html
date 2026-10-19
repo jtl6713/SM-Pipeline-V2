@@ -1929,12 +1929,12 @@
 
  <section class="ops-creative-panel" id="operationsCreativePanel" aria-labelledby="operationsCreativeHeading">
  <div class="ops-creative-heading"><h3 id="operationsCreativeHeading">Creative Guidance</h3><strong id="operationsCreativeProfile">Selected profile</strong></div>
- <p class="subtle">One consistent creative identity across thumbnails and spoken storytelling, with separate instructions for each format. Blank fields preserve the existing generation defaults. Changes affect future generation only.</p>
+ <p class="subtle">The editable instructions below are populated from the selected profile’s existing Airtable records. Save a profile-specific version without changing shared Brand, Persona, or system-wide AI prompt templates. Changes affect future generation only.</p>
  <form id="operationsCreativeForm">
  <div class="ops-creative-fields">
- <label class="form-field"><span>Shared Creative Direction</span><textarea name="shared_direction" maxlength="4000" rows="7" placeholder="Brand personality, local perspective, target audience, recurring visual motifs and story themes"></textarea><small class="subtle">Used by both thumbnail composition and narration.</small></label>
- <label class="form-field"><span>Thumbnail Instructions</span><textarea name="thumbnail_instructions" maxlength="4000" rows="7" placeholder="Photo realism, lighting, cover titles, typography, color palette, safe zones"></textarea><small class="subtle">Applies to newly designed thumbnails and covers.</small></label>
- <label class="form-field"><span>Narration Instructions</span><textarea name="narration_instructions" maxlength="4000" rows="7" placeholder="Voice and pace, style of opening hook, local facts, narrative arc, what to avoid"></textarea><small class="subtle">Applies when AI writes a spoken script; never overrides Force exact.</small></label>
+ <label class="form-field"><span>Shared Creative Direction</span><textarea name="shared_direction" maxlength="4000" rows="7" placeholder="Brand personality, local perspective, target audience, recurring visual motifs and story themes"></textarea><small class="subtle">Used by both thumbnail composition and narration.</small><small class="subtle ops-creative-source" id="operationsCreativeSource_shared_direction">Reading existing database guidance…</small></label>
+ <label class="form-field"><span>Thumbnail Instructions</span><textarea name="thumbnail_instructions" maxlength="4000" rows="7" placeholder="Photo realism, lighting, cover titles, typography, color palette, safe zones"></textarea><small class="subtle">Applies to newly designed thumbnails and covers.</small><small class="subtle ops-creative-source" id="operationsCreativeSource_thumbnail_instructions">Reading existing database guidance…</small></label>
+ <label class="form-field"><span>Narration Instructions</span><textarea name="narration_instructions" maxlength="4000" rows="7" placeholder="Voice and pace, style of opening hook, local facts, narrative arc, what to avoid"></textarea><small class="subtle">Applies when AI writes a spoken script; never overrides Force exact.</small><small class="subtle ops-creative-source" id="operationsCreativeSource_narration_instructions">Reading existing database guidance…</small></label>
  </div>
  <div class="ops-creative-actions">
  <button type="submit" class="primary-button" id="operationsCreativeSave" disabled>Save creative guidance</button>
@@ -1942,6 +1942,11 @@
  <span id="operationsCreativeStatus" class="subtle" role="status" aria-live="polite"></span>
  </div>
  </form>
+ <details class="ops-creative-reference-drawer" id="operationsCreativeReferenceDrawer">
+ <summary>View original database prompts and shared generation templates</summary>
+ <p class="subtle">These are the current Airtable Brand, AI Persona, and P1/P2 system prompts, shown for reference. Shared templates affect multiple city profiles, so edits made above are saved only for the selected profile.</p>
+ <div id="operationsCreativeReferences" class="ops-creative-reference-list"></div>
+ </details>
  </section>
  </div>
  <div class="ops-tab-panel ops-global-settings" id="operationsGlobalPanel" data-ops-tab-panel="global" role="tabpanel" aria-labelledby="operationsTabGlobal" hidden>
