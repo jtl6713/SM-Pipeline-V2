@@ -11,6 +11,9 @@ export const READY_PRODUCTION_SCHEMA = "studio.ready-production.1";
 export const READY_PRODUCTION_LEASE_MS = 5 * 60 * 1000;
 export const READY_PRODUCTION_MAX_CONCURRENCY = 2;
 export const READY_PRODUCTION_MAX_PER_PROFILE = 1;
+/** Durable cron checkpoint, deliberately separate from authoritative Airtable data. */
+export const READY_PRODUCTION_CRON_DIAGNOSTIC_KEY = `${READY_PRODUCTION_PREFIX}/ops/cron-latest.json`;
+
 export const READY_PRODUCTION_RETRY_BASE_MS = 60 * 1000;
 export const READY_PRODUCTION_RETRY_MAX_MS = 30 * 60 * 1000;
 
@@ -119,6 +122,36 @@ export async function readyProductionEnqueue(bucket, options) {
     return { job: revived, created: false, revived: true };
   }
   return { job: prior.value, created: false };
+}
+
+/** Record where the one-minute dispatcher reached, including early auth/discovery failures.
+ * Diagnostic writes are best-effort at the caller so monitoring cannot stop production.
+ */
+export async function readyProductionWriteCronDiagnostic(bucket, state, at = new Date().toISOString()) {
+  assertBucket(bucket);
+  const data = {
+    schema: "studio.ready-production-cron.1",
+    at,
+    started_at: String(state?.started_at || at),
+    status: String(state?.status || "running").slice(0,32),
+    stage: String(state?.stage || "entry").slice(0,64),
+    discovered: Math.max(0, Number(state?.discovered) || 0),
+    enqueued: Math.max(0, Number(state?.enqueued) || 0),
+    claimed: Math.max(0, Number(state?.claimed) || 0),
+    error_name: String(state?.error_name || "").slice(0,70) || null,
+    error_status: Number(state?.error_status || 0) || null,
+    error: String(state?.error || "").slice(0,240) || null,
+  };
+  await bucket.put(READY_PRODUCTION_CRON_DIAGNOSTIC_KEY, JSON.stringify(data), {
+    httpMetadata: { contentType: "application/json" },
+  });
+  return data;
+}
+
+export async function readyProductionReadCronDiagnostic(bucket) {
+  assertBucket(bucket);
+  const row = await read(bucket, READY_PRODUCTION_CRON_DIAGNOSTIC_KEY);
+  return row?.value?.schema === "studio.ready-production-cron.1" ? row.value : null;
 }
 
 export async function readyProductionRead(bucket, ideaId) {
