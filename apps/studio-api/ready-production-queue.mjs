@@ -100,6 +100,28 @@ export async function readyProductionEnqueue(bucket, options) {
   if (prior.value.schema !== READY_PRODUCTION_SCHEMA || prior.value.idea_id !== job.idea_id) {
     throw Error("Ready-to-produce key is bound to invalid state");
   }
+  // Incident #907: the split Worker briefly omitted PR_PLATFORMS, giving every
+  // planned claim a 30-minute permanent-error backoff. Once the deployment
+  // contains the corrected import, the regular Airtable eligibility discovery
+  // may release ONLY that exact obsolete error, with CAS and lease fencing.
+  // All other retry delays and human gates remain untouched.
+  if (prior.value.status === "retry_wait" && prior.value.last_error === "PR_PLATFORMS is not defined") {
+    const recovered = await cas(bucket, key, (value) => {
+      if (value.status !== "retry_wait" || value.last_error !== "PR_PLATFORMS is not defined"
+          || (value.owner && Number(value.lease_expires_ms || 0) > Date.now())) return null;
+      return {
+        ...value,
+        status: "queued",
+        stage: "recovered_platform_registry",
+        owner: null,
+        lease_expires_ms: 0,
+        next_attempt_ms: 0,
+        last_error: null,
+        updated_at: new Date().toISOString(),
+      };
+    });
+    return { job: recovered, created: false, revived: recovered.status === "queued" && recovered.stage === "recovered_platform_registry" };
+  }
   // A prior nonterminal observation may have gone dormant (hold, missing assets,
   // etc.). Fresh Airtable eligibility revives it. Truly completed promoted work
   // never appears in the discovery query again.
