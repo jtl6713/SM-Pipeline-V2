@@ -11304,6 +11304,7 @@ export async function getStudioReadyProductionDiagnostic(request, env, url) {
   });
 }
 
+/*__STUDIO_WORKER_END:getStudioReadyProductionDiagnostic__*/
 
 export async function getStudioOperations(request, env, authorization) {
   const chicago = chicagoNowParts();
