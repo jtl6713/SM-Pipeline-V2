@@ -39,3 +39,51 @@ export function validateCreativeGuidancePatch(patch, previous = {}) {
   }
   return result;
 }
+
+// Resolve existing Airtable guidance before showing a blank new Settings record.
+// The underlying Brand, Persona and core AI Prompts may be shared between
+// Content Profiles; editing here saves a profile-scoped override, not a shared
+// source mutation.
+export function resolveCreativeGuidance({ saved = {}, profile = {}, brand = {}, persona = {} } = {}) {
+  const overrides = normalizeCreativeGuidance(saved);
+  const options = {
+    shared_direction: [
+      ["Content Profiles · Profile_Override_Guidelines", profile.Profile_Override_Guidelines],
+      ["Content Profiles · Content_Strategy_Overrides", profile.Content_Strategy_Overrides],
+      ["Brands · Brand_Personality", brand.Brand_Personality],
+      ["Brands · Visual_Style_Guidelines", brand.Visual_Style_Guidelines],
+    ],
+    thumbnail_instructions: [
+      ["Content Profiles · Thumbnail_Guideline_Overrides", profile.Thumbnail_Guideline_Overrides],
+      ["Brands · Thumbnail_Style_Guidelines", brand.Thumbnail_Style_Guidelines],
+      ["Brands · Visual_Style_Guidelines", brand.Visual_Style_Guidelines],
+    ],
+    narration_instructions: [
+      ["Content Profiles · Brand_Voice", profile.Brand_Voice],
+      ["Brands · Brand_Voice", brand.Brand_Voice],
+      ["AI Personas · Tone_Guidelines", persona.Tone_Guidelines],
+      ["AI Personas · Communication_Style", persona.Communication_Style],
+    ],
+  };
+  const creative = {};
+  const sources = {};
+  for (const key of CREATIVE_FIELDS) {
+    if (overrides[key]) {
+      creative[key] = overrides[key];
+      sources[key] = { label: "Saved profile-specific Creative Guidance", inherited: false };
+    } else {
+      const [label, value] = options[key].find(([, text]) => String(text || "").trim()) || ["No existing guidance in this source", ""];
+      creative[key] = String(value || "").trim().slice(0, CREATIVE_MAX_CHARS);
+      sources[key] = { label, inherited: true };
+    }
+  }
+  const references = [
+    { label: "Brand · Visual Style", text: brand.Visual_Style_Guidelines, scope: "Shared Brand" },
+    { label: "Brand · Thumbnail Style", text: brand.Thumbnail_Style_Guidelines, scope: "Shared Brand" },
+    { label: "AI Persona · Tone", text: persona.Tone_Guidelines, scope: "Shared Persona" },
+    { label: "AI Persona · Pacing", text: persona.Pacing_Guidelines, scope: "Shared Persona" },
+    { label: "AI Persona · Communication Style", text: persona.Communication_Style, scope: "Shared Persona" },
+  ].filter((item) => String(item.text || "").trim())
+    .map((item) => ({ ...item, text: String(item.text).slice(0, 10000) }));
+  return { creative, sources, references };
+}
