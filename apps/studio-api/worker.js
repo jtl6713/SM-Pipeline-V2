@@ -688,6 +688,7 @@ import {
   getStudioOperations,
   getStudioOperationsProfiles,
   patchStudioOperationsProfile,
+  studioProfileCreativeGuidance,
   studioHealAutonomousRevisionLock,
   runStudioAutonomousProduce,
   runStudioDailyIdeas,
@@ -793,6 +794,7 @@ export default {
       const isAdminVisualVoiceoverCanaryRoute = url.pathname === "/api/admin/visual-voiceover-canary";
       const isOperationsRoute = url.pathname === "/api/operations";
       const isOperationsProfilesListRoute = url.pathname === "/api/operations/profiles";
+      const isOperationsCreativeRoute = /^\\/api\\/operations\\/profiles\\/rec[A-Za-z0-9]+\\/creative$/.test(url.pathname);
       const isOperationsQueueRoute = url.pathname === "/api/operations/queue";
       const isOperationsQueuePauseRoute = url.pathname === "/api/operations/queue/pause";
       const isOperationsQueueReorderRoute = url.pathname === "/api/operations/queue/reorder";
@@ -1575,6 +1577,13 @@ export default {
           return mutateFactoryDesk(request, env, authorization, ctx);
         }
         throw new HttpError(405, "Method not allowed");
+      }
+
+      if (isOperationsCreativeRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method === "PATCH") assertWriteRequest(request, env);
+        if (!["GET", "PATCH"].includes(request.method)) throw new HttpError(405, "Method not allowed");
+        return studioProfileCreativeGuidance(request, env, url, authorization);
       }
 
       if (isOperationsProfileRoute) {
