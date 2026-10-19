@@ -199,6 +199,7 @@ import {
   AUTONOMOUS_CITY_CREATE_ATTEMPTS,
   AUTONOMOUS_CITY_CREATE_MS,
   AUTONOMOUS_IDEAS_PER_HOUR,
+  autonomousIdeasForOutputDeficit,
   AUTONOMOUS_LIBRARY_SCAN_CAP,
   AUTONOMOUS_HOUR_ASSET_DRAIN,
   AUTONOMOUS_OPEN_IDEAS_CAP,
@@ -12016,7 +12017,13 @@ export async function fillAutonomousCityIdeas(env, authorization, {
   refillScores,
   createBudget = AUTONOMOUS_IDEAS_PER_HOUR,
 }) {
-  const hourGoal = AUTONOMOUS_IDEAS_PER_HOUR;
+  const deficit = refillScores?.[profileId]?.deficit;
+  // Never produce more estimated ideas than the remaining output gap.
+  // The five-output multiplier is for planning, not an inventory counter.
+  const estimatedNeeded = deficit == null
+    ? AUTONOMOUS_IDEAS_PER_HOUR
+    : autonomousIdeasForOutputDeficit(deficit);
+  const hourGoal = Math.min(AUTONOMOUS_IDEAS_PER_HOUR, estimatedNeeded);
   let count = Math.max(0, Number(counts?.[profileId]) || 0);
   const budget = Math.max(0, Number(createBudget) || 0);
   const goal = Math.min(hourGoal, count + budget);
