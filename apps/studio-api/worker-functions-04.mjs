@@ -4890,6 +4890,31 @@ export function respondProfilesOverviewSoft(request, env, { records = [], cached
 }
 /*__STUDIO_WORKER_END:respondProfilesOverviewSoft__*/
 
+// A partial/ID-only Content Profile is not a source for authoritative Home
+// counts. The autonomous hourly runner uses mapOperationsProfile(), which is
+// intentionally presentation-only and has no Airtable `.fields` map.
+function studioProfilesOverviewRowsHealthy(rows) {
+  if (!Array.isArray(rows) || !rows.length) return false;
+  const ids = new Set();
+  const labels = new Set();
+  for (const row of rows) {
+    const id = String(row?.id || "").trim();
+    const label = String(row?.city_label || row?.name || "").trim().toLowerCase();
+    if (!/^rec[A-Za-z0-9]{14}$/.test(id) || !label || ids.has(id) || labels.has(label)) return false;
+    ids.add(id);
+    labels.add(label);
+    for (const platform of ["Facebook", "Instagram", "TikTok", "YouTube"]) {
+      const n = row?.scheduled?.[platform];
+      if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return false;
+    }
+    for (const key of ["manual", "failed", "approval", "ideas"]) {
+      const n = row?.[key];
+      if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return false;
+    }
+  }
+  return true;
+}
+
 function profilesOverviewSnapshotView() {
   const cache = studioProfilesOverviewCache;
   return {
@@ -4907,7 +4932,10 @@ function profilesOverviewSnapshotView() {
 
 export function rememberProfilesOverviewSnapshot(snapshot) {
   const rows = Array.isArray(snapshot?.rows) ? snapshot.rows : [];
-  if (!rows.length) return null;
+  if (!studioProfilesOverviewRowsHealthy(rows)) {
+    console.warn("profiles overview: rejecting incomplete/duplicate-city snapshot");
+    return null;
+  }
   studioProfilesOverviewCache.rows = rows;
   studioProfilesOverviewCache.at = Number(snapshot.at) || 0;
   studioProfilesOverviewCache.authKey = String(snapshot.authKey || "");
@@ -4947,6 +4975,11 @@ export async function readStudioProfilesOverviewSnapshot(env, options = {}) {
   const cacheGeneration = String(cache.generation || "");
   const needsDurable = options.forceDurable === true
     || (expectedGeneration && cacheGeneration !== expectedGeneration);
+  if (cache.rows?.length && !studioProfilesOverviewRowsHealthy(cache.rows)) {
+    cache.rows = null;
+    cache.complete = false;
+    cache.at = 0;
+  }
   if (!needsDurable && cache.rows?.length) return profilesOverviewSnapshotView();
   if (!env?.STUDIO_MEDIA?.get) return cache.rows?.length ? profilesOverviewSnapshotView() : null;
   try {
@@ -4964,6 +4997,9 @@ export async function writeStudioProfilesOverviewSnapshot(env, rows, authKey, ex
   const merged = extra.preserveRowIdeas === true
     ? (Array.isArray(rows) ? rows : [])
     : applyCachedOverviewIdeaCounts(rows);
+  if (!studioProfilesOverviewRowsHealthy(merged)) {
+    throw new Error("Refusing to overwrite Home overview with incomplete or duplicate-city rows");
+  }
   const at = extra.at != null ? Number(extra.at) || Date.now() : Date.now();
   const ideasAt = extra.ideasAt != null ? Number(extra.ideasAt) || 0 : Number(studioProfilesOverviewCache.ideasAt || 0);
   const readSource = String(extra.readSource || merged?.[0]?.read_source || studioProfilesOverviewCache.readSource || "");
@@ -5025,7 +5061,7 @@ export async function writeStudioProfilesOverviewSnapshot(env, rows, authKey, ex
 
 export async function verifyStudioProfilesOverviewSnapshot(env, expectedGeneration) {
   const snapshot = await readStudioProfilesOverviewSnapshotFromR2(env);
-  if (!snapshot?.complete || snapshot.schemaVersion !== 4 || !Array.isArray(snapshot.rows) || !snapshot.rows.length) {
+  if (!snapshot?.complete || snapshot.schemaVersion !== 4 || !studioProfilesOverviewRowsHealthy(snapshot.rows)) {
     throw new Error("Forced overview refresh could not verify a complete durable snapshot");
   }
   if (String(snapshot.generation || "") !== String(expectedGeneration || "")) {
@@ -5259,6 +5295,20 @@ export async function profilesOverview(request, env, authorization, ctx) {
 /*__STUDIO_WORKER_END:profilesOverview__*/
 
 export function validateStudioProfilesOverviewRows(rows, profiles) {
+  if (!studioProfilesOverviewRowsHealthy(rows)) {
+    throw new Error("Profiles overview rebuild returned incomplete/duplicate-city data");
+  }
+  for (const profile of profiles || []) {
+    const profileName = String(f(profile, "Profile_Name") || "").trim();
+    if (!profileName || !profile?.fields) {
+      throw new Error("Profiles overview requires full Airtable Content Profile records");
+    }
+    const expectedCity = studioCityLabel(studioThemeForProfile(profile), profile);
+    const row = (rows || []).find((candidate) => candidate.id === profile.id);
+    if (!row || String(row.city_label || "").trim() !== expectedCity) {
+      throw new Error("Profiles overview city identity does not match authoritative profile");
+    }
+  }
   const expected = new Set((profiles || []).map((row) => String(row?.id || "")).filter(Boolean));
   const actual = new Set((rows || []).map((row) => String(row?.id || "")).filter(Boolean));
   if (!expected.size || actual.size !== expected.size || [...expected].some((id) => !actual.has(id))) {
@@ -11130,15 +11180,24 @@ export async function studioLoadAutonomousRefillScores(env, profiles, { refresh 
   let rows = [];
   let source = "snapshot";
   const snapshot = await readStudioProfilesOverviewSnapshot(env).catch(() => null);
-  if (snapshot?.rows?.length) {
-    rows = snapshot.rows;
-  }
+  if (studioProfilesOverviewRowsHealthy(snapshot?.rows)) rows = snapshot.rows;
   const age = snapshot?.at ? Date.now() - snapshot.at : Infinity;
-  const stale = !rows.length || age > Math.max(STUDIO_PROFILES_OVERVIEW_CACHE_MS, 15 * 60 * 1000);
+  const missingProfiles = enabled.some((profile) => !rows.some((row) => row.id === profile.id));
+  const stale = !rows.length || missingProfiles || age > Math.max(STUDIO_PROFILES_OVERVIEW_CACHE_MS, 15 * 60 * 1000);
   if (refresh || stale) {
     try {
-      rows = await buildStudioProfilesOverviewRows(env, enabled);
-      await writeStudioProfilesOverviewSnapshot(env, rows, authKey).catch(() => null);
+      // The hourly runner passes display-mapped profiles. Resolve their IDs
+      // back to full Airtable records before matching outputs and Ideas.
+      const raw = await listContentProfileRecords(env);
+      const byId = new Map(raw.map((profile) => [profile.id, profile]));
+      const authoritative = enabled.map((profile) => byId.get(profile.id));
+      if (authoritative.some((profile) => !profile?.fields || !f(profile, "Profile_Name"))) {
+        throw new Error("Hourly refill cannot resolve complete Content Profile records");
+      }
+      rows = await buildStudioProfilesOverviewRows(env, authoritative, { commitIdeas: false });
+      validateStudioProfilesOverviewRows(rows, authoritative);
+      // Refill scoring is a consumer, not a Home snapshot writer. Only Home's
+      // own full authorized-profile build may update the shared durable snapshot.
       source = "live";
     } catch (error) {
       console.warn("autonomous refill overview load failed", error);

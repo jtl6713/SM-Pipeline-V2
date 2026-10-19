@@ -32,23 +32,49 @@
     return platformOrder.reduce((sum, platform) => sum + (Number(row?.scheduled?.[platform]) || 0), 0);
   }
 
+  function validOverviewRows(rows) {
+    if (!Array.isArray(rows) || !rows.length) return false;
+    const ids = new Set();
+    const cities = new Set();
+    for (const row of rows) {
+      const id = String(row?.id || "").trim();
+      const city = String(row?.city_label || row?.name || "").trim().toLowerCase();
+      if (!/^rec[A-Za-z0-9]{14}$/.test(id) || !city || ids.has(id) || cities.has(city)) return false;
+      ids.add(id);
+      cities.add(city);
+      for (const platform of platformOrder) {
+        if (!Number.isFinite(Number(row?.scheduled?.[platform]))) return false;
+      }
+      for (const kind of ["manual", "failed", "approval", "ideas"]) {
+        if (!Number.isFinite(Number(row?.[kind]))) return false;
+      }
+    }
+    return true;
+  }
+
   function readCache() {
     try {
       const raw = localStorage.getItem(CACHE_KEY) || sessionStorage.getItem(CACHE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed?.rows) ? {
+      if (!validOverviewRows(parsed?.rows)) {
+        localStorage.removeItem(CACHE_KEY);
+        sessionStorage.removeItem(CACHE_KEY);
+        return null;
+      }
+      return {
         rows: parsed.rows,
         at: Number(parsed.at) || 0,
         generation: String(parsed.generation || ""),
         ideasAt: Number(parsed.ideasAt || 0),
-      } : null;
+      };
     } catch {
       return null;
     }
   }
 
   function writeCache(rows, metadata = {}) {
+    if (!validOverviewRows(rows)) return;
     const authoritativeAt = Number(metadata.snapshotAt || 0);
     if (authoritativeAt > 0) state.cacheAt = authoritativeAt;
     if (metadata.generation != null) state.snapshotGeneration = String(metadata.generation || "");
@@ -279,7 +305,8 @@
 
   function adoptOverview(data) {
     const rows = Array.isArray(data?.records) ? data.records : [];
-    if (!rows.length) return false;
+    // Reject invalid server snapshots instead of caching four fake Chicago rows.
+    if (!validOverviewRows(rows)) return false;
     state.rows = mapRows(rows);
     const snapshotAt = Number(data?.snapshot_at || 0);
     if (snapshotAt > 0) state.cacheAt = snapshotAt;
