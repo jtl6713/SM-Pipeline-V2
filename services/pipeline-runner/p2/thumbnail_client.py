@@ -54,7 +54,15 @@ def build_thumbnail_prompt(thumbnail_prompt: str, *, aspect_ratio: str = "9:16")
         f"\nFRAME: Exact {orientation} {ratio} social cover ({width}x{height}). "
         "Fill the full frame edge-to-edge. Do not compose as a landscape banner."
     )
-    return f"{base}{frame_line}{THUMBNAIL_PROMPT_SUFFIX}"
+    # The brand's existing safety/frame rules remain mandatory. Editable
+    # profile-specific style is applied last so a city's chosen palette and
+    # narrative theme are not overridden by the legacy Chicago defaults.
+    marker = "\nPROFILE-SPECIFIC CREATIVE DIRECTION"
+    profile_style = ""
+    if marker in base:
+        base, remainder = base.split(marker, 1)
+        profile_style = marker + remainder
+    return f"{base}{frame_line}{THUMBNAIL_PROMPT_SUFFIX}{profile_style}"
 
 
 def fit_png_to_ratio(png_bytes: bytes, aspect_ratio: str = "9:16") -> bytes:
