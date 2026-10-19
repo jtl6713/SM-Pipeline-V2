@@ -5,6 +5,13 @@ import { IDEA_LIBRARY_NAMED_PLACES } from "./idea-photo-wait.mjs";
 
 /** All-Profiles load per city: keep Scheduled + Awaiting Approval at or above this. */
 export const AUTONOMOUS_SCHEDULED_TARGET = 500;
+/** Planning estimate only: actual output inventory is always rechecked. */
+export const AUTONOMOUS_EXPECTED_OUTPUTS_PER_IDEA = 5;
+export function autonomousIdeasForOutputDeficit(deficit, outputsPerIdea = AUTONOMOUS_EXPECTED_OUTPUTS_PER_IDEA) {
+  const remaining = Math.max(0, Math.ceil(Number(deficit) || 0));
+  const yieldPerIdea = Math.max(1, Math.floor(Number(outputsPerIdea) || AUTONOMOUS_EXPECTED_OUTPUTS_PER_IDEA));
+  return Math.ceil(remaining / yieldPerIdea);
+}
 /** Combined load above this skips that city for the Chicago hour. 500–509 holds. */
 export const AUTONOMOUS_SCHEDULED_SKIP_ABOVE = 509;
 /** Distinct-subject ideas to open per city per Chicago hour while Scheduled+Awaiting Approval is under target. */
@@ -249,6 +256,8 @@ export function autonomousRefillScoresFromOverview(overviewRows, target = AUTONO
       pipeline_load: pipelineLoad,
       band,
       deficit,
+      estimated_ideas_needed: autonomousIdeasForOutputDeficit(deficit),
+      expected_outputs_per_idea: AUTONOMOUS_EXPECTED_OUTPUTS_PER_IDEA,
       needed,
       target: Math.max(1, Number(target) || AUTONOMOUS_SCHEDULED_TARGET),
     };
