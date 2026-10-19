@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { runInNewContext } from "node:vm";
 import {
   FACTORY_DESK_KEY,
   FACTORY_DESK_SCHEMA,
@@ -77,6 +78,56 @@ test("Content 654 output 3431 stays In Flight while rendering despite Ready for 
   assert.equal(classifyFactoryLane(queueingStory), "auto_high");
   const completed = { ...queueingStory, render_status: "Rendered" };
   assert.equal(classifyFactoryLane(completed), "needs_eyes");
+});
+
+test("LA review-ready outputs survive provisional Ready to Schedule and a publish lane", () => {
+  const ready = {
+    id: "recLaReadyForReview1",
+    kind: "output",
+    output_id: 4660,
+    profile_id: "recF7UAn0LkMZZrWZ",
+    studio_state: "Ready for Review",
+    output_status: "Ready for Review",
+    render_status: "Rendered",
+    review_status: "",
+    publish_status: "Ready to Schedule",
+    scheduled_at: "2026-10-28T02:45:00.000Z",
+    lane: "publish",
+    final_file_url: "https://example.test/complete.mp4",
+  };
+  assert.equal(classifyFactoryLane(ready), "needs_eyes");
+  assert.equal(classifyFactoryLane({ ...ready, review_status: "Review Sent" }), "needs_eyes");
+  assert.equal(partitionFactoryLanes([ready]).summary.needs_eyes, 1);
+  assert.equal(classifyFactoryLane({ ...ready, render_status: "Waiting in Render Queue" }), "auto_high");
+  assert.equal(classifyFactoryLane({ ...ready, review_status: "Approved" }), null);
+  assert.equal(classifyFactoryLane({ ...ready, publish_status: "Scheduled" }), null);
+  assert.equal(classifyFactoryLane({ ...ready, publish_status: "Published" }), null);
+  assert.equal(classifyFactoryLane({ ...ready, output_status: "Approved for Publishing" }), null);
+});
+
+test("Home approval metric matches actionable review-ready outputs instead of queued siblings", async () => {
+  const workerFunctions = await readFile(path.join(here, "worker-functions-04.mjs"), "utf8");
+  const start = workerFunctions.indexOf("export function studioOverviewOperationalMetrics(");
+  const end = workerFunctions.indexOf("/*__STUDIO_WORKER_END:studioOverviewOperationalMetrics__*/", start);
+  assert.ok(start >= 0 && end > start, "overview function is available for runtime contract test");
+  const fn = runInNewContext(`(${workerFunctions.slice(start, end).trim().replace(/^export /, "")})`);
+  const base = {
+    studio_state: "Ready for Review",
+    output_status: "Ready for Review",
+    render_status: "Rendered",
+    review_status: "",
+    publish_status: "Ready to Schedule",
+    do_not_publish: false,
+  };
+  const rows = [
+    ...Array.from({ length: 14 }, () => ({ ...base })),
+    { ...base, render_status: "Waiting in Render Queue" },
+    { ...base, render_status: "Rendering" },
+    { ...base, review_status: "Approved" },
+    { ...base, publish_status: "Published" },
+    { ...base, do_not_publish: true },
+  ];
+  assert.equal(fn(rows, []).awaiting_approval, 14);
 });
 
 test("Content 841-style Story stays In Flight when studio_state is Ready but Output_Status is In Production", () => {
