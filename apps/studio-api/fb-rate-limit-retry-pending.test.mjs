@@ -7,9 +7,9 @@ import { normalizedOutputState } from "./worker-functions-01.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
 
-test("Worker version is 0.10.666-home-overview-snapshot-fix", () => {
+test("Worker version is 0.10.667-ready-production-flow", () => {
   const worker = readFileSync(join(root, "worker.js"), "utf8");
-  assert.match(worker, /version: "0\.10\.666-home-overview-snapshot-fix"/);
+  assert.match(worker, /version: "0\.10\.667-ready-production-flow"/);
 });
 
 test("Facebook Graph 368 park paints Retry Pending, not Failed", () => {

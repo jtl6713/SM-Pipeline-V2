@@ -148,7 +148,7 @@ test("first-party analytics sweep allocates work independently by content profil
 const youtubeUploaderSource = fs.readFileSync(
   new URL("../../services/youtube-uploader/youtube-upload-service.js", import.meta.url),
   "utf8"
-);
+).replace(/\r\n/g, "\n");
 
 test("youtube uploader tests analytics independently from channel identity", () => {
   const start = youtubeUploaderSource.indexOf("async function oauthStatus() {");

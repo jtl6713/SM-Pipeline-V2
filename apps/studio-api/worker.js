@@ -690,6 +690,7 @@ import {
   patchStudioOperationsProfile,
   studioProfileCreativeGuidance,
   studioHealAutonomousRevisionLock,
+  studioReadyProductionCronResume,
   runStudioAutonomousProduce,
   runStudioDailyIdeas,
   kickStudioOutputPublish,
@@ -1063,7 +1064,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.666-home-overview-snapshot-fix",
+          version: "0.10.667-ready-production-flow",
           photo_match_error_json_v1: true,
           factory_batch_canary_revision: "chicago-ig-reel-v1",
           factory_batch_phase2a_post_gate_fix_v1: true,
@@ -1129,6 +1130,8 @@ export default {
           studio_autonomous_keep_picking_v1: true,
           studio_autonomous_ten_ideas_anyway_v1: true,
           studio_autonomous_music_variety_v1: true,
+          studio_ready_production_flow_v1: true,
+          studio_ready_production_human_final_approval_v1: true,
           studio_az_finished_video_v1: true,
           studio_az_auto_queue_v1: true,
           studio_az_large_video_staging_v1: true,
@@ -2326,9 +2329,9 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
-    // Dedicated one-minute Factory-only recovery. Do not run the expensive
-    // Studio light/heavy cron sweep for these ticks. Each tick chooses at most
-    // one eligible child per profile, leaving the profile CAS lock intact.
+    // Dedicated one-minute Factory recovery and Ready-to-produce dispatch.
+    // Do not run the expensive Studio light/heavy cron sweep for these ticks.
+    // Both paths retain their own bounded, per-profile concurrency controls.
     if (String(event?.cron || "").trim() === "* * * * *") {
       ctx.waitUntil((async () => {
         // Factory recovery must still run while Airtable is cooling. Skipping the
@@ -2342,6 +2345,11 @@ export default {
           await factoryBatchCronResume(env, ctx);
         } catch (error) {
           console.warn("Factory one-minute recovery failed", error);
+        }
+        try {
+          await studioReadyProductionCronResume(env, ctx);
+        } catch (error) {
+          console.warn("Ready-to-produce one-minute dispatch failed", error);
         }
       })());
       return;

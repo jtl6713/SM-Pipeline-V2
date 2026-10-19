@@ -30,6 +30,16 @@ import {
   factoryBatchQualitySignals, factoryBatchNeedsAttention, factoryBatchReconcile, factoryBatchCronScan,
   factoryBatchCronSelectJobs,
 } from "./factory-approval-queue.mjs";
+import {
+  READY_PRODUCTION_MAX_CONCURRENCY,
+  readyProductionClaim,
+  readyProductionEnqueue,
+  readyProductionFailure,
+  readyProductionFinishClaim,
+  readyProductionList,
+  readyProductionOutputsAwaitingFinalApproval,
+  readyProductionSelectJobs,
+} from "./ready-production-queue.mjs";
 import { factoryGlobalPolicy, factoryGlobalAcceptsOutput } from "./factory-batch-global-policy.mjs";
 import {
   factoryApprovalGroupPlan, factoryApprovalGroupEnqueue, factoryApprovalGroupRead,
@@ -679,6 +689,7 @@ import {
   cadenceScheduleSync,
   studioFirstLinkedId,
   advanceStudioProductionOutputs,
+  listStudioContinuationCandidates,
   pulseOnDemandR2B,
   pulseOnDemandM1,
   pulseOnDemandMakeAdminBridge,
@@ -10934,6 +10945,282 @@ export async function prepareIdeaToReview(request, env, url, authorization, ctx 
   });
 }
 /*__STUDIO_WORKER_END:prepareIdeaToReview__*/
+
+const READY_PRODUCTION_IDEA_FORMULA =
+  "AND({Test_Run_ID}=BLANK(),{Studio_Photo_Wait_Status}='Ready',{Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK(),{Candidate_Status}!='On Hold',{Candidate_Status}!='Rejected',{Candidate_Status}!='Promoted')";
+
+function readyProductionIdeaEligible(idea) {
+  if (!idea?.id) return false;
+  const status = String(f(idea, "Candidate_Status") || "").trim().toLowerCase();
+  const photo = String(f(idea, "Studio_Photo_Wait_Status") || "").trim();
+  if (photo !== "Ready" || ["on hold", "rejected", "promoted"].includes(status)) return false;
+  if (String(f(idea, "Test_Run_ID") || "").trim()) return false;
+  if (linkedRecordIds(f(idea, "Content Items")).length) return false;
+  if (String(f(idea, "Promoted_Content_Record_ID") || "").trim()) return false;
+  return true;
+}
+
+async function discoverReadyProductionIdeas(env, { limit = 100 } = {}) {
+  const ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+    limit: Math.max(1, Math.min(200, Number(limit) || 100)),
+    sortField: "Create_Date",
+    sortDirection: "asc",
+    filterFormula: READY_PRODUCTION_IDEA_FORMULA,
+    fields: [
+      "Candidate_Title",
+      "Candidate_Status",
+      "Content_Profile",
+      "Content Items",
+      "Promoted_Content_Record_ID",
+      "Production Requests",
+      "Studio_Photo_Wait_Status",
+      "Studio_Matched_Media_Assets",
+      "Production_Config_Notes",
+      "Production_Content_Type",
+      "Production_Target_Platforms",
+      "Suggested_Platforms",
+      "Production_Include_Voiceover",
+      "Production_Include_Background_Music",
+      "Production_Include_Thumbnail",
+      "Production_Video_Duration",
+      "Production_Notes",
+      "Test_Run_ID",
+      "Create_Date",
+    ],
+  });
+  return ideas.filter(readyProductionIdeaEligible);
+}
+
+async function readyProductionRequestForIdea(env, idea) {
+  const ids = linkedRecordIds(f(idea, "Production Requests"));
+  if (!ids.length) return null;
+  // Airtable's reciprocal link is the authority. Fail closed if any linked row
+  // cannot be read so a transient read failure cannot mint a duplicate request.
+  const rows = await Promise.all(ids.map((id) => airtableFetch(env, PRODUCTION_REQUEST_TABLE, id)));
+  const candidates = rows.filter((row) => {
+    if (!row?.id || !f(row, "Active")) return false;
+    if (!linkedRecordIds(f(row, "Idea_Candidate")).includes(idea.id)) return false;
+    return ["Draft", "Ready", "Submitted", "Promoted"].includes(String(f(row, "Request_Status") || "").trim());
+  });
+  const order = { Promoted: 4, Submitted: 3, Ready: 2, Draft: 1 };
+  return candidates.sort((left, right) => {
+    const status = (order[String(f(right, "Request_Status") || "").trim()] || 0)
+      - (order[String(f(left, "Request_Status") || "").trim()] || 0);
+    if (status) return status;
+    return Date.parse(f(right, "Created_At") || right.createdTime || "")
+      - Date.parse(f(left, "Created_At") || left.createdTime || "");
+  })[0] || null;
+}
+
+function readyProductionIdeaPlan(idea) {
+  const platforms = canonicalProductionPlatforms(
+    (Array.isArray(f(idea, "Production_Target_Platforms")) && f(idea, "Production_Target_Platforms").length)
+      ? f(idea, "Production_Target_Platforms")
+      : ((Array.isArray(f(idea, "Suggested_Platforms")) && f(idea, "Suggested_Platforms").length)
+        ? f(idea, "Suggested_Platforms")
+        : AUTONOMOUS_STANDARD_PLATFORMS)
+  );
+  const contentType = String(f(idea, "Production_Content_Type") || "Vertical Short Video").trim()
+    || "Vertical Short Video";
+  const libraryIds = [...new Set([
+    ...linkedRecordIds(f(idea, "Studio_Matched_Media_Assets")),
+    ...parseIdeaNotedMediaIds(f(idea, "Production_Config_Notes")),
+  ].filter((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))))];
+  return { platforms, contentType, libraryIds };
+}
+
+async function monitorReadyProductionRequest(env, requestRecord) {
+  const outputs = await listStudioContinuationCandidates(env, {
+    requestRecordId: requestRecord.id,
+    limit: 20,
+  });
+  if (readyProductionOutputsAwaitingFinalApproval(outputs)) {
+    return { complete: true, output_count: outputs.length };
+  }
+  if (productionNotesRevisionOpen(f(requestRecord, "Production_Notes"))) {
+    return { blocked: true, reason: "factory_revision_open", output_count: outputs.length };
+  }
+  const job = parseStudioProductionJob(requestRecord);
+  const step = String(job?.step || "").trim();
+  if (!job || step === "blocked") {
+    try { await enqueueStudioProductionJob(env, requestRecord.id, { resume: true }); } catch (error) {
+      console.warn("Ready-to-produce job enqueue/resume failed", requestRecord.id, error);
+    }
+  }
+  await advanceStudioProductionOutputs(env, { requestRecordId: requestRecord.id, waitMs: 0 });
+  return {
+    complete: false,
+    output_count: outputs.length,
+    produce_step: step || null,
+  };
+}
+
+async function processReadyProductionClaim(env, authorization, ctx, lease, { deferProduce = false } = {}) {
+  const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, lease.job.idea_id);
+  let requestRecord = await readyProductionRequestForIdea(env, idea);
+  if (requestRecord && String(f(requestRecord, "Request_Status") || "").trim() === "Promoted") {
+    const monitored = await monitorReadyProductionRequest(env, requestRecord);
+    if (monitored.complete) {
+      return readyProductionFinishClaim(env.STUDIO_MEDIA, lease, {
+        status: "completed",
+        stage: "awaiting_final_approval",
+        completed_reason: "awaiting_final_approval",
+        production_request_id: requestRecord.id,
+        output_count: monitored.output_count,
+      });
+    }
+    if (monitored.blocked) {
+      return readyProductionFinishClaim(env.STUDIO_MEDIA, lease, {
+        status: "blocked",
+        stage: "human_revision",
+        completed_reason: monitored.reason,
+        production_request_id: requestRecord.id,
+      });
+    }
+    return readyProductionFinishClaim(env.STUDIO_MEDIA, lease, {
+      status: "awaiting_review",
+      stage: "production_render_qa",
+      production_request_id: requestRecord.id,
+      output_count: monitored.output_count,
+      produce_step: monitored.produce_step,
+    });
+  }
+
+  if (!readyProductionIdeaEligible(idea)) {
+    const promoted = String(f(idea, "Promoted_Content_Record_ID") || "").trim()
+      || linkedRecordIds(f(idea, "Content Items"))[0]
+      || null;
+    return readyProductionFinishClaim(env.STUDIO_MEDIA, lease, {
+      status: promoted ? "completed" : "blocked",
+      stage: promoted ? "promoted_elsewhere" : "no_longer_eligible",
+      completed_reason: promoted ? "promoted_elsewhere" : "no_longer_eligible",
+      production_request_id: requestRecord?.id || null,
+    });
+  }
+
+  const plan = readyProductionIdeaPlan(idea);
+  if (!plan.libraryIds.length) {
+    return readyProductionFinishClaim(env.STUDIO_MEDIA, lease, {
+      status: "retry_wait",
+      stage: "waiting_assets",
+      retry_delay_ms: 5 * 60 * 1000,
+      last_error: "Ready idea has no linked matched library assets",
+    });
+  }
+  if (!plan.platforms.length) throw new HttpError(409, "Ready idea has no target platforms");
+
+  if (!requestRecord) {
+    const input = {
+      content_type: plan.contentType,
+      platforms: plan.platforms,
+      include_voiceover: f(idea, "Production_Include_Voiceover") || "Yes",
+      include_background_music: f(idea, "Production_Include_Background_Music") || "Yes",
+      include_thumbnail: f(idea, "Production_Include_Thumbnail") || "Yes",
+      video_duration: f(idea, "Production_Video_Duration") || 30,
+      production_notes: stampPrepareToReviewNotes(f(idea, "Production_Notes")),
+    };
+    requestRecord = await createDraftForIdea(env, idea, authorization, input);
+  }
+  await attachItem4LibraryAssetIds(env, requestRecord.id, plan.libraryIds, authorization);
+  requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
+  const notes = String(f(requestRecord, "Production_Notes") || "");
+  if (!/origin=(prepare-to-review|autonomous|az-finished-video)/i.test(notes)) {
+    requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: { Production_Notes: stampPrepareToReviewNotes(notes) },
+        typecast: true,
+      }),
+    });
+  }
+  if (String(f(requestRecord, "Studio_Output_Plan_Status") || "").trim() !== "Ready") {
+    const planCall = studioInternalJsonRequest(`/api/production-requests/${requestRecord.id}/plan`, {
+      platforms: plan.platforms,
+      overrides: autonomousPlanOverrides(plan.contentType),
+      extras: autonomousPlanExtras(),
+      skip_fbs1_guard: true,
+    });
+    await buildItem4OutputPlan(planCall.request, env, planCall.url, authorization);
+    requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
+  }
+  const finished = await finishAutonomousProductionRequest(
+    env,
+    authorization,
+    ctx,
+    idea,
+    requestRecord,
+    { media_asset_ids: plan.libraryIds, content_type: plan.contentType },
+    { awaitFinish: true, scheduled: true, deferProduce }
+  );
+  return readyProductionFinishClaim(env.STUDIO_MEDIA, lease, {
+    status: finished.waiting ? "retry_wait" : "awaiting_review",
+    stage: finished.waiting
+      ? (finished.waiting_reason === "awaiting_i4" ? "awaiting_i4" : "waiting_variants")
+      : "production_render_qa",
+    retry_delay_ms: finished.waiting ? 60 * 1000 : 0,
+    production_request_id: finished.production_request_id || requestRecord.id,
+    last_error: finished.waiting ? (finished.waiting_reason || "variants_still_preparing") : null,
+  });
+}
+
+async function studioReadyProductionCronResume(env, ctx = null, options = {}) {
+  if (!env?.STUDIO_MEDIA) throw new HttpError(503, "Ready-to-produce durable queue storage is unavailable");
+  const authorization = options.authorization?.user?.record_id
+    ? options.authorization
+    : await resolveStudioCronAuthorization(env);
+  const discovered = await discoverReadyProductionIdeas(env, { limit: options.discoveryLimit || 100 });
+  const enqueued = [];
+  for (const idea of discovered) {
+    const result = await readyProductionEnqueue(env.STUDIO_MEDIA, {
+      ideaId: idea.id,
+      profileId: firstLinkedRecordId(f(idea, "Content_Profile")) || null,
+      createdAt: f(idea, "Create_Date") || idea.createdTime || null,
+    });
+    enqueued.push({ idea_id: idea.id, created: result.created, revived: Boolean(result.revived) });
+  }
+  const jobs = await readyProductionList(env.STUDIO_MEDIA, { maxScan: options.maxScan || 500 });
+  const selected = readyProductionSelectJobs(jobs, {
+    maxConcurrency: options.maxConcurrency || READY_PRODUCTION_MAX_CONCURRENCY,
+    maxPerProfile: 1,
+  });
+  const claims = [];
+  for (const job of selected) {
+    const owner = crypto.randomUUID();
+    const lease = await readyProductionClaim(env.STUDIO_MEDIA, job.idea_id, owner);
+    if (lease) claims.push(lease);
+  }
+  const settled = await Promise.all(claims.map(async (lease, index) => {
+    try {
+      const job = await processReadyProductionClaim(env, authorization, ctx, lease, {
+        // Only one new heavy produce enqueue per pass; the existing render queue
+        // and later one-minute ticks advance the other claimed profile safely.
+        deferProduce: index > 0,
+      });
+      return { idea_id: lease.job.idea_id, status: job?.status || "unknown", stage: job?.stage || null };
+    } catch (error) {
+      const failure = readyProductionFailure(error);
+      console.warn("Ready-to-produce dispatch failed", lease.job.idea_id, error);
+      const job = await readyProductionFinishClaim(env.STUDIO_MEDIA, lease, {
+        status: "retry_wait",
+        stage: "retry",
+        last_error: failure.message,
+        ...(!failure.transient ? { retry_delay_ms: 30 * 60 * 1000 } : {}),
+      });
+      return { idea_id: lease.job.idea_id, status: job?.status || "retry_wait", error: failure.message };
+    }
+  }));
+  return {
+    ok: true,
+    discovered: discovered.length,
+    enqueued: enqueued.filter((row) => row.created || row.revived).length,
+    claimed: claims.length,
+    max_concurrency: READY_PRODUCTION_MAX_CONCURRENCY,
+    results: settled,
+    final_approval: "human_only",
+  };
+}
+
+export { studioReadyProductionCronResume };
 
 export async function getStudioOperations(request, env, authorization) {
   const chicago = chicagoNowParts();

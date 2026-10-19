@@ -34,5 +34,7 @@ export function readStudioWorkerSource() {
     return value;
   });
   if (count !== body.size) throw new Error("Worker split markers out of sync: " + count + " of " + body.size);
-  return restored;
+  // Static-source assertions use LF boundaries. Normalize the checkout's
+  // platform line endings so they behave the same on Windows and Linux CI.
+  return restored.replace(/\r\n/g, "\n");
 }

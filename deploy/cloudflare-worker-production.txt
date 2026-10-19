@@ -495,3 +495,5 @@ Release PR 890: selected-only Profile Admin endpoint, exact linked music names, 
 Deploy Vizcaya photo match bounded forced retries and failure journaling from merged PR #900 (commit 569274be8d07ae7d07e498459a91347ebf15f778), 2026-10-19. Airtable authoritative; preserve low-burn cron, Supabase Phase 5 and publishing/scheduling boundaries.
 Deploy PR #903: await asynchronous photo-matching route and persist bounded matcher exception detail for Cloudflare 1101 diagnosis, 2026-10-19. Preserve Airtable as authoritative, Phase 5 Supabase circuit breaker, scheduling and publishing.
 Deploy PR #905 photo-wait historical platform default repair (Threads 400): filter unsupported inherited idea platforms before production draft creation. Airtable authoritative; preserve Supabase Phase 5, scheduling, publishing and binding contract. 2026-10-19.
+
+2026-10-19: Deploy Worker 0.10.667-ready-production-flow. Continuously claim every eligible Ready-to-produce idea across profiles and advance it through Factory production, rendering, and QA to human Awaiting final approval with bounded retries and no automatic final approval.
