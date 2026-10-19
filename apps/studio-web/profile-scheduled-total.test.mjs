@@ -69,7 +69,11 @@ test("all-profiles overview shows each profile's own scheduled total beside its 
 
   try {
     await import(`${pathToFileURL(overviewPath).href}?test=${Date.now()}`);
-    while (idleCallbacks.length) idleCallbacks.shift()();
+    // Do not execute the mocked AbortController timeout before the fetch
+    // promise has settled: doing so races the response and produces a
+    // spurious "No Content Profiles returned yet" in hermetic CI.
+    // load() starts synchronously at module initialization.
+
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
     assert.match(host.innerHTML, /<th scope="row">Chicago \(3\)<\/th>/);
