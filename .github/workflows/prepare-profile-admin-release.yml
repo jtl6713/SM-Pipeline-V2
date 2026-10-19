@@ -1,0 +1,67 @@
+name: Prepare PR 884 Studio UI release version
+
+on:
+  push:
+    branches:
+      - feature/profile-admin-creative-guidance-20261018
+    paths:
+      - '.github/workflows/prepare-profile-admin-release.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/profile-admin-creative-guidance-20261018
+          persist-credentials: true
+      - name: Bump UI release contract consistently
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          previous = '0.6.718-factory-toggle-collapse'
+          release = '0.6.719-profile-creative-guidance'
+          html = Path('apps/studio-web/index.html')
+          app = Path('apps/studio-web/assets/app-item4-1008.js')
+          test = Path('apps/studio-web/ui-release-contract.test.mjs')
+
+          source_html = html.read_text(encoding='utf-8')
+          source_app = app.read_text(encoding='utf-8')
+          source_test = test.read_text(encoding='utf-8')
+          if source_html.count(previous) < 20:
+              raise SystemExit('Refusing release: unexpected HTML cache key count')
+          if ('item4-' + previous) not in source_app:
+              raise SystemExit('Refusing release: app BUILD_ID differs from source baseline')
+          if source_test.count(previous) < 3:
+              raise SystemExit('Refusing release: UI release tests differ from source baseline')
+
+          html.write_text(
+              source_html.replace(previous, release).replace('UI build 0.6.718', 'UI build 0.6.719'),
+              encoding='utf-8',
+          )
+          app.write_text(source_app.replace('item4-' + previous, 'item4-' + release), encoding='utf-8')
+          test.write_text(
+              source_test.replace(previous, release).replace('0.6.718', '0.6.719'),
+              encoding='utf-8',
+          )
+          print('Version bump: 0.6.719, with app build ID and all asset cache keys')
+          PY
+          node apps/studio-web/ui-release-contract.mjs
+          node --test apps/studio-web/ui-release-contract.test.mjs apps/studio-web/profile-admin-creative.test.mjs
+      - name: Commit version bump to PR branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/studio-web/index.html apps/studio-web/assets/app-item4-1008.js apps/studio-web/ui-release-contract.test.mjs
+          git diff --cached --quiet && exit 0
+          git commit -m "Release UI 0.6.719: Profile Admin creative guidance"
+          git push origin HEAD:feature/profile-admin-creative-guidance-20261018
