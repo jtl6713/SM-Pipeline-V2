@@ -7,6 +7,8 @@ import {
   readyProductionEnqueue,
   readyProductionFinishClaim,
   readyProductionList,
+  readyProductionReadCronDiagnostic,
+  readyProductionWriteCronDiagnostic,
   readyProductionOutputsAwaitingFinalApproval,
   readyProductionRetryDelayMs,
   readyProductionSelectJobs,
@@ -143,4 +145,56 @@ test("Worker continuously dispatches every Airtable-ready profile but never perf
   assert.match(dispatcher, /final_approval: "human_only"/);
   assert.doesNotMatch(dispatcher, /factoryApproveOutput|approveOutputRecordForPublishing|Review_Status:\s*"Approved"/);
   assert.doesNotMatch(dispatcher, /Autonomous_Produce_Enabled/);
+});
+
+test("cron diagnosis survives a failed authorization or an early queue read failure", async () => {
+  const bucket = new FakeR2();
+  assert.equal(await readyProductionReadCronDiagnostic(bucket), null);
+  await readyProductionWriteCronDiagnostic(bucket, {
+    started_at: "2026-10-19T23:00:00.000Z",
+    status: "running",
+    stage: "authorization",
+  }, "2026-10-19T23:00:00.000Z");
+  await readyProductionWriteCronDiagnostic(bucket, {
+    started_at: "2026-10-19T23:00:00.000Z",
+    status: "failed",
+    stage: "authorization",
+    error_name: "HttpError",
+    error_status: 503,
+    error: "Airtable authorization unavailable",
+  }, "2026-10-19T23:00:01.000Z");
+  const diagnostic = await readyProductionReadCronDiagnostic(bucket);
+  assert.equal(diagnostic.status, "failed");
+  assert.equal(diagnostic.stage, "authorization");
+  assert.equal(diagnostic.error_status, 503);
+  assert.equal(diagnostic.error, "Airtable authorization unavailable");
+  assert.equal(diagnostic.started_at, "2026-10-19T23:00:00.000Z");
+  assert.equal(diagnostic.at, "2026-10-19T23:00:01.000Z");
+});
+
+test("Ready queue diagnostics are read-only and require tenant-admin authorization", async () => {
+  const functions = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+  const ops = functions.slice(
+    functions.indexOf("export async function getStudioOperations(request, env, authorization)"),
+    functions.indexOf("/*__STUDIO_WORKER_END:getStudioOperations__*/"),
+  );
+  assert.match(ops, /ready_production_diagnostic/);
+  assert.match(ops, /requirePermission\(authorization, "tenant_admin"\)/);
+  assert.match(ops, /request.method !== "GET"/);
+  assert.match(ops, /ideaIds.length > 8/);
+  assert.match(ops, /readyProductionReadCronDiagnostic/);
+  assert.match(ops, /readyProductionRead\(env.STUDIO_MEDIA, ideaId\)/);
+  assert.doesNotMatch(ops, /method: "PATCH"|method: "POST"|method: "DELETE"/);
+  const dispatcher = functions.slice(
+    functions.indexOf("async function studioReadyProductionCronResume"),
+    functions.indexOf("export { studioReadyProductionCronResume };"),
+  );
+  assert.match(dispatcher, /await checkpoint\("authorization"\)/);
+  assert.match(dispatcher, /await checkpoint\("discovery"\)/);
+  assert.match(dispatcher, /await checkpoint\("enqueue"\)/);
+  assert.match(dispatcher, /await checkpoint\("queue_list"\)/);
+  assert.match(dispatcher, /await checkpoint\("claim"\)/);
+  assert.match(dispatcher, /await checkpoint\("processing"\)/);
+  assert.match(dispatcher, /await checkpoint\("complete"\)/);
+  assert.match(dispatcher, /state.status = "failed"/);
 });
