@@ -235,7 +235,7 @@ import {
   summarizeObservations,
   youtubePublishedAfterIso,
 } from "./autonomous-produce.mjs";
-import { ideaAutoListenContentType, ideaManagePhotoPauseActive, ideaProductionConfigFields, mergeIdeaProductionNotes, mergeProductionRequestNotes, parseIdeaMachineNotes, parseIdeaNotedMediaIds, productionNotesForPromotionHandoff, productionPhotoWaitAutoOff, productionPhotoWaitRejectedIds, shouldAttachPhotoWaitAssets, withIdeaManagePhotoPause, withoutIdeaManagePhotoPause, withProductionPhotoWaitManual } from "./idea-photo-wait.mjs";
+import { ideaAutoListenContentType, ideaManagePhotoPauseActive, prioritizeWaitingIdeaPhotoScans, ideaProductionConfigFields, mergeIdeaProductionNotes, mergeProductionRequestNotes, parseIdeaMachineNotes, parseIdeaNotedMediaIds, productionNotesForPromotionHandoff, productionPhotoWaitAutoOff, productionPhotoWaitRejectedIds, shouldAttachPhotoWaitAssets, withIdeaManagePhotoPause, withoutIdeaManagePhotoPause, withProductionPhotoWaitManual } from "./idea-photo-wait.mjs";
 import {
   STUDIO_PUBLISH_RECONCILE_SCHEDULE_FORMULA,
   STUDIO_TIKTOK_INBOX_DUE_FORMULA,
@@ -702,7 +702,19 @@ import {
 } from "./worker-functions-04.mjs";
 
 export async function findDraftProductionRequestForIdea(env, ideaRecordId) {
-  const records = await listOpenProductionRequests(env);
+  // Airtable maintains the reciprocal Production Requests link on each idea.
+  // Scanning the full open-request inventory per photo match used to consume
+  // Worker subrequests/time out manual Find Images Now before ranking photos.
+  const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaRecordId);
+  const ids = [...new Set((Array.isArray(f(idea, "Production Requests"))
+    ? f(idea, "Production Requests") : [])
+    .filter(id => /^rec[A-Za-z0-9]+$/.test(String(id || ""))))];
+  if (!ids.length) return null;
+  // Never turn a failed authoritative linked-record read into "no draft":
+  // that would risk minting duplicate Production Requests for the same idea.
+  const records = await Promise.all(ids.map(id =>
+    airtableFetch(env, PRODUCTION_REQUEST_TABLE, id)
+  ));
   const matches = records.filter((record) => {
     const ideaLinks = Array.isArray(f(record, "Idea_Candidate")) ? f(record, "Idea_Candidate") : [];
     const status = String(f(record, "Request_Status") || "").trim();
@@ -716,9 +728,7 @@ export async function findDraftProductionRequestForIdea(env, ideaRecordId) {
     record,
   }));
   const preferred = preferAuthoritativeProductionRequest(matches);
-  const chosen = preferred ? (matches.find((row) => row.id === preferred.id)?.record || null) : null;
-  if (!chosen?.id) return null;
-  return airtableFetch(env, PRODUCTION_REQUEST_TABLE, chosen.id);
+  return preferred ? (matches.find(row => row.id === preferred.id)?.record || null) : null;
 }
 /*__STUDIO_WORKER_END:findDraftProductionRequestForIdea__*/
 
@@ -1060,10 +1070,15 @@ export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { autho
 /*__STUDIO_WORKER_END:evaluateAndMaybeAttachWaitingIdeaPhotos__*/
 
 export async function runWaitingIdeaPhotoMatches(env, { limit = 8 } = {}) {
-  const records = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
-    limit: Math.max(1, Number(limit) || 8),
+  const candidates = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+    // Enumerate the lean waiting queue before choosing eight. An unsorted
+    // LIMIT 8 repeatedly selected the same rows; Idea #1255 was 53rd of 63.
+    // Small field projection keeps this read bounded as the backlog grows.
+    limit: 500,
+    fields: ["Studio_Photo_Match_JSON", "Production_Config_Notes"],
     filterFormula: "AND({Studio_Photo_Wait_Status}='Waiting',{Promoted_Content_Record_ID}=BLANK(),{Candidate_Status}!='On Hold')",
   });
+  const records = prioritizeWaitingIdeaPhotoScans(candidates, { limit });
   const authorization = records.length ? await resolveStudioCronAuthorization(env) : null;
   const results = [];
   for (const idea of records) {
