@@ -81,6 +81,7 @@ export async function withPhase5SyncLease(bucket, run, {
   if (!acquired.acquired) return { skipped: true, reason: acquired.reason, expires_at: acquired.expires_at || null };
   let failure = null;
   let heartbeatBusy = false;
+  let heartbeatPromise = null;
   const assertOwned = async () => {
     if (failure) throw failure;
     await verifyPhase5SyncLease(bucket, acquired.owner);
@@ -88,7 +89,7 @@ export async function withPhase5SyncLease(bucket, run, {
   const timer = setInterval(() => {
     if (heartbeatBusy || failure) return;
     heartbeatBusy = true;
-    void renewPhase5SyncLease(bucket, acquired.owner, { ttlMs })
+    heartbeatPromise = renewPhase5SyncLease(bucket, acquired.owner, { ttlMs })
       .catch((error) => { failure = error; })
       .finally(() => { heartbeatBusy = false; });
   }, heartbeatMs);
@@ -99,6 +100,7 @@ export async function withPhase5SyncLease(bucket, run, {
     return result;
   } finally {
     clearInterval(timer);
+    if (heartbeatPromise) await heartbeatPromise;
     try {
       await releasePhase5SyncLease(bucket, acquired.owner);
     } catch (error) {
