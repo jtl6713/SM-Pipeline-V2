@@ -11013,13 +11013,16 @@ async function readyProductionRequestForIdea(env, idea) {
 }
 
 function readyProductionIdeaPlan(idea) {
+  // Existing ready Ideas may still carry retired historical platform values
+  // (for example Threads). Do not let one unsupported suggestion block all
+  // of a photo-ready draft's valid platform output planning.
   const platforms = canonicalProductionPlatforms(
     (Array.isArray(f(idea, "Production_Target_Platforms")) && f(idea, "Production_Target_Platforms").length)
       ? f(idea, "Production_Target_Platforms")
       : ((Array.isArray(f(idea, "Suggested_Platforms")) && f(idea, "Suggested_Platforms").length)
         ? f(idea, "Suggested_Platforms")
         : AUTONOMOUS_STANDARD_PLATFORMS)
-  );
+  ).filter((platform) => PR_PLATFORMS.has(platform));
   const contentType = String(f(idea, "Production_Content_Type") || "Vertical Short Video").trim()
     || "Vertical Short Video";
   const libraryIds = [...new Set([
