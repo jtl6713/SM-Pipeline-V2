@@ -1063,7 +1063,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.665-manual-ideas-no-cap",
+          version: "0.10.666-home-overview-snapshot-fix",
           factory_batch_canary_revision: "chicago-ig-reel-v1",
           factory_batch_phase2a_post_gate_fix_v1: true,
           studio_supabase_pipeline_reads_v1: true,
@@ -2503,17 +2503,7 @@ export default {
         console.warn("profiles overview snapshot refresh failed", error);
       }
 
-      if (!cadence.heavy) {
-        // Make progress on the waiting-photo queue between heavy half-hour
-        // sweeps. One fair candidate per five-minute light tick avoids a
-        // large Airtable burst while preventing hours of silent starvation.
-        try {
-          await runWaitingIdeaPhotoMatches(env, { limit: 1 });
-        } catch (error) {
-          console.warn("idea light photo-wait matcher failed", error);
-        }
-        return;
-      }
+      if (!cadence.heavy) return;
 
       // --- HEAVY (UTC :00 / :30): platform polls, heals, ideas, ingest, release ---
       try {
