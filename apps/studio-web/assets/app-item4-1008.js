@@ -25569,46 +25569,99 @@ function timedScriptAssetLabel(asset, index) {
     });
   });
 
-  async function loadOperationsProfilesPanel() {
-    const meta = $("operationsIdeaMeta");
-    if (meta && !String(meta.textContent || "").trim()) meta.textContent = "Loading profiles…";
-    try {
-      const [profilesResult, voicesResult, musicResult] = await Promise.all([
-        api("/api/operations/profiles", { timeoutMs: 15000 }),
-        api("/api/voices", { timeoutMs: 20000 }).catch(() => ({ voices: [] })),
-        api("/api/music?limit=100", { timeoutMs: 15000 }).catch(() => ({ records: [] })),
-      ]);
-      loadOperationsScheduleSettings().catch(() => {});
-      operationsVoiceOptions = phase6NormalizeVoices(voicesResult?.voices || voicesResult?.records || voicesResult?.items || []);
-      operationsMusicOptions = sortClientMusic(
-        (Array.isArray(musicResult?.records) ? musicResult.records : []).filter((record) => !record.do_not_use)
-      );
-      operationsCanEditProfiles = Boolean(profilesResult?.can_edit_profiles);
-      const profiles = Array.isArray(profilesResult?.profiles) ? profilesResult.profiles : [];
-      mergeOperationsProfilesIntoStudio(profiles);
-      profileVoicesLoaded = true;
-      if (!$("productionRequestWorkspace")?.hidden) applyResolvedDefaultVoice();
-      const working = studioProfiles.find((item) => item.id === selectedProfileId);
-      if (working) applyStudioBackgroundColor(working);
-      renderOperationsProfiles(profiles, operationsCanEditProfiles);
-      const run = $("operationsRunDailyIdeas");
-      if (run) run.hidden = !operationsCanEditProfiles;
-      if (meta && /Loading (operations|profiles)/i.test(String(meta.textContent || ""))) {
-        meta.textContent = `${profiles.length} profile${profiles.length === 1 ? "" : "s"} loaded. Change default narration voice below.`;
-      }
-    } catch (error) {
-      setOperationsMessage(error.message || "Could not load profiles.", "error-text");
-      if (meta) meta.textContent = "Unable to load profiles.";
+  let operationsProfilesLoadInFlight = null;
+  let operationsProfilesLoadTarget = "";
+
+  function loadOperationsProfilesPanel() {
+    const profileId = String(selectedProfileId || "");
+    if (operationsProfilesLoadInFlight && operationsProfilesLoadTarget === profileId) {
+      return operationsProfilesLoadInFlight;
     }
+    const meta = $("operationsIdeaMeta");
+    if (!/^rec[A-Za-z0-9]{14}$/.test(profileId)) {
+      if (meta) meta.textContent = "Select a Content Profile in the header to load its settings.";
+      return Promise.resolve();
+    }
+    operationsProfilesLoadTarget = profileId;
+    const sameProfile = () => selectedProfileId === profileId && operationsControlTab === "profiles";
+    const pending = (async () => {
+      if (meta) meta.textContent = "Loading selected profile settings…";
+      try {
+        // Only one profile and its linked music are required to paint this tab.
+        // Never block selected-profile controls on the large global operations,
+        // music catalog, or ElevenLabs voice requests.
+        const profilesResult = await api("/api/operations/profiles?selected_only=1", {
+          timeoutMs: 15000, retries: 1,
+        });
+        if (!sameProfile()) return;
+        const profiles = Array.isArray(profilesResult?.profiles) ? profilesResult.profiles : [];
+        if (!profiles.length) throw new Error("The selected profile was not returned");
+        operationsCanEditProfiles = Boolean(profilesResult?.can_edit_profiles);
+        operationsMusicOptions = sortClientMusic(
+          (Array.isArray(profilesResult?.music_records) ? profilesResult.music_records : [])
+            .filter((record) => !record.do_not_use)
+        );
+        mergeOperationsProfilesIntoStudio(profiles);
+        profileVoicesLoaded = true;
+        if (!$("productionRequestWorkspace")?.hidden) applyResolvedDefaultVoice();
+        const working = studioProfiles.find((item) => item.id === profileId);
+        if (working) applyStudioBackgroundColor(working);
+        renderOperationsProfiles(profiles, operationsCanEditProfiles);
+        if (meta) meta.textContent = "Showing " + (profiles[0].name || "selected profile")
+          + ". Loading additional voice and music choices…";
+        const run = $("operationsRunDailyIdeas");
+        if (run) run.hidden = !operationsCanEditProfiles;
+
+        // Load enrichment independently. A failed global catalog must not hide
+        // linked track names, checkboxes or their playable source URLs.
+        let voiceFailed = false;
+        let musicFailed = false;
+        const voiceTask = api("/api/voices", { timeoutMs: 15000, retries: 1 })
+          .then((data) => {
+            if (!sameProfile()) return;
+            operationsVoiceOptions = phase6NormalizeVoices(data?.voices || data?.records || data?.items || []);
+            if (operationsVoiceOptions.length) renderOperationsProfiles(profiles, operationsCanEditProfiles);
+          })
+          .catch((error) => { voiceFailed = true; console.warn("Profile Admin voice catalog", error); });
+        const musicTask = api("/api/music?limit=100", { timeoutMs: 15000, retries: 1 })
+          .then((data) => {
+            if (!sameProfile()) return;
+            const records = (Array.isArray(data?.records) ? data.records : []).filter((record) => !record.do_not_use);
+            const byId = new Map(operationsMusicOptions.map((record) => [record.id, record]));
+            // Selected linked records always win over truncated global catalog.
+            records.forEach((record) => { if (!byId.has(record.id)) byId.set(record.id, record); });
+            operationsMusicOptions = sortClientMusic([...byId.values()]);
+            renderOperationsProfiles(profiles, operationsCanEditProfiles);
+          })
+          .catch((error) => { musicFailed = true; console.warn("Profile Admin music catalog", error); });
+        await Promise.allSettled([voiceTask, musicTask]);
+        if (!sameProfile()) return;
+        if (meta) {
+          meta.textContent = voiceFailed || musicFailed
+            ? "Showing selected profile. Some additional choices could not load; use this tab's Refresh button to retry."
+            : "Showing " + (profiles[0].name || "selected profile") + " settings.";
+        }
+      } catch (error) {
+        if (!sameProfile()) return;
+        setOperationsMessage(error?.message || "Profile settings could not load.", "error-text");
+        if (meta) meta.textContent = "Could not load selected profile settings. Use Refresh profile settings below to retry.";
+      }
+    })();
+    operationsProfilesLoadInFlight = pending;
+    pending.finally(() => {
+      if (operationsProfilesLoadInFlight === pending) operationsProfilesLoadInFlight = null;
+    });
+    return pending;
   }
 
   async function loadOperations() {
     const meta = $("operationsIdeaMeta");
     initOperationsInsightsSeason();
     if (meta) meta.textContent = "Loading operations…";
-    // Profiles tab must not wait on the full Ops inventory / desk / music waterfall.
+    // Profile Admin is a fast, self-contained screen. The heavy operational
+    // inventory below must not start or overwrite this tab's load status.
     if (operationsControlTab === "profiles") {
-      await loadOperationsProfilesPanel();
+      return loadOperationsProfilesPanel();
     }
     const voicesPromise = api("/api/voices", { timeoutMs: 20000 }).catch(() => ({ voices: [] }));
     const musicPromise = api("/api/music?limit=100", { timeoutMs: 15000 }).catch(() => ({ records: [] }));
