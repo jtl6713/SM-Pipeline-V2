@@ -503,3 +503,5 @@ Deploy PR #905 photo-wait historical platform default repair (Threads 400): filt
 2026-10-19: P0 #907 diagnostic-only deployment: durable one-minute cron stage/error heartbeat, authenticated tenant-admin R2 queue inspector, read-only 4-idea service-binding verification. Do not change Airtable authority, Supabase Phase 5 read breaker, scheduling or human approval. Keep issue open until live render/QA/final-review trace.
 
 2026-10-19: Fix #907 confirmed 422 in one-minute Ready-production discovery by removing nonexistent Idea Candidates Production_Notes projection. Keep Production_Config_Notes; validate authoritative Airtable schema, preserve all controls and deploy with live queue inspector (PR #912).
+
+2026-10-19: P0 #907 live R2 Ready queue progressed past discovery after PR #912, but first claim fails ReferenceError PR_PLATFORMS is not defined. Import canonical worker.js export into split queue module and regression guard; deploy controlled Worker only (PR #913).
