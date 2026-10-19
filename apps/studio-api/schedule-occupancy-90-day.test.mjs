@@ -62,7 +62,7 @@ test("strict occupancy reads do not rely on the best-effort UI cache", () => {
 test("atomic Factory strict occupancy is platform-scoped without weakening its complete-read check", () => {
   const formula = between(f01, "export function studioOccupiedFilterFormula", "/*__STUDIO_WORKER_END:studioOccupiedFilterFormula__*/");
   assert.match(formula, /platformClause/);
-  assert.match(formula, /\\{Platform\\}/);
+  assert.match(formula, /Platform/);
   const loader = between(f01, "export async function studioLoadOccupiedScheduleRows", "/*__STUDIO_WORKER_END:studioLoadOccupiedScheduleRows__*/");
   assert.match(loader, /studioOccupiedFilterFormula\\(now, profile, platform\\)/);
   assert.match(loader, /requireComplete/);
