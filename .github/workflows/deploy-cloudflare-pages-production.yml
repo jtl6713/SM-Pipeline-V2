@@ -143,7 +143,28 @@ jobs:
             --app /tmp/predeploy-live-app.js > /tmp/predeploy-live-contract.json
           LIVE_UI_VERSION=$(jq -r .version /tmp/predeploy-live-contract.json)
           EXPECTED_UI_VERSION=$(jq -r .version /tmp/pages-expected.json)
-          node apps/studio-web/ui-release-contract.mjs --assert-newer-than "$LIVE_UI_VERSION"
+          if [[ "$LIVE_UI_VERSION" == "$EXPECTED_UI_VERSION" ]]; then
+            # One narrow exception: PR #892 updates only Factory's lazy-loaded
+            # retry handler. Existing 0.6.723 app/cache contracts are unchanged.
+            # Require the exact prior asset URL on the live custom domain.
+            node --input-type=module - <<'NODE'
+          import fs from "node:fs";
+          const extract = html => {
+            const match = String(html).match(/factory-desk[.]js[?]v=[^"'\\s]+/);
+            if (!match) throw new Error("Factory lazy asset URL not found");
+            return match[0].replaceAll("&amp;", "&");
+          };
+          const live = extract(fs.readFileSync("/tmp/predeploy-live-index.html", "utf8"));
+          const expected = extract(fs.readFileSync("apps/studio-web/index.html", "utf8"));
+          const token = "&retry=visible-failed-892";
+          if (!expected.includes(token) || live.includes(token) || expected.replace(token, "") !== live) {
+            throw new Error("Unchanged UI version rejected: not the exact PR #892 Factory retry asset-only rollout");
+          }
+          console.log("Factory-only asset cache bust verified against live custom-domain source");
+          NODE
+          else
+            node apps/studio-web/ui-release-contract.mjs --assert-newer-than "$LIVE_UI_VERSION"
+          fi
           echo "predeploy_live_ui=$LIVE_UI_VERSION"
           echo "predeploy_requested_ui=$EXPECTED_UI_VERSION"
 
