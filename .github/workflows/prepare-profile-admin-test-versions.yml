@@ -54,7 +54,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add 'apps/studio-web/**/*.test.mjs' 'apps/studio-web/*.test.mjs'
+          git add -u apps/studio-web
           git diff --cached --check
           git diff --cached --quiet && exit 0
           git commit -m "Align existing Studio tests with UI 0.6.719 release"
