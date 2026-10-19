@@ -964,7 +964,10 @@ export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { autho
   const min = Number(f(idea, "Production_Carousel_Slide_Count_Min") || 0);
   const max = Number(f(idea, "Production_Carousel_Slide_Count_Max") || 0);
   const matches = await rankStillsForIdeaPhotoWait(env, idea);
-  const pendingBatchIds = await unfinishedIntakeBatchIds(env, matches.map((row) => row.intake_batch_id));
+  // An explicit Find images now bypasses incomplete intake batches. Do not
+  // perform up to 20 serial Airtable batch scans for a forced request: they can
+  // exhaust its Worker budget before the already-classified photos attach.
+  const pendingBatchIds = force ? [] : await unfinishedIntakeBatchIds(env, matches.map((row) => row.intake_batch_id));
   const decision = selectMatchedPhotos({ matches, min, max, pendingBatchIds, force });
   const evaluatedAt = new Date().toISOString();
   const matchJson = {
@@ -1089,6 +1092,21 @@ export async function runWaitingIdeaPhotoMatches(env, { limit = 8 } = {}) {
       }));
     } catch (error) {
       console.warn("idea photo-wait evaluate failed", idea.id, error);
+      // A failed attempt must advance the fair queue too. Otherwise the same
+      // failing unscanned ideas monopolize the next 12 slots forever, while
+      // their failure is invisible in Studio_Photo_Match_JSON.
+      try {
+        await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+          method: "PATCH",
+          body: JSON.stringify({ fields: { Studio_Photo_Match_JSON: JSON.stringify({
+            evaluated_at: new Date().toISOString(),
+            action: "error",
+            reason: "matcher_error",
+          }) } }),
+        });
+      } catch (diagnosticError) {
+        console.warn("idea photo-wait error diagnostic write failed", idea.id, diagnosticError);
+      }
       results.push({ action: "error", idea_id: idea.id, error: error?.message || String(error) });
     }
   }
