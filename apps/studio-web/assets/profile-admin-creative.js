@@ -33,7 +33,11 @@
     if (!response.ok) throw new Error(data?.error || data?.message || "Creative guidance request failed (" + response.status + ")");
     return data;
   }
+  function profileAdminVisible() {
+    return !$("operationsProfilesPanel")?.hidden && $("page-operations")?.classList.contains("active");
+  }
   async function load() {
+    if (!profileAdminVisible()) { loadedProfile = ""; return; }
     const id = String(profileSelect.value || "");
     const serial = ++requestSerial;
     loadedProfile = "";
@@ -85,9 +89,28 @@
     }
   });
   reload.addEventListener("click", load);
+  $("operationsTabProfiles")?.addEventListener("click", () => queueMicrotask(load));
   profileSelect.addEventListener("change", load);
   new MutationObserver(() => {
     if (profileSelect.value !== (loadedProfile || "") && !pending) load();
   }).observe(profileSelect, { childList: true });
-  load();
+  // The preexisting tab switcher may not know this new tab. Ensure switching
+  // to Global Admin works while preserving its existing scheduling handlers.
+  const globalTab = $("operationsTabGlobal");
+  const globalPanel = $("operationsGlobalPanel");
+  const otherTabs = Array.from(document.querySelectorAll("#operationsControlView .ops-card-tab"))
+    .filter((tab) => tab !== globalTab);
+  if (globalTab && globalPanel) {
+    globalTab.addEventListener("click", () => {
+      document.querySelectorAll("#operationsControlView .ops-tab-panel").forEach((panel) => { panel.hidden = panel !== globalPanel; });
+      document.querySelectorAll("#operationsControlView .ops-card-tab").forEach((tab) => {
+        const active = tab === globalTab;
+        tab.classList.toggle("active", active);
+        tab.setAttribute("aria-selected", String(active));
+        tab.tabIndex = active ? 0 : -1;
+      });
+    });
+    for (const tab of otherTabs) tab.addEventListener("click", () => { globalPanel.hidden = true; });
+  }
+  if (profileAdminVisible()) load();
 })();
