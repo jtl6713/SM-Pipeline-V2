@@ -131,6 +131,10 @@ test("Worker continuously dispatches every Airtable-ready profile but never perf
   assert.match(minuteCron, /console\.info\("Ready-to-produce one-minute dispatch"/);
 
   assert.match(functions, /Studio_Photo_Wait_Status}='Ready'/);
+  const plan = functions.slice(functions.indexOf("function readyProductionIdeaPlan("),
+    functions.indexOf("async function monitorReadyProductionRequest("));
+  assert.match(plan, /PR_PLATFORMS\.has\(platform\)/,
+    "retired suggestions must never break an existing photo-ready draft");
   const dispatcher = functions.slice(
     functions.indexOf("async function studioReadyProductionCronResume"),
     functions.indexOf("export async function getStudioOperations(request"),
