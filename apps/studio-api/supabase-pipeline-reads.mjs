@@ -1157,7 +1157,7 @@ async function listAirtableOutputsByIds(env, listRecords, tableId, ids, fields) 
       limit: batch.length,
       fields,
       filterFormula: batch.length === 1 ? formula : `OR(${formula})`,
-    }).catch(() => []);
+    });
     rows.push(...(found || []));
   }
   return rows;
@@ -1187,7 +1187,7 @@ export async function reconcileSupabaseDroppedOpenOutputs(env, {
     );
   } catch (error) {
     console.warn("supabase dropped-open reconcile list failed", error);
-    return 0;
+    throw error;
   }
   const missing = [];
   for (const row of remote || []) {
@@ -1213,7 +1213,7 @@ export async function reconcileSupabaseDroppedOpenOutputs(env, {
     const found = await supabaseRest(
       env,
       `content_items?airtable_record_id=in.(${quoted})&select=id,airtable_record_id&limit=200`,
-    ).catch(() => []);
+    );
     for (const row of found || []) {
       if (row?.airtable_record_id && row.id) contentUuidByAirtableId.set(row.airtable_record_id, row.id);
     }
@@ -1297,7 +1297,7 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
       fields: outputFields,
     }),
     typeof deps.listOpenOutputs === "function"
-      ? deps.listOpenOutputs(profile).catch(() => [])
+      ? deps.listOpenOutputs(profile)
       : Promise.resolve([]),
     ideaTableId
       ? listRecords(env, ideaTableId, {
