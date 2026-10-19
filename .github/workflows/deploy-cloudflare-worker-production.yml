@@ -464,9 +464,11 @@ jobs:
               const overview = url.pathname === "/$TOKEN/overview";
               const overviewRefresh = url.pathname === "/$TOKEN/overview-refresh";
               const overviewStatus = url.pathname === "/$TOKEN/overview-status";
-              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !overview && !overviewRefresh && !overviewStatus) return new Response("Not found", {status:404});
+              const readyProductionDiagnostic = url.pathname === "/$TOKEN/ready-production-diagnostic";
+              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic) return new Response("Not found", {status:404});
               const generation = String(url.searchParams.get("generation") || "");
-              const path = overviewRefresh ? "/api/profiles/overview/refresh"
+              const path = readyProductionDiagnostic ? "/api/admin/ready-production-diagnostic"
+                : overviewRefresh ? "/api/profiles/overview/refresh"
                 : overviewStatus ? "/api/profiles/overview/refresh-status"
                 : overview ? "/api/profiles/overview" + (generation ? "?min_generation=" + encodeURIComponent(generation) : "")
                 : factoryDesk ? "/api/factory/desk"
@@ -720,6 +722,25 @@ jobs:
           echo "Factory Needs Eyes API never produced a valid complete response (HTTP $CODE)" >&2
           exit 1
 
+      - name: Inspect stalled Ready-production jobs through authenticated service binding (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS "$API_ROOT/workers/subdomain" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/ready-production-subdomain.json
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/ready-production-subdomain.json)
+          TOKEN=$(cat /tmp/verify-token.txt)
+          URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/ready-production-diagnostic"
+          CODE=$(curl -sS --max-time 60 -o /tmp/ready-production-diagnostic.json -w '%{http_code}' "$URL" || true)
+          if [[ "$CODE" != "200" ]] || ! jq -e '.ok==true and .read_only==true and .source=="worker_r2_binding" and (.jobs|length)==4' /tmp/ready-production-diagnostic.json >/dev/null 2>&1; then
+            echo "Ready-production inspector not reachable, http=$CODE" >&2
+            head -c 250 /tmp/ready-production-diagnostic.json >&2 || true
+            exit 1
+          fi
+          # Never claim incident closure based on an accessible diagnostic route.
+          # The heartbeat may be absent: that is precisely the runtime evidence.
+          jq -c '{heartbeat, jobs}' /tmp/ready-production-diagnostic.json
+
       - name: Delete functional verification bridge
         if: always()
         shell: bash
@@ -821,5 +842,6 @@ jobs:
             /tmp/overview-before.json
             /tmp/overview-refresh-status.json
             /tmp/overview-after.json
+            /tmp/ready-production-diagnostic.json
           if-no-files-found: ignore
           retention-days: 30

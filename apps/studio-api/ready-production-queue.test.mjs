@@ -144,3 +144,22 @@ test("Worker continuously dispatches every Airtable-ready profile but never perf
   assert.doesNotMatch(dispatcher, /factoryApproveOutput|approveOutputRecordForPublishing|Review_Status:\s*"Approved"/);
   assert.doesNotMatch(dispatcher, /Autonomous_Produce_Enabled/);
 });
+
+
+test("P0 #907 exposes cron-stage diagnostics only through tenant-admin GET; no queue mutations", async () => {
+  const worker = await readFile(new URL("./worker.js", import.meta.url), "utf8");
+  const functions = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+  assert.match(worker, /const isReadyProductionDiagnosticRoute = url\.pathname === "\/api\/admin\/ready-production-diagnostic"/);
+  assert.match(worker, /if \(isReadyProductionDiagnosticRoute\) \{\s*requirePermission\(authorization, "tenant_admin"\);\s*if \(request\.method !== "GET"\)/);
+  assert.match(functions, /async function getStudioReadyProductionDiagnostic\(/);
+  const diagnostic = functions.slice(functions.indexOf("export async function getStudioReadyProductionDiagnostic("), functions.indexOf("export async function getStudioOperations("));
+  assert.match(diagnostic, /readyProductionRead\(env\.STUDIO_MEDIA, id\)/);
+  assert.doesNotMatch(diagnostic, /readyProductionClaim|readyProductionEnqueue|studioReadyProductionCronResume\(/);
+  const dispatcher = functions.slice(functions.indexOf("async function studioReadyProductionCronResume("), functions.indexOf("export \{ studioReadyProductionCronResume \}"));
+  assert.match(dispatcher, /recordRun\("running"\)/);
+  assert.match(dispatcher, /recordRun\("failed"/);
+  assert.match(dispatcher, /recordRun\("completed"/);
+  for (const stage of ["authorization", "discovery", "enqueue", "list", "claim", "process"]) {
+    assert.match(dispatcher, new RegExp(stage));
+  }
+});

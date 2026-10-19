@@ -33,6 +33,7 @@ import {
 import {
   READY_PRODUCTION_MAX_CONCURRENCY,
   readyProductionClaim,
+  readyProductionRead,
   readyProductionEnqueue,
   readyProductionFailure,
   readyProductionFinishClaim,
@@ -11168,10 +11169,28 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
 
 async function studioReadyProductionCronResume(env, ctx = null, options = {}) {
   if (!env?.STUDIO_MEDIA) throw new HttpError(503, "Ready-to-produce durable queue storage is unavailable");
+  // P0 #907: bounded run-level trace, independent of authorization and Airtable.
+  // The Worker itself owns its R2 binding; no new token, service or auth bypass.
+  const startedAt = new Date().toISOString();
+  let stage = "authorization";
+  const recordRun = async (status, detail = {}) => {
+    try {
+      await env.STUDIO_MEDIA.put("studio/state/ready-production/v1/last-run.json", JSON.stringify({
+        schema: "studio.ready-production.cron.1", started_at: startedAt,
+        updated_at: new Date().toISOString(), status, stage, ...detail,
+      }), { httpMetadata: { contentType: "application/json" } });
+    } catch (error) {
+      console.warn("Ready-to-produce cron journal unavailable", String(error?.message || error).slice(0, 120));
+    }
+  };
+  await recordRun("running");
+  try {
   const authorization = options.authorization?.user?.record_id
     ? options.authorization
     : await resolveStudioCronAuthorization(env);
+  stage = "discovery";
   const discovered = await discoverReadyProductionIdeas(env, { limit: options.discoveryLimit || 100 });
+  stage = "enqueue";
   const enqueued = [];
   for (const idea of discovered) {
     const result = await readyProductionEnqueue(env.STUDIO_MEDIA, {
@@ -11181,17 +11200,20 @@ async function studioReadyProductionCronResume(env, ctx = null, options = {}) {
     });
     enqueued.push({ idea_id: idea.id, created: result.created, revived: Boolean(result.revived) });
   }
+  stage = "list";
   const jobs = await readyProductionList(env.STUDIO_MEDIA, { maxScan: options.maxScan || 500 });
   const selected = readyProductionSelectJobs(jobs, {
     maxConcurrency: options.maxConcurrency || READY_PRODUCTION_MAX_CONCURRENCY,
     maxPerProfile: 1,
   });
+  stage = "claim";
   const claims = [];
   for (const job of selected) {
     const owner = crypto.randomUUID();
     const lease = await readyProductionClaim(env.STUDIO_MEDIA, job.idea_id, owner);
     if (lease) claims.push(lease);
   }
+  stage = "process";
   const settled = await Promise.all(claims.map(async (lease, index) => {
     try {
       const job = await processReadyProductionClaim(env, authorization, ctx, lease, {
@@ -11212,7 +11234,7 @@ async function studioReadyProductionCronResume(env, ctx = null, options = {}) {
       return { idea_id: lease.job.idea_id, status: job?.status || "retry_wait", error: failure.message };
     }
   }));
-  return {
+  const outcome = {
     ok: true,
     discovered: discovered.length,
     enqueued: enqueued.filter((row) => row.created || row.revived).length,
@@ -11221,9 +11243,68 @@ async function studioReadyProductionCronResume(env, ctx = null, options = {}) {
     results: settled,
     final_approval: "human_only",
   };
+  stage = "finished";
+  await recordRun("completed", {
+    discovered: outcome.discovered, enqueued: outcome.enqueued,
+    claimed: outcome.claimed, results: outcome.results.map(row => ({
+      idea_id: row.idea_id, status: row.status,
+      stage: row.stage || null, error: String(row.error || "").slice(0, 180) || null,
+    })),
+  });
+  return outcome;
+  } catch (error) {
+    await recordRun("failed", {
+      error: String(error?.message || error).slice(0, 220),
+      error_status: Number(error?.status || error?.statusCode || 0) || null,
+    });
+    throw error;
+  }
 }
 
 export { studioReadyProductionCronResume };
+// Incident #907: never expose this outside authenticated tenant administration.
+// Bounded keyed reads avoid a costly R2 bucket scan and never modify jobs.
+export async function getStudioReadyProductionDiagnostic(request, env, url) {
+  if (!env?.STUDIO_MEDIA) throw new HttpError(503, "Ready-production queue storage unavailable");
+  const defaults = [
+    "recnviDYIh1G5o4ba", // Vizcaya Garden Textures
+    "rec4k3Jevbal4GphK", // Subway Door Myths
+    "recDRsvCYnlpGNPZc", // Tiffany Dome Glow
+    "recjeoGFgKv5GnUrQ", // LA Breakfast Bite
+  ];
+  const rawIds = String(url.searchParams.get("ideas") || "").trim();
+  const ids = [...new Set(rawIds ? rawIds.split(",").map(x => x.trim()) : defaults)];
+  if (!ids.length || ids.length > 12 || ids.some(id => !/^rec[A-Za-z0-9]{14}$/.test(id))) {
+    throw new HttpError(400, "Supply one to twelve valid Airtable idea IDs");
+  }
+  let heartbeat = null;
+  try {
+    const object = await env.STUDIO_MEDIA.get("studio/state/ready-production/v1/last-run.json");
+    if (object) heartbeat = JSON.parse(await object.text());
+  } catch (error) { heartbeat = { read_error: String(error?.message || error).slice(0, 180) }; }
+  const jobs = await Promise.all(ids.map(async (id) => {
+    try {
+      const job = await readyProductionRead(env.STUDIO_MEDIA, id);
+      if (!job) return { idea_id: id, found: false };
+      return {
+        idea_id: id, found: true, status: job.status || null, stage: job.stage || null,
+        attempts: Number(job.attempts || 0),
+        last_error: String(job.last_error || "").slice(0, 220) || null,
+        production_request_id: job.production_request_id || null,
+        updated_at: job.updated_at || null, next_attempt_ms: Number(job.next_attempt_ms || 0),
+        lease_expires_ms: Number(job.lease_expires_ms || 0),
+      };
+    } catch (error) {
+      return { idea_id: id, found: false, read_error: String(error?.message || error).slice(0, 180) };
+    }
+  }));
+  return respond(request, env, {
+    ok: true, read_only: true, source: "worker_r2_binding",
+    inspected_at: new Date().toISOString(), heartbeat, jobs,
+  });
+}
+
+/*__STUDIO_WORKER_END:getStudioReadyProductionDiagnostic__*/
 
 export async function getStudioOperations(request, env, authorization) {
   const chicago = chicagoNowParts();
