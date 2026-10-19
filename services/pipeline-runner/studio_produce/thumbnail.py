@@ -14,6 +14,7 @@ from p2.constants import THUMBNAIL_DRIVE_FOLDER_ID
 from p2.thumbnail_client import generate_thumbnail_png
 from render.fields import field_str
 from studio_produce.thumbnail_prompt import build_finished_thumbnail_prompt
+from studio_produce.creative_guidance import load_profile_creative_guidance
 
 logger = logging.getLogger("pipeline-runner.studio-produce")
 
@@ -96,7 +97,10 @@ def _generate_cover_bytes(
     *,
     aspect_ratio: str,
 ) -> tuple[bytes, str]:
-    prompt = build_finished_thumbnail_prompt(request, parent, aspect_ratio=aspect_ratio)
+    prompt = build_finished_thumbnail_prompt(
+        request, parent, aspect_ratio=aspect_ratio,
+        creative_guidance=load_profile_creative_guidance(client, request, parent),
+    )
     raw = generate_thumbnail_png(prompt, aspect_ratio=aspect_ratio)
     png = apply_watermark_bytes(raw, brand_watermark_bytes(client), output_format="png")
     return png, prompt

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from studio_produce.creative_guidance import creative_prompt_suffix
+
 PROMPT_TEMPLATE = """You are the Studio AI slide themer and caption writer for SM Pipeline V2.
 
 Return strict JSON only. No markdown. No explanations.
@@ -99,11 +101,12 @@ FINAL SELF-CHECK BEFORE RETURNING
 - Output is valid JSON only."""
 
 
-def build_themer_prompt(*, title: str, covered_text: str, needed: int, total: int, market: str = "Chicago") -> str:
-    return PROMPT_TEMPLATE.format(
+def build_themer_prompt(*, title: str, covered_text: str, needed: int, total: int, market: str = "Chicago", creative_guidance: dict | None = None) -> str:
+    prompt = PROMPT_TEMPLATE.format(
         market=market or "Chicago",
         title=title or "",
         covered_text=covered_text or "(none)",
         needed=int(needed),
         total=int(total),
     )
+    return prompt + creative_prompt_suffix(creative_guidance, mode="narration")

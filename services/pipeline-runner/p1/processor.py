@@ -34,6 +34,7 @@ from p1.eligibility import (
     require_active,
 )
 from p1.openai_package import generate_package
+from studio_produce.creative_guidance import load_profile_creative_guidance, creative_prompt_suffix
 from render.fields import field, field_str, first_linked_id
 
 
@@ -198,6 +199,12 @@ def _process_one(
     if dry_run:
         return {"processed": False, "dry_run": True, **preview}
 
+    guidance = load_profile_creative_guidance(client, item)
+    # The P1 package writes both Thumbnail_Prompt and Voiceover_Script.
+    # Keep medium-specific styling separate and preserve the canonical
+    # JSON schema / factual requirements from the active P1 prompt.
+    context += creative_prompt_suffix(guidance, mode="thumbnail")
+    context += creative_prompt_suffix(guidance, mode="narration")
     generated = generate_package(prompt, context)
     parsed = generated.get("parsed") or {}
     if not _package_complete(parsed):

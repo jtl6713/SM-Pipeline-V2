@@ -6,6 +6,7 @@ import {
   readProfilesOverviewRefreshStateRecord,
 } from "./profiles-overview-refresh.mjs";
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
+import { creativeSettingName, parseCreativeGuidance, validateCreativeGuidancePatch } from "./profile-creative-guidance.mjs";
 import {
   reconcileScheduleReservation,
   scheduleReservationAuthorityEnabled,
@@ -10982,6 +10983,43 @@ export async function patchStudioOperationsProfile(request, env, url, authorizat
   return respond(request, env, { ok: true, profile: mapOperationsProfile(updated) });
 }
 /*__STUDIO_WORKER_END:patchStudioOperationsProfile__*/
+
+// Scoped creative instructions are saved as Pipeline Settings, so existing
+// Content Profile schemas/defaults and Supabase read gating remain unchanged.
+export async function studioProfileCreativeGuidance(request, env, url, authorization) {
+  const match = /^\/api\/operations\/profiles\/(rec[A-Za-z0-9]+)\/creative$/.exec(url.pathname);
+  if (!match) throw new HttpError(400, "Invalid profile creative-guidance path");
+  const profileId = match[1];
+  const profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId);
+  if (!profile?.id) throw new HttpError(404, "Content Profile was not found");
+  const name = creativeSettingName(profileId);
+  const stored = await studioSettingsByName(env, name);
+  const raw = String(f(stored, "Setting_Value") || "");
+  let version = "0";
+  try { version = String(JSON.parse(raw)?.revision || "0"); } catch { /* old/missing setting */ }
+  const previous = parseCreativeGuidance(raw);
+  if (request.method === "GET") {
+    return respond(request, env, { ok: true, profile_id: profileId, profile_name: String(f(profile, "Profile_Name") || ""),
+      creative: previous, revision: version, can_edit: true });
+  }
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new HttpError(400, "Request body must be a JSON object");
+  }
+  if (String(payload.revision ?? "") !== version) {
+    throw new HttpError(409, "Creative instructions changed in another session; reload before saving");
+  }
+  let creative;
+  try { creative = validateCreativeGuidancePatch(payload.creative, previous); }
+  catch (error) { throw new HttpError(400, String(error.message || error)); }
+  const nextRevision = crypto.randomUUID();
+  const storedValue = JSON.stringify({ ...creative, revision: nextRevision, updated_at: new Date().toISOString() });
+  await studioUpsertSetting(env, name, storedValue, `Profile-specific thumbnail + narration direction for ${profileId}`);
+  return respond(request, env, { ok: true, profile_id: profileId,
+    profile_name: String(f(profile, "Profile_Name") || ""), creative, revision: nextRevision, can_edit: true });
+}
+/*__STUDIO_WORKER_END:studioProfileCreativeGuidance__*/
 
 export function studioInternalJsonRequest(pathname, body) {
   const url = new URL(`https://studio.chicagoshining.com${pathname}`);

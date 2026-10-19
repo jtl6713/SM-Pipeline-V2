@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from studio_produce.creative_guidance import creative_prompt_suffix
+
 # Photorealistic scene; restrained gold lettering (~80%); colorful 3D only as occasional variety.
 THUMBNAIL_LETTER_STYLE_RULE = (
     "Photorealism: the scene must look like a real photograph (natural camera, real light, "
@@ -42,11 +44,12 @@ def build_finished_thumbnail_prompt(
     parent: dict[str, Any] | None,
     *,
     aspect_ratio: str = "9:16",
+    creative_guidance: dict[str, Any] | None = None,
 ) -> str:
     existing = _text(parent, "Thumbnail_Prompt")
     ratio = str(aspect_ratio or "9:16").replace("x", ":").strip() or "9:16"
     # Old landscape-leaning prompts must not be reused for vertical platform covers.
-    if existing and _prompt_has_letter_style(existing) and f"{ratio}" in existing and "FRAME:" in existing:
+    if not creative_prompt_suffix(creative_guidance, mode="thumbnail") and existing and _prompt_has_letter_style(existing) and f"{ratio}" in existing and "FRAME:" in existing:
         return existing
     title = (
         _text(request, "Requested_Title")
@@ -69,6 +72,7 @@ def build_finished_thumbnail_prompt(
             f"Compose for a {orientation} {ratio} platform cover that matches the video frame.",
             "Text must be large and readable on a phone, near the center or slightly below center, inside safe margins, and not in the top or bottom 10%. Do not let lettering dominate the frame.",
             "Photorealistic and readable. Do not invent logos, watermarks, platform UI, or distorted letters.",
+            creative_prompt_suffix(creative_guidance, mode="thumbnail"),
         )
         if part
     )

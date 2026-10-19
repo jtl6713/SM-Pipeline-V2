@@ -43,6 +43,7 @@ from p2.formulas import (
 from p2.normalizer_client import normalization_details, normalize_voiceover
 from p2.stale_clears import stale_media_run_clears
 from p2.thumbnail_client import generate_thumbnail_png
+from studio_produce.creative_guidance import load_profile_creative_guidance, creative_prompt_suffix
 from render.fields import field_str, first_linked_id, linked_ids
 
 
@@ -351,7 +352,9 @@ def process_request(
     test_run = field_str(item, "Test_Run_ID")
 
     def _branded_thumbnail(prompt: str, *, aspect_ratio: str = "9:16") -> bytes:
-        raw = generate_thumbnail_png(prompt, aspect_ratio=aspect_ratio)
+        guidance = load_profile_creative_guidance(client, item)
+        enhanced = prompt + creative_prompt_suffix(guidance, mode="thumbnail")
+        raw = generate_thumbnail_png(enhanced, aspect_ratio=aspect_ratio)
         return apply_watermark_bytes(raw, brand_watermark_bytes(client), output_format="png")
 
     if route == "silent_thumbnail":

@@ -1,0 +1,9 @@
+.ops-creative-panel{margin:1.25rem 0 0;padding:1.15rem;border:1px solid var(--line,rgba(0,0,0,.14));border-radius:12px}
+.ops-creative-panel .ops-creative-heading{display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap}
+.ops-creative-panel .ops-creative-heading h3{margin:0}
+.ops-creative-panel .ops-creative-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:1rem;margin-top:1rem}
+.ops-creative-panel .ops-creative-fields textarea{box-sizing:border-box;width:100%;min-height:165px;resize:vertical}
+.ops-creative-panel .ops-creative-fields .form-field{display:flex;flex-direction:column;gap:.35rem;min-width:0}
+.ops-creative-panel .ops-creative-actions{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;margin-top:1rem}
+.ops-creative-panel .subtle{line-height:1.45}
+.ops-global-settings{max-width:900px}

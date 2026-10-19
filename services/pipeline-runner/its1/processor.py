@@ -99,6 +99,7 @@ def process_request(
     location: str = "",
     market: str = "Chicago",
     catalog: list[dict[str, Any]] | None = None,
+    creative_guidance: dict[str, Any] | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     stills = [item for item in (catalog or []) if isinstance(item, dict) and _still_id(item) and _still_name(item)]
@@ -108,6 +109,7 @@ def process_request(
         location=location,
         market=market or "Chicago",
         catalog=stills,
+        creative_guidance=creative_guidance,
     )
     preview = {
         "make_scenario_id": MAKE_SCENARIO_ID,
