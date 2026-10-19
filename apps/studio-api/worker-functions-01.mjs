@@ -3788,7 +3788,15 @@ export async function updateIdea(request, env, url, authorization) {
   const input = cleanIdeaUpdatePayload(payload);
   let productionFields = {};
   try {
-    productionFields = ideaProductionConfigFields(payload, String(f(record, "Production_Config_Notes") || ""));
+    productionFields = ideaProductionConfigFields(
+      payload,
+      String(f(record, "Production_Config_Notes") || ""),
+      {
+        status: String(f(record, "Studio_Photo_Wait_Status") || ""),
+        selectedAssetCount: arrayOrEmpty(f(record, "Studio_Matched_Media_Assets")).length,
+        minimum: Number(f(record, "Production_Carousel_Slide_Count_Min") || 1),
+      }
+    );
   } catch (error) {
     throw new HttpError(400, error instanceof Error ? error.message : "Invalid production options");
   }
