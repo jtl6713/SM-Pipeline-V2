@@ -486,3 +486,5 @@ Release PR 890: selected-only Profile Admin endpoint, exact linked music names, 
 2026-10-19 PR #895: deploy autonomous five-output per idea refill estimate; per-profile ceil((500 - scheduled - awaiting approval)/5), capped by existing hourly and backlog safety controls; no Supabase read or scheduling authority changes. Seven CI checks green.
 
 2026-10-19 Deploy PR #896 global unpromoted Idea Candidate cap 20 to 100. Preserve 500 eligible-output target, five-output-per-idea deficit planning, Airtable authority, Supabase read circuit breaker and existing production binding safeguards.
+
+2026-10-19 Vizcaya photo matcher queue fairness | PR #898 merged fb6863a71e090a2c280418a9f81959143808297c | fair 8-of-500 waiting queue, direct linked draft lookup to eliminate global production request scan; 4/4 CI PASS, preserve Airtable authority, Supabase reads disabled and publish/approval guardrails. Deploy Worker only; no automatic approval or publishing.
