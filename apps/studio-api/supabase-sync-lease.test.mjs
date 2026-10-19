@@ -98,6 +98,7 @@ test("Phase 5 circuit activation aborts remaining profiles and production reques
     assertLease: async () => {
       noteSupabaseCircuitFailure(new Error("PGRST003 pool timeout"));
       noteSupabaseCircuitFailure(new Error("57014 statement timeout"));
+      throw new Error("PGRST003 pool timeout");
     },
   });
   assert.equal(result.status, "circuit_open");
