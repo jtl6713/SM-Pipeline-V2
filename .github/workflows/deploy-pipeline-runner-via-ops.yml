@@ -256,3 +256,4 @@ jobs:
 # 2026-10-17 service_version=2026-10-17-visual-voiceover-revision-guard
 # 2026-10-17: fresh runner restart to clear stale final visual-canary request after exact-target/timing fixes.
 # Trigger pipeline-runner deploy for PR 884 profile-specific thumbnail and narration prompt guidance.
+# Controlled single retry for PR 884 after verified rollback; 2026-10-18 profile creative guidance.
