@@ -1063,7 +1063,8 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.667-photo-match-error-json",
+          version: "0.10.666-home-overview-snapshot-fix",
+          photo_match_error_json_v1: true,
           factory_batch_canary_revision: "chicago-ig-reel-v1",
           factory_batch_phase2a_post_gate_fix_v1: true,
           studio_supabase_pipeline_reads_v1: true,
