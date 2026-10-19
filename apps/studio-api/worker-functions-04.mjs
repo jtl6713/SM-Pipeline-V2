@@ -2296,9 +2296,12 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
       // Commit-time source of truth: never trust Approve All / Factory batch
       // occupancy snapshots here. Force the shared cache cold, then re-read.
       studioInvalidateOccupiedScheduleCache();
+      // Profile/platform is the atomic lock lane. Keep all output types.
+      // Server-side filtering cuts unrelated Airtable rows from this strict,
+      // lock-held read without trusting a stale occupancy cache.
       const occupied = await studioOccupiedSchedulesOrEmpty(env, {
         excludeIds: [id],
-        profile, requireComplete: true });
+        profile, platform, requireComplete: true });
       const laneOccupied = studioOccupiedForLane(occupied, platform, outputType).slice();
       const platformOccupied = studioOccupiedForPlatform(occupied, platform).slice();
 
