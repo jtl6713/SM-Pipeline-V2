@@ -12,18 +12,18 @@ test("Home boots a thin script set and lazy-loads the other pages", async () => 
   const loader = await readFile(path.join(here, "assets/studio-lazy-pages.js"), "utf8");
 
   assert.match(html, /id="studioLazyManifest"/);
-  assert.match(html, /studio-lazy-pages\.js\?v=0.6.723-profile-fast-music/);
+  assert.match(html, /studio-lazy-pages\.js\?v=0.6.724-home-overview-cache-guard/);
   assert.match(html, /window\.StudioLazyLoad\.boot\(\)/);
   assert.doesNotMatch(html, /<script src="\/assets\/insights-0622\.js/);
   assert.doesNotMatch(html, /<script src="\/assets\/engagement-1008\.js/);
   assert.doesNotMatch(html, /<script src="\/assets\/new-profile-1009\.js/);
   assert.doesNotMatch(html, /<script src="\/assets\/pipeline-schedule-grid-0622\.js/);
-  assert.match(html, /\/assets\/insights-0622\.js\?v=0.6.723-profile-fast-music/);
-  assert.match(html, /\/assets\/engagement-1008\.js\?v=0.6.723-profile-fast-music/);
-  assert.match(html, /\/assets\/app-item4-1008\.js\?v=0.6.723-profile-fast-music/);
+  assert.match(html, /\/assets\/insights-0622\.js\?v=0.6.724-home-overview-cache-guard/);
+  assert.match(html, /\/assets\/engagement-1008\.js\?v=0.6.724-home-overview-cache-guard/);
+  assert.match(html, /\/assets\/app-item4-1008\.js\?v=0.6.724-home-overview-cache-guard/);
   assert.match(loader, /function ensure\(/);
   assert.match(loader, /prefetchRemaining/);
-  assert.match(app, /BUILD_ID = "item4-0.6.723-profile-fast-music"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.724-home-overview-cache-guard"/);
   assert.match(app, /window\.StudioLazyLoad\?\.ensure\(page\)/);
   assert.match(app, /window\.StudioLazyLoad\?\.ensure\("content"\)/);
   assert.match(app, /page === "insights"/);
