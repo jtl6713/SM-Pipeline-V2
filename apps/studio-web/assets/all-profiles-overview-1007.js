@@ -4,9 +4,9 @@
 
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
   const platformOrder = ["Facebook","Instagram","TikTok","YouTube"];
-  // Cache format v4 requires the authoritative approved_unpublished metric.
-  // Discard legacy browser snapshots instead of painting their old parentheses.
-  const CACHE_KEY = "studio.allProfilesOverview.v4";
+  // Cache v5 uses all final-approved, unpublished outputs, including overdue.
+  // Do not reuse v4 browser snapshots that expired counts on the schedule date.
+  const CACHE_KEY = "studio.allProfilesOverview.v5";
   const REFRESH_KEY = "studio.allProfilesOverview.refresh.v1";
   const POLL_MS = 12000;
   const REFRESH_POLL_MS = 1800;
