@@ -563,3 +563,5 @@ Deploy targeted November 17 MAE overage selector from merged PR #936; no automat
 2026-10-20: P0 Factory post-deploy acceptance: re-run authenticated read-only Factory status canary and log sanitized active group counts so observed backlog progress is measurable. No application code or binding changes.
 
 2026-10-20: P0 Factory live verified 33 approved / 64 pending for 8 global batches after PR #981. Deploy merged PR #986 independent R2 parent-ledger child recovery when rotating child scan starves accepted Miami/LA approvals; preserve idempotent Airtable approval, strict scheduling, Phase 5 Supabase breaker and existing Cloudflare bindings; verify production counts using the authenticated read-only Factory audit.
+
+2026-10-20: P0 Factory #987 production recovery. Strict 90-day per-platform Airtable occupancy (all output types) replaces capped all-platform Factory scan for accepted batches. Preserve Airtable authoritative source, MAE collision protection, serial profile leases, output idempotency, Supabase Phase 5 breaker and existing bindings. Validate stalled 8 batches/64 pending counts via authenticated read-only audit after deploy.
