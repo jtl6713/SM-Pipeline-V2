@@ -79,6 +79,13 @@ jobs:
           echo '### Shadow profile hourly observation' >> "$GITHUB_STEP_SUMMARY"
           jq -r '"- Captured: " + .captured_at + "\\n- Summary version: " + (.summary_version|tostring) + "\\n- Dirty applied: " + (.evidence.dirty_applied|tostring) + "\\n- Airtable dirty attempts: " + (.evidence.airtable_dirty_batch_attempts|tostring) + "\\n- Airtable dirty errors: " + (.evidence.airtable_dirty_batch_errors|tostring)' evidence.json >> "$GITHUB_STEP_SUMMARY"
           echo '- Interpretation: cumulative telemetry only; these values do not establish full Airtable request savings.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Enforce complete core-source collection
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '.worker.ok == true and .runner.ok == true and .complete == true' airtable-egress-coverage.json > /dev/null
+          echo 'Core Worker and runner exports both available; external sources and historic windows remain independently gated.'
+
       - name: Save evidence artifact
         if: always()
         uses: actions/upload-artifact@v4
