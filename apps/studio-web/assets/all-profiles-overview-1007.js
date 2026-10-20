@@ -593,9 +593,19 @@
     load();
     syncRefreshStatus({ quiet: true });
   };
+  // Paint the last verified snapshot before any network request starts.
+  const initialCache = readCache();
+  if (initialCache?.rows?.length) {
+    state.rows = initialCache.rows;
+    state.cacheAt = initialCache.at;
+    state.snapshotGeneration = initialCache.generation;
+    state.summaryVersion = initialCache.summaryVersion || 0;
+    state.ideasAt = initialCache.ideasAt;
+    render({ stale: true });
+  }
   start();
 
-  // Twelve-second Home polling remains cheap snapshot reads only. Durable refresh
+  // Twelve-second Home polling uses read-only snapshot reads, not forced rebuilds. Durable refresh
   // status polling is independent, so leaving Home does not cancel a refresh.
   state.timer = window.setInterval(() => {
     if (overviewViewActive()) load();
