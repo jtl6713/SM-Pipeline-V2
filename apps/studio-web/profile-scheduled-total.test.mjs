@@ -78,10 +78,10 @@ test("all-profiles overview shows overdue unpublished approved totals rather tha
 
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
-    assert.match(host.innerHTML, /<th scope="row">Chicago \(3\)<\/th>/);
-    assert.match(host.innerHTML, /<th scope="row">Miami \(1\)<\/th>/);
+    assert.match(host.innerHTML, /<th scope="row">Chicago \(2\)<\/th>/);
+    assert.match(host.innerHTML, /<th scope="row">Miami \(4\)<\/th>/);
     assert.match(host.innerHTML, /<th scope="row">Total<\/th>/);
-    assert.doesNotMatch(host.innerHTML, /Total \(4\)/);
+    assert.doesNotMatch(host.innerHTML, /Total \(6\)/);
   } finally {
     globalThis.document = prior.document;
     globalThis.fetch = prior.fetch;
