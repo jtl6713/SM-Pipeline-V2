@@ -36,6 +36,11 @@ jobs:
           pip install -r services/pipeline-runner/requirements.txt
           pip install -r services/timing-engine/requirements.txt
 
+      - name: Validate Airtable source-hour coverage and baseline safety
+        run: |
+          python -m unittest discover -s repair/scripts -p 'airtable_coverage_baseline_test.py' -v
+          python -m unittest discover -s repair/scripts -p 'airtable_standalone_egress_test.py' -v
+
       - name: Hermetic packs
         shell: bash
         run: |
