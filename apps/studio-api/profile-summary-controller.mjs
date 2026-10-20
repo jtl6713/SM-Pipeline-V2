@@ -7,6 +7,8 @@ import {
   studioOverviewRowMatchesProfile, validateStudioProfilesOverviewRows,
 } from "./worker-functions-04.mjs";
 import { OUTPUT_LIST_FIELDS } from "./worker.js";
+import { homeApprovedCalendarCounts } from "./home-approved-calendar-counts.mjs";
+import { validProfileSummaryV6Rows } from "./profile-summary-v6.mjs";
 
 export const PROFILE_SUMMARY_BINDING = "STUDIO_PROFILE_SUMMARIES";
 const NAME = "all-profiles-v1";
@@ -165,14 +167,23 @@ async function runStudioProfileSummaryReconcile(env) {
     const ideaRows = ideas.map(mapIdea);
     const metrics = studioOverviewOperationalMetrics(mapped, ideaRows);
     const scheduled = studioOverviewScheduledCounts(mapped);
+    const calendar = homeApprovedCalendarCounts(mapped);
     expectedRows.push({
       id: profile.id,
       name: info.find((p) => p.id === profile.id)?.city_label,
       city_label: info.find((p) => p.id === profile.id)?.city_label,
       scheduled, manual: metrics.manual_action_required,
-      failed: metrics.failed_outputs, approval: metrics.awaiting_approval,
+      failed: metrics.failed_outputs, approval: calendar.awaiting,
+      awaiting_final_by_platform: calendar.awaiting_by_platform,
+      pipeline_by_platform: calendar.pipeline_by_platform,
+      pipeline_total: calendar.pipeline_total,
       approved_unpublished: metrics.approved_unpublished,
       overdue_unpublished: metrics.overdue_unpublished,
+      approved_future_by_platform: calendar.future_by_platform,
+      approved_future: calendar.future,
+      approved_past_due: calendar.past_due,
+      approved_missing_date: calendar.missing_date,
+      approved_calendar_slots: calendar.slots,
       ideas: metrics.ideas_not_in_production, metrics,
     });
   }
@@ -196,6 +207,5 @@ export function validVerifiedStudioSummary(summary, profileIds, maxAgeMs = 60 * 
   const required = new Set((profileIds || []).map((id) => String(id)));
   const ids = new Set(summary.records.map((record) => String(record.id || "")));
   if (ids.size !== 4 || required.size > ids.size || [...required].some((id) => !ids.has(id))) return false;
-  return summary.records.every((record) => PLATFORMS.every((p) => Number.isFinite(record.scheduled?.[p]))
-    && ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished"].every((key) => Number.isFinite(record[key])));
+  return validProfileSummaryV6Rows(summary.records);
 }
