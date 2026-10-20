@@ -1,0 +1,1 @@
+2026-10-20: After Worker v6 deploy and force-refresh verification, run existing authenticated Pages production workflow_dispatch with the new Home approved-future-output-v6 lazy asset. Preserve UI 0.6.727 app-wide identity and all protected live domain contract checks.
