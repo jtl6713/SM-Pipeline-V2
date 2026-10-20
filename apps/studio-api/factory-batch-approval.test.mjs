@@ -134,14 +134,17 @@ test("Factory cron never burns Airtable occupancy scans before claiming profile 
   const source = functions04.slice(start, end);
   const claim = source.indexOf("const result = await factoryBatchDrain(");
   const approval = source.indexOf("approve: async (id, currentJob, checkpoint");
-  const occupancy = source.indexOf("occupiedByLane = await studioOccupiedSchedulesOrEmpty(");
+  const occupancy = source.indexOf("const platformOccupancy = await studioOccupiedSchedulesOrEmpty(");
   assert.ok(claim >= 0 && approval > claim && occupancy > approval,
     "only the R2-lease winner can fetch expensive scheduling occupancy");
   const beforeClaim = source.slice(0, claim);
   assert.doesNotMatch(beforeClaim, /studioOccupiedSchedulesOrEmpty|await airtableFetch\(env, STUDIO_IDEA_PROFILE_TABLE_ID/);
-  assert.match(source, /let occupiedByLane = null/);
-  assert.match(source, /if \(occupiedByLane === null\)/);
+  assert.match(source, /const occupiedByLane = \{\}/);
+  assert.match(source, /if \(!loadedOccupancyPlatforms\.has\(platform\)\)/);
   assert.match(source, /requireComplete: true/);
+  assert.match(source, /profile, platform, requireComplete: true/);
+  assert.match(source, /loadedOccupancyPlatforms\.add\(platform\)/);
+  assert.doesNotMatch(source, /profile, requireComplete: true/);
   assert.match(source, /filter\(\(item\) => !\["approved", "already_satisfied", "failed"\]/);
   assert.match(source, /skipOccupancyRefresh: true/);
 });
