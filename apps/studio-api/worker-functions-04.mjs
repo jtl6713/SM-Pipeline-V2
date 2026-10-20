@@ -4891,8 +4891,8 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
     const mappedOutputs = profileOutputs.map((row) => mappedById.get(row.id) || mapOutput(row, null));
     const metrics = studioOverviewOperationalMetrics(mappedOutputs, []);
     const calendar = homeApprovedCalendarCounts(mappedOutputs);
-    // Final approved-but-unpublished count is status-driven; the date
-    // crossing into overdue must not remove it from Home parentheses.
+    // Approved future outputs and rendered awaiting final human approval are
+    // disjoint platform-output records. Past due and missing date are exceptions.
     let ideasCount = 0;
     let ideasSource = "snapshot";
     if (airtableIdeaRows) {
@@ -4921,7 +4921,10 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
       scheduled: studioOverviewScheduledCounts(mappedOutputs),
       manual: metrics.manual_action_required,
       failed: metrics.failed_outputs,
-      approval: metrics.awaiting_approval,
+      approval: calendar.awaiting,
+      awaiting_final_by_platform: calendar.awaiting_by_platform,
+      pipeline_by_platform: calendar.pipeline_by_platform,
+      pipeline_total: calendar.pipeline_total,
       approved_unpublished: metrics.approved_unpublished,
       overdue_unpublished: metrics.overdue_unpublished,
       approved_future_by_platform: calendar.future_by_platform,
@@ -4984,7 +4987,7 @@ function studioProfilesOverviewRowsHealthy(rows) {
       if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return false;
     }
     // Reject legacy snapshots without per-output calendar timestamps.
-    for (const key of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished", "approved_future", "approved_past_due", "approved_missing_date"]) {
+    for (const key of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished", "approved_future", "approved_past_due", "approved_missing_date", "pipeline_total"]) {
       const n = row?.[key];
       if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return false;
     }
@@ -4992,6 +4995,8 @@ function studioProfilesOverviewRowsHealthy(rows) {
       const slots = row?.approved_calendar_slots?.[platform];
       if (!Array.isArray(slots) || slots.some((stamp) => !Number.isFinite(stamp) || stamp <= 0)) return false;
       if (!Number.isInteger(row?.approved_future_by_platform?.[platform]) || row.approved_future_by_platform[platform] < 0) return false;
+      if (!Number.isInteger(row?.awaiting_final_by_platform?.[platform]) || row.awaiting_final_by_platform[platform] < 0) return false;
+      if (row?.pipeline_by_platform?.[platform] !== row.approved_future_by_platform[platform] + row.awaiting_final_by_platform[platform]) return false;
     }
   }
   return true;
@@ -5427,13 +5432,16 @@ export function validateStudioProfilesOverviewRows(rows, profiles) {
         throw new Error(`Profiles overview scheduled count is incomplete for ${platform}`);
       }
     }
-    for (const key of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished", "approved_future", "approved_past_due", "approved_missing_date"]) {
+    for (const key of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished", "approved_future", "approved_past_due", "approved_missing_date", "pipeline_total"]) {
       if (typeof row?.[key] !== "number" || !Number.isFinite(row[key]) || row[key] < 0) {
         throw new Error(`Profiles overview ${key} count is incomplete`);
       }
     }
     for (const platform of ["Facebook", "Instagram", "TikTok", "YouTube"]) {
-      if (!Array.isArray(row?.approved_calendar_slots?.[platform]) || !Number.isInteger(row?.approved_future_by_platform?.[platform])) {
+      if (!Array.isArray(row?.approved_calendar_slots?.[platform])
+        || !Number.isInteger(row?.approved_future_by_platform?.[platform])
+        || !Number.isInteger(row?.awaiting_final_by_platform?.[platform])
+        || row?.pipeline_by_platform?.[platform] !== row.approved_future_by_platform[platform] + row.awaiting_final_by_platform[platform]) {
         throw new Error(`Profiles overview ${platform} approved calendar records missing`);
       }
     }
