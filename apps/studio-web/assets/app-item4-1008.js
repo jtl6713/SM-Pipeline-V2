@@ -24760,8 +24760,9 @@ function timedScriptAssetLabel(asset, index) {
         button.addEventListener("click", () => {
           const id = String(button.dataset.opsMusicPreview || "").trim();
           if (!id) return;
-          const preview = String(button.dataset.previewUrl || "").trim()
-            || `/api/music/${encodeURIComponent(id)}/preview`;
+          // Always stream through Studio's authenticated audio proxy. A music
+          // record's preview_url can be a Drive/R2 link that is not browser-readable.
+          const preview = `/api/music/${encodeURIComponent(id)}/preview`;
           const label = button.closest(".ops-music-preview-row")?.querySelector(".ops-music-option span")?.textContent?.trim() || "track";
           playStudioAudioPreview(preview, button, setOperationsMessage, label);
         });
