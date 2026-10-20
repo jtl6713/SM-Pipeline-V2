@@ -1,0 +1,46 @@
+name: Prepare Profile Admin Music Proxy Release
+on:
+  push:
+    branches: [fix/profile-admin-music-preview-proxy-20261020]
+    paths:
+      - '.github/workflows/prepare-music-preview-proxy-release.yml'
+permissions:
+  contents: write
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/profile-admin-music-preview-proxy-20261020
+      - name: Update UI build and regression expectations
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          previous = '0.6.724-profile-fast-music'
+          release = '0.6.725-music-preview-proxy'
+          html=Path('apps/studio-web/index.html')
+          app=Path('apps/studio-web/assets/app-item4-1008.js')
+          h=html.read_text()
+          a=app.read_text()
+          assert h.count(previous)>20 and ('item4-'+previous) in a and 'UI build 0.6.724' in h
+          html.write_text(h.replace(previous,release).replace('UI build 0.6.724','UI build 0.6.725'))
+          app.write_text(a.replace('item4-'+previous,'item4-'+release))
+          for p in Path('apps/studio-web').rglob('*.test.mjs'):
+            original=p.read_text()
+            edited=original.replace(previous,release).replace(previous.replace('.',chr(92)+'.'),release.replace('.',chr(92)+'.')).replace('0.6.724','0.6.725').replace('0'+chr(92)+'.6'+chr(92)+'.724','0'+chr(92)+'.6'+chr(92)+'.725')
+            if edited!=original:p.write_text(edited)
+          PY
+          node apps/studio-web/ui-release-contract.mjs
+          node --test apps/studio-web/ui-release-contract.test.mjs apps/studio-web/operations-profile-audio-preview.test.mjs
+      - name: Commit release version
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -u apps/studio-web
+          git diff --cached --check
+          git commit -m "Release UI 0.6.725: music playback proxy"
+          git push origin HEAD:fix/profile-admin-music-preview-proxy-20261020
