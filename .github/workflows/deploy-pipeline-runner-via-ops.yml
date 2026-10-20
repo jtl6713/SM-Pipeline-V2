@@ -265,3 +265,5 @@ jobs:
 # 2026-10-20: Roll out PR #944 durable Airtable request accounting to runner, persist using /scratch/metrics on the existing volume, and verify shared-secret metrics endpoint without impacting pipeline writes.
 
 # 2026-10-20: Deploy PR955 default persisted runner Airtable egress SQLite path to /scratch/metrics; verify hourly evidence proxy.
+
+# 2026-10-20: Re-deploy current main pipeline runner, including numeric-suffix-free I1 idea-title prompt; retain existing Ops safety tests and health verification.
