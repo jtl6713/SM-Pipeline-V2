@@ -5003,6 +5003,8 @@ function profilesOverviewSnapshotView() {
 }
 
 export function rememberProfilesOverviewSnapshot(snapshot) {
+  // V4 snapshots used future-only approved counts; never hydrate those into V5.
+  if (Number(snapshot?.schemaVersion || 0) !== 5) return null;
   const rows = Array.isArray(snapshot?.rows) ? snapshot.rows : [];
   if (!studioProfilesOverviewRowsHealthy(rows)) {
     console.warn("profiles overview: rejecting incomplete/duplicate-city snapshot");
@@ -5047,7 +5049,7 @@ export async function readStudioProfilesOverviewSnapshot(env, options = {}) {
   const cacheGeneration = String(cache.generation || "");
   const needsDurable = options.forceDurable === true
     || (expectedGeneration && cacheGeneration !== expectedGeneration);
-  if (cache.rows?.length && !studioProfilesOverviewRowsHealthy(cache.rows)) {
+  if (cache.rows?.length && (cache.schemaVersion !== 5 || !studioProfilesOverviewRowsHealthy(cache.rows))) {
     cache.rows = null;
     cache.complete = false;
     cache.at = 0;
@@ -5133,7 +5135,7 @@ export async function writeStudioProfilesOverviewSnapshot(env, rows, authKey, ex
 
 export async function verifyStudioProfilesOverviewSnapshot(env, expectedGeneration) {
   const snapshot = await readStudioProfilesOverviewSnapshotFromR2(env);
-  if (!snapshot?.complete || snapshot.schemaVersion !== 4 || !studioProfilesOverviewRowsHealthy(snapshot.rows)) {
+  if (!snapshot?.complete || snapshot.schemaVersion !== 5 || !studioProfilesOverviewRowsHealthy(snapshot.rows)) {
     throw new Error("Forced overview refresh could not verify a complete durable snapshot");
   }
   if (String(snapshot.generation || "") !== String(expectedGeneration || "")) {

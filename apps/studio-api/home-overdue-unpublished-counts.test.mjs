@@ -97,3 +97,20 @@ test("Home parentheses depend on final-approved-unpublished state, not scheduled
   assert.match(durable, /approved_unpublished_definition/);
   assert.match(durable, /future_count_reconcile_required/);
 });
+
+
+test("Home V5 force refresh verifies the schema it actually writes and rejects V4 cache", () => {
+  const writer = worker.slice(worker.indexOf("export async function writeStudioProfilesOverviewSnapshot("),
+    worker.indexOf("/*__STUDIO_WORKER_END:writeStudioProfilesOverviewSnapshot__*/"));
+  const verifier = worker.slice(worker.indexOf("export async function verifyStudioProfilesOverviewSnapshot("),
+    worker.indexOf("/*__STUDIO_WORKER_END:verifyStudioProfilesOverviewSnapshot__*/"));
+  const remember = worker.slice(worker.indexOf("export function rememberProfilesOverviewSnapshot("),
+    worker.indexOf("/*__STUDIO_WORKER_END:rememberProfilesOverviewSnapshot__*/"));
+  const reader = worker.slice(worker.indexOf("export async function readStudioProfilesOverviewSnapshot(env,"),
+    worker.indexOf("/*__STUDIO_WORKER_END:readStudioProfilesOverviewSnapshot__*/"));
+  assert.match(writer, /schemaVersion: 5/);
+  assert.match(verifier, /snapshot\.schemaVersion !== 5/);
+  assert.doesNotMatch(verifier, /schemaVersion !== 4/);
+  assert.match(remember, /snapshot\?\.schemaVersion \|\| 0\) !== 5/);
+  assert.match(reader, /cache\.schemaVersion !== 5/);
+});
