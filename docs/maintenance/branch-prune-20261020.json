@@ -1,0 +1,175 @@
+{
+  "repo": "jtl6713/SM-Pipeline-V2",
+  "as_of": "2026-10-20",
+  "main_at_audit": "d4b343304825d216dad5e442e4742399df1030d6",
+  "operation": "Archive unique branch heads with SHA-pinned git tags, then delete only closed/obsolete branches. Live open PRs are never deleted.",
+  "keep": [
+    {
+      "pr": 923,
+      "branch": "fix/365-day-idea-title-guard-20261019",
+      "reason": "Conflicts with main; uniqueness scope/performance require review"
+    },
+    {
+      "pr": 951,
+      "branch": "feature/runner-egress-diagnostics-20261020",
+      "reason": "Failed CI and merge conflict; unfinished evidence instrumentation"
+    },
+    {
+      "pr": 974,
+      "branch": "fix/973-evidence-coverage-gates",
+      "reason": "PR explicitly says do not merge incomplete coverage work"
+    }
+  ],
+  "candidates": [
+    {
+      "branch": "deploy/home-approved-unpublished-20261020",
+      "sha": "25139d62b42c8655447ec76505babe99d8f8d66a",
+      "closed_pr": 940,
+      "reason": "deployment duplicate replaced by PR #942"
+    },
+    {
+      "branch": "feature/airtable-evidence-coverage-guard-20261020",
+      "sha": "74d331a88e35dd93f536a7859c5da7763500c655",
+      "closed_pr": 965,
+      "reason": "superseded by merged PR #968"
+    },
+    {
+      "branch": "feature/shadow-telemetry-readonly-evidence-20261020",
+      "sha": "d2c6dc3f647ed6bfa5c885344865bd4741a58cee",
+      "closed_pr": null,
+      "reason": "already contained in main; no unique commits"
+    },
+    {
+      "branch": "fix/deploy-preflight-preserve-active-reservation-lanes-20261020",
+      "sha": "e2b0d642fa2d07799a3ab876d0af92bfc72fe96e",
+      "closed_pr": 952,
+      "reason": "equivalent preservation tests landed on main"
+    },
+    {
+      "branch": "fix/factory-platform-occupancy-limit-20261020",
+      "sha": "d92e79d5b7ea766676cc6cb1b45c26c35a8b5d74",
+      "closed_pr": 988,
+      "reason": "superseded by merged and deployed PR #987"
+    },
+    {
+      "branch": "fix/home-approval-count-stale-snapshot-refresh-20261020",
+      "sha": "e2e33038b42b8d6933871fb1452c093519aaf245",
+      "closed_pr": 954,
+      "reason": "older Home snapshot fix; preserve unique history in tag"
+    },
+    {
+      "branch": "fix/home-approval-tally-expired-snapshot-main-20261020",
+      "sha": "01db3bd906d8f6648e3b7b330e671a2345f21bc3",
+      "closed_pr": 957,
+      "reason": "older Home snapshot fix; preserve unique history in tag"
+    },
+    {
+      "branch": "fix/home-approved-parenthesis-pages-release-0726",
+      "sha": "5311c4602bb9a40dfef3051f77c2e69c7eb60a38",
+      "closed_pr": 943,
+      "reason": "superseded by verified UI release PR #959"
+    },
+    {
+      "branch": "fix/home-approved-unpublished-all-states-20261020",
+      "sha": "48f7a7339009747291dc1a6f2807e9a5912c079b",
+      "closed_pr": 972,
+      "reason": "superseded by merged PR #971"
+    },
+    {
+      "branch": "fix/home-approved-unpublished-parenthesis-20261020",
+      "sha": "95dac1af6faa9e6775e0ae6f655179ab24a4c98d",
+      "closed_pr": 941,
+      "reason": "superseded by merged PR #937"
+    },
+    {
+      "branch": "fix/home-approved-unpublished-parenthesis-rebased-20261020",
+      "sha": "91efa2a2dba0a7cc4089d721b3afd5fae7fac787",
+      "closed_pr": null,
+      "reason": "already contained in main; no unique commits"
+    },
+    {
+      "branch": "fix/home-approved-unpublished-provider-state-20261020",
+      "sha": "4a9e98f008f30ea37c0bf1e780490fe159aaba91",
+      "closed_pr": 947,
+      "reason": "same semantics rebuilt in PR #948"
+    },
+    {
+      "branch": "fix/home-overview-v5-verify-20261020",
+      "sha": "045607240659d15c818769b426e9546fa260899f",
+      "closed_pr": 975,
+      "reason": "superseded by merged PR #976"
+    },
+    {
+      "branch": "fix/home-parenthetical-approved-future-only-20261020",
+      "sha": "cbaa64e13c5a6d0d50270ab4bf1555ab2cc47d89",
+      "closed_pr": 961,
+      "reason": "reverses approved-unpublished business rule; explicitly rejected"
+    },
+    {
+      "branch": "fix/home-tally-960-pages-release-727",
+      "sha": "d851ecf026dba8a40502257557b09022ce51fb3e",
+      "closed_pr": 964,
+      "reason": "superseded by merged PR #966"
+    },
+    {
+      "branch": "fix/home-v5-forced-refresh-validator",
+      "sha": "40d6b1d0a61cb10eb0e1c1b8312352ce6f5c8c65",
+      "closed_pr": 979,
+      "reason": "superseded by merged PR #976"
+    },
+    {
+      "branch": "fix/home-v6-upgrade-canary-20261020",
+      "sha": "f4bc691d30cf0cc875c45783193633bfc665bacf",
+      "closed_pr": 993,
+      "reason": "superseded by PR #994 with corrected count rules"
+    },
+    {
+      "branch": "fix/music-preview-drive-error-20261020",
+      "sha": "b0c8f9863da01b6fd72d57a9b98c32fc8a7590c4",
+      "closed_pr": null,
+      "reason": "already contained in main; no unique commits"
+    },
+    {
+      "branch": "fix/runner-evidence-auth-proxy-20261020",
+      "sha": "ae01a109cbefbe1a81161268485449421b7b2218",
+      "closed_pr": 946,
+      "reason": "closed incomplete old evidence proxy; retain unique history by tag"
+    },
+    {
+      "branch": "fix/runner-metrics-default-current-main-20261020",
+      "sha": "85d5929ad0559d7dd3ff0b2c96497f6de21ef25f",
+      "closed_pr": 953,
+      "reason": "superseded by merged PR #955 with runner canary"
+    },
+    {
+      "branch": "fix/runner-metrics-persistent-default-20261020",
+      "sha": "6a5eec9af3df2da6cd2b72b9d77236f213c2ceb1",
+      "closed_pr": 949,
+      "reason": "superseded by merged PR #955"
+    },
+    {
+      "branch": "release/home-approved-tally-ui-0-6-728",
+      "sha": "32efa30b7dd3cec15760f891dff672c7d70befdc",
+      "closed_pr": 977,
+      "reason": "closed due to failed pinned UI tests; superseded"
+    },
+    {
+      "branch": "release/studio-ui-0-6-727-home-tally-cache-integrity",
+      "sha": "44e638517ef4224bf0a74ff44fbf75336a727405",
+      "closed_pr": 962,
+      "reason": "superseded by merged PR #966"
+    },
+    {
+      "branch": "release/studio-ui-0-6-728-home-approved-tally",
+      "sha": "a0d4658b4814c8d86323a0d85683fb2ecc812248",
+      "closed_pr": 978,
+      "reason": "superseded by deployed PR #980"
+    },
+    {
+      "branch": "release/ui-0.6.725-overdue-unpublished",
+      "sha": "b41512136629b514416570e9881931bcdb58b1ea",
+      "closed_pr": 927,
+      "reason": "superseded by verified UI release PR #959"
+    }
+  ]
+}
