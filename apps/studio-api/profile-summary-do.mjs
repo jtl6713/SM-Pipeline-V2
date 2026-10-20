@@ -157,6 +157,7 @@ export class StudioProfileSummary {
               scheduled: c.scheduled, manual: c.manual_action_required,
               failed: c.failed_outputs, approval: c.awaiting_approval,
               ideas: c.ideas_not_in_production,
+              approved_unpublished: c.approved_unpublished || 0,
               overdue_unpublished: overdue,
               metrics: {
                 ...c, overdue_unpublished: overdue, manual_action_required: c.manual_action_required,
@@ -249,6 +250,7 @@ export class StudioProfileSummary {
             || expected.ideas !== actual.ideas_not_in_production
             || expected.manual !== actual.manual_action_required
             || expected.failed !== actual.failed_outputs
+            || expected.approved_unpublished !== actual.approved_unpublished
             || expected.overdue_unpublished !== actual.overdue_unpublished
             || HOME_PLATFORMS.some((name) => expected.scheduled?.[name] !== actual.scheduled[name])) {
             return json({ ok: false, error: "reconciliation_mismatch", profile_id: p.id }, 409);
