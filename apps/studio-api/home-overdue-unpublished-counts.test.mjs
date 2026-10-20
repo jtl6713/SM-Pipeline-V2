@@ -56,3 +56,42 @@ test("shadow summary expires future scheduled counts at publication time without
   assert.match(durable, /approved_unpublished: futureByProfile\.get\(p\.id\) \|\| 0/);
   assert.match(durable, /future_count_reconcile_required/);
 });
+
+test("final approval increases parenthetical only when Scheduled_Post_Date is now or in future", () => {
+  const now = Date.parse("2026-10-20T11:00:00Z");
+  const base = {
+    id: "rec12345678901234", platform: "TikTok",
+    studio_state: "Ready for Review", output_status: "Ready for Review",
+    render_status: "Rendered", review_status: "",
+    scheduled_post_date: "2026-10-20T11:00:00Z",
+  };
+  const before = homeOutputContribution(base, now);
+  const approved = { ...base, studio_state: "Scheduled",
+    output_status: "Approved for Publishing", review_status: "Approved",
+    publish_status: "Ready to Publish" };
+  const after = homeOutputContribution(approved, now);
+  assert.equal(before.awaiting_approval, 1);
+  assert.equal(before.approved_unpublished, 0);
+  assert.equal(after.awaiting_approval, 0);
+  assert.equal(after.approved_unpublished, 1);
+  assert.equal(homeOutputContribution({ ...approved,
+    scheduled_post_date: "2020-01-01T00:00:00Z" }, now).approved_unpublished, 0);
+  assert.equal(homeOutputContribution({ ...approved,
+    scheduled_post_date: "2020-01-01T00:00:00Z" }, now).overdue_unpublished, 1);
+});
+
+test("Home rejects old R2/browser snapshots missing parenthesized approved count", () => {
+  const valid=worker.slice(worker.indexOf("function studioProfilesOverviewRowsHealthy("),
+    worker.indexOf("function profilesOverviewSnapshotView("));
+  const verify=worker.slice(worker.indexOf("export function validateStudioProfilesOverviewRows("),
+    worker.indexOf("function profilesOverviewRefreshFailureComponents("));
+  assert.match(valid, /"approved_unpublished", "overdue_unpublished"/);
+  assert.match(verify, /"approved_unpublished", "overdue_unpublished"/);
+  assert.match(valid, /typeof n !== "number"/);
+  assert.ok(ui.includes('studio.allProfilesOverview.v4'));
+  const browserValidation=ui.slice(ui.indexOf("function validOverviewRows("),ui.indexOf("function readCache("));
+  assert.match(browserValidation, /"approved_unpublished", "overdue_unpublished"/);
+  assert.ok(browserValidation.includes('typeof row?.[kind] !== "number"'));
+  const map=ui.slice(ui.indexOf("function mapRows("),ui.indexOf("function adoptOverview("));
+  assert.ok(map.includes('overdue_unpublished: Number(row.overdue_unpublished) || 0'));
+});
