@@ -3242,9 +3242,14 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
             limit: STUDIO_OCCUPIED_LIST_LIMIT,
             sortField: "Scheduled_Post_Date",
             sortDirection: "asc",
-            filterFormula: scheduleRegenCandidateFilterFormula({
-              nowMs, horizonDays, profileFormula, platform: combo.platform,
-            }),
+            filterFormula: [
+              "AND(",
+              profileFormula ? profileFormula + "," : "",
+              'LOWER({Platform})="' + platformWant.replace(/"/g, "") + '",',
+              'IS_AFTER({Scheduled_Post_Date},DATETIME_PARSE("' + new Date(Date.parse(job.repair_date + "T00:00:00Z") - 2 * 86400000).toISOString() + '")),',
+              'IS_BEFORE({Scheduled_Post_Date},DATETIME_PARSE("' + new Date(Date.parse(job.repair_date + "T00:00:00Z") + 3 * 86400000).toISOString() + '"))',
+              ")",
+            ].join(""),
             fields: scheduleFields,
           });
           if (platformRows.length >= STUDIO_OCCUPIED_LIST_LIMIT) {
