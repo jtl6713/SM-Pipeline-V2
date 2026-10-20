@@ -26,6 +26,9 @@ function row(id, city, n = 2) {
     manual: 0, failed: 0, approval: n, ideas: 12,
     approved_unpublished: 0, overdue_unpublished: 0,
     approved_future: 0, approved_past_due: 0, approved_missing_date: 0,
+    pipeline_total: 0,
+    awaiting_final_by_platform: {Facebook:0,Instagram:0,TikTok:0,YouTube:0},
+    pipeline_by_platform: {Facebook:0,Instagram:0,TikTok:0,YouTube:0},
     approved_future_by_platform: {Facebook:0,Instagram:0,TikTok:0,YouTube:0},
     approved_calendar_slots: {Facebook:[],Instagram:[],TikTok:[],YouTube:[]} };
 }
