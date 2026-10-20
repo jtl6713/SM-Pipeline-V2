@@ -155,3 +155,5 @@ jobs:
 # 2026-10-20: Verify post-PR955 runner store+service proxy authenticates and exports nonempty aggregate evidence.
 
 # 2026-10-20: verify post-PR969 reconciliation egress attribution and both durable exports.
+
+# 2026-10-20: post-PR969 read-only attribution verification; no full Airtable reconciliation.
