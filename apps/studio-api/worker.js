@@ -3007,7 +3007,7 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   const endpoint = `https://api.airtable.com/v0/${env.AIRTABLE_BASE_ID}/${tableRef}${suffix}`;
   await airtableRequestSlot();
   const airtableRequestStarted = Date.now();
-  const source = ["shadow_reconcile", "home_overview_refresh", "home_ideas_refresh"].includes(options.airtableEgressSource)
+  const source = ["shadow_reconcile", "home_overview_refresh", "home_ideas_refresh", "autonomous_refill_scan"].includes(options.airtableEgressSource)
     ? options.airtableEgressSource : "studio_worker_gateway";
   const { airtableEgressSource, ...fetchOptions } = options;
   let response;
