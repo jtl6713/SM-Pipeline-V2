@@ -1,0 +1,36 @@
+name: One-time Home tally Pages hotfix dispatch
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/home-tally-pages-manual-dispatch.txt'
+permissions:
+  contents: read
+  actions: write
+concurrency:
+  group: home-tally-pages-hotfix-dispatch
+  cancel-in-progress: false
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch existing verified Pages workflow on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /tmp/dispatch.json -w '%{http_code}' \
+            -X POST "https://api.github.com/repos/$REPOSITORY/actions/workflows/deploy-cloudflare-pages-production.yml/dispatches" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H "Content-Type: application/json" \
+            -d '{"ref":"main"}')
+          if [[ "$code" != "204" ]]; then
+            echo "Pages manual dispatch failed: HTTP $code" >&2
+            cat /tmp/dispatch.json >&2
+            exit 1
+          fi
+          echo "Existing protected Pages workflow dispatched on main"
