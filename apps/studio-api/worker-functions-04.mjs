@@ -5133,7 +5133,7 @@ export async function writeStudioProfilesOverviewSnapshot(env, rows, authKey, ex
 
 export async function verifyStudioProfilesOverviewSnapshot(env, expectedGeneration) {
   const snapshot = await readStudioProfilesOverviewSnapshotFromR2(env);
-  if (!snapshot?.complete || snapshot.schemaVersion !== 4 || !studioProfilesOverviewRowsHealthy(snapshot.rows)) {
+  if (!snapshot?.complete || snapshot.schemaVersion !== 5 || !studioProfilesOverviewRowsHealthy(snapshot.rows)) {
     throw new Error("Forced overview refresh could not verify a complete durable snapshot");
   }
   if (String(snapshot.generation || "") !== String(expectedGeneration || "")) {
