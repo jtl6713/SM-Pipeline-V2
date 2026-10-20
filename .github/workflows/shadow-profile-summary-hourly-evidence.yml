@@ -23,6 +23,8 @@ jobs:
       - uses: actions/checkout@v6
       - name: Test freshness window accounting
         run: python -m unittest discover -s repair/scripts -p 'shadow_freshness_window_report_test.py' -v
+      - name: Verify rollup logic
+        run: python -m unittest discover -s repair/scripts -p 'airtable_hourly_rollup_test.py' -v
       - name: Collect read-only metrics through temporary service binding
         shell: bash
         run: |
@@ -71,6 +73,7 @@ jobs:
           fi
           jq -n --slurpfile worker worker-airtable-egress.json --slurpfile runner runner-airtable-egress.json '{captured_at:(now|todate),worker: $worker[0],runner: $runner[0],complete:($worker[0].ok==true and $runner[0].ok==true),net_savings_verifiable:false}' >airtable-egress-coverage.json
           cat airtable-egress-coverage.json
+          python repair/scripts/airtable_hourly_rollup.py --worker worker-airtable-egress.json --runner runner-airtable-egress.json --captured-at "$(jq -r '.captured_at' airtable-egress-coverage.json)" --output airtable-hourly-rollup.json
           echo '### Shadow profile hourly observation' >> "$GITHUB_STEP_SUMMARY"
           jq -r '"- Captured: " + .captured_at + "\\n- Summary version: " + (.summary_version|tostring) + "\\n- Dirty applied: " + (.evidence.dirty_applied|tostring) + "\\n- Airtable dirty attempts: " + (.evidence.airtable_dirty_batch_attempts|tostring) + "\\n- Airtable dirty errors: " + (.evidence.airtable_dirty_batch_errors|tostring)' evidence.json >> "$GITHUB_STEP_SUMMARY"
           echo '- Interpretation: cumulative telemetry only; these values do not establish full Airtable request savings.' >> "$GITHUB_STEP_SUMMARY"
@@ -84,6 +87,7 @@ jobs:
             worker-airtable-egress.json
             runner-airtable-egress.json
             airtable-egress-coverage.json
+            airtable-hourly-rollup.json
           retention-days: 30
           if-no-files-found: ignore
 
