@@ -460,3 +460,5 @@ Release Studio UI 0.6.723: fast Profile Admin voice/music load and playable name
 2026-10-20: UI 0.6.727 required for approved-unpublished Home parenthetical tally cache integrity (PR #960). Previous same-version release correctly blocked by Pages version guard; preserve that guard and verify live custom domain.
 
 2026-10-20 Home approved-but-unpublished parentheses v5: deploy merged PR #971 (a1ad9e75de395cd18ac5b9c00c780f310672c7f9) Studio Pages assets and lazy manifest cache bust. Ensure newly approved, overdue, and unscheduled final-approved unpublished items stay in parentheses until published. Do not alter approval or publishing authority.
+
+2026-10-20: Deploy UI 0.6.728 after PR #971 Home parentheses counter fix. Change lazy manifest and BUILD_ID atomically; force new Home script/browser cache key and verify exact production custom-domain build. No approval/publish state mutation; Airtable remains write authority.
