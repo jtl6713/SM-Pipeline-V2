@@ -107,6 +107,35 @@ def install_requests_monitor(db_path, source="standalone_scripts"):
     send._studio_standalone_monitored=True
     requests.sessions.Session.send=send
 
+
+def install_urllib_monitor(db_path, source="standalone_scripts"):
+    """Account for urllib.request.urlopen Airtable attempts, including errors."""
+    import urllib.request
+    import urllib.error
+    import uuid
+    from urllib.parse import urlsplit
+    original=urllib.request.urlopen
+    if getattr(original,"_studio_standalone_monitored",False):
+        return
+    def monitored(url, *args, **kwargs):
+        target=url.full_url if isinstance(url,urllib.request.Request) else str(url)
+        if urlsplit(target).hostname!="api.airtable.com":
+            return original(url,*args,**kwargs)
+        method=url.get_method() if isinstance(url,urllib.request.Request) else "GET"
+        status="network_error"
+        try:
+            response=original(url,*args,**kwargs)
+            status=str(response.status//100)+"xx"
+            return response
+        except urllib.error.HTTPError as exc:
+            status=str(exc.code//100)+"xx"
+            raise
+        finally:
+            record_attempt(db_path,event_id=uuid.uuid4().hex,source=source,
+                           method=method,status_class=status,at=datetime.now(timezone.utc))
+    monitored._studio_standalone_monitored=True
+    urllib.request.urlopen=monitored
+
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--db",required=True)
