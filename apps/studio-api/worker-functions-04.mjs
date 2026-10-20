@@ -285,6 +285,7 @@ import {
   summarizeObservations,
   youtubePublishedAfterIso,
 } from "./autonomous-produce.mjs";
+import { studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { ideaAutoListenContentType, ideaManagePhotoPauseActive, ideaProductionConfigFields, mergeIdeaProductionNotes, mergeProductionRequestNotes, parseIdeaMachineNotes, parseIdeaNotedMediaIds, productionNotesForPromotionHandoff, productionPhotoWaitAutoOff, productionPhotoWaitRejectedIds, shouldAttachPhotoWaitAssets, withIdeaManagePhotoPause, withoutIdeaManagePhotoPause, withProductionPhotoWaitManual } from "./idea-photo-wait.mjs";
 import {
   STUDIO_PUBLISH_RECONCILE_SCHEDULE_FORMULA,
@@ -11860,6 +11861,16 @@ export async function studioAutonomousOpenAiPick(env, prompt) {
 /*__STUDIO_WORKER_END:studioAutonomousOpenAiPick__*/
 
 export async function createAutonomousIdea(env, profile, pick) {
+  // The hourly library planner used to re-create location titles every run.
+  // Check all production Idea Candidates and Content Items for 365 days.
+  const duplicateTitle = await studioFindRecentDuplicateTitle(pick.candidate_title, (kind, formula) => {
+    const table = kind === "idea" ? env.AIRTABLE_IDEA_TABLE_ID : env.AIRTABLE_CONTENT_TABLE_ID;
+    if (!table) throw new HttpError(503, "Title history unavailable: autonomous creation blocked");
+    return listRecords(env, table, { filterFormula: formula, limit: 3 });
+  });
+  if (duplicateTitle) throw new HttpError(
+    409, `Title "${pick.candidate_title}" already used within 365 days (${duplicateTitle.source}).`
+  );
   const fields = {
     Candidate_Title: pick.candidate_title,
     Candidate_Status: "Generated",
@@ -12601,8 +12612,11 @@ export async function fillAutonomousCityIdeas(env, authorization, {
       catalog = [];
     }
   }
+  // Plan additional distinct locations, so collisions do not pin a city below
+  // its refill target by repeatedly selecting only the same first few packets.
+  const remainingIdeas = Math.max(0, goal - count);
   const planned = planAutonomousHourIdeas(catalog, {
-    goal: Math.max(0, goal - count),
+    goal: Math.min(100, Math.max(remainingIdeas, remainingIdeas * 4)),
     profileName: String(f(profile, "Profile_Name") || "").trim(),
     startIndex: count,
   });
@@ -12675,6 +12689,10 @@ export async function fillAutonomousCityIdeas(env, authorization, {
         });
         savedThis = true;
       } catch (error) {
+        if (error?.status === 409 && /already used within 365 days/.test(String(error?.message || ""))) {
+          console.warn("autonomous hour skipped previously used title", profileId, pick.candidate_title);
+          break;
+        }
         console.warn("autonomous hour idea failed", profileId, attempt, error);
       }
     }
