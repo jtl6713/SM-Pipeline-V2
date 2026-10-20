@@ -4,15 +4,19 @@ export const HOME_PLATFORMS = Object.freeze(["Facebook", "Instagram", "TikTok", 
 export const HOME_METRIC_KEYS = Object.freeze([
   "manual_action_required", "failed_outputs", "awaiting_approval",
   "attention_outputs", "published_outputs", "active_outputs", "approved_unpublished", "overdue_unpublished",
-  "platform_outputs", "ideas_not_in_production", "ideas",
+  "platform_outputs", "ideas_not_in_production", "ideas", "approved_missing_date",
 ]);
 
 export function emptyHomeContribution() {
   return {
     scheduled: { Facebook: 0, Instagram: 0, TikTok: 0, YouTube: 0 },
+    awaiting_final_by_platform: { Facebook: 0, Instagram: 0, TikTok: 0, YouTube: 0 },
+    // Record-level metadata: used by the indexed V6 approved calendar query.
+    calendar_platform: "",
     manual_action_required: 0, failed_outputs: 0, awaiting_approval: 0,
     attention_outputs: 0, published_outputs: 0, active_outputs: 0,
     platform_outputs: 0, ideas_not_in_production: 0, ideas: 0, approved_unpublished: 0, overdue_unpublished: 0,
+    approved_missing_date: 0,
   };
 }
 
@@ -53,8 +57,7 @@ export function homeOverdueDueAt(row) {
  * NOT used by the approved-but-unpublished Home parentheses.
  */
 export function homeApprovedUpcomingAt(row) {
-  if (!row || row.do_not_publish) return 0;
-  if (String(row.review_status || "").trim().toLowerCase() !== "approved") return 0;
+  if (!row || !HOME_PLATFORMS.includes(row.platform) || !homeApprovedUnpublished(row)) return 0;
   const when = Date.parse(String(row.scheduled_post_date || ""));
   if (!Number.isFinite(when) || when <= 0) return 0;
   const state = String(row.studio_state || "").trim().toLowerCase();
@@ -95,7 +98,10 @@ export function homeOutputContribution(row, now = Date.now()) {
   const result = emptyHomeContribution();
   if (!row) return result;
   result.platform_outputs = 1;
+  const knownPlatform = HOME_PLATFORMS.includes(row.platform);
+  result.calendar_platform = knownPlatform ? row.platform : "";
   result.approved_unpublished = Number(homeApprovedUnpublished(row, now));
+  result.approved_missing_date = Number(knownPlatform && result.approved_unpublished && !homeApprovedUpcomingAt(row));
   const dueAt = homeOverdueDueAt(row);
   result.overdue_unpublished = Number(dueAt > 0 && dueAt <= now);
   const state = String(row.studio_state || "").trim();
@@ -120,6 +126,7 @@ export function homeOutputContribution(row, now = Date.now()) {
   if (/origin=az-finished-video/i.test(notes)) return result;
   if (/az-auto-queue=1/i.test(notes) && /ez-input=finished-video/i.test(notes)) return result;
   result.awaiting_approval = 1;
+  if (knownPlatform) result.awaiting_final_by_platform[row.platform] = 1;
   return result;
 }
 
@@ -138,7 +145,10 @@ export function combineHomeContributions(rows) {
   const total = emptyHomeContribution();
   for (const row of rows || []) {
     if (!row) continue;
-    for (const platform of HOME_PLATFORMS) total.scheduled[platform] += Number(row.scheduled?.[platform]) || 0;
+    for (const platform of HOME_PLATFORMS) {
+      total.scheduled[platform] += Number(row.scheduled?.[platform]) || 0;
+      total.awaiting_final_by_platform[platform] += Number(row.awaiting_final_by_platform?.[platform]) || 0;
+    }
     for (const key of HOME_METRIC_KEYS) total[key] += Number(row[key]) || 0;
   }
   return total;
@@ -150,6 +160,7 @@ export function homeContributionDelta(oldContribution, newContribution) {
   const delta = emptyHomeContribution();
   for (const platform of HOME_PLATFORMS) {
     delta.scheduled[platform] = (Number(b.scheduled?.[platform]) || 0) - (Number(a.scheduled?.[platform]) || 0);
+    delta.awaiting_final_by_platform[platform] = (Number(b.awaiting_final_by_platform?.[platform]) || 0) - (Number(a.awaiting_final_by_platform?.[platform]) || 0);
   }
   for (const key of HOME_METRIC_KEYS) delta[key] = (Number(b[key]) || 0) - (Number(a[key]) || 0);
   return delta;
