@@ -577,3 +577,5 @@ Deploy targeted November 17 MAE overage selector from merged PR #936; no automat
 Deploy Worker 0.10.671-quality-failed-output-recovery-home-v6-fast-cache. Fix V6 fresh cache, cross-isolate R2 refresh, no Supabase read cutover. Triggered 2026-10-20.
 
 2026-10-20: Deploy Home incremental V6 Durable Object compatibility and reconciliation repair (PR #1005). Shadow ledger only: STUDIO_HOME_PROFILE_SUMMARY_READS=false, Airtable authoritative, R2 Home unchanged, Supabase reads disabled. No profile cutover without clean shadow parity.
+
+2026-10-20: Retry bounded Cloudflare verification bridge routing 1042 during Home force refresh; preserve strict V6 parity, production rollback, R2 Home source, and Airtable authority. Redeploy merged Home V6 shadow compatibility (PR #1005); no summary read cutover.
