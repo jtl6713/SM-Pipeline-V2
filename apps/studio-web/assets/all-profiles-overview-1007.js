@@ -8,7 +8,7 @@
   // Do not reuse v4 browser snapshots that expired counts on the schedule date.
   const CACHE_KEY = "studio.allProfilesOverview.v5";
   const REFRESH_KEY = "studio.allProfilesOverview.refresh.v1";
-  const POLL_MS = 12000;
+  const POLL_MS = 5000;
   const REFRESH_POLL_MS = 1800;
   // The Worker expires abandoned refresh operations after 120s. Keep a small
   // client grace period, then stop painting "Refreshing…" if browser storage
@@ -593,9 +593,19 @@
     load();
     syncRefreshStatus({ quiet: true });
   };
+  // Paint the last verified snapshot before any network request starts.
+  const initialCache = readCache();
+  if (initialCache?.rows?.length) {
+    state.rows = initialCache.rows;
+    state.cacheAt = initialCache.at;
+    state.snapshotGeneration = initialCache.generation;
+    state.summaryVersion = initialCache.summaryVersion || 0;
+    state.ideasAt = initialCache.ideasAt;
+    render({ stale: true });
+  }
   start();
 
-  // Twelve-second Home polling remains cheap snapshot reads only. Durable refresh
+  // Five-second Home polling uses read-only snapshot reads, not forced rebuilds. Durable refresh
   // status polling is independent, so leaving Home does not cancel a refresh.
   state.timer = window.setInterval(() => {
     if (overviewViewActive()) load();
