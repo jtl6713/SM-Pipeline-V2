@@ -24,9 +24,11 @@ class DurableEgressTests(unittest.TestCase):
         from airtable.egress_monitor import _metrics_path
         env = dict(os.environ)
         env.pop("AIRTABLE_EGRESS_SQLITE_PATH", None)
-        with patch.dict(os.environ, env, clear=True), \\
-             patch("airtable.egress_monitor.Path.is_dir", return_value=True), \\
-             patch("airtable.egress_monitor.os.access", return_value=True):
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch("airtable.egress_monitor.Path.is_dir", return_value=True),
+            patch("airtable.egress_monitor.os.access", return_value=True),
+        ):
             self.assertEqual(_metrics_path(), "/scratch/metrics/airtable-egress.sqlite")
 
     def test_not_configured_not_reported_as_zero(self):
