@@ -9,6 +9,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const worker = fs.readFileSync(path.join(here, "worker-functions-04.mjs"), "utf8");
 const healing = fs.readFileSync(path.join(here, "worker-functions-01.mjs"), "utf8");
 const factory = fs.readFileSync(path.join(here, "../studio-web/assets/factory-batch-quality-0710.js"), "utf8");
+const deployWorkflow = fs.readFileSync(path.join(here, "../../.github/workflows/deploy-cloudflare-worker-production.yml"), "utf8");
 const record = (id, fields = {}) => ({ id, fields });
 
 test("paginated failed-output scan returns every outstanding record, without the newest-12 cap", async () => {
@@ -62,6 +63,23 @@ test("every raw failure has a visible identity, diagnostic and recommended actio
   assert.equal(item.recovery, "needs_attention");
 });
 
+test("known live failure signatures get safe root-cause actions instead of blind retries", () => {
+  const cases = [
+    ["AP1C slide-set mismatch", "needs_attention", /actual carousel slides/i],
+    ["Only photo or video can be accepted as media type", "needs_attention", /unsupported carousel slide media/i],
+    ["AP3P parent container terminal state", "healer_eligible", /parent-container recreation/i],
+    ["Facebook rate limit 1390008", "cooldown", /publishing cooldown/i],
+  ];
+  for (const [error, recovery, action] of cases) {
+    const item = describeFailedOutput(record("recKnown", {
+      Output_ID: 99, Platform: "Instagram", Publish_Status: "Failed",
+      Publish_Error_Message: error,
+    }));
+    assert.equal(item.recovery, recovery, error);
+    assert.match(item.action, action, error);
+  }
+});
+
 test("Desk and Factory use the complete census and show scan failures as unavailable", () => {
   assert.match(worker, /loadStudioFailedOutputSnapshot/);
   assert.match(worker, /scanOutstandingFailedOutputs/);
@@ -69,8 +87,22 @@ test("Desk and Factory use the complete census and show scan failures as unavail
   assert.match(worker, /output_failures: outputFailures/);
   assert.match(worker, /output_failed_unclassified/);
   assert.match(factory, /Unresolved output failures across all profiles/);
+  assert.match(factory, /profile_name \|\| item\.profile_id/);
   assert.match(factory, /output_failures\?\.status !== "ok"/);
   assert.match(factory, /Unresolved output count is unknown/);
   assert.match(healing, /failedOutputRetryGate\(row\)/);
   assert.match(healing, /scanOutstandingFailedOutputs/);
+  assert.match(deployWorkflow, /failed-output-census/);
+  assert.match(deployWorkflow, /\.output_failures\.status=="ok"/);
+});
+
+test("render recovery counts only eligible failed-render attempts and remains bounded", () => {
+  const declaration = healing.indexOf("let failedRenderRetries = 0;");
+  const loopEnd = healing.indexOf('console.log("Studio stuck-render heal"', declaration);
+  assert.ok(declaration > 0 && loopEnd > declaration, "failed-render recovery loop must exist");
+  assert.doesNotMatch(healing.slice(0, declaration), /failedRenderRetries\s*\+=\s*1/);
+  const loop = healing.slice(declaration, loopEnd);
+  assert.match(loop, /if \(failedRenderRetries >= 6\) break/);
+  assert.match(loop, /if \(failedOutputRetryGate\(row\)\) continue/);
+  assert.match(loop, /failedRenderRetries\s*\+=\s*1;[\s\S]*?airtableFetch/);
 });

@@ -8993,11 +8993,22 @@ export function deskOutputsForRequest(outputs, requestId) {
 async function loadStudioFailedOutputSnapshot(env) {
   // 60-second shared read cache, independent of the R2 batch monitor.
   return studioReadCoalesce("quality-agent-failed-output-census", 60000, async () => {
-    const rows = await scanOutstandingFailedOutputs((options) =>
-      listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options));
+    const [rows, profiles] = await Promise.all([
+      scanOutstandingFailedOutputs((options) =>
+        listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options)),
+      listContentProfileRecords(env).catch(() => []),
+    ]);
+    const profileNames = new Map((profiles || []).map((profile) => [
+      profile.id,
+      String(f(profile, "Market_Name") || f(profile, "Profile_Name") || profile.id).trim(),
+    ]));
+    const items = rows.map((record) => {
+      const item = describeFailedOutput(record);
+      return { ...item, profile_name: profileNames.get(item.profile_id) || item.profile_id };
+    });
     return {
       status: "ok", scanned_at: new Date().toISOString(),
-      count: rows.length, rows, items: rows.map((record) => describeFailedOutput(record)),
+      count: rows.length, rows, items,
     };
   });
 }

@@ -77,7 +77,7 @@
       : `<p class="factory-batch-quality-heading">Unresolved output failures across all profiles: ${Number(failures.count) || 0}</p>
         ${(failures.items || []).length ? '<ul class="factory-batch-quality-list">' +
           failures.items.map(item => `<li class="factory-batch-quality-item">
-            <strong>${esc(item.profile_id || "Profile not linked")} · Output ${esc(item.output_id || item.record_id)} · ${esc(item.platform || "Unknown platform")} ${esc(item.output_type || "")}</strong>
+            <strong>${esc(item.profile_name || item.profile_id || "Profile not linked")} · Output ${esc(item.output_id || item.record_id)} · ${esc(item.platform || "Unknown platform")} ${esc(item.output_type || "")}</strong>
             <p>${esc(item.error || "No diagnostic provided")}</p>
             <p class="factory-batch-quality-action">${esc(item.action || "Review the failure.")}</p>
             <small>Recovery: ${esc(item.recovery || "needs_attention")}</small>

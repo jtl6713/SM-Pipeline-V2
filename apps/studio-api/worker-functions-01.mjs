@@ -11449,7 +11449,6 @@ export async function healStuckStudioRenders(env) {
   }).catch(() => []);
   for (const row of readyToTypo || []) {
     try {
-      failedRenderRetries += 1;
       await airtableFetch(env, outputTable, row.id, {
         method: "PATCH",
         body: JSON.stringify({
@@ -11592,6 +11591,7 @@ export async function healStuckStudioRenders(env) {
       last_modified: f(row, "Last_Modified") || f(row, "Updated_At") || f(row, "Last_Render_Attempt_At"),
     })) continue;
     try {
+      failedRenderRetries += 1;
       await airtableFetch(env, outputTable, row.id, {
         method: "PATCH",
         body: JSON.stringify({

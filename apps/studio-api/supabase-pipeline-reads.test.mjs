@@ -354,7 +354,7 @@ test("overview pack aborts a hung profile lookup before the 26s race", async () 
 
 test("worker wires supabase phase4 reads behind the same flag", async () => {
   const worker = readStudioWorkerSource();
-  assert.match(worker, /version: "0.10.670-profile-summary-parity"/);
+  assert.match(worker, /version: "0.10.671-quality-failed-output-recovery"/);
   assert.match(worker, /skipSupabaseWriteThrough/);
   assert.match(worker, /supabaseCircuitOpen/);
   assert.match(worker, /studio_supabase_pipeline_reads_v1: true/);
