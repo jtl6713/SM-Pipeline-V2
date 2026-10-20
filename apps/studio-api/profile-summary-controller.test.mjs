@@ -69,7 +69,7 @@ test("reconciliation fences updates and never publishes staged partial totals", 
   const controller = raw("profile-summary-controller.mjs");
   const durable = raw("profile-summary-do.mjs");
   assert.match(controller, /await summaryRequest\(env, "\/begin", \{ generation, profiles: info \}\)/);
-  assert.ok(controller.indexOf('await summaryRequest(env, "/begin"') < controller.indexOf('const outputs = await listRecords'));
+  assert.ok(controller.indexOf('await summaryRequest(env, "/begin"') < controller.indexOf('const outputs = (await listRecords'));
   assert.match(durable, /if \(this\.getMeta\("building_generation"\)\) return;/);
   assert.match(durable, /if \(staged\.length !== Number\(body\.expected_count\)/);
   assert.match(durable, /reconciliation_mismatch/);
@@ -77,6 +77,7 @@ test("reconciliation fences updates and never publishes staged partial totals", 
   assert.match(durable, /url.pathname === "\/status"/);
   assert.match(durable, /url.pathname === "\/fail"/);
   assert.match(controller, /listRecordsWithCoolingRetry/);
+  assert.match(controller, /studioOverviewRowMatchesProfile\(row, profile\)/);
 });
 
 test("Supabase Phase 5 read wall and feature gates remain intact", () => {
@@ -95,6 +96,7 @@ test("operator summary reconcile is admitted through the Phase 2A write gate", (
   assert.match(worker, /url\.pathname === "\/api\/profiles\/overview\/summary\/reconcile"/);
   assert.match(worker, /const result = await reconcileStudioProfileSummary\(env\)/);
   assert.match(worker, /studio_profile_summary_reconcile_await_v1: true/);
+  assert.match(worker, /studio_profile_summary_home_membership_v1: true/);
 });
 
 test("shadow canary waits for awaited four-city reconcile instead of a 4-minute curl cut", () => {
@@ -104,6 +106,7 @@ test("shadow canary waits for awaited four-city reconcile instead of a 4-minute 
   assert.match(canary, /summary-status/);
   assert.match(canary, /overview-refresh/);
   assert.match(canary, /cannot claim Home\/shadow parity against a stale cache/);
+  assert.match(canary, /parity_retry=/);
   assert.doesNotMatch(canary, /ENABLE_HOME_PROFILE_SUMMARY_READS/);
 });
 

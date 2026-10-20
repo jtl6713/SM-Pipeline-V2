@@ -1,5 +1,6 @@
 import { OUTPUT_LIST_FIELDS } from "./worker.js";
 import { mapOutput, mapIdea } from "./worker-functions-01.mjs";
+import { studioOverviewRowMatchesProfile } from "./worker-functions-04.mjs";
 import {
   emptyHomeContribution, homeOutputContribution, homeIdeaContribution,
   homeContributionDelta, combineHomeContributions, contributionEqual, homeOverdueDueAt,
@@ -68,10 +69,10 @@ export class StudioProfileSummary {
     return records(this.sql, "SELECT * FROM profiles ORDER BY city_label");
   }
   inferProfile(record) {
-    const linked = record?.fields?.Content_Profile;
-    const labels = (Array.isArray(linked) ? linked : [linked]).filter(Boolean).map((v) => code(typeof v === "object" ? v.id || v.name : v).toLowerCase());
-    const matches = this.getProfiles().filter((profile) => labels.some((value) =>
-      value === profile.id.toLowerCase() || (profile.name && value.includes(profile.name.toLowerCase()))));
+    const matches = this.getProfiles().filter((profile) => studioOverviewRowMatchesProfile(record, {
+      id: profile.id,
+      fields: { Profile_Name: profile.name },
+    }));
     if (matches.length !== 1) return "";
     return matches[0].id;
   }
