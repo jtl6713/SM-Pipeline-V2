@@ -362,14 +362,13 @@
     const ready = new Set(readyCards.map((card) => card.id));
     const selectedCards = readyCards.filter((card) => state.selectedOutputs.has(card.id));
     const selectable = selectedCards.length;
-    const missing = state.selectedOutputs.size - selectable;
     const global = state.batchGlobal?.enabled === true;
     const limit = Math.max(1, Number(global ? state.batchGlobal.max_total : (state.batchRollout?.max_items || 100)));
     const perProfile = Math.max(1, Number(state.batchGlobal?.max_per_profile || limit));
     const planned = global && selectable
       ? planFactoryApprovalBatches(selectedCards, limit, perProfile).length : (selectable ? 1 : 0);
     const count = $("factoryBatchSelectionCount");
-    if (count) count.textContent = `${selectable} output${selectable === 1 ? "" : "s"} selected${planned > 1 ? ` · will submit as ${planned} batches` : ""}${missing ? ` · ${missing} no longer eligible` : ""}`;
+    if (count) count.textContent = `${selectable} output${selectable === 1 ? "" : "s"} selected${planned > 1 ? ` · will submit as ${planned} batches` : ""}`;
     const submit = $("factoryBatchSubmit");
     if (submit) {
       submit.disabled = !selectable || (!global && selectable > limit) || state.submittingBatch || state.batchApprovalsEnabled !== true;
