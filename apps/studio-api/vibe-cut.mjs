@@ -879,8 +879,9 @@ export function validateVibeCutSourceAssets(assets) {
   if (!(asset.google_drive_file_id || asset.r2_key || asset.url)) {
     return { ok: false, reason: "Vibe Cut source video has no retrievable media location." };
   }
-  const state = String(asset.upload_status || asset.compression_status || "").trim().toLowerCase();
-  if (["multipart_pending", "pending", "uploading", "failed", "compressing", "downloading", "queued"].includes(state)) {
+  const states = [asset.upload_status, asset.compression_status]
+    .map(value => String(value || "").trim().toLowerCase());
+  if (states.some(state => ["multipart_pending", "pending", "uploading", "failed", "compressing", "downloading", "queued"].includes(state))) {
     return { ok: false, reason: "Vibe Cut source video is still transferring or processing." };
   }
   return { ok: true, reason: "" };
