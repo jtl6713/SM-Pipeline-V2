@@ -1,0 +1,36 @@
+name: Deploy Approved Calendar Home Columns (Once)
+on:
+  push:
+    branches: [main]
+    paths:
+      - deploy/approved-calendar-pages-dispatch-once.txt
+permissions:
+  contents: read
+  actions: write
+concurrency:
+  group: home-approved-calendar-pages-dispatch
+  cancel-in-progress: false
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch existing authenticated Pages production workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /tmp/response.json -w '%{http_code}' \
+            -X POST "https://api.github.com/repos/$REPOSITORY/actions/workflows/deploy-cloudflare-pages-production.yml/dispatches" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H "Content-Type: application/json" \
+            -d '{"ref":"main"}')
+          if [[ "$code" != "204" ]]; then
+            echo "Pages dispatch failed with HTTP $code" >&2
+            cat /tmp/response.json >&2
+            exit 1
+          fi
+          echo "Existing verified Pages deploy dispatched on main"
