@@ -30,6 +30,7 @@ jobs:
           PYTHONPATH=services/pipeline-runner python -m pytest -q \
             services/pipeline-runner/tests/test_a2b_existing_lookup.py \
             services/pipeline-runner/tests/test_airtable_atomic_upsert.py \
+            services/pipeline-runner/tests/test_airtable_egress_monitor.py \
             services/pipeline-runner/tests/test_r2_studio_exact_source.py \
             services/pipeline-runner/tests/test_profile_music_policy.py \
             services/pipeline-runner/tests/test_item4_variant_batch.py \
@@ -257,3 +258,5 @@ jobs:
 # 2026-10-17: fresh runner restart to clear stale final visual-canary request after exact-target/timing fixes.
 # Trigger pipeline-runner deploy for PR 884 profile-specific thumbnail and narration prompt guidance.
 # Controlled single retry for PR 884 after verified rollback; 2026-10-18 profile creative guidance.
+
+# 2026-10-20: Deploy PR #935 runner-wide sanitized Airtable HTTP egress monitoring, preserving production pipeline behavior. Smoke-test monitor before Ops deploy.
