@@ -7,7 +7,7 @@ import path from "node:path";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const overviewPath = path.join(here, "assets/all-profiles-overview-1007.js");
 
-test("all-profiles overview shows each profile's own scheduled total beside its name", async () => {
+test("all-profiles overview shows overdue unpublished approved totals rather than scheduled totals", async () => {
   const host = {
     innerHTML: "",
     querySelectorAll() { return []; },
@@ -18,6 +18,7 @@ test("all-profiles overview shows each profile's own scheduled total beside its 
       city_label: "Chicago",
       name: "Chicago",
       scheduled: { Facebook: 1, Instagram: 1, TikTok: 0, YouTube: 1 },
+      overdue_unpublished: 2,
       manual: 0,
       failed: 0,
       approval: 0,
@@ -28,6 +29,7 @@ test("all-profiles overview shows each profile's own scheduled total beside its 
       city_label: "Miami",
       name: "Miami",
       scheduled: { Facebook: 0, Instagram: 0, TikTok: 1, YouTube: 0 },
+      overdue_unpublished: 4,
       manual: 0,
       failed: 0,
       approval: 0,
@@ -76,10 +78,10 @@ test("all-profiles overview shows each profile's own scheduled total beside its 
 
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
-    assert.match(host.innerHTML, /<th scope="row">Chicago \(3\)<\/th>/);
-    assert.match(host.innerHTML, /<th scope="row">Miami \(1\)<\/th>/);
+    assert.match(host.innerHTML, /<th scope="row">Chicago \(2\)<\/th>/);
+    assert.match(host.innerHTML, /<th scope="row">Miami \(4\)<\/th>/);
     assert.match(host.innerHTML, /<th scope="row">Total<\/th>/);
-    assert.doesNotMatch(host.innerHTML, /Total \(4\)/);
+    assert.doesNotMatch(host.innerHTML, /Total \(6\)/);
   } finally {
     globalThis.document = prior.document;
     globalThis.fetch = prior.fetch;
