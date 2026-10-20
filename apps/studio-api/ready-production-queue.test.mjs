@@ -335,3 +335,52 @@ test("P0 #907 never treats an empty Ready plan as complete", async () => {
   assert.match(manual, /fallback: !explicitlySelectedPlatforms/);
   assert.match(manual, /if \(!autonomousHasUsableItem4Plan\(requestRecord\)\)/);
 });
+
+test("P0 #907 releases invalid empty-plan retry once without losing lease or retry protection", async () => {
+  const bucket = new FakeR2();
+  const ideaId = "recEmptyPlan907NYC";
+  const profileId = "recReadyProfile907";
+  const obsolete = "Build a complete platform output plan before preparing platform media";
+  await readyProductionEnqueue(bucket, { ideaId, profileId });
+  const lease = await readyProductionClaim(bucket, ideaId, "original", 1_000, 5_000);
+  const parked = await readyProductionFinishClaim(bucket, lease, {
+    status: "retry_wait", stage: "retry", last_error: obsolete,
+    retry_delay_ms: 30 * 60 * 1000,
+  }, 2_000);
+  assert.equal(parked.next_attempt_ms, 1_802_000);
+  const resumed = await readyProductionEnqueue(bucket, { ideaId, profileId });
+  assert.equal(resumed.created, false);
+  assert.equal(resumed.revived, true);
+  assert.equal(resumed.job.status, "queued");
+  assert.equal(resumed.job.next_attempt_ms, 0);
+  assert.equal(resumed.job.stage, "recovered_empty_item4_plan");
+  assert.ok(resumed.job.empty_plan_recovered_at);
+  assert.equal((await readyProductionList(bucket)).length, 1);
+  const newLease = await readyProductionClaim(bucket, ideaId, "new-owner", Date.now());
+  assert.equal(newLease.job.attempts, 2);
+  assert.notEqual((await readyProductionEnqueue(bucket, { ideaId, profileId })).revived, true);
+
+  // A real error persisting after the repair must NOT be retried instantly
+  // on every one-minute tick. Keep the ordinary backoff and marker.
+  const now = Date.now();
+  const stillBroken = await readyProductionFinishClaim(bucket, newLease, {
+    status: "retry_wait", stage: "retry", last_error: obsolete,
+    retry_delay_ms: 30 * 60 * 1000,
+  }, now);
+  assert.ok(stillBroken.empty_plan_recovered_at);
+  const next = await readyProductionEnqueue(bucket, { ideaId, profileId });
+  assert.notEqual(next.revived, true);
+  assert.equal(next.job.status, "retry_wait");
+  assert.equal(next.job.next_attempt_ms, now + 30 * 60 * 1000);
+
+  const otherId = "recOtherRetry907";
+  await readyProductionEnqueue(bucket, { ideaId: otherId, profileId });
+  const otherLease = await readyProductionClaim(bucket, otherId, "other", 1_000, 5_000);
+  await readyProductionFinishClaim(bucket, otherLease, {
+    status: "retry_wait", stage: "retry",
+    last_error: "Production media still rendering", retry_delay_ms: 30 * 60 * 1000,
+  }, 2_000);
+  const untouched = await readyProductionEnqueue(bucket, { ideaId: otherId, profileId });
+  assert.notEqual(untouched.revived, true);
+  assert.equal(untouched.job.next_attempt_ms, 1_802_000);
+});

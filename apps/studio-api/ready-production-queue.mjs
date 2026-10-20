@@ -122,6 +122,37 @@ export async function readyProductionEnqueue(bucket, options) {
     });
     return { job: recovered, created: false, revived: recovered.status === "queued" && recovered.stage === "recovered_platform_registry" };
   }
+  // P0 #907: recover the legacy "Ready but no output plan items" backoff
+  // once after the Item4 destination/empty-plan fix. Persistent marker means
+  // a newly failing plan won't be requeued every minute; CAS and owner lease
+  // checks keep concurrent Worker ticks from duplicating claims.
+  const obsoleteEmptyPlanError = "Build a complete platform output plan before preparing platform media";
+  if (prior.value.status === "retry_wait"
+      && prior.value.last_error === obsoleteEmptyPlanError
+      && !prior.value.empty_plan_recovered_at) {
+    const recovered = await cas(bucket, key, (value) => {
+      if (value.status !== "retry_wait"
+          || value.last_error !== obsoleteEmptyPlanError
+          || value.empty_plan_recovered_at
+          || (value.owner && Number(value.lease_expires_ms || 0) > Date.now())) return null;
+      return {
+        ...value,
+        status: "queued",
+        stage: "recovered_empty_item4_plan",
+        owner: null,
+        lease_expires_ms: 0,
+        next_attempt_ms: 0,
+        last_error: null,
+        empty_plan_recovered_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+    });
+    return {
+      job: recovered,
+      created: false,
+      revived: recovered.status === "queued" && recovered.stage === "recovered_empty_item4_plan",
+    };
+  }
   // A prior nonterminal observation may have gone dormant (hold, missing assets,
   // etc.). Fresh Airtable eligibility revives it. Truly completed promoted work
   // never appears in the discovery query again.
