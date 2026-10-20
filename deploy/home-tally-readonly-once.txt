@@ -1,2 +1,0 @@
-2026-10-20: Once-only read of existing Home overview cached snapshot through standard service-binding authentication; no forced refresh, no production read/write changes. Remove workflow after evidence captured.
-2026-10-20: Re-run strictly read-only probe until Home snapshot generation advances beyond the 12:45:57 UTC stale snapshot.

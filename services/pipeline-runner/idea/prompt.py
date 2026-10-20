@@ -120,6 +120,7 @@ Across the batch:
 - When generating 5 or more ideas, include at least one practical tip idea and one educational/hidden-detail/history/architecture idea.
 - Include a mix of landmarks, neighborhoods, routes, practical tips, food/drink, transit, architecture, museums, seasonal contexts, and hidden details when allowed by the profile.
 - Avoid repeating title or hook patterns.
+- Never create an idea by appending a sequence number to an existing idea title (for example, "Venice Beach 2", "Venice Beach #3", or "Venice Beach (4)"). Invent a genuinely descriptive title instead; do not use numerical suffixes just to distinguish ideas.
 
 COMPACT OUTPUT RULES
 This is important to avoid Make Parse JSON truncation. Keep every field short:

@@ -6,6 +6,7 @@ on:
     paths: ['deploy/branch-prune-907.txt']
 permissions:
   contents: write
+  pull-requests: read
 jobs:
   prune:
     runs-on: ubuntu-latest
