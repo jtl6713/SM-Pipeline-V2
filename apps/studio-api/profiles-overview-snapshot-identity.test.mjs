@@ -23,7 +23,8 @@ const health = runInNewContext("(" + functionSource(
 const scheduled = { Facebook: 4, Instagram: 5, TikTok: 3, YouTube: 2 };
 function row(id, city, n = 2) {
   return { id, city_label: city, name: city, scheduled: { ...scheduled },
-    manual: 0, failed: 0, approval: n, ideas: 12 };
+    manual: 0, failed: 0, approval: n, ideas: 12,
+    approved_unpublished: 0, overdue_unpublished: 0 };
 }
 const idLa = "recF7UAn0LkMZZrWZ";
 const idChicago = "recT2rbKX3MF7cVFU";
