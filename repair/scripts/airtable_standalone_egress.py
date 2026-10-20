@@ -59,7 +59,7 @@ def attest_hour(db_path, *, source, hour, observed_at):
     observed=datetime.fromisoformat(observed_at.replace("Z","+00:00"))
     if observed.tzinfo is None or datetime.fromisoformat(h)>=observed.astimezone(timezone.utc):
         raise ValueError("hour is not completed")
-    if datetime.fromisoformat(h)+__import__("datetime").timedelta(hours=1)>observ.astimezone(timezone.utc):
+    if datetime.fromisoformat(h)+__import__("datetime").timedelta(hours=1)>observed.astimezone(timezone.utc):
         raise ValueError("hour is still in progress")
     with connect(db_path) as db:
         db.execute("INSERT OR REPLACE INTO airtable_heartbeats VALUES (?,?,1,?)",
