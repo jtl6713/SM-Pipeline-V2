@@ -9,5 +9,8 @@ test("deployment retries only Cloudflare bridge routing 1042, never a real Home 
   assert.match(refresh, /sleep 5\s+continue/);
   assert.match(refresh, /Overview refresh start failed http=\$CODE status=\$STATUS/);
   assert.match(refresh, /test|refreshing|completed/);
+  assert.match(workflow, /bridge_get\(\) \{/);
+  assert.match(workflow, /grep -Fq "error code: 1042" "\$output"/);
+  assert.match(workflow, /bridge_get "\$BASE\/overview-status" \/tmp\/overview-refresh-status\.json/);
   assert.match(workflow, /automatic_rollback_verified=true/);
 });
