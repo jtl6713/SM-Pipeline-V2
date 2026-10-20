@@ -10,6 +10,8 @@ on:
       - feature/airtable-hourly-rollup-report-20261020
     paths:
       - 'repair/scripts/audit_airtable_egress_paths.py'
+      - 'repair/scripts/audit_airtable_egress_paths_test.py'
+      - '.github/workflows/shadow-profile-summary-hourly-evidence.yml'
       - '.github/workflows/airtable-egress-coverage-audit.yml'
       - 'repair/scripts/airtable_hourly_rollup.py'
       - 'repair/scripts/airtable_hourly_rollup_test.py'
@@ -37,6 +39,8 @@ jobs:
           if obj['production_runtime_unverified_count']:
               raise SystemExit('Uninstrumented production-runtime Airtable code path discovered')
           PY
+      - name: Verify coverage scope classification
+        run: python -m unittest discover -s repair/scripts -p 'audit_airtable_egress_paths_test.py' -v
       - name: Test equal-window reporting safety
         run: python -m unittest discover -s repair/scripts -p 'airtable_request_window_report_test.py' -v
       - name: Test durable hourly window accounting
