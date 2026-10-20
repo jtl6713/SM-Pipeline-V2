@@ -14760,6 +14760,18 @@ export async function getStudioLibraryIntakeStatus(request, env, url) {
 export async function factoryBatchStatusRoute(request, env, authorization) {
   const url = new URL(request.url);
   if (url.searchParams.get("scope") === "all") {
+    // Deployment policy verification must not enumerate up to 5,000 R2
+    // activity/history entries. This is policy-only, NOT a batch census.
+    if (url.searchParams.get("rollout_only") === "1") {
+      const rollout = factoryBatchRolloutPolicy(env);
+      const global_rollout = factoryGlobalPolicy(env);
+      return respond(request, env, {
+        ok: true, scope: "all", rollout_only: true,
+        approvals_enabled: rollout.enabled || global_rollout.enabled,
+        rollout, global_rollout,
+        activity_status: "not_measured",
+      });
+    }
     // Exact-id recovery is separate from completed-history browsing. This
     // preserves idempotent POST recovery even if a small group already finished.
     const exactRequest = String(url.searchParams.get("request_id") || "").trim();
