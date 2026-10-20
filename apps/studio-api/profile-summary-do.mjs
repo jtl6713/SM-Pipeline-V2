@@ -14,6 +14,7 @@ const records = (sql, ...args) => sql.exec(...args).toArray();
 const validId = (id) => /^rec[A-Za-z0-9]{14}$/.test(code(id));
 const validKind = (kind) => ["output", "idea"].includes(kind);
 const EMPTY_AGE_MS = 3 * 60 * 60 * 1000;
+const LAG_BUCKET_MS = [1000, 2500, 5000, 10000, 15000, 30000, 60000];
 
 function counterPlus(before, delta) {
   const next = structuredClone(before || ZERO());
@@ -58,6 +59,23 @@ export class StudioProfileSummary {
       this.sql.exec("CREATE TABLE IF NOT EXISTS pending (kind TEXT NOT NULL, record_id TEXT NOT NULL, touched_at INTEGER NOT NULL, PRIMARY KEY(kind,record_id))");
       this.sql.exec("CREATE TABLE IF NOT EXISTS stage (kind TEXT NOT NULL, record_id TEXT NOT NULL, profile_id TEXT NOT NULL, contribution TEXT NOT NULL, overdue_due_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(kind,record_id))");
     });
+  }
+  incrementMetric(key, amount = 1) {
+    this.putMeta(key, Number(this.getMeta(key) || 0) + amount);
+  }
+  getEvidence() {
+    const n = (key) => Number(this.getMeta(key) || 0);
+    const bins = LAG_BUCKET_MS.map((limit) => ({ le_ms: limit, count: n("dirty_lag_le_" + limit) }));
+    return {
+      definition: "dirty_notification_to_authoritative_reread_application; not Airtable_commit_to_UI",
+      dirty_enqueued: n("dirty_enqueued"), dirty_applied: n("dirty_applied"),
+      dirty_lag_sum_ms: n("dirty_lag_sum_ms"), dirty_lag_max_ms: n("dirty_lag_max_ms"),
+      dirty_lag_le_buckets: bins, dirty_lag_over_60000: n("dirty_lag_over_60000"),
+      airtable_dirty_batch_attempts: n("airtable_dirty_batch_attempts"),
+      airtable_dirty_batch_successes: n("airtable_dirty_batch_successes"),
+      airtable_dirty_batch_errors: n("airtable_dirty_batch_errors"),
+      note: "Counts only shadow dirty-replay Airtable requests, not legacy Home/refill or full reconciliation requests.",
+    };
   }
   getMeta(key) {
     return records(this.sql, "SELECT value FROM meta WHERE key=?", key)[0]?.value || "";
@@ -112,6 +130,7 @@ export class StudioProfileSummary {
           building_started_at: Number(this.getMeta("building_started_at") || 0),
           error: this.getMeta("error") || "",
           version: Number(this.getMeta("version") || 0),
+          evidence: this.getEvidence(),
         });
       }
       if (request.method === "GET" && url.pathname === "/snapshot") {
@@ -164,6 +183,7 @@ export class StudioProfileSummary {
         this.state.storage.transactionSync(() => {
           for (const id of new Set(ids)) {
             this.sql.exec("INSERT INTO pending (kind,record_id,touched_at) VALUES (?,?,?) ON CONFLICT(kind,record_id) DO UPDATE SET touched_at=excluded.touched_at", kind, id, at);
+            this.incrementMetric("dirty_enqueued");
           }
         });
         const alarm = await this.state.storage.getAlarm();
@@ -300,10 +320,12 @@ export class StudioProfileSummary {
           ? OUTPUT_LIST_FIELDS
           : ["Content_Profile", "Promoted_Content_Record_ID", "Content Items"];
         for (const field of fields) url.searchParams.append("fields[]", field);
+        this.incrementMetric("airtable_dirty_batch_attempts");
         const res = await fetch(url.toString(), { headers: { Authorization: "Bearer " + this.env.AIRTABLE_PAT } });
         if (!res.ok) throw new Error("Airtable batch reread returned " + res.status);
         const pack = await res.json();
         if (!Array.isArray(pack.records) || pack.offset) throw new Error("Incomplete Airtable batch reread");
+        this.incrementMetric("airtable_dirty_batch_successes");
         const readById = new Map(pack.records.map((row) => [row.id, row]));
         this.state.storage.transactionSync(() => {
           // A rebuild may have started during the Airtable fetch. The dirty
@@ -320,11 +342,18 @@ export class StudioProfileSummary {
             this.modify(kind, item.record_id, profile,
               profile ? contributionForRecord(kind, record) : ZERO(),
               Date.now(), profile ? dueAtForRecord(kind, record) : 0);
+            const lag = Math.max(0, Date.now() - Number(item.touched_at));
+            this.incrementMetric("dirty_applied");
+            this.incrementMetric("dirty_lag_sum_ms", lag);
+            this.putMeta("dirty_lag_max_ms", Math.max(Number(this.getMeta("dirty_lag_max_ms") || 0), lag));
+            const bucket = LAG_BUCKET_MS.find((limit) => lag <= limit);
+            this.incrementMetric(bucket ? "dirty_lag_le_" + bucket : "dirty_lag_over_60000");
             this.sql.exec("DELETE FROM pending WHERE kind=? AND record_id=?", kind, item.record_id);
           }
         });
         this.putMeta("error", "");
       } catch (error) {
+        this.incrementMetric("airtable_dirty_batch_errors");
         this.putMeta("error", String(error?.message || error).slice(0, 300));
         break;
       }
