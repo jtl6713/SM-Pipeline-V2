@@ -36,6 +36,9 @@ export function readStudioProfileSummary(env) {
 }
 
 export async function notifyStudioProfileSummary(env, tableId, method, body) {
+  if (env?.STUDIO_PROFILE_SUMMARY_CAPTURE_ENABLED !== "true") {
+    return { skipped: true, reason: "capture_not_enabled" };
+  }
   if (!profileSummaryStub(env)) return { skipped: true, reason: "not_configured" };
   const verb = String(method || "GET").toUpperCase();
   if (!["POST", "PATCH", "PUT", "DELETE"].includes(verb)) return { skipped: true, reason: "read" };
