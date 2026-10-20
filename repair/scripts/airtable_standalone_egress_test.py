@@ -17,6 +17,10 @@ class StandaloneEgressTests(unittest.TestCase):
                      start="2026-10-20T10:00:00+00:00",end="2026-10-20T11:00:00+00:00")
             self.assertEqual(x["hourly"][0]["attempts"],1)
             self.assertEqual(len(x["attestations"]),1)
+            z=export(db,source="standalone_scripts",
+                     start="2026-10-20T10:00:00Z",end="2026-10-20T11:00:00Z")
+            self.assertEqual(z["hourly"],x["hourly"])
+            self.assertEqual(z["attestations"],x["attestations"])
     def test_reject_attestation_of_open_hour(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(ValueError):
