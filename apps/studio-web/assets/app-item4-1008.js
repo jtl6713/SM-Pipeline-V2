@@ -15833,6 +15833,8 @@ function timedScriptAssetLabel(asset, index) {
       }
 
       const audio = new Audio(url);
+      audio.muted = false;
+      audio.volume = 1;
       studioPreviewAudio = audio;
       studioPreviewButton = button || null;
       audio.preload = "auto";
@@ -15847,9 +15849,11 @@ function timedScriptAssetLabel(asset, index) {
         restore();
         messageFn(`That ${label} could not be played.`, "error-text");
       }, { once: true });
-      audio.play().catch(() => {
+      audio.play().then(() => {
+        if (studioPreviewAudio === audio) messageFn(`Playing ${label}.`);
+      }).catch((error) => {
         restore();
-        messageFn("Browser playback was blocked. Click Preview again.", "error-text");
+        messageFn(`Unable to play ${label}: ${error?.message || "audio could not load"}.`, "error-text");
       });
     } catch (e) {
       messageFn(e.message || "Preview failed.", "error-text");
