@@ -64,7 +64,7 @@ jobs:
           if [[ "$code" != "200" ]] || ! jq -e '.ok==true and (.hourly|type)=="array"' runner-airtable-egress.json >/dev/null 2>&1; then
             reason=$(jq -r '.reason // empty' runner-airtable-egress.json 2>/dev/null || true)
             case "$reason" in
-              runner_metrics_backend_unconfigured|runner_metrics_unavailable|runner_metrics_unreachable) ;;
+              runner_metrics_backend_unconfigured|runner_metrics_unavailable|runner_metrics_unreachable|runner_metrics_auth_failed|runner_metrics_store_unconfigured|runner_metrics_route_missing) ;;
               *) reason="runner_proxy_http_${code:-unknown}" ;;
             esac
             jq -n --arg reason "$reason" '{ok:false,reason:$reason}' >runner-airtable-egress.json
