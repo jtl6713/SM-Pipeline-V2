@@ -27,8 +27,8 @@ test("Home boots a thin script set and lazy-loads the other pages", async () => 
   assert.match(app, /window\.StudioLazyLoad\?\.ensure\(page\)/);
   assert.match(app, /window\.StudioLazyLoad\?\.ensure\("content"\)/);
   assert.match(app, /page === "insights"/);
-  assert.match(html, /"factory":\s*\[\s*"\/assets\/factory-open-target\.js\?v=0\.6\.728-factory-toolbar-cleanup"/);
-  assert.match(html, /factory-desk\.js\?v=0\.6\.728-factory-toolbar-cleanup&retry=visible-failed-892&rollout=chicago-ig-reel-v1/);
+  assert.match(html, /"factory":\s*\[\s*"\/assets\/factory-open-target\.js\?v=0\.6\.729-factory-review-ipad"/);
+  assert.match(html, /factory-desk\.js\?v=0\.6\.729-factory-review-ipad&retry=visible-failed-892&rollout=chicago-ig-reel-v1/);
   assert.doesNotMatch(html, /<script src="\/assets\/factory-desk\.js/);
   assert.match(app, /page === "factory"/);
 });
