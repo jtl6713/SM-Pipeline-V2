@@ -1079,7 +1079,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.671-home-v6-fast-cache",
+          version: "0.10.670-profile-summary-parity" + "-home-v6-fast-cache",
           studio_profile_summary_reconcile_gate_v1: true,
           studio_profile_summary_reconcile_await_v1: true,
           studio_profile_summary_home_membership_v1: true,
