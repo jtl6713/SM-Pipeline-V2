@@ -38,9 +38,19 @@ test("awaiting approval is review-ready but not approved or rendering", () => {
   assert.equal(homeOutputContribution({ ...ready, review_status: "Approved" }).awaiting_approval, 0);
 });
 
-test("parenthesized profile count uses all approved unpublished, not overdue or scheduled column sum", () => {
+test("parenthesized profile count reads future-approved scheduled metric, not overdue or platform sum", () => {
   assert.match(ui, /function approvedUnpublishedTotal\(row\)/);
   assert.match(ui, /approved_unpublished: Number\(row\.approved_unpublished\) \|\| 0/);
   assert.match(ui, /approved_unpublished"\]/);
   assert.doesNotMatch(ui, /scheduledTotal\(row\)/);
+  assert.match(classifier, /scheduled_post_date \|\| ""/);
+  assert.match(classifier, /scheduled >= now/);
+});
+
+test("shadow summary expires future scheduled counts at publication time without Airtable mutation", () => {
+  const durable = fs.readFileSync(path.join(root, "apps/studio-api/profile-summary-do.mjs"), "utf8");
+  assert.match(durable, /idx_summary_ledger_future/);
+  assert.match(durable, /approved_future_at>=\?/);
+  assert.match(durable, /approved_unpublished: futureByProfile\.get\(p\.id\) \|\| 0/);
+  assert.match(durable, /future_count_reconcile_required/);
 });
