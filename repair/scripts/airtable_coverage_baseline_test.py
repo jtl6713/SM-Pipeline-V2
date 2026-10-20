@@ -27,6 +27,10 @@ class CoverageBaselineTests(unittest.TestCase):
            "complete":True,"workload":{"outputs":100,"refreshes":10,"dirty_updates":20,"reconciliations":0},"total_attempts":500}
         q={**p,"start_utc":"2026-10-19T00:00:00Z","end_utc":"2026-10-20T00:00:00Z",
            "read_flags":{"home":False},"workload":{**p["workload"],"outputs":200}}
+        p["source_revisions"]={name:"revision1" for name in REQUIRED}
+        q["source_revisions"]={name:"revision1" for name in REQUIRED}
+        p["workload"].update({"reads":100,"writes":100})
+        q["workload"].update({"reads":100,"writes":100})
         self.assertEqual(assess({"sources":{}},p,q)["workload_comparability"],"workload_outside_10pct")
 
 
