@@ -5,6 +5,8 @@ import {
   item4BridgeIssuesAreDestinationLinks,
   item4IsRetryablePrepareFailure,
   item4PrepareButtonView,
+  item4VariantCountLabel,
+  item4VariantProgressCounts,
   item4PrepareHttpStatus,
   item4ProductionPillState,
 } from "./item4-prepare-controls.mjs";
@@ -107,4 +109,38 @@ test("destination-link issues are not mixed with crop-complete copy", () => {
   assert.equal(item4BridgeIssuesAreDestinationLinks([
     "Platform-ready variants must be Ready before source-to-production handoff.",
   ]), false);
+});
+
+test("unknown frame target never displays the misleading 0/?", () => {
+  assert.equal(item4VariantCountLabel(0, 0), "0 ready");
+  assert.equal(item4PrepareButtonView({
+    planStatus: "Ready", variantStatus: "Preparing", readyCount: 0, targetCount: 0,
+  }).label, "Retry remaining (0 ready)");
+  assert.equal(item4PrepareButtonView({
+    planStatus: "Ready", variantStatus: "Preparing", readyCount: 0, targetCount: 0, inFlight: true,
+  }).label, "Preparing… 0 ready");
+});
+
+test("variant progress uses persisted counts, API progress, then exact plan totals", () => {
+  assert.deepEqual(item4VariantProgressCounts({
+    variants: { ready_count: 3, target_count: 9 },
+  }), { readyCount: 3, targetCount: 9 });
+  assert.deepEqual(item4VariantProgressCounts({
+    variants: null, variant_progress: { ready: 4, target: 12 },
+  }), { readyCount: 4, targetCount: 12 });
+  assert.deepEqual(item4VariantProgressCounts({
+    variants: { ready_count: 0, target_count: 0, plan_ready_count: 2, plan_target_count: 8 },
+  }), { readyCount: 2, targetCount: 8 });
+  assert.deepEqual(item4VariantProgressCounts({
+    variants: null,
+  }), { readyCount: 0, targetCount: 0 });
+});
+
+test("production runtime uses the same count fallback as the tested controls", async () => {
+  const fs = await import("node:fs");
+  const runtime = fs.readFileSync(new URL("./assets/app-item4-1008.js", import.meta.url), "utf8");
+  assert.match(runtime, /function item4VariantProgressCounts\(status\)/);
+  assert.match(runtime, /const \{ readyCount, targetCount \} = item4VariantProgressCounts\(status\)/);
+  assert.match(runtime, /variant_progress: \{ ready: progressReady, target: progressTarget \}/);
+  assert.doesNotMatch(runtime, /targetCount \|\| "\?"/);
 });

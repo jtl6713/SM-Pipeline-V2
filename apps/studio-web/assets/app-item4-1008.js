@@ -3280,7 +3280,7 @@
       const min = Number(idea?.carousel_slide_count_min || 0);
       const max = Number(idea?.carousel_slide_count_max || 0);
       $("promoteIdeaButton").textContent = "Listening for photos";
-      setManageMessage(`Listening in the Studio media library. ${high} / ${min || "?"} high-confidence matches so far. Automatic matching runs every 5 minutes; use Find images now for an immediate scan. Studio will use up to ${max || "?"} photos, then you can edit the selected assets and set production rules.`, "");
+      setManageMessage(`Listening in the Studio media library. ${min ? `${high} / ${min}` : `${high}`} high-confidence matches so far. Automatic matching runs every 5 minutes; use Find images now for an immediate scan. Studio will use up to ${max || "?"} photos, then you can edit the selected assets and set production rules.`, "");
     } else if (String(idea?.photo_wait_status || "") === "Ready" || hasPhotos) {
       $("promoteIdeaButton").textContent = "Photos ready";
       const count = Array.isArray(idea?.matched_media_asset_links) ? idea.matched_media_asset_links.length : (idea?.photo_match?.selected?.length || ideaLibrarySelected?.size || 0);
@@ -9108,6 +9108,30 @@ function timedScriptAssetLabel(asset, index) {
     return "idle";
   }
 
+  function item4VariantProgressCounts(status) {
+    const manifest = status?.variants || {};
+    const progress = status?.variant_progress || {};
+    const manifestTarget = Number(manifest.target_count || 0);
+    const progressTarget = Number(progress.target || 0);
+    const usePlan = !(manifestTarget > 0 || progressTarget > 0) && Number(manifest.plan_target_count || 0) > 0;
+    const targetCount = usePlan ? Number(manifest.plan_target_count) : (manifestTarget || progressTarget);
+    const readyCount = usePlan
+      ? Number(manifest.plan_ready_count || 0)
+      : Math.max(Number(manifest.ready_count || 0), Number(progress.ready || 0));
+    return {
+      readyCount: Math.max(0, Number.isFinite(readyCount) ? readyCount : 0),
+      targetCount: Math.max(0, Number.isFinite(targetCount) ? targetCount : 0),
+    };
+  }
+
+  function item4VariantCountLabel(readyCount, targetCount) {
+    const ready = Math.max(0, Number(readyCount) || 0);
+    const target = Number(targetCount);
+    return Number.isFinite(target) && target > 0
+      ? `${ready}/${target}`
+      : `${ready} ready`;
+  }
+
   function item4PrepareButtonView({
     planStatus = "",
     variantStatus = "None",
@@ -9117,7 +9141,7 @@ function timedScriptAssetLabel(asset, index) {
     canAutoPlan = false,
   } = {}) {
     const planReady = String(planStatus || "") === "Ready";
-    const count = `${Number(readyCount || 0)}/${targetCount || "?"}`;
+    const count = item4VariantCountLabel(readyCount, targetCount);
     if (!planReady && !canAutoPlan) {
       return { disabled: true, label: "Prepare", retry: false };
     }
@@ -10344,8 +10368,7 @@ function timedScriptAssetLabel(asset, index) {
       return;
     }
     const clips = item4WorkspaceHasClips(status);
-    const readyCount = Number(status?.variants?.ready_count || 0);
-    const targetCount = Number(status?.variants?.target_count || status?.variants?.source_asset_count || 0);
+    const { readyCount, targetCount } = item4VariantProgressCounts(status);
     const elapsed = item4FormatElapsed(Date.now() - (item4VariantPollStartedAt || Date.now()));
     const count = targetCount ? `${readyCount} of ${targetCount} ready` : `${readyCount} ready`;
     progress.hidden = false;
@@ -10451,14 +10474,13 @@ function timedScriptAssetLabel(asset, index) {
     }
     if (button) button.hidden = false;
     const variantStatus = status?.variant_status || "None";
-    const manifest = status?.variants || null;
-    const readyCount = Number(manifest?.ready_count || 0);
-    const targetCount = Number(manifest?.target_count || manifest?.source_asset_count || 0);
+    const { readyCount, targetCount } = item4VariantProgressCounts(status);
+    const count = item4VariantCountLabel(readyCount, targetCount);
     const clipRequest = item4WorkspaceHasClips(status);
     if (badge) badge.textContent = variantStatus === "Ready"
       ? `${readyCount} frames ready`
       : variantStatus === "Preparing"
-        ? `Preparing… ${readyCount}/${targetCount || "?"}`
+        ? `Preparing… ${count}`
         : variantStatus === "Error" ? "Needs attention" : "Waiting";
     const shownError = String(status?.variant_error || item4PrepareError || "").trim();
     if (error) {
@@ -10485,8 +10507,8 @@ function timedScriptAssetLabel(asset, index) {
           : "Finish adding media before preparing frames.")
         : variantStatus === "Preparing"
           ? (clipRequest
-            ? `Studio is attaching clip frames (${readyCount}/${targetCount || "?"}). Leftover frames retry automatically if the count stops moving.`
-            : `Studio is preparing crops in the background (${readyCount}/${targetCount || "?"}). Leftover crops retry automatically if the count stops moving.`)
+            ? `Studio is attaching clip frames (${count}). Leftover frames retry automatically if the count stops moving.`
+            : `Studio is preparing crops in the background (${count}). Leftover crops retry automatically if the count stops moving.`)
           : variantStatus === "Error"
             ? "Preparation stopped. Click Retry to send the leftover crops again. The originals are still safe."
             : variantStatus === "Ready"
@@ -10919,13 +10941,14 @@ function timedScriptAssetLabel(asset, index) {
       if (activeProductionRequest?.id !== requestId || revision !== item4WorkspaceRevision || !item4VariantPolling) return;
       const state = String(variantStatus?.status || item4Workspace?.variant_status || "None");
       const manifest = variantStatus?.manifest || null;
-      const progressReady = Number(variantStatus?.progress?.ready || manifest?.ready_count || 0);
+      const progressReady = Math.max(Number(variantStatus?.progress?.ready || 0), Number(manifest?.ready_count || 0));
       const progressTarget = Number(variantStatus?.progress?.target || manifest?.target_count || 0);
       item4Workspace = {
         ...(item4Workspace || {}),
         variant_status: state,
         variant_updated_at: variantStatus?.updated_at || item4Workspace?.variant_updated_at || null,
         variant_error: variantStatus?.error || null,
+        variant_progress: { ready: progressReady, target: progressTarget },
         variants: manifest || item4Workspace?.variants || {
           ready_count: progressReady,
           target_count: progressTarget,
@@ -10968,13 +10991,13 @@ function timedScriptAssetLabel(asset, index) {
         renderItem4Variants(item4Workspace || {});
         return;
       }
-      const readyCount = progressReady;
-      const targetCount = progressTarget;
+      const { readyCount, targetCount } = item4VariantProgressCounts(item4Workspace);
+      const count = item4VariantCountLabel(readyCount, targetCount);
       const elapsed = item4FormatElapsed(Date.now() - item4VariantPollStartedAt);
       if (state === "Preparing") {
         setRequestMessage(clips
-          ? `Attaching clip frames ${readyCount}/${targetCount || "?"} · ${elapsed} elapsed.`
-          : `Preparing platform crops ${readyCount}/${targetCount || "?"} · ${elapsed} elapsed.`, "success");
+          ? `Attaching clip frames ${count} · ${elapsed} elapsed.`
+          : `Preparing platform crops ${count} · ${elapsed} elapsed.`, "success");
       }
       const decision = item4NextStatusPoll(Date.now() - item4VariantPollStartedAt, ITEM4_VARIANT_POLL_TIMEOUT_MS, item4VariantExtraWindows);
       if (!decision.continue) {
@@ -10983,8 +11006,8 @@ function timedScriptAssetLabel(asset, index) {
         if ((state === "Preparing" || state === "Error") && auto.retry) {
           item4VariantAutoRetries = auto.attempt;
           setRequestMessage(clips
-            ? `Clip frames still attaching (${readyCount}/${targetCount || "?"}). Automatic retry ${item4VariantAutoRetries}/${ITEM4_VARIANT_AUTO_RETRIES}…`
-            : `Platform media still preparing (${readyCount}/${targetCount || "?"}). Automatic retry ${item4VariantAutoRetries}/${ITEM4_VARIANT_AUTO_RETRIES}…`, "success");
+            ? `Clip frames still attaching (${count}). Automatic retry ${item4VariantAutoRetries}/${ITEM4_VARIANT_AUTO_RETRIES}…`
+            : `Platform media still preparing (${count}). Automatic retry ${item4VariantAutoRetries}/${ITEM4_VARIANT_AUTO_RETRIES}…`, "success");
           prepareItem4Variants({ autoRetry: true }).catch((error) => {
             console.warn("Item 4 automatic prepare retry deferred", error);
           });
@@ -15170,7 +15193,8 @@ function timedScriptAssetLabel(asset, index) {
     if (wait === "Waiting") {
       const high = Number(record?.photo_match?.high_count || 0);
       const min = Number(record?.carousel_slide_count_min || 0);
-      return `${high} / ${min || "?"} photos`;
+      const target = min || Number(record?.carousel_slide_count || 0);
+      return target > 0 ? `${high} / ${target} photos` : `${high} matched photos`;
     }
     if (wait === "Ready") {
       const count = Array.isArray(record?.matched_media_asset_links) ? record.matched_media_asset_links.length : (record?.photo_match?.selected?.length || 0);

@@ -1,4 +1,4 @@
-// Keep these helpers aligned with apps/studio-web/assets/app-item4-0621.js
+// Keep these helpers aligned with apps/studio-web/assets/app-item4-1008.js
 // (item4PrepareButtonView, productionPillState, item4IsRetryablePrepareFailure).
 
 export function item4ProductionPillState(text) {
@@ -7,6 +7,30 @@ export function item4ProductionPillState(text) {
   if (/process|prepar|upload|building/.test(t)) return "busy";
   if (/ready|complete/.test(t)) return "ready";
   return "idle";
+}
+
+export function item4VariantProgressCounts(status) {
+  const manifest = status?.variants || {};
+  const progress = status?.variant_progress || {};
+  const manifestTarget = Number(manifest.target_count || 0);
+  const progressTarget = Number(progress.target || 0);
+  const usePlan = !(manifestTarget > 0 || progressTarget > 0) && Number(manifest.plan_target_count || 0) > 0;
+  const targetCount = usePlan ? Number(manifest.plan_target_count) : (manifestTarget || progressTarget);
+  const readyCount = usePlan
+    ? Number(manifest.plan_ready_count || 0)
+    : Math.max(Number(manifest.ready_count || 0), Number(progress.ready || 0));
+  return {
+    readyCount: Math.max(0, Number.isFinite(readyCount) ? readyCount : 0),
+    targetCount: Math.max(0, Number.isFinite(targetCount) ? targetCount : 0),
+  };
+}
+
+export function item4VariantCountLabel(readyCount, targetCount) {
+  const ready = Math.max(0, Number(readyCount) || 0);
+  const target = Number(targetCount);
+  return Number.isFinite(target) && target > 0
+    ? `${ready}/${target}`
+    : `${ready} ready`;
 }
 
 export function item4PrepareButtonView({
@@ -18,7 +42,7 @@ export function item4PrepareButtonView({
   canAutoPlan = false,
 } = {}) {
   const planReady = String(planStatus || "") === "Ready";
-  const count = `${Number(readyCount || 0)}/${targetCount || "?"}`;
+  const count = item4VariantCountLabel(readyCount, targetCount);
   if (!planReady && !canAutoPlan) {
     return { disabled: true, label: "Prepare", retry: false };
   }
