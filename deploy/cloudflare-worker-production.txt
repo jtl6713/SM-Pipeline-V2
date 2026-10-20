@@ -534,3 +534,5 @@ Deploy PR #905 photo-wait historical platform default repair (Threads 400): filt
 2026-10-20: Deploy merged PR #935 sanitized Airtable request egress logging and hourly shadow evidence workflow. Preserve Airtable SoR, shadow capture/reconcile and disabled Home/refill read cutovers. Confirm production binding contract, canaries, rollback.
 
 Deploy targeted November 17 MAE overage selector from merged PR #936; no automatic repair execution or reservation lane activation. 2026-10-20.
+
+2026-10-20: Home profile parentheses reflect all approved-but-unpublished outputs, including future scheduled and overdue items; retain separate overdue metric. Deploy with profile summary reconcile and approval-count regression validation. Airtable remains authoritative; no approval or publication mutations.
