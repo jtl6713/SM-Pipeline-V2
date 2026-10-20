@@ -3264,7 +3264,15 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
             if (String(f(row, "Platform") || "").trim().toLowerCase() !== platformWant) return false;
             const stamp = Date.parse(String(f(row, "Scheduled_Post_Date") || ""));
             return Number.isFinite(stamp) && localDate(stamp) === job.repair_date;
-          }).sort((a, b) => Number(f(a, "Output_ID") || 0) - Number(f(b, "Output_ID") || 0));
+          }).sort((a, b) => {
+            // An immutable/published occupant wins even if its Output_ID is newer.
+            const immutable = (row) => Boolean(f(row, "Do_Not_Publish"))
+              || Boolean(String(f(row, "Published_At") || "").trim())
+              || ["Published", "Canceled", "Cancelled"].includes(String(f(row, "Output_Status") || "").trim())
+              || String(f(row, "Publish_Status") || "").trim() === "Published";
+            return Number(immutable(b)) - Number(immutable(a))
+              || Number(f(a, "Output_ID") || 0) - Number(f(b, "Output_ID") || 0);
+          });
           const claimed = new Set();
           const displacedIds = new Set();
           for (const row of matching) {
