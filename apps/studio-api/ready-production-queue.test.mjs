@@ -239,3 +239,62 @@ test("P0 #907 immediately reclaims only the corrected platform-registry Referenc
   assert.equal(unchanged.job.status, "retry_wait");
   assert.equal(unchanged.job.next_attempt_ms, 1_802_000);
 });
+
+test("Ready dispatcher separately schedules new planning and due render monitors", () => {
+  const jobs = [
+    { idea_id: "old-monitor", profile_id: "miami", status: "awaiting_review", created_at: "2026-10-18T01:00:00Z" },
+    { idea_id: "new-planner", profile_id: "chicago", status: "queued", created_at: "2026-10-18T02:00:00Z" },
+    { idea_id: "other-planner", profile_id: "nyc", status: "queued", created_at: "2026-10-18T03:00:00Z" },
+  ];
+  assert.deepEqual(readyProductionSelectJobs(jobs, { nowMs: 10000 }).map((job) => job.idea_id),
+    ["new-planner", "old-monitor"], "old render monitoring must not occupy both continuation slots");
+  assert.deepEqual(readyProductionSelectJobs(jobs.slice(1), { nowMs: 10000 }).map((job) => job.idea_id),
+    ["new-planner", "other-planner"], "when no monitor is due both slots can plan");
+  jobs[0].next_attempt_ms = 10001;
+  assert.deepEqual(readyProductionSelectJobs(jobs, { nowMs: 10000 }).map((job) => job.idea_id),
+    ["new-planner", "other-planner"], "not-yet-due monitors cannot block ready drafts");
+});
+
+test("Awaiting-review jobs release the lease and defer monitoring while renders run", async () => {
+  const bucket = new FakeR2();
+  const ideaId = "recAwaitReview907";
+  await readyProductionEnqueue(bucket, { ideaId, profileId: "recReadyProfile907" });
+  const lease = await readyProductionClaim(bucket, ideaId, "first", 1_000, 5_000);
+  const waiting = await readyProductionFinishClaim(bucket, lease, {
+    status: "awaiting_review", stage: "production_render_qa",
+  }, 2_000);
+  assert.equal(waiting.status, "awaiting_review");
+  assert.equal(waiting.next_attempt_ms, 182_000);
+  assert.equal(waiting.owner, null);
+  assert.equal(await readyProductionClaim(bucket, ideaId, "too-soon", 61_999), null);
+  const retry = await readyProductionClaim(bucket, ideaId, "due", 183_000);
+  assert.equal(retry.owner, "due");
+});
+
+test("Ready production backfills existing linked asset-ready autonomous drafts with blank photo status", async () => {
+  const functions = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+  const eligibility = functions.slice(functions.indexOf("function readyProductionExistingDraftEligible("),
+    functions.indexOf("async function readyProductionRequestForIdea("));
+  assert.match(eligibility, /Studio_Master_Asset_Status/);
+  assert.match(eligibility, /Studio_Master_Asset_Count/);
+  assert.match(eligibility, /linkedRecordIds\(f\(requestRecord, "Idea_Candidate"\)\)/);
+  assert.match(eligibility, /origin=\(\?:autonomous\|prepare-to-review\)/);
+  assert.match(eligibility, /return readyProductionExistingDraftEligible\(idea, requestRecord\)/);
+  const draftQuery = eligibility.slice(eligibility.indexOf("async function discoverAssetReadyProductionDrafts("));
+  assert.match(draftQuery, /sortField: "Created_At"/);
+  assert.match(draftQuery, /Studio_Master_Asset_Status}='Ready'/);
+  assert.match(draftQuery, /Studio_Master_Asset_Count}>0/);
+  assert.match(draftQuery, /origin=autonomous/);
+  const dispatcher = functions.slice(functions.indexOf("async function studioReadyProductionCronResume("),
+    functions.indexOf("export { studioReadyProductionCronResume };"));
+  assert.match(dispatcher, /discoverAssetReadyProductionDrafts\(env/);
+  assert.match(dispatcher, /const known = new Map\(jobs\.map/);
+  assert.match(dispatcher, /maxBackfillPerTick/);
+  assert.match(dispatcher, /readyProductionEnqueue\(env.STUDIO_MEDIA/);
+  assert.match(dispatcher, /draft_backfilled: backfilled/);
+  const processor = functions.slice(functions.indexOf("async function processReadyProductionClaim("),
+    functions.indexOf("async function studioReadyProductionCronResume("));
+  assert.match(processor, /readyProductionIdeaEligible\(idea, requestRecord\)/);
+  assert.match(processor, /autonomousMasterMediaIds\(item4ParseJson/);
+  assert.match(processor, /if \(!requestRecord\) \{/); // Only absent link may create a draft.
+});
