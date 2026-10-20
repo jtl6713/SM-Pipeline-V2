@@ -13,8 +13,10 @@ test("force refresh routes pass the Phase 2A gate and existing Studio write secu
   assert.match(worker, /isProfilesOverviewRefreshRoute = url\.pathname === "\/api\/profiles\/overview\/refresh"/);
   assert.match(worker, /isProfilesOverviewRefreshStatusRoute = url\.pathname === "\/api\/profiles\/overview\/refresh-status"/);
   assert.match(worker, /isProfilesOverviewRefreshWrite = isProfilesOverviewRefreshRoute && request\.method === "POST"/);
+  assert.match(worker, /isProfilesOverviewSummaryReconcileWrite/);
   const gate = worker.slice(worker.indexOf("const allowedMethod ="), worker.indexOf('if (url.pathname === "/api/hooks/r5-done")'));
   assert.match(gate, /isProfilesOverviewRefreshWrite/);
+  assert.match(gate, /isProfilesOverviewSummaryReconcileWrite/);
   const route = worker.slice(worker.indexOf("if (isProfilesOverviewRefreshRoute)"), worker.indexOf('if (url.pathname === "/api/dashboard")'));
   assert.match(route, /assertWriteRequest\(request, env\)/);
   assert.match(route, /requireAnyPermission/);
