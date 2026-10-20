@@ -120,7 +120,7 @@ test("Factory batch drain reuses one occupancy map like Approve All", () => {
   assert.match(drain, /studioInvalidateOccupiedScheduleCache\(\)/);
   assert.match(drain, /filter\(\(item\) => !\["approved", "already_satisfied", "failed"\]/);
   assert.match(drain, /result\?\.scheduled_ms/);
-  assert.match(drain, /\(occupiedByLane\[lane\] \|\|= \[\]\)\.push\(Number\(result\.scheduled_ms\)\)/);
+  assert.match(drain, /\(laneOccupancy\[lane\] \|\|= \[\]\)\.push\(Number\(result\.scheduled_ms\)\)/);
   assert.match(drain, /Factory batch continue/);
   assert.match(drain, /continueSlice/);
   assert.match(drain, /result\?\.claimed && processed > 0 && continueSlice < 8/);
@@ -134,13 +134,13 @@ test("Factory cron never burns Airtable occupancy scans before claiming profile 
   const source = functions04.slice(start, end);
   const claim = source.indexOf("const result = await factoryBatchDrain(");
   const approval = source.indexOf("approve: async (id, currentJob, checkpoint");
-  const occupancy = source.indexOf("occupiedByLane = await studioOccupiedSchedulesOrEmpty(");
+  const occupancy = source.indexOf("const occupied = await studioOccupiedSchedulesOrEmpty(");
   assert.ok(claim >= 0 && approval > claim && occupancy > approval,
     "only the R2-lease winner can fetch expensive scheduling occupancy");
   const beforeClaim = source.slice(0, claim);
   assert.doesNotMatch(beforeClaim, /studioOccupiedSchedulesOrEmpty|await airtableFetch\(env, STUDIO_IDEA_PROFILE_TABLE_ID/);
-  assert.match(source, /let occupiedByLane = null/);
-  assert.match(source, /if \(occupiedByLane === null\)/);
+  assert.match(source, /const occupancyByPlatform = new Map\(\)/);
+  assert.match(source, /if \(!occupancyByPlatform\.has\(platform\)\)/);
   assert.match(source, /requireComplete: true/);
   assert.match(source, /filter\(\(item\) => !\["approved", "already_satisfied", "failed"\]/);
   assert.match(source, /skipOccupancyRefresh: true/);
@@ -160,6 +160,25 @@ test("one-minute Factory recovery discovers global children even when the rotati
   assert.match(cron, /new Map\(candidates\.map/);
   assert.match(cron, /factoryBatchCronSelectJobs\(distinct/);
   assert.match(cron, /factoryBatchProcess\(env, candidate\.profileId, candidate\.requestId, ctx\)/);
+});
+
+test("Factory strict occupancy is per profile and platform, once per platform in the claimed drain", () => {
+  const start = functions04.indexOf("export async function factoryBatchProcess(");
+  const end = functions04.indexOf("/*__STUDIO_WORKER_END:factoryBatchProcess__*/", start);
+  const source = functions04.slice(start, end);
+  assert.match(source, /const occupancyByPlatform = new Map\(\)/);
+  assert.match(source, /if \(!occupancyByPlatform\.has\(platform\)\)/);
+  assert.match(source, /const occupied = await studioOccupiedSchedulesOrEmpty\(env, \{[\s\S]*?profile, platform, requireComplete: true/);
+  assert.match(source, /const occupiedByLane = occupancyByPlatform\.get\(platform\)/);
+  assert.match(source, /occupiedMs: studioOccupiedForLane\(occupiedByLane, platform, outputType\)/);
+  assert.match(source, /occupancyByPlatform\.set\(platform, occupied\)/);
+  assert.match(source, /const laneOccupancy = occupancyByPlatform\.get\(lanePlatform\)/);
+  assert.doesNotMatch(source, /profile, requireComplete: true/);
+  // Existing canonical approval/DO locking remains responsible for the final
+  // authoritative claim, and already-approved slots are never excluded.
+  assert.match(source, /scheduleOperationId: `factory-batch:/);
+  assert.match(source, /skipOccupancyRefresh: true/);
+  assert.match(source, /filter\(\(item\) => !\["approved", "already_satisfied", "failed"\]/);
 });
 
 test("Global Factory group submit accepts from desk hints before Airtable", () => {
