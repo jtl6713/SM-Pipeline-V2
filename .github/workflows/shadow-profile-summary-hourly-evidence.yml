@@ -83,3 +83,5 @@ jobs:
           if-no-files-found: ignore
 
 # 2026-10-20: first post-PR944 live durable hourly accounting export verification.
+
+# 2026-10-20: verify runner metrics proxy after Worker production deployment completed.
