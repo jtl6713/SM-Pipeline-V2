@@ -127,3 +127,15 @@ test("authoritative Airtable refresh filters terminal output history and promote
   assert.match(build, /filterFormula: profileOutputFormula/);
   assert.match(build, /filterFormula: profileIdeaFormula/);
 });
+
+test("v5 Home snapshot writer, force verifier and read cache use the same schema", () => {
+  const writer = functions04.slice(functions04.indexOf("export async function writeStudioProfilesOverviewSnapshot("),
+    functions04.indexOf("/*__STUDIO_WORKER_END:writeStudioProfilesOverviewSnapshot__*/"));
+  const verifier = functions04.slice(functions04.indexOf("export async function verifyStudioProfilesOverviewSnapshot("),
+    functions04.indexOf("/*__STUDIO_WORKER_END:verifyStudioProfilesOverviewSnapshot__*/"));
+  assert.match(writer, /schemaVersion: 5/);
+  assert.match(verifier, /snapshot\.schemaVersion !== 5/);
+  assert.match(verifier, /studioProfilesOverviewRowsHealthy\(snapshot\.rows\)/);
+  assert.match(verifier, /expectedGeneration/);
+  assert.match(functions04, /snapshot\.schemaVersion === 5 && age < freshMs/);
+});
