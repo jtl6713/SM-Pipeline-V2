@@ -14904,7 +14904,7 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
             // closed if even this bounded lane is incomplete.
             const platformOccupancy = await studioOccupiedSchedulesOrEmpty(env, {
               excludeIds: (job.items || [])
-                .filter(item => !["approved", "already_satisfied", "failed"].includes(String(item.status || "")))
+                .filter((item) => !["approved", "already_satisfied", "failed"].includes(String(item.status || "")))
                 .map(item => item.id),
               profile, platform, requireComplete: true,
             });
