@@ -106,9 +106,9 @@ test("all-profiles overview shows per-output approved future and past-due totals
     assert.match(host.innerHTML, /Approved · Past Due/);
     assert.match(host.innerHTML, /Pipeline · Total/);
     assert.match(host.innerHTML, /Ideas Needed/);
-    assert.match(host.innerHTML, /data-label="Pipeline total"[^>]*>3<\\/td>/);
-    assert.match(host.innerHTML, /data-label="Pipeline total"[^>]*>4<\\/td>/);
-    assert.match(host.innerHTML, /data-label="Ideas needed"[^>]*>100<\\/td>/);
+    assert.match(host.innerHTML, /data-label="Pipeline total"[^>]*>3<\/td>/);
+    assert.match(host.innerHTML, /data-label="Pipeline total"[^>]*>4<\/td>/);
+    assert.match(host.innerHTML, /data-label="Ideas needed"[^>]*>100<\/td>/);
   } finally {
     globalThis.document = prior.document;
     globalThis.fetch = prior.fetch;
