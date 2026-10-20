@@ -10951,15 +10951,29 @@ export async function prepareIdeaToReview(request, env, url, authorization, ctx 
 const READY_PRODUCTION_IDEA_FORMULA =
   "AND({Test_Run_ID}=BLANK(),{Studio_Photo_Wait_Status}='Ready',{Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK(),{Candidate_Status}!='On Hold',{Candidate_Status}!='Rejected',{Candidate_Status}!='Promoted')";
 
-function readyProductionIdeaEligible(idea) {
+function readyProductionExistingDraftEligible(idea, requestRecord) {
+  // Some hourly autonomous Ideas deliberately disable photo-wait. Their
+  // reciprocal Production Request already contains verified master assets;
+  // requiring Studio_Photo_Wait_Status=Ready strands those Drafts forever.
+  if (!idea?.id || !requestRecord?.id) return false;
+  if (!f(requestRecord, "Active")) return false;
+  if (!linkedRecordIds(f(requestRecord, "Idea_Candidate")).includes(idea.id)) return false;
+  if (!["Draft", "Ready", "Submitted"].includes(String(f(requestRecord, "Request_Status") || "").trim())) return false;
+  if (String(f(requestRecord, "Studio_Master_Asset_Status") || "").trim() !== "Ready") return false;
+  if (!(Number(f(requestRecord, "Studio_Master_Asset_Count") || 0) > 0)) return false;
+  if (!/(?:^|\s)origin=(?:autonomous|prepare-to-review)(?:\s|$)/i.test(String(f(requestRecord, "Production_Notes") || ""))) return false;
+  return true;
+}
+
+function readyProductionIdeaEligible(idea, requestRecord = null) {
   if (!idea?.id) return false;
   const status = String(f(idea, "Candidate_Status") || "").trim().toLowerCase();
-  const photo = String(f(idea, "Studio_Photo_Wait_Status") || "").trim();
-  if (photo !== "Ready" || ["on hold", "rejected", "promoted"].includes(status)) return false;
+  if (["on hold", "rejected", "promoted", "deleted", "expired"].includes(status)) return false;
   if (String(f(idea, "Test_Run_ID") || "").trim()) return false;
   if (linkedRecordIds(f(idea, "Content Items")).length) return false;
   if (String(f(idea, "Promoted_Content_Record_ID") || "").trim()) return false;
-  return true;
+  if (String(f(idea, "Studio_Photo_Wait_Status") || "").trim() === "Ready") return true;
+  return readyProductionExistingDraftEligible(idea, requestRecord);
 }
 
 async function discoverReadyProductionIdeas(env, { limit = 100 } = {}) {
@@ -10990,6 +11004,28 @@ async function discoverReadyProductionIdeas(env, { limit = 100 } = {}) {
     ],
   });
   return ideas.filter(readyProductionIdeaEligible);
+}
+
+/** Backfill already asset-ready autonomous drafts without creating new PRs.
+ * The photo-ready idea query intentionally excludes photo-wait-off hourly
+ * library ideas, even though their linked PR has Studio_Master_Asset_Status=Ready.
+ */
+async function discoverAssetReadyProductionDrafts(env, { limit = 120 } = {}) {
+  return listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    limit: Math.max(1, Math.min(150, Number(limit) || 120)),
+    sortField: "Created_At",
+    sortDirection: "asc",
+    filterFormula: "AND({Test_Run_ID}=BLANK(),{Active}=1,OR({Request_Status}='Draft',{Request_Status}='Ready',{Request_Status}='Submitted'),{Studio_Master_Asset_Status}='Ready',{Studio_Master_Asset_Count}>0,FIND('origin=autonomous',{Production_Notes}&'')>0)",
+    fields: [
+      "Idea_Candidate",
+      "Request_Status",
+      "Studio_Master_Asset_Status",
+      "Studio_Master_Asset_Count",
+      "Production_Notes",
+      "Created_At",
+      "Active",
+    ],
+  });
 }
 
 async function readyProductionRequestForIdea(env, idea) {
@@ -11090,7 +11126,7 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
     });
   }
 
-  if (!readyProductionIdeaEligible(idea)) {
+  if (!readyProductionIdeaEligible(idea, requestRecord)) {
     const promoted = String(f(idea, "Promoted_Content_Record_ID") || "").trim()
       || linkedRecordIds(f(idea, "Content Items"))[0]
       || null;
@@ -11103,6 +11139,11 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
   }
 
   const plan = readyProductionIdeaPlan(idea);
+  // The PR is authoritative for uploaded masters when hourly photo-wait was
+  // disabled. Do not needlessly block a linked request with Ready assets.
+  if (!plan.libraryIds.length && requestRecord) {
+    plan.libraryIds = autonomousMasterMediaIds(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []));
+  }
   if (!plan.libraryIds.length) {
     return readyProductionFinishClaim(env.STUDIO_MEDIA, lease, {
       status: "retry_wait",
@@ -11202,6 +11243,43 @@ async function studioReadyProductionCronResume(env, ctx = null, options = {}) {
   }
   stage = "list";
   const jobs = await readyProductionList(env.STUDIO_MEDIA, { maxScan: options.maxScan || 500 });
+  // Backfill at most eight NEW reciprocal, photo-wait-off drafts per minute.
+  // Already indexed jobs cost no Airtable per-Idea read, so this remains
+  // low-burn under the hourly refill's large existing backlog.
+  stage = "draft_backfill";
+  const known = new Map(jobs.map((job) => [job.idea_id, job]));
+  let backfilled = 0;
+  const existingDrafts = await discoverAssetReadyProductionDrafts(env, {
+    limit: options.draftDiscoveryLimit || 120,
+  });
+  for (const draft of existingDrafts) {
+    if (backfilled >= Math.min(8, Math.max(1, Number(options.maxBackfillPerTick) || 8))) break;
+    const ideaId = firstLinkedRecordId(f(draft, "Idea_Candidate"));
+    if (!ideaId || !/^rec[A-Za-z0-9]{14}$/.test(ideaId)) continue;
+    const prior = known.get(ideaId);
+    if (prior && !(prior.status === "blocked" && prior.completed_reason === "no_longer_eligible")) continue;
+    try {
+      const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId);
+      if (!readyProductionIdeaEligible(idea, draft)) continue;
+      // Existing reciprocal request is the only authority; never create a
+      // second request to backfill this missing R2 job.
+      const result = await readyProductionEnqueue(env.STUDIO_MEDIA, {
+        ideaId,
+        profileId: firstLinkedRecordId(f(idea, "Content_Profile")) || null,
+        createdAt: f(idea, "Create_Date") || idea.createdTime || f(draft, "Created_At") || null,
+      });
+      if (result.created || result.revived) {
+        backfilled += 1;
+        jobs.push(result.job);
+      }
+      known.set(ideaId, result.job);
+    } catch (error) {
+      console.warn("Ready-to-produce reciprocal draft backfill failed", draft.id, String(error?.message || error).slice(0, 160));
+    }
+  }
+  jobs.sort((left, right) =>
+    (Date.parse(left.created_at || left.updated_at || "") || 0)
+    - (Date.parse(right.created_at || right.updated_at || "") || 0));
   const selected = readyProductionSelectJobs(jobs, {
     maxConcurrency: options.maxConcurrency || READY_PRODUCTION_MAX_CONCURRENCY,
     maxPerProfile: 1,
@@ -11237,7 +11315,8 @@ async function studioReadyProductionCronResume(env, ctx = null, options = {}) {
   const outcome = {
     ok: true,
     discovered: discovered.length,
-    enqueued: enqueued.filter((row) => row.created || row.revived).length,
+    enqueued: enqueued.filter((row) => row.created || row.revived).length + backfilled,
+    draft_backfilled: backfilled,
     claimed: claims.length,
     max_concurrency: READY_PRODUCTION_MAX_CONCURRENCY,
     results: settled,
