@@ -42,8 +42,13 @@ test("desk inventory marks scheduling checks scanned and surfaces runtime findin
 });
 
 test("production deployment provisions Durable Object and activates only with exact confirmed lane", () => {
-  assert.match(deploy, /STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED'\]='true' if activation else 'false'/);
-  assert.match(deploy, /STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST'\]=activation/);
+  // Ordinary deploys preserve active lanes; only an explicit guarded dispatch adds one.
+  assert.match(deploy, /existing_lanes=\\[v\\.strip\\(\\) for v in active_vars\\.get/);
+  assert.match(deploy, /if activation and activation not in existing_lanes:/);
+  assert.match(deploy, /existing_lanes\\.append\\(activation\\)/);
+  assert.match(deploy, /STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST'\\]='\\,'\\.join\\(existing_lanes\\)/);
+  assert.match(deploy, /STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED'\\]='true'/);
+  assert.match(deploy, /STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED'\\]=active_vars\\.get/);
   assert.match(deploy, /confirmation!='ACTIVATE-SCHEDULE-LANE'/);
   assert.match(deploy, /reservation_state!='bootstrapped'/);
   assert.match(deploy, /'name':'STUDIO_SCHEDULE_RESERVATIONS'/);
