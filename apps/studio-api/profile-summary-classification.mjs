@@ -4,6 +4,7 @@ export const HOME_PLATFORMS = Object.freeze(["Facebook", "Instagram", "TikTok", 
 export const HOME_METRIC_KEYS = Object.freeze([
   "manual_action_required", "failed_outputs", "awaiting_approval",
   "attention_outputs", "published_outputs", "active_outputs", "overdue_unpublished",
+  "approved_unpublished",
   "platform_outputs", "ideas_not_in_production", "ideas",
 ]);
 
@@ -13,6 +14,7 @@ export function emptyHomeContribution() {
     manual_action_required: 0, failed_outputs: 0, awaiting_approval: 0,
     attention_outputs: 0, published_outputs: 0, active_outputs: 0,
     platform_outputs: 0, ideas_not_in_production: 0, ideas: 0, overdue_unpublished: 0,
+    approved_unpublished: 0,
   };
 }
 
@@ -26,6 +28,23 @@ export function emptyHomeContribution() {
  * This clock-independent candidate supports indexed live overdue evaluation in
  * SQLite even if no Airtable status changes when the deadline passes.
  */
+/** Approved and not published includes future, overdue and unscheduled outputs. */
+export function homeIsApprovedUnpublished(row) {
+  if (!row || row.do_not_publish) return false;
+  const review = String(row.review_status || "").trim().toLowerCase();
+  const output = String(row.output_status || "").trim().toLowerCase();
+  if (review && review !== "approved") return false;
+  if (!(review === "approved" || output === "approved" || output.includes("approved for publishing"))) return false;
+  const state = String(row.studio_state || "").trim().toLowerCase();
+  const publish = String(row.publish_status || "").trim().toLowerCase();
+  const platformPublish = String(row.platform_publish_status || "").trim().toLowerCase();
+  const manual = String(row.manual_completion_status || "").trim().toLowerCase();
+  if (/published|posted/.test(state) || /published|posted|publish complete|publish succeeded/.test(publish)
+    || /published|posted|completed|succeeded/.test(platformPublish)
+    || /^(published|posted|completed)$/.test(manual)) return false;
+  return !(row.published_at || row.platform_post_url || row.manual_published_url);
+}
+
 export function homeOverdueDueAt(row) {
   if (!row || row.do_not_publish) return 0;
   const review = String(row.review_status || "").trim().toLowerCase();
@@ -51,6 +70,7 @@ export function homeOutputContribution(row) {
   const result = emptyHomeContribution();
   if (!row) return result;
   result.platform_outputs = 1;
+  result.approved_unpublished = Number(homeIsApprovedUnpublished(row));
   const dueAt = homeOverdueDueAt(row);
   result.overdue_unpublished = Number(dueAt > 0 && dueAt <= Date.now());
   const state = String(row.studio_state || "").trim();
