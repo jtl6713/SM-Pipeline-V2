@@ -52,6 +52,7 @@ export class StudioProfileSummary {
     this.sql = state.storage.sql;
     this.state.blockConcurrencyWhile(async () => {
       this.sql.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+      this.sql.exec("CREATE TABLE IF NOT EXISTS airtable_egress_hourly (hour_utc TEXT NOT NULL, source TEXT NOT NULL, method TEXT NOT NULL, status_class TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(hour_utc,source,method,status_class))");
       this.sql.exec("CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY, name TEXT NOT NULL, city_label TEXT NOT NULL, counters TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 0, event_at INTEGER NOT NULL DEFAULT 0)");
       this.sql.exec("CREATE TABLE IF NOT EXISTS ledger (kind TEXT NOT NULL, record_id TEXT NOT NULL, profile_id TEXT NOT NULL, contribution TEXT NOT NULL, overdue_due_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(kind,record_id))");
       this.sql.exec("CREATE INDEX IF NOT EXISTS idx_summary_ledger_profile ON ledger(profile_id)");
@@ -122,6 +123,27 @@ export class StudioProfileSummary {
   async fetch(request) {
     try {
       const url = new URL(request.url);
+      if (request.method === "POST" && url.pathname === "/egress") {
+        const input = await request.json();
+        const source = code(input.source), method = code(input.method).toUpperCase();
+        const status = Number(input.status), occurred = Number(input.at_ms);
+        const allowedSources = ["studio_worker_gateway", "shadow_reconcile", "pipeline_runner_http", "other_direct"];
+        if (!allowedSources.includes(source) || !["GET","POST","PUT","PATCH","DELETE"].includes(method)
+          || !Number.isInteger(status) || status < 0 || status > 599
+          || !Number.isFinite(occurred) || Math.abs(Date.now()-occurred) > 300000) {
+          return json({ok:false,error:"invalid_egress_event"},400);
+        }
+        const hour = new Date(occurred).toISOString().slice(0,13)+":00:00Z";
+        const statusClass = status === 0 ? "network" : String(Math.floor(status / 100)) + "xx";
+        this.sql.exec("INSERT INTO airtable_egress_hourly (hour_utc,source,method,status_class,attempts) VALUES (?,?,?,?,1) ON CONFLICT(hour_utc,source,method,status_class) DO UPDATE SET attempts=attempts+1", hour,source,method,statusClass);
+        return json({ok:true});
+      }
+      if (request.method === "GET" && url.pathname === "/egress") {
+        const hours = Math.min(72,Math.max(1, Number(url.searchParams.get("hours")) || 48));
+        const since = new Date(Date.now()-hours*3600000).toISOString().slice(0,13)+":00:00Z";
+        return json({ok:true, source:"profile_summary_durable_object", hourly:records(this.sql,
+          "SELECT hour_utc,source,method,status_class,attempts FROM airtable_egress_hourly WHERE hour_utc>=? ORDER BY hour_utc,source,method,status_class",since)});
+      }
       if (request.method === "GET" && url.pathname === "/status") {
         return json({
           ok: true,
