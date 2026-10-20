@@ -3,6 +3,8 @@ import {
   notifyStudioProfileSummary,
   reconcileStudioProfileSummary,
   studioProfileSummaryStatus,
+  recordStudioAirtableEgress,
+  studioAirtableEgressWindow,
 } from "./profile-summary-controller.mjs";
 export { StudioProfileSummary } from "./profile-summary-do.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
@@ -1907,6 +1909,12 @@ export default {
         }
       }
 
+      if (url.pathname === "/api/profiles/overview/summary/airtable-egress") {
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        requireAnyPermission(authorization, ["tenant_admin", "production_configure"]);
+        return respond(request, env, await studioAirtableEgressWindow(env, Number(url.searchParams.get("hours") || 48)));
+      }
+
       if (url.pathname === "/api/profiles/overview/summary/status") {
         if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
         requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure", "outputs_review"]);
@@ -2988,7 +2996,7 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   } finally {
     // One event for each attempted outbound request, including network failures.
     // No record ID, filter formula, Airtable token or full URL is logged.
-    console.log("studio_airtable_egress_v1", JSON.stringify({
+    const egressEvent = {
       source: "studio_worker_gateway",
       table_kind: String(tableId) === String(env.AIRTABLE_OUTPUT_TABLE_ID) ? "outputs"
         : String(tableId) === String(env.AIRTABLE_IDEA_TABLE_ID) ? "ideas" : "other",
@@ -2997,7 +3005,13 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
       duration_ms: Date.now() - airtableRequestStarted,
       at: new Date().toISOString(),
       request_count: 1,
-    }));
+    };
+    console.log("studio_airtable_egress_v1", JSON.stringify(egressEvent));
+    await recordStudioAirtableEgress(env, {
+      source: "studio_worker_gateway", method: egressEvent.method,
+      status: egressEvent.status, at_ms: airtableRequestStarted,
+    }).catch(error => console.warn("airtable egress durable accounting unavailable", String(error?.message || error)));
+
   }
   const responseText = await response.text();
   let body = {};
