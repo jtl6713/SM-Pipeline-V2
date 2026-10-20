@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from typing import Any
+import re
 
 from airtable.client import AirtableClient
-from airtable.constants import CONTENT_PROFILES_TABLE, SOURCE_CANDIDATES_TABLE
+from airtable.constants import CONTENT_PROFILES_TABLE, CONTENT_ITEMS_TABLE, SOURCE_CANDIDATES_TABLE
 from carousel.timeutil import chicago_now
 from i1.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from i1.openai_ideas import generate_ideas
@@ -83,6 +84,39 @@ def _candidate_fields(
     return fields
 
 
+
+def _year_title_formula(title: str, title_field: str, created_field: str) -> str:
+    """Normalized exact title, across the full 365-day production history."""
+    key = re.sub(r"[^a-z0-9]", "", str(title or "").lower())
+    if not key:
+        raise ValueError("Idea title is empty")
+    if title_field not in ("Candidate_Title", "Content_Title"):
+        raise ValueError("Invalid title field")
+    if created_field not in ("Create_Date", "Created_At"):
+        raise ValueError("Invalid created date field")
+    return (
+        f"AND({{Test_Run_ID}}=BLANK(),"
+        f"IS_AFTER({{{created_field}}},DATEADD(TODAY(),-365,'days')),"
+        f"REGEX_REPLACE(LOWER({{{title_field}}}&''),'[^a-z0-9]','')='{key}')"
+    )
+
+
+def _title_used_in_last_year(client: AirtableClient, title: str) -> bool:
+    # Never swallow Airtable query errors; duplicate guards must fail closed.
+    for table, field, created in (
+        (SOURCE_CANDIDATES_TABLE, "Candidate_Title", "Create_Date"),
+        (CONTENT_ITEMS_TABLE, "Content_Title", "Created_At"),
+    ):
+        if client.list_records(
+            table,
+            formula=_year_title_formula(title, field, created),
+            max_records=1,
+            fields=[field],
+        ):
+            return True
+    return False
+
+
 def process_request(
     *,
     profile_record_id: str | None,
@@ -122,9 +156,17 @@ def process_request(
     ideas = list((generated.get("parsed") or {}).get("ideas") or [])[:remaining]
     preview["openai_idea_count"] = len(ideas)
     created_ids: list[str] = []
+    skipped_duplicate_titles: list[str] = []
+    seen_titles: set[str] = set()
     for idea in ideas:
-        if not str(idea.get("candidate_title") or "").strip():
+        title = str(idea.get("candidate_title") or "").strip()
+        if not title:
             continue
+        title_key = re.sub(r"[^a-z0-9]", "", title.lower())
+        if title_key in seen_titles or _title_used_in_last_year(client, title):
+            skipped_duplicate_titles.append(title)
+            continue
+        seen_titles.add(title_key)
         created = client.create_records(
             SOURCE_CANDIDATES_TABLE,
             [
@@ -141,6 +183,7 @@ def process_request(
             created_ids.append(created[0]["id"])
 
     preview["created_record_ids"] = created_ids
+    preview["skipped_duplicate_titles"] = skipped_duplicate_titles
     if not created_ids:
         return {"processed": False, "reason": "no_ideas_created", **preview}
 
