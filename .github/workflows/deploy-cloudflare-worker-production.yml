@@ -305,8 +305,17 @@ jobs:
           if reservation_state == 'bootstrapped' or lifecycle_change:
               # Preserve an existing namespace, or perform the explicit one-time
               # bootstrap. In both cases the scheduling authority remains OFF.
-              active_vars['STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED']='true' if activation else 'false'
-              active_vars['STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST']=activation
+              # Preserve active atomic lanes on ordinary push deployments; only an
+              # explicit dispatch may add a new lane. Do not silently disable
+              # the reservation authority on the next source deploy.
+              existing_lanes=[v.strip() for v in active_vars.get('STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST','').split(',') if v.strip()]
+              if activation and activation not in existing_lanes:
+                  existing_lanes.append(activation)
+              if activation:
+                  active_vars['STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST']=','.join(existing_lanes)
+                  active_vars['STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED']='true'
+              else:
+                  active_vars['STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED']=active_vars.get('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED','false')
               cfg['durable_objects']['bindings'].append({
                   'name':'STUDIO_SCHEDULE_RESERVATIONS',
                   'class_name':'ScheduleReservationLane',
