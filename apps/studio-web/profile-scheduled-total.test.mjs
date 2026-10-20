@@ -136,7 +136,7 @@ test("every All Profiles heading has an explanatory hover tooltip", async () => 
   const end = overview.indexOf("</thead>", start);
   assert.ok(end > start, "Overview table header is present");
   const headings = overview.slice(start, end);
-  const titles = headings.match(/<th\\b[^>]*\\btitle="[^"]+"/g) || [];
+  const titles = headings.match(/<th\b[^>]*\btitle="[^"]+"/g) || [];
   // Profile, 4-platform group, 7 summary fields, and each platform heading.
   assert.equal(titles.length, 12);
   for (const label of [
@@ -146,9 +146,9 @@ test("every All Profiles heading has an explanatory hover tooltip", async () => 
   ]) {
     assert.ok(headings.includes(label), `missing column heading: ${label}`);
   }
-  assert.match(headings, /<th class="all-profiles-scheduled-col" title="\\$\\{p\\}:/);
-  assert.match(headings, /title="Estimated additional ideas: round up \\(500 minus Pipeline Total\\) divided by 5/);
+  assert.match(headings, /<th class="all-profiles-scheduled-col" title="\$\{p\}:/);
+  assert.match(headings, /title="Estimated additional ideas: round up \(500 minus Pipeline Total\) divided by 5/);
   assert.match(headings, /title="Fully rendered platform outputs awaiting final human approval/);
   const html = await readFile(path.join(here, "index.html"), "utf8");
-  assert.match(html, /all-profiles-overview-1007\\.js\\?v=[^"]+&tooltips=all-columns-v1/);
+  assert.match(html, /all-profiles-overview-1007\.js\?v=[^"]+&tooltips=all-columns-v1/);
 });
