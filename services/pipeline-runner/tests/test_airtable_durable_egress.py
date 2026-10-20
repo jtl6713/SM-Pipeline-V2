@@ -4,10 +4,14 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from airtable.egress_monitor import persist_airtable_egress, read_airtable_egress
+from airtable.egress_monitor import persist_airtable_egress, read_airtable_egress, _metrics_path
 
 
 class DurableEgressTests(unittest.TestCase):
+    def test_default_persistent_path_when_env_unset(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(_metrics_path(), '/scratch/metrics/airtable-egress.sqlite')
+
     def test_count_rollup_and_status_classes(self):
         with tempfile.TemporaryDirectory() as folder:
             target = os.path.join(folder, "metrics.sqlite")
