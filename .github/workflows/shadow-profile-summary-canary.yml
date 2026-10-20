@@ -1,0 +1,252 @@
+name: Shadow Profile Summary Canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_full_reconcile:
+        description: 'Start one operator-authorized full Airtable reconciliation'
+        required: false
+        type: boolean
+        default: false
+      confirmation:
+        description: 'Enter SHADOW-PROFILE-SUMMARY to allow reconcile or parity'
+        required: true
+        type: string
+        default: ''
+      measure_samples:
+        description: 'Timed GET samples per path'
+        required: false
+        type: string
+        default: '12'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicagoshining-studio-shadow-summary-canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      VERIFY_BRIDGE: chicagoshining-studio-shadow-verify
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Refuse Home/refill cutover and require confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ inputs.confirmation }}" = "SHADOW-PROFILE-SUMMARY"
+          echo "shadow_canary_scope=no_home_or_refill_read_cutover"
+
+      - name: Upload one-time service-binding verify bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(python - <<'PY'
+          import secrets
+          print(secrets.token_urlsafe(32))
+          PY
+          )
+          printf '%s' "$TOKEN" >/tmp/verify-token.txt
+          cat >/tmp/verify-worker.js <<EOF
+          export default {
+            async fetch(request, env) {
+              const url = new URL(request.url);
+              const overview = url.pathname === "/$TOKEN/overview";
+              const summary = url.pathname === "/$TOKEN/summary";
+              const summaryReconcile = url.pathname === "/$TOKEN/summary-reconcile";
+              if (!overview && !summary && !summaryReconcile) return new Response("Not found", {status:404});
+              const path = summaryReconcile ? "/api/profiles/overview/summary/reconcile"
+                : summary ? "/api/profiles/overview/summary"
+                : "/api/profiles/overview";
+              const method = summaryReconcile ? "POST" : "GET";
+              const headers = {"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Accept":"application/json"};
+              if (summaryReconcile) headers["Content-Type"] = "application/json";
+              const internal = new Request("https://studio.chicagoshining.com" + path, {
+                method,
+                headers,
+                body: summaryReconcile ? "{}" : undefined,
+              });
+              const started = Date.now();
+              const response = await env.STUDIO_API.fetch(internal);
+              const text = await response.text();
+              return new Response(text, {status:response.status,headers:{"Content-Type":"application/json","Cache-Control":"no-store","X-Shadow-Elapsed-Ms":String(Date.now()-started)}});
+            }
+          };
+          EOF
+          cat >/tmp/verify-metadata.json <<EOF
+          {"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"$TARGET_WORKER"}]}
+          EOF
+          node --check /tmp/verify-worker.js
+          API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -sS -X DELETE "$API_ROOT/workers/scripts/$VERIFY_BRIDGE" -H "$AUTH" >/dev/null || true
+          code=$(curl -sS -o /tmp/verify-upload.json -w '%{http_code}' -X PUT "$API_ROOT/workers/scripts/$VERIFY_BRIDGE/content" -H "$AUTH" \
+            -F 'metadata=@/tmp/verify-metadata.json;type=application/json' \
+            -F 'worker.js=@/tmp/verify-worker.js;type=application/javascript+module;filename=worker.js')
+          test "$code" -ge 200 -a "$code" -lt 300
+          jq -e '.success==true' /tmp/verify-upload.json >/dev/null
+          curl -fsS -X POST "$API_ROOT/workers/scripts/$VERIFY_BRIDGE/subdomain" -H "$AUTH" -H 'Content-Type: application/json' \
+            --data '{"enabled":true,"previews_enabled":false}' >/tmp/verify-subdomain.json
+          jq -e '.success==true and .result.enabled==true' /tmp/verify-subdomain.json >/dev/null
+
+      - name: Authoritative Home snapshot, optional reconcile, shadow parity and timings
+        shell: bash
+        run: |
+          set -euo pipefail
+          API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API_ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain.json
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
+          TOKEN=$(cat /tmp/verify-token.txt)
+          BASE="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN"
+          for i in $(seq 1 20); do
+            CODE=$(curl -sS --max-time 60 -o /tmp/overview.json -D /tmp/overview.hdr -w '%{http_code}' "$BASE/overview" || true)
+            if [[ "$CODE" == "200" ]] && jq -e '.ok==true and (.records|length)>=4' /tmp/overview.json >/dev/null; then
+              break
+            fi
+            sleep 3
+          done
+          test "$CODE" = "200"
+          jq -e '.ok==true and (.records|length)>=4' /tmp/overview.json >/dev/null
+
+          if [[ "${{ inputs.start_full_reconcile }}" == "true" ]]; then
+            CODE=$(curl -sS --max-time 60 -o /tmp/reconcile-start.json -w '%{http_code}' -X POST "$BASE/summary-reconcile" || true)
+            echo "reconcile_start_http=$CODE"
+            cat /tmp/reconcile-start.json
+            test "$CODE" = "200"
+            jq -e '.ok==true and .started==true and .read_cutover_enabled==false' /tmp/reconcile-start.json >/dev/null
+          fi
+
+          READY=0
+          for attempt in $(seq 1 80); do
+            CODE=$(curl -sS --max-time 60 -o /tmp/summary.json -D /tmp/summary.hdr -w '%{http_code}' "$BASE/summary" || true)
+            if [[ "$CODE" == "200" ]] && jq -e '.ok==true and .source=="durable-profile-summary" and (.records|length)==4 and .degraded!=true' /tmp/summary.json >/dev/null; then
+              READY=1
+              break
+            fi
+            echo "summary_wait=$attempt http=$CODE reason=$(jq -r '.reason // .error // empty' /tmp/summary.json 2>/dev/null || true)"
+            sleep 8
+          done
+          test "$READY" = "1"
+
+          python - <<'PY'
+          import json, statistics, time, urllib.request
+          from pathlib import Path
+          overview=json.loads(Path('/tmp/overview.json').read_text())
+          summary=json.loads(Path('/tmp/summary.json').read_text())
+          def row_key(row):
+              return str(row.get('city_label') or row.get('name') or row.get('id'))
+          def metrics(row):
+              return {
+                  'approval': int(row.get('approval') or 0),
+                  'ideas': int(row.get('ideas') or 0),
+                  'manual': int(row.get('manual') or 0),
+                  'failed': int(row.get('failed') or 0),
+                  'overdue_unpublished': int(row.get('overdue_unpublished') or 0),
+                  'scheduled': {
+                      name: int((row.get('scheduled') or {}).get(name) or 0)
+                      for name in ('Facebook','Instagram','TikTok','YouTube')
+                  },
+              }
+          left={row_key(r): metrics(r) for r in overview['records']}
+          right={row_key(r): metrics(r) for r in summary['records']}
+          cities=('Chicago','New York','Los Angeles','Miami')
+          matched=[]
+          for city in cities:
+              l=next((v for k,v in left.items() if city.lower() in k.lower()), None)
+              r=next((v for k,v in right.items() if city.lower() in k.lower()), None)
+              if l is None or r is None:
+                  raise SystemExit('Missing city in parity: '+city)
+              if l!=r:
+                  raise SystemExit('Parity mismatch for '+city+': authoritative='+json.dumps(l)+' shadow='+json.dumps(r))
+              matched.append({'city':city,'authoritative':l,'shadow':r,'equal':True})
+          Path('/tmp/shadow-parity.json').write_text(json.dumps({
+              'ok':True,
+              'summary_version':summary.get('version'),
+              'last_reconciled_at':summary.get('last_reconciled_at'),
+              'read_source':summary.get('source'),
+              'cities':matched,
+          },indent=2))
+          print('shadow_parity=PASS cities=4 version='+str(summary.get('version')))
+          PY
+
+          echo "$BASE" >/tmp/base-url.txt
+          python - <<'PY'
+          import json, time, urllib.request
+          from pathlib import Path
+          base=Path('/tmp/base-url.txt').read_text().strip()
+          samples=int("${{ inputs.measure_samples }}".strip() or "12")
+          def timed(path):
+              times=[]
+              errors=0
+              for _ in range(samples):
+                  req=urllib.request.Request(base+path, headers={'Accept':'application/json'})
+                  started=time.perf_counter()
+                  try:
+                      with urllib.request.urlopen(req, timeout=60) as res:
+                          body=json.loads(res.read().decode())
+                          elapsed=int((time.perf_counter()-started)*1000)
+                          header=res.headers.get('X-Shadow-Elapsed-Ms')
+                          if header and header.isdigit():
+                              elapsed=int(header)
+                          if body.get('ok') is True:
+                              times.append(elapsed)
+                          else:
+                              errors += 1
+                  except Exception:
+                      errors += 1
+              times.sort()
+              def pct(p):
+                  if not times: return None
+                  idx=min(len(times)-1, max(0, int(round((p/100)*(len(times)-1)))))
+                  return times[idx]
+              return {
+                  'samples':samples,
+                  'ok':len(times),
+                  'errors':errors,
+                  'p50_ms':pct(50),
+                  'p95_ms':pct(95),
+                  'max_ms': max(times) if times else None,
+              }
+          report={
+              'authoritative_home': timed('/overview'),
+              'shadow_summary': timed('/summary'),
+              'note':'Service-binding measurements. Home production reads remain Airtable/R2 authoritative.',
+          }
+          Path('/tmp/shadow-timings.json').write_text(json.dumps(report,indent=2))
+          print(json.dumps(report))
+          PY
+          jq -e '.ok==true and (.cities|length)==4' /tmp/shadow-parity.json >/dev/null
+          echo "shadow_home_reads_remain_off=true"
+
+      - name: Delete verify bridge
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          code=$(curl -sS -o /tmp/verify-delete.json -w '%{http_code}' -X DELETE "$API_ROOT/workers/scripts/$VERIFY_BRIDGE" -H "$AUTH")
+          if [[ "$code" -ge 200 && "$code" -lt 300 ]]; then jq -e '.success==true' /tmp/verify-delete.json >/dev/null || true; elif [[ "$code" != "404" ]]; then exit 1; fi
+
+      - name: Upload sanitized shadow evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shadow-profile-summary-${{ github.run_id }}
+          path: |
+            /tmp/overview.json
+            /tmp/summary.json
+            /tmp/reconcile-start.json
+            /tmp/shadow-parity.json
+            /tmp/shadow-timings.json
+          if-no-files-found: ignore
+          retention-days: 30
