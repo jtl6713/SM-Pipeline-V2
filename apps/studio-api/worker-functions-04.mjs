@@ -1,3 +1,4 @@
+import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
 import { readStudioProfileSummary, validVerifiedStudioSummary } from "./profile-summary-controller.mjs";
 import { homeOutputContribution, homeIdeaContribution, homeApprovedUpcomingAt, combineHomeContributions } from "./profile-summary-classification.mjs";
@@ -11998,6 +11999,13 @@ export async function studioAutonomousOpenAiPick(env, prompt) {
 /*__STUDIO_WORKER_END:studioAutonomousOpenAiPick__*/
 
 export async function createAutonomousIdea(env, profile, pick) {
+  const duplicateTitle = await studioFindRecentDuplicateTitle(pick.candidate_title, (kind, formula, field) => {
+    const table = kind === "idea" ? env.AIRTABLE_IDEA_TABLE_ID : env.AIRTABLE_CONTENT_TABLE_ID;
+    if (!table) throw new HttpError(503, "Title history unavailable: autonomous creation blocked");
+    return listRecords(env, table, { filterFormula: formula, fields: [field], limit: 1001 });
+  });
+  if (duplicateTitle) throw new HttpError(409,
+    `Title already used within 365 days (${duplicateTitle.source}); selecting a different subject.`);
   const fields = {
     Candidate_Title: pick.candidate_title,
     Candidate_Status: "Generated",
@@ -12740,7 +12748,8 @@ export async function fillAutonomousCityIdeas(env, authorization, {
     }
   }
   const planned = planAutonomousHourIdeas(catalog, {
-    goal: Math.max(0, goal - count),
+    // Try more distinct library clusters when historical titles are exhausted.
+    goal: Math.min(40, Math.max(0, goal - count) * 4),
     profileName: String(f(profile, "Profile_Name") || "").trim(),
     startIndex: count,
   });
@@ -12813,6 +12822,10 @@ export async function fillAutonomousCityIdeas(env, authorization, {
         });
         savedThis = true;
       } catch (error) {
+        if (error?.status === 409 && /already used within 365 days/.test(String(error?.message || ""))) {
+          console.warn("autonomous hour skipped repeat subject", profileId, pick.candidate_title);
+          break;
+        }
         console.warn("autonomous hour idea failed", profileId, attempt, error);
       }
     }

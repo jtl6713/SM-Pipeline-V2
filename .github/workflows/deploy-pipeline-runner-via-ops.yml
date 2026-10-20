@@ -29,6 +29,8 @@ jobs:
           python -m pip install --quiet -r services/pipeline-runner/requirements.txt pytest
           PYTHONPATH=services/pipeline-runner python -m pytest -q \
             services/pipeline-runner/tests/test_a2b_existing_lookup.py \
+            services/pipeline-runner/tests/test_i1_title_uniqueness.py \
+            services/pipeline-runner/tests/test_idea_chain.py \
             services/pipeline-runner/tests/test_airtable_atomic_upsert.py \
             services/pipeline-runner/tests/test_airtable_egress_monitor.py \
             services/pipeline-runner/tests/test_airtable_durable_egress.py \
@@ -267,3 +269,4 @@ jobs:
 # 2026-10-20: Deploy PR955 default persisted runner Airtable egress SQLite path to /scratch/metrics; verify hourly evidence proxy.
 
 # 2026-10-20: Re-deploy current main pipeline runner, including numeric-suffix-free I1 idea-title prompt; retain existing Ops safety tests and health verification.
+# 2026-10-20 PR #923 corrected: deploy 365-day duplicate-title guard and no-numbered-refill behavior for Python I1 runner.

@@ -571,4 +571,5 @@ Deploy targeted November 17 MAE overage selector from merged PR #936; no automat
 2026-10-20: Deploy merged PR #991 Factory Quality Agent 15-minute approval-progress stall alert, existing cron-safe R2 lease recovery, and 30-minute operator escalation. Preserve Airtable authority, reservation locks, Supabase Phase 5 breaker, and production bindings.
 
 2026-10-20: Publish approved-future plus rendered-awaiting-final-human-approval platform-output pipeline count and output-target 500/5 hourly refill from Worker with v6 empty-snapshot migration canary. Airtable authoritative. No schedule/publish changes.
+2026-10-20 PR #923 corrected: deploy 365-day title-history checks in Studio manual and autonomous writers, no numeric title clones, no filler duplicates. Do not publish or delete existing outputs.
 Deploy Worker 0.10.671-home-v6-fast-cache. Fix V6 fresh cache, cross-isolate R2 refresh, no Supabase read cutover. Triggered 2026-10-20.

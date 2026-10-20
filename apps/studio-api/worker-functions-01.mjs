@@ -1,3 +1,4 @@
+import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
 import { isQueuedForPlatformDispatch } from "./overview-dispatch-counts.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
@@ -3671,6 +3672,13 @@ export async function createIdea(request, env, authorization) {
 
   const input = cleanIdeaCreatePayload(payload);
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
+  const duplicateTitle = await studioFindRecentDuplicateTitle(input.title, (kind, formula, field) => {
+    const table = kind === "idea" ? env.AIRTABLE_IDEA_TABLE_ID : env.AIRTABLE_CONTENT_TABLE_ID;
+    if (!table) throw new HttpError(503, "Title history unavailable: creation blocked");
+    return listRecords(env, table, { filterFormula: formula, fields: [field], limit: 1001 });
+  });
+  if (duplicateTitle) throw new HttpError(409,
+    `This title is already used within 365 days (${duplicateTitle.source}). Choose a genuinely different subject.`);
   const fields = {
     Candidate_Title: input.title,
     Candidate_Status: "Generated",
@@ -3787,6 +3795,15 @@ export async function updateIdea(request, env, url, authorization) {
   assertIdeaNotApproved(record, "Editing");
 
   const input = cleanIdeaUpdatePayload(payload);
+  if (studioIdeaTitleKey(input.title) !== studioIdeaTitleKey(f(record, "Candidate_Title"))) {
+    const duplicateTitle = await studioFindRecentDuplicateTitle(input.title, (kind, formula, field) => {
+      const table = kind === "idea" ? env.AIRTABLE_IDEA_TABLE_ID : env.AIRTABLE_CONTENT_TABLE_ID;
+      if (!table) throw new HttpError(503, "Title history unavailable: edit blocked");
+      return listRecords(env, table, { filterFormula: formula, fields: [field], limit: 1001 });
+    }, { excludeIdeaId: recordId });
+    if (duplicateTitle) throw new HttpError(409,
+      `This title is already used within 365 days (${duplicateTitle.source}).`);
+  }
   let productionFields = {};
   try {
     productionFields = ideaProductionConfigFields(
