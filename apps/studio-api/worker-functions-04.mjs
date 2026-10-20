@@ -2774,6 +2774,7 @@ export async function studioGetApproveAllJob(env, jobId) {
 
 export async function studioPutApproveAllJob(env, job) {
   const store = await studioLoadApproveAllJobStore(env);
+  if (repairDate) job.repair_date = repairDate;
   store.jobs[job.id] = job;
   if (job.profile_id && (job.status === "queued" || job.status === "running")) {
     store.active_by_profile[job.profile_id] = job.id;
@@ -3233,7 +3234,37 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
           if (iso && Number.isFinite(stamp) && stamp > horizonMs) continue;
           eligible.push(row);
         }
-        eligibleIds = eligible.map((row) => row.id);
+        if (job.repair_date) {
+          // Repair only duplicate wall-clock reservations on the requested local day.
+          // A legitimate first occupant remains fixed; every additional occupant
+          // is rescheduled by the standard atomic MAE transaction.
+          const ordered = eligible
+            .filter((row) => {
+              const stamp = Date.parse(String(f(row, "Scheduled_Post_Date") || ""));
+              if (!Number.isFinite(stamp)) return false;
+              const dateParts = maeZonedDateTimeParts(new Date(stamp), timeZone);
+              const localDay = [dateParts.year, String(dateParts.month).padStart(2, "0"), String(dateParts.day).padStart(2, "0")].join("-");
+              return localDay === job.repair_date;
+            })
+            .sort((a, b) => Number(f(a, "Output_ID") || 0) - Number(f(b, "Output_ID") || 0));
+          const claimed = new Set();
+          const displaced = [];
+          for (const row of ordered) {
+            const stamp = Date.parse(String(f(row, "Scheduled_Post_Date") || ""));
+            if (claimed.has(stamp) || protectedTimes.includes(stamp)) displaced.push(row);
+            else claimed.add(stamp);
+          }
+          eligibleIds = displaced.map((row) => row.id);
+          // Every other output is protected. Only displaced IDs may be excluded
+          // from the authoritative occupancy scan while acquiring replacement slots.
+          for (const row of eligible) {
+            if (displaced.includes(row)) continue;
+            const stamp = studioOccupiedMsFromRow(row, nowMs);
+            if (stamp != null) protectedTimes.push(stamp);
+          }
+        } else {
+          eligibleIds = eligible.map((row) => row.id);
+        }
         // Prefer placed_isos from completed combos. Skip the heavy same-platform
         // Airtable scan — it kept killing waitUntil before Story could persist a plan.
         const platformProtectedTimes = [];
@@ -3348,6 +3379,9 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
 
     const done = Math.max(0, Number(combo.completed_posts) || 0);
     const sliceEnd = Math.min(plan.length, done + postsPerSlice);
+    if (job.repair_date && !scheduleReservationLaneEnabled(env, combo.profile_id, combo.platform)) {
+      throw new HttpError(409, "Targeted repair cannot run without atomic reservation protection");
+    }
     if (scheduleReservationLaneEnabled(env, job.profile_id || combo.profile_id, combo.platform)) {
       // The stored regeneration plan is a progress/order checkpoint only.
       // Final slot selection is repeated against authoritative occupancy while
@@ -3516,6 +3550,13 @@ export async function startScheduleRegenJob(request, env, authorization, ctx = n
   const payload = await readJsonBody(request);
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(new URL(request.url), payload));
   const { platforms, outputTypes, profiles } = studioNormalizeRegenFilters(payload);
+  const repairDate = String(payload.repair_date || "").trim();
+  if (repairDate && !/^\d{4}-\d{2}-\d{2}$/.test(repairDate)) {
+    throw new HttpError(400, "repair_date must be YYYY-MM-DD");
+  }
+  if (repairDate && !scheduleReservationLaneEnabled(env, profile?.id, platforms[0])) {
+    throw new HttpError(409, "Targeted repair requires the atomic scheduling reservation authority");
+  }
   if (!platforms.length || !outputTypes.length) {
     throw new HttpError(400, "Select at least one platform and one output type");
   }
