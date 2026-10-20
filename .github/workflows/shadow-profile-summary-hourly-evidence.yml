@@ -126,6 +126,13 @@ jobs:
           python repair/scripts/shadow_24h_auto_evidence.py --current evidence.json --prior previous/evidence.json --output freshness-24h.json
           jq -r '"- 24-hour evidence ready: " + (.ready|tostring) + "\n- 24-hour freshness gate: " + (.freshness_gate_passed|tostring) + "\n- Samples applied: " + ((.observed_samples // 0)|tostring) + "\n- Reason: " + .reason' freshness-24h.json >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Enforce complete core Airtable evidence coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '.complete == true and .worker.ok == true and .runner.ok == true' airtable-egress-coverage.json >/dev/null
+          echo 'Core Worker and runner exports available; standalone and external Airtable paths require separate accounting.'
+
       - name: Save evidence artifact
         if: always()
         uses: actions/upload-artifact@v4
