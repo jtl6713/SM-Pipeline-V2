@@ -112,7 +112,7 @@ test("Home approval transfers one record into approved-unpublished regardless of
     assert.equal(after.approved_unpublished, 1, String(scheduled_post_date));
     assert.equal(after.awaiting_approval, 0);
     assert.equal(homeContributionDelta(before, after).approved_unpublished, 1);
-    assert.equal(after.overdue_unpublished, Number(scheduled_post_date === "2026-10-20T10:59:59Z"));
+    assert.equal(after.overdue_unpublished, Number(["2026-10-20T10:59:59Z", "2026-10-20T11:00:00Z"].includes(scheduled_post_date)));
   }
   const future = { ...ready, review_status: "Approved", scheduled_post_date: "2026-10-21T11:00:00Z" };
   for (const patch of [
