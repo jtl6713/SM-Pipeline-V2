@@ -19,7 +19,7 @@ const LAG_BUCKET_MS = [1000, 2500, 5000, 10000, 15000, 30000, 60000];
 function counterPlus(before, delta) {
   const next = structuredClone(before || ZERO());
   for (const platform of HOME_PLATFORMS) next.scheduled[platform] += delta.scheduled[platform] || 0;
-  for (const key of HOME_METRIC_KEYS) next[key] += delta[key] || 0;
+  for (const key of HOME_METRIC_KEYS) next[key] = (Number(next[key]) || 0) + (Number(delta[key]) || 0);
   if (HOME_PLATFORMS.some((p) => next.scheduled[p] < 0)
     || HOME_METRIC_KEYS.some((key) => next[key] < 0)) {
     throw new Error("Counter underflow: requires authoritative reconciliation");
