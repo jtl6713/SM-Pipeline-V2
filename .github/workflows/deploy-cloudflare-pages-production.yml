@@ -47,6 +47,7 @@ jobs:
             apps/studio-web/production-progress-timeline-truth.test.mjs \
             apps/studio-web/production-render-layout.test.mjs \
             apps/studio-web/factory-needs-eyes-layout.test.mjs \
+            apps/studio-web/factory-batch-quality-agent.test.mjs \
             apps/studio-web/factory-review-feedback.test.mjs \
             apps/studio-web/factory-completed-batches.test.mjs \
             apps/studio-web/factory-content-toggle.test.mjs \

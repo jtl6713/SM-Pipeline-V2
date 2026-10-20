@@ -102,6 +102,7 @@ jobs:
           node --test apps/studio-api/engagement-auth-recovery.test.mjs
           node --test apps/studio-api/production-photo-wait-visibility.test.mjs
           node --test apps/studio-api/production-request-suggested-platforms-fallback.test.mjs
+          node --test apps/studio-api/failed-output-monitor.test.mjs
           node --test apps/studio-api/quality-checks.test.mjs
           node --test apps/studio-api/profiles-overview-refresh.test.mjs
           node --test apps/studio-api/profiles-overview-force-refresh-contract.test.mjs
@@ -530,13 +531,14 @@ jobs:
               const factoryDesk = url.pathname === "/$TOKEN/factory-desk";
               const chicagoCanary = url.pathname === "/$TOKEN/factory-status-chicago";
               const globalCanary = url.pathname === "/$TOKEN/factory-status-global";
+              const failedOutputCensus = url.pathname === "/$TOKEN/failed-output-census";
               const overview = url.pathname === "/$TOKEN/overview";
               const overviewRefresh = url.pathname === "/$TOKEN/overview-refresh";
               const overviewStatus = url.pathname === "/$TOKEN/overview-status";
               const readyProductionDiagnostic = url.pathname === "/$TOKEN/ready-production-diagnostic";
               const summary = url.pathname === "/$TOKEN/summary";
               const summaryReconcile = url.pathname === "/$TOKEN/summary-reconcile";
-              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic && !summary && !summaryReconcile) return new Response("Not found", {status:404});
+              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !failedOutputCensus && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic && !summary && !summaryReconcile) return new Response("Not found", {status:404});
               const generation = String(url.searchParams.get("generation") || "");
               const path = readyProductionDiagnostic ? "/api/admin/ready-production-diagnostic"
                 : overviewRefresh ? "/api/profiles/overview/refresh"
@@ -545,6 +547,7 @@ jobs:
                 : summary ? "/api/profiles/overview/summary"
                 : overview ? "/api/profiles/overview" + (generation ? "?min_generation=" + encodeURIComponent(generation) : "")
                 : factoryDesk ? "/api/factory/desk"
+                : failedOutputCensus ? "/api/factory/approval-batches?scope=all&quality_only=1"
                 : globalCanary ? "/api/factory/approval-batches?scope=all"
                 : chicagoCanary ? "/api/factory/approval-batches?profile=recT2rbKX3MF7cVFU"
                 : factoryStatus ? "/api/factory/approval-batches?profile=recF7UAn0LkMZZrWZ" : "/api/session";
@@ -815,6 +818,22 @@ jobs:
             batches:[(.batches // [])[] | {status,created_at,updated_at,approved_count,pending_count,failed_count}],
             quality_codes:[(.quality_signals // [])[] | .code],
             partial_history:(.history_complete == false)}' /tmp/factory-batch-global.json
+
+          FAILED_OUTPUT_URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/failed-output-census"
+          curl -fsS --max-time 70 "$FAILED_OUTPUT_URL" -o /tmp/failed-output-census.json
+          jq -e '.ok==true and .scope=="all" and .quality_only==true
+            and .output_failures.status=="ok"
+            and (.output_failures.count|type)=="number"
+            and (.output_failures.items|type)=="array"
+            and .output_failures.count==(.output_failures.items|length)' /tmp/failed-output-census.json >/dev/null
+          jq -c '{outstanding:.output_failures.count,scanned_at:.output_failures.scanned_at,
+            items:[.output_failures.items[] | {profile_name,profile_id,output_id,platform,output_type,recovery,attempt_count,retry_at,error,action}]}' /tmp/failed-output-census.json
+          {
+            echo "### Quality Agent failed-output production census"
+            echo "- Completed scan: $(jq -r '.output_failures.scanned_at' /tmp/failed-output-census.json)"
+            echo "- Outstanding failures: $(jq -r '.output_failures.count' /tmp/failed-output-census.json)"
+            jq -r '.output_failures.items[] | "- \(.profile_name // .profile_id // "unlinked") output \(.output_id // .record_id): \(.platform // "unknown") \(.output_type // "") — \(.recovery); \(.error) Recommended: \(.action)"' /tmp/failed-output-census.json
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify NYC Needs eyes is not starved by scheduled backlog (read-only)
         shell: bash

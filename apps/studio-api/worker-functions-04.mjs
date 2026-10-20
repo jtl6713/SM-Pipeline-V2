@@ -1,3 +1,4 @@
+import { scanOutstandingFailedOutputs, describeFailedOutput } from "./failed-output-monitor.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
 import { readStudioProfileSummary, validVerifiedStudioSummary } from "./profile-summary-controller.mjs";
@@ -568,6 +569,7 @@ import {
   studioSupabaseWriteThroughOutput,
   airtableBatchUpdate,
   listRecords,
+  listRecordsPage,
   f,
   studioOutputIsNativePhoto,
   studioYoutubePublicSourceUrl,
@@ -5083,8 +5085,6 @@ export async function readStudioProfilesOverviewSnapshot(env, options = {}) {
     const snapshot = await readStudioProfilesOverviewSnapshotFromR2(env);
     cache.lastR2CheckAt = Date.now();
     if (!snapshot) return cache.rows?.length ? profilesOverviewSnapshotView() : null;
-    // An eventual older object/read must never roll back a newer valid
-    // in-isolate generation (including a successful force refresh).
     if (cache.rows?.length && Number(snapshot.at || 0) < Number(cache.at || 0)) {
       return profilesOverviewSnapshotView();
     }
@@ -9002,6 +9002,29 @@ export function deskOutputsForRequest(outputs, requestId) {
 }
 /*__STUDIO_WORKER_END:deskOutputsForRequest__*/
 
+async function loadStudioFailedOutputSnapshot(env) {
+  // 60-second shared read cache, independent of the R2 batch monitor.
+  return studioReadCoalesce("quality-agent-failed-output-census", 60000, async () => {
+    const [rows, profiles] = await Promise.all([
+      scanOutstandingFailedOutputs((options) =>
+        listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options)),
+      listContentProfileRecords(env).catch(() => []),
+    ]);
+    const profileNames = new Map((profiles || []).map((profile) => [
+      profile.id,
+      String(f(profile, "Market_Name") || f(profile, "Profile_Name") || profile.id).trim(),
+    ]));
+    const items = rows.map((record) => {
+      const item = describeFailedOutput(record);
+      return { ...item, profile_name: profileNames.get(item.profile_id) || item.profile_id };
+    });
+    return {
+      status: "ok", scanned_at: new Date().toISOString(),
+      count: rows.length, rows, items,
+    };
+  });
+}
+
 export async function gatherStudioDeskInventory(env) {
   const chicago = chicagoNowParts();
   const nowMs = Date.now();
@@ -9240,16 +9263,13 @@ export async function gatherStudioDeskInventory(env) {
     push(classifyPublishFailed(mapOut(record), nowMs));
     push(classifyYoutubeCoverQuota(mapOut(record)));
   }
+  let failedOutputSnapshot;
   try {
-    const failedRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit: 12,
-      sortField: "Output_ID",
-      sortDirection: "desc",
-      filterFormula: 'AND({Test_Run_ID}=BLANK(),OR({Render_Status}="Failed",{Publish_Status}="Failed",AND({Publish_Error_Message}!="",{Published_At}=BLANK()),AND({IG_Carousel_Error_Message}!="",{Published_At}=BLANK())))',
-    }).catch(() => []);
+    failedOutputSnapshot = await loadStudioFailedOutputSnapshot(env);
     scanned("render_failed", "publish_failed_transient", "publish_live_failed_status", "ttd0_route_blank_draft", "facebook_publish_rate_limit", "tiktok_auth_signature", "ig_carousel_too_many_children", "ig_carousel_child_verification_race", "ig_carousel_child_poll_failure", "ig_carousel_rate_limited");
-    for (const record of failedRows || []) {
+    for (const record of failedOutputSnapshot.rows) {
       const mapped = mapOut(record);
+      const before = incidents.length;
       push(classifyRenderRow(mapped, nowMs));
       push(classifyPublishLiveFailedStatus(mapped));
       push(classifyTtd0RouteBlankDraft(mapped));
@@ -9260,9 +9280,23 @@ export async function gatherStudioDeskInventory(env) {
       push(classifyIgCarouselChildPollFailure(mapped));
       push(classifyIgCarouselRateLimited(mapped));
       push(classifyPublishFailed(mapped, nowMs));
+      if (incidents.length === before && !incidents.some((item) => item.record_id === record.id)) {
+        const detail = describeFailedOutput(record, nowMs);
+        push({
+          kind: "output_failed_unclassified", class: "data_repair", actor: "desk_agent",
+          record_id: record.id, fingerprint: "output_failed_unclassified:" + record.id,
+          output_id: mapped.output_id, output_title: mapped.output_title,
+          platform: mapped.platform, platform_output_type: mapped.platform_output_type,
+          diagnosis: detail.error + " " + detail.action,
+        });
+      }
     }
   } catch (error) {
     console.warn("desk failed-status scan failed", error);
+    failedOutputSnapshot = {
+      status: "unavailable", scanned_at: new Date().toISOString(),
+      error: "Airtable failed-output scan failed; unresolved count is unknown.",
+    };
   }
   try {
     const igCarouselOverRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
@@ -9492,7 +9526,8 @@ export async function gatherStudioDeskInventory(env) {
   for (const row of incidents) rememberIdentity(row.record_id, deskWorkIdentity(row));
   activityEvents = await enrichDeskActivityIdentity(env, activityEvents, identityByRecord, contentById);
 
-  return buildDeskInventoryPayload({
+  return {
+    ...buildDeskInventoryPayload({
     mode,
     chicagoDate: chicago.date,
     chicagoHour: chicago.hour,
@@ -9501,7 +9536,9 @@ export async function gatherStudioDeskInventory(env) {
     caps,
     scannedKinds,
     activityEvents,
-  });
+    }),
+    failed_outputs: { ...failedOutputSnapshot, rows: undefined },
+  };
 }
 /*__STUDIO_WORKER_END:gatherStudioDeskInventory__*/
 
@@ -14783,7 +14820,17 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
             };
           },
         );
-        return respond(request, env, report);
+        let outputFailures;
+        try {
+          const snapshot = await loadStudioFailedOutputSnapshot(env);
+          outputFailures = { status: "ok", count: snapshot.count,
+            scanned_at: snapshot.scanned_at, items: snapshot.items };
+        } catch (error) {
+          console.warn("Factory failed-output Quality Agent scan degraded", error);
+          outputFailures = { status: "unavailable",
+            error: "Failed-output monitoring unavailable; the outstanding count is unknown." };
+        }
+        return respond(request, env, { ...report, output_failures: outputFailures });
       } catch (error) {
         console.warn("Factory quality read-only R2 monitoring degraded",
           String(error?.code || error?.status || error?.name || "unknown"));
@@ -14794,6 +14841,7 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
           quality_status: "unavailable",
           monitored_at: new Date().toISOString(),
           job_id: null, batches: [], quality_signals: [],
+          output_failures: { status: "unavailable", error: "Monitoring unavailable; count unknown." },
           totals: { batches: 0, pending: 0, failed: 0, findings: 0 },
         });
       }

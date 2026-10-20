@@ -70,10 +70,22 @@
     if (!data || !Array.isArray(data.quality_signals)) {
       return '<p class="factory-batch-quality-unavailable">Worker has not supplied Quality Agent batch signals. Do not assume there are no findings.</p>';
     }
+    // Failed platform outputs are a separate census, not Factory approval batches.
+    const failures = data.output_failures;
+    const failureMarkup = !failures || failures.status !== "ok"
+      ? '<p class="factory-batch-quality-unavailable">Failed-output Quality Agent status unavailable. Unresolved output count is unknown; do not treat this as zero.</p>'
+      : `<p class="factory-batch-quality-heading">Unresolved output failures across all profiles: ${Number(failures.count) || 0}</p>
+        ${(failures.items || []).length ? '<ul class="factory-batch-quality-list">' +
+          failures.items.map(item => `<li class="factory-batch-quality-item">
+            <strong>${esc(item.profile_name || item.profile_id || "Profile not linked")} · Output ${esc(item.output_id || item.record_id)} · ${esc(item.platform || "Unknown platform")} ${esc(item.output_type || "")}</strong>
+            <p>${esc(item.error || "No diagnostic provided")}</p>
+            <p class="factory-batch-quality-action">${esc(item.action || "Review the failure.")}</p>
+            <small>Recovery: ${esc(item.recovery || "needs_attention")}</small>
+          </li>`).join("") + '</ul>' : '<p>No unresolved output failures found in the completed scan.</p>'}`;
     if (!data.job_id) {
       return data?.quality_status === "partial"
-        ? '<p class="factory-batch-quality-unavailable">Partial batch monitoring window. No findings were returned from the scanned records; older activity was not verified.</p>'
-        : '<p class="subtle">No active Factory batches requiring attention in the checked window.</p>';
+        ? failureMarkup + '<p class="factory-batch-quality-unavailable">Partial batch monitoring window. No findings were returned from the scanned records; older activity was not verified.</p>'
+        : failureMarkup + '<p class="subtle">No active Factory batches requiring attention in the checked window.</p>';
     }
     const global = data.scope === "all";
     const partialNotice = data?.quality_status === "partial"
@@ -101,16 +113,17 @@
         <p class="factory-batch-quality-action">${esc(catalog.guidance)}</p>
       </li>`;
     }).join("");
-    return `${partialNotice}<p class="factory-batch-quality-meta">${global ? `${Number(data.totals?.batches)||0} active Factory batches` : `${total} latest batch outputs`} · ${pending} pending · ${failed} failed</p>
+    return `${failureMarkup}${partialNotice}<p class="factory-batch-quality-meta">${global ? `${Number(data.totals?.batches)||0} active Factory batches` : `${total} latest batch outputs`} · ${pending} pending · ${failed} failed</p>
       ${countMismatch ? '<p class="factory-batch-quality-unavailable">Batch totals disagree: investigate status reconciliation.</p>' : ""}
       ${signals.length ? `<p class="factory-batch-quality-heading">${signals.length} Quality Agent finding${signals.length === 1 ? "" : "s"} for this batch</p>
         <ul class="factory-batch-quality-list">${rowMarkup}</ul>`
-         : `<p class="factory-batch-quality-clear">No Quality Agent findings in ${global ? "recent Factory batches" : "the latest batch"}.</p>`}`;
+         : `<p class="factory-batch-quality-clear">No Quality Agent findings in ${global ? "recent Factory batches" : "the latest batch"} (approval batches only).</p>`}`;
   }
 
   function render(profileId, data, error = "") {
     const metric = $("factoryBatchQualityMetric");
-    if (metric) metric.textContent = error || data?.quality_status === "unavailable" ? "!" : String(data?.quality_signals?.length ?? "—");
+    if (metric) metric.textContent = error || data?.quality_status !== "ok" || data?.output_failures?.status !== "ok"
+      ? "!" : String((data?.quality_signals?.length || 0) + (data?.output_failures?.count || 0));
     const html = panelMarkup({ profileId, data, error });
     for (const id of panelIds) {
       const node = $(id);
