@@ -1,3 +1,4 @@
+import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
 import { readStudioProfileSummary, validVerifiedStudioSummary } from "./profile-summary-controller.mjs";
 import { homeOutputContribution, homeIdeaContribution, combineHomeContributions } from "./profile-summary-classification.mjs";
 import { countPendingPlatformDispatch } from "./overview-dispatch-counts.mjs";
@@ -3264,30 +3265,15 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
             if (String(f(row, "Platform") || "").trim().toLowerCase() !== platformWant) return false;
             const stamp = Date.parse(String(f(row, "Scheduled_Post_Date") || ""));
             return Number.isFinite(stamp) && localDate(stamp) === job.repair_date;
-          }).sort((a, b) => {
-            // An immutable/published occupant wins even if its Output_ID is newer.
-            const immutable = (row) => Boolean(f(row, "Do_Not_Publish"))
-              || Boolean(String(f(row, "Published_At") || "").trim())
-              || ["Published", "Canceled", "Cancelled"].includes(String(f(row, "Output_Status") || "").trim())
-              || String(f(row, "Publish_Status") || "").trim() === "Published";
-            return Number(immutable(b)) - Number(immutable(a))
-              || Number(f(a, "Output_ID") || 0) - Number(f(b, "Output_ID") || 0);
           });
-          const claimed = new Set();
-          const displacedIds = new Set();
-          for (const row of matching) {
-            const stamp = Date.parse(String(f(row, "Scheduled_Post_Date") || ""));
-            const immutable = Boolean(f(row, "Do_Not_Publish"))
+          const displacedIds = new Set(selectTargetedScheduleOverages(matching, eligible.map((row) => row.id), {
+            getStamp: (row) => Date.parse(String(f(row, "Scheduled_Post_Date") || "")),
+            getOrder: (row) => Number(f(row, "Output_ID") || 0),
+            isImmutable: (row) => Boolean(f(row, "Do_Not_Publish"))
               || Boolean(String(f(row, "Published_At") || "").trim())
               || ["Published", "Canceled", "Cancelled"].includes(String(f(row, "Output_Status") || "").trim())
-              || String(f(row, "Publish_Status") || "").trim() === "Published";
-            if (immutable) {
-              claimed.add(stamp);
-              continue;
-            }
-            if (claimed.has(stamp)) displacedIds.add(row.id);
-            else claimed.add(stamp);
-          }
+              || String(f(row, "Publish_Status") || "").trim() === "Published",
+          }));
           eligibleIds = eligible.filter((row) => displacedIds.has(row.id)).map((row) => row.id);
           // Only overages are excluded by the atomic writer. Every other
           // record—including companions in a different output type—stays occupied.
