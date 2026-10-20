@@ -1,0 +1,1 @@
+2026-10-20 post-PR981 production acceptance: check current live global Factory active approvals twice via existing authenticated service binding, read-only and no R2 direct bucket permission required. Never approve, schedule, publish, or modify queue.
