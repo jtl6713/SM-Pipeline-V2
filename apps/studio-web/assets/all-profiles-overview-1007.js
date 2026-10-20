@@ -4,7 +4,9 @@
 
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
   const platformOrder = ["Facebook","Instagram","TikTok","YouTube"];
-  const CACHE_KEY = "studio.allProfilesOverview.v3";
+  // Cache format v4 requires the authoritative approved_unpublished metric.
+  // Discard legacy browser snapshots instead of painting their old parentheses.
+  const CACHE_KEY = "studio.allProfilesOverview.v4";
   const REFRESH_KEY = "studio.allProfilesOverview.refresh.v1";
   const POLL_MS = 12000;
   const REFRESH_POLL_MS = 1800;
@@ -46,8 +48,8 @@
       for (const platform of platformOrder) {
         if (!Number.isFinite(Number(row?.scheduled?.[platform]))) return false;
       }
-      for (const kind of ["manual", "failed", "approval", "ideas", "approved_unpublished"]) {
-        if (!Number.isFinite(Number(row?.[kind]))) return false;
+      for (const kind of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished"]) {
+        if (typeof row?.[kind] !== "number" || !Number.isFinite(row[kind]) || row[kind] < 0) return false;
       }
     }
     return true;
@@ -305,6 +307,7 @@
       failed: Number(row.failed) || 0,
       approval: Number(row.approval) || 0,
       approved_unpublished: Number(row.approved_unpublished) || 0,
+      overdue_unpublished: Number(row.overdue_unpublished) || 0,
       ideas: Number(row.ideas) || 0,
     }));
   }
