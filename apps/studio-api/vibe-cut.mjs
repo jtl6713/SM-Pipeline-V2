@@ -871,7 +871,7 @@ export function validateVibeCutSourceAssets(assets) {
   const name = String(asset.name || "").trim();
   const isVideo = kind === "video" || (
     kind !== "photo" && kind !== "image"
-    && (mime.startsWith("video/") || /\\.(mp4|mov|m4v|webm)$/i.test(name))
+    && (mime.startsWith("video/") || [".mp4", ".mov", ".m4v", ".webm"].some(ext => name.toLowerCase().endsWith(ext)))
   );
   if (!isVideo) {
     return { ok: false, reason: "Vibe Cut source is a still image, not a video. Reattach the original footage." };
