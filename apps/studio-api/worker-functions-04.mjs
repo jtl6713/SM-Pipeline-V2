@@ -5289,7 +5289,7 @@ export async function profilesOverview(request, env, authorization, ctx) {
   const manualRefreshing = manualRefresh.status === "refreshing";
   const age = snapshot?.at ? Date.now() - snapshot.at : Infinity;
   const freshMs = studioProfilesOverviewFreshMs(snapshot);
-  if (snapshot?.rows?.length && snapshot.complete === true && snapshot.schemaVersion === 4 && age < freshMs) {
+  if (snapshot?.rows?.length && snapshot.complete === true && snapshot.schemaVersion === 5 && age < freshMs) {
     if (!manualRefreshing) scheduleStudioProfilesOverviewIdeasRefresh(ctx, env, authorization);
     return respondProfilesOverviewSoft(request, env, {
       records: snapshot.rows,
