@@ -3706,7 +3706,7 @@ export async function studioMusicR2Preview(request, env, mapped) {
   if (!key || !env.STUDIO_MEDIA) throw new HttpError(404, "Studio music preview source is not available");
 
   const rangeHeader = request.method === "GET" ? request.headers.get("Range") : null;
-  const validRange = rangeHeader && /^bytes=(?:\\d+-\\d*|-\\d+)$/.test(rangeHeader.trim());
+  const validRange = rangeHeader && /^bytes=(?:\d+-\d*|-\d+)$/.test(rangeHeader.trim());
   const object = await env.STUDIO_MEDIA.get(key, validRange ? { range: request.headers } : undefined);
   if (!object) throw new HttpError(404, "Studio music file was not found in storage");
 
