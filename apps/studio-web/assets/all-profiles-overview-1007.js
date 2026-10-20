@@ -4,7 +4,7 @@
 
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
   const platformOrder = ["Facebook","Instagram","TikTok","YouTube"];
-  const CACHE_KEY = "studio.allProfilesOverview.v2";
+  const CACHE_KEY = "studio.allProfilesOverview.v3";
   const REFRESH_KEY = "studio.allProfilesOverview.refresh.v1";
   const POLL_MS = 12000;
   const REFRESH_POLL_MS = 1800;
@@ -29,8 +29,8 @@
     refreshTone: "",
   };
 
-  function overdueUnpublishedTotal(row) {
-    return Number(row?.overdue_unpublished) || 0;
+  function approvedUnpublishedTotal(row) {
+    return Number(row?.approved_unpublished) || 0;
   }
 
   function validOverviewRows(rows) {
@@ -46,7 +46,7 @@
       for (const platform of platformOrder) {
         if (!Number.isFinite(Number(row?.scheduled?.[platform]))) return false;
       }
-      for (const kind of ["manual", "failed", "approval", "ideas", "overdue_unpublished"]) {
+      for (const kind of ["manual", "failed", "approval", "ideas", "approved_unpublished"]) {
         if (!Number.isFinite(Number(row?.[kind]))) return false;
       }
     }
@@ -260,18 +260,18 @@
       return;
     }
 
-    const total = { scheduled:Object.fromEntries(platformOrder.map((p)=>[p,0])), manual:0, failed:0, approval:0, ideas:0, overdue_unpublished:0 };
+    const total = { scheduled:Object.fromEntries(platformOrder.map((p)=>[p,0])), manual:0, failed:0, approval:0, ideas:0, approved_unpublished:0 };
     for (const row of state.rows) {
       platformOrder.forEach((p)=> total.scheduled[p] += row.scheduled?.[p] || 0);
       total.manual += row.manual;
       total.failed += row.failed;
       total.approval += row.approval;
-      total.overdue_unpublished += row.overdue_unpublished;
+      total.approved_unpublished += row.approved_unpublished;
       total.ideas += row.ideas;
     }
 
     const rowHtml = (row, isTotal=false) => `<tr class="${isTotal ? "all-profiles-total" : ""}">
-      <th scope="row">${esc(row.name)}${isTotal ? "" : ` (${overdueUnpublishedTotal(row)})`}</th>
+      <th scope="row">${esc(row.name)}${isTotal ? "" : ` (${approvedUnpublishedTotal(row)})`}</th>
       ${platformOrder.map((p)=>`<td data-label="${p}">${row.scheduled?.[p] || 0}</td>`).join("")}
       <td data-label="Manual" class="overview-tone-${tone(row.manual,"manual")}">${actionCount(row, "manual", "manual action")}</td>
       <td data-label="Failed" class="overview-tone-${tone(row.failed,"failed")}">${actionCount(row, "failed", "failed")}</td>
@@ -304,7 +304,7 @@
       manual: Number(row.manual) || 0,
       failed: Number(row.failed) || 0,
       approval: Number(row.approval) || 0,
-      overdue_unpublished: Number(row.overdue_unpublished) || 0,
+      approved_unpublished: Number(row.approved_unpublished) || 0,
       ideas: Number(row.ideas) || 0,
     }));
   }

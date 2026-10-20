@@ -148,6 +148,7 @@ async function runStudioProfileSummaryReconcile(env) {
       city_label: info.find((p) => p.id === profile.id)?.city_label,
       scheduled, manual: metrics.manual_action_required,
       failed: metrics.failed_outputs, approval: metrics.awaiting_approval,
+      approved_unpublished: metrics.approved_unpublished,
       overdue_unpublished: metrics.overdue_unpublished,
       ideas: metrics.ideas_not_in_production, metrics,
     });
@@ -173,5 +174,5 @@ export function validVerifiedStudioSummary(summary, profileIds, maxAgeMs = 60 * 
   const ids = new Set(summary.records.map((record) => String(record.id || "")));
   if (ids.size !== 4 || required.size > ids.size || [...required].some((id) => !ids.has(id))) return false;
   return summary.records.every((record) => PLATFORMS.every((p) => Number.isFinite(record.scheduled?.[p]))
-    && ["manual", "failed", "approval", "ideas", "overdue_unpublished"].every((key) => Number.isFinite(record[key])));
+    && ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished"].every((key) => Number.isFinite(record[key])));
 }

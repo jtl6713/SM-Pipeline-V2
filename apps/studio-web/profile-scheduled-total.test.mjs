@@ -7,7 +7,7 @@ import path from "node:path";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const overviewPath = path.join(here, "assets/all-profiles-overview-1007.js");
 
-test("all-profiles overview shows overdue unpublished approved totals rather than scheduled totals", async () => {
+test("all-profiles overview shows approved unpublished totals rather than scheduled totals", async () => {
   const host = {
     innerHTML: "",
     querySelectorAll() { return []; },
@@ -18,7 +18,7 @@ test("all-profiles overview shows overdue unpublished approved totals rather tha
       city_label: "Chicago",
       name: "Chicago",
       scheduled: { Facebook: 1, Instagram: 1, TikTok: 0, YouTube: 1 },
-      overdue_unpublished: 2,
+      approved_unpublished: 2,
       manual: 0,
       failed: 0,
       approval: 0,
@@ -29,7 +29,7 @@ test("all-profiles overview shows overdue unpublished approved totals rather tha
       city_label: "Miami",
       name: "Miami",
       scheduled: { Facebook: 0, Instagram: 0, TikTok: 1, YouTube: 0 },
-      overdue_unpublished: 4,
+      approved_unpublished: 4,
       manual: 0,
       failed: 0,
       approval: 0,

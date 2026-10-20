@@ -19,7 +19,7 @@ const LAG_BUCKET_MS = [1000, 2500, 5000, 10000, 15000, 30000, 60000];
 function counterPlus(before, delta) {
   const next = structuredClone(before || ZERO());
   for (const platform of HOME_PLATFORMS) next.scheduled[platform] += delta.scheduled[platform] || 0;
-  for (const key of HOME_METRIC_KEYS) next[key] += delta[key] || 0;
+  for (const key of HOME_METRIC_KEYS) next[key] = (Number(next[key]) || 0) + (Number(delta[key]) || 0);
   if (HOME_PLATFORMS.some((p) => next.scheduled[p] < 0)
     || HOME_METRIC_KEYS.some((key) => next[key] < 0)) {
     throw new Error("Counter underflow: requires authoritative reconciliation");
@@ -157,6 +157,7 @@ export class StudioProfileSummary {
               scheduled: c.scheduled, manual: c.manual_action_required,
               failed: c.failed_outputs, approval: c.awaiting_approval,
               ideas: c.ideas_not_in_production,
+              approved_unpublished: c.approved_unpublished || 0,
               overdue_unpublished: overdue,
               metrics: {
                 ...c, overdue_unpublished: overdue, manual_action_required: c.manual_action_required,
@@ -249,6 +250,7 @@ export class StudioProfileSummary {
             || expected.ideas !== actual.ideas_not_in_production
             || expected.manual !== actual.manual_action_required
             || expected.failed !== actual.failed_outputs
+            || expected.approved_unpublished !== actual.approved_unpublished
             || expected.overdue_unpublished !== actual.overdue_unpublished
             || HOME_PLATFORMS.some((name) => expected.scheduled?.[name] !== actual.scheduled[name])) {
             return json({ ok: false, error: "reconciliation_mismatch", profile_id: p.id }, 409);
