@@ -4828,6 +4828,7 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
         : `AND({Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK())`;
       const [outputs, ideas] = await Promise.all([
         listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+          airtableEgressSource: "home_overview_refresh",
           limit: STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT,
           filterFormula: profileOutputFormula,
           sortField: "Output_ID",
@@ -4835,6 +4836,7 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
           fields: OUTPUT_LIST_FIELDS,
         }),
         listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+          airtableEgressSource: "home_overview_refresh",
           limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
           filterFormula: profileIdeaFormula,
           fields: ["Content_Profile", "Promoted_Content_Record_ID", "Content Items"],
@@ -5215,6 +5217,7 @@ export async function refreshStudioProfilesOverviewIdeas(env, authorization) {
     if (!profiles?.length) return cache.rows || [];
     const formula = studioProfilesOverviewCombinedFormula(profiles);
     const ideaRows = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+      airtableEgressSource: "home_ideas_refresh",
       limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
       sortField: "Create_Date",
       filterFormula: formula,
