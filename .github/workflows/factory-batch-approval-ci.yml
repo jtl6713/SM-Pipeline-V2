@@ -33,6 +33,7 @@ jobs:
       - name: Factory single and batch approval regressions
         run: |
           node --check apps/studio-api/schedule-occupancy-90-day.test.mjs
+          node --test apps/studio-api/failed-output-monitor.test.mjs
           node --test apps/studio-api/schedule-occupancy-90-day.test.mjs
           node --test apps/studio-api/approve-all-batch.test.mjs apps/studio-api/factory-approve.test.mjs apps/studio-api/factory-batch-approval.test.mjs apps/studio-api/factory-approval-queue.test.mjs apps/studio-api/factory-approval-groups.test.mjs apps/studio-api/factory-batch-global-policy.test.mjs apps/studio-api/factory-real-record-publish-route.staging.test.mjs apps/studio-api/output-approval-lease.test.mjs apps/studio-web/factory-desk.test.mjs apps/studio-web/factory-batch-approval.test.mjs
       - name: Validate signed Factory global deployment contract and reject drift
