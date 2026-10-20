@@ -186,15 +186,35 @@ export function readyProductionSelectJobs(jobs, {
   const perProfile = new Map();
   const cap = Math.max(0, Math.min(8, Math.trunc(maxConcurrency) || 0));
   const profileCap = Math.max(1, Math.min(4, Math.trunc(maxPerProfile) || 1));
-  for (const job of Array.isArray(jobs) ? jobs : []) {
-    if (selected.length >= cap) break;
-    if (!ACTIVE.has(String(job?.status || ""))) continue;
-    if (job.status === "running" && Number(job.lease_expires_ms || 0) > nowMs) continue;
-    if (Number(job.next_attempt_ms || 0) > nowMs) continue;
-    const profile = String(job.profile_id || "unscoped");
-    if ((perProfile.get(profile) || 0) >= profileCap) continue;
-    selected.push(job);
-    perProfile.set(profile, (perProfile.get(profile) || 0) + 1);
+  const available = (Array.isArray(jobs) ? jobs : []).filter((job) => {
+    if (!ACTIVE.has(String(job?.status || ""))) return false;
+    if (job.status === "running" && Number(job.lease_expires_ms || 0) > nowMs) return false;
+    return Number(job.next_attempt_ms || 0) <= nowMs;
+  });
+  // Planning and rendering are separate lanes. Reserve one slot for a due
+  // render/QA monitor, but never let oldest awaiting_review jobs consume both
+  // global slots and block new photo-ready planning indefinitely.
+  const planning = available.filter((job) => job.status !== "awaiting_review");
+  const monitoring = available.filter((job) => job.status === "awaiting_review");
+  const take = (candidates, quota) => {
+    let taken = 0;
+    for (const job of candidates) {
+      if (selected.length >= cap || taken >= quota) break;
+      const profile = String(job.profile_id || "unscoped");
+      if ((perProfile.get(profile) || 0) >= profileCap) continue;
+      selected.push(job);
+      perProfile.set(profile, (perProfile.get(profile) || 0) + 1);
+      taken += 1;
+    }
+  };
+  if (planning.length && monitoring.length && cap >= 2) {
+    take(planning, cap - 1);
+    take(monitoring, 1);
+    take(planning, cap);
+    take(monitoring, cap);
+  } else {
+    take(planning, cap);
+    take(monitoring, cap);
   }
   return selected;
 }
@@ -244,7 +264,9 @@ export async function readyProductionFinishClaim(bucket, lease, outcome = {}, no
     if (value.owner !== lease.owner) return null;
     const retryDelay = status === "retry_wait"
       ? Number(outcome.retry_delay_ms || readyProductionRetryDelayMs(value.attempts))
-      : 0;
+      : status === "awaiting_review"
+        ? Math.max(60 * 1000, Math.min(5 * 60 * 1000, Number(outcome.review_poll_delay_ms) || 3 * 60 * 1000))
+        : 0;
     return {
       ...value,
       ...outcome,
