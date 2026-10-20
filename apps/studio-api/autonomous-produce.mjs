@@ -53,6 +53,22 @@ export const AUTONOMOUS_STANDARD_PLATFORMS = Object.freeze([
   "TikTok",
   "YouTube",
 ]);
+/**
+ * Item 4 only supports these four autonomous platforms. The wider PR model
+ * still recognizes retired/non-renderable destinations (notably X), which
+ * otherwise produce a "Ready" platform plan with zero items.
+ *
+ * Call with canonical platform names. An empty supported selection from old
+ * suggestions falls back to the Studio's existing four-platform defaults.
+ */
+export function autonomousItem4Platforms(canonicalCandidates, { fallback = true } = {}) {
+  const supported = new Set(AUTONOMOUS_STANDARD_PLATFORMS);
+  const platforms = [...new Set((Array.isArray(canonicalCandidates) ? canonicalCandidates : [])
+    .map((value) => String(value || "").trim())
+    .filter((value) => supported.has(value)))];
+  return platforms.length || !fallback ? platforms : [...AUTONOMOUS_STANDARD_PLATFORMS];
+}
+
 export const AUTONOMOUS_REEL_OVERRIDES = Object.freeze({
   Instagram: "Reel",
   Facebook: "Reel",

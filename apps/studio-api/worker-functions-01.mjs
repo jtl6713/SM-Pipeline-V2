@@ -8512,6 +8512,11 @@ export async function buildItem4OutputPlan(request, env, url, authorization) {
   } else if (vibeCut) {
     plannedItems = capVibeCutPlanItems(items, { notes: notesText });
   }
+  // Do not persist Ready-with-zero-items: downstream variant preparation sees
+  // this as incomplete and repeatedly retries without a recoverable diagnosis.
+  if (!plannedItems.length) {
+    throw new HttpError(409, "No supported platform output destinations in plan. Choose Instagram, Facebook, TikTok or YouTube.");
+  }
   const plan={schema_version:"item4.output-plan.1",generated_at:new Date().toISOString(),production_request_record_id:recordId,source_asset_count:photoCount,photo_count_kind:item4PhotoCountKind(photoCount),items:plannedItems};
   needsReview = plannedItems.some((item) => !item.aspect_ratio);
 

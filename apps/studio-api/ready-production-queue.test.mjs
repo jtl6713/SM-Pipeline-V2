@@ -298,3 +298,40 @@ test("Ready production backfills existing linked asset-ready autonomous drafts w
   assert.match(processor, /autonomousMasterMediaIds\(item4ParseJson/);
   assert.match(processor, /if \(!requestRecord\) \{/); // Only absent link may create a draft.
 });
+
+test("P0 #907 never treats an empty Ready plan as complete", async () => {
+  const worker01 = await readFile(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
+  const worker04 = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+  const item4 = worker01.slice(worker01.indexOf("export async function buildItem4OutputPlan("),
+    worker01.indexOf("/*__STUDIO_WORKER_END:buildItem4OutputPlan__*/"));
+  assert.match(item4, /if \(!plannedItems\.length\)/);
+  assert.match(item4, /No supported platform output destinations in plan/);
+  assert.ok(item4.indexOf("if (!plannedItems.length)") <
+    item4.indexOf("await item4SyncPlanOutputs"),
+    "must reject empty plan before writing any output or Ready state");
+
+  const plan = worker04.slice(worker04.indexOf("function readyProductionIdeaPlan("),
+    worker04.indexOf("async function monitorReadyProductionRequest("));
+  assert.match(plan, /autonomousItem4Platforms\(canonicalProductionPlatforms/);
+  assert.match(plan, /PR_PLATFORMS\.has\(platform\)/);
+  assert.match(plan, /plan\.items\.length > 0/);
+  const check = worker04.slice(worker04.indexOf("function autonomousHasUsableItem4Plan("),
+    worker04.indexOf("async function monitorReadyProductionRequest("));
+  assert.match(check, /Studio_Output_Plan_JSON/);
+  assert.match(check, /Studio_Output_Plan_Status/);
+  assert.match(check, /plan\.items\.length > 0/);
+
+  const queued = worker04.slice(worker04.indexOf("async function processReadyProductionClaim("),
+    worker04.indexOf("async function studioReadyProductionCronResume("));
+  assert.match(queued, /if \(!autonomousHasUsableItem4Plan\(requestRecord\)\)/,
+    "linked Draft with an empty Ready plan must be rebuilt before preparing variants");
+  const finish = worker04.slice(worker04.indexOf("export async function finishAutonomousProductionRequest("),
+    worker04.indexOf("/*__STUDIO_WORKER_END:finishAutonomousProductionRequest__*/"));
+  assert.match(finish, /if \(!autonomousHasUsableItem4Plan\(current\)\)/,
+    "automatic continuation must not skip invalid Ready plans");
+  const manual = worker04.slice(worker04.indexOf("export async function prepareIdeaToReview("),
+    worker04.indexOf("/*__STUDIO_WORKER_END:prepareIdeaToReview__*/"));
+  assert.match(manual, /autonomousItem4Platforms\(canonicalProductionPlatforms/);
+  assert.match(manual, /fallback: !explicitlySelectedPlatforms/);
+  assert.match(manual, /if \(!autonomousHasUsableItem4Plan\(requestRecord\)\)/);
+});
