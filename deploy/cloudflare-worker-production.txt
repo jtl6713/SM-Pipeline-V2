@@ -552,3 +552,5 @@ Deploy targeted November 17 MAE overage selector from merged PR #936; no automat
 2026-10-20: Deploy merged PR #967 Home profile-name parenthetical: count only Review_Status=Approved and Scheduled_Post_Date >= current instant (as-yet unpublished); preserve separate overdue metric, per-platform Scheduled columns, Airtable write SoR, shadow Home/refill reads OFF, and authoritative four-profile Home force-refresh canary.
 
 2026-10-20: Deploy PR #969 reconciliation-only Airtable egress attribution. Keep Airtable write SoR, Home/refill summary reads OFF, existing capture/reconcile ON; no forced reconciliation, no publishing mutations. Verify Worker production canaries.
+
+2026-10-20: Deploy PR #970 Airtable Home/refill request category attribution only. Preserve production Worker configuration, Airtable write authority, Home/refill summary reads OFF; avoid forced full reconciliations and protect scheduling.
