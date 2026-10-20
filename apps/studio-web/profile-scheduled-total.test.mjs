@@ -25,10 +25,13 @@ test("all-profiles overview shows per-output approved future and past-due totals
       overdue_unpublished: 1,
       approved_future: 2, approved_past_due: 1, approved_missing_date: 0,
       approved_future_by_platform: {Facebook:1,Instagram:1,TikTok:0,YouTube:0},
+      awaiting_final_by_platform: {Facebook:0,Instagram:1,TikTok:0,YouTube:0},
+      pipeline_by_platform: {Facebook:1,Instagram:2,TikTok:0,YouTube:0},
+      pipeline_total: 3,
       approved_calendar_slots: { ...empty, Facebook:[future], Instagram:[future], YouTube:[past] },
       manual: 0,
       failed: 0,
-      approval: 0,
+      approval: 1,
       ideas: 0,
     },
     {
@@ -40,10 +43,13 @@ test("all-profiles overview shows per-output approved future and past-due totals
       overdue_unpublished: 2,
       approved_future: 2, approved_past_due: 2, approved_missing_date: 1,
       approved_future_by_platform: {Facebook:0,Instagram:1,TikTok:1,YouTube:0},
+      awaiting_final_by_platform: {Facebook:1,Instagram:1,TikTok:0,YouTube:0},
+      pipeline_by_platform: {Facebook:1,Instagram:2,TikTok:1,YouTube:0},
+      pipeline_total: 4,
       approved_calendar_slots: { ...empty, Facebook:[past,past], Instagram:[future], TikTok:[future] },
       manual: 0,
       failed: 0,
-      approval: 0,
+      approval: 2,
       ideas: 0,
     },
   ];
@@ -98,6 +104,11 @@ test("all-profiles overview shows per-output approved future and past-due totals
     assert.match(host.innerHTML, /data-label="Approved no date"[^>]*>1<\/td>/);
     assert.match(host.innerHTML, /Approved · Future/);
     assert.match(host.innerHTML, /Approved · Past Due/);
+    assert.match(host.innerHTML, /Pipeline · Total/);
+    assert.match(host.innerHTML, /Ideas Needed/);
+    assert.match(host.innerHTML, /data-label="Pipeline total"[^>]*>3<\/td>/);
+    assert.match(host.innerHTML, /data-label="Pipeline total"[^>]*>4<\/td>/);
+    assert.match(host.innerHTML, /data-label="Ideas needed"[^>]*>100<\/td>/);
   } finally {
     globalThis.document = prior.document;
     globalThis.fetch = prior.fetch;
