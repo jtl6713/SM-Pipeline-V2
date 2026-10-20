@@ -1923,7 +1923,12 @@ export default {
           });
           const report = await upstream.json();
           if (!upstream.ok || report?.ok !== true || !Array.isArray(report.hourly)) {
-            return respond(request, env, { ok: false, reason: "runner_metrics_unavailable" }, 503);
+            const reason = upstream.status === 401 ? "runner_metrics_auth_failed"
+              : report?.reason === "persistent_metrics_store_not_configured"
+                ? "runner_metrics_store_unconfigured"
+                : upstream.status === 404 ? "runner_metrics_route_missing"
+                : "runner_metrics_unavailable";
+            return respond(request, env, { ok: false, reason }, 503);
           }
           return respond(request, env, {
             ok: true, source: "pipeline_runner_sqlite", hourly: report.hourly,
