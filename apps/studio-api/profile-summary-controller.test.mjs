@@ -74,6 +74,9 @@ test("reconciliation fences updates and never publishes staged partial totals", 
   assert.match(durable, /if \(staged\.length !== Number\(body\.expected_count\)/);
   assert.match(durable, /reconciliation_mismatch/);
   assert.match(durable, /last_reconciled_at/);
+  assert.match(durable, /url.pathname === "\/status"/);
+  assert.match(durable, /url.pathname === "\/fail"/);
+  assert.match(controller, /listRecordsWithCoolingRetry/);
 });
 
 test("Supabase Phase 5 read wall and feature gates remain intact", () => {
@@ -90,6 +93,8 @@ test("operator summary reconcile is admitted through the Phase 2A write gate", (
   const gate = worker.slice(worker.indexOf("const allowedMethod ="), worker.indexOf("if (!allowedMethod)"));
   assert.match(gate, /isProfilesOverviewSummaryReconcileWrite/);
   assert.match(worker, /url\.pathname === "\/api\/profiles\/overview\/summary\/reconcile"/);
+  assert.match(worker, /const result = await reconcileStudioProfileSummary\(env\)/);
+  assert.match(worker, /studio_profile_summary_reconcile_await_v1: true/);
 });
 
 test("production rollback treats both SQLite namespaces as lifecycle boundaries", () => {

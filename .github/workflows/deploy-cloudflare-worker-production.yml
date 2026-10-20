@@ -293,6 +293,7 @@ jobs:
             'vars':active_vars,
             'triggers':{'crons':['*/5 * * * *', '0 6 * * *', '* * * * *']},
             'observability':{'enabled':True,'head_sampling_rate':1},
+            'limits':{'cpu_ms':180000},
             'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}],
             'secrets':{'required':['AIRTABLE_PAT']}
           }

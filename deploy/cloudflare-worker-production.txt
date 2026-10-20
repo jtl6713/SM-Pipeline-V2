@@ -522,3 +522,5 @@ Deploy PR #905 photo-wait historical platform default repair (Threads 400): filt
 2026-10-19: Repair Worker rollback for both SQLite Durable Object namespaces (STUDIO_SCHEDULE_RESERVATIONS and STUDIO_PROFILE_SUMMARIES). Do not attempt historical rollback across a namespace migration. Retry Home force-refresh canary on overview-force-resolve Airtable cooldown. Keep Home/refill profile-summary reads OFF.
 
 2026-10-19: Admit POST /api/profiles/overview/summary/reconcile through the Phase 2A write gate so operator-authorized shadow bootstrap can run. Worker 0.10.668-profile-summary-shadow. Home/refill reads stay OFF; preserve capture/reconcile flags already enabled in production.
+
+2026-10-19: Await operator shadow reconciliation instead of waitUntil, persist fail-closed errors, raise Worker CPU budget, and expose /summary/status. Worker 0.10.669-profile-summary-await. Home/refill reads stay OFF.

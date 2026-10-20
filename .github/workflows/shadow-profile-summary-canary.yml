@@ -62,8 +62,10 @@ jobs:
               const overview = url.pathname === "/$TOKEN/overview";
               const summary = url.pathname === "/$TOKEN/summary";
               const summaryReconcile = url.pathname === "/$TOKEN/summary-reconcile";
-              if (!overview && !summary && !summaryReconcile) return new Response("Not found", {status:404});
+              const summaryStatus = url.pathname === "/$TOKEN/summary-status";
+              if (!overview && !summary && !summaryReconcile && !summaryStatus) return new Response("Not found", {status:404});
               const path = summaryReconcile ? "/api/profiles/overview/summary/reconcile"
+                : summaryStatus ? "/api/profiles/overview/summary/status"
                 : summary ? "/api/profiles/overview/summary"
                 : "/api/profiles/overview";
               const method = summaryReconcile ? "POST" : "GET";
@@ -118,11 +120,19 @@ jobs:
           jq -e '.ok==true and (.records|length)>=4' /tmp/overview.json >/dev/null
 
           if [[ "${{ inputs.start_full_reconcile }}" == "true" ]]; then
-            CODE=$(curl -sS --max-time 60 -o /tmp/reconcile-start.json -w '%{http_code}' -X POST "$BASE/summary-reconcile" || true)
+            CODE=$(curl -sS --max-time 240 -o /tmp/reconcile-start.json -w '%{http_code}' -X POST "$BASE/summary-reconcile" || true)
             echo "reconcile_start_http=$CODE"
             cat /tmp/reconcile-start.json
-            test "$CODE" = "200"
-            jq -e '.ok==true and .started==true and .read_cutover_enabled==false' /tmp/reconcile-start.json >/dev/null
+            curl -sS --max-time 60 "$BASE/summary-status" -o /tmp/summary-status.json || true
+            cat /tmp/summary-status.json || true
+            if [[ "$CODE" == "200" ]]; then
+              jq -e '.ok==true and .read_cutover_enabled==false and (.completed==true or .started==true)' /tmp/reconcile-start.json >/dev/null
+            elif [[ "$CODE" == "503" ]]; then
+              echo "reconcile reported a fail-closed error" >&2
+              exit 1
+            else
+              test "$CODE" = "200"
+            fi
           fi
 
           READY=0

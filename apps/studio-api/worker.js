@@ -2,6 +2,7 @@ import {
   readStudioProfileSummary,
   notifyStudioProfileSummary,
   reconcileStudioProfileSummary,
+  studioProfileSummaryStatus,
 } from "./profile-summary-controller.mjs";
 export { StudioProfileSummary } from "./profile-summary-do.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
@@ -1075,8 +1076,9 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.668-profile-summary-shadow",
+          version: "0.10.669-profile-summary-await",
           studio_profile_summary_reconcile_gate_v1: true,
+          studio_profile_summary_reconcile_await_v1: true,
           photo_match_error_json_v1: true,
           factory_batch_canary_revision: "chicago-ig-reel-v1",
           factory_batch_phase2a_post_gate_fix_v1: true,
@@ -1882,10 +1884,32 @@ export default {
         assertWriteRequest(request, env);
         requirePermission(authorization, "tenant_admin");
         if (!env.STUDIO_PROFILE_SUMMARIES?.get) throw new HttpError(503, "Profile summary namespace not configured");
-        ctx.waitUntil(reconcileStudioProfileSummary(env).catch((error) => {
-          console.warn("profile summary full reconciliation failed", error);
-        }));
-        return respond(request, env, { ok: true, started: true, read_cutover_enabled: env.STUDIO_HOME_PROFILE_SUMMARY_READS === "true" });
+        try {
+          const result = await reconcileStudioProfileSummary(env);
+          return respond(request, env, {
+            ok: true,
+            started: false,
+            completed: true,
+            read_cutover_enabled: env.STUDIO_HOME_PROFILE_SUMMARY_READS === "true",
+            generation: result.generation,
+            version: result.version,
+            count: result.count,
+          });
+        } catch (error) {
+          return respond(request, env, {
+            ok: false,
+            started: false,
+            completed: false,
+            read_cutover_enabled: env.STUDIO_HOME_PROFILE_SUMMARY_READS === "true",
+            error: String(error?.message || error).slice(0, 300),
+          }, 503);
+        }
+      }
+
+      if (url.pathname === "/api/profiles/overview/summary/status") {
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure", "outputs_review"]);
+        return respond(request, env, await studioProfileSummaryStatus(env));
       }
 
       if (url.pathname === "/api/profiles/overview") {
