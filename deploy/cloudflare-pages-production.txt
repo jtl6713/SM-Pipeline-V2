@@ -453,4 +453,4 @@ Release Studio UI 0.6.723: fast Profile Admin voice/music load and playable name
 
 2026-10-20: Deploy merged #937 Home approved-unpublished profile-parentheses metric. Preserve Airtable write authority, profile-summary circuit breaker, approvals, and publishing.
 
-2026-10-20: deploy merged #950 Home overview monotonic snapshot freshness fence and approved-unpublished parentheses count display. This is UI-only; no change to Airtable write source, publishing, or approvals.
+2026-10-20: deploy merged #950 Home overview monotonic snapshot freshness fence and approved-unpublished parentheses count display. This is UI-only; no change to Airtable write source, publishing, or approvals.\n2026-10-20: UI 0.6.726 Home approved-but-unpublished parentheses release from latest main; guarded Pages deployment and live version verification.\n
