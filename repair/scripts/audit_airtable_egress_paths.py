@@ -41,6 +41,8 @@ def inventory():
             if ".test." in path.name or path.name.startswith("test_") or "/tests/" in path.as_posix():
                 continue
             rel = str(path.relative_to(ROOT))
+            if rel == "repair/scripts/audit_airtable_egress_paths.py":
+                continue  # Scanner contains match patterns, not Airtable HTTP calls.
             content = path.read_text(encoding="utf-8", errors="replace")
             hits = [n for n, line in enumerate(content.splitlines(), 1) if MARKERS.search(line)]
             if hits:
