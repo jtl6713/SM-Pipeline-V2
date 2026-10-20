@@ -44,3 +44,15 @@ test("parenthesized profile count uses all approved unpublished, not overdue or 
   assert.match(ui, /approved_unpublished"\]/);
   assert.doesNotMatch(ui, /scheduledTotal\(row\)/);
 });
+
+test("Home rebuilds expired Airtable output tally instead of only refreshing Ideas", () => {
+  const entry = fs.readFileSync(path.join(root, "apps/studio-api/worker.js"), "utf8");
+  const view = worker.slice(worker.indexOf("export async function profilesOverview("),
+    worker.indexOf("/*__STUDIO_WORKER_END:profilesOverview__*/"));
+  assert.match(entry, /STUDIO_PROFILES_OVERVIEW_CACHE_MS = 2 \* 60 \* 1000/);
+  assert.match(view, /!manualRefreshing && !supabaseBacked && !cooling/);
+  assert.match(view, /scheduleStudioProfilesOverviewRefresh\(ctx, env, authorization\)/);
+  assert.ok(view.indexOf("scheduleStudioProfilesOverviewRefresh(ctx, env, authorization)") >
+    view.indexOf("if (snapshot?.rows?.length)"),
+    "snapshot-age refresh must be on stale output path, never every GET");
+});
