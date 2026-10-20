@@ -424,10 +424,14 @@ jobs:
           binding_values=after_plain
           if expected_bootstrapped:
               activation=Path('/tmp/schedule-activation-lane.txt').read_text().strip()
-              if binding_values.get('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED') != ('true' if activation else 'false'):
-                  raise SystemExit('Atomic scheduling authority flag differs from requested rollout')
-              if binding_values.get('STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST','') != activation:
-                  raise SystemExit('Atomic scheduling lane allowlist differs from requested rollout')
+              expected_lanes=[v.strip() for v in expected.get('STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST','').split(',') if v.strip()]
+              if activation and activation not in expected_lanes:
+                  expected_lanes.append(activation)
+              expected_enabled = 'true' if expected_lanes else 'false'
+              if binding_values.get('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED') != expected_enabled:
+                  raise SystemExit('Atomic scheduling authority flag differs from preserved rollout')
+              if binding_values.get('STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST','') != ','.join(expected_lanes):
+                  raise SystemExit('Atomic scheduling lane allowlist differs from preserved rollout')
           elif 'STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED' in binding_values:
               raise SystemExit('Atomic scheduling feature flag appeared before namespace bootstrap')
           for name,value in expected.items():
