@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inventory direct Airtable API call sites; fail on newly discovered unclassified paths.
+"""Inventory direct Airtable API call sites; flag unclassified paths for owners.
 
 Static inventory is *not* runtime request accounting or a zero-activity heartbeat.
 """
@@ -34,7 +34,7 @@ def main():
     paths=inventory(Path(a.root))
     classified=[]
     for path in paths:
-        if path.startswith(("apps/studio-api/","pipeline-runner/","apps/pipeline-runner/")):
+        if path.startswith(("apps/studio-api/","services/pipeline-runner/","pipeline-runner/","apps/pipeline-runner/")):
             status="core_runtime_candidate"
         elif path.startswith((".github/","repair/","scripts/")):
             status="standalone_or_ci_requires_runtime_attestation"
