@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
+import { item4EffectivePlanStatus, item4EffectivePlanStatusLight } from "./item4-plan-integrity.mjs";
 
 const valid = { items: [{ platform: "Instagram", output_type: "Reel" }] };
 
@@ -36,6 +36,21 @@ test("P0 #907 all relevant plan views fail closed without mutating reads", async
     one.indexOf("/*__STUDIO_WORKER_END:getItem4OutputPlan__*/"));
   assert.match(get, /item4EffectivePlanStatus\(/);
   assert.doesNotMatch(get, /item4UpdateRequestState|airtableBatchUpdate|airtableFetch\(.*PATCH/);
-  assert.equal((two.match(/item4EffectivePlanStatus\(/g) || []).length, 4,
-    "snapshot/full workspace and light/full Production Request status must agree");
+  assert.equal((two.match(/item4EffectivePlanStatus\(/g) || []).length, 3,
+    "snapshot/full workspace and full Production Request must use strict validation");
+  const light = two.slice(two.indexOf("export function mapProductionRequestLight("),
+    two.indexOf("/*__STUDIO_WORKER_END:mapProductionRequestLight__*/"));
+  assert.match(light, /item4EffectivePlanStatusLight\(/);
+  assert.doesNotMatch(light, /item4ParseJson\(|JSON\.parse\(/,
+    "listing a Production Request must not parse heavy plan JSON");
+});
+
+test("P0 #907 low-burn open/list rejects empty/missing serialized items without parsing", () => {
+  const json = JSON.stringify({ schema_version: "item4.output-plan.1",
+    items: [{ platform: "Instagram", output_type: "Reel", ratio: "9:16" }] });
+  assert.equal(item4EffectivePlanStatusLight("Ready", json, "Draft").status, "Ready");
+  assert.equal(item4EffectivePlanStatusLight("Ready", JSON.stringify({ items: [] }), "Draft").status, "Needs Plan");
+  assert.equal(item4EffectivePlanStatusLight("Ready", "", "Promoted").status, "Needs Review");
+  assert.equal(item4EffectivePlanStatusLight("Ready", '{"items":[{}]}', "Draft").status, "Needs Plan");
+  assert.equal(item4EffectivePlanStatusLight("Needs Plan", "", "Draft").invalid, false);
 });
