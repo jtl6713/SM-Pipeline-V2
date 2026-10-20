@@ -12,9 +12,15 @@ const raw = (name) => readFileSync(resolve(dirname(fileURLToPath(import.meta.url
 const ids = ["rec00000000000001","rec00000000000002","rec00000000000003","rec00000000000004"];
 const snapshot = () => ({
   ok: true, version: 4, last_reconciled_at: Date.now(), degraded: false,
-  records: ids.map((id) => ({
-    id, scheduled: { Facebook: 2, Instagram: 3, TikTok: 0, YouTube: 1 },
+  records: ids.map((id, i) => ({
+    id, city_label: ["Chicago", "New York", "Los Angeles", "Miami"][i],
+    scheduled: { Facebook: 2, Instagram: 3, TikTok: 0, YouTube: 1 },
     manual: 0, failed: 0, approval: 2, ideas: 1, approved_unpublished: 0, overdue_unpublished: 0,
+    approved_future: 0, approved_past_due: 0, approved_missing_date: 0, pipeline_total: 2,
+    approved_future_by_platform: { Facebook: 0, Instagram: 0, TikTok: 0, YouTube: 0 },
+    awaiting_final_by_platform: { Facebook: 0, Instagram: 2, TikTok: 0, YouTube: 0 },
+    pipeline_by_platform: { Facebook: 0, Instagram: 2, TikTok: 0, YouTube: 0 },
+    approved_calendar_slots: { Facebook: [], Instagram: [], TikTok: [], YouTube: [] },
   })),
 });
 
@@ -24,6 +30,7 @@ test("only complete, recent, nondegraded, four-city snapshots can cut Home/refil
   assert.equal(validVerifiedStudioSummary({ ...snapshot(), records: snapshot().records.slice(0, 3) }, ids), false);
   assert.equal(validVerifiedStudioSummary({ ...snapshot(), last_reconciled_at: Date.now() - 2 * 3600000 }, ids), false);
   assert.equal(validVerifiedStudioSummary({ ...snapshot(), records: snapshot().records.map((r) => ({ ...r, approval: NaN })) }, ids), false);
+  assert.equal(validVerifiedStudioSummary({ ...snapshot(), records: snapshot().records.map((r) => ({ ...r, approved_calendar_slots: undefined })) }, ids), false);
 });
 
 test("POST/PATCH notifications are scoped to confirmed authoritative output/idea records", async () => {
@@ -127,5 +134,5 @@ test("SQLite overdue queue uses indexed due_at instead of a stale snapshot-time 
   const source = raw("profile-summary-do.mjs");
   assert.match(source, /idx_summary_ledger_due/);
   assert.match(source, /overdue_due_at<=\?/);
-  assert.match(source, /overdue_unpublished: overdue/);
+  assert.match(source, /row\.overdue_unpublished = overdue/);
 });

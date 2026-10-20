@@ -94,7 +94,9 @@ test("Home parentheses depend on final-approved-unpublished state, not scheduled
     classifier.indexOf("export function homeOutputContribution(")), /scheduled >= now|Date\.parse/);
   assert.match(worker, /approved_unpublished: metrics\.approved_unpublished/);
   assert.doesNotMatch(worker, /approved_unpublished: approvedFutureTimes\.filter/);
-  assert.match(durable, /approved_unpublished: c\.approved_unpublished/);
+  assert.match(durable, /buildProfileSummaryV6Row\(p, counters, approvedByProfile\.get\(p\.id\), now\)/);
+  const v6=fs.readFileSync(path.join(root, "apps/studio-api/profile-summary-v6.mjs"), "utf8");
+  assert.match(v6, /approved_unpublished: Number\(c\.approved_unpublished \|\| 0\)/);
   assert.doesNotMatch(durable, /approved_unpublished: futureByProfile/);
   assert.match(durable, /approved_unpublished_definition/);
   assert.match(durable, /future_count_reconcile_required/);
