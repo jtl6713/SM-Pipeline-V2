@@ -32,7 +32,7 @@ class AirtableClient:
         started = time.monotonic()
         response = None
         try:
-            response = requests.request(method, url, **kwargs)
+            response = getattr(requests, method.lower())(url, **kwargs)
             return response
         finally:
             category = ("outputs" if table_id == self._settings.get("airtable_output_table_id")
