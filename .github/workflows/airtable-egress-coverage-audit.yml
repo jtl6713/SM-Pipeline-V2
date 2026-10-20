@@ -3,6 +3,8 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - main
+      - feature/airtable-evidence-coverage-guard-20261020
       - feature/automatic-shadow-evidence-20261020
       - feature/durable-airtable-egress-20261020
       - feature/airtable-hourly-rollup-report-20261020
@@ -26,10 +28,14 @@ jobs:
           python - <<'PY'
           import json
           obj=json.load(open('airtable-egress-coverage.json'))
-          print('airtable_egress_unverified_paths='+str(obj['unverified_count']))
+          print('airtable_production_unverified='+str(obj['production_runtime_unverified_count']))
+          print('airtable_standalone_unverified='+str(obj['standalone_unverified_count']))
+          print('airtable_staging_only='+str(obj['staging_only_count']))
           for p in obj['candidates']:
-              if p['coverage'].startswith('UNVERIFIED'):
-                  print('unverified_path='+p['path']+' lines='+','.join(map(str,p['lines'])))
+              if p['scope'] in ('production_runtime_unverified','standalone_unverified'):
+                  print(p['scope']+'='+p['path']+' lines='+','.join(map(str,p['lines'])))
+          if obj['production_runtime_unverified_count']:
+              raise SystemExit('Uninstrumented production-runtime Airtable code path discovered')
           PY
       - name: Test equal-window reporting safety
         run: python -m unittest discover -s repair/scripts -p 'airtable_request_window_report_test.py' -v
