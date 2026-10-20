@@ -74,3 +74,40 @@ export function profileSummaryV6StaticParity(expected, actual) {
   ];
   return keys.every((key) => JSON.stringify(expected?.[key]) === JSON.stringify(actual?.[key]));
 }
+
+/** Fail closed before Home uses the incremental summary as a V6 source. */
+export function validProfileSummaryV6Rows(rows) {
+  if (!Array.isArray(rows) || rows.length !== 4) return false;
+  const ids = new Set(), cities = new Set();
+  const count = (value) => Number.isInteger(value) && value >= 0;
+  for (const row of rows) {
+    const id = String(row?.id || "");
+    const city = String(row?.city_label || "").trim().toLowerCase();
+    if (!/^rec[A-Za-z0-9]{14}$/.test(id) || !city || ids.has(id) || cities.has(city)) return false;
+    ids.add(id); cities.add(city);
+    for (const key of [
+      "manual", "failed", "approval", "ideas", "approved_unpublished",
+      "overdue_unpublished", "approved_future", "approved_past_due",
+      "approved_missing_date", "pipeline_total",
+    ]) if (!count(row[key])) return false;
+    for (const platform of HOME_PLATFORMS) {
+      if (!count(row.scheduled?.[platform])
+        || !count(row.approved_future_by_platform?.[platform])
+        || !count(row.awaiting_final_by_platform?.[platform])
+        || !count(row.pipeline_by_platform?.[platform])
+        || row.pipeline_by_platform[platform] !== row.approved_future_by_platform[platform]
+          + row.awaiting_final_by_platform[platform]) return false;
+      const dates = row.approved_calendar_slots?.[platform];
+      if (!Array.isArray(dates)
+        || dates.some((stamp) => !Number.isFinite(stamp) || stamp <= 0)
+        || row.approved_future_by_platform[platform] > dates.length) return false;
+    }
+    const sum = (field) => HOME_PLATFORMS.reduce((n, p) => n + row[field][p], 0);
+    const slotCount = HOME_PLATFORMS.reduce((n, p) => n + row.approved_calendar_slots[p].length, 0);
+    if (sum("approved_future_by_platform") !== row.approved_future
+      || sum("awaiting_final_by_platform") !== row.approval
+      || sum("pipeline_by_platform") !== row.pipeline_total
+      || row.approved_future + row.approved_past_due !== slotCount) return false;
+  }
+  return true;
+}
