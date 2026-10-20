@@ -567,3 +567,5 @@ Deploy targeted November 17 MAE overage selector from merged PR #936; no automat
 2026-10-20: P0 Factory #987 production recovery. Strict 90-day per-platform Airtable occupancy (all output types) replaces capped all-platform Factory scan for accepted batches. Preserve Airtable authoritative source, MAE collision protection, serial profile leases, output idempotency, Supabase Phase 5 breaker and existing bindings. Validate stalled 8 batches/64 pending counts via authenticated read-only audit after deploy.
 
 2026-10-20: Home v6 future-approved platform-output count by canonical Scheduled_Post_Date, separate past-due and missing-date exceptions; rebuild v5 R2 snapshot after deploy, Airtable remains source of truth, Supabase Home/refill reads remain disabled, preserve scheduling lock and all approval/publish paths.
+
+2026-10-20: Retry Home approved-future calendar output v6 Worker deploy with migration-aware empty pre-refresh snapshot canary. Require fresh v6 authenticated rebuild and full four-profile payload; keep Airtable write authority and Supabase reads off.
