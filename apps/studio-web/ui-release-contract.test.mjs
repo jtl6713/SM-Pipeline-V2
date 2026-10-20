@@ -13,10 +13,10 @@ const app = fs.readFileSync(new URL("./assets/app-item4-1008.js", import.meta.ur
 
 test("Studio UI release label, BUILD_ID, and every JS/CSS cache key are one contract", () => {
   const contract = readUiReleaseContract(html, app);
-  assert.equal(contract.version, "0.6.726");
+  assert.equal(contract.version, "0.6.727");
   assert.equal(contract.cacheKey, "0.6.727-home-tally-cache-integrity");
   assert.equal(contract.expectedBuildId, "item4-0.6.727-home-tally-cache-integrity");
-  assert.match(contract.expectedJsUrl, /^\/assets\/app-item4-1008\.js\?v=0\.6\.726-approved-unpublished-home/);
+  assert.match(contract.expectedJsUrl, /^\/assets\/app-item4-1008\.js\?v=0\.6\.727-home-tally-cache-integrity/);
   assert.ok(contract.versionedAssetCount >= 20);
   assert.equal(extractUiVersionFromHtml(html), contract.version);
   assert.equal(extractAppUrlFromHtml(html), contract.expectedJsUrl);
@@ -24,7 +24,7 @@ test("Studio UI release label, BUILD_ID, and every JS/CSS cache key are one cont
 
 test("release contract rejects drift that can produce a green stale deploy", () => {
   assert.throws(
-    () => readUiReleaseContract(html.replace("UI build 0.6.726", "UI build 0.6.710"), app),
+    () => readUiReleaseContract(html.replace("UI build 0.6.727", "UI build 0.6.710"), app),
     /does not match application cache version/,
   );
   assert.throws(
@@ -38,7 +38,7 @@ test("release contract rejects drift that can produce a green stale deploy", () 
 });
 
 test("release newness comparison is numeric and rejects unchanged versions", () => {
-  assert.equal(compareUiVersions("0.6.726", "0.6.709"), 1);
-  assert.equal(compareUiVersions("0.6.726", "0.6.726"), 0);
-  assert.equal(compareUiVersions("0.6.709", "0.6.726"), -1);
+  assert.equal(compareUiVersions("0.6.727", "0.6.709"), 1);
+  assert.equal(compareUiVersions("0.6.727", "0.6.727"), 0);
+  assert.equal(compareUiVersions("0.6.709", "0.6.727"), -1);
 });
