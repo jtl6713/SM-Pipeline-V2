@@ -17,7 +17,7 @@ class AirtableRequestReportTests(unittest.TestCase):
             path = Path(root) / "requests.jsonl"
             path.write_text("\n".join([
                 'studio_airtable_egress_v1 '+json.dumps({"source": "studio_worker_gateway", "at": "2026-10-19T12:00:00Z", "status": 200, "request_count": 3}),
-                'studio_airtable_egress_v1 '+json.dumps({"source": "pipeline_runner_client", "at": "2026-10-19T12:05:00Z", "status": 429, "request_count": 1}),
+                'studio_airtable_egress_v1 '+json.dumps({"source": "pipeline_runner_http", "at": "2026-10-19T12:05:00Z", "status": 429, "request_count": 1}),
                 'studio_airtable_egress_v1 '+json.dumps({"source": "studio_worker_gateway", "at": "2026-10-20T12:00:00Z", "status": 200, "request_count": 1}),
             ]))
             events = report.read_events([str(path)])
