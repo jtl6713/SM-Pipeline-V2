@@ -42,11 +42,6 @@ test("desk inventory marks scheduling checks scanned and surfaces runtime findin
 });
 
 test("production deployment provisions Durable Object and activates only with exact confirmed lane", () => {
-  // Ordinary deploys preserve already activated lanes; they must not silently
-  // reset the durable scheduling authority when no new lane is requested.
-  assert.match(deploy, /existing_lanes=\[v\.strip\(\)/);
-  assert.match(deploy, /if activation and activation not in existing_lanes:/);
-  assert.match(deploy, /STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST'\]='\,'\.join\(existing_lanes\)/);
   // Ordinary deploys preserve active lanes; only an explicit guarded dispatch adds one.
   assert.match(deploy, /existing_lanes=\[v\.strip\(\) for v in active_vars\.get/);
   assert.match(deploy, /if activation and activation not in existing_lanes:/);
