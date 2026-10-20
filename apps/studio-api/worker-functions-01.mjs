@@ -1,3 +1,4 @@
+import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
 import { isQueuedForPlatformDispatch } from "./overview-dispatch-counts.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
@@ -8558,7 +8559,14 @@ export async function buildItem4OutputPlan(request, env, url, authorization) {
 export async function getItem4OutputPlan(request, env, url, authorization) {
   const recordId=item4RequestIdFromPath(url);
   const record=await loadAuthorizedProductionRequest(env,recordId,authorization);
-  return respond(request,env,{ok:true,status:f(record,"Studio_Output_Plan_Status")||"Needs Plan",plan:item4ParseJson(f(record,"Studio_Output_Plan_JSON"),null)});
+  const plan=item4ParseJson(f(record,"Studio_Output_Plan_JSON"),null);
+  const integrity=item4EffectivePlanStatus(
+    f(record,"Studio_Output_Plan_Status"),plan,f(record,"Request_Status")
+  );
+  return respond(request,env,{
+    ok:true,status:integrity.status,plan,
+    plan_integrity_error:integrity.invalid?integrity.issue:null,
+  });
 }
 /*__STUDIO_WORKER_END:getItem4OutputPlan__*/
 
@@ -10098,6 +10106,11 @@ export async function azEnsurePlatformOutputs(env, requestRecord, options = {}) 
     const planItems = finishedVideo
       ? capFinishedPlanItems(items, { notes: studioRequestNotesText(requestRecord) })
       : items;
+    // A post-cap empty list is not Ready even when pre-cap defaults existed.
+    if (!planItems.length) return {
+      error: "no_supported_plan_items_after_capping",
+      production_request_id: requestRecord.id,
+    };
     await item4SyncPlanOutputs(env, requestRecord, planItems);
     const needsReview = planItems.some((item) => !item.aspect_ratio);
     const plan = {
