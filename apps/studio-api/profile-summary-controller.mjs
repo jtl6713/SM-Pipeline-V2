@@ -35,6 +35,10 @@ export function readStudioProfileSummary(env) {
   return summaryRequest(env, "/snapshot");
 }
 
+export function studioProfileSummaryStatus(env) {
+  return summaryRequest(env, "/status");
+}
+
 export async function notifyStudioProfileSummary(env, tableId, method, body) {
   if (env?.STUDIO_PROFILE_SUMMARY_CAPTURE_ENABLED !== "true") {
     return { skipped: true, reason: "capture_not_enabled" };
@@ -67,7 +71,32 @@ function buildProfileInfo(profiles) {
  * authoritative totals before atomically switching the read model.
  * Failed/interrupted runs leave the prior completed ledger intact.
  */
+async function listRecordsWithCoolingRetry(env, tableId, options) {
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await listRecords(env, tableId, options);
+    } catch (error) {
+      lastError = error;
+      const cooling = Number(error?.status) === 429
+        || /cooling down|rate.?limit|too many requests/i.test(String(error?.message || error || ""));
+      if (!cooling || attempt === 3) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 8000 * attempt));
+    }
+  }
+  throw lastError;
+}
+
 export async function reconcileStudioProfileSummary(env) {
+  try {
+    return await runStudioProfileSummaryReconcile(env);
+  } catch (error) {
+    await summaryRequest(env, "/fail", { error: String(error?.message || error) }).catch(() => null);
+    throw error;
+  }
+}
+
+async function runStudioProfileSummaryReconcile(env) {
   const rawProfiles = await listContentProfileRecords(env);
   const profiles = rawProfiles.filter((p) => {
     const label = String(p.fields?.Profile_Name || "").toLowerCase();
@@ -89,11 +118,11 @@ export async function reconcileStudioProfileSummary(env) {
   for (const profile of profiles) {
     const profileFormula = contentProfileFilterFormula(profile);
     if (!profileFormula) throw new Error("Missing profile filter");
-    const outputs = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    const outputs = await listRecordsWithCoolingRetry(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       filterFormula: "AND(" + profileFormula + ',{Output_Status}!="Published",{Publish_Status}!="Published")',
       limit: 10000, fields: OUTPUT_LIST_FIELDS,
     });
-    const ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+    const ideas = await listRecordsWithCoolingRetry(env, env.AIRTABLE_IDEA_TABLE_ID, {
       filterFormula: "AND(" + profileFormula + ",{Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK())",
       limit: 10000,
       fields: ["Content_Profile", "Promoted_Content_Record_ID", "Content Items"],

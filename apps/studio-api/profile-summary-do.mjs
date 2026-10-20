@@ -103,6 +103,16 @@ export class StudioProfileSummary {
   async fetch(request) {
     try {
       const url = new URL(request.url);
+      if (request.method === "GET" && url.pathname === "/status") {
+        return json({
+          ok: true,
+          complete: this.getMeta("complete") === "true",
+          building_generation: this.getMeta("building_generation") || "",
+          building_started_at: Number(this.getMeta("building_started_at") || 0),
+          error: this.getMeta("error") || "",
+          version: Number(this.getMeta("version") || 0),
+        });
+      }
       if (request.method === "GET" && url.pathname === "/snapshot") {
         if (this.getMeta("complete") !== "true") return json({ ok: false, reason: "not_bootstrapped" }, 503);
         const profiles = this.getProfiles();
@@ -140,6 +150,10 @@ export class StudioProfileSummary {
       }
       if (request.method !== "POST") return json({ ok: false, error: "method" }, 405);
       const body = await request.json();
+      if (url.pathname === "/fail") {
+        this.putMeta("error", String(body?.error || "reconciliation failed").slice(0, 300));
+        return json({ ok: true, recorded: true });
+      }
       if (url.pathname === "/dirty") {
         const kind = code(body.kind), ids = Array.isArray(body.ids) ? body.ids : [];
         if (!validKind(kind) || !ids.length || ids.length > 100 || ids.some((id) => !validId(id))) {
@@ -164,7 +178,7 @@ export class StudioProfileSummary {
         }
         const active = this.getMeta("building_generation");
         const buildingAge = Date.now() - Number(this.getMeta("building_started_at") || 0);
-        if (active && buildingAge < 10 * 60_000) {
+        if (active && buildingAge < 25 * 60_000) {
           return json({ ok: false, error: "reconciliation_already_active" }, 409);
         }
         this.state.storage.transactionSync(() => {
@@ -250,7 +264,7 @@ export class StudioProfileSummary {
     const generation = this.getMeta("building_generation");
     if (generation) {
       const age = Date.now() - Number(this.getMeta("building_started_at") || 0);
-      if (age < 10 * 60 * 1000) {
+      if (age < 25 * 60 * 1000) {
         await this.state.storage.setAlarm(Date.now() + 10_000);
         return;
       }
