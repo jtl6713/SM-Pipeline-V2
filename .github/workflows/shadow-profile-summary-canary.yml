@@ -29,7 +29,7 @@ concurrency:
 jobs:
   canary:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -120,7 +120,7 @@ jobs:
           jq -e '.ok==true and (.records|length)>=4' /tmp/overview.json >/dev/null
 
           if [[ "${{ inputs.start_full_reconcile }}" == "true" ]]; then
-            CODE=$(curl -sS --max-time 240 -o /tmp/reconcile-start.json -w '%{http_code}' -X POST "$BASE/summary-reconcile" || true)
+            CODE=$(curl -sS --max-time 900 -o /tmp/reconcile-start.json -w '%{http_code}' -X POST "$BASE/summary-reconcile" || true)
             echo "reconcile_start_http=$CODE"
             cat /tmp/reconcile-start.json
             curl -sS --max-time 60 "$BASE/summary-status" -o /tmp/summary-status.json || true

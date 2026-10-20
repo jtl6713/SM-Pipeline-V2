@@ -97,6 +97,14 @@ test("operator summary reconcile is admitted through the Phase 2A write gate", (
   assert.match(worker, /studio_profile_summary_reconcile_await_v1: true/);
 });
 
+test("shadow canary waits for awaited four-city reconcile instead of a 4-minute curl cut", () => {
+  const canary = raw("../../.github/workflows/shadow-profile-summary-canary.yml");
+  assert.match(canary, /--max-time 900/);
+  assert.match(canary, /timeout-minutes: 45/);
+  assert.match(canary, /summary-status/);
+  assert.doesNotMatch(canary, /ENABLE_HOME_PROFILE_SUMMARY_READS/);
+});
+
 test("production rollback treats both SQLite namespaces as lifecycle boundaries", () => {
   const workflow = raw("../../.github/workflows/deploy-cloudflare-worker-production.yml");
   assert.match(workflow, /from studio_api_rollback_lifecycle import decide_rollback/);
