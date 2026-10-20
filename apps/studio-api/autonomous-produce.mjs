@@ -250,15 +250,25 @@ export function autonomousScheduledDeficit(
 
 /**
  * Build per-profile refill scores from All-Profiles overview rows
- * (`scheduled` map + `approval` awaiting-approval count).
- * Band / deficit use Scheduled + Awaiting Approval.
+ * Approved future platform outputs + fully rendered awaiting final human
+ * approval. A legacy scheduled map is supported for old callers only.
+ * New Home snapshots carry per-output due times so expired dates stop
+ * contributing immediately, even before the next Airtable change.
  */
 export function autonomousRefillScoresFromOverview(overviewRows, target = AUTONOMOUS_SCHEDULED_TARGET) {
   const byId = Object.create(null);
   for (const row of Array.isArray(overviewRows) ? overviewRows : []) {
     const id = String(row?.id || "").trim();
     if (!id) continue;
-    const scheduledTotal = autonomousScheduledTotal(row?.scheduled);
+    const slots = row?.approved_calendar_slots;
+    const canonicalSlots = slots && ["Facebook", "Instagram", "TikTok", "YouTube"]
+      .every((platform) => Array.isArray(slots[platform]));
+    const scheduledTotal = canonicalSlots
+      ? ["Facebook", "Instagram", "TikTok", "YouTube"].reduce((sum, platform) =>
+        sum + slots[platform].filter((stamp) => Number(stamp) > Date.now()).length, 0)
+      : Number.isFinite(Number(row?.approved_future))
+        ? Math.max(0, Number(row.approved_future))
+        : autonomousScheduledTotal(row?.scheduled);
     const awaiting = Math.max(0, Number(row?.approval ?? row?.metrics?.awaiting_approval) || 0);
     const pipelineLoad = autonomousPipelineLoadTotal(scheduledTotal, awaiting);
     const band = autonomousScheduledBand(pipelineLoad, target);
@@ -1036,11 +1046,11 @@ export function summarizeUnusedLibraryOverview(assets, { limit = 16 } = {}) {
 }
 
 function autonomousHourTitle(base, seen) {
-  const clean = String(base || "Library stills").replace(/\s+/g, " ").trim().slice(0, 72) || "Library stills";
-  const key = clean.toLowerCase();
-  const n = (seen.get(key) || 0) + 1;
-  seen.set(key, n);
-  return n === 1 ? clean : `${clean} ${n}`.slice(0, 80);
+  const clean = String(base || "").replace(/\s+/g, " ").trim().slice(0, 72);
+  const key = clean.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!key || seen.has(key)) return "";
+  seen.add(key);
+  return clean;
 }
 
 function autonomousRecordIds(rows, max) {
@@ -1107,49 +1117,32 @@ export function planAutonomousHourIdeas(assets, {
     });
   }
 
-  const seen = new Map();
-  const city = String(profileName || "Profile").trim() || "Profile";
+  const seen = new Set();
   const ideas = [];
-  for (let i = 0; i < need; i += 1) {
-    const packet = packets[i] || null;
-    const n = Math.max(0, Number(startIndex) || 0) + i + 1;
-    if (packet?.media_asset_ids?.length) {
-      const place = String(packet.location || packet.label || "Library stills").trim() || "Library stills";
-      ideas.push({
-        candidate_title: autonomousHourTitle(place, seen),
-        idea_summary: `Library stills from ${place}.`.slice(0, 180),
-        hook: place.slice(0, 80),
-        primary_location: place.slice(0, 80),
-        neighborhood_or_area: "",
-        suggested_visuals: place.slice(0, 80),
-        required_assets: "",
-        why_this_should_work: "Library stills are ready.",
-        content_type: "Vertical Short Video",
-        media_asset_ids: packet.media_asset_ids,
-        cited_trend: "library",
-        cluster_label: String(packet.label || place).slice(0, 80),
-        post_caption: "",
-        needs_assets: false,
-      });
-    } else {
-      ideas.push({
-        candidate_title: autonomousHourTitle(`${city} stills needed`, seen),
-        idea_summary: "Waiting for library stills.",
-        hook: "",
-        primary_location: city.slice(0, 80),
-        neighborhood_or_area: "",
-        suggested_visuals: "",
-        required_assets: "Library stills",
-        why_this_should_work: "Scheduled runway is under target.",
-        content_type: "Vertical Short Video",
-        media_asset_ids: [],
-        cited_trend: "",
-        cluster_label: "",
-        post_caption: "",
-        needs_assets: true,
-        hour_index: n,
-      });
-    }
+  for (const packet of packets) {
+    if (ideas.length >= need) break;
+    // A second packet from the same place is extra media, not a second idea.
+    // No auto-numbered titles and no repeated city-wide "stills needed" fillers.
+    if (!packet?.media_asset_ids?.length) continue;
+    const place = String(packet.location || packet.label || "").trim();
+    const candidateTitle = autonomousHourTitle(place, seen);
+    if (!candidateTitle) continue;
+    ideas.push({
+      candidate_title: candidateTitle,
+      idea_summary: `Library stills from ${place}.`.slice(0, 180),
+      hook: place.slice(0, 80),
+      primary_location: place.slice(0, 80),
+      neighborhood_or_area: "",
+      suggested_visuals: place.slice(0, 80),
+      required_assets: "",
+      why_this_should_work: "Library stills are ready.",
+      content_type: "Vertical Short Video",
+      media_asset_ids: packet.media_asset_ids,
+      cited_trend: "library",
+      cluster_label: String(packet.label || place).slice(0, 80),
+      post_caption: "",
+      needs_assets: false,
+    });
   }
   return ideas;
 }

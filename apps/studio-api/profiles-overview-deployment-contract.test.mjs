@@ -47,3 +47,14 @@ test("Home expired Airtable tally is rebuilt rather than being stale forever", (
   assert.match(view, /scheduleStudioProfilesOverviewRefresh\(ctx, env, authorization\)/);
   assert.match(view, /if \(snapshot\?\.rows\?\.length\)/);
 });
+
+
+test("Worker production canary tolerates empty pre-upgrade Home snapshot but requires complete v6 post-refresh counts", () => {
+  assert.match(workerDeploy, /\(\.records\|length\)==0 or \(\.records\|length\)>=4/);
+  assert.match(workerDeploy, /approved_future\|numbers/);
+  assert.match(workerDeploy, /approved_past_due\|numbers/);
+  assert.match(workerDeploy, /approved_missing_date\|numbers/);
+  assert.match(workerDeploy, /approved_calendar_slots\.Facebook\|arrays/);
+  assert.match(workerDeploy, /approved_future_by_platform\.YouTube\|numbers/);
+  assert.match(workerDeploy, /snapshot_generation==\$generation/);
+});

@@ -5,6 +5,7 @@
  */
 import { factoryBatchList } from "./factory-approval-queue.mjs";
 import { factoryApprovalTimingReport } from "./factory-approval-timings.mjs";
+import { factoryApprovalGroupList } from "./factory-approval-groups.mjs";
 
 const NYC_PROFILE_ID = "recgtK8Z7eNADNtVy";
 const FROM = "2026-10-18T20:00:00.000Z";
@@ -39,7 +40,41 @@ export async function readFactoryTimingReport(bucket) {
       timing_report: report,
     };
   });
+  // Read parent ledgers as well: active global submissions are hidden from
+  // the child-only "active" list. No R2 writes, Airtable access or approvals.
+  const active = await factoryApprovalGroupList(bucket, {
+    mode: "active", limit: 30, maxScan: 1000,
+  });
+  const activeGroups = active.groups.map(group => ({
+    job_id: group.job_id,
+    created_at: group.created_at,
+    updated_at: group.updated_at,
+    status: group.status,
+    total: group.total,
+    approved_count: group.approved_count,
+    pending_count: group.pending_count,
+    failed_count: group.failed_count,
+    children: (group.children || []).map(child => ({
+      profile_id: child.profile_id,
+      request_id: child.request_id,
+      status: child.status,
+      total: child.total,
+      approved_count: child.approved_count,
+      pending_count: child.pending_count,
+      failed_count: child.failed_count,
+      updated_at: child.updated_at || null,
+    })),
+  }));
   return {
+    active_group_scan: { scanned: active.scanned, has_more: active.has_more,
+      complete: active.complete, read_at: new Date().toISOString() },
+    active_group_totals: {
+      batches: activeGroups.length,
+      approved: activeGroups.reduce((n, g) => n + Number(g.approved_count || 0), 0),
+      pending: activeGroups.reduce((n, g) => n + Number(g.pending_count || 0), 0),
+      failed: activeGroups.reduce((n, g) => n + Number(g.failed_count || 0), 0),
+    },
+    active_groups: activeGroups,
     schema: "studio.factory-nyc-batch-timing-audit.1",
     read_only: true, profile: "NYC",
     jobs_scanned: jobs.length,

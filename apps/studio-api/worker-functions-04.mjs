@@ -1,6 +1,9 @@
+import { scanOutstandingFailedOutputs, describeFailedOutput } from "./failed-output-monitor.mjs";
+import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
 import { readStudioProfileSummary, validVerifiedStudioSummary } from "./profile-summary-controller.mjs";
 import { homeOutputContribution, homeIdeaContribution, homeApprovedUpcomingAt, combineHomeContributions } from "./profile-summary-classification.mjs";
+import { homeApprovedCalendarCounts } from "./home-approved-calendar-counts.mjs";
 import { countPendingPlatformDispatch } from "./overview-dispatch-counts.mjs";
 import {
   claimProfilesOverviewRefresh,
@@ -566,6 +569,7 @@ import {
   studioSupabaseWriteThroughOutput,
   airtableBatchUpdate,
   listRecords,
+  listRecordsPage,
   f,
   studioOutputIsNativePhoto,
   studioYoutubePublicSourceUrl,
@@ -4889,9 +4893,9 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
     // Skip produce-job hydration — overview only needs studio_state + schedule fields.
     const mappedOutputs = profileOutputs.map((row) => mappedById.get(row.id) || mapOutput(row, null));
     const metrics = studioOverviewOperationalMetrics(mappedOutputs, []);
-    // Keep future publication instants so cached totals age out at the
-    // scheduled time without another authoritative Airtable scan.
-    const approvedFutureTimes = mappedOutputs.map(homeApprovedUpcomingAt).filter((ms) => ms > 0);
+    const calendar = homeApprovedCalendarCounts(mappedOutputs);
+    // Approved future outputs and rendered awaiting final human approval are
+    // disjoint platform-output records. Past due and missing date are exceptions.
     let ideasCount = 0;
     let ideasSource = "snapshot";
     if (airtableIdeaRows) {
@@ -4920,10 +4924,17 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
       scheduled: studioOverviewScheduledCounts(mappedOutputs),
       manual: metrics.manual_action_required,
       failed: metrics.failed_outputs,
-      approval: metrics.awaiting_approval,
-      approved_unpublished: approvedFutureTimes.filter((ms) => ms >= Date.now()).length,
-      approved_future_times: approvedFutureTimes,
+      approval: calendar.awaiting,
+      awaiting_final_by_platform: calendar.awaiting_by_platform,
+      pipeline_by_platform: calendar.pipeline_by_platform,
+      pipeline_total: calendar.pipeline_total,
+      approved_unpublished: metrics.approved_unpublished,
       overdue_unpublished: metrics.overdue_unpublished,
+      approved_future_by_platform: calendar.future_by_platform,
+      approved_future: calendar.future,
+      approved_past_due: calendar.past_due,
+      approved_missing_date: calendar.missing_date,
+      approved_calendar_slots: calendar.slots,
       ideas: ideasCount,
       ideas_source: ideasSource,
       metrics,
@@ -4956,11 +4967,7 @@ export function respondProfilesOverviewSoft(request, env, { records = [], cached
     snapshot_generation: meta.generation || null,
     ideas_at: Number(meta.ideasAt || 0) || null,
     read_source: meta.readSource || null,
-    records: Array.isArray(records) ? records.map((row) =>
-      Array.isArray(row?.approved_future_times)
-        ? { ...row, approved_unpublished: row.approved_future_times.filter((ms) =>
-          Number.isFinite(ms) && ms >= Date.now()).length }
-        : row) : [],
+    records: Array.isArray(records) ? records : [],
   });
 }
 /*__STUDIO_WORKER_END:respondProfilesOverviewSoft__*/
@@ -4982,12 +4989,17 @@ function studioProfilesOverviewRowsHealthy(rows) {
       const n = row?.scheduled?.[platform];
       if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return false;
     }
-    // Approved-but-unpublished is the parenthesized Home tally. Older
-    // durable snapshots could omit it yet pass this integrity gate, causing
-    // the browser to retain stale approved counts after real approvals.
-    for (const key of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished"]) {
+    // Reject legacy snapshots without per-output calendar timestamps.
+    for (const key of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished", "approved_future", "approved_past_due", "approved_missing_date", "pipeline_total"]) {
       const n = row?.[key];
       if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return false;
+    }
+    for (const platform of ["Facebook", "Instagram", "TikTok", "YouTube"]) {
+      const slots = row?.approved_calendar_slots?.[platform];
+      if (!Array.isArray(slots) || slots.some((stamp) => !Number.isFinite(stamp) || stamp <= 0)) return false;
+      if (!Number.isInteger(row?.approved_future_by_platform?.[platform]) || row.approved_future_by_platform[platform] < 0) return false;
+      if (!Number.isInteger(row?.awaiting_final_by_platform?.[platform]) || row.awaiting_final_by_platform[platform] < 0) return false;
+      if (row?.pipeline_by_platform?.[platform] !== row.approved_future_by_platform[platform] + row.awaiting_final_by_platform[platform]) return false;
     }
   }
   return true;
@@ -5009,6 +5021,8 @@ function profilesOverviewSnapshotView() {
 }
 
 export function rememberProfilesOverviewSnapshot(snapshot) {
+  // V5 snapshots lack the per-output future/overdue calendar breakdown.
+  if (Number(snapshot?.schemaVersion || 0) !== 6) return null;
   const rows = Array.isArray(snapshot?.rows) ? snapshot.rows : [];
   if (!studioProfilesOverviewRowsHealthy(rows)) {
     console.warn("profiles overview: rejecting incomplete/duplicate-city snapshot");
@@ -5016,6 +5030,7 @@ export function rememberProfilesOverviewSnapshot(snapshot) {
   }
   studioProfilesOverviewCache.rows = rows;
   studioProfilesOverviewCache.at = Number(snapshot.at) || 0;
+  studioProfilesOverviewCache.lastR2CheckAt = Date.now();
   studioProfilesOverviewCache.authKey = String(snapshot.authKey || "");
   studioProfilesOverviewCache.complete = snapshot.complete === true;
   studioProfilesOverviewCache.schemaVersion = Number(snapshot.schemaVersion || 0);
@@ -5053,18 +5068,29 @@ export async function readStudioProfilesOverviewSnapshot(env, options = {}) {
   const cacheGeneration = String(cache.generation || "");
   const needsDurable = options.forceDurable === true
     || (expectedGeneration && cacheGeneration !== expectedGeneration);
-  if (cache.rows?.length && !studioProfilesOverviewRowsHealthy(cache.rows)) {
+  if (cache.rows?.length && (cache.schemaVersion !== 6 || !studioProfilesOverviewRowsHealthy(cache.rows))) {
     cache.rows = null;
     cache.complete = false;
     cache.at = 0;
   }
-  if (!needsDurable && cache.rows?.length) return profilesOverviewSnapshotView();
+  // Recheck the small R2 snapshot every 10s across Worker isolates. A warm
+  // isolate must not pin an older Home snapshot indefinitely; this is one
+  // bounded R2 GET, not an Airtable / Supabase rebuild.
+  if (!needsDurable && cache.rows?.length
+    && Date.now() - Number(cache.lastR2CheckAt || 0) < 10_000) {
+    return profilesOverviewSnapshotView();
+  }
   if (!env?.STUDIO_MEDIA?.get) return cache.rows?.length ? profilesOverviewSnapshotView() : null;
   try {
     const snapshot = await readStudioProfilesOverviewSnapshotFromR2(env);
+    cache.lastR2CheckAt = Date.now();
     if (!snapshot) return cache.rows?.length ? profilesOverviewSnapshotView() : null;
-    return rememberProfilesOverviewSnapshot(snapshot);
+    if (cache.rows?.length && Number(snapshot.at || 0) < Number(cache.at || 0)) {
+      return profilesOverviewSnapshotView();
+    }
+    return rememberProfilesOverviewSnapshot(snapshot) || (cache.rows?.length ? profilesOverviewSnapshotView() : null);
   } catch (error) {
+    cache.lastR2CheckAt = Date.now();
     console.warn("profiles overview snapshot read failed", error);
     return cache.rows?.length ? profilesOverviewSnapshotView() : null;
   }
@@ -5090,7 +5116,7 @@ export async function writeStudioProfilesOverviewSnapshot(env, rows, authKey, ex
     authKey,
     at,
     complete: true,
-    schemaVersion: 4,
+    schemaVersion: 6,
     generation,
     ideasAt,
     readSource,
@@ -5139,7 +5165,7 @@ export async function writeStudioProfilesOverviewSnapshot(env, rows, authKey, ex
 
 export async function verifyStudioProfilesOverviewSnapshot(env, expectedGeneration) {
   const snapshot = await readStudioProfilesOverviewSnapshotFromR2(env);
-  if (!snapshot?.complete || snapshot.schemaVersion !== 4 || !studioProfilesOverviewRowsHealthy(snapshot.rows)) {
+  if (!snapshot?.complete || snapshot.schemaVersion !== 6 || !studioProfilesOverviewRowsHealthy(snapshot.rows)) {
     throw new Error("Forced overview refresh could not verify a complete durable snapshot");
   }
   if (String(snapshot.generation || "") !== String(expectedGeneration || "")) {
@@ -5295,7 +5321,7 @@ export async function profilesOverview(request, env, authorization, ctx) {
   const manualRefreshing = manualRefresh.status === "refreshing";
   const age = snapshot?.at ? Date.now() - snapshot.at : Infinity;
   const freshMs = studioProfilesOverviewFreshMs(snapshot);
-  if (snapshot?.rows?.length && snapshot.complete === true && snapshot.schemaVersion === 4 && age < freshMs) {
+  if (snapshot?.rows?.length && snapshot.complete === true && snapshot.schemaVersion === 6 && age < freshMs) {
     if (!manualRefreshing) scheduleStudioProfilesOverviewIdeasRefresh(ctx, env, authorization);
     return respondProfilesOverviewSoft(request, env, {
       records: snapshot.rows,
@@ -5421,9 +5447,17 @@ export function validateStudioProfilesOverviewRows(rows, profiles) {
         throw new Error(`Profiles overview scheduled count is incomplete for ${platform}`);
       }
     }
-    for (const key of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished"]) {
+    for (const key of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished", "approved_future", "approved_past_due", "approved_missing_date", "pipeline_total"]) {
       if (typeof row?.[key] !== "number" || !Number.isFinite(row[key]) || row[key] < 0) {
         throw new Error(`Profiles overview ${key} count is incomplete`);
+      }
+    }
+    for (const platform of ["Facebook", "Instagram", "TikTok", "YouTube"]) {
+      if (!Array.isArray(row?.approved_calendar_slots?.[platform])
+        || !Number.isInteger(row?.approved_future_by_platform?.[platform])
+        || !Number.isInteger(row?.awaiting_final_by_platform?.[platform])
+        || row?.pipeline_by_platform?.[platform] !== row.approved_future_by_platform[platform] + row.awaiting_final_by_platform[platform]) {
+        throw new Error(`Profiles overview ${platform} approved calendar records missing`);
       }
     }
   }
@@ -8968,6 +9002,29 @@ export function deskOutputsForRequest(outputs, requestId) {
 }
 /*__STUDIO_WORKER_END:deskOutputsForRequest__*/
 
+async function loadStudioFailedOutputSnapshot(env) {
+  // 60-second shared read cache, independent of the R2 batch monitor.
+  return studioReadCoalesce("quality-agent-failed-output-census", 60000, async () => {
+    const [rows, profiles] = await Promise.all([
+      scanOutstandingFailedOutputs((options) =>
+        listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options)),
+      listContentProfileRecords(env).catch(() => []),
+    ]);
+    const profileNames = new Map((profiles || []).map((profile) => [
+      profile.id,
+      String(f(profile, "Market_Name") || f(profile, "Profile_Name") || profile.id).trim(),
+    ]));
+    const items = rows.map((record) => {
+      const item = describeFailedOutput(record);
+      return { ...item, profile_name: profileNames.get(item.profile_id) || item.profile_id };
+    });
+    return {
+      status: "ok", scanned_at: new Date().toISOString(),
+      count: rows.length, rows, items,
+    };
+  });
+}
+
 export async function gatherStudioDeskInventory(env) {
   const chicago = chicagoNowParts();
   const nowMs = Date.now();
@@ -9206,16 +9263,13 @@ export async function gatherStudioDeskInventory(env) {
     push(classifyPublishFailed(mapOut(record), nowMs));
     push(classifyYoutubeCoverQuota(mapOut(record)));
   }
+  let failedOutputSnapshot;
   try {
-    const failedRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit: 12,
-      sortField: "Output_ID",
-      sortDirection: "desc",
-      filterFormula: 'AND({Test_Run_ID}=BLANK(),OR({Render_Status}="Failed",{Publish_Status}="Failed",AND({Publish_Error_Message}!="",{Published_At}=BLANK()),AND({IG_Carousel_Error_Message}!="",{Published_At}=BLANK())))',
-    }).catch(() => []);
+    failedOutputSnapshot = await loadStudioFailedOutputSnapshot(env);
     scanned("render_failed", "publish_failed_transient", "publish_live_failed_status", "ttd0_route_blank_draft", "facebook_publish_rate_limit", "tiktok_auth_signature", "ig_carousel_too_many_children", "ig_carousel_child_verification_race", "ig_carousel_child_poll_failure", "ig_carousel_rate_limited");
-    for (const record of failedRows || []) {
+    for (const record of failedOutputSnapshot.rows) {
       const mapped = mapOut(record);
+      const before = incidents.length;
       push(classifyRenderRow(mapped, nowMs));
       push(classifyPublishLiveFailedStatus(mapped));
       push(classifyTtd0RouteBlankDraft(mapped));
@@ -9226,9 +9280,23 @@ export async function gatherStudioDeskInventory(env) {
       push(classifyIgCarouselChildPollFailure(mapped));
       push(classifyIgCarouselRateLimited(mapped));
       push(classifyPublishFailed(mapped, nowMs));
+      if (incidents.length === before && !incidents.some((item) => item.record_id === record.id)) {
+        const detail = describeFailedOutput(record, nowMs);
+        push({
+          kind: "output_failed_unclassified", class: "data_repair", actor: "desk_agent",
+          record_id: record.id, fingerprint: "output_failed_unclassified:" + record.id,
+          output_id: mapped.output_id, output_title: mapped.output_title,
+          platform: mapped.platform, platform_output_type: mapped.platform_output_type,
+          diagnosis: detail.error + " " + detail.action,
+        });
+      }
     }
   } catch (error) {
     console.warn("desk failed-status scan failed", error);
+    failedOutputSnapshot = {
+      status: "unavailable", scanned_at: new Date().toISOString(),
+      error: "Airtable failed-output scan failed; unresolved count is unknown.",
+    };
   }
   try {
     const igCarouselOverRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
@@ -9458,7 +9526,8 @@ export async function gatherStudioDeskInventory(env) {
   for (const row of incidents) rememberIdentity(row.record_id, deskWorkIdentity(row));
   activityEvents = await enrichDeskActivityIdentity(env, activityEvents, identityByRecord, contentById);
 
-  return buildDeskInventoryPayload({
+  return {
+    ...buildDeskInventoryPayload({
     mode,
     chicagoDate: chicago.date,
     chicagoHour: chicago.hour,
@@ -9467,7 +9536,9 @@ export async function gatherStudioDeskInventory(env) {
     caps,
     scannedKinds,
     activityEvents,
-  });
+    }),
+    failed_outputs: { ...failedOutputSnapshot, rows: undefined },
+  };
 }
 /*__STUDIO_WORKER_END:gatherStudioDeskInventory__*/
 
@@ -11965,6 +12036,13 @@ export async function studioAutonomousOpenAiPick(env, prompt) {
 /*__STUDIO_WORKER_END:studioAutonomousOpenAiPick__*/
 
 export async function createAutonomousIdea(env, profile, pick) {
+  const duplicateTitle = await studioFindRecentDuplicateTitle(pick.candidate_title, (kind, formula, field) => {
+    const table = kind === "idea" ? env.AIRTABLE_IDEA_TABLE_ID : env.AIRTABLE_CONTENT_TABLE_ID;
+    if (!table) throw new HttpError(503, "Title history unavailable: autonomous creation blocked");
+    return listRecords(env, table, { filterFormula: formula, fields: [field], limit: 1001 });
+  });
+  if (duplicateTitle) throw new HttpError(409,
+    `Title already used within 365 days (${duplicateTitle.source}); selecting a different subject.`);
   const fields = {
     Candidate_Title: pick.candidate_title,
     Candidate_Status: "Generated",
@@ -12707,7 +12785,8 @@ export async function fillAutonomousCityIdeas(env, authorization, {
     }
   }
   const planned = planAutonomousHourIdeas(catalog, {
-    goal: Math.max(0, goal - count),
+    // Try more distinct library clusters when historical titles are exhausted.
+    goal: Math.min(40, Math.max(0, goal - count) * 4),
     profileName: String(f(profile, "Profile_Name") || "").trim(),
     startIndex: count,
   });
@@ -12780,6 +12859,10 @@ export async function fillAutonomousCityIdeas(env, authorization, {
         });
         savedThis = true;
       } catch (error) {
+        if (error?.status === 409 && /already used within 365 days/.test(String(error?.message || ""))) {
+          console.warn("autonomous hour skipped repeat subject", profileId, pick.candidate_title);
+          break;
+        }
         console.warn("autonomous hour idea failed", profileId, attempt, error);
       }
     }
@@ -14737,7 +14820,17 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
             };
           },
         );
-        return respond(request, env, report);
+        let outputFailures;
+        try {
+          const snapshot = await loadStudioFailedOutputSnapshot(env);
+          outputFailures = { status: "ok", count: snapshot.count,
+            scanned_at: snapshot.scanned_at, items: snapshot.items };
+        } catch (error) {
+          console.warn("Factory failed-output Quality Agent scan degraded", error);
+          outputFailures = { status: "unavailable",
+            error: "Failed-output monitoring unavailable; the outstanding count is unknown." };
+        }
+        return respond(request, env, { ...report, output_failures: outputFailures });
       } catch (error) {
         console.warn("Factory quality read-only R2 monitoring degraded",
           String(error?.code || error?.status || error?.name || "unknown"));
@@ -14748,6 +14841,7 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
           quality_status: "unavailable",
           monitored_at: new Date().toISOString(),
           job_id: null, batches: [], quality_signals: [],
+          output_failures: { status: "unavailable", error: "Monitoring unavailable; count unknown." },
           totals: { batches: 0, pending: 0, failed: 0, findings: 0 },
         });
       }
@@ -14847,20 +14941,16 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
         child.records.some((row,i)=>row.id!==job.items[i]?.id)) return null;
   } else if (!rollout.enabled) return null;
   const run = async () => {
-    // Approve All already keeps one in-memory occupancy map for the whole job.
-    // Factory used to invalidate and reload Miami's occupied calendar after every
-    // row (limit 1200), which made 10-20 output batches feel stalled and burned
-    // Airtable into the cooling path that then 500'd the next large submit.
-    const profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId).catch(() => null);
-    // Only exclude still-pending rows. Already-approved times must stay in the
-    // occupancy map so a cron resume after the 20s drain budget cannot double-book.
-    const occupiedByLane = await studioOccupiedSchedulesOrEmpty(env, {
-      excludeIds: (job.items || [])
-        .filter((item) => !["approved", "already_satisfied", "failed"].includes(String(item.status || "")))
-        .map((item) => item.id),
-      profile, requireComplete: true });
-    const timeZone = studioScheduleTimeZoneForProfile(profile, MAE_DEFAULT_TIME_ZONE);
-    const horizonDays = await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS);
+    // A strict all-platform 90-day calendar read reaches the hard 1200-row cap
+    // for active profiles and rejects every Factory approval, even when the
+    // target platform has far fewer occupied slots. MAE lanes are independent
+    // per profile/platform; fetch authoritative occupancy for the exact
+    // platform after the R2 profile claim and reuse it for that drain.
+    // Never weaken requireComplete or omit any output type on that platform.
+    const occupancyByPlatform = new Map();
+    let profile = null;
+    let timeZone = null;
+    let horizonDays = null;
     try {
       const result = await factoryBatchDrain(env.STUDIO_MEDIA, {
         profileId, requestId, maxItems: 25, maxElapsedMs: 20000,
@@ -14892,6 +14982,24 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
           }
           const platform = String(f(record, "Platform") || "").trim();
           const outputType = String(f(record, "Studio_Output_Type") || f(record, "Format") || "").trim();
+          if (!platform) throw new HttpError(409, "Cannot verify Factory output platform for scheduling");
+          if (!occupancyByPlatform.has(platform)) {
+            if (!profile) {
+              profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId);
+              timeZone = studioScheduleTimeZoneForProfile(profile, MAE_DEFAULT_TIME_ZONE);
+              horizonDays = await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS);
+            }
+            // Exclude only the uncommitted outputs in this same batch. Already
+            // approved sibling slots remain occupied to prevent double booking.
+            const occupied = await studioOccupiedSchedulesOrEmpty(env, {
+              excludeIds: (job.items || [])
+                .filter((item) => !["approved", "already_satisfied", "failed"].includes(String(item.status || "")))
+                .map((item) => item.id),
+              profile, platform, requireComplete: true,
+            });
+            occupancyByPlatform.set(platform, occupied);
+          }
+          const occupiedByLane = occupancyByPlatform.get(platform);
           // Canonical single-output approval owns terminal-state idempotence and Do_Not_Publish.
           checkpoint("approval_started");
           const result = await factoryApproveOutput(
@@ -14919,7 +15027,8 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
             const lanePlatform = String(result.platform || platform).trim();
             const laneFormat = String(result.format || outputType).trim();
             const lane = maeScheduleLaneKey(lanePlatform, laneFormat) || lanePlatform.toLowerCase();
-            (occupiedByLane[lane] ||= []).push(Number(result.scheduled_ms));
+            const laneOccupancy = occupancyByPlatform.get(lanePlatform);
+            if (laneOccupancy) (laneOccupancy[lane] ||= []).push(Number(result.scheduled_ms));
           }
           checkpoint("approval_finished");
           return result;
@@ -15329,23 +15438,53 @@ async function factoryGroupRecordsFromAirtablePreflight(env, authorization, ids,
 export async function factoryBatchCronResume(env, ctx = null) {
   if (String(env?.FACTORY_BATCH_APPROVALS_ENABLED || "").toLowerCase() !== "true" && !factoryGlobalPolicy(env).enabled) return 0;
   if (!env?.STUDIO_MEDIA?.list) return 0;
-  // Independently resume parent ledgers after interrupted child enqueue.
+  // Parent group ledgers are a second, authoritative index for newly accepted
+  // global approvals. Discover a bounded set of pending children here instead
+  // of relying exclusively on the rotating, history-heavy child-key scan.
+  // Each child retains its existing R2 profile lease and canonical output guard.
+  const candidates = [];
   if (factoryGlobalPolicy(env).enabled) {
-    const groupIds=await factoryApprovalGroupCronScan(env.STUDIO_MEDIA,{maxScan:50});
-    let groupResumes=0;
-    for (const groupId of groupIds) {
-      if (groupResumes>=5) break;
-      const parent=await factoryApprovalGroupRead(env.STUDIO_MEDIA,groupId);
-      if (parent?.status==="enqueuing") {
-        await factoryApprovalGroupResume(env.STUDIO_MEDIA,groupId);
-        groupResumes++;
+    try {
+      const groupIds = await factoryApprovalGroupCronScan(env.STUDIO_MEDIA, { maxScan: 50 });
+      let groupResumes = 0, inspectedGroups = 0;
+      for (const groupId of groupIds) {
+        try {
+          const parent = await factoryApprovalGroupRead(env.STUDIO_MEDIA, groupId);
+          if (parent?.status === "enqueuing" && groupResumes < 5) {
+            await factoryApprovalGroupResume(env.STUDIO_MEDIA, groupId);
+            groupResumes++;
+          }
+          if (!Array.isArray(parent?.children) || inspectedGroups >= 12) continue;
+          inspectedGroups++;
+          for (const child of parent.children.slice(0, 5)) {
+            const profileId = String(child.profile_id || "");
+            const requestId = String(child.request_id || "");
+            if (!/^rec[A-Za-z0-9]+$/.test(profileId) || !/^[A-Za-z0-9_-]{12,128}$/.test(requestId)) continue;
+            const job = await factoryBatchRead(env.STUDIO_MEDIA, profileId, requestId);
+            if (job && ["queued", "running"].includes(job.status)
+                && !factoryBatchQualitySignals(job).some(s => s.code === "QA-FACTORY-BATCH-DUPLICATE-ITEM")) {
+              candidates.push({ profileId, requestId, job });
+            }
+          }
+        } catch (error) {
+          console.warn("Factory parent recovery skipped malformed group", groupId,
+            String(error?.message || error).slice(0, 140));
+        }
       }
+    } catch (error) {
+      // A parent-index failure must never suppress independently durable child
+      // recovery. Previous behavior aborted the entire minute here.
+      console.warn("Factory parent recovery scan unavailable", String(error?.message || error).slice(0, 140));
     }
   }
-  // The persisted cursor rotates through old histories (rather than rereading
-  // the first 200 lexical R2 keys forever). Process only a bounded scan on each tick.
-  const { objects } = await factoryBatchCronScan(env.STUDIO_MEDIA, { maxScan: 200 });
-  const candidates = [];
+  // Keep the original rotating child scan for standalone, historical and
+  // non-group jobs. A bad scan must not starve the parent-index candidates.
+  let objects = [];
+  try {
+    ({ objects } = await factoryBatchCronScan(env.STUDIO_MEDIA, { maxScan: 200 }));
+  } catch (error) {
+    console.warn("Factory child recovery scan unavailable", String(error?.message || error).slice(0, 140));
+  }
   for (const object of objects) {
     const match = object.key.match(/\/jobs\/(rec[A-Za-z0-9]+)\/([A-Za-z0-9_-]{12,128})\.json$/);
     if (!match) continue;
@@ -15365,7 +15504,10 @@ export async function factoryBatchCronResume(env, ctx = null) {
     if (signatures.some(item => item.code === "QA-FACTORY-BATCH-DUPLICATE-ITEM")) continue;
     candidates.push({ profileId: match[1], requestId: match[2], job });
   }
-  const selected = factoryBatchCronSelectJobs(candidates, { maxProfiles: 5 });
+  // The same child may appear in both indexes; dispatch it only once.
+  const distinct = [...new Map(candidates.map(row =>
+    [row.profileId + "/" + row.requestId, row])).values()];
+  const selected = factoryBatchCronSelectJobs(distinct, { maxProfiles: 5 });
   for (const candidate of selected) {
     await factoryBatchProcess(env, candidate.profileId, candidate.requestId, ctx);
   }

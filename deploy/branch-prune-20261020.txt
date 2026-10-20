@@ -1,0 +1,2 @@
+2026-10-20 Pinned branch archive/prune run: after audited comparison and closed-PR review, safely archive unique commits and delete 25 inactive branches; retain only main plus open PR #923, #951 and #974. No runtime or publishing code changes.
+Retry 2026-10-20: verified archive tag propagation may lag; retry bounded 404 checks. No branch SHA or candidate scope changes.

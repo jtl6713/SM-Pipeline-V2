@@ -852,44 +852,24 @@ test("unused stills cluster into a related 5-10 set", () => {
   assert.deepEqual(occupiedRequest.media_asset_ids, ["recPilsen0000000000"]);
 });
 
-test("under 500 the hour plans 10 ideas even when subjects repeat or stills are thin", () => {
+test("hourly planner creates only distinct subjects, never numbered or filler duplicates", () => {
   const thin = [
-    {
-      id: "recThin0000000001",
-      name: "Pool 1.jpeg",
-      location: "Venetian Pool",
-    },
-    {
-      id: "recThin0000000002",
-      name: "Pool 2.jpeg",
-      location: "Venetian Pool",
-    },
+    {id: "recThin0000000001", name: "Pool 1.jpeg", location: "Venetian Pool"},
+    {id: "recThin0000000002", name: "Pool 2.jpeg", location: "Venetian Pool"},
   ];
-  const planned = planAutonomousHourIdeas(thin, { profileName: "Miami", goal: 10 });
-  assert.equal(planned.length, 10);
-  assert.equal(planned.filter((row) => row.media_asset_ids.length).length, 1);
+  const planned = planAutonomousHourIdeas(thin, {profileName: "Miami", goal: 10});
+  assert.equal(planned.length, 1);
+  assert.equal(planned[0].candidate_title, "Venetian Pool");
   assert.deepEqual(planned[0].media_asset_ids, ["recThin0000000001", "recThin0000000002"]);
-  assert.equal(planned[0].needs_assets, false);
-  assert.equal(planned.filter((row) => row.needs_assets).length, 9);
-  assert.equal(planned[1].media_asset_ids.length, 0);
-  assert.equal(planned[1].candidate_title, "Miami stills needed");
-  const empty = planAutonomousHourIdeas([], { profileName: "Chicago", goal: 10 });
-  assert.equal(empty.length, 10);
-  assert.equal(empty.every((row) => row.needs_assets && row.media_asset_ids.length === 0), true);
-  const many = [];
-  for (let index = 0; index < 12; index += 1) {
-    many.push({
-      id: `recPark${String(index).padStart(12, "0")}`,
-      name: `Park ${index}.jpeg`,
-      location: "Millennium Park",
-    });
-  }
-  const split = planAutonomousHourIdeas(many, { profileName: "Chicago", goal: 10 });
-  assert.equal(split.filter((row) => row.media_asset_ids.length).length, 2);
-  assert.equal(split[0].media_asset_ids.length, 10);
-  assert.equal(split[1].media_asset_ids.length, 2);
-  assert.equal(split.filter((row) => row.needs_assets).length, 8);
-  assert.notEqual(split[0].candidate_title, split[1].candidate_title);
+  assert.deepEqual(planAutonomousHourIdeas([], {profileName:"Chicago",goal:10}), []);
+  const many=Array.from({length:12},(_,i)=>({
+    id:`recPark${String(i).padStart(12,"0")}`, name:`Park ${i}.jpeg`,location:"Millennium Park",
+  }));
+  const split=planAutonomousHourIdeas(many,{profileName:"Chicago",goal:10});
+  assert.equal(split.length,1,"second image packet is not a new content idea");
+  assert.equal(split[0].candidate_title,"Millennium Park");
+  assert.equal(split[0].media_asset_ids.length,10);
+  assert.doesNotMatch(split.map(x=>x.candidate_title).join(","), /stills needed|park 2/i);
 });
 
 test("JSON fences unwrap and last-run notes stay readable", () => {
@@ -904,7 +884,7 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   const path = await import("node:path");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const worker = readStudioWorkerSource();
-  assert.match(worker, /version: "0.10.670-profile-summary-parity"/);
+  assert.match(worker, /version: "0.10.671-quality-failed-output-recovery"/);
   assert.match(worker, /studio_autonomous_ten_ideas_anyway_v1: true/);
   assert.match(worker, /planAutonomousHourIdeas/);
   const hourFill = worker.slice(

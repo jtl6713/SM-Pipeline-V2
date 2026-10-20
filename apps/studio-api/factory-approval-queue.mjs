@@ -448,10 +448,24 @@ export function factoryBatchQualitySignals(job, nowMs = Date.now()) {
     signals.push({ code: "QA-FACTORY-BATCH-STATE-MISMATCH", safe_auto_recover: true,
       detail: "Active job has only terminal items" });
   }
-  const updated = Date.parse(job.updated_at || job.created_at || "");
-  if (counts.pending_count && updated && nowMs - updated > 20 * 60 * 1000) {
+  // A transient retry or a lease heartbeat is not an approval. Watch actual
+  // successful completions while work remains; existing cron safely reclaims
+  // expired profile leases and resumes from the durable item ledger.
+  const lastSuccess = Math.max(
+    Date.parse(job.created_at || job.updated_at || "") || 0,
+    ...(job.items || []).flatMap(item => (item.timeline || [])
+      .filter(event => event.state === "approved" || event.state === "already_satisfied")
+      .map(event => Date.parse(event.at || "") || 0)),
+  );
+  const approvalIdleMs = nowMs - lastSuccess;
+  if (counts.pending_count && ["queued", "running"].includes(job.status) &&
+      lastSuccess > 0 && approvalIdleMs >= 15 * 60 * 1000) {
     signals.push({ code: "QA-FACTORY-BATCH-STALLED", safe_auto_recover: true,
-      detail: "No durable batch progress for over 20 minutes; cron may reclaim expired lease" });
+      detail: "Pending Factory approvals with no successful approval for 15 minutes; existing cron reclaims expired lease and resumes pending items" });
+    if (approvalIdleMs >= 30 * 60 * 1000) {
+      signals.push({ code: "QA-FACTORY-BATCH-RECOVERY-FAILED", safe_auto_recover: false,
+        detail: "No successful Factory approval after an additional 15 minutes; operator attention required" });
+    }
   }
   if (job.items.some(item => item.status === "pending" && Number(item.next_attempt_ms) > nowMs)) {
     signals.push({ code: "QA-FACTORY-BATCH-TRANSIENT-WAIT", safe_auto_recover: true,

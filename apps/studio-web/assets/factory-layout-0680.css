@@ -562,3 +562,26 @@
   }
   #page-factory .factory-batch-child-grid{grid-template-columns:1fr}
 }
+
+/* Factory review pagination: keep the iPad queue compact, navigable and
+   in the document scroll instead of trapping hundreds of rows in a small box. */
+#page-factory .factory-band-eyes .factory-review-pagination{
+  box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;
+  flex-wrap:wrap;gap:8px 14px;width:100%;min-width:0;padding:9px 12px;
+  background:#f6f8fb;border-bottom:1px solid #dfe6ef;color:#40536e;
+  font-size:.78rem;line-height:1.35;
+}
+#page-factory .factory-review-page-count{min-width:0;overflow-wrap:anywhere}
+#page-factory .factory-review-page-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+#page-factory .factory-review-page-actions button{min-height:36px;padding:6px 12px}
+#page-factory .factory-band-eyes .factory-content-bar,
+#page-factory .factory-band-eyes .factory-content-rows{flex:0 0 auto}
+@media (min-width:761px) and (max-width:1366px){
+  #page-factory .factory-band-eyes .factory-lane-list{
+    max-height:none;overflow:visible;scrollbar-gutter:auto;
+  }
+}
+@media (max-width:760px){
+  #page-factory .factory-review-page-actions{width:100%;justify-content:space-between}
+  #page-factory .factory-review-page-actions button{min-height:42px}
+}

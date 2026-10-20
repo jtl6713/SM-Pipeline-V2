@@ -554,3 +554,24 @@ Deploy targeted November 17 MAE overage selector from merged PR #936; no automat
 2026-10-20: Deploy PR #969 reconciliation-only Airtable egress attribution. Keep Airtable write SoR, Home/refill summary reads OFF, existing capture/reconcile ON; no forced reconciliation, no publishing mutations. Verify Worker production canaries.
 
 2026-10-20: Deploy PR #970 Airtable Home/refill request category attribution only. Preserve production Worker configuration, Airtable write authority, Home/refill summary reads OFF; avoid forced full reconciliations and protect scheduling.
+
+2026-10-20: Home profile parenthesis tally v5 — count every final-approved, not-yet-published output (upcoming, overdue, and unscheduled) until genuine publication; rebuild old future-only DO/R2 snapshots, preserve Airtable SoR and approval/publish paths. Controlled Worker deploy and All Profiles force-refresh acceptance.
+
+2026-10-20: P0 Home tally deploy hotfix: V5 overview writer and verifier must both accept schema 5 (previous verifier incorrectly required 4); reject legacy v4 snapshots and keep Airtable authority, supabase breaker, and all scheduling approvals unchanged. Trigger controlled Worker deployment and authenticated overview canary.
+
+2026-10-20: P0 Factory approval recovery PR #981. Claim the per-profile R2 lease BEFORE running authoritative 90-day Airtable schedule occupancy reads; preserve complete-read fail-closed safety, idempotent approvals, Airtable SoR, Supabase Phase 5 read breaker, and production binding contract. Controlled Worker rollout; verify pending batch counts decline and no approved outputs are repeated.
+2026-10-20: P0 Factory post-deploy acceptance: re-run authenticated read-only Factory status canary and log sanitized active group counts so observed backlog progress is measurable. No application code or binding changes.
+
+2026-10-20: P0 Factory live verified 33 approved / 64 pending for 8 global batches after PR #981. Deploy merged PR #986 independent R2 parent-ledger child recovery when rotating child scan starves accepted Miami/LA approvals; preserve idempotent Airtable approval, strict scheduling, Phase 5 Supabase breaker and existing Cloudflare bindings; verify production counts using the authenticated read-only Factory audit.
+
+2026-10-20: P0 Factory #987 production recovery. Strict 90-day per-platform Airtable occupancy (all output types) replaces capped all-platform Factory scan for accepted batches. Preserve Airtable authoritative source, MAE collision protection, serial profile leases, output idempotency, Supabase Phase 5 breaker and existing bindings. Validate stalled 8 batches/64 pending counts via authenticated read-only audit after deploy.
+
+2026-10-20: Home v6 future-approved platform-output count by canonical Scheduled_Post_Date, separate past-due and missing-date exceptions; rebuild v5 R2 snapshot after deploy, Airtable remains source of truth, Supabase Home/refill reads remain disabled, preserve scheduling lock and all approval/publish paths.
+
+2026-10-20: Deploy merged PR #991 Factory Quality Agent 15-minute approval-progress stall alert, existing cron-safe R2 lease recovery, and 30-minute operator escalation. Preserve Airtable authority, reservation locks, Supabase Phase 5 breaker, and production bindings.
+
+2026-10-20: Publish approved-future plus rendered-awaiting-final-human-approval platform-output pipeline count and output-target 500/5 hourly refill from Worker with v6 empty-snapshot migration canary. Airtable authoritative. No schedule/publish changes.
+2026-10-20 PR #923 corrected: deploy 365-day title-history checks in Studio manual and autonomous writers, no numeric title clones, no filler duplicates. Do not publish or delete existing outputs.
+2026-10-20 Quality Agent all-failed-output recovery v2: complete paginated failure census, existing bounded cooldown-safe self-heal, no silent empty findings, Factory output failure visibility. PR reconciled from #1000.
+2026-10-20: Deploy Worker 0.10.671-quality-failed-output-recovery. Fix the bounded render-retry counter, resolve profile names in the census, and verify residual failures through the authenticated production canary.
+Deploy Worker 0.10.671-quality-failed-output-recovery-home-v6-fast-cache. Fix V6 fresh cache, cross-isolate R2 refresh, no Supabase read cutover. Triggered 2026-10-20.
