@@ -11,6 +11,7 @@ on:
     - cron: '13 * * * *'
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: shadow-profile-evidence-hourly
   cancel-in-progress: false
@@ -27,6 +28,8 @@ jobs:
         run: python -m unittest discover -s repair/scripts -p 'shadow_freshness_window_report_test.py' -v
       - name: Verify rollup logic
         run: python -m unittest discover -s repair/scripts -p 'airtable_hourly_rollup_test.py' -v
+      - name: Test automatic 24-hour evidence gate
+        run: python -m unittest discover -s repair/scripts -p 'shadow_24h_auto_evidence_test.py' -v
       - name: Collect read-only metrics through temporary service binding
         shell: bash
         run: |
@@ -79,6 +82,50 @@ jobs:
           echo '### Shadow profile hourly observation' >> "$GITHUB_STEP_SUMMARY"
           jq -r '"- Captured: " + .captured_at + "\\n- Summary version: " + (.summary_version|tostring) + "\\n- Dirty applied: " + (.evidence.dirty_applied|tostring) + "\\n- Airtable dirty attempts: " + (.evidence.airtable_dirty_batch_attempts|tostring) + "\\n- Airtable dirty errors: " + (.evidence.airtable_dirty_batch_errors|tostring)' evidence.json >> "$GITHUB_STEP_SUMMARY"
           echo '- Interpretation: cumulative telemetry only; these values do not establish full Airtable request savings.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Find retained evidence from approximately 24 hours earlier
+        id: prior
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/shadow-profile-summary-hourly-evidence.yml/runs?status=success&per_page=100" > /tmp/previous-evidence-runs.json
+          python - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          from pathlib import Path
+          current = datetime.fromisoformat(json.loads(Path("evidence.json").read_text())["captured_at"].replace("Z","+00:00"))
+          runs = json.loads(Path("/tmp/previous-evidence-runs.json").read_text()).get("workflow_runs", [])
+          candidates = []
+          for run in runs:
+              if run.get("head_branch") != "main" or run.get("conclusion") != "success":
+                  continue
+              stamp = datetime.fromisoformat(run["created_at"].replace("Z","+00:00"))
+              age = (current - stamp).total_seconds() / 3600
+              if 23 <= age <= 25:
+                  candidates.append((abs(age - 24), run["id"]))
+          best = min(candidates)[1] if candidates else ""
+          with open(os.environ["GITHUB_OUTPUT"], "a") as stream:
+              stream.write("run_id=" + str(best) + "\n")
+          print("prior_24h_run_found=" + str(bool(best)))
+          PY
+
+      - name: Download prior day's retained evidence
+        if: steps.prior.outputs.run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: shadow-evidence-${{ steps.prior.outputs.run_id }}
+          run-id: ${{ steps.prior.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: previous
+
+      - name: Evaluate 24-hour shadow freshness automatically
+        shell: bash
+        run: |
+          set -euo pipefail
+          python repair/scripts/shadow_24h_auto_evidence.py --current evidence.json --prior previous/evidence.json --output freshness-24h.json
+          jq -r '"- 24-hour evidence ready: " + (.ready|tostring) + "\n- 24-hour freshness gate: " + (.freshness_gate_passed|tostring) + "\n- Samples applied: " + ((.observed_samples // 0)|tostring) + "\n- Reason: " + .reason' freshness-24h.json >> "$GITHUB_STEP_SUMMARY"
+
       - name: Save evidence artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -90,6 +137,7 @@ jobs:
             runner-airtable-egress.json
             airtable-egress-coverage.json
             airtable-hourly-rollup.json
+            freshness-24h.json
           retention-days: 30
           if-no-files-found: ignore
 
