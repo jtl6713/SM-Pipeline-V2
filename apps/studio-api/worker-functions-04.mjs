@@ -5293,8 +5293,11 @@ export async function profilesOverview(request, env, authorization, ctx) {
   if (snapshot?.rows?.length) {
     const supabaseBacked = studioProfilesOverviewReadSource(snapshot) === "supabase" || studioReadSource(env) === "supabase";
     const cooling = !supabaseBacked && airtableCooldownWaitMs() > AIRTABLE_SLOT_FAIL_FAST_MS;
-    // Do not scheduleStudioProfilesOverviewRefresh from this poll. Every stale
-    // Home view was starting a Supabase rebuild and GET content_profiles 504'd.
+    // Expired Airtable snapshots must rebuild output counts after approvals;
+    // never reactivate the Supabase read path or retry during Airtable cooling.
+    if (!manualRefreshing && !supabaseBacked && !cooling) {
+      scheduleStudioProfilesOverviewRefresh(ctx, env, authorization);
+    }
     if (!manualRefreshing) scheduleStudioProfilesOverviewIdeasRefresh(ctx, env, authorization);
     return respondProfilesOverviewSoft(request, env, {
       records: snapshot.rows,
