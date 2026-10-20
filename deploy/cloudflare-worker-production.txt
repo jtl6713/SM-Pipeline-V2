@@ -507,3 +507,5 @@ Deploy PR #905 photo-wait historical platform default repair (Threads 400): filt
 2026-10-19: P0 #907 live R2 Ready queue progressed past discovery after PR #912, but first claim fails ReferenceError PR_PLATFORMS is not defined. Import canonical worker.js export into split queue module and regression guard; deploy controlled Worker only (PR #913).
 
 2026-10-19: P0 #907 release only the exact obsolete PR_PLATFORMS is not defined retry signature after import repair, without resetting active leases or other backoffs; preserve existing requests and human final review. Validate recovered production outputs.
+
+2026-10-19: P0 #907 reconcile linked asset-ready autonomous Production Requests whose Ideas have blank photo-wait status; enqueue durable per-profile jobs in bounded batches, reserve separate planning and render/QA monitoring lanes, and avoid duplicate requests or automatic approval. Airtable remains authoritative, Supabase Phase 5 reads off; controlled deployment with canaries.
