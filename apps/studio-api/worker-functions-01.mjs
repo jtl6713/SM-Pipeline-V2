@@ -1179,7 +1179,7 @@ export async function listRecords(env, tableId, options = {}) {
       if (field) params.append("fields[]", String(field));
     }
     if (offset) params.set("offset", offset);
-    const result = await airtableFetch(env, tableId, `?${params.toString()}`);
+    const result = await airtableFetch(env, tableId, `?${params.toString()}`, { airtableEgressSource: options.airtableEgressSource });
     const page = Array.isArray(result.records) ? result.records : [];
     records.push(...page);
     offset = result.offset || null;
@@ -3018,13 +3018,13 @@ export function studioApproveAllCandidateFormula(profile) {
 }
 /*__STUDIO_WORKER_END:studioApproveAllCandidateFormula__*/
 
-export async function listContentProfileRecords(env) {
+export async function listContentProfileRecords(env, options = {}) {
   if (Array.isArray(env.__contentProfilesCache) && env.__contentProfilesCache.length) {
     return env.__contentProfilesCache;
   }
   // Do not cache an unsettled/rejected Promise on env — a canceled in-flight
   // listRecords would hang every profile-scoped route until isolate recycle.
-  const rows = await listRecords(env, "Content Profiles", { limit: 100 });
+  const rows = await listRecords(env, "Content Profiles", { limit: 100, airtableEgressSource: options.airtableEgressSource });
   env.__contentProfilesCache = rows;
   return rows;
 }

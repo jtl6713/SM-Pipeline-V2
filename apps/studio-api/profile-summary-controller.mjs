@@ -98,7 +98,7 @@ async function listRecordsWithCoolingRetry(env, tableId, options) {
   let lastError;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      return await listRecords(env, tableId, options);
+      return await listRecords(env, tableId, { ...options, airtableEgressSource: "shadow_reconcile" });
     } catch (error) {
       lastError = error;
       const cooling = Number(error?.status) === 429
@@ -120,7 +120,7 @@ export async function reconcileStudioProfileSummary(env) {
 }
 
 async function runStudioProfileSummaryReconcile(env) {
-  const rawProfiles = await listContentProfileRecords(env);
+  const rawProfiles = await listContentProfileRecords(env, { airtableEgressSource: "shadow_reconcile" });
   const profiles = rawProfiles.filter((p) => {
     const label = String(p.fields?.Profile_Name || "").toLowerCase();
     return ["chicago", "new york", "los angeles", "miami"].some((city) => label.includes(city));
