@@ -24,10 +24,11 @@ jobs:
           auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           name="chicagoshining-summary-evidence"
           trap 'curl -sS -X DELETE "$api/workers/scripts/$name" -H "$auth" >/dev/null || true' EXIT
-          cat >worker.js <<'JS'
+          token=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
+          cat >worker.js <<JS
           export default {
             async fetch(req, env) {
-              if (new URL(req.url).pathname !== "/evidence") return new Response("Not found", {status:404});
+              if (new URL(req.url).pathname !== "/$token/evidence") return new Response("Not found", {status:404});
               const headers = {"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Accept":"application/json"};
               const response = await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/profiles/overview/summary/status",{headers}));
               return new Response(response.body,{status:response.status,headers:{"Content-Type":"application/json","Cache-Control":"no-store"}});
@@ -44,7 +45,7 @@ jobs:
           jq -e '.success == true' subdomain.json >/dev/null
           curl -fsS "$api/workers/subdomain" -H "$auth" >account.json
           sub=$(jq -er '.result.subdomain' account.json)
-          curl -fsS --max-time 30 "https://$name.$sub.workers.dev/evidence" >status.json
+          curl -fsS --max-time 30 "https://$name.$sub.workers.dev/$token/evidence" >status.json
           jq -e '.ok == true and (.evidence | type) == "object"' status.json >/dev/null
           jq '{captured_at:(now|todate),summary_version:.version,complete:.complete,building_generation:.building_generation,error:.error,evidence:.evidence}' status.json >evidence.json
           cat evidence.json
