@@ -1,13 +1,13 @@
 /** Complete, read-only failed-output census used by Desk and Factory Quality Agent. */
 export const FAILED_OUTPUT_FORMULA = 'AND({Test_Run_ID}=BLANK(),OR({Output_Status}="Failed",{Render_Status}="Failed",{Publish_Status}="Failed",AND({Publish_Error_Message}!="",{Published_At}=BLANK()),AND({IG_Carousel_Error_Message}!="",{Published_At}=BLANK())))';
 
-export async function scanOutstandingFailedOutputs(fetchPage, { pageSize = 100 } = {}) {
+export async function scanOutstandingFailedOutputs(fetchPage, { pageSize = 100, filterFormula = FAILED_OUTPUT_FORMULA } = {}) {
   const records = [];
   const seenRecords = new Set();
   const visitedOffsets = new Set();
   let offset = null;
   do {
-    const page = await fetchPage({ limit: Math.min(100, Math.max(1, pageSize)), offset, filterFormula: FAILED_OUTPUT_FORMULA });
+    const page = await fetchPage({ limit: Math.min(100, Math.max(1, pageSize)), offset, filterFormula });
     if (!page || !Array.isArray(page.records)) throw new Error("Failed-output scan returned an invalid page");
     for (const row of page.records) {
       if (row?.id && !seenRecords.has(row.id)) {
