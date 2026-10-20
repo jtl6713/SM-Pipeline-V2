@@ -1,3 +1,4 @@
+import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
 import { readStudioProfileSummary, validVerifiedStudioSummary } from "./profile-summary-controller.mjs";
 import { homeOutputContribution, homeIdeaContribution, combineHomeContributions } from "./profile-summary-classification.mjs";
 import { countPendingPlatformDispatch } from "./overview-dispatch-counts.mjs";
@@ -388,6 +389,7 @@ import {
   maeScheduleLaneKey,
   maeScheduleNextSlot,
   maeTimeZoneFromTheme,
+  maeZonedDateTimeParts,
 } from "./mae-schedule.mjs";
 import {
   SCHEDULE_REGEN_JOBS_SETTING,
@@ -3233,7 +3235,55 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
           if (iso && Number.isFinite(stamp) && stamp > horizonMs) continue;
           eligible.push(row);
         }
-        eligibleIds = eligible.map((row) => row.id);
+        if (job.repair_date) {
+          // Occupancy belongs to the entire profile/platform, not the output type:
+          // a Story and a Reel at the same time are competing reservations.
+          const platformRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+            limit: STUDIO_OCCUPIED_LIST_LIMIT,
+            sortField: "Scheduled_Post_Date",
+            sortDirection: "asc",
+            filterFormula: [
+              "AND(",
+              profileFormula ? profileFormula + "," : "",
+              'LOWER({Platform})="' + platformWant.replace(/"/g, "") + '",',
+              'IS_AFTER({Scheduled_Post_Date},DATETIME_PARSE("' + new Date(Date.parse(job.repair_date + "T00:00:00Z") - 2 * 86400000).toISOString() + '")),',
+              'IS_BEFORE({Scheduled_Post_Date},DATETIME_PARSE("' + new Date(Date.parse(job.repair_date + "T00:00:00Z") + 3 * 86400000).toISOString() + '"))',
+              ")",
+            ].join(""),
+            fields: scheduleFields,
+          });
+          if (platformRows.length >= STUDIO_OCCUPIED_LIST_LIMIT) {
+            throw new HttpError(409, "Targeted repair requires a complete platform occupancy scan");
+          }
+          const localDate = (stamp) => {
+            const d = maeZonedDateTimeParts(new Date(stamp), timeZone);
+            return [d.year, String(d.month).padStart(2, "0"), String(d.day).padStart(2, "0")].join("-");
+          };
+          const matching = platformRows.filter((row) => {
+            if (!studioOccupiedRowMatchesProfile(row, profile)) return false;
+            if (String(f(row, "Platform") || "").trim().toLowerCase() !== platformWant) return false;
+            const stamp = Date.parse(String(f(row, "Scheduled_Post_Date") || ""));
+            return Number.isFinite(stamp) && localDate(stamp) === job.repair_date;
+          });
+          const displacedIds = new Set(selectTargetedScheduleOverages(matching, eligible.map((row) => row.id), {
+            getStamp: (row) => Date.parse(String(f(row, "Scheduled_Post_Date") || "")),
+            getOrder: (row) => Number(f(row, "Output_ID") || 0),
+            isImmutable: (row) => Boolean(f(row, "Do_Not_Publish"))
+              || Boolean(String(f(row, "Published_At") || "").trim())
+              || ["Published", "Canceled", "Cancelled"].includes(String(f(row, "Output_Status") || "").trim())
+              || String(f(row, "Publish_Status") || "").trim() === "Published",
+          }));
+          eligibleIds = eligible.filter((row) => displacedIds.has(row.id)).map((row) => row.id);
+          // Only overages are excluded by the atomic writer. Every other
+          // record—including companions in a different output type—stays occupied.
+          for (const row of eligible) {
+            if (displacedIds.has(row.id)) continue;
+            const stamp = studioOccupiedMsFromRow(row, nowMs);
+            if (stamp != null) protectedTimes.push(stamp);
+          }
+        } else {
+          eligibleIds = eligible.map((row) => row.id);
+        }
         // Prefer placed_isos from completed combos. Skip the heavy same-platform
         // Airtable scan — it kept killing waitUntil before Story could persist a plan.
         const platformProtectedTimes = [];
@@ -3348,6 +3398,9 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
 
     const done = Math.max(0, Number(combo.completed_posts) || 0);
     const sliceEnd = Math.min(plan.length, done + postsPerSlice);
+    if (job.repair_date && !scheduleReservationLaneEnabled(env, combo.profile_id, combo.platform)) {
+      throw new HttpError(409, "Targeted repair cannot run without atomic reservation protection");
+    }
     if (scheduleReservationLaneEnabled(env, job.profile_id || combo.profile_id, combo.platform)) {
       // The stored regeneration plan is a progress/order checkpoint only.
       // Final slot selection is repeated against authoritative occupancy while
@@ -3516,6 +3569,21 @@ export async function startScheduleRegenJob(request, env, authorization, ctx = n
   const payload = await readJsonBody(request);
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(new URL(request.url), payload));
   const { platforms, outputTypes, profiles } = studioNormalizeRegenFilters(payload);
+  const repairDate = String(payload.repair_date || "").trim();
+  if (repairDate) {
+    const parsed = new Date(repairDate + "T00:00:00Z");
+    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(repairDate)
+      || !Number.isFinite(parsed.getTime())
+      || parsed.toISOString().slice(0, 10) !== repairDate) {
+      throw new HttpError(400, "repair_date must be a real YYYY-MM-DD date");
+    }
+  }
+  if (repairDate && (profiles.length > 1 || (profiles.length === 1 && profiles[0].id !== profile?.id) || !profile?.id || platforms.length !== 1 || outputTypes.length !== 1)) {
+    throw new HttpError(400, "Targeted repair requires exactly one selected profile, platform, and output type");
+  }
+  if (repairDate && !scheduleReservationLaneEnabled(env, profile?.id, platforms[0])) {
+    throw new HttpError(409, "Targeted repair requires the atomic scheduling reservation authority");
+  }
   if (!platforms.length || !outputTypes.length) {
     throw new HttpError(400, "Select at least one platform and one output type");
   }
@@ -3555,6 +3623,7 @@ export async function startScheduleRegenJob(request, env, authorization, ctx = n
     horizonDays,
     eligibleCount: Number(payload.eligible_count || payload.eligibleCount || 0) || 0,
   });
+  if (repairDate) job.repair_date = repairDate;
   store.jobs[job.id] = job;
   store.active_by_scope[scope] = job.id;
   await studioPutScheduleRegenJobStore(env, store);
