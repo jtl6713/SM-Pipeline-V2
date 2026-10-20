@@ -556,3 +556,5 @@ Deploy targeted November 17 MAE overage selector from merged PR #936; no automat
 2026-10-20: Deploy PR #970 Airtable Home/refill request category attribution only. Preserve production Worker configuration, Airtable write authority, Home/refill summary reads OFF; avoid forced full reconciliations and protect scheduling.
 
 2026-10-20: Home profile parenthesis tally v5 — count every final-approved, not-yet-published output (upcoming, overdue, and unscheduled) until genuine publication; rebuild old future-only DO/R2 snapshots, preserve Airtable SoR and approval/publish paths. Controlled Worker deploy and All Profiles force-refresh acceptance.
+
+2026-10-20: Hotfix Home approved-unpublished all-states v5 snapshot verifier: match v5 writer and keep strict authoritative refresh safety; no changes to Airtable SoR, Supabase read breaker, scheduling, approvals or publishing.
