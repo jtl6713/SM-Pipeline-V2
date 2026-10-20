@@ -1,0 +1,2 @@
+One-time P0 #907 post-recovery GitHub branch hygiene.
+Only the 19 verified main-ancestor branches with pinned exact SHA and no open PR are candidates. Never delete diverged or modified branches. This marker triggers the scoped cleanup Action on merge to main after production incident acceptance.
