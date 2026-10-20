@@ -1909,6 +1909,30 @@ export default {
         }
       }
 
+      if (url.pathname === "/api/profiles/overview/summary/runner-egress") {
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        requireAnyPermission(authorization, ["tenant_admin", "production_configure"]);
+        const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
+        const sharedSecret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+        if (!runnerUrl || !sharedSecret) {
+          return respond(request, env, { ok: false, reason: "runner_metrics_backend_unconfigured" }, 503);
+        }
+        try {
+          const upstream = await fetch(runnerUrl + "/admin/airtable-egress?hours=48", {
+            headers: { "X-Pipeline-Secret": sharedSecret, "Accept": "application/json" },
+          });
+          const report = await upstream.json();
+          if (!upstream.ok || report?.ok !== true || !Array.isArray(report.hourly)) {
+            return respond(request, env, { ok: false, reason: "runner_metrics_unavailable" }, 503);
+          }
+          return respond(request, env, {
+            ok: true, source: "pipeline_runner_sqlite", hourly: report.hourly,
+          });
+        } catch (error) {
+          return respond(request, env, { ok: false, reason: "runner_metrics_unreachable" }, 503);
+        }
+      }
+
       if (url.pathname === "/api/profiles/overview/summary/airtable-egress") {
         if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
         requireAnyPermission(authorization, ["tenant_admin", "production_configure"]);
