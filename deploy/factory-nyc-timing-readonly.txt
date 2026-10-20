@@ -1,2 +1,3 @@
 2026-10-18 single-run NYC Factory acceptance timing read from existing R2 ledger.
 No Airtable writes or publishing; ephemeral worker is deleted after inspection.
+2026-10-20 P0 #981 acceptance: read-only existing authenticated Cloudflare R2 inspector reports global active group backlog (approved/pending/failed) after Worker rollout; no Airtable mutations, no approvals, no publishing.
