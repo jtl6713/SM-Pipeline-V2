@@ -52,7 +52,13 @@ def read_airtable_egress(hours: int = 48) -> dict:
     since = (datetime.now(timezone.utc) - timedelta(hours=max(1, min(72, hours)))).strftime("%Y-%m-%dT%H:00:00Z")
     with sqlite3.connect(path, timeout=3) as db:
         rows = db.execute("SELECT hour_utc,source,method,status_class,attempts FROM hourly WHERE hour_utc>=? ORDER BY hour_utc,source,method,status_class", (since,)).fetchall()
-    return {"ok": True, "source": "pipeline_runner_sqlite", "hourly": [
+    # A live exporter read is a collector heartbeat, not proof that every
+    # independent process emitted its requests. Never backfill missing hours.
+    observed_at = datetime.now(timezone.utc).isoformat()
+    return {"ok": True, "source": "pipeline_runner_sqlite",
+            "collector_heartbeat": {"observed_at": observed_at, "ok": True,
+                                    "scope": "this_runner_metrics_store_only"},
+            "hourly": [
         dict(zip(("hour_utc","source","method","status_class","attempts"), row)) for row in rows
     ]}
 

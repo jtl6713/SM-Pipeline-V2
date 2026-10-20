@@ -28,6 +28,12 @@ jobs:
         run: python -m unittest discover -s repair/scripts -p 'shadow_freshness_window_report_test.py' -v
       - name: Verify rollup logic
         run: python -m unittest discover -s repair/scripts -p 'airtable_hourly_rollup_test.py' -v
+      - name: Inventory direct Airtable call sites without additional requests
+        run: python repair/scripts/airtable_direct_egress_inventory.py --output airtable-direct-egress-inventory.json
+      - name: Test durable standalone Airtable egress and attestations
+        run: python -m unittest discover -s repair/scripts -p 'airtable_standalone_egress_test.py' -v
+      - name: Test source coverage and matched baseline gates
+        run: python -m unittest discover -s repair/scripts -p 'airtable_coverage_baseline_test.py' -v
       - name: Test automatic 24-hour evidence gate
         run: python -m unittest discover -s repair/scripts -p 'shadow_24h_auto_evidence_test.py' -v
       - name: Collect read-only metrics through temporary service binding
@@ -76,8 +82,9 @@ jobs:
             esac
             jq -n --arg reason "$reason" '{ok:false,reason:$reason}' >runner-airtable-egress.json
           fi
-          jq -n --slurpfile worker worker-airtable-egress.json --slurpfile runner runner-airtable-egress.json '{captured_at:(now|todate),worker: $worker[0],runner: $runner[0],complete:($worker[0].ok==true and $runner[0].ok==true),net_savings_verifiable:false}' >airtable-egress-coverage.json
+          jq -n --slurpfile worker worker-airtable-egress.json --slurpfile runner runner-airtable-egress.json '{captured_at:(now|todate),worker: $worker[0],runner: $runner[0],core_complete:($worker[0].ok==true and $runner[0].ok==true),complete:($worker[0].ok==true and $runner[0].ok==true),source_universe:["studio_worker_gateway","shadow_dirty_replay","shadow_reconcile","runner","standalone_scripts","external_integrations"],missing_sources:["standalone_scripts","external_integrations"],missing_hours:"unverified",zero_activity_verified:false,baseline_eligibility:"unverified_no_complete_matched_prechange_window",workload_comparability:"unverified",reconcile_attribution_observed:false,system_wide_complete:false,net_saved_requests:null,net_savings_verifiable:false}' >airtable-egress-coverage.json
           cat airtable-egress-coverage.json
+          python repair/scripts/airtable_coverage_baseline.py --coverage airtable-egress-coverage.json --output airtable-baseline-assessment.json
           python repair/scripts/airtable_hourly_rollup.py --worker worker-airtable-egress.json --runner runner-airtable-egress.json --captured-at "$(jq -r '.captured_at' airtable-egress-coverage.json)" --output airtable-hourly-rollup.json
           echo '### Shadow profile hourly observation' >> "$GITHUB_STEP_SUMMARY"
           jq -r '"- Captured: " + .captured_at + "\\n- Summary version: " + (.summary_version|tostring) + "\\n- Dirty applied: " + (.evidence.dirty_applied|tostring) + "\\n- Airtable dirty attempts: " + (.evidence.airtable_dirty_batch_attempts|tostring) + "\\n- Airtable dirty errors: " + (.evidence.airtable_dirty_batch_errors|tostring)' evidence.json >> "$GITHUB_STEP_SUMMARY"
@@ -143,6 +150,8 @@ jobs:
             worker-airtable-egress.json
             runner-airtable-egress.json
             airtable-egress-coverage.json
+            airtable-baseline-assessment.json
+            airtable-direct-egress-inventory.json
             airtable-hourly-rollup.json
             freshness-24h.json
           retention-days: 30

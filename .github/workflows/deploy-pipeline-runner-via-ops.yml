@@ -270,3 +270,5 @@ jobs:
 
 # 2026-10-20: Re-deploy current main pipeline runner, including numeric-suffix-free I1 idea-title prompt; retain existing Ops safety tests and health verification.
 # 2026-10-20 PR #923 corrected: deploy 365-day duplicate-title guard and no-numbered-refill behavior for Python I1 runner.
+
+# 2026-10-20: PR #974 fail-closed Airtable coverage evidence; deploy runner collector heartbeat metadata and verify health (no read-SoR changes).

@@ -12,6 +12,14 @@ QUEUE = "tblBZLXPd1p2NRWRK"
 REQUESTS = "tbl75nxNi6PMUjBQE"
 PAT = os.environ.get("AIRTABLE_PAT", "")
 
+# Instrument standalone Airtable urllib egress before the first request.
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "repair" / "scripts"))
+from airtable_standalone_egress import install_urllib_monitor
+install_urllib_monitor(os.environ.get("AIRTABLE_EGRESS_SQLITE_PATH", "/scratch/metrics/airtable-standalone.sqlite"))
+
+
 
 def api(path: str, params: dict | None = None) -> dict:
     url = f"https://api.airtable.com/v0/{BASE}/{path}"
