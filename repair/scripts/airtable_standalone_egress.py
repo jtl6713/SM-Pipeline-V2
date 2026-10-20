@@ -57,7 +57,7 @@ def attest_hour(db_path, *, source, hour, observed_at):
     """Attest a completed UTC hour only; no invented zero hours."""
     h=hour_of(hour)
     observed=datetime.fromisoformat(observed_at.replace("Z","+00:00"))
-    if observed.tzinfo is None or datetime.fromisoformat(h)>=observ.astimezone(timezone.utc):
+    if observed.tzinfo is None or datetime.fromisoformat(h)>=observed.astimezone(timezone.utc):
         raise ValueError("hour is not completed")
     if datetime.fromisoformat(h)+__import__("datetime").timedelta(hours=1)>observ.astimezone(timezone.utc):
         raise ValueError("hour is still in progress")
