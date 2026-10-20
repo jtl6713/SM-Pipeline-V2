@@ -63,6 +63,7 @@ jobs:
           mkdir -p /tmp/factory-timing-readonly
           cp apps/studio-api/factory-timing-r2-inspector.mjs /tmp/factory-timing-readonly/worker.mjs
           cp apps/studio-api/factory-approval-queue.mjs /tmp/factory-timing-readonly/
+          cp apps/studio-api/factory-approval-groups.mjs /tmp/factory-timing-readonly/
           cp apps/studio-api/factory-approval-timings.mjs /tmp/factory-timing-readonly/
           cd /tmp/factory-timing-readonly
           R2_BUCKET="$(cat /tmp/factory-r2-bucket-name)"
@@ -91,7 +92,7 @@ jobs:
             exit 1
           fi
           jq -e '.schema=="studio.factory-nyc-batch-timing-audit.1" and .read_only==true' /tmp/factory-timing-result.json >/dev/null
-          jq -c '{schema,read_only,profile,jobs_scanned,eligible_ten_output_batches,shown_bundles,combined_timing_report,batches}' /tmp/factory-timing-result.json
+          jq -c '{schema,read_only,profile,active_group_scan,active_group_totals,active_groups,jobs_scanned,eligible_ten_output_batches,shown_bundles,combined_timing_report,batches}' /tmp/factory-timing-result.json
           echo "factory_real_r2_timing_readonly=PASS"
       - name: Upload sanitized performance report
         if: always()
