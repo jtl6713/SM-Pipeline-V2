@@ -1,3 +1,4 @@
+import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
 import { scanOutstandingFailedOutputs, describeFailedOutput } from "./failed-output-monitor.mjs";
 import { readStudioProfileSummary, validVerifiedStudioSummary } from "./profile-summary-controller.mjs";
@@ -8992,11 +8993,22 @@ export function deskOutputsForRequest(outputs, requestId) {
 async function loadStudioFailedOutputSnapshot(env) {
   // 60-second shared read cache, independent of the R2 batch monitor.
   return studioReadCoalesce("quality-agent-failed-output-census", 60000, async () => {
-    const rows = await scanOutstandingFailedOutputs((options) =>
-      listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options));
+    const [rows, profiles] = await Promise.all([
+      scanOutstandingFailedOutputs((options) =>
+        listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options)),
+      listContentProfileRecords(env).catch(() => []),
+    ]);
+    const profileNames = new Map((profiles || []).map((profile) => [
+      profile.id,
+      String(f(profile, "Market_Name") || f(profile, "Profile_Name") || profile.id).trim(),
+    ]));
+    const items = rows.map((record) => {
+      const item = describeFailedOutput(record);
+      return { ...item, profile_name: profileNames.get(item.profile_id) || item.profile_id };
+    });
     return {
       status: "ok", scanned_at: new Date().toISOString(),
-      count: rows.length, rows, items: rows.map((record) => describeFailedOutput(record)),
+      count: rows.length, rows, items,
     };
   });
 }
@@ -12012,6 +12024,13 @@ export async function studioAutonomousOpenAiPick(env, prompt) {
 /*__STUDIO_WORKER_END:studioAutonomousOpenAiPick__*/
 
 export async function createAutonomousIdea(env, profile, pick) {
+  const duplicateTitle = await studioFindRecentDuplicateTitle(pick.candidate_title, (kind, formula, field) => {
+    const table = kind === "idea" ? env.AIRTABLE_IDEA_TABLE_ID : env.AIRTABLE_CONTENT_TABLE_ID;
+    if (!table) throw new HttpError(503, "Title history unavailable: autonomous creation blocked");
+    return listRecords(env, table, { filterFormula: formula, fields: [field], limit: 1001 });
+  });
+  if (duplicateTitle) throw new HttpError(409,
+    `Title already used within 365 days (${duplicateTitle.source}); selecting a different subject.`);
   const fields = {
     Candidate_Title: pick.candidate_title,
     Candidate_Status: "Generated",
@@ -12754,7 +12773,8 @@ export async function fillAutonomousCityIdeas(env, authorization, {
     }
   }
   const planned = planAutonomousHourIdeas(catalog, {
-    goal: Math.max(0, goal - count),
+    // Try more distinct library clusters when historical titles are exhausted.
+    goal: Math.min(40, Math.max(0, goal - count) * 4),
     profileName: String(f(profile, "Profile_Name") || "").trim(),
     startIndex: count,
   });
@@ -12827,6 +12847,10 @@ export async function fillAutonomousCityIdeas(env, authorization, {
         });
         savedThis = true;
       } catch (error) {
+        if (error?.status === 409 && /already used within 365 days/.test(String(error?.message || ""))) {
+          console.warn("autonomous hour skipped repeat subject", profileId, pick.candidate_title);
+          break;
+        }
         console.warn("autonomous hour idea failed", profileId, attempt, error);
       }
     }

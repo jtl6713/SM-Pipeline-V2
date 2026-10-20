@@ -151,12 +151,6 @@ jobs:
           const fs = require('fs');
           const previous = fs.readFileSync('/tmp/predeploy-live-index.html', 'utf8');
           const next = fs.readFileSync('apps/studio-web/index.html', 'utf8');
-          const qualityMarker = 'factory-batch-quality-0710.js?v=0.6.729-factory-review-ipad&global=factory-v1&monitor=lightweight-quality-20261018&output-failures=quality-v2';
-          if (next.includes(qualityMarker) && !previous.includes(qualityMarker)
-              && previous.includes('factory-batch-quality-0710.js?v=0.6.729-factory-review-ipad&')) {
-            console.log('quality_agent_same_version_one_time_cache_bust=PASS');
-            process.exit(0);
-          }
           const marker = 'factory-desk.js?v=0.6.723-profile-fast-music&retry=visible-failed-892&';
           if (!next.includes(marker) || previous.includes(marker)) {
             throw new Error('Same-version release is permitted only for the first Factory retry #892 cache change');
