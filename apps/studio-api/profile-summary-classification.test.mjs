@@ -115,3 +115,50 @@ test("approving an output moves one from Awaiting Approval into parentheses, reg
     assert.equal(homeOutputContribution({ ...approved, review_status: "Rejected" }).approved_unpublished, 0);
   }
 });
+
+
+test("provider upload/draft completion is not publication; parentheses track true unpublished approval", () => {
+  const ready = { ...base, review_status: "", render_status: "Rendered" };
+  const before = homeOutputContribution(ready);
+  assert.equal(before.awaiting_approval, 1);
+  for (const platform of ["TikTok", "YouTube", "Facebook", "Instagram"]) {
+    for (const providerState of ["Completed", "Succeeded", "Processing", "Uploaded", "Draft Delivered"]) {
+      const approved = {
+        ...ready, platform, review_status: "Approved",
+        output_status: "Approved for Publishing", publish_status: "Ready to Schedule",
+        platform_publish_status: providerState, studio_state: "Platform Processing",
+        studio_publish_dispatch_count: 1,
+        scheduled_post_date: "2020-01-01T00:00:00Z",
+      };
+      const after = homeOutputContribution(approved);
+      assert.equal(after.awaiting_approval, 0, platform + " " + providerState);
+      assert.equal(after.approved_unpublished, 1, platform + " " + providerState);
+      assert.equal(after.overdue_unpublished, 1, platform + " " + providerState);
+      const delta = homeContributionDelta(before, after);
+      assert.equal(delta.awaiting_approval, -1);
+      assert.equal(delta.approved_unpublished, 1);
+      for (const publication of [
+        { platform_post_url: "https://example.test/published" },
+        { published_at: "2026-10-20T02:00:00Z" },
+        { publish_status: "Published" },
+        { platform_publish_status: "Published" },
+      ]) {
+        assert.equal(homeOutputContribution({ ...approved, ...publication }).approved_unpublished, 0);
+      }
+    }
+  }
+});
+
+test("concurrent publication can offset approved-unpublished gains, without losing any approved item", () => {
+  const pending = { ...base, studio_state: "Scheduled", review_status: "Approved",
+    output_status: "Approved for Publishing", publish_status: "Ready to Schedule" };
+  const first = { ...pending, id: "rec00000000000004" };
+  const second = { ...base, id: "rec00000000000005" };
+  const before = combineHomeContributions([homeOutputContribution(first), homeOutputContribution(second)]);
+  const after = combineHomeContributions([
+    homeOutputContribution({ ...first, published_at: "2026-10-20T02:00:00Z" }),
+    homeOutputContribution({ ...second, review_status: "Approved", output_status: "Approved for Publishing" }),
+  ]);
+  assert.equal(after.awaiting_approval, before.awaiting_approval - 1);
+  assert.equal(after.approved_unpublished, before.approved_unpublished);
+});
