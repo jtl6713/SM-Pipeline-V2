@@ -148,7 +148,7 @@ export class StudioProfileSummary {
         const input = await request.json();
         const source = code(input.source), method = code(input.method).toUpperCase();
         const status = Number(input.status), occurred = Number(input.at_ms);
-        const allowedSources = ["studio_worker_gateway", "shadow_reconcile", "pipeline_runner_http", "other_direct"];
+        const allowedSources = ["studio_worker_gateway", "shadow_reconcile", "home_overview_refresh", "home_ideas_refresh", "autonomous_refill_scan", "pipeline_runner_http", "other_direct"];
         if (!allowedSources.includes(source) || !["GET","POST","PUT","PATCH","DELETE"].includes(method)
           || !Number.isInteger(status) || status < 0 || status > 599
           || !Number.isFinite(occurred) || Math.abs(Date.now()-occurred) > 300000) {
