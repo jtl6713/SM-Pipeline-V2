@@ -85,7 +85,7 @@
     if (!data.job_id) {
       return data?.quality_status === "partial"
         ? failureMarkup + '<p class="factory-batch-quality-unavailable">Partial batch monitoring window. No findings were returned from the scanned records; older activity was not verified.</p>'
-        : failureMarkup + '<p class="subtle">No active Factory approval batches requiring attention in the checked window.</p>';
+        : failureMarkup + '<p class="subtle">No active Factory batches requiring attention in the checked window.</p>';
     }
     const global = data.scope === "all";
     const partialNotice = data?.quality_status === "partial"
