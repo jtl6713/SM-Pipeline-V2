@@ -120,6 +120,12 @@ export class StudioProfileSummary {
     this.sql.exec("UPDATE profiles SET counters=?, version=version+1, event_at=? WHERE id=?",
       JSON.stringify(next), at, profileId);
   }
+  recordAirtableEgress(source, method, status, at = Date.now()) {
+    const hour = new Date(at).toISOString().slice(0,13) + ":00:00Z";
+    const statusClass = status === 0 ? "network" : String(Math.floor(status / 100)) + "xx";
+    this.sql.exec("INSERT INTO airtable_egress_hourly (hour_utc,source,method,status_class,attempts) VALUES (?,?,?,?,1) ON CONFLICT(hour_utc,source,method,status_class) DO UPDATE SET attempts=attempts+1",
+      hour, source, method, statusClass);
+  }
   async fetch(request) {
     try {
       const url = new URL(request.url);
@@ -133,9 +139,7 @@ export class StudioProfileSummary {
           || !Number.isFinite(occurred) || Math.abs(Date.now()-occurred) > 300000) {
           return json({ok:false,error:"invalid_egress_event"},400);
         }
-        const hour = new Date(occurred).toISOString().slice(0,13)+":00:00Z";
-        const statusClass = status === 0 ? "network" : String(Math.floor(status / 100)) + "xx";
-        this.sql.exec("INSERT INTO airtable_egress_hourly (hour_utc,source,method,status_class,attempts) VALUES (?,?,?,?,1) ON CONFLICT(hour_utc,source,method,status_class) DO UPDATE SET attempts=attempts+1", hour,source,method,statusClass);
+        this.recordAirtableEgress(source,method,status,occurred);
         return json({ok:true});
       }
       if (request.method === "GET" && url.pathname === "/egress") {
@@ -345,7 +349,12 @@ export class StudioProfileSummary {
           : ["Content_Profile", "Promoted_Content_Record_ID", "Content Items"];
         for (const field of fields) url.searchParams.append("fields[]", field);
         this.incrementMetric("airtable_dirty_batch_attempts");
-        const res = await fetch(url.toString(), { headers: { Authorization: "Bearer " + this.env.AIRTABLE_PAT } });
+        let res;
+        try {
+          res = await fetch(url.toString(), { headers: { Authorization: "Bearer " + this.env.AIRTABLE_PAT } });
+        } finally {
+          this.recordAirtableEgress("shadow_dirty_replay", "GET", res?.status || 0);
+        }
         if (!res.ok) throw new Error("Airtable batch reread returned " + res.status);
         const pack = await res.json();
         if (!Array.isArray(pack.records) || pack.offset) throw new Error("Incomplete Airtable batch reread");
