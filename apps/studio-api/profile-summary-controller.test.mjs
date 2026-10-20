@@ -102,6 +102,8 @@ test("shadow canary waits for awaited four-city reconcile instead of a 4-minute 
   assert.match(canary, /--max-time 900/);
   assert.match(canary, /timeout-minutes: 45/);
   assert.match(canary, /summary-status/);
+  assert.match(canary, /overview-refresh/);
+  assert.match(canary, /cannot claim Home\/shadow parity against a stale cache/);
   assert.doesNotMatch(canary, /ENABLE_HOME_PROFILE_SUMMARY_READS/);
 });
 

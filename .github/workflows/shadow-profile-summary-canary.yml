@@ -60,21 +60,26 @@ jobs:
             async fetch(request, env) {
               const url = new URL(request.url);
               const overview = url.pathname === "/$TOKEN/overview";
+              const overviewRefresh = url.pathname === "/$TOKEN/overview-refresh";
+              const overviewStatus = url.pathname === "/$TOKEN/overview-status";
               const summary = url.pathname === "/$TOKEN/summary";
               const summaryReconcile = url.pathname === "/$TOKEN/summary-reconcile";
               const summaryStatus = url.pathname === "/$TOKEN/summary-status";
-              if (!overview && !summary && !summaryReconcile && !summaryStatus) return new Response("Not found", {status:404});
+              if (!overview && !overviewRefresh && !overviewStatus && !summary && !summaryReconcile && !summaryStatus) return new Response("Not found", {status:404});
+              const generation = String(url.searchParams.get("generation") || "");
               const path = summaryReconcile ? "/api/profiles/overview/summary/reconcile"
                 : summaryStatus ? "/api/profiles/overview/summary/status"
                 : summary ? "/api/profiles/overview/summary"
-                : "/api/profiles/overview";
-              const method = summaryReconcile ? "POST" : "GET";
+                : overviewRefresh ? "/api/profiles/overview/refresh"
+                : overviewStatus ? "/api/profiles/overview/refresh-status"
+                : "/api/profiles/overview" + (generation ? "?min_generation=" + encodeURIComponent(generation) : "");
+              const method = (summaryReconcile || overviewRefresh) ? "POST" : "GET";
               const headers = {"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Accept":"application/json"};
-              if (summaryReconcile) headers["Content-Type"] = "application/json";
+              if (summaryReconcile || overviewRefresh) headers["Content-Type"] = "application/json";
               const internal = new Request("https://studio.chicagoshining.com" + path, {
                 method,
                 headers,
-                body: summaryReconcile ? "{}" : undefined,
+                body: (summaryReconcile || overviewRefresh) ? "{}" : undefined,
               });
               const started = Date.now();
               const response = await env.STUDIO_API.fetch(internal);
@@ -118,6 +123,9 @@ jobs:
           done
           test "$CODE" = "200"
           jq -e '.ok==true and (.records|length)>=4' /tmp/overview.json >/dev/null
+          cp /tmp/overview.json /tmp/overview-before.json
+          BEFORE_AT=$(jq -r '.snapshot_at // 0' /tmp/overview-before.json)
+          BEFORE_GENERATION=$(jq -r '.snapshot_generation // ""' /tmp/overview-before.json)
 
           if [[ "${{ inputs.start_full_reconcile }}" == "true" ]]; then
             CODE=$(curl -sS --max-time 900 -o /tmp/reconcile-start.json -w '%{http_code}' -X POST "$BASE/summary-reconcile" || true)
@@ -133,6 +141,72 @@ jobs:
             else
               test "$CODE" = "200"
             fi
+            echo "Waiting 15s for Airtable cooling after the sequential shadow scan"
+            sleep 15
+
+            ACCEPTED=0
+            for attempt in 1 2 3 4 5 6; do
+              CODE=$(curl -sS --max-time 60 -o /tmp/overview-refresh-start.json -w '%{http_code}' -X POST "$BASE/overview-refresh" || true)
+              STATUS=$(jq -r '.refresh.status // .status // ""' /tmp/overview-refresh-start.json 2>/dev/null || true)
+              if [[ "$CODE" =~ ^20[02]$ ]] && [[ "$STATUS" == "refreshing" || "$STATUS" == "completed" ]]; then
+                ACCEPTED=1
+                break
+              fi
+              START_ERROR=$(jq -r '.error // .refresh.error // ""' /tmp/overview-refresh-start.json 2>/dev/null || true)
+              if [[ "$STATUS" == "cooling_down" || "$CODE" == "429" || "$START_ERROR" == *"cooling down"* ]]; then
+                RETRY_MS=$(jq -r '.refresh.retry_after_ms // .refresh.cooldown_remaining_ms // 8000' /tmp/overview-refresh-start.json)
+                SLEEP_SECS=$(( (RETRY_MS + 999) / 1000 ))
+                if (( SLEEP_SECS < 3 )); then SLEEP_SECS=3; fi
+                if (( SLEEP_SECS > 20 )); then SLEEP_SECS=20; fi
+                echo "Overview refresh cooling down http=$CODE status=$STATUS; sleep ${SLEEP_SECS}s" >&2
+                sleep "$SLEEP_SECS"
+                continue
+              fi
+              echo "Overview refresh start failed http=$CODE status=$STATUS" >&2
+              cat /tmp/overview-refresh-start.json >&2 || true
+              exit 1
+            done
+            test "$ACCEPTED" = "1"
+
+            COMPLETE=0
+            BUDGET_RETRIES=0
+            for attempt in $(seq 1 90); do
+              curl -fsS --max-time 60 "$BASE/overview-status" -o /tmp/overview-refresh-status.json
+              STATUS=$(jq -r '.refresh.status // .status // ""' /tmp/overview-refresh-status.json)
+              if [[ "$STATUS" == "completed" ]]; then
+                COMPLETE=1
+                break
+              fi
+              if [[ "$STATUS" == "failed" ]]; then
+                ERROR=$(jq -r '.refresh.error // ""' /tmp/overview-refresh-status.json)
+                if [[ "$ERROR" == *"overview-force-build budget"* || "$ERROR" == *"overview-force-resolve budget"* || "$ERROR" == *"cooling down"* ]] && (( BUDGET_RETRIES < 3 )); then
+                  BUDGET_RETRIES=$((BUDGET_RETRIES + 1))
+                  echo "Overview force refresh hit budget (retry $BUDGET_RETRIES/3)" >&2
+                  sleep 12
+                  curl -sS --max-time 60 -o /tmp/overview-refresh-start.json -w '%{http_code}' -X POST "$BASE/overview-refresh" >/dev/null || true
+                  sleep 8
+                  continue
+                fi
+                echo "Overview force refresh failed; cannot claim Home/shadow parity against a stale cache" >&2
+                cat /tmp/overview-refresh-status.json >&2 || true
+                exit 1
+              fi
+              sleep 2
+            done
+            test "$COMPLETE" = "1"
+            GENERATION=$(jq -er '.refresh.snapshot_generation' /tmp/overview-refresh-status.json)
+            SNAPSHOT_AT=$(jq -er '.refresh.snapshot_at' /tmp/overview-refresh-status.json)
+            jq -e '.refresh.component_status.outputs=="completed" and .refresh.component_status.ideas=="completed"' /tmp/overview-refresh-status.json >/dev/null
+            test -n "$GENERATION"
+            test "$GENERATION" != "$BEFORE_GENERATION"
+            test "$SNAPSHOT_AT" -gt "$BEFORE_AT"
+            curl -fsS --max-time 60 "$BASE/overview?generation=$GENERATION" -o /tmp/overview.json
+            jq -e --arg generation "$GENERATION" --argjson at "$SNAPSHOT_AT" '
+              .ok==true
+              and .snapshot_generation==$generation
+              and .snapshot_at==$at
+              and (.records|length)>=4
+            ' /tmp/overview.json >/dev/null
           fi
 
           READY=0
@@ -254,7 +328,10 @@ jobs:
           name: shadow-profile-summary-${{ github.run_id }}
           path: |
             /tmp/overview.json
+            /tmp/overview-before.json
+            /tmp/overview-refresh-status.json
             /tmp/summary.json
+            /tmp/summary-status.json
             /tmp/reconcile-start.json
             /tmp/shadow-parity.json
             /tmp/shadow-timings.json
