@@ -4889,9 +4889,8 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
     // Skip produce-job hydration — overview only needs studio_state + schedule fields.
     const mappedOutputs = profileOutputs.map((row) => mappedById.get(row.id) || mapOutput(row, null));
     const metrics = studioOverviewOperationalMetrics(mappedOutputs, []);
-    // Keep future publication instants so cached totals age out at the
-    // scheduled time without another authoritative Airtable scan.
-    const approvedFutureTimes = mappedOutputs.map(homeApprovedUpcomingAt).filter((ms) => ms > 0);
+    // Final approved-but-unpublished count is status-driven; the date
+    // crossing into overdue must not remove it from Home parentheses.
     let ideasCount = 0;
     let ideasSource = "snapshot";
     if (airtableIdeaRows) {
@@ -4921,8 +4920,7 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
       manual: metrics.manual_action_required,
       failed: metrics.failed_outputs,
       approval: metrics.awaiting_approval,
-      approved_unpublished: approvedFutureTimes.filter((ms) => ms >= Date.now()).length,
-      approved_future_times: approvedFutureTimes,
+      approved_unpublished: metrics.approved_unpublished,
       overdue_unpublished: metrics.overdue_unpublished,
       ideas: ideasCount,
       ideas_source: ideasSource,
@@ -4956,11 +4954,7 @@ export function respondProfilesOverviewSoft(request, env, { records = [], cached
     snapshot_generation: meta.generation || null,
     ideas_at: Number(meta.ideasAt || 0) || null,
     read_source: meta.readSource || null,
-    records: Array.isArray(records) ? records.map((row) =>
-      Array.isArray(row?.approved_future_times)
-        ? { ...row, approved_unpublished: row.approved_future_times.filter((ms) =>
-          Number.isFinite(ms) && ms >= Date.now()).length }
-        : row) : [],
+    records: Array.isArray(records) ? records : [],
   });
 }
 /*__STUDIO_WORKER_END:respondProfilesOverviewSoft__*/
@@ -5090,7 +5084,7 @@ export async function writeStudioProfilesOverviewSnapshot(env, rows, authKey, ex
     authKey,
     at,
     complete: true,
-    schemaVersion: 4,
+    schemaVersion: 5,
     generation,
     ideasAt,
     readSource,
