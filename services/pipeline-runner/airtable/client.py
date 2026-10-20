@@ -1,7 +1,4 @@
 import logging
-import json
-import time
-from datetime import datetime, timezone
 from typing import Any
 
 from config import load_settings
@@ -26,27 +23,9 @@ class AirtableClient:
         self._api_root = "https://api.airtable.com/v0"
 
     def _request(self, method: str, url: str, *, table_id: str, **kwargs):
-        """Count each outbound runner Airtable attempt, without logging identifiers."""
+        """Use the verb-specific requests API; runner-wide Session.send records egress."""
         import requests
-
-        started = time.monotonic()
-        response = None
-        try:
-            response = getattr(requests, method.lower())(url, **kwargs)
-            return response
-        finally:
-            category = ("outputs" if table_id == self._settings.get("airtable_output_table_id")
-                        else "ideas" if table_id == self._settings.get("airtable_idea_table_id")
-                        else "other")
-            logger.info("studio_airtable_egress_v1 %s", json.dumps({
-                "source": "pipeline_runner_client",
-                "table_kind": category,
-                "method": method.upper(),
-                "status": response.status_code if response is not None else 0,
-                "duration_ms": round((time.monotonic() - started) * 1000),
-                "at": datetime.now(timezone.utc).isoformat(),
-                "request_count": 1,
-            }, separators=(",", ":")))
+        return getattr(requests, method.lower())(url, **kwargs)
 
     def _mirror(self, table_id: str, records: list[dict], *, partial: bool = False) -> None:
         from supabase_pipeline import mirror_airtable_records
