@@ -5293,8 +5293,13 @@ export async function profilesOverview(request, env, authorization, ctx) {
   if (snapshot?.rows?.length) {
     const supabaseBacked = studioProfilesOverviewReadSource(snapshot) === "supabase" || studioReadSource(env) === "supabase";
     const cooling = !supabaseBacked && airtableCooldownWaitMs() > AIRTABLE_SLOT_FAIL_FAST_MS;
-    // Do not scheduleStudioProfilesOverviewRefresh from this poll. Every stale
-    // Home view was starting a Supabase rebuild and GET content_profiles 504'd.
+    // An expired Home snapshot must not be served forever after approvals.
+    // Restore bounded background rebuilding only for Airtable-backed snapshots;
+    // Supabase pool saturation previously required leaving its reads disabled.
+    // refreshStudioProfilesOverviewSnapshot already coalesces concurrent builds.
+    if (!manualRefreshing && !supabaseBacked && !cooling) {
+      scheduleStudioProfilesOverviewRefresh(ctx, env, authorization);
+    }
     if (!manualRefreshing) scheduleStudioProfilesOverviewIdeasRefresh(ctx, env, authorization);
     return respondProfilesOverviewSoft(request, env, {
       records: snapshot.rows,
