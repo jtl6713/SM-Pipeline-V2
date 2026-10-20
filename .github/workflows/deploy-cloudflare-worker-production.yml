@@ -644,6 +644,13 @@ jobs:
               ACCEPTED=1
               break
             fi
+            # Cloudflare workers.dev may briefly return 1042 while this one-time
+            # verification bridge propagates; retry only that exact routing fault.
+            if [[ "$CODE" == "404" ]] && grep -Fq "error code: 1042" /tmp/overview-refresh-start.json; then
+              echo "Temporary verification bridge routing 1042 (attempt $attempt/6); retrying" >&2
+              sleep 5
+              continue
+            fi
             START_ERROR=$(jq -r '.error // .refresh.error // ""' /tmp/overview-refresh-start.json 2>/dev/null || true)
             if [[ "$STATUS" == "cooling_down" || "$CODE" == "429" || "$START_ERROR" == *"cooling down"* ]]; then
               RETRY_MS=$(jq -r '.refresh.retry_after_ms // .refresh.cooldown_remaining_ms // 8000' /tmp/overview-refresh-start.json)
