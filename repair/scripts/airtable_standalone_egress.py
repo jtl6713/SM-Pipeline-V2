@@ -66,6 +66,10 @@ def attest_hour(db_path, *, source, hour, observed_at):
                    (source,h,observed.astimezone(timezone.utc).isoformat()))
 
 def export(db_path, *, source, start, end):
+    # Normalize Z and +00:00 identically before lexical SQLite hour comparisons.
+    start, end = hour_of(start), hour_of(end)
+    if start >= end:
+        raise ValueError("invalid hourly export window")
     with connect(db_path) as db:
         attempts=db.execute("""SELECT hour_utc,method,status_class,COUNT(*)
           FROM airtable_attempts WHERE source=? AND hour_utc>=? AND hour_utc<?
