@@ -15337,23 +15337,53 @@ async function factoryGroupRecordsFromAirtablePreflight(env, authorization, ids,
 export async function factoryBatchCronResume(env, ctx = null) {
   if (String(env?.FACTORY_BATCH_APPROVALS_ENABLED || "").toLowerCase() !== "true" && !factoryGlobalPolicy(env).enabled) return 0;
   if (!env?.STUDIO_MEDIA?.list) return 0;
-  // Independently resume parent ledgers after interrupted child enqueue.
+  // Parent group ledgers are a second, authoritative index for newly accepted
+  // global approvals. Discover a bounded set of pending children here instead
+  // of relying exclusively on the rotating, history-heavy child-key scan.
+  // Each child retains its existing R2 profile lease and canonical output guard.
+  const candidates = [];
   if (factoryGlobalPolicy(env).enabled) {
-    const groupIds=await factoryApprovalGroupCronScan(env.STUDIO_MEDIA,{maxScan:50});
-    let groupResumes=0;
-    for (const groupId of groupIds) {
-      if (groupResumes>=5) break;
-      const parent=await factoryApprovalGroupRead(env.STUDIO_MEDIA,groupId);
-      if (parent?.status==="enqueuing") {
-        await factoryApprovalGroupResume(env.STUDIO_MEDIA,groupId);
-        groupResumes++;
+    try {
+      const groupIds = await factoryApprovalGroupCronScan(env.STUDIO_MEDIA, { maxScan: 50 });
+      let groupResumes = 0, inspectedGroups = 0;
+      for (const groupId of groupIds) {
+        try {
+          const parent = await factoryApprovalGroupRead(env.STUDIO_MEDIA, groupId);
+          if (parent?.status === "enqueuing" && groupResumes < 5) {
+            await factoryApprovalGroupResume(env.STUDIO_MEDIA, groupId);
+            groupResumes++;
+          }
+          if (!Array.isArray(parent?.children) || inspectedGroups >= 12) continue;
+          inspectedGroups++;
+          for (const child of parent.children.slice(0, 5)) {
+            const profileId = String(child.profile_id || "");
+            const requestId = String(child.request_id || "");
+            if (!/^rec[A-Za-z0-9]+$/.test(profileId) || !/^[A-Za-z0-9_-]{12,128}$/.test(requestId)) continue;
+            const job = await factoryBatchRead(env.STUDIO_MEDIA, profileId, requestId);
+            if (job && ["queued", "running"].includes(job.status)
+                && !factoryBatchQualitySignals(job).some(s => s.code === "QA-FACTORY-BATCH-DUPLICATE-ITEM")) {
+              candidates.push({ profileId, requestId, job });
+            }
+          }
+        } catch (error) {
+          console.warn("Factory parent recovery skipped malformed group", groupId,
+            String(error?.message || error).slice(0, 140));
+        }
       }
+    } catch (error) {
+      // A parent-index failure must never suppress independently durable child
+      // recovery. Previous behavior aborted the entire minute here.
+      console.warn("Factory parent recovery scan unavailable", String(error?.message || error).slice(0, 140));
     }
   }
-  // The persisted cursor rotates through old histories (rather than rereading
-  // the first 200 lexical R2 keys forever). Process only a bounded scan on each tick.
-  const { objects } = await factoryBatchCronScan(env.STUDIO_MEDIA, { maxScan: 200 });
-  const candidates = [];
+  // Keep the original rotating child scan for standalone, historical and
+  // non-group jobs. A bad scan must not starve the parent-index candidates.
+  let objects = [];
+  try {
+    ({ objects } = await factoryBatchCronScan(env.STUDIO_MEDIA, { maxScan: 200 }));
+  } catch (error) {
+    console.warn("Factory child recovery scan unavailable", String(error?.message || error).slice(0, 140));
+  }
   for (const object of objects) {
     const match = object.key.match(/\/jobs\/(rec[A-Za-z0-9]+)\/([A-Za-z0-9_-]{12,128})\.json$/);
     if (!match) continue;
@@ -15373,7 +15403,10 @@ export async function factoryBatchCronResume(env, ctx = null) {
     if (signatures.some(item => item.code === "QA-FACTORY-BATCH-DUPLICATE-ITEM")) continue;
     candidates.push({ profileId: match[1], requestId: match[2], job });
   }
-  const selected = factoryBatchCronSelectJobs(candidates, { maxProfiles: 5 });
+  // The same child may appear in both indexes; dispatch it only once.
+  const distinct = [...new Map(candidates.map(row =>
+    [row.profileId + "/" + row.requestId, row])).values()];
+  const selected = factoryBatchCronSelectJobs(distinct, { maxProfiles: 5 });
   for (const candidate of selected) {
     await factoryBatchProcess(env, candidate.profileId, candidate.requestId, ctx);
   }

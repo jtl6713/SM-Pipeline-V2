@@ -146,6 +146,22 @@ test("Factory cron never burns Airtable occupancy scans before claiming profile 
   assert.match(source, /skipOccupancyRefresh: true/);
 });
 
+
+test("one-minute Factory recovery discovers global children even when the rotating child scan fails", () => {
+  const cronStart = functions04.indexOf("export async function factoryBatchCronResume(");
+  const cronEnd = functions04.indexOf("/*__STUDIO_WORKER_END:factoryBatchCronResume__*/", cronStart);
+  const cron = functions04.slice(cronStart, cronEnd);
+  assert.ok(cronStart >= 0 && cronEnd > cronStart);
+  assert.match(cron, /factoryApprovalGroupCronScan/);
+  assert.match(cron, /parent\.children\.slice\(0, 5\)/);
+  assert.match(cron, /factoryBatchRead\(env\.STUDIO_MEDIA, profileId, requestId\)/);
+  assert.match(cron, /Factory parent recovery scan unavailable/);
+  assert.match(cron, /Factory child recovery scan unavailable/);
+  assert.match(cron, /new Map\(candidates\.map/);
+  assert.match(cron, /factoryBatchCronSelectJobs\(distinct/);
+  assert.match(cron, /factoryBatchProcess\(env, candidate\.profileId, candidate\.requestId, ctx\)/);
+});
+
 test("Global Factory group submit accepts from desk hints before Airtable", () => {
   // Group submit lives as a module sibling after the submit-route extract marker,
   // so assert against the live ESM source rather than the reconstructed Worker.
