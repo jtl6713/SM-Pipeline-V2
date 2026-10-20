@@ -41,7 +41,7 @@ test("awaiting approval is review-ready but not approved or rendering", () => {
 test("parenthesized profile count uses all approved unpublished, not overdue or scheduled column sum", () => {
   assert.match(ui, /function approvedUnpublishedTotal\(row\)/);
   assert.match(ui, /approved_unpublished: Number\(row\.approved_unpublished\) \|\| 0/);
-  assert.match(ui, /approved_unpublished"\]/);
+  assert.ok(ui.includes('"approved_unpublished", "overdue_unpublished"'));
   assert.doesNotMatch(ui, /scheduledTotal\(row\)/);
 });
 
@@ -72,10 +72,10 @@ test("Home rejects old R2/browser snapshots missing parenthesized approved count
   assert.match(valid, /"approved_unpublished", "overdue_unpublished"/);
   assert.match(verify, /"approved_unpublished", "overdue_unpublished"/);
   assert.match(valid, /typeof n !== "number"/);
-  assert.match(ui, /studio\\.allProfilesOverview\\.v4/);
+  assert.ok(ui.includes('studio.allProfilesOverview.v4'));
   const browserValidation=ui.slice(ui.indexOf("function validOverviewRows("),ui.indexOf("function readCache("));
   assert.match(browserValidation, /"approved_unpublished", "overdue_unpublished"/);
-  assert.match(browserValidation, /typeof row\\?\\.\\[kind\\] !== "number"/);
+  assert.ok(browserValidation.includes('typeof row?.[kind] !== "number"'));
   const map=ui.slice(ui.indexOf("function mapRows("),ui.indexOf("function adoptOverview("));
-  assert.match(map, /overdue_unpublished: Number\\(row\\.overdue_unpublished\\) \\|\\| 0/);
+  assert.ok(map.includes('overdue_unpublished: Number(row.overdue_unpublished) || 0'));
 });
