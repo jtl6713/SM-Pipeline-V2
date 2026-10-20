@@ -7,7 +7,7 @@ const css = fs.readFileSync(new URL("./assets/home-city-hero-0724.css", import.m
 const app = fs.readFileSync(new URL("./assets/app-item4-1008.js", import.meta.url), "utf8");
 
 test("all four city profiles receive the same scenic launcher with unique imagery", () => {
-  assert.match(html, /home-city-hero-0724\.css\?v=0\.6\.724-profile-fast-music/);
+  assert.match(html, /home-city-hero-0724\.css\?v=0\.6\.725-music-preview-proxy/);
   assert.match(css, /:root\s*\{[\s\S]*--launcher-photo:/);
   for (const city of ["nyc", "la", "miami"]) {
     assert.ok(css.includes(`html[data-studio-theme="${city}"]`), city);
