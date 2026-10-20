@@ -53,7 +53,8 @@ export function studioIdeaTitleYearFormula(title,titleField) {
   const key=studioIdeaTitleKey(title);
   if(!key) throw new Error("A nonempty idea title is required");
   const prefix=key.slice(0,Math.min(8,key.length));
-  return `AND({Test_Run_ID}=BLANK(),IS_AFTER(CREATED_TIME(),DATEADD(TODAY(),-${IDEA_TITLE_UNIQUENESS_DAYS},"days")),REGEX_MATCH(REGEX_REPLACE(LOWER({${titleField}}&""),"[^a-z0-9]",""),"^${prefix}"))`;
+  const candidateOnly = titleField === "Candidate_Title" ? "{Test_Run_ID}=BLANK()," : "";
+  return `AND(${candidateOnly}IS_AFTER(CREATED_TIME(),DATEADD(TODAY(),-${IDEA_TITLE_UNIQUENESS_DAYS},"days")),REGEX_MATCH(REGEX_REPLACE(LOWER({${titleField}}&""),"[^a-z0-9]",""),"^${prefix}"))`;
 }
 export async function studioFindRecentDuplicateTitle(title,query,{excludeIdeaId="",excludeContentId=""}={}) {
   for(const [kind,field,excluded] of [["idea","Candidate_Title",excludeIdeaId],["content","Content_Title",excludeContentId]]) {
