@@ -4,7 +4,7 @@ import { studioOverviewRowMatchesProfile } from "./worker-functions-04.mjs";
 import {
   emptyHomeContribution, homeOutputContribution, homeIdeaContribution,
   homeContributionDelta, combineHomeContributions, contributionEqual, homeOverdueDueAt,
-  HOME_PLATFORMS, HOME_METRIC_KEYS,
+  HOME_PLATFORMS, HOME_METRIC_KEYS, homeApprovedUpcomingAt,
 } from "./profile-summary-classification.mjs";
 
 const ZERO = () => emptyHomeContribution();
@@ -38,6 +38,10 @@ function dueAtForRecord(kind, record) {
   return kind === "output" && record && eligibleRecord(kind, record)
     ? homeOverdueDueAt(mapOutput(record, null)) : 0;
 }
+function approvedFutureAtForRecord(kind, record) {
+  return kind === "output" && record && eligibleRecord(kind, record)
+    ? homeApprovedUpcomingAt(mapOutput(record, null)) : 0;
+}
 function contributionForRecord(kind, record) {
   if (!record || !eligibleRecord(kind, record)) return ZERO();
   return kind === "output"
@@ -54,11 +58,21 @@ export class StudioProfileSummary {
       this.sql.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
       this.sql.exec("CREATE TABLE IF NOT EXISTS airtable_egress_hourly (hour_utc TEXT NOT NULL, source TEXT NOT NULL, method TEXT NOT NULL, status_class TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(hour_utc,source,method,status_class))");
       this.sql.exec("CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY, name TEXT NOT NULL, city_label TEXT NOT NULL, counters TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 0, event_at INTEGER NOT NULL DEFAULT 0)");
-      this.sql.exec("CREATE TABLE IF NOT EXISTS ledger (kind TEXT NOT NULL, record_id TEXT NOT NULL, profile_id TEXT NOT NULL, contribution TEXT NOT NULL, overdue_due_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(kind,record_id))");
+      this.sql.exec("CREATE TABLE IF NOT EXISTS ledger (kind TEXT NOT NULL, record_id TEXT NOT NULL, profile_id TEXT NOT NULL, contribution TEXT NOT NULL, overdue_due_at INTEGER NOT NULL DEFAULT 0, approved_future_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(kind,record_id))");
+      const ledgerColumns = records(this.sql, "PRAGMA table_info(ledger)").map((col) => col.name);
+      if (!ledgerColumns.includes("approved_future_at")) {
+        this.sql.exec("ALTER TABLE ledger ADD COLUMN approved_future_at INTEGER NOT NULL DEFAULT 0");
+        this.putMeta("future_count_reconcile_required", "true");
+      }
+      this.sql.exec("CREATE INDEX IF NOT EXISTS idx_summary_ledger_future ON ledger(profile_id,approved_future_at)");
       this.sql.exec("CREATE INDEX IF NOT EXISTS idx_summary_ledger_profile ON ledger(profile_id)");
       this.sql.exec("CREATE INDEX IF NOT EXISTS idx_summary_ledger_due ON ledger(profile_id,overdue_due_at)");
       this.sql.exec("CREATE TABLE IF NOT EXISTS pending (kind TEXT NOT NULL, record_id TEXT NOT NULL, touched_at INTEGER NOT NULL, PRIMARY KEY(kind,record_id))");
-      this.sql.exec("CREATE TABLE IF NOT EXISTS stage (kind TEXT NOT NULL, record_id TEXT NOT NULL, profile_id TEXT NOT NULL, contribution TEXT NOT NULL, overdue_due_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(kind,record_id))");
+      this.sql.exec("CREATE TABLE IF NOT EXISTS stage (kind TEXT NOT NULL, record_id TEXT NOT NULL, profile_id TEXT NOT NULL, contribution TEXT NOT NULL, overdue_due_at INTEGER NOT NULL DEFAULT 0, approved_future_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(kind,record_id))");
+      const stageColumns = records(this.sql, "PRAGMA table_info(stage)").map((col) => col.name);
+      if (!stageColumns.includes("approved_future_at")) {
+        this.sql.exec("ALTER TABLE stage ADD COLUMN approved_future_at INTEGER NOT NULL DEFAULT 0");
+      }
     });
   }
   incrementMetric(key, amount = 1) {
@@ -95,18 +109,19 @@ export class StudioProfileSummary {
     if (matches.length !== 1) return "";
     return matches[0].id;
   }
-  modify(kind, recordId, profileId, contribution, at, dueAt = 0) {
+  modify(kind, recordId, profileId, contribution, at, dueAt = 0, futureAt = 0) {
     const previous = records(this.sql, "SELECT * FROM ledger WHERE kind=? AND record_id=?", kind, recordId)[0];
     const old = previous ? JSON.parse(previous.contribution) : ZERO();
     const next = contribution || ZERO();
     if (previous?.profile_id === profileId && contributionEqual(old, next)
-      && Number(previous.overdue_due_at || 0) === Number(dueAt || 0)) return false;
+      && Number(previous.overdue_due_at || 0) === Number(dueAt || 0)
+      && Number(previous.approved_future_at || 0) === Number(futureAt || 0)) return false;
     if (previous) this.incrementProfile(previous.profile_id, homeContributionDelta(old, ZERO()), at);
     if (profileId) this.incrementProfile(profileId, homeContributionDelta(ZERO(), next), at);
     this.sql.exec("DELETE FROM ledger WHERE kind=? AND record_id=?", kind, recordId);
     if (profileId) {
-      this.sql.exec("INSERT INTO ledger (kind,record_id,profile_id,contribution,overdue_due_at) VALUES (?,?,?,?,?)",
-        kind, recordId, profileId, JSON.stringify(next), dueAt);
+      this.sql.exec("INSERT INTO ledger (kind,record_id,profile_id,contribution,overdue_due_at,approved_future_at) VALUES (?,?,?,?,?,?)",
+        kind, recordId, profileId, JSON.stringify(next), dueAt, futureAt);
     }
     this.putMeta("last_authoritative_at", at);
     const global = Number(this.getMeta("version") || 0);
@@ -167,12 +182,15 @@ export class StudioProfileSummary {
         const overdueByProfile = new Map(records(this.sql,
           "SELECT profile_id,COUNT(*) AS amount FROM ledger WHERE overdue_due_at>0 AND overdue_due_at<=? GROUP BY profile_id",
           Date.now()).map((row) => [row.profile_id, Number(row.amount || 0)]));
+        const futureByProfile = new Map(records(this.sql,
+          "SELECT profile_id,COUNT(*) AS amount FROM ledger WHERE approved_future_at>=? GROUP BY profile_id",
+          Date.now()).map((row) => [row.profile_id, Number(row.amount || 0)]));
         const lastReconciled = Number(this.getMeta("last_reconciled_at") || 0);
         const pending = records(this.sql, "SELECT COUNT(*) AS n FROM pending")[0]?.n || 0;
         return json({
           ok: true, source: "durable-profile-summary", version: Number(this.getMeta("version") || 0),
           last_authoritative_event_at: Number(this.getMeta("last_authoritative_at") || 0),
-          last_reconciled_at: lastReconciled, degraded: Boolean(this.getMeta("error"))
+          last_reconciled_at: lastReconciled, degraded: Boolean(this.getMeta("future_count_reconcile_required")) || Boolean(this.getMeta("error"))
             || Date.now() - lastReconciled > EMPTY_AGE_MS || pending > 0,
           pending_changes: pending,
           records: profiles.map((p) => {
@@ -183,10 +201,11 @@ export class StudioProfileSummary {
               scheduled: c.scheduled, manual: c.manual_action_required,
               failed: c.failed_outputs, approval: c.awaiting_approval,
               ideas: c.ideas_not_in_production,
-              approved_unpublished: c.approved_unpublished || 0,
+              approved_unpublished: futureByProfile.get(p.id) || 0,
               overdue_unpublished: overdue,
               metrics: {
-                ...c, overdue_unpublished: overdue, manual_action_required: c.manual_action_required,
+                ...c, approved_unpublished: futureByProfile.get(p.id) || 0,
+                overdue_unpublished: overdue, manual_action_required: c.manual_action_required,
                 failed_outputs: c.failed_outputs, awaiting_approval: c.awaiting_approval,
                 ideas_not_in_production: c.ideas_not_in_production,
               }, version: p.version, read_source: "durable-profile-summary",
@@ -250,8 +269,9 @@ export class StudioProfileSummary {
         this.state.storage.transactionSync(() => {
           for (const item of items) {
             const contribution = contributionForRecord(kind, item.record);
-            this.sql.exec("INSERT INTO stage (kind,record_id,profile_id,contribution,overdue_due_at) VALUES (?,?,?,?,?) ON CONFLICT(kind,record_id) DO UPDATE SET profile_id=excluded.profile_id,contribution=excluded.contribution,overdue_due_at=excluded.overdue_due_at",
-              kind, item.record.id, item.profile_id, JSON.stringify(contribution), dueAtForRecord(kind, item.record));
+            this.sql.exec("INSERT INTO stage (kind,record_id,profile_id,contribution,overdue_due_at,approved_future_at) VALUES (?,?,?,?,?,?) ON CONFLICT(kind,record_id) DO UPDATE SET profile_id=excluded.profile_id,contribution=excluded.contribution,overdue_due_at=excluded.overdue_due_at,approved_future_at=excluded.approved_future_at",
+              kind, item.record.id, item.profile_id, JSON.stringify(contribution),
+              dueAtForRecord(kind, item.record), approvedFutureAtForRecord(kind, item.record));
           }
         });
         return json({ ok: true, count: items.length });
@@ -289,10 +309,11 @@ export class StudioProfileSummary {
             this.sql.exec("INSERT INTO profiles (id,name,city_label,counters,version,event_at) VALUES (?,?,?,?,?,?)",
               p.id, p.name, p.city_label, JSON.stringify(counts.get(p.id)), Number(this.getMeta("version") || 0) + 1, Date.now());
           }
-          this.sql.exec("INSERT INTO ledger SELECT kind,record_id,profile_id,contribution,overdue_due_at FROM stage");
+          this.sql.exec("INSERT INTO ledger (kind,record_id,profile_id,contribution,overdue_due_at,approved_future_at) SELECT kind,record_id,profile_id,contribution,overdue_due_at,approved_future_at FROM stage");
           this.sql.exec("DELETE FROM stage");
           this.putMeta("version", Number(this.getMeta("version") || 0) + 1);
           this.putMeta("last_reconciled_at", Date.now());
+          this.putMeta("future_count_reconcile_required", "");
           this.putMeta("complete", "true");
           this.putMeta("building_generation", "");
           this.putMeta("error", "");
@@ -374,7 +395,8 @@ export class StudioProfileSummary {
             if (record && eligibleRecord(kind, record) && !profile) throw new Error("Cannot resolve profile for " + item.record_id);
             this.modify(kind, item.record_id, profile,
               profile ? contributionForRecord(kind, record) : ZERO(),
-              Date.now(), profile ? dueAtForRecord(kind, record) : 0);
+              Date.now(), profile ? dueAtForRecord(kind, record) : 0,
+              profile ? approvedFutureAtForRecord(kind, record) : 0);
             const lag = Math.max(0, Date.now() - Number(item.touched_at));
             this.incrementMetric("dirty_applied");
             this.incrementMetric("dirty_lag_sum_ms", lag);

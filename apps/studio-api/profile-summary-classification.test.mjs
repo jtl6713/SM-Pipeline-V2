@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   emptyHomeContribution, homeOutputContribution, homeIdeaContribution,
-  combineHomeContributions, homeContributionDelta, homeOverdueDueAt,
+  combineHomeContributions, homeContributionDelta, homeOverdueDueAt, homeApprovedUpcomingAt, homeApprovedUnpublished,
 } from "./profile-summary-classification.mjs";
 
 const base = {
@@ -30,7 +30,7 @@ test("review count is actionable, not merely Ready for Review state", () => {
 test("scheduled requires authorized undelivered platform dispatch", () => {
   const approved = {
     ...base, studio_state: "Scheduled", review_status: "Approved",
-    output_status: "Approved for Publishing", scheduled_post_date: "2026-10-20T11:00:00Z",
+    output_status: "Approved for Publishing", scheduled_post_date: "2099-10-20T11:00:00Z",
   };
   assert.equal(homeOutputContribution(approved).scheduled.Instagram, 1);
   for (const patch of [
@@ -53,7 +53,7 @@ test("record contributions support correct reversible deltas and no double count
   const before = homeOutputContribution(base);
   const after = homeOutputContribution({
     ...base, studio_state: "Scheduled", review_status: "Approved",
-    output_status: "Approved for Publishing", scheduled_post_date: "2026-10-20T11:00:00Z",
+    output_status: "Approved for Publishing", scheduled_post_date: "2099-10-20T11:00:00Z",
   });
   const delta = homeContributionDelta(before, after);
   assert.equal(delta.awaiting_approval, -1);
@@ -95,61 +95,84 @@ test("overdue unpublished survives dispatch, but disappears after publication", 
   }).overdue_unpublished, 0);
 });
 
-test("approving an output moves one from Awaiting Approval into parentheses, regardless of scheduled date", () => {
-  const ready = { ...base, render_status: "Rendered", review_status: "" };
-  const before = homeOutputContribution(ready);
+test("parentheses include only final-approved, non-past Scheduled_Post_Date", () => {
+  const now = Date.parse("2026-10-20T11:00:00Z");
+  const ready = { ...base, render_status: "Rendered", review_status: "",
+    studio_state: "Ready for Review" };
+  const before = homeOutputContribution(ready, now);
   assert.equal(before.awaiting_approval, 1);
-  assert.equal(before.approved_unpublished, 0);
-  for (const scheduled_post_date of ["2099-01-01T00:00:00Z", "2020-01-01T00:00:00Z", null]) {
-    const approved = { ...ready, review_status: "Approved", output_status: "Approved for Publishing",
-      studio_state: "Scheduled", scheduled_post_date };
-    const after = homeOutputContribution(approved);
-    assert.equal(after.awaiting_approval, 0);
+  for (const scheduled_post_date of [
+    "2026-10-20T11:00:00Z", "2026-10-21T11:00:00Z",
+  ]) {
+    const approved = { ...ready, review_status: "Approved",
+      output_status: "Approved for Publishing", studio_state: "Scheduled",
+      scheduled_post_date };
+    const after = homeOutputContribution(approved, now);
     assert.equal(after.approved_unpublished, 1);
+    assert.equal(after.awaiting_approval, 0);
     assert.equal(homeContributionDelta(before, after).approved_unpublished, 1);
-    assert.equal(homeContributionDelta(before, after).awaiting_approval, -1);
-    assert.equal(homeOutputContribution({ ...approved, studio_publish_dispatch_count: 1,
-      studio_state: "Platform Processing" }).approved_unpublished, 1);
-    assert.equal(homeOutputContribution({ ...approved, published_at: "2026-10-20T02:00:00Z" }).approved_unpublished, 0);
-    assert.equal(homeOutputContribution({ ...approved, platform_post_url: "https://example.test/post" }).approved_unpublished, 0);
-    assert.equal(homeOutputContribution({ ...approved, review_status: "Rejected" }).approved_unpublished, 0);
   }
+  for (const scheduled_post_date of ["2026-10-20T10:59:59Z", null, "", "bad-date"]) {
+    const row = { ...ready, review_status: "Approved",
+      output_status: "Approved for Publishing", studio_state: "Scheduled",
+      scheduled_post_date };
+    assert.equal(homeOutputContribution(row, now).approved_unpublished, 0,
+      String(scheduled_post_date));
+  }
+  const future = { ...ready, review_status: "Approved", scheduled_post_date: "2026-10-21T11:00:00Z" };
+  for (const patch of [
+    { review_status: "Pending", output_status: "Approved for Publishing" },
+    { review_status: "", output_status: "Approved" },
+    { review_status: "Rejected" },
+    { do_not_publish: true },
+    { published_at: "2026-10-19T11:00:00Z" },
+    { platform_post_url: "https://example.test/post" },
+    { publish_status: "Published" },
+  ]) {
+    assert.equal(homeOutputContribution({ ...future, ...patch }, now).approved_unpublished,
+      0, JSON.stringify(patch));
+  }
+  assert.equal(homeApprovedUpcomingAt({
+    ...future, scheduled_post_date: "", scheduled_at: "2099-01-01T00:00:00Z",
+    youtube_scheduled_publish_at: "2099-01-01T00:00:00Z",
+  }), 0, "never substitute alternative dates for scheduled publication");
+  assert.equal(homeApprovedUnpublished(future, now), true);
+  assert.equal(homeApprovedUnpublished(future, Date.parse("2026-10-22T11:00:00Z")), false);
 });
 
-
-test("provider completion does not remove approved but unpublished posts", () => {
+test("delivered drafts count in parentheses only if publication is still in future", () => {
+  const now = Date.parse("2026-10-20T11:00:00Z");
   const ready = { ...base, render_status: "Rendered", review_status: "" };
-  const before = homeOutputContribution(ready);
-  assert.equal(before.awaiting_approval, 1);
   for (const platform of ["Instagram", "Facebook", "TikTok", "YouTube"]) {
     for (const state of ["Completed", "Succeeded", "Uploaded", "Draft Delivered"]) {
       const row = { ...ready, platform, review_status: "Approved",
         output_status: "Approved for Publishing", studio_state: "Platform Processing",
         publish_status: "Ready to Schedule", platform_publish_status: state,
-        scheduled_post_date: "2020-01-01T00:00:00Z", studio_publish_dispatch_count: 1 };
-      const result = homeOutputContribution(row);
-      assert.equal(result.awaiting_approval, 0, platform + " " + state);
-      assert.equal(result.approved_unpublished, 1, platform + " " + state);
-      assert.equal(result.overdue_unpublished, 1, platform + " " + state);
-      assert.equal(homeContributionDelta(before, result).approved_unpublished, 1);
-      for(const published of [
-        { published_at: "2026-10-20T02:00:00Z" },
+        scheduled_post_date: "2026-10-21T11:00:00Z", studio_publish_dispatch_count: 1 };
+      assert.equal(homeOutputContribution(row, now).approved_unpublished, 1, platform + " " + state);
+      assert.equal(homeOutputContribution({ ...row,
+        scheduled_post_date: "2026-10-19T11:00:00Z" }, now).approved_unpublished, 0);
+      for (const published of [
+        { published_at: "2026-10-19T11:00:00Z" },
         { platform_post_url: "https://example.test/post" },
-        { publish_status: "Published" }, { platform_publish_status: "Published" },
-      ]) assert.equal(homeOutputContribution({ ...row, ...published }).approved_unpublished, 0);
+        { publish_status: "Published" },
+        { platform_publish_status: "Published" },
+      ]) assert.equal(homeOutputContribution({ ...row, ...published }, now).approved_unpublished, 0);
     }
   }
 });
 
-test("approval minus simultaneous publication is a net backlog, not cumulative approved count", () => {
+test("approval and publication leave unchanged future scheduled backlog", () => {
+  const now = Date.parse("2026-10-20T11:00:00Z");
   const approved = { ...base, review_status: "Approved", output_status: "Approved for Publishing",
-    studio_state: "Scheduled" };
+    studio_state: "Scheduled", scheduled_post_date: "2026-10-25T11:00:00Z" };
   const before = combineHomeContributions([
-    homeOutputContribution(approved), homeOutputContribution(base),
+    homeOutputContribution(approved, now), homeOutputContribution(base, now),
   ]);
   const after = combineHomeContributions([
-    homeOutputContribution({ ...approved, published_at: "2026-10-20T02:00:00Z" }),
-    homeOutputContribution({ ...base, review_status: "Approved", output_status: "Approved for Publishing" }),
+    homeOutputContribution({ ...approved, published_at: "2026-10-20T02:00:00Z" }, now),
+    homeOutputContribution({ ...base, review_status: "Approved", output_status: "Approved for Publishing",
+      studio_state: "Scheduled", scheduled_post_date: "2026-10-25T11:00:00Z" }, now),
   ]);
   assert.equal(after.awaiting_approval, before.awaiting_approval - 1);
   assert.equal(after.approved_unpublished, before.approved_unpublished);
