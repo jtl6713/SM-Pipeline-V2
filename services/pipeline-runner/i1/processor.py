@@ -121,7 +121,7 @@ def _year_title_formula(title: str, title_field: str, created_field: str) -> str
     if not prefix:
         raise ValueError("Idea title is empty")
     return (
-        f'AND({{Test_Run_ID}}=BLANK(),'
+        f'AND({"{Test_Run_ID}=BLANK()," if title_field == "Candidate_Title" else ""}'
         f'IS_AFTER(CREATED_TIME(),DATEADD(TODAY(),-365,"days")),'
         f'REGEX_MATCH(REGEX_REPLACE(LOWER({{{title_field}}}&""),"[^a-z0-9]",""),"^{prefix}"))'
     )
