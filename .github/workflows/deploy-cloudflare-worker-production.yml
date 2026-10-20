@@ -737,6 +737,16 @@ jobs:
               (.ideas|numbers)
             ] | length) >= 32
           ' /tmp/overview-after.json >/dev/null
+          jq -e '
+            .ok==true
+            and (.records|length)>=4
+            and ([.records[] | (.pipeline_total|numbers),(.approval|numbers),(.approved_future|numbers)] | length)>=12
+            and ([.records[] | .pipeline_total == (.approved_future + .approval)] | all)
+            and ([.records[] | .pipeline_by_platform
+                | (.Facebook|numbers),(.Instagram|numbers),(.TikTok|numbers),(.YouTube|numbers)] | length)>=16
+            and ([.records[] | .awaiting_final_by_platform
+                | (.Facebook|numbers),(.Instagram|numbers),(.TikTok|numbers),(.YouTube|numbers)] | length)>=16
+          ' /tmp/overview-after.json >/dev/null
           echo "overview_force_refresh_production=PASS generation=$GENERATION profiles=$(jq '.records|length' /tmp/overview-after.json) snapshot_at=$SNAPSHOT_AT"
 
       - name: Verify Factory batch rollout via read-only Worker status
