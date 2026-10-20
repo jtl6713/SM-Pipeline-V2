@@ -20,6 +20,15 @@ class DurableEgressTests(unittest.TestCase):
                 self.assertEqual(sum(x["attempts"] for x in out["hourly"]), 3)
                 self.assertEqual({x["status_class"] for x in out["hourly"]}, {"2xx", "4xx"})
 
+    def test_fallback_prefers_existing_scratch_volume(self):
+        from airtable.egress_monitor import _metrics_path
+        env = dict(os.environ)
+        env.pop("AIRTABLE_EGRESS_SQLITE_PATH", None)
+        with patch.dict(os.environ, env, clear=True), \\
+             patch("airtable.egress_monitor.Path.is_dir", return_value=True), \\
+             patch("airtable.egress_monitor.os.access", return_value=True):
+            self.assertEqual(_metrics_path(), "/scratch/metrics/airtable-egress.sqlite")
+
     def test_not_configured_not_reported_as_zero(self):
         with patch.dict(os.environ, {"AIRTABLE_EGRESS_SQLITE_PATH": ""}):
             self.assertFalse(persist_airtable_egress("GET", 200))
