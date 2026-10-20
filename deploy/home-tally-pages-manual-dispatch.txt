@@ -1,1 +1,0 @@
-2026-10-20: Dispatch existing workflow_dispatch Deploy Studio Pages Production on main after #971 corrected approved-but-unpublished parentheses; same UI 0.6.727 app BUILD_ID, new cached Home tally v5 script and manifest cache query, no relaxation of default push release gate. Confirm custom domain and Home asset fingerprint.
