@@ -239,6 +239,7 @@ import {
   summarizeObservations,
   youtubePublishedAfterIso,
 } from "./autonomous-produce.mjs";
+import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { ideaAutoListenContentType, ideaManagePhotoPauseActive, ideaProductionConfigFields, mergeIdeaProductionNotes, mergeProductionRequestNotes, parseIdeaMachineNotes, parseIdeaNotedMediaIds, productionNotesForPromotionHandoff, productionPhotoWaitAutoOff, productionPhotoWaitRejectedIds, shouldAttachPhotoWaitAssets, withIdeaManagePhotoPause, withoutIdeaManagePhotoPause, withProductionPhotoWaitManual } from "./idea-photo-wait.mjs";
 import {
   STUDIO_PUBLISH_RECONCILE_SCHEDULE_FORMULA,
@@ -3670,6 +3671,12 @@ export async function createIdea(request, env, authorization) {
 
   const input = cleanIdeaCreatePayload(payload);
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
+  const duplicateTitle = await studioFindRecentDuplicateTitle(input.title, (kind, formula) => {
+    const table = kind === "idea" ? env.AIRTABLE_IDEA_TABLE_ID : env.AIRTABLE_CONTENT_TABLE_ID;
+    if (!table) throw new HttpError(503, "Title history unavailable: creation blocked");
+    return listRecords(env, table, { filterFormula: formula, limit: 3 });
+  });
+  if (duplicateTitle) throw new HttpError(409, `Title "${input.title}" already used within 365 days (${duplicateTitle.source}).`);
   const fields = {
     Candidate_Title: input.title,
     Candidate_Status: "Generated",
@@ -3786,6 +3793,14 @@ export async function updateIdea(request, env, url, authorization) {
   assertIdeaNotApproved(record, "Editing");
 
   const input = cleanIdeaUpdatePayload(payload);
+  if (studioIdeaTitleKey(input.title) !== studioIdeaTitleKey(f(record, "Candidate_Title"))) {
+    const duplicateTitle = await studioFindRecentDuplicateTitle(input.title, (kind, formula) => {
+      const table = kind === "idea" ? env.AIRTABLE_IDEA_TABLE_ID : env.AIRTABLE_CONTENT_TABLE_ID;
+      if (!table) throw new HttpError(503, "Title history unavailable: edit blocked");
+      return listRecords(env, table, { filterFormula: formula, limit: 3 });
+    }, { excludeIdeaId: recordId });
+    if (duplicateTitle) throw new HttpError(409, `Title "${input.title}" already used within 365 days (${duplicateTitle.source}).`);
+  }
   let productionFields = {};
   try {
     productionFields = ideaProductionConfigFields(
