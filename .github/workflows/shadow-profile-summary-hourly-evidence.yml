@@ -30,6 +30,8 @@ jobs:
         run: python -m unittest discover -s repair/scripts -p 'airtable_hourly_rollup_test.py' -v
       - name: Inventory direct Airtable call sites without additional requests
         run: python repair/scripts/airtable_direct_egress_inventory.py --output airtable-direct-egress-inventory.json
+      - name: Test durable standalone Airtable egress and attestations
+        run: python -m unittest discover -s repair/scripts -p 'airtable_standalone_egress_test.py' -v
       - name: Test source coverage and matched baseline gates
         run: python -m unittest discover -s repair/scripts -p 'airtable_coverage_baseline_test.py' -v
       - name: Test automatic 24-hour evidence gate
