@@ -25,7 +25,6 @@
     batchDeskReconcileNextAttempt: 0,
     lastBatchFetchMs: 0,
   };
-  const FACTORY_REVIEW_GROUPS_PER_PAGE = 12;
   const FACTORY_SELECTION_KEY = "studio.factory.batch-selection.v1";
   const FACTORY_LAST_BATCH_KEY = "studio.factory.last-batch.v1";
   const FACTORY_PENDING_REQUEST_KEY = "studio.factory.pending-approval-request.v1";
@@ -1083,6 +1082,7 @@
     }
     if (options.groupContent) {
       const groups = groupByContent(cards);
+      const FACTORY_REVIEW_GROUPS_PER_PAGE = 12;
       // Bound the iPad DOM: rendering hundreds of off-screen accordions made
       // Safari show one row followed by a large apparently empty review list.
       const pages = Math.max(1, Math.ceil(groups.length / FACTORY_REVIEW_GROUPS_PER_PAGE));
