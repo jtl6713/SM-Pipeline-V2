@@ -622,7 +622,27 @@ jobs:
           TOKEN=$(cat /tmp/verify-token.txt)
           BASE="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN"
 
-          curl -fsS --max-time 60 "$BASE/overview" -o /tmp/overview-before.json
+          # The temporary Cloudflare bridge can return a routing-only 1042
+          # during propagation, even after an earlier request succeeded.
+          # Never retry or conceal an actual Studio API error response.
+          bridge_get() {
+            local target="$1" output="$2" code
+            for bridge_attempt in 1 2 3 4 5 6; do
+              code=$(curl -sS --max-time 60 -o "$output" -w '%{http_code}' "$target" || true)
+              if [[ "$code" == "200" ]]; then return 0; fi
+              if [[ "$code" == "404" ]] && grep -Fq "error code: 1042" "$output"; then
+                echo "Temporary verification bridge GET routing 1042 (attempt $bridge_attempt/6)" >&2
+                sleep 5
+                continue
+              fi
+              echo "Verification bridge GET failed http=$code" >&2
+              return 1
+            done
+            echo "Verification bridge GET still unavailable after bounded 1042 retries" >&2
+            return 1
+          }
+
+          bridge_get "$BASE/overview" /tmp/overview-before.json
           # A schema bump deliberately rejects the previous R2 Home snapshot.
           # An empty first read is expected until this very canary rebuilds it.
           # Reject a PARTIAL non-empty snapshot; never bless incomplete profiles.
@@ -644,6 +664,13 @@ jobs:
               ACCEPTED=1
               break
             fi
+            # Cloudflare workers.dev may briefly return 1042 while this one-time
+            # verification bridge propagates; retry only that exact routing fault.
+            if [[ "$CODE" == "404" ]] && grep -Fq "error code: 1042" /tmp/overview-refresh-start.json; then
+              echo "Temporary verification bridge routing 1042 (attempt $attempt/6); retrying" >&2
+              sleep 5
+              continue
+            fi
             START_ERROR=$(jq -r '.error // .refresh.error // ""' /tmp/overview-refresh-start.json 2>/dev/null || true)
             if [[ "$STATUS" == "cooling_down" || "$CODE" == "429" || "$START_ERROR" == *"cooling down"* ]]; then
               RETRY_MS=$(jq -r '.refresh.retry_after_ms // .refresh.cooldown_remaining_ms // 8000' /tmp/overview-refresh-start.json)
@@ -663,7 +690,7 @@ jobs:
           COMPLETE=0
           BUDGET_RETRIES=0
           for attempt in $(seq 1 90); do
-            curl -fsS --max-time 60 "$BASE/overview-status" -o /tmp/overview-refresh-status.json
+            bridge_get "$BASE/overview-status" /tmp/overview-refresh-status.json
             STATUS=$(jq -r '.refresh.status // .status // ""' /tmp/overview-refresh-status.json)
             if [[ "$STATUS" == "completed" ]]; then
               COMPLETE=1
@@ -711,7 +738,7 @@ jobs:
           test "$GENERATION" != "$BEFORE_GENERATION"
           test "$SNAPSHOT_AT" -gt "$BEFORE_AT"
 
-          curl -fsS --max-time 60 "$BASE/overview?generation=$GENERATION" -o /tmp/overview-after.json
+          bridge_get "$BASE/overview?generation=$GENERATION" /tmp/overview-after.json
           jq -e --arg generation "$GENERATION" --argjson at "$SNAPSHOT_AT" '
             .ok==true
             and .snapshot_generation==$generation
