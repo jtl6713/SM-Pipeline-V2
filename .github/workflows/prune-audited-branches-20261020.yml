@@ -28,7 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json, os, pathlib, urllib.error, urllib.parse, urllib.request
+          import json, os, pathlib, urllib.error, urllib.parse, urllib.request, time
           repo = os.environ["GITHUB_REPOSITORY"]
           token = os.environ["GH_TOKEN"]
           manifest = json.loads(pathlib.Path("docs/maintenance/branch-prune-20261020.json").read_text())
@@ -97,8 +97,21 @@ jobs:
                   if e.code != 404:
                       raise
                   api("git/refs", method="POST", data={"ref": "refs/tags/" + tag, "sha": expected})
-              if api("git/ref/tags/" + qp)["object"]["sha"] != expected:
-                  raise SystemExit("Archive verification failure for " + name)
+              # GitHub can briefly return 404 immediately after accepting a new tag.
+              verified = False
+              for attempt in range(12):
+                  try:
+                      observed = api("git/ref/tags/" + qp)["object"]["sha"]
+                      if observed != expected:
+                          raise SystemExit("Archive tag SHA mismatch for " + name)
+                      verified = True
+                      break
+                  except urllib.error.HTTPError as e:
+                      if e.code != 404:
+                          raise
+                      time.sleep(1)
+              if not verified:
+                  raise SystemExit("Archive tag failed to propagate for " + name)
               archived.append((name, tag))
           print("archived_unique_branches=" + str(len(archived)))
           # Delete exact untouched refs only; GH API rejects drifted or protected refs.
