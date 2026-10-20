@@ -29,6 +29,8 @@ jobs:
           python -m pip install --quiet -r services/pipeline-runner/requirements.txt pytest
           PYTHONPATH=services/pipeline-runner python -m pytest -q \
             services/pipeline-runner/tests/test_a2b_existing_lookup.py \
+            services/pipeline-runner/tests/test_i1_title_uniqueness.py \
+            services/pipeline-runner/tests/test_idea_chain.py \
             services/pipeline-runner/tests/test_airtable_atomic_upsert.py \
             services/pipeline-runner/tests/test_airtable_egress_monitor.py \
             services/pipeline-runner/tests/test_airtable_durable_egress.py \
