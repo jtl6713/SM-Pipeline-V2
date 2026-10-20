@@ -110,7 +110,7 @@ def main():
         before["total_observed"] += shadow_before
         after["total_observed"] += shadow_after
     # These data are accounted from snapshot deltas, not from egress JSONL logs.
-    covered = set(args.coverage)
+    covered = set(args.coverage) - {"shadow_dirty_replay"}
     if shadow_before is not None and shadow_after is not None:
         covered.add("shadow_dirty_replay")
     fully_covered = covered >= SOURCES
