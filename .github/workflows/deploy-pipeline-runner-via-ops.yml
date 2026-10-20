@@ -257,3 +257,5 @@ jobs:
 # 2026-10-17: fresh runner restart to clear stale final visual-canary request after exact-target/timing fixes.
 # Trigger pipeline-runner deploy for PR 884 profile-specific thumbnail and narration prompt guidance.
 # Controlled single retry for PR 884 after verified rollback; 2026-10-18 profile creative guidance.
+
+# 2026-10-19 PR #923: deploy Python I1 365-day title uniqueness lookup alongside Studio Worker guard.
