@@ -96,3 +96,20 @@ test("Factory batch counts and status never overlap the full-width progress rail
   assert.doesNotMatch(layout, /max-width:260px|position:absolute;left:10px/);
   assert.match(desk, /style="width:\$\{percent\}%"/);
 });
+
+test("Factory Quality Agent starts collapsed, expands via native accessible disclosure, and keeps metric visible", () => {
+ const factory=html.match(/<details class="factory-batch-quality-panel factory-global-quality"[^]*?<\/details>/)?.[0];
+ assert.ok(factory, "Factory Quality Agent uses a native disclosure");
+ assert.doesNotMatch(factory.slice(0, factory.indexOf(">")), /\sopen(?:\s|=|$)/, "starts collapsed");
+ const summary=factory.match(/<summary[^>]*>[^]*?<\/summary>/)?.[0];
+ assert.ok(summary, "summary is the click/keyboard toggle");
+ assert.match(summary, /id="factoryBatchQualityHeading"[^>]*>Quality Agent/);
+ assert.match(summary, /id="factoryBatchQualityMetric"[^>]*aria-live="polite"/);
+ assert.match(factory.slice(factory.indexOf("</summary>")), /id="factoryBatchQualityRefresh"/);
+ assert.match(factory.slice(factory.indexOf("</summary>")), /id="factoryBatchQualitySignals"/);
+ assert.match(css, /#factoryBatchQuality\[open\] \.factory-batch-quality-toggle-hint/);
+ assert.match(css, /#factoryBatchQuality > \.factory-batch-quality-toggle:focus-visible/);
+ assert.match(quality, /factoryBatchQualityMetric/);
+ assert.match(html, /<section class="factory-batch-quality-panel" id="operationsFactoryBatchQuality"/,
+   "Operations Quality Agent remains independent");
+});

@@ -163,3 +163,36 @@
 #page-factory .factory-global-quality.factory-batch-quality-panel #factoryBatchQualityRefresh {
   margin:0 0 0 auto;
 }
+
+/* Factory Quality Agent: native, keyboard-accessible disclosure; compact by default.
+   Keep the live finding count and status visible without changing polling. */
+#page-factory #factoryBatchQuality > .factory-batch-quality-toggle {
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:8px 12px;
+  cursor:pointer;
+  list-style:none;
+  min-height:30px;
+}
+#page-factory #factoryBatchQuality > .factory-batch-quality-toggle::-webkit-details-marker { display:none; }
+#page-factory #factoryBatchQuality > .factory-batch-quality-toggle::marker { content:""; }
+#page-factory #factoryBatchQuality > .factory-batch-quality-toggle:focus-visible {
+  outline:2px solid var(--accent,#367fbe);
+  outline-offset:3px;
+  border-radius:4px;
+}
+#page-factory #factoryBatchQuality .factory-batch-quality-toggle-hint {
+  margin-left:auto;
+  color:var(--text-muted,#526576);
+  font-size:.76rem;
+  font-weight:600;
+  white-space:nowrap;
+}
+#page-factory #factoryBatchQuality .factory-batch-quality-toggle-hint::after { content:"Show findings \25BE"; }
+#page-factory #factoryBatchQuality[open] .factory-batch-quality-toggle-hint::after { content:"Hide findings \25B4"; }
+#page-factory #factoryBatchQuality .factory-batch-quality-body { margin-top:9px; }
+#page-factory #factoryBatchQuality .factory-batch-quality-actions { display:flex; justify-content:flex-end; }
+#page-factory #factoryBatchQuality .factory-batch-quality-actions #factoryBatchQualityRefresh {
+  margin:0 0 4px auto;
+}
