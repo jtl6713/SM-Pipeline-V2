@@ -1,3 +1,4 @@
+import { OUTPUT_LIST_FIELDS } from "./worker.js";
 import { mapOutput, mapIdea } from "./worker-functions-01.mjs";
 import {
   emptyHomeContribution, homeOutputContribution, homeIdeaContribution,
@@ -116,7 +117,7 @@ export class StudioProfileSummary {
           ok: true, source: "durable-profile-summary", version: Number(this.getMeta("version") || 0),
           last_authoritative_event_at: Number(this.getMeta("last_authoritative_at") || 0),
           last_reconciled_at: lastReconciled, degraded: Boolean(this.getMeta("error"))
-            || Date.now() - lastReconciled > EMPTY_AGE_MS || pending > 100,
+            || Date.now() - lastReconciled > EMPTY_AGE_MS || pending > 0,
           pending_changes: pending,
           records: profiles.map((p) => {
             const c = JSON.parse(p.counters);
@@ -161,12 +162,18 @@ export class StudioProfileSummary {
           || profiles.some((p) => !validId(p.id) || !code(p.name) || !code(p.city_label))) {
           return json({ ok: false, error: "invalid_bootstrap" }, 400);
         }
+        const active = this.getMeta("building_generation");
+        const buildingAge = Date.now() - Number(this.getMeta("building_started_at") || 0);
+        if (active && buildingAge < 10 * 60_000) {
+          return json({ ok: false, error: "reconciliation_already_active" }, 409);
+        }
         this.state.storage.transactionSync(() => {
           this.sql.exec("DELETE FROM stage");
           this.putMeta("building_generation", generation);
           this.putMeta("building_profiles", JSON.stringify(profiles));
           this.putMeta("building_started_at", Date.now());
         });
+        await this.state.storage.setAlarm(Date.now() + 10_000);
         return json({ ok: true, generation });
       }
       if (url.pathname === "/stage") {
@@ -256,29 +263,50 @@ export class StudioProfileSummary {
         this.putMeta("error", "Reconciliation expired before complete commit");
       });
     }
-    const pending = records(this.sql, "SELECT kind,record_id,touched_at FROM pending ORDER BY touched_at LIMIT 6");
+    if (this.getMeta("complete") !== "true") return;
+    // Read a bounded set of dirty records with one filtered Airtable list call
+    // per kind. Batched authoritative rereads avoid one request per approval,
+    // allow 10–15s freshness during ordinary approval waves, and lower 429s.
+    const pending = records(this.sql, "SELECT kind,record_id,touched_at FROM pending ORDER BY touched_at LIMIT 20");
+    const grouped = new Map();
     for (const item of pending) {
+      if (!grouped.has(item.kind)) grouped.set(item.kind, []);
+      grouped.get(item.kind).push(item);
+    }
+    for (const [kind, items] of grouped) {
       try {
-        if (this.getMeta("complete") !== "true") break;
         const base = code(this.env.AIRTABLE_BASE_ID);
-        const table = item.kind === "output" ? this.env.AIRTABLE_OUTPUT_TABLE_ID : this.env.AIRTABLE_IDEA_TABLE_ID;
+        const table = kind === "output" ? this.env.AIRTABLE_OUTPUT_TABLE_ID : this.env.AIRTABLE_IDEA_TABLE_ID;
         if (!base || !table || !this.env.AIRTABLE_PAT) throw new Error("Airtable binding unavailable");
-        const address = "https://api.airtable.com/v0/" + encodeURIComponent(base) + "/" + encodeURIComponent(table) + "/" + encodeURIComponent(item.record_id);
-        const res = await fetch(address, { headers: { Authorization: "Bearer " + this.env.AIRTABLE_PAT } });
-        if (!res.ok && res.status !== 404) throw new Error("Airtable reread returned " + res.status);
-        const record = res.status === 404 ? null : await res.json();
+        const url = new URL("https://api.airtable.com/v0/" + encodeURIComponent(base) + "/" + encodeURIComponent(table));
+        url.searchParams.set("pageSize", "100");
+        url.searchParams.set("filterByFormula", "OR(" + items.map((item) => 'RECORD_ID()="' + item.record_id + '"').join(",") + ")");
+        const fields = kind === "output"
+          ? OUTPUT_LIST_FIELDS
+          : ["Content_Profile", "Promoted_Content_Record_ID", "Content Items"];
+        for (const field of fields) url.searchParams.append("fields[]", field);
+        const res = await fetch(url.toString(), { headers: { Authorization: "Bearer " + this.env.AIRTABLE_PAT } });
+        if (!res.ok) throw new Error("Airtable batch reread returned " + res.status);
+        const pack = await res.json();
+        if (!Array.isArray(pack.records) || pack.offset) throw new Error("Incomplete Airtable batch reread");
+        const readById = new Map(pack.records.map((row) => [row.id, row]));
         this.state.storage.transactionSync(() => {
-          // An operator rebuild may have begun while the Airtable GET awaited.
-          // Keep this dirty record queued for the post-reconciliation replay.
+          // A rebuild may have started during the Airtable fetch. The dirty
+          // queue remains intact and is replayed after the rebuild commits.
           if (this.getMeta("building_generation")) return;
-          const latest = records(this.sql, "SELECT touched_at FROM pending WHERE kind=? AND record_id=?", item.kind, item.record_id)[0];
-          if (!latest || Number(latest.touched_at) !== Number(item.touched_at)) return;
-          const profile = record && eligibleRecord(item.kind, record) ? this.inferProfile(record) : "";
-          if (record && eligibleRecord(item.kind, record) && !profile) throw new Error("Cannot resolve profile for " + item.record_id);
-          this.modify(item.kind, item.record_id, profile,
-            profile ? contributionForRecord(item.kind, record) : ZERO(),
-            Date.now(), profile ? dueAtForRecord(item.kind, record) : 0);
-          this.sql.exec("DELETE FROM pending WHERE kind=? AND record_id=?", item.kind, item.record_id);
+          for (const item of items) {
+            const latest = records(this.sql,
+              "SELECT touched_at FROM pending WHERE kind=? AND record_id=?",
+              item.kind, item.record_id)[0];
+            if (!latest || Number(latest.touched_at) !== Number(item.touched_at)) continue;
+            const record = readById.get(item.record_id) || null;
+            const profile = record && eligibleRecord(kind, record) ? this.inferProfile(record) : "";
+            if (record && eligibleRecord(kind, record) && !profile) throw new Error("Cannot resolve profile for " + item.record_id);
+            this.modify(kind, item.record_id, profile,
+              profile ? contributionForRecord(kind, record) : ZERO(),
+              Date.now(), profile ? dueAtForRecord(kind, record) : 0);
+            this.sql.exec("DELETE FROM pending WHERE kind=? AND record_id=?", kind, item.record_id);
+          }
         });
         this.putMeta("error", "");
       } catch (error) {
