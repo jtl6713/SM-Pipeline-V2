@@ -14852,7 +14852,12 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
     // cron tick, and a scan failure silently left the child pending forever.
     // Read it once, only from the approval callback after the profile lease
     // has been claimed. A failure now enters the existing per-item retry path.
-    let occupiedByLane = null;
+    // A 90-day scan across all four platforms exceeded the 1,200-row
+    // strict occupancy cap in Miami and LA. Read each actual platform's full
+    // calendar once, after acquiring the profile lease. Include Stories and
+    // every output type on that platform to preserve the shared MAE lane.
+    const occupiedByLane = {};
+    const loadedOccupancyPlatforms = new Set();
     let profile = null;
     let timeZone = null;
     let horizonDays = null;
@@ -14863,16 +14868,8 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
           // Canonical Factory single-item guard handles existing Approved/Published,
           // render eligibility, Do_Not_Publish and the MAE / Story scheduling rules.
           // Reject profile drift before calling any authoritative approval mutation.
-          if (occupiedByLane === null) {
+          if (profile === null) {
             profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId).catch(() => null);
-            // Keep already-approved slots occupied on recovery. Incomplete
-            // reads fail closed; do not schedule against guessed free capacity.
-            occupiedByLane = await studioOccupiedSchedulesOrEmpty(env, {
-              excludeIds: (job.items || [])
-                .filter((item) => !["approved", "already_satisfied", "failed"].includes(String(item.status || "")))
-                .map((item) => item.id),
-              profile, requireComplete: true,
-            });
             timeZone = studioScheduleTimeZoneForProfile(profile, MAE_DEFAULT_TIME_ZONE);
             horizonDays = await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS);
           }
@@ -14900,6 +14897,22 @@ export async function factoryBatchProcess(env, profileId, requestId, ctx = null,
           }
           const platform = String(f(record, "Platform") || "").trim();
           const outputType = String(f(record, "Studio_Output_Type") || f(record, "Format") || "").trim();
+          if (!platform) throw new HttpError(409, "Cannot verify output platform for MAE scheduling");
+          if (!loadedOccupancyPlatforms.has(platform)) {
+            // Keep already-approved slots occupied on recovery. The strict
+            // platform-filtered Airtable scan includes all formats and fails
+            // closed if even this bounded lane is incomplete.
+            const platformOccupancy = await studioOccupiedSchedulesOrEmpty(env, {
+              excludeIds: (job.items || [])
+                .filter(item => !["approved", "already_satisfied", "failed"].includes(String(item.status || "")))
+                .map(item => item.id),
+              profile, platform, requireComplete: true,
+            });
+            for (const [lane, times] of Object.entries(platformOccupancy)) {
+              (occupiedByLane[lane] ||= []).push(...times);
+            }
+            loadedOccupancyPlatforms.add(platform);
+          }
           // Canonical single-output approval owns terminal-state idempotence and Do_Not_Publish.
           checkpoint("approval_started");
           const result = await factoryApproveOutput(
