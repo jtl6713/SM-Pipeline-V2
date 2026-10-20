@@ -1912,7 +1912,7 @@ export default {
       if (url.pathname === "/api/profiles/overview/summary/runner-airtable-egress") {
         if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
         requireAnyPermission(authorization, ["tenant_admin", "production_configure"]);
-        const base = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\\/+$/, "");
+        const base = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
         const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
         if (!base || !secret) return respond(request, env,
           { ok: false, reason: "runner_metrics_proxy_not_configured" }, 503);
