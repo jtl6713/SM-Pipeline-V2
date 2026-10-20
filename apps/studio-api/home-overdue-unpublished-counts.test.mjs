@@ -45,6 +45,8 @@ test("parenthesized profile count reads future-approved scheduled metric, not ov
   assert.doesNotMatch(ui, /scheduledTotal\(row\)/);
   assert.match(classifier, /scheduled_post_date \|\| ""/);
   assert.match(classifier, /scheduled >= now/);
+  assert.match(worker, /approved_future_times: approvedFutureTimes/);
+  assert.match(worker, /row\.approved_future_times\.filter/);
 });
 
 test("shadow summary expires future scheduled counts at publication time without Airtable mutation", () => {
