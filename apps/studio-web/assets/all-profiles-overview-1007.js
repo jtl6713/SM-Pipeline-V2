@@ -316,9 +316,14 @@
     const nextVersion = Number(data?.summary_version || 0);
     // Reject out-of-order summary requests; legacy snapshots retain their own fallback.
     if (nextVersion > 0 && state.summaryVersion > nextVersion) return false;
+    const snapshotAt = Number(data?.snapshot_at || 0);
+    // Overlapping Home polls can finish out of order. Never replace a newer
+    // authoritative snapshot (and its approval totals) with older cached data.
+    // Match versions first; for versionless legacy snapshots use the timestamp.
+    if (snapshotAt > 0 && state.cacheAt > 0 && snapshotAt < state.cacheAt
+        && (nextVersion === 0 || nextVersion === state.summaryVersion)) return false;
     state.summaryVersion = nextVersion;
     state.rows = mapRows(rows);
-    const snapshotAt = Number(data?.snapshot_at || 0);
     if (snapshotAt > 0) state.cacheAt = snapshotAt;
     if (data?.snapshot_generation != null) state.snapshotGeneration = String(data.snapshot_generation || "");
     if (data?.ideas_at != null) state.ideasAt = Number(data.ideas_at || 0);
