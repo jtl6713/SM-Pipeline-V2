@@ -388,6 +388,7 @@ import {
   maeScheduleLaneKey,
   maeScheduleNextSlot,
   maeTimeZoneFromTheme,
+  maeZonedDateTimeParts,
 } from "./mae-schedule.mjs";
 import {
   SCHEDULE_REGEN_JOBS_SETTING,
@@ -3553,6 +3554,9 @@ export async function startScheduleRegenJob(request, env, authorization, ctx = n
   const repairDate = String(payload.repair_date || "").trim();
   if (repairDate && !/^\d{4}-\d{2}-\d{2}$/.test(repairDate)) {
     throw new HttpError(400, "repair_date must be YYYY-MM-DD");
+  }
+  if (repairDate && (profiles.length > 1 || !profile?.id || platforms.length !== 1 || outputTypes.length !== 1)) {
+    throw new HttpError(400, "Targeted repair requires exactly one selected profile, platform, and output type");
   }
   if (repairDate && !scheduleReservationLaneEnabled(env, profile?.id, platforms[0])) {
     throw new HttpError(409, "Targeted repair requires the atomic scheduling reservation authority");
