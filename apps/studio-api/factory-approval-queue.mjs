@@ -452,7 +452,7 @@ export function factoryBatchQualitySignals(job, nowMs = Date.now()) {
   // successful completions while work remains; existing cron safely reclaims
   // expired profile leases and resumes from the durable item ledger.
   const lastSuccess = Math.max(
-    Date.parse(job.created_at || "") || 0,
+    Date.parse(job.created_at || job.updated_at || "") || 0,
     ...(job.items || []).flatMap(item => (item.timeline || [])
       .filter(event => event.state === "approved" || event.state === "already_satisfied")
       .map(event => Date.parse(event.at || "") || 0)),
