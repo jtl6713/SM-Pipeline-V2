@@ -85,6 +85,18 @@ test("Supabase Phase 5 read wall and feature gates remain intact", () => {
   assert.match(home, /STUDIO_REFILL_PROFILE_SUMMARY_READS === "true"/);
 });
 
+test("production rollback treats both SQLite namespaces as lifecycle boundaries", () => {
+  const workflow = raw("../../.github/workflows/deploy-cloudflare-worker-production.yml");
+  assert.match(workflow, /from studio_api_rollback_lifecycle import decide_rollback/);
+  assert.match(workflow, /STUDIO_SCHEDULE_RESERVATIONS/);
+  assert.match(workflow, /STUDIO_PROFILE_SUMMARIES/);
+  assert.match(workflow, /automatic_rollback_skipped=durable_object_lifecycle_boundary/);
+  assert.match(workflow, /STUDIO_HOME_PROFILE_SUMMARY_READS']='false'/);
+  assert.match(workflow, /STUDIO_REFILL_PROFILE_SUMMARY_READS']='false'/);
+  assert.match(workflow, /SHADOW-PROFILE-SUMMARY/);
+  assert.doesNotMatch(workflow, /ENABLE_HOME_PROFILE_SUMMARY_READS/);
+});
+
 test("SQLite overdue queue uses indexed due_at instead of a stale snapshot-time count", () => {
   const source = raw("profile-summary-do.mjs");
   assert.match(source, /idx_summary_ledger_due/);
