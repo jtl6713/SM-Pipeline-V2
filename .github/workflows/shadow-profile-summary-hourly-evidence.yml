@@ -153,3 +153,5 @@ jobs:
 # 2026-10-20: verify runner metrics proxy after Worker production deployment completed.
 
 # 2026-10-20: Verify post-PR955 runner store+service proxy authenticates and exports nonempty aggregate evidence.
+
+# 2026-10-20: verify post-PR969 reconciliation egress attribution and both durable exports.
