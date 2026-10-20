@@ -14,7 +14,7 @@ const snapshot = () => ({
   ok: true, version: 4, last_reconciled_at: Date.now(), degraded: false,
   records: ids.map((id) => ({
     id, scheduled: { Facebook: 2, Instagram: 3, TikTok: 0, YouTube: 1 },
-    manual: 0, failed: 0, approval: 2, ideas: 1, overdue_unpublished: 0,
+    manual: 0, failed: 0, approval: 2, ideas: 1, approved_unpublished: 0, overdue_unpublished: 0,
   })),
 });
 
