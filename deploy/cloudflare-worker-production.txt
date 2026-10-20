@@ -513,3 +513,5 @@ Deploy PR #905 photo-wait historical platform default repair (Threads 400): filt
 2026-10-19: P0 #907 empty Ready platform plans from legacy unsupported X/Threads-only Feed Post suggestions: use Item4 supported Instagram/Facebook/TikTok/YouTube fallback, reject zero-item plans, rebuild existing invalid Ready plans without new Production Requests. PR #920; retain Airtable authority, human review, Supabase Phase 5 circuit breaker.
 
 2026-10-19: P0 #907 one-time CAS/lease-safe recovery for obsolete empty Item4 plan backoffs after merged PR #920. Preserve same Production Request and attempts; permanent marker prevents repeated early retries. PR #921 with CI and live R2 canary.
+
+2026-10-19: PR #923 production fix: enforce trailing 365-day normalized exact title history across manually created and hourly autonomous Studio Ideas; preserve already-approved Miami Content 828 and exclude 12 duplicate outputs from review/publishing.
