@@ -1078,7 +1078,8 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.670-profile-summary-parity",
+          version: "0.10.671-quality-failed-output-recovery",
+          quality_failed_output_scan_v2: true,
           studio_profile_summary_reconcile_gate_v1: true,
           studio_profile_summary_reconcile_await_v1: true,
           studio_profile_summary_home_membership_v1: true,
