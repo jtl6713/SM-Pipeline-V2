@@ -394,6 +394,7 @@ import {
   proposeVibeCuts,
   provisionalSelectsFromDuration,
   selectsFromSceneTimestamps,
+  validateVibeCutSourceAssets,
   vibeCutProductionDefaults,
   vibeCutRenderSettings,
 } from "./vibe-cut.mjs";
@@ -10581,6 +10582,36 @@ export async function enqueueStudioProductionJob(env, requestId, options = {}) {
   // one-video heuristic. Clear that route so produce stamps + T1 cut the source.
   // Also remount when a prior stamp left Selected_Clip_Count=1 (head-of-file trim).
   const vibeCut = studioIsVibeCut(record);
+  // A Vibe Cut must be cut from a real uploaded video, never from a
+  // retained photo package. Fail closed before a runner can render stills
+  // under an apparently successful Vibe Cut badge.
+  if (vibeCut) {
+    const sourceCheck = validateVibeCutSourceAssets(item4AssetManifest(record));
+    if (!sourceCheck.ok) {
+      const now = new Date().toISOString();
+      const detail = `Vibe Cut source blocked: ${sourceCheck.reason}`;
+      const blockedJob = {
+        ...(existing && typeof existing === "object" ? existing : {}),
+        schema_version: "studio.production-job.1",
+        job_id: existing?.job_id || `spj-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+        route: "vibe-cut:invalid-source",
+        step: "blocked",
+        attempt: Number(existing?.attempt || 1) || 1,
+        updated_at: now,
+        error: detail,
+        detail,
+        percent: 0,
+      };
+      await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: { Studio_Production_Job_JSON: JSON.stringify(blockedJob), Updated_At: now },
+          typecast: false,
+        }),
+      });
+      throw new HttpError(409, detail);
+    }
+  }
   const vibeCutPassthrough = vibeCut && /passthrough/i.test(String(existing?.route || ""));
   const vibeDirective = vibeCut ? parseVibeCutDirective(studioRequestNotesText(record)) : null;
   const vibeTarget = Number(vibeDirective?.target_seconds || 0) || 0;

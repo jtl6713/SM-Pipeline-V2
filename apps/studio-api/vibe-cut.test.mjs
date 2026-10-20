@@ -26,6 +26,7 @@ import {
   rankVibeSelects,
   selectsFromSceneTimestamps,
   stripVibeCutDirective,
+  validateVibeCutSourceAssets,
   vibeCutOriginNotes,
   vibeCutProductionDefaults,
   vibeCutRenderSettings,
@@ -289,4 +290,44 @@ test("Studio web exposes Vibe Cut creation path", () => {
   assert.match(app, /ez-input=vibe-cut|inputKind:\s*"vibe-cut"/);
   assert.match(html, /vibe-cut\.js/);
   assert.match(html, /id="ezVibeCutLaunch"/);
+});
+
+test("Vibe Cut rejects missing and recycled photo masters instead of rendering stills", () => {
+  assert.equal(validateVibeCutSourceAssets([]).ok, false);
+  const photos = ["Edge", "West Village", "Bryant Park", "Top of the Rock", "Summit One", "One World"]
+    .map((name, i) => ({
+      id: String(i + 1),
+      name: `${name}.jpg`,
+      mime_type: "image/jpeg",
+      media_kind: "photo",
+      google_drive_file_id: `photo-${i}`,
+    }));
+  assert.equal(validateVibeCutSourceAssets(photos).ok, false);
+  assert.match(validateVibeCutSourceAssets(photos).reason, /one uploaded source video/);
+  assert.equal(validateVibeCutSourceAssets([photos[0]]).ok, false);
+});
+
+test("Vibe Cut accepts a completed real video but blocks an incomplete or mixed upload", () => {
+  const source = {
+    id: "navy-pier-source",
+    name: "Navy Pier Fireworks.mp4",
+    media_kind: "video",
+    mime_type: "video/mp4",
+    r2_key: "studio/master-assets/record/navy-pier-source.mp4",
+    upload_status: "complete",
+  };
+  assert.equal(validateVibeCutSourceAssets([source]).ok, true);
+  assert.equal(validateVibeCutSourceAssets([{ ...source, upload_status: "multipart_pending" }]).ok, false);
+  assert.equal(validateVibeCutSourceAssets([{ ...source, compression_status: "compressing" }]).ok, false);
+  assert.equal(validateVibeCutSourceAssets([{ ...source, r2_key: "" }]).ok, false);
+  assert.equal(validateVibeCutSourceAssets([source, {
+    id: "old-photo", media_kind: "photo", mime_type: "image/jpeg", google_drive_file_id: "old"
+  }]).ok, false);
+});
+
+test("Vibe Cut production enqueue fails closed before runner receives photo masters", () => {
+  const worker = readStudioWorkerSource();
+  assert.match(worker, /validateVibeCutSourceAssets\(item4AssetManifest\(record\)\)/);
+  assert.match(worker, /route: "vibe-cut:invalid-source"/);
+  assert.match(worker, /throw new HttpError\(409, detail\)/);
 });

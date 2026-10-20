@@ -852,3 +852,37 @@ export function vibeCutProductionDefaults(config, { sourceAspect = "", notes = "
       : ["Instagram::Story", "Facebook::Story"],
   };
 }
+
+/**
+ * Vibe Cuts are video-only edits. The origin/notes stamp must never turn a
+ * recycled photo package into an apparently successful music montage.
+ * Pure contract shared by Studio's enqueue gate and regression tests.
+ */
+export function validateVibeCutSourceAssets(assets) {
+  const rows = Array.isArray(assets) ? assets : [];
+  if (rows.length !== 1) {
+    return { ok: false, reason: rows.length
+      ? "Vibe Cut needs one uploaded source video, not a mixed or multi-photo asset package."
+      : "Vibe Cut needs an uploaded source video before production." };
+  }
+  const asset = rows[0] || {};
+  const kind = String(asset.media_kind || "").trim().toLowerCase();
+  const mime = String(asset.mime_type || "").trim().toLowerCase();
+  const name = String(asset.name || "").trim();
+  const isVideo = kind === "video" || (
+    kind !== "photo" && kind !== "image"
+    && (mime.startsWith("video/") || [".mp4", ".mov", ".m4v", ".webm"].some(ext => name.toLowerCase().endsWith(ext)))
+  );
+  if (!isVideo) {
+    return { ok: false, reason: "Vibe Cut source is a still image, not a video. Reattach the original footage." };
+  }
+  if (!(asset.google_drive_file_id || asset.r2_key || asset.url)) {
+    return { ok: false, reason: "Vibe Cut source video has no retrievable media location." };
+  }
+  const states = [asset.upload_status, asset.compression_status]
+    .map(value => String(value || "").trim().toLowerCase());
+  if (states.some(state => ["multipart_pending", "pending", "uploading", "failed", "compressing", "downloading", "queued"].includes(state))) {
+    return { ok: false, reason: "Vibe Cut source video is still transferring or processing." };
+  }
+  return { ok: true, reason: "" };
+}
