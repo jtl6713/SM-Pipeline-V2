@@ -194,6 +194,10 @@ try {
  await phone.evaluate(()=>window.StudioFactoryDesk.load());
  await phone.waitForFunction(()=>document.getElementById("factoryBatchSummary").textContent.includes("19 approved"));
  assert.match(await phone.locator("#factoryBatchSummary").innerText(),/1 failed/);
+ assert.equal(await phone.locator("#factoryBatchQuality").getAttribute("open"),null,"Quality Agent starts collapsed");
+ assert.equal(await phone.locator("#factoryBatchQualityMetric").isVisible(),true,"Quality Agent count remains visible");
+ await phone.locator("#factoryBatchQuality > summary").click();
+ assert.equal(await phone.locator("#factoryBatchQuality").evaluate(node=>node.open),true,"Quality Agent expands");
  await phone.locator("#factoryBatchQualityRefresh").click();
  await phone.locator("#factoryBatchQualitySignals").getByText("Approval item failed").waitFor();
  assert.match(await phone.locator("#factoryBatchQualitySignals").textContent(),/QA-FACTORY-BATCH-FAILED-ITEM/);
