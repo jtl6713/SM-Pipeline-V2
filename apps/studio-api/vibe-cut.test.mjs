@@ -318,6 +318,7 @@ test("Vibe Cut accepts a completed real video but blocks an incomplete or mixed 
   };
   assert.equal(validateVibeCutSourceAssets([source]).ok, true);
   assert.equal(validateVibeCutSourceAssets([{ ...source, upload_status: "multipart_pending" }]).ok, false);
+  assert.equal(validateVibeCutSourceAssets([{ ...source, compression_status: "compressing" }]).ok, false);
   assert.equal(validateVibeCutSourceAssets([{ ...source, r2_key: "" }]).ok, false);
   assert.equal(validateVibeCutSourceAssets([source, {
     id: "old-photo", media_kind: "photo", mime_type: "image/jpeg", google_drive_file_id: "old"
