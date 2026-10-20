@@ -8,6 +8,7 @@ import {
   isDerivedLibraryStillName,
   autonomousMasterMediaIds,
   autonomousPlanOverrides,
+  autonomousItem4Platforms,
   autonomousCanonicalContentType,
   autonomousPlanExtras,
   autonomousDefaultVoiceoverSeconds,
@@ -1024,3 +1025,17 @@ test("Worker stamps photo-ready ideas and drains the 30m SLA on light ticks", as
   );
 });
 
+
+test("P0 #907 platform suggestions cannot produce zero Item4 outputs", () => {
+  const defaults = ["Instagram", "Facebook", "TikTok", "YouTube"];
+  // Old still/Feed Post recommendations may have only destinations that do
+  // not have Item4 mappings. Do not silently persist a zero-item Ready plan.
+  assert.deepEqual(autonomousItem4Platforms(["X"]), defaults);
+  assert.deepEqual(autonomousItem4Platforms(["Threads", "X"]), defaults);
+  assert.deepEqual(autonomousItem4Platforms([]), defaults);
+  assert.deepEqual(autonomousItem4Platforms(["Instagram", "X", "YouTube"]), ["Instagram", "YouTube"]);
+  assert.deepEqual(autonomousItem4Platforms(["Facebook", "Facebook", "TikTok"]), ["Facebook", "TikTok"]);
+  // Operator explicitly requesting only an unsupported destination should
+  // fail validation instead of being silently expanded to four platforms.
+  assert.deepEqual(autonomousItem4Platforms(["X"], { fallback: false }), []);
+});
