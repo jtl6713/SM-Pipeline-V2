@@ -1,1 +1,2 @@
 One-time UI release automation for Home snapshot monotonicity PR #950. This triggers a version-bumped Pages deploy while preserving the existing UI release contract.
+Retry version bump with updated UI build label contract (2026-10-20).
