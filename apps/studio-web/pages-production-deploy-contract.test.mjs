@@ -19,3 +19,15 @@ test("Pages production retries and proves exact custom-domain release identity",
   assert.match(workflow, /custom_domain_verified_ui=\$EXPECTED_LABEL/);
   assert.match(workflow, /custom_domain_verified_build_id=\$EXPECTED_BUILD_ID/);
 });
+
+
+test("PR960 same-version Home exception is exact, one-time, and keeps default release guard", () => {
+  assert.match(workflow, /same_version_home_integrity_release=verified_PR960_one_time/);
+  assert.match(workflow, /approval-snapshot-monotonic-v1/);
+  assert.match(workflow, /approved-unpublished-integrity-v2/);
+  assert.match(workflow, /studio\\.allProfilesOverview\\.v4/);
+  assert.match(workflow, /previous\\.includes\\(oldHome\\)/);
+  assert.match(workflow, /!previous\\.includes\\(newHome\\)/);
+  assert.match(workflow, /Unchanged UI build refused: no verified one-time cache fingerprint transition/);
+  assert.match(workflow, /--assert-newer-than "\\$LIVE_UI_VERSION"/);
+});
