@@ -28,6 +28,7 @@ test("year guard uses paginated prefix matches and fail-closed results",async()=
   assert.match(formula,/REGEX_MATCH/);
   assert.match(formula,/miamiorm/);
   assert.match(formula,/Test_Run_ID/);
+  assert.doesNotMatch(studioIdeaTitleYearFormula("Miami Or Miami Beach","Content_Title"),/Test_Run_ID/);
   const row={id:"recAAAAAAAAAAAAAA",fields:{Candidate_Title:"Miami Or Miami Beach? (3)"}};
   assert.deepEqual(await studioFindRecentDuplicateTitle("Miami or Miami Beach 2",async kind=>kind==="idea"?[row]:[]),
     {source:"idea",record_id:row.id});
