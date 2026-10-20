@@ -4972,7 +4972,10 @@ function studioProfilesOverviewRowsHealthy(rows) {
       const n = row?.scheduled?.[platform];
       if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return false;
     }
-    for (const key of ["manual", "failed", "approval", "ideas"]) {
+    // Approved-but-unpublished is the parenthesized Home tally. Older
+    // durable snapshots could omit it yet pass this integrity gate, causing
+    // the browser to retain stale approved counts after real approvals.
+    for (const key of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished"]) {
       const n = row?.[key];
       if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return false;
     }
@@ -5407,8 +5410,8 @@ export function validateStudioProfilesOverviewRows(rows, profiles) {
         throw new Error(`Profiles overview scheduled count is incomplete for ${platform}`);
       }
     }
-    for (const key of ["manual", "failed", "approval", "ideas"]) {
-      if (!Number.isFinite(Number(row?.[key]))) {
+    for (const key of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished"]) {
+      if (typeof row?.[key] !== "number" || !Number.isFinite(row[key]) || row[key] < 0) {
         throw new Error(`Profiles overview ${key} count is incomplete`);
       }
     }
