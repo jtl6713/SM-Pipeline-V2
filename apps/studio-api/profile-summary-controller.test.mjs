@@ -29,6 +29,7 @@ test("only complete, recent, nondegraded, four-city snapshots can cut Home/refil
 test("POST/PATCH notifications are scoped to confirmed authoritative output/idea records", async () => {
   const calls = [];
   const env = {
+    STUDIO_PROFILE_SUMMARY_CAPTURE_ENABLED: "true",
     AIRTABLE_OUTPUT_TABLE_ID: "tblOutput",
     AIRTABLE_IDEA_TABLE_ID: "tblIdea",
     STUDIO_PROFILE_SUMMARIES: {
@@ -81,6 +82,7 @@ test("Supabase Phase 5 read wall and feature gates remain intact", () => {
   assert.match(home, /if \(false && \(studioReadSource\(env\) === "supabase"/);
   assert.match(home, /STUDIO_HOME_PROFILE_SUMMARY_READS === "true"/);
   assert.match(worker, /STUDIO_PROFILE_SUMMARY_RECONCILE_ENABLED === "true"/);
+  assert.match(home, /STUDIO_REFILL_PROFILE_SUMMARY_READS === "true"/);
 });
 
 test("SQLite overdue queue uses indexed due_at instead of a stale snapshot-time count", () => {
