@@ -1912,7 +1912,7 @@ export default {
       if (url.pathname === "/api/profiles/overview/summary/runner-egress") {
         if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
         requireAnyPermission(authorization, ["tenant_admin", "production_configure"]);
-        const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\\/+$/, "");
+        const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
         const sharedSecret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
         if (!runnerUrl || !sharedSecret) {
           return respond(request, env, { ok: false, reason: "runner_metrics_backend_unconfigured" }, 503);
