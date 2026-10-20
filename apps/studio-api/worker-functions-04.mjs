@@ -4599,7 +4599,7 @@ export function studioOverviewOperationalMetrics(mappedOutputs, ideas) {
     const publish = String(o.publish_status || "").trim().toLowerCase();
     if (["approved", "rejected", "skipped"].includes(review)) return false;
     if (["in production", "rendering", "ready for render", "approved", "approved for publishing", "published"].includes(output)) return false;
-    if (/ready for render|waiting in render queue|^rendering$|^failed$|^blocked$/.test(render)) return false;
+    if (/ready for render|waiting in render queue|rendering|queued|pending render|^processing$|^preparing$|^failed$|^blocked$/.test(render)) return false;
     if (/^(scheduled|published|uploading|platform processing|draft delivered)$/.test(publish)) return false;
     if (o.do_not_publish) return false;
     const notes = `${o.output_notes || ""}\n${o.production_notes || ""}`;
@@ -4623,8 +4623,8 @@ export function studioOverviewOperationalMetrics(mappedOutputs, ideas) {
     const publish = String(o.publish_status || "").trim().toLowerCase();
     const platformPublish = String(o.platform_publish_status || "").trim().toLowerCase();
     const manual = String(o.manual_completion_status || "").trim().toLowerCase();
-    if (/^(published|posted)$/.test(state)) return false;
-    if (/^(published|posted)$/.test(publish) || /^(published|posted)$/.test(platformPublish)) return false;
+    if (/published|posted/.test(state)) return false;
+    if (/published|posted|publish complete|publish succeeded/.test(publish) || /published|posted|completed|succeeded/.test(platformPublish)) return false;
     if (/^(published|posted|completed)$/.test(manual)) return false;
     if (o.published_at || o.platform_post_url || o.manual_published_url) return false;
     return true;
