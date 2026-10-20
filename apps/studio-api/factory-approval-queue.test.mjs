@@ -5,6 +5,7 @@ import {
   factoryBatchSummary, factoryBatchCounts, factoryBatchDrain,
   factoryBatchRetry, factoryBatchLockKey, factoryBatchCronScan,
   factoryBatchCronSelectJobs, factoryBatchListGlobal, factoryBatchNeedsAttention,
+  factoryBatchBuild, factoryBatchQualitySignals,
 } from "./factory-approval-queue.mjs";
 
 class FakeR2 {
@@ -388,4 +389,17 @@ test("profile handoff chooses oldest eligible sibling after first child complete
   assert.equal(second.job.status, "completed");
   assert.equal(calls.size, 10);
   assert.ok([...calls.values()].every(n => n === 1));
+});
+
+test("Quality Agent measures successful approval silence, not retry heartbeats", () => {
+  const now = Date.parse("2026-10-20T12:30:00Z");
+  const job = factoryBatchBuild({profileId,requestId:"quality_stall_20261020",records:records.slice(0,2),now:"2026-10-20T12:00:00Z"});
+  job.updated_at = "2026-10-20T12:29:00Z";
+  job.items[0].status = "approved";
+  job.items[0].timeline.push({state:"approved",at:"2026-10-20T12:14:00Z"});
+  assert.ok(factoryBatchQualitySignals(job,now).some(s => s.code === "QA-FACTORY-BATCH-STALLED"));
+  assert.ok(!factoryBatchQualitySignals(job,now).some(s => s.code === "QA-FACTORY-BATCH-RECOVERY-FAILED"));
+  assert.ok(factoryBatchQualitySignals(job,now + 15*60*1000).some(s => s.code === "QA-FACTORY-BATCH-RECOVERY-FAILED"));
+  job.items[1].timeline.push({state:"approved",at:"2026-10-20T12:28:00Z"});
+  assert.ok(!factoryBatchQualitySignals(job,now).some(s => s.code === "QA-FACTORY-BATCH-STALLED"));
 });

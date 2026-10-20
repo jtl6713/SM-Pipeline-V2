@@ -10,6 +10,7 @@ const css = fs.readFileSync(path.join(here, "assets/factory-layout-0680.css"), "
 
 test("Factory batch UI has selection, activity, refresh, inspect and failed-only retry", () => {
   new Function(js); // Parse the production browser script without executing browser globals.
+  assert.doesNotMatch(js, /no longer eligible/i, "Stale selection history must not appear in the Factory toolbar");
   for (const id of ["factoryBatchActivity", "factoryBatchSummary", "factoryBatchDetails",
     "factoryBatchSelectionCount", "factoryBatchSubmit", "factoryBatchClear",
     "factoryBatchInspect", "factoryBatchRetry", "factoryBatchRefresh"]) {

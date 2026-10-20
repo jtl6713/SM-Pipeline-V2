@@ -14,6 +14,11 @@
       guidance: "Background recovery may resume after the lease expires. Refresh status before intervening.",
       severity: "warning"
     },
+    "QA-FACTORY-BATCH-RECOVERY-FAILED": {
+      title: "Approval recovery needs attention",
+      guidance: "No successful approval after 30 minutes. Inspect the Factory processor and outstanding queue.",
+      severity: "critical"
+    },
     "QA-FACTORY-BATCH-STATE-MISMATCH": {
       title: "Batch status needs reconciliation",
       guidance: "The stored status and item results disagree. Check whether background reconciliation has completed.",

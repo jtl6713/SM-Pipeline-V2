@@ -1,0 +1,6 @@
+2026-10-20 post-PR981 production acceptance: check current live global Factory active approvals twice via existing authenticated service binding, read-only and no R2 direct bucket permission required. Never approve, schedule, publish, or modify queue.
+2026-10-20 P0 follow-up: capture installed Cloudflare cron schedules, global batch QA signatures and child retry status; verify why none of the 64 pending items moved after deploy.
+2026-10-20 post-PR987 acceptance: compare global Factory 8 group/64 pending baseline after strict platform-scoped calendar occupancy repair; 75-second read-only samples, no queue mutations.
+2026-10-20 recovery continuation: confirm autonomous progress beyond 55 pending and zero new failures, without retriggering approvals.
+
+2026-10-20 post-PR987 sustained progress verification: re-sample live Factory global batch counts twice; baseline at 13:13:15 UTC 7 active / 55 pending / 0 failed. Read-only; no approval, schedule or publication mutations.

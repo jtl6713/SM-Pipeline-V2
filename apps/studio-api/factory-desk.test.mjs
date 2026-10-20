@@ -1,3 +1,4 @@
+import { combineHomeContributions, homeOutputContribution, homeIdeaContribution } from "./profile-summary-classification.mjs";
 import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -110,7 +111,7 @@ test("Home approval metric matches actionable review-ready outputs instead of qu
   const start = workerFunctions.indexOf("export function studioOverviewOperationalMetrics(");
   const end = workerFunctions.indexOf("/*__STUDIO_WORKER_END:studioOverviewOperationalMetrics__*/", start);
   assert.ok(start >= 0 && end > start, "overview function is available for runtime contract test");
-  const fn = runInNewContext(`(${workerFunctions.slice(start, end).trim().replace(/^export /, "")})`);
+  const fn = runInNewContext(`(${workerFunctions.slice(start, end).trim().replace(/^export /, "")})`, { combineHomeContributions, homeOutputContribution, homeIdeaContribution });
   const base = {
     studio_state: "Ready for Review",
     output_status: "Ready for Review",
@@ -413,7 +414,7 @@ test("Worker exposes factory desk routes and version flag", async () => {
   assert.match(worker, /Do_Not_Publish: true/);
   assert.match(worker, /revision_approve/);
   assert.match(worker, /productionRequestRevisionOpen\(requestRecord\)/);
-    assert.match(worker, /0.10.667-ready-production-flow/);
+    assert.match(worker, /0.10.670-profile-summary-parity/);
   assert.match(worker, /async function studioHealLiveFailedPublishStatus/);
   assert.match(worker, /async function studioHealTtd0RouteBlankDraft/);
   assert.match(worker, /await studioHealLiveFailedPublishStatus\(env/);
@@ -428,7 +429,7 @@ test("Worker allows Factory Desk POST through Phase 2A gate", async () => {
   const worker = readStudioWorkerSource();
   assert.match(worker, /const isFactoryDeskWrite = isFactoryDeskRoute && request\.method === "POST"/);
   assert.match(worker, /isFactoryDeskWrite \|/);
-  assert.match(worker, /version: "0.10.667-ready-production-flow"/);
+  assert.match(worker, /version: "0.10.670-profile-summary-parity"/);
   assert.match(worker, /studio_factory_desk_write_v1: true/);
 });
 
@@ -437,7 +438,7 @@ test("Worker allows Supabase sync POST through Phase 2A gate", async () => {
   assert.match(worker, /const isOpsSupabaseSyncWrite = isOpsSupabaseSyncRoute && request\.method === "POST"/);
   assert.match(worker, /isOpsSupabaseSyncWrite \|/);
   assert.match(worker, /studio_supabase_sync_gate_v1: true/);
-  assert.match(worker, /version: "0.10.667-ready-production-flow"/);
+  assert.match(worker, /version: "0.10.670-profile-summary-parity"/);
 });
 
 test("Worker allows schedule regeneration POST through Phase 2A gate", async () => {
@@ -446,5 +447,5 @@ test("Worker allows schedule regeneration POST through Phase 2A gate", async () 
   assert.match(worker, /isScheduleRegenWrite \|/);
   assert.match(worker, /const isScheduleSettingsWrite = isScheduleSettingsRoute &&/);
   assert.match(worker, /isScheduleSettingsWrite \|/);
-  assert.match(worker, /version: "0.10.667-ready-production-flow"/);
+  assert.match(worker, /version: "0.10.670-profile-summary-parity"/);
 });

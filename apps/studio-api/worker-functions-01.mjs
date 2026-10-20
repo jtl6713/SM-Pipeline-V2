@@ -1,3 +1,5 @@
+import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
+import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
 import { isQueuedForPlatformDispatch } from "./overview-dispatch-counts.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
@@ -239,7 +241,6 @@ import {
   summarizeObservations,
   youtubePublishedAfterIso,
 } from "./autonomous-produce.mjs";
-import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { ideaAutoListenContentType, ideaManagePhotoPauseActive, ideaProductionConfigFields, mergeIdeaProductionNotes, mergeProductionRequestNotes, parseIdeaMachineNotes, parseIdeaNotedMediaIds, productionNotesForPromotionHandoff, productionPhotoWaitAutoOff, productionPhotoWaitRejectedIds, shouldAttachPhotoWaitAssets, withIdeaManagePhotoPause, withoutIdeaManagePhotoPause, withProductionPhotoWaitManual } from "./idea-photo-wait.mjs";
 import {
   STUDIO_PUBLISH_RECONCILE_SCHEDULE_FORMULA,
@@ -1179,7 +1180,7 @@ export async function listRecords(env, tableId, options = {}) {
       if (field) params.append("fields[]", String(field));
     }
     if (offset) params.set("offset", offset);
-    const result = await airtableFetch(env, tableId, `?${params.toString()}`);
+    const result = await airtableFetch(env, tableId, `?${params.toString()}`, { airtableEgressSource: options.airtableEgressSource });
     const page = Array.isArray(result.records) ? result.records : [];
     records.push(...page);
     offset = result.offset || null;
@@ -3018,13 +3019,13 @@ export function studioApproveAllCandidateFormula(profile) {
 }
 /*__STUDIO_WORKER_END:studioApproveAllCandidateFormula__*/
 
-export async function listContentProfileRecords(env) {
+export async function listContentProfileRecords(env, options = {}) {
   if (Array.isArray(env.__contentProfilesCache) && env.__contentProfilesCache.length) {
     return env.__contentProfilesCache;
   }
   // Do not cache an unsettled/rejected Promise on env — a canceled in-flight
   // listRecords would hang every profile-scoped route until isolate recycle.
-  const rows = await listRecords(env, "Content Profiles", { limit: 100 });
+  const rows = await listRecords(env, "Content Profiles", { limit: 100, airtableEgressSource: options.airtableEgressSource });
   env.__contentProfilesCache = rows;
   return rows;
 }
@@ -3671,12 +3672,13 @@ export async function createIdea(request, env, authorization) {
 
   const input = cleanIdeaCreatePayload(payload);
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
-  const duplicateTitle = await studioFindRecentDuplicateTitle(input.title, (kind, formula) => {
+  const duplicateTitle = await studioFindRecentDuplicateTitle(input.title, (kind, formula, field) => {
     const table = kind === "idea" ? env.AIRTABLE_IDEA_TABLE_ID : env.AIRTABLE_CONTENT_TABLE_ID;
     if (!table) throw new HttpError(503, "Title history unavailable: creation blocked");
-    return listRecords(env, table, { filterFormula: formula, limit: 3 });
+    return listRecords(env, table, { filterFormula: formula, fields: [field], limit: 1001 });
   });
-  if (duplicateTitle) throw new HttpError(409, `Title "${input.title}" already used within 365 days (${duplicateTitle.source}).`);
+  if (duplicateTitle) throw new HttpError(409,
+    `This title is already used within 365 days (${duplicateTitle.source}). Choose a genuinely different subject.`);
   const fields = {
     Candidate_Title: input.title,
     Candidate_Status: "Generated",
@@ -3794,12 +3796,13 @@ export async function updateIdea(request, env, url, authorization) {
 
   const input = cleanIdeaUpdatePayload(payload);
   if (studioIdeaTitleKey(input.title) !== studioIdeaTitleKey(f(record, "Candidate_Title"))) {
-    const duplicateTitle = await studioFindRecentDuplicateTitle(input.title, (kind, formula) => {
+    const duplicateTitle = await studioFindRecentDuplicateTitle(input.title, (kind, formula, field) => {
       const table = kind === "idea" ? env.AIRTABLE_IDEA_TABLE_ID : env.AIRTABLE_CONTENT_TABLE_ID;
       if (!table) throw new HttpError(503, "Title history unavailable: edit blocked");
-      return listRecords(env, table, { filterFormula: formula, limit: 3 });
+      return listRecords(env, table, { filterFormula: formula, fields: [field], limit: 1001 });
     }, { excludeIdeaId: recordId });
-    if (duplicateTitle) throw new HttpError(409, `Title "${input.title}" already used within 365 days (${duplicateTitle.source}).`);
+    if (duplicateTitle) throw new HttpError(409,
+      `This title is already used within 365 days (${duplicateTitle.source}).`);
   }
   let productionFields = {};
   try {
@@ -8573,7 +8576,14 @@ export async function buildItem4OutputPlan(request, env, url, authorization) {
 export async function getItem4OutputPlan(request, env, url, authorization) {
   const recordId=item4RequestIdFromPath(url);
   const record=await loadAuthorizedProductionRequest(env,recordId,authorization);
-  return respond(request,env,{ok:true,status:f(record,"Studio_Output_Plan_Status")||"Needs Plan",plan:item4ParseJson(f(record,"Studio_Output_Plan_JSON"),null)});
+  const plan=item4ParseJson(f(record,"Studio_Output_Plan_JSON"),null);
+  const integrity=item4EffectivePlanStatus(
+    f(record,"Studio_Output_Plan_Status"),plan,f(record,"Request_Status")
+  );
+  return respond(request,env,{
+    ok:true,status:integrity.status,plan,
+    plan_integrity_error:integrity.invalid?integrity.issue:null,
+  });
 }
 /*__STUDIO_WORKER_END:getItem4OutputPlan__*/
 
@@ -10113,6 +10123,11 @@ export async function azEnsurePlatformOutputs(env, requestRecord, options = {}) 
     const planItems = finishedVideo
       ? capFinishedPlanItems(items, { notes: studioRequestNotesText(requestRecord) })
       : items;
+    // A post-cap empty list is not Ready even when pre-cap defaults existed.
+    if (!planItems.length) return {
+      error: "no_supported_plan_items_after_capping",
+      production_request_id: requestRecord.id,
+    };
     await item4SyncPlanOutputs(env, requestRecord, planItems);
     const needsReview = planItems.some((item) => !item.aspect_ratio);
     const plan = {

@@ -1,3 +1,13 @@
+import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
+import {
+  readStudioProfileSummary,
+  notifyStudioProfileSummary,
+  reconcileStudioProfileSummary,
+  studioProfileSummaryStatus,
+  recordStudioAirtableEgress,
+  studioAirtableEgressWindow,
+} from "./profile-summary-controller.mjs";
+export { StudioProfileSummary } from "./profile-summary-do.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
   studioReadSource,
@@ -233,7 +243,6 @@ import {
   summarizeObservations,
   youtubePublishedAfterIso,
 } from "./autonomous-produce.mjs";
-import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { ideaAutoListenContentType, ideaManagePhotoPauseActive, ideaProductionConfigFields, mergeIdeaProductionNotes, mergeProductionRequestNotes, parseIdeaMachineNotes, parseIdeaNotedMediaIds, productionNotesForPromotionHandoff, productionPhotoWaitAutoOff, productionPhotoWaitRejectedIds, shouldAttachPhotoWaitAssets, withIdeaManagePhotoPause, withoutIdeaManagePhotoPause, withProductionPhotoWaitManual } from "./idea-photo-wait.mjs";
 import {
   STUDIO_PUBLISH_RECONCILE_SCHEDULE_FORMULA,
@@ -869,6 +878,8 @@ export default {
       const isPublishedLibraryReleaseRoute = /^\/api\/library\/published\/rec[A-Za-z0-9]+\/release-file$/.test(url.pathname);
       const isPublishedLibraryReleaseWrite = isPublishedLibraryReleaseRoute && request.method === "POST";
       const isProfilesOverviewRefreshWrite = isProfilesOverviewRefreshRoute && request.method === "POST";
+      const isProfilesOverviewSummaryReconcileWrite =
+        url.pathname === "/api/profiles/overview/summary/reconcile" && request.method === "POST";
       const isIdeaCreateRoute = url.pathname === "/api/ideas" && request.method === "POST";
       const isIdeaGenerateWrite = isIdeaGenerateRoute && request.method === "POST";
       const isScriptedShortProposeWrite = isScriptedShortProposeRoute && request.method === "POST";
@@ -945,6 +956,7 @@ export default {
         request.method === "GET" ||
         (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isMediaAssetStreamRoute || isPublicBrandWatermarkRoute || isOutputPreviewRoute || isVoicePreviewRoute)) ||
         isProfilesOverviewRefreshWrite ||
+        isProfilesOverviewSummaryReconcileWrite ||
         isIdeaCreateRoute ||
         isIdeaGenerateWrite ||
         isScriptedShortProposeWrite ||
@@ -1067,7 +1079,10 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.667-ready-production-flow",
+          version: "0.10.670-profile-summary-parity",
+          studio_profile_summary_reconcile_gate_v1: true,
+          studio_profile_summary_reconcile_await_v1: true,
+          studio_profile_summary_home_membership_v1: true,
           photo_match_error_json_v1: true,
           factory_batch_canary_revision: "chicago-ig-reel-v1",
           factory_batch_phase2a_post_gate_fix_v1: true,
@@ -1861,6 +1876,76 @@ export default {
         return getProfilesOverviewRefreshStatus(request, env);
       }
 
+      if (url.pathname === "/api/profiles/overview/summary") {
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure", "outputs_review"]);
+        const summary = await readStudioProfileSummary(env);
+        return respond(request, env, summary);
+      }
+
+      if (url.pathname === "/api/profiles/overview/summary/reconcile") {
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "tenant_admin");
+        if (!env.STUDIO_PROFILE_SUMMARIES?.get) throw new HttpError(503, "Profile summary namespace not configured");
+        try {
+          const result = await reconcileStudioProfileSummary(env);
+          return respond(request, env, {
+            ok: true,
+            started: false,
+            completed: true,
+            read_cutover_enabled: env.STUDIO_HOME_PROFILE_SUMMARY_READS === "true",
+            generation: result.generation,
+            version: result.version,
+            count: result.count,
+          });
+        } catch (error) {
+          return respond(request, env, {
+            ok: false,
+            started: false,
+            completed: false,
+            read_cutover_enabled: env.STUDIO_HOME_PROFILE_SUMMARY_READS === "true",
+            error: String(error?.message || error).slice(0, 300),
+          }, 503);
+        }
+      }
+
+      if (url.pathname === "/api/profiles/overview/summary/runner-egress") {
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        requireAnyPermission(authorization, ["tenant_admin", "production_configure"]);
+        const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
+        const sharedSecret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+        if (!runnerUrl || !sharedSecret) {
+          return respond(request, env, { ok: false, reason: "runner_metrics_backend_unconfigured" }, 503);
+        }
+        try {
+          const upstream = await fetch(runnerUrl + "/admin/airtable-egress?hours=48", {
+            headers: { "X-Pipeline-Secret": sharedSecret, "Accept": "application/json" },
+          });
+          const report = await upstream.json();
+          if (!upstream.ok || report?.ok !== true || !Array.isArray(report.hourly)) {
+            return respond(request, env, { ok: false, reason: "runner_metrics_unavailable" }, 503);
+          }
+          return respond(request, env, {
+            ok: true, source: "pipeline_runner_sqlite", hourly: report.hourly,
+          });
+        } catch (error) {
+          return respond(request, env, { ok: false, reason: "runner_metrics_unreachable" }, 503);
+        }
+      }
+
+      if (url.pathname === "/api/profiles/overview/summary/airtable-egress") {
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        requireAnyPermission(authorization, ["tenant_admin", "production_configure"]);
+        return respond(request, env, await studioAirtableEgressWindow(env, Number(url.searchParams.get("hours") || 48)));
+      }
+
+      if (url.pathname === "/api/profiles/overview/summary/status") {
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure", "outputs_review"]);
+        return respond(request, env, await studioProfileSummaryStatus(env));
+      }
+
       if (url.pathname === "/api/profiles/overview") {
         if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
         return profilesOverview(request, env, authorization, ctx);
@@ -2531,11 +2616,13 @@ export default {
       } catch (error) {
         console.warn("AZ finished-video resume failed", error);
       }
-      try {
-        // Supabase overview rebuilds are paused. This tick used to start one
-        // whenever the snapshot was older than 10 minutes.
-      } catch (error) {
-        console.warn("profiles overview snapshot refresh failed", error);
+      // Summary reconciliation is a separate, explicitly gated Airtable scan.
+      // Never share the Supabase 30-minute sync or scheduling authority.
+      if (cadence.heavy && Number(cadence.minute) === 30
+          && env.STUDIO_PROFILE_SUMMARY_RECONCILE_ENABLED === "true") {
+        ctx.waitUntil(reconcileStudioProfileSummary(env).catch((error) => {
+          console.warn("profile summary periodic reconciliation failed", error);
+        }));
       }
 
       if (!cadence.heavy) return;
@@ -2920,14 +3007,40 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   const tableRef = encodeURIComponent(String(tableId));
   const endpoint = `https://api.airtable.com/v0/${env.AIRTABLE_BASE_ID}/${tableRef}${suffix}`;
   await airtableRequestSlot();
-  const response = await fetch(endpoint, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${env.AIRTABLE_PAT}`,
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
+  const airtableRequestStarted = Date.now();
+  const source = ["shadow_reconcile", "home_overview_refresh", "home_ideas_refresh", "autonomous_refill_scan"].includes(options.airtableEgressSource)
+    ? options.airtableEgressSource : "studio_worker_gateway";
+  const { airtableEgressSource, ...fetchOptions } = options;
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      ...fetchOptions,
+      headers: {
+        Authorization: `Bearer ${env.AIRTABLE_PAT}`,
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+    });
+  } finally {
+    // One event for each attempted outbound request, including network failures.
+    // No record ID, filter formula, Airtable token or full URL is logged.
+    const egressEvent = {
+      source,
+      table_kind: String(tableId) === String(env.AIRTABLE_OUTPUT_TABLE_ID) ? "outputs"
+        : String(tableId) === String(env.AIRTABLE_IDEA_TABLE_ID) ? "ideas" : "other",
+      method: String(options.method || "GET").toUpperCase(),
+      status: response?.status ?? 0,
+      duration_ms: Date.now() - airtableRequestStarted,
+      at: new Date().toISOString(),
+      request_count: 1,
+    };
+    console.log("studio_airtable_egress_v1", JSON.stringify(egressEvent));
+    await recordStudioAirtableEgress(env, {
+      source, method: egressEvent.method,
+      status: egressEvent.status, at_ms: airtableRequestStarted,
+    }).catch(error => console.warn("airtable egress durable accounting unavailable", String(error?.message || error)));
+
+  }
   const responseText = await response.text();
   let body = {};
   try { body = responseText ? JSON.parse(responseText) : {}; } catch { body = { raw: responseText }; }
@@ -2945,6 +3058,14 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   // Callers that own the post-commit Supabase mirror (Factory approve,
   // schedule regen, calendar save) pass skipSupabaseWriteThrough so Airtable
   // verify under the scheduling lock is not followed by a second mirror.
+  // Airtable has already confirmed this write. Queue the summary change
+  // BEFORE optional Supabase mirror calls so a slow/broken mirror never
+  // prevents Home's near-real-time invalidation.
+  if (options?.method && String(options.method).toUpperCase() !== "GET") {
+    await notifyStudioProfileSummary(env, tableId, options.method, body).catch((error) => {
+      console.warn("profile summary dirty notification failed", error);
+    });
+  }
   if (options?.skipSupabaseWriteThrough !== true) {
     await studioSupabaseWriteThroughAirtableMutation(env, tableId, options?.method, body).catch((error) => {
       console.warn("supabase airtable write-through failed", tableId, error);
@@ -5451,7 +5572,7 @@ const STUDIO_OVERDUE_SCHEDULED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 // use a 10s TTL so a 5s All Profiles poll can see fresh output counts, and a
 // stale snapshot is still served immediately while a rebuild runs in the background.
 // Ideas counts refresh on a slower cadence and must not block that output rebuild.
-const STUDIO_PROFILES_OVERVIEW_CACHE_MS = 15 * 60 * 1000;
+const STUDIO_PROFILES_OVERVIEW_CACHE_MS = 2 * 60 * 1000;
 const STUDIO_PROFILES_OVERVIEW_SUPABASE_CACHE_MS = 10 * 1000;
 const STUDIO_PROFILES_OVERVIEW_IDEAS_REFRESH_MS = 15 * 60 * 1000;
 const STUDIO_PROFILES_OVERVIEW_SNAPSHOT_KEY = "studio/state/profiles-overview.json";

@@ -4,6 +4,7 @@
     loading: false,
     desk: null,
     expandedReviewGroup: null,
+    needsEyesPage: 0,
     pendingFactoryFeedback: null,
     selectedOutputs: new Set(),
     submittingBatch: false,
@@ -362,14 +363,13 @@
     const ready = new Set(readyCards.map((card) => card.id));
     const selectedCards = readyCards.filter((card) => state.selectedOutputs.has(card.id));
     const selectable = selectedCards.length;
-    const missing = state.selectedOutputs.size - selectable;
     const global = state.batchGlobal?.enabled === true;
     const limit = Math.max(1, Number(global ? state.batchGlobal.max_total : (state.batchRollout?.max_items || 100)));
     const perProfile = Math.max(1, Number(state.batchGlobal?.max_per_profile || limit));
     const planned = global && selectable
       ? planFactoryApprovalBatches(selectedCards, limit, perProfile).length : (selectable ? 1 : 0);
     const count = $("factoryBatchSelectionCount");
-    if (count) count.textContent = `${selectable} output${selectable === 1 ? "" : "s"} selected${planned > 1 ? ` · will submit as ${planned} batches` : ""}${missing ? ` · ${missing} no longer eligible` : ""}`;
+    if (count) count.textContent = `${selectable} output${selectable === 1 ? "" : "s"} selected${planned > 1 ? ` · will submit as ${planned} batches` : ""}`;
     const submit = $("factoryBatchSubmit");
     if (submit) {
       submit.disabled = !selectable || (!global && selectable > limit) || state.submittingBatch || state.batchApprovalsEnabled !== true;
@@ -1082,22 +1082,50 @@
     }
     if (options.groupContent) {
       const groups = groupByContent(cards);
+      const FACTORY_REVIEW_GROUPS_PER_PAGE = 12;
+      // Bound the iPad DOM: rendering hundreds of off-screen accordions made
+      // Safari show one row followed by a large apparently empty review list.
+      const pages = Math.max(1, Math.ceil(groups.length / FACTORY_REVIEW_GROUPS_PER_PAGE));
+      state.needsEyesPage = Math.min(pages - 1, Math.max(0, Number(state.needsEyesPage) || 0));
+      const start = state.needsEyesPage * FACTORY_REVIEW_GROUPS_PER_PAGE;
+      const pageGroups = groups.slice(start, start + FACTORY_REVIEW_GROUPS_PER_PAGE);
       // "" means the operator explicitly collapsed every content item.
-      // Only choose a default when the previous expanded item disappeared.
-      if (state.expandedReviewGroup !== "" && !groups.some((group) => group.key === state.expandedReviewGroup)) {
-        state.expandedReviewGroup = groups[0]?.key || null;
+      // Choose a default only if the previously opened group is no longer on this page.
+      if (state.expandedReviewGroup !== "" && !pageGroups.some((group) => group.key === state.expandedReviewGroup)) {
+        state.expandedReviewGroup = pageGroups[0]?.key || null;
       }
-      node.innerHTML = groups.map((group) => {
+      const pageLabel = `Showing ${start + 1}–${start + pageGroups.length} of ${groups.length} content items · ${cards.length} outputs in queue`;
+      const pager = `<nav class="factory-review-pagination" aria-label="Needs eyes queue pages">
+        <span class="factory-review-page-count">${esc(pageLabel)}</span>
+        <span class="factory-review-page-actions">
+          <button type="button" class="secondary-button" data-factory-review-page="prev" ${state.needsEyesPage === 0 ? "disabled" : ""}>Previous items</button>
+          <span>Page ${state.needsEyesPage + 1} of ${pages}</span>
+          <button type="button" class="secondary-button" data-factory-review-page="next" ${state.needsEyesPage + 1 >= pages ? "disabled" : ""}>Next items</button>
+        </span>
+      </nav>`;
+      node.innerHTML = pager + pageGroups.map((group) => {
         const expanded = group.key === state.expandedReviewGroup;
         const id = `factory-review-${group.key.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
         return renderContentBar(group, expanded) +
           `<div id="${esc(id)}" class="factory-content-rows" ${expanded ? "" : "hidden"}>${group.cards.map((card) => renderCard(card, options)).join("")}</div>`;
-      }).join("");
+      }).join("") + (pages > 1 ? pager : "");
       node.querySelectorAll("[data-factory-toggle-content]").forEach((button) => {
         button.addEventListener("click", () => {
           const key = button.dataset.factoryToggleContent;
           state.expandedReviewGroup = state.expandedReviewGroup === key ? "" : key;
           renderDesk(state.desk);
+        });
+      });
+      node.querySelectorAll("[data-factory-review-page]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const delta = button.dataset.factoryReviewPage === "next" ? 1 : -1;
+          const target = state.needsEyesPage + delta;
+          if (target < 0 || target >= pages) return;
+          state.needsEyesPage = target;
+          state.expandedReviewGroup = null;
+          renderDesk(state.desk);
+          const lane = $(listId);
+          if (lane) lane.scrollTop = 0;
         });
       });
       return;

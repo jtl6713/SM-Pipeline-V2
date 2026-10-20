@@ -39,13 +39,13 @@ test("failure and cooldown retain old data with compact age messaging", () => {
   assert.match(source, /cacheAgeLabel\(\)/);
 });
 
-test("normal five-second polling never calls the force-refresh POST", () => {
+test("normal twelve-second polling never calls the force-refresh POST", () => {
   const loadStart = source.indexOf("async function load(");
   const loadEnd = source.indexOf("const cachedNow", loadStart);
   const loadBody = source.slice(loadStart, loadEnd);
   assert.match(loadBody, /\/api\/profiles\/overview\?_=/);
   assert.doesNotMatch(loadBody, /profiles\/overview\/refresh"/);
-  assert.match(source, /POLL_MS = 5000/);
+  assert.match(source, /POLL_MS = 12000/);
 });
 
 test("durable refresh status continues independently of Home visibility", () => {

@@ -3705,7 +3705,9 @@ export async function studioMusicR2Preview(request, env, mapped) {
   const key = String(mapped.r2_preview_key || studioMusicR2KeyFromUrl(mapped.google_drive_url) || "").trim();
   if (!key || !env.STUDIO_MEDIA) throw new HttpError(404, "Studio music preview source is not available");
 
-  const object = await env.STUDIO_MEDIA.get(key);
+  const rangeHeader = request.method === "GET" ? request.headers.get("Range") : null;
+  const validRange = rangeHeader && /^bytes=(?:\d+-\d*|-\d+)$/.test(rangeHeader.trim());
+  const object = await env.STUDIO_MEDIA.get(key, validRange ? { range: request.headers } : undefined);
   if (!object) throw new HttpError(404, "Studio music file was not found in storage");
 
   const headers = new Headers();
@@ -3714,12 +3716,18 @@ export async function studioMusicR2Preview(request, env, mapped) {
   headers.set("Cache-Control", "private, max-age=300");
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("X-Studio-Preview-Source", "studio-r2");
-  if (object.size) headers.set("Content-Length", String(object.size));
+  const servedRange = validRange && object.range && typeof object.range.offset === "number";
+  if (servedRange) {
+    const start = object.range.offset;
+    const length = object.range.length ?? (object.size - start);
+    headers.set("Content-Range", `bytes ${start}-${start + length - 1}/${object.size}`);
+    headers.set("Content-Length", String(length));
+  } else if (object.size) headers.set("Content-Length", String(object.size));
 
   if (request.method === "HEAD") {
     return new Response(null, { status: 200, headers });
   }
-  return new Response(object.body, { status: 200, headers });
+  return new Response(object.body, { status: servedRange ? 206 : 200, headers });
 }
 /*__STUDIO_WORKER_END:studioMusicR2Preview__*/
 

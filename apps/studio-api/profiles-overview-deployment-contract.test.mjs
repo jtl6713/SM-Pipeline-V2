@@ -36,3 +36,25 @@ test("Pages production deploy verifies the exact force-refresh asset on custom d
   assert.match(pagesDeploy, /Updated just now/);
   assert.match(pagesDeploy, /custom-domain Home overview cache-busted asset/);
 });
+
+test("Home expired Airtable tally is rebuilt rather than being stale forever", () => {
+  const worker = fs.readFileSync(path.join(root, "apps/studio-api/worker.js"), "utf8");
+  const functions = fs.readFileSync(path.join(root, "apps/studio-api/worker-functions-04.mjs"), "utf8");
+  assert.match(worker, /STUDIO_PROFILES_OVERVIEW_CACHE_MS = 2 \* 60 \* 1000/);
+  const view = functions.slice(functions.indexOf("export async function profilesOverview("),
+    functions.indexOf("/*__STUDIO_WORKER_END:profilesOverview__*/"));
+  assert.match(view, /!manualRefreshing && !supabaseBacked && !cooling/);
+  assert.match(view, /scheduleStudioProfilesOverviewRefresh\(ctx, env, authorization\)/);
+  assert.match(view, /if \(snapshot\?\.rows\?\.length\)/);
+});
+
+
+test("Worker production canary tolerates empty pre-upgrade Home snapshot but requires complete v6 post-refresh counts", () => {
+  assert.match(workerDeploy, /\(\.records\|length\)==0 or \(\.records\|length\)>=4/);
+  assert.match(workerDeploy, /approved_future\|numbers/);
+  assert.match(workerDeploy, /approved_past_due\|numbers/);
+  assert.match(workerDeploy, /approved_missing_date\|numbers/);
+  assert.match(workerDeploy, /approved_calendar_slots\.Facebook\|arrays/);
+  assert.match(workerDeploy, /approved_future_by_platform\.YouTube\|numbers/);
+  assert.match(workerDeploy, /snapshot_generation==\$generation/);
+});

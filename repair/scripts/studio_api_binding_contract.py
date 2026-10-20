@@ -32,6 +32,12 @@ RESERVATION_BINDINGS = {
 }
 
 OPTIONAL_BINDINGS = {
+    # Separate, non-authoritative Home counter namespace (not schedule authority).
+    "STUDIO_PROFILE_SUMMARIES": "durable_object_namespace",
+    "STUDIO_HOME_PROFILE_SUMMARY_READS": "plain_text",
+    "STUDIO_REFILL_PROFILE_SUMMARY_READS": "plain_text",
+    "STUDIO_PROFILE_SUMMARY_CAPTURE_ENABLED": "plain_text",
+    "STUDIO_PROFILE_SUMMARY_RECONCILE_ENABLED": "plain_text",
     # Production rollout flags are allowlisted but validated by live release gates.
     "FACTORY_BATCH_APPROVALS_ENABLED": "plain_text",
     "FACTORY_BATCH_ROLLOUT_MODE": "plain_text",

@@ -14,7 +14,7 @@ test("All Profiles overview uses one lean /api/profiles/overview call", () => {
   assert.match(overview, /\/api\/profiles\/overview/);
   assert.doesNotMatch(overview, /\/api\/dashboard\?profile=/);
   assert.doesNotMatch(overview, /mapPool\(profiles/);
-  assert.match(overview, /POLL_MS = 5000/);
+  assert.match(overview, /POLL_MS = 12000/);
   assert.match(overview, /overviewViewActive/);
   assert.match(overview, /document\.hidden/);
   assert.match(overview, /\n  start\(\);/);
@@ -68,5 +68,5 @@ test("Worker budgets overview Airtable work so home never waits 60s", () => {
   assert.match(worker, /studio_home_overview_budget_v1:\s*true/);
   assert.match(worker, /STUDIO_PROFILES_OVERVIEW_BUILD_BUDGET_MS/);
   assert.match(worker, /raceStudioOverviewBudget/);
-  assert.match(worker, /0\.10\.667-ready-production-flow/);
+  assert.match(worker, /0\.10\.670-profile-summary-parity/);
 });

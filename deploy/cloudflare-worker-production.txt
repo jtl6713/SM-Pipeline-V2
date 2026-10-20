@@ -514,4 +514,61 @@ Deploy PR #905 photo-wait historical platform default repair (Threads 400): filt
 
 2026-10-19: P0 #907 one-time CAS/lease-safe recovery for obsolete empty Item4 plan backoffs after merged PR #920. Preserve same Production Request and attempts; permanent marker prevents repeated early retries. PR #921 with CI and live R2 canary.
 
-2026-10-19: PR #923 production fix: enforce trailing 365-day normalized exact title history across manually created and hourly autonomous Studio Ideas; preserve already-approved Miami Content 828 and exclude 12 duplicate outputs from review/publishing.
+2026-10-19 P0 #907 plan integrity: reject post-cap zero-item plans, fail closed on zero/missing output items in authenticated plan/workspace/Production Request APIs, preserve promoted historical output state. Confirm live invalid Ready count after deployment; no automatic approval or scheduling.
+2026-10-19: Deploy PR #926 Home overview counters: profile parentheses show approved outputs scheduled in the past but unpublished; Awaiting Approval shows produced, review-ready outputs without final approval. Airtable remains authoritative; preserve scheduled dispatch counters and refresh invariants.
+
+2026-10-19: Deploy merged PR #925 isolated SQLite Studio Home profile summary infrastructure in DORMANT SHADOW-SAFE mode. STUDIO_PROFILE_SUMMARY_CAPTURE_ENABLED=false, STUDIO_HOME_PROFILE_SUMMARY_READS=false, STUDIO_REFILL_PROFILE_SUMMARY_READS=false, STUDIO_PROFILE_SUMMARY_RECONCILE_ENABLED=false by default. No Airtable write-authority change, no Supabase Home reads, no Phase 6; preserve schedule reservation Durable Object, production app bindings, circuit breaker, all existing workflows and rollback.
+
+2026-10-19: Repair Worker rollback for both SQLite Durable Object namespaces (STUDIO_SCHEDULE_RESERVATIONS and STUDIO_PROFILE_SUMMARIES). Do not attempt historical rollback across a namespace migration. Retry Home force-refresh canary on overview-force-resolve Airtable cooldown. Keep Home/refill profile-summary reads OFF.
+
+2026-10-19: Admit POST /api/profiles/overview/summary/reconcile through the Phase 2A write gate so operator-authorized shadow bootstrap can run. Worker 0.10.668-profile-summary-shadow. Home/refill reads stay OFF; preserve capture/reconcile flags already enabled in production.
+
+2026-10-19: Await operator shadow reconciliation instead of waitUntil, persist fail-closed errors, raise Worker CPU budget, and expose /summary/status. Worker 0.10.669-profile-summary-await. Home/refill reads stay OFF.
+
+2026-10-19: Align shadow ledger membership with Home studioOverviewRowMatchesProfile so Chicago ideas and dirty profile inference match the authoritative Home scan. Worker 0.10.670-profile-summary-parity. Home/refill reads stay OFF.
+
+2026-10-20: Deploy PR #934 shadow-only telemetry for dirty-notification application lag and Airtable dirty batch requests. Preserve production shadow capture/reconcile current values, keep Home/refill summary reads disabled, preserve Airtable write authority, deploy with production canary and rollback guard.
+
+2026-10-20: Deploy PR #935 sanitized Airtable egress telemetry in Studio Worker. Preserve STUDIO_PROFILE_SUMMARY_CAPTURE_ENABLED and RECONCILE_ENABLED current settings; keep STUDIO_HOME_PROFILE_SUMMARY_READS=false and STUDIO_REFILL_PROFILE_SUMMARY_READS=false. Airtable authoritative; no Supabase Home reads or scheduling behavior changes.
+
+2026-10-20: Deploy merged PR #935 sanitized Airtable request egress logging and hourly shadow evidence workflow. Preserve Airtable SoR, shadow capture/reconcile and disabled Home/refill read cutovers. Confirm production binding contract, canaries, rollback.
+
+Deploy targeted November 17 MAE overage selector from merged PR #936; no automatic repair execution or reservation lane activation. 2026-10-20.
+
+2026-10-20: Deploy merged #937 Home approved-unpublished profile-parentheses metric. Preserve Airtable write authority, profile-summary circuit breaker, approvals, and publishing.
+
+2026-10-20: Deploy PR #944 durable Airtable egress hourly telemetry; preserve Airtable SoR and existing production shadow capture/reconcile, keep Home/refill summary reads OFF. Ensure prod Worker canary, rollback and namespace bindings remain healthy.
+
+2026-10-20: Deploy PR #945 tenant-admin runner Airtable metrics proxy. Reuse existing Worker-to-runner shared secret; do not add Github Actions secrets. Preserve production API, Airtable write source, and Home/refill read flags OFF.
+
+2026-10-20: Home parentheses represent a net approved-unpublished backlog. Do not drop provider uploads/draft handoffs marked Completed/Succeeded until explicit publishing proof; preserve Airtable write authority, Supabase Phase 5 and human approval gates.
+
+2026-10-20: Deploy verified Home approved-unpublished classifier (merged #948) after synchronizing runtime preflight to guarded preservation of active scheduling reservation lanes. Validated tests; no authority, approval, publishing, or secret changes.
+
+2026-10-20: Fix Home approved-but-unpublished parentheses stale snapshot: 2-minute Airtable snapshot TTL and cooldown-gated automatic background output reconciliation; no Supabase reads or approval side effects.
+
+2026-10-20: Home tally integrity: reject missing approved_unpublished and overdue_unpublished in R2 Worker snapshot and browser cache; do not display obsolete parenthesized approvals. Deploy Worker and Pages with existing authoritative-refresh verification. Airtable remains SoR; no Supabase read changes.
+
+2026-10-20: Deploy merged PR #967 Home profile-name parenthetical: count only Review_Status=Approved and Scheduled_Post_Date >= current instant (as-yet unpublished); preserve separate overdue metric, per-platform Scheduled columns, Airtable write SoR, shadow Home/refill reads OFF, and authoritative four-profile Home force-refresh canary.
+
+2026-10-20: Deploy PR #969 reconciliation-only Airtable egress attribution. Keep Airtable write SoR, Home/refill summary reads OFF, existing capture/reconcile ON; no forced reconciliation, no publishing mutations. Verify Worker production canaries.
+
+2026-10-20: Deploy PR #970 Airtable Home/refill request category attribution only. Preserve production Worker configuration, Airtable write authority, Home/refill summary reads OFF; avoid forced full reconciliations and protect scheduling.
+
+2026-10-20: Home profile parenthesis tally v5 — count every final-approved, not-yet-published output (upcoming, overdue, and unscheduled) until genuine publication; rebuild old future-only DO/R2 snapshots, preserve Airtable SoR and approval/publish paths. Controlled Worker deploy and All Profiles force-refresh acceptance.
+
+2026-10-20: P0 Home tally deploy hotfix: V5 overview writer and verifier must both accept schema 5 (previous verifier incorrectly required 4); reject legacy v4 snapshots and keep Airtable authority, supabase breaker, and all scheduling approvals unchanged. Trigger controlled Worker deployment and authenticated overview canary.
+
+2026-10-20: P0 Factory approval recovery PR #981. Claim the per-profile R2 lease BEFORE running authoritative 90-day Airtable schedule occupancy reads; preserve complete-read fail-closed safety, idempotent approvals, Airtable SoR, Supabase Phase 5 read breaker, and production binding contract. Controlled Worker rollout; verify pending batch counts decline and no approved outputs are repeated.
+2026-10-20: P0 Factory post-deploy acceptance: re-run authenticated read-only Factory status canary and log sanitized active group counts so observed backlog progress is measurable. No application code or binding changes.
+
+2026-10-20: P0 Factory live verified 33 approved / 64 pending for 8 global batches after PR #981. Deploy merged PR #986 independent R2 parent-ledger child recovery when rotating child scan starves accepted Miami/LA approvals; preserve idempotent Airtable approval, strict scheduling, Phase 5 Supabase breaker and existing Cloudflare bindings; verify production counts using the authenticated read-only Factory audit.
+
+2026-10-20: P0 Factory #987 production recovery. Strict 90-day per-platform Airtable occupancy (all output types) replaces capped all-platform Factory scan for accepted batches. Preserve Airtable authoritative source, MAE collision protection, serial profile leases, output idempotency, Supabase Phase 5 breaker and existing bindings. Validate stalled 8 batches/64 pending counts via authenticated read-only audit after deploy.
+
+2026-10-20: Home v6 future-approved platform-output count by canonical Scheduled_Post_Date, separate past-due and missing-date exceptions; rebuild v5 R2 snapshot after deploy, Airtable remains source of truth, Supabase Home/refill reads remain disabled, preserve scheduling lock and all approval/publish paths.
+
+2026-10-20: Deploy merged PR #991 Factory Quality Agent 15-minute approval-progress stall alert, existing cron-safe R2 lease recovery, and 30-minute operator escalation. Preserve Airtable authority, reservation locks, Supabase Phase 5 breaker, and production bindings.
+
+2026-10-20: Publish approved-future plus rendered-awaiting-final-human-approval platform-output pipeline count and output-target 500/5 hourly refill from Worker with v6 empty-snapshot migration canary. Airtable authoritative. No schedule/publish changes.
+2026-10-20 PR #923 corrected: deploy 365-day title-history checks in Studio manual and autonomous writers, no numeric title clones, no filler duplicates. Do not publish or delete existing outputs.

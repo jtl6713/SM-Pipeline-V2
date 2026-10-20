@@ -1,0 +1,161 @@
+name: Shadow Profile Summary Evidence (hourly)
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/shadow-profile-summary-hourly-evidence.yml'
+      - 'repair/scripts/airtable_hourly_rollup.py'
+      - 'repair/scripts/airtable_hourly_rollup_test.py'
+  schedule:
+    - cron: '13 * * * *'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: shadow-profile-evidence-hourly
+  cancel-in-progress: false
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Test freshness window accounting
+        run: python -m unittest discover -s repair/scripts -p 'shadow_freshness_window_report_test.py' -v
+      - name: Verify rollup logic
+        run: python -m unittest discover -s repair/scripts -p 'airtable_hourly_rollup_test.py' -v
+      - name: Test automatic 24-hour evidence gate
+        run: python -m unittest discover -s repair/scripts -p 'shadow_24h_auto_evidence_test.py' -v
+      - name: Collect read-only metrics through temporary service binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          name="chicagoshining-summary-evidence"
+          trap 'curl -sS -X DELETE "$api/workers/scripts/$name" -H "$auth" >/dev/null || true' EXIT
+          token=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
+          cat >worker.js <<JS
+          export default {
+            async fetch(req, env) {
+              const path = new URL(req.url).pathname;
+              if (path !== "/$token/evidence" && path !== "/$token/airtable-egress" && path !== "/$token/runner-egress") return new Response("Not found", {status:404});
+              const headers = {"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Accept":"application/json"};
+              const endpoint = path.endsWith("runner-egress") ? "runner-egress" : path.endsWith("airtable-egress") ? "airtable-egress?hours=48" : "status";
+              const response = await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/profiles/overview/summary/"+endpoint,{headers}));
+              return new Response(response.body,{status:response.status,headers:{"Content-Type":"application/json","Cache-Control":"no-store"}});
+            }
+          };
+          JS
+          cat >metadata.json <<'JSON'
+          {"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"chicagoshining-studio-api"}]}
+          JSON
+          node --check worker.js
+          curl -fsS -X PUT "$api/workers/scripts/$name/content" -H "$auth" -F 'metadata=@metadata.json;type=application/json' -F 'worker.js=@worker.js;type=application/javascript+module;filename=worker.js' >upload.json
+          jq -e '.success == true' upload.json >/dev/null
+          curl -fsS -X POST "$api/workers/scripts/$name/subdomain" -H "$auth" -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' >subdomain.json
+          jq -e '.success == true' subdomain.json >/dev/null
+          curl -fsS "$api/workers/subdomain" -H "$auth" >account.json
+          sub=$(jq -er '.result.subdomain' account.json)
+          curl -fsS --retry 12 --retry-all-errors --retry-delay 2 --max-time 30 "https://$name.$sub.workers.dev/$token/evidence" >status.json
+          jq -e '.ok == true and .complete == true and (.evidence | type) == "object"' status.json >/dev/null
+          jq '{captured_at:(now|todate),summary_version:.version,complete:.complete,building_generation:.building_generation,error:.error,evidence:.evidence}' status.json >evidence.json
+          cat evidence.json
+          curl -fsS --retry 5 --retry-all-errors --retry-delay 2 --max-time 30 "https://$name.$sub.workers.dev/$token/airtable-egress" >worker-airtable-egress.json
+          jq -e '.ok == true and (.hourly|type)=="array"' worker-airtable-egress.json >/dev/null
+          code=$(curl -sS --retry 5 --retry-all-errors --retry-delay 2 --max-time 30 -o runner-airtable-egress.json -w '%{http_code}' "https://$name.$sub.workers.dev/$token/runner-egress" || true)
+          if [[ "$code" != "200" ]] || ! jq -e '.ok==true and (.hourly|type)=="array"' runner-airtable-egress.json >/dev/null 2>&1; then
+            reason=$(jq -r '.reason // empty' runner-airtable-egress.json 2>/dev/null || true)
+            case "$reason" in
+              runner_metrics_backend_unconfigured|runner_metrics_unavailable|runner_metrics_unreachable) ;;
+              *) reason="runner_proxy_http_${code:-unknown}" ;;
+            esac
+            jq -n --arg reason "$reason" '{ok:false,reason:$reason}' >runner-airtable-egress.json
+          fi
+          jq -n --slurpfile worker worker-airtable-egress.json --slurpfile runner runner-airtable-egress.json '{captured_at:(now|todate),worker: $worker[0],runner: $runner[0],complete:($worker[0].ok==true and $runner[0].ok==true),net_savings_verifiable:false}' >airtable-egress-coverage.json
+          cat airtable-egress-coverage.json
+          python repair/scripts/airtable_hourly_rollup.py --worker worker-airtable-egress.json --runner runner-airtable-egress.json --captured-at "$(jq -r '.captured_at' airtable-egress-coverage.json)" --output airtable-hourly-rollup.json
+          echo '### Shadow profile hourly observation' >> "$GITHUB_STEP_SUMMARY"
+          jq -r '"- Captured: " + .captured_at + "\\n- Summary version: " + (.summary_version|tostring) + "\\n- Dirty applied: " + (.evidence.dirty_applied|tostring) + "\\n- Airtable dirty attempts: " + (.evidence.airtable_dirty_batch_attempts|tostring) + "\\n- Airtable dirty errors: " + (.evidence.airtable_dirty_batch_errors|tostring)' evidence.json >> "$GITHUB_STEP_SUMMARY"
+          echo '- Interpretation: cumulative telemetry only; these values do not establish full Airtable request savings.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Find retained evidence from approximately 24 hours earlier
+        id: prior
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/shadow-profile-summary-hourly-evidence.yml/runs?status=success&per_page=100" > /tmp/previous-evidence-runs.json
+          python - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          from pathlib import Path
+          current = datetime.fromisoformat(json.loads(Path("evidence.json").read_text())["captured_at"].replace("Z","+00:00"))
+          runs = json.loads(Path("/tmp/previous-evidence-runs.json").read_text()).get("workflow_runs", [])
+          candidates = []
+          for run in runs:
+              if run.get("head_branch") != "main" or run.get("conclusion") != "success":
+                  continue
+              stamp = datetime.fromisoformat(run["created_at"].replace("Z","+00:00"))
+              age = (current - stamp).total_seconds() / 3600
+              if 23 <= age <= 25:
+                  candidates.append((abs(age - 24), run["id"]))
+          best = min(candidates)[1] if candidates else ""
+          with open(os.environ["GITHUB_OUTPUT"], "a") as stream:
+              stream.write("run_id=" + str(best) + "\n")
+          print("prior_24h_run_found=" + str(bool(best)))
+          PY
+
+      - name: Download prior day's retained evidence
+        if: steps.prior.outputs.run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: shadow-evidence-${{ steps.prior.outputs.run_id }}
+          run-id: ${{ steps.prior.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: previous
+
+      - name: Evaluate 24-hour shadow freshness automatically
+        shell: bash
+        run: |
+          set -euo pipefail
+          python repair/scripts/shadow_24h_auto_evidence.py --current evidence.json --prior previous/evidence.json --output freshness-24h.json
+          jq -r '"- 24-hour evidence ready: " + (.ready|tostring) + "\n- 24-hour freshness gate: " + (.freshness_gate_passed|tostring) + "\n- Samples applied: " + ((.observed_samples // 0)|tostring) + "\n- Reason: " + .reason' freshness-24h.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce complete core Airtable evidence coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '.complete == true and .worker.ok == true and .runner.ok == true' airtable-egress-coverage.json >/dev/null
+          echo 'Core Worker and runner exports available; standalone and external Airtable paths require separate accounting.'
+
+      - name: Save evidence artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shadow-evidence-${{ github.run_id }}
+          path: |
+            evidence.json
+            worker-airtable-egress.json
+            runner-airtable-egress.json
+            airtable-egress-coverage.json
+            airtable-hourly-rollup.json
+            freshness-24h.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+# 2026-10-20: first post-PR944 live durable hourly accounting export verification.
+
+# 2026-10-20: verify runner metrics proxy after Worker production deployment completed.
+
+# 2026-10-20: Verify post-PR955 runner store+service proxy authenticates and exports nonempty aggregate evidence.
+
+# 2026-10-20: verify post-PR969 reconciliation egress attribution and both durable exports.
+
+# 2026-10-20: post-PR969 read-only attribution verification; no full Airtable reconciliation.
+
+# 2026-10-20: verify post-PR970 Home and autonomous-refill hourly source labels with both core exports.

@@ -1,0 +1,118 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+import { homeOutputContribution, homeOverdueDueAt } from "./profile-summary-classification.mjs";
+const worker = fs.readFileSync(path.join(root, "apps/studio-api/worker-functions-04.mjs"), "utf8");
+const classifier = fs.readFileSync(path.join(root, "apps/studio-api/profile-summary-classification.mjs"), "utf8");
+const ui = fs.readFileSync(path.join(root, "apps/studio-web/assets/all-profiles-overview-1007.js"), "utf8");
+
+test("profile overview includes overdue approved outputs separately from platform dispatch", () => {
+  assert.match(worker, /overdue_unpublished: outputCounts.overdue_unpublished/);
+  assert.match(worker, /overdue_unpublished: metrics.overdue_unpublished/);
+  assert.ok(worker.includes("scheduled: studioOverviewScheduledCounts(mappedOutputs)"));
+  const late = {
+    id: "rec12345678901234", platform: "Instagram",
+    studio_state: "Platform Processing", output_status: "Approved for Publishing",
+    review_status: "Approved", scheduled_post_date: "2020-01-01T00:00:00Z",
+    studio_publish_dispatch_at: "2020-01-01T00:00:01Z",
+  };
+  const contribution = homeOutputContribution(late);
+  assert.equal(contribution.scheduled.Instagram, 0);
+  assert.equal(contribution.overdue_unpublished, 1);
+  assert.ok(homeOverdueDueAt(late) > 0);
+  assert.equal(homeOutputContribution({ ...late, published_at: "2020-01-01T00:01:00Z" }).overdue_unpublished, 0);
+});
+
+test("awaiting approval is review-ready but not approved or rendering", () => {
+  assert.match(classifier, /state !== "Ready for Review" && state !== "Awaiting Approval"/);
+  assert.ok(classifier.includes('["approved", "rejected", "skipped"].includes(review)'));
+  assert.ok(classifier.includes("ready for render|waiting in render queue"));
+  const ready = { id: "rec12345678901234", studio_state: "Ready for Review",
+    output_status: "Ready for Review", render_status: "Rendered", review_status: "" };
+  assert.equal(homeOutputContribution(ready).awaiting_approval, 1);
+  assert.equal(homeOutputContribution({ ...ready, render_status: "Queued" }).awaiting_approval, 0);
+  assert.equal(homeOutputContribution({ ...ready, review_status: "Approved" }).awaiting_approval, 0);
+});
+
+test("Home uses explicit approved future and past due columns, not parentheses", () => {
+  assert.match(ui, /Approved · Future/);
+  assert.match(ui, /Approved · Past Due/);
+  assert.doesNotMatch(ui, /approvedUnpublishedTotal/);
+});
+
+test("Home parentheses count rises for final approval even when schedule is overdue", () => {
+  const base = {
+    id:"rec12345678901234", platform:"TikTok",
+    studio_state:"Ready for Review", output_status:"Ready for Review",
+    render_status:"Rendered", review_status:"",
+    scheduled_post_date:"2099-01-01T00:00:00Z",
+  };
+  const before=homeOutputContribution(base);
+  const after=homeOutputContribution({
+    ...base,studio_state:"Scheduled",output_status:"Approved for Publishing",
+    review_status:"Approved",publish_status:"Ready to Publish",
+  });
+  assert.equal(before.awaiting_approval,1);
+  assert.equal(before.approved_unpublished,0);
+  assert.equal(after.awaiting_approval,0);
+  assert.equal(after.approved_unpublished,1);
+  assert.equal(after.overdue_unpublished,0);
+  const overdue = homeOutputContribution({ ...after, ...base, review_status:"Approved",
+    studio_state:"Scheduled", output_status:"Approved for Publishing",
+    scheduled_post_date:"2020-01-01T00:00:00Z" });
+  assert.equal(overdue.approved_unpublished,1);
+  assert.equal(overdue.overdue_unpublished,1);
+});
+
+test("Home rejects old R2/browser snapshots missing per-output calendar breakdown", () => {
+  const valid=worker.slice(worker.indexOf("function studioProfilesOverviewRowsHealthy("),
+    worker.indexOf("function profilesOverviewSnapshotView("));
+  const verify=worker.slice(worker.indexOf("export function validateStudioProfilesOverviewRows("),
+    worker.indexOf("function profilesOverviewRefreshFailureComponents("));
+  assert.match(valid, /"approved_unpublished", "overdue_unpublished"/);
+  assert.match(verify, /"approved_unpublished", "overdue_unpublished"/);
+  assert.match(valid, /typeof n !== "number"/);
+  assert.ok(ui.includes('studio.allProfilesOverview.v6'));
+  assert.match(valid, /approved_calendar_slots/);
+  assert.match(verify, /approved_calendar_slots/);
+  const browserValidation=ui.slice(ui.indexOf("function validOverviewRows("),ui.indexOf("function readCache("));
+  assert.match(browserValidation, /"approved_unpublished", "overdue_unpublished"/);
+  assert.match(browserValidation, /approved_calendar_slots/);
+  assert.ok(browserValidation.includes('typeof row?.[kind] !== "number"'));
+  const map=ui.slice(ui.indexOf("function mapRows("),ui.indexOf("function adoptOverview("));
+  assert.ok(map.includes('overdue_unpublished: Number(row.overdue_unpublished) || 0'));
+});
+
+test("Home parentheses depend on final-approved-unpublished state, not scheduled-time passage", () => {
+  const durable=fs.readFileSync(path.join(root, "apps/studio-api/profile-summary-do.mjs"), "utf8");
+  assert.match(classifier, /export function homeApprovedUnpublished/);
+  assert.doesNotMatch(classifier.slice(classifier.indexOf("export function homeApprovedUnpublished("),
+    classifier.indexOf("export function homeOutputContribution(")), /scheduled >= now|Date\.parse/);
+  assert.match(worker, /approved_unpublished: metrics\.approved_unpublished/);
+  assert.doesNotMatch(worker, /approved_unpublished: approvedFutureTimes\.filter/);
+  assert.match(durable, /approved_unpublished: c\.approved_unpublished/);
+  assert.doesNotMatch(durable, /approved_unpublished: futureByProfile/);
+  assert.match(durable, /approved_unpublished_definition/);
+  assert.match(durable, /future_count_reconcile_required/);
+});
+
+
+test("Home V6 force refresh verifies the schema it actually writes and rejects V5 cache", () => {
+  const writer = worker.slice(worker.indexOf("export async function writeStudioProfilesOverviewSnapshot("),
+    worker.indexOf("/*__STUDIO_WORKER_END:writeStudioProfilesOverviewSnapshot__*/"));
+  const verifier = worker.slice(worker.indexOf("export async function verifyStudioProfilesOverviewSnapshot("),
+    worker.indexOf("/*__STUDIO_WORKER_END:verifyStudioProfilesOverviewSnapshot__*/"));
+  const remember = worker.slice(worker.indexOf("export function rememberProfilesOverviewSnapshot("),
+    worker.indexOf("/*__STUDIO_WORKER_END:rememberProfilesOverviewSnapshot__*/"));
+  const reader = worker.slice(worker.indexOf("export async function readStudioProfilesOverviewSnapshot(env,"),
+    worker.indexOf("/*__STUDIO_WORKER_END:readStudioProfilesOverviewSnapshot__*/"));
+  assert.match(writer, /schemaVersion: 6/);
+  assert.match(verifier, /snapshot\.schemaVersion !== 6/);
+  assert.doesNotMatch(verifier, /schemaVersion !== 5/);
+  assert.match(remember, /snapshot\?\.schemaVersion \|\| 0\) !== 6/);
+  assert.match(reader, /cache\.schemaVersion !== 6/);
+});

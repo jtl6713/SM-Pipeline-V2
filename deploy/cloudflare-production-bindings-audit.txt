@@ -3,3 +3,7 @@ Sanitized read-only binding audit trigger.
 Target: chicagoshining-studio-api
 Purpose: compare the currently active Worker version with known-good version 86 using binding names/types only after Item 1 lease-store access failure.
 Triggered: 2026-08-16 rerun
+
+2026-10-19 read-only post-PR925 shadow deployment audit: identify active version and verify dormant STUDIO_PROFILE_SUMMARIES namespace after force-refresh canary failed on Airtable cooldown; do not mutate Cloudflare Worker.
+
+2026-10-19: Re-audit after rollback-lifecycle repair. Emit sanitized Home/refill/shadow feature-flag values plus Durable Object namespace names; no secrets.

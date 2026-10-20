@@ -354,7 +354,7 @@ test("overview pack aborts a hung profile lookup before the 26s race", async () 
 
 test("worker wires supabase phase4 reads behind the same flag", async () => {
   const worker = readStudioWorkerSource();
-  assert.match(worker, /version: "0.10.667-ready-production-flow"/);
+  assert.match(worker, /version: "0.10.670-profile-summary-parity"/);
   assert.match(worker, /skipSupabaseWriteThrough/);
   assert.match(worker, /supabaseCircuitOpen/);
   assert.match(worker, /studio_supabase_pipeline_reads_v1: true/);
@@ -387,7 +387,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /supabase content list read failed/);
   assert.match(worker, /supabase profiles overview read failed/);
   assert.match(worker, /supabase factory\/ops queue read failed/);
-  assert.match(worker, /schemaVersion: 4/);
+  assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /usedSupabaseOutputs/);
   assert.match(worker, /Reuse last-good Ideas counts/);

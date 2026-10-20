@@ -280,7 +280,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.724-profile-fast-music";
+  const BUILD_ID = "item4-0.6.729-factory-review-ipad";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -15833,6 +15833,8 @@ function timedScriptAssetLabel(asset, index) {
       }
 
       const audio = new Audio(url);
+      audio.muted = false;
+      audio.volume = 1;
       studioPreviewAudio = audio;
       studioPreviewButton = button || null;
       audio.preload = "auto";
@@ -15847,9 +15849,11 @@ function timedScriptAssetLabel(asset, index) {
         restore();
         messageFn(`That ${label} could not be played.`, "error-text");
       }, { once: true });
-      audio.play().catch(() => {
+      audio.play().then(() => {
+        if (studioPreviewAudio === audio) messageFn(`Playing ${label}.`);
+      }).catch((error) => {
         restore();
-        messageFn("Browser playback was blocked. Click Preview again.", "error-text");
+        messageFn(`Unable to play ${label}: ${error?.message || "audio could not load"}.`, "error-text");
       });
     } catch (e) {
       messageFn(e.message || "Preview failed.", "error-text");
@@ -24760,8 +24764,9 @@ function timedScriptAssetLabel(asset, index) {
         button.addEventListener("click", () => {
           const id = String(button.dataset.opsMusicPreview || "").trim();
           if (!id) return;
-          const preview = String(button.dataset.previewUrl || "").trim()
-            || `/api/music/${encodeURIComponent(id)}/preview`;
+          // Always stream through Studio's authenticated audio proxy. A music
+          // record's preview_url can be a Drive/R2 link that is not browser-readable.
+          const preview = `/api/music/${encodeURIComponent(id)}/preview`;
           const label = button.closest(".ops-music-preview-row")?.querySelector(".ops-music-option span")?.textContent?.trim() || "track";
           playStudioAudioPreview(preview, button, setOperationsMessage, label);
         });

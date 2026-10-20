@@ -166,7 +166,6 @@ def test_i1_does_not_chain_i2_when_email_disabled(monkeypatch):
             return {"id": "recPROFILE", "fields": {"Daily_Idea_Limit": 1}}
 
         def list_records(self, *_args, **_kwargs):
-            # No recent duplicate titles across Ideas or Content Items.
             return []
 
         def create_records(self, *_args, **_kwargs):

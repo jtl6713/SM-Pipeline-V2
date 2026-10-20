@@ -1,0 +1,64 @@
+name: One-Time Home Approval Freshness UI Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/home-approval-freshness-trigger.txt'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: chicagoshining-home-approval-ui-release
+  cancel-in-progress: false
+
+jobs:
+  version-and-trigger-pages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: true
+      - name: Increment complete Studio UI release contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          html_path=Path('apps/studio-web/index.html')
+          app_path=Path('apps/studio-web/assets/app-item4-1008.js')
+          html=html_path.read_text()
+          app=app_path.read_text()
+          m=re.search(r'/assets/app-item4-1008\.js\?v=([0-9]+\.[0-9]+\.[0-9]+-[a-z0-9-]+)',html)
+          if not m: raise SystemExit('Unable to find app release cache key')
+          old=m.group(1)
+          parts=old.split('-',1)[0].split('.')
+          new='.'.join(parts[:2]+[str(int(parts[2])+1)])+'-home-approval-freshness'
+          if ('item4-'+old) not in app: raise SystemExit('Application BUILD_ID does not match live HTML contract')
+          if 'all-profiles-overview-1007.js' not in html or 'approval-snapshot-monotonic-v1' not in html:
+              raise SystemExit('Missing merged #950 Home asset; refusing unrelated UI release')
+          if ('UI build '+parts[0]+'.'+parts[1]+'.'+parts[2]) not in html:
+              raise SystemExit('UI label does not match app release version')
+          html=html.replace(old,new)
+          html=re.sub(r'UI build [0-9]+\\.[0-9]+\\.[0-9]+(?:-[a-z0-9-]+)?', 'UI build '+new, html)
+          app=app.replace('item4-'+old,'item4-'+new)
+          html_path.write_text(html)
+          app_path.write_text(app)
+          print('home_freshness_ui_version='+new)
+          PY
+          node apps/studio-web/ui-release-contract.mjs --assert-newer-than 0.6.725
+          node --check apps/studio-web/assets/app-item4-1008.js
+          node --test apps/studio-web/home-approval-freshness.test.mjs
+      - name: Commit changed versioned assets and trigger standard Pages production deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '\n2026-10-20: publish version-bumped Home approval freshness (#950); preserve exact Studio UI release contract.\n' >> deploy/cloudflare-pages-production.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/studio-web/index.html apps/studio-web/assets/app-item4-1008.js deploy/cloudflare-pages-production.txt
+          git commit -m 'release(pages): version-bump Home approval freshness fix'
+          git push origin HEAD:main

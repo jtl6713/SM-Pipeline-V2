@@ -4,9 +4,11 @@
 
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
   const platformOrder = ["Facebook","Instagram","TikTok","YouTube"];
-  const CACHE_KEY = "studio.allProfilesOverview.v2";
+  // V6 caches approved per-output calendar dates so future/past-due boundaries
+  // move with the clock, including while a durable snapshot stays cached.
+  const CACHE_KEY = "studio.allProfilesOverview.v6";
   const REFRESH_KEY = "studio.allProfilesOverview.refresh.v1";
-  const POLL_MS = 5000;
+  const POLL_MS = 12000;
   const REFRESH_POLL_MS = 1800;
   // The Worker expires abandoned refresh operations after 120s. Keep a small
   // client grace period, then stop painting "Refreshing…" if browser storage
@@ -21,6 +23,7 @@
     followUp: false,
     cacheAt: 0,
     snapshotGeneration: "",
+    summaryVersion: 0,
     ideasAt: 0,
     manualRefreshing: false,
     refreshOperationId: "",
@@ -28,8 +31,26 @@
     refreshTone: "",
   };
 
-  function scheduledTotal(row) {
-    return platformOrder.reduce((sum, platform) => sum + (Number(row?.scheduled?.[platform]) || 0), 0);
+  function approvedCalendarCounts(row, now = Date.now()) {
+    const byPlatform = {};
+    let future = 0, pastDue = 0;
+    for (const platform of platformOrder) {
+      const slots = row?.approved_calendar_slots?.[platform] || [];
+      byPlatform[platform] = slots.filter((due) => due > now).length;
+      future += byPlatform[platform];
+      pastDue += slots.length - byPlatform[platform];
+    }
+    const awaitingByPlatform = row?.awaiting_final_by_platform || {};
+    const pipelineByPlatform = Object.fromEntries(platformOrder.map((platform) => [
+      platform, byPlatform[platform] + (Number(awaitingByPlatform[platform]) || 0),
+    ]));
+    const awaiting = platformOrder.reduce((sum, platform) => sum + (Number(awaitingByPlatform[platform]) || 0), 0);
+    const pipelineTotal = future + awaiting;
+    return {
+      byPlatform, future, pastDue, awaiting, pipelineByPlatform,
+      pipelineTotal, ideasNeeded: Math.ceil(Math.max(0, 500 - pipelineTotal) / 5),
+      missingDate: Number(row?.approved_missing_date) || 0,
+    };
   }
 
   function validOverviewRows(rows) {
@@ -45,8 +66,15 @@
       for (const platform of platformOrder) {
         if (!Number.isFinite(Number(row?.scheduled?.[platform]))) return false;
       }
-      for (const kind of ["manual", "failed", "approval", "ideas"]) {
-        if (!Number.isFinite(Number(row?.[kind]))) return false;
+      for (const kind of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished", "approved_future", "approved_past_due", "approved_missing_date", "pipeline_total"]) {
+        if (typeof row?.[kind] !== "number" || !Number.isFinite(row[kind]) || row[kind] < 0) return false;
+      }
+      for (const platform of platformOrder) {
+        const dates = row?.approved_calendar_slots?.[platform];
+        if (!Array.isArray(dates) || dates.some((due) => !Number.isFinite(due) || due <= 0)) return false;
+        if (!Number.isInteger(row?.approved_future_by_platform?.[platform])) return false;
+        if (!Number.isInteger(row?.awaiting_final_by_platform?.[platform])) return false;
+        if (row?.pipeline_by_platform?.[platform] !== row.approved_future_by_platform[platform] + row.awaiting_final_by_platform[platform]) return false;
       }
     }
     return true;
@@ -66,6 +94,7 @@
         rows: parsed.rows,
         at: Number(parsed.at) || 0,
         generation: String(parsed.generation || ""),
+        summaryVersion: Number(parsed.summaryVersion || 0),
         ideasAt: Number(parsed.ideasAt || 0),
       };
     } catch {
@@ -78,11 +107,13 @@
     const authoritativeAt = Number(metadata.snapshotAt || 0);
     if (authoritativeAt > 0) state.cacheAt = authoritativeAt;
     if (metadata.generation != null) state.snapshotGeneration = String(metadata.generation || "");
+    if (metadata.summaryVersion != null) state.summaryVersion = Number(metadata.summaryVersion) || 0;
     if (metadata.ideasAt != null) state.ideasAt = Number(metadata.ideasAt || 0);
     const payload = JSON.stringify({
       rows,
       at: state.cacheAt,
       generation: state.snapshotGeneration,
+      summaryVersion: state.summaryVersion,
       ideasAt: state.ideasAt,
     });
     try { localStorage.setItem(CACHE_KEY, payload); } catch { /* ignore quota */ }
@@ -256,23 +287,43 @@
       return;
     }
 
-    const total = { scheduled:Object.fromEntries(platformOrder.map((p)=>[p,0])), manual:0, failed:0, approval:0, ideas:0 };
+    const now = Date.now();
+    const total = {
+      scheduled: Object.fromEntries(platformOrder.map((p) => [p, 0])),
+      approved_calendar_slots: Object.fromEntries(platformOrder.map((p) => [p, []])),
+      approved_missing_date: 0,
+      awaiting_final_by_platform: Object.fromEntries(platformOrder.map((p) => [p, 0])),
+      manual: 0, failed: 0, approval: 0, ideas: 0,
+    };
     for (const row of state.rows) {
-      platformOrder.forEach((p)=> total.scheduled[p] += row.scheduled?.[p] || 0);
+      for (const platform of platformOrder) {
+        total.scheduled[platform] += row.scheduled?.[platform] || 0;
+        total.approved_calendar_slots[platform].push(...row.approved_calendar_slots[platform]);
+        total.awaiting_final_by_platform[platform] += row.awaiting_final_by_platform[platform];
+      }
+      total.approved_missing_date += row.approved_missing_date;
       total.manual += row.manual;
       total.failed += row.failed;
       total.approval += row.approval;
       total.ideas += row.ideas;
     }
 
-    const rowHtml = (row, isTotal=false) => `<tr class="${isTotal ? "all-profiles-total" : ""}">
-      <th scope="row">${esc(row.name)}${isTotal ? "" : ` (${scheduledTotal(row)})`}</th>
-      ${platformOrder.map((p)=>`<td data-label="${p}">${row.scheduled?.[p] || 0}</td>`).join("")}
-      <td data-label="Manual" class="overview-tone-${tone(row.manual,"manual")}">${actionCount(row, "manual", "manual action")}</td>
-      <td data-label="Failed" class="overview-tone-${tone(row.failed,"failed")}">${actionCount(row, "failed", "failed")}</td>
-      <td data-label="Approval" class="overview-tone-${tone(row.approval,"approval")}">${actionCount(row, "approval", "awaiting approval")}</td>
-      <td data-label="Ideas" class="overview-tone-${tone(row.ideas,"ideas")}">${actionCount(row, "ideas", "ideas")}</td>
+    const rowHtml = (row, isTotal = false) => {
+      const calendar = approvedCalendarCounts(row, now);
+      return `<tr class="${isTotal ? "all-profiles-total" : ""}">
+      <th scope="row">${esc(row.name)}</th>
+      ${platformOrder.map((p) => `<td data-label="${p} future and review outputs">${calendar.pipelineByPlatform[p]}</td>`).join("")}
+      <td data-label="Pipeline total" class="overview-tone-ok">${calendar.pipelineTotal}</td>
+      <td data-label="Approved future" class="overview-tone-ok">${calendar.future}</td>
+      <td data-label="Ideas needed">${calendar.ideasNeeded}</td>
+      <td data-label="Approved past due" class="overview-tone-${tone(calendar.pastDue, "failed")}">${calendar.pastDue}</td>
+      <td data-label="Approved no date" class="overview-tone-${tone(calendar.missingDate, "failed")}">${calendar.missingDate}</td>
+      <td data-label="Manual" class="overview-tone-${tone(row.manual, "manual")}">${actionCount(row, "manual", "manual action")}</td>
+      <td data-label="Failed" class="overview-tone-${tone(row.failed, "failed")}">${actionCount(row, "failed", "failed")}</td>
+      <td data-label="Approval" class="overview-tone-${tone(row.approval, "approval")}">${actionCount(row, "approval", "awaiting approval")}</td>
+      <td data-label="Ideas" class="overview-tone-${tone(row.ideas, "ideas")}">${actionCount(row, "ideas", "ideas")}</td>
     </tr>`;
+    };
 
     const statusText = refreshStatusText({ stale, error, cooling });
     const statusNote = statusText
@@ -282,7 +333,7 @@
     const disabled = state.manualRefreshing ? " disabled aria-disabled=\"true\"" : "";
 
     host.innerHTML = `<div class="all-profiles-heading"><div><p class="studio-hub-kicker">ALL PROFILES</p><h1>Studio overview</h1>${statusNote}</div><button type="button" class="secondary-button" id="allProfilesRefresh"${disabled}>${refreshText}</button></div>
-      <div class="all-profiles-table-wrap"><table class="all-profiles-table"><thead><tr class="all-profiles-group-row"><th rowspan="2">Profile</th><th colspan="4" class="all-profiles-scheduled-group">Scheduled posts</th><th rowspan="2">Manual action</th><th rowspan="2">Failed</th><th rowspan="2">Awaiting approval</th><th rowspan="2">Ideas</th></tr><tr class="all-profiles-platform-row">${platformOrder.map((p)=>`<th class="all-profiles-scheduled-col">${p}</th>`).join("")}</tr></thead>
+      <div class="all-profiles-table-wrap"><table class="all-profiles-table"><thead><tr class="all-profiles-group-row"><th rowspan="2" title="City profile. Counts represent individual platform outputs associated with this city.">Profile</th><th colspan="4" class="all-profiles-scheduled-group" title="Each platform counts individual unpublished outputs that are approved and scheduled after now, plus fully rendered outputs awaiting final human approval. An output is counted only once.">Future + Review platform outputs</th><th rowspan="2" title="Total of Facebook, Instagram, TikTok and YouTube: approved unpublished outputs scheduled in the future, plus rendered outputs awaiting final human approval.">Pipeline · Total</th><th rowspan="2" title="Fully approved, not yet published platform outputs with a scheduled date and time later than now. Excludes outputs still awaiting approval.">Approved · Future</th><th rowspan="2" title="Estimated additional ideas: round up (500 minus Pipeline Total) divided by 5, with a minimum of 0. Assumes 5 platform outputs per idea; creation remains subject to hourly limits.">Ideas Needed</th><th rowspan="2" title="Fully approved outputs that are still unpublished after their scheduled date and time. Publishing exceptions; not part of the future Pipeline Total.">Approved · Past Due</th><th rowspan="2" title="Fully approved, unpublished outputs without a valid Scheduled Post Date. Scheduling exceptions; not part of the future Pipeline Total.">Approved · No Date</th><th rowspan="2" title="Platform outputs in Manual Action Required status. These need a person to complete a workflow or publishing action.">Manual action</th><th rowspan="2" title="Platform outputs in Failed status that require investigation or retry.">Failed</th><th rowspan="2" title="Fully rendered platform outputs awaiting final human approval. Already included in Pipeline Total, not counted again.">Awaiting approval</th><th rowspan="2" title="Existing idea candidates that have not been promoted into production. Different from the Ideas Needed estimate.">Ideas</th></tr><tr class="all-profiles-platform-row">${platformOrder.map((p)=>`<th class="all-profiles-scheduled-col" title="${p}: individual approved, unpublished outputs scheduled after now, plus fully rendered outputs awaiting final human approval. Counts every output format once.">${p}</th>`).join("")}</tr></thead>
       <tbody>${state.rows.map((r)=>rowHtml(r)).join("")}${rowHtml({name:"Total",...total},true)}</tbody></table></div>`;
 
     document.getElementById("allProfilesRefresh")?.addEventListener("click", forceRefresh);
@@ -299,6 +350,16 @@
       manual: Number(row.manual) || 0,
       failed: Number(row.failed) || 0,
       approval: Number(row.approval) || 0,
+      approved_unpublished: Number(row.approved_unpublished) || 0,
+      overdue_unpublished: Number(row.overdue_unpublished) || 0,
+      approved_future: Number(row.approved_future) || 0,
+      approved_past_due: Number(row.approved_past_due) || 0,
+      approved_missing_date: Number(row.approved_missing_date) || 0,
+      pipeline_total: Number(row.pipeline_total) || 0,
+      awaiting_final_by_platform: row.awaiting_final_by_platform,
+      pipeline_by_platform: row.pipeline_by_platform,
+      approved_future_by_platform: row.approved_future_by_platform,
+      approved_calendar_slots: row.approved_calendar_slots,
       ideas: Number(row.ideas) || 0,
     }));
   }
@@ -307,8 +368,17 @@
     const rows = Array.isArray(data?.records) ? data.records : [];
     // Reject invalid server snapshots instead of caching four fake Chicago rows.
     if (!validOverviewRows(rows)) return false;
-    state.rows = mapRows(rows);
+    const nextVersion = Number(data?.summary_version || 0);
+    // Reject out-of-order summary requests; legacy snapshots retain their own fallback.
+    if (nextVersion > 0 && state.summaryVersion > nextVersion) return false;
     const snapshotAt = Number(data?.snapshot_at || 0);
+    // Overlapping Home polls can finish out of order. Never replace a newer
+    // authoritative snapshot (and its approval totals) with older cached data.
+    // Match versions first; for versionless legacy snapshots use the timestamp.
+    if (snapshotAt > 0 && state.cacheAt > 0 && snapshotAt < state.cacheAt
+        && (nextVersion === 0 || nextVersion === state.summaryVersion)) return false;
+    state.summaryVersion = nextVersion;
+    state.rows = mapRows(rows);
     if (snapshotAt > 0) state.cacheAt = snapshotAt;
     if (data?.snapshot_generation != null) state.snapshotGeneration = String(data.snapshot_generation || "");
     if (data?.ideas_at != null) state.ideasAt = Number(data.ideas_at || 0);
@@ -316,6 +386,7 @@
       writeCache(state.rows, {
         snapshotAt,
         generation: state.snapshotGeneration,
+        summaryVersion: state.summaryVersion,
         ideasAt: state.ideasAt,
       });
     }
@@ -493,6 +564,7 @@
         state.rows = cached.rows;
         state.cacheAt = cached.at;
         state.snapshotGeneration = cached.generation;
+        state.summaryVersion = cached.summaryVersion || 0;
         state.ideasAt = cached.ideasAt;
         render({ stale: true });
       } else {
@@ -555,6 +627,7 @@
     state.rows = cachedNow.rows;
     state.cacheAt = cachedNow.at;
     state.snapshotGeneration = cachedNow.generation;
+    state.summaryVersion = cachedNow.summaryVersion || 0;
     state.ideasAt = cachedNow.ideasAt;
     render({ stale: true });
   }
@@ -572,9 +645,19 @@
     load();
     syncRefreshStatus({ quiet: true });
   };
+  // Paint the last verified snapshot before any network request starts.
+  const initialCache = readCache();
+  if (initialCache?.rows?.length) {
+    state.rows = initialCache.rows;
+    state.cacheAt = initialCache.at;
+    state.snapshotGeneration = initialCache.generation;
+    state.summaryVersion = initialCache.summaryVersion || 0;
+    state.ideasAt = initialCache.ideasAt;
+    render({ stale: true });
+  }
   start();
 
-  // Five-second Home polling remains cheap snapshot reads only. Durable refresh
+  // Twelve-second Home polling uses read-only snapshot reads, not forced rebuilds. Durable refresh
   // status polling is independent, so leaving Home does not cancel a refresh.
   state.timer = window.setInterval(() => {
     if (overviewViewActive()) load();

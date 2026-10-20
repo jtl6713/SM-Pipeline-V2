@@ -23,6 +23,16 @@ on:
         required: false
         type: string
         default: ''
+      enable_profile_summary_shadow:
+        description: 'Enable shadow capture + operator/cron reconciliation only. Home and refill reads stay OFF.'
+        required: false
+        type: boolean
+        default: false
+      profile_summary_shadow_confirmation:
+        description: 'When enabling shadow counters, enter SHADOW-PROFILE-SUMMARY'
+        required: false
+        type: string
+        default: ''
   push:
     branches: [main]
     paths:
@@ -50,6 +60,8 @@ jobs:
       ACTIVATE_SCHEDULE_CONFIRMATION: ${{ inputs.activate_schedule_confirmation || '' }}
       BOOTSTRAP_RESERVATION: ${{ inputs.bootstrap_schedule_reservation_namespace || 'false' }}
       BOOTSTRAP_CONFIRMATION: ${{ inputs.bootstrap_confirmation || '' }}
+      ENABLE_PROFILE_SUMMARY_SHADOW: ${{ inputs.enable_profile_summary_shadow || 'false' }}
+      PROFILE_SUMMARY_SHADOW_CONFIRMATION: ${{ inputs.profile_summary_shadow_confirmation || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -73,6 +85,15 @@ jobs:
           ' /tmp/bootstrap-commit-status.json >/dev/null
           echo "reservation_bootstrap_code_precondition=PASS"
 
+      - name: Gate shadow profile-summary capture without Home/refill cutover
+        if: env.ENABLE_PROFILE_SUMMARY_SHADOW == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          test "$PROFILE_SUMMARY_SHADOW_CONFIRMATION" = "SHADOW-PROFILE-SUMMARY"
+          echo "profile_summary_shadow_enablement=CAPTURE_AND_RECONCILE_ONLY"
+
       - name: Verify engagement auth recovery regression before deployment
         shell: bash
         run: |
@@ -85,7 +106,8 @@ jobs:
           node --test apps/studio-api/profiles-overview-refresh.test.mjs
           node --test apps/studio-api/profiles-overview-force-refresh-contract.test.mjs
           node --test apps/studio-api/overview-dispatch-counts.test.mjs
-          PYTHONPATH=repair/scripts python -m unittest repair.scripts.studio_api_binding_contract_test
+          PYTHONPATH=repair/scripts python -m unittest studio_api_binding_contract_test studio_api_rollback_lifecycle_test
+          node --test apps/studio-api/profile-summary-controller.test.mjs apps/studio-api/profile-summary-classification.test.mjs
           node --check apps/studio-api/schedule-reservation-authority.mjs
           node --check apps/studio-api/schedule-reservation-transaction.mjs
           node --check apps/studio-api/schedule-reservation-quality.mjs
@@ -156,12 +178,15 @@ jobs:
               'bootstrapped' if reservation_bootstrapped else 'absent'
           )
           print('reservation_binding_state=' + ('bootstrapped' if reservation_bootstrapped else 'absent'))
+          from studio_api_rollback_lifecycle import durable_object_names, sanitize_runtime_flags
+          Path('/tmp/before-do-namespaces.json').write_text(json.dumps(sorted(durable_object_names(bindings))))
           # Read the active deployment's plain-text values as the authoritative
           # source. A failed, rolled-back version can still be Wrangler's
           # --keep-vars source and silently reintroduce old global flags.
           plain_vars={str(b['name']):str(b['text']) for b in bindings if b.get('type')=='plain_text' and 'text' in b}
           if len(plain_vars) != sum(b.get('type')=='plain_text' for b in bindings):
               raise SystemExit('Cannot preserve active Worker plaintext bindings: missing binding text')
+          print('predeploy_profile_summary_flags=' + json.dumps(sanitize_runtime_flags(plain_vars)))
           prior_stage=assert_global_factory_binding_tuple(plain_vars,'Predeploy Worker',allow_absent=True)
           print('predeploy_global_factory_stage='+prior_stage)
           Path('/tmp/active-plain-vars.json').write_text(json.dumps(plain_vars))
@@ -221,6 +246,9 @@ jobs:
             'STUDIO_VISUAL_SCRIPT_V1':'true' if visual_rollout.get('enabled') and visual_rollout.get('script_enabled') else 'false',
             'STUDIO_VISUAL_CANARY_OUTPUT_IDS':','.join(canary_ids),
           }
+          # Summary reads remain OFF until independent shadow parity and
+          # production latency/freshness verification have passed.
+          # The namespace is isolated from existing schedule reservation lanes.
           # Preserve all active plaintext settings explicitly; never use
           # --keep-vars, which can inherit stale settings from rolled-back
           # Worker versions instead of the currently active deployment.
@@ -228,6 +256,19 @@ jobs:
           module.assert_global_factory_binding_tuple(active_vars,'Predeploy Worker',allow_absent=True)
           active_vars.update(factory_vars)
           active_vars.update(visual_vars)
+          # Home and refill reads stay OFF in this workflow. Shadow capture and
+          # reconciliation are independently gated and default off.
+          active_vars['STUDIO_HOME_PROFILE_SUMMARY_READS']='false'
+          active_vars['STUDIO_REFILL_PROFILE_SUMMARY_READS']='false'
+          shadow=os.environ.get('ENABLE_PROFILE_SUMMARY_SHADOW','').strip().lower()=='true'
+          if shadow:
+              if os.environ.get('PROFILE_SUMMARY_SHADOW_CONFIRMATION','')!='SHADOW-PROFILE-SUMMARY':
+                  raise SystemExit('Shadow profile-summary enablement refused: confirmation mismatch')
+              active_vars['STUDIO_PROFILE_SUMMARY_CAPTURE_ENABLED']='true'
+              active_vars['STUDIO_PROFILE_SUMMARY_RECONCILE_ENABLED']='true'
+          else:
+              active_vars.setdefault('STUDIO_PROFILE_SUMMARY_CAPTURE_ENABLED','false')
+              active_vars.setdefault('STUDIO_PROFILE_SUMMARY_RECONCILE_ENABLED','false')
           reservation_state=Path('/tmp/reservation-binding-state.txt').read_text().strip()
           import re
           activation=os.environ.get('ACTIVATE_SCHEDULE_LANE','').strip()
@@ -252,25 +293,36 @@ jobs:
             'vars':active_vars,
             'triggers':{'crons':['*/5 * * * *', '0 6 * * *', '* * * * *']},
             'observability':{'enabled':True,'head_sampling_rate':1},
+            'limits':{'cpu_ms':180000},
             'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}],
             'secrets':{'required':['AIRTABLE_PAT']}
           }
+          # Independent SQLite namespace. No schedule reservation data is shared.
+          cfg['durable_objects']={'bindings':[{
+            'name':'STUDIO_PROFILE_SUMMARIES','class_name':'StudioProfileSummary'
+          }]}
+          cfg['exports']={'StudioProfileSummary':{'type':'durable-object','storage':'sqlite'}}
           if reservation_state == 'bootstrapped' or lifecycle_change:
               # Preserve an existing namespace, or perform the explicit one-time
               # bootstrap. In both cases the scheduling authority remains OFF.
-              active_vars['STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED']='true' if activation else 'false'
-              active_vars['STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST']=activation
-              cfg['durable_objects']={
-                  'bindings':[{
-                      'name':'STUDIO_SCHEDULE_RESERVATIONS',
-                      'class_name':'ScheduleReservationLane',
-                  }],
-              }
-              cfg['exports']={
-                  'ScheduleReservationLane':{
-                      'type':'durable-object',
-                      'storage':'sqlite',
-                  },
+              # Preserve active atomic lanes on ordinary push deployments; only an
+              # explicit dispatch may add a new lane. Do not silently disable
+              # the reservation authority on the next source deploy.
+              existing_lanes=[v.strip() for v in active_vars.get('STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST','').split(',') if v.strip()]
+              if activation and activation not in existing_lanes:
+                  existing_lanes.append(activation)
+              if activation:
+                  active_vars['STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST']=','.join(existing_lanes)
+                  active_vars['STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED']='true'
+              else:
+                  active_vars['STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED']=active_vars.get('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED','false')
+              cfg['durable_objects']['bindings'].append({
+                  'name':'STUDIO_SCHEDULE_RESERVATIONS',
+                  'class_name':'ScheduleReservationLane',
+              })
+              cfg['exports']['ScheduleReservationLane']={
+                  'type':'durable-object',
+                  'storage':'sqlite',
               }
           else:
               # Before the explicit bootstrap runs, ordinary production deploys
@@ -325,6 +377,8 @@ jobs:
               'Postdeploy live Worker',
               allow_reservation_absent=(not expected_bootstrapped),
           )
+          if got.get('STUDIO_PROFILE_SUMMARIES') != 'durable_object_namespace':
+              raise SystemExit('Home summary Durable Object namespace is missing')
           if expected_bootstrapped:
               if got.get('STUDIO_SCHEDULE_RESERVATIONS') != 'durable_object_namespace':
                   raise SystemExit('Atomic scheduling Durable Object binding disappeared after deploy')
@@ -353,16 +407,31 @@ jobs:
             'STUDIO_VISUAL_SCRIPT_V1':'true' if visual_rollout.get('enabled') and visual_rollout.get('script_enabled') else 'false',
             'STUDIO_VISUAL_CANARY_OUTPUT_IDS':','.join(str(x).strip() for x in visual_rollout.get('canary_output_ids',[]) if str(x).strip()),
           }
+          expected['STUDIO_HOME_PROFILE_SUMMARY_READS']='false'
+          expected['STUDIO_REFILL_PROFILE_SUMMARY_READS']='false'
+          import os as _os
+          if _os.environ.get('ENABLE_PROFILE_SUMMARY_SHADOW','').strip().lower()=='true':
+              expected['STUDIO_PROFILE_SUMMARY_CAPTURE_ENABLED']='true'
+              expected['STUDIO_PROFILE_SUMMARY_RECONCILE_ENABLED']='true'
+          else:
+              expected.setdefault('STUDIO_PROFILE_SUMMARY_CAPTURE_ENABLED',prior_plain.get('STUDIO_PROFILE_SUMMARY_CAPTURE_ENABLED','false'))
+              expected.setdefault('STUDIO_PROFILE_SUMMARY_RECONCILE_ENABLED',prior_plain.get('STUDIO_PROFILE_SUMMARY_RECONCILE_ENABLED','false'))
+          from studio_api_rollback_lifecycle import sanitize_runtime_flags
+          print('postdeploy_profile_summary_flags=' + json.dumps(sanitize_runtime_flags(after_plain)))
           for name,value in prior_plain.items():
               if name not in expected and name not in ('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED','STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST') and after_plain.get(name)!=value:
                   raise SystemExit('Worker plaintext setting changed or disappeared: '+name)
           binding_values=after_plain
           if expected_bootstrapped:
               activation=Path('/tmp/schedule-activation-lane.txt').read_text().strip()
-              if binding_values.get('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED') != ('true' if activation else 'false'):
-                  raise SystemExit('Atomic scheduling authority flag differs from requested rollout')
-              if binding_values.get('STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST','') != activation:
-                  raise SystemExit('Atomic scheduling lane allowlist differs from requested rollout')
+              expected_lanes=[v.strip() for v in expected.get('STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST','').split(',') if v.strip()]
+              if activation and activation not in expected_lanes:
+                  expected_lanes.append(activation)
+              expected_enabled = 'true' if expected_lanes else 'false'
+              if binding_values.get('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED') != expected_enabled:
+                  raise SystemExit('Atomic scheduling authority flag differs from preserved rollout')
+              if binding_values.get('STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST','') != ','.join(expected_lanes):
+                  raise SystemExit('Atomic scheduling lane allowlist differs from preserved rollout')
           elif 'STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED' in binding_values:
               raise SystemExit('Atomic scheduling feature flag appeared before namespace bootstrap')
           for name,value in expected.items():
@@ -465,23 +534,27 @@ jobs:
               const overviewRefresh = url.pathname === "/$TOKEN/overview-refresh";
               const overviewStatus = url.pathname === "/$TOKEN/overview-status";
               const readyProductionDiagnostic = url.pathname === "/$TOKEN/ready-production-diagnostic";
-              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic) return new Response("Not found", {status:404});
+              const summary = url.pathname === "/$TOKEN/summary";
+              const summaryReconcile = url.pathname === "/$TOKEN/summary-reconcile";
+              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic && !summary && !summaryReconcile) return new Response("Not found", {status:404});
               const generation = String(url.searchParams.get("generation") || "");
               const path = readyProductionDiagnostic ? "/api/admin/ready-production-diagnostic"
                 : overviewRefresh ? "/api/profiles/overview/refresh"
                 : overviewStatus ? "/api/profiles/overview/refresh-status"
+                : summaryReconcile ? "/api/profiles/overview/summary/reconcile"
+                : summary ? "/api/profiles/overview/summary"
                 : overview ? "/api/profiles/overview" + (generation ? "?min_generation=" + encodeURIComponent(generation) : "")
                 : factoryDesk ? "/api/factory/desk"
                 : globalCanary ? "/api/factory/approval-batches?scope=all"
                 : chicagoCanary ? "/api/factory/approval-batches?profile=recT2rbKX3MF7cVFU"
                 : factoryStatus ? "/api/factory/approval-batches?profile=recF7UAn0LkMZZrWZ" : "/api/session";
-              const method = overviewRefresh ? "POST" : "GET";
+              const method = (overviewRefresh || summaryReconcile) ? "POST" : "GET";
               const headers = {"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Accept":"application/json"};
-              if (overviewRefresh) headers["Content-Type"] = "application/json";
+              if (overviewRefresh || summaryReconcile) headers["Content-Type"] = "application/json";
               const internal = new Request("https://studio.chicagoshining.com" + path, {
                 method,
                 headers,
-                body: overviewRefresh ? "{}" : undefined,
+                body: (overviewRefresh || summaryReconcile) ? "{}" : undefined,
               });
               const response = await env.STUDIO_API.fetch(internal);
               return new Response(await response.text(), {status:response.status,headers:{"Content-Type":"application/json","Cache-Control":"no-store"}});
@@ -547,7 +620,16 @@ jobs:
           BASE="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN"
 
           curl -fsS --max-time 60 "$BASE/overview" -o /tmp/overview-before.json
-          jq -e '.ok==true and (.records|type)=="array" and (.records|length)>=4' /tmp/overview-before.json >/dev/null
+          # A schema bump deliberately rejects the previous R2 Home snapshot.
+          # An empty first read is expected until this very canary rebuilds it.
+          # Reject a PARTIAL non-empty snapshot; never bless incomplete profiles.
+          jq -e '.ok==true and (.records|type)=="array"
+            and ((.records|length)==0 or (.records|length)>=4)' /tmp/overview-before.json >/dev/null || {
+              echo "Unexpected incomplete Home pre-refresh snapshot" >&2
+              jq -c '{ok,rows:(.records|length),snapshot_generation,error}' /tmp/overview-before.json >&2
+              exit 1
+            }
+          echo "home_pre_refresh_rows=$(jq '.records|length' /tmp/overview-before.json)"
           BEFORE_AT=$(jq -r '.snapshot_at // 0' /tmp/overview-before.json)
           BEFORE_GENERATION=$(jq -r '.snapshot_generation // ""' /tmp/overview-before.json)
 
@@ -559,11 +641,13 @@ jobs:
               ACCEPTED=1
               break
             fi
-            if [[ "$STATUS" == "cooling_down" ]]; then
-              RETRY_MS=$(jq -r '.refresh.retry_after_ms // .refresh.cooldown_remaining_ms // 3000' /tmp/overview-refresh-start.json)
+            START_ERROR=$(jq -r '.error // .refresh.error // ""' /tmp/overview-refresh-start.json 2>/dev/null || true)
+            if [[ "$STATUS" == "cooling_down" || "$CODE" == "429" || "$START_ERROR" == *"cooling down"* ]]; then
+              RETRY_MS=$(jq -r '.refresh.retry_after_ms // .refresh.cooldown_remaining_ms // 8000' /tmp/overview-refresh-start.json)
               SLEEP_SECS=$(( (RETRY_MS + 999) / 1000 ))
-              if (( SLEEP_SECS < 1 )); then SLEEP_SECS=1; fi
-              if (( SLEEP_SECS > 15 )); then SLEEP_SECS=15; fi
+              if (( SLEEP_SECS < 3 )); then SLEEP_SECS=3; fi
+              if (( SLEEP_SECS > 20 )); then SLEEP_SECS=20; fi
+              echo "Overview refresh cooling down http=$CODE status=$STATUS; sleep ${SLEEP_SECS}s" >&2
               sleep "$SLEEP_SECS"
               continue
             fi
@@ -587,16 +671,20 @@ jobs:
               # The 26s label says Airtable cooling even when the build is waiting on a
               # saturated Supabase pool. The new Worker is already live here, so give
               # the pool time to drain and try the canary again before rolling it back.
-              if [[ "$ERROR" == *"overview-force-build budget"* ]] && (( BUDGET_RETRIES < 2 )); then
+              if [[ "$ERROR" == *"overview-force-build budget"* || "$ERROR" == *"overview-force-resolve budget"* || "$ERROR" == *"cooling down"* ]] && (( BUDGET_RETRIES < 3 )); then
                 BUDGET_RETRIES=$((BUDGET_RETRIES + 1))
-                echo "Overview force refresh exceeded the 26s build budget (retry $BUDGET_RETRIES/2)" >&2
+                echo "Overview force refresh hit Airtable/Supabase budget (retry $BUDGET_RETRIES/3)" >&2
                 jq -c '.refresh | {status,error,component_status,duration_ms}' /tmp/overview-refresh-status.json >&2 || true
-                sleep 8
+                sleep 12
                 CODE=$(curl -sS --max-time 60 -o /tmp/overview-refresh-start.json -w '%{http_code}' -X POST "$BASE/overview-refresh" || true)
                 RETRY_STATUS=$(jq -r '.refresh.status // .status // ""' /tmp/overview-refresh-start.json 2>/dev/null || true)
                 echo "Overview force refresh retry http=$CODE status=$RETRY_STATUS" >&2
                 if [[ "$CODE" =~ ^20[02]$ ]] && [[ "$RETRY_STATUS" == "refreshing" || "$RETRY_STATUS" == "completed" || "$RETRY_STATUS" == "cooling_down" ]]; then
                   sleep 8
+                  continue
+                fi
+                if [[ "$CODE" == "429" || "$RETRY_STATUS" == "cooling_down" ]]; then
+                  sleep 12
                   continue
                 fi
               fi
@@ -627,6 +715,18 @@ jobs:
             and .snapshot_at==$at
             and (.records|length)>=4
             and ([.records[] |
+              (.approved_future|numbers), (.approved_past_due|numbers), (.approved_missing_date|numbers),
+              (.approved_future_by_platform.Facebook|numbers),
+              (.approved_future_by_platform.Instagram|numbers),
+              (.approved_future_by_platform.TikTok|numbers),
+              (.approved_future_by_platform.YouTube|numbers),
+              (.approved_calendar_slots.Facebook|arrays),
+              (.approved_calendar_slots.Instagram|arrays),
+              (.approved_calendar_slots.TikTok|arrays),
+              (.approved_calendar_slots.YouTube|arrays)
+            ] | length) == 44
+            and ([.records[] | (.approved_future == ((.approved_future_by_platform.Facebook // 0) + (.approved_future_by_platform.Instagram // 0) + (.approved_future_by_platform.TikTok // 0) + (.approved_future_by_platform.YouTube // 0)))] | all)
+            and ([.records[] |
               (.scheduled.Facebook|numbers),
               (.scheduled.Instagram|numbers),
               (.scheduled.TikTok|numbers),
@@ -636,6 +736,16 @@ jobs:
               (.approval|numbers),
               (.ideas|numbers)
             ] | length) >= 32
+          ' /tmp/overview-after.json >/dev/null
+          jq -e '
+            .ok==true
+            and (.records|length)>=4
+            and ([.records[] | (.pipeline_total|numbers),(.approval|numbers),(.approved_future|numbers)] | length)>=12
+            and ([.records[] | .pipeline_total == (.approved_future + .approval)] | all)
+            and ([.records[] | .pipeline_by_platform
+                | (.Facebook|numbers),(.Instagram|numbers),(.TikTok|numbers),(.YouTube|numbers)] | length)>=16
+            and ([.records[] | .awaiting_final_by_platform
+                | (.Facebook|numbers),(.Instagram|numbers),(.TikTok|numbers),(.YouTube|numbers)] | length)>=16
           ' /tmp/overview-after.json >/dev/null
           echo "overview_force_refresh_production=PASS generation=$GENERATION profiles=$(jq '.records|length' /tmp/overview-after.json) snapshot_at=$SNAPSHOT_AT"
 
@@ -686,6 +796,25 @@ jobs:
           done
           jq -e --arg stage "$EXPECTED_STAGE" --argjson total "$EXPECTED_TOTAL" --argjson per "$EXPECTED_PER_PROFILE" '.ok==true and .scope=="all" and .global_rollout.enabled==true and .global_rollout.stage==$stage and .global_rollout.max_total==$total and .global_rollout.max_per_profile==$per and .global_rollout.allowed_platforms==["Instagram","Facebook","TikTok","YouTube"] and .global_rollout.allowed_output_types_by_platform=={"Instagram":["Reel","Story","Single Image","Carousel"],"Facebook":["Reel","Story","Single Image","Multi-Image Post","Slideshow Reel"],"TikTok":["Video Draft","Story","Single Photo","Multi-Photo"],"YouTube":["Short","Standard Video","Slideshow Video"]}' /tmp/factory-batch-global.json >/dev/null || { echo "Global Factory read-only canary failed (HTTP $GLOBAL_CODE)" >&2; exit 1; }
           echo "factory_global_read_only_canary=PASS signed_stage=$EXPECTED_STAGE total=$EXPECTED_TOTAL per_profile=$EXPECTED_PER_PROFILE"
+          # Sanitize operational counts from the same authorized read-only call.
+          # Nothing here posts approvals, schedules, publishes or writes to R2.
+          jq -c '{
+            observed_at: now | todateiso8601,
+            totals,
+            active_batches: [.batches[]? | {
+              status, created_at, updated_at, total, approved_count, pending_count, failed_count,
+              children: [.children[]? | {
+                profile_id, status, updated_at, total, approved_count, pending_count, failed_count
+              }]
+            }]
+          }' /tmp/factory-batch-global.json | sed 's/^/factory_global_progress_snapshot=/'
+
+          # Read-only sanitized acceptance snapshot: expose real pending progress
+          # without logging output identifiers or changing approval state.
+          jq -c '{evidence:"factory_active_backlog",totals:(.totals // {}),
+            batches:[(.batches // [])[] | {status,created_at,updated_at,approved_count,pending_count,failed_count}],
+            quality_codes:[(.quality_signals // [])[] | .code],
+            partial_history:(.history_complete == false)}' /tmp/factory-batch-global.json
 
       - name: Verify NYC Needs eyes is not starved by scheduled backlog (read-only)
         shell: bash
@@ -783,44 +912,59 @@ jobs:
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           BEFORE=$(cat /tmp/active-before.txt)
-          LIFECYCLE_CHANGE=false
-          if [[ -f /tmp/reservation-lifecycle-change.txt ]]; then
-            LIFECYCLE_CHANGE=$(cat /tmp/reservation-lifecycle-change.txt)
-          fi
           curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/current-deployments.json
           CURRENT=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/current-deployments.json)
-          if [[ "$CURRENT" == "$BEFORE" ]]; then
+          curl -fsS "$API/versions/$CURRENT" -H "$AUTH" -o /tmp/rollback-current-version.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, str(Path('repair/scripts')))
+          from studio_api_rollback_lifecycle import decide_rollback
+          before=json.loads(Path('/tmp/version-before.json').read_text())['result']
+          current=json.loads(Path('/tmp/rollback-current-version.json').read_text())['result']
+          before_bindings=(before.get('resources') or {}).get('bindings') or []
+          current_bindings=(current.get('resources') or {}).get('bindings') or []
+          current_plain={str(b['name']):str(b['text']) for b in current_bindings if b.get('type')=='plain_text' and 'text' in b}
+          decision=decide_rollback(
+              before_version=Path('/tmp/active-before.txt').read_text().strip(),
+              current_version=current.get('id') or '',
+              before_bindings=before_bindings,
+              current_bindings=current_bindings,
+              current_plain=current_plain,
+          )
+          Path('/tmp/rollback-decision.json').write_text(json.dumps(decision, indent=2, sort_keys=True))
+          print('rollback_decision=' + decision['action'])
+          print('rollback_reason=' + decision['reason'])
+          print('rollback_lifecycle=' + json.dumps(decision['lifecycle']))
+          print('rollback_safe_flags=' + json.dumps(decision['flags']))
+          PY
+          ACTION=$(jq -er '.action' /tmp/rollback-decision.json)
+          if [[ "$ACTION" == "noop" ]]; then
             echo "automatic_rollback_not_needed=production_version_unchanged"
             exit 0
           fi
-          if [[ "$LIFECYCLE_CHANGE" == "true" ]]; then
-            # Only treat the lifecycle boundary as applied when the active
-            # version actually exposes the namespace plus disabled flag. If the
-            # deploy failed before lifecycle reconciliation, the normal prior-
-            # version rollback below is still valid.
-            curl -fsS "$API/versions/$CURRENT" -H "$AUTH" -o /tmp/bootstrap-failure-version.json
-            if jq -e '
-              .result.resources.bindings as $b
-              | ([$b[] | select(.name=="STUDIO_SCHEDULE_RESERVATIONS" and .type=="durable_object_namespace")] | length)==1
-              and ([$b[] | select(.name=="STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED" and .type=="plain_text" and .text=="false")] | length)==1
-            ' /tmp/bootstrap-failure-version.json >/dev/null; then
-              # Cloudflare cannot roll back across a Durable Object lifecycle
-              # boundary. The exact code commit was already production-green
-              # before bootstrap and the new authority remains disabled, so
-              # retain the dormant namespace and fail visibly instead of
-              # attempting an invalid historical rollback.
-              echo "automatic_rollback_skipped=dormant_durable_object_lifecycle_boundary"
-              exit 0
-            fi
+          if [[ "$ACTION" == "skip_lifecycle" ]]; then
+            # Cloudflare cannot roll a Worker back across either
+            # STUDIO_SCHEDULE_RESERVATIONS or STUDIO_PROFILE_SUMMARIES becoming
+            # present. Keep the new dormant namespaces, verify Home/refill reads
+            # stayed off, and fail the job with explicit evidence instead of
+            # attempting an invalid historical rollback.
+            jq -e '.flags.STUDIO_HOME_PROFILE_SUMMARY_READS!="true" and .flags.STUDIO_REFILL_PROFILE_SUMMARY_READS!="true"' /tmp/rollback-decision.json >/dev/null
+            echo "automatic_rollback_skipped=durable_object_lifecycle_boundary"
+            echo "production_safe_state=home_and_refill_reads_off"
+            exit 0
           fi
-          if [[ "$CURRENT" != "$BEFORE" ]]; then
-            cat >/tmp/rollback.json <<EOF
+          cat >/tmp/rollback.json <<EOF
           {"strategy":"percentage","versions":[{"version_id":"$BEFORE","percentage":100}],"annotations":{"workers/message":"Automatic rollback after Studio API deployment verification failure"}}
           EOF
-            code=$(curl -sS -o /tmp/rollback-result.json -w '%{http_code}' -X POST "$API/deployments?force=true" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/rollback.json)
-            test "$code" -ge 200 -a "$code" -lt 300
-            jq -e '.success==true' /tmp/rollback-result.json >/dev/null
+          code=$(curl -sS -o /tmp/rollback-result.json -w '%{http_code}' -X POST "$API/deployments?force=true" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/rollback.json)
+          if [[ "$code" -lt 200 || "$code" -ge 300 ]]; then
+            echo "automatic_rollback_http=$code" >&2
+            jq -c '{success,errors}' /tmp/rollback-result.json >&2 || true
+            exit 1
           fi
+          jq -e '.success==true' /tmp/rollback-result.json >/dev/null
           for i in 1 2 3 4 5 6 7 8 9 10; do
             curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/rollback-check.json
             CURRENT=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/rollback-check.json)
@@ -843,5 +987,6 @@ jobs:
             /tmp/overview-refresh-status.json
             /tmp/overview-after.json
             /tmp/ready-production-diagnostic.json
+            /tmp/rollback-decision.json
           if-no-files-found: ignore
           retention-days: 30
