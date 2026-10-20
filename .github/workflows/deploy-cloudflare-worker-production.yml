@@ -102,6 +102,7 @@ jobs:
           node --test apps/studio-api/engagement-auth-recovery.test.mjs
           node --test apps/studio-api/production-photo-wait-visibility.test.mjs
           node --test apps/studio-api/production-request-suggested-platforms-fallback.test.mjs
+          node --test apps/studio-api/failed-output-monitor.test.mjs
           node --test apps/studio-api/quality-checks.test.mjs
           node --test apps/studio-api/profiles-overview-refresh.test.mjs
           node --test apps/studio-api/profiles-overview-force-refresh-contract.test.mjs
