@@ -229,6 +229,7 @@ import {
   autonomousCanonicalContentType,
   autonomousPlanExtras,
   autonomousPlanOverrides,
+  autonomousItem4Platforms,
   autonomousPreferredSubject,
   autonomousProfilesNeedingRefill,
   autonomousProfileHourOpen,
@@ -10843,13 +10844,14 @@ export async function prepareIdeaToReview(request, env, url, authorization, ctx 
     throw new HttpError(409, "Restore this idea before preparing it for review");
   }
 
-  const platforms = canonicalProductionPlatforms(
-    Array.isArray(payload.platforms) && payload.platforms.length
+  const explicitlySelectedPlatforms = Array.isArray(payload.platforms) && payload.platforms.length > 0;
+  const platforms = autonomousItem4Platforms(canonicalProductionPlatforms(
+    explicitlySelectedPlatforms
       ? payload.platforms
       : (Array.isArray(f(idea, "Production_Target_Platforms")) && f(idea, "Production_Target_Platforms").length
         ? f(idea, "Production_Target_Platforms")
         : (Array.isArray(f(idea, "Suggested_Platforms")) ? f(idea, "Suggested_Platforms") : AUTONOMOUS_STANDARD_PLATFORMS))
-  );
+  ), { fallback: !explicitlySelectedPlatforms });
   if (!platforms.length) throw new HttpError(400, "Choose at least one target platform");
 
   const contentType = String(
@@ -10911,7 +10913,7 @@ export async function prepareIdeaToReview(request, env, url, authorization, ctx 
   }
 
   // Plan with the operator's platforms before finishAutonomous (which defaults to standard Reel set).
-  if (String(f(requestRecord, "Studio_Output_Plan_Status") || "").trim() !== "Ready") {
+  if (!autonomousHasUsableItem4Plan(requestRecord)) {
     const planCall = studioInternalJsonRequest(`/api/production-requests/${requestRecord.id}/plan`, {
       platforms,
       overrides: autonomousPlanOverrides(contentType),
@@ -11053,13 +11055,13 @@ function readyProductionIdeaPlan(idea) {
   // Existing ready Ideas may still carry retired historical platform values
   // (for example Threads). Do not let one unsupported suggestion block all
   // of a photo-ready draft's valid platform output planning.
-  const platforms = canonicalProductionPlatforms(
+  const platforms = autonomousItem4Platforms(canonicalProductionPlatforms(
     (Array.isArray(f(idea, "Production_Target_Platforms")) && f(idea, "Production_Target_Platforms").length)
       ? f(idea, "Production_Target_Platforms")
       : ((Array.isArray(f(idea, "Suggested_Platforms")) && f(idea, "Suggested_Platforms").length)
         ? f(idea, "Suggested_Platforms")
         : AUTONOMOUS_STANDARD_PLATFORMS)
-  ).filter((platform) => PR_PLATFORMS.has(platform));
+  ).filter((platform) => PR_PLATFORMS.has(platform)));
   const contentType = String(f(idea, "Production_Content_Type") || "Vertical Short Video").trim()
     || "Vertical Short Video";
   const libraryIds = [...new Set([
@@ -11067,6 +11069,13 @@ function readyProductionIdeaPlan(idea) {
     ...parseIdeaNotedMediaIds(f(idea, "Production_Config_Notes")),
   ].filter((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))))];
   return { platforms, contentType, libraryIds };
+}
+
+/** A Ready status on an empty plan is legacy invalid data, not a valid plan. */
+function autonomousHasUsableItem4Plan(requestRecord) {
+  const plan = item4ParseJson(f(requestRecord, "Studio_Output_Plan_JSON"), null);
+  return String(f(requestRecord, "Studio_Output_Plan_Status") || "").trim() === "Ready"
+    && Array.isArray(plan?.items) && plan.items.length > 0;
 }
 
 async function monitorReadyProductionRequest(env, requestRecord) {
@@ -11178,7 +11187,7 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
       }),
     });
   }
-  if (String(f(requestRecord, "Studio_Output_Plan_Status") || "").trim() !== "Ready") {
+  if (!autonomousHasUsableItem4Plan(requestRecord)) {
     const planCall = studioInternalJsonRequest(`/api/production-requests/${requestRecord.id}/plan`, {
       platforms: plan.platforms,
       overrides: autonomousPlanOverrides(plan.contentType),
@@ -11927,7 +11936,7 @@ export async function finishAutonomousProductionRequest(env, authorization, ctx,
     await attachItem4LibraryAssetIds(env, requestId, incoming, authorization);
     current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
   }
-  if (String(f(current, "Studio_Output_Plan_Status") || "").trim() !== "Ready") {
+  if (!autonomousHasUsableItem4Plan(current)) {
     const planCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/plan`, {
       platforms: [...AUTONOMOUS_STANDARD_PLATFORMS],
       overrides: autonomousPlanOverrides(pick.content_type),
