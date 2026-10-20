@@ -528,3 +528,5 @@ Deploy PR #905 photo-wait historical platform default repair (Threads 400): filt
 2026-10-19: Align shadow ledger membership with Home studioOverviewRowMatchesProfile so Chicago ideas and dirty profile inference match the authoritative Home scan. Worker 0.10.670-profile-summary-parity. Home/refill reads stay OFF.
 
 2026-10-20: Deploy PR #934 shadow-only telemetry for dirty-notification application lag and Airtable dirty batch requests. Preserve production shadow capture/reconcile current values, keep Home/refill summary reads disabled, preserve Airtable write authority, deploy with production canary and rollback guard.
+
+2026-10-20: Deploy PR #935 sanitized Airtable egress telemetry in Studio Worker. Preserve STUDIO_PROFILE_SUMMARY_CAPTURE_ENABLED and RECONCILE_ENABLED current settings; keep STUDIO_HOME_PROFILE_SUMMARY_READS=false and STUDIO_REFILL_PROFILE_SUMMARY_READS=false. Airtable authoritative; no Supabase Home reads or scheduling behavior changes.
