@@ -11,7 +11,7 @@ class CoverageBaselineTests(unittest.TestCase):
         x=assess({"sources":sources})
         self.assertIn("runner",x["missing_hours"])
         for s in REQUIRED:
-            sources[s]["hourly_attestations"]["2026-10-20T10:00:00Z"]={"collector_ok":True,"attempts":0}
+            sources[s]["hourly_attestations"]["2026-10-20T10:00:00Z"]={"collector_ok":True,"complete":True,"attempts":0}
         self.assertEqual(assess({"sources":sources})["missing_hours"],{})
     def test_equal_flags_never_claim_savings(self):
         p={"start_utc":"2026-10-18T00:00:00Z","end_utc":"2026-10-19T00:00:00Z",
