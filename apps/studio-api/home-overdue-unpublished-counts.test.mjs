@@ -97,3 +97,14 @@ test("Home parentheses depend on final-approved-unpublished state, not scheduled
   assert.match(durable, /approved_unpublished_definition/);
   assert.match(durable, /future_count_reconcile_required/);
 });
+
+
+test("Home v5 snapshot writer and force-refresh verifier agree on schema", () => {
+  const writer = worker.slice(worker.indexOf("export async function writeStudioProfilesOverviewSnapshot("),
+    worker.indexOf("/*__STUDIO_WORKER_END:writeStudioProfilesOverviewSnapshot__*/"));
+  const verifier = worker.slice(worker.indexOf("export async function verifyStudioProfilesOverviewSnapshot("),
+    worker.indexOf("/*__STUDIO_WORKER_END:verifyStudioProfilesOverviewSnapshot__*/"));
+  assert.match(writer, /schemaVersion: 5/);
+  assert.match(verifier, /snapshot\.schemaVersion !== 5/);
+  assert.doesNotMatch(verifier, /schemaVersion !== 4/);
+});
