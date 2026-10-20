@@ -4607,6 +4607,28 @@ export function studioOverviewOperationalMetrics(mappedOutputs, ideas) {
     if (/az-auto-queue=1/i.test(notes) && /ez-input=finished-video/i.test(notes)) return false;
     return true;
   }).length;
+  // Count approved outputs whose scheduled publication time has passed but which
+  // have no authoritative evidence of publication. This is intentionally NOT the
+  // dispatch queue: a late handoff, upload or retry remains outstanding until posted.
+  const overdueUnpublished = mappedOutputs.filter((o) => {
+    const review = String(o.review_status || "").trim().toLowerCase();
+    const output = String(o.output_status || "").trim().toLowerCase();
+    if (review && review !== "approved") return false;
+    if (!(review === "approved" || output === "approved" || output.includes("approved for publishing"))) return false;
+    if (o.do_not_publish) return false;
+    const scheduled = o.scheduled_at || o.scheduled_post_date || o.youtube_scheduled_publish_at;
+    const when = Date.parse(String(scheduled || ""));
+    if (!Number.isFinite(when) || when > Date.now()) return false;
+    const state = String(o.studio_state || "").trim().toLowerCase();
+    const publish = String(o.publish_status || "").trim().toLowerCase();
+    const platformPublish = String(o.platform_publish_status || "").trim().toLowerCase();
+    const manual = String(o.manual_completion_status || "").trim().toLowerCase();
+    if (/^(published|posted)$/.test(state)) return false;
+    if (/^(published|posted)$/.test(publish) || /^(published|posted)$/.test(platformPublish)) return false;
+    if (/^(published|posted|completed)$/.test(manual)) return false;
+    if (o.published_at || o.platform_post_url || o.manual_published_url) return false;
+    return true;
+  }).length;
   const ideasNotInProduction = (ideas || []).filter((idea) => !(
     Boolean(idea?.promoted_content_record_id)
     || (Array.isArray(idea?.content_item_links) && idea.content_item_links.length > 0)
@@ -4615,6 +4637,7 @@ export function studioOverviewOperationalMetrics(mappedOutputs, ideas) {
     manual_action_required: manualAction,
     failed_outputs: failed,
     awaiting_approval: awaitingApproval,
+    overdue_unpublished: overdueUnpublished,
     ideas_not_in_production: ideasNotInProduction,
     attention_outputs: mappedOutputs.filter((o) => attentionStates.has(o.studio_state)).length,
     published_outputs: mappedOutputs.filter((o) => o.studio_state === "Published").length,
@@ -4867,6 +4890,7 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
       manual: metrics.manual_action_required,
       failed: metrics.failed_outputs,
       approval: metrics.awaiting_approval,
+      overdue_unpublished: metrics.overdue_unpublished,
       ideas: ideasCount,
       ideas_source: ideasSource,
       metrics,
