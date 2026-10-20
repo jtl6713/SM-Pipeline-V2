@@ -11634,7 +11634,7 @@ export async function studioLoadAutonomousLastRun(env) {
 export async function studioLoadAutonomousRefillScores(env, profiles, { refresh = false } = {}) {
   const enabled = (Array.isArray(profiles) ? profiles : []).filter((row) => row?.id);
   if (!enabled.length) return { scores: {}, overview: [], source: "empty" };
-  const summaryEnabled = env?.STUDIO_HOME_PROFILE_SUMMARY_READS === "true";
+  const summaryEnabled = env?.STUDIO_REFILL_PROFILE_SUMMARY_READS === "true";
   if (summaryEnabled) {
     try {
       const summary = await readStudioProfileSummary(env);
