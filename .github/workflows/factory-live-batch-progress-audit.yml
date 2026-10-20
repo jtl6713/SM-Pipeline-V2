@@ -28,6 +28,13 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          CRON_HTTP=$(curl -sS --max-time 25 -o /tmp/studio-cron-schedules.json -w '%{http_code}' -H "$AUTH" "$API/workers/scripts/$TARGET_WORKER/schedules" || true)
+          echo "factory_worker_cron_schedule_http=$CRON_HTTP"
+          if [[ "$CRON_HTTP" == "200" ]]; then
+            jq -c '{success,cron_schedules:(.result.schedules // .result // [])}' /tmp/studio-cron-schedules.json
+          else
+            jq -c '{success,errors}' /tmp/studio-cron-schedules.json 2>/dev/null || true
+          fi
           # Fail closed if another Worker already owns this name.
           EXISTING=$(curl -sS -o /tmp/existing.json -w '%{http_code}' -H "$AUTH" "$API/workers/scripts/$AUDIT_WORKER/settings")
           if [[ "$EXISTING" != "404" ]]; then echo "::error::Auditor Worker name already in use or unavailable: HTTP $EXISTING"; exit 1; fi
@@ -83,7 +90,7 @@ jobs:
               exit 1
             fi
             echo "FACTORY_LIVE_SAMPLE=$ROUND"
-            jq -c '{at:(now|todateiso8601),totals,history_complete,history_scanned, batches:[.batches[] | {status,created_at,updated_at,total,approved_count,pending_count,failed_count,children:(.children // [] | map({status,total,approved_count,pending_count,failed_count,profile_id,request_id}))}]}' /tmp/factory-live.json
+            jq -c '{at:(now|todateiso8601),totals,quality_signals,history_complete,history_scanned, batches:[.batches[] | {status,created_at,updated_at,total,approved_count,pending_count,failed_count,quality_signals,items:(.items // [] | map({status,error,next_attempt_ms,attempts})),children:(.children // [] | map({status,total,approved_count,pending_count,failed_count,profile_id,request_id,updated_at,quality_signals,items:(.items // [] | map({status,error,next_attempt_ms,attempts}))}))}]}' /tmp/factory-live.json
             cp /tmp/factory-live.json "/tmp/factory-live-$ROUND.json"
             if [[ "$ROUND" == "1" ]]; then sleep 75; fi
           done
