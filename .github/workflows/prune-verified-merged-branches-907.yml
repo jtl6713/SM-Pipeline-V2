@@ -1,4 +1,4 @@
-name: P0 907 Prune Verified Merged-Only Branches
+name: P0 907 Archive and Prune Verified Legacy Branches
 
 on:
   push:
@@ -9,10 +9,10 @@ permissions:
 jobs:
   prune:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v6
-      - name: Remove only exact-known no-ahead branches with no open PR
+      - name: Archive unique heads and delete only pinned verified legacy branches
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -22,45 +22,57 @@ jobs:
           import json, os, urllib.request, urllib.parse, urllib.error
           repo=os.environ["GITHUB_REPOSITORY"]
           token=os.environ["GH_TOKEN"]
-          headers={"Authorization": "Bearer "+token,"Accept":"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"}
-          allowed=["diagnostic/miami-factory-batch-stall-readonly","feat/factory-approval-stage-latency","feat/factory-approval-stage-timing","feat/home-overview-force-refresh","feature/factory-batch-approval-20261016","feature/factory-batch-multi-reel-v2","feature/visual-timeline-phase1-rebase-20261017","feature/visual-voiceover-final-20261017","feature/visual-voiceover-final-current-20261017","fix/atomic-mae-rollout-readiness","fix/factory-all-platforms-rollout-migration-20261017","fix/factory-cloudflare-keepvars-contract-v2-20261017","fix/live-canary-report-http-errors","perf/factory-parallel-lanes-v1","verify/visual-rerender-concurrency-ci-20261017","verify/visual-voiceover-ci-20261017","verify/visual-voiceover-ci-concurrency-final-20261017","verify/visual-voiceover-ci-final-20261017","ops/vizcaya-photo-acceptance-20261019"]
-          expected_legacy="ffba5d372ee5af0124a97cf4b4612a0993cf5448"
-          expected_ops="3cc86fdc1e3eb517325d014eb1f98d08d80397a7"
-          def api(path, method="GET"):
-              request=urllib.request.Request("https://api.github.com/repos/"+repo+"/"+path,headers=headers,method=method)
-              with urllib.request.urlopen(request, timeout=30) as r:
-                  data=r.read().decode()
-                  return json.loads(data) if data.strip() else {}
+          headers={"Authorization":"Bearer "+token,"Accept":"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"}
+          pins={"diagnostic/miami-factory-batch-stall-readonly":"ffba5d372ee5af0124a97cf4b4612a0993cf5448","feat/factory-approval-stage-latency":"ffba5d372ee5af0124a97cf4b4612a0993cf5448","feat/factory-approval-stage-timing":"ffba5d372ee5af0124a97cf4b4612a0993cf5448","feat/home-overview-force-refresh":"ffba5d372ee5af0124a97cf4b4612a0993cf5448","feature/factory-batch-approval-20261016":"ffba5d372ee5af0124a97cf4b4612a0993cf5448","feature/factory-batch-multi-reel-v2":"ffba5d372ee5af0124a97cf4b4612a0993cf5448","feature/visual-timeline-phase1-rebase-20261017":"ffba5d372ee5af0124a97cf4b4612a0993cf5448","feature/visual-voiceover-final-20261017":"ffba5d372ee5af0124a97cf4b4612a0993cf5448","feature/visual-voiceover-final-current-20261017":"ffba5d372ee5af0124a97cf4b4612a0993cf5448","fix/atomic-mae-rollout-readiness":"ffba5d372ee5af0124a97cf4b4612a0993cf5448","fix/factory-all-platforms-rollout-migration-20261017":"ffba5d372ee5af0124a97cf4b4612a0993cf5448","fix/factory-cloudflare-keepvars-contract-v2-20261017":"ffba5d372ee5af0124a97cf4b4612a0993cf5448","fix/live-canary-report-http-errors":"ffba5d372ee5af0124a97cf4b4612a0993cf5448","perf/factory-parallel-lanes-v1":"ffba5d372ee5af0124a97cf4b4612a0993cf5448","verify/visual-rerender-concurrency-ci-20261017":"ffba5d372ee5af0124a97cf4b4612a0993cf5448","verify/visual-voiceover-ci-20261017":"ffba5d372ee5af0124a97cf4b4612a0993cf5448","verify/visual-voiceover-ci-concurrency-final-20261017":"ffba5d372ee5af0124a97cf4b4612a0993cf5448","verify/visual-voiceover-ci-final-20261017":"ffba5d372ee5af0124a97cf4b4612a0993cf5448","ops/vizcaya-photo-acceptance-20261019":"3cc86fdc1e3eb517325d014eb1f98d08d80397a7","audit/chicago-factory-77-timings-20261018":"4eaec8e353322517ec2ebefa658a779dce23d516","fix/p0-907-import-platform-registry":"48c87c629abf09b88e715eebbed2134aa7a7ca39","fix/p0-907-remove-nonexistent-idea-notes-field":"fca3e9e2795ea20cd8e7eebf1a22dbb04cffbcc9","fix/pages-factory-retry-asset-only-rollout-892":"1da3c6ad57f759b9f9bc00c551b61da295be5cb6","fix/pages-ui-719-factory-quality-20261018":"f1496e53707fadc003528b662dd0f98cd960aaed","fix/ready-production-durable-queue-diagnostics-20261019":"2546c8f9b9d826092dde50131ac5f9cb61a0e083","release/studio-ui-0-6-724-home-overview-cache":"06b196f086d70b580cebabb59410bb36162770c0"}
+          archived_names=set(["audit/chicago-factory-77-timings-20261018","fix/p0-907-import-platform-registry","fix/p0-907-remove-nonexistent-idea-notes-field","fix/pages-factory-retry-asset-only-rollout-892","fix/pages-ui-719-factory-quality-20261018","fix/ready-production-durable-queue-diagnostics-20261019","release/studio-ui-0-6-724-home-overview-cache"])
+          def api(path, method="GET", data=None):
+              payload=None if data is None else json.dumps(data).encode()
+              request=urllib.request.Request("https://api.github.com/repos/"+repo+"/"+path,headers=headers,method=method,data=payload)
+              with urllib.request.urlopen(request,timeout=30) as response:
+                  raw=response.read().decode()
+                  return json.loads(raw) if raw.strip() else {}
           open_prs=api("pulls?state=open&per_page=100")
-          open_heads={pr["head"]["ref"] for pr in open_prs if pr["head"]["repo"] and pr["head"]["repo"]["full_name"]==repo}
+          open_heads={pr["head"]["ref"] for pr in open_prs if pr["head"].get("repo") and pr["head"]["repo"]["full_name"]==repo}
           deleted=[]
           skipped=[]
-          for branch in allowed:
-              if branch in open_heads:
-                  skipped.append((branch,"open_pr")); continue
+          archived=[]
+          for branch,expected in pins.items():
+              if branch in open_heads or branch=="main":
+                  skipped.append((branch,"open_pr_or_main"));continue
               q=urllib.parse.quote(branch,safe="/")
               try:
                   current=api("branches/"+q)
-              except urllib.error.HTTPError as e:
-                  if e.code==404:
-                      skipped.append((branch,"already_absent")); continue
+              except urllib.error.HTTPError as exc:
+                  if exc.code==404:
+                      skipped.append((branch,"already_absent"));continue
                   raise
-              sha=current["commit"]["sha"]
-              expected=expected_ops if branch.startswith("ops/") else expected_legacy
-              if sha!=expected or current.get("protected"):
-                  skipped.append((branch,"head_changed_or_protected")); continue
-              compare=api("compare/main..."+q)
-              if compare["ahead_by"]!=0:
-                  skipped.append((branch,"contains_unmerged_commits")); continue
-              # Final lease/recheck so a recent push is never deleted based on old inspection.
+              if current["commit"]["sha"]!=expected or current.get("protected"):
+                  skipped.append((branch,"head_changed_or_protected"));continue
+              comparison=api("compare/main..."+q)
+              if comparison.get("ahead_by",0)>0:
+                  if branch not in archived_names:
+                      skipped.append((branch,"unmerged_changes_not_allowlisted"));continue
+                  # Keep the exact old commit permanently reachable by an immutable tag.
+                  tag="archive/incident-907/"+branch.replace("/","--")
+                  tagpath="git/ref/tags/"+urllib.parse.quote(tag,safe="/")
+                  try:
+                      existing=api(tagpath)
+                      if existing["object"]["sha"]!=expected:
+                          skipped.append((branch,"archive_tag_conflict"));continue
+                  except urllib.error.HTTPError as exc:
+                      if exc.code!=404:raise
+                      api("git/refs",method="POST",data={"ref":"refs/tags/"+tag,"sha":expected})
+                  check=api(tagpath)
+                  if check["object"]["sha"]!=expected:
+                      raise RuntimeError("Archive tag verification failed: "+branch)
+                  archived.append((branch,tag))
               again=api("branches/"+q)
               if again["commit"]["sha"]!=expected or again.get("protected"):
-                  skipped.append((branch,"concurrent_branch_change")); continue
+                  skipped.append((branch,"concurrent_branch_change"));continue
               api("git/refs/heads/"+q,method="DELETE")
               deleted.append(branch)
-          print("deleted_count="+str(len(deleted)))
-          for branch in deleted: print("deleted="+branch)
-          for branch,reason in skipped: print("kept="+branch+" reason="+reason)
-          # Any API/permission failure exits nonzero and is visible in the Action logs.
-          
+          print("deleted_count="+str(len(deleted))+" archived_unique_count="+str(len(archived)))
+          for branch in deleted:print("deleted="+branch)
+          for branch,tag in archived:print("archived="+branch+" tag="+tag)
+          for branch,reason in skipped:print("kept="+branch+" reason="+reason)
           PY
