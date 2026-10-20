@@ -38,7 +38,7 @@ test("awaiting approval is review-ready but not approved or rendering", () => {
   assert.equal(homeOutputContribution({ ...ready, review_status: "Approved" }).awaiting_approval, 0);
 });
 
-test("parenthesized profile count uses overdue unpublished, not scheduled column sum", () => {
+test("parenthesized profile count uses all approved unpublished, not overdue or scheduled column sum", () => {
   assert.match(ui, /function overdueUnpublishedTotal\(row\)/);
   assert.match(ui, /overdue_unpublished: Number\(row\.overdue_unpublished\) \|\| 0/);
   assert.match(ui, /overdue_unpublished"\]/);
