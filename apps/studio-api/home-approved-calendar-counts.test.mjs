@@ -74,7 +74,38 @@ test("Home uses platform-output timestamps, explicit future and past due columns
   assert.match(ui,/Approved · Past Due/);
   assert.match(ui,/Approved · No Date/);
   assert.match(ui,/approvedCalendarCounts\(row, now = Date\.now\(\)\)/);
-  assert.match(ui,/calendar\.byPlatform\[p\]/);
+  assert.match(ui,/calendar\.pipelineByPlatform\[p\]/);
   assert.doesNotMatch(ui,/approvedUnpublishedTotal\(row\)/);
-  assert.match(index,/all-profiles-overview-1007\.js\?v=.*cache=approved-future-output-v6/);
+  assert.match(index,/all-profiles-overview-1007\.js\?v=.*cache=pipeline-future-review-v6/);
+});
+
+test("rendered awaiting human approval adds to future-output pipeline, not approved count", () => {
+  const review=(platform, renderStatus="Rendered")=>({
+    id:"rec12345678901234",platform,studio_state:"Ready for Review",
+    output_status:"Ready for Review",render_status:renderStatus,
+    review_status:"",publish_status:"",
+  });
+  const rows=[
+    approved("Instagram",stampFuture),
+    approved("Facebook",stampPast),
+    review("Instagram"), review("YouTube"),
+    review("TikTok","Queued"), review("Facebook","Rendering"),
+  ];
+  const c=homeApprovedCalendarCounts(rows,at);
+  assert.equal(c.future,1);
+  assert.equal(c.past_due,1);
+  assert.equal(c.awaiting,2);
+  assert.equal(c.pipeline_total,3);
+  assert.deepEqual(c.pipeline_by_platform,{Facebook:0,Instagram:2,TikTok:0,YouTube:1});
+  assert.deepEqual(c.awaiting_by_platform,{Facebook:0,Instagram:1,TikTok:0,YouTube:1});
+  assert.equal(c.missing_date,0);
+});
+test("Home UI combines future and human-review per platform, not rendering queue",()=>{
+  assert.match(worker,/awaiting_final_by_platform: calendar.awaiting_by_platform/);
+  assert.match(worker,/pipeline_total: calendar.pipeline_total/);
+  assert.match(ui,/Future \+ Review platform outputs/);
+  assert.match(ui,/Pipeline · Total/);
+  assert.match(ui,/Ideas Needed/);
+  assert.match(ui,/const pipelineTotal = future \+ awaiting/);
+  assert.match(ui,/Math.ceil\(Math.max\(0, 500 - pipelineTotal\) \/ 5\)/);
 });

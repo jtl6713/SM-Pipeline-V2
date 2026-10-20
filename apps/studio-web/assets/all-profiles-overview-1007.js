@@ -40,7 +40,17 @@
       future += byPlatform[platform];
       pastDue += slots.length - byPlatform[platform];
     }
-    return { byPlatform, future, pastDue, missingDate: Number(row?.approved_missing_date) || 0 };
+    const awaitingByPlatform = row?.awaiting_final_by_platform || {};
+    const pipelineByPlatform = Object.fromEntries(platformOrder.map((platform) => [
+      platform, byPlatform[platform] + (Number(awaitingByPlatform[platform]) || 0),
+    ]));
+    const awaiting = platformOrder.reduce((sum, platform) => sum + (Number(awaitingByPlatform[platform]) || 0), 0);
+    const pipelineTotal = future + awaiting;
+    return {
+      byPlatform, future, pastDue, awaiting, pipelineByPlatform,
+      pipelineTotal, ideasNeeded: Math.ceil(Math.max(0, 500 - pipelineTotal) / 5),
+      missingDate: Number(row?.approved_missing_date) || 0,
+    };
   }
 
   function validOverviewRows(rows) {
@@ -56,13 +66,15 @@
       for (const platform of platformOrder) {
         if (!Number.isFinite(Number(row?.scheduled?.[platform]))) return false;
       }
-      for (const kind of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished", "approved_future", "approved_past_due", "approved_missing_date"]) {
+      for (const kind of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished", "approved_future", "approved_past_due", "approved_missing_date", "pipeline_total"]) {
         if (typeof row?.[kind] !== "number" || !Number.isFinite(row[kind]) || row[kind] < 0) return false;
       }
       for (const platform of platformOrder) {
         const dates = row?.approved_calendar_slots?.[platform];
         if (!Array.isArray(dates) || dates.some((due) => !Number.isFinite(due) || due <= 0)) return false;
         if (!Number.isInteger(row?.approved_future_by_platform?.[platform])) return false;
+        if (!Number.isInteger(row?.awaiting_final_by_platform?.[platform])) return false;
+        if (row?.pipeline_by_platform?.[platform] !== row.approved_future_by_platform[platform] + row.awaiting_final_by_platform[platform]) return false;
       }
     }
     return true;
@@ -279,12 +291,15 @@
     const total = {
       scheduled: Object.fromEntries(platformOrder.map((p) => [p, 0])),
       approved_calendar_slots: Object.fromEntries(platformOrder.map((p) => [p, []])),
-      approved_missing_date: 0, manual: 0, failed: 0, approval: 0, ideas: 0,
+      approved_missing_date: 0,
+      awaiting_final_by_platform: Object.fromEntries(platformOrder.map((p) => [p, 0])),
+      manual: 0, failed: 0, approval: 0, ideas: 0,
     };
     for (const row of state.rows) {
       for (const platform of platformOrder) {
         total.scheduled[platform] += row.scheduled?.[platform] || 0;
         total.approved_calendar_slots[platform].push(...row.approved_calendar_slots[platform]);
+        total.awaiting_final_by_platform[platform] += row.awaiting_final_by_platform[platform];
       }
       total.approved_missing_date += row.approved_missing_date;
       total.manual += row.manual;
@@ -297,8 +312,10 @@
       const calendar = approvedCalendarCounts(row, now);
       return `<tr class="${isTotal ? "all-profiles-total" : ""}">
       <th scope="row">${esc(row.name)}</th>
-      ${platformOrder.map((p) => `<td data-label="${p} future outputs">${calendar.byPlatform[p]}</td>`).join("")}
+      ${platformOrder.map((p) => `<td data-label="${p} future and review outputs">${calendar.pipelineByPlatform[p]}</td>`).join("")}
+      <td data-label="Pipeline total" class="overview-tone-ok">${calendar.pipelineTotal}</td>
       <td data-label="Approved future" class="overview-tone-ok">${calendar.future}</td>
+      <td data-label="Ideas needed">${calendar.ideasNeeded}</td>
       <td data-label="Approved past due" class="overview-tone-${tone(calendar.pastDue, "failed")}">${calendar.pastDue}</td>
       <td data-label="Approved no date" class="overview-tone-${tone(calendar.missingDate, "failed")}">${calendar.missingDate}</td>
       <td data-label="Manual" class="overview-tone-${tone(row.manual, "manual")}">${actionCount(row, "manual", "manual action")}</td>
@@ -316,7 +333,7 @@
     const disabled = state.manualRefreshing ? " disabled aria-disabled=\"true\"" : "";
 
     host.innerHTML = `<div class="all-profiles-heading"><div><p class="studio-hub-kicker">ALL PROFILES</p><h1>Studio overview</h1>${statusNote}</div><button type="button" class="secondary-button" id="allProfilesRefresh"${disabled}>${refreshText}</button></div>
-      <div class="all-profiles-table-wrap"><table class="all-profiles-table"><thead><tr class="all-profiles-group-row"><th rowspan="2">Profile</th><th colspan="4" class="all-profiles-scheduled-group" title="One count per approved, unpublished platform output with a Scheduled Post Date later than now">Approved platform outputs · future</th><th rowspan="2" title="Sum of the four future platform-output columns">Approved · Future</th><th rowspan="2" title="Approved, unpublished platform outputs whose Scheduled Post Date has passed">Approved · Past Due</th><th rowspan="2" title="Approved, unpublished outputs missing their canonical calendar Scheduled Post Date">Approved · No Date</th><th rowspan="2">Manual action</th><th rowspan="2">Failed</th><th rowspan="2">Awaiting approval</th><th rowspan="2">Ideas</th></tr><tr class="all-profiles-platform-row">${platformOrder.map((p)=>`<th class="all-profiles-scheduled-col">${p}</th>`).join("")}</tr></thead>
+      <div class="all-profiles-table-wrap"><table class="all-profiles-table"><thead><tr class="all-profiles-group-row"><th rowspan="2">Profile</th><th colspan="4" class="all-profiles-scheduled-group" title="One count per platform-output record: approved and scheduled in the future, OR rendered and awaiting final human approval">Future + Review platform outputs</th><th rowspan="2" title="Four platform columns summed: approved future plus awaiting final approval">Pipeline · Total</th><th rowspan="2">Approved · Future</th><th rowspan="2" title="Estimated new ideas needed to reach 500 platform outputs, assuming 5 outputs per idea">Ideas Needed</th><th rowspan="2" title="Approved, unpublished platform outputs whose Scheduled Post Date has passed">Approved · Past Due</th><th rowspan="2" title="Approved, unpublished outputs missing their canonical calendar Scheduled Post Date">Approved · No Date</th><th rowspan="2">Manual action</th><th rowspan="2">Failed</th><th rowspan="2">Awaiting approval</th><th rowspan="2">Ideas</th></tr><tr class="all-profiles-platform-row">${platformOrder.map((p)=>`<th class="all-profiles-scheduled-col">${p}</th>`).join("")}</tr></thead>
       <tbody>${state.rows.map((r)=>rowHtml(r)).join("")}${rowHtml({name:"Total",...total},true)}</tbody></table></div>`;
 
     document.getElementById("allProfilesRefresh")?.addEventListener("click", forceRefresh);
@@ -338,6 +355,9 @@
       approved_future: Number(row.approved_future) || 0,
       approved_past_due: Number(row.approved_past_due) || 0,
       approved_missing_date: Number(row.approved_missing_date) || 0,
+      pipeline_total: Number(row.pipeline_total) || 0,
+      awaiting_final_by_platform: row.awaiting_final_by_platform,
+      pipeline_by_platform: row.pipeline_by_platform,
       approved_future_by_platform: row.approved_future_by_platform,
       approved_calendar_slots: row.approved_calendar_slots,
       ideas: Number(row.ideas) || 0,
