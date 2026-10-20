@@ -85,6 +85,13 @@ test("Supabase Phase 5 read wall and feature gates remain intact", () => {
   assert.match(home, /STUDIO_REFILL_PROFILE_SUMMARY_READS === "true"/);
 });
 
+test("operator summary reconcile is admitted through the Phase 2A write gate", () => {
+  const worker = raw("worker.js");
+  const gate = worker.slice(worker.indexOf("const allowedMethod ="), worker.indexOf("if (!allowedMethod)"));
+  assert.match(gate, /isProfilesOverviewSummaryReconcileWrite/);
+  assert.match(worker, /url\.pathname === "\/api\/profiles\/overview\/summary\/reconcile"/);
+});
+
 test("production rollback treats both SQLite namespaces as lifecycle boundaries", () => {
   const workflow = raw("../../.github/workflows/deploy-cloudflare-worker-production.yml");
   assert.match(workflow, /from studio_api_rollback_lifecycle import decide_rollback/);

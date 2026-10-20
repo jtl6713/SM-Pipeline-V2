@@ -874,6 +874,8 @@ export default {
       const isPublishedLibraryReleaseRoute = /^\/api\/library\/published\/rec[A-Za-z0-9]+\/release-file$/.test(url.pathname);
       const isPublishedLibraryReleaseWrite = isPublishedLibraryReleaseRoute && request.method === "POST";
       const isProfilesOverviewRefreshWrite = isProfilesOverviewRefreshRoute && request.method === "POST";
+      const isProfilesOverviewSummaryReconcileWrite =
+        url.pathname === "/api/profiles/overview/summary/reconcile" && request.method === "POST";
       const isIdeaCreateRoute = url.pathname === "/api/ideas" && request.method === "POST";
       const isIdeaGenerateWrite = isIdeaGenerateRoute && request.method === "POST";
       const isScriptedShortProposeWrite = isScriptedShortProposeRoute && request.method === "POST";
@@ -950,6 +952,7 @@ export default {
         request.method === "GET" ||
         (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isMediaAssetStreamRoute || isPublicBrandWatermarkRoute || isOutputPreviewRoute || isVoicePreviewRoute)) ||
         isProfilesOverviewRefreshWrite ||
+        isProfilesOverviewSummaryReconcileWrite ||
         isIdeaCreateRoute ||
         isIdeaGenerateWrite ||
         isScriptedShortProposeWrite ||
@@ -1072,7 +1075,8 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.667-ready-production-flow",
+          version: "0.10.668-profile-summary-shadow",
+          studio_profile_summary_reconcile_gate_v1: true,
           photo_match_error_json_v1: true,
           factory_batch_canary_revision: "chicago-ig-reel-v1",
           factory_batch_phase2a_post_gate_fix_v1: true,
