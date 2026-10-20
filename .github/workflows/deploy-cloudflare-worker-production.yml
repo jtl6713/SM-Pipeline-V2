@@ -221,6 +221,9 @@ jobs:
             'STUDIO_VISUAL_SCRIPT_V1':'true' if visual_rollout.get('enabled') and visual_rollout.get('script_enabled') else 'false',
             'STUDIO_VISUAL_CANARY_OUTPUT_IDS':','.join(canary_ids),
           }
+          # Summary reads remain OFF until independent shadow parity and
+          # production latency/freshness verification have passed.
+          # The namespace is isolated from existing schedule reservation lanes.
           # Preserve all active plaintext settings explicitly; never use
           # --keep-vars, which can inherit stale settings from rolled-back
           # Worker versions instead of the currently active deployment.
@@ -228,6 +231,8 @@ jobs:
           module.assert_global_factory_binding_tuple(active_vars,'Predeploy Worker',allow_absent=True)
           active_vars.update(factory_vars)
           active_vars.update(visual_vars)
+          active_vars.setdefault('STUDIO_HOME_PROFILE_SUMMARY_READS','false')
+          active_vars.setdefault('STUDIO_PROFILE_SUMMARY_RECONCILE_ENABLED','false')
           reservation_state=Path('/tmp/reservation-binding-state.txt').read_text().strip()
           import re
           activation=os.environ.get('ACTIVATE_SCHEDULE_LANE','').strip()
@@ -255,22 +260,23 @@ jobs:
             'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}],
             'secrets':{'required':['AIRTABLE_PAT']}
           }
+          # Independent SQLite namespace. No schedule reservation data is shared.
+          cfg['durable_objects']={'bindings':[{
+            'name':'STUDIO_PROFILE_SUMMARIES','class_name':'StudioProfileSummary'
+          }]}
+          cfg['exports']={'StudioProfileSummary':{'type':'durable-object','storage':'sqlite'}}
           if reservation_state == 'bootstrapped' or lifecycle_change:
               # Preserve an existing namespace, or perform the explicit one-time
               # bootstrap. In both cases the scheduling authority remains OFF.
               active_vars['STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED']='true' if activation else 'false'
               active_vars['STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST']=activation
-              cfg['durable_objects']={
-                  'bindings':[{
-                      'name':'STUDIO_SCHEDULE_RESERVATIONS',
-                      'class_name':'ScheduleReservationLane',
-                  }],
-              }
-              cfg['exports']={
-                  'ScheduleReservationLane':{
-                      'type':'durable-object',
-                      'storage':'sqlite',
-                  },
+              cfg['durable_objects']['bindings'].append({
+                  'name':'STUDIO_SCHEDULE_RESERVATIONS',
+                  'class_name':'ScheduleReservationLane',
+              })
+              cfg['exports']['ScheduleReservationLane']={
+                  'type':'durable-object',
+                  'storage':'sqlite',
               }
           else:
               # Before the explicit bootstrap runs, ordinary production deploys
@@ -325,6 +331,8 @@ jobs:
               'Postdeploy live Worker',
               allow_reservation_absent=(not expected_bootstrapped),
           )
+          if got.get('STUDIO_PROFILE_SUMMARIES') != 'durable_object_namespace':
+              raise SystemExit('Home summary Durable Object namespace is missing')
           if expected_bootstrapped:
               if got.get('STUDIO_SCHEDULE_RESERVATIONS') != 'durable_object_namespace':
                   raise SystemExit('Atomic scheduling Durable Object binding disappeared after deploy')
@@ -353,6 +361,8 @@ jobs:
             'STUDIO_VISUAL_SCRIPT_V1':'true' if visual_rollout.get('enabled') and visual_rollout.get('script_enabled') else 'false',
             'STUDIO_VISUAL_CANARY_OUTPUT_IDS':','.join(str(x).strip() for x in visual_rollout.get('canary_output_ids',[]) if str(x).strip()),
           }
+          expected.setdefault('STUDIO_HOME_PROFILE_SUMMARY_READS',prior_plain.get('STUDIO_HOME_PROFILE_SUMMARY_READS','false'))
+          expected.setdefault('STUDIO_PROFILE_SUMMARY_RECONCILE_ENABLED',prior_plain.get('STUDIO_PROFILE_SUMMARY_RECONCILE_ENABLED','false'))
           for name,value in prior_plain.items():
               if name not in expected and name not in ('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED','STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST') and after_plain.get(name)!=value:
                   raise SystemExit('Worker plaintext setting changed or disappeared: '+name)

@@ -14,7 +14,7 @@ test("All Profiles overview uses one lean /api/profiles/overview call", () => {
   assert.match(overview, /\/api\/profiles\/overview/);
   assert.doesNotMatch(overview, /\/api\/dashboard\?profile=/);
   assert.doesNotMatch(overview, /mapPool\(profiles/);
-  assert.match(overview, /POLL_MS = 5000/);
+  assert.match(overview, /POLL_MS = 12000/);
   assert.match(overview, /overviewViewActive/);
   assert.match(overview, /document\.hidden/);
   assert.match(overview, /\n  start\(\);/);
