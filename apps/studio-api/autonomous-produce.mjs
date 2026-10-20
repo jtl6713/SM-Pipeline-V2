@@ -250,15 +250,25 @@ export function autonomousScheduledDeficit(
 
 /**
  * Build per-profile refill scores from All-Profiles overview rows
- * (`scheduled` map + `approval` awaiting-approval count).
- * Band / deficit use Scheduled + Awaiting Approval.
+ * Approved future platform outputs + fully rendered awaiting final human
+ * approval. A legacy scheduled map is supported for old callers only.
+ * New Home snapshots carry per-output due times so expired dates stop
+ * contributing immediately, even before the next Airtable change.
  */
 export function autonomousRefillScoresFromOverview(overviewRows, target = AUTONOMOUS_SCHEDULED_TARGET) {
   const byId = Object.create(null);
   for (const row of Array.isArray(overviewRows) ? overviewRows : []) {
     const id = String(row?.id || "").trim();
     if (!id) continue;
-    const scheduledTotal = autonomousScheduledTotal(row?.scheduled);
+    const slots = row?.approved_calendar_slots;
+    const canonicalSlots = slots && ["Facebook", "Instagram", "TikTok", "YouTube"]
+      .every((platform) => Array.isArray(slots[platform]));
+    const scheduledTotal = canonicalSlots
+      ? ["Facebook", "Instagram", "TikTok", "YouTube"].reduce((sum, platform) =>
+        sum + slots[platform].filter((stamp) => Number(stamp) > Date.now()).length, 0)
+      : Number.isFinite(Number(row?.approved_future))
+        ? Math.max(0, Number(row.approved_future))
+        : autonomousScheduledTotal(row?.scheduled);
     const awaiting = Math.max(0, Number(row?.approval ?? row?.metrics?.awaiting_approval) || 0);
     const pipelineLoad = autonomousPipelineLoadTotal(scheduledTotal, awaiting);
     const band = autonomousScheduledBand(pipelineLoad, target);
