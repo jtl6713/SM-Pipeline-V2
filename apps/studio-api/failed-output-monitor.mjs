@@ -26,6 +26,20 @@ const text = (row, key) => String(row?.fields?.[key] ?? row?.[key] ?? "").trim()
 const truthy = (row, key) => row?.fields?.[key] === true || row?.[key] === true;
 const firstLinkedId = (value) => Array.isArray(value) ? String(value[0] || "") : String(value || "");
 
+/** Enforce publication idempotency, cooldowns and bounded automatic retries. */
+export function failedOutputRetryGate(record, { nowMs = Date.now(), maxAttempts = 3 } = {}) {
+  if (text(record, "Published_At") || text(record, "Platform_Post_ID") || text(record, "Platform_Post_URL")) return "publication_evidence";
+  if (truthy(record, "Do_Not_Publish")) return "publication_held";
+  const retryMs = Date.parse(text(record, "Publish_Next_Retry_At"));
+  if (Number.isFinite(retryMs) && retryMs > nowMs) return "cooldown";
+  if (Number(text(record, "Publish_Attempt_Count")) >= maxAttempts ||
+      Number(text(record, "Studio_Publish_Dispatch_Count")) >= maxAttempts) return "retry_limit";
+  const lockMs = Date.parse(text(record, "Publish_Locked_At"));
+  if (text(record, "Publish_Locked_By") && Number.isFinite(lockMs) &&
+      nowMs - lockMs < 15 * 60 * 1000) return "publish_locked";
+  return null;
+}
+
 export function describeFailedOutput(record, nowMs = Date.now()) {
   const outputId = text(record, "Output_ID");
   const output = text(record, "Output_Status");
