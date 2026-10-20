@@ -62,7 +62,7 @@ jobs:
           jq -e '.ok == true and (.hourly|type)=="array"' worker-airtable-egress.json >/dev/null
           code=$(curl -sS --retry 5 --retry-all-errors --retry-delay 2 --max-time 30 -o runner-airtable-egress.json -w '%{http_code}' "https://$name.$sub.workers.dev/$token/runner-egress" || true)
           if [[ "$code" != "200" ]] || ! jq -e '.ok==true and (.hourly|type)=="array"' runner-airtable-egress.json >/dev/null 2>&1; then
-            echo '{"ok":false,"reason":"runner_metrics_unavailable_via_admin_proxy"}' >runner-airtable-egress.json
+            printf '{"ok":false,"reason":"runner_proxy_http_%s"}\n' "${code:-unknown}" >runner-airtable-egress.json
           fi
           jq -n --slurpfile worker worker-airtable-egress.json --slurpfile runner runner-airtable-egress.json '{captured_at:(now|todate),worker: $worker[0],runner: $runner[0],complete:($worker[0].ok==true and $runner[0].ok==true),net_savings_verifiable:false}' >airtable-egress-coverage.json
           cat airtable-egress-coverage.json
