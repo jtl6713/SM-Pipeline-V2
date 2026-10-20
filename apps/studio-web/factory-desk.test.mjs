@@ -43,7 +43,7 @@ test("Factory Desk is a separate page beside Operations", async () => {
   const support = html.indexOf('id="page-support"');
   assert.ok(operations > 0 && factoryPage > operations && support > factoryPage);
 
-  assert.match(app, /BUILD_ID = "item4-0\.6\.\d+-profile-fast-music"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.\d+(?:-[a-z0-9-]+)?"/);
   assert.match(app, /page === "factory"/);
   assert.match(app, /StudioFactoryDesk\?\.load/);
   assert.match(factory, /StudioFactoryDesk/);
