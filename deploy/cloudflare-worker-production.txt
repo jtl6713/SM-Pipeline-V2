@@ -542,3 +542,5 @@ Deploy targeted November 17 MAE overage selector from merged PR #936; no automat
 2026-10-20: Deploy PR #945 tenant-admin runner Airtable metrics proxy. Reuse existing Worker-to-runner shared secret; do not add Github Actions secrets. Preserve production API, Airtable write source, and Home/refill read flags OFF.
 
 2026-10-20: Home parentheses represent a net approved-unpublished backlog. Do not drop provider uploads/draft handoffs marked Completed/Succeeded until explicit publishing proof; preserve Airtable write authority, Supabase Phase 5 and human approval gates.
+
+2026-10-20: Deploy verified Home approved-unpublished classifier (merged #948) after synchronizing runtime preflight to guarded preservation of active scheduling reservation lanes. Validated tests; no authority, approval, publishing, or secret changes.
