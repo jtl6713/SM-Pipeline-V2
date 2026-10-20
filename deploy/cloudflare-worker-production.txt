@@ -558,3 +558,5 @@ Deploy targeted November 17 MAE overage selector from merged PR #936; no automat
 2026-10-20: Home profile parenthesis tally v5 — count every final-approved, not-yet-published output (upcoming, overdue, and unscheduled) until genuine publication; rebuild old future-only DO/R2 snapshots, preserve Airtable SoR and approval/publish paths. Controlled Worker deploy and All Profiles force-refresh acceptance.
 
 2026-10-20: P0 Home tally deploy hotfix: V5 overview writer and verifier must both accept schema 5 (previous verifier incorrectly required 4); reject legacy v4 snapshots and keep Airtable authority, supabase breaker, and all scheduling approvals unchanged. Trigger controlled Worker deployment and authenticated overview canary.
+
+2026-10-20: P0 Factory approval recovery PR #981. Claim the per-profile R2 lease BEFORE running authoritative 90-day Airtable schedule occupancy reads; preserve complete-read fail-closed safety, idempotent approvals, Airtable SoR, Supabase Phase 5 read breaker, and production binding contract. Controlled Worker rollout; verify pending batch counts decline and no approved outputs are repeated.
