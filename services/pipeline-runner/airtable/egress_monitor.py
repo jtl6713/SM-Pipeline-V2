@@ -19,8 +19,12 @@ logger = logging.getLogger("pipeline-runner.airtable.egress")
 
 
 def _metrics_path():
-    """Explicit runtime persistent volume path; never claim durability from /tmp."""
-    return os.environ.get("AIRTABLE_EGRESS_SQLITE_PATH", "").strip()
+    """Use explicit path or the runner's mounted /scratch volume; never /tmp."""
+    if "AIRTABLE_EGRESS_SQLITE_PATH" in os.environ:
+        return os.environ["AIRTABLE_EGRESS_SQLITE_PATH"].strip()
+    if Path("/scratch").is_dir() and os.access("/scratch", os.W_OK):
+        return "/scratch/metrics/airtable-egress.sqlite"
+    return ""
 
 
 def persist_airtable_egress(method: str, status: int, at=None) -> bool:
