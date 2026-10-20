@@ -128,6 +128,24 @@ test("Factory batch drain reuses one occupancy map like Approve All", () => {
   assert.match(drain, /factoryBatchList\(env\.STUDIO_MEDIA, profileId/);
 });
 
+test("Factory cron never burns Airtable occupancy scans before claiming profile lease", () => {
+  const start = functions04.indexOf("export async function factoryBatchProcess(");
+  const end = functions04.indexOf("/*__STUDIO_WORKER_END:factoryBatchProcess__*/", start);
+  const source = functions04.slice(start, end);
+  const claim = source.indexOf("const result = await factoryBatchDrain(");
+  const approval = source.indexOf("approve: async (id, currentJob, checkpoint");
+  const occupancy = source.indexOf("occupiedByLane = await studioOccupiedSchedulesOrEmpty(");
+  assert.ok(claim >= 0 && approval > claim && occupancy > approval,
+    "only the R2-lease winner can fetch expensive scheduling occupancy");
+  const beforeClaim = source.slice(0, claim);
+  assert.doesNotMatch(beforeClaim, /studioOccupiedSchedulesOrEmpty|await airtableFetch\(env, STUDIO_IDEA_PROFILE_TABLE_ID/);
+  assert.match(source, /let occupiedByLane = null/);
+  assert.match(source, /if \(occupiedByLane === null\)/);
+  assert.match(source, /requireComplete: true/);
+  assert.match(source, /filter\(\(item\) => !\["approved", "already_satisfied", "failed"\]/);
+  assert.match(source, /skipOccupancyRefresh: true/);
+});
+
 test("Global Factory group submit accepts from desk hints before Airtable", () => {
   // Group submit lives as a module sibling after the submit-route extract marker,
   // so assert against the live ESM source rather than the reconstructed Worker.

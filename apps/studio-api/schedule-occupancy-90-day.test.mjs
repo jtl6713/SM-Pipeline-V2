@@ -40,7 +40,9 @@ test("authoritative occupancy scan fails closed on read errors and truncated res
 
 test("Factory, Approve All, atomic approval, regeneration and Calendar save require a verified calendar", () => {
   const factory = between(f04, "export async function factoryBatchProcess", "/*__STUDIO_WORKER_END:factoryBatchProcess__*/");
-  assert.match(factory, /const occupiedByLane = await studioOccupiedSchedulesOrEmpty\(env, \{[\s\S]*?requireComplete: true/);
+  assert.match(factory, /occupiedByLane = await studioOccupiedSchedulesOrEmpty\(env, \{[\s\S]*?requireComplete: true/);
+  assert.ok(factory.indexOf("factoryBatchDrain(") < factory.indexOf("occupiedByLane = await studioOccupiedSchedulesOrEmpty"),
+    "complete occupancy must be fetched after the exclusive Factory profile claim");
   const approveAll = between(f04, "export async function studioProcessApproveAllJobSlice", "/*__STUDIO_WORKER_END:studioProcessApproveAllJobSlice__*/");
   assert.match(approveAll, /const occupiedByLane = await studioOccupiedSchedulesOrEmpty\(env, \{[\s\S]*?requireComplete: true/);
   const approve = between(f04, "export async function approveOutputRecordForPublishing", "/*__STUDIO_WORKER_END:approveOutputRecordForPublishing__*/");
