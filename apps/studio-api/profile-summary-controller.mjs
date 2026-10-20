@@ -142,7 +142,7 @@ export function validVerifiedStudioSummary(summary, profileIds, maxAgeMs = 60 * 
   if (Date.now() - Number(summary.last_reconciled_at || 0) > maxAgeMs) return false;
   const required = new Set((profileIds || []).map((id) => String(id)));
   const ids = new Set(summary.records.map((record) => String(record.id || "")));
-  if (required.size !== ids.size || [...required].some((id) => !ids.has(id))) return false;
+  if (ids.size !== 4 || required.size > ids.size || [...required].some((id) => !ids.has(id))) return false;
   return summary.records.every((record) => PLATFORMS.every((p) => Number.isFinite(record.scheduled?.[p]))
     && ["manual", "failed", "approval", "ideas", "overdue_unpublished"].every((key) => Number.isFinite(record[key])));
 }
