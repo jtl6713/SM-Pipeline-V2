@@ -13,7 +13,7 @@ const ui = fs.readFileSync(path.join(root, "apps/studio-web/assets/all-profiles-
 test("profile overview includes overdue approved outputs separately from platform dispatch", () => {
   assert.match(worker, /overdue_unpublished: outputCounts.overdue_unpublished/);
   assert.match(worker, /overdue_unpublished: metrics.overdue_unpublished/);
-  assert.match(worker, /scheduled: studioOverviewScheduledCounts\\(mappedOutputs\\)/);
+  assert.ok(worker.includes("scheduled: studioOverviewScheduledCounts(mappedOutputs)"));
   const late = {
     id: "rec12345678901234", platform: "Instagram",
     studio_state: "Platform Processing", output_status: "Approved for Publishing",
@@ -29,8 +29,8 @@ test("profile overview includes overdue approved outputs separately from platfor
 
 test("awaiting approval is review-ready but not approved or rendering", () => {
   assert.match(classifier, /state !== "Ready for Review" && state !== "Awaiting Approval"/);
-  assert.match(classifier, /\\["approved", "rejected", "skipped"\\]\\.includes\\(review\\)/);
-  assert.match(classifier, /ready for render\\|waiting in render queue/);
+  assert.ok(classifier.includes('["approved", "rejected", "skipped"].includes(review)'));
+  assert.ok(classifier.includes("ready for render|waiting in render queue"));
   const ready = { id: "rec12345678901234", studio_state: "Ready for Review",
     output_status: "Ready for Review", render_status: "Rendered", review_status: "" };
   assert.equal(homeOutputContribution(ready).awaiting_approval, 1);
