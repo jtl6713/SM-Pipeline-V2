@@ -536,3 +536,5 @@ Deploy PR #905 photo-wait historical platform default repair (Threads 400): filt
 Deploy targeted November 17 MAE overage selector from merged PR #936; no automatic repair execution or reservation lane activation. 2026-10-20.
 
 2026-10-20: Deploy merged #937 Home approved-unpublished profile-parentheses metric. Preserve Airtable write authority, profile-summary circuit breaker, approvals, and publishing.
+
+2026-10-20: Deploy PR #944 durable Airtable egress hourly telemetry; preserve Airtable SoR and existing production shadow capture/reconcile, keep Home/refill summary reads OFF. Ensure prod Worker canary, rollback and namespace bindings remain healthy.
