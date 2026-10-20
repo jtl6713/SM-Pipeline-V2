@@ -450,3 +450,5 @@ Release Studio UI 0.6.723: fast Profile Admin voice/music load and playable name
 2026-10-19 Studio Pages UI 0.6.724 four-city scenic Home launcher | PR #918 | Preserve Vibe Cut, completed-video and classic wizard handlers | Cloudflare Pages deployment only after PR regression checks.
 2026-10-19: Deploy PR #926 Home overview counters: profile parentheses show approved outputs scheduled in the past but unpublished; Awaiting Approval shows produced, review-ready outputs without final approval. Airtable remains authoritative; preserve scheduled dispatch counters and refresh invariants.
 # Release UI 0.6.725: Profile Admin music preview streams through authenticated Studio proxy.
+
+2026-10-20: Deploy merged #937 Home approved-unpublished profile-parentheses metric. Preserve Airtable write authority, profile-summary circuit breaker, approvals, and publishing.
