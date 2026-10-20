@@ -1909,6 +1909,39 @@ export default {
         }
       }
 
+      if (url.pathname === "/api/profiles/overview/summary/runner-airtable-egress") {
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        requireAnyPermission(authorization, ["tenant_admin", "production_configure"]);
+        const base = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\\/+$/, "");
+        const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+        if (!base || !secret) return respond(request, env,
+          { ok: false, reason: "runner_metrics_proxy_not_configured" }, 503);
+        const hours = Math.max(1, Math.min(72, Number(url.searchParams.get("hours")) || 48));
+        let upstream;
+        try {
+          upstream = await fetch(base + "/admin/airtable-egress?hours=" + hours, {
+            method: "GET",
+            headers: { "X-Pipeline-Secret": secret, "Accept": "application/json" },
+            signal: AbortSignal.timeout(12000),
+          });
+        } catch (_) {
+          return respond(request, env, { ok: false, reason: "runner_metrics_unreachable" }, 503);
+        }
+        if (!upstream.ok) return respond(request, env,
+          { ok: false, reason: "runner_metrics_upstream_unavailable" }, 503);
+        const payload = await upstream.json().catch(() => null);
+        if (!payload?.ok || !Array.isArray(payload.hourly)) return respond(request, env,
+          { ok: false, reason: "runner_metrics_invalid_response" }, 503);
+        return respond(request, env, {
+          ok: true, source: "pipeline_runner_sqlite",
+          hourly: payload.hourly.map(row => ({
+            hour_utc: row.hour_utc, source: row.source,
+            method: row.method, status_class: row.status_class,
+            attempts: row.attempts,
+          })),
+        });
+      }
+
       if (url.pathname === "/api/profiles/overview/summary/airtable-egress") {
         if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
         requireAnyPermission(authorization, ["tenant_admin", "production_configure"]);
