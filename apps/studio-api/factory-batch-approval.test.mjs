@@ -144,6 +144,8 @@ test("Factory cron never burns Airtable occupancy scans before claiming profile 
   assert.match(source, /requireComplete: true/);
   assert.match(source, /profile, platform, requireComplete: true/);
   assert.match(source, /loadedOccupancyPlatforms\.add\(platform\)/);
+  assert.match(source, /for \(const \[lane, times\] of Object\.entries\(platformOccupancy\)\)/);
+  assert.match(source, /\(occupiedByLane\[lane\] \|\|= \[\]\)\.push\(\.\.\.times\)/);
   assert.doesNotMatch(source, /profile, requireComplete: true/);
   assert.match(source, /filter\(\(item\) => !\["approved", "already_satisfied", "failed"\]/);
   assert.match(source, /skipOccupancyRefresh: true/);
