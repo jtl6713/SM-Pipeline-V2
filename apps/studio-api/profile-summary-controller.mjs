@@ -148,6 +148,7 @@ async function runStudioProfileSummaryReconcile(env) {
       city_label: info.find((p) => p.id === profile.id)?.city_label,
       scheduled, manual: metrics.manual_action_required,
       failed: metrics.failed_outputs, approval: metrics.awaiting_approval,
+      approved_unpublished: metrics.approved_unpublished,
       overdue_unpublished: metrics.overdue_unpublished,
       ideas: metrics.ideas_not_in_production, metrics,
     });
