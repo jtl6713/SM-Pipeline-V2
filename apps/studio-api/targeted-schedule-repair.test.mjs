@@ -6,20 +6,22 @@ import { fileURLToPath } from "node:url";
 
 const source = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "worker-functions-04.mjs"), "utf8");
 
-test("targeted repair is opt-in and requires a single atomic lane", () => {
-  assert.match(source, /payload\.repair_date/);
-  assert.match(source, /Targeted repair requires exactly one selected profile, platform, and output type/);
-  assert.match(source, /Targeted repair requires the atomic scheduling reservation authority/);
-  assert.match(source, /Targeted repair cannot run without atomic reservation protection/);
+test("targeted repair is opt-in and requires one atomic lane", () => {
+  assert.ok(source.includes("payload.repair_date"));
+  assert.ok(source.includes("Targeted repair requires exactly one selected profile, platform, and output type"));
+  assert.ok(source.includes("Targeted repair requires the atomic scheduling reservation authority"));
+  assert.ok(source.includes("Targeted repair cannot run without atomic reservation protection"));
 });
 
-test("targeted repair selects only duplicate scheduled stamps on the profile-local date", () => {
-  assert.match(source, /maeZonedDateTimeParts\(new Date\(stamp\), timeZone\)/);
-  assert.match(source, /localDay === job\.repair_date/);
-  assert.match(source, /claimed\.has\(stamp\) \|\| protectedTimes\.includes\(stamp\)/);
-  assert.match(source, /eligibleIds = displaced\.map\(\(row\) => row\.id\)/);
+test("overage selection considers shared platform occupancy and local day", () => {
+  assert.ok(source.includes("platformRows = await listRecords"));
+  assert.ok(source.includes("maeZonedDateTimeParts(new Date(stamp), timeZone)"));
+  assert.ok(source.includes("localDate(stamp) === job.repair_date"));
+  assert.ok(source.includes("claimed.has(stamp)"));
+  assert.ok(source.includes("displacedIds.has(row.id)"));
+  assert.ok(source.includes("Targeted repair requires a complete platform occupancy scan"));
 });
 
-test("ordinary regeneration keeps its existing full eligible selection", () => {
-  assert.match(source, /else \{\s*eligibleIds = eligible\.map\(\(row\) => row\.id\)/);
+test("normal regeneration still selects all eligible records", () => {
+  assert.ok(source.includes("eligibleIds = eligible.map((row) => row.id)"));
 });
