@@ -3570,10 +3570,15 @@ export async function startScheduleRegenJob(request, env, authorization, ctx = n
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(new URL(request.url), payload));
   const { platforms, outputTypes, profiles } = studioNormalizeRegenFilters(payload);
   const repairDate = String(payload.repair_date || "").trim();
-  if (repairDate && !/^\d{4}-\d{2}-\d{2}$/.test(repairDate)) {
-    throw new HttpError(400, "repair_date must be YYYY-MM-DD");
+  if (repairDate) {
+    const parsed = new Date(repairDate + "T00:00:00Z");
+    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(repairDate)
+      || !Number.isFinite(parsed.getTime())
+      || parsed.toISOString().slice(0, 10) !== repairDate) {
+      throw new HttpError(400, "repair_date must be a real YYYY-MM-DD date");
+    }
   }
-  if (repairDate && (profiles.length > 1 || !profile?.id || platforms.length !== 1 || outputTypes.length !== 1)) {
+  if (repairDate && (profiles.length > 1 || (profiles.length === 1 && profiles[0].id !== profile?.id) || !profile?.id || platforms.length !== 1 || outputTypes.length !== 1)) {
     throw new HttpError(400, "Targeted repair requires exactly one selected profile, platform, and output type");
   }
   if (repairDate && !scheduleReservationLaneEnabled(env, profile?.id, platforms[0])) {
