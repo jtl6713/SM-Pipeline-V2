@@ -4828,7 +4828,7 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
         : `AND({Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK())`;
       const [outputs, ideas] = await Promise.all([
         listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-          airtableEgressSource: "home_overview_refresh",
+          airtableEgressSource: options.airtableEgressSource === "autonomous_refill_scan" ? "autonomous_refill_scan" : "home_overview_refresh",
           limit: STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT,
           filterFormula: profileOutputFormula,
           sortField: "Output_ID",
@@ -4836,7 +4836,7 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
           fields: OUTPUT_LIST_FIELDS,
         }),
         listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
-          airtableEgressSource: "home_overview_refresh",
+          airtableEgressSource: options.airtableEgressSource === "autonomous_refill_scan" ? "autonomous_refill_scan" : "home_overview_refresh",
           limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
           filterFormula: profileIdeaFormula,
           fields: ["Content_Profile", "Promoted_Content_Record_ID", "Content Items"],
@@ -11752,13 +11752,13 @@ export async function studioLoadAutonomousRefillScores(env, profiles, { refresh 
     try {
       // The hourly runner passes display-mapped profiles. Resolve their IDs
       // back to full Airtable records before matching outputs and Ideas.
-      const raw = await listContentProfileRecords(env);
+      const raw = await listContentProfileRecords(env, { airtableEgressSource: "autonomous_refill_scan" });
       const byId = new Map(raw.map((profile) => [profile.id, profile]));
       const authoritative = enabled.map((profile) => byId.get(profile.id));
       if (authoritative.some((profile) => !profile?.fields || !f(profile, "Profile_Name"))) {
         throw new Error("Hourly refill cannot resolve complete Content Profile records");
       }
-      rows = await buildStudioProfilesOverviewRows(env, authoritative, { commitIdeas: false });
+      rows = await buildStudioProfilesOverviewRows(env, authoritative, { commitIdeas: false, airtableEgressSource: "autonomous_refill_scan" });
       validateStudioProfilesOverviewRows(rows, authoritative);
       // Refill scoring is a consumer, not a Home snapshot writer. Only Home's
       // own full authorized-profile build may update the shared durable snapshot.
