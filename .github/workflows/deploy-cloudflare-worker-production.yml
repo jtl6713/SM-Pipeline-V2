@@ -765,6 +765,19 @@ jobs:
           done
           jq -e --arg stage "$EXPECTED_STAGE" --argjson total "$EXPECTED_TOTAL" --argjson per "$EXPECTED_PER_PROFILE" '.ok==true and .scope=="all" and .global_rollout.enabled==true and .global_rollout.stage==$stage and .global_rollout.max_total==$total and .global_rollout.max_per_profile==$per and .global_rollout.allowed_platforms==["Instagram","Facebook","TikTok","YouTube"] and .global_rollout.allowed_output_types_by_platform=={"Instagram":["Reel","Story","Single Image","Carousel"],"Facebook":["Reel","Story","Single Image","Multi-Image Post","Slideshow Reel"],"TikTok":["Video Draft","Story","Single Photo","Multi-Photo"],"YouTube":["Short","Standard Video","Slideshow Video"]}' /tmp/factory-batch-global.json >/dev/null || { echo "Global Factory read-only canary failed (HTTP $GLOBAL_CODE)" >&2; exit 1; }
           echo "factory_global_read_only_canary=PASS signed_stage=$EXPECTED_STAGE total=$EXPECTED_TOTAL per_profile=$EXPECTED_PER_PROFILE"
+          # Sanitize operational counts from the same authorized read-only call.
+          # Nothing here posts approvals, schedules, publishes or writes to R2.
+          jq -c '{
+            observed_at: now | todateiso8601,
+            totals,
+            active_batches: [.batches[]? | {
+              status, created_at, updated_at, total, approved_count, pending_count, failed_count,
+              children: [.children[]? | {
+                profile_id, status, updated_at, total, approved_count, pending_count, failed_count
+              }]
+            }]
+          }' /tmp/factory-batch-global.json | sed 's/^/factory_global_progress_snapshot=/'
+
           # Read-only sanitized acceptance snapshot: expose real pending progress
           # without logging output identifiers or changing approval state.
           jq -c '{evidence:"factory_active_backlog",totals:(.totals // {}),
