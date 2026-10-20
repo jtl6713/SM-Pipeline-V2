@@ -1,6 +1,10 @@
 name: Shadow Profile Summary Evidence (hourly)
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/shadow-profile-summary-hourly-evidence.yml'
   schedule:
     - cron: '13 * * * *'
 permissions:
@@ -16,6 +20,9 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
+      - uses: actions/checkout@v6
+      - name: Test freshness window accounting
+        run: python -m unittest discover -s repair/scripts -p 'shadow_freshness_window_report_test.py' -v
       - name: Collect read-only metrics through temporary service binding
         shell: bash
         run: |
@@ -46,9 +53,12 @@ jobs:
           curl -fsS "$api/workers/subdomain" -H "$auth" >account.json
           sub=$(jq -er '.result.subdomain' account.json)
           curl -fsS --max-time 30 "https://$name.$sub.workers.dev/$token/evidence" >status.json
-          jq -e '.ok == true and (.evidence | type) == "object"' status.json >/dev/null
+          jq -e '.ok == true and .complete == true and (.evidence | type) == "object"' status.json >/dev/null
           jq '{captured_at:(now|todate),summary_version:.version,complete:.complete,building_generation:.building_generation,error:.error,evidence:.evidence}' status.json >evidence.json
           cat evidence.json
+          echo '### Shadow profile hourly observation' >> "$GITHUB_STEP_SUMMARY"
+          jq -r '"- Captured: " + .captured_at + "\\n- Summary version: " + (.summary_version|tostring) + "\\n- Dirty applied: " + (.evidence.dirty_applied|tostring) + "\\n- Airtable dirty attempts: " + (.evidence.airtable_dirty_batch_attempts|tostring) + "\\n- Airtable dirty errors: " + (.evidence.airtable_dirty_batch_errors|tostring)' evidence.json >> "$GITHUB_STEP_SUMMARY"
+          echo '- Interpretation: cumulative telemetry only; these values do not establish full Airtable request savings.' >> "$GITHUB_STEP_SUMMARY"
       - name: Save evidence artifact
         if: always()
         uses: actions/upload-artifact@v4
