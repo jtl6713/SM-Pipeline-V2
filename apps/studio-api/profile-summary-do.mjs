@@ -73,6 +73,12 @@ export class StudioProfileSummary {
       if (!stageColumns.includes("approved_future_at")) {
         this.sql.exec("ALTER TABLE stage ADD COLUMN approved_future_at INTEGER NOT NULL DEFAULT 0");
       }
+      // A v1 tally counted only future scheduled outputs. Do not serve stale
+      // counters as v2: force authoritative reconciliation before summary reads.
+      if (this.getMeta("approved_unpublished_definition") !== "all_final_approved_unpublished_v2") {
+        this.putMeta("approved_unpublished_definition", "all_final_approved_unpublished_v2");
+        this.putMeta("future_count_reconcile_required", "true");
+      }
     });
   }
   incrementMetric(key, amount = 1) {
@@ -182,9 +188,9 @@ export class StudioProfileSummary {
         const overdueByProfile = new Map(records(this.sql,
           "SELECT profile_id,COUNT(*) AS amount FROM ledger WHERE overdue_due_at>0 AND overdue_due_at<=? GROUP BY profile_id",
           Date.now()).map((row) => [row.profile_id, Number(row.amount || 0)]));
-        const futureByProfile = new Map(records(this.sql,
-          "SELECT profile_id,COUNT(*) AS amount FROM ledger WHERE approved_future_at>=? GROUP BY profile_id",
-          Date.now()).map((row) => [row.profile_id, Number(row.amount || 0)]));
+        // Stable final-approved/unpublished membership is owned by the
+        // authoritative per-record ledger contribution. Time must not cause
+        // the parentheses to shrink without a publication or review change.
         const lastReconciled = Number(this.getMeta("last_reconciled_at") || 0);
         const pending = records(this.sql, "SELECT COUNT(*) AS n FROM pending")[0]?.n || 0;
         return json({
@@ -201,10 +207,10 @@ export class StudioProfileSummary {
               scheduled: c.scheduled, manual: c.manual_action_required,
               failed: c.failed_outputs, approval: c.awaiting_approval,
               ideas: c.ideas_not_in_production,
-              approved_unpublished: futureByProfile.get(p.id) || 0,
+              approved_unpublished: c.approved_unpublished,
               overdue_unpublished: overdue,
               metrics: {
-                ...c, approved_unpublished: futureByProfile.get(p.id) || 0,
+                ...c, approved_unpublished: c.approved_unpublished,
                 overdue_unpublished: overdue, manual_action_required: c.manual_action_required,
                 failed_outputs: c.failed_outputs, awaiting_approval: c.awaiting_approval,
                 ideas_not_in_production: c.ideas_not_in_production,
