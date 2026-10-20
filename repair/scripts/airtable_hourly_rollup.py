@@ -59,9 +59,19 @@ def report(worker, runner, captured_at):
     older = window(rows, boundary - timedelta(hours=48), boundary - timedelta(hours=24))
     recent = window(rows, boundary - timedelta(hours=24), boundary)
     present = worker.get("ok") is True and runner.get("ok") is True
+    # A missing hour is not zero traffic. Withhold differences until both
+    # sources have activity in every hour of both windows. This conservative
+    # check cannot certify zero-activity hours; those require independent
+    # collector liveness attestations before a complete savings claim.
+    comparable = present and all(
+        snapshot["worker_hours_with_events"] == 24 and
+        snapshot["runner_hours_with_events"] == 24
+        for snapshot in (older, recent)
+    )
     return {"captured_at": captured.isoformat(), "core_sources_collected": present,
+            "hourly_coverage_sufficient_for_observed_difference": comparable,
             "prior_24h": older, "latest_complete_24h": recent,
-            "observed_difference_requests": (older["attempts_observed"] - recent["attempts_observed"]) if present else None,
+            "observed_difference_requests": (older["attempts_observed"] - recent["attempts_observed"]) if comparable else None,
             "system_wide_complete": False, "net_saved_requests": None,
             "not_yet_proven": ["complete 24-hour instrumentation history", "standalone and external Airtable writers",
                                "matched workload/traffic comparability", "zero-versus-missing hour attestations"],
