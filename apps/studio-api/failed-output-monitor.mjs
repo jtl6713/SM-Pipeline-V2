@@ -24,7 +24,17 @@ export async function scanOutstandingFailedOutputs(fetchPage, { pageSize = 100, 
 
 const text = (row, key) => String(row?.fields?.[key] ?? row?.[key] ?? "").trim();
 const truthy = (row, key) => row?.fields?.[key] === true || row?.[key] === true;
-const firstLinkedId = (value) => Array.isArray(value) ? String(value[0] || "") : String(value || "");
+function firstLinkedId(value) {
+  if (Array.isArray(value)) {
+    const first = value[0];
+    return typeof first === "object" ? String(first?.id || first?.name || "") : String(first || "");
+  }
+  if (value && typeof value === "object") {
+    const nested = Object.values(value.valuesByLinkedRecordId || {}).flat();
+    return String(nested[0]?.id || nested[0]?.name || value.linkedRecordIds?.[0] || "");
+  }
+  return String(value || "");
+}
 
 /** Enforce publication idempotency, cooldowns and bounded automatic retries. */
 export function failedOutputRetryGate(record, { nowMs = Date.now(), maxAttempts = 3 } = {}) {
