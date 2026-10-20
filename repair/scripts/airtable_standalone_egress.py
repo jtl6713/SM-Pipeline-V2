@@ -80,6 +80,33 @@ def export(db_path, *, source, start, end):
               for h,ok,at in heartbeats],
             "note":"An attestation proves only this instrumented store was queried successfully, not that all independent processes use it."}
 
+def install_requests_monitor(db_path, source="standalone_scripts"):
+    """Intercept all requests.Session.send Airtable attempts in this process.
+
+    Install at process entry before making HTTP requests. Persist an event for
+    each completed or failed send, without storing sensitive request details.
+    """
+    import requests
+    import uuid
+    from urllib.parse import urlsplit
+    current=requests.sessions.Session.send
+    if getattr(current, "_studio_standalone_monitored", False):
+        return
+    def send(session, request, **kwargs):
+        if urlsplit(request.url).hostname != "api.airtable.com":
+            return current(session, request, **kwargs)
+        status="network_error"
+        try:
+            response=current(session, request, **kwargs)
+            status=str(response.status_code // 100)+"xx"
+            return response
+        finally:
+            record_attempt(db_path, event_id=uuid.uuid4().hex, source=source,
+                           method=request.method, status_class=status,
+                           at=datetime.now(timezone.utc))
+    send._studio_standalone_monitored=True
+    requests.sessions.Session.send=send
+
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--db",required=True)
