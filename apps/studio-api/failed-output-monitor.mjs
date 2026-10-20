@@ -1,5 +1,5 @@
 /** Complete, read-only failed-output census used by Desk and Factory Quality Agent. */
-export const FAILED_OUTPUT_FORMULA = 'AND({Test_Run_ID}=BLANK(),OR({Output_Status}="Failed",{Render_Status}="Failed",{Publish_Status}="Failed",AND({Publish_Error_Message}!="",{Published_At}=BLANK()),AND({IG_Carousel_Error_Message}!="",{Published_At}=BLANK())))';
+export const FAILED_OUTPUT_FORMULA = 'AND({Test_Run_ID}=BLANK(),OR({Output_Status}="Failed",{Render_Status}="Failed",{Publish_Status}="Failed",AND({Publish_Error_Message}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published"),AND({IG_Carousel_Error_Message}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published")))';
 
 export async function scanOutstandingFailedOutputs(fetchPage, { pageSize = 100, filterFormula = FAILED_OUTPUT_FORMULA } = {}) {
   const records = [];
@@ -93,6 +93,19 @@ export function describeFailedOutput(record, nowMs = Date.now()) {
   } else if (error) {
     recovery = "diagnostic";
     action = "Inspect the remaining error and current stage; do not reset a progressing output.";
+  }
+  if (!publishedEvidence && /AP1C slide-set mismatch/i.test(error)) {
+    recovery = "needs_attention";
+    action = "Reconcile the actual carousel slides with the configured expected count, repair the slide set, and retry AP1C; never publish an incomplete carousel.";
+  } else if (!publishedEvidence && /only photo or video can be accepted as media type/i.test(error)) {
+    recovery = "needs_attention";
+    action = "Replace the unsupported carousel slide media with a valid photo or video, then retry child creation; do not blindly retry HTTP 400.";
+  } else if (!publishedEvidence && /parent container terminal state|AP3P.*poll timeout/i.test(error)) {
+    recovery = "healer_eligible";
+    action = "Allow the existing AP3C parent-container recreation path to run within its retry guards; verify the replacement parent before publication.";
+  } else if (!publishedEvidence && /facebook rate limit|1390008|\\b368\\b/i.test(error)) {
+    recovery = "cooldown";
+    action = "Honor the Facebook publishing cooldown and rate-limit rearm; never force immediate publication.";
   }
   return {
     record_id: record.id, output_id: outputId || null, title: text(record, "Output_Title") || null,
