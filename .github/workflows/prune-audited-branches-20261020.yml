@@ -115,6 +115,23 @@ jobs:
               print("deleted=" + name)
           print("deleted_count=" + str(len(deleted)))
           print("retained_open_pr_branches=" + str(len(keep)))
+          # Remove the temporary PR branch for this one-shot maintenance change,
+          # only after GitHub confirms the PR merged and the pinned head is unchanged.
+          self_name = "chore/prune-audited-branches-20261020"
+          self_pr = api("pulls/999")
+          if not self_pr.get("merged") or self_pr["head"]["ref"] != self_name:
+              raise SystemExit("Cleanup PR not verified merged; keep maintenance branch")
+          try:
+              self_ref = api("branches/" + urllib.parse.quote(self_name, safe="/"))
+          except urllib.error.HTTPError as e:
+              if e.code != 404:
+                  raise
+              self_ref = None
+          if self_ref is not None:
+              if self_ref["commit"]["sha"] != self_pr["head"]["sha"] or self_ref.get("protected"):
+                  raise SystemExit("Maintenance branch moved/protected; leave untouched")
+              api("git/refs/heads/" + urllib.parse.quote(self_name, safe="/"), method="DELETE")
+              print("deleted_maintenance_branch=" + self_name)
           current = api("branches?per_page=100")
           remaining = {b["name"] for b in current}
           if remaining != {"main"} | keep:
