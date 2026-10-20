@@ -261,3 +261,5 @@ jobs:
 # Controlled single retry for PR 884 after verified rollback; 2026-10-18 profile creative guidance.
 
 # 2026-10-20: Deploy PR #935 runner-wide sanitized Airtable HTTP egress monitoring, preserving production pipeline behavior. Smoke-test monitor before Ops deploy.
+
+# 2026-10-20: Roll out PR #944 durable Airtable request accounting to runner, persist using /scratch/metrics on the existing volume, and verify shared-secret metrics endpoint without impacting pipeline writes.
