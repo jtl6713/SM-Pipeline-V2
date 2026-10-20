@@ -15,15 +15,18 @@ test("Needs eyes shows a bounded iPad page and can reach all review groups", () 
   const node = {
     innerHTML: "",
     scrollTop: 5,
+    bound: {},
     querySelectorAll(selector) {
+      if (this.bound[selector]) return this.bound[selector];
       const attr = selector === "[data-factory-review-page]" ? "data-factory-review-page" :
         selector === "[data-factory-toggle-content]" ? "data-factory-toggle-content" : null;
       if (!attr) return [];
-      return [...this.innerHTML.matchAll(new RegExp(attr + '="([^"]+)"', "g"))]
+      this.bound[selector] = [...this.innerHTML.matchAll(new RegExp(attr + '="([^"]+)"', "g"))]
         .map(match => ({
           dataset: selector.includes("review-page") ? {factoryReviewPage:match[1]} : {factoryToggleContent:match[1]},
           addEventListener(event, fn) { if(event === "click") this.click = fn; }
         }));
+      return this.bound[selector];
     }
   };
   const ctx = {
@@ -33,7 +36,7 @@ test("Needs eyes shows a bounded iPad page and can reach all review groups", () 
     renderCard:c=>'<article>'+c.id+'</article>',
   };
   const renderLane = vm.runInNewContext(renderer+"\nrenderLane",ctx);
-  const render=()=>renderLane("needsEyes",cards,"Empty",{groupContent:true});
+  const render=()=>{node.bound={};renderLane("needsEyes",cards,"Empty",{groupContent:true});};
   ctx.renderDesk=render;
   render();
   assert.match(node.innerHTML,/Showing 1–12 of 31 content items · 31 outputs in queue/);
