@@ -544,3 +544,5 @@ Deploy targeted November 17 MAE overage selector from merged PR #936; no automat
 2026-10-20: Home parentheses represent a net approved-unpublished backlog. Do not drop provider uploads/draft handoffs marked Completed/Succeeded until explicit publishing proof; preserve Airtable write authority, Supabase Phase 5 and human approval gates.
 
 2026-10-20: Deploy verified Home approved-unpublished classifier (merged #948) after synchronizing runtime preflight to guarded preservation of active scheduling reservation lanes. Validated tests; no authority, approval, publishing, or secret changes.
+
+2026-10-20: Fix Home approved-but-unpublished parentheses stale snapshot: 2-minute Airtable snapshot TTL and cooldown-gated automatic background output reconciliation; no Supabase reads or approval side effects.
