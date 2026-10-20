@@ -1,3 +1,4 @@
+import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import { scheduleReservationAuthorityEnabled } from "./schedule-reservation-authority.mjs";
 import { creativeSettingName, parseCreativeGuidance } from "./profile-creative-guidance.mjs";
@@ -2430,7 +2431,11 @@ export async function getItem4WorkspaceStatus(request, env, url, authorization, 
       state: f(record, "Studio_Item4_State") || "Draft",
       assets_status: f(record, "Studio_Master_Asset_Status") || "None",
       assets,
-      plan_status: f(record, "Studio_Output_Plan_Status") || "Needs Plan",
+      plan_status: item4EffectivePlanStatus(
+      f(record, "Studio_Output_Plan_Status"),
+      item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null),
+      f(record, "Request_Status")
+    ).status,
       plan: item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null),
       variant_status: f(record, "Studio_Variant_Status") || "None",
       variant_updated_at: f(record, "Studio_Variant_Updated_At") || null,
@@ -2608,7 +2613,11 @@ export async function getItem4WorkspaceStatus(request, env, url, authorization, 
     state: f(record, "Studio_Item4_State") || "Draft",
     assets_status: assetsStatus,
     assets,
-    plan_status: f(record, "Studio_Output_Plan_Status") || "Needs Plan",
+    plan_status: item4EffectivePlanStatus(
+      f(record, "Studio_Output_Plan_Status"),
+      item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null),
+      f(record, "Request_Status")
+    ).status,
     plan,
     variant_status: variantStatus,
     variant_updated_at: f(record, "Studio_Variant_Updated_At") || null,
@@ -2764,7 +2773,11 @@ export function mapProductionRequest(record, ideaTitle = null) {
     studio_master_asset_count: Number(f(record, "Studio_Master_Asset_Count") || 0),
     studio_master_asset_status: f(record, "Studio_Master_Asset_Status") || "None",
     studio_output_plan: studioOutputPlan,
-    studio_output_plan_status: f(record, "Studio_Output_Plan_Status") || "Needs Plan",
+    studio_output_plan_status: item4EffectivePlanStatus(
+      f(record, "Studio_Output_Plan_Status"),
+      item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null),
+      f(record, "Request_Status")
+    ).status,
     studio_variant_manifest: item4ParseJson(f(record, "Studio_Variant_Manifest_JSON"), null),
     studio_variant_status: f(record, "Studio_Variant_Status") || "None",
     studio_variant_updated_at: f(record, "Studio_Variant_Updated_At") || null,
@@ -3453,7 +3466,11 @@ export function mapProductionRequestLight(record, ideaTitle = null) {
     active: Boolean(f(record, "Active")),
     studio_master_asset_count: Number(f(record, "Studio_Master_Asset_Count") || 0),
     studio_master_asset_status: f(record, "Studio_Master_Asset_Status") || "None",
-    studio_output_plan_status: f(record, "Studio_Output_Plan_Status") || "Needs Plan",
+    studio_output_plan_status: item4EffectivePlanStatus(
+      f(record, "Studio_Output_Plan_Status"),
+      item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null),
+      f(record, "Request_Status")
+    ).status,
     studio_variant_status: f(record, "Studio_Variant_Status") || "None",
     studio_variant_updated_at: f(record, "Studio_Variant_Updated_At") || null,
     studio_variant_error: f(record, "Studio_Variant_Error") || null,
