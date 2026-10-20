@@ -3,12 +3,16 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - main
+      - feature/airtable-evidence-coverage-guard-rebased-20261020
       - feature/automatic-shadow-evidence-20261020
       - feature/durable-airtable-egress-20261020
       - feature/airtable-hourly-rollup-report-20261020
       - feature/automatic-24h-shadow-evidence-20261020
     paths:
       - 'repair/scripts/audit_airtable_egress_paths.py'
+      - 'repair/scripts/audit_airtable_egress_paths_test.py'
+      - '.github/workflows/shadow-profile-summary-hourly-evidence.yml'
       - '.github/workflows/airtable-egress-coverage-audit.yml'
       - 'repair/scripts/airtable_hourly_rollup.py'
       - 'repair/scripts/airtable_hourly_rollup_test.py'
@@ -29,11 +33,17 @@ jobs:
           python - <<'PY'
           import json
           obj=json.load(open('airtable-egress-coverage.json'))
-          print('airtable_egress_unverified_paths='+str(obj['unverified_count']))
+          print('airtable_production_unverified='+str(obj['production_runtime_unverified_count']))
+          print('airtable_standalone_unverified='+str(obj['standalone_unverified_count']))
+          print('airtable_staging_only='+str(obj['staging_only_count']))
           for p in obj['candidates']:
-              if p['coverage'].startswith('UNVERIFIED'):
-                  print('unverified_path='+p['path']+' lines='+','.join(map(str,p['lines'])))
+              if p['scope'] in ('production_runtime_unverified','standalone_unverified'):
+                  print(p['scope']+'='+p['path']+' lines='+','.join(map(str,p['lines'])))
+          if obj['production_runtime_unverified_count']:
+              raise SystemExit('Uninstrumented production-runtime Airtable code path discovered')
           PY
+      - name: Verify coverage scope classification
+        run: python -m unittest discover -s repair/scripts -p 'audit_airtable_egress_paths_test.py' -v
       - name: Test equal-window reporting safety
         run: python -m unittest discover -s repair/scripts -p 'airtable_request_window_report_test.py' -v
       - name: Test durable hourly window accounting
