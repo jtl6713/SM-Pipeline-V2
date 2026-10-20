@@ -28,6 +28,8 @@ jobs:
         run: python -m unittest discover -s repair/scripts -p 'shadow_freshness_window_report_test.py' -v
       - name: Verify rollup logic
         run: python -m unittest discover -s repair/scripts -p 'airtable_hourly_rollup_test.py' -v
+      - name: Inventory direct Airtable call sites without additional requests
+        run: python repair/scripts/airtable_direct_egress_inventory.py --output airtable-direct-egress-inventory.json
       - name: Test source coverage and matched baseline gates
         run: python -m unittest discover -s repair/scripts -p 'airtable_coverage_baseline_test.py' -v
       - name: Test automatic 24-hour evidence gate
@@ -147,6 +149,7 @@ jobs:
             runner-airtable-egress.json
             airtable-egress-coverage.json
             airtable-baseline-assessment.json
+            airtable-direct-egress-inventory.json
             airtable-hourly-rollup.json
             freshness-24h.json
           retention-days: 30
