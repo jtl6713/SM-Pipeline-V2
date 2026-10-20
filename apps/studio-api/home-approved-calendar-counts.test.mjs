@@ -106,6 +106,6 @@ test("Home UI combines future and human-review per platform, not rendering queue
   assert.match(ui,/Future \+ Review platform outputs/);
   assert.match(ui,/Pipeline · Total/);
   assert.match(ui,/Ideas Needed/);
-  assert.match(ui,/pipelineTotal: future \+ awaiting/);
+  assert.match(ui,/const pipelineTotal = future \+ awaiting/);
   assert.match(ui,/Math.ceil\(Math.max\(0, 500 - pipelineTotal\) \/ 5\)/);
 });
