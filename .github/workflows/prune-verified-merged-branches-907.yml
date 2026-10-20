@@ -34,7 +34,7 @@ jobs:
           # Clean up this merged cleanup PR branch itself only if the merge snapshot
           # still matches its exact head SHA; a post-merge push must be retained.
           pr=api("pulls/917")
-          if pr.get("merged") and pr.get("head",{}).get("ref")=="chore/907-prune-verified-merged-branches" and pr.get("head",{}).get("repo",{}).get("full_name")==repo:
+          if pr.get("merged") and pr.get("head",{}).get("ref")=="chore/907-prune-verified-merged-branches" and (pr.get("head",{}).get("repo") or {}).get("full_name")==repo:
               pins["chore/907-prune-verified-merged-branches"]=pr["head"]["sha"]
               archived_names.add("chore/907-prune-verified-merged-branches")
           open_prs=api("pulls?state=open&per_page=100")
