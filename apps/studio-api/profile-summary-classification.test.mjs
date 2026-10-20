@@ -95,7 +95,7 @@ test("overdue unpublished survives dispatch, but disappears after publication", 
   }).overdue_unpublished, 0);
 });
 
-test("parentheses include only final-approved, non-past Scheduled_Post_Date", () => {
+test("parentheses include every final-approved unpublished output regardless of schedule", () => {
   const now = Date.parse("2026-10-20T11:00:00Z");
   const ready = { ...base, render_status: "Rendered", review_status: "",
     studio_state: "Ready for Review" };
@@ -116,7 +116,7 @@ test("parentheses include only final-approved, non-past Scheduled_Post_Date", ()
     const row = { ...ready, review_status: "Approved",
       output_status: "Approved for Publishing", studio_state: "Scheduled",
       scheduled_post_date };
-    assert.equal(homeOutputContribution(row, now).approved_unpublished, 0,
+    assert.equal(homeOutputContribution(row, now).approved_unpublished, 1,
       String(scheduled_post_date));
   }
   const future = { ...ready, review_status: "Approved", scheduled_post_date: "2026-10-21T11:00:00Z" };
@@ -137,10 +137,10 @@ test("parentheses include only final-approved, non-past Scheduled_Post_Date", ()
     youtube_scheduled_publish_at: "2099-01-01T00:00:00Z",
   }), 0, "never substitute alternative dates for scheduled publication");
   assert.equal(homeApprovedUnpublished(future, now), true);
-  assert.equal(homeApprovedUnpublished(future, Date.parse("2026-10-22T11:00:00Z")), false);
+  assert.equal(homeApprovedUnpublished(future, Date.parse("2026-10-22T11:00:00Z")), true);
 });
 
-test("delivered drafts count in parentheses only if publication is still in future", () => {
+test("delivered drafts remain in parentheses until publication succeeds", () => {
   const now = Date.parse("2026-10-20T11:00:00Z");
   const ready = { ...base, render_status: "Rendered", review_status: "" };
   for (const platform of ["Instagram", "Facebook", "TikTok", "YouTube"]) {
@@ -151,7 +151,7 @@ test("delivered drafts count in parentheses only if publication is still in futu
         scheduled_post_date: "2026-10-21T11:00:00Z", studio_publish_dispatch_count: 1 };
       assert.equal(homeOutputContribution(row, now).approved_unpublished, 1, platform + " " + state);
       assert.equal(homeOutputContribution({ ...row,
-        scheduled_post_date: "2026-10-19T11:00:00Z" }, now).approved_unpublished, 0);
+        scheduled_post_date: "2026-10-19T11:00:00Z" }, now).approved_unpublished, 1);
       for (const published of [
         { published_at: "2026-10-19T11:00:00Z" },
         { platform_post_url: "https://example.test/post" },
