@@ -5568,7 +5568,8 @@ const STUDIO_OVERDUE_SCHEDULED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 // use a 10s TTL so a 5s All Profiles poll can see fresh output counts, and a
 // stale snapshot is still served immediately while a rebuild runs in the background.
 // Ideas counts refresh on a slower cadence and must not block that output rebuild.
-const STUDIO_PROFILES_OVERVIEW_CACHE_MS = 15 * 60 * 1000;
+// Approval counts must not be frozen for 15 minutes; expired snapshots refresh in the background.
+const STUDIO_PROFILES_OVERVIEW_CACHE_MS = 2 * 60 * 1000;
 const STUDIO_PROFILES_OVERVIEW_SUPABASE_CACHE_MS = 10 * 1000;
 const STUDIO_PROFILES_OVERVIEW_IDEAS_REFRESH_MS = 15 * 60 * 1000;
 const STUDIO_PROFILES_OVERVIEW_SNAPSHOT_KEY = "studio/state/profiles-overview.json";
