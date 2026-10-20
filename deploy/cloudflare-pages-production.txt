@@ -468,3 +468,5 @@ Release Studio UI 0.6.723: fast Profile Admin voice/music load and playable name
 2026-10-20: Studio UI 0.6.731-factory-quality-collapse. Make Factory Quality Agent a native collapsed-by-default disclosure with live count visible; preserve findings refresh, Operations Quality Agent, and backend behavior. Trigger guarded Pages production deployment.
 
 Deploy Studio UI 0.6.732-progress-count: Production and Ideas unknown progress count fixes (#1008), full cache-key bump. Trigger controlled Pages production deployment 2026-10-20.
+
+Retry Studio UI 0.6.732-progress-count production Pages deploy after updating hard-coded regression version expectations; 2026-10-20.
