@@ -52,7 +52,8 @@ def source_hour_gaps(sources, required_hours):
         except (ValueError, TypeError, OverflowError):
             gaps[source] = ["invalid_hour_manifest"]
             continue
-        missing = [h for h in required_hours if h not in canonical
+        needed_hours = required_hours if required_hours else sorted(canonical)
+        missing = [h for h in needed_hours if h not in canonical
                    or not isinstance(attestations.get(h), dict)
                    or attestations[h].get("collector_ok") is not True
                    or attestations[h].get("complete") is not True]
