@@ -9,7 +9,7 @@ const root = dirname(fileURLToPath(import.meta.url));
 
 test("Worker version is 0.10.670-profile-summary-parity", () => {
   const worker = readFileSync(join(root, "worker.js"), "utf8");
-  assert.match(worker, /version: "0\.10\.669-profile-summary-await"/);
+  assert.match(worker, /version: "0\.10\.670-profile-summary-parity"/);
 });
 
 test("Facebook Graph 368 park paints Retry Pending, not Failed", () => {
