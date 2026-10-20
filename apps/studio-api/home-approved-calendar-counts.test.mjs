@@ -74,7 +74,7 @@ test("Home uses platform-output timestamps, explicit future and past due columns
   assert.match(ui,/Approved · Past Due/);
   assert.match(ui,/Approved · No Date/);
   assert.match(ui,/approvedCalendarCounts\(row, now = Date\.now\(\)\)/);
-  assert.match(ui,/calendar\.byPlatform\[p\]/);
+  assert.match(ui,/calendar\.pipelineByPlatform\[p\]/);
   assert.doesNotMatch(ui,/approvedUnpublishedTotal\(row\)/);
   assert.match(index,/all-profiles-overview-1007\.js\?v=.*cache=pipeline-future-review-v6/);
 });
