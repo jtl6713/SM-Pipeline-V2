@@ -548,3 +548,5 @@ Deploy targeted November 17 MAE overage selector from merged PR #936; no automat
 2026-10-20: Fix Home approved-but-unpublished parentheses stale snapshot: 2-minute Airtable snapshot TTL and cooldown-gated automatic background output reconciliation; no Supabase reads or approval side effects.
 
 2026-10-20: Home tally integrity: reject missing approved_unpublished and overdue_unpublished in R2 Worker snapshot and browser cache; do not display obsolete parenthesized approvals. Deploy Worker and Pages with existing authoritative-refresh verification. Airtable remains SoR; no Supabase read changes.
+
+2026-10-20: Deploy merged PR #967 Home profile-name parenthetical: count only Review_Status=Approved and Scheduled_Post_Date >= current instant (as-yet unpublished); preserve separate overdue metric, per-platform Scheduled columns, Airtable write SoR, shadow Home/refill reads OFF, and authoritative four-profile Home force-refresh canary.
