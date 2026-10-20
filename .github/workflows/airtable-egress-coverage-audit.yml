@@ -5,9 +5,12 @@ on:
     branches:
       - feature/automatic-shadow-evidence-20261020
       - feature/durable-airtable-egress-20261020
+      - feature/airtable-hourly-rollup-report-20261020
     paths:
       - 'repair/scripts/audit_airtable_egress_paths.py'
       - '.github/workflows/airtable-egress-coverage-audit.yml'
+      - 'repair/scripts/airtable_hourly_rollup.py'
+      - 'repair/scripts/airtable_hourly_rollup_test.py'
 permissions:
   contents: read
 jobs:
@@ -32,6 +35,8 @@ jobs:
         run: python -m unittest discover -s repair/scripts -p 'airtable_request_window_report_test.py' -v
       - name: Test durable hourly window accounting
         run: python -m unittest discover -s repair/scripts -p 'durable_airtable_window_report_test.py' -v
+      - name: Test hourly rollup
+        run: python -m unittest discover -s repair/scripts -p 'airtable_hourly_rollup_test.py' -v
       - name: Store coverage audit
         uses: actions/upload-artifact@v4
         with:
