@@ -48,22 +48,16 @@ export function homeOverdueDueAt(row) {
   return when;
 }
 
-/** Approved and not published, regardless of whether the schedule is future or overdue.
- * Do not equate a dispatch attempt, upload, or scheduled timestamp with publication.
- */
 /**
- * Home profile-name parentheses: final-approved, as-yet unpublished outputs
- * with an authoritative Scheduled_Post_Date at or after the current instant.
- * No fallback to Studio_Scheduled_At or YouTube private-upload dates.
- *
- * Keep this clock-independent timestamp in the summary ledger so that a
- * scheduled time crossing into the past drops from the count without a write.
+ * Parenthesized Home tally: final-approved outputs that have NOT been published.
+ * Future, overdue, and temporarily unscheduled approved outputs all remain
+ * counted; date passage or draft delivery is never publication evidence.
+ * A rejected, skipped or do-not-publish output cannot contribute.
  */
-export function homeApprovedUpcomingAt(row) {
-  if (!row || row.do_not_publish) return 0;
-  if (String(row.review_status || "").trim().toLowerCase() !== "approved") return 0;
-  const when = Date.parse(String(row.scheduled_post_date || ""));
-  if (!Number.isFinite(when) || when <= 0) return 0;
+export function homeApprovedUnpublished(row, _now = Date.now()) {
+  if (!row || row.do_not_publish) return false;
+  // Only authoritative final approval, not provisional output status.
+  if (String(row.review_status || "").trim().toLowerCase() !== "approved") return false;
   const state = String(row.studio_state || "").trim().toLowerCase();
   const publish = String(row.publish_status || "").trim().toLowerCase();
   const platformPublish = String(row.platform_publish_status || "").trim().toLowerCase();
@@ -72,13 +66,8 @@ export function homeApprovedUpcomingAt(row) {
     || /published|posted|publish complete|publish succeeded/.test(publish)
     || /published|posted/.test(platformPublish)
     || /^(published|posted|completed)$/.test(manual)
-    || row.published_at || row.platform_post_url || row.manual_published_url) return 0;
-  return when;
-}
-
-export function homeApprovedUnpublished(row, now = Date.now()) {
-  const scheduled = homeApprovedUpcomingAt(row);
-  return scheduled > 0 && scheduled >= now;
+    || row.published_at || row.platform_post_url || row.manual_published_url) return false;
+  return true;
 }
 
 export function homeOutputContribution(row, now = Date.now()) {
@@ -87,7 +76,7 @@ export function homeOutputContribution(row, now = Date.now()) {
   result.platform_outputs = 1;
   result.approved_unpublished = Number(homeApprovedUnpublished(row, now));
   const dueAt = homeOverdueDueAt(row);
-  result.overdue_unpublished = Number(dueAt > 0 && dueAt <= Date.now());
+  result.overdue_unpublished = Number(dueAt > 0 && dueAt <= now);
   const state = String(row.studio_state || "").trim();
   result.manual_action_required = Number(state === "Manual Action Required");
   result.failed_outputs = Number(state === "Failed");
