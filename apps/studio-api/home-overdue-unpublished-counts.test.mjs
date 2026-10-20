@@ -112,7 +112,7 @@ test("Home V6 force refresh verifies the schema it actually writes and rejects V
     worker.indexOf("/*__STUDIO_WORKER_END:readStudioProfilesOverviewSnapshot__*/"));
   assert.match(writer, /schemaVersion: 6/);
   assert.match(verifier, /snapshot\.schemaVersion !== 6/);
-  assert.doesNotMatch(verifier, /schemaVersion !== 6/);
+  assert.doesNotMatch(verifier, /schemaVersion !== 5/);
   assert.match(remember, /snapshot\?\.schemaVersion \|\| 0\) !== 6/);
   assert.match(reader, /cache\.schemaVersion !== 6/);
 });

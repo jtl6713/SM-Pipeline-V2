@@ -7,19 +7,25 @@ import path from "node:path";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const overviewPath = path.join(here, "assets/all-profiles-overview-1007.js");
 
-test("all-profiles overview shows approved unpublished totals rather than scheduled totals", async () => {
+test("all-profiles overview shows per-output approved future and past-due totals, not parentheses", async () => {
   const host = {
     innerHTML: "",
     querySelectorAll() { return []; },
   };
+  const future = Date.now() + 120000;
+  const past = Date.now() - 120000;
+  const empty = {Facebook: [], Instagram: [], TikTok: [], YouTube: []};
   const overviewRows = [
     {
       id: "recChicago0000000",
       city_label: "Chicago",
       name: "Chicago",
       scheduled: { Facebook: 1, Instagram: 1, TikTok: 0, YouTube: 1 },
-      approved_unpublished: 2,
-      overdue_unpublished: 0,
+      approved_unpublished: 3,
+      overdue_unpublished: 1,
+      approved_future: 2, approved_past_due: 1, approved_missing_date: 0,
+      approved_future_by_platform: {Facebook:1,Instagram:1,TikTok:0,YouTube:0},
+      approved_calendar_slots: { ...empty, Facebook:[future], Instagram:[future], YouTube:[past] },
       manual: 0,
       failed: 0,
       approval: 0,
@@ -30,8 +36,11 @@ test("all-profiles overview shows approved unpublished totals rather than schedu
       city_label: "Miami",
       name: "Miami",
       scheduled: { Facebook: 0, Instagram: 0, TikTok: 1, YouTube: 0 },
-      approved_unpublished: 4,
-      overdue_unpublished: 0,
+      approved_unpublished: 5,
+      overdue_unpublished: 2,
+      approved_future: 2, approved_past_due: 2, approved_missing_date: 1,
+      approved_future_by_platform: {Facebook:0,Instagram:1,TikTok:1,YouTube:0},
+      approved_calendar_slots: { ...empty, Facebook:[past,past], Instagram:[future], TikTok:[future] },
       manual: 0,
       failed: 0,
       approval: 0,
@@ -80,10 +89,15 @@ test("all-profiles overview shows approved unpublished totals rather than schedu
 
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
-    assert.match(host.innerHTML, /<th scope="row">Chicago \(2\)<\/th>/);
-    assert.match(host.innerHTML, /<th scope="row">Miami \(4\)<\/th>/);
+    assert.match(host.innerHTML, /<th scope="row">Chicago<\/th>/);
+    assert.match(host.innerHTML, /<th scope="row">Miami<\/th>/);
     assert.match(host.innerHTML, /<th scope="row">Total<\/th>/);
-    assert.doesNotMatch(host.innerHTML, /Total \(6\)/);
+    assert.doesNotMatch(host.innerHTML, /Chicago \(/);
+    assert.match(host.innerHTML, /data-label="Approved future"[^>]*>2<\/td>/);
+    assert.match(host.innerHTML, /data-label="Approved past due"[^>]*>1<\/td>/);
+    assert.match(host.innerHTML, /data-label="Approved no date"[^>]*>1<\/td>/);
+    assert.match(host.innerHTML, /Approved · Future/);
+    assert.match(host.innerHTML, /Approved · Past Due/);
   } finally {
     globalThis.document = prior.document;
     globalThis.fetch = prior.fetch;
