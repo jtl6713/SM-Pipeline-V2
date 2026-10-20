@@ -73,6 +73,12 @@ export class StudioProfileSummary {
       if (!stageColumns.includes("approved_future_at")) {
         this.sql.exec("ALTER TABLE stage ADD COLUMN approved_future_at INTEGER NOT NULL DEFAULT 0");
       }
+      // The previous summary only counted future scheduled approvals.
+      // Fail closed until an authoritative full reconciliation rebuilds every
+      // output contribution using the new approved-but-unpublished definition.
+      if (this.getMeta("approved_unpublished_definition") !== "all-unpublished-v2") {
+        this.putMeta("future_count_reconcile_required", "true");
+      }
     });
   }
   incrementMetric(key, amount = 1) {
@@ -182,9 +188,6 @@ export class StudioProfileSummary {
         const overdueByProfile = new Map(records(this.sql,
           "SELECT profile_id,COUNT(*) AS amount FROM ledger WHERE overdue_due_at>0 AND overdue_due_at<=? GROUP BY profile_id",
           Date.now()).map((row) => [row.profile_id, Number(row.amount || 0)]));
-        const futureByProfile = new Map(records(this.sql,
-          "SELECT profile_id,COUNT(*) AS amount FROM ledger WHERE approved_future_at>=? GROUP BY profile_id",
-          Date.now()).map((row) => [row.profile_id, Number(row.amount || 0)]));
         const lastReconciled = Number(this.getMeta("last_reconciled_at") || 0);
         const pending = records(this.sql, "SELECT COUNT(*) AS n FROM pending")[0]?.n || 0;
         return json({
@@ -201,10 +204,10 @@ export class StudioProfileSummary {
               scheduled: c.scheduled, manual: c.manual_action_required,
               failed: c.failed_outputs, approval: c.awaiting_approval,
               ideas: c.ideas_not_in_production,
-              approved_unpublished: futureByProfile.get(p.id) || 0,
+              approved_unpublished: Number(c.approved_unpublished || 0),
               overdue_unpublished: overdue,
               metrics: {
-                ...c, approved_unpublished: futureByProfile.get(p.id) || 0,
+                ...c, approved_unpublished: Number(c.approved_unpublished || 0),
                 overdue_unpublished: overdue, manual_action_required: c.manual_action_required,
                 failed_outputs: c.failed_outputs, awaiting_approval: c.awaiting_approval,
                 ideas_not_in_production: c.ideas_not_in_production,
@@ -314,6 +317,7 @@ export class StudioProfileSummary {
           this.putMeta("version", Number(this.getMeta("version") || 0) + 1);
           this.putMeta("last_reconciled_at", Date.now());
           this.putMeta("future_count_reconcile_required", "");
+          this.putMeta("approved_unpublished_definition", "all-unpublished-v2");
           this.putMeta("complete", "true");
           this.putMeta("building_generation", "");
           this.putMeta("error", "");
