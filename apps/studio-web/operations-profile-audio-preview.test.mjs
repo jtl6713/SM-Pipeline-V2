@@ -45,3 +45,13 @@ test("Worker supports the existing safe voice and music preview endpoints", () =
   assert.match(css, /ops-music-preview-row/);
   assert.match(css, /ops-voice-preview-row/);
 });
+
+test("Profile Admin music preview never uses inaccessible raw Drive or R2 URLs", () => {
+  const begin = render.indexOf('card.querySelectorAll("[data-ops-music-preview]")');
+  const end = render.indexOf("    syncOperationsProfileContext();", begin);
+  assert.ok(begin > 0 && end > begin);
+  const handler = render.slice(begin, end);
+  assert.match(handler, /const preview = `\/api\/music\/\$\{encodeURIComponent\(id\)\}\/preview`/);
+  assert.doesNotMatch(handler, /button\.dataset\.previewUrl/);
+  assert.match(handler, /playStudioAudioPreview\(preview, button, setOperationsMessage, label\)/);
+});
