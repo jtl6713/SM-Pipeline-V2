@@ -38,9 +38,33 @@ test("awaiting approval is review-ready but not approved or rendering", () => {
   assert.equal(homeOutputContribution({ ...ready, review_status: "Approved" }).awaiting_approval, 0);
 });
 
-test("parenthesized profile count uses overdue unpublished, not scheduled column sum", () => {
-  assert.match(ui, /function overdueUnpublishedTotal\(row\)/);
-  assert.match(ui, /overdue_unpublished: Number\(row\.overdue_unpublished\) \|\| 0/);
+test("parenthesized profile count shows all approved unpublished, not overdue only", () => {
+  assert.match(ui, /function approvedUnpublishedTotal\(row\)/);
+  assert.match(ui, /approved_unpublished: Number\(row\.approved_unpublished\) \|\| 0/);
   assert.match(ui, /overdue_unpublished"\]/);
   assert.doesNotMatch(ui, /scheduledTotal\(row\)/);
+});
+
+test("approval moves a review-ready output into parentheses until actually published", () => {
+  const base = {
+    id: "rec12345678901234", platform: "Instagram",
+    studio_state: "Ready for Review", output_status: "Ready for Review",
+    render_status: "Rendered", review_status: "",
+    scheduled_post_date: "2099-01-01T15:00:00Z",
+  };
+  const pending = homeOutputContribution(base);
+  assert.equal(pending.awaiting_approval, 1);
+  assert.equal(pending.approved_unpublished, 0);
+  const approved = homeOutputContribution({
+    ...base, review_status: "Approved", output_status: "Approved for Publishing",
+    studio_state: "Scheduled",
+  });
+  assert.equal(approved.awaiting_approval, 0);
+  assert.equal(approved.approved_unpublished, 1);
+  assert.equal(approved.overdue_unpublished, 0);
+  assert.equal(homeOutputContribution({ ...base, review_status: "Approved",
+    output_status: "Approved for Publishing", scheduled_post_date: "" }).approved_unpublished, 1);
+  assert.equal(homeOutputContribution({ ...base, review_status: "Rejected" }).approved_unpublished, 0);
+  assert.equal(homeOutputContribution({ ...base, review_status: "Approved",
+    output_status: "Approved for Publishing", published_at: "2026-10-20T05:00:00Z" }).approved_unpublished, 0);
 });
