@@ -463,3 +463,4 @@ Release Studio UI 0.6.723: fast Profile Admin voice/music load and playable name
 2026-10-20: Deploy Studio UI 0.6.728 Factory toolbar cleanup (PR #995). Hide obsolete 'no longer eligible' count; preserve current selection and approvals. Run guarded Pages production deployment.
 
 2026-10-20: Studio UI 0.6.729 fixes iPad Factory Needs eyes: bounded 12-content-group navigation, clear queue counts, and no nested tablet scroll. Deploy guarded Pages production; preserve approvals and Worker state.
+2026-10-20: Deploy Studio Factory Quality Agent v2 (PR #1000); distinct output-failure census plus approval-batch findings, cache-busted Quality Agent panel on existing UI 0.6.729 with one-time guarded same-version exemption.
