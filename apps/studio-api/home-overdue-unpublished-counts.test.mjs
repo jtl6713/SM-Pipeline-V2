@@ -38,19 +38,19 @@ test("awaiting approval is review-ready but not approved or rendering", () => {
   assert.equal(homeOutputContribution({ ...ready, review_status: "Approved" }).awaiting_approval, 0);
 });
 
-test("parenthesized profile count uses all approved unpublished, not overdue or scheduled column sum", () => {
+test("parenthesized profile count uses only final-approved, upcoming publish date, not platform sum", () => {
   assert.match(ui, /function approvedUnpublishedTotal\(row\)/);
   assert.match(ui, /approved_unpublished: Number\(row\.approved_unpublished\) \|\| 0/);
   assert.ok(ui.includes('"approved_unpublished", "overdue_unpublished"'));
   assert.doesNotMatch(ui, /scheduledTotal\(row\)/);
 });
 
-test("Home approved-unpublished count rises when an output is approved, even if overdue", () => {
+test("Home parentheses count rises only for final-approved non-past scheduled outputs", () => {
   const base = {
     id:"rec12345678901234", platform:"TikTok",
     studio_state:"Ready for Review", output_status:"Ready for Review",
     render_status:"Rendered", review_status:"",
-    scheduled_post_date:"2020-01-01T00:00:00Z",
+    scheduled_post_date:"2099-01-01T00:00:00Z",
   };
   const before=homeOutputContribution(base);
   const after=homeOutputContribution({
@@ -61,7 +61,12 @@ test("Home approved-unpublished count rises when an output is approved, even if 
   assert.equal(before.approved_unpublished,0);
   assert.equal(after.awaiting_approval,0);
   assert.equal(after.approved_unpublished,1);
-  assert.equal(after.overdue_unpublished,1);
+  assert.equal(after.overdue_unpublished,0);
+  const overdue = homeOutputContribution({ ...after, ...base, review_status:"Approved",
+    studio_state:"Scheduled", output_status:"Approved for Publishing",
+    scheduled_post_date:"2020-01-01T00:00:00Z" });
+  assert.equal(overdue.approved_unpublished,0);
+  assert.equal(overdue.overdue_unpublished,1);
 });
 
 test("Home rejects old R2/browser snapshots missing parenthesized approved count", () => {
@@ -78,4 +83,15 @@ test("Home rejects old R2/browser snapshots missing parenthesized approved count
   assert.ok(browserValidation.includes('typeof row?.[kind] !== "number"'));
   const map=ui.slice(ui.indexOf("function mapRows("),ui.indexOf("function adoptOverview("));
   assert.ok(map.includes('overdue_unpublished: Number(row.overdue_unpublished) || 0'));
+});
+
+test("parentheses apply strict Scheduled_Post_Date and expire cached future slots", () => {
+  const durable=fs.readFileSync(path.join(root, "apps/studio-api/profile-summary-do.mjs"), "utf8");
+  assert.match(classifier, /scheduled_post_date \|\| ""/);
+  assert.match(classifier, /scheduled >= now/);
+  assert.match(worker, /approved_future_times: approvedFutureTimes/);
+  assert.match(worker, /row\.approved_future_times\.filter/);
+  assert.match(durable, /idx_summary_ledger_future/);
+  assert.match(durable, /approved_future_at>=\?/);
+  assert.match(durable, /future_count_reconcile_required/);
 });
