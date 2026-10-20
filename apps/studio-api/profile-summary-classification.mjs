@@ -49,6 +49,27 @@ export function homeOverdueDueAt(row) {
 }
 
 /**
+ * Scheduled-date diagnostic retained for legacy ledger metadata.
+ * NOT used by the approved-but-unpublished Home parentheses.
+ */
+export function homeApprovedUpcomingAt(row) {
+  if (!row || row.do_not_publish) return 0;
+  if (String(row.review_status || "").trim().toLowerCase() !== "approved") return 0;
+  const when = Date.parse(String(row.scheduled_post_date || ""));
+  if (!Number.isFinite(when) || when <= 0) return 0;
+  const state = String(row.studio_state || "").trim().toLowerCase();
+  const publish = String(row.publish_status || "").trim().toLowerCase();
+  const platformPublish = String(row.platform_publish_status || "").trim().toLowerCase();
+  const manual = String(row.manual_completion_status || "").trim().toLowerCase();
+  if (/published|posted/.test(state)
+    || /published|posted|publish complete|publish succeeded/.test(publish)
+    || /published|posted/.test(platformPublish)
+    || /^(published|posted|completed)$/.test(manual)
+    || row.published_at || row.platform_post_url || row.manual_published_url) return 0;
+  return when;
+}
+
+/**
  * Parenthesized Home tally: final-approved outputs that have NOT been published.
  * Future, overdue, and temporarily unscheduled approved outputs all remain
  * counted; date passage or draft delivery is never publication evidence.
