@@ -1,6 +1,7 @@
 import { OUTPUT_LIST_FIELDS } from "./worker.js";
 import { mapOutput, mapIdea } from "./worker-functions-01.mjs";
 import { studioOverviewRowMatchesProfile } from "./worker-functions-04.mjs";
+import { buildProfileSummaryV6Row, profileSummaryV6StaticParity } from "./profile-summary-v6.mjs";
 import {
   emptyHomeContribution, homeOutputContribution, homeIdeaContribution,
   homeContributionDelta, combineHomeContributions, contributionEqual, homeOverdueDueAt,
@@ -18,9 +19,12 @@ const LAG_BUCKET_MS = [1000, 2500, 5000, 10000, 15000, 30000, 60000];
 
 function counterPlus(before, delta) {
   const next = structuredClone(before || ZERO());
-  for (const platform of HOME_PLATFORMS) next.scheduled[platform] += delta.scheduled[platform] || 0;
+  for (const platform of HOME_PLATFORMS) {
+    next.scheduled[platform] += delta.scheduled[platform] || 0;
+    next.awaiting_final_by_platform[platform] += delta.awaiting_final_by_platform?.[platform] || 0;
+  }
   for (const key of HOME_METRIC_KEYS) next[key] = (Number(next[key]) || 0) + (Number(delta[key]) || 0);
-  if (HOME_PLATFORMS.some((p) => next.scheduled[p] < 0)
+  if (HOME_PLATFORMS.some((p) => next.scheduled[p] < 0 || next.awaiting_final_by_platform[p] < 0)
     || HOME_METRIC_KEYS.some((key) => next[key] < 0)) {
     throw new Error("Counter underflow: requires authoritative reconciliation");
   }
@@ -75,6 +79,10 @@ export class StudioProfileSummary {
       }
       // A v1 tally counted only future scheduled outputs. Do not serve stale
       // counters as v2: force authoritative reconciliation before summary reads.
+      if (this.getMeta("home_summary_contract") !== "v6_complete_calendar_v1") {
+        this.putMeta("home_summary_contract", "v6_complete_calendar_v1");
+        this.putMeta("future_count_reconcile_required", "true");
+      }
       if (this.getMeta("approved_unpublished_definition") !== "all_final_approved_unpublished_v2") {
         this.putMeta("approved_unpublished_definition", "all_final_approved_unpublished_v2");
         this.putMeta("future_count_reconcile_required", "true");
@@ -193,31 +201,31 @@ export class StudioProfileSummary {
         // the parentheses to shrink without a publication or review change.
         const lastReconciled = Number(this.getMeta("last_reconciled_at") || 0);
         const pending = records(this.sql, "SELECT COUNT(*) AS n FROM pending")[0]?.n || 0;
+        const approvedByProfile = new Map(profiles.map((p) => [p.id, []]));
+        // One indexed SQLite pass reads the durable approved calendar, not Airtable.
+        for (const entry of records(this.sql,
+          "SELECT profile_id,approved_future_at,contribution FROM ledger WHERE approved_future_at>0 ORDER BY profile_id,approved_future_at")) {
+          const list = approvedByProfile.get(entry.profile_id);
+          if (!list) throw new Error("Calendar record references unknown profile");
+          list.push(entry);
+        }
+        const now = Date.now();
+        const resultRows = profiles.map((p) => {
+          const counters = JSON.parse(p.counters);
+          const overdue = overdueByProfile.get(p.id) || 0;
+          const row = buildProfileSummaryV6Row(p, counters, approvedByProfile.get(p.id), now);
+          row.overdue_unpublished = overdue;
+          row.metrics = { ...counters, overdue_unpublished: overdue };
+          return row;
+        });
         return json({
           ok: true, source: "durable-profile-summary", version: Number(this.getMeta("version") || 0),
           last_authoritative_event_at: Number(this.getMeta("last_authoritative_at") || 0),
-          last_reconciled_at: lastReconciled, degraded: Boolean(this.getMeta("future_count_reconcile_required")) || Boolean(this.getMeta("error"))
+          last_reconciled_at: lastReconciled,
+          degraded: Boolean(this.getMeta("future_count_reconcile_required")) || Boolean(this.getMeta("error"))
             || Date.now() - lastReconciled > EMPTY_AGE_MS || pending > 0,
           pending_changes: pending,
-          records: profiles.map((p) => {
-            const c = JSON.parse(p.counters);
-            const overdue = overdueByProfile.get(p.id) || 0;
-            return {
-              id: p.id, name: p.name, city_label: p.city_label,
-              scheduled: c.scheduled, manual: c.manual_action_required,
-              failed: c.failed_outputs, approval: c.awaiting_approval,
-              ideas: c.ideas_not_in_production,
-              approved_unpublished: c.approved_unpublished,
-              overdue_unpublished: overdue,
-              metrics: {
-                ...c, approved_unpublished: c.approved_unpublished,
-                overdue_unpublished: overdue, manual_action_required: c.manual_action_required,
-                failed_outputs: c.failed_outputs, awaiting_approval: c.awaiting_approval,
-                ideas_not_in_production: c.ideas_not_in_production,
-              }, version: p.version, read_source: "durable-profile-summary",
-              ideas_source: "durable-profile-summary",
-            };
-          }),
+          records: resultRows,
         });
       }
       if (request.method !== "POST") return json({ ok: false, error: "method" }, 405);
@@ -297,14 +305,11 @@ export class StudioProfileSummary {
         const compare = body.expected_rows || [];
         for (const p of profiles) {
           const expected = compare.find((v) => v.id === p.id);
-          const actual = counts.get(p.id);
-          if (!expected || expected.approval !== actual.awaiting_approval
-            || expected.ideas !== actual.ideas_not_in_production
-            || expected.manual !== actual.manual_action_required
-            || expected.failed !== actual.failed_outputs
-            || expected.approved_unpublished !== actual.approved_unpublished
-            || expected.overdue_unpublished !== actual.overdue_unpublished
-            || HOME_PLATFORMS.some((name) => expected.scheduled?.[name] !== actual.scheduled[name])) {
+          const counters = counts.get(p.id);
+          const approvedEntries = staged.filter((entry) =>
+            entry.profile_id === p.id && Number(entry.approved_future_at) > 0);
+          const actual = buildProfileSummaryV6Row(p, counters, approvedEntries);
+          if (!expected || !profileSummaryV6StaticParity(expected, actual)) {
             return json({ ok: false, error: "reconciliation_mismatch", profile_id: p.id }, 409);
           }
         }
