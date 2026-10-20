@@ -2974,14 +2974,31 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   const tableRef = encodeURIComponent(String(tableId));
   const endpoint = `https://api.airtable.com/v0/${env.AIRTABLE_BASE_ID}/${tableRef}${suffix}`;
   await airtableRequestSlot();
-  const response = await fetch(endpoint, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${env.AIRTABLE_PAT}`,
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
+  const airtableRequestStarted = Date.now();
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${env.AIRTABLE_PAT}`,
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+    });
+  } finally {
+    // One event for each attempted outbound request, including network failures.
+    // No record ID, filter formula, Airtable token or full URL is logged.
+    console.log("studio_airtable_egress_v1", JSON.stringify({
+      source: "studio_worker_gateway",
+      table_kind: String(tableId) === String(env.AIRTABLE_OUTPUT_TABLE_ID) ? "outputs"
+        : String(tableId) === String(env.AIRTABLE_IDEA_TABLE_ID) ? "ideas" : "other",
+      method: String(options.method || "GET").toUpperCase(),
+      status: response?.status ?? 0,
+      duration_ms: Date.now() - airtableRequestStarted,
+      at: new Date().toISOString(),
+      request_count: 1,
+    }));
+  }
   const responseText = await response.text();
   let body = {};
   try { body = responseText ? JSON.parse(responseText) : {}; } catch { body = { raw: responseText }; }

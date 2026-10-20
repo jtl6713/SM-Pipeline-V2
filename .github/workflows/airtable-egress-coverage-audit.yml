@@ -1,0 +1,37 @@
+name: Airtable Egress Coverage Audit
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/automatic-shadow-evidence-20261020
+    paths:
+      - 'repair/scripts/audit_airtable_egress_paths.py'
+      - '.github/workflows/airtable-egress-coverage-audit.yml'
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Identify direct Airtable paths and unresolved callers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python repair/scripts/audit_airtable_egress_paths.py > airtable-egress-coverage.json
+          python - <<'PY'
+          import json
+          obj=json.load(open('airtable-egress-coverage.json'))
+          print('airtable_egress_unverified_paths='+str(obj['unverified_count']))
+          for p in obj['candidates']:
+              if p['coverage'].startswith('UNVERIFIED'):
+                  print('unverified_path='+p['path']+' lines='+','.join(map(str,p['lines'])))
+          PY
+      - name: Test equal-window reporting safety
+        run: python -m unittest discover -s repair/scripts -p 'airtable_request_window_report_test.py' -v
+      - name: Store coverage audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: airtable-egress-coverage-${{ github.run_id }}
+          path: airtable-egress-coverage.json
+          retention-days: 30

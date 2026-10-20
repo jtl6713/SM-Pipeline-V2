@@ -22,6 +22,11 @@ class AirtableClient:
         }
         self._api_root = "https://api.airtable.com/v0"
 
+    def _request(self, method: str, url: str, *, table_id: str, **kwargs):
+        """Use the verb-specific requests API; runner-wide Session.send records egress."""
+        import requests
+        return getattr(requests, method.lower())(url, **kwargs)
+
     def _mirror(self, table_id: str, records: list[dict], *, partial: bool = False) -> None:
         from supabase_pipeline import mirror_airtable_records
 
@@ -36,7 +41,7 @@ class AirtableClient:
         import requests
 
         url = f"{self._api_root}/{self._base_id}/{table_id}/{record_id}"
-        response = requests.get(url, headers=self._headers, timeout=60)
+        response = self._request("GET", url, table_id=table_id, headers=self._headers, timeout=60)
         response.raise_for_status()
         return response.json()
 
@@ -47,7 +52,7 @@ class AirtableClient:
         body = {"fields": fields}
         if typecast:
             body["typecast"] = True
-        response = requests.patch(url, headers=self._headers, json=body, timeout=60)
+        response = self._request("PATCH", url, table_id=table_id, headers=self._headers, json=body, timeout=60)
         if not response.ok:
             detail = (response.text or "").strip().replace("\n", " ")[:500]
             message = f"{response.status_code} {response.reason} for url: {url}"
@@ -101,7 +106,7 @@ class AirtableClient:
         while True:
             if offset:
                 params["offset"] = offset
-            response = requests.get(url, headers=self._headers, params=params, timeout=60)
+            response = self._request("GET", url, table_id=table_id, headers=self._headers, params=params, timeout=60)
             response.raise_for_status()
             payload = response.json()
             records.extend(payload.get("records", []))
@@ -115,7 +120,7 @@ class AirtableClient:
         import requests
 
         url = f"{self._api_root}/{self._base_id}/{table_id}/{record_id}"
-        response = requests.delete(url, headers=self._headers, timeout=60)
+        response = self._request("DELETE", url, table_id=table_id, headers=self._headers, timeout=60)
         response.raise_for_status()
         return response.json()
 
@@ -129,7 +134,7 @@ class AirtableClient:
             body: dict[str, Any] = {"records": [{"fields": item} for item in chunk]}
             if typecast:
                 body["typecast"] = True
-            response = requests.post(url, headers=self._headers, json=body, timeout=60)
+            response = self._request("POST", url, table_id=table_id, headers=self._headers, json=body, timeout=60)
             response.raise_for_status()
             batch = response.json().get("records", [])
             created.extend(batch)
@@ -169,7 +174,7 @@ class AirtableClient:
                 ], partial=True)
             if typecast:
                 body["typecast"] = True
-            response = requests.patch(url, headers=self._headers, json=body, timeout=60)
+            response = self._request("PATCH", url, table_id=table_id, headers=self._headers, json=body, timeout=60)
             if not response.ok and legacy:
                 logger.warning(
                     "Airtable legacy export batch failed for %s: %s %s",
@@ -210,7 +215,7 @@ class AirtableClient:
             "performUpsert": {"fieldsToMergeOn": [merge_field]},
             "typecast": typecast,
         }
-        response = requests.patch(url, headers=self._headers, json=body, timeout=60)
+        response = self._request("PATCH", url, table_id=table_id, headers=self._headers, json=body, timeout=60)
         if not response.ok:
             detail = (response.text or "").strip().replace("\n", " ")[:500]
             message = f"{response.status_code} {response.reason} for url: {url}"
