@@ -307,6 +307,7 @@
       failed: Number(row.failed) || 0,
       approval: Number(row.approval) || 0,
       approved_unpublished: Number(row.approved_unpublished) || 0,
+      overdue_unpublished: Number(row.overdue_unpublished) || 0,
       ideas: Number(row.ideas) || 0,
     }));
   }
