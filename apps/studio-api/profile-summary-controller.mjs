@@ -149,6 +149,7 @@ async function runStudioProfileSummaryReconcile(env) {
       scheduled, manual: metrics.manual_action_required,
       failed: metrics.failed_outputs, approval: metrics.awaiting_approval,
       overdue_unpublished: metrics.overdue_unpublished,
+      approved_unpublished: metrics.approved_unpublished,
       ideas: metrics.ideas_not_in_production, metrics,
     });
   }
