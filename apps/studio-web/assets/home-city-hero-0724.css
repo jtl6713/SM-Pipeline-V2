@@ -113,7 +113,7 @@ html[data-studio-theme="miami"]{
   color:#cbdff4;
   text-shadow:none;
 }
-#page-home .ez-path-fork-copy h1{display:none}
+#page-home .ez-path-fork-copy h1{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;white-space:nowrap;clip-path:inset(50%)}
 #page-home .ez-path-fork-copy .ez-current-profile{
   margin:auto 0 0;
   padding:10px 14px;
@@ -220,9 +220,16 @@ html[data-studio-theme="miami"]{
 }
 #page-home .ez-portal-card-action .ez-arrow{font-size:1.25rem;font-weight:500;line-height:0}
 #page-home .ez-portal-card[data-ez-portal-path="wizard"] .ez-portal-card-action{color:#2e2447}
-#page-home .ez-path-panel:not([hidden]){
+#page-home .ez-path-fork-inner:has(.ez-path-panel:not([hidden])),
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-path-fork-inner:has(.ez-path-panel:not([hidden])){
+  width:100%;
+  grid-template-columns:1fr;
+  grid-template-areas:"copy" "panel";
+}
+#page-home .ez-path-panel:not([hidden]),
+.main:has(#page-home.active):has(#page-dashboard.active) .ez-path-panel:not([hidden]){
+  grid-area:panel;
   grid-column:1 / -1;
-  grid-area:auto;
   max-width:100%;
 }
 #page-home .az-drop:not([hidden]),#page-home .ez-wizard:not([hidden]){grid-column:1 / -1}
