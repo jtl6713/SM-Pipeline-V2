@@ -55,11 +55,11 @@ jobs:
           jq -e '.success == true' subdomain.json >/dev/null
           curl -fsS "$api/workers/subdomain" -H "$auth" >account.json
           sub=$(jq -er '.result.subdomain' account.json)
-          curl -fsS --max-time 30 "https://$name.$sub.workers.dev/$token/evidence" >status.json
+          curl -fsS --retry 12 --retry-all-errors --retry-delay 2 --max-time 30 "https://$name.$sub.workers.dev/$token/evidence" >status.json
           jq -e '.ok == true and .complete == true and (.evidence | type) == "object"' status.json >/dev/null
           jq '{captured_at:(now|todate),summary_version:.version,complete:.complete,building_generation:.building_generation,error:.error,evidence:.evidence}' status.json >evidence.json
           cat evidence.json
-          curl -fsS --max-time 30 "https://$name.$sub.workers.dev/$token/airtable-egress" >worker-airtable-egress.json
+          curl -fsS --retry 5 --retry-all-errors --retry-delay 2 --max-time 30 "https://$name.$sub.workers.dev/$token/airtable-egress" >worker-airtable-egress.json
           jq -e '.ok == true and (.hourly|type)=="array"' worker-airtable-egress.json >/dev/null
           if [[ -n "${PIPELINE_RUNNER_SHARED_SECRET:-}" ]]; then
             code=$(curl -sS --max-time 30 -o runner-airtable-egress.json -w '%{http_code}' -H "X-Pipeline-Secret: $PIPELINE_RUNNER_SHARED_SECRET" "https://pipeline.chicagoshining.com/admin/airtable-egress?hours=48" || true)
