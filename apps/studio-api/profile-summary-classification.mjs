@@ -41,7 +41,8 @@ export function homeOverdueDueAt(row) {
   const manual = String(row.manual_completion_status || "").trim().toLowerCase();
   if (/published|posted/.test(state)) return 0;
   if (/published|posted|publish complete|publish succeeded/.test(publish)
-    || /published|posted|completed|succeeded/.test(platformPublish)) return 0;
+    || // Upload/draft handoff success is not public publication.
+    /published|posted/.test(platformPublish)) return 0;
   if (/^(published|posted|completed)$/.test(manual)) return 0;
   if (row.published_at || row.platform_post_url || row.manual_published_url) return 0;
   return when;
@@ -61,7 +62,8 @@ export function homeApprovedUnpublished(row) {
   const provider = String(row.platform_publish_status || "").trim().toLowerCase();
   const manual = String(row.manual_completion_status || "").trim().toLowerCase();
   if (/published|posted/.test(state) || /published|posted|publish complete|publish succeeded/.test(publish)
-      || /published|posted|completed|succeeded/.test(provider)
+      || // Generic provider completion may only indicate an uploaded asset or delivered draft.
+      /published|posted/.test(provider)
       || /^(published|posted|completed)$/.test(manual)
       || row.published_at || row.platform_post_url || row.manual_published_url) return false;
   return true;

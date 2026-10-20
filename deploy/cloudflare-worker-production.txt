@@ -540,3 +540,5 @@ Deploy targeted November 17 MAE overage selector from merged PR #936; no automat
 2026-10-20: Deploy PR #944 durable Airtable egress hourly telemetry; preserve Airtable SoR and existing production shadow capture/reconcile, keep Home/refill summary reads OFF. Ensure prod Worker canary, rollback and namespace bindings remain healthy.
 
 2026-10-20: Deploy PR #945 tenant-admin runner Airtable metrics proxy. Reuse existing Worker-to-runner shared secret; do not add Github Actions secrets. Preserve production API, Airtable write source, and Home/refill read flags OFF.
+
+2026-10-20: Home parentheses represent a net approved-unpublished backlog. Do not drop provider uploads/draft handoffs marked Completed/Succeeded until explicit publishing proof; preserve Airtable write authority, Supabase Phase 5 and human approval gates.

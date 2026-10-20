@@ -115,3 +115,42 @@ test("approving an output moves one from Awaiting Approval into parentheses, reg
     assert.equal(homeOutputContribution({ ...approved, review_status: "Rejected" }).approved_unpublished, 0);
   }
 });
+
+
+test("provider completion does not remove approved but unpublished posts", () => {
+  const ready = { ...base, render_status: "Rendered", review_status: "" };
+  const before = homeOutputContribution(ready);
+  assert.equal(before.awaiting_approval, 1);
+  for (const platform of ["Instagram", "Facebook", "TikTok", "YouTube"]) {
+    for (const state of ["Completed", "Succeeded", "Uploaded", "Draft Delivered"]) {
+      const row = { ...ready, platform, review_status: "Approved",
+        output_status: "Approved for Publishing", studio_state: "Platform Processing",
+        publish_status: "Ready to Schedule", platform_publish_status: state,
+        scheduled_post_date: "2020-01-01T00:00:00Z", studio_publish_dispatch_count: 1 };
+      const result = homeOutputContribution(row);
+      assert.equal(result.awaiting_approval, 0, platform + " " + state);
+      assert.equal(result.approved_unpublished, 1, platform + " " + state);
+      assert.equal(result.overdue_unpublished, 1, platform + " " + state);
+      assert.equal(homeContributionDelta(before, result).approved_unpublished, 1);
+      for(const published of [
+        { published_at: "2026-10-20T02:00:00Z" },
+        { platform_post_url: "https://example.test/post" },
+        { publish_status: "Published" }, { platform_publish_status: "Published" },
+      ]) assert.equal(homeOutputContribution({ ...row, ...published }).approved_unpublished, 0);
+    }
+  }
+});
+
+test("approval minus simultaneous publication is a net backlog, not cumulative approved count", () => {
+  const approved = { ...base, review_status: "Approved", output_status: "Approved for Publishing",
+    studio_state: "Scheduled" };
+  const before = combineHomeContributions([
+    homeOutputContribution(approved), homeOutputContribution(base),
+  ]);
+  const after = combineHomeContributions([
+    homeOutputContribution({ ...approved, published_at: "2026-10-20T02:00:00Z" }),
+    homeOutputContribution({ ...base, review_status: "Approved", output_status: "Approved for Publishing" }),
+  ]);
+  assert.equal(after.awaiting_approval, before.awaiting_approval - 1);
+  assert.equal(after.approved_unpublished, before.approved_unpublished);
+});
