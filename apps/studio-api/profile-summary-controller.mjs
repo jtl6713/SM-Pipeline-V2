@@ -39,6 +39,29 @@ export function studioProfileSummaryStatus(env) {
   return summaryRequest(env, "/status");
 }
 
+// Non-authoritative metrics only: a telemetry fault never blocks a live Airtable call.
+export async function recordStudioAirtableEgress(env, event) {
+  if (!profileSummaryStub(env)) return { skipped: true };
+  return summaryRequest(env, "/egress", {
+    source: event.source,
+    method: event.method,
+    status: event.status,
+    at_ms: event.at_ms,
+  });
+}
+
+export function studioAirtableEgressWindow(env, hours = 48) {
+  const stub = profileSummaryStub(env);
+  if (!stub) throw new Error("Airtable egress collector unavailable");
+  return stub.fetch("https://profile-summary.internal/egress?hours="+
+    encodeURIComponent(String(Math.max(1,Math.min(72,Number(hours)||48))))).then(async res => {
+      const data = await res.json();
+      if (!res.ok || data?.ok !== true) throw new Error("Airtable egress metrics unavailable");
+      return data;
+    });
+}
+
+
 export async function notifyStudioProfileSummary(env, tableId, method, body) {
   if (env?.STUDIO_PROFILE_SUMMARY_CAPTURE_ENABLED !== "true") {
     return { skipped: true, reason: "capture_not_enabled" };

@@ -150,6 +150,7 @@ services:
       PORT: "3350"
       HOST: 0.0.0.0
       ALLOW_DOCKER_INTERNAL: "1"
+      AIRTABLE_EGRESS_SQLITE_PATH: /scratch/metrics/airtable-egress.sqlite
       PUBLIC_BASE_URL: ${PIPELINE_RUNNER_PUBLIC_URL:-https://pipeline.chicagoshining.com}
       REMOTION_RENDERER_URL: http://remotion-renderer:3333
       TIMING_ENGINE_URL: http://timing-engine:3336

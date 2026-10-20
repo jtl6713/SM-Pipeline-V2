@@ -19,6 +19,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PIPELINE_RUNNER_SHARED_SECRET: ${{ secrets.PIPELINE_RUNNER_SHARED_SECRET }}
     steps:
       - uses: actions/checkout@v6
       - name: Test freshness window accounting
@@ -35,9 +36,11 @@ jobs:
           cat >worker.js <<JS
           export default {
             async fetch(req, env) {
-              if (new URL(req.url).pathname !== "/$token/evidence") return new Response("Not found", {status:404});
+              const path = new URL(req.url).pathname;
+              if (path !== "/$token/evidence" && path !== "/$token/airtable-egress") return new Response("Not found", {status:404});
               const headers = {"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Accept":"application/json"};
-              const response = await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/profiles/overview/summary/status",{headers}));
+              const endpoint = path.endsWith("airtable-egress") ? "airtable-egress?hours=48" : "status";
+              const response = await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/profiles/overview/summary/"+endpoint,{headers}));
               return new Response(response.body,{status:response.status,headers:{"Content-Type":"application/json","Cache-Control":"no-store"}});
             }
           };
@@ -56,6 +59,18 @@ jobs:
           jq -e '.ok == true and .complete == true and (.evidence | type) == "object"' status.json >/dev/null
           jq '{captured_at:(now|todate),summary_version:.version,complete:.complete,building_generation:.building_generation,error:.error,evidence:.evidence}' status.json >evidence.json
           cat evidence.json
+          curl -fsS --max-time 30 "https://$name.$sub.workers.dev/$token/airtable-egress" >worker-airtable-egress.json
+          jq -e '.ok == true and (.hourly|type)=="array"' worker-airtable-egress.json >/dev/null
+          if [[ -n "${PIPELINE_RUNNER_SHARED_SECRET:-}" ]]; then
+            code=$(curl -sS --max-time 30 -o runner-airtable-egress.json -w '%{http_code}' -H "X-Pipeline-Secret: $PIPELINE_RUNNER_SHARED_SECRET" "https://pipeline.chicagoshining.com/admin/airtable-egress?hours=48" || true)
+            if [[ "$code" != "200" ]] || ! jq -e '.ok==true and (.hourly|type)=="array"' runner-airtable-egress.json >/dev/null 2>&1; then
+              echo '{"ok":false,"reason":"runner_metrics_unavailable"}' >runner-airtable-egress.json
+            fi
+          else
+            echo '{"ok":false,"reason":"runner_secret_not_configured_for_evidence_job"}' >runner-airtable-egress.json
+          fi
+          jq -n --slurpfile worker worker-airtable-egress.json --slurpfile runner runner-airtable-egress.json '{captured_at:(now|todate),worker: $worker[0],runner: $runner[0],complete:($worker[0].ok==true and $runner[0].ok==true),net_savings_verifiable:false}' >airtable-egress-coverage.json
+          cat airtable-egress-coverage.json
           echo '### Shadow profile hourly observation' >> "$GITHUB_STEP_SUMMARY"
           jq -r '"- Captured: " + .captured_at + "\\n- Summary version: " + (.summary_version|tostring) + "\\n- Dirty applied: " + (.evidence.dirty_applied|tostring) + "\\n- Airtable dirty attempts: " + (.evidence.airtable_dirty_batch_attempts|tostring) + "\\n- Airtable dirty errors: " + (.evidence.airtable_dirty_batch_errors|tostring)' evidence.json >> "$GITHUB_STEP_SUMMARY"
           echo '- Interpretation: cumulative telemetry only; these values do not establish full Airtable request savings.' >> "$GITHUB_STEP_SUMMARY"
@@ -64,6 +79,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: shadow-evidence-${{ github.run_id }}
-          path: evidence.json
+          path: |
+            evidence.json
+            worker-airtable-egress.json
+            runner-airtable-egress.json
+            airtable-egress-coverage.json
           retention-days: 30
           if-no-files-found: ignore

@@ -52,6 +52,7 @@ export class StudioProfileSummary {
     this.sql = state.storage.sql;
     this.state.blockConcurrencyWhile(async () => {
       this.sql.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+      this.sql.exec("CREATE TABLE IF NOT EXISTS airtable_egress_hourly (hour_utc TEXT NOT NULL, source TEXT NOT NULL, method TEXT NOT NULL, status_class TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(hour_utc,source,method,status_class))");
       this.sql.exec("CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY, name TEXT NOT NULL, city_label TEXT NOT NULL, counters TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 0, event_at INTEGER NOT NULL DEFAULT 0)");
       this.sql.exec("CREATE TABLE IF NOT EXISTS ledger (kind TEXT NOT NULL, record_id TEXT NOT NULL, profile_id TEXT NOT NULL, contribution TEXT NOT NULL, overdue_due_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(kind,record_id))");
       this.sql.exec("CREATE INDEX IF NOT EXISTS idx_summary_ledger_profile ON ledger(profile_id)");
@@ -119,9 +120,34 @@ export class StudioProfileSummary {
     this.sql.exec("UPDATE profiles SET counters=?, version=version+1, event_at=? WHERE id=?",
       JSON.stringify(next), at, profileId);
   }
+  recordAirtableEgress(source, method, status, at = Date.now()) {
+    const hour = new Date(at).toISOString().slice(0,13) + ":00:00Z";
+    const statusClass = status === 0 ? "network" : String(Math.floor(status / 100)) + "xx";
+    this.sql.exec("INSERT INTO airtable_egress_hourly (hour_utc,source,method,status_class,attempts) VALUES (?,?,?,?,1) ON CONFLICT(hour_utc,source,method,status_class) DO UPDATE SET attempts=attempts+1",
+      hour, source, method, statusClass);
+  }
   async fetch(request) {
     try {
       const url = new URL(request.url);
+      if (request.method === "POST" && url.pathname === "/egress") {
+        const input = await request.json();
+        const source = code(input.source), method = code(input.method).toUpperCase();
+        const status = Number(input.status), occurred = Number(input.at_ms);
+        const allowedSources = ["studio_worker_gateway", "shadow_reconcile", "pipeline_runner_http", "other_direct"];
+        if (!allowedSources.includes(source) || !["GET","POST","PUT","PATCH","DELETE"].includes(method)
+          || !Number.isInteger(status) || status < 0 || status > 599
+          || !Number.isFinite(occurred) || Math.abs(Date.now()-occurred) > 300000) {
+          return json({ok:false,error:"invalid_egress_event"},400);
+        }
+        this.recordAirtableEgress(source,method,status,occurred);
+        return json({ok:true});
+      }
+      if (request.method === "GET" && url.pathname === "/egress") {
+        const hours = Math.min(72,Math.max(1, Number(url.searchParams.get("hours")) || 48));
+        const since = new Date(Date.now()-hours*3600000).toISOString().slice(0,13)+":00:00Z";
+        return json({ok:true, source:"profile_summary_durable_object", hourly:records(this.sql,
+          "SELECT hour_utc,source,method,status_class,attempts FROM airtable_egress_hourly WHERE hour_utc>=? ORDER BY hour_utc,source,method,status_class",since)});
+      }
       if (request.method === "GET" && url.pathname === "/status") {
         return json({
           ok: true,
@@ -323,7 +349,12 @@ export class StudioProfileSummary {
           : ["Content_Profile", "Promoted_Content_Record_ID", "Content Items"];
         for (const field of fields) url.searchParams.append("fields[]", field);
         this.incrementMetric("airtable_dirty_batch_attempts");
-        const res = await fetch(url.toString(), { headers: { Authorization: "Bearer " + this.env.AIRTABLE_PAT } });
+        let res;
+        try {
+          res = await fetch(url.toString(), { headers: { Authorization: "Bearer " + this.env.AIRTABLE_PAT } });
+        } finally {
+          this.recordAirtableEgress("shadow_dirty_replay", "GET", res?.status || 0);
+        }
         if (!res.ok) throw new Error("Airtable batch reread returned " + res.status);
         const pack = await res.json();
         if (!Array.isArray(pack.records) || pack.offset) throw new Error("Incomplete Airtable batch reread");

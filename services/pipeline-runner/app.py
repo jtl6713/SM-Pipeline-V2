@@ -15,7 +15,7 @@ from audio.backfill import process_request as backfill_audio_leading_silence
 from i1.openai_ideas import generate_ideas
 from carousel.image_gen import build_c2_prompt, generate_carousel_png
 from studio_music.processor import ingest_studio_music, trash_studio_music
-from airtable.egress_monitor import install_airtable_egress_monitor
+from airtable.egress_monitor import install_airtable_egress_monitor, read_airtable_egress
 install_airtable_egress_monitor()
 from airtable.client import AirtableClient
 from item4.clip_poster import ensure_request_clip_posters
@@ -71,6 +71,22 @@ def _verify_secret() -> tuple[dict | None, int | None]:
     if provided != expected:
         return jsonify({"error": "Invalid pipeline secret"}), 401
     return None, None
+
+
+@app.get("/admin/airtable-egress")
+def durable_airtable_egress():
+    """Read-only metrics. Runner shared secret required; no record details."""
+    if not settings.get("pipeline_runner_shared_secret", "").strip():
+        return jsonify({"ok": False, "error": "metrics_auth_unconfigured"}), 503
+    denied, status = _verify_secret()
+    if denied is not None:
+        return denied, status
+    try:
+        hours = max(1, min(72, int(request.args.get("hours", "48"))))
+        result = read_airtable_egress(hours)
+    except (TypeError, ValueError, OSError) as error:
+        return jsonify({"ok": False, "error": type(error).__name__}), 400
+    return jsonify(result), 200 if result.get("ok") else 503
 
 
 @app.get("/health")
