@@ -29,6 +29,8 @@ jobs:
           PY
       - name: Test equal-window reporting safety
         run: python -m unittest discover -s repair/scripts -p 'airtable_request_window_report_test.py' -v
+      - name: Test durable hourly window accounting
+        run: python -m unittest discover -s repair/scripts -p 'durable_airtable_window_report_test.py' -v
       - name: Store coverage audit
         uses: actions/upload-artifact@v4
         with:
