@@ -35,3 +35,14 @@ test("repair is single lane, opt-in and atomic only", () => {
 test("ordinary regeneration retains original selection", () => {
   assert.ok(source.includes("eligibleIds = eligible.map((row) => row.id)"));
 });
+
+test("repair date belongs to schedule regeneration, never Approve All", () => {
+  const approvalStart = source.indexOf("export async function studioPutApproveAllJob(");
+  const approvalEnd = source.indexOf("/*__STUDIO_WORKER_END:studioPutApproveAllJob__*/", approvalStart);
+  assert.ok(approvalStart >= 0 && approvalEnd > approvalStart);
+  assert.equal(source.slice(approvalStart, approvalEnd).includes("repairDate"), false);
+  const regenStart = source.indexOf("export async function startScheduleRegenJob(");
+  const regenEnd = source.indexOf("/*__STUDIO_WORKER_END:startScheduleRegenJob__*/", regenStart);
+  assert.ok(regenStart >= 0 && regenEnd > regenStart);
+  assert.ok(source.slice(regenStart, regenEnd).includes("if (repairDate) job.repair_date = repairDate;"));
+});
