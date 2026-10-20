@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/automatic-shadow-evidence-20261020
+      - feature/durable-airtable-egress-20261020
     paths:
       - 'repair/scripts/audit_airtable_egress_paths.py'
       - '.github/workflows/airtable-egress-coverage-audit.yml'
