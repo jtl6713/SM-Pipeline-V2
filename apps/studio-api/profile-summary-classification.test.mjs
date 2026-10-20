@@ -94,3 +94,24 @@ test("overdue unpublished survives dispatch, but disappears after publication", 
     ...late, scheduled_post_date: "2099-01-01T00:00:00Z",
   }).overdue_unpublished, 0);
 });
+
+test("approving an output moves one from Awaiting Approval into parentheses, regardless of scheduled date", () => {
+  const ready = { ...base, render_status: "Rendered", review_status: "" };
+  const before = homeOutputContribution(ready);
+  assert.equal(before.awaiting_approval, 1);
+  assert.equal(before.approved_unpublished, 0);
+  for (const scheduled_post_date of ["2099-01-01T00:00:00Z", "2020-01-01T00:00:00Z", null]) {
+    const approved = { ...ready, review_status: "Approved", output_status: "Approved for Publishing",
+      studio_state: "Scheduled", scheduled_post_date };
+    const after = homeOutputContribution(approved);
+    assert.equal(after.awaiting_approval, 0);
+    assert.equal(after.approved_unpublished, 1);
+    assert.equal(homeContributionDelta(before, after).approved_unpublished, 1);
+    assert.equal(homeContributionDelta(before, after).awaiting_approval, -1);
+    assert.equal(homeOutputContribution({ ...approved, studio_publish_dispatch_count: 1,
+      studio_state: "Platform Processing" }).approved_unpublished, 1);
+    assert.equal(homeOutputContribution({ ...approved, published_at: "2026-10-20T02:00:00Z" }).approved_unpublished, 0);
+    assert.equal(homeOutputContribution({ ...approved, platform_post_url: "https://example.test/post" }).approved_unpublished, 0);
+    assert.equal(homeOutputContribution({ ...approved, review_status: "Rejected" }).approved_unpublished, 0);
+  }
+});
