@@ -117,7 +117,7 @@
       ${countMismatch ? '<p class="factory-batch-quality-unavailable">Batch totals disagree: investigate status reconciliation.</p>' : ""}
       ${signals.length ? `<p class="factory-batch-quality-heading">${signals.length} Quality Agent finding${signals.length === 1 ? "" : "s"} for this batch</p>
         <ul class="factory-batch-quality-list">${rowMarkup}</ul>`
-         : `<p class="factory-batch-quality-clear">No approval-batch findings in ${global ? "recent Factory batches" : "the latest batch"}.</p>`}`;
+         : `<p class="factory-batch-quality-clear">No Quality Agent findings in ${global ? "recent Factory batches" : "the latest batch"} (approval batches only).</p>`}`;
   }
 
   function render(profileId, data, error = "") {
