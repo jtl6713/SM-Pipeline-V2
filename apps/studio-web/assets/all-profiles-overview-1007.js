@@ -6,7 +6,7 @@
   const platformOrder = ["Facebook","Instagram","TikTok","YouTube"];
   const CACHE_KEY = "studio.allProfilesOverview.v2";
   const REFRESH_KEY = "studio.allProfilesOverview.refresh.v1";
-  const POLL_MS = 5000;
+  const POLL_MS = 12000;
   const REFRESH_POLL_MS = 1800;
   // The Worker expires abandoned refresh operations after 120s. Keep a small
   // client grace period, then stop painting "Refreshing…" if browser storage
@@ -21,6 +21,7 @@
     followUp: false,
     cacheAt: 0,
     snapshotGeneration: "",
+    summaryVersion: 0,
     ideasAt: 0,
     manualRefreshing: false,
     refreshOperationId: "",
@@ -66,6 +67,7 @@
         rows: parsed.rows,
         at: Number(parsed.at) || 0,
         generation: String(parsed.generation || ""),
+        summaryVersion: Number(parsed.summaryVersion || 0),
         ideasAt: Number(parsed.ideasAt || 0),
       };
     } catch {
@@ -78,11 +80,13 @@
     const authoritativeAt = Number(metadata.snapshotAt || 0);
     if (authoritativeAt > 0) state.cacheAt = authoritativeAt;
     if (metadata.generation != null) state.snapshotGeneration = String(metadata.generation || "");
+    if (metadata.summaryVersion != null) state.summaryVersion = Number(metadata.summaryVersion) || 0;
     if (metadata.ideasAt != null) state.ideasAt = Number(metadata.ideasAt || 0);
     const payload = JSON.stringify({
       rows,
       at: state.cacheAt,
       generation: state.snapshotGeneration,
+      summaryVersion: state.summaryVersion,
       ideasAt: state.ideasAt,
     });
     try { localStorage.setItem(CACHE_KEY, payload); } catch { /* ignore quota */ }
@@ -309,6 +313,10 @@
     const rows = Array.isArray(data?.records) ? data.records : [];
     // Reject invalid server snapshots instead of caching four fake Chicago rows.
     if (!validOverviewRows(rows)) return false;
+    const nextVersion = Number(data?.summary_version || 0);
+    // Reject out-of-order summary requests; legacy snapshots retain their own fallback.
+    if (nextVersion > 0 && state.summaryVersion > nextVersion) return false;
+    state.summaryVersion = nextVersion;
     state.rows = mapRows(rows);
     const snapshotAt = Number(data?.snapshot_at || 0);
     if (snapshotAt > 0) state.cacheAt = snapshotAt;
@@ -318,6 +326,7 @@
       writeCache(state.rows, {
         snapshotAt,
         generation: state.snapshotGeneration,
+        summaryVersion: state.summaryVersion,
         ideasAt: state.ideasAt,
       });
     }
@@ -495,6 +504,7 @@
         state.rows = cached.rows;
         state.cacheAt = cached.at;
         state.snapshotGeneration = cached.generation;
+        state.summaryVersion = cached.summaryVersion || 0;
         state.ideasAt = cached.ideasAt;
         render({ stale: true });
       } else {
@@ -557,6 +567,7 @@
     state.rows = cachedNow.rows;
     state.cacheAt = cachedNow.at;
     state.snapshotGeneration = cachedNow.generation;
+    state.summaryVersion = cachedNow.summaryVersion || 0;
     state.ideasAt = cachedNow.ideasAt;
     render({ stale: true });
   }
@@ -576,7 +587,7 @@
   };
   start();
 
-  // Five-second Home polling remains cheap snapshot reads only. Durable refresh
+  // Twelve-second Home polling remains cheap snapshot reads only. Durable refresh
   // status polling is independent, so leaving Home does not cancel a refresh.
   state.timer = window.setInterval(() => {
     if (overviewViewActive()) load();

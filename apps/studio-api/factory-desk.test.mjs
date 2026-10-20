@@ -1,3 +1,4 @@
+import { combineHomeContributions, homeOutputContribution, homeIdeaContribution } from "./profile-summary-classification.mjs";
 import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -110,7 +111,7 @@ test("Home approval metric matches actionable review-ready outputs instead of qu
   const start = workerFunctions.indexOf("export function studioOverviewOperationalMetrics(");
   const end = workerFunctions.indexOf("/*__STUDIO_WORKER_END:studioOverviewOperationalMetrics__*/", start);
   assert.ok(start >= 0 && end > start, "overview function is available for runtime contract test");
-  const fn = runInNewContext(`(${workerFunctions.slice(start, end).trim().replace(/^export /, "")})`);
+  const fn = runInNewContext(`(${workerFunctions.slice(start, end).trim().replace(/^export /, "")})`, { combineHomeContributions, homeOutputContribution, homeIdeaContribution });
   const base = {
     studio_state: "Ready for Review",
     output_status: "Ready for Review",

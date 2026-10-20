@@ -1,3 +1,9 @@
+import {
+  readStudioProfileSummary,
+  notifyStudioProfileSummary,
+  reconcileStudioProfileSummary,
+} from "./profile-summary-controller.mjs";
+export { StudioProfileSummary } from "./profile-summary-do.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
   studioReadSource,
@@ -1860,6 +1866,24 @@ export default {
         return getProfilesOverviewRefreshStatus(request, env);
       }
 
+      if (url.pathname === "/api/profiles/overview/summary") {
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure", "outputs_review"]);
+        const summary = await readStudioProfileSummary(env);
+        return respond(request, env, summary);
+      }
+
+      if (url.pathname === "/api/profiles/overview/summary/reconcile") {
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "tenant_admin");
+        if (!env.STUDIO_PROFILE_SUMMARIES?.get) throw new HttpError(503, "Profile summary namespace not configured");
+        ctx.waitUntil(reconcileStudioProfileSummary(env).catch((error) => {
+          console.warn("profile summary full reconciliation failed", error);
+        }));
+        return respond(request, env, { ok: true, started: true, read_cutover_enabled: env.STUDIO_HOME_PROFILE_SUMMARY_READS === "true" });
+      }
+
       if (url.pathname === "/api/profiles/overview") {
         if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
         return profilesOverview(request, env, authorization, ctx);
@@ -2530,11 +2554,13 @@ export default {
       } catch (error) {
         console.warn("AZ finished-video resume failed", error);
       }
-      try {
-        // Supabase overview rebuilds are paused. This tick used to start one
-        // whenever the snapshot was older than 10 minutes.
-      } catch (error) {
-        console.warn("profiles overview snapshot refresh failed", error);
+      // Summary reconciliation is a separate, explicitly gated Airtable scan.
+      // Never share the Supabase 30-minute sync or scheduling authority.
+      if (cadence.heavy && Number(cadence.minute) === 30
+          && env.STUDIO_PROFILE_SUMMARY_RECONCILE_ENABLED === "true") {
+        ctx.waitUntil(reconcileStudioProfileSummary(env).catch((error) => {
+          console.warn("profile summary periodic reconciliation failed", error);
+        }));
       }
 
       if (!cadence.heavy) return;
@@ -2944,6 +2970,14 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   // Callers that own the post-commit Supabase mirror (Factory approve,
   // schedule regen, calendar save) pass skipSupabaseWriteThrough so Airtable
   // verify under the scheduling lock is not followed by a second mirror.
+  // Airtable has already confirmed this write. Queue the summary change
+  // BEFORE optional Supabase mirror calls so a slow/broken mirror never
+  // prevents Home's near-real-time invalidation.
+  if (options?.method && String(options.method).toUpperCase() !== "GET") {
+    await notifyStudioProfileSummary(env, tableId, options.method, body).catch((error) => {
+      console.warn("profile summary dirty notification failed", error);
+    });
+  }
   if (options?.skipSupabaseWriteThrough !== true) {
     await studioSupabaseWriteThroughAirtableMutation(env, tableId, options?.method, body).catch((error) => {
       console.warn("supabase airtable write-through failed", tableId, error);

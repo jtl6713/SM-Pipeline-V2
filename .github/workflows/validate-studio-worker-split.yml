@@ -82,8 +82,8 @@ jobs:
             "workers_dev": false,
             "vars": {"STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED":"false"},
             "r2_buckets": [{"binding":"STUDIO_MEDIA","bucket_name":"dummy"}],
-            "durable_objects": {"bindings":[{"name":"STUDIO_SCHEDULE_RESERVATIONS","class_name":"ScheduleReservationLane"}]},
-            "exports": {"ScheduleReservationLane":{"type":"durable-object","storage":"sqlite"}}
+            "durable_objects": {"bindings":[{"name":"STUDIO_SCHEDULE_RESERVATIONS","class_name":"ScheduleReservationLane"},{"name":"STUDIO_PROFILE_SUMMARIES","class_name":"StudioProfileSummary"}]},
+            "exports": {"ScheduleReservationLane":{"type":"durable-object","storage":"sqlite"},"StudioProfileSummary":{"type":"durable-object","storage":"sqlite"}}
           }
           EOF
           ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --dry-run

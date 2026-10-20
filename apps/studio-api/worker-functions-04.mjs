@@ -1,3 +1,5 @@
+import { readStudioProfileSummary, validVerifiedStudioSummary } from "./profile-summary-controller.mjs";
+import { homeOutputContribution, homeIdeaContribution, combineHomeContributions } from "./profile-summary-classification.mjs";
 import { countPendingPlatformDispatch } from "./overview-dispatch-counts.mjs";
 import {
   claimProfilesOverviewRefresh,
@@ -4585,65 +4587,19 @@ export function studioOverviewScheduledCounts(mappedOutputs) {
 /*__STUDIO_WORKER_END:studioOverviewScheduledCounts__*/
 
 export function studioOverviewOperationalMetrics(mappedOutputs, ideas) {
-  const attentionStates = new Set(["Failed", "Retry Pending", "Manual Action Required"]);
-  const manualAction = mappedOutputs.filter((o) => o.studio_state === "Manual Action Required").length;
-  const failed = mappedOutputs.filter((o) => o.studio_state === "Failed").length;
-  const awaitingApproval = mappedOutputs.filter((o) => {
-    const state = String(o.studio_state || "").trim();
-    if (state !== "Ready for Review" && state !== "Awaiting Approval") return false;
-    // Only count approvals an operator can act on. A stale Ready for Review
-    // studio_state can coexist with a still-queued Remotion render.
-    const output = String(o.output_status || "").trim().toLowerCase();
-    const render = String(o.render_status || "").trim().toLowerCase();
-    const review = String(o.review_status || "").trim().toLowerCase();
-    const publish = String(o.publish_status || "").trim().toLowerCase();
-    if (["approved", "rejected", "skipped"].includes(review)) return false;
-    if (["in production", "rendering", "ready for render", "approved", "approved for publishing", "published"].includes(output)) return false;
-    if (/ready for render|waiting in render queue|rendering|queued|pending render|^processing$|^preparing$|^failed$|^blocked$/.test(render)) return false;
-    if (/^(scheduled|published|uploading|platform processing|draft delivered)$/.test(publish)) return false;
-    if (o.do_not_publish) return false;
-    const notes = `${o.output_notes || ""}\n${o.production_notes || ""}`;
-    if (/origin=az-finished-video/i.test(notes)) return false;
-    if (/az-auto-queue=1/i.test(notes) && /ez-input=finished-video/i.test(notes)) return false;
-    return true;
-  }).length;
-  // Count approved outputs whose scheduled publication time has passed but which
-  // have no authoritative evidence of publication. This is intentionally NOT the
-  // dispatch queue: a late handoff, upload or retry remains outstanding until posted.
-  const overdueUnpublished = mappedOutputs.filter((o) => {
-    const review = String(o.review_status || "").trim().toLowerCase();
-    const output = String(o.output_status || "").trim().toLowerCase();
-    if (review && review !== "approved") return false;
-    if (!(review === "approved" || output === "approved" || output.includes("approved for publishing"))) return false;
-    if (o.do_not_publish) return false;
-    const scheduled = o.scheduled_at || o.scheduled_post_date || o.youtube_scheduled_publish_at;
-    const when = Date.parse(String(scheduled || ""));
-    if (!Number.isFinite(when) || when > Date.now()) return false;
-    const state = String(o.studio_state || "").trim().toLowerCase();
-    const publish = String(o.publish_status || "").trim().toLowerCase();
-    const platformPublish = String(o.platform_publish_status || "").trim().toLowerCase();
-    const manual = String(o.manual_completion_status || "").trim().toLowerCase();
-    if (/published|posted/.test(state)) return false;
-    if (/published|posted|publish complete|publish succeeded/.test(publish) || /published|posted|completed|succeeded/.test(platformPublish)) return false;
-    if (/^(published|posted|completed)$/.test(manual)) return false;
-    if (o.published_at || o.platform_post_url || o.manual_published_url) return false;
-    return true;
-  }).length;
-  const ideasNotInProduction = (ideas || []).filter((idea) => !(
-    Boolean(idea?.promoted_content_record_id)
-    || (Array.isArray(idea?.content_item_links) && idea.content_item_links.length > 0)
-  )).length;
+  const outputCounts = combineHomeContributions((mappedOutputs || []).map(homeOutputContribution));
+  const ideaCounts = combineHomeContributions((ideas || []).map(homeIdeaContribution));
   return {
-    manual_action_required: manualAction,
-    failed_outputs: failed,
-    awaiting_approval: awaitingApproval,
-    overdue_unpublished: overdueUnpublished,
-    ideas_not_in_production: ideasNotInProduction,
-    attention_outputs: mappedOutputs.filter((o) => attentionStates.has(o.studio_state)).length,
-    published_outputs: mappedOutputs.filter((o) => o.studio_state === "Published").length,
-    active_outputs: mappedOutputs.filter((o) => !["Published", "Skipped", "Failed"].includes(o.studio_state)).length,
-    ideas: (ideas || []).length,
-    platform_outputs: mappedOutputs.length,
+    manual_action_required: outputCounts.manual_action_required,
+    failed_outputs: outputCounts.failed_outputs,
+    awaiting_approval: outputCounts.awaiting_approval,
+    overdue_unpublished: outputCounts.overdue_unpublished,
+    ideas_not_in_production: ideaCounts.ideas_not_in_production,
+    attention_outputs: outputCounts.attention_outputs,
+    published_outputs: outputCounts.published_outputs,
+    active_outputs: outputCounts.active_outputs,
+    ideas: ideaCounts.ideas,
+    platform_outputs: outputCounts.platform_outputs,
   };
 }
 /*__STUDIO_WORKER_END:studioOverviewOperationalMetrics__*/
@@ -5225,6 +5181,25 @@ export function scheduleStudioProfilesOverviewIdeasRefresh(ctx, env, authorizati
 /*__STUDIO_WORKER_END:scheduleStudioProfilesOverviewIdeasRefresh__*/
 
 export async function profilesOverview(request, env, authorization, ctx) {
+  if (env?.STUDIO_HOME_PROFILE_SUMMARY_READS === "true") {
+    try {
+      const summary = await readStudioProfileSummary(env);
+      if (validVerifiedStudioSummary(summary, summary.records.map((row) => row.id))) {
+        return respond(request, env, {
+          ok: true, cached: true, stale: false, snapshot: true,
+          summary_version: summary.version,
+          last_authoritative_event_at: summary.last_authoritative_event_at,
+          last_reconciled_at: summary.last_reconciled_at,
+          snapshot_at: Math.max(Number(summary.last_authoritative_event_at || 0), Number(summary.last_reconciled_at || 0)),
+          snapshot_generation: "summary-" + summary.version,
+          read_source: summary.source,
+          records: summary.records,
+        });
+      }
+    } catch (error) {
+      console.warn("Home summary fallback to last-good snapshot", error);
+    }
+  }
   const url = new URL(request.url);
   const minGeneration = String(url.searchParams.get("min_generation") || "");
   const [snapshot, refreshRecord] = await Promise.all([
@@ -11659,6 +11634,24 @@ export async function studioLoadAutonomousLastRun(env) {
 export async function studioLoadAutonomousRefillScores(env, profiles, { refresh = false } = {}) {
   const enabled = (Array.isArray(profiles) ? profiles : []).filter((row) => row?.id);
   if (!enabled.length) return { scores: {}, overview: [], source: "empty" };
+  const summaryEnabled = env?.STUDIO_REFILL_PROFILE_SUMMARY_READS === "true";
+  if (summaryEnabled) {
+    try {
+      const summary = await readStudioProfileSummary(env);
+      if (validVerifiedStudioSummary(summary, enabled.map((row) => row.id))) {
+        const overview = summary.records.filter((row) => enabled.some((profile) => profile.id === row.id));
+        return {
+          scores: autonomousRefillScoresFromOverview(overview, AUTONOMOUS_SCHEDULED_TARGET),
+          overview, source: "durable_summary", target: AUTONOMOUS_SCHEDULED_TARGET,
+        };
+      }
+    } catch (error) {
+      console.warn("Autonomous summary unavailable; requesting authoritative fallback", error);
+    }
+    // A stale summary is NEVER grounds for creating more Ideas.
+    // Use a fresh authoritative scan; if it fails, create nothing.
+    refresh = true;
+  }
   const authKey = studioProfilesOverviewAuthKey(enabled);
   let rows = [];
   let source = "snapshot";
@@ -11684,7 +11677,7 @@ export async function studioLoadAutonomousRefillScores(env, profiles, { refresh 
       source = "live";
     } catch (error) {
       console.warn("autonomous refill overview load failed", error);
-      if (!rows.length) return { scores: {}, overview: [], source: "error", error: String(error?.message || error).slice(0, 180) };
+      if (summaryEnabled || !rows.length) return { scores: {}, overview: [], source: "error", error: String(error?.message || error).slice(0, 180) };
       source = "stale_snapshot";
     }
   }
