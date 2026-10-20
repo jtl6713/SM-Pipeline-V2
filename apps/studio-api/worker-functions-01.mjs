@@ -1,4 +1,5 @@
 import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
+import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
 import { isQueuedForPlatformDispatch } from "./overview-dispatch-counts.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
@@ -11431,6 +11432,7 @@ export async function healStuckStudioRenders(env) {
   }).catch(() => []);
   for (const row of readyToTypo || []) {
     try {
+      failedRenderRetries += 1;
       await airtableFetch(env, outputTable, row.id, {
         method: "PATCH",
         body: JSON.stringify({
@@ -11550,13 +11552,13 @@ export async function healStuckStudioRenders(env) {
       pulses.push({ key: "R5_LONG_RENDER", id: row.id, error: error instanceof Error ? error.message : String(error) });
     }
   }
-  const failedRenders = await listRecords(env, outputTable, {
-    limit: 6,
-    sortField: "Output_ID",
-    sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Failed")',
-  }).catch(() => []);
-  for (const row of failedRenders || []) {
+  const failedRenders = await scanOutstandingFailedOutputs(
+    (options) => listRecordsPage(env, outputTable, options),
+    { filterFormula: 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Failed")' });
+  let failedRenderRetries = 0;
+  for (const row of failedRenders) {
+    if (failedRenderRetries >= 6) break;
+    if (failedOutputRetryGate(row)) continue;
     if (studioPrivateDriveWatermarkSignature(row)) {
       if (!rendererSupportsPrivateDrive) {
         pulses.push({ key: "R4_FAILED_REQUEUE", id: row.id, skipped: "private_drive_watermark_renderer_not_updated" });
@@ -11989,13 +11991,14 @@ export async function studioHealFailedStatuses(env, options = {}) {
   const limit = Math.max(1, Math.min(8, Number(options.limit || 6)));
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const pulses = [];
-  const failedPublish = await listRecords(env, outputTable, {
-    limit,
-    sortField: "Output_ID",
-    sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,OR({Publish_Status}="Failed",AND({Publish_Error_Message}!="",OR({Publish_Status}="Ready to Publish",{Publish_Status}="Publishing"))))',
-  }).catch(() => []);
-  for (const row of failedPublish || []) {
+  const filterFormula = 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,OR({Publish_Status}="Failed",AND({Publish_Error_Message}!="",OR({Publish_Status}="Ready to Publish",{Publish_Status}="Publishing"))))';
+  const failedPublish = await scanOutstandingFailedOutputs(
+    (options) => listRecordsPage(env, outputTable, options), { filterFormula });
+  let retried = 0;
+  for (const row of failedPublish) {
+    if (retried >= limit) break;
+    // Existing platform evidence, cooldown, lock and attempt fences take precedence.
+    if (failedOutputRetryGate(row)) continue;
     const err = [
       String(f(row, "Publish_Error_Message") || ""),
       String(f(row, "FB_Slideshow_Error_Message") || ""),
@@ -12059,6 +12062,7 @@ export async function studioHealFailedStatuses(env, options = {}) {
     });
     if (status !== "Failed" && !deskTransientPublishError(err) && !needsHeal) continue;
     if (status === "Failed" && !needsHeal) continue;
+    retried += 1;
     const corruptUpload = /2207082|media upload has failed/i.test(err);
     const alreadyRetried = Number(f(row, "Publish_Attempt_Count") || 0) >= 2
       || Number(f(row, "Studio_Publish_Dispatch_Count") || 0) >= 2;
@@ -12076,7 +12080,6 @@ export async function studioHealFailedStatuses(env, options = {}) {
               Publish_Error_Message: "",
               Publish_Locked_By: "",
               Publish_Locked_At: null,
-              Studio_Publish_Dispatch_Count: 0,
             },
             typecast: true,
           }),
@@ -12104,7 +12107,6 @@ export async function studioHealFailedStatuses(env, options = {}) {
             Publish_Started_At: null,
             Publish_Retry_Eligible: true,
             Publish_Next_Retry_At: null,
-            Studio_Publish_Dispatch_Count: 0,
             Platform_Media_ID: /in_progress|still being processed/i.test(err)
               ? (f(row, "Platform_Media_ID") || "")
               : "",
