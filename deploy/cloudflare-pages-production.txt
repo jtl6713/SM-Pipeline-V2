@@ -456,3 +456,5 @@ Release Studio UI 0.6.723: fast Profile Admin voice/music load and playable name
 2026-10-20: deploy merged #950 Home overview monotonic snapshot freshness fence and approved-unpublished parentheses count display. This is UI-only; no change to Airtable write source, publishing, or approvals.\n2026-10-20: UI 0.6.726 Home approved-but-unpublished parentheses release from latest main; guarded Pages deployment and live version verification.\n
 
 2026-10-20: Home tally integrity: reject missing approved_unpublished and overdue_unpublished in R2 Worker snapshot and browser cache; do not display obsolete parenthesized approvals. Deploy Worker and Pages with existing authoritative-refresh verification. Airtable remains SoR; no Supabase read changes.
+
+2026-10-20: Release Studio UI 0.6.727-home-tally-cache-integrity after P0 #960 Worker source/counter integrity fix. Unique version and BUILD_ID to safely deploy corrected Home parenthesized approved-not-published tally. No backend state changes.
