@@ -4,7 +4,7 @@ import {
 } from "./worker-functions-01.mjs";
 import {
   studioOverviewOperationalMetrics, studioOverviewScheduledCounts,
-  validateStudioProfilesOverviewRows,
+  studioOverviewRowMatchesProfile, validateStudioProfilesOverviewRows,
 } from "./worker-functions-04.mjs";
 import { OUTPUT_LIST_FIELDS } from "./worker.js";
 
@@ -118,15 +118,15 @@ async function runStudioProfileSummaryReconcile(env) {
   for (const profile of profiles) {
     const profileFormula = contentProfileFilterFormula(profile);
     if (!profileFormula) throw new Error("Missing profile filter");
-    const outputs = await listRecordsWithCoolingRetry(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    const outputs = (await listRecordsWithCoolingRetry(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       filterFormula: "AND(" + profileFormula + ',{Output_Status}!="Published",{Publish_Status}!="Published")',
       limit: 10000, fields: OUTPUT_LIST_FIELDS,
-    });
-    const ideas = await listRecordsWithCoolingRetry(env, env.AIRTABLE_IDEA_TABLE_ID, {
+    })).filter((row) => studioOverviewRowMatchesProfile(row, profile));
+    const ideas = (await listRecordsWithCoolingRetry(env, env.AIRTABLE_IDEA_TABLE_ID, {
       filterFormula: "AND(" + profileFormula + ",{Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK())",
       limit: 10000,
       fields: ["Content_Profile", "Promoted_Content_Record_ID", "Content Items"],
-    });
+    })).filter((row) => studioOverviewRowMatchesProfile(row, profile));
     if (outputs.length >= 10000 || ideas.length >= 10000) {
       throw new Error("Summary scan reached an incomplete-result safety ceiling");
     }

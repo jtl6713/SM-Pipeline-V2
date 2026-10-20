@@ -29,7 +29,7 @@ concurrency:
 jobs:
   canary:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -60,21 +60,26 @@ jobs:
             async fetch(request, env) {
               const url = new URL(request.url);
               const overview = url.pathname === "/$TOKEN/overview";
+              const overviewRefresh = url.pathname === "/$TOKEN/overview-refresh";
+              const overviewStatus = url.pathname === "/$TOKEN/overview-status";
               const summary = url.pathname === "/$TOKEN/summary";
               const summaryReconcile = url.pathname === "/$TOKEN/summary-reconcile";
               const summaryStatus = url.pathname === "/$TOKEN/summary-status";
-              if (!overview && !summary && !summaryReconcile && !summaryStatus) return new Response("Not found", {status:404});
+              if (!overview && !overviewRefresh && !overviewStatus && !summary && !summaryReconcile && !summaryStatus) return new Response("Not found", {status:404});
+              const generation = String(url.searchParams.get("generation") || "");
               const path = summaryReconcile ? "/api/profiles/overview/summary/reconcile"
                 : summaryStatus ? "/api/profiles/overview/summary/status"
                 : summary ? "/api/profiles/overview/summary"
-                : "/api/profiles/overview";
-              const method = summaryReconcile ? "POST" : "GET";
+                : overviewRefresh ? "/api/profiles/overview/refresh"
+                : overviewStatus ? "/api/profiles/overview/refresh-status"
+                : "/api/profiles/overview" + (generation ? "?min_generation=" + encodeURIComponent(generation) : "");
+              const method = (summaryReconcile || overviewRefresh) ? "POST" : "GET";
               const headers = {"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Accept":"application/json"};
-              if (summaryReconcile) headers["Content-Type"] = "application/json";
+              if (summaryReconcile || overviewRefresh) headers["Content-Type"] = "application/json";
               const internal = new Request("https://studio.chicagoshining.com" + path, {
                 method,
                 headers,
-                body: summaryReconcile ? "{}" : undefined,
+                body: (summaryReconcile || overviewRefresh) ? "{}" : undefined,
               });
               const started = Date.now();
               const response = await env.STUDIO_API.fetch(internal);
@@ -118,9 +123,12 @@ jobs:
           done
           test "$CODE" = "200"
           jq -e '.ok==true and (.records|length)>=4' /tmp/overview.json >/dev/null
+          cp /tmp/overview.json /tmp/overview-before.json
+          BEFORE_AT=$(jq -r '.snapshot_at // 0' /tmp/overview-before.json)
+          BEFORE_GENERATION=$(jq -r '.snapshot_generation // ""' /tmp/overview-before.json)
 
           if [[ "${{ inputs.start_full_reconcile }}" == "true" ]]; then
-            CODE=$(curl -sS --max-time 240 -o /tmp/reconcile-start.json -w '%{http_code}' -X POST "$BASE/summary-reconcile" || true)
+            CODE=$(curl -sS --max-time 900 -o /tmp/reconcile-start.json -w '%{http_code}' -X POST "$BASE/summary-reconcile" || true)
             echo "reconcile_start_http=$CODE"
             cat /tmp/reconcile-start.json
             curl -sS --max-time 60 "$BASE/summary-status" -o /tmp/summary-status.json || true
@@ -133,6 +141,72 @@ jobs:
             else
               test "$CODE" = "200"
             fi
+            echo "Waiting 15s for Airtable cooling after the sequential shadow scan"
+            sleep 15
+
+            ACCEPTED=0
+            for attempt in 1 2 3 4 5 6; do
+              CODE=$(curl -sS --max-time 60 -o /tmp/overview-refresh-start.json -w '%{http_code}' -X POST "$BASE/overview-refresh" || true)
+              STATUS=$(jq -r '.refresh.status // .status // ""' /tmp/overview-refresh-start.json 2>/dev/null || true)
+              if [[ "$CODE" =~ ^20[02]$ ]] && [[ "$STATUS" == "refreshing" || "$STATUS" == "completed" ]]; then
+                ACCEPTED=1
+                break
+              fi
+              START_ERROR=$(jq -r '.error // .refresh.error // ""' /tmp/overview-refresh-start.json 2>/dev/null || true)
+              if [[ "$STATUS" == "cooling_down" || "$CODE" == "429" || "$START_ERROR" == *"cooling down"* ]]; then
+                RETRY_MS=$(jq -r '.refresh.retry_after_ms // .refresh.cooldown_remaining_ms // 8000' /tmp/overview-refresh-start.json)
+                SLEEP_SECS=$(( (RETRY_MS + 999) / 1000 ))
+                if (( SLEEP_SECS < 3 )); then SLEEP_SECS=3; fi
+                if (( SLEEP_SECS > 20 )); then SLEEP_SECS=20; fi
+                echo "Overview refresh cooling down http=$CODE status=$STATUS; sleep ${SLEEP_SECS}s" >&2
+                sleep "$SLEEP_SECS"
+                continue
+              fi
+              echo "Overview refresh start failed http=$CODE status=$STATUS" >&2
+              cat /tmp/overview-refresh-start.json >&2 || true
+              exit 1
+            done
+            test "$ACCEPTED" = "1"
+
+            COMPLETE=0
+            BUDGET_RETRIES=0
+            for attempt in $(seq 1 90); do
+              curl -fsS --max-time 60 "$BASE/overview-status" -o /tmp/overview-refresh-status.json
+              STATUS=$(jq -r '.refresh.status // .status // ""' /tmp/overview-refresh-status.json)
+              if [[ "$STATUS" == "completed" ]]; then
+                COMPLETE=1
+                break
+              fi
+              if [[ "$STATUS" == "failed" ]]; then
+                ERROR=$(jq -r '.refresh.error // ""' /tmp/overview-refresh-status.json)
+                if [[ "$ERROR" == *"overview-force-build budget"* || "$ERROR" == *"overview-force-resolve budget"* || "$ERROR" == *"cooling down"* ]] && (( BUDGET_RETRIES < 3 )); then
+                  BUDGET_RETRIES=$((BUDGET_RETRIES + 1))
+                  echo "Overview force refresh hit budget (retry $BUDGET_RETRIES/3)" >&2
+                  sleep 12
+                  curl -sS --max-time 60 -o /tmp/overview-refresh-start.json -w '%{http_code}' -X POST "$BASE/overview-refresh" >/dev/null || true
+                  sleep 8
+                  continue
+                fi
+                echo "Overview force refresh failed; cannot claim Home/shadow parity against a stale cache" >&2
+                cat /tmp/overview-refresh-status.json >&2 || true
+                exit 1
+              fi
+              sleep 2
+            done
+            test "$COMPLETE" = "1"
+            GENERATION=$(jq -er '.refresh.snapshot_generation' /tmp/overview-refresh-status.json)
+            SNAPSHOT_AT=$(jq -er '.refresh.snapshot_at' /tmp/overview-refresh-status.json)
+            jq -e '.refresh.component_status.outputs=="completed" and .refresh.component_status.ideas=="completed"' /tmp/overview-refresh-status.json >/dev/null
+            test -n "$GENERATION"
+            test "$GENERATION" != "$BEFORE_GENERATION"
+            test "$SNAPSHOT_AT" -gt "$BEFORE_AT"
+            curl -fsS --max-time 60 "$BASE/overview?generation=$GENERATION" -o /tmp/overview.json
+            jq -e --arg generation "$GENERATION" --argjson at "$SNAPSHOT_AT" '
+              .ok==true
+              and .snapshot_generation==$generation
+              and .snapshot_at==$at
+              and (.records|length)>=4
+            ' /tmp/overview.json >/dev/null
           fi
 
           READY=0
@@ -147,11 +221,12 @@ jobs:
           done
           test "$READY" = "1"
 
+          echo "$BASE" >/tmp/base-url.txt
           python - <<'PY'
-          import json, statistics, time, urllib.request
+          import json, time, urllib.request
           from pathlib import Path
-          overview=json.loads(Path('/tmp/overview.json').read_text())
-          summary=json.loads(Path('/tmp/summary.json').read_text())
+          base=Path('/tmp/base-url.txt').read_text().strip()
+          cities=('Chicago','New York','Los Angeles','Miami')
           def row_key(row):
               return str(row.get('city_label') or row.get('name') or row.get('id'))
           def metrics(row):
@@ -166,25 +241,50 @@ jobs:
                       for name in ('Facebook','Instagram','TikTok','YouTube')
                   },
               }
-          left={row_key(r): metrics(r) for r in overview['records']}
-          right={row_key(r): metrics(r) for r in summary['records']}
-          cities=('Chicago','New York','Los Angeles','Miami')
-          matched=[]
-          for city in cities:
-              l=next((v for k,v in left.items() if city.lower() in k.lower()), None)
-              r=next((v for k,v in right.items() if city.lower() in k.lower()), None)
-              if l is None or r is None:
-                  raise SystemExit('Missing city in parity: '+city)
-              if l!=r:
-                  raise SystemExit('Parity mismatch for '+city+': authoritative='+json.dumps(l)+' shadow='+json.dumps(r))
-              matched.append({'city':city,'authoritative':l,'shadow':r,'equal':True})
+          def load(path):
+              return json.loads(Path(path).read_text())
+          def pull(url, dest):
+              req=urllib.request.Request(url, headers={'Accept':'application/json'})
+              with urllib.request.urlopen(req, timeout=60) as res:
+                  body=res.read()
+              Path(dest).write_bytes(body)
+              return json.loads(body.decode())
+          def compare(overview, summary):
+              left={row_key(r): metrics(r) for r in overview['records']}
+              right={row_key(r): metrics(r) for r in summary['records']}
+              matched=[]
+              mismatches=[]
+              for city in cities:
+                  l=next((v for k,v in left.items() if city.lower() in k.lower()), None)
+                  r=next((v for k,v in right.items() if city.lower() in k.lower()), None)
+                  if l is None or r is None:
+                      mismatches.append({'city':city,'error':'missing'})
+                      continue
+                  item={'city':city,'authoritative':l,'shadow':r,'equal':l==r}
+                  matched.append(item)
+                  if l!=r:
+                      mismatches.append(item)
+              return matched, mismatches
+          overview=load('/tmp/overview.json')
+          summary=load('/tmp/summary.json')
+          matched, mismatches = compare(overview, summary)
+          for attempt in range(1, 7):
+              if not mismatches:
+                  break
+              print('parity_retry='+str(attempt)+' mismatches='+json.dumps([{k:x.get(k) for k in ('city','authoritative','shadow','error') if k in x} for x in mismatches]))
+              time.sleep(3)
+              summary=pull(base+'/summary', '/tmp/summary.json')
+              matched, mismatches = compare(overview, summary)
           Path('/tmp/shadow-parity.json').write_text(json.dumps({
-              'ok':True,
+              'ok': not mismatches,
               'summary_version':summary.get('version'),
               'last_reconciled_at':summary.get('last_reconciled_at'),
               'read_source':summary.get('source'),
               'cities':matched,
+              'mismatches':mismatches,
           },indent=2))
+          if mismatches:
+              raise SystemExit('Parity mismatch: '+json.dumps(mismatches))
           print('shadow_parity=PASS cities=4 version='+str(summary.get('version')))
           PY
 
@@ -254,7 +354,10 @@ jobs:
           name: shadow-profile-summary-${{ github.run_id }}
           path: |
             /tmp/overview.json
+            /tmp/overview-before.json
+            /tmp/overview-refresh-status.json
             /tmp/summary.json
+            /tmp/summary-status.json
             /tmp/reconcile-start.json
             /tmp/shadow-parity.json
             /tmp/shadow-timings.json

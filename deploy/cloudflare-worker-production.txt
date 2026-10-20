@@ -524,3 +524,5 @@ Deploy PR #905 photo-wait historical platform default repair (Threads 400): filt
 2026-10-19: Admit POST /api/profiles/overview/summary/reconcile through the Phase 2A write gate so operator-authorized shadow bootstrap can run. Worker 0.10.668-profile-summary-shadow. Home/refill reads stay OFF; preserve capture/reconcile flags already enabled in production.
 
 2026-10-19: Await operator shadow reconciliation instead of waitUntil, persist fail-closed errors, raise Worker CPU budget, and expose /summary/status. Worker 0.10.669-profile-summary-await. Home/refill reads stay OFF.
+
+2026-10-19: Align shadow ledger membership with Home studioOverviewRowMatchesProfile so Chicago ideas and dirty profile inference match the authoritative Home scan. Worker 0.10.670-profile-summary-parity. Home/refill reads stay OFF.
