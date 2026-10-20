@@ -620,7 +620,16 @@ jobs:
           BASE="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN"
 
           curl -fsS --max-time 60 "$BASE/overview" -o /tmp/overview-before.json
-          jq -e '.ok==true and (.records|type)=="array" and (.records|length)>=4' /tmp/overview-before.json >/dev/null
+          # A schema bump deliberately rejects the previous R2 Home snapshot.
+          # An empty first read is expected until this very canary rebuilds it.
+          # Reject a PARTIAL non-empty snapshot; never bless incomplete profiles.
+          jq -e '.ok==true and (.records|type)=="array"
+            and ((.records|length)==0 or (.records|length)>=4)' /tmp/overview-before.json >/dev/null || {
+              echo "Unexpected incomplete Home pre-refresh snapshot" >&2
+              jq -c '{ok,rows:(.records|length),snapshot_generation,error}' /tmp/overview-before.json >&2
+              exit 1
+            }
+          echo "home_pre_refresh_rows=$(jq '.records|length' /tmp/overview-before.json)"
           BEFORE_AT=$(jq -r '.snapshot_at // 0' /tmp/overview-before.json)
           BEFORE_GENERATION=$(jq -r '.snapshot_generation // ""' /tmp/overview-before.json)
 
@@ -705,6 +714,18 @@ jobs:
             and .snapshot_generation==$generation
             and .snapshot_at==$at
             and (.records|length)>=4
+            and ([.records[] |
+              (.approved_future|numbers), (.approved_past_due|numbers), (.approved_missing_date|numbers),
+              (.approved_future_by_platform.Facebook|numbers),
+              (.approved_future_by_platform.Instagram|numbers),
+              (.approved_future_by_platform.TikTok|numbers),
+              (.approved_future_by_platform.YouTube|numbers),
+              (.approved_calendar_slots.Facebook|arrays),
+              (.approved_calendar_slots.Instagram|arrays),
+              (.approved_calendar_slots.TikTok|arrays),
+              (.approved_calendar_slots.YouTube|arrays)
+            ] | length) == 44
+            and ([.records[] | (.approved_future == ((.approved_future_by_platform.Facebook // 0) + (.approved_future_by_platform.Instagram // 0) + (.approved_future_by_platform.TikTok // 0) + (.approved_future_by_platform.YouTube // 0)))] | all)
             and ([.records[] |
               (.scheduled.Facebook|numbers),
               (.scheduled.Instagram|numbers),
