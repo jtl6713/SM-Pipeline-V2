@@ -2776,7 +2776,6 @@ export async function studioGetApproveAllJob(env, jobId) {
 
 export async function studioPutApproveAllJob(env, job) {
   const store = await studioLoadApproveAllJobStore(env);
-  if (repairDate) job.repair_date = repairDate;
   store.jobs[job.id] = job;
   if (job.profile_id && (job.status === "queued" || job.status === "running")) {
     store.active_by_profile[job.profile_id] = job.id;
@@ -3619,6 +3618,7 @@ export async function startScheduleRegenJob(request, env, authorization, ctx = n
     horizonDays,
     eligibleCount: Number(payload.eligible_count || payload.eligibleCount || 0) || 0,
   });
+  if (repairDate) job.repair_date = repairDate;
   store.jobs[job.id] = job;
   store.active_by_scope[scope] = job.id;
   await studioPutScheduleRegenJobStore(env, store);
