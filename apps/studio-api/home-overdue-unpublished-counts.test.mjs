@@ -39,8 +39,8 @@ test("awaiting approval is review-ready but not approved or rendering", () => {
 });
 
 test("parenthesized profile count uses all approved unpublished, not overdue or scheduled column sum", () => {
-  assert.match(ui, /function overdueUnpublishedTotal\(row\)/);
-  assert.match(ui, /overdue_unpublished: Number\(row\.overdue_unpublished\) \|\| 0/);
-  assert.match(ui, /overdue_unpublished"\]/);
+  assert.match(ui, /function approvedUnpublishedTotal\(row\)/);
+  assert.match(ui, /approved_unpublished: Number\(row\.approved_unpublished\) \|\| 0/);
+  assert.match(ui, /approved_unpublished"\]/);
   assert.doesNotMatch(ui, /scheduledTotal\(row\)/);
 });
