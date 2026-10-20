@@ -76,6 +76,8 @@ def _verify_secret() -> tuple[dict | None, int | None]:
 @app.get("/admin/airtable-egress")
 def durable_airtable_egress():
     """Read-only metrics. Runner shared secret required; no record details."""
+    if not settings.get("pipeline_runner_shared_secret", "").strip():
+        return jsonify({"ok": False, "error": "metrics_auth_unconfigured"}), 503
     denied, status = _verify_secret()
     if denied is not None:
         return denied, status
