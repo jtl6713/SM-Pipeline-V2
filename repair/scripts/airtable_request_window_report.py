@@ -11,7 +11,7 @@ from collections import Counter
 from datetime import datetime, timezone
 
 
-SOURCES = {"studio_worker_gateway", "pipeline_runner_client", "shadow_dirty_replay", "other_direct"}
+SOURCES = {"studio_worker_gateway", "pipeline_runner_http", "shadow_dirty_replay", "other_direct"}
 
 
 def read_events(paths):
