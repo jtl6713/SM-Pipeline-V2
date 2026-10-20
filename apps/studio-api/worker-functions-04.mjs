@@ -3236,30 +3236,50 @@ export async function studioProcessScheduleRegenJobSlice(env, jobId, options = {
           eligible.push(row);
         }
         if (job.repair_date) {
-          // Repair only duplicate wall-clock reservations on the requested local day.
-          // A legitimate first occupant remains fixed; every additional occupant
-          // is rescheduled by the standard atomic MAE transaction.
-          const ordered = eligible
-            .filter((row) => {
-              const stamp = Date.parse(String(f(row, "Scheduled_Post_Date") || ""));
-              if (!Number.isFinite(stamp)) return false;
-              const dateParts = maeZonedDateTimeParts(new Date(stamp), timeZone);
-              const localDay = [dateParts.year, String(dateParts.month).padStart(2, "0"), String(dateParts.day).padStart(2, "0")].join("-");
-              return localDay === job.repair_date;
-            })
-            .sort((a, b) => Number(f(a, "Output_ID") || 0) - Number(f(b, "Output_ID") || 0));
-          const claimed = new Set();
-          const displaced = [];
-          for (const row of ordered) {
+          // Occupancy belongs to the entire profile/platform, not the output type:
+          // a Story and a Reel at the same time are competing reservations.
+          const platformRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+            limit: STUDIO_OCCUPIED_LIST_LIMIT,
+            sortField: "Scheduled_Post_Date",
+            sortDirection: "asc",
+            filterFormula: scheduleRegenCandidateFilterFormula({
+              nowMs, horizonDays, profileFormula, platform: combo.platform,
+            }),
+            fields: scheduleFields,
+          });
+          if (platformRows.length >= STUDIO_OCCUPIED_LIST_LIMIT) {
+            throw new HttpError(409, "Targeted repair requires a complete platform occupancy scan");
+          }
+          const localDate = (stamp) => {
+            const d = maeZonedDateTimeParts(new Date(stamp), timeZone);
+            return [d.year, String(d.month).padStart(2, "0"), String(d.day).padStart(2, "0")].join("-");
+          };
+          const matching = platformRows.filter((row) => {
+            if (!studioOccupiedRowMatchesProfile(row, profile)) return false;
+            if (String(f(row, "Platform") || "").trim().toLowerCase() !== platformWant) return false;
             const stamp = Date.parse(String(f(row, "Scheduled_Post_Date") || ""));
-            if (claimed.has(stamp) || protectedTimes.includes(stamp)) displaced.push(row);
+            return Number.isFinite(stamp) && localDate(stamp) === job.repair_date;
+          }).sort((a, b) => Number(f(a, "Output_ID") || 0) - Number(f(b, "Output_ID") || 0));
+          const claimed = new Set();
+          const displacedIds = new Set();
+          for (const row of matching) {
+            const stamp = Date.parse(String(f(row, "Scheduled_Post_Date") || ""));
+            const immutable = Boolean(f(row, "Do_Not_Publish"))
+              || Boolean(String(f(row, "Published_At") || "").trim())
+              || ["Published", "Canceled", "Cancelled"].includes(String(f(row, "Output_Status") || "").trim())
+              || String(f(row, "Publish_Status") || "").trim() === "Published";
+            if (immutable) {
+              claimed.add(stamp);
+              continue;
+            }
+            if (claimed.has(stamp)) displacedIds.add(row.id);
             else claimed.add(stamp);
           }
-          eligibleIds = displaced.map((row) => row.id);
-          // Every other output is protected. Only displaced IDs may be excluded
-          // from the authoritative occupancy scan while acquiring replacement slots.
+          eligibleIds = eligible.filter((row) => displacedIds.has(row.id)).map((row) => row.id);
+          // Only overages are excluded by the atomic writer. Every other
+          // record—including companions in a different output type—stays occupied.
           for (const row of eligible) {
-            if (displaced.includes(row)) continue;
+            if (displacedIds.has(row.id)) continue;
             const stamp = studioOccupiedMsFromRow(row, nowMs);
             if (stamp != null) protectedTimes.push(stamp);
           }
