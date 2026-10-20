@@ -5030,6 +5030,7 @@ export function rememberProfilesOverviewSnapshot(snapshot) {
   }
   studioProfilesOverviewCache.rows = rows;
   studioProfilesOverviewCache.at = Number(snapshot.at) || 0;
+  studioProfilesOverviewCache.lastR2CheckAt = Date.now();
   studioProfilesOverviewCache.authKey = String(snapshot.authKey || "");
   studioProfilesOverviewCache.complete = snapshot.complete === true;
   studioProfilesOverviewCache.schemaVersion = Number(snapshot.schemaVersion || 0);
@@ -5072,13 +5073,24 @@ export async function readStudioProfilesOverviewSnapshot(env, options = {}) {
     cache.complete = false;
     cache.at = 0;
   }
-  if (!needsDurable && cache.rows?.length) return profilesOverviewSnapshotView();
+  // Recheck the small R2 snapshot every 10s across Worker isolates. A warm
+  // isolate must not pin an older Home snapshot indefinitely; this is one
+  // bounded R2 GET, not an Airtable / Supabase rebuild.
+  if (!needsDurable && cache.rows?.length
+    && Date.now() - Number(cache.lastR2CheckAt || 0) < 10_000) {
+    return profilesOverviewSnapshotView();
+  }
   if (!env?.STUDIO_MEDIA?.get) return cache.rows?.length ? profilesOverviewSnapshotView() : null;
   try {
     const snapshot = await readStudioProfilesOverviewSnapshotFromR2(env);
+    cache.lastR2CheckAt = Date.now();
     if (!snapshot) return cache.rows?.length ? profilesOverviewSnapshotView() : null;
-    return rememberProfilesOverviewSnapshot(snapshot);
+    if (cache.rows?.length && Number(snapshot.at || 0) < Number(cache.at || 0)) {
+      return profilesOverviewSnapshotView();
+    }
+    return rememberProfilesOverviewSnapshot(snapshot) || (cache.rows?.length ? profilesOverviewSnapshotView() : null);
   } catch (error) {
+    cache.lastR2CheckAt = Date.now();
     console.warn("profiles overview snapshot read failed", error);
     return cache.rows?.length ? profilesOverviewSnapshotView() : null;
   }
@@ -5309,7 +5321,7 @@ export async function profilesOverview(request, env, authorization, ctx) {
   const manualRefreshing = manualRefresh.status === "refreshing";
   const age = snapshot?.at ? Date.now() - snapshot.at : Infinity;
   const freshMs = studioProfilesOverviewFreshMs(snapshot);
-  if (snapshot?.rows?.length && snapshot.complete === true && snapshot.schemaVersion === 5 && age < freshMs) {
+  if (snapshot?.rows?.length && snapshot.complete === true && snapshot.schemaVersion === 6 && age < freshMs) {
     if (!manualRefreshing) scheduleStudioProfilesOverviewIdeasRefresh(ctx, env, authorization);
     return respondProfilesOverviewSoft(request, env, {
       records: snapshot.rows,

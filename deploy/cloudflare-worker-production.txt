@@ -574,3 +574,4 @@ Deploy targeted November 17 MAE overage selector from merged PR #936; no automat
 2026-10-20 PR #923 corrected: deploy 365-day title-history checks in Studio manual and autonomous writers, no numeric title clones, no filler duplicates. Do not publish or delete existing outputs.
 2026-10-20 Quality Agent all-failed-output recovery v2: complete paginated failure census, existing bounded cooldown-safe self-heal, no silent empty findings, Factory output failure visibility. PR reconciled from #1000.
 2026-10-20: Deploy Worker 0.10.671-quality-failed-output-recovery. Fix the bounded render-retry counter, resolve profile names in the census, and verify residual failures through the authenticated production canary.
+Deploy Worker 0.10.671-quality-failed-output-recovery-home-v6-fast-cache. Fix V6 fresh cache, cross-isolate R2 refresh, no Supabase read cutover. Triggered 2026-10-20.
