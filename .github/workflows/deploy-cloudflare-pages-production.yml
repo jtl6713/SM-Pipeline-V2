@@ -151,11 +151,23 @@ jobs:
           const previous = fs.readFileSync('/tmp/predeploy-live-index.html', 'utf8');
           const next = fs.readFileSync('apps/studio-web/index.html', 'utf8');
           const marker = 'factory-desk.js?v=0.6.723-profile-fast-music&retry=visible-failed-892&';
-          if (!next.includes(marker) || previous.includes(marker)) {
-            throw new Error('Same-version release is permitted only for the first Factory retry #892 cache change');
-          }
-          if (!previous.includes('factory-desk.js?v=0.6.723-profile-fast-music&')) {
-            throw new Error('Unexpected live Factory asset; refusing same-version release');
+          // PR #960: this exact one-time Home lazy bundle fingerprint was merged
+          // with the existing UI build. Do not allow a generic same-version deploy.
+          const oldHome = 'all-profiles-overview-1007.js?v=0.6.726-approved-unpublished-home&cache=approval-snapshot-monotonic-v1';
+          const newHome = 'all-profiles-overview-1007.js?v=0.6.726-approved-unpublished-home&cache=approved-unpublished-integrity-v2';
+          const sourceHome = fs.readFileSync('apps/studio-web/assets/all-profiles-overview-1007.js', 'utf8');
+          const homeIntegrity = sourceHome.includes('studio.allProfilesOverview.v4')
+            && sourceHome.includes('"approved_unpublished", "overdue_unpublished"')
+            && sourceHome.includes('typeof row?.[kind] !== "number"');
+          if (next.includes(newHome) && previous.includes(oldHome)
+              && !previous.includes(newHome) && !next.includes(oldHome)
+              && homeIntegrity && next.includes('UI build 0.6.726')) {
+            console.log('same_version_home_integrity_release=verified_PR960_one_time');
+          } else if (next.includes(marker) && !previous.includes(marker)
+              && previous.includes('factory-desk.js?v=0.6.723-profile-fast-music&')) {
+            console.log('same_version_factory_retry_release=verified_PR892_one_time');
+          } else {
+            throw new Error('Unchanged UI build refused: no verified one-time cache fingerprint transition');
           }
           NODE
           else
