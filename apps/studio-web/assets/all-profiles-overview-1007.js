@@ -4,9 +4,9 @@
 
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
   const platformOrder = ["Facebook","Instagram","TikTok","YouTube"];
-  // Cache v5 uses all final-approved, unpublished outputs, including overdue.
-  // Do not reuse v4 browser snapshots that expired counts on the schedule date.
-  const CACHE_KEY = "studio.allProfilesOverview.v5";
+  // V6 caches approved per-output calendar dates so future/past-due boundaries
+  // move with the clock, including while a durable snapshot stays cached.
+  const CACHE_KEY = "studio.allProfilesOverview.v6";
   const REFRESH_KEY = "studio.allProfilesOverview.refresh.v1";
   const POLL_MS = 12000;
   const REFRESH_POLL_MS = 1800;
@@ -31,8 +31,16 @@
     refreshTone: "",
   };
 
-  function approvedUnpublishedTotal(row) {
-    return Number(row?.approved_unpublished) || 0;
+  function approvedCalendarCounts(row, now = Date.now()) {
+    const byPlatform = {};
+    let future = 0, pastDue = 0;
+    for (const platform of platformOrder) {
+      const slots = row?.approved_calendar_slots?.[platform] || [];
+      byPlatform[platform] = slots.filter((due) => due > now).length;
+      future += byPlatform[platform];
+      pastDue += slots.length - byPlatform[platform];
+    }
+    return { byPlatform, future, pastDue, missingDate: Number(row?.approved_missing_date) || 0 };
   }
 
   function validOverviewRows(rows) {
@@ -48,8 +56,13 @@
       for (const platform of platformOrder) {
         if (!Number.isFinite(Number(row?.scheduled?.[platform]))) return false;
       }
-      for (const kind of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished"]) {
+      for (const kind of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished", "approved_future", "approved_past_due", "approved_missing_date"]) {
         if (typeof row?.[kind] !== "number" || !Number.isFinite(row[kind]) || row[kind] < 0) return false;
+      }
+      for (const platform of platformOrder) {
+        const dates = row?.approved_calendar_slots?.[platform];
+        if (!Array.isArray(dates) || dates.some((due) => !Number.isFinite(due) || due <= 0)) return false;
+        if (!Number.isInteger(row?.approved_future_by_platform?.[platform])) return false;
       }
     }
     return true;
@@ -262,24 +275,38 @@
       return;
     }
 
-    const total = { scheduled:Object.fromEntries(platformOrder.map((p)=>[p,0])), manual:0, failed:0, approval:0, ideas:0, approved_unpublished:0 };
+    const now = Date.now();
+    const total = {
+      scheduled: Object.fromEntries(platformOrder.map((p) => [p, 0])),
+      approved_calendar_slots: Object.fromEntries(platformOrder.map((p) => [p, []])),
+      approved_missing_date: 0, manual: 0, failed: 0, approval: 0, ideas: 0,
+    };
     for (const row of state.rows) {
-      platformOrder.forEach((p)=> total.scheduled[p] += row.scheduled?.[p] || 0);
+      for (const platform of platformOrder) {
+        total.scheduled[platform] += row.scheduled?.[platform] || 0;
+        total.approved_calendar_slots[platform].push(...row.approved_calendar_slots[platform]);
+      }
+      total.approved_missing_date += row.approved_missing_date;
       total.manual += row.manual;
       total.failed += row.failed;
       total.approval += row.approval;
-      total.approved_unpublished += row.approved_unpublished;
       total.ideas += row.ideas;
     }
 
-    const rowHtml = (row, isTotal=false) => `<tr class="${isTotal ? "all-profiles-total" : ""}">
-      <th scope="row">${esc(row.name)}${isTotal ? "" : ` (${approvedUnpublishedTotal(row)})`}</th>
-      ${platformOrder.map((p)=>`<td data-label="${p}">${row.scheduled?.[p] || 0}</td>`).join("")}
-      <td data-label="Manual" class="overview-tone-${tone(row.manual,"manual")}">${actionCount(row, "manual", "manual action")}</td>
-      <td data-label="Failed" class="overview-tone-${tone(row.failed,"failed")}">${actionCount(row, "failed", "failed")}</td>
-      <td data-label="Approval" class="overview-tone-${tone(row.approval,"approval")}">${actionCount(row, "approval", "awaiting approval")}</td>
-      <td data-label="Ideas" class="overview-tone-${tone(row.ideas,"ideas")}">${actionCount(row, "ideas", "ideas")}</td>
+    const rowHtml = (row, isTotal = false) => {
+      const calendar = approvedCalendarCounts(row, now);
+      return `<tr class="${isTotal ? "all-profiles-total" : ""}">
+      <th scope="row">${esc(row.name)}</th>
+      ${platformOrder.map((p) => `<td data-label="${p} future outputs">${calendar.byPlatform[p]}</td>`).join("")}
+      <td data-label="Approved future" class="overview-tone-ok">${calendar.future}</td>
+      <td data-label="Approved past due" class="overview-tone-${tone(calendar.pastDue, "failed")}">${calendar.pastDue}</td>
+      <td data-label="Approved no date" class="overview-tone-${tone(calendar.missingDate, "failed")}">${calendar.missingDate}</td>
+      <td data-label="Manual" class="overview-tone-${tone(row.manual, "manual")}">${actionCount(row, "manual", "manual action")}</td>
+      <td data-label="Failed" class="overview-tone-${tone(row.failed, "failed")}">${actionCount(row, "failed", "failed")}</td>
+      <td data-label="Approval" class="overview-tone-${tone(row.approval, "approval")}">${actionCount(row, "approval", "awaiting approval")}</td>
+      <td data-label="Ideas" class="overview-tone-${tone(row.ideas, "ideas")}">${actionCount(row, "ideas", "ideas")}</td>
     </tr>`;
+    };
 
     const statusText = refreshStatusText({ stale, error, cooling });
     const statusNote = statusText
@@ -289,7 +316,7 @@
     const disabled = state.manualRefreshing ? " disabled aria-disabled=\"true\"" : "";
 
     host.innerHTML = `<div class="all-profiles-heading"><div><p class="studio-hub-kicker">ALL PROFILES</p><h1>Studio overview</h1>${statusNote}</div><button type="button" class="secondary-button" id="allProfilesRefresh"${disabled}>${refreshText}</button></div>
-      <div class="all-profiles-table-wrap"><table class="all-profiles-table"><thead><tr class="all-profiles-group-row"><th rowspan="2">Profile</th><th colspan="4" class="all-profiles-scheduled-group">Scheduled posts</th><th rowspan="2">Manual action</th><th rowspan="2">Failed</th><th rowspan="2">Awaiting approval</th><th rowspan="2">Ideas</th></tr><tr class="all-profiles-platform-row">${platformOrder.map((p)=>`<th class="all-profiles-scheduled-col">${p}</th>`).join("")}</tr></thead>
+      <div class="all-profiles-table-wrap"><table class="all-profiles-table"><thead><tr class="all-profiles-group-row"><th rowspan="2">Profile</th><th colspan="4" class="all-profiles-scheduled-group" title="One count per approved, unpublished platform output with a Scheduled Post Date later than now">Approved platform outputs · future</th><th rowspan="2" title="Sum of the four future platform-output columns">Approved · Future</th><th rowspan="2" title="Approved, unpublished platform outputs whose Scheduled Post Date has passed">Approved · Past Due</th><th rowspan="2" title="Approved, unpublished outputs missing their canonical calendar Scheduled Post Date">Approved · No Date</th><th rowspan="2">Manual action</th><th rowspan="2">Failed</th><th rowspan="2">Awaiting approval</th><th rowspan="2">Ideas</th></tr><tr class="all-profiles-platform-row">${platformOrder.map((p)=>`<th class="all-profiles-scheduled-col">${p}</th>`).join("")}</tr></thead>
       <tbody>${state.rows.map((r)=>rowHtml(r)).join("")}${rowHtml({name:"Total",...total},true)}</tbody></table></div>`;
 
     document.getElementById("allProfilesRefresh")?.addEventListener("click", forceRefresh);
@@ -308,6 +335,11 @@
       approval: Number(row.approval) || 0,
       approved_unpublished: Number(row.approved_unpublished) || 0,
       overdue_unpublished: Number(row.overdue_unpublished) || 0,
+      approved_future: Number(row.approved_future) || 0,
+      approved_past_due: Number(row.approved_past_due) || 0,
+      approved_missing_date: Number(row.approved_missing_date) || 0,
+      approved_future_by_platform: row.approved_future_by_platform,
+      approved_calendar_slots: row.approved_calendar_slots,
       ideas: Number(row.ideas) || 0,
     }));
   }

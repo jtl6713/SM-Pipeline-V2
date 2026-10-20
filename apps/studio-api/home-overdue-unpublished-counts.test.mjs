@@ -38,11 +38,10 @@ test("awaiting approval is review-ready but not approved or rendering", () => {
   assert.equal(homeOutputContribution({ ...ready, review_status: "Approved" }).awaiting_approval, 0);
 });
 
-test("parenthesized profile count uses final-approved unpublished status, not platform sum", () => {
-  assert.match(ui, /function approvedUnpublishedTotal\(row\)/);
-  assert.match(ui, /approved_unpublished: Number\(row\.approved_unpublished\) \|\| 0/);
-  assert.ok(ui.includes('"approved_unpublished", "overdue_unpublished"'));
-  assert.doesNotMatch(ui, /scheduledTotal\(row\)/);
+test("Home uses explicit approved future and past due columns, not parentheses", () => {
+  assert.match(ui, /Approved · Future/);
+  assert.match(ui, /Approved · Past Due/);
+  assert.doesNotMatch(ui, /approvedUnpublishedTotal/);
 });
 
 test("Home parentheses count rises for final approval even when schedule is overdue", () => {
@@ -69,7 +68,7 @@ test("Home parentheses count rises for final approval even when schedule is over
   assert.equal(overdue.overdue_unpublished,1);
 });
 
-test("Home rejects old R2/browser snapshots missing parenthesized approved count", () => {
+test("Home rejects old R2/browser snapshots missing per-output calendar breakdown", () => {
   const valid=worker.slice(worker.indexOf("function studioProfilesOverviewRowsHealthy("),
     worker.indexOf("function profilesOverviewSnapshotView("));
   const verify=worker.slice(worker.indexOf("export function validateStudioProfilesOverviewRows("),
@@ -77,9 +76,12 @@ test("Home rejects old R2/browser snapshots missing parenthesized approved count
   assert.match(valid, /"approved_unpublished", "overdue_unpublished"/);
   assert.match(verify, /"approved_unpublished", "overdue_unpublished"/);
   assert.match(valid, /typeof n !== "number"/);
-  assert.ok(ui.includes('studio.allProfilesOverview.v5'));
+  assert.ok(ui.includes('studio.allProfilesOverview.v6'));
+  assert.match(valid, /approved_calendar_slots/);
+  assert.match(verify, /approved_calendar_slots/);
   const browserValidation=ui.slice(ui.indexOf("function validOverviewRows("),ui.indexOf("function readCache("));
   assert.match(browserValidation, /"approved_unpublished", "overdue_unpublished"/);
+  assert.match(browserValidation, /approved_calendar_slots/);
   assert.ok(browserValidation.includes('typeof row?.[kind] !== "number"'));
   const map=ui.slice(ui.indexOf("function mapRows("),ui.indexOf("function adoptOverview("));
   assert.ok(map.includes('overdue_unpublished: Number(row.overdue_unpublished) || 0'));
@@ -99,7 +101,7 @@ test("Home parentheses depend on final-approved-unpublished state, not scheduled
 });
 
 
-test("Home V5 force refresh verifies the schema it actually writes and rejects V4 cache", () => {
+test("Home V6 force refresh verifies the schema it actually writes and rejects V5 cache", () => {
   const writer = worker.slice(worker.indexOf("export async function writeStudioProfilesOverviewSnapshot("),
     worker.indexOf("/*__STUDIO_WORKER_END:writeStudioProfilesOverviewSnapshot__*/"));
   const verifier = worker.slice(worker.indexOf("export async function verifyStudioProfilesOverviewSnapshot("),
@@ -108,9 +110,9 @@ test("Home V5 force refresh verifies the schema it actually writes and rejects V
     worker.indexOf("/*__STUDIO_WORKER_END:rememberProfilesOverviewSnapshot__*/"));
   const reader = worker.slice(worker.indexOf("export async function readStudioProfilesOverviewSnapshot(env,"),
     worker.indexOf("/*__STUDIO_WORKER_END:readStudioProfilesOverviewSnapshot__*/"));
-  assert.match(writer, /schemaVersion: 5/);
-  assert.match(verifier, /snapshot\.schemaVersion !== 5/);
-  assert.doesNotMatch(verifier, /schemaVersion !== 4/);
-  assert.match(remember, /snapshot\?\.schemaVersion \|\| 0\) !== 5/);
-  assert.match(reader, /cache\.schemaVersion !== 5/);
+  assert.match(writer, /schemaVersion: 6/);
+  assert.match(verifier, /snapshot\.schemaVersion !== 6/);
+  assert.doesNotMatch(verifier, /schemaVersion !== 5/);
+  assert.match(remember, /snapshot\?\.schemaVersion \|\| 0\) !== 6/);
+  assert.match(reader, /cache\.schemaVersion !== 6/);
 });

@@ -1,6 +1,7 @@
 import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
 import { readStudioProfileSummary, validVerifiedStudioSummary } from "./profile-summary-controller.mjs";
 import { homeOutputContribution, homeIdeaContribution, homeApprovedUpcomingAt, combineHomeContributions } from "./profile-summary-classification.mjs";
+import { homeApprovedCalendarCounts } from "./home-approved-calendar-counts.mjs";
 import { countPendingPlatformDispatch } from "./overview-dispatch-counts.mjs";
 import {
   claimProfilesOverviewRefresh,
@@ -4889,6 +4890,7 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
     // Skip produce-job hydration — overview only needs studio_state + schedule fields.
     const mappedOutputs = profileOutputs.map((row) => mappedById.get(row.id) || mapOutput(row, null));
     const metrics = studioOverviewOperationalMetrics(mappedOutputs, []);
+    const calendar = homeApprovedCalendarCounts(mappedOutputs);
     // Final approved-but-unpublished count is status-driven; the date
     // crossing into overdue must not remove it from Home parentheses.
     let ideasCount = 0;
@@ -4922,6 +4924,11 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
       approval: metrics.awaiting_approval,
       approved_unpublished: metrics.approved_unpublished,
       overdue_unpublished: metrics.overdue_unpublished,
+      approved_future_by_platform: calendar.future_by_platform,
+      approved_future: calendar.future,
+      approved_past_due: calendar.past_due,
+      approved_missing_date: calendar.missing_date,
+      approved_calendar_slots: calendar.slots,
       ideas: ideasCount,
       ideas_source: ideasSource,
       metrics,
@@ -4976,12 +4983,15 @@ function studioProfilesOverviewRowsHealthy(rows) {
       const n = row?.scheduled?.[platform];
       if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return false;
     }
-    // Approved-but-unpublished is the parenthesized Home tally. Older
-    // durable snapshots could omit it yet pass this integrity gate, causing
-    // the browser to retain stale approved counts after real approvals.
-    for (const key of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished"]) {
+    // Reject legacy snapshots without per-output calendar timestamps.
+    for (const key of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished", "approved_future", "approved_past_due", "approved_missing_date"]) {
       const n = row?.[key];
       if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return false;
+    }
+    for (const platform of ["Facebook", "Instagram", "TikTok", "YouTube"]) {
+      const slots = row?.approved_calendar_slots?.[platform];
+      if (!Array.isArray(slots) || slots.some((stamp) => !Number.isFinite(stamp) || stamp <= 0)) return false;
+      if (!Number.isInteger(row?.approved_future_by_platform?.[platform]) || row.approved_future_by_platform[platform] < 0) return false;
     }
   }
   return true;
@@ -5003,8 +5013,8 @@ function profilesOverviewSnapshotView() {
 }
 
 export function rememberProfilesOverviewSnapshot(snapshot) {
-  // V4 snapshots used future-only approved counts; never hydrate those into V5.
-  if (Number(snapshot?.schemaVersion || 0) !== 5) return null;
+  // V5 snapshots lack the per-output future/overdue calendar breakdown.
+  if (Number(snapshot?.schemaVersion || 0) !== 6) return null;
   const rows = Array.isArray(snapshot?.rows) ? snapshot.rows : [];
   if (!studioProfilesOverviewRowsHealthy(rows)) {
     console.warn("profiles overview: rejecting incomplete/duplicate-city snapshot");
@@ -5049,7 +5059,7 @@ export async function readStudioProfilesOverviewSnapshot(env, options = {}) {
   const cacheGeneration = String(cache.generation || "");
   const needsDurable = options.forceDurable === true
     || (expectedGeneration && cacheGeneration !== expectedGeneration);
-  if (cache.rows?.length && (cache.schemaVersion !== 5 || !studioProfilesOverviewRowsHealthy(cache.rows))) {
+  if (cache.rows?.length && (cache.schemaVersion !== 6 || !studioProfilesOverviewRowsHealthy(cache.rows))) {
     cache.rows = null;
     cache.complete = false;
     cache.at = 0;
@@ -5086,7 +5096,7 @@ export async function writeStudioProfilesOverviewSnapshot(env, rows, authKey, ex
     authKey,
     at,
     complete: true,
-    schemaVersion: 5,
+    schemaVersion: 6,
     generation,
     ideasAt,
     readSource,
@@ -5135,7 +5145,7 @@ export async function writeStudioProfilesOverviewSnapshot(env, rows, authKey, ex
 
 export async function verifyStudioProfilesOverviewSnapshot(env, expectedGeneration) {
   const snapshot = await readStudioProfilesOverviewSnapshotFromR2(env);
-  if (!snapshot?.complete || snapshot.schemaVersion !== 5 || !studioProfilesOverviewRowsHealthy(snapshot.rows)) {
+  if (!snapshot?.complete || snapshot.schemaVersion !== 6 || !studioProfilesOverviewRowsHealthy(snapshot.rows)) {
     throw new Error("Forced overview refresh could not verify a complete durable snapshot");
   }
   if (String(snapshot.generation || "") !== String(expectedGeneration || "")) {
@@ -5417,9 +5427,14 @@ export function validateStudioProfilesOverviewRows(rows, profiles) {
         throw new Error(`Profiles overview scheduled count is incomplete for ${platform}`);
       }
     }
-    for (const key of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished"]) {
+    for (const key of ["manual", "failed", "approval", "ideas", "approved_unpublished", "overdue_unpublished", "approved_future", "approved_past_due", "approved_missing_date"]) {
       if (typeof row?.[key] !== "number" || !Number.isFinite(row[key]) || row[key] < 0) {
         throw new Error(`Profiles overview ${key} count is incomplete`);
+      }
+    }
+    for (const platform of ["Facebook", "Instagram", "TikTok", "YouTube"]) {
+      if (!Array.isArray(row?.approved_calendar_slots?.[platform]) || !Number.isInteger(row?.approved_future_by_platform?.[platform])) {
+        throw new Error(`Profiles overview ${platform} approved calendar records missing`);
       }
     }
   }

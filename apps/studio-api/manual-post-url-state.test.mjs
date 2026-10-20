@@ -55,7 +55,7 @@ test("overview and Pipeline share the live-post clear", () => {
   const worker = readStudioWorkerSource();
   assert.match(worker, /function loadManualActionPipelineOutputs/);
   assert.match(worker, /overlayLiveTikTokPublishRows\(env, mappedAll\)/);
-  assert.match(worker, /schemaVersion: 5/);
+  assert.match(worker, /schemaVersion: 6/);
   assert.match(app, /function outputHasLivePostUrl/);
   assert.match(app, /function pipelineGroupLivePost/);
   assert.match(app, /pipeline-content-post-link/);
