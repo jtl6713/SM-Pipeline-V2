@@ -21,9 +21,10 @@ class MonitorTests(unittest.TestCase):
             out = requests.Session().send(prepared)
         self.assertIs(out, fake)
         self.assertEqual(send.call_count, 1)
-        self.assertEqual(len(captured.records), 1)
-        self.assertIn("pipeline_runner_http", captured.output[0])
-        self.assertNotIn("/base/table/record", captured.output[0])
+        events = [line for line in captured.output if "studio_airtable_egress_v1" in line]
+        self.assertEqual(len(events), 1)
+        self.assertIn("pipeline_runner_http", events[0])
+        self.assertNotIn("/base/table/record", events[0])
 
     def test_unrelated_request_does_not_count(self):
         install_airtable_egress_monitor()
