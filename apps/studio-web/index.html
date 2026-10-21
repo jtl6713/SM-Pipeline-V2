@@ -517,6 +517,14 @@
  <button type="button" class="production-workspace-tab" role="tab" aria-selected="false" tabindex="-1" data-production-workspace-tab="rendering">Rendering</button>
  <button type="button" class="production-workspace-tab" role="tab" aria-selected="false" tabindex="-1" data-production-workspace-tab="details">Details</button>
  </nav>
+<div class="production-factory-feedback" id="item4VibeCommitActions" aria-label="Vibe Cut source video and save" hidden>
+<strong>Vibe Cut source video</strong>
+<p id="item4VibeSourceStatus" aria-live="polite">Waiting for a processed MOV or MP4.</p>
+<div class="item4-upload-actions">
+<button type="button" class="primary-button" id="item4VibeSaveContinue" disabled>Waiting for source video</button>
+<button type="button" class="secondary-button" id="item4VibeRetryVideo">Replace / retry video upload</button>
+</div>
+</div>
  <div id="productionProgressChecklist" aria-live="polite"></div>
  <aside id="productionFactoryFeedback" class="production-factory-feedback" aria-label="Factory review instructions" tabindex="-1" hidden>
  <div class="production-factory-feedback-heading"><strong>Changes requested in Factory</strong><span class="production-factory-feedback-pill">Review notes</span></div>
@@ -529,14 +537,7 @@
  <h3 id="item4MediaHeading">Photos</h3>
  <span class="item4-state-pill" id="item4AssetStatus" data-state="idle">No media yet</span>
  </div>
- <div class="production-factory-feedback" id="item4VibeCommitActions" aria-label="Vibe Cut source video and save" hidden>
-<strong>Vibe Cut source video</strong>
-<p id="item4VibeSourceStatus" aria-live="polite">Waiting for a processed MOV or MP4.</p>
-<div class="item4-upload-actions">
-<button type="button" class="primary-button" id="item4VibeSaveContinue" disabled>Waiting for source video</button>
-<button type="button" class="secondary-button" id="item4VibeRetryVideo">Replace / retry video upload</button>
-</div>
-</div>
+ 
 <p class="production-vo-handoff" id="prVoiceoverHandoff" hidden>Voiceover timeline is attached. Open <button type="button" class="link-button" id="prOpenRenderingTab">Rendering</button> to review the scenes, then Approve. This does not publish.</p>
  <div class="ez-card-grid item4-media-kind-grid" id="item4MediaKindGrid">
  <button type="button" class="ez-card production-media-kind" data-pr-input="single-photo">
