@@ -382,6 +382,7 @@ def choose_render_request(
 ) -> tuple[str, dict[str, Any]]:
     vo = "" if voiceover_is_disabled(output, content_item) else voiceover_url(output, content_item)
     if field_str(output, "Creative_Render_Manifest_JSON"):
+        route = "p020_manifest"
         payload = build_p020_request(output, content_item, default_music=default_music)
         if vo and payload.get("sceneVoiceoverAuthority") is not True:
             attach_voiceover(
@@ -391,15 +392,22 @@ def choose_render_request(
                 default_voice=default_voice,
                 url=vo,
             )
-        return "p020_manifest", attach_youtube_first_frame(apply_authoritative_timing(attach_timing_plan(payload, output), output), output), output)
-    if vo:
-        return "voiceover", attach_youtube_first_frame(apply_authoritative_timing(attach_timing_plan(build_voiceover_request(
+    elif vo:
+        route = "voiceover"
+        payload = build_voiceover_request(
             output,
             content_item,
             default_music=default_music,
             default_voice=default_voice,
-        ), output), output), output)
-    return "no_voiceover", attach_youtube_first_frame(apply_authoritative_timing(attach_timing_plan(
-        build_no_voiceover_request(output, content_item, default_music=default_music),
+        )
+    else:
+        route = "no_voiceover"
+        payload = build_no_voiceover_request(
+            output,
+            content_item,
+            default_music=default_music,
+        )
+    return route, attach_youtube_first_frame(
+        apply_authoritative_timing(attach_timing_plan(payload, output), output),
         output,
-    ), output), output)
+    )
