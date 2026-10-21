@@ -41,6 +41,6 @@ test("Vibe Cut upload requires confirmed video and explicit Continue", () => {
   assert.equal((creation.match(/showProductionRequestWorkspace\(\)/g) || []).length, 1);
   assert.match(creation, /if \(allowEmpty\) \{[\s\S]*?showProductionRequestWorkspace\(\)/);
   const listener = app.slice(app.indexOf("function bindEzIntake("), app.indexOf("function item4SelectedPlatforms("));
-  assert.match(listener, /vibeCutPersistedSource\(\)/);
+  assert.match(listener, /vibeCutReadySource\(\)/);
   assert.match(listener, /showProductionRequestWorkspace\(\)/);
 });
