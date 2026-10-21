@@ -31,7 +31,14 @@ test("startEzProduction probes video aspect before plan save", () => {
   assert.match(app, /sourceAspect/);
 });
 
-test("Vibe Cut upload opens Production workspace", () => {
-  assert.match(app, /ezIsVibeCut\(\) && activeProductionRequest\?\.id/);
-  assert.match(app, /showProductionRequestWorkspace\(\)/);
+test("Vibe Cut upload requires confirmed video and explicit Continue", () => {
+  const begin = app.indexOf("async function startEzProduction(");
+  const end = app.indexOf("function bindEzWizard(", begin);
+  const creation = app.slice(begin, end);
+  assert.match(creation, /!uploadResult\?\.ok \|\| !vibeCutPersistedSource\(\)/);
+  assert.match(creation, /action\.hidden = false/);
+  assert.doesNotMatch(creation, /showProductionRequestWorkspace\(\)/);
+  const listener = app.slice(app.indexOf("function bindEzIntake("), app.indexOf("function item4SelectedPlatforms("));
+  assert.match(listener, /vibeCutPersistedSource\(\)/);
+  assert.match(listener, /showProductionRequestWorkspace\(\)/);
 });
