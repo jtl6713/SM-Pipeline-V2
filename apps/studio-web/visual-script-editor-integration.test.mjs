@@ -34,5 +34,5 @@ test("Pipeline lazy-loads only the canonical visual script editor", () => {
   assert.match(html, /visual-script-editor\.css/);
   assert.match(html, /"outputs": \[[\s\S]*visual-script-editor\.js/);
   assert.doesNotMatch(html, /visual-script-review/);
-  assert.match(html, /0\.6\.731-factory-quality-collapse/);
+  assert.match(html, /0\.6\.739-approved-past-due-qa/);
 });
