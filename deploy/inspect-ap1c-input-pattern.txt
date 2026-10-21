@@ -1,1 +1,3 @@
 Read-only inspection of AP1C scenario 5790745 to find an existing Start Scenario/scenario-input exact-addressing pattern. No Make mutation, activation/run, Airtable write, or publishing. Triggered 2026-08-16.
+
+2026-10-21: read-only AP1C input audit before guarded resumption of repaired outputs 7856 and 7043; no external scenario execution.
