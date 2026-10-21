@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { scanOutstandingFailedOutputs, describeFailedOutput, failedOutputRetryGate, facebookRateLimitResetReason } from "./failed-output-monitor.mjs";
+import { FAILED_OUTPUT_FORMULA, scanOutstandingFailedOutputs, describeFailedOutput, failedOutputRetryGate, facebookRateLimitResetReason } from "./failed-output-monitor.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const worker = fs.readFileSync(path.join(here, "worker-functions-04.mjs"), "utf8");
