@@ -28,6 +28,11 @@ jobs:
         run: |
           cd services/remotion-renderer && npm ci
           cd ../pipeline-runner && pip install -r requirements.txt pytest
+      - name: Install system FFmpeg for real MP4 tests
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          ffmpeg -version | head -1
       - name: Lint and compile Remotion compositions
         working-directory: services/remotion-renderer
         run: |
