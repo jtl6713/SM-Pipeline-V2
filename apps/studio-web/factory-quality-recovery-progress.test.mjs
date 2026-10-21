@@ -41,7 +41,7 @@ function harness(initial = [item(idA, 2366)], handlePost = async () => approved(
   const document = {
     hidden: false,
     getElementById: el,
-    addEventListener(type, fn) { handlers[type] = fn; },
+    addEventListener(type, fn) { (handlers[type] ||= []).push(fn); },
     querySelector() { return null; },
   };
   const window = {
@@ -67,10 +67,12 @@ function harness(initial = [item(idA, 2366)], handlePost = async () => approved(
     };
   };
   vm.runInNewContext(script, { document, window, fetch, URLSearchParams, Intl, Date, console });
-  const fire = (selector, dataset = {}) => handlers.click({
-    preventDefault() {},
-    target: { closest: queried => queried === selector ? { dataset } : null },
-  });
+  const fire = (selector, dataset = {}) => {
+    for (const listener of handlers.click || []) listener({
+      preventDefault() {},
+      target: { closest: queried => queried === selector ? { dataset } : null },
+    });
+  };
   return {
     el, fire, calls, window,
     setFailures(value) { failures = value; },
