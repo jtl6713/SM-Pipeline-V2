@@ -403,3 +403,27 @@ test("Quality Agent measures successful approval silence, not retry heartbeats",
   job.items[1].timeline.push({state:"approved",at:"2026-10-20T12:28:00Z"});
   assert.ok(!factoryBatchQualitySignals(job,now).some(s => s.code === "QA-FACTORY-BATCH-STALLED"));
 });
+
+
+test("Factory Quality Agent identifies missing approval source from the durable item error only", () => {
+  const job = factoryBatchBuild({
+    profileId: "recChicago123456", requestId: "repair_7932_7934_20261021",
+    records: [{ id: "recOutput1234567", output_id: 7932 },
+              { id: "recOutput1234568", output_id: 7934 }],
+  });
+  job.status = "failed";
+  job.items[0].status = "failed";
+  job.items[0].error = "404 Record not found";
+  job.items[1].status = "failed";
+  job.items[1].error = "Approval rejected because schedule lane remains locked";
+  const source = factoryBatchQualitySignals(job).find(
+    row => row.code === "QA-FACTORY-APPROVAL-SOURCE-NOT-FOUND",
+  );
+  assert.ok(source);
+  assert.deepEqual(source.output_ids, [7932]);
+  assert.equal(source.safe_auto_recover, false);
+  assert.match(source.detail, /Reread authoritative Airtable by record ID/);
+  assert.ok(factoryBatchQualitySignals(job).some(
+    row => row.code === "QA-FACTORY-BATCH-FAILED-ITEM",
+  ));
+});
