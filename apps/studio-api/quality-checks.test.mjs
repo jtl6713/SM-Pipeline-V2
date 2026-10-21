@@ -78,3 +78,19 @@ test("Quality Agent catalog registers all atomic scheduling runtime signatures",
     assert.equal(row.heal, heal);
   }
 });
+
+
+test("Quality Agent registers exact October 21 Instagram/Factory signatures with bounded actions", () => {
+  const expected = {
+    factory_approval_missing_authority: ["QA-FACTORY-APPROVAL-SOURCE-NOT-FOUND", "ticket_only"],
+    ig_duplicate_slide_sets: ["QA-IG-AP1C-DUPLICATE-SLIDE-SETS", "ticket_only"],
+    ig_ambiguous_parent: ["QA-IG-AP3C-AMBIGUOUS-PARENT", "ticket_only"],
+    ig_expired_child_drift: ["QA-IG-EXPIRED-CHILD-STATE-DRIFT", "verify_children_then_advance"],
+    ig_retry_storm: ["QA-IG-RETRY-STORM", "ticket_only"],
+  };
+  for (const [kind, [signature, heal]] of Object.entries(expected)) {
+    assert.equal(QUALITY_CHECK_BY_KIND[kind]?.signature, signature);
+    assert.equal(QUALITY_CHECK_BY_KIND[kind]?.heal, heal);
+  }
+  assert.equal(assertQualityCatalog().ok, true);
+});
