@@ -278,3 +278,6 @@ jobs:
 
 # PR #1026: deploy runner's YouTube first-frame gate and shared-render isolation alongside Remotion.
 # Keep YOUTUBE_FIRST_FRAME_MODE=off until private YouTube canary has been proven.
+
+# 2026-10-21: Deploy merged PR #1029 AP1C duplicate slide-set / AP3C Meta ambiguity circuit breakers.
+# Version 2026-10-21-ig-carousel-guard-qa1029; retain Airtable write authority, Supabase Phase 5 circuit breaker, no automatic publish or reapproval.
