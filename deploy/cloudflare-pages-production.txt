@@ -474,5 +474,7 @@ Retry Studio UI 0.6.732-progress-count production Pages deploy after updating ha
 Deploy UI 0.6.733 Vibe Cut persisted-source confirmation and explicit Continue action.
 
 Retry deploy UI 0.6.733 Vibe Cut upload confirmation after aligning release-pinned Pages tests.
+2026-10-20: Deploy Studio UI 0.6.734-prepare-frame-progress from PR #1017. Repair Platforms & Frames Prepare 0/? counter and browser cache key.
+2026-10-20: Retry UI 0.6.734 Prepare progress Pages release after aligning 11 version-pinned regression test expectations with new cache key.
 
-2026-10-20: Deploy UI 0.6.734-quality-reapprove with clickable Quality Agent cards and safe individual/bulk Facebook Return to Approved controls, complete census intact.
+2026-10-20: Deploy Studio UI 0.6.735-quality-reapprove: clickable Quality Agent failures and safe individual/bulk Facebook reapproval; preserves PR #1017 frame-progress fix.

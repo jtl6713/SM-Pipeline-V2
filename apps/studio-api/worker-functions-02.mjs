@@ -2125,15 +2125,27 @@ export async function getItem4Variants(request, env, url, authorization, ctx = n
       }
     })());
   }
+  // Reconciliation can report a null manifest until the first crop job is
+  // persisted. Always return the total from the saved output plan in that
+  // window, and do not dereference a null manifest (which broke polling).
+  const manifest = reconciled.manifest;
+  const current = reconciled.record || record;
+  const plan = item4ParseJson(f(current, "Studio_Output_Plan_JSON"), null);
+  const assets = item4AssetManifest(current);
+  const planRatios = item4PlanRatios(plan || {});
+  const requiredRatios = item4RequiredRatios(plan || {});
+  const plannedTotal = assets.length && planRatios.length
+    ? assets.length * planRatios.length + Math.max(0, requiredRatios.length - planRatios.length)
+    : 0;
   return respond(request, env, {
     ok: true,
     status: reconciled.status,
-    updated_at: f(reconciled.record, "Studio_Variant_Updated_At") || null,
+    updated_at: f(current, "Studio_Variant_Updated_At") || null,
     error: reconciled.error,
-    manifest: reconciled.manifest,
+    manifest,
     progress: {
-      ready: reconciled.manifest.ready_count,
-      target: reconciled.manifest.target_count,
+      ready: Number(manifest?.ready_count || 0),
+      target: Number(manifest?.target_count || plannedTotal),
     },
   });
 }

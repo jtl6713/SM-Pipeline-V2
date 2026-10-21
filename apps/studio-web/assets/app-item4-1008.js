@@ -280,7 +280,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.734-quality-reapprove";
+  const BUILD_ID = "item4-0.6.735-quality-reapprove";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -9143,25 +9143,40 @@ function timedScriptAssetLabel(asset, index) {
   function item4VariantProgressCounts(status) {
     const manifest = status?.variants || {};
     const progress = status?.variant_progress || {};
-    const manifestTarget = Number(manifest.target_count || 0);
-    const progressTarget = Number(progress.target || 0);
-    const usePlan = !(manifestTarget > 0 || progressTarget > 0) && Number(manifest.plan_target_count || 0) > 0;
-    const targetCount = usePlan ? Number(manifest.plan_target_count) : (manifestTarget || progressTarget);
-    const readyCount = usePlan
-      ? Number(manifest.plan_ready_count || 0)
-      : Math.max(Number(manifest.ready_count || 0), Number(progress.ready || 0));
+    const positiveCount = (value) => {
+      const number = Number(value);
+      return Number.isFinite(number) && number > 0 ? number : 0;
+    };
+    // The preparation manifest can be absent while Prepare is queuing work.
+    // Derive the planned total from the saved plan rather than displaying 0/?
+    // indefinitely. The authoritative manifest overrides this fallback.
+    const assets = Array.isArray(status?.assets) ? status.assets : [];
+    const planItems = Array.isArray(status?.plan?.items) ? status.plan.items : [];
+    const planRatios = [...new Set(planItems.map((item) => String(item?.aspect_ratio || '').trim()).filter(Boolean))];
+    const extraYoutubeCover = planRatios.length > 0 && !planRatios.includes('16:9')
+      && planItems.some((item) => String(item?.platform || '').trim() === 'YouTube') ? 1 : 0;
+    const plannedTotal = assets.length && planRatios.length
+      ? assets.length * planRatios.length + extraYoutubeCover : 0;
+    const manifestTarget = positiveCount(manifest.target_count);
+    const progressTarget = positiveCount(progress.target);
+    const planTarget = positiveCount(manifest.plan_target_count) || plannedTotal;
+    const targetCount = manifestTarget || progressTarget || planTarget;
+    const readyCount = manifestTarget
+      ? Math.max(positiveCount(manifest.ready_count), positiveCount(progress.ready))
+      : progressTarget
+        ? positiveCount(progress.ready)
+        : Math.max(positiveCount(manifest.plan_ready_count), positiveCount(progress.ready));
     return {
-      readyCount: Math.max(0, Number.isFinite(readyCount) ? readyCount : 0),
-      targetCount: Math.max(0, Number.isFinite(targetCount) ? targetCount : 0),
+      readyCount: Math.max(0, targetCount ? Math.min(readyCount, targetCount) : readyCount),
+      targetCount,
     };
   }
-
   function item4VariantCountLabel(readyCount, targetCount) {
     const ready = Math.max(0, Number(readyCount) || 0);
     const target = Number(targetCount);
     return Number.isFinite(target) && target > 0
       ? `${ready}/${target}`
-      : `${ready} ready`;
+      : (ready ? `${ready} ready` : "total pending");
   }
 
   function item4PrepareButtonView({
@@ -9178,13 +9193,13 @@ function timedScriptAssetLabel(asset, index) {
       return { disabled: true, label: "Prepare", retry: false };
     }
     if (inFlight) {
-      return { disabled: true, label: `Preparing… ${count}`, retry: false };
+      return { disabled: true, label: targetCount ? `Preparing… ${count}` : "Preparing…", retry: false };
     }
     if (variantStatus === "Ready") {
       return { disabled: false, label: "Rebuild", retry: false };
     }
     if (variantStatus === "Preparing") {
-      return { disabled: false, label: `Retry remaining (${count})`, retry: true };
+      return { disabled: false, label: targetCount ? `Retry remaining (${count})` : "Retry remaining", retry: true };
     }
     if (variantStatus === "Error") {
       return { disabled: false, label: "Retry", retry: true };
@@ -10402,7 +10417,7 @@ function timedScriptAssetLabel(asset, index) {
     const clips = item4WorkspaceHasClips(status);
     const { readyCount, targetCount } = item4VariantProgressCounts(status);
     const elapsed = item4FormatElapsed(Date.now() - (item4VariantPollStartedAt || Date.now()));
-    const count = targetCount ? `${readyCount} of ${targetCount} ready` : `${readyCount} ready`;
+    const count = targetCount ? `${readyCount} of ${targetCount} ready` : (readyCount ? `${readyCount} ready; total pending` : "Calculating frame total…");
     progress.hidden = false;
     progress.dataset.heal = "preparing";
     progress.innerHTML = `<strong>${clips ? "Attaching clip frames" : "Preparing platform crops"}</strong><span>${escapeHtml(count)} · ${escapeHtml(elapsed)} elapsed. This page updates automatically. Studio retries leftovers on its own if the count stops moving.</span>`;
@@ -10512,7 +10527,7 @@ function timedScriptAssetLabel(asset, index) {
     if (badge) badge.textContent = variantStatus === "Ready"
       ? `${readyCount} frames ready`
       : variantStatus === "Preparing"
-        ? `Preparing… ${count}`
+        ? (targetCount ? `Preparing… ${count}` : "Preparing…")
         : variantStatus === "Error" ? "Needs attention" : "Waiting";
     const shownError = String(status?.variant_error || item4PrepareError || "").trim();
     if (error) {

@@ -580,5 +580,6 @@ Deploy Worker 0.10.671-quality-failed-output-recovery-home-v6-fast-cache. Fix V6
 Deploy Vibe Cut source-video validation safeguard (PR #1006, merged 7e9a593e) 2026-10-20; do not let photo-only render packages pass as Vibe Cuts.
 
 2026-10-20: Re-deploy Home incremental V6 shadow compatibility with targeted transient Cloudflare verification bridge 1042 retry. Preserve PR #1006 Vibe Cut video-source safety, R2 Home reads, Airtable write authority, Supabase breaker and existing rollback; no Home summary cutover.
+2026-10-20: Deploy PR #1017 read-only GET /variants progress target fallback and null-manifest safety. Keep Airtable authoritative and existing flags unchanged.
 
-2026-10-20: Deploy guarded Facebook Quality Agent Return to Approved via existing atomic MAE schedule route, 48h cooldown and publication-proof gate. No automatic mass retry. PR quality-facebook-reapprove.
+2026-10-20: Deploy guarded Factory Quality Agent Facebook Return to Approved recovery from PR #1016 after preserving PR #1017 frame-progress release.
