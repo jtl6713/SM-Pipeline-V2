@@ -583,3 +583,4 @@ Deploy Vibe Cut source-video validation safeguard (PR #1006, merged 7e9a593e) 20
 2026-10-20: Deploy PR #1017 read-only GET /variants progress target fallback and null-manifest safety. Keep Airtable authoritative and existing flags unchanged.
 
 2026-10-20: Deploy guarded Factory Quality Agent Facebook Return to Approved recovery from PR #1016 after preserving PR #1017 frame-progress release.
+2026-10-20: Deploy merged PR #1018 Vibe Cut verified MOV-only masters, no-library still replacement, clean notes and plan guards; Airtable source-of-truth and existing circuit breakers unchanged.
