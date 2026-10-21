@@ -170,10 +170,16 @@ shortcut. Airtable remains the write source of truth.
 ### QA-FACTORY-APPROVAL-SOURCE-NOT-FOUND — 7932 and 7934
 
 Both were reported as failing **inside Factory approval**, before Instagram
-publishing. At the time of investigation neither numeric Output_ID resolved
-in the production Airtable Platform Outputs table. **This does not prove deletion,
-nor does it establish the Factory exception text.** Before assigning a more
-specific root cause, read the exact Factory R2
+publishing. Neither numeric Output_ID resolves in production Airtable. An
+independent **complete scan of 7,361 Platform Outputs** documented in
+[issue #1027](https://github.com/jtl6713/SM-Pipeline-V2/issues/1027)
+found the entire neighboring cohort **7931–7936** missing, and a complete
+1,372-Content-Item scan found their likely parent **Content 1446** missing.
+That strongly suggests a deleted/superseded cohort left behind stale R2
+Factory approval items, but does **not** establish whether deletion was
+intentional or reveal each Factory item's exact exception text.
+
+Before assigning a precise deletion/retry root cause, read the exact Factory R2
 `studio/state/factory-approvals/v2/jobs/{profile_id}/{request_id}.json`
 ledger, and for a global submit inspect its corresponding `groups` parent.
 Match the stored `item.output_id`, `item.id`, `item.status`, `item.error`,
