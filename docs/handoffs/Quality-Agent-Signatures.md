@@ -311,3 +311,14 @@ can reset a fenced Instagram publishing stage.
 `apps/studio-api/failed-output-monitor.mjs`,
 `apps/studio-api/worker-functions-04.mjs`, and
 `apps/studio-api/quality-checks.mjs`.
+
+
+## QA-FB0-DOUBLE-SLIDE-SETS — Facebook photo output mislabeled Manual Action (2026-10-21)
+
+**Known affected outputs:** Miami #6982 (`recEgbTPeXyX2r2ai`, four expected/eight ready), Chicago #7040 (`receQBUf5jqZtpy99`, four/eight), New York #7060 (`rectIfOlgbmCETdD8`, one/two). All were FB0 stage `FB0_ASSETS`, `FB_Publish_Status=Manual Fallback Required`, `Manual_Fallback_Required=true`; unlike a TikTok draft, **the user cannot complete these manually**. For Chicago and NYC the `Publish_Error_Message` can be blank, so Quality Agent census must explicitly include `Manual_Fallback_Required`.
+
+**Signature:** Every ordered Facebook `Carousel Slides` row is duplicated, yielding exactly `2 × Image_Count` eligible 4:5 assets. Each duplicate pair shares one original Google Drive file ID and `Asset_Family_Key`, but some rows' `Asset_4x5_Public_URL` resolve to a **different ordered image**. FB0 counts all rows, exhausts its three retries, and incorrectly escalates to manual action. Do not just clear the manual flag or choose arbitrary rows.
+
+**Native autonomous recovery:** At FB0, only if there are exactly two rows per manifest order and every row belongs solely to the same Platform Output, has the original approved Drive ID, expected asset-family record, Ready public asset and Shared_Asset_Approved=true: select one row per order using the canonical public URL `https://media.chicagoshining.com/studio/previews/lettered/{output_record_id}/{order-1}.jpg`. Repair any mismapped public URL on that kept row; mark only redundant slide row(s) `Deleted From Carousel=true` and remove their `Platform Output` link, preserving original source Drive/media assets and their other platform variants. **Re-read** after changing links: proceed only when exactly N canonical approved slides remain. Otherwise, quarantine and raise Needs Eyes with per-order details. This signature can be automatically classified as `healer_eligible` by Desk/Factory; it is **not** a user-facing Manual Action.
+
+**For pre-existing held outputs:** Quality Agent may rearm only after an approved, not-published, unlocked and exact-manifest preflight; set `FB_Publish_Status=Ready for Assets`, `Manual_Fallback_Required=false`, restore bounded stage retry state, clear FB0 error fields, and leave approved content and publishing schedule intact. Native FB0 will perform the same guarded reconciliation before any Graph publishing. **Never** rearm after an existing Facebook Post ID / Published_At / active lock. Continue to honor scheduled and rate-limit windows, and do not replay already published output.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -66,6 +67,85 @@ def list_ready_slides(
     formula = slide_formula(output_id)
     rows = client.list_records(CAROUSEL_SLIDES_TABLE, formula=formula, max_records=max_photos)
     return sorted(rows, key=_sort_key)
+
+
+def canonical_doubled_slide_repair(
+    output: dict[str, Any],
+    slides: list[dict[str, Any]],
+    expected: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, dict[str, str]]] | None:
+    """Plan safe FB0 double-link recovery against the immutable approved manifest.
+
+    No guesses on missing, mixed, revised or mismatched source assets. Never
+    reuse a row linked to another platform output or delete original media.
+    """
+    if not 1 <= expected <= DEFAULT_MAX_PHOTOS or len(slides) != expected * 2:
+        return None
+    output_rec_id = str(output.get("id") or "").strip()
+    if not output_rec_id:
+        return None
+    try:
+        manifest = json.loads(field_str(output, "Render_Clip_List_JSON"))
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(manifest, list) or len(manifest) != expected:
+        return None
+    ordered: dict[int, list[dict[str, Any]]] = {}
+    for slide in slides:
+        number = parse_int(field(slide, "Current Order"), 0) or 0
+        linked = field(slide, "Platform Output")
+        if number < 1 or number > expected or not slide.get("id"):
+            return None
+        if not isinstance(linked, list) or len(linked) != 1 or linked[0] != output_rec_id:
+            return None
+        if field(slide, "Deleted From Carousel"):
+            return None
+        ordered.setdefault(number, []).append(slide)
+    if len(ordered) != expected or any(len(rows) != 2 for rows in ordered.values()):
+        return None
+    keep, surplus, url_updates = [], [], {}
+    seen_drive_ids: set[str] = set()
+    for position in range(1, expected + 1):
+        entry = manifest[position - 1]
+        if not isinstance(entry, dict) or parse_int(entry.get("order"), 0) != position:
+            return None
+        source = str(entry.get("googleDriveFileId") or entry.get("google_drive_file_id") or "").strip()
+        family = str(entry.get("mediaAssetRecordId") or "").strip()
+        url = str(entry.get("url") or "").strip()
+        exact = f"https://media.chicagoshining.com/studio/previews/lettered/{output_rec_id}/{position - 1}.jpg"
+        if not source or source in seen_drive_ids or not family or url != exact:
+            return None
+        seen_drive_ids.add(source)
+        rows = ordered[position]
+        for row in rows:
+            if (
+                field_str(row, "Google Drive File ID") != source
+                or field_str(row, "Asset_Family_Key") != family
+                or field_str(row, "Asset_4x5_Public_Status").casefold() != "ready"
+                or field(row, "Shared_Asset_Approved") is not True
+                or field_str(row, "FB_Photo_ID")
+            ):
+                return None
+        canonical = next(
+            (row for row in rows if field_str(row, "Asset_4x5_Public_URL") == exact),
+            rows[0],
+        )
+        duplicate = next(row for row in rows if row["id"] != canonical["id"])
+        keep.append(canonical)
+        surplus.append(duplicate)
+        if field_str(canonical, "Asset_4x5_Public_URL") != exact:
+            url_updates[canonical["id"]] = {
+                "Asset_4x5_Public_URL": exact,
+                "Current Image URL": exact,
+                "Final Image URL": exact,
+                "Watermarked Image URL": exact,
+            }
+            canonical = dict(canonical, fields={
+                **canonical.get("fields", {}),
+                **url_updates[canonical["id"]],
+            })
+            keep[-1] = canonical
+    return keep, surplus, url_updates
 
 
 def list_ready_photos(client: AirtableClient, output_id: str, package_revision: str) -> list[dict[str, Any]]:

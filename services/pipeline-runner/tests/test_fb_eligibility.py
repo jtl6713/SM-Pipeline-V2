@@ -104,3 +104,47 @@ def test_public_feed_url_prefers_vanity_over_new_pages_profile_id():
         post_id="831080826745798_122143898307022170",
         permalink_url=npe,
     ) == "https://www.facebook.com/831080826745798/posts/122143898307022170"
+
+
+def test_fb0_manifest_guard_reconciles_exact_duplicate_sources_and_url_drift():
+    import json
+    from fb.assets import canonical_doubled_slide_repair
+    record_id="rec1234567890ABCD"
+    ids=["drive-A","drive-B","drive-C","drive-D"]
+    families=["recasset000000001","recasset000000002","recasset000000003","recasset000000004"]
+    manifest=[{"order":i+1,"googleDriveFileId":drive,"mediaAssetRecordId":families[i],
+      "url":f"https://media.chicagoshining.com/studio/previews/lettered/{record_id}/{i}.jpg"}
+      for i,drive in enumerate(ids)]
+    slides=[]
+    for i,drive in enumerate(ids):
+        for suffix in ("a","b"):
+            slides.append({"id":f"rec{i}{suffix}1234567890AB", "fields":{
+                "Current Order":i+1,"Platform Output":[record_id],
+                "Google Drive File ID":drive,"Asset_Family_Key":families[i],
+                "Asset_4x5_Public_Status":"Ready","Shared_Asset_Approved":True,
+                "Asset_4x5_Public_URL":manifest[i]["url"] if suffix=="b" and i!=1
+                    else "https://media.chicagoshining.com/wrong.jpg",
+            }})
+    output={"id":record_id,"fields":{"Render_Clip_List_JSON":json.dumps(manifest)}}
+    result=canonical_doubled_slide_repair(output,slides,4)
+    assert result is not None
+    kept,surplus,corrections=result
+    assert len(kept)==len(surplus)==4
+    assert len(set(x["id"] for x in kept+surplus))==8
+    assert len(corrections)==1
+    assert [row["fields"]["Asset_4x5_Public_URL"] for row in kept]==[x["url"] for x in manifest]
+    assert canonical_doubled_slide_repair(output,slides[:4],4) is None
+    broken=[dict(x,fields=dict(x["fields"])) for x in slides]
+    broken[0]["fields"]["Google Drive File ID"]="different-source"
+    assert canonical_doubled_slide_repair(output,broken,4) is None
+    cross=[dict(x,fields=dict(x["fields"])) for x in slides]
+    cross[0]["fields"]["Platform Output"].append("recOTHER0000000A")
+    assert canonical_doubled_slide_repair(output,cross,4) is None
+
+
+def test_fb0_repair_is_verified_before_sending_to_graph():
+    from pathlib import Path
+    source=(Path(__file__).resolve().parents[1]/"fb"/"fb0.py").read_text()
+    assert "canonical_doubled_slide_repair" in source
+    assert "post-repair linked assets not canonical" in source
+    assert '"Platform Output": []' in source

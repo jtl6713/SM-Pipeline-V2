@@ -1,5 +1,5 @@
 /** Complete, read-only failed-output census used by Desk and Factory Quality Agent. */
-export const FAILED_OUTPUT_FORMULA = 'AND({Test_Run_ID}=BLANK(),OR({Output_Status}="Failed",{Render_Status}="Failed",{Publish_Status}="Failed",AND({Publish_Error_Message}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published"),AND({IG_Carousel_Error_Message}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published"),AND({IG_Carousel_Status}="Children Processing",{IG_Carousel_Parent_Response_JSON}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published")))';
+export const FAILED_OUTPUT_FORMULA = 'AND({Test_Run_ID}=BLANK(),OR({Output_Status}="Failed",{Render_Status}="Failed",{Publish_Status}="Failed",AND({Publish_Error_Message}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published"),AND({IG_Carousel_Error_Message}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published"),AND({IG_Carousel_Status}="Children Processing",{IG_Carousel_Parent_Response_JSON}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published"),AND({Manual_Fallback_Required}=1,{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published")))';
 
 export async function scanOutstandingFailedOutputs(fetchPage, { pageSize = 100, filterFormula = FAILED_OUTPUT_FORMULA } = {}) {
   const records = [];
@@ -140,6 +140,24 @@ export function describeFailedOutput(record, nowMs = Date.now()) {
   } else if (!publishedEvidence && /facebook rate limit|1390008|\\b368\\b/i.test(error)) {
     recovery = "cooldown";
     action = "Honor the Facebook publishing cooldown and rate-limit rearm; never force immediate publication.";
+  }
+  // FB0 source verification also diagnoses held outputs with no Publish_Error_Message
+  // (e.g. output 7040/7060). No user/manual action is needed for exact 2N
+  // duplicates: native FB0 will verify source IDs and repair ordered links.
+  if (!publishedEvidence && text(record, "Platform").toLowerCase() === "facebook"
+      && text(record, "Publish_Error_Stage") === "FB0_ASSETS"
+      && text(record, "FB_Publish_Status") === "Manual Fallback Required"
+      && expected > 0 && linked === expected * 2) {
+    signature = "QA-FB0-DOUBLE-SLIDE-SETS";
+    recovery = "healer_eligible";
+    reason = "FB0 doubled the approved 4:5 slide set: " + linked + " linked rows for "
+      + expected + " selected source images; manual fallback was incorrectly assigned.";
+    action = "Quality Agent: verify each of the 2N rows against the immutable ordered "
+      + "Render_Clip_List_JSON (same Drive source per pair, one output link, "
+      + "exact stamped public URL). FB0 can repair duplicates automatically: "
+      + "rebind each canonical public URL, unlink only redundant slide records, "
+      + "clear manual fallback and resume the native Facebook photo stages. "
+      + "If any source mapping differs, retain the hold and escalate Needs Eyes.";
   }
   // Source-of-truth media and Graph state take precedence over generic failed
   // badges. Never reset Instagram children/parents from an Airtable counter.
