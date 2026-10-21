@@ -59,7 +59,9 @@ export function facebookRateLimitResetReason(record, { nowMs = Date.now(), maxAt
   if (text(record, "Review_Status") !== "Approved") return "approval_not_confirmed";
   if (text(record, "Published_At") || text(record, "Platform_Post_ID")
       || text(record, "Platform_Post_URL") || text(record, "Facebook_Post_ID")
-      || text(record, "FB_Post_ID") || text(record, "FB_Video_ID")) return "publication_evidence";
+      || text(record, "FB_Post_ID") || text(record, "FB_Video_ID")
+      || /published/i.test(text(record, "FB_Publish_Status"))
+      || /published/i.test(text(record, "FB_Slideshow_Status"))) return "publication_evidence";
   if (truthy(record, "Do_Not_Publish")) return "publication_held";
   if (Number(text(record, "Publish_Attempt_Count")) >= maxAttempts
       || Number(text(record, "Studio_Publish_Dispatch_Count")) >= maxAttempts) return "retry_limit";
