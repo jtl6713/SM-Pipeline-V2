@@ -9268,7 +9268,7 @@ export async function gatherStudioDeskInventory(env) {
   let failedOutputSnapshot;
   try {
     failedOutputSnapshot = await loadStudioFailedOutputSnapshot(env);
-    scanned("render_failed", "publish_failed_transient", "publish_live_failed_status", "ttd0_route_blank_draft", "facebook_publish_rate_limit", "tiktok_auth_signature", "ig_carousel_too_many_children", "ig_carousel_child_verification_race", "ig_carousel_child_poll_failure", "ig_carousel_rate_limited");
+    scanned("render_failed", "publish_failed_transient", "publish_live_failed_status", "ttd0_route_blank_draft", "facebook_publish_rate_limit", "tiktok_auth_signature", "ig_carousel_too_many_children", "ig_carousel_child_verification_race", "ig_carousel_child_poll_failure", "ig_carousel_rate_limited", "ig_duplicate_slide_sets", "ig_ambiguous_parent", "ig_expired_child_drift", "ig_retry_storm");
     for (const record of failedOutputSnapshot.rows) {
       const mapped = mapOut(record);
       const before = incidents.length;
@@ -9282,6 +9282,27 @@ export async function gatherStudioDeskInventory(env) {
       push(classifyIgCarouselChildPollFailure(mapped));
       push(classifyIgCarouselRateLimited(mapped));
       push(classifyPublishFailed(mapped, nowMs));
+      // A generic failed-output badge is not enough for Instagram photo
+      // carousels. Their exact AP1C/AP3C evidence must surface as a Quality
+      // finding even when no existing classifier matches Output_Status.
+      const classified = describeFailedOutput(record, nowMs);
+      const instagramKinds = {
+        "QA-IG-AP1C-DUPLICATE-SLIDE-SETS": "ig_duplicate_slide_sets",
+        "QA-IG-AP3C-AMBIGUOUS-PARENT": "ig_ambiguous_parent",
+        "QA-IG-EXPIRED-CHILD-STATE-DRIFT": "ig_expired_child_drift",
+        "QA-IG-RETRY-STORM": "ig_retry_storm",
+      };
+      const instagramKind = instagramKinds[classified.signature];
+      if (instagramKind) {
+        push({
+          kind: instagramKind, class: "data_repair", actor: "desk_agent",
+          record_id: record.id,
+          fingerprint: classified.signature + ":" + record.id,
+          output_id: mapped.output_id, output_title: mapped.output_title,
+          platform: mapped.platform, platform_output_type: mapped.platform_output_type,
+          diagnosis: classified.error + " " + classified.action,
+        });
+      }
       if (incidents.length === before && !incidents.some((item) => item.record_id === record.id)) {
         const detail = describeFailedOutput(record, nowMs);
         push({
