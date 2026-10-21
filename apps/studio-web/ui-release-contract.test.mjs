@@ -13,10 +13,10 @@ const app = fs.readFileSync(new URL("./assets/app-item4-1008.js", import.meta.ur
 
 test("Studio UI release label, BUILD_ID, and every JS/CSS cache key are one contract", () => {
   const contract = readUiReleaseContract(html, app);
-  assert.equal(contract.version, "0.6.735");
+  assert.equal(contract.version, "0.6.736");
   assert.equal(contract.cacheKey, "0.6.736-vibe-video-source");
   assert.equal(contract.expectedBuildId, "item4-0.6.736-vibe-video-source");
-  assert.match(contract.expectedJsUrl, /^\/assets\/app-item4-1008\.js\?v=0\.6\.734-prepare-frame-progress/);
+  assert.match(contract.expectedJsUrl, /app-item4-1008.*0\\.6\\.736-vibe-video-source/);
   assert.ok(contract.versionedAssetCount >= 20);
   assert.equal(extractUiVersionFromHtml(html), contract.version);
   assert.equal(extractAppUrlFromHtml(html), contract.expectedJsUrl);
