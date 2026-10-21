@@ -280,7 +280,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.732-progress-count";
+  const BUILD_ID = "item4-0.6.733-vibe-upload-confirm";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -6249,6 +6249,13 @@ function timedScriptAssetLabel(asset, index) {
       .filter((asset) => asset && !String(asset.id || "").startsWith("local:")).length;
   }
 
+  function vibeCutPersistedSource(status = item4Workspace) {
+    return (Array.isArray(status?.assets) ? status.assets : []).find((asset) => {
+      const id = String(asset?.id || "");
+      return id && !id.startsWith("local:") && !id.startsWith("staged:") && item4AssetLooksLikeVideo(asset);
+    }) || null;
+  }
+
   function ezPersistedKindCounts() {
     const assets = (Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [])
       .filter((asset) => asset && !String(asset.id || "").startsWith("local:"));
@@ -7365,6 +7372,7 @@ function timedScriptAssetLabel(asset, index) {
       renderEzPhotoStrip();
     }
     ezIntakeKind = nextKind;
+    if ($("ezContinue")) $("ezContinue").hidden = true;
     document.querySelectorAll("[data-ez-input]").forEach((button) => {
       button.classList.toggle("selected", button.dataset.ezInput === ezIntakeKind);
     });
@@ -8453,6 +8461,7 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function receiveMasterPhotos(fileList) {
+    if ($("ezContinue") && !(ezIsVibeCut() && vibeCutPersistedSource())) $("ezContinue").hidden = true;
     const incoming = Array.from(fileList || []);
     item4AdoptKindForIncomingFiles(incoming);
     const unsupportedNote = item4UnsupportedPhotoMessage(incoming);
@@ -8690,20 +8699,28 @@ function timedScriptAssetLabel(asset, index) {
         setRequestMessage("AI image plan saved. You can still add a title, script, or notes before promote.", "success");
         await maybeAutoEzPlan(true);
       } else {
-        ezAutoPlanAfterUpload = !ezIsAzFinishedPath();
+        ezAutoPlanAfterUpload = !ezIsAzFinishedPath() && !ezIsVibeCut();
         if (!item4ShowOversizedClipNotice()) {
           setEzMessage("Uploading originals…");
           if (ezIsAzFinishedPath()) setAzFinishedMessage("Uploading your video. You can close this tab after it finishes.");
         }
-        await uploadItem4Files(nextFiles, { preserveOversizedNotice: true });
+        const uploadResult = await uploadItem4Files(nextFiles, { preserveOversizedNotice: true });
         renderEzPhotoStrip();
         if (ezIsAzFinishedPath()) startAzFinishedProgressPolling();
-        if (ezIsVibeCut() && activeProductionRequest?.id) {
+        if (ezIsVibeCut() || pending?.inputKind === "vibe-cut") {
+          if (!uploadResult?.ok || !vibeCutPersistedSource()) {
+            throw new Error("Vibe Cut video was not confirmed on this Production request. Upload again before continuing.");
+          }
           applyEzExtraOutputs(extras);
           applyEzToAdvanced({ force: true });
-          switchToPage("content");
-          showProductionRequestWorkspace();
-          setRequestMessage("Production is ready — outputs match your source video.", "success");
+          const action = $("ezContinue");
+          if (action) {
+            action.textContent = "Continue to Production";
+            action.hidden = false;
+            action.disabled = false;
+          }
+          setEzMessage("Source video saved to this Production request. Select Continue to Production to review it before rendering.", "success");
+          setRequestMessage("Vibe Cut source video saved and attached to this Production request.", "success");
         }
       }
       return Boolean(activeProductionRequest?.id || allowEmpty);
@@ -8711,6 +8728,8 @@ function timedScriptAssetLabel(asset, index) {
       const saved = Boolean(activeProductionRequest?.id);
       const message = ezIsAzFinishedPath()
         ? (error.message || "The video did not finish uploading. Please choose it again.")
+        : (ezIsVibeCut() || pending?.inputKind === "vibe-cut")
+        ? `Video upload needs attention: ${error.message}`
         : saved
         ? `Your photos are still here, but Studio could not finish saving (${error.message}). You can keep editing captions.`
         : error.message;
@@ -9054,6 +9073,19 @@ function timedScriptAssetLabel(asset, index) {
       event.target.value = "";
     });
     $("ezContinue")?.addEventListener("click", () => {
+      if (ezIsVibeCut()) {
+        if (!activeProductionRequest?.id || !vibeCutPersistedSource() || item4Uploading || ezStarting) {
+          setEzMessage("Video is not yet confirmed on the Production request. Retry the upload before continuing.", "error-text");
+          return;
+        }
+        $("ezContinue").disabled = true;
+        ezAutoPlanAfterUpload = true;
+        switchToPage("content");
+        showProductionRequestWorkspace();
+        setRequestMessage("Source video saved. Review the source clip and output settings before rendering.", "success");
+        Promise.resolve().then(() => maybeAutoEzPlan());
+        return;
+      }
       if (activeProductionRequest?.id && ezPersistedAssetCount()) return;
       startEzFromFiles(ezStagedFiles);
     });
@@ -12019,12 +12051,15 @@ function timedScriptAssetLabel(asset, index) {
             },
           });
           if (result?.record) activeProductionRequest = result.record;
-          item4UploadBatchDone += 1;
           if (Array.isArray(result?.assets)) {
             item4ApplyAssetsLocally(result.assets);
           } else {
             await loadItem4Workspace(activeProductionRequest, { allowAssetChanges: true });
           }
+          if (ezIsVibeCut() && item4FileLooksLikeVideo(file) && !vibeCutPersistedSource()) {
+            throw new Error("Upload returned without a saved source video attachment.");
+          }
+          item4UploadBatchDone += 1;
           ezStagedFiles = files.slice(index + 1);
           updateItem4MasterProgress(item4Workspace || {});
         } catch (error) {
@@ -12077,7 +12112,7 @@ function timedScriptAssetLabel(asset, index) {
         }
         startItem4MasterPolling();
       }
-      if (!failed.length && !incomplete && !ezIsAzFinishedPath()) await maybeAutoEzPlan();
+      if (!failed.length && !incomplete && !ezIsAzFinishedPath() && !ezIsVibeCut()) await maybeAutoEzPlan();
       if (!failed.length && ezIsAzFinishedPath()) startAzFinishedProgressPolling();
       files.forEach((file, index) => {
         const blob = posterBlobs[index];
@@ -12090,6 +12125,7 @@ function timedScriptAssetLabel(asset, index) {
       });
       renderEzCaptionUi();
       renderEzPhotoStrip();
+      return { ok: !failed.length && !incomplete, savedCount: total, sourceVideo: Boolean(vibeCutPersistedSource()) };
     } catch (error) {
       ezAutoPlanAfterUpload = false;
       const friendly = item4UploadErrorMessage(error, files);
@@ -12106,6 +12142,7 @@ function timedScriptAssetLabel(asset, index) {
       }
       setRequestMessage(friendly, "error-text");
       setEzMessage(friendly, "error-text");
+      return { ok: false, error: friendly };
     } finally {
       item4Uploading = false;
       item4UploadBatchTotal = 0;

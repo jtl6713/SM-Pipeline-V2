@@ -13,9 +13,9 @@ const app = fs.readFileSync(new URL("./assets/app-item4-1008.js", import.meta.ur
 
 test("Studio UI release label, BUILD_ID, and every JS/CSS cache key are one contract", () => {
   const contract = readUiReleaseContract(html, app);
-  assert.equal(contract.version, "0.6.732");
-  assert.equal(contract.cacheKey, "0.6.732-progress-count");
-  assert.equal(contract.expectedBuildId, "item4-0.6.732-progress-count");
+  assert.equal(contract.version, "0.6.733");
+  assert.equal(contract.cacheKey, "0.6.733-vibe-upload-confirm");
+  assert.equal(contract.expectedBuildId, "item4-0.6.733-vibe-upload-confirm");
   assert.match(contract.expectedJsUrl, /^\/assets\/app-item4-1008\.js\?v=0\.6\.732-progress-count/);
   assert.ok(contract.versionedAssetCount >= 20);
   assert.equal(extractUiVersionFromHtml(html), contract.version);
@@ -24,21 +24,21 @@ test("Studio UI release label, BUILD_ID, and every JS/CSS cache key are one cont
 
 test("release contract rejects drift that can produce a green stale deploy", () => {
   assert.throws(
-    () => readUiReleaseContract(html.replace("UI build 0.6.732", "UI build 0.6.710"), app),
+    () => readUiReleaseContract(html.replace("UI build 0.6.733", "UI build 0.6.710"), app),
     /does not match application cache version/,
   );
   assert.throws(
-    () => readUiReleaseContract(html.replace("styles-phase7-0621.css?v=0.6.732-progress-count", "styles-phase7-0621.css?v=stale"), app),
+    () => readUiReleaseContract(html.replace("styles-phase7-0621.css?v=0.6.733-vibe-upload-confirm", "styles-phase7-0621.css?v=stale"), app),
     /do not share release cache key/,
   );
   assert.throws(
-    () => readUiReleaseContract(html, app.replace("item4-0.6.732-progress-count", "item4-0.6.710-stale")),
+    () => readUiReleaseContract(html, app.replace("item4-0.6.733-vibe-upload-confirm", "item4-0.6.710-stale")),
     /must equal/,
   );
 });
 
 test("release newness comparison is numeric and rejects unchanged versions", () => {
-  assert.equal(compareUiVersions("0.6.732", "0.6.709"), 1);
-  assert.equal(compareUiVersions("0.6.732", "0.6.732"), 0);
-  assert.equal(compareUiVersions("0.6.709", "0.6.732"), -1);
+  assert.equal(compareUiVersions("0.6.733", "0.6.709"), 1);
+  assert.equal(compareUiVersions("0.6.733", "0.6.733"), 0);
+  assert.equal(compareUiVersions("0.6.709", "0.6.733"), -1);
 });
