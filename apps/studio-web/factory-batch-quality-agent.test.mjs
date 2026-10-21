@@ -22,7 +22,8 @@ test("Quality Agent has profile-scoped, read-only Factory batch findings in Fact
   assert.match(quality,/credentials: "same-origin"/);
   assert.match(quality,/cache: "no-store"/);
   assert.match(quality,/new URLSearchParams\(\{ profile: profileId \}\)/);
-  assert.match(quality,/quality_rate_limit_recovery: true/);\n  assert.match(quality,/data-qa-reapprove-all/);
+  assert.match(quality,/quality_rate_limit_recovery: true/);
+  assert.match(quality,/data-qa-reapprove-all/);
   assert.doesNotMatch(quality,/\/api\/factory\/approve-all/);
   assert.match(css,/@media \(max-width: 600px\)/);
 });
