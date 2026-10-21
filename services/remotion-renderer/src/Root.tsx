@@ -19,6 +19,12 @@ import {
     ChicagoShiningPhotoSequence,
     type ChicagoShiningPhotoSequenceProps,
 } from './ChicagoShiningPhotoSequence';
+import {withYouTubeFirstFrame} from './YouTubeFirstFrame';
+
+const YouTubeV2 = withYouTubeFirstFrame(TestRemotionV2);
+const YouTubeV3 = withYouTubeFirstFrame(TestRemotionV3);
+const YouTubePhotoSequence = withYouTubeFirstFrame(ChicagoShiningPhotoSequence);
+
 export const RemotionRoot: React.FC = () => {
     return (
         <>
@@ -32,7 +38,7 @@ export const RemotionRoot: React.FC = () => {
             />
             <Composition
                 id="TEST-REMOTION-V2"
-                component={TestRemotionV2}
+                component={YouTubeV2}
                 durationInFrames={240}
                 fps={30}
                 width={1080}
@@ -41,7 +47,7 @@ export const RemotionRoot: React.FC = () => {
             />
 			<Composition
 				id="TEST-REMOTION-V3"
-				component={TestRemotionV3}
+				component={YouTubeV3}
 				width={1080}
 				height={1920}
 				fps={30}
@@ -58,7 +64,7 @@ export const RemotionRoot: React.FC = () => {
 			/>
             <Composition
                 id="TEST-REMOTION-V4"
-                component={TestRemotionV3}
+                component={YouTubeV3}
                 durationInFrames={900}
                 fps={30}
                 width={1080}
@@ -207,7 +213,7 @@ export const RemotionRoot: React.FC = () => {
             />
             <Composition<ChicagoShiningPhotoSequenceProps>
                 id="ChicagoShiningPhotoSequence"
-                component={ChicagoShiningPhotoSequence}
+                component={YouTubePhotoSequence}
                 width={1080}
                 height={1920}
                 fps={30}

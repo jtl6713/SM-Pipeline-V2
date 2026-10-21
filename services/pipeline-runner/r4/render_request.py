@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from render.fields import field, field_str, parse_json_field
+from render.youtube_first_frame import youtube_first_frame_enabled_for_output
 from audio.voiceover_duration import voiceover_is_disabled
 
 
@@ -353,6 +354,25 @@ def apply_authoritative_timing(payload: dict[str, Any], output: dict[str, Any]) 
     return body
 
 
+def attach_youtube_first_frame(
+    payload: dict[str, Any],
+    output: dict[str, Any],
+) -> dict[str, Any]:
+    """Opt-in renderer contract, including single-output canary allowlisting."""
+    if not youtube_first_frame_enabled_for_output(output):
+        return payload
+
+    # No Clip_1_URL fallback: using the first source image is not the same as
+    # Studio's cover. Missing covers fail explicitly when the render prepares.
+    payload["youtubeFirstFrame"] = {
+        "enabled": True,
+        "coverUrl": field_str(output, "Thumbnail_URL"),
+        "holdFrames": 21,
+        "fadeFrames": 4,
+    }
+    return payload
+
+
 def choose_render_request(
     output: dict[str, Any],
     content_item: dict[str, Any] | None,
@@ -362,6 +382,7 @@ def choose_render_request(
 ) -> tuple[str, dict[str, Any]]:
     vo = "" if voiceover_is_disabled(output, content_item) else voiceover_url(output, content_item)
     if field_str(output, "Creative_Render_Manifest_JSON"):
+        route = "p020_manifest"
         payload = build_p020_request(output, content_item, default_music=default_music)
         if vo and payload.get("sceneVoiceoverAuthority") is not True:
             attach_voiceover(
@@ -371,15 +392,22 @@ def choose_render_request(
                 default_voice=default_voice,
                 url=vo,
             )
-        return "p020_manifest", apply_authoritative_timing(attach_timing_plan(payload, output), output)
-    if vo:
-        return "voiceover", apply_authoritative_timing(attach_timing_plan(build_voiceover_request(
+    elif vo:
+        route = "voiceover"
+        payload = build_voiceover_request(
             output,
             content_item,
             default_music=default_music,
             default_voice=default_voice,
-        ), output), output)
-    return "no_voiceover", apply_authoritative_timing(attach_timing_plan(
-        build_no_voiceover_request(output, content_item, default_music=default_music),
+        )
+    else:
+        route = "no_voiceover"
+        payload = build_no_voiceover_request(
+            output,
+            content_item,
+            default_music=default_music,
+        )
+    return route, attach_youtube_first_frame(
+        apply_authoritative_timing(attach_timing_plan(payload, output), output),
         output,
-    ), output)
+    )

@@ -275,3 +275,6 @@ jobs:
 # 2026-10-20: PR #974 fail-closed Airtable coverage evidence; deploy runner collector heartbeat metadata and verify health (no read-SoR changes).
 
 # 2026-10-20: Deploy merged PR #1018 Vibe Cut MOV no-decoder audio fallback; run video watermark regression before live Ops deployment.
+
+# PR #1026: deploy runner's YouTube first-frame gate and shared-render isolation alongside Remotion.
+# Keep YOUTUBE_FIRST_FRAME_MODE=off until private YouTube canary has been proven.

@@ -1,0 +1,51 @@
+name: YouTube first encoded frame
+
+on:
+  pull_request:
+    paths:
+      - 'services/remotion-renderer/**'
+      - 'services/pipeline-runner/r4/**'
+      - 'services/pipeline-runner/tests/test_youtube_first_frame_request.py services/pipeline-runner/tests/test_shared_render.py'
+      - '.github/workflows/youtube-first-frame.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install renderer and Python requirements
+        run: |
+          cd services/remotion-renderer && npm ci
+          cd ../pipeline-runner && pip install -r requirements.txt pytest
+      - name: Install system FFmpeg for real MP4 tests
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          ffmpeg -version | head -1
+      - name: Lint and compile Remotion compositions
+        working-directory: services/remotion-renderer
+        run: |
+          npx eslint src/YouTubeFirstFrame.tsx
+          npx tsc --noEmit --jsx react-jsx --esModuleInterop --skipLibCheck --lib es2022,dom src/YouTubeFirstFrame.tsx
+          node --check render-server.js
+          npm run build
+      - name: Validate first encoded frames with real FFmpeg
+        run: node --test services/remotion-renderer/first-frame-verify.test.js
+      - name: Render real Remotion MP4s and inspect decoded opening frames
+        working-directory: services/remotion-renderer
+        run: node first-frame-remotion.integration.js
+      - name: Validate YouTube-only render contract
+        env:
+          PYTHONPATH: services/pipeline-runner
+        run: python -m pytest -q services/pipeline-runner/tests/test_youtube_first_frame_request.py

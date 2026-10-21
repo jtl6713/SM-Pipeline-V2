@@ -19,7 +19,7 @@ jobs:
       OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
       OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
       OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
-      EXPECTED_VERSION: '2026-10-17-visual-voiceover-timeline'
+      EXPECTED_VERSION: '2026-10-21-youtube-first-frame-canary'
     steps:
       - name: Authenticate to Ops Dashboard
         id: auth

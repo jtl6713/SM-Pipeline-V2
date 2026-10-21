@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { registerRemotionCleanup } = require('./remotion-cleanup');
 const { authoritativeRenderPlan } = require('./authoritative-duration');
+const { verifyFirstFrame } = require('./first-frame-verify');
 
 const app = express();
 
@@ -20,7 +21,7 @@ const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
 const PIPELINE_RUNNER_INTERNAL_URL = String(
     process.env.PIPELINE_RUNNER_INTERNAL_URL || 'http://127.0.0.1:3350'
 ).replace(/\/$/, '');
-const SERVICE_VERSION = '2026-10-17-visual-voiceover-timeline';
+const SERVICE_VERSION = '2026-10-21-youtube-first-frame-canary';
 const PROJECT_DIR = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_DIR, 'public');
 const OUT_DIR = path.join(PROJECT_DIR, 'out');
@@ -1067,6 +1068,56 @@ function compactRemotionFailure(job, exitCode) {
     return detail ? `${base}: ${detail}`.slice(0, 2000) : base;
 }
 
+async function rewriteYouTubeFirstFrame({ config, originalClips, rewrittenClips, jobAssetDir, job }) {
+    if (!config?.enabled) return null;
+    const cover = String(config.coverUrl || '').trim();
+    if (!cover) {
+        throw new Error('YouTube first-frame cover unavailable: Studio Thumbnail_URL is empty. No substitute image was generated.');
+    }
+    const driveId = googleDriveFileIdFromUrl(cover);
+    const sourceUrl = driveId
+        ? `${PIPELINE_RUNNER_INTERNAL_URL}/internal/drive-media/${encodeURIComponent(driveId)}`
+        : cover;
+    if (!isHttpUrl(sourceUrl)) {
+        throw new Error('YouTube first-frame cover is not a fetchable URL or Drive asset.');
+    }
+    // Reuse the localized original when Studio's cover is also a still clip.
+    for (let i = 0; i < (originalClips || []).length; i += 1) {
+        const clip = originalClips[i];
+        if (clip?.url !== cover && clip?.src !== cover) continue;
+        if (inferClipMediaKind(clip) === 'video') continue;
+        const local = resolvePublicAssetPath(rewrittenClips[i]?.src);
+        if (local) {
+            assertDownloadedImageFile(local, 'localized clip cover');
+            appendLog(job, 'YouTube cover reused from existing localized source image.');
+            return {
+                enabled: true,
+                src: toPublicSrc(local),
+                holdFrames: clamp(Math.round(toFiniteNumber(config.holdFrames, 21)), 15, 23),
+                fadeFrames: clamp(Math.round(toFiniteNumber(config.fadeFrames, 4)), 1, 8),
+            };
+        }
+    }
+    const temp = path.join(jobAssetDir, 'youtube-first-frame-cover.download');
+    await downloadUrlToFile(sourceUrl, temp, 5, { expectImage: true });
+    const bytes = await fsp.readFile(temp);
+    const isPng = bytes[0] === 0x89 && bytes[1] === 0x50;
+    const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
+    const isWebp = bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP';
+    const isGif = bytes.toString('ascii', 0, 3) === 'GIF';
+    const ext = isPng ? '.png' : isJpeg ? '.jpg' : isWebp ? '.webp' : isGif ? '.gif' : '';
+    if (!ext) throw new Error('Localized YouTube cover format is unsupported.');
+    const filename = path.join(jobAssetDir, 'youtube-first-frame-cover' + ext);
+    await fsp.rename(temp, filename);
+    appendLog(job, 'Localized existing Studio YouTube cover; no AI generation or MP4 re-encode.');
+    return {
+        enabled: true,
+        src: toPublicSrc(filename),
+        holdFrames: clamp(Math.round(toFiniteNumber(config.holdFrames, 21)), 15, 23),
+        fadeFrames: clamp(Math.round(toFiniteNumber(config.fadeFrames, 4)), 1, 8),
+    };
+}
+
 async function buildRewrittenProps({ body, jobId, job }) {
     if (String(body.compositionId || '') === 'ARM-SMOKE') {
         const filename = sanitizeOutputFilename(body.filename || 'arm-smoke.mp4');
@@ -1124,6 +1175,13 @@ async function buildRewrittenProps({ body, jobId, job }) {
 
     const rewrittenWatermarkUrl = await rewriteWatermarkAsset({
         watermarkUrl: body.watermarkUrl,
+        jobAssetDir,
+        job,
+    });
+    const youtubeFirstFrame = await rewriteYouTubeFirstFrame({
+        config: body.youtubeFirstFrame,
+        originalClips: body.clips,
+        rewrittenClips,
         jobAssetDir,
         job,
     });
@@ -1290,6 +1348,7 @@ async function buildRewrittenProps({ body, jobId, job }) {
         musicEndFadeFrames: Math.round(musicEndFadeSeconds * fps),
         sourceClipCount: rewrittenClips.length,
         clips: adjustedClips,
+        ...(youtubeFirstFrame ? { youtubeFirstFrame } : {}),
     };
 
     if (rewrittenMusic) {
@@ -1393,12 +1452,31 @@ function runRemotionRender({ jobId, compositionId, filename, propsFilePath }) {
                     reject(error);
                 });
 
-                child.on('close', (code) => {
+                child.on('close', async (code) => {
                     job.exitCode = code;
                     job.updatedAt = nowIso();
                     job.childPid = null;
 
                     if (code === 0) {
+                        try {
+                            if (job.props?.youtubeFirstFrame?.enabled) {
+                                const coverPath = resolvePublicAssetPath(job.props.youtubeFirstFrame.src);
+                                if (!coverPath) throw new Error('Cover path missing after MP4 encoding.');
+                                const videoPath = path.join(OUT_DIR, filename);
+                                const previewPath = path.join(OUT_DIR, filename.replace(/\.mp4$/i, '') + '-opening.jpg');
+                                job.firstFrameVerification = await verifyFirstFrame({videoPath, coverPath, previewPath});
+                                job.firstFramePreviewUrl = job.renderUrl.replace(/\.mp4$/i, '-opening.jpg');
+                                appendLog(job, 'YouTube first encoded frame verified against the intended Studio cover.');
+                            }
+                        } catch (error) {
+                            job.status = 'failed';
+                            job.error = 'YouTube first-frame verification failed: ' + error.message;
+                            job.updatedAt = nowIso();
+                            appendLog(job, job.error);
+                            notifyStudioR5Done(job);
+                            reject(error);
+                            return;
+                        }
                         job.status = 'completed';
                         job.completedAt = nowIso();
                         appendLog(job, `Render completed: ${outputRelative}`);
