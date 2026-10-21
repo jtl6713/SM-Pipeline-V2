@@ -75,6 +75,17 @@ async function verifyFirstFrame({videoPath, coverPath, previewPath, threshold = 
   ])).toString('utf8'));
   const {width, height} = dimensions.streams?.[0] || {};
   if (!width || !height) throw new Error('Finished MP4 has no readable video dimensions.');
+  const coverDimensions = JSON.parse((await execute(FFPROBE, [
+    '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height',
+    '-of', 'json', coverPath,
+  ])).toString('utf8'));
+  const coverWidth = Number(coverDimensions.streams?.[0]?.width);
+  const coverHeight = Number(coverDimensions.streams?.[0]?.height);
+  if (!coverWidth || !coverHeight) throw new Error('Intended Studio cover has no readable dimensions.');
+  const aspectError = Math.abs((coverWidth / coverHeight) / (width / height) - 1);
+  if (aspectError > 0.05) {
+    throw new Error(`YouTube cover aspect mismatch: cover ${coverWidth}x${coverHeight}, MP4 ${width}x${height}.`);
+  }
   const reference = await sampleCover(coverPath, width, height);
   if (averageRgb(reference) < 5) throw new Error('Intended cover is nearly blank/black.');
 
