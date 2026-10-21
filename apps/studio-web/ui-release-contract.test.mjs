@@ -13,9 +13,9 @@ const app = fs.readFileSync(new URL("./assets/app-item4-1008.js", import.meta.ur
 
 test("Studio UI release label, BUILD_ID, and every JS/CSS cache key are one contract", () => {
   const contract = readUiReleaseContract(html, app);
-  assert.equal(contract.version, "0.6.736");
-  assert.equal(contract.cacheKey, "0.6.736-vibe-video-source");
-  assert.equal(contract.expectedBuildId, "item4-0.6.736-vibe-video-source");
+  assert.equal(contract.version, "0.6.737");
+  assert.equal(contract.cacheKey, "0.6.737-qa-http500-preflight");
+  assert.equal(contract.expectedBuildId, "item4-0.6.737-qa-http500-preflight");
   assert.match(contract.expectedJsUrl, /app-item4-1008.*0[.]6[.]736-vibe-video-source/);
   assert.ok(contract.versionedAssetCount >= 20);
   assert.equal(extractUiVersionFromHtml(html), contract.version);
@@ -24,15 +24,15 @@ test("Studio UI release label, BUILD_ID, and every JS/CSS cache key are one cont
 
 test("release contract rejects drift that can produce a green stale deploy", () => {
   assert.throws(
-    () => readUiReleaseContract(html.replace("UI build 0.6.736", "UI build 0.6.710"), app),
+    () => readUiReleaseContract(html.replace("UI build 0.6.737", "UI build 0.6.710"), app),
     /does not match application cache version/,
   );
   assert.throws(
-    () => readUiReleaseContract(html.replace("styles-phase7-0621.css?v=0.6.736-vibe-video-source", "styles-phase7-0621.css?v=stale"), app),
+    () => readUiReleaseContract(html.replace("styles-phase7-0621.css?v=0.6.737-qa-http500-preflight", "styles-phase7-0621.css?v=stale"), app),
     /do not share release cache key/,
   );
   assert.throws(
-    () => readUiReleaseContract(html, app.replace("item4-0.6.736-vibe-video-source", "item4-0.6.710-stale")),
+    () => readUiReleaseContract(html, app.replace("item4-0.6.737-qa-http500-preflight", "item4-0.6.710-stale")),
     /must equal/,
   );
 });
