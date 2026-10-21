@@ -9002,9 +9002,11 @@ export function deskOutputsForRequest(outputs, requestId) {
 }
 /*__STUDIO_WORKER_END:deskOutputsForRequest__*/
 
-async function loadStudioFailedOutputSnapshot(env) {
-  // 60-second shared read cache, independent of the R2 batch monitor.
-  return studioReadCoalesce("quality-agent-failed-output-census", 60000, async () => {
+async function loadStudioFailedOutputSnapshot(env, { fresh = false } = {}) {
+  // Force a fresh census only after an explicit user recovery or refresh.
+  // Ordinary polling still uses a 60-second coalesced Airtable read.
+  return studioReadCoalesce(fresh ? "quality-agent-census-fresh:" + Date.now()
+    : "quality-agent-failed-output-census", fresh ? 0 : 60000, async () => {
     const [rows, profiles] = await Promise.all([
       scanOutstandingFailedOutputs((options) =>
         listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options)),
@@ -14876,7 +14878,9 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
         );
         let outputFailures;
         try {
-          const snapshot = await loadStudioFailedOutputSnapshot(env);
+          const snapshot = await loadStudioFailedOutputSnapshot(env, {
+            fresh: url.searchParams.get("fresh_output_failures") === "1",
+          });
           outputFailures = { status: "ok", count: snapshot.count,
             scanned_at: snapshot.scanned_at, items: snapshot.items };
         } catch (error) {
