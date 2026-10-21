@@ -13930,7 +13930,7 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
           {
             occupiedMs: publishNowImmediate ? null : platformOccupiedMs,
             forceWrite: true,
-            exactOverride: manualScheduleOverride,
+            exactOverride: manualScheduleOverride || qualityRecovery,
             timeZone,
           },
         );
@@ -14022,7 +14022,7 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
       {
         occupiedMs: publishNowImmediate ? null : studioOccupiedForPlatform(occupied, platform),
         forceWrite: true,
-        exactOverride: manualScheduleOverride,
+        exactOverride: manualScheduleOverride || qualityRecovery,
         timeZone,
       },
     );
