@@ -598,3 +598,5 @@ Deploy Worker: complete paginated MAE occupancy for safe Facebook Quality Agent 
 2026-10-21: Deploy hotfix FB3 existing-public-post finalization during Facebook Graph publish hold. No FB0/FB1/FB2/FB2R on held graph; no new posts; oldest first. Verify counters and preserve Airtable authority and current binding contract.
 
 2026-10-21: Deploy merged PR #1038: Desk and Factory Quality Agent fb_duplicate_slide_sets first-class signature and manual fallback census; no publish override.
+
+2026-10-21: Controlled retry of production Worker hotfix PR #1039 FB3 existing Facebook post finalization. Previous deploy reported failure; preserve automatic rollback, bindings, Airtable authority, and no new Facebook create actions under Graph hold.
