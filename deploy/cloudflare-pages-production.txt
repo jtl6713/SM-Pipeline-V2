@@ -478,3 +478,4 @@ Retry deploy UI 0.6.733 Vibe Cut upload confirmation after aligning release-pinn
 2026-10-20: Retry UI 0.6.734 Prepare progress Pages release after aligning 11 version-pinned regression test expectations with new cache key.
 
 2026-10-20: Deploy Studio UI 0.6.735-quality-reapprove: clickable Quality Agent failures and safe individual/bulk Facebook reapproval; preserves PR #1017 frame-progress fix.
+2026-10-20: Deploy merged PR #1018 Studio UI 0.6.736 Vibe Cut Save & Continue and replace-video controls with server-ready-video gate.
