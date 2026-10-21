@@ -37,6 +37,9 @@ jobs:
           npm run build
       - name: Validate first encoded frames with real FFmpeg
         run: node --test services/remotion-renderer/first-frame-verify.test.js
+      - name: Render real Remotion MP4s and inspect decoded opening frames
+        working-directory: services/remotion-renderer
+        run: node first-frame-remotion.integration.js
       - name: Validate YouTube-only render contract
         env:
           PYTHONPATH: services/pipeline-runner
