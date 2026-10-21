@@ -7,6 +7,7 @@ import json
 from typing import Any
 
 from render.fields import field, field_str
+from render.youtube_first_frame import youtube_first_frame_enabled_for_output
 from r5.processor import review_fields_after_successful_render
 from studio_produce.constants import PLATFORM_OUTPUTS_TABLE, STORY_OUTPUT_TYPES
 from studio_produce.stamp import is_native_photo
@@ -30,6 +31,11 @@ def is_shared_render_eligible(output: dict[str, Any]) -> bool:
     if output_type in STORY_OUTPUT_TYPES or output_type not in SHARED_RENDER_OUTPUT_TYPES:
         return False
     platform = field_str(output, "Platform")
+    # A YouTube-specific encoded cover must not be inherited from an IG/FB
+    # canonical render or propagated to other platforms. This deliberately
+    # isolates only opted-in Shorts while preserving shared rendering otherwise.
+    if youtube_first_frame_enabled_for_output(output):
+        return False
     mapping = field_str(output, "Platform_Output_Type")
     if is_native_photo(platform, output_type, mapping):
         return False
