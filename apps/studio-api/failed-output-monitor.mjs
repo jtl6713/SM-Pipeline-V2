@@ -135,6 +135,8 @@ export function describeFailedOutput(record, nowMs = Date.now()) {
     platform: text(record, "Platform") || null, output_type: text(record, "Studio_Output_Type") || text(record, "Platform_Output_Type") || null,
     profile_id: firstLinkedId(record?.fields?.Content_Profile) || null,
     output_status: output || null, render_status: render || null, publish_status: publish || null,
-    error: reason, action, recovery, retry_at: retryAt || null, attempt_count: attempts,\n    can_return_to_approved: facebookRateLimitResetReason(record, { nowMs }) === null,\n    return_to_approved_blocked: facebookRateLimitResetReason(record, { nowMs }),
+    error: reason, action, recovery, retry_at: retryAt || null, attempt_count: attempts,
+    can_return_to_approved: facebookRateLimitResetReason(record, { nowMs }) === null,
+    return_to_approved_blocked: facebookRateLimitResetReason(record, { nowMs }),
   };
 }
