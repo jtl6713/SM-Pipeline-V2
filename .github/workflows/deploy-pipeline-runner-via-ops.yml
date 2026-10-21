@@ -38,7 +38,8 @@ jobs:
             services/pipeline-runner/tests/test_profile_music_policy.py \
             services/pipeline-runner/tests/test_item4_variant_batch.py \
             services/pipeline-runner/tests/test_fbs2_storage_retry.py \
-            services/pipeline-runner/tests/test_supabase_pipeline_writes.py
+            services/pipeline-runner/tests/test_supabase_pipeline_writes.py \
+            services/pipeline-runner/tests/test_visual_watermark.py
 
       - name: Deploy Pipeline Runner through allowlisted Ops action
         shell: bash
@@ -272,3 +273,5 @@ jobs:
 # 2026-10-20 PR #923 corrected: deploy 365-day duplicate-title guard and no-numbered-refill behavior for Python I1 runner.
 
 # 2026-10-20: PR #974 fail-closed Airtable coverage evidence; deploy runner collector heartbeat metadata and verify health (no read-SoR changes).
+
+# 2026-10-20: Deploy merged PR #1018 Vibe Cut MOV no-decoder audio fallback; run video watermark regression before live Ops deployment.
