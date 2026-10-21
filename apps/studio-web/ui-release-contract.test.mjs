@@ -16,7 +16,7 @@ test("Studio UI release label, BUILD_ID, and every JS/CSS cache key are one cont
   assert.equal(contract.version, "0.6.737");
   assert.equal(contract.cacheKey, "0.6.737-qa-http500-preflight");
   assert.equal(contract.expectedBuildId, "item4-0.6.737-qa-http500-preflight");
-  assert.match(contract.expectedJsUrl, /app-item4-1008.*0[.]6[.]736-vibe-video-source/);
+  assert.match(contract.expectedJsUrl, /app-item4-1008.*0[.]6[.]737-qa-http500-preflight/);
   assert.ok(contract.versionedAssetCount >= 20);
   assert.equal(extractUiVersionFromHtml(html), contract.version);
   assert.equal(extractAppUrlFromHtml(html), contract.expectedJsUrl);
