@@ -472,3 +472,5 @@ Deploy Studio UI 0.6.732-progress-count: Production and Ideas unknown progress c
 Retry Studio UI 0.6.732-progress-count production Pages deploy after updating hard-coded regression version expectations; 2026-10-20.
 
 Deploy UI 0.6.733 Vibe Cut persisted-source confirmation and explicit Continue action.
+
+Retry deploy UI 0.6.733 Vibe Cut upload confirmation after aligning release-pinned Pages tests.
