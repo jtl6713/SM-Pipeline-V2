@@ -35,6 +35,19 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
+test("deleted Instagram 7894 cannot resurrect from Supabase while sibling variants remain", () => {
+  const rows = [
+    { id: "recAlU4bLFmWDBV4H", content_item_id: "recPOI2nA8AwzLCfS" },
+    { id: "recCqQ25AvLeysIlS", content_item_id: "recPOI2nA8AwzLCfS" },
+    { id: "reck9cu90TsGp9JxI", content_item_id: "recPOI2nA8AwzLCfS" },
+    { id: "rectXNIdVeJEQo4tZ", content_item_id: "recPOI2nA8AwzLCfS" },
+  ];
+  assert.deepEqual(stripDeletedDuplicateOutputRecords(rows).map(row => row.id), [
+    "recCqQ25AvLeysIlS", "reck9cu90TsGp9JxI", "rectXNIdVeJEQo4tZ"
+  ]);
+});
+
+
 test("studioReadSource defaults to airtable and requires supabase secrets", () => {
   assert.equal(studioReadSource({}), "airtable");
   assert.equal(studioReadSource({ STUDIO_READ_SOURCE: "supabase" }), "airtable");
