@@ -12,7 +12,7 @@ const worker = readStudioWorkerSource();
 
 test("UI 0.6.516 Approve gate rejects stale Rendering / In Production (Output 1807)", () => {
   assert.match(app, /BUILD_ID = "item4-0.6.739-approved-past-due-qa"/);
-  assert.match(html, /UI build 0.6.731/);
+  assert.match(html, /UI build 0.6.739/);
   assert.match(html, /app-item4-1008\.js\?v=0.6.739-approved-past-due-qa/);
   assert.match(html, /styles-phase7-0621\.css\?v=0.6.739-approved-past-due-qa/);
   assert.match(app, /function creativeCanApproveForPublishing\(/);
