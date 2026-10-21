@@ -1,0 +1,130 @@
+name: Scoped R2 Vibe Cut Cleanup 20261020
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/cleanup-vibe-attempt-20261020.yml'
+permissions:
+  contents: read
+concurrency:
+  group: vibe-cut-r2-cleanup-20261020
+  cancel-in-progress: false
+jobs:
+  cleanup:
+    if: github.event.head_commit.message == 'cleanup(vibe): purge request-scoped R2 remnants for 20261020'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-vibe-cleanup-20261020
+    steps:
+      - uses: actions/checkout@v6
+      - name: Resolve current Studio media R2 binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API/workers/scripts/chicagoshining-studio-api/deployments" -H "$AUTH" -o /tmp/deployments.json
+          ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments.json)
+          curl -fsS "$API/workers/scripts/chicagoshining-studio-api/versions/$ACTIVE" -H "$AUTH" -o /tmp/version.json
+          BUCKET=$(jq -er '.result.resources.bindings[]|select(.name=="STUDIO_MEDIA" and .type=="r2_bucket")|(.bucket_name//.bucket)' /tmp/version.json)
+          echo "MEDIA_BUCKET=$BUCKET" >>"$GITHUB_ENV"
+          echo "binding_resolved=true"
+      - name: Deploy temporary R2 cleanup Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          cat >/tmp/worker.mjs <<'JS'
+          const PREFIXES=[
+            "studio/master-assets/recgm8jon1A3HFdQa/",
+            "studio/previews/item4/recgm8jon1A3HFdQa/",
+            "studio/previews/thumbnails/recLEd4eZCBNKPhK1/",
+            "studio/previews/recLEd4eZCBNKPhK1/",
+            "studio/previews/recFl0ns8XTx5jTOc/",
+            "studio/previews/recL7BfDYb9Xg4EQX/",
+            "studio/previews/recJpYNFOXQu3EZsG/",
+            "studio/previews/recinAYQfjLYgwlKd/",
+            "studio/previews/recZKsatQG0JiKzms/",
+            "studio/previews/recPrvQReKrzdCUbV/"
+          ];
+          async function inventory(bucket) {
+            const rows=[];
+            for(const prefix of PREFIXES) {
+              let cursor;const keys=[];
+              for(let i=0;i<6;i++) {
+                const page=await bucket.list({prefix,limit:500,...(cursor?{cursor}:{})});
+                for(const object of page.objects||[]) {
+                  if(!object.key.startsWith(prefix)) throw Error("Scope breach");
+                  keys.push(object.key);
+                  if(keys.length>200) throw Error("Exceeded per-prefix safety cap");
+                }
+                if(!page.truncated) break;
+                if(!page.cursor) throw Error("Missing cursor");
+                cursor=page.cursor;
+                if(i===5) throw Error("Too many pages");
+              }
+              rows.push({prefix,keys});
+            }
+            return rows;
+          }
+          export default {async fetch(req,env) {
+            if(req.headers.get("X-Cleanup-Token")!==env.CLEANUP_TOKEN)return new Response("Forbidden",{status:403});
+            if(new URL(req.url).pathname!=="/cleanup")return new Response("Not Found",{status:404});
+            try {
+              const before=await inventory(env.STUDIO_MEDIA);
+              const count=before.reduce((n,row)=>n+row.keys.length,0);
+              if(count>250)throw Error("Global safety cap");
+              if(req.method==="GET")return Response.json({ok:true,dry_run:true,total:count,counts:before.map(x=>({prefix:x.prefix,count:x.keys.length}))});
+              if(req.method!=="POST"||(await req.json()).confirm!=="DELETE-ONLY-recgm8jon1A3HFdQa")return new Response("Invalid request",{status:400});
+              for(const row of before)for(let i=0;i<row.keys.length;i+=50)await env.STUDIO_MEDIA.delete(row.keys.slice(i,i+50));
+              const after=await inventory(env.STUDIO_MEDIA);
+              const leftover=after.reduce((n,row)=>n+row.keys.length,0);
+              return Response.json({ok:leftover===0,deleted:count,leftover},{status:leftover===0?200:500});
+            }catch(e){return Response.json({ok:false,error:String(e.message||e)},{status:500});}
+          }};
+          JS
+          openssl rand -hex 32 >/tmp/cleanup-token
+          TOKEN=$(cat /tmp/cleanup-token)
+          jq -n --arg bucket "$MEDIA_BUCKET" --arg token "$TOKEN" '{main_module:"worker.mjs",compatibility_date:"2026-10-01",bindings:[{type:"r2_bucket",name:"STUDIO_MEDIA",bucket_name:$bucket},{type:"plain_text",name:"CLEANUP_TOKEN",text:$token}]}' >/tmp/metadata.json
+          CODE=$(curl -sS -w '%{http_code}' -o /tmp/worker-exists "$API/workers/scripts/$TARGET_WORKER" -H "$AUTH")
+          test "$CODE" = 404
+          curl -fsS -X PUT "$API/workers/scripts/$TARGET_WORKER/content" -H "$AUTH" -F 'metadata=@/tmp/metadata.json;type=application/json' -F 'worker.mjs=@/tmp/worker.mjs;type=application/javascript+module;filename=worker.mjs' -o /tmp/worker-upload.json
+          jq -e '.success==true' /tmp/worker-upload.json >/dev/null
+          curl -fsS -X POST "$API/workers/scripts/$TARGET_WORKER/subdomain" -H "$AUTH" -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' -o /tmp/subdomain-enabled.json
+          jq -e '.success==true' /tmp/subdomain-enabled.json >/dev/null
+          curl -fsS "$API/workers/subdomain" -H "$AUTH" -o /tmp/subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/subdomain.json)
+          echo "CLEANUP_URL=https://$TARGET_WORKER.$SUB.workers.dev/cleanup" >>"$GITHUB_ENV"
+      - name: Inventory then purge exact scoped objects
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(cat /tmp/cleanup-token)
+          curl -fsS --max-time 100 "$CLEANUP_URL" -H "X-Cleanup-Token: $TOKEN" -o /tmp/before.json
+          jq -e '.ok==true and .dry_run==true and .total<251' /tmp/before.json >/dev/null
+          jq -c '{dry_run,total,found:[.counts[]|select(.count>0)]}' /tmp/before.json
+          curl -fsS --max-time 120 -X POST "$CLEANUP_URL" -H "X-Cleanup-Token: $TOKEN" -H 'Content-Type: application/json' --data '{"confirm":"DELETE-ONLY-recgm8jon1A3HFdQa"}' -o /tmp/after.json
+          jq -e '.ok==true and .leftover==0' /tmp/after.json >/dev/null
+          jq -c '{ok,deleted,leftover}' /tmp/after.json
+      - name: Remove temporary cleanup Worker
+        if: always()
+        shell: bash
+        run: |
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -sS -X DELETE "$API/workers/scripts/$TARGET_WORKER" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/worker-cleanup.json || true
+          if test -f /tmp/cleanup-token; then shred -u /tmp/cleanup-token 2>/dev/null || rm -f /tmp/cleanup-token; fi
+      - name: Store sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vibe-cut-r2-cleanup-${{ github.run_id }}
+          path: |
+            /tmp/before.json
+            /tmp/after.json
+          if-no-files-found: ignore
+          retention-days: 14
