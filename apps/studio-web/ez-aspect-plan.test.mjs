@@ -37,7 +37,9 @@ test("Vibe Cut upload requires confirmed video and explicit Continue", () => {
   const creation = app.slice(begin, end);
   assert.match(creation, /!uploadResult\?\.ok \|\| !vibeCutPersistedSource\(\)/);
   assert.match(creation, /action\.hidden = false/);
-  assert.doesNotMatch(creation, /showProductionRequestWorkspace\(\)/);
+  // Photo-only (allowEmpty) creates a workspace immediately; Vibe Cut must still await persisted video and Continue.
+  assert.equal((creation.match(/showProductionRequestWorkspace\(\)/g) || []).length, 1);
+  assert.match(creation, /if \(allowEmpty\) \{[\s\S]*?showProductionRequestWorkspace\(\)/);
   const listener = app.slice(app.indexOf("function bindEzIntake("), app.indexOf("function item4SelectedPlatforms("));
   assert.match(listener, /vibeCutPersistedSource\(\)/);
   assert.match(listener, /showProductionRequestWorkspace\(\)/);
