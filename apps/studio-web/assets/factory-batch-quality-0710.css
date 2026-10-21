@@ -206,3 +206,47 @@
 .factory-quality-bulk { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:.5rem 0; }
 .factory-quality-bulk small, .factory-quality-blocked { font-size:.72rem; opacity:.8; }
 .factory-quality-result { font-size:.82rem; margin:.5rem 0; overflow-wrap:anywhere; }
+
+/* Shared status surface for single-output and bulk Facebook recovery. */
+.factory-quality-progress {
+  margin: 0.7rem 0;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border-color, #a9b9c9);
+  border-left: 4px solid var(--accent, #367fbe);
+  border-radius: 8px;
+  background: var(--surface-muted, rgba(95, 130, 170, 0.08));
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+.factory-quality-progress-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.factory-quality-progress progress {
+  display: block;
+  width: 100%;
+  height: 0.75rem;
+  margin: 0.6rem 0;
+  accent-color: var(--accent, #367fbe);
+}
+.factory-quality-progress-phase { margin: 0.3rem 0; font-weight: 600; }
+.factory-quality-progress-counts { margin: 0.4rem 0; font-variant-numeric: tabular-nums; }
+.factory-quality-progress small { display: block; opacity: 0.8; }
+.factory-quality-progress [data-qa-dismiss-recovery] { margin-top: 0.4rem; }
+.factory-batch-quality-item.factory-quality-processing,
+.factory-batch-quality-item.factory-quality-waiting { border-left-color: #397da0; }
+.factory-batch-quality-item.factory-quality-success { border-left-color: #28835b; background: rgba(40,131,91,0.08); }
+.factory-batch-quality-item.factory-quality-uncertain,
+.factory-batch-quality-item.factory-quality-blocked,
+.factory-batch-quality-item.factory-quality-failed { border-left-color: #b16e24; }
+.factory-quality-item-status { margin: 0.35rem 0; font-weight: 500; }
+.factory-quality-item-status strong { display: inline; font-size: inherit; }
+.factory-quality-item-status[role="status"] { overflow-wrap: anywhere; }
+[data-qa-reapprove][disabled], [data-qa-reapprove-all][disabled] { opacity: .56; cursor: wait; }
+@media (max-width: 600px) {
+  .factory-quality-progress { padding: 0.6rem; }
+  .factory-quality-progress-heading { align-items: flex-start; }
+}

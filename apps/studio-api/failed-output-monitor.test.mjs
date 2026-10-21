@@ -145,7 +145,7 @@ test("Facebook QA reapproval uses original protected scheduling route and cooldo
   assert.match(factory, /data-qa-open/);
   assert.match(factory, /data-qa-reapprove-all/);
   assert.match(factory, /window\.confirm/);
-  assert.match(factory, /for \(const item of allowed\)/);
+  assert.match(factory, /for \(let i = 0; i < allowed.length; i\+\+\)/);
 });
 
 test("Facebook QA preflight cannot mutate or publish and returns diagnostic stage", () => {
@@ -159,7 +159,8 @@ test("Facebook QA preflight cannot mutate or publish and returns diagnostic stag
   assert.match(preview, /quality_rate_limit_preview: true/);
   assert.doesNotMatch(preview, /method: "PATCH"|runAtomicScheduleTransaction|studioDispatchApprovedPublishNow/);
   assert.match(factory, /quality_rate_limit_preview: true/);
-  assert.match(factory, /if \(\(error\.httpStatus \|\| 0\) >= 500\)/);
+  assert.match(factory, /if \(status === "uncertain"\)/);
+  assert.match(factory, /error\.httpStatus >= 500/);
   const workflow = fs.readFileSync(path.join(here, "../../.github/workflows/deploy-cloudflare-worker-production.yml"), "utf8");
   assert.match(workflow, /quality_facebook_preflight_http/);
   assert.match(workflow, /quality-facebook-preview/);
