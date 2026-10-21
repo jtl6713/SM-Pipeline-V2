@@ -402,7 +402,7 @@ def choose_render_request(
                 default_voice=default_voice,
                 url=vo,
             )
-        return "p020_manifest", attach_youtube_first_frame(apply_authoritative_timing(attach_timing_plan(payload, output), output), output)
+        return "p020_manifest", attach_youtube_first_frame(apply_authoritative_timing(attach_timing_plan(payload, output), output), output), output)
     if vo:
         return "voiceover", attach_youtube_first_frame(apply_authoritative_timing(attach_timing_plan(build_voiceover_request(
             output,
@@ -413,4 +413,4 @@ def choose_render_request(
     return "no_voiceover", attach_youtube_first_frame(apply_authoritative_timing(attach_timing_plan(
         build_no_voiceover_request(output, content_item, default_music=default_music),
         output,
-    ), output)
+    ), output), output)
