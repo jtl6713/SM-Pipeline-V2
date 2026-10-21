@@ -32,7 +32,9 @@ jobs:
         working-directory: services/remotion-renderer
         run: |
           npx eslint src/YouTubeFirstFrame.tsx
-          npx tsc --noEmit
+          npx tsc --noEmit --jsx react-jsx --esModuleInterop --skipLibCheck --lib es2022,dom src/YouTubeFirstFrame.tsx
+          node --check render-server.js
+          npm run build
       - name: Validate first encoded frames with real FFmpeg
         run: node --test services/remotion-renderer/first-frame-verify.test.js
       - name: Validate YouTube-only render contract
