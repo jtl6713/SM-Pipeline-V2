@@ -858,8 +858,32 @@ export function vibeCutProductionDefaults(config, { sourceAspect = "", notes = "
  * recycled photo package into an apparently successful music montage.
  * Pure contract shared by Studio's enqueue gate and regression tests.
  */
-export function validateVibeCutSourceAssets(assets) {
+export function validateVibeCutSourceAssets(assets, { allowPhotoMontage = false } = {}) {
   const rows = Array.isArray(assets) ? assets : [];
+  // The new Vibe Cut workflow may start with several already-selected stills.
+  // Keep single-video trimming strict by default; opt in only at production
+  // planning/enqueue, where the still package can use the existing 9:16
+  // music-driven Remotion photo-sequence path without replacing its sources.
+  const photos = rows.length >= 2 && rows.every((asset) => {
+    const kind = String(asset?.media_kind || "").trim().toLowerCase();
+    const mime = String(asset?.mime_type || "").trim().toLowerCase();
+    const filename = String(asset?.name || "").trim().toLowerCase();
+    return kind === "photo" || kind === "image"
+      || (!kind && (mime.startsWith("image/") || /\.(?:jpg|jpeg|png|webp|heic)$/.test(filename)));
+  });
+  if (allowPhotoMontage && photos) {
+    const pending = new Set(["multipart_pending", "pending", "uploading", "failed", "compressing", "downloading", "queued"]);
+    for (const asset of rows) {
+      if (!(asset.google_drive_file_id || asset.r2_key || asset.url)) {
+        return { ok: false, reason: "Vibe Cut photo montage has a still without a retrievable media location." };
+      }
+      if ([asset.upload_status, asset.compression_status]
+        .some((status) => pending.has(String(status || "").trim().toLowerCase()))) {
+        return { ok: false, reason: "Vibe Cut photo montage stills are transferring or processing." };
+      }
+    }
+    return { ok: true, reason: "", source_kind: "photo_montage" };
+  }
   if (rows.length !== 1) {
     return { ok: false, reason: rows.length
       ? "Vibe Cut needs one uploaded source video, not a mixed or multi-photo asset package."
