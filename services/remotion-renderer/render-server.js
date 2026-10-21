@@ -471,7 +471,7 @@ function probeMediaDurationSeconds(filePath, job) {
             );
         });
 
-        child.on('close', async (code) => {
+        child.on('close', (code) => {
             if (code !== 0) {
                 reject(
                     new Error(
@@ -1452,7 +1452,7 @@ function runRemotionRender({ jobId, compositionId, filename, propsFilePath }) {
                     reject(error);
                 });
 
-                child.on('close', (code) => {
+                child.on('close', async (code) => {
                     job.exitCode = code;
                     job.updatedAt = nowIso();
                     job.childPid = null;
@@ -1463,9 +1463,9 @@ function runRemotionRender({ jobId, compositionId, filename, propsFilePath }) {
                                 const coverPath = resolvePublicAssetPath(job.props.youtubeFirstFrame.src);
                                 if (!coverPath) throw new Error('Cover path missing after MP4 encoding.');
                                 const videoPath = path.join(OUT_DIR, filename);
-                                const previewPath = path.join(OUT_DIR, filename.replace(/\\.mp4$/i, '') + '-opening.jpg');
+                                const previewPath = path.join(OUT_DIR, filename.replace(/\.mp4$/i, '') + '-opening.jpg');
                                 job.firstFrameVerification = await verifyFirstFrame({videoPath, coverPath, previewPath});
-                                job.firstFramePreviewUrl = job.renderUrl.replace(/\\.mp4$/i, '-opening.jpg');
+                                job.firstFramePreviewUrl = job.renderUrl.replace(/\.mp4$/i, '-opening.jpg');
                                 appendLog(job, 'YouTube first encoded frame verified against the intended Studio cover.');
                             }
                         } catch (error) {
