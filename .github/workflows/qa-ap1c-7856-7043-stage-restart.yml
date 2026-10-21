@@ -1,0 +1,56 @@
+name: Guarded AP1C resume 7856 7043
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/qa-ap1c-7856-7043-stage-restart.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: exact-ap1c-resume-7856-7043
+  cancel-in-progress: false
+
+jobs:
+  resume:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify guarded exact-output script syntax
+        run: python -m py_compile repair/scripts/recover-ap1c-7856-7043.py
+      - name: Execute single bounded, manifest-verified AP1C resume
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          function cleanup() {
+            for f in /tmp/qa-ap1c-key.pem /tmp/qa-ap1c-pat.enc /tmp/qa-ap1c-pat.txt; do
+              if [[ -e "$f" ]]; then shred -u "$f" 2>/dev/null || rm -f "$f"; fi
+            done
+          }
+          trap cleanup EXIT
+          test -n "$CLOUDFLARE_API_TOKEN"
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -pass env:CLOUDFLARE_API_TOKEN \
+            -in deploy/credential-envelope/private.pem.enc \
+            -out /tmp/qa-ap1c-key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 \
+            >/tmp/qa-ap1c-pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/qa-ap1c-key.pem \
+            -in /tmp/qa-ap1c-pat.enc \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 \
+            -pkeyopt rsa_mgf1_md:sha256 \
+            -out /tmp/qa-ap1c-pat.txt
+          export AIRTABLE_PAT="$(tr -d '\r\n' </tmp/qa-ap1c-pat.txt)"
+          test -n "$AIRTABLE_PAT"
+          python repair/scripts/recover-ap1c-7856-7043.py
+          unset AIRTABLE_PAT
