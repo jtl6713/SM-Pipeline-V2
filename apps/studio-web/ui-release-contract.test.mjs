@@ -16,7 +16,7 @@ test("Studio UI release label, BUILD_ID, and every JS/CSS cache key are one cont
   assert.equal(contract.version, "0.6.740");
   assert.equal(contract.cacheKey, "0.6.740-factory-parent-grouping");
   assert.equal(contract.expectedBuildId, "item4-0.6.740-factory-parent-grouping");
-  assert.match(contract.expectedJsUrl, /app-item4-1008.*0[.]6[.]739-factory-profile-fast/);
+  assert.match(contract.expectedJsUrl, /app-item4-1008.*0[.]6[.]740-factory-parent-grouping/);
   assert.ok(contract.versionedAssetCount >= 20);
   assert.equal(extractUiVersionFromHtml(html), contract.version);
   assert.equal(extractAppUrlFromHtml(html), contract.expectedJsUrl);
