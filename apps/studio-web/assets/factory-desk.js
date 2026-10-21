@@ -951,7 +951,7 @@
     const parentId = String(card?.content_item_id || "").trim();
     if (/^rec[A-Za-z0-9]+$/.test(parentId)) return `content:${parentId}`;
     // Compatibility for older queue projections which only carry Content_ID.
-    const contentId = String(card?.content_id || "").trim();
+    if (/^[0-9]+$/.test(contentId)) return `legacy-content:${contentId}`;
     if (/^\\d+$/.test(contentId)) return `legacy-content:${contentId}`;
     // Never merge unlinked outputs using their title: unrelated posts can match.
     return `solo:${card?.id || ""}`;
