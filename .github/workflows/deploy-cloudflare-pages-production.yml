@@ -52,6 +52,7 @@ jobs:
             apps/studio-web/factory-review-feedback.test.mjs \
             apps/studio-web/factory-completed-batches.test.mjs \
             apps/studio-web/factory-content-toggle.test.mjs \
+            apps/studio-web/factory-profile-filter-fast.test.mjs \
             apps/studio-web/factory-desk.test.mjs \
             apps/studio-web/unified-platform-outputs.test.mjs \
             apps/studio-web/all-profiles-load.test.mjs \

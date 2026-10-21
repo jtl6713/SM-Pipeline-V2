@@ -1684,6 +1684,19 @@
       loadFactoryDesk(true).catch(() => {});
     }
   }, 45000);
+  // Populate the Factory filter as soon as this lightweight page module loads.
+  // Waiting for /api/factory/desk makes an already-available profile list
+  // appear empty while the much more expensive queue request is in flight.
+  syncFactoryFilterOptions();
+  // The topbar may hydrate from /api/profiles after Factory opens. Observe
+  // only its option list; never tie Factory's profile choices to Desk latency.
+  const studioProfileOptions = $("studioProfileSelect");
+  if (studioProfileOptions && typeof MutationObserver !== "undefined") {
+    const profileOptionsObserver = new MutationObserver(() => syncFactoryFilterOptions());
+    profileOptionsObserver.observe(studioProfileOptions, {
+      childList: true, subtree: true, characterData: true,
+    });
+  }
   $("factoryProfileFilter")?.addEventListener("change", () => {
     state.completedOpen = false;
     state.completedBatch = null;
