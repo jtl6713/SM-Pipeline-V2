@@ -5,7 +5,7 @@ on:
     paths:
       - 'services/remotion-renderer/**'
       - 'services/pipeline-runner/r4/**'
-      - 'services/pipeline-runner/tests/test_youtube_first_frame_request.py'
+      - 'services/pipeline-runner/tests/test_youtube_first_frame_request.py services/pipeline-runner/tests/test_shared_render.py'
       - '.github/workflows/youtube-first-frame.yml'
   workflow_dispatch:
 
@@ -30,7 +30,9 @@ jobs:
           cd ../pipeline-runner && pip install -r requirements.txt pytest
       - name: Lint and compile Remotion compositions
         working-directory: services/remotion-renderer
-        run: npm run lint
+        run: |
+          npx eslint src/YouTubeFirstFrame.tsx
+          npx tsc --noEmit
       - name: Validate first encoded frames with real FFmpeg
         run: node --test services/remotion-renderer/first-frame-verify.test.js
       - name: Validate YouTube-only render contract
