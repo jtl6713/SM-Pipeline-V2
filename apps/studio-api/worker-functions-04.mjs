@@ -9291,6 +9291,7 @@ export async function gatherStudioDeskInventory(env) {
         "QA-IG-AP3C-AMBIGUOUS-PARENT": "ig_ambiguous_parent",
         "QA-IG-EXPIRED-CHILD-STATE-DRIFT": "ig_expired_child_drift",
         "QA-IG-RETRY-STORM": "ig_retry_storm",
+        "QA-FB0-DOUBLE-SLIDE-SETS": "fb_duplicate_slide_sets",
       };
       const instagramKind = instagramKinds[classified.signature];
       if (instagramKind) {
