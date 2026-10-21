@@ -21,6 +21,7 @@ from apc.constants import (
     CHILD_IN_PROGRESS,
     CHILD_RETRY,
     ERROR_AP1C,
+    ERROR_AP4C,
     IG_GRAPH_MAX_CHILDREN,
     MAKE_AP1C_ID,
     MAKE_AP1C_NAME,
@@ -76,6 +77,21 @@ def _reset_parent(
             "IG_Carousel_Next_Retry_At": retry_stamp,
         },
         typecast=True,
+    )
+
+
+def _requires_fresh_children_after_expired_parent(output: dict[str, Any]) -> bool:
+    """Graph expired the parent; previously FINISHED child containers are stale.
+
+    Only the AP4C explicit Expired Media reset is authority to regenerate all
+    children. Generic AP3C HTTP500 ambiguity cannot trigger this branch.
+    """
+    return (
+        field_str(output, "IG_Carousel_Error_Stage") == ERROR_AP4C
+        and "expired media" in field_str(output, "IG_Carousel_Error_Message").lower()
+        and not field_str(output, "IG_Carousel_Parent_Container_ID")
+        and not field_str(output, "Platform_Post_ID")
+        and not field_str(output, "IG_Carousel_Published_Media_ID")
     )
 
 
@@ -176,6 +192,7 @@ def process_request(
         result["expected_child_count"] = len(slides)
     settings = PipelineSettings(client)
     graph = InstagramCarouselClient(**load_instagram_settings(settings, output, client=client))
+    force_fresh_children = _requires_fresh_children_after_expired_parent(output)
     retained_child_ids: list[str] = []
     created_now = 0
     for slide in slides:
@@ -184,7 +201,7 @@ def process_request(
         # Preserve healthy/in-flight children. AP1C retries must create only
         # missing or terminal children; recreating already-good children caused
         # Meta "User is performing too many actions" throttling on NYC 1298.
-        if existing_id and existing_status not in {"error", "expired"}:
+        if existing_id and existing_status not in {"error", "expired"} and not force_fresh_children:
             retained_child_ids.append(existing_id)
             continue
 
@@ -290,6 +307,7 @@ def process_request(
     result.update({
         "processed": True,
         "needs_child_poll": True,
+        "recovered_expired_parent_children": force_fresh_children,
         "created_count": created_count,
         "created_now": created_now,
         "retained_count": created_count - created_now,
