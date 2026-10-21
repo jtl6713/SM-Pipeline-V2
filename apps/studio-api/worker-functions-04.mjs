@@ -1,4 +1,4 @@
-import { scanOutstandingFailedOutputs, describeFailedOutput } from "./failed-output-monitor.mjs";
+import { scanOutstandingFailedOutputs, describeFailedOutput, facebookRateLimitResetReason } from "./failed-output-monitor.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
 import { readStudioProfileSummary, validVerifiedStudioSummary } from "./profile-summary-controller.mjs";
@@ -13812,19 +13812,44 @@ export async function kickStudioOutputPublish(request, env, url, authorization, 
 }
 /*__STUDIO_WORKER_END:kickStudioOutputPublish__*/
 
+function qualityFacebookRecoverySlot(row, occupiedMs, timeZone, horizonDays) {
+  const retryAt = Date.parse(String(f(row, "Publish_Next_Retry_At") || ""));
+  // Error 368/1390008 has no reliable unblock promise. Give the page 48 hours
+  // or longer if Facebook already supplied a later retry timestamp.
+  const notBefore = Math.max(Date.now() + 48 * 60 * 60 * 1000,
+    Number.isFinite(retryAt) ? retryAt + 60 * 1000 : 0);
+  const picked = maeScheduleNextSlot({
+    now: new Date(notBefore), timeZone, horizonDays,
+    occupiedMs, platformOccupiedMs: occupiedMs,
+    gapMs: 12 * 60 * 60 * 1000,
+  });
+  if (!picked.ok || !picked.iso || Date.parse(picked.iso) <= notBefore)
+    throw new HttpError(409, "No MAE Facebook slot after cooldown; failure remains visible");
+  return picked.iso;
+}
+
 export async function scheduleStudioPublishOutput(request, env, url, authorization, ctx = null) {
   const match = /^\/api\/operations\/outputs\/(rec[A-Za-z0-9]+)\/schedule$/.exec(url.pathname);
   if (!match) throw new HttpError(400, "Invalid output path");
   let payload;
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const value = String(payload?.scheduled_post_date || "").trim();
+  const qualityRecovery = payload?.quality_rate_limit_recovery === true;
+  if (qualityRecovery && (value || payload?.publish_now || payload?.manual_schedule_override))
+    throw new HttpError(400, "Quality recovery must use a cooldown-paced automatic MAE slot");
   const existing = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]);
+  if (qualityRecovery) {
+    const blocked = facebookRateLimitResetReason(existing);
+    if (blocked) throw new HttpError(409, "Return to Approved blocked: " + blocked);
+  }
   if (Boolean(f(existing, "Do_Not_Publish"))) {
     throw new HttpError(409, "Do_Not_Publish outputs cannot be rescheduled");
   }
   const published = /published/i.test(String(f(existing, "Publish_Status") || ""))
     || String(f(existing, "Output_Status") || "").trim() === "Published"
-    || Boolean(f(existing, "Published_At"));
+    || Boolean(f(existing, "Published_At"))
+    || Boolean(f(existing, "Platform_Post_ID") || f(existing, "Platform_Post_URL")
+      || f(existing, "FB_Post_ID") || f(existing, "FB_Video_ID"));
   if (published) throw new HttpError(409, "Published outputs cannot be rescheduled");
   const platform = String(f(existing, "Platform") || "").trim();
   const outputType = String(f(existing, "Studio_Output_Type") || f(existing, "Format") || "").trim();
@@ -13862,6 +13887,13 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
         throw new HttpError(503, "Atomic schedule transaction unexpectedly entered legacy mode");
       },
       plan: async ({ occupied_reservations: durableReservations }) => {
+        const authoritative = qualityRecovery
+          ? await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1])
+          : existing;
+        if (qualityRecovery) {
+          const blocked = facebookRateLimitResetReason(authoritative);
+          if (blocked) throw new HttpError(409, "Return to Approved blocked: " + blocked);
+        }
         studioInvalidateOccupiedScheduleCache();
         const fresh = await studioOccupiedSchedulesOrEmpty(env, {
           excludeIds: [match[1]],
@@ -13884,9 +13916,13 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
           }
         }
 
+        const recoveryIso = qualityRecovery
+          ? qualityFacebookRecoverySlot(authoritative, platformOccupiedMs, timeZone,
+            await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS))
+          : "";
         const fields = studioPublishScheduleFields(
-          { scheduled_post_date: value || "immediate", timezone: timeZone },
-          existing,
+          { scheduled_post_date: recoveryIso || value || "immediate", timezone: timeZone },
+          authoritative,
           {
             occupiedMs: publishNowImmediate ? null : platformOccupiedMs,
             forceWrite: true,
@@ -13899,6 +13935,13 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
           fields.Output_Status = "Approved for Publishing";
         }
         fields.Publish_Error_Message = "";
+        if (qualityRecovery) Object.assign(fields, {
+          Review_Status: "Approved", Output_Status: "Approved for Publishing",
+          Publish_Status: "Ready to Schedule", Publish_Method: "Automated",
+          Auto_Publish_Enabled: true, Publish_Error_Stage: "",
+          Publish_Locked_At: null, Publish_Locked_By: "",
+          Publish_Retry_Eligible: true, Studio_Scheduled_At: null,
+        });
 
         const selectedRaw = String(fields.Scheduled_Post_Date || "").trim();
         const selectedMs = Date.parse(selectedRaw);
@@ -13965,8 +14008,12 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
         requireComplete: true,
       });
     const timeZone = await studioScheduleTimeZoneForRecord(env, existing, payload);
+    const recoveryIso = qualityRecovery
+      ? qualityFacebookRecoverySlot(existing, studioOccupiedForPlatform(occupied, platform), timeZone,
+        await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS))
+      : "";
     const fields = studioPublishScheduleFields(
-      { scheduled_post_date: value || "immediate", timezone: timeZone },
+      { scheduled_post_date: recoveryIso || value || "immediate", timezone: timeZone },
       existing,
       {
         occupiedMs: publishNowImmediate ? null : studioOccupiedForPlatform(occupied, platform),
@@ -13980,6 +14027,13 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
       fields.Output_Status = "Approved for Publishing";
     }
     fields.Publish_Error_Message = "";
+    if (qualityRecovery) Object.assign(fields, {
+      Review_Status: "Approved", Output_Status: "Approved for Publishing",
+      Publish_Status: "Ready to Schedule", Publish_Method: "Automated",
+      Auto_Publish_Enabled: true, Publish_Error_Stage: "",
+      Publish_Locked_At: null, Publish_Locked_By: "",
+      Publish_Retry_Eligible: true, Studio_Scheduled_At: null,
+    });
     updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
       method: "PATCH",
       skipSupabaseWriteThrough: true,
