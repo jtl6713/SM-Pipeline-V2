@@ -78,6 +78,6 @@ test("multipart Vibe Cut upload preserves Vibe Cut request notes", () => {
   );
   assert.match(session, /const vibeCut = originKind === "vibe-cut"/);
   assert.match(session, /role: vibeCut \? "vibe-cut-source" : "large-finished-video"/);
-  assert.match(session, /const stamped = vibeCut \? notes : studioRewriteFinishedOriginNotes/);
+  assert.match(session, /const stamped = vibeCut \? sanitizeVibeCutSourceNotes\(notes\) : studioRewriteFinishedOriginNotes/);
   assert.match(worker, /origin_kind: draft\.origin_kind \|\| "finished-video"/);
 });
