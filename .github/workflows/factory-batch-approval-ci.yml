@@ -34,6 +34,7 @@ jobs:
         run: |
           node --check apps/studio-api/schedule-occupancy-90-day.test.mjs
           node --test apps/studio-api/failed-output-monitor.test.mjs
+          node --test apps/studio-api/facebook-held-finalize.test.mjs
           node --test apps/studio-web/factory-quality-recovery-progress.test.mjs
           node --test apps/studio-web/factory-batch-quality-agent.test.mjs apps/studio-web/ui-release-contract.test.mjs
           node --test apps/studio-api/schedule-occupancy-90-day.test.mjs
