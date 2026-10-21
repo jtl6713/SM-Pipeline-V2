@@ -122,6 +122,8 @@ test("Facebook rate-limit failures can return to Approved only with safe publica
   blocked({ Review_Status: "Needs Review" }, "approval_not_confirmed");
   blocked({ Platform_Post_ID: "remote_post" }, "publication_evidence");
   blocked({ FB_Post_ID: "remote_post" }, "publication_evidence");
+  blocked({ FB_Publish_Status: "Published" }, "publication_evidence");
+  blocked({ FB_Slideshow_Status: "Published" }, "publication_evidence");
   blocked({ Do_Not_Publish: true }, "publication_held");
   blocked({ Publish_Attempt_Count: 3 }, "retry_limit");
   blocked({ Studio_Publish_Dispatch_Count: 3 }, "retry_limit");
