@@ -17268,7 +17268,14 @@ function timedScriptAssetLabel(asset, index) {
   async function submitTiktokComplete(recordId, { url, musicCompleted, record } = {}) {
     const postUrl = String(url || "").trim();
     if (!/tiktok\.com/i.test(postUrl)) throw new Error("Paste a live TikTok URL containing tiktok.com.");
-    return api(`/api/outputs/${encodeURIComponent(recordId)}/tiktok-complete`, {
+    // Confirm a failed/live TikTok without re-sending it to the publishing pipeline.
+    // The Operations route also accepts corrections to an already published URL.
+    const lifecycle = [record?.publish_status, record?.output_status].join(" ");
+    const isCorrectionOrRecovery = Boolean(tiktokLiveUrl(record)) || /\b(?:published|failed)\b/i.test(lifecycle);
+    const endpoint = isCorrectionOrRecovery
+      ? `/api/operations/outputs/${encodeURIComponent(recordId)}/published`
+      : `/api/outputs/${encodeURIComponent(recordId)}/tiktok-complete`;
+    return api(endpoint, {
       method: "POST",
       body: JSON.stringify({
         platform_post_url: postUrl,
@@ -18687,13 +18694,20 @@ function timedScriptAssetLabel(asset, index) {
     if (tiktokNeedsDraftResend(record)) {
       parts.push(`<div class="pipeline-tiktok-resend" data-tiktok-resend="${escapeHtml(record.id)}"><button type="button" class="secondary-button pipeline-tiktok-resend-btn">Resend draft to TikTok</button><span class="pipeline-tiktok-complete-msg" aria-live="polite"></span></div>`);
     }
-    if (tiktokNeedsUrlEntry(record)) {
+    const tiktok = String(record?.platform || "").trim().toLowerCase() === "tiktok";
+    const alreadyLive = tiktok && Boolean(tiktokLiveUrl(record));
+    const failed = tiktok && /failed/i.test([record?.publish_status, record?.output_status, record?.studio_state].join(" "));
+    if (tiktok && !record?.do_not_publish && (tiktokNeedsUrlEntry(record) || alreadyLive || failed)) {
       const current = pipelineTiktokUrlDraft(record);
-      parts.push(`<form class="pipeline-tiktok-complete" data-tiktok-complete="${escapeHtml(record.id)}"><label><span>TikTok URL</span><input type="url" required placeholder="https://www.tiktok.com/@…/video/…" value="${escapeHtml(current)}" autocomplete="url"></label><button type="submit" class="secondary-button pipeline-tiktok-save">Save URL</button><span class="pipeline-tiktok-complete-msg" aria-live="polite"></span></form>`);
+      const label = alreadyLive ? "Published TikTok URL" : "TikTok live URL";
+      const submitText = alreadyLive ? "Update URL" : "Confirm published";
+      const form = `<form class="pipeline-tiktok-complete" data-tiktok-complete="${escapeHtml(record.id)}"><label><span>${label}</span><input type="url" required placeholder="https://www.tiktok.com/@…/video/…" value="${escapeHtml(current)}" autocomplete="url" aria-label="TikTok URL for output ${escapeHtml(String(record.output_id || ""))}"></label><button type="submit" class="secondary-button pipeline-tiktok-save">${submitText}</button><span class="pipeline-tiktok-complete-msg" aria-live="polite"></span></form>`;
+      parts.push(alreadyLive
+        ? `<details class="pipeline-tiktok-url-edit"><summary>Edit TikTok URL</summary>${form}</details>`
+        : form);
     }
     return parts.join("");
   }
-
   function pipelineYoutubeCompleteCell(record) {
     if (!youtubeNeedsUrlEntry(record)) return "";
     const current = pipelineYoutubeUrlDraft(record);
@@ -18701,6 +18715,10 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function bindPipelineTiktokComplete(root) {
+    (root || document).querySelectorAll(".pipeline-tiktok-url-edit").forEach((details) => {
+      ["click", "mousedown", "pointerdown", "keydown"].forEach((type) =>
+        details.addEventListener(type, (event) => event.stopPropagation()));
+    });
     (root || document).querySelectorAll("[data-tiktok-resend]").forEach((wrap) => {
       const keepOnRow = (event) => event.stopPropagation();
       wrap.addEventListener("click", keepOnRow);
@@ -18759,6 +18777,10 @@ function timedScriptAssetLabel(asset, index) {
           message.textContent = "Saving…";
         }
         try {
+          if (tiktokLiveUrl(record) && tiktokLiveUrl(record) === String(input.value || "").trim()) {
+            if (message) message.textContent = "This URL is already saved.";
+            return;
+          }
           await submitTiktokComplete(id, { url: input.value, record });
           pipelineTiktokUrlDrafts.delete(id);
           if (message) message.textContent = "Saved";

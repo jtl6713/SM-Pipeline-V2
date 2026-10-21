@@ -14210,6 +14210,25 @@ export function tiktokCompleteViewFromRecord(record) {
 /*__STUDIO_WORKER_END:tiktokCompleteViewFromRecord__*/
 
 export async function patchTiktokManualPublish(env, record, { url, musicCompleted } = {}) {
+  const previousUrl = String(f(record, "Platform_Post_URL") || f(record, "Manual_Published_URL") || "").trim();
+  const alreadyPublished = [f(record, "Output_Status"), f(record, "Publish_Status")]
+    .some((value) => String(value || "").trim().toLowerCase() === "published");
+  if (previousUrl && alreadyPublished) {
+    if (previousUrl === url) return record;
+    // A corrected share link is not a new publish: retain dates, music completion,
+    // audit history and the no-retry terminal state.
+    const stamp = new Date().toISOString();
+    const oldNotes = String(f(record, "Output_Notes") || "").trim();
+    const correction = `Studio TikTok public URL corrected at ${stamp}. Previous: ${previousUrl}. New: ${url}. No republish performed.`;
+    return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: {
+        Platform_Post_URL: url,
+        Manual_Published_URL: url,
+        Output_Notes: [oldNotes, correction].filter(Boolean).join("\n\n").slice(0, 10000),
+      }, typecast: true }),
+    });
+  }
   const music = tiktokMusicStatusFromChoice(musicCompleted, f(record, "Music_Status"));
   const fields = tiktokManualPublishFields({
     url,
