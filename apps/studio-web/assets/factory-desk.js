@@ -945,8 +945,15 @@
   }
 
   function contentGroupKey(card) {
+    // Lean queue rows may omit numeric Content_ID but retain the authoritative
+    // Airtable parent record. Group every platform by this immutable identity.
+    const parentId = String(card?.content_item_id || "").trim();
+    if (/^rec[A-Za-z0-9]+$/.test(parentId)) return `content:${parentId}`;
+    // Legacy projections sometimes put that same linked record in content_id.
     const contentId = String(card?.content_id || "").trim();
-    if (contentId) return `content:${contentId}`;
+    if (/^rec[A-Za-z0-9]+$/.test(contentId)) return `content:${contentId}`;
+    if (/^[0-9]+$/.test(contentId)) return `legacy-content:${contentId}`;
+    // No title-based guesses: two separate packages can legitimately share a title.
     return `solo:${card?.id || ""}`;
   }
 
