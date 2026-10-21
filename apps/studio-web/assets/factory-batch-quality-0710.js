@@ -210,10 +210,33 @@
             '</li>';
         }).join("") + '</ul>'
         : censusOk ? '<p>No unresolved output failures found in the completed scan.</p>' : '');
+    // Separate from failures: elapsed schedule is a diagnostic, not proof of
+    // remote publication failure. QA-PUBLISH-001 never provides a repost button.
+    const overdue = data.approved_past_due;
+    const overdueOk = overdue?.status === "ok" && Array.isArray(overdue.items);
+    const overdueMarkup = overdueOk
+      ? '<p class="factory-batch-quality-heading">QA-PUBLISH-001 · Approved past due, unconfirmed: ' +
+        (Number(overdue.count) || 0) + '</p>' +
+        (overdue.items.length ? '<ul class="factory-batch-quality-list">' +
+          overdue.items.map(item =>
+            '<li class="factory-batch-quality-item" data-qa-output="' + esc(item.record_id || "") +
+              '" data-qa-profile="' + esc(item.profile_id || "") + '">' +
+              '<button type="button" class="factory-quality-open" data-qa-open="' +
+                esc(item.record_id || "") + '" title="Open exact output in Pipeline">' +
+                esc(item.profile_name || item.profile_id || "Profile") + ' · Output ' +
+                esc(item.output_id || item.record_id) + ' · ' + esc(item.platform) +
+                ' ↗</button>' +
+              '<p><strong>' + esc(item.cause || "Unconfirmed publication") + '</strong> · ' +
+                esc(item.minutes_past_due == null ? "Date unavailable" : item.minutes_past_due + " min past due") +
+              '</p><p class="factory-batch-quality-action">' + esc(item.action) + '</p>' +
+              '<small>Recovery: ' + esc(item.recovery) + ' · No blind republishing</small></li>'
+          ).join("") + '</ul>'
+          : '<p>No past-due approvals beyond the reconciliation grace window.</p>')
+      : '<p class="factory-batch-quality-unavailable">Past-due Quality Agent scan unavailable. Count unknown; do not treat this as zero.</p>';
     if (!data.job_id) {
       return data?.quality_status === "partial"
-        ? failureMarkup + '<p class="factory-batch-quality-unavailable">Partial batch monitoring window. No findings were returned from the scanned records; older activity was not verified.</p>'
-        : failureMarkup + '<p class="subtle">No active Factory batches requiring attention in the checked window.</p>';
+        ? failureMarkup + overdueMarkup + '<p class="factory-batch-quality-unavailable">Partial batch monitoring window. No findings were returned from the scanned records; older activity was not verified.</p>'
+        : failureMarkup + overdueMarkup + '<p class="subtle">No active Factory batches requiring attention in the checked window.</p>';
     }
     const global = data.scope === "all";
     const partialNotice = data?.quality_status === "partial"
@@ -241,7 +264,7 @@
         <p class="factory-batch-quality-action">${esc(catalog.guidance)}</p>
       </li>`;
     }).join("");
-    return `${failureMarkup}${partialNotice}<p class="factory-batch-quality-meta">${global ? `${Number(data.totals?.batches)||0} active Factory batches` : `${total} latest batch outputs`} · ${pending} pending · ${failed} failed</p>
+    return `${failureMarkup}${overdueMarkup}${partialNotice}<p class="factory-batch-quality-meta">${global ? `${Number(data.totals?.batches)||0} active Factory batches` : `${total} latest batch outputs`} · ${pending} pending · ${failed} failed</p>
       ${countMismatch ? '<p class="factory-batch-quality-unavailable">Batch totals disagree: investigate status reconciliation.</p>' : ""}
       ${signals.length ? `<p class="factory-batch-quality-heading">${signals.length} Quality Agent finding${signals.length === 1 ? "" : "s"} for this batch</p>
         <ul class="factory-batch-quality-list">${rowMarkup}</ul>`
@@ -252,8 +275,9 @@
     state.lastView = { profileId, data, error };
     if (data?.output_failures?.status === "ok") state.failures = data.output_failures.items || [];
     const metric = $("factoryBatchQualityMetric");
-    if (metric) metric.textContent = error || data?.quality_status !== "ok" || data?.output_failures?.status !== "ok"
-      ? "!" : String((data?.quality_signals?.length || 0) + (data?.output_failures?.count || 0));
+    if (metric) metric.textContent = error || data?.quality_status !== "ok" || data?.output_failures?.status !== "ok" || data?.approved_past_due?.status !== "ok"
+      ? "!" : String((data?.quality_signals?.length || 0) +
+        (data?.output_failures?.count || 0) + (data?.approved_past_due?.count || 0));
     const html = panelMarkup({ profileId, data, error });
     for (const id of panelIds) {
       const node = $(id);
