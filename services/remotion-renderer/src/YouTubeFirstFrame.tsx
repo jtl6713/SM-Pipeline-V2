@@ -1,5 +1,5 @@
 import React from 'react';
-import {AbsoluteFill, Img, interpolate, useCurrentFrame} from 'remotion';
+import {AbsoluteFill, Img, interpolate, staticFile, useCurrentFrame} from 'remotion';
 
 /**
  * A visual-only top layer: the original clips, narration, captions and music
@@ -35,6 +35,7 @@ export const YouTubeFirstFrameOverlay: React.FC<{
   if (!config.src) {
     throw new Error('YouTube first-frame cover enabled but no localized cover image was supplied.');
   }
+  const imageSrc = /^https?:\/\//i.test(config.src) ? config.src : staticFile(config.src.replace(/^[/\\\\]+/, ''));
   const opacity = openingFrameOpacity(
     frame,
     config.holdFrames ?? 21,
@@ -44,7 +45,7 @@ export const YouTubeFirstFrameOverlay: React.FC<{
   return (
     <AbsoluteFill style={{zIndex: 2000, pointerEvents: 'none', opacity}}>
       <Img
-        src={config.src}
+        src={imageSrc}
         style={{width: '100%', height: '100%', objectFit: 'cover'}}
       />
     </AbsoluteFill>
