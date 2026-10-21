@@ -384,6 +384,7 @@ import {
   isVibeCutNotes,
   mergeVibeCutIntoNotes,
   parseVibeCutDirective,
+  sanitizeVibeCutSourceNotes,
   proposeVibeCuts,
   provisionalSelectsFromDuration,
   selectsFromSceneTimestamps,
@@ -680,6 +681,10 @@ export function studioIdeaProxyFromProduceRequest(requestRecord, parent) {
 /*__STUDIO_WORKER_END:studioIdeaProxyFromProduceRequest__*/
 
 export async function studioRecoverEscalatedMasters(env, requestRecord) {
+  // Vibe Cut cannot recover by matching library stills.
+  if (studioIsVibeCut(requestRecord)) {
+    return { ok: false, attached: 0, already: item4AssetManifest(requestRecord).length, reason: "vibe-cut-source-video-required" };
+  }
   const existing = item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []);
   if (Array.isArray(existing) && existing.length) {
     return { ok: true, attached: 0, already: existing.length };
@@ -2311,6 +2316,8 @@ export async function item4ResumePendingVariants(env, recordId, record = null) {
 
 export function item4TimelineAutoPrepareEligible(record) {
   if (!record?.id) return false;
+  // No narrated still timeline for Vibe Cut.
+  if (studioIsVibeCut(record)) return false;
   const notes = String(f(record, "Production_Notes") || "");
   if (!/idea-vo-timeline=/i.test(notes) && !/\[timed-script\]\s*\{/i.test(notes)) return false;
   const requestStatus = String(f(record, "Request_Status") || "").trim();
@@ -3637,6 +3644,9 @@ export async function updateProductionRequest(request, env, url, authorization) 
     stripFactoryRevisionNote(f(existing, "Production_Notes")),
     input.production_notes
   );
+  if (studioIsVibeCut(input.production_notes)) {
+    input.production_notes = sanitizeVibeCutSourceNotes(input.production_notes);
+  }
   if (revisionOpen) input.production_notes = withFactoryRevisionOpen(input.production_notes);
   const now = new Date().toISOString();
   const editableStatus = revisionOpen ? "Draft" : status;

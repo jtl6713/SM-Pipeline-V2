@@ -77,8 +77,8 @@ def watermark_video_bytes(
             f"[1:v][0:v]scale2ref=w=main_w*{float(scale or DEFAULT_SCALE)}:h=-1[wm][base];"
             f"[base][wm]overlay={overlay_xy}:format=auto[outv]"
         )
-        completed = subprocess.run(
-            [
+        def command(*, include_audio: bool) -> list[str]:
+            return [
                 "ffmpeg",
                 "-hide_banner",
                 "-loglevel",
@@ -92,8 +92,7 @@ def watermark_video_bytes(
                 filter_graph,
                 "-map",
                 "[outv]",
-                "-map",
-                "0:a?",
+                *(["-map", "0:a?"] if include_audio else ["-an"]),
                 "-c:v",
                 "libx264",
                 "-preset",
@@ -102,18 +101,18 @@ def watermark_video_bytes(
                 "19",
                 "-pix_fmt",
                 "yuv420p",
-                "-c:a",
-                "aac",
-                "-b:a",
-                "192k",
+                *(["-c:a", "aac", "-b:a", "192k"] if include_audio else []),
                 "-movflags",
                 "+faststart",
                 str(output),
-            ],
-            capture_output=True,
-            check=False,
-            timeout=900,
-        )
+            ]
+
+        completed = subprocess.run(command(include_audio=True), capture_output=True, check=False, timeout=900)
+        # Some iPhone MOV clips include an audio stream with codec_name=none.
+        # Mapping 0:a? selects the stream even though FFmpeg cannot decode it.
+        # Retry without source audio, but still burn the mandatory video watermark.
+        if completed.returncode != 0 and b"Decoding requested, but no decoder found for: none" in completed.stderr:
+            completed = subprocess.run(command(include_audio=False), capture_output=True, check=False, timeout=900)
         if completed.returncode != 0 or not output.exists() or output.stat().st_size < 100:
             detail = completed.stderr.decode("utf-8", errors="replace")[-1000:]
             raise RuntimeError(f"Video watermark ffmpeg failed: {detail or 'no output'}")
