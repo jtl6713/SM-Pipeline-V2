@@ -66,8 +66,8 @@ test("Factory profile filter hydrates without waiting for Factory Desk", () => {
 });
 
 test("Factory profile selector is independent of Factory Desk network completion", () => {
-  assert.match(source, /syncFactoryFilterOptions\\(\\);\\s*\\/\\/ The topbar may hydrate/);
-  assert.match(source, /new MutationObserver\\(\\(\\) => syncFactoryFilterOptions\\(\\)\\)/);
+  assert.match(source, /syncFactoryFilterOptions\(\);\s*\/\/ The topbar may hydrate/);
+  assert.match(source, /new MutationObserver\(\(\) => syncFactoryFilterOptions\(\)\)/);
   const init = source.indexOf('// Populate the Factory filter as soon');
   const change = source.indexOf('$(\"factoryProfileFilter\")?.addEventListener("change"');
   assert.ok(init > 0 && change > init);
