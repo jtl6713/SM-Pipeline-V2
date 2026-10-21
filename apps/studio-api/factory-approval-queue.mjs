@@ -8,7 +8,7 @@ export const FACTORY_BATCH_PREFIX = "studio/state/factory-approvals/v2";
 export const FACTORY_BATCH_LEASE_MS = 12 * 60 * 1000;
 const ID = /^rec[A-Za-z0-9]+$/;
 const RID = /^[A-Za-z0-9_-]{12,128}$/;
-const done = new Set(["approved", "already_satisfied", "failed"]);
+const done = new Set(["approved", "already_satisfied", "skipped_removed", "failed"]);
 
 function assertBucket(bucket) {
   if (!bucket?.put || !bucket?.get || !bucket?.list) throw Error("STUDIO_MEDIA R2 storage required");
@@ -26,7 +26,7 @@ export function factoryBatchCounts(job) {
   const result = { total: items.length, approved_count: 0, skipped_count: 0, failed_count: 0, pending_count: 0 };
   for (const item of items) {
     if (item.status === "approved") result.approved_count++;
-    else if (item.status === "already_satisfied") result.skipped_count++;
+    else if (item.status === "already_satisfied" || item.status === "skipped_removed") result.skipped_count++;
     else if (item.status === "failed") result.failed_count++;
     else result.pending_count++;
   }
@@ -490,6 +490,57 @@ export function factoryBatchQualitySignals(job, nowMs = Date.now()) {
   }
   return signals;
 }
+/**
+ * Mark one precise R2 Factory item terminal when its authoritative Platform
+ * Output has been independently verified absent. This is ledger reconciliation,
+ * never an approval, content recreation or publish. The validation callback
+ * must obtain a fresh *authoritative* Airtable result; an unavailable/timeout
+ * response is NOT proof of absence.
+ */
+export async function factoryBatchMarkRemoved(
+  bucket, {profileId, requestId, recordId, outputId, verifyAbsent, reason, verifiedBy = "quality-agent"} = {},
+) {
+  assertBucket(bucket);
+  if (!ID.test(String(recordId || "")) || !Number.isSafeInteger(Number(outputId)) ||
+      Number(outputId) <= 0 || typeof verifyAbsent !== "function" ||
+      !String(reason || "").trim()) {
+    throw Error("Exact record identity, output ID, verifier and reason required");
+  }
+  const snapshot = await factoryBatchRead(bucket, profileId, requestId);
+  const item = snapshot?.items?.find(row => row.id === recordId && Number(row.output_id) === Number(outputId));
+  if (!item) throw Error("Exact Factory ledger item not found; no reconciliation");
+  if (item.status === "skipped_removed") return snapshot; // idempotent
+  if (item.status !== "failed") throw Error("Only failed approval items can be reconciled as removed");
+  const absent = await verifyAbsent(recordId, Number(outputId));
+  if (absent !== true) throw Error("Authoritative Airtable absence not confirmed");
+  const key = factoryBatchKey(profileId, requestId);
+  return cas(bucket, key, job => {
+    const matching = (job.items || []).filter(row =>
+      row.id === recordId && Number(row.output_id) === Number(outputId));
+    if (matching.length !== 1) throw Error("Factory ledger changed or identity ambiguous");
+    if (matching[0].status === "skipped_removed") return null;
+    if (matching[0].status !== "failed") throw Error("Factory item changed after verification");
+    const at = new Date().toISOString();
+    const items = job.items.map(row => row.id === recordId ? {
+      ...row,
+      status: "skipped_removed",
+      error: null,
+      next_attempt_ms: 0,
+      removed_reason: String(reason).slice(0, 500),
+      removed_verified_by: String(verifiedBy).slice(0, 120),
+      removed_verified_at: at,
+      timeline: [...(row.timeline || []), {
+        state: "skipped_removed", at, attempt: row.total_attempts || 0,
+        reason: String(reason).slice(0, 500),
+      }].slice(-180),
+    } : row);
+    const counts = factoryBatchCounts({...job,items});
+    return {...job, items, updated_at: at,
+      status: counts.pending_count ? "running" :
+        counts.failed_count && !counts.approved_count && !counts.skipped_count ? "failed" : "completed"};
+  });
+}
+
 export async function factoryBatchReconcile(bucket, profileId, requestId) {
   assertBucket(bucket);
   const key = factoryBatchKey(profileId, requestId);

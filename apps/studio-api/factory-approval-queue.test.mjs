@@ -5,7 +5,7 @@ import {
   factoryBatchSummary, factoryBatchCounts, factoryBatchDrain,
   factoryBatchRetry, factoryBatchLockKey, factoryBatchCronScan,
   factoryBatchCronSelectJobs, factoryBatchListGlobal, factoryBatchNeedsAttention,
-  factoryBatchBuild, factoryBatchQualitySignals,
+  factoryBatchBuild, factoryBatchQualitySignals, factoryBatchMarkRemoved,
 } from "./factory-approval-queue.mjs";
 
 class FakeR2 {
@@ -426,4 +426,61 @@ test("Factory Quality Agent identifies missing approval source from the durable 
   assert.ok(factoryBatchQualitySignals(job).some(
     row => row.code === "QA-FACTORY-BATCH-FAILED-ITEM",
   ));
+});
+
+
+test("Deleted Factory approval is reconciled by exact output identity without approval", async () => {
+  const bucket = new FakeR2();
+  const profileId = "recT2rbKX3MF7cVFU";
+  const requestId = "factory_removed_7932_7934";
+  const output1 = "recDeletedApproval01";
+  const output2 = "recDeletedApproval02";
+  await factoryBatchEnqueue(bucket, {
+    profileId, requestId,
+    records: [{id:output1,output_id:7932},{id:output2,output_id:7934}],
+  });
+  const key = "studio/state/factory-approvals/v2/jobs/"+profileId+"/"+requestId+".json";
+  const payload = bucket.objects.get(key).value;
+  payload.status = "failed";
+  for (const item of payload.items) { item.status = "failed"; item.error = "404 Record not found"; }
+  let verifications = 0;
+  const verifyAbsent = async (id, n) => {
+    verifications++;
+    return (id === output1 && n === 7932) || (id === output2 && n === 7934);
+  };
+  const opts = {profileId,requestId,verifyAbsent,reason:"Airtable verified removed; original row not restored"};
+  const first = await factoryBatchMarkRemoved(bucket,{...opts,recordId:output1,outputId:7932});
+  assert.equal(first.items[0].status,"skipped_removed");
+  assert.equal(first.items[1].status,"failed");
+  assert.equal(factoryBatchCounts(first).skipped_count,1);
+  assert.equal(factoryBatchNeedsAttention(first),true);
+  assert.match(first.items[0].removed_reason,/Airtable verified/);
+  const repeated = await factoryBatchMarkRemoved(bucket,{...opts,recordId:output1,outputId:7932});
+  assert.equal(verifications,1);
+  assert.equal(repeated.items[0].timeline.length,first.items[0].timeline.length);
+  const done = await factoryBatchMarkRemoved(bucket,{...opts,recordId:output2,outputId:7934});
+  assert.equal(done.status,"completed");
+  assert.equal(factoryBatchNeedsAttention(done),false);
+  assert.equal(factoryBatchCounts(done).skipped_count,2);
+  assert.equal(factoryBatchCounts(done).approved_count,0);
+  assert.equal(factoryBatchCounts(done).failed_count,0);
+  assert.equal(factoryBatchSummary(done).can_retry,false);
+  const retry = await factoryBatchRetry(bucket,profileId,requestId);
+  assert.deepEqual(retry,done); // no removed item is ever re-approved
+});
+
+test("Deleted Factory reconciliation refuses ambiguous or unverified records", async () => {
+  const bucket = new FakeR2();
+  const profileId = "recT2rbKX3MF7cVFU", requestId="factory_no_unsafe_delete";
+  const id="recDeletedApproval01";
+  await factoryBatchEnqueue(bucket,{profileId,requestId,records:[{id,output_id:7932}]});
+  const key="studio/state/factory-approvals/v2/jobs/"+profileId+"/"+requestId+".json";
+  const state=bucket.objects.get(key).value;state.status="failed";state.items[0].status="failed";
+  const base={profileId,requestId,recordId:id,outputId:7932,reason:"Missing in Airtable"};
+  await assert.rejects(() => factoryBatchMarkRemoved(bucket,{...base,verifyAbsent:async()=>false}),/absence not confirmed/);
+  await assert.rejects(() => factoryBatchMarkRemoved(bucket,{...base,outputId:7934,verifyAbsent:async()=>true}),/Exact Factory ledger item not found/);
+  await assert.rejects(() => factoryBatchMarkRemoved(bucket,{...base,verifyAbsent:async()=>{throw Error("Airtable unavailable")}}),/Airtable unavailable/);
+  state.items[0].status="approved";
+  await assert.rejects(() => factoryBatchMarkRemoved(bucket,{...base,verifyAbsent:async()=>true}),/Only failed/);
+  assert.equal(factoryBatchCounts(state).approved_count,1);
 });
