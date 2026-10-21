@@ -143,5 +143,5 @@ test("Facebook QA reapproval uses original protected scheduling route and cooldo
   assert.match(factory, /data-qa-open/);
   assert.match(factory, /data-qa-reapprove-all/);
   assert.match(factory, /window\.confirm/);
-  assert.match(factory, /Promise\.all\(batch\.map/);
+  assert.match(factory, /for \(const item of allowed\)/);
 });
