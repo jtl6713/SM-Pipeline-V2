@@ -26,6 +26,7 @@ import {
   rankVibeSelects,
   selectsFromSceneTimestamps,
   stripVibeCutDirective,
+  sanitizeVibeCutSourceNotes,
   validateVibeCutSourceAssets,
   vibeCutOriginNotes,
   vibeCutProductionDefaults,
@@ -330,4 +331,13 @@ test("Vibe Cut production enqueue fails closed before runner receives photo mast
   assert.match(worker, /validateVibeCutSourceAssets\(item4AssetManifest\(record\)\)/);
   assert.match(worker, /route: "vibe-cut:invalid-source"/);
   assert.match(worker, /throw new HttpError\(409, detail\)/);
+});
+
+test("Vibe Cut draft removes still-timeline and voiceover directives", () => {
+  const cleaned = sanitizeVibeCutSourceNotes(
+    "ez-input=vibe-cut\nidea-vo-timeline=1\n[timed-script] {}\n[vibe-cut] {}"
+  );
+  assert.equal(cleaned.includes("idea-vo-timeline=1"), false);
+  assert.equal(cleaned.includes("[timed-script]"), false);
+  assert.equal(cleaned.includes("ez-photo-wait=off"), true);
 });

@@ -13,7 +13,7 @@ function section(a, b) {
 }
 
 test("Vibe Cut source must have a persisted video asset before Continue is enabled", () => {
-  assert.match(html, /id="ezContinue" hidden>Continue to Production/);
+  assert.match(html, /id="ezContinue" hidden>Save Video &amp; Continue to Production/);
   const sourceCheck = section("function vibeCutPersistedSource(", "function ezPersistedKindCounts(");
   assert.match(sourceCheck, /item4AssetLooksLikeVideo\(asset\)/);
   assert.match(sourceCheck, /id\.startsWith\("local:"\)/);
@@ -31,6 +31,6 @@ test("Upload failure cannot silently advance the Vibe Cut workflow", () => {
   assert.match(upload, /throw new Error\("Upload returned without a saved source video attachment/);
   const listener = section("function bindEzIntake(", "function item4SelectedPlatforms(");
   assert.match(listener, /if \(ezIsVibeCut\(\)\)/);
-  assert.match(listener, /!activeProductionRequest\?\.id \|\| !vibeCutPersistedSource\(\)/);
+  assert.match(listener, /!activeProductionRequest\?\.id \|\| !vibeCutReadySource\(\)/);
   assert.match(listener, /showProductionRequestWorkspace\(\)/);
 });

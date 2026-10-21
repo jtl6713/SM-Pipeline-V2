@@ -855,6 +855,11 @@ export async function unfinishedIntakeBatchIds(env, batchIds) {
 /*__STUDIO_WORKER_END:unfinishedIntakeBatchIds__*/
 
 export async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaIds, { replaceWaitAssets = false, allowManagePaused = false, replaceAll = false, allowVideo = false } = {}) {
+  // Vibe Cut masters must come from the user's uploaded footage. Never
+  // substitute photo-wait/library imagery (including replaceAll recovery).
+  if (studioIsVibeCut(requestRecord)) {
+    return { record: requestRecord, assets: item4AssetManifest(requestRecord), appended: 0, skipped: true, reason: "vibe-cut-uploaded-video-only" };
+  }
   const existingAll = item4AssetManifest(requestRecord);
   const existing = replaceAll
     ? []
@@ -905,6 +910,11 @@ export async function applyLibraryAssetsToProductionRequest(env, requestRecord, 
   }
   // Slow matching/watermark work must not commit over an operator edit.
   const latest = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
+  // Re-check after slow matching so an earlier cron cannot win a race against
+  // the operator switching this request to a video-only Vibe Cut.
+  if (studioIsVibeCut(latest)) {
+    return { record: latest, assets: item4AssetManifest(latest), appended: 0, skipped: true, reason: "vibe-cut-uploaded-video-only" };
+  }
   const ideaId = firstLinkedRecordId(f(latest, "Idea_Candidate"));
   const latestIdea = ideaId ? await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId) : null;
   if (!replaceAll && (productionPhotoWaitAutoOff(f(latest, "Production_Notes"))

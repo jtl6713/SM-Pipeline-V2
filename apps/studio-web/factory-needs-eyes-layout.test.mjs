@@ -7,7 +7,7 @@ const css = readFileSync(new URL("assets/factory-layout-0680.css", root), "utf8"
 const factory = readFileSync(new URL("assets/factory-desk.js", root), "utf8");
 
 test("Needs eyes responsive action layout is shipped after base stylesheet", () => {
-  assert.match(html, /factory-layout-0680\.css\?v=0.6.735-quality-reapprove/);
+  assert.match(html, /factory-layout-0680\.css\?v=0.6.736-vibe-video-source/);
   assert.match(html, /UI build 0.6.735/);
   assert.ok(html.indexOf("factory-layout-0680.css") > html.indexOf("styles-phase7-0621.css"));
 });

@@ -280,7 +280,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.735-quality-reapprove";
+  const BUILD_ID = "item4-0.6.736-vibe-video-source";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -5039,7 +5039,8 @@
   }
 
   function timedScriptActive() {
-    return Boolean(productionTimedScript && Array.isArray(productionTimedScript.segments) && productionTimedScript.segments.length);
+    // Vibe Cut has no narrated still-scene timeline even if stale notes remain.
+    return !ezIsVibeCut() && Boolean(productionTimedScript && Array.isArray(productionTimedScript.segments) && productionTimedScript.segments.length);
   }
 
   function scriptedShortMissingSceneNumbers(record = activeProductionRequest) {
@@ -5881,7 +5882,7 @@ function timedScriptAssetLabel(asset, index) {
     hideEzFrontDoor();
     const workspace = $("productionRequestWorkspace");
     if (workspace) workspace.hidden = false;
-    setProductionWorkspaceTab(timedScriptActive() ? "rendering" : (productionWorkspaceTab || "media"));
+    setProductionWorkspaceTab(ezIsVibeCut() ? "media" : (timedScriptActive() ? "rendering" : (productionWorkspaceTab || "media")));
     syncPrMediaKindUi();
     syncProductionVoBanner();
   }
@@ -6254,6 +6255,52 @@ function timedScriptAssetLabel(asset, index) {
       const id = String(asset?.id || "");
       return id && !id.startsWith("local:") && !id.startsWith("staged:") && item4AssetLooksLikeVideo(asset);
     }) || null;
+  }
+
+  function vibeCutReadySource(status = item4Workspace) {
+    const assets = Array.isArray(status?.assets) ? status.assets : [];
+    if (assets.length !== 1 || status?.assets_status !== "Ready") return null;
+    const video = vibeCutPersistedSource(status);
+    if (!video) return null;
+    const states = [video.upload_status, video.compression_status]
+      .map(x => String(x || "").trim().toLowerCase());
+    if (states.some(x => ["multipart_pending", "uploading", "pending", "queued", "compressing", "downloading", "failed"].includes(x))) return null;
+    return video;
+  }
+
+  function renderVibeCutCommitAction(status = item4Workspace) {
+    const panel = $("item4VibeCommitActions");
+    if (!panel) return;
+    const vibe = ezIsVibeCut();
+    panel.hidden = !vibe;
+    if (!vibe) return;
+    const source = vibeCutReadySource(status);
+    const staged = vibeCutPersistedSource(status);
+    const editable = ["Draft", "Ready"].includes(String(activeProductionRequest?.status || "Draft"));
+    const message = $("item4VibeSourceStatus");
+    const save = $("item4VibeSaveContinue");
+    const retry = $("item4VibeRetryVideo");
+    if (message) message.textContent = !editable
+      ? "This request is already in production. Start a new Vibe Cut if the original video failed."
+      : source
+      ? "Original video verified and saved. Continue to choose the Vibe Cut outputs."
+      : staged
+      ? "Video upload received, but processing is not Ready. Wait for completion or replace the source video."
+      : "No usable source video is attached. The photo timeline cannot be saved as a Vibe Cut. Upload your MOV/MP4 again.";
+    if (save) {
+      save.disabled = !editable || !source || item4Uploading || ezStarting;
+      save.textContent = source ? "Save Vibe Cut & Continue" : "Waiting for source video";
+    }
+    if (retry) {
+      retry.hidden = !editable || Boolean(source);
+      retry.disabled = item4Uploading || ezStarting;
+    }
+    const wizard = $("ezContinue");
+    if (wizard && source && editable && vibe) {
+      wizard.textContent = "Save Video & Continue to Production";
+      wizard.hidden = false;
+      wizard.disabled = false;
+    }
   }
 
   function ezPersistedKindCounts() {
@@ -8715,11 +8762,11 @@ function timedScriptAssetLabel(asset, index) {
           applyEzToAdvanced({ force: true });
           const action = $("ezContinue");
           if (action) {
-            action.textContent = "Continue to Production";
+            action.textContent = "Save Video & Continue to Production";
             action.hidden = false;
-            action.disabled = false;
+            action.disabled = !vibeCutReadySource();
           }
-          setEzMessage("Source video saved to this Production request. Select Continue to Production to review it before rendering.", "success");
+          setEzMessage(vibeCutReadySource() ? "Source video saved and verified. Select Save Video & Continue." : "Video received. Processing must finish before you can continue; Studio will not substitute photos.", "success");
           setRequestMessage("Vibe Cut source video saved and attached to this Production request.", "success");
         }
       }
@@ -9074,7 +9121,7 @@ function timedScriptAssetLabel(asset, index) {
     });
     $("ezContinue")?.addEventListener("click", () => {
       if (ezIsVibeCut()) {
-        if (!activeProductionRequest?.id || !vibeCutPersistedSource() || item4Uploading || ezStarting) {
+        if (!activeProductionRequest?.id || !vibeCutReadySource() || item4Uploading || ezStarting) {
           setEzMessage("Video is not yet confirmed on the Production request. Retry the upload before continuing.", "error-text");
           return;
         }
@@ -11235,6 +11282,7 @@ function timedScriptAssetLabel(asset, index) {
     renderItem4Assets(status);
     renderItem4Plan(status);
     renderItem4Variants(status);
+    renderVibeCutCommitAction(status);
     const assets = Array.isArray(status?.assets) ? status.assets : [];
     document.querySelectorAll("[data-item4-platform]").forEach(input => {
       const planPlatforms = status?.plan?.items?.map(x => x.platform) || [];
@@ -14043,6 +14091,35 @@ function timedScriptAssetLabel(asset, index) {
     }
   }
 
+  $("item4VibeRetryVideo")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    if (!["Draft", "Ready"].includes(String(activeProductionRequest?.status || "Draft"))) {
+      setRequestMessage("This request is locked. Start a new Vibe Cut to replace the source footage.", "error-text");
+      return;
+    }
+    item4BeginClipPick("item4ClipInput");
+  });
+  $("item4VibeSaveContinue")?.addEventListener("click", async (event) => {
+    event.preventDefault();
+    const source = vibeCutReadySource();
+    if (!source || !["Draft", "Ready"].includes(String(activeProductionRequest?.status || "Draft"))) {
+      setRequestMessage("A saved and fully processed source MOV/MP4 is required. Studio will not use the asset-library photo timeline.", "error-text");
+      setProductionWorkspaceTab("media");
+      return;
+    }
+    const button = $("item4VibeSaveContinue");
+    button.disabled = true;
+    try {
+      await saveActiveProductionRequest({ quiet: false });
+      if (item4Workspace?.plan_status !== "Ready") await buildItem4Plan();
+      setProductionWorkspaceTab("formats");
+      setRequestMessage("Vibe Cut source and draft saved. Review platform outputs, then Approve when ready.", "success");
+    } catch (error) {
+      setRequestMessage(error?.message || "Could not save Vibe Cut.", "error-text");
+    } finally {
+      renderVibeCutCommitAction(item4Workspace);
+    }
+  });
   $("item4ChooseMedia")?.addEventListener("click", (event) => {
     event.stopPropagation();
     item4ApplyMediaInputAccept(ezIntakeKind);

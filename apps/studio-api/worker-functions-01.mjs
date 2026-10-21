@@ -391,6 +391,7 @@ import {
   isVibeCutNotes,
   mergeVibeCutIntoNotes,
   parseVibeCutDirective,
+  sanitizeVibeCutSourceNotes,
   proposeVibeCuts,
   provisionalSelectsFromDuration,
   selectsFromSceneTimestamps,
@@ -5696,11 +5697,23 @@ export async function createItem4LargeVideoUploadSession(request, env, url, auth
   };
   if (!draft.multipart_upload_id) throw new HttpError(502, "Could not start staged upload");
   const notes = String(f(record, "Production_Notes") || "").trim();
-  const stamped = vibeCut ? notes : studioRewriteFinishedOriginNotes(notes, "finished-video");
+  const stamped = vibeCut ? sanitizeVibeCutSourceNotes(notes) : studioRewriteFinishedOriginNotes(notes, "finished-video");
   const fields = {
-    Studio_Master_Assets_JSON: JSON.stringify([...existing, draft]),
-    Studio_Master_Asset_Count: existing.length + 1,
+    // On a Vibe Cut upload, discard any auto-attached photo-wait masters.
+    // Their generated slides and timed-script plan must not survive a video retry.
+    Studio_Master_Assets_JSON: JSON.stringify(vibeCut ? [draft] : [...existing, draft]),
+    Studio_Master_Asset_Count: vibeCut ? 1 : existing.length + 1,
     Studio_Master_Asset_Status: "Uploading",
+    ...(vibeCut ? {
+      Studio_Master_Media_Assets: [],
+      Studio_Platform_Variant_Assets: [],
+      Studio_Output_Plan_Status: "Needs Plan",
+      Studio_Output_Plan_JSON: null,
+      Studio_Variant_Manifest_JSON: null,
+      Studio_Variant_Status: "None",
+      Studio_Variant_Updated_At: null,
+      Studio_Variant_Error: null,
+    } : {}),
     Studio_Item4_State: "Draft",
   };
   if (stamped !== notes) fields.Production_Notes = stamped;
@@ -8480,6 +8493,13 @@ export async function buildItem4OutputPlan(request, env, url, authorization) {
   let record=await loadAuthorizedProductionRequest(env,recordId,authorization);
   assertEditableProductionRequest(record);
   const assets=item4AssetManifest(record).sort((a,b)=>Number(a.order||0)-Number(b.order||0));
+  // A photo plan must never be mistaken for a successfully uploaded Vibe Cut.
+  if (studioIsVibeCut(record)) {
+    const source = validateVibeCutSourceAssets(assets);
+    if (!source.ok || String(f(record, "Studio_Master_Asset_Status") || "").trim() !== "Ready") {
+      throw new HttpError(409, "Vibe Cut requires its original uploaded and processed video before platform planning. " + (source.reason || "Video processing is not ready."));
+    }
+  }
   const photoCount=item4EffectivePhotoCount(record, assets);
   const hasVideo=item4PlanHasVideo(record, assets);
   if (!photoCount) throw new HttpError(409,"Upload at least one master photo or clip before building the platform plan, or set an exact AI slide count with Make AI Generated.");

@@ -62,6 +62,29 @@ def test_video_watermark_burns_overlay_and_keeps_optional_audio(monkeypatch):
     assert "yuv420p" in command
 
 
+
+def test_mov_with_undecodable_audio_retries_watermarked_video_only(monkeypatch):
+    calls = []
+
+    def fake_run(args, **_kwargs):
+        calls.append(list(args))
+        if len(calls) == 1:
+            return SimpleNamespace(
+                returncode=1,
+                stderr=b"Decoding requested, but no decoder found for: none",
+            )
+        Path(args[-1]).write_bytes(b"branded-video" * 20)
+        return SimpleNamespace(returncode=0, stderr=b"")
+
+    monkeypatch.setattr(watermark_module.subprocess, "run", fake_run)
+    result = watermark_video_bytes(b"iPhone MOV", b"official-watermark", filename="IMG_7901.mov")
+    assert len(result) > 100
+    assert len(calls) == 2
+    assert "0:a?" in calls[0]
+    assert "-an" in calls[1] and "0:a?" not in calls[1]
+    assert "overlay=" in calls[1][calls[1].index("-filter_complex") + 1]
+    assert "libx264" in calls[1]
+
 def test_item4_master_handoff_watermarks_chicagoshining_before_drive_authority():
     source = inspect.getsource(_process_master_pending)
 

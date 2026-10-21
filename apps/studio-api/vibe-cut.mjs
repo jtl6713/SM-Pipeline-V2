@@ -886,3 +886,12 @@ export function validateVibeCutSourceAssets(assets) {
   }
   return { ok: true, reason: "" };
 }
+
+/** A Vibe Cut is video with music, never a generated spoken still timeline. */
+export function sanitizeVibeCutSourceNotes(notes) {
+  const lines = String(notes || "").split(/\r?\n/).filter(line =>
+    !/^\s*(?:idea-vo-timeline=|\[timed-script\])/i.test(line)
+  );
+  const text = lines.join("\n").trim();
+  return /ez-photo-wait=off/i.test(text) ? text : [text, "ez-photo-wait=off"].filter(Boolean).join("\n");
+}
