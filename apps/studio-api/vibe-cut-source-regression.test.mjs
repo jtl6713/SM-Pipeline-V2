@@ -17,7 +17,7 @@ test("vibe source upload replaces stale photos and clears their old crop plan", 
 });
 
 test("vibe plan allows validated photo montage while retaining source guards", () => {
-  assert.ok(source.includes("validateVibeCutSourceAssets(assets, { allowPhotoMontage: true })"));
+  assert.ok(source.includes("validateVibeCutSourceAssets(assets, { allowPhotoMontage:") && source.includes("allow-vibe-cut-photo-montage=1"));
   assert.ok(source.includes("Vibe Cut requires its original uploaded and processed video"));
   assert.ok(source.includes("if (studioIsVibeCut(record)) return false;"));
 });
