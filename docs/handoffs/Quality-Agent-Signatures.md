@@ -156,3 +156,144 @@ Durable Object alarms perform immediate lease-expiry fencing. The Worker Quality
 - Runtime sweep: Studio API Worker scheduled handler (only after the feature is enabled)
 - Durable lane index: `studio/state/schedule-reservation-lanes/v1/`
 - Latest Quality Agent report: `studio/state/schedule-reservation-quality/v1/latest.json`
+
+
+## October 21, 2026: AP1C/AP3C carousel and Factory approval failures (outputs 7932, 7934, 7894, 6934, 7856, 7043)
+
+This incident was investigated against the production Airtable Platform Outputs,
+Carousel Slides, and Production Request Outputs tables. Failure diagnosis is
+**per-stage**; an approved parent Output can have an unresolved downstream
+Instagram task. The Production Request Output may separately remain Draft even
+when its routed Platform Output is approved; never rewrite those statuses as a
+shortcut. Airtable remains the write source of truth.
+
+### QA-FACTORY-APPROVAL-SOURCE-NOT-FOUND — 7932 and 7934
+
+Both were reported as failing **inside Factory approval**, before Instagram
+publishing. At the time of investigation neither numeric Output_ID resolved
+in the production Airtable Platform Outputs table. **This does not prove deletion,
+nor does it establish the Factory exception text.** Before assigning a more
+specific root cause, read the exact Factory R2
+`studio/state/factory-approvals/v2/jobs/{profile_id}/{request_id}.json`
+ledger, and for a global submit inspect its corresponding `groups` parent.
+Match the stored `item.output_id`, `item.id`, `item.status`, `item.error`,
+`item.total_attempts` and timestamped `timeline` to a fresh Airtable
+record lookup by **record ID**, not display number alone.
+
+- If the item ledger says approved and the authoritative record is confirmed
+  approved, reconcile the ledger only; never resubmit approval.
+- If the item failed transiently and the authoritative record remains
+  unapproved, retry **only that item**, under the existing profile/approval
+  lease and bounded backoff. First recheck whether scheduling or output changes
+  partially committed.
+- If the output record is absent, its identity is ambiguous, or the approval
+  may have written schedule/dispatch state before an exception, **quarantine
+  the item and escalate Needs Eyes** with the exact ledger error. Do not
+  recreate the content or approve a guessed substitute.
+- The Quality Agent must scan Factory batch failures independently from
+  Platform Output Failed flags; otherwise precommit failures will disappear.
+
+This signature is an **evidence-pending** classification for 7932/7934 until
+the R2 ledger is inspected; it is not a claim that both have the same root cause.
+
+### QA-IG-AP1C-DUPLICATE-SLIDE-SETS — 7856 and 7043
+
+The Instagram AP1C child-creation stage reported
+`AP1C slide-set mismatch: final view 8, public-ready 8, expected 4`.
+Both Airtable parents have exactly eight linked slide rows (two separate
+slide-number groups 1..4), four approved images in the ordered
+`Render_Clip_List_JSON`/`Selected_Assets_JSON`, and **no created Instagram
+child IDs**. Retry counts were **31** (7856) and **42** (7043).
+
+The two sets have different saved source URL/order combinations: a doubled
+count does **not** by itself prove that four rows are interchangeable.
+Safe remediation:
+
+1. Acquire an exact output + approved media revision lease and ensure the
+   output is unpublished, not currently producing, and not held.
+2. Read **all** linked slide records, final public URLs, source/asset identities,
+   slide numbers, revision stamps, and the authoritative ordered stamped media
+   manifest. Verify exactly four unique intended logical media assets.
+3. Only if there is an unambiguous 1:1 match for each approved manifest entry,
+   detach demonstrably noncanonical *links*, preserving every physical image
+   and revision; verify the remaining order and readiness after rereading
+   authoritative records. Never arbitrarily select the first four rows.
+4. Resume AP1C once under the idempotency fence, ensure four distinct saved
+   child IDs and advance through AP2C. If source selection is ambiguous,
+   escalate with the conflicting slide IDs and URLs without any mutation.
+
+The pipeline's AP1C failure handler now fences exact doubled mismatch rows
+in `IG_Carousel_Status=Retry Pending`, `Publish_Retry_Eligible=false`,
+rather than endlessly returning them to Assets Ready. This is an automatic
+**containment** action, not an unconditional auto-detach; the latter remains
+unsafe without strict manifest matching and an atomic repair lease.
+
+### QA-IG-AP3C-AMBIGUOUS-PARENT — 7894
+
+AP1C/AP2C have finished: four distinct child containers and four children
+ready. AP3C parent creation returns **HTTP 500**, Meta OAuthException
+`code=2, is_transient=true`; the saved error has a Graph trace ID but no
+acknowledged parent container ID. `IG_Carousel_Retry_Count=62`.
+
+An HTTP 500 on a state-creating call is **ambiguous**, not proof that Meta
+created nothing. The automated safe action is to quarantine additional AP3C
+creates, preserve the complete saved Graph response, and investigate whether
+a parent was actually committed. Only a verified existing parent may be
+reused; otherwise require a confirmed negative provider outcome before one
+bounded re-create. Retain children, media, and schedule. Do not call
+`media_publish` as part of the recovery probe. AP3C now quarantines ambiguous
+HTTP5xx/unknown outcomes and caps nonambiguous retries.
+
+### QA-IG-EXPIRED-CHILD-STATE-DRIFT — 6934
+
+Airtable parent still reports `IG_Carousel_Status=Children Processing`,
+`IG_Carousel_Children_Ready_Count=0`, but all four linked child rows retain
+unique provider IDs marked `FINISHED`. The saved parent response contains
+Meta OAuthException `error_subcode=2207020`, `Expired Media`:
+`The media you are trying to access has expired. Please try to upload again.`
+The parent retry count was 2.
+
+The *historical* FINISHED row status cannot override a newer provider error.
+AP2C already polls every saved child ID and, **if Meta confirms** all four
+FINISHED and current, recomputes the ready count and moves to Children Ready.
+If any ID expired, do not promote the stale count: recreate only expired
+child containers from the four approved public images with a revision lease,
+verify all N, then attempt parent creation **once**. Never regenerate or
+reorder source assets merely to clear a stale counter.
+
+### QA-IG-RETRY-STORM — cross-cutting guard
+
+Stop deterministic or ambiguous stage retries after detection, and cap
+otherwise transient retries at five across the carousel attempt counter
+until a repaired revision is explicitly rearmed. Keep the actual last error,
+Stage, Retry Count, Graph trace/response, next eligibility and linked output ID
+visible. A retry limit must not be reset by merely clicking the Factory
+"Retry Failed" control; only a verified source repair/new content revision
+can reset a fenced Instagram publishing stage.
+
+### Autonomous review / recovery lifecycle
+
+- Scan paginated Platform Output failures **and** downstream Instagram stage
+  errors without relying only on `Output_Status=Failed`; for child-drift also
+  inspect `IG_Carousel_Status=Children Processing` with a saved parent
+  response. Scan Factory R2 failed items as a separate surface.
+- Report the specific stable signature in the Quality Agent checks catalog
+  with the exact output, stage, evidence, action, and whether it was
+  automatically contained, repaired, or escalated.
+- Always guard by Airtable's authoritative current approval, publish evidence
+  (Platform_Post_ID, post URL, Published_At, IG media IDs), active lock,
+  cooldown, approved media revision, and original schedule.
+- The only unconditional automatic action for ambiguous Meta writes or
+  conflicting media sets is **quarantine + actionable escalation**.
+  Performing potentially duplicate creates, deleting media, guessing an
+  ordering, or forcing a publish is forbidden.
+- Reuse the existing AP2C child polling/reconciliation for provably
+  verified, safe state drift. Repair only exact, uniquely attributable
+  assets or children and verify postconditions before resuming publishing.
+
+**Code:** `services/pipeline-runner/apc/ap1c.py`,
+`services/pipeline-runner/apc/ap2c.py`,
+`services/pipeline-runner/apc/ap3c.py`,
+`apps/studio-api/failed-output-monitor.mjs`,
+`apps/studio-api/worker-functions-04.mjs`, and
+`apps/studio-api/quality-checks.mjs`.
