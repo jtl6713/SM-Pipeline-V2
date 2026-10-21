@@ -50,6 +50,29 @@ export function failedOutputRetryGate(record, { nowMs = Date.now(), maxAttempts 
   return null;
 }
 
+/** Operator-driven Facebook rate-limit reset: never bypass publishing safety guards. */
+export function facebookRateLimitResetReason(record, { nowMs = Date.now(), maxAttempts = 3 } = {}) {
+  if (text(record, "Platform").toLowerCase() !== "facebook") return "not_facebook";
+  const error = text(record, "Publish_Error_Message");
+  if (!/facebook rate limit|1390008|\\b368\\b/i.test(error)) return "not_rate_limited";
+  if (text(record, "Publish_Status") !== "Failed" && text(record, "Output_Status") !== "Failed") return "not_failed";
+  if (text(record, "Review_Status") !== "Approved") return "approval_not_confirmed";
+  if (text(record, "Published_At") || text(record, "Platform_Post_ID")
+      || text(record, "Platform_Post_URL") || text(record, "Facebook_Post_ID")
+      || text(record, "FB_Post_ID") || text(record, "FB_Video_ID")) return "publication_evidence";
+  if (truthy(record, "Do_Not_Publish")) return "publication_held";
+  if (Number(text(record, "Publish_Attempt_Count")) >= maxAttempts
+      || Number(text(record, "Studio_Publish_Dispatch_Count")) >= maxAttempts) return "retry_limit";
+  const lockedAt = Date.parse(text(record, "Publish_Locked_At"));
+  if (text(record, "Publish_Locked_By") && (!Number.isFinite(lockedAt) || nowMs - lockedAt < 15 * 60 * 1000))
+    return "publish_locked";
+  if (text(record, "Render_Status") === "Failed") return "render_failed";
+  if (!text(record, "Final_File_ID") && !text(record, "Final_File_URL")
+      && !text(record, "Final_Video_URL") && !text(record, "Rendered_Video_URL"))
+    return "finished_media_missing";
+  return null;
+}
+
 export function describeFailedOutput(record, nowMs = Date.now()) {
   const outputId = text(record, "Output_ID");
   const output = text(record, "Output_Status");
@@ -112,6 +135,6 @@ export function describeFailedOutput(record, nowMs = Date.now()) {
     platform: text(record, "Platform") || null, output_type: text(record, "Studio_Output_Type") || text(record, "Platform_Output_Type") || null,
     profile_id: firstLinkedId(record?.fields?.Content_Profile) || null,
     output_status: output || null, render_status: render || null, publish_status: publish || null,
-    error: reason, action, recovery, retry_at: retryAt || null, attempt_count: attempts,
+    error: reason, action, recovery, retry_at: retryAt || null, attempt_count: attempts,\n    can_return_to_approved: facebookRateLimitResetReason(record, { nowMs }) === null,\n    return_to_approved_blocked: facebookRateLimitResetReason(record, { nowMs }),
   };
 }
