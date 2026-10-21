@@ -1,3 +1,4 @@
+import { studioLoadOccupiedSchedules } from "./worker-functions-01.mjs";
 import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import { scheduleReservationAuthorityEnabled } from "./schedule-reservation-authority.mjs";
