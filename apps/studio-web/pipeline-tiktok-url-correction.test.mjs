@@ -1,10 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { readStudioWorkerSource } from "../studio-api/worker-source-reader.mjs";
 const app = fs.readFileSync(new URL("./assets/app-item4-1008.js", import.meta.url), "utf8");
 const html = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
-const worker = readStudioWorkerSource();
+const worker = fs.readFileSync(new URL("../studio-api/worker-functions-04.mjs", import.meta.url), "utf8");
 
 test("Pipeline exposes URL correction on already published TikTok rows", () => {
   assert.match(app, /pipeline-tiktok-url-edit/);
