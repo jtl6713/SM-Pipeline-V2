@@ -29,6 +29,7 @@ from apc.constants import (
     STATUS_ASSETS_READY,
     STATUS_CHILDREN_PROCESSING,
     STATUS_CREATING_CHILDREN,
+    STATUS_RETRY,
 )
 from apc.eligibility import ap1c_eligibility_reason
 from apc.graph import InstagramCarouselClient, error_message, graph_id, http_ok, load_instagram_settings
@@ -52,19 +53,26 @@ def _reset_parent(
     message: str,
     *,
     retry_minutes: int = RETRY_MINUTES,
+    park_for_quality: bool = False,
 ) -> None:
-    retry_stamp = retry_at(retry_minutes)
+    # Deterministic or exhausted failures must not spin until Meta throttles us.
+    # A paused row remains approved; only the AP1C stage is fenced.
+    attempts = (parse_int(field(output, "IG_Carousel_Retry_Count"), 0) or 0) + 1
+    park = park_for_quality or attempts >= 5
+    retry_stamp = None if park else retry_at(retry_minutes)
     client.update_record(
         PLATFORM_OUTPUTS_TABLE,
         output["id"],
         {
             **unlock_fields(),
-            "IG_Carousel_Status": STATUS_ASSETS_READY,
+            "IG_Carousel_Status": STATUS_RETRY if park else STATUS_ASSETS_READY,
             "Publish_Next_Retry_At": retry_stamp,
-            "Publish_Retry_Eligible": True,
+            "Publish_Retry_Eligible": not park,
             "IG_Carousel_Error_Stage": ERROR_AP1C,
-            "IG_Carousel_Retry_Count": (parse_int(field(output, "IG_Carousel_Retry_Count"), 0) or 0) + 1,
-            "IG_Carousel_Error_Message": message,
+            "IG_Carousel_Retry_Count": attempts,
+            "IG_Carousel_Error_Message": (
+                message + (" QA-IG-AP1C-RETRY-FENCED: inspect exact slide identities before rearming." if park else "")
+            ),
             "IG_Carousel_Next_Retry_At": retry_stamp,
         },
         typecast=True,
@@ -140,8 +148,19 @@ def process_request(
                 f"public-ready {len(ready_slides)}, expected {expected_before_clamp}; "
                 "not creating an incomplete carousel."
             )
-            _reset_parent(client, output, message, retry_minutes=AP1C_RATE_LIMIT_RETRY_MINUTES)
-            return {"processed": True, "needs_children": True, "reason": "incomplete_slide_set", **result}
+            # Output 7856 / 7043: 8 linked public-ready slides vs 4 approved.
+            # Two slide-number sets are not proof that their media/order match.
+            # Never arbitrarily discard records or create Instagram children.
+            doubled = len(slides) == 2 * expected_before_clamp and len(ready_slides) == len(slides)
+            if doubled:
+                message = "QA-IG-AP1C-DUPLICATE-SLIDE-SETS: " + message
+            _reset_parent(
+                client, output, message,
+                retry_minutes=AP1C_RATE_LIMIT_RETRY_MINUTES,
+                park_for_quality=doubled,
+            )
+            return {"processed": True, "needs_children": False if doubled else True,
+                    "reason": "duplicate_slide_sets" if doubled else "incomplete_slide_set", **result}
     slides, capped = clamp_ig_graph_children(slides, IG_GRAPH_MAX_CHILDREN)
     if capped:
         client.update_record(

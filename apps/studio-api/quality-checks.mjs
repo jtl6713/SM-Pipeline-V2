@@ -114,6 +114,12 @@ export const QUALITY_CHECKS = Object.freeze([
   check({ id: "factory_batch_failed_item", title: "Surface failed-only Factory approval retries without touching successes", lane: "service",
     kind: "factory_batch_failed_item", actor: "desk_agent", heal: "ticket_only" }),
   check({
+    id: "factory_approval_missing_authority",
+    signature: "QA-FACTORY-APPROVAL-SOURCE-NOT-FOUND",
+    title: "Detect Factory approval failures whose output ID cannot resolve to an authoritative Airtable Platform Output",
+    lane: "service", kind: "factory_approval_missing_authority", actor: "desk_agent", heal: "ticket_only",
+  }),
+  check({
     id: "intake_processed_residue",
     title: "Check for orphaned ingestion content that has already been fully processed",
     lane: "service",
@@ -261,6 +267,30 @@ export const QUALITY_CHECKS = Object.freeze([
     kind: "tiktok_auth_signature",
     actor: "desk_agent",
     heal: "align_signature_then_rearm",
+  }),
+  check({
+    id: "ig_duplicate_slide_sets",
+    signature: "QA-IG-AP1C-DUPLICATE-SLIDE-SETS",
+    title: "Detect Instagram AP1C doubled linked slide-number sets and require approved-manifest reconciliation before retry",
+    lane: "service", kind: "ig_duplicate_slide_sets", actor: "desk_agent", heal: "ticket_only",
+  }),
+  check({
+    id: "ig_ambiguous_parent",
+    signature: "QA-IG-AP3C-AMBIGUOUS-PARENT",
+    title: "Quarantine ambiguous Instagram AP3C HTTP 5xx parent creation until provider-side outcome can be verified",
+    lane: "service", kind: "ig_ambiguous_parent", actor: "desk_agent", heal: "ticket_only",
+  }),
+  check({
+    id: "ig_expired_child_drift",
+    signature: "QA-IG-EXPIRED-CHILD-STATE-DRIFT",
+    title: "Detect stale Instagram child-ready counters where Meta returned expired media but Airtable still claims FINISHED",
+    lane: "service", kind: "ig_expired_child_drift", actor: "worker_heal", heal: "verify_children_then_advance",
+  }),
+  check({
+    id: "ig_retry_storm",
+    signature: "QA-IG-RETRY-STORM",
+    title: "Fence Instagram carousel stages that repeat a persistent error beyond their bounded retry allowance",
+    lane: "service", kind: "ig_retry_storm", actor: "desk_agent", heal: "ticket_only",
   }),
   check({
     id: "ig_carousel_too_many_children",

@@ -1,5 +1,5 @@
 /** Complete, read-only failed-output census used by Desk and Factory Quality Agent. */
-export const FAILED_OUTPUT_FORMULA = 'AND({Test_Run_ID}=BLANK(),OR({Output_Status}="Failed",{Render_Status}="Failed",{Publish_Status}="Failed",AND({Publish_Error_Message}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published"),AND({IG_Carousel_Error_Message}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published")))';
+export const FAILED_OUTPUT_FORMULA = 'AND({Test_Run_ID}=BLANK(),OR({Output_Status}="Failed",{Render_Status}="Failed",{Publish_Status}="Failed",AND({Publish_Error_Message}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published"),AND({IG_Carousel_Error_Message}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published"),AND({IG_Carousel_Status}="Children Processing",{IG_Carousel_Parent_Response_JSON}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published")))';
 
 export async function scanOutstandingFailedOutputs(fetchPage, { pageSize = 100, filterFormula = FAILED_OUTPUT_FORMULA } = {}) {
   const records = [];
@@ -84,9 +84,18 @@ export function describeFailedOutput(record, nowMs = Date.now()) {
     || text(record, "Final_File_Error_Message") || text(record, "IG_Carousel_Error_Message")
     || text(record, "FB_Slideshow_Error_Message") || text(record, "YouTube_Error_Message");
   const publishedEvidence = Boolean(text(record, "Published_At") || text(record, "Platform_Post_ID") || text(record, "Platform_Post_URL"));
+  const igError = text(record, "IG_Carousel_Error_Message");
+  const igParentResponse = text(record, "IG_Carousel_Parent_Response_JSON");
+  const igStatus = text(record, "IG_Carousel_Status");
+  const igAttempts = Number(text(record, "IG_Carousel_Retry_Count")) || 0;
+  const expected = Number(text(record, "Image_Count")) || Number(text(record, "IG_Carousel_Child_Count")) || 0;
+  const linked = Array.isArray(record?.fields?.["Carousel Slides"]) ? record.fields["Carousel Slides"].length : 0;
+  const isIgCarousel = text(record, "Platform").toLowerCase() === "instagram"
+    && /carousel/i.test(text(record, "Platform_Output_Type") || text(record, "Studio_Output_Type"));
   const retryAt = text(record, "Publish_Next_Retry_At");
   const retryMs = Date.parse(retryAt);
   const attempts = Math.max(Number(text(record, "Publish_Attempt_Count")) || 0, Number(text(record, "Studio_Publish_Dispatch_Count")) || 0);
+  let signature = null;
   let recovery = "needs_attention";
   let reason = error || "Failure has no diagnostic message. Inspect the output and last pipeline activity.";
   let action = "Inspect the failure and repair its source before retrying.";
@@ -132,7 +141,36 @@ export function describeFailedOutput(record, nowMs = Date.now()) {
     recovery = "cooldown";
     action = "Honor the Facebook publishing cooldown and rate-limit rearm; never force immediate publication.";
   }
+  // Source-of-truth media and Graph state take precedence over generic failed
+  // badges. Never reset Instagram children/parents from an Airtable counter.
+  if (!publishedEvidence && isIgCarousel) {
+    const doubled = expected > 0 && linked === expected * 2;
+    if (/AP1C slide-set mismatch|QA-IG-AP1C-DUPLICATE-SLIDE-SETS/i.test(igError) && (
+        doubled || /final view (\d+), public-ready (\\d+), expected (\\d+)/i.test(igError)
+      )) {
+      signature = "QA-IG-AP1C-DUPLICATE-SLIDE-SETS";
+      recovery = "needs_attention";
+      reason = igError;
+      action = "Quarantine AP1C. Compare every linked slide against the immutable ordered selected-asset manifest; detach only provably noncanonical links (never delete source media). If mapping is ambiguous, escalate Needs Eyes. Once exactly N distinct approved public URLs remain, resume AP1C under a fenced revision lease.";
+    } else if (/AP3C parent creation failed.*HTTP 5\d\d|QA-IG-AP3C-AMBIGUOUS-PARENT/i.test(igError)) {
+      signature = "QA-IG-AP3C-AMBIGUOUS-PARENT";
+      recovery = "needs_attention";
+      reason = igError;
+      action = "Suspend parent creation; inspect Graph trace and reconcile any remotely created parent. Reuse verified existing parent, or allow one fenced retry only after its absence is established. Never publish before scheduled time.";
+    } else if (igStatus === "Children Processing" && /2207020|Expired Media/i.test(igParentResponse)) {
+      signature = "QA-IG-EXPIRED-CHILD-STATE-DRIFT";
+      recovery = "needs_attention";
+      reason = "Meta response reported expired media while Airtable retains earlier FINISHED child statuses and a stale ready count.";
+      action = "Poll every saved child container ID against Meta. Reconcile ready count only if all remain valid; otherwise recreate only the expired child media from the approved public images and verify all children before parent creation.";
+    } else if (igAttempts >= 5 && igError) {
+      signature = "QA-IG-RETRY-STORM";
+      recovery = "exhausted";
+      reason = igError;
+      action = "Quarantine this carousel stage after bounded retries and escalate its exact failure signature; do not repeatedly create Meta containers.";
+    }
+  }
   return {
+    signature,
     record_id: record.id, output_id: outputId || null, title: text(record, "Output_Title") || null,
     platform: text(record, "Platform") || null, output_type: text(record, "Studio_Output_Type") || text(record, "Platform_Output_Type") || null,
     profile_id: firstLinkedId(record?.fields?.Content_Profile) || null,

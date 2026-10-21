@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { scanOutstandingFailedOutputs, describeFailedOutput, failedOutputRetryGate, facebookRateLimitResetReason } from "./failed-output-monitor.mjs";
+import { FAILED_OUTPUT_FORMULA, scanOutstandingFailedOutputs, describeFailedOutput, failedOutputRetryGate, facebookRateLimitResetReason } from "./failed-output-monitor.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const worker = fs.readFileSync(path.join(here, "worker-functions-04.mjs"), "utf8");
@@ -173,4 +173,61 @@ test("Cross-module MAE occupancy resolves the authoritative schedule reader", ()
   assert.ok(source02.includes('} from "./worker-functions-01.mjs";'));
   assert.match(source01, /export async function studioLoadOccupiedSchedules\(/);
   assert.match(source02, /return studioLoadOccupiedSchedules\(env, options\)/);
+});
+
+
+test("Quality Agent recognizes doubled Instagram carousel links without guessing canonical slides", () => {
+  const result = describeFailedOutput(record("recYjLdlux4hAvZts", {
+    Output_ID: 7856, Platform: "Instagram", Platform_Output_Type: "Instagram Carousel",
+    Output_Status: "Approved for Publishing", Render_Status: "Native Photo Route",
+    IG_Carousel_Status: "Assets Ready", IG_Carousel_Retry_Count: 31,
+    IG_Carousel_Error_Message: "AP1C slide-set mismatch: final view 8, public-ready 8, expected 4;",
+    Image_Count: 4, "Carousel Slides": Array.from({ length: 8 }, (_, i) => "rec" + i),
+  }));
+  assert.equal(result.signature, "QA-IG-AP1C-DUPLICATE-SLIDE-SETS");
+  assert.equal(result.recovery, "needs_attention");
+  assert.match(result.action, /immutable ordered selected-asset manifest/);
+  assert.match(result.action, /never delete source media/);
+});
+
+test("Quality Agent quarantines ambiguous Meta parent HTTP 500 rather than blind-recreating", () => {
+  const result = describeFailedOutput(record("recAlU4bLFmWDBV4H", {
+    Output_ID: 7894, Platform: "Instagram", Platform_Output_Type: "Instagram Carousel",
+    IG_Carousel_Error_Stage: "AP3C Parent Creation",
+    IG_Carousel_Error_Message: "AP3C parent creation failed. HTTP 500: An unexpected error has occurred.",
+    IG_Carousel_Retry_Count: 62, Image_Count: 4,
+  }));
+  assert.equal(result.signature, "QA-IG-AP3C-AMBIGUOUS-PARENT");
+  assert.equal(result.recovery, "needs_attention");
+  assert.match(result.action, /reconcile any remotely created parent/);
+  assert.doesNotMatch(result.action, /blind retry/i);
+});
+
+test("Quality Agent exposes expired media despite historical FINISHED child state", () => {
+  const result = describeFailedOutput(record("recYgGHJOmSQMqrFH", {
+    Output_ID: 6934, Platform: "Instagram", Platform_Output_Type: "Instagram Carousel",
+    IG_Carousel_Status: "Children Processing", IG_Carousel_Children_Ready_Count: 0,
+    IG_Carousel_Parent_Response_JSON: JSON.stringify({
+      error: { error_subcode: 2207020, error_user_title: "Expired Media" },
+    }),
+  }));
+  assert.equal(result.signature, "QA-IG-EXPIRED-CHILD-STATE-DRIFT");
+  assert.equal(result.recovery, "needs_attention");
+  assert.match(result.action, /Poll every saved child container ID/);
+  assert.match(FAILED_OUTPUT_FORMULA, /IG_Carousel_Parent_Response_JSON/);
+});
+
+test("Published carousels are reconciled, never reprocessed from stale AP3C errors", () => {
+  const result = describeFailedOutput(record("recPublished", {
+    Output_ID: 99, Platform: "Instagram", Platform_Output_Type: "Instagram Carousel",
+    Platform_Post_ID: "179020000", IG_Carousel_Error_Message: "AP3C parent creation failed. HTTP 500",
+  }));
+  assert.equal(result.signature, null);
+  assert.equal(result.recovery, "reconcile");
+});
+
+test("Desk and Factory quality feed promotes exact Instagram classifications to first-class checks", () => {
+  for (const kind of ["ig_duplicate_slide_sets", "ig_ambiguous_parent", "ig_expired_child_drift", "ig_retry_storm"]) {
+    assert.match(worker, new RegExp('"' + kind + '"'));
+  }
 });

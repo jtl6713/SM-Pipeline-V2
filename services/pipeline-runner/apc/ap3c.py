@@ -29,6 +29,7 @@ from apc.constants import (
     STATUS_CHILDREN_READY,
     STATUS_CREATING_PARENT,
     STATUS_PARENT_PROCESSING,
+    STATUS_RETRY,
 )
 from apc.eligibility import ap3c_eligibility_reason
 from apc.graph import InstagramCarouselClient, error_message, graph_id, http_ok, load_instagram_settings
@@ -36,6 +37,25 @@ from asset.helpers import parse_int
 from carousel.timeutil import iso_utc
 from item4.settings import PipelineSettings
 from render.fields import field, field_str
+
+AP3C_RETRY_MAX_ATTEMPTS = 5
+
+
+def ap3c_requires_reconciliation(status_code: int, payload: dict[str, Any], attempts: int) -> bool:
+    """Do not recreate an ambiguous or permanently rejected Meta parent.
+
+    A 5xx/unknown response might have created a container without returning its
+    ID. Recreating it unconditionally can create duplicate parent containers.
+    """
+    err = payload.get("error") if isinstance(payload, dict) else {}
+    err = err if isinstance(err, dict) else {}
+    return (
+        status_code >= 500 or status_code <= 0
+        or bool(err.get("is_transient"))
+        or err.get("error_subcode") == 2207020
+        or (status_code >= 400 and status_code != 429)
+        or attempts >= AP3C_RETRY_MAX_ATTEMPTS
+    )
 
 
 def process_request(
@@ -137,13 +157,16 @@ def process_request(
             record_id,
             {
                 **unlock_fields(),
-                "IG_Carousel_Status": STATUS_CHILDREN_READY,
-                "Publish_Next_Retry_At": retry_at(RETRY_MINUTES),
-                "Publish_Retry_Eligible": True,
+                "IG_Carousel_Status": STATUS_RETRY,
+                "Publish_Next_Retry_At": None,
+                "Publish_Retry_Eligible": False,
                 "IG_Carousel_Error_Stage": ERROR_AP3C,
                 "IG_Carousel_Retry_Count": (parse_int(field(output, "IG_Carousel_Retry_Count"), 0) or 0) + 1,
-                "IG_Carousel_Error_Message": "AP3C runtime error while creating parent container.",
-                "IG_Carousel_Next_Retry_At": retry_at(RETRY_MINUTES),
+                "IG_Carousel_Error_Message": (
+                    "QA-IG-AP3C-AMBIGUOUS-PARENT: runtime error while creating a parent. "
+                    "Reconcile the provider-side outcome before any re-creation."
+                ),
+                "IG_Carousel_Next_Retry_At": None,
             },
             typecast=True,
         )
@@ -175,18 +198,28 @@ def process_request(
         result.update({"processed": True, "needs_parent_poll": True, "parent_id": parent_id})
         return result
 
+    attempts = (parse_int(field(output, "IG_Carousel_Retry_Count"), 0) or 0) + 1
+    parked = ap3c_requires_reconciliation(status_code, payload, attempts)
+    # A real 429 may retry after a longer cooldown; all ambiguous commits
+    # require proof of absence/reconciliation before creating another parent.
+    next_retry = None if parked else retry_at(30)
+    diagnostic = f"AP3C parent creation failed. HTTP {status_code}: {error_message(payload, status_code)}"
+    if parked:
+        diagnostic = "QA-IG-AP3C-AMBIGUOUS-PARENT: " + diagnostic + (
+            " Inspect saved Meta response and provider containers; do not blindly retry."
+        )
     client.update_record(
         PLATFORM_OUTPUTS_TABLE,
         record_id,
         {
             **unlock_fields(),
-            "IG_Carousel_Status": STATUS_CHILDREN_READY,
-            "Publish_Next_Retry_At": retry_at(RETRY_MINUTES),
-            "Publish_Retry_Eligible": True,
+            "IG_Carousel_Status": STATUS_RETRY if parked else STATUS_CHILDREN_READY,
+            "Publish_Next_Retry_At": next_retry,
+            "Publish_Retry_Eligible": not parked,
             "IG_Carousel_Error_Stage": ERROR_AP3C,
-            "IG_Carousel_Retry_Count": (parse_int(field(output, "IG_Carousel_Retry_Count"), 0) or 0) + 1,
-            "IG_Carousel_Error_Message": f"AP3C parent creation failed. HTTP {status_code}: {error_message(payload, status_code)}",
-            "IG_Carousel_Next_Retry_At": retry_at(RETRY_MINUTES),
+            "IG_Carousel_Retry_Count": attempts,
+            "IG_Carousel_Error_Message": diagnostic,
+            "IG_Carousel_Next_Retry_At": next_retry,
             "IG_Carousel_Parent_Response_JSON": response_json(payload),
         },
         typecast=True,

@@ -201,3 +201,63 @@ def test_ap1c_orders_final_slides_before_graph_clamp():
     selected = list_final_slides(client, "1298")
     assert client.max_records_seen[0] >= 11
     assert [row["fields"]["Current Order"] for row in selected] == list(range(1, 11))
+
+
+def test_ap1c_doubled_slide_mismatch_is_fenced_not_replayed_forever():
+    from apc.ap1c import _reset_parent
+
+    class CapturingClient:
+        def __init__(self):
+            self.last = None
+
+        def update_record(self, table, record_id, fields, *, typecast=False):
+            self.last = dict(fields)
+
+    fake = CapturingClient()
+    output = _record(IG_Carousel_Retry_Count=31)
+    _reset_parent(
+        fake, output,
+        "QA-IG-AP1C-DUPLICATE-SLIDE-SETS: final view 8, public-ready 8, expected 4",
+        park_for_quality=True,
+    )
+    fields = fake.last
+    assert fields["IG_Carousel_Status"] == "Retry Pending"
+    assert fields["Publish_Retry_Eligible"] is False
+    assert fields["Publish_Next_Retry_At"] is None
+    assert fields["IG_Carousel_Next_Retry_At"] is None
+    assert fields["IG_Carousel_Retry_Count"] == 32
+    assert "QA-IG-AP1C-RETRY-FENCED" in fields["IG_Carousel_Error_Message"]
+
+
+def test_ap1c_transient_retry_is_bounded_and_not_a_new_publication():
+    from apc.ap1c import _reset_parent
+
+    class CapturingClient:
+        last = None
+
+        def update_record(self, table, record_id, fields, *, typecast=False):
+            self.last = dict(fields)
+
+    fake = CapturingClient()
+    _reset_parent(fake, _record(IG_Carousel_Retry_Count=0), "Temporary network error")
+    assert fake.last["IG_Carousel_Status"] == "Assets Ready"
+    assert fake.last["Publish_Retry_Eligible"] is True
+    assert fake.last["IG_Carousel_Retry_Count"] == 1
+    _reset_parent(fake, _record(IG_Carousel_Retry_Count=4), "Temporary network error")
+    assert fake.last["IG_Carousel_Status"] == "Retry Pending"
+    assert fake.last["Publish_Retry_Eligible"] is False
+
+
+def test_ap3c_ambiguous_parent_outcome_never_recreates_unverified_container():
+    from apc.ap3c import ap3c_requires_reconciliation
+
+    assert ap3c_requires_reconciliation(
+        500, {"error": {"code": 2, "is_transient": True}}, 1,
+    ) is True
+    assert ap3c_requires_reconciliation(0, {}, 1) is True
+    assert ap3c_requires_reconciliation(
+        400, {"error": {"error_subcode": 2207020}}, 1,
+    ) is True
+    assert ap3c_requires_reconciliation(429, {}, 1) is False
+    assert ap3c_requires_reconciliation(429, {}, 5) is True
+    assert ap3c_requires_reconciliation(400, {}, 1) is True
