@@ -21,6 +21,7 @@ import {
 } from './ChicagoShiningPhotoSequence';
 import {withYouTubeFirstFrame} from './YouTubeFirstFrame';
 
+const YouTubeV2 = withYouTubeFirstFrame(TestRemotionV2);
 const YouTubeV3 = withYouTubeFirstFrame(TestRemotionV3);
 const YouTubePhotoSequence = withYouTubeFirstFrame(ChicagoShiningPhotoSequence);
 
@@ -37,7 +38,7 @@ export const RemotionRoot: React.FC = () => {
             />
             <Composition
                 id="TEST-REMOTION-V2"
-                component={TestRemotionV2}
+                component={YouTubeV2}
                 durationInFrames={240}
                 fps={30}
                 width={1080}
