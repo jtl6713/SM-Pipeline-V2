@@ -261,3 +261,36 @@ def test_ap3c_ambiguous_parent_outcome_never_recreates_unverified_container():
     assert ap3c_requires_reconciliation(429, {}, 1) is False
     assert ap3c_requires_reconciliation(429, {}, 5) is True
     assert ap3c_requires_reconciliation(400, {}, 1) is True
+
+
+def test_ap1c_rebuilds_finished_children_only_after_confirmed_ap4c_parent_expiration():
+    from apc.ap1c import _requires_fresh_children_after_expired_parent
+    expired = _record(
+        IG_Carousel_Error_Stage="AP4C Parent Publishing",
+        IG_Carousel_Error_Message=(
+            "AP4C media_publish failed. Instagram reported expired media; "
+            "AP1C will recreate fresh child containers."
+        ),
+        IG_Carousel_Parent_Container_ID="",
+    )
+    assert _requires_fresh_children_after_expired_parent(expired) is True
+    assert _requires_fresh_children_after_expired_parent(_record(
+        **{**expired["fields"], "Platform_Post_ID": "media123"}
+    )) is False
+    assert _requires_fresh_children_after_expired_parent(_record(
+        **{**expired["fields"], "IG_Carousel_Parent_Container_ID": "parent123"}
+    )) is False
+    assert _requires_fresh_children_after_expired_parent(_record(
+        **{**expired["fields"], "IG_Carousel_Error_Stage": "AP3C Parent Creation"}
+    )) is False
+    assert _requires_fresh_children_after_expired_parent(_record(
+        **{**expired["fields"], "IG_Carousel_Error_Message": "HTTP500 transient"}
+    )) is False
+
+
+def test_ap1c_do_not_reuse_finished_children_after_ap4c_expiry_source():
+    from pathlib import Path
+    source=(Path(__file__).resolve().parents[1] / "apc" / "ap1c.py").read_text(encoding="utf-8")
+    assert "and not force_fresh_children" in source
+    assert 'force_fresh_children = _requires_fresh_children_after_expired_parent(output)' in source
+    assert '"recovered_expired_parent_children": force_fresh_children' in source
