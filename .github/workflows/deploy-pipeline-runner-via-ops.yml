@@ -281,3 +281,5 @@ jobs:
 
 # 2026-10-21: Deploy merged PR #1029 AP1C duplicate slide-set / AP3C Meta ambiguity circuit breakers.
 # Version 2026-10-21-ig-carousel-guard-qa1029; retain Airtable write authority, Supabase Phase 5 circuit breaker, no automatic publish or reapproval.
+
+# 2026-10-21: Deploy PR #1035 verified AP4C expired parent => fresh children on AP1C, protecting output 7856's Oct 23 schedule and all future carousel parents; keep Airtable authoritative and publishing time guards.
