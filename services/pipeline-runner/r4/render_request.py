@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
 from render.fields import field, field_str, parse_json_field
+from render.youtube_first_frame import youtube_first_frame_enabled_for_output
 from audio.voiceover_duration import voiceover_is_disabled
 
 
@@ -358,20 +358,9 @@ def attach_youtube_first_frame(
     payload: dict[str, Any],
     output: dict[str, Any],
 ) -> dict[str, Any]:
-    """Opt-in renderer contract. Canary is explicitly pinned to an output ID."""
-    if field_str(output, "Platform").casefold() != "youtube":
+    """Opt-in renderer contract, including single-output canary allowlisting."""
+    if not youtube_first_frame_enabled_for_output(output):
         return payload
-    mode = os.environ.get("YOUTUBE_FIRST_FRAME_MODE", "off").strip().casefold()
-    if mode not in ("canary", "all"):
-        return payload
-    if mode == "canary":
-        allowed = {
-            token.strip()
-            for token in os.environ.get("YOUTUBE_FIRST_FRAME_CANARY_OUTPUT_IDS", "").split(",")
-            if token.strip()
-        }
-        if str(output.get("id") or "") not in allowed and field_str(output, "Output_ID") not in allowed:
-            return payload
 
     # No Clip_1_URL fallback: using the first source image is not the same as
     # Studio's cover. Missing covers fail explicitly when the render prepares.
