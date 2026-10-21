@@ -488,3 +488,4 @@ Retry Studio Pages UI 0.6.737 Quality Agent preflight after correcting historica
 Deploy Pages UI 0.6.737: corrected Factory QA release contract gate and retained read-only preflight.
 
 2026-10-21: Deploy Studio UI 0.6.738-quality-recovery-progress from PR #1023. Shared visible single and bulk Facebook output Return to Approved progress; confirmed future schedules, retained results, no automatic publishing. Pages-only release.
+Deploy UI 0.6.739-tiktok-published-url-edit: Pipeline live TikTok URL edits and false-failed confirmation; PR 1024 (2026-10-21).
