@@ -25,13 +25,13 @@ test("MAE occupancy scans up to the configured maximum, not the 30-day suggestio
   assert.match(f01, /STUDIO_OCCUPIED_HORIZON_MS/);
 });
 
-test("authoritative occupancy scan fails closed on read errors and truncated result pages", () => {
+test("authoritative occupancy paginates all pages and fails closed on read errors or incomplete cursors", () => {
   const scan = between(f01, "export async function studioLoadOccupiedScheduleRows", "/*__STUDIO_WORKER_END:studioLoadOccupiedScheduleRows__*/");
   assert.match(scan, /if \(requireComplete\)/);
   assert.match(scan, /if \(!profile\?\.id\) throw new HttpError\(503/);
-  assert.match(scan, /await fetchRows\(\)/);
+  assert.match(scan, /await listRecordsPage\(/);\n  assert.match(scan, /rows\.push\(\.\.\.page\.records\)/);\n  assert.match(scan, /offset = page\.offset \|\| null/);\n  assert.match(scan, /Repeated MAE occupancy cursor/);
   assert.match(scan, /Cannot verify MAE occupancy; approval or reschedule was not committed/);
-  assert.match(scan, /rows\.length >= STUDIO_OCCUPIED_LIST_LIMIT/);
+  assert.doesNotMatch(scan, /rows\.length >= STUDIO_OCCUPIED_LIST_LIMIT/);\n  assert.match(scan, /rows\.length > 6000/);
   assert.match(scan, /MAE occupancy result is incomplete/);
   const reads = between(f02, "export async function studioOccupiedSchedulesOrEmpty", "/*__STUDIO_WORKER_END:studioOccupiedSchedulesOrEmpty__*/");
   assert.match(reads, /if \(options\.requireComplete === true\) \{/);
