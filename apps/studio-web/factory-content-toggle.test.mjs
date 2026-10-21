@@ -81,3 +81,41 @@ test("switching between content items expands only the clicked item and can coll
   assert.equal(state.expandedReviewGroup, "");
   assert.match(node.innerHTML, /data-factory-toggle-content="content:B" aria-expanded="false"/);
 });
+
+const groupingStart = source.indexOf("  function contentGroupKey(");
+const groupingEnd = source.indexOf("  function readyContentCards(", groupingStart);
+assert.ok(groupingStart >= 0 && groupingEnd > groupingStart, "Factory grouping functions must exist");
+const groupByContent = vm.runInNewContext(
+  source.slice(groupingStart, groupingEnd) + "\ngroupByContent",
+  {},
+);
+test("NYC platform variants roll up to one row per authoritative Content Item", () => {
+  const fixtures = [
+    ["recy82plmsPHPmwAg", "Hudson River Park Golden Hour", [8393,8394]],
+    ["reczMLPhC7DoAeqUi", "Hudson Sunset Hour Plan", [8366,8367,8368]],
+    ["reczG9JrgmvT8ZGRy", "Ferry Deck Skyline Still", [8305,8306,8307]],
+    ["recz24MquTRqY1Sul", "Bryant Park Winter Loop", [7950,7951,7952]],
+  ];
+  const cards = fixtures.flatMap(([content_item_id,title,numbers]) =>
+    numbers.map((output_id) => ({id: "recOutput"+output_id, content_item_id, title, output_id, content_id: null})));
+  const groups = groupByContent(cards);
+  assert.equal(groups.length,4);
+  assert.deepEqual(Array.from(groups, group => group.cards.map(card => card.output_id).join(",")),
+    ["8393,8394","8366,8367,8368","8305,8306,8307","7950,7951,7952"]);
+  assert.equal(cards.length,11,"No legitimate output is lost");
+});
+test("Legacy projections group by linked ID or numeric Content_ID but never by title", () => {
+  const groups = groupByContent([
+    {id:"recOld1",content_id:"recLinkedParent",title:"Shared"},
+    {id:"recOld2",content_id:"recLinkedParent",title:"Shared"},
+    {id:"recNumeric1",content_id:567,title:"Shared"},
+    {id:"recNumeric2",content_id:"567",title:"Shared"},
+    {id:"recDifferent",content_item_id:"recOtherParent",content_id:"recLinkedParent",title:"Shared"},
+    {id:"recOrphan1",title:"Shared"},
+    {id:"recOrphan2",title:"Shared"},
+  ]);
+  assert.deepEqual(Array.from(groups, group=>[group.key, group.cards.length]), [
+    ["content:recLinkedParent",2],["legacy-content:567",2],
+    ["content:recOtherParent",1],["solo:recOrphan1",1],["solo:recOrphan2",1],
+  ]);
+});
