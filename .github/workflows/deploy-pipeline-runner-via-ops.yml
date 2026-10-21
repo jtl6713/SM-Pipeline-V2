@@ -283,3 +283,5 @@ jobs:
 # Version 2026-10-21-ig-carousel-guard-qa1029; retain Airtable write authority, Supabase Phase 5 circuit breaker, no automatic publish or reapproval.
 
 # 2026-10-21: Deploy PR #1035 verified AP4C expired parent => fresh children on AP1C, protecting output 7856's Oct 23 schedule and all future carousel parents; keep Airtable authoritative and publishing time guards.
+
+# 2026-10-21: Deploy merged PR #1038 FB0 manifest-backed doubled-slide auto-recovery. Airtable remains authoritative; publish idempotency unchanged.
