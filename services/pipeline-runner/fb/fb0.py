@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from airtable.client import AirtableClient
-from airtable.constants import PLATFORM_OUTPUTS_TABLE
+from airtable.constants import CAROUSEL_SLIDES_TABLE, PLATFORM_OUTPUTS_TABLE
 from asset.helpers import parse_int
 from carousel.timeutil import iso_utc, stamp_minutes
-from fb.assets import is_slideshow_route, list_ready_slides, package_revision, quoted_url_array
+from fb.assets import canonical_doubled_slide_repair, is_slideshow_route, list_ready_slides, package_revision, quoted_url_array
 from fb.common import append_note, preview, retry_at, unlock_fields, valid_record_id
 from fb.constants import (
     DEFAULT_IMAGE_STAGE_MAX_RETRIES,
@@ -104,7 +104,36 @@ def process_request(
             normalize["FB_Image_Publish_Mode"] = "Multi-Photo Collage"
         client.update_record(PLATFORM_OUTPUTS_TABLE, record_id, normalize, typecast=True)
 
-    slides = list_ready_slides(client, field_str(output, "Output_ID"), max_photos=max_photos)
+    slides = list_ready_slides(client, field_str(output, "Output_ID"), max_photos=max(2, max_photos * 2))
+    expected_count = expected if expected is not None else 0
+    recovery = canonical_doubled_slide_repair(output, slides, expected_count)
+    if recovery:
+        canonical, surplus, url_updates = recovery
+        for row in canonical:
+            changes = url_updates.get(row["id"])
+            if changes:
+                client.update_record(CAROUSEL_SLIDES_TABLE, row["id"], changes, typecast=True)
+        for row in surplus:
+            client.update_record(CAROUSEL_SLIDES_TABLE, row["id"], {
+                "Deleted From Carousel": True,
+                "Platform Output": [],
+            }, typecast=True)
+        # Read back from Airtable, not an assumed successful mutation: publication
+        # is gated on the exact ordered set being present and approved.
+        slides = list_ready_slides(client, field_str(output, "Output_ID"), max_photos=max(2, max_photos * 2))
+        if len(slides) != expected_count or [
+            row["id"] for row in slides
+        ] != [row["id"] for row in canonical]:
+            raise RuntimeError("QA-FB0-DOUBLE-SLIDE-SETS: post-repair linked assets not canonical")
+        result["qa_duplicate_repaired"] = len(surplus)
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE, record_id, {
+                "Output_Notes": append_note(
+                    output, f"QA-FB0-DOUBLE-SLIDE-SETS repaired {len(surplus)} surplus linked slides "
+                    f"from approved ordered Drive manifest at {stamp_minutes()}; original media retained."
+                ),
+            }, typecast=True,
+        )
     actual = len(slides)
     result["slide_count"] = actual
     result["requested_image_count"] = requested
