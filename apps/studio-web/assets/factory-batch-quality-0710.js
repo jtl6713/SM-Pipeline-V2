@@ -200,24 +200,21 @@
     render(selectedProfile(), { quality_status: "ok", quality_signals: [], output_failures: { status: "ok", count: state.failures.length, items: state.failures } });
     const results = [];
     try {
-      // Bound outstanding mutations, rather than sending another Facebook burst.
-      for (let at = 0; at < allowed.length; at += 2) {
-        const batch = allowed.slice(at, at + 2);
-        const done = await Promise.all(batch.map(async item => {
-          try {
-            const res = await fetch("/api/operations/outputs/" + encodeURIComponent(item.record_id) + "/schedule", {
-              method: "POST", credentials: "same-origin", cache: "no-store",
-              headers: { "Content-Type": "application/json", Accept: "application/json" },
-              body: JSON.stringify({ quality_rate_limit_recovery: true }),
-            });
-            const body = await res.json().catch(() => ({}));
-            if (!res.ok || body.ok === false) throw new Error(body.error || body.message || "HTTP " + res.status);
-            return { id: item.output_id || item.record_id, ok: true };
-          } catch (error) {
-            return { id: item.output_id || item.record_id, ok: false, error: error.message || String(error) };
-          }
-        }));
-        results.push(...done);
+      // Sequential requests are deliberate. With the legacy non-atomic scheduling
+      // flag, simultaneous resets could select the same available Facebook slot.
+      for (const item of allowed) {
+        try {
+          const res = await fetch("/api/operations/outputs/" + encodeURIComponent(item.record_id) + "/schedule", {
+            method: "POST", credentials: "same-origin", cache: "no-store",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({ quality_rate_limit_recovery: true }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok || body.ok === false) throw new Error(body.error || body.message || "HTTP " + res.status);
+          results.push({ id: item.output_id || item.record_id, ok: true });
+        } catch (error) {
+          results.push({ id: item.output_id || item.record_id, ok: false, error: error.message || String(error) });
+        }
       }
       const successes = results.filter(result => result.ok).length;
       const failures = results.filter(result => !result.ok);
