@@ -231,3 +231,37 @@ test("Desk and Factory quality feed promotes exact Instagram classifications to 
     assert.match(worker, new RegExp('"' + kind + '"'));
   }
 });
+
+
+test("Quality Agent recognizes Facebook FB0 doubled source links without a generic publish error", () => {
+  for (const [id, actual, expected] of [[6982,8,4],[7040,8,4],[7060,2,1]]) {
+    const found = describeFailedOutput(record("recFb" + id, {
+      Output_ID:id, Platform:"Facebook", Platform_Output_Type:"Facebook Photo Set",
+      Output_Status:"Approved for Publishing", Publish_Status:"Ready to Publish",
+      FB_Publish_Status:"Manual Fallback Required", Manual_Fallback_Required:true,
+      Publish_Error_Stage:"FB0_ASSETS", Image_Count:expected,
+      "Carousel Slides":Array.from({length:actual},(_,i)=>"rec"+i),
+    }));
+    assert.equal(found.signature, "QA-FB0-DOUBLE-SLIDE-SETS");
+    assert.equal(found.recovery, "healer_eligible");
+    assert.match(found.action,/FB0 can repair duplicates automatically/);
+    assert.match(found.action,/Needs Eyes/);
+  }
+  assert.match(FAILED_OUTPUT_FORMULA,/Manual_Fallback_Required/);
+  assert.match(worker,/fb_duplicate_slide_sets/);
+});
+
+test("FB0 cannot automatically repair an incomplete or published Facebook output", () => {
+  const bad = describeFailedOutput(record("recFbIncomplete",{
+    Platform:"Facebook", FB_Publish_Status:"Manual Fallback Required",
+    Publish_Error_Stage:"FB0_ASSETS", Image_Count:4,
+    "Carousel Slides":["recOnlyOne"], 
+  }));
+  assert.notEqual(bad.signature,"QA-FB0-DOUBLE-SLIDE-SETS");
+  const published = describeFailedOutput(record("recFbPublished",{
+    Platform:"Facebook", FB_Publish_Status:"Manual Fallback Required",
+    Publish_Error_Stage:"FB0_ASSETS", Image_Count:1,
+    "Carousel Slides":["rec1","rec2"],Platform_Post_ID:"known"
+  }));
+  assert.notEqual(published.signature,"QA-FB0-DOUBLE-SLIDE-SETS");
+});
