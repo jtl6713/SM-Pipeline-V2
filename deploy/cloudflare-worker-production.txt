@@ -588,4 +588,4 @@ Deploy Vibe Cut source-video validation safeguard (PR #1006, merged 7e9a593e) 20
 2026-10-20: QA Facebook recovery HTTP500 diagnosis PR #1020: authenticated read-only MAE preflight, live preflight verification bridge, bounded bulk fail-fast. Airtable remains source of truth; no new publication paths.
 
 Deploy Worker: complete paginated MAE occupancy for safe Facebook Quality Agent recovery; keep strict collision guards.
-Deploy Worker 0.10.672-tiktok-published-url-edit: preserve original TikTok publication metadata when operator corrects public URL; PR 1024 (2026-10-21).
+Redeploy Worker 0.10.671-quality-failed-output-recovery with TikTok URL-correction patch: preserve original TikTok publication metadata when operator corrects public URL; PR 1024 (2026-10-21).
