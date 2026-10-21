@@ -869,7 +869,7 @@ export function validateVibeCutSourceAssets(assets, { allowPhotoMontage = false 
     const mime = String(asset?.mime_type || "").trim().toLowerCase();
     const filename = String(asset?.name || "").trim().toLowerCase();
     return kind === "photo" || kind === "image"
-      || (!kind && (mime.startsWith("image/") || /\\.(?:jpg|jpeg|png|webp|heic)$/.test(filename)));
+      || (!kind && (mime.startsWith("image/") || /\.(?:jpg|jpeg|png|webp|heic)$/.test(filename)));
   });
   if (allowPhotoMontage && photos) {
     const pending = new Set(["multipart_pending", "pending", "uploading", "failed", "compressing", "downloading", "queued"]);
