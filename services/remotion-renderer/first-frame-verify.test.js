@@ -71,3 +71,20 @@ test('rejects a different intended cover without replacing or modifying the MP4'
     fs.rmSync(dir, {recursive: true, force: true});
   }
 });
+
+
+test('rejects a thumbnail with the wrong aspect before silently cropping', {skip: !haveFFmpeg}, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-youtube-cover-ratio-'));
+  try {
+    const {video, preview} = fixture(dir, 'vertical');
+    const wrong = path.join(dir, 'wide.jpg');
+    run('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi',
+      '-i', 'color=c=white:s=320x180', '-frames:v', '1', wrong]);
+    await assert.rejects(
+      verifyFirstFrame({videoPath: video, coverPath: wrong, previewPath: preview}),
+      /cover aspect mismatch/,
+    );
+  } finally {
+    fs.rmSync(dir, {recursive: true, force: true});
+  }
+});
