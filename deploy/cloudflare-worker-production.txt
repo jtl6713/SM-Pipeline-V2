@@ -584,3 +584,5 @@ Deploy Vibe Cut source-video validation safeguard (PR #1006, merged 7e9a593e) 20
 
 2026-10-20: Deploy guarded Factory Quality Agent Facebook Return to Approved recovery from PR #1016 after preserving PR #1017 frame-progress release.
 2026-10-20: Deploy merged PR #1018 Vibe Cut verified MOV-only masters, no-library still replacement, clean notes and plan guards; Airtable source-of-truth and existing circuit breakers unchanged.
+
+2026-10-20: QA Facebook recovery HTTP500 diagnosis PR #1020: authenticated read-only MAE preflight, live preflight verification bridge, bounded bulk fail-fast. Airtable remains source of truth; no new publication paths.
