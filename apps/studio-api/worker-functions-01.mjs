@@ -8518,7 +8518,7 @@ export async function buildItem4OutputPlan(request, env, url, authorization) {
   const assets=item4AssetManifest(record).sort((a,b)=>Number(a.order||0)-Number(b.order||0));
   // Accept a verified still-photo Vibe Cut as a montage while rejecting incomplete or mixed sources.
   if (studioIsVibeCut(record)) {
-    const source = validateVibeCutSourceAssets(assets, { allowPhotoMontage: /(?:^|\\n)allow-vibe-cut-photo-montage=1(?:\\s|;|$)/i.test(studioRequestNotesText(record)) });
+    const source = validateVibeCutSourceAssets(assets, { allowPhotoMontage: /(?:^|\n)allow-vibe-cut-photo-montage=1(?:\s|;|$)/i.test(studioRequestNotesText(record)) });
     if (!source.ok || String(f(record, "Studio_Master_Asset_Status") || "").trim() !== "Ready") {
       throw new HttpError(409, "Vibe Cut requires its original uploaded and processed video before platform planning. " + (source.reason || "Video processing is not ready."));
     }
@@ -10629,7 +10629,7 @@ export async function enqueueStudioProductionJob(env, requestId, options = {}) {
   // montage. The renderer already handles stills with the existing photo sequence
   // route; reject mixed, unavailable, or incomplete sources before queuing.
   if (vibeCut) {
-    const sourceCheck = validateVibeCutSourceAssets(item4AssetManifest(record), { allowPhotoMontage: /(?:^|\\n)allow-vibe-cut-photo-montage=1(?:\\s|;|$)/i.test(studioRequestNotesText(record)) });
+    const sourceCheck = validateVibeCutSourceAssets(item4AssetManifest(record), { allowPhotoMontage: /(?:^|\n)allow-vibe-cut-photo-montage=1(?:\s|;|$)/i.test(studioRequestNotesText(record)) });
     if (!sourceCheck.ok) {
       const now = new Date().toISOString();
       const detail = `Vibe Cut source blocked: ${sourceCheck.reason}`;
