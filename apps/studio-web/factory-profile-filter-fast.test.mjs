@@ -15,7 +15,7 @@ function createSelect(options) {
     addEventListener() {},
     set innerHTML(markup) {
       this.html = markup;
-      this.options = [...markup.matchAll(/<option value="([^"]*)">([^<]*)<\\/option>/g)]
+      this.options = [...markup.matchAll(/<option value="([^"]*)">([^<]*)/g)]
         .map((match) => ({ value: match[1], textContent: match[2] }));
       this.value = this.options[0]?.value || "";
     },
