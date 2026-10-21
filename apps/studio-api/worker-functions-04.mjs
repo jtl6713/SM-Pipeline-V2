@@ -1023,11 +1023,22 @@ export async function studioReconcileTiktokDrafts(env, options = {}) {
 /*__STUDIO_WORKER_END:studioReconcileTiktokDrafts__*/
 
 export async function studioReconcileFacebookPhotos(env, options = {}) {
-  if (studioFacebookGraphPublishHeld(env)) return [];
+  // Graph publish hold blocks creation, NOT finalization of a confirmed
+  // pre-existing Facebook post. Unlike FB0/FB1/FB2, FB3 only reconciles
+  // Platform_Post_ID, which was already assigned by the publishing provider.
+  // Do not re-dispatch or create a new post while Graph publishing is held.
+  const graphPublishHeld = studioFacebookGraphPublishHeld(env);
   if (pipelineStageBackend(env, "FB0").mode !== "python") return [];
   const limit = Number(options.limit || 3);
   const results = [];
+  // Finalize first; otherwise queued FB0/FB1/FB2 work can consume the cron
+  // budget and leave already-public posts in Publishing for days.
   const scans = [
+    {
+      stage: "fb3",
+      pulse: studioPulseFb3,
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Platform_Post_ID}!="",{Publish_Status}!="Published")',
+    },
     {
       stage: "fb0",
       pulse: studioPulseFb0,
@@ -1048,16 +1059,12 @@ export async function studioReconcileFacebookPhotos(env, options = {}) {
       pulse: studioPulseFb2r,
       formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Platform_Post_ID}="",{FB_Publish_Status}="Reconcile Pending")',
     },
-    {
-      stage: "fb3",
-      pulse: studioPulseFb3,
-      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Platform_Post_ID}!="",{Publish_Status}!="Published")',
-    },
   ];
   for (const scan of scans) {
+    if (graphPublishHeld && scan.stage !== "fb3") continue;
     let rows = [];
     try {
-      rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit, filterFormula: scan.formula });
+      rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit, filterFormula: scan.formula, sortField: "Scheduled_Post_Date", sortDirection: "asc" });
     } catch (error) {
       console.warn(`facebook photo ${scan.stage} reconcile scan failed`, error);
       continue;
