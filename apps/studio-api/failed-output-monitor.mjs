@@ -146,13 +146,13 @@ export function describeFailedOutput(record, nowMs = Date.now()) {
   if (!publishedEvidence && isIgCarousel) {
     const doubled = expected > 0 && linked === expected * 2;
     if (/AP1C slide-set mismatch|QA-IG-AP1C-DUPLICATE-SLIDE-SETS/i.test(igError) && (
-        doubled || /final view (\\d+), public-ready (\\d+), expected (\\d+)/i.test(igError)
+        doubled || /final view (\d+), public-ready (\\d+), expected (\\d+)/i.test(igError)
       )) {
       signature = "QA-IG-AP1C-DUPLICATE-SLIDE-SETS";
       recovery = "needs_attention";
       reason = igError;
       action = "Quarantine AP1C. Compare every linked slide against the immutable ordered selected-asset manifest; detach only provably noncanonical links (never delete source media). If mapping is ambiguous, escalate Needs Eyes. Once exactly N distinct approved public URLs remain, resume AP1C under a fenced revision lease.";
-    } else if (/AP3C parent creation failed.*HTTP 5\\d\\d|QA-IG-AP3C-AMBIGUOUS-PARENT/i.test(igError)) {
+    } else if (/AP3C parent creation failed.*HTTP 5\d\d|QA-IG-AP3C-AMBIGUOUS-PARENT/i.test(igError)) {
       signature = "QA-IG-AP3C-AMBIGUOUS-PARENT";
       recovery = "needs_attention";
       reason = igError;
