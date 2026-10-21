@@ -16,8 +16,8 @@ test("vibe source upload replaces stale photos and clears their old crop plan", 
   assert.ok(source.includes('Studio_Variant_Manifest_JSON: null'));
 });
 
-test("vibe plan rejects library-photo masters and timeline auto-prepare", () => {
-  assert.ok(source.includes("validateVibeCutSourceAssets(assets)"));
+test("vibe plan allows validated photo montage while retaining source guards", () => {
+  assert.ok(source.includes("validateVibeCutSourceAssets(assets, { allowPhotoMontage: true })"));
   assert.ok(source.includes("Vibe Cut requires its original uploaded and processed video"));
   assert.ok(source.includes("if (studioIsVibeCut(record)) return false;"));
 });
