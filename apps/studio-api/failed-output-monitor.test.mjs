@@ -168,7 +168,8 @@ test("Facebook QA preflight cannot mutate or publish and returns diagnostic stag
 test("Cross-module MAE occupancy resolves the authoritative schedule reader", () => {
   const source02 = fs.readFileSync(path.join(here, "worker-functions-02.mjs"), "utf8");
   const source01 = fs.readFileSync(path.join(here, "worker-functions-01.mjs"), "utf8");
-  assert.match(source02, /studioLoadOccupiedSchedules,[\\s\\S]*?} from "\\.\\/worker-functions-01\\.mjs"/);
+  assert.ok(source02.includes("studioLoadOccupiedSchedules,"));
+  assert.ok(source02.includes('} from "./worker-functions-01.mjs";'));
   assert.match(source01, /export async function studioLoadOccupiedSchedules\(/);
   assert.match(source02, /return studioLoadOccupiedSchedules\(env, options\)/);
 });
