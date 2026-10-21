@@ -8461,7 +8461,7 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function receiveMasterPhotos(fileList) {
-    if ($("ezContinue")) $("ezContinue").hidden = true;
+    if ($("ezContinue") && !(ezIsVibeCut() && vibeCutPersistedSource())) $("ezContinue").hidden = true;
     const incoming = Array.from(fileList || []);
     item4AdoptKindForIncomingFiles(incoming);
     const unsupportedNote = item4UnsupportedPhotoMessage(incoming);
