@@ -349,7 +349,7 @@ test("Vibe Cut can safely render eight selected stills as a music-driven photo m
 test("Vibe Cut production enqueue fails closed before runner receives photo masters", () => {
   const worker = readStudioWorkerSource();
   assert.match(worker, /allow-vibe-cut-photo-montage=1/);
-  assert.match(worker, /validateVibeCutSourceAssets\\(item4AssetManifest\\(record\\), \\{ allowPhotoMontage:/);
+  assert.ok(worker.includes("validateVibeCutSourceAssets(item4AssetManifest(record), { allowPhotoMontage:"));
   assert.match(worker, /route: "vibe-cut:invalid-source"/);
   assert.match(worker, /throw new HttpError\(409, detail\)/);
 });
