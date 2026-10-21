@@ -1,0 +1,152 @@
+name: One-shot QA five-output recovery audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/qa-five-output-recovery-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Verify original approved preview assets (no mutations)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, urllib.request, json
+          outputs = ("recYjLdlux4hAvZts", "recr1riuXe2jYA5df")
+          for output in outputs:
+              rows = []
+              for n in range(4):
+                  url = f"https://media.chicagoshining.com/studio/previews/lettered/{output}/{n}.jpg"
+                  try:
+                      req = urllib.request.Request(url, headers={"User-Agent":"ChicagoShining-QA-Audit/1.0"})
+                      with urllib.request.urlopen(req,timeout=18) as resp:
+                          payload=resp.read(12*1024*1024+1)
+                          rows.append({"slide":n+1,"http":resp.status,
+                                       "type":resp.headers.get("Content-Type"),
+                                       "bytes":len(payload),"sha256":hashlib.sha256(payload).hexdigest()[:20],
+                                       "image_magic":payload[:3].hex(),"too_large":len(payload)>12*1024*1024})
+                  except Exception as exc:
+                      rows.append({"slide":n+1,"error":str(exc)[:220]})
+              print("MEDIA_PREVIEW_PROBE " + json.dumps({"output_record_id":output,"slides":rows}))
+          PY
+
+      - name: Read exact Factory R2 ledger without writing to R2
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          API="$ROOT/workers/scripts/chicagoshining-studio-api"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          NAME="qa-factory-audit-${GITHUB_RUN_ID}"
+          function cleanup() {
+            curl -sS --max-time 20 -X DELETE "$ROOT/workers/scripts/$NAME" -H "$AUTH" >/dev/null || true
+          }
+          trap cleanup EXIT
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/qa-deployments.json
+          BEFORE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/qa-deployments.json)
+          curl -fsS "$API/versions/$BEFORE" -H "$AUTH" -o /tmp/qa-version.json
+          BUCKET=$(jq -er '[.result.resources.bindings[]|select(.name=="STUDIO_MEDIA")][0]|.bucket_name//.bucket' /tmp/qa-version.json)
+          TOKEN=$(openssl rand -hex 32)
+          export TOKEN BUCKET
+          cat > /tmp/qa-factory-read-worker.js <<'JS'
+          const prefix = "studio/state/factory-approvals/v2/";
+          export default {
+            async fetch(request, env) {
+              if (request.headers.get("x-qa-token") !== env.AUDIT_TOKEN)
+                return new Response("Not found", {status: 404});
+              const targets = new Set([7932,7934]);
+              const cutoff = Date.now()-8*86400*1000;
+              let cursor, scanned=0, examined=0, complete=true;
+              const matches=[];
+              do {
+                const opts={prefix:prefix+"jobs/",limit:1000,include:["customMetadata"]};
+                if (cursor) opts.cursor=cursor;
+                const page=await env.STUDIO_MEDIA.list(opts);
+                for (const item of page.objects || []) {
+                  scanned++;
+                  const metadata=item.customMetadata || {};
+                  const uploaded=Date.parse(item.uploaded || "");
+                  if (Number.isFinite(uploaded) && uploaded<cutoff
+                      && Number(metadata.factory_failed||0)===0) continue;
+                  const obj=await env.STUDIO_MEDIA.get(item.key);
+                  if (!obj) continue;
+                  examined++;
+                  let data;
+                  try {data=await obj.json();} catch {continue;}
+                  const found=(data.items||[]).filter(x=>targets.has(Number(x.output_id)));
+                  if (!found.length) continue;
+                  const profile=(item.key.match(/\/jobs\/(rec[A-Za-z0-9]+)\//)||[])[1];
+                  const groupId=data.group_request_id||null;
+                  let group=null;
+                  if (groupId) {
+                    const groupObj=await env.STUDIO_MEDIA.get(prefix+"groups/"+groupId+".json");
+                    if (groupObj) {
+                      const groupData=await groupObj.json();
+                      group={id:groupId,status:groupData.status,
+                        linked_items:(groupData.records||[]).filter(x=>targets.has(Number(x.output_id))),
+                        children:groupData.children};
+                    }
+                  }
+                  matches.push({profile_id:profile,request_id:data.request_id,
+                    status:data.status,group,etag:obj.etag,
+                    matching_items:found.map(x=>({
+                      id:x.id,output_id:x.output_id,status:x.status,error:x.error,
+                      attempts:x.attempts,total_attempts:x.total_attempts,
+                      timeline:(x.timeline||[]).slice(-16)
+                    }))});
+                }
+                cursor=page.truncated?page.cursor:null;
+                if (scanned>=14000 || examined>=3000){complete=false;break;}
+              }while(cursor);
+              return Response.json({complete,scanned,examined,matches});
+            }
+          };
+          JS
+          python - <<'PY'
+          import os,json
+          meta={
+           "main_module":"worker.js",
+           "compatibility_date":"2026-08-02",
+           "bindings":[
+             {"type":"r2_bucket","name":"STUDIO_MEDIA","bucket_name":os.environ["BUCKET"]},
+             {"type":"plain_text","name":"AUDIT_TOKEN","text":os.environ["TOKEN"]},
+           ],
+          }
+          open("/tmp/qa-factory-metadata.json","w").write(json.dumps(meta))
+          PY
+          code=$(curl -sS --max-time 90 -o /tmp/qa-worker-create.json -w '%{http_code}' \
+              -X PUT "$ROOT/workers/scripts/$NAME/content" -H "$AUTH" \
+              -F 'metadata=@/tmp/qa-factory-metadata.json;type=application/json' \
+              -F 'worker.js=@/tmp/qa-factory-read-worker.js;type=application/javascript+module;filename=worker.js')
+          if [[ "$code" -lt 200 || "$code" -ge 300 ]]; then
+            jq '{errors,success}' /tmp/qa-worker-create.json
+            exit 1
+          fi
+          curl -fsS -X POST "$ROOT/workers/scripts/$NAME/subdomain" -H "$AUTH" \
+            -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' >/tmp/qa-subdomain-enable.json
+          curl -fsS "$ROOT/workers/subdomain" -H "$AUTH" -o /tmp/qa-account-subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/qa-account-subdomain.json)
+          for i in $(seq 1 8); do
+            status=$(curl -sS --max-time 110 -o /tmp/qa-factory-response.json -w '%{http_code}' \
+              -H "x-qa-token: $TOKEN" "https://$NAME.$SUB.workers.dev/" || true)
+            if [[ "$status" == 200 ]]; then break; fi
+            sleep 4
+          done
+          test "$status" = 200
+          echo 'FACTORY_LEDGER_AUDIT'
+          jq -c '.' /tmp/qa-factory-response.json
+          jq -e '.complete==true' /tmp/qa-factory-response.json >/dev/null
+          echo 'FACTORY_LEDGER_AUDIT_COMPLETE'
