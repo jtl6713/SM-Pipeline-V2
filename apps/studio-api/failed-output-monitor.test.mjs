@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { scanOutstandingFailedOutputs, describeFailedOutput, failedOutputRetryGate } from "./failed-output-monitor.mjs";
+import { scanOutstandingFailedOutputs, describeFailedOutput, failedOutputRetryGate, facebookRateLimitResetReason } from "./failed-output-monitor.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const worker = fs.readFileSync(path.join(here, "worker-functions-04.mjs"), "utf8");
@@ -105,4 +105,43 @@ test("render recovery counts only eligible failed-render attempts and remains bo
   assert.match(loop, /if \(failedRenderRetries >= 6\) break/);
   assert.match(loop, /if \(failedOutputRetryGate\(row\)\) continue/);
   assert.match(loop, /failedRenderRetries\s*\+=\s*1;[\s\S]*?airtableFetch/);
+});
+
+test("Facebook rate-limit failures can return to Approved only with safe publication and media evidence", () => {
+  const safe = record("recFacebook", {
+    Platform: "Facebook", Review_Status: "Approved", Publish_Status: "Failed",
+    Publish_Error_Message: "Facebook rate limit (368/1390008): Try later",
+    Final_File_ID: "fileReady", Render_Status: "Completed", Publish_Attempt_Count: 1,
+  });
+  assert.equal(facebookRateLimitResetReason(safe), null);
+  assert.equal(describeFailedOutput(safe).can_return_to_approved, true);
+  const blocked = (changes, reason) =>
+    assert.equal(facebookRateLimitResetReason(record("recFacebook", { ...safe.fields, ...changes })), reason);
+  blocked({ Platform: "Instagram" }, "not_facebook");
+  blocked({ Publish_Error_Message: "OAuth token expired" }, "not_rate_limited");
+  blocked({ Review_Status: "Needs Review" }, "approval_not_confirmed");
+  blocked({ Platform_Post_ID: "remote_post" }, "publication_evidence");
+  blocked({ FB_Post_ID: "remote_post" }, "publication_evidence");
+  blocked({ Do_Not_Publish: true }, "publication_held");
+  blocked({ Publish_Attempt_Count: 3 }, "retry_limit");
+  blocked({ Studio_Publish_Dispatch_Count: 3 }, "retry_limit");
+  blocked({ Render_Status: "Failed" }, "render_failed");
+  blocked({ Final_File_ID: "", Final_File_URL: "" }, "finished_media_missing");
+  blocked({ Publish_Locked_By: "runner", Publish_Locked_At: new Date().toISOString() }, "publish_locked");
+});
+
+test("Facebook QA reapproval uses original protected scheduling route and cooldown-aware MAE", () => {
+  assert.match(worker, /quality_rate_limit_recovery === true/);
+  assert.match(worker, /facebookRateLimitResetReason\(authoritative\)/);
+  assert.match(worker, /qualityFacebookRecoverySlot\(/);
+  assert.match(worker, /48 \* 60 \* 60 \* 1000/);
+  assert.match(worker, /gapMs: 12 \* 60 \* 60 \* 1000/);
+  assert.match(worker, /Output_Status: "Approved for Publishing"/);
+  assert.match(worker, /Publish_Status: "Ready to Schedule"/);
+  assert.match(worker, /runAtomicScheduleTransaction/);
+  assert.match(worker, /fresh_output_failures/);
+  assert.match(factory, /data-qa-open/);
+  assert.match(factory, /data-qa-reapprove-all/);
+  assert.match(factory, /window\.confirm/);
+  assert.match(factory, /Promise\.all\(batch\.map/);
 });
