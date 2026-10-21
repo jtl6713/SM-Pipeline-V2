@@ -13881,8 +13881,10 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
       platform_output_record_id: match[1],
       content_item_id: studioFirstLinkedId(f(existing, "Content_Item")) || null,
       operation_id: String(
-        payload?.schedule_operation_id
-        || `schedule:${match[1]}:${previousRaw || "blank"}->${value || (publishNowImmediate ? "immediate" : "auto")}`
+        qualityRecovery
+          ? `quality-facebook-reset:${match[1]}:${String(f(existing, "Publish_Attempt_Count") || "0")}:${previousRaw || "blank"}`
+          : (payload?.schedule_operation_id
+            || `schedule:${match[1]}:${previousRaw || "blank"}->${value || (publishNowImmediate ? "immediate" : "auto")}`)
       ).replace(/[^A-Za-z0-9._:>+-]+/g, "_").slice(0, 180),
     }, {
       legacy: async () => {
