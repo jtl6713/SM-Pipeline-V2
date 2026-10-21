@@ -326,9 +326,29 @@ test("Vibe Cut accepts a completed real video but blocks an incomplete or mixed 
   }]).ok, false);
 });
 
+test("Vibe Cut can safely render eight selected stills as a music-driven photo montage", () => {
+  const photos = Array.from({ length: 8 }, (_, i) => ({
+    name: `Navy-Pier-Fireworks-${i + 1}.jpg`,
+    mime_type: "image/jpeg",
+    media_kind: "photo",
+    google_drive_file_id: `photo-${i}`,
+    upload_status: "complete",
+  }));
+  assert.equal(validateVibeCutSourceAssets(photos).ok, false, "strict video-only callers remain strict");
+  const result = validateVibeCutSourceAssets(photos, { allowPhotoMontage: true });
+  assert.equal(result.ok, true);
+  assert.equal(result.source_kind, "photo_montage");
+  assert.equal(validateVibeCutSourceAssets(photos.slice(0, 1), { allowPhotoMontage: true }).ok, false);
+  assert.equal(validateVibeCutSourceAssets([...photos.slice(0, 7), {
+    name: "other.mov", mime_type: "video/quicktime", media_kind: "video", google_drive_file_id: "video",
+  }], { allowPhotoMontage: true }).ok, false);
+  assert.equal(validateVibeCutSourceAssets(photos.map((x, i) => i === 3 ? { ...x, upload_status: "failed" } : x), { allowPhotoMontage: true }).ok, false);
+  assert.equal(validateVibeCutSourceAssets(photos.map((x, i) => i === 4 ? { ...x, google_drive_file_id: "" } : x), { allowPhotoMontage: true }).ok, false);
+});
+
 test("Vibe Cut production enqueue fails closed before runner receives photo masters", () => {
   const worker = readStudioWorkerSource();
-  assert.match(worker, /validateVibeCutSourceAssets\(item4AssetManifest\(record\)\)/);
+  assert.match(worker, /validateVibeCutSourceAssets\(item4AssetManifest\(record\), \{ allowPhotoMontage: true \}\)/);
   assert.match(worker, /route: "vibe-cut:invalid-source"/);
   assert.match(worker, /throw new HttpError\(409, detail\)/);
 });
