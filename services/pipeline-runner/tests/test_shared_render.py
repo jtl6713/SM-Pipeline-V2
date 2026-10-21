@@ -238,3 +238,43 @@ def test_propagate_fields_from_source():
     assert fields["Final_File_ID"] == "abc"
     assert fields["Render_Status"] == "Rendered"
     assert fields["Remotion_Job_ID"] == ""
+
+
+def test_youtube_first_frame_canary_does_not_inherit_instagram_render(monkeypatch):
+    """The YouTube MP4 must be independent when exact canary rendering is on."""
+    monkeypatch.setenv("YOUTUBE_FIRST_FRAME_MODE", "canary")
+    monkeypatch.setenv("YOUTUBE_FIRST_FRAME_CANARY_OUTPUT_IDS", "recYT")
+    common = dict(
+        Aspect_Ratio="9:16",
+        Composition_ID="ChicagoShiningPhotoSequence",
+        Render_Clip_List_JSON='[{"url":"https://example.com/still.jpg","durationFrames":90}]',
+    )
+    ig = _output(id="recIG", Platform="Instagram", Studio_Output_Type="Reel", **common)
+    yt = _output(id="recYT", Platform="YouTube", Studio_Output_Type="Short", **common)
+    fb = _output(id="recFB", Platform="Facebook", Studio_Output_Type="Reel", **common)
+    assert is_shared_render_eligible(yt) is False
+    plan = build_shared_render_plan([ig, fb, yt])
+    assert plan["recYT"]["role"] == "solo"
+    assert plan["recYT"]["canonical_id"] == "recYT"
+    assert plan["recIG"]["canonical_id"] == "recIG"
+    assert plan["recFB"]["role"] == "sibling"
+    monkeypatch.setenv("YOUTUBE_FIRST_FRAME_CANARY_OUTPUT_IDS", "not-this-output")
+    assert is_shared_render_eligible(yt) is True
+
+
+def test_global_youtube_first_frame_isolation_and_platform_unaffected(monkeypatch):
+    monkeypatch.setenv("YOUTUBE_FIRST_FRAME_MODE", "all")
+    common = dict(Aspect_Ratio="9:16", Composition_ID="ChicagoShiningPhotoSequence",
+                  Render_Clip_List_JSON='[{"url":"https://example.com/still.jpg","durationFrames":90}]')
+    yt = _output(id="recYT", Platform="YouTube", Studio_Output_Type="Short", **common)
+    ig = _output(id="recIG", Platform="Instagram", Studio_Output_Type="Reel", **common)
+    fb = _output(id="recFB", Platform="Facebook", Studio_Output_Type="Reel", **common)
+    assert is_shared_render_eligible(yt) is False
+    assert is_shared_render_eligible(ig) is True
+    assert is_shared_render_eligible(fb) is True
+    plan = build_shared_render_plan([ig, fb, yt])
+    assert plan["recYT"]["role"] == "solo"
+    assert plan["recFB"]["role"] == "sibling"
+    assert plan["recIG"]["role"] == "canonical"
+    monkeypatch.setenv("YOUTUBE_FIRST_FRAME_MODE", "off")
+    assert build_shared_render_plan([ig, fb, yt])["recYT"]["role"] == "sibling"
