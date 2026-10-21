@@ -1,0 +1,156 @@
+name: Factory exact deleted-output ledger reconciliation 7932 7934
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/qa-factory-7932-7934-reconcile.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Exact-item CAS R2 reconciliation (no approval or publication)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          API="$ROOT/workers/scripts/chicagoshining-studio-api"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          NAME="qa-factory-reconcile-${GITHUB_RUN_ID}"
+          function cleanup() {
+            curl -sS --max-time 20 -X DELETE "$ROOT/workers/scripts/$NAME" -H "$AUTH" >/dev/null || true
+          }
+          trap cleanup EXIT
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/current-deployments.json
+          BEFORE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/current-deployments.json)
+          curl -fsS "$API/versions/$BEFORE" -H "$AUTH" -o /tmp/worker-version.json
+          BUCKET=$(jq -er '[.result.resources.bindings[]|select(.name=="STUDIO_MEDIA")][0]|.bucket_name//.bucket' /tmp/worker-version.json)
+          TOKEN=$(openssl rand -hex 32)
+          export TOKEN BUCKET
+          cat > /tmp/qa-factory-reconcile-worker.js <<'JS'
+          const prefix="studio/state/factory-approvals/v2";
+          const profile="recgtK8Z7eNADNtVy";
+          const requestId="fgc_c18ca3f5647850c2cc560fd96c4e3ce4a7aee7029e9d5402fa14c5db66da8cfe";
+          const target=[
+            {id:"recL7BfDYb9Xg4EQX", output_id:7932},
+            {id:"recinAYQfjLYgwlKd", output_id:7934},
+          ];
+          const reason="QA-FACTORY-APPROVAL-SOURCE-NOT-FOUND: verified deleted original Airtable cohort 7931-7936 and Content 1446; do not reapprove or recreate";
+          function counts(items) {
+            const n={approved:0,skipped:0,failed:0,pending:0};
+            for(const row of items){
+              if(row.status==="approved") n.approved++;
+              else if(row.status==="already_satisfied"||row.status==="skipped_removed") n.skipped++;
+              else if(row.status==="failed") n.failed++;
+              else n.pending++;
+            }
+            return n;
+          }
+          export default {
+            async fetch(request,env) {
+              if(request.method!=="POST"||request.headers.get("x-qa-token")!==env.AUDIT_TOKEN)
+                return new Response("Not found",{status:404});
+              const key=prefix+"/jobs/"+profile+"/"+requestId+".json";
+              const original=await env.STUDIO_MEDIA.get(key);
+              if(!original)return Response.json({error:"Exact child job missing"},{status:409});
+              const job=await original.json();
+              if(job.schema!=="studio.factory-batch.2"||job.profile_id!==profile||
+                 job.request_id!==requestId||job.group_request_id!=="b62c9cc5-706a-42e6-bc33-a93f98d75173") {
+                return Response.json({error:"Unexpected R2 Factory child identity"},{status:409});
+              }
+              if(new Set(job.items.map(x=>x.id)).size!==job.items.length)
+                return Response.json({error:"Duplicate job item identities"},{status:409});
+              for(const targetItem of target){
+                const row=job.items.find(x=>x.id===targetItem.id&&Number(x.output_id)===targetItem.output_id);
+                if(!row)return Response.json({error:"Exact removed item not present",output_id:targetItem.output_id},{status:409});
+                if(row.status!=="failed"&&row.status!=="skipped_removed")
+                  return Response.json({error:"Unexpected item lifecycle state",output_id:targetItem.output_id,status:row.status},{status:409});
+                if(row.status==="failed"&&!String(row.error||"").includes("INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND"))
+                  return Response.json({error:"Unexpected failure reason; no R2 write",output_id:targetItem.output_id},{status:409});
+              }
+              const untouched=job.items.filter(x=>!target.some(a=>a.id===x.id)).map(x=>JSON.stringify(x));
+              const at=new Date().toISOString();
+              const changed=job.items.map(row=>{
+                if(!target.some(a=>a.id===row.id)||row.status==="skipped_removed")return row;
+                return {...row,status:"skipped_removed",error:null,next_attempt_ms:0,
+                  removed_reason:reason,removed_verified_at:at,removed_verified_by:"quality-agent-PR1032",
+                  timeline:[...(row.timeline||[]),{state:"skipped_removed",at,
+                    attempt:row.total_attempts||0,reason}].slice(-180)};
+              });
+              const count=counts(changed);
+              const status=count.pending?"running":count.failed&&!count.approved&&!count.skipped?"failed":"completed";
+              const next={...job,items:changed,status,updated_at:at};
+              if(changed.some((x,i)=>x!==job.items[i])){
+                const result=await env.STUDIO_MEDIA.put(key,JSON.stringify(next),{
+                  onlyIf:{etagMatches:original.etag},
+                  httpMetadata:{contentType:"application/json"},
+                  customMetadata:{factory_status:status,factory_failed:String(count.failed),
+                    factory_group:String(job.group_request_id)}
+                });
+                if(!result)return Response.json({error:"Concurrent R2 update; nothing overwritten"},{status:409});
+              }
+              const reread=await env.STUDIO_MEDIA.get(key);
+              if(!reread)return Response.json({error:"Postwrite child job absent"},{status:500});
+              const current=await reread.json();
+              const postCount=counts(current.items);
+              const remained=current.items.filter(x=>!target.some(a=>a.id===x.id)).map(x=>JSON.stringify(x));
+              if(JSON.stringify(untouched)!==JSON.stringify(remained)||
+                 !target.every(x=>current.items.some(y=>y.id===x.id&&y.status==="skipped_removed"))){
+                return Response.json({error:"Postwrite unrelated mutation or missing verification"},{status:500});
+              }
+              const groupObj=await env.STUDIO_MEDIA.get(prefix+"/groups/"+job.group_request_id+".json");
+              const group=groupObj?await groupObj.json():null;
+              return Response.json({ok:true,request_id:requestId,profile_id:profile,
+                group_id:job.group_request_id,group_found:!!group,
+                child_status:current.status,verified_output_ids:target.map(x=>x.output_id),
+                counts:postCount,record_ids:target.map(x=>x.id),
+                unchanged_other_items:true});
+            }
+          };
+          JS
+          node --check /tmp/qa-factory-reconcile-worker.js
+          python - <<'PY'
+          import os,json
+          meta={"main_module":"worker.js","compatibility_date":"2026-08-02",
+                "bindings":[{"type":"r2_bucket","name":"STUDIO_MEDIA","bucket_name":os.environ["BUCKET"]},
+                            {"type":"plain_text","name":"AUDIT_TOKEN","text":os.environ["TOKEN"]}]}
+          open("/tmp/reconcile-metadata.json","w").write(json.dumps(meta))
+          PY
+          code=$(curl -sS --max-time 90 -o /tmp/worker-upload.json -w '%{http_code}' \
+            -X PUT "$ROOT/workers/scripts/$NAME/content" -H "$AUTH" \
+            -F 'metadata=@/tmp/reconcile-metadata.json;type=application/json' \
+            -F 'worker.js=@/tmp/qa-factory-reconcile-worker.js;type=application/javascript+module;filename=worker.js')
+          if [[ "$code" -lt 200 || "$code" -ge 300 ]]; then
+            jq '{errors,success}' /tmp/worker-upload.json
+            exit 1
+          fi
+          curl -fsS -X POST "$ROOT/workers/scripts/$NAME/subdomain" -H "$AUTH" \
+            -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' >/tmp/reconcile-subdomain.json
+          curl -fsS "$ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
+          for i in $(seq 1 8); do
+            code=$(curl -sS --max-time 60 -o /tmp/reconcile-response.json -w '%{http_code}' \
+              -X POST -H "x-qa-token: $TOKEN" "https://$NAME.$SUB.workers.dev/" || true)
+            if [[ "$code" == 200 ]]; then break; fi
+            if [[ "$code" == 409 ]]; then
+              echo "SAFETY_CONFLICT:"
+              jq -c . /tmp/reconcile-response.json
+              exit 2
+            fi
+            sleep 4
+          done
+          test "$code" = 200
+          jq -ec '. | select(.ok==true and .unchanged_other_items==true
+            and (.verified_output_ids|sort)==[7932,7934]
+            and .counts.failed==0)' /tmp/reconcile-response.json
+          echo 'FACTORY_EXACT_DELETION_LEDGER_RECONCILIATION_SUCCESS'
