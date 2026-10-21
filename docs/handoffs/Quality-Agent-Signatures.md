@@ -207,6 +207,14 @@ child IDs**. Retry counts were **31** (7856) and **42** (7043).
 
 The two sets have different saved source URL/order combinations: a doubled
 count does **not** by itself prove that four rows are interchangeable.
+A follow-up read of both outputs established a stronger pattern: for each
+logical order, the two slide records share the same approved Google Drive file
+ID, **but their saved IG public URLs are shifted**. The authoritative four
+approved previews are numbered `0.jpg, 1.jpg, 2.jpg, 3.jpg`; for **order 2**,
+neither duplicate row points to `1.jpg` (one points to `2.jpg`, the other
+to `3.jpg`). Thus, merely unlinking four rows would still publish a
+misaddressed image. Resolve source URL identity and verify the actual public
+object before considering the records interchangeable.
 Safe remediation:
 
 1. Acquire an exact output + approved media revision lease and ensure the
