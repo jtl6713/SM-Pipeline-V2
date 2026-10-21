@@ -13881,7 +13881,7 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
       stage = "read_occupancy";
       studioInvalidateOccupiedScheduleCache();
       const occupied = await studioOccupiedSchedulesOrEmpty(env, {
-        excludeIds: [match[1]], profile, requireComplete: true,
+        excludeIds: [match[1]], profile, platform, requireComplete: true,
       });
       const platformOccupiedMs = studioOccupiedForPlatform(occupied, platform);
       stage = "plan_mae";
@@ -13938,7 +13938,7 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
         studioInvalidateOccupiedScheduleCache();
         const fresh = await studioOccupiedSchedulesOrEmpty(env, {
           excludeIds: [match[1]],
-          profile, requireComplete: true });
+          profile, platform: qualityRecovery ? platform : "", requireComplete: true });
         let platformOccupiedMs = studioOccupiedForPlatform(fresh, platform).slice();
         for (const reservation of durableReservations || []) {
           const ms = Date.parse(String(reservation?.scheduled_iso || ""));
@@ -14046,6 +14046,7 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
       : await studioOccupiedSchedulesOrEmpty(env, {
         excludeIds: [match[1]],
         profile: await item4ProductionProfileRecord(env, existing).catch(() => null),
+        platform: qualityRecovery ? platform : "",
         requireComplete: true,
       });
     const timeZone = await studioScheduleTimeZoneForRecord(env, existing, payload);

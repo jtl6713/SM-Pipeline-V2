@@ -1204,10 +1204,14 @@ export async function listRecordsPage(env, tableId, options = {}) {
     params.set("sort[0][direction]", options.sortDirection || "desc");
   }
   if (options.offset) params.set("offset", String(options.offset));
+  for (const field of options.fields || []) {
+    if (field) params.append("fields[]", String(field));
+  }
   const result = await airtableFetch(env, tableId, `?${params.toString()}`);
   return {
     records: Array.isArray(result?.records) ? result.records : [],
     offset: result?.offset || null,
+    valid: Array.isArray(result?.records),
   };
 }
 /*__STUDIO_WORKER_END:listRecordsPage__*/
@@ -7428,15 +7432,34 @@ export async function studioLoadOccupiedScheduleRows(env, { profile = null, requ
   // empty capacity. Strict reads bypass the best-effort UI cache and fail closed.
   if (requireComplete) {
     if (!profile?.id) throw new HttpError(503, "Profile is required to reserve MAE capacity");
-    let rows;
+    // The bounded list is suitable for UI previews, not authoritative MAE.
+    // Walk every Airtable page for the scoped profile/platform before reserving.
+    // Any missing/repeated cursor, failed page or excessive scan fails CLOSED.
+    const rows = [];
+    const cursors = new Set();
+    let offset = null;
     try {
-      rows = await fetchRows();
+      do {
+        const page = await listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+          limit: 100, offset,
+          sortField: "Scheduled_Post_Date", sortDirection: "asc",
+          filterFormula: studioOccupiedFilterFormula(now, profile, platform),
+          fields: ["Platform", "Scheduled_Post_Date", "YouTube_Scheduled_Publish_At",
+            "Studio_Scheduled_At", "Publish_Status", "Studio_Output_Type",
+            "Format", "Content_Profile"],
+        });
+        if (!page.valid || (page.offset && !page.records.length)) {
+          throw new Error("Invalid or empty MAE occupancy page with continuation");
+        }
+        rows.push(...page.records);
+        if (rows.length > 6000) throw new Error("MAE occupancy scan exceeded safety ceiling");
+        offset = page.offset || null;
+        if (offset && cursors.has(offset)) throw new Error("Repeated MAE occupancy cursor");
+        if (offset) cursors.add(offset);
+      } while (offset);
     } catch (error) {
       console.warn("authoritative MAE occupancy read failed", error);
-      throw new HttpError(503, "Cannot verify MAE occupancy; approval or reschedule was not committed");
-    }
-    if (!Array.isArray(rows) || rows.length >= STUDIO_OCCUPIED_LIST_LIMIT) {
-      throw new HttpError(503, "MAE occupancy result is incomplete; scheduling blocked to prevent collisions");
+      throw new HttpError(503, "Cannot verify complete MAE occupancy; approval or reschedule was not committed");
     }
     return rows;
   }
