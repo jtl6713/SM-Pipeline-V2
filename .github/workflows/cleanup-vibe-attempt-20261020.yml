@@ -105,7 +105,19 @@ jobs:
         run: |
           set -euo pipefail
           TOKEN=$(cat /tmp/cleanup-token)
-          curl -fsS --max-time 100 "$CLEANUP_URL" -H "X-Cleanup-Token: $TOKEN" -o /tmp/before.json
+          # Workers subdomain propagation can return 404 immediately after creation.
+          READY=false
+          for attempt in $(seq 1 15); do
+            CODE=$(curl -sS --max-time 20 -w '%{http_code}' -o /tmp/before.json "$CLEANUP_URL" -H "X-Cleanup-Token: $TOKEN" || true)
+            if [[ "$CODE" == 200 ]]; then READY=true; break; fi
+            echo "cleanup_worker_probe_attempt=$attempt http=$CODE"
+            sleep 3
+          done
+          if [[ "$READY" != true ]]; then
+            echo "Temporary cleanup Worker not reachable" >&2
+            head -c 500 /tmp/before.json >&2 || true
+            exit 1
+          fi
           jq -e '.ok==true and .dry_run==true and .total<251' /tmp/before.json >/dev/null
           jq -c '{dry_run,total,found:[.counts[]|select(.count>0)]}' /tmp/before.json
           curl -fsS --max-time 120 -X POST "$CLEANUP_URL" -H "X-Cleanup-Token: $TOKEN" -H 'Content-Type: application/json' --data '{"confirm":"DELETE-ONLY-recgm8jon1A3HFdQa"}' -o /tmp/after.json
