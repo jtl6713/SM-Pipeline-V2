@@ -596,3 +596,5 @@ Deploy Worker: complete paginated MAE occupancy for safe Facebook Quality Agent 
 2026-10-21: Deploy merged PR #1032 Factory Quality Agent verified-missing-output terminal skipped_removed ledger outcome; preserve existing approvals and histories; R2 output #7932/#7934 exact-item reconciliation follows after safe deployment and independent authoritative absence checks. No reapproval or publishing.
 
 2026-10-21: Deploy hotfix FB3 existing-public-post finalization during Facebook Graph publish hold. No FB0/FB1/FB2/FB2R on held graph; no new posts; oldest first. Verify counters and preserve Airtable authority and current binding contract.
+
+2026-10-21: Deploy merged PR #1038: Desk and Factory Quality Agent fb_duplicate_slide_sets first-class signature and manual fallback census; no publish override.
