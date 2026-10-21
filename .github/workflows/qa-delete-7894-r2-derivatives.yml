@@ -1,0 +1,121 @@
+name: One-shot prune deleted output 7894 R2 derivatives
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/qa-delete-7894-r2-derivatives.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: delete-output-7894-derivatives
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Delete only named output 7894 derivative files in Studio R2
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          NAME="qa-purge-7894-${GITHUB_RUN_ID}"
+          cleanup() {
+            curl -sS --max-time 25 -X DELETE "$ROOT/workers/scripts/$NAME" -H "$AUTH" >/dev/null || true
+          }
+          trap cleanup EXIT
+          curl -fsS "$ROOT/workers/scripts/chicagoshining-studio-api/deployments" \
+            -H "$AUTH" -o /tmp/deployments.json
+          VERSION=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments.json)
+          curl -fsS "$ROOT/workers/scripts/chicagoshining-studio-api/versions/$VERSION" \
+            -H "$AUTH" -o /tmp/version.json
+          BUCKET=$(jq -er '[.result.resources.bindings[]|select(.name=="STUDIO_MEDIA")][0]|.bucket_name//.bucket' /tmp/version.json)
+          TOKEN=$(openssl rand -hex 32)
+          export BUCKET TOKEN
+          cat > /tmp/worker.js <<'JS'
+          const output = "recAlU4bLFmWDBV4H";
+          const prefixes = [
+            "studio/previews/lettered/" + output + "/",
+            "studio/previews/watermarked/" + output + "/",
+            "ig-carousel/output-7894/"
+          ];
+          async function keysFor(env, prefix) {
+            const found = [];
+            let cursor = null;
+            do {
+              const page = await env.STUDIO_MEDIA.list({
+                prefix, limit: 1000, ...(cursor ? {cursor} : {}),
+              });
+              if (!Array.isArray(page.objects)) throw Error("Invalid R2 page");
+              found.push(...page.objects.map(item => item.key));
+              if (found.length > 100) throw Error("Unexpectedly large output derivative set");
+              cursor = page.truncated ? page.cursor : null;
+            } while (cursor);
+            if (found.some(key => !key.startsWith(prefix)))
+              throw Error("Cross-prefix object found");
+            return found;
+          }
+          export default {
+            async fetch(req, env) {
+              if (req.method !== "POST" || req.headers.get("x-qa-token") !== env.TOKEN)
+                return new Response("Not found", {status:404});
+              try {
+                const before = await Promise.all(prefixes.map(p => keysFor(env,p)));
+                const keys = before.flat();
+                if (new Set(keys).size !== keys.length || keys.length > 120)
+                  return Response.json({ok:false,error:"ambiguous_keys"},{status:409});
+                if (keys.length) await env.STUDIO_MEDIA.delete(keys);
+                const after = await Promise.all(prefixes.map(p => keysFor(env,p)));
+                const remaining = after.flat();
+                return Response.json({ok:remaining.length===0,
+                  output_id:7894,output_record_id:output,
+                  objects_removed:keys.length,
+                  by_prefix:prefixes.map((p,i)=>({prefix:p,removed:before[i].length,remaining:after[i].length})),
+                  remaining});
+              } catch (e) {
+                return Response.json({ok:false,error:String(e?.message||e)},{status:409});
+              }
+            }
+          };
+          JS
+          node --check /tmp/worker.js
+          python - <<'PY'
+          import json,os
+          meta = {"main_module":"worker.js","compatibility_date":"2026-08-02",
+            "bindings":[
+              {"type":"r2_bucket","name":"STUDIO_MEDIA","bucket_name":os.environ["BUCKET"]},
+              {"type":"plain_text","name":"TOKEN","text":os.environ["TOKEN"]}]}
+          open("/tmp/meta.json","w").write(json.dumps(meta))
+          PY
+          code=$(curl -sS --max-time 90 -o /tmp/upload.json -w '%{http_code}' \
+            -X PUT "$ROOT/workers/scripts/$NAME/content" -H "$AUTH" \
+            -F 'metadata=@/tmp/meta.json;type=application/json' \
+            -F 'worker.js=@/tmp/worker.js;type=application/javascript+module;filename=worker.js')
+          if [[ "$code" -lt 200 || "$code" -ge 300 ]]; then
+            jq '{errors,success}' /tmp/upload.json
+            exit 1
+          fi
+          curl -fsS -X POST "$ROOT/workers/scripts/$NAME/subdomain" -H "$AUTH" \
+            -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' >/tmp/subdomain-enable.json
+          curl -fsS "$ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account.json
+          SUB=$(jq -er '.result.subdomain' /tmp/account.json)
+          for i in $(seq 1 8); do
+            status=$(curl -sS --max-time 25 -o /tmp/purge.json -w '%{http_code}' \
+              -X POST -H "x-qa-token: $TOKEN" "https://$NAME.$SUB.workers.dev/" || true)
+            if [[ "$status" == 200 || "$status" == 409 ]]; then break; fi
+            sleep 3
+          done
+          jq -c . /tmp/purge.json
+          test "$status" = 200
+          jq -e '.ok == true and .output_id == 7894 and (.remaining|length) == 0' /tmp/purge.json >/dev/null
+          echo "OUTPUT_7894_DERIVATIVE_R2_PURGE_COMPLETE"
