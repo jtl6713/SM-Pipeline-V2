@@ -170,7 +170,7 @@
     }
     const eligible = allFailures.filter(item => item.can_return_to_approved
       && /^rec[A-Za-z0-9]+$/.test(item.record_id || "")
-      && recoveryResult(item.record_id)?.status !== "success");
+      && !["success", "uncertain"].includes(recoveryResult(item.record_id)?.status));
     const failureMarkup =
       (censusOk
         ? '<p class="factory-batch-quality-heading">Unresolved output failures across all profiles: ' +
@@ -316,7 +316,8 @@
   async function recoverQualityOutputs(items, bulk) {
     if (state.recovering) return;
     const allowed = [...new Map((items || [])
-      .filter(item => item.can_return_to_approved && /^rec[A-Za-z0-9]+$/.test(item.record_id || ""))
+      .filter(item => item.can_return_to_approved && /^rec[A-Za-z0-9]+$/.test(item.record_id || "")
+        && !["success", "uncertain"].includes(recoveryResult(item.record_id)?.status))
       .map(item => [item.record_id, item])).values()];
     if (!allowed.length) return;
     if (bulk && !window.confirm("Return " + allowed.length + " eligible Facebook rate-limit failures to Approved? Each will receive a cooldown-paced MAE slot; nothing publishes immediately.")) return;
@@ -415,7 +416,8 @@
     const bulk = event.target.closest?.("[data-qa-reapprove-all]");
     if (bulk) {
       event.preventDefault();
-      recoverQualityOutputs(state.failures, true).catch(error => {
+      recoverQualityOutputs(state.failures.filter(item =>
+        !["success", "uncertain"].includes(recoveryResult(item.record_id)?.status)), true).catch(error => {
         state.recovering = false;
         if (state.recovery) { state.recovery.running = false; state.recovery.phase = "Recovery stopped unexpectedly: " + String(error) + ". Verify status before retrying."; }
         renderCurrent();
