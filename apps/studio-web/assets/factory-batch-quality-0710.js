@@ -394,7 +394,7 @@
       const s = state.recovery.results.filter(row => row.status === "success").length;
       const pending = state.recovery.results.filter(row => row.status === "uncertain").length;
       state.recovery.phase = s + " confirmed Approved with future schedules" +
-        (pending ? "; " + pending + " need verification before retry" : "") +
+        (pending ? "; " + pending + (pending === 1 ? " needs" : " need") + " verification before retry" : "") +
         ". Results remain visible until dismissed.";
     } finally {
       state.recovering = false;
