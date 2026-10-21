@@ -196,3 +196,13 @@
 #page-factory #factoryBatchQuality .factory-batch-quality-actions #factoryBatchQualityRefresh {
   margin:0 0 4px auto;
 }
+
+/* Failed-output cards are actionable; keep the title keyboard-focusable. */
+.factory-batch-quality-item[data-qa-output] { cursor:pointer; }
+.factory-batch-quality-item[data-qa-output]:hover { outline:1px solid var(--border-color,#b5c4d1); }
+.factory-quality-open { border:0; background:transparent; padding:0; margin:0; font:inherit; font-size:.87rem; font-weight:700; color:inherit; text-align:left; cursor:pointer; }
+.factory-quality-open:hover { text-decoration:underline; }
+.factory-quality-open:focus-visible, [data-qa-reapprove]:focus-visible, [data-qa-reapprove-all]:focus-visible { outline:2px solid var(--accent,#367fbe); outline-offset:2px; }
+.factory-quality-bulk { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:.5rem 0; }
+.factory-quality-bulk small, .factory-quality-blocked { font-size:.72rem; opacity:.8; }
+.factory-quality-result { font-size:.82rem; margin:.5rem 0; overflow-wrap:anywhere; }
