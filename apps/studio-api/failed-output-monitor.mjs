@@ -54,7 +54,7 @@ export function failedOutputRetryGate(record, { nowMs = Date.now(), maxAttempts 
 export function facebookRateLimitResetReason(record, { nowMs = Date.now(), maxAttempts = 3 } = {}) {
   if (text(record, "Platform").toLowerCase() !== "facebook") return "not_facebook";
   const error = text(record, "Publish_Error_Message");
-  if (!/facebook rate limit|1390008|\\b368\\b/i.test(error)) return "not_rate_limited";
+  if (!/facebook rate limit|1390008|\b368\b/i.test(error)) return "not_rate_limited";
   if (text(record, "Publish_Status") !== "Failed" && text(record, "Output_Status") !== "Failed") return "not_failed";
   if (text(record, "Review_Status") !== "Approved") return "approval_not_confirmed";
   if (text(record, "Published_At") || text(record, "Platform_Post_ID")
