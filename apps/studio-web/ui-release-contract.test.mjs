@@ -16,7 +16,7 @@ test("Studio UI release label, BUILD_ID, and every JS/CSS cache key are one cont
   assert.equal(contract.version, "0.6.733");
   assert.equal(contract.cacheKey, "0.6.733-vibe-upload-confirm");
   assert.equal(contract.expectedBuildId, "item4-0.6.733-vibe-upload-confirm");
-  assert.match(contract.expectedJsUrl, /^\/assets\/app-item4-1008\.js\?v=0\.6\.732-progress-count/);
+  assert.match(contract.expectedJsUrl, /^\/assets\/app-item4-1008\.js\?v=0\.6\.733-vibe-upload-confirm/);
   assert.ok(contract.versionedAssetCount >= 20);
   assert.equal(extractUiVersionFromHtml(html), contract.version);
   assert.equal(extractAppUrlFromHtml(html), contract.expectedJsUrl);
