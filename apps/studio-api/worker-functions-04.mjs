@@ -13868,6 +13868,43 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
   const reservationProfile = scheduleReservationAuthorityEnabled(env)
     ? await item4ProductionProfileRecord(env, existing).catch(() => null)
     : null;
+  // Read-only diagnosis of the same recovery eligibility, occupancy, cooldown,
+  // and MAE calculation. Never reserves a slot, patches a row, or publishes.
+  // Keep it in the existing authenticated schedule route: no new service.
+  if (payload?.quality_rate_limit_preview === true) {
+    if (!qualityRecovery) throw new HttpError(400, "Preview requires guarded Facebook recovery");
+    let stage = "read_profile";
+    try {
+      const profile = reservationProfile
+        || await item4ProductionProfileRecord(env, existing);
+      if (!profile?.id) throw new HttpError(409, "Content Profile unavailable for MAE schedule");
+      stage = "read_occupancy";
+      studioInvalidateOccupiedScheduleCache();
+      const occupied = await studioOccupiedSchedulesOrEmpty(env, {
+        excludeIds: [match[1]], profile, requireComplete: true,
+      });
+      const platformOccupiedMs = studioOccupiedForPlatform(occupied, platform);
+      stage = "plan_mae";
+      const timeZone = await studioScheduleTimeZoneForRecord(env, existing, payload);
+      const horizonDays = await studioScheduleHorizonDays(env);
+      const selectedIso = qualityFacebookRecoverySlot(
+        existing, platformOccupiedMs, timeZone, horizonDays);
+      return respond(request, env, {
+        ok: true, quality_rate_limit_preview: true,
+        stage: "planned", output_id: f(existing, "Output_ID"),
+        platform, occupied_count: platformOccupiedMs.length, scheduled_at: selectedIso,
+      });
+    } catch (error) {
+      console.warn("Quality Facebook read-only MAE preview failed", {
+        stage, output_id: f(existing, "Output_ID"),
+        error: String(error?.message || error),
+      });
+      return respond(request, env, {
+        ok: false, quality_rate_limit_preview: true,
+        stage, error: String(error?.message || "Recovery preview unavailable"),
+      }, error?.status || 503);
+    }
+  }
   if (scheduleReservationLaneEnabled(env, reservationProfile?.id, platform)) {
     const profile = reservationProfile;
     const timeZone = await studioScheduleTimeZoneForRecord(env, existing, payload);

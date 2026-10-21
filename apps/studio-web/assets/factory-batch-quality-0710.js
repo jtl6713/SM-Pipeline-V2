@@ -196,37 +196,65 @@
     if (!allowed.length) return;
     if (bulk && !window.confirm("Return " + allowed.length + " eligible Facebook rate-limit failures to Approved? Each will receive a cooldown-paced MAE slot; nothing publishes immediately.")) return;
     state.recovering = true;
-    state.actionSummary = "Rescheduling " + allowed.length + " eligible output(s) after Facebook cooldown…";
+    const route = item => "/api/operations/outputs/" + encodeURIComponent(item.record_id) + "/schedule";
+    const post = async (item, payload) => {
+      const response = await fetch(route(item), {
+        method: "POST", credentials: "same-origin", cache: "no-store",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const raw = await response.text();
+      let body = {};
+      try { body = JSON.parse(raw); } catch { /* Cloudflare can return non-JSON on Worker failures. */ }
+      if (!response.ok || body.ok === false) {
+        const stage = body.stage ? " (" + body.stage + ")" : "";
+        const reason = body.error || body.message || "HTTP " + response.status;
+        const error = new Error(reason + stage);
+        error.httpStatus = response.status;
+        throw error;
+      }
+      return body;
+    };
+    state.actionSummary = "Checking Facebook cooldown and MAE availability…";
     render(selectedProfile(), { quality_status: "ok", quality_signals: [], output_failures: { status: "ok", count: state.failures.length, items: state.failures } });
     const results = [];
+    let aborted = 0;
     try {
-      // Sequential requests are deliberate. With the legacy non-atomic scheduling
-      // flag, simultaneous resets could select the same available Facebook slot.
+      // Fail fast on server/occupancy errors: never launch 23 identical HTTP 500s.
+      try {
+        await post(allowed[0], {
+          quality_rate_limit_recovery: true, quality_rate_limit_preview: true,
+        });
+      } catch (error) {
+        state.actionSummary = "No outputs changed. MAE recovery preflight failed: " +
+          (error.message || error) + ". The failed outputs remain available for review.";
+        return;
+      }
+      // Sequential: legacy schedulers must not select the same Facebook slot.
       for (const item of allowed) {
         try {
-          const res = await fetch("/api/operations/outputs/" + encodeURIComponent(item.record_id) + "/schedule", {
-            method: "POST", credentials: "same-origin", cache: "no-store",
-            headers: { "Content-Type": "application/json", Accept: "application/json" },
-            body: JSON.stringify({ quality_rate_limit_recovery: true }),
-          });
-          const body = await res.json().catch(() => ({}));
-          if (!res.ok || body.ok === false) throw new Error(body.error || body.message || "HTTP " + res.status);
+          await post(item, { quality_rate_limit_recovery: true });
           results.push({ id: item.output_id || item.record_id, ok: true });
         } catch (error) {
           results.push({ id: item.output_id || item.record_id, ok: false, error: error.message || String(error) });
+          if ((error.httpStatus || 0) >= 500) {
+            aborted = allowed.length - results.length;
+            break;
+          }
         }
       }
       const successes = results.filter(result => result.ok).length;
       const failures = results.filter(result => !result.ok);
       state.actionSummary = successes + " returned to Approved with paced MAE schedules; " +
-        failures.length + " blocked or unsuccessful." + (failures.length
-          ? " " + failures.slice(0, 6).map(result => result.id + ": " + result.error).join("; ")
-          : "");
+        failures.length + " blocked or unsuccessful" +
+        (aborted ? "; " + aborted + " not attempted after a server error" : "") + "." +
+        (failures.length ? " " + failures.slice(0, 4).map(result => result.id + ": " + result.error).join("; ") : "");
       await refresh(true);
     } finally {
       state.recovering = false;
-      const summaries = document.querySelectorAll(".factory-quality-result");
-      for (const el of summaries) el.textContent = state.actionSummary;
+      for (const el of document.querySelectorAll(".factory-quality-result")) {
+        el.textContent = state.actionSummary;
+      }
     }
   }
 

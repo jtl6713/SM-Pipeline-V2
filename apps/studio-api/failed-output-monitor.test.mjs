@@ -147,3 +147,29 @@ test("Facebook QA reapproval uses original protected scheduling route and cooldo
   assert.match(factory, /window\.confirm/);
   assert.match(factory, /for \(const item of allowed\)/);
 });
+
+test("Facebook QA preflight cannot mutate or publish and returns diagnostic stage", () => {
+  const start = worker.indexOf("if (payload?.quality_rate_limit_preview === true)");
+  const end = worker.indexOf("if (scheduleReservationLaneEnabled(env, reservationProfile?.id, platform))", start);
+  assert.ok(start > 0 && end > start);
+  const preview = worker.slice(start, end);
+  assert.match(preview, /qualityFacebookRecoverySlot/);
+  assert.match(preview, /studioOccupiedSchedulesOrEmpty/);
+  assert.match(preview, /stage = "read_occupancy"/);
+  assert.match(preview, /quality_rate_limit_preview: true/);
+  assert.doesNotMatch(preview, /method: "PATCH"|runAtomicScheduleTransaction|studioDispatchApprovedPublishNow/);
+  assert.match(factory, /quality_rate_limit_preview: true/);
+  assert.match(factory, /if \(\(error\.httpStatus \|\| 0\) >= 500\)/);
+  const workflow = fs.readFileSync(path.join(here, "../../.github/workflows/deploy-cloudflare-worker-production.yml"), "utf8");
+  assert.match(workflow, /quality_facebook_preflight_http/);
+  assert.match(workflow, /quality-facebook-preview/);
+});
+
+test("Cross-module MAE occupancy resolves the authoritative schedule reader", () => {
+  const source02 = fs.readFileSync(path.join(here, "worker-functions-02.mjs"), "utf8");
+  const source01 = fs.readFileSync(path.join(here, "worker-functions-01.mjs"), "utf8");
+  assert.ok(source02.includes("studioLoadOccupiedSchedules,"));
+  assert.ok(source02.includes('} from "./worker-functions-01.mjs";'));
+  assert.match(source01, /export async function studioLoadOccupiedSchedules\(/);
+  assert.match(source02, /return studioLoadOccupiedSchedules\(env, options\)/);
+});

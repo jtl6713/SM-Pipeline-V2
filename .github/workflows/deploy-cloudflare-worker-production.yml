@@ -532,15 +532,19 @@ jobs:
               const chicagoCanary = url.pathname === "/$TOKEN/factory-status-chicago";
               const globalCanary = url.pathname === "/$TOKEN/factory-status-global";
               const failedOutputCensus = url.pathname === "/$TOKEN/failed-output-census";
+              const qualityFacebookPreview = url.pathname === "/$TOKEN/quality-facebook-preview";
+              const previewOutputId = String(url.searchParams.get("output_id") || "");
+              if (qualityFacebookPreview && !/^rec[A-Za-z0-9]+$/.test(previewOutputId)) return new Response("Invalid output", {status:400});
               const overview = url.pathname === "/$TOKEN/overview";
               const overviewRefresh = url.pathname === "/$TOKEN/overview-refresh";
               const overviewStatus = url.pathname === "/$TOKEN/overview-status";
               const readyProductionDiagnostic = url.pathname === "/$TOKEN/ready-production-diagnostic";
               const summary = url.pathname === "/$TOKEN/summary";
               const summaryReconcile = url.pathname === "/$TOKEN/summary-reconcile";
-              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !failedOutputCensus && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic && !summary && !summaryReconcile) return new Response("Not found", {status:404});
+              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !failedOutputCensus && !qualityFacebookPreview && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic && !summary && !summaryReconcile) return new Response("Not found", {status:404});
               const generation = String(url.searchParams.get("generation") || "");
-              const path = readyProductionDiagnostic ? "/api/admin/ready-production-diagnostic"
+              const path = qualityFacebookPreview ? "/api/operations/outputs/" + previewOutputId + "/schedule"
+                : readyProductionDiagnostic ? "/api/admin/ready-production-diagnostic"
                 : overviewRefresh ? "/api/profiles/overview/refresh"
                 : overviewStatus ? "/api/profiles/overview/refresh-status"
                 : summaryReconcile ? "/api/profiles/overview/summary/reconcile"
@@ -551,13 +555,15 @@ jobs:
                 : globalCanary ? "/api/factory/approval-batches?scope=all"
                 : chicagoCanary ? "/api/factory/approval-batches?profile=recT2rbKX3MF7cVFU"
                 : factoryStatus ? "/api/factory/approval-batches?profile=recF7UAn0LkMZZrWZ" : "/api/session";
-              const method = (overviewRefresh || summaryReconcile) ? "POST" : "GET";
+              const method = (overviewRefresh || summaryReconcile || qualityFacebookPreview) ? "POST" : "GET";
               const headers = {"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Accept":"application/json"};
-              if (overviewRefresh || summaryReconcile) headers["Content-Type"] = "application/json";
+              if (overviewRefresh || summaryReconcile || qualityFacebookPreview) headers["Content-Type"] = "application/json";
               const internal = new Request("https://studio.chicagoshining.com" + path, {
                 method,
                 headers,
-                body: (overviewRefresh || summaryReconcile) ? "{}" : undefined,
+                body: qualityFacebookPreview
+                  ? '{"quality_rate_limit_recovery":true,"quality_rate_limit_preview":true}'
+                  : ((overviewRefresh || summaryReconcile) ? "{}" : undefined),
               });
               const response = await env.STUDIO_API.fetch(internal);
               return new Response(await response.text(), {status:response.status,headers:{"Content-Type":"application/json","Cache-Control":"no-store"}});
@@ -853,6 +859,23 @@ jobs:
             and (.output_failures.count|type)=="number"
             and (.output_failures.items|type)=="array"
             and .output_failures.count==(.output_failures.items|length)' /tmp/failed-output-census.json >/dev/null
+          # One read-only preflight for a live, currently eligible Facebook failure.
+          # This runs the same guarded MAE planning path without any Airtable PATCH,
+          # reservation, or publication. Fail the deployment verification if broken.
+          QUALITY_PREVIEW_ID=$(jq -r '[.output_failures.items[] | select(.can_return_to_approved == true) | .record_id][0] // ""' /tmp/failed-output-census.json)
+          if [[ "$QUALITY_PREVIEW_ID" =~ ^rec[A-Za-z0-9]+$ ]]; then
+            QUALITY_PREVIEW_URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/quality-facebook-preview?output_id=$QUALITY_PREVIEW_ID"
+            PREVIEW_CODE=$(curl -sS --max-time 65 -o /tmp/quality-facebook-preview.json -w '%{http_code}' "$QUALITY_PREVIEW_URL" || true)
+            echo "quality_facebook_preflight_http=$PREVIEW_CODE"
+            if [ "$PREVIEW_CODE" != "200" ]; then
+              jq -c '{ok,stage,error}' /tmp/quality-facebook-preview.json 2>/dev/null || head -c 300 /tmp/quality-facebook-preview.json
+              exit 1
+            fi
+            jq -e '.ok==true and .quality_rate_limit_preview==true and .stage=="planned" and (.scheduled_at|type)=="string"' /tmp/quality-facebook-preview.json >/dev/null
+            jq -c '{qa_preflight:"PASS",stage,occupied_count}' /tmp/quality-facebook-preview.json
+          else
+            echo "quality_facebook_preflight=SKIP (no eligible outstanding Facebook failures)"
+          fi
           jq -c '{outstanding:.output_failures.count,scanned_at:.output_failures.scanned_at,
             items:[.output_failures.items[] | {profile_name,profile_id,output_id,platform,output_type,recovery,attempt_count,retry_at,error,action}]}' /tmp/failed-output-census.json
           {
