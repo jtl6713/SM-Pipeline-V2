@@ -488,3 +488,4 @@ Retry Studio Pages UI 0.6.737 Quality Agent preflight after correcting historica
 Deploy Pages UI 0.6.737: corrected Factory QA release contract gate and retained read-only preflight.
 
 2026-10-21: Deploy Studio UI 0.6.738-quality-recovery-progress from PR #1023. Shared visible single and bulk Facebook output Return to Approved progress; confirmed future schedules, retained results, no automatic publishing. Pages-only release.
+Deploy Studio Pages UI 0.6.739 approved-past-due Quality Agent Factory panel; PR 1028, clickable findings and cache-busted assets.
