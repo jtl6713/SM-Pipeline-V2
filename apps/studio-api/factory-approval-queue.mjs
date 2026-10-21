@@ -474,6 +474,19 @@ export function factoryBatchQualitySignals(job, nowMs = Date.now()) {
   if (counts.failed_count) {
     signals.push({ code: "QA-FACTORY-BATCH-FAILED-ITEM", safe_auto_recover: false,
       detail: "Failed outputs require inspection or Retry Failed; never retry successful rows" });
+    // A Factory item may fail before Airtable has any Platform Output row.
+    // The exact R2 job ledger is authoritative for the approval error; do not
+    // classify a missing record from a UI display number alone.
+    const sourceMissing = (job.items || []).filter(item => item.status === "failed" &&
+      /(?:404|422|not found|missing output|unknown record|record does not exist|invalid record)/i.test(String(item.error || "")));
+    if (sourceMissing.length) {
+      signals.push({
+        code: "QA-FACTORY-APPROVAL-SOURCE-NOT-FOUND",
+        safe_auto_recover: false,
+        detail: "One or more failed Factory approval items report missing/invalid authority. Reread authoritative Airtable by record ID, inspect stored item error and timeline, and quarantine ambiguous writes; do not create or approve a substitute.",
+        output_ids: sourceMissing.map(item => item.output_id).filter(Boolean),
+      });
+    }
   }
   return signals;
 }
