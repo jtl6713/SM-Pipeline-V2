@@ -482,3 +482,5 @@ Retry deploy UI 0.6.733 Vibe Cut upload confirmation after aligning release-pinn
 2026-10-20: Retry UI 0.6.736 Vibe Cut production Pages deployment after correcting eight stale 0.6.735 test expectations; source remains PR #1018.
 
 2026-10-20: UI 0.6.737 QA Facebook recovery preflight and stop-on-first-500 guard; no new monitoring framework. PR #1020.
+
+Retry Studio Pages UI 0.6.737 Quality Agent preflight after correcting historical fixed-build regression assertion.
