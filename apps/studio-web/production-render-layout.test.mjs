@@ -7,7 +7,7 @@ const css = readFileSync(new URL("assets/production-render-layout-0678.css", roo
 
 test("Rendering layout fix is linked and shipped with its cache-busted version", () => {
 assert.match(html, /production-render-layout-0678\.css\?v=0.6.736-vibe-video-source/);
-assert.match(html, /UI build 0.6.735/);
+assert.match(html, /UI build 0.6.736/);
 });
 test("Production no longer crops a long timed script at an 880px shell", () => {
   assert.match(css, /#page-content\.production-page\s*\{[^}]*max-width:\s*1280px/);
