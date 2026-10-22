@@ -1082,6 +1082,7 @@ export default {
           version: "0.10.677-scripted-short-profile-500-recovery" + "-home-v6-fast-cache" + "-home-summary-v6-shadow",
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
+          quality_durable_recovery_ledger_v1: true,
           quality_meta_story_readonly_verification_v1: true,
           quality_facebook_preapproval_recovery_v1: true,
           studio_profile_summary_reconcile_gate_v1: true,
