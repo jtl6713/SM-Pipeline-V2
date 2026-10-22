@@ -853,7 +853,11 @@ jobs:
             and .output_failures.status=="ok"
             and (.output_failures.count|type)=="number"
             and (.output_failures.items|type)=="array"
-            and .output_failures.count==(.output_failures.items|length)' /tmp/failed-output-census.json >/dev/null
+            and .output_failures.count==(.output_failures.items|length)
+            and .output_failures.verification_recovery.status=="ok"
+            and .output_failures.verification_recovery.metrics_source=="airtable_quality_agent_recovery_ledger"
+            and (.output_failures.verification_recovery.counts.recovered_automatically|type)=="number"' /tmp/failed-output-census.json >/dev/null
+          echo "qa_durable_recovery_ledger=PASS"
           # One read-only preflight for a live, currently eligible Facebook failure.
           # This runs the same guarded MAE planning path without any Airtable PATCH,
           # reservation, or publication. Fail the deployment verification if broken.
