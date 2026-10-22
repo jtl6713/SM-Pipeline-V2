@@ -12014,7 +12014,7 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
   // rearming or resetting the original dispatch counter.
   const remoteCandidates = await scanOutstandingFailedOutputs(
     (page) => listRecordsPage(env, outputTable, page),
-    { filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Platform_Output_Type}="Facebook Story",{Publish_Error_Stage}="FACEBOOK_STORY_RATE_LIMIT_368",{Published_At}=BLANK(),{Platform_Post_ID}=BLANK(),{Platform_Media_ID}!="")' },
+    { filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Platform_Output_Type}="Facebook Story",OR({Publish_Error_Stage}="FACEBOOK_STORY_RATE_LIMIT_368",{Publish_Error_Stage}="FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING"),{Published_At}=BLANK(),{Platform_Post_ID}=BLANK(),{Platform_Media_ID}!="")' },
   ).catch((error) => {
     console.warn("QA Facebook Story remote census unavailable", String(error?.message || error));
     return [];
@@ -12023,7 +12023,7 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
   for (const candidate of remoteCandidates) {
     if (remoteHealed.length >= limit) break;
     const latest = await airtableFetch(env, outputTable, candidate.id).catch(() => null);
-    if (!latest || String(f(latest, "Publish_Error_Stage") || "") !== "FACEBOOK_STORY_RATE_LIMIT_368"
+    if (!latest || !["FACEBOOK_STORY_RATE_LIMIT_368", "FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING"].includes(String(f(latest, "Publish_Error_Stage") || ""))
         || f(latest, "Published_At") || f(latest, "Platform_Post_ID")
         || f(latest, "Publish_Locked_By") || f(latest, "Publish_Locked_At")
         || !String(f(latest, "Platform_Media_ID") || "").trim()) continue;
@@ -12040,7 +12040,7 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
     if (!current || f(current, "Published_At") || f(current, "Platform_Post_ID")
         || f(current, "Publish_Locked_By") || f(current, "Publish_Locked_At")
         || String(f(current, "Platform_Media_ID") || "").trim() !== mediaId
-        || String(f(current, "Publish_Error_Stage") || "") !== "FACEBOOK_STORY_RATE_LIMIT_368") continue;
+        || !["FACEBOOK_STORY_RATE_LIMIT_368", "FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING"].includes(String(f(current, "Publish_Error_Stage") || ""))) continue;
     const evidence = verified.evidence;
     const oldNote = String(f(current, "Studio_Publish_Dispatch_Note") || "").slice(0, 360);
     try {
