@@ -89,6 +89,16 @@ export function classifyApprovedPastDue(row, nowMs = Date.now()) {
   } else if (has(row, "Published_At")) {
     cause = "canonical_publication_receipt_status_stale"; recovery = "verify_and_reconcile_status";
     action = "Re-read the authoritative receipt; only repair statuses if public visibility evidence and platform safety guards pass. No new dispatch.";
+  } else if (platform === "Facebook"
+      && /^(Facebook Photo Set|Facebook Post)$/i.test(
+        value(row, "Studio_Output_Type") || value(row, "Platform_Output_Type"))
+      && value(row, "FB_Publish_Status") === "Published Pending Finalize"
+      && has(row, "Platform_Post_ID")) {
+    // FB2 already returned a unique Page post id. This is a *finalization*
+    // stall, never a reason to publish another photo or attached-media feed.
+    cause = "facebook_photo_existing_post_finalize_stalled";
+    recovery = "verify_remote_before_retry";
+    action = "Run the bounded FB3 existing-Page-post Graph GET. Require matching post id and permalink before repairing publication status; never call FB0/FB1/FB2 or create another Facebook post.";
   } else if (has(row, "Platform_Post_URL") || has(row, "Manual_Published_URL")
       || has(row, "Platform_Post_ID") || has(row, "YouTube_Video_ID")) {
     cause = "remote_identity_not_public_visibility"; recovery = "verify_remote_before_retry";
