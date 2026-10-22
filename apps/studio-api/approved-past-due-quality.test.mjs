@@ -90,6 +90,29 @@ test("TikTok draft delivery and YouTube uploads are not public posting proof", (
   assert.equal(yt.recovery, "verify_remote_before_retry");
 });
 
+test("stalled Facebook photo or feed post with saved identity is FB3-only recovery, never repost", () => {
+  for (const type of ["Facebook Photo Set", "Facebook Post"]) {
+    const issue = classifyApprovedPastDue(record("rec1055", {
+      Platform_Output_Type: type,
+      Publish_Status: "Publishing",
+      FB_Publish_Status: "Published Pending Finalize",
+      Platform_Post_ID: "831080826745798_122147173317022170",
+      FB_Last_Checked_At: "2026-10-03T12:02:57.000Z",
+    }), now);
+    assert.equal(issue.cause, "facebook_photo_existing_post_finalize_stalled");
+    assert.equal(issue.recovery, "verify_remote_before_retry");
+    assert.match(issue.action, /FB3 existing-Page-post Graph GET/);
+    assert.match(issue.action, /never call FB0\/FB1\/FB2/);
+  }
+  // A pending Facebook Reel with a provider video id is not FB3 photo work.
+  const reel = classifyApprovedPastDue(record("rec1691", {
+    Platform_Output_Type: "Facebook Reel", Publish_Status: "Publishing",
+    FB_Publish_Status: "Publishing Slideshow Reel", Platform_Post_ID: "1419429243115702",
+  }), now);
+  assert.equal(reel.cause, "remote_identity_not_public_visibility");
+  assert.notEqual(reel.recovery, "existing_overdue_rescue");
+});
+
 test("verified published timestamp is repairable; generic ID, upload and hold are not", () => {
   assert.equal(publishedReceiptRepairReason(record("rec1", {
     Published_At: "2026-10-21T17:00:00Z",
