@@ -26217,8 +26217,9 @@ function timedScriptAssetLabel(asset, index) {
         refreshPipelineOutputs({ force: true });
         return;
       }
-      // The normal full list is already in memory; re-filter without
-      // issuing another history read.
+      // Full list is already in memory — re-filter locally so tab counts stay
+      // honest and switching Review→All does not blank the other counts.
+      // Focused exception lists are handled by the separate safe refresh above.
       if (pipelineOutputs.length) {
         updatePipelineQuickTabs(pipelineOutputs);
         const target = $("outputsList");
