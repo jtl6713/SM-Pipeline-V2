@@ -643,6 +643,7 @@ import {
   studioReconcileTiktokDrafts,
   studioReconcileFacebookPhotos,
   studioReconcileFacebookPhotoFinalizes,
+  studioReconcileFacebookReelFinalizes,
   studioReconcileInstagramCarousels,
   studioReconcileOverdueScheduledPublishes,
   studioHealApprovedMissingSchedule,
@@ -2498,6 +2499,18 @@ export default {
           })))
           .catch((error) => console.warn("FB3 independent cron failed", error)));
       }
+    }
+    // Exact-video FBS4 status poll is separate from any Meta Reel creation.
+    // Polling can attach a best-effort thumbnail to an EXISTING posted video,
+    // but cannot create a new Reel or resend its MP4.
+    if (!cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioReconcileFacebookReelFinalizes(env, { limit: 3 })
+        .then((results) => console.info("FBS4 existing-video cron result", JSON.stringify({
+          checked: results.length,
+          verified: results.filter((row) => row.status === "verified_published").length,
+          results, creates: 0,
+        })))
+        .catch((error) => console.warn("FBS4 existing-video cron failed", error)));
     }
     ctx.waitUntil((async () => {
       // Fail-safe Factory recovery before the Airtable cooldown return so a busy
@@ -5532,6 +5545,7 @@ const STUDIO_PUBLISH_RECONCILE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:studioReconcileYoutubePublishes__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileTiktokDrafts__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookPhotoFinalizes__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookReelFinalizes__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookPhotos__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileInstagramCarousels__*/
 // Scheduled posts are a hard deadline. This rescue deliberately ignores the normal
