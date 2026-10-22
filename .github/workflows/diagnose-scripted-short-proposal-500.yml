@@ -28,7 +28,8 @@ jobs:
               if (new URL(request.url).pathname !== "/$TOKEN") return new Response("Not found",{status:404});
               const prompt="Educate on the history of Battery Park City area of lower Manhattan. You don't have to be brief. Utilize the battery park images that are uploaded into the system.";
               try {
-              const response=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/scripted-short/propose",{
+              const requestedProfile = url.searchParams.get("wrong") === "1" ? "recT2rbKX3MF7cVFU" : "recgtK8Z7eNADNtVy";
+              const response=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/scripted-short/propose?profile=" + requestedProfile,{
                 method:"POST",
                 headers:{
                   "Content-Type":"application/json",
@@ -36,7 +37,7 @@ jobs:
                   "Origin":"https://studio.chicagoshining.com",
                   "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com"
                 },
-                body:JSON.stringify({prompt,content_profile_id:"recgtK8Z7eNADNtVy"})
+                body:JSON.stringify({prompt})
               }));
               let payload={};
               try {payload=await response.json();} catch {}
@@ -74,3 +75,12 @@ jobs:
           done
           echo "proposal_probe_http=$code"
           if [[ "$code" == "200" ]]; then jq '{status,ok,error,scene_count,owned_count,required_location,verification}' /tmp/proposal-result.json; else head -c 140 /tmp/proposal-result.json; fi
+          test "$code" = "200"
+          jq -e '.status==200 and .ok==true and .required_location=="battery park" and .scene_count>=6 and .owned_count==.scene_count and .verification==.scene_count' /tmp/proposal-result.json >/dev/null
+          echo "nyc_battery_park_browser_profile_canary=PASS"
+          negative_code=$(curl -sS --max-time 90 -o /tmp/proposal-negative.json -w '%{http_code}' "$URL?wrong=1" || true)
+          echo "wrong_profile_bridge_http=$negative_code"
+          jq '{status,ok,error}' /tmp/proposal-negative.json
+          test "$negative_code" = "200"
+          jq -e '.status==409 and .ok==false and (.error|contains("No verified battery park assets"))' /tmp/proposal-negative.json >/dev/null
+          echo "wrong_profile_409_handled_without_1101=PASS"
