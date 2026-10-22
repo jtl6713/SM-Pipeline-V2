@@ -18,7 +18,7 @@ export function fb3FinalizeEligible(row, nowMs = Date.now()) {
       txt(row, "Published_At") ||
       txt(row, "Test_Run_ID") ||
       field(row, "Do_Not_Publish") === true) return false;
-  if (!/^\\d{6,30}(?:_\\d{6,30})?$/.test(txt(row, "Platform_Post_ID"))) return false;
+  if (!/^\d{6,30}(?:_\d{6,30})?$/.test(txt(row, "Platform_Post_ID"))) return false;
   // Do not race a live publisher. Stale lock recovery is owned by the
   // existing reservation/lock healer, never this finalization function.
   if (txt(row, "Publish_Locked_By")) {
