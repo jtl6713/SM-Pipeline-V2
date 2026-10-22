@@ -1042,7 +1042,7 @@ export function classifyTtd0RouteBlankDraft(row) {
 export function classifyFacebookStoryRateLimit(row, nowMs = Date.now()) {
   if (String(row?.platform || "") !== "Facebook"
       || String(row?.platform_output_type || "") !== "Facebook Story"
-      || String(row?.publish_error_stage || "") !== "FACEBOOK_STORY_RATE_LIMIT_368"
+      || !["FACEBOOK_STORY_RATE_LIMIT_368", "FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING"].includes(String(row?.publish_error_stage || ""))
       || row?.do_not_publish || row?.published_at || row?.platform_post_id
       || row?.platform_post_url) return null;
   const state = String(row?.publish_status || "");
@@ -1050,7 +1050,7 @@ export function classifyFacebookStoryRateLimit(row, nowMs = Date.now()) {
   const retryAt = Date.parse(String(row?.publish_next_retry_at || ""));
   const waiting = !Number.isFinite(retryAt) || retryAt > nowMs;
   const dispatchCount = Number(row?.dispatch_count || 0);
-  const blocked = dispatchCount >= 3
+  const blocked = String(row?.publish_error_stage || "") === "FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING" || dispatchCount >= 3
     ? "pending_verification"
     : waiting ? "cooldown" : "eligible_for_guarded_rearm";
   const recordId = String(row?.id || row?.record_id || "").trim();
@@ -1062,7 +1062,7 @@ export function classifyFacebookStoryRateLimit(row, nowMs = Date.now()) {
     fingerprint: fingerprint("facebook_story_rate_limit", recordId, "graph_368_story"),
     actor: "worker_heal", // exhausted counters are not a human-action verdict
     blocker: blocked,
-    diagnosis: dispatchCount >= 3
+    diagnosis: blocked === "pending_verification"
       ? "Facebook Story Graph 368 (spam/rate limit), " + dispatchCount
         + " dispatches and no verified public post ID. Preserve the 48-hour cooldown and all counters; "
         + "automatic evidence checks continue; do not create another Graph post without verified absence. Not permanently unrecoverable."
@@ -1073,7 +1073,7 @@ export function classifyFacebookStoryRateLimit(row, nowMs = Date.now()) {
 
 export function classifyFacebookPublishRateLimit(row) {
   if (String(row?.platform_output_type || "") === "Facebook Story"
-      && String(row?.publish_error_stage || "") === "FACEBOOK_STORY_RATE_LIMIT_368") return null;
+      && ["FACEBOOK_STORY_RATE_LIMIT_368", "FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING"].includes(String(row?.publish_error_stage || ""))) return null;
   const err = `${row?.publish_error || ""} ${row?.fb_slideshow_error || ""} ${row?.publish_error_stage || ""}`;
   if (!isFacebookPublishRateLimitError(err)) return null;
   const publish = String(row?.publish_status || "").trim();

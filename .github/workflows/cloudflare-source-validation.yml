@@ -89,6 +89,8 @@ jobs:
         run: |
           node --test apps/studio-api/autonomous-verification-recovery.test.mjs
           node --test apps/studio-api/facebook-story-rate-limit-quality.test.mjs
+          node --test apps/studio-api/facebook-story-remote-verification.test.mjs
+          node --test apps/studio-api/facebook-preapproval-recovery.test.mjs
 
       - name: Source validation summary
         shell: bash

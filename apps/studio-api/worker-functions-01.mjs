@@ -1,5 +1,6 @@
 import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
 import { facebookPreapprovalRecoveryReason, facebookPreapprovalRecoveryFields, FACEBOOK_PREAPPROVAL_FORMULA } from "./facebook-preapproval-recovery.mjs";
+import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
 import { isQueuedForPlatformDispatch } from "./overview-dispatch-counts.mjs";
@@ -12005,10 +12006,67 @@ export async function studioHealTtd0RouteBlankDraft(env, options = {}) {
 /*__STUDIO_WORKER_END:studioHealTtd0RouteBlankDraft__*/
 
 export async function studioHealFacebookRateLimitRearm(env, options = {}) {
-  // Quality Agent: never replay a rejected Meta create. Hand off safe, cooled
-  // items to Ready for Review, where an explicit approval schedules via MAE.
+  // Rearm approved Graph 368 Reels and Stories after cooldown. Do not bypass
+  // a future Story schedule, double-post or erase evidence of a live post.
   const limit = Math.max(1, Math.min(8, Number(options.limit || 4)));
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  // Read-only Meta verification for previously exhausted Graph 368 holds.
+  // Exact saved video/media identity only; an absent Graph entry NEVER permits
+  // rearming or resetting the original dispatch counter.
+  const remoteCandidates = await scanOutstandingFailedOutputs(
+    (page) => listRecordsPage(env, outputTable, page),
+    { filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Platform_Output_Type}="Facebook Story",OR({Publish_Error_Stage}="FACEBOOK_STORY_RATE_LIMIT_368",{Publish_Error_Stage}="FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING"),{Published_At}=BLANK(),{Platform_Post_ID}=BLANK(),{Platform_Media_ID}!="")' },
+  ).catch((error) => {
+    console.warn("QA Facebook Story remote census unavailable", String(error?.message || error));
+    return [];
+  });
+  const remoteHealed = [];
+  for (const candidate of remoteCandidates) {
+    if (remoteHealed.length >= limit) break;
+    const latest = await airtableFetch(env, outputTable, candidate.id).catch(() => null);
+    if (!latest || !["FACEBOOK_STORY_RATE_LIMIT_368", "FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING"].includes(String(f(latest, "Publish_Error_Stage") || ""))
+        || f(latest, "Published_At") || f(latest, "Platform_Post_ID")
+        || f(latest, "Publish_Locked_By") || f(latest, "Publish_Locked_At")
+        || !String(f(latest, "Platform_Media_ID") || "").trim()) continue;
+    const mediaId = String(f(latest, "Platform_Media_ID")).trim();
+    const settings = await studioActivePipelineSettings(env, [
+      "FACEBOOK_PAGE_ID", "FACEBOOK_PAGE_ACCESS_TOKEN", "FACEBOOK_GRAPH_API_VERSION",
+    ], latest).catch(() => ({}));
+    const verified = await verifyFacebookStoryByMediaId({
+      pageId: settings.FACEBOOK_PAGE_ID, token: settings.FACEBOOK_PAGE_ACCESS_TOKEN,
+      version: settings.FACEBOOK_GRAPH_API_VERSION || "v25.0", mediaId,
+    });
+    if (verified.verdict !== "verified_published") continue;
+    const current = await airtableFetch(env, outputTable, latest.id).catch(() => null);
+    if (!current || f(current, "Published_At") || f(current, "Platform_Post_ID")
+        || f(current, "Publish_Locked_By") || f(current, "Publish_Locked_At")
+        || String(f(current, "Platform_Media_ID") || "").trim() !== mediaId
+        || !["FACEBOOK_STORY_RATE_LIMIT_368", "FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING"].includes(String(f(current, "Publish_Error_Stage") || ""))) continue;
+    const evidence = verified.evidence;
+    const oldNote = String(f(current, "Studio_Publish_Dispatch_Note") || "").slice(0, 360);
+    try {
+      await airtableFetch(env, outputTable, current.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields: {
+          Publish_Status: "Published", Output_Status: "Published",
+          FB_Publish_Status: "Published", Platform_Post_ID: evidence.post_id,
+          ...(evidence.url ? { Platform_Post_URL: evidence.url } : {}),
+          ...(evidence.published_at ? { Published_At: evidence.published_at } : {}),
+          Publish_Error_Stage: "", Publish_Error_Message: "", Publish_Retry_Eligible: false,
+          Publish_Next_Retry_At: null, Auto_Publish_Enabled: false,
+          Studio_Publish_Dispatch_Note: (oldNote + " | QA-AUTOVERIFY-RECOVERED:" +
+            new Date().toISOString() + " exact Meta Page Story media_id=" + mediaId +
+            " status=" + evidence.remote_status + "; no new Graph create").slice(0, 900),
+        }, typecast: true }),
+      });
+      remoteHealed.push({ key: "FB_STORY_REMOTE_VERIFIED_PUBLISHED", id: current.id,
+        output_id: f(current, "Output_ID") || null, post_id: evidence.post_id,
+        evidence_source: evidence.source, action: "reconciled_without_post" });
+    } catch (error) {
+      console.warn("QA Facebook Story remote reconciliation failed", current.id,
+        String(error?.message || error));
+    }
+  }
   // Read-only reconciliation of already recorded publication evidence. This
   // never makes a Graph create request and never converts absent IDs into proof.
   // Re-read Airtable immediately before marking an output Published.
@@ -12043,7 +12101,6 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
         String(error?.message || error));
     }
   }
-
   const candidates = await scanOutstandingFailedOutputs(
     (args) => listRecordsPage(env, outputTable, args),
     { filterFormula: FACEBOOK_PREAPPROVAL_FORMULA }
@@ -12088,16 +12145,17 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
       console.warn("Facebook preapproval recovery failed", candidate.id, String(error?.message || error));
     }
   }
-  if (recovered.length || evidenceHealed.length || Object.keys(blocked).length) {
+  if (recovered.length || evidenceHealed.length || remoteHealed.length || Object.keys(blocked).length) {
     console.log("Studio Facebook rate-limit Quality Agent recovery", JSON.stringify({
       recovered_to_review: recovered.length,
       reconciled_published: evidenceHealed.length,
+      remote_verified_published: remoteHealed.length,
       rescheduled_without_approval: 0,
       human_verification_needed: blocked.remote_publication_verification_required || 0,
       blocked, recovered: recovered.map(({ output_id, state }) => ({ output_id, state })),
     }));
   }
-  return [...evidenceHealed, ...recovered];
+  return [...remoteHealed, ...evidenceHealed, ...recovered];
 }
 /*__STUDIO_WORKER_END:studioHealFacebookRateLimitRearm__*/
 
