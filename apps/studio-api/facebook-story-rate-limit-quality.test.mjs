@@ -76,18 +76,18 @@ test("Story signature correctly separates 48-hour cooldown from eight dispatches
 test("Quality and Helpdesk keep the exact signature and restrained action", () => {
   const check = QUALITY_CHECK_BY_KIND.facebook_story_rate_limit;
   assert.equal(check.signature, "QA-FB-STORY-368-RETRY-PENDING");
-  assert.equal(check.heal, "rearm_original_story_schedule");
+  assert.equal(check.heal, "return_to_preapproval_after_cooldown");
   assert.equal(assertQualityCatalog().ok, true);
   assert.match(qualityRecapCopy("facebook_story_rate_limit").action, /counters are not reset/);
   const healing = fs.readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
   const service = healing.slice(healing.indexOf("export async function studioHealFacebookRateLimitRearm("),
     healing.indexOf("/*__STUDIO_WORKER_END:studioHealFacebookRateLimitRearm__*/"));
   assert.match(service, /FACEBOOK_STORY_RATE_LIMIT_368/);
-  assert.match(service, /facebookStoryRateLimitRearmReason\(authoritative\)/);
-  assert.match(service, /Auto_Publish_Enabled: true/);
-  assert.match(service, /Publish_Status: due \? "Ready to Publish" : "Ready to Schedule"/);
-  assert.doesNotMatch(service.split("if (String(f(record, \"Publish_Error_Stage\")")[1].split("const err =")[0],
-    /studioDispatchApprovedPublishNow/);
+  assert.match(service, /facebookPreapprovalRecoveryReason\\(latest\\)/);
+  assert.match(service, /facebookPreapprovalRecoveryFields\\(latest\\)/);
+  assert.match(service, /scanOutstandingFailedOutputs/);
+  assert.doesNotMatch(service, /studioDispatchApprovedPublishNow/);
+  assert.doesNotMatch(service, /Studio_Publish_Dispatch_Count:\\s*0/);
   const worker = fs.readFileSync(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(worker, /push\(classifyFacebookStoryRateLimit\(mapped, nowMs\)\)/);
   assert.match(worker, /push\(classifyFacebookStoryRateLimit\(mapOut\(record\), nowMs\)\)/);
