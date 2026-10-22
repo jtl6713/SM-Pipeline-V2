@@ -637,6 +637,7 @@ import {
   studioTiktokComplete,
 } from "./worker-functions-03.mjs";
 import { auditReel368Holds } from "./facebook-reel-368-audit.mjs";
+import { studioActivePipelineSettings } from "./worker-functions-03.mjs";
 import {
   healStaleManualFlagsOnPublishedRecord,
   healYoutubeManualWithLiveVideoRecord,
@@ -2504,7 +2505,12 @@ export default {
     // QA-1050: half-hour read-only evidence audit, independent of Factory.
     // Never performs a Meta Graph create or releases safety holds.
     if (cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
-      ctx.waitUntil(auditReel368Holds(env, { airtableFetch })
+      ctx.waitUntil(auditReel368Holds(env, { airtableFetch, metaCredentialsForRow: async (record) => {
+        const settings = await studioActivePipelineSettings(env,
+          ["FACEBOOK_PAGE_ACCESS_TOKEN", "FACEBOOK_GRAPH_API_VERSION"], record);
+        return { token: settings.FACEBOOK_PAGE_ACCESS_TOKEN,
+          version: settings.FACEBOOK_GRAPH_API_VERSION || "v25.0" };
+      } })
         .then((results) => console.info("QA-1050 reel368 read-only audit", JSON.stringify({
           outcomes: results.map(({ output_id, outcome, safety_blocked, next_check_at }) =>
             ({ output_id, outcome, safety_blocked, next_check_at })),
