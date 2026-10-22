@@ -16,6 +16,7 @@ export const QUALITY_HEALS = Object.freeze([
   "park_six_hours",
   "rearm_original_story_schedule",
   "repair_render_sources",
+  "repair_scripted_short_assets",
   "promote_native_photo_review_strand",
   "complete_native_photo_approve",
   "heal_stale_rfr_after_approve",
@@ -59,6 +60,15 @@ function check(row) {
 
 /** Precise operator sentences. `kind` matches a classifier or tester assertion. */
 export const QUALITY_CHECKS = Object.freeze([
+  check({
+    id: "asset_location_mismatch",
+    signature: "QA-ASSET-LOCATION-MISMATCH",
+    title: "Detect and safely repair scripted short library media that violates the requested location or profile",
+    lane: "both",
+    kind: "asset_location_mismatch",
+    actor: "worker_heal",
+    heal: "repair_scripted_short_assets",
+  }),
   check({
     id: "schedule_lock_hung",
     signature: "QA-SCHEDULE-LOCK-HUNG",

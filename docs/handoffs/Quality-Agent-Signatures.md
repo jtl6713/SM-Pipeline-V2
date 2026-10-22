@@ -469,3 +469,43 @@ approval, asset, lock, schedule, cooldown and retry limits remain intact.
 The new Graph client performs only GETs, never POSTs. If errors increase, roll
 back Worker source and keep saved media IDs and held publication states; never
 erase them to make retries proceed.
+
+## QA-ASSET-LOCATION-MISMATCH — Scripted-short location-constrained library media
+
+**First observed:** Battery Park City history proposal, New York Shining profile,
+October 21, 2026. The prompt expressly required uploaded Battery Park images;
+the proposal incorrectly claimed successful library matches for Lincoln Park
+Boardwalk, North Pond, and North Avenue Beach (Chicago).
+
+**Signature:** A scripted-short prompt requires uploaded imagery from a named
+place and any scene references a missing media asset, a different content
+profile, or an asset whose library name, Location, Topic and Asset_Description
+contain no evidence of the requested place. A valid Airtable media ID is **not**
+evidence of geographic relevance. Scope applies to Chicago, New York, Los
+Angeles and Miami profiles.
+
+**Prevent / repair:** The Proposal Engine extracts an explicit location/media
+constraint before searching. Filter discovered candidates to the profile and
+place before passing the catalog to the writer. The independent Quality Agent
+checks the finished timeline; if a mismatch is detected, replace only with an
+unused, eligible library file. If no verified replacement exists, leave that
+scene unassigned, explain what imagery is missing and report suggestion_count
+rather than a false success. If zero eligible files exist, stop proposal
+creation with a clear 409. Proposal acceptance re-fetches the exact media
+records from authoritative Airtable and runs the same independent check
+*before* any idea or Production Request writes.
+
+**Safeguards:** Preserve original voiceover and scene ordering; no automatic
+external-image ingestion, public publishing, synthetic geographic metadata,
+cross-profile substitutions or Drive media mutations. An unscoped asset needs
+direct location evidence. The UI may display all-library success only when
+the validation reports no mismatch and zero unassigned scenes.
+
+**Observability:** Proposal payload reports asset_policy and
+asset_validation with verified/unassigned/recovered/unresolved counts,
+signature and mismatches. Escalate incomplete imagery to the proposal editor;
+do not rerun indefinitely. Regression tests use the original Battery Park
+prompt plus Chicago, New York, Los Angeles and Miami fixtures.
+
+**Rollback:** Revert the Worker asset-policy integration and its catalog entry;
+no Airtable schema migration or mutation is required.
