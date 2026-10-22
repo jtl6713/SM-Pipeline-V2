@@ -93,3 +93,28 @@ test("proposal and acceptance routes contain their respective independent valida
   assert.match(source, /const mediaRows = await Promise\.all\(selectedMediaIds\.map/);
   assert.match(source, /validateScriptedShortAssets\(timeline, authoritativeCatalog, acceptPolicy/);
 });
+
+
+test("scripted short proposal and accept honor the selected Studio profile query parameter", async () => {
+  const functions = await readFile(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
+  const worker = await readFile(new URL("./worker.js", import.meta.url), "utf8");
+  assert.match(functions, /export async function proposeScriptedShortRoute\(request, env, authorization, url = null\)/);
+  assert.match(functions, /export async function acceptScriptedShortRoute\(request, env, authorization, ctx = null, url = null\)/);
+  const propose = functions.split("export async function proposeScriptedShortRoute(")[1].split("/*__STUDIO_WORKER_END:proposeScriptedShortRoute__*/")[0];
+  const accept = functions.split("export async function acceptScriptedShortRoute(")[1].split("/*__STUDIO_WORKER_END:acceptScriptedShortRoute__*/")[0];
+  assert.match(propose, /resolveWorkingContentProfile\(env, authorization, requestedProfileId\(url, payload\)\)/);
+  assert.match(accept, /resolveWorkingContentProfile\(env, authorization, requestedProfileId\(url, payload\)\)/);
+  // Awaiting inside the Worker fetch try/catch retains expected HttpError 409
+  // status codes instead of causing an unhandled Cloudflare 1101/500.
+  assert.match(worker, /return await proposeScriptedShortRoute\(request, env, authorization, url\)/);
+  assert.match(worker, /return await acceptScriptedShortRoute\(request, env, authorization, ctx, url\)/);
+  assert.match(propose, /synthetic\.fields\.Market_Name = profileMarket/);
+});
+
+test("original Battery Park fixture remains NYC-only after fixing profile routing", () => {
+  const newYork = { id: "recBattery", name: "Battery Park 9", location: "Battery Park City", profile_id: "recgtK8Z7eNADNtVy" };
+  const chicago = { id: "recNorthPond", name: "North Pond 2", location: "Lincoln Park, Chicago", profile_id: "recT2rbKX3MF7cVFU" };
+  assert.equal(libraryAssetSatisfiesPolicy(newYork, policy, "recgtK8Z7eNADNtVy"), true);
+  assert.equal(libraryAssetSatisfiesPolicy(chicago, policy, "recgtK8Z7eNADNtVy"), false);
+  assert.equal(libraryAssetSatisfiesPolicy(newYork, policy, "recT2rbKX3MF7cVFU"), false);
+});
