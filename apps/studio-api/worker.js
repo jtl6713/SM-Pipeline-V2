@@ -649,6 +649,7 @@ import {
   studioScheduleReservationQualitySweep,
   studioScheduleReservationQualityLatest,
   studioReconcileApprovedPublishes,
+  studioQualityAuditApprovedPastDue,
   studioReconcileFacebookVideoCovers,
   studioReconcilePublishingInstagramStories,
   studioReconcilePublishingInstagramReels,
@@ -2652,6 +2653,13 @@ export default {
         await studioHealLiveFailedPublishStatus(env, { limit: 8 });
       } catch (error) {
         console.warn("studio live-failed publish heal failed", error);
+      }
+      // QA-PUBLISH-001 only reconciles existing verified public receipts;
+      // normal overdue rescue remains the sole new-publication path.
+      try {
+        await studioQualityAuditApprovedPastDue(env, { limit: 8 });
+      } catch (error) {
+        console.warn("Quality Agent approved-past-due audit unavailable", error);
       }
       try {
         await studioHealTtd0RouteBlankDraft(env, { limit: 4 });
@@ -5850,6 +5858,7 @@ const DESK_OUTPUT_IDENTITY_KINDS = new Set([
 /*__STUDIO_WORKER_EXTRACT:enrichDeskActivityIdentity__*/
 /*__STUDIO_WORKER_EXTRACT:mapDeskInventoryOutput__*/
 /*__STUDIO_WORKER_EXTRACT:deskOutputsForRequest__*/
+/*__STUDIO_WORKER_EXTRACT:studioQualityAuditApprovedPastDue__*/
 /*__STUDIO_WORKER_EXTRACT:gatherStudioDeskInventory__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioDeskInventory__*/
 /*__STUDIO_WORKER_EXTRACT:isStudioTestActivityEvent__*/
