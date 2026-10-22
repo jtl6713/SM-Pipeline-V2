@@ -1,4 +1,5 @@
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
+import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { withPhase5SyncLease } from "./supabase-sync-lease.mjs";
 import { homeApprovedExceptionKind, homeIsUnpublishedFailure } from "./profile-summary-classification.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
@@ -11422,7 +11423,18 @@ export async function studioPublishFacebookPageStory(env, record) {
           " exact Meta media_id; no duplicate Graph send").slice(0, 900),
       } }),
     });
-    return { ok: true, post_id: evidence.post_id, reused_existing_remote_story: true };
+    const verifiedWrite = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id).catch(() => null);
+    const durable = verifiedWrite
+      ? await persistVerifiedRecoveryInAirtable(env, verifiedWrite, evidence, {
+        listRecords, airtableFetch,
+      }).catch((error) => {
+        console.warn("QA Story publisher recovery ledger append deferred", record.id,
+          String(error?.message || error));
+        return { recorded: false };
+      })
+      : { recorded: false };
+    return { ok: true, post_id: evidence.post_id, reused_existing_remote_story: true,
+      durable_recovery_recorded: durable.recorded === true };
   }
 
   // A legacy dispatched Story with no persisted media ID is not safe to
