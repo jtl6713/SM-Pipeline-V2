@@ -21,10 +21,9 @@ export function fb3FinalizeEligible(row, nowMs = Date.now()) {
   if (!/^\d{6,30}(?:_\d{6,30})?$/.test(txt(row, "Platform_Post_ID"))) return false;
   // Do not race a live publisher. Stale lock recovery is owned by the
   // existing reservation/lock healer, never this finalization function.
-  if (txt(row, "Publish_Locked_By")) {
-    const lockedAt = Date.parse(txt(row, "Publish_Locked_At"));
-    if (!Number.isFinite(lockedAt) || nowMs - lockedAt < 15 * 60_000) return false;
-  }
+  // Any extant lock is authoritative; never clear or override it here.
+  // The independent lock-recovery routine must release it first.
+  if (txt(row, "Publish_Locked_By") || txt(row, "Publish_Locked_At")) return false;
   return true;
 }
 
