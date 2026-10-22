@@ -36,7 +36,7 @@ export function assessAutonomousVerification(record, { nowMs = Date.now() } = {}
   if (securityChallenge) return { ...base, outcome: "human_action_required",
     action_required: "Complete the verified Meta account security checkpoint; then allow Quality Agent to recheck.",
     reason: "Meta security checkpoint requires the page administrator" };
-  const rateLimited = stage === "FACEBOOK_STORY_RATE_LIMIT_368"
+  const rateLimited = stage === "FACEBOOK_STORY_RATE_LIMIT_368" || stage === "FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING"
     || ["FBS3_RATE_LIMIT", "FB_GRAPH_RATE_LIMIT"].includes(stage)
     || /(?:we limit how often you can post|protect the community from spam)/i.test(error);
   if (!rateLimited) return null;
@@ -51,6 +51,12 @@ export function assessAutonomousVerification(record, { nowMs = Date.now() } = {}
     return { ...base, outcome: "safety_blocked", reason: "Publication explicitly held" };
   const retryAt = Date.parse(string(record, "Publish_Next_Retry_At"));
   const attempts = Math.max(number(record, "Publish_Attempt_Count"), number(record, "Studio_Publish_Dispatch_Count"));
+  if (stage === "FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING") return { ...base,
+    outcome: "pending_verification", safety_blocked: true,
+    next_check_at: new Date(nowMs + 30 * 60 * 1000).toISOString(),
+    reason: string(record, "Platform_Media_ID")
+      ? "Meta Page Story exact upload identity is checked read-only; no repeat Graph create."
+      : "Legacy Story dispatch lacks saved upload identity; retry remains fenced." };
   const expired = Number.isFinite(retryAt) && retryAt <= nowMs;
   if (!expired) return { ...base, outcome: "cooldown_waiting",
     next_check_at: Number.isFinite(retryAt) ? new Date(retryAt).toISOString() : null,
