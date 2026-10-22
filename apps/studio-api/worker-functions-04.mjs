@@ -1,4 +1,5 @@
 import { summarizeAutonomousVerification } from "./autonomous-verification-recovery.mjs";
+import { FACEBOOK_PENDING_FINALIZE_FORMULA, fb3FinalizeEligible, selectFb3FinalizeBatch } from "./facebook-photo-finalize-priority.mjs";
 import { scanApprovedPastDueOutputs, classifyApprovedPastDue, STALE_PUBLISHED_RECEIPT_FORMULA, publishedReceiptRepairReason } from "./approved-past-due-quality.mjs";
 import { QUALITY_RECOVERY_LEDGER_TABLE } from "./qa-recovery-ledger.mjs";
 import { scanOutstandingFailedOutputs, describeFailedOutput, facebookRateLimitResetReason } from "./failed-output-monitor.mjs";
@@ -1026,6 +1027,47 @@ export async function studioReconcileTiktokDrafts(env, options = {}) {
   return results;
 }
 /*__STUDIO_WORKER_END:studioReconcileTiktokDrafts__*/
+
+export async function studioReconcileFacebookPhotoFinalizes(env, options = {}) {
+  // FB3 is an exact existing-post Graph GET followed by status/URL finalize.
+  // Never invoke FB0/FB1/FB2, rearm, reschedule or create a new Graph post.
+  const limit = Math.max(1, Math.min(4, Number(options.limit || 4)));
+  const table = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const rows = await listRecords(env, table, {
+    limit: 48, filterFormula: FACEBOOK_PENDING_FINALIZE_FORMULA,
+    sortField: "FB_Last_Checked_At", sortDirection: "asc",
+  });
+  const candidates = selectFb3FinalizeBatch(rows, { limit });
+  const results = [];
+  for (const candidate of candidates) {
+    const latest = await airtableFetch(env, table, candidate.id).catch(() => null);
+    if (!latest || !fb3FinalizeEligible(latest) ||
+      String(f(latest, "Platform_Post_ID") || "") !== String(f(candidate, "Platform_Post_ID") || "")) {
+      results.push({ id: candidate.id, output_id: f(candidate, "Output_ID") || null,
+        status: "skipped_state_changed" });
+      continue;
+    }
+    try {
+      const result = await studioPulseFb3(env, latest);
+      const verified = await airtableFetch(env, table, candidate.id).catch(() => null);
+      const completed = Boolean(verified &&
+        String(f(verified, "Platform_Post_ID") || "") === String(f(latest, "Platform_Post_ID") || "") &&
+        f(verified, "Output_Status") === "Published" &&
+        f(verified, "Publish_Status") === "Published" &&
+        f(verified, "Published_At") &&
+        /^https:\/\/(?:www\.)?facebook\.com\//i.test(String(f(verified, "Platform_Post_URL") || "")));
+      results.push({ id: candidate.id, output_id: f(latest, "Output_ID") || null,
+        status: completed ? "verified_published" : result?.skipped || result?.message || "pending_remote_evidence",
+        post_id: String(f(latest, "Platform_Post_ID") || ""), no_graph_create: true });
+    } catch (error) {
+      results.push({ id: candidate.id, output_id: f(latest, "Output_ID") || null,
+        status: "stage_unavailable", error: String(error?.message || error).slice(0, 180),
+        no_graph_create: true });
+    }
+  }
+  return results;
+}
+/*__STUDIO_WORKER_END:studioReconcileFacebookPhotoFinalizes__*/
 
 export async function studioReconcileFacebookPhotos(env, options = {}) {
   // Graph publish hold blocks creation, NOT finalization of a confirmed
