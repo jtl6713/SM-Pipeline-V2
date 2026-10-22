@@ -52,8 +52,8 @@ function scheduleReferencingAirtableWriters() {
 
 const EXPECTED_WRITER_SURFACE = [
   "worker-functions-01.mjs:studioCompleteNativePhotoPublishArming",
-  // Story Graph-368 recovery reads Scheduled_Post_Date but patches only status/retry fields.
-  "worker-functions-01.mjs:studioHealFacebookRateLimitRearm",
+  // Facebook rate-limit recovery preserves Scheduled_Post_Date until the next
+  // approved atomic MAE move. It clears only the non-authoritative suggestion marker.
   "worker-functions-02.mjs:fanoutProductionRequestOutputsToContentItems",
   "worker-functions-02.mjs:studioAtomicApplyPlatformOutputSeedSchedule",
   "worker-functions-03.mjs:studioPrepareVisualVoiceoverCanary",

@@ -90,7 +90,7 @@ test("Worker integrates census and telemetry without bypassing #1045's attempt c
   const factory = fs.readFileSync(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   const ui = fs.readFileSync(new URL("../studio-web/assets/factory-batch-quality-0710.js", import.meta.url), "utf8");
   assert.match(worker, /QA-AUTOVERIFY-RECOVERED:/);
-  assert.match(worker, /facebookStoryRateLimitRearmReason\(authoritative\)/);
+  assert.ok(worker.includes("facebookPreapprovalRecoveryReason(latest)"));
   assert.match(factory, /summarizeAutonomousVerification/);
   assert.match(factory, /verification_recovery: snapshot\.verification_recovery/);
   assert.match(ui, /recovered_automatically/);

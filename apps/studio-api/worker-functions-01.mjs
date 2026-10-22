@@ -1,4 +1,5 @@
-import { scanOutstandingFailedOutputs, failedOutputRetryGate, facebookStoryRateLimitRearmReason } from "./failed-output-monitor.mjs";
+import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
+import { facebookPreapprovalRecoveryReason, facebookPreapprovalRecoveryFields, FACEBOOK_PREAPPROVAL_FORMULA } from "./facebook-preapproval-recovery.mjs";
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
@@ -12100,121 +12101,61 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
         String(error?.message || error));
     }
   }
-  const rows = await listRecords(env, outputTable, {
-    limit: Math.max(limit * 3, 18),
-    sortField: "Output_ID",
-    sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Published_At}=BLANK(),{Do_Not_Publish}=0,OR(AND({Publish_Status}="Failed",OR({Publish_Error_Stage}="FBS3_RATE_LIMIT",{Publish_Error_Stage}="FB_GRAPH_RATE_LIMIT")),AND({Publish_Error_Stage}="FACEBOOK_STORY_RATE_LIMIT_368",OR({Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish",{Publish_Status}="Failed"))),OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))',
-  }).catch(() => []);
-  const healed = [];
-  for (const record of rows || []) {
-    if (healed.length >= limit) break;
-    if (String(f(record, "Publish_Error_Stage") || "") === "FACEBOOK_STORY_RATE_LIMIT_368") {
-      const blocked = facebookStoryRateLimitRearmReason(record);
-      if (blocked) continue; // The Quality census reports the exact reason; do not starve other rows.
-      // Re-read authoritative Airtable state before changing a possibly stale
-      // scan row. In particular never overwrite a newly published Story.
-      const authoritative = await airtableFetch(env, outputTable, record.id).catch(() => null);
-      if (!authoritative || facebookStoryRateLimitRearmReason(authoritative)) continue;
-      // This arm operation is NOT a Graph send. The existing due-time dispatcher
-      // handles the eventual Story publication, retaining its normal guards.
-      const scheduled = String(f(authoritative, "Scheduled_Post_Date") || "");
-      const due = Date.parse(scheduled) <= Date.now();
-      const oldNote = String(f(authoritative, "Studio_Publish_Dispatch_Note") || "").trim();
-      try {
-        await airtableFetch(env, outputTable, record.id, {
-          method: "PATCH",
-          body: JSON.stringify({
-            fields: {
-              Auto_Publish_Enabled: true,
-              Publish_Retry_Eligible: false,
-              Publish_Status: due ? "Ready to Publish" : "Ready to Schedule",
-              Publish_Error_Stage: "",
-              Publish_Error_Message: "",
-              Publish_Next_Retry_At: null,
-              Studio_Publish_Dispatch_Note:
-                (oldNote.slice(0, 440) + " | QA-FB-STORY-368-RETRY-PENDING: cooldown elapsed; rearmed original schedule" +
-                  " | QA-AUTOVERIFY-RECOVERED:" + new Date().toISOString()).trim().slice(0, 900),
-            },
-            typecast: true,
-          }),
-        });
-        healed.push({
-          key: "FB_STORY_RATE_LIMIT_REARM", id: record.id,
-          output_id: f(record, "Output_ID") || null,
-          scheduled_post_date: scheduled, dispatch: "at-original-scheduled-time",
-        });
-      } catch (error) {
-        healed.push({
-          key: "FB_STORY_RATE_LIMIT_REARM", id: record.id,
-          output_id: f(record, "Output_ID") || null,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
+  const candidates = await scanOutstandingFailedOutputs(
+    (args) => listRecordsPage(env, outputTable, args),
+    { filterFormula: FACEBOOK_PREAPPROVAL_FORMULA }
+  ).catch((error) => {
+    console.warn("Facebook preapproval candidate census unavailable", error);
+    return [];
+  });
+  const recovered = [];
+  const blocked = {};
+  for (const candidate of candidates) {
+    if (recovered.length >= limit) break;
+    // The fresh authoritative read protects against stale scan results,
+    // recently published outputs, late retry time, and active publish locks.
+    const latest = await airtableFetch(env, outputTable, candidate.id).catch(() => null);
+    if (!latest) {
+      blocked.read_failed = (blocked.read_failed || 0) + 1;
       continue;
     }
-    const err = [
-      String(f(record, "Publish_Error_Message") || ""),
-      String(f(record, "FB_Slideshow_Error_Message") || ""),
-      String(f(record, "Publish_Error_Stage") || ""),
-    ].join(" ");
-    if (!isFacebookPublishRateLimitError(err) && !/RATE_LIMIT/i.test(String(f(record, "Publish_Error_Stage") || ""))) {
+    const reason = facebookPreapprovalRecoveryReason(latest);
+    if (reason) {
+      blocked[reason] = (blocked[reason] || 0) + 1;
       continue;
     }
-    const hasPublic = Boolean(
-      String(f(record, "Publish_Asset_URL") || f(record, "FB_Slideshow_Public_URL") || f(record, "Final_File_URL") || "")
-        .trim()
-        .startsWith("https://media.chicagoshining.com/")
-    );
     try {
-      await airtableFetch(env, outputTable, record.id, {
+      const fields = facebookPreapprovalRecoveryFields(latest);
+      await airtableFetch(env, outputTable, candidate.id, {
         method: "PATCH",
-        body: JSON.stringify({
-          fields: {
-            Auto_Publish_Enabled: true,
-            Publish_Retry_Eligible: true,
-            Publish_Status: "Ready to Publish",
-            Publish_Error_Stage: "",
-            Publish_Error_Message: "",
-            Publish_Next_Retry_At: null,
-            Publish_Locked_By: "",
-            Publish_Locked_At: null,
-            FB_Publish_Status: "Retry Pending",
-            FB_Slideshow_Status: hasPublic ? "Video Ready" : "Retry Pending",
-            FB_Slideshow_Error_Message: "",
-            Studio_Publish_Dispatch_Count: 0,
-          },
-          typecast: true,
-        }),
+        body: JSON.stringify({ fields, typecast: true }),
       });
-      const refreshed = await airtableFetch(env, outputTable, record.id).catch(() => record);
-      const dispatched = hasPublic
-        ? await studioDispatchApprovedPublishNow(env, refreshed).catch((error) => ({
-          ok: false,
-          error: error instanceof Error ? error.message : String(error),
-        }))
-        : { ok: true, skipped: "waiting-fbs2-public-mp4" };
-      healed.push({
-        key: "FB_RATE_LIMIT_REARM",
-        id: record.id,
-        output_id: f(record, "Output_ID") || null,
-        ok: dispatched?.ok !== false,
-        target: dispatched?.target || dispatched?.skipped || null,
+      // This is a pre-approval handoff only. Existing MAE + atomic reservation
+      // selection occurs when the operator subsequently approves.
+      studioMarkMappedListDirty(env, "outputs");
+      studioInvalidateOccupiedScheduleCache();
+      recovered.push({
+        key: "FB_RATE_LIMIT_TO_PREAPPROVAL",
+        id: candidate.id,
+        output_id: f(latest, "Output_ID") || null,
+        state: "Ready for Review",
       });
     } catch (error) {
-      healed.push({
-        key: "FB_RATE_LIMIT_REARM",
-        id: record.id,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      blocked.write_failed = (blocked.write_failed || 0) + 1;
+      console.warn("Facebook preapproval recovery failed", candidate.id, String(error?.message || error));
     }
   }
-  if (healed.length || evidenceHealed.length || remoteHealed.length)
-    console.log("Studio Facebook rate-limit recovery", JSON.stringify({
-      rearmed: healed.length, reconciled: evidenceHealed.length,
-      remote_verified: remoteHealed.length, healed, evidenceHealed, remoteHealed,
+  if (recovered.length || evidenceHealed.length || remoteHealed.length || Object.keys(blocked).length) {
+    console.log("Studio Facebook rate-limit Quality Agent recovery", JSON.stringify({
+      recovered_to_review: recovered.length,
+      reconciled_published: evidenceHealed.length,
+      remote_verified_published: remoteHealed.length,
+      rescheduled_without_approval: 0,
+      human_verification_needed: blocked.remote_publication_verification_required || 0,
+      blocked, recovered: recovered.map(({ output_id, state }) => ({ output_id, state })),
     }));
-  return [...remoteHealed, ...evidenceHealed, ...healed];
+  }
+  return [...remoteHealed, ...evidenceHealed, ...recovered];
 }
 /*__STUDIO_WORKER_END:studioHealFacebookRateLimitRearm__*/
 

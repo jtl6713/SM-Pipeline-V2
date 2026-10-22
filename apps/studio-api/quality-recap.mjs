@@ -32,11 +32,11 @@ const COPY = {
   },
   facebook_publish_rate_limit: {
     found: "Facebook temporarily blocked Reel upload because the page hit a post rate limit.",
-    action: "Parked the retry for about six hours so Graph is not stormed.",
+    action: "After the saved cooldown, eligible rejected outputs return to Ready for Review; the next approval uses MAE. No automatic Graph resend or dispatch counter reset.",
   },
   facebook_story_rate_limit: {
     found: "Facebook temporarily restricted a Story; Studio retained the approval but blocked publishing.",
-    action: "During cooldown, no post is sent. After cooldown, safe low-attempt Stories rearm for their original scheduled time. Stories with many attempts need remote publication verification; counters are not reset automatically.",
+    action: "During cooldown, no post is sent. After cooldown, safe low-attempt Stories return to Ready for Review for a fresh MAE approval. Ambiguous or repeated sends require remote publication verification; counters are not reset automatically.",
   },
   tiktok_auth_signature: {
     found: "A TikTok draft failed because the city auth Worker rejected the pipeline secret (HTTP 401).",

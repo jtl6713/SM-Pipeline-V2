@@ -1079,10 +1079,11 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.675-asset-aware-proposal-qa" + "-home-v6-fast-cache" + "-home-summary-v6-shadow",
+          version: "0.10.676-facebook-preapproval-recovery" + "-home-v6-fast-cache" + "-home-summary-v6-shadow",
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
           quality_meta_story_readonly_verification_v1: true,
+          quality_facebook_preapproval_recovery_v1: true,
           studio_profile_summary_reconcile_gate_v1: true,
           studio_profile_summary_reconcile_await_v1: true,
           studio_profile_summary_home_membership_v1: true,
