@@ -103,7 +103,7 @@ export function deskTransientRenderError(text) {
 
 export function isFacebookPublishRateLimitError(text) {
   const value = String(text || "");
-  return /limit how often you can post|protect the community from spam|FBS3_RATE_LIMIT|FB_GRAPH_RATE_LIMIT|error_subcode['":\s]*1390008|(^|[^0-9])368([^0-9]|$)/i.test(value);
+  return /limit how often you can post|protect the community from spam|FBS3_RATE_LIMIT|FB_GRAPH_RATE_LIMIT|FACEBOOK_STORY_RATE_LIMIT_368|error_subcode['":\s]*1390008|(^|[^0-9])368([^0-9]|$)/i.test(value);
 }
 
 export function deskTransientPublishError(text) {
@@ -1034,7 +1034,46 @@ export function classifyTtd0RouteBlankDraft(row) {
   }, row);
 }
 
+/**
+ * QA-FB-STORY-368-RETRY-PENDING. Story Graph rate-limit parks do not always
+ * set Publish_Status=Failed; 4112 remains Ready to Schedule. Distinguish a
+ * reversible cooldown from a capped 8-dispatch, no-remote-proof hold.
+ */
+export function classifyFacebookStoryRateLimit(row, nowMs = Date.now()) {
+  if (String(row?.platform || "") !== "Facebook"
+      || String(row?.platform_output_type || "") !== "Facebook Story"
+      || String(row?.publish_error_stage || "") !== "FACEBOOK_STORY_RATE_LIMIT_368"
+      || row?.do_not_publish || row?.published_at || row?.platform_post_id
+      || row?.platform_post_url) return null;
+  const state = String(row?.publish_status || "");
+  if (!["Failed", "Ready to Schedule", "Ready to Publish"].includes(state)) return null;
+  const retryAt = Date.parse(String(row?.publish_next_retry_at || ""));
+  const waiting = !Number.isFinite(retryAt) || retryAt > nowMs;
+  const dispatchCount = Number(row?.dispatch_count || 0);
+  const blocked = dispatchCount >= 3
+    ? "remote_verification_required"
+    : waiting ? "cooldown" : "eligible_for_guarded_rearm";
+  const recordId = String(row?.id || row?.record_id || "").trim();
+  return withDeskIdentity({
+    kind: "facebook_story_rate_limit",
+    signature: "QA-FB-STORY-368-RETRY-PENDING",
+    class: "transient",
+    record_id: recordId || null,
+    fingerprint: fingerprint("facebook_story_rate_limit", recordId, "graph_368_story"),
+    actor: blocked === "remote_verification_required" ? "desk_agent" : "worker_heal",
+    blocker: blocked,
+    diagnosis: dispatchCount >= 3
+      ? "Facebook Story Graph 368 (spam/rate limit), " + dispatchCount
+        + " dispatches and no verified public post ID. Preserve the 48-hour cooldown and all counters; "
+        + "remote publication must be reconciled before another attempt. Not permanently unrecoverable."
+      : "Approved Facebook Story Graph 368 hold; Quality Agent can rearm the original schedule only after "
+        + "the saved cooldown, public asset and duplicate/lock guards pass. Never publish early.",
+  }, row);
+}
+
 export function classifyFacebookPublishRateLimit(row) {
+  if (String(row?.platform_output_type || "") === "Facebook Story"
+      && String(row?.publish_error_stage || "") === "FACEBOOK_STORY_RATE_LIMIT_368") return null;
   const err = `${row?.publish_error || ""} ${row?.fb_slideshow_error || ""} ${row?.publish_error_stage || ""}`;
   if (!isFacebookPublishRateLimitError(err)) return null;
   const publish = String(row?.publish_status || "").trim();
@@ -1056,6 +1095,7 @@ export function classifyFacebookPublishRateLimit(row) {
 export function classifyPublishFailed(row, nowMs = Date.now()) {
   if (classifyPublishLiveFailedStatus(row)) return null;
   if (classifyTtd0RouteBlankDraft(row)) return null;
+  if (classifyFacebookStoryRateLimit(row, nowMs)) return null;
   if (classifyFacebookPublishRateLimit(row)) return null;
   if (row?.published_at) return null;
   if (classifyTikTokAuthSignature(row)) return null;
@@ -1509,6 +1549,7 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "publish_live_failed_status",
   "ttd0_route_blank_draft",
   "facebook_publish_rate_limit",
+  "facebook_story_rate_limit",
   "tiktok_auth_signature",
   "ig_carousel_too_many_children",
   "ig_carousel_child_verification_race",

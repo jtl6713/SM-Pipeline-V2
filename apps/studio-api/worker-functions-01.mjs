@@ -1,4 +1,4 @@
-import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
+import { scanOutstandingFailedOutputs, failedOutputRetryGate, facebookStoryRateLimitRearmReason } from "./failed-output-monitor.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
 import { isQueuedForPlatformDispatch } from "./overview-dispatch-counts.mjs";
@@ -12004,19 +12004,62 @@ export async function studioHealTtd0RouteBlankDraft(env, options = {}) {
 /*__STUDIO_WORKER_END:studioHealTtd0RouteBlankDraft__*/
 
 export async function studioHealFacebookRateLimitRearm(env, options = {}) {
-  // After a Graph 368 park (including interim Auto_Publish=0 fences), re-arm once
-  // Publish_Next_Retry_At is due so FBS3 can try again without a human toggle.
+  // Rearm approved Graph 368 Reels and Stories after cooldown. Do not bypass
+  // a future Story schedule, double-post or erase evidence of a live post.
   const limit = Math.max(1, Math.min(8, Number(options.limit || 4)));
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const rows = await listRecords(env, outputTable, {
     limit: Math.max(limit * 3, 18),
     sortField: "Output_ID",
     sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Published_At}=BLANK(),{Do_Not_Publish}=0,{Publish_Status}="Failed",OR({Publish_Error_Stage}="FBS3_RATE_LIMIT",{Publish_Error_Stage}="FB_GRAPH_RATE_LIMIT"),OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))',
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Published_At}=BLANK(),{Do_Not_Publish}=0,OR(AND({Publish_Status}="Failed",OR({Publish_Error_Stage}="FBS3_RATE_LIMIT",{Publish_Error_Stage}="FB_GRAPH_RATE_LIMIT")),AND({Publish_Error_Stage}="FACEBOOK_STORY_RATE_LIMIT_368",OR({Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish",{Publish_Status}="Failed"))),OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))',
   }).catch(() => []);
   const healed = [];
   for (const record of rows || []) {
     if (healed.length >= limit) break;
+    if (String(f(record, "Publish_Error_Stage") || "") === "FACEBOOK_STORY_RATE_LIMIT_368") {
+      const blocked = facebookStoryRateLimitRearmReason(record);
+      if (blocked) continue; // The Quality census reports the exact reason; do not starve other rows.
+      // Re-read authoritative Airtable state before changing a possibly stale
+      // scan row. In particular never overwrite a newly published Story.
+      const authoritative = await airtableFetch(env, outputTable, record.id).catch(() => null);
+      if (!authoritative || facebookStoryRateLimitRearmReason(authoritative)) continue;
+      // This arm operation is NOT a Graph send. The existing due-time dispatcher
+      // handles the eventual Story publication, retaining its normal guards.
+      const scheduled = String(f(authoritative, "Scheduled_Post_Date") || "");
+      const due = Date.parse(scheduled) <= Date.now();
+      const oldNote = String(f(authoritative, "Studio_Publish_Dispatch_Note") || "").trim();
+      try {
+        await airtableFetch(env, outputTable, record.id, {
+          method: "PATCH",
+          body: JSON.stringify({
+            fields: {
+              Auto_Publish_Enabled: true,
+              Publish_Retry_Eligible: false,
+              Publish_Status: due ? "Ready to Publish" : "Ready to Schedule",
+              Publish_Error_Stage: "",
+              Publish_Error_Message: "",
+              Publish_Next_Retry_At: null,
+              Studio_Publish_Dispatch_Note:
+                (oldNote.slice(0, 440) + " | QA-FB-STORY-368-RETRY-PENDING: cooldown elapsed; rearmed original schedule").trim().slice(0, 900),
+            },
+            typecast: true,
+          }),
+        });
+        healed.push({
+          key: "FB_STORY_RATE_LIMIT_REARM", id: record.id,
+          output_id: f(record, "Output_ID") || null,
+          scheduled_post_date: scheduled, dispatch: "at-original-scheduled-time",
+        });
+      } catch (error) {
+        healed.push({
+          key: "FB_STORY_RATE_LIMIT_REARM", id: record.id,
+          output_id: f(record, "Output_ID") || null,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      continue;
+    }
     const err = [
       String(f(record, "Publish_Error_Message") || ""),
       String(f(record, "FB_Slideshow_Error_Message") || ""),
