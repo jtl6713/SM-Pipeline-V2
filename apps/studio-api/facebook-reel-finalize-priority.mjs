@@ -16,7 +16,7 @@ export function facebookReelPollVideoId(row) {
   const post = value(row, "Platform_Post_ID");
   if (media && post && media !== post) return "";
   const id = media || post;
-  return /^\\d{6,30}$/.test(id) ? id : "";
+  return /^\d{6,30}$/.test(id) ? id : "";
 }
 
 export function facebookReelPollEligible(row, nowMs = Date.now()) {
