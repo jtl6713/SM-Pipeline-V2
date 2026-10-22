@@ -171,18 +171,19 @@ export function describeFailedOutput(record, nowMs = Date.now()) {
     recovery = "cooldown";
     action = "Honor the Facebook publishing cooldown and rate-limit rearm; never force immediate publication.";
   }
-  if (text(record, "Publish_Error_Stage") === "FACEBOOK_STORY_RATE_LIMIT_368"
+  if (["FACEBOOK_STORY_RATE_LIMIT_368", "FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING"].includes(text(record, "Publish_Error_Stage"))
       && text(record, "Platform") === "Facebook" && text(record, "Platform_Output_Type") === "Facebook Story"
       && !publishedEvidence) {
     signature = "QA-FB-STORY-368-RETRY-PENDING";
-    const blocked = facebookStoryRateLimitRearmReason(record, { nowMs });
+    const remotePending = text(record, "Publish_Error_Stage") === "FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING";
+    const blocked = remotePending ? "remote_verification_pending" : facebookStoryRateLimitRearmReason(record, { nowMs });
     recovery = blocked === null ? "healer_eligible" : blocked === "cooldown" ? "cooldown"
-      : blocked === "retry_limit" ? "verification_pending" : "needs_attention";
+      : ["retry_limit", "remote_verification_pending"].includes(blocked) ? "verification_pending" : "needs_attention";
     reason = text(record, "Studio_Publish_Dispatch_Note") || "Facebook Graph 368 stopped the Story; approval and scheduled time are retained.";
     action = blocked === "cooldown" ? "Wait for Facebook's saved retry time; Quality Agent will rearm the original schedule."
       : blocked === null ? "Quality Agent can rearm the approved Story and let the existing publisher send only at its original scheduled time."
-      : blocked === "retry_limit"
-        ? "Quality Agent retains the safety hold and rechecks evidence. Do not repost or reset the dispatch counter without reliable remote verification."
+      : ["retry_limit", "remote_verification_pending"].includes(blocked)
+        ? "Quality Agent checks Meta Page Story evidence read-only. Do not repost or reset counters without trustworthy remote verification."
         : "Do not repost blindly. Repair gate: " + blocked + "; verify Facebook and retry eligibility first.";
   }
   // FB0 source verification also diagnoses held outputs with no Publish_Error_Message
