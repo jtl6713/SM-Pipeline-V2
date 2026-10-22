@@ -104,3 +104,36 @@ test("duplicate or missing output records never authorize a publish or audit a f
   assert.ok(outcomes.every(x => x.outcome === "record_unavailable" && x.graph_create_authorized === false));
   assert.equal(writes.length, 0);
 });
+
+test("authorized exact-ID provider read verifies identity but never reconciles without separate publication receipt", async () => {
+  const writes = [];
+  const fetcher = async (_env, table, path, opts = {}) => {
+    if (table === "Platform Outputs") {
+      const id = Number(decodeURIComponent(path).match(/Output_ID}=([0-9]+)/)?.[1]);
+      return { records: [row(id, id === 2457 ? { FB_Slideshow_Meta_Video_ID:"123456789012345" } : {})] };
+    }
+    if (opts.method === "PATCH") {
+      writes.push(JSON.parse(opts.body).records[0].fields);
+      return { records: [{ id: "rec12345678901234" }] };
+    }
+    return { records: [] };
+  };
+  const requests = [];
+  const results = await auditReel368Holds({}, {
+    airtableFetch: fetcher,
+    nowMs: Date.parse("2026-10-24T13:00:00Z"),
+    metaCredentialsForRow: async () => ({token:"read-only-token",version:"v25.0"}),
+    metaFetch: async (url, options) => {
+      requests.push({url, method:options.method});
+      return {ok:true,json:async()=>({id:"123456789012345",status:"PUBLISHED",
+        permalink_url:"https://www.facebook.com/reel/123456789012345/"})};
+    },
+  });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].method, "GET");
+  assert.equal(results[0].outcome, "remote_identity_confirmed_pending_reconciliation");
+  assert.equal(results[0].graph_create_authorized,false);
+  assert.equal(writes.length,3);
+  assert.equal(writes[0].Outcome,"remote_identity_confirmed_pending_reconciliation");
+  assert.ok(writes.every(x=>!x.Published_At&&!x.Platform_Post_ID&&!x.Publish_Status));
+});
