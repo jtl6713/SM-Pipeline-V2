@@ -642,6 +642,7 @@ import {
   studioReconcileYoutubePublishes,
   studioReconcileTiktokDrafts,
   studioReconcileFacebookPhotos,
+  studioReconcileFacebookPhotoFinalizes,
   studioReconcileInstagramCarousels,
   studioReconcileOverdueScheduledPublishes,
   studioHealApprovedMissingSchedule,
@@ -2507,6 +2508,16 @@ export default {
         }
       }
 
+      // FB3 is read-only Graph lookup of an existing recorded Page post.
+      // Keep this bounded independent lane on light ticks: the old heavy
+      // sequence was leaving October posts Pending Finalize without a poll.
+      if (!cadence.heavy) {
+        ctx.waitUntil(studioReconcileFacebookPhotoFinalizes(env, { limit: 4 })
+          .then((result) => {
+            if (result.length) console.info("FB3 pending-finalize priority recovery", JSON.stringify(result));
+          })
+          .catch((error) => console.warn("FB3 priority reconcile unavailable", error)));
+      }
       // --- LIGHT (every 5 min): due-publish + stuck produce/render only ---
       // Stamp MAE onto approved rows that Factory left blank BEFORE reconcile.
       // A blank Scheduled_Post_Date matches the due-publish formula and goes out now.
@@ -5510,6 +5521,7 @@ const STUDIO_PUBLISH_RECONCILE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:studioRearmDueYoutubeManualPublishes__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileYoutubePublishes__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileTiktokDrafts__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookPhotoFinalizes__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookPhotos__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileInstagramCarousels__*/
 // Scheduled posts are a hard deadline. This rescue deliberately ignores the normal
