@@ -288,3 +288,6 @@ jobs:
 # 2026-10-21: Deploy merged PR #1038 FB0 manifest-backed doubled-slide auto-recovery. Airtable remains authoritative; publish idempotency unchanged.
 
 # 2026-10-22: deploy Graph-368 FBS3 no-auto-recreate guard and test through existing Ops runner workflow.
+
+# Step 2 existing-media reconciliation: 2026-10-22 restart runner through audited Ops deploy action.
+# Existing YouTube YT2 video IDs and TikTok TTD2 publish IDs must be polled, NEVER uploaded/created twice.
