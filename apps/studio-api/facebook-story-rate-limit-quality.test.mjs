@@ -66,8 +66,8 @@ test("Story signature correctly separates 48-hour cooldown from eight dispatches
   assert.equal(story.blocker, "cooldown");
   assert.equal(story.actor, "worker_heal");
   story = classifyFacebookStoryRateLimit(mapped({ dispatch_count: 8 }), at);
-  assert.equal(story.blocker, "remote_verification_required");
-  assert.equal(story.actor, "desk_agent");
+  assert.equal(story.blocker, "pending_verification");
+  assert.equal(story.actor, "worker_heal");
   assert.match(story.diagnosis, /Not permanently unrecoverable/);
   assert.equal(classifyFacebookPublishRateLimit(mapped({ platform_output_type: "Facebook Reel", publish_status: "Failed", publish_error_stage: "FBS3_RATE_LIMIT" }))?.kind, "facebook_publish_rate_limit");
   assert.equal(classifyFacebookStoryRateLimit(mapped({ published_at: "2026-10-24T21:00:00Z" }), at), null);
