@@ -58,9 +58,11 @@ test("never count not-final-approved, published, excluded, or draft delivered as
   assert.equal(homeApprovedCalendarCounts([{...tiktok,publish_status:"Draft Delivered"}],at).future,1);
 });
 
-test("past due includes approved output with failed platform dispatch, but not published records", () => {
+test("failed dispatch moves to Quality Agent Failed; Pending Finalize remains an overdue exception", () => {
   const late=approved("Instagram",stampPast);
-  assert.equal(homeApprovedCalendarCounts([{...late,publish_status:"Failed"}],at).past_due,1);
+  assert.equal(homeApprovedCalendarCounts([{...late,publish_status:"Failed"}],at).past_due,0);
+  assert.equal(homeOutputContribution({...late,publish_status:"Failed"},at).failed_outputs,1);
+  assert.equal(homeApprovedCalendarCounts([{...late,platform_publish_status:"Published Pending Finalize"}],at).past_due,1);
   assert.equal(homeApprovedCalendarCounts([{...late,publish_status:"Published"}],at).past_due,0);
   assert.equal(homeOutputContribution(late).approved_unpublished,1);
 });
