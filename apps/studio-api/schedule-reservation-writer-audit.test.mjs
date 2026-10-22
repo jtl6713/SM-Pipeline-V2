@@ -52,6 +52,8 @@ function scheduleReferencingAirtableWriters() {
 
 const EXPECTED_WRITER_SURFACE = [
   "worker-functions-01.mjs:studioCompleteNativePhotoPublishArming",
+  // Story Graph-368 recovery reads Scheduled_Post_Date but patches only status/retry fields.
+  "worker-functions-01.mjs:studioHealFacebookRateLimitRearm",
   "worker-functions-02.mjs:fanoutProductionRequestOutputsToContentItems",
   "worker-functions-02.mjs:studioAtomicApplyPlatformOutputSeedSchedule",
   "worker-functions-03.mjs:studioPrepareVisualVoiceoverCanary",
