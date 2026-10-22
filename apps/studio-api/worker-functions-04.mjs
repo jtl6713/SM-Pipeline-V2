@@ -1,4 +1,5 @@
-import { AUTOVERIFY_RECOVERED_FORMULA, summarizeAutonomousVerification } from "./autonomous-verification-recovery.mjs";
+import { summarizeAutonomousVerification } from "./autonomous-verification-recovery.mjs";
+import { QUALITY_RECOVERY_LEDGER_TABLE } from "./qa-recovery-ledger.mjs";
 import { scanOutstandingFailedOutputs, describeFailedOutput, facebookRateLimitResetReason } from "./failed-output-monitor.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
@@ -9022,9 +9023,11 @@ async function loadStudioFailedOutputSnapshot(env, { fresh = false } = {}) {
       scanOutstandingFailedOutputs((options) =>
         listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options)),
       listContentProfileRecords(env).catch(() => []),
+      // Independent, persistent events survive overwritten dispatch notes.
+      // Full pagination; never report an unavailable ledger as zero recovered.
       scanOutstandingFailedOutputs((options) =>
-        listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options),
-      { filterFormula: AUTOVERIFY_RECOVERED_FORMULA })
+        listRecordsPage(env, QUALITY_RECOVERY_LEDGER_TABLE, options),
+      { filterFormula: 'AND({Outcome}="reconciled_published",{Reconciled_At}!="")' })
         .then((records) => ({ status: "ok", records }))
         .catch((error) => ({ status: "unavailable", records: [], error: String(error?.message || error) })),
     ]);
@@ -9040,7 +9043,7 @@ async function loadStudioFailedOutputSnapshot(env, { fresh = false } = {}) {
       status: "ok", scanned_at: new Date().toISOString(),
       count: rows.length, rows, items,
       verification_recovery: summarizeAutonomousVerification(rows, recoveredScan.records, {
-        recoveredScanStatus: recoveredScan.status,
+        ledgerScanStatus: recoveredScan.status,
       }),
     };
   });
