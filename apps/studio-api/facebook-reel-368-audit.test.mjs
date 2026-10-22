@@ -137,3 +137,32 @@ test("authorized exact-ID provider read verifies identity but never reconciles w
   assert.equal(writes[0].Outcome,"remote_identity_confirmed_pending_reconciliation");
   assert.ok(writes.every(x=>!x.Published_At&&!x.Platform_Post_ID&&!x.Publish_Status));
 });
+
+test("overlapping half-hour audits use a stable upsert key and never call Meta create", async () => {
+  const saved = new Map(), writes = [];
+  const fetcher = async (_env, table, path, options = {}) => {
+    if (table === "Platform Outputs") {
+      const id = Number(decodeURIComponent(path).match(/Output_ID}=([0-9]+)/)?.[1]);
+      return { records: [row(id)] };
+    }
+    if (options.method === "PATCH") {
+      const payload=JSON.parse(options.body);
+      assert.deepEqual(payload.performUpsert.fieldsToMergeOn, ["Event_Key"]);
+      const data=payload.records[0].fields;
+      writes.push(data.Event_Key);
+      saved.set(data.Event_Key, data);
+      return { records: [{fields:data}] };
+    }
+    const key=decodeURIComponent(path).match(/Event_Key}="([^"]+)"/)?.[1];
+    return {records:key&&saved.has(key)?[{fields:saved.get(key)}]:[]};
+  };
+  const nowMs=Date.parse("2026-10-24T13:00:00Z");
+  const [left,right]=await Promise.all([
+    auditReel368Holds({}, {airtableFetch:fetcher, nowMs}),
+    auditReel368Holds({}, {airtableFetch:fetcher, nowMs})
+  ]);
+  assert.equal(left.length,3); assert.equal(right.length,3);
+  assert.equal(new Set(writes).size,3);
+  assert.equal(saved.size,3);
+  assert.ok([...saved.values()].every(x=>JSON.parse(x.Details_JSON).graph_create_authorized===false));
+});
