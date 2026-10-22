@@ -12092,7 +12092,7 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
     if (!latest || String(f(latest, "Platform") || "") !== "Facebook"
         || String(f(latest, "Platform_Output_Type") || "") !== "Facebook Story"
         || f(latest, "Test_Run_ID") || f(latest, "Do_Not_Publish")) continue;
-    if (!f(latest, "Published_At") || !/^\\d{6,30}$/.test(String(f(latest, "Platform_Post_ID") || ""))) continue;
+    if (!f(latest, "Published_At") || !/^\d{6,30}$/.test(String(f(latest, "Platform_Post_ID") || ""))) continue;
     if (f(latest, "Publish_Status") === "Published"
         && f(latest, "Output_Status") === "Published"
         && !f(latest, "Publish_Error_Stage")) continue;
