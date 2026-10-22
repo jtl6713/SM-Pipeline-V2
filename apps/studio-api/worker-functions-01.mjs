@@ -12078,6 +12078,7 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
               FB_Publish_Status: "Published", Publish_Error_Stage: "",
               Publish_Error_Message: "", Publish_Next_Retry_At: null,
               Publish_Retry_Eligible: false, Auto_Publish_Enabled: false,
+              Studio_Publish_Dispatch_At: new Date().toISOString(),
               Studio_Publish_Dispatch_Note: VERIFICATION_REMOTE_MARKER + " | exact Meta media_id=" + match.media_id,
             }, typecast: true,
           }) });
