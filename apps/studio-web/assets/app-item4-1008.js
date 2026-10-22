@@ -22075,6 +22075,7 @@ function timedScriptAssetLabel(asset, index) {
         if (profileAtRequest !== selectedProfileId) return;
         if (!Array.isArray(focused?.records)) throw new Error("Pipeline drill-down was not verified");
         pipelineOutputs = focused.records;
+        pipelineListExceptionScope = true;
         pipelineContentRecords = [];
         pipelineListUnverified = focused.complete === false;
         renderOutputsTable(target, focused.records);
@@ -22127,6 +22128,7 @@ function timedScriptAssetLabel(asset, index) {
       const historyStale = !outputsSettled.ok || Boolean(outputsResult.stale);
       pipelineListUnverified = historyStale;
       pipelineOutputs = records;
+      pipelineListExceptionScope = false;
       if (activeCreativeOutputId && $("creativeOutputMeta")) {
         const freshCreative = records.find((row) => row && row.id === activeCreativeOutputId);
         if (freshCreative) {
@@ -26202,8 +26204,20 @@ function timedScriptAssetLabel(asset, index) {
     button.addEventListener("click", () => {
       pipelineViewFilter = String(button.dataset.pipelineQuickView || "all");
       pipelineOpenSingleOnLoad = false;
-      // Full list is already in memory — re-filter locally so tab counts stay
-      // honest and switching Review→All does not blank the other counts.
+      // Exception/Failed views are a separately scoped historical fetch.
+      // Never reuse those rows for All, other profile tabs, or another
+      // exception view: that was making navigation silently drop outputs.
+      const needsFreshScope = ["approved_missing_date", "approved_past_due", "failed"].includes(pipelineViewFilter)
+        || pipelineListExceptionScope === true;
+      if (needsFreshScope) {
+        pipelineListExceptionScope = false;
+        pipelineOutputs = [];
+        clearPipelineColumnFilters();
+        refreshPipelineOutputs({ force: true });
+        return;
+      }
+      // The normal full list is already in memory; re-filter without
+      // issuing another history read.
       if (pipelineOutputs.length) {
         updatePipelineQuickTabs(pipelineOutputs);
         const target = $("outputsList");
@@ -26213,6 +26227,7 @@ function timedScriptAssetLabel(asset, index) {
       refreshPipelineOutputs({ force: true });
     });
   });
+  let pipelineListExceptionScope = false;
   window.studioOpenPipelineFilter = (filter, options = {}) => {
     const profileId = String(options.profileId || "").trim();
     if (profileId && selectedProfileId !== profileId) {
