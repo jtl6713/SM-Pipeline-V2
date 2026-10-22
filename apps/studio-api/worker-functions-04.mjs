@@ -1,3 +1,4 @@
+import { AUTOVERIFY_RECOVERED_FORMULA, summarizeAutonomousVerification } from "./autonomous-verification-recovery.mjs";
 import { scanOutstandingFailedOutputs, describeFailedOutput, facebookRateLimitResetReason } from "./failed-output-monitor.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
@@ -9016,10 +9017,15 @@ async function loadStudioFailedOutputSnapshot(env, { fresh = false } = {}) {
   // Ordinary polling still uses a 60-second coalesced Airtable read.
   return studioReadCoalesce(fresh ? "quality-agent-census-fresh:" + Date.now()
     : "quality-agent-failed-output-census", fresh ? 0 : 60000, async () => {
-    const [rows, profiles] = await Promise.all([
+    const [rows, profiles, recoveredScan] = await Promise.all([
       scanOutstandingFailedOutputs((options) =>
         listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options)),
       listContentProfileRecords(env).catch(() => []),
+      scanOutstandingFailedOutputs((options) =>
+        listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options),
+      { filterFormula: AUTOVERIFY_RECOVERED_FORMULA })
+        .then((records) => ({ status: "ok", records }))
+        .catch((error) => ({ status: "unavailable", records: [], error: String(error?.message || error) })),
     ]);
     const profileNames = new Map((profiles || []).map((profile) => [
       profile.id,
@@ -9032,6 +9038,9 @@ async function loadStudioFailedOutputSnapshot(env, { fresh = false } = {}) {
     return {
       status: "ok", scanned_at: new Date().toISOString(),
       count: rows.length, rows, items,
+      verification_recovery: summarizeAutonomousVerification(rows, recoveredScan.records, {
+        recoveredScanStatus: recoveredScan.status,
+      }),
     };
   });
 }
@@ -9573,6 +9582,7 @@ export async function gatherStudioDeskInventory(env) {
     activityEvents,
     }),
     failed_outputs: { ...failedOutputSnapshot, rows: undefined },
+    verification_recovery: failedOutputSnapshot?.verification_recovery || { status: "unavailable" },
   };
 }
 /*__STUDIO_WORKER_END:gatherStudioDeskInventory__*/
@@ -14955,7 +14965,8 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
             fresh: url.searchParams.get("fresh_output_failures") === "1",
           });
           outputFailures = { status: "ok", count: snapshot.count,
-            scanned_at: snapshot.scanned_at, items: snapshot.items };
+            scanned_at: snapshot.scanned_at, items: snapshot.items,
+            verification_recovery: snapshot.verification_recovery };
         } catch (error) {
           console.warn("Factory failed-output Quality Agent scan degraded", error);
           outputFailures = { status: "unavailable",
