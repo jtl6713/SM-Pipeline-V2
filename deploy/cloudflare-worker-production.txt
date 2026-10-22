@@ -604,3 +604,5 @@ Deploy Worker: complete paginated MAE occupancy for safe Facebook Quality Agent 
 2026-10-21: Deploy explicit Airtable-authoritative profile-scoped historical exception read route and Home failed-publish counting correction; recover LA nine clickable records; preserve Facebook Pending Finalize evidence, no publishing side effects.
 
 2026-10-21: PR #1048 authoritative Home bucket parity for historical Failed, Approved No Date and Approved Past Due Pipeline drilldowns. Airtable write authority preserved; no publishing actions, no Phase 6.
+
+2026-10-21: Deploy Worker 0.10.673-autonomous-verification-recovery for Issue #1050. Preserves PR #1045 Story cooldown and eight-dispatch safety; reconciles confirmed existing published evidence without a Graph send; classifies exhausted holds as verification pending, not manual; Factory/Desk metrics report recovered versus genuine human challenge with partial-data warning. Airtable stays authoritative.

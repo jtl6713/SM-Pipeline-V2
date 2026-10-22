@@ -1,5 +1,5 @@
 /** Complete, read-only failed-output census used by Desk and Factory Quality Agent. */
-export const FAILED_OUTPUT_FORMULA = 'AND({Test_Run_ID}=BLANK(),OR(AND({Publish_Error_Stage}="FACEBOOK_STORY_RATE_LIMIT_368",{Published_At}=BLANK(),{Platform_Post_ID}=BLANK(),{Platform_Post_URL}=BLANK(),{Do_Not_Publish}=0),{Output_Status}="Failed",{Render_Status}="Failed",{Publish_Status}="Failed",AND({Publish_Error_Message}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published"),AND({IG_Carousel_Error_Message}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published"),AND({IG_Carousel_Status}="Children Processing",{IG_Carousel_Parent_Response_JSON}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published"),AND({Manual_Fallback_Required}=1,{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published")))';
+export const FAILED_OUTPUT_FORMULA = 'AND({Test_Run_ID}=BLANK(),OR(AND({Platform}="Facebook",{Publish_Error_Stage}="META_SECURITY_CHALLENGE",{Published_At}=BLANK()),AND({Platform}="Facebook",{Publish_Error_Stage}="FACEBOOK_CHECKPOINT_REQUIRED",{Published_At}=BLANK()),AND({Publish_Error_Stage}="FACEBOOK_STORY_RATE_LIMIT_368",{Published_At}=BLANK(),{Platform_Post_ID}=BLANK(),{Platform_Post_URL}=BLANK(),{Do_Not_Publish}=0),{Output_Status}="Failed",{Render_Status}="Failed",{Publish_Status}="Failed",AND({Publish_Error_Message}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published"),AND({IG_Carousel_Error_Message}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published"),AND({IG_Carousel_Status}="Children Processing",{IG_Carousel_Parent_Response_JSON}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published"),AND({Manual_Fallback_Required}=1,{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published")))';
 
 export async function scanOutstandingFailedOutputs(fetchPage, { pageSize = 100, filterFormula = FAILED_OUTPUT_FORMULA } = {}) {
   const records = [];
@@ -176,11 +176,14 @@ export function describeFailedOutput(record, nowMs = Date.now()) {
       && !publishedEvidence) {
     signature = "QA-FB-STORY-368-RETRY-PENDING";
     const blocked = facebookStoryRateLimitRearmReason(record, { nowMs });
-    recovery = blocked === null ? "healer_eligible" : blocked === "cooldown" ? "cooldown" : "needs_attention";
+    recovery = blocked === null ? "healer_eligible" : blocked === "cooldown" ? "cooldown"
+      : blocked === "retry_limit" ? "verification_pending" : "needs_attention";
     reason = text(record, "Studio_Publish_Dispatch_Note") || "Facebook Graph 368 stopped the Story; approval and scheduled time are retained.";
     action = blocked === "cooldown" ? "Wait for Facebook's saved retry time; Quality Agent will rearm the original schedule."
       : blocked === null ? "Quality Agent can rearm the approved Story and let the existing publisher send only at its original scheduled time."
-      : "Do not repost blindly. Repair gate: " + blocked + "; verify Facebook and retry eligibility first.";
+      : blocked === "retry_limit"
+        ? "Quality Agent retains the safety hold and rechecks evidence. Do not repost or reset the dispatch counter without reliable remote verification."
+        : "Do not repost blindly. Repair gate: " + blocked + "; verify Facebook and retry eligibility first.";
   }
   // FB0 source verification also diagnoses held outputs with no Publish_Error_Message
   // (e.g. output 7040/7060). No user/manual action is needed for exact 2N

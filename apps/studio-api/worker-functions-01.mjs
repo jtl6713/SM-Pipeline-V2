@@ -12007,6 +12007,40 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
   // Rearm approved Graph 368 Reels and Stories after cooldown. Do not bypass
   // a future Story schedule, double-post or erase evidence of a live post.
   const limit = Math.max(1, Math.min(8, Number(options.limit || 4)));
+  // Read-only reconciliation of already recorded publication evidence. This
+  // never makes a Graph create request and never converts absent IDs into proof.
+  // Re-read Airtable immediately before marking an output Published.
+  const evidenced = await listRecords(env, outputTable, {
+    limit: Math.max(limit * 3, 18),
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Platform_Output_Type}="Facebook Story",{Publish_Error_Stage}="FACEBOOK_STORY_RATE_LIMIT_368",OR({Published_At}!="",{Platform_Post_ID}!="",{Platform_Post_URL}!=""))',
+  }).catch(() => []);
+  const evidenceHealed = [];
+  for (const candidate of evidenced || []) {
+    if (evidenceHealed.length >= limit) break;
+    const latest = await airtableFetch(env, outputTable, candidate.id).catch(() => null);
+    if (!latest || String(f(latest, "Publish_Error_Stage") || "") !== "FACEBOOK_STORY_RATE_LIMIT_368") continue;
+    if (!["Published", "Posted"].includes(String(f(latest, "Publish_Status") || "")) &&
+        ![f(latest, "Published_At"), f(latest, "Platform_Post_ID"), f(latest, "Platform_Post_URL")].some(Boolean)) continue;
+    if (f(latest, "Publish_Locked_By") || f(latest, "Publish_Locked_At")) continue;
+    const note = String(f(latest, "Studio_Publish_Dispatch_Note") || "").slice(0, 440);
+    try {
+      await airtableFetch(env, outputTable, candidate.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields: {
+          Publish_Status: "Published", Publish_Error_Stage: "", Publish_Error_Message: "",
+          Publish_Retry_Eligible: false, Publish_Next_Retry_At: null,
+          Auto_Publish_Enabled: false,
+          Studio_Publish_Dispatch_Note: (note + " | QA-AUTOVERIFY-RECOVERED:" + new Date().toISOString()
+            + " verified existing publication evidence; no new Graph create").slice(0, 900),
+        }, typecast: true }),
+      });
+      evidenceHealed.push({ key: "FB_STORY_AUTOVERIFY_PUBLISHED", id: candidate.id,
+        output_id: f(latest, "Output_ID") || null, action: "reconciled_no_send" });
+    } catch (error) {
+      console.warn("QA auto-verification publication reconciliation failed", candidate.id,
+        String(error?.message || error));
+    }
+  }
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const rows = await listRecords(env, outputTable, {
     limit: Math.max(limit * 3, 18),
@@ -12041,7 +12075,8 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
               Publish_Error_Message: "",
               Publish_Next_Retry_At: null,
               Studio_Publish_Dispatch_Note:
-                (oldNote.slice(0, 440) + " | QA-FB-STORY-368-RETRY-PENDING: cooldown elapsed; rearmed original schedule").trim().slice(0, 900),
+                (oldNote.slice(0, 440) + " | QA-FB-STORY-368-RETRY-PENDING: cooldown elapsed; rearmed original schedule" +
+                  " | QA-AUTOVERIFY-RECOVERED:" + new Date().toISOString()).trim().slice(0, 900),
             },
             typecast: true,
           }),
@@ -12116,8 +12151,9 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
       });
     }
   }
-  if (healed.length) console.log("Studio Facebook rate-limit rearm", JSON.stringify({ count: healed.length, healed }));
-  return healed;
+  if (healed.length || evidenceHealed.length) console.log("Studio Facebook rate-limit recovery",
+    JSON.stringify({ rearmed: healed.length, reconciled: evidenceHealed.length, healed, evidenceHealed }));
+  return [...evidenceHealed, ...healed];
 }
 /*__STUDIO_WORKER_END:studioHealFacebookRateLimitRearm__*/
 
