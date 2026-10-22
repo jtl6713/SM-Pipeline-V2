@@ -11393,6 +11393,13 @@ export async function studioPublishFacebookPageStory(env, record) {
       pageId, token, version, mediaId: previousMediaId,
     });
     if (result.verdict !== "verified_published") {
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
+        method: "PATCH", body: JSON.stringify({ typecast: true, fields: {
+          Publish_Status: "Failed", Publish_Error_Stage: "FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING",
+          Publish_Error_Message: "Exact Meta Story media ID requires remote verification; no duplicate create allowed.",
+          Publish_Retry_Eligible: false, Auto_Publish_Enabled: false,
+        } }),
+      });
       return { ok: false, skipped: "remote-verification-pending",
         verification_reason: result.reason || "no_published_story_evidence" };
     }
@@ -11416,6 +11423,20 @@ export async function studioPublishFacebookPageStory(env, record) {
       } }),
     });
     return { ok: true, post_id: evidence.post_id, reused_existing_remote_story: true };
+  }
+
+  // A legacy dispatched Story with no persisted media ID is not safe to
+  // replay merely because Graph returned a transient error or the Page list
+  // no longer exposes the original Story. Preserve it for evidence review.
+  if (Number(f(record, "Studio_Publish_Dispatch_Count") || 0) > 0) {
+    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
+      method: "PATCH", body: JSON.stringify({ typecast: true, fields: {
+        Publish_Status: "Failed", Publish_Error_Stage: "FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING",
+        Publish_Error_Message: "Prior Story dispatch has no saved media ID; publication absence cannot be proven.",
+        Publish_Retry_Eligible: false, Auto_Publish_Enabled: false,
+      } }),
+    });
+    return { ok: false, skipped: "legacy-dispatch-no-remote-identity" };
   }
 
   const location = await studioResolvePublishLocation(env, record);
