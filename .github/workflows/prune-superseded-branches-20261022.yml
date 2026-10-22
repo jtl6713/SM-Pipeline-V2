@@ -1,0 +1,64 @@
+name: Prune superseded and duplicate pointers (2026-10-22)
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/prune-superseded-branches-20261022.yml
+permissions:
+  contents: write
+  pull-requests: read
+concurrency:
+  group: prune-superseded-branches-20261022
+  cancel-in-progress: false
+jobs:
+  prune:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Verify current-main supersession contract and exact branch identities
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          # The old #1012 route is superseded by a stronger one-R2-object status_only check.
+          grep -Fq 'status_only: true' apps/studio-api/factory-global-rollout-health.mjs
+          grep -Fq 'history_checked: false' apps/studio-api/factory-global-rollout-health.mjs
+          grep -Fq 'status_only=1' .github/workflows/deploy-cloudflare-worker-production.yml
+          # The old #1007 patch is present, with its safety regression test.
+          grep -Fq 'error code: 1042' .github/workflows/deploy-cloudflare-worker-production.yml
+          grep -Fq 'error code: 1042' apps/studio-api/deploy-bridge-1042.test.mjs
+          for pr in 1012 1007; do
+            state="$(gh pr view "$pr" --json state --jq .state)"
+            [[ "$state" == "CLOSED" ]] || { echo "PR_$pr not closed; refuse"; exit 1; }
+          done
+          dup="$(gh pr view 1028 --json headRefOid,headRefName,state --jq '[.headRefOid,.headRefName,.state]|join(" ")')"
+          [[ "$dup" == 'daefeee5950dfbdac7226af2661e58a3c449bc65 feature/qa-approved-past-due-reconcile-20261021 OPEN' ]] || { echo "Active PR #1028 no longer preserves duplicate temp branch; refuse"; exit 1; }
+          while IFS=' ' read -r branch expected kind; do
+            [[ -z "$branch" ]] && continue
+            echo "CHECK $branch"
+            live="$(git ls-remote origin "refs/heads/$branch" | awk '{print $1}')"
+            if [[ "$live" != "$expected" ]]; then echo "SKIP_DRIFT $branch"; continue; fi
+            [[ "$(gh pr list --head "$branch" --state open --json number --jq length)" == 0 ]] || { echo "SKIP_ACTIVE_PR $branch"; continue; }
+            if [[ "$kind" == 'trigger' ]]; then
+              git fetch --no-tags origin "$branch"
+              merge_base="$(git merge-base "origin/main" "$expected")"
+              files="$(git diff --name-only "$merge_base" "$expected")"
+              [[ "$files" == 'deploy/cloudflare-pages-production.txt' ]] || { echo "SKIP_UNIQUE_CODE $branch files=$files"; continue; }
+            fi
+            # Deletion fails if any concurrent contributor moves the branch head.
+            git push --force-with-lease="refs/heads/$branch:$expected" origin ":refs/heads/$branch"
+            echo "DELETED_VERIFIED_SUPERSEDED $branch"
+          done <<'BRANCHES'
+          fix/factory-global-rollout-probe-for-deploy-20261020 24c637e23aa4656b14ca82a470dc08e57bca2505 superseded
+          fix/deploy-bridge-1042-transient-retry-20261020 e532a4dff2c3b68581e61bf1424d1c12e84903cc superseded
+          fix/prepare-progress-pages-tests-20261020 5489b259155493c6df61d47778e3b26a5d53429f trigger
+          tmp/qa-1028-ci-cleanup-20261021 daefeee5950dfbdac7226af2661e58a3c449bc65 duplicate
+          BRANCHES
+          echo 'PRUNE_SUPERSEDED_AUDIT_COMPLETE'
