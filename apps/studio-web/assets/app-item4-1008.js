@@ -280,7 +280,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.740-factory-parent-grouping";
+  const BUILD_ID = "item4-0.6.741-approved-exception-links";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -20283,6 +20283,25 @@ function timedScriptAssetLabel(asset, index) {
   }
 
 
+  // Same Home definition: final approved, still unpublished, Scheduled_Post_Date only.
+  function pipelineApprovedExceptionKind(record, now = Date.now()) {
+    if (!record || record.do_not_publish
+        || !["Facebook", "Instagram", "TikTok", "YouTube"].includes(record.platform)) return "";
+    if (String(record.review_status || "").trim().toLowerCase() !== "approved") return "";
+    const state = String(record.studio_state || "").trim().toLowerCase();
+    const publish = String(record.publish_status || "").trim().toLowerCase();
+    const platformPublish = String(record.platform_publish_status || "").trim().toLowerCase();
+    const manual = String(record.manual_completion_status || "").trim().toLowerCase();
+    if (/published|posted/.test(state)
+        || /published|posted|publish complete|publish succeeded/.test(publish)
+        || /published|posted/.test(platformPublish)
+        || /^(published|posted|completed)$/.test(manual)
+        || record.published_at || record.platform_post_url || record.manual_published_url) return "";
+    const stamp = Date.parse(String(record.scheduled_post_date || ""));
+    if (!Number.isFinite(stamp) || stamp <= 0) return "approved_missing_date";
+    return stamp <= now ? "approved_past_due" : "";
+  }
+
   function pipelineFilterLabel(filter = pipelineViewFilter) {
     if (filter === "active") return "Active";
     if (filter === "attention") return "Needs attention";
@@ -20291,6 +20310,8 @@ function timedScriptAssetLabel(asset, index) {
     if (filter === "approval") return "Awaiting Approval";
     if (filter === "rendering") return "Rendering";
     if (filter === "approved") return "Approved";
+    if (filter === "approved_past_due") return "Approved · Past Due";
+    if (filter === "approved_missing_date") return "Approved · No Date";
     if (filter === "scheduled") return "Scheduled";
     if (filter === "published") return "Published";
     return "All";
@@ -20303,6 +20324,7 @@ function timedScriptAssetLabel(asset, index) {
     const review = String(record?.review_status || "");
     const publish = String(pipelinePublishStatusLabel(record) || record?.publish_status || "");
     if (!filter || filter === "all") return true;
+    if (filter === "approved_past_due" || filter === "approved_missing_date") return pipelineApprovedExceptionKind(record) === filter;
     if (filter === "published") return studio === "Published" || state === "Published";
     // Same predicate as All Profiles manual_action_required. A stored post URL
     // makes pipelineStudioStateLabel return Published, so the click-through
@@ -20441,6 +20463,11 @@ function timedScriptAssetLabel(asset, index) {
 
   function filteredPipelineRecords(records) {
     const all = records || [];
+    // Home exception totals count outputs, not their nonmatching package siblings.
+    if (pipelineViewFilter === "approved_past_due" || pipelineViewFilter === "approved_missing_date") {
+      return all.filter((record) => pipelineRecordMatchesFilter(record)
+        && pipelineRecordMatchesColumnFilters(record, pipelineColumnFilters, all));
+    }
     // Keep every sibling on a matching package. Filtering by Published/Active row
     // alone hid TikTok 847 (Published) from Content 143 while IG/FB siblings stayed
     // Ready to Schedule.
@@ -20577,6 +20604,7 @@ function timedScriptAssetLabel(asset, index) {
   function isPipelineGroupExpanded(key, { isNewest = false, isArchived = false } = {}) {
     if (pipelineGroupOpen.has(key)) return pipelineGroupOpen.get(key);
     if (isArchived) return false;
+    if (pipelineViewFilter === "approved_past_due" || pipelineViewFilter === "approved_missing_date") return true;
     return Boolean(isNewest);
   }
 
@@ -20882,7 +20910,7 @@ function timedScriptAssetLabel(asset, index) {
     )).length;
     // Attention/manual must show the same output count All Profiles uses,
     // not the sibling-expanded package size.
-    const countFilter = pipelineViewFilter === "attention" || pipelineViewFilter === "manual";
+    const countFilter = ["attention", "manual", "approved_past_due", "approved_missing_date"].includes(pipelineViewFilter);
     updatePipelineFilterBar(countFilter ? matchingCount : source.length);
     if (!source.length) {
       const filteredEmpty = (pipelineViewFilter && pipelineViewFilter !== "all") || pipelineColumnFiltersActive();
@@ -22019,6 +22047,7 @@ function timedScriptAssetLabel(asset, index) {
     if (!target) return;
     if (silent && pipelinePollInFlight && !force) return;
     pipelinePollInFlight = true;
+    const profileAtRequest = selectedProfileId;
     const cachedRows = pipelineOutputs.length ? pipelineOutputs : readPipelineOutputCache();
     if (cachedRows.length && !target.querySelector("table")) {
       pipelineOutputs = cachedRows;
@@ -22041,6 +22070,7 @@ function timedScriptAssetLabel(asset, index) {
       const fullPromise = settled(api("/api/outputs?limit=250", { timeoutMs: 8000, retries: 1 }));
       const schedulePromise = settled(api(schedulePath, { timeoutMs: 15000, retries: 1 }));
       const latestSettled = await latestPromise;
+      if (profileAtRequest !== selectedProfileId) return;
       const latestRows = latestSettled.ok && Array.isArray(latestSettled.value?.records)
         ? latestSettled.value.records : [];
       if (latestRows.length) {
@@ -22052,6 +22082,7 @@ function timedScriptAssetLabel(asset, index) {
         setPipelineLiveHint("Newest outputs checked live · loading full Pipeline…");
       }
       const [outputsSettled, scheduleSettled] = await Promise.all([fullPromise, schedulePromise]);
+      if (profileAtRequest !== selectedProfileId) return;
       if (!outputsSettled.ok && !latestRows.length) throw outputsSettled.error || new Error("Outputs unavailable");
       const outputsResult = outputsSettled.ok ? outputsSettled.value : { records: [], stale: true };
       const contentResult = { records: [] };
@@ -26171,6 +26202,12 @@ function timedScriptAssetLabel(asset, index) {
         select.value = profileId;
         select.dispatchEvent(new Event("change", { bubbles: true }));
       }
+      if (selectedProfileId !== profileId) return;
+      // Do not show records cached from the previously selected city.
+      pipelineOutputs = [];
+      pipelineContentRecords = [];
+      const target = $("outputsList");
+      if (target) target.innerHTML = "";
     }
     clearPipelineColumnFilters();
     showStudioPage("outputs", { pipelineFilter: String(filter || "approval").trim() || "approval" });

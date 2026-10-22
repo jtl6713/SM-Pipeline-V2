@@ -217,8 +217,8 @@
     return n === 0 ? "ok" : n <= 2 ? "warn" : "critical";
   }
 
-  function actionCount(row, kind, label) {
-    const value = Number(row?.[kind]) || 0;
+  function actionCount(row, kind, label, countOverride = row?.[kind]) {
+    const value = Number(countOverride) || 0;
     if (!value || !row?.id) return String(value);
     return `<button type="button" class="overview-action-count" data-overview-profile="${esc(row.id)}" data-overview-action="${esc(kind)}" aria-label="Open ${esc(label)} for ${esc(row.name)}">${value}</button>`;
   }
@@ -243,7 +243,8 @@
       document.getElementById("page-ideas")?.scrollIntoView({ block: "start" });
       return;
     }
-    const view = kind === "approval" ? "approval" : kind === "failed" ? "failed" : "attention";
+    const view = ["approved_past_due", "approved_missing_date"].includes(kind) ? kind
+      : kind === "approval" ? "approval" : kind === "failed" ? "failed" : "attention";
     if (typeof window.studioOpenPipelineFilter === "function") {
       window.studioOpenPipelineFilter(view, { profileId: profileId || "" });
       return;
@@ -316,8 +317,8 @@
       <td data-label="Pipeline total" class="overview-tone-ok">${calendar.pipelineTotal}</td>
       <td data-label="Approved future" class="overview-tone-ok">${calendar.future}</td>
       <td data-label="Ideas needed">${calendar.ideasNeeded}</td>
-      <td data-label="Approved past due" class="overview-tone-${tone(calendar.pastDue, "failed")}">${calendar.pastDue}</td>
-      <td data-label="Approved no date" class="overview-tone-${tone(calendar.missingDate, "failed")}">${calendar.missingDate}</td>
+      <td data-label="Approved past due" class="overview-tone-${tone(calendar.pastDue, "failed")}">${actionCount(isTotal ? null : row, "approved_past_due", "approved past due", calendar.pastDue)}</td>
+      <td data-label="Approved no date" class="overview-tone-${tone(calendar.missingDate, "failed")}">${actionCount(isTotal ? null : row, "approved_missing_date", "approved with no date", calendar.missingDate)}</td>
       <td data-label="Manual" class="overview-tone-${tone(row.manual, "manual")}">${actionCount(row, "manual", "manual action")}</td>
       <td data-label="Failed" class="overview-tone-${tone(row.failed, "failed")}">${actionCount(row, "failed", "failed")}</td>
       <td data-label="Approval" class="overview-tone-${tone(row.approval, "approval")}">${actionCount(row, "approval", "awaiting approval")}</td>
