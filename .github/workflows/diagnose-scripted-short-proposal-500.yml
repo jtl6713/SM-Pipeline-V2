@@ -28,6 +28,7 @@ jobs:
               if (new URL(request.url).pathname !== "/$TOKEN") return new Response("Not found",{status:404});
               const prompt="Educate on the history of Battery Park City area of lower Manhattan. You don't have to be brief. Utilize the battery park images that are uploaded into the system.";
               try {
+              const url = new URL(request.url);
               const requestedProfile = url.searchParams.get("wrong") === "1" ? "recT2rbKX3MF7cVFU" : "recgtK8Z7eNADNtVy";
               const response=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/scripted-short/propose?profile=" + requestedProfile,{
                 method:"POST",
