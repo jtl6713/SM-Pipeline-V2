@@ -1,7 +1,7 @@
 import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
 import { facebookPreapprovalRecoveryReason, facebookPreapprovalRecoveryFields, FACEBOOK_PREAPPROVAL_FORMULA } from "./facebook-preapproval-recovery.mjs";
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
-import { persistVerifiedRecoveryInAirtable, QUALITY_RECOVERY_LEDGER_TABLE } from "./qa-recovery-ledger.mjs";
+import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
 import { isQueuedForPlatformDispatch } from "./overview-dispatch-counts.mjs";
@@ -12078,20 +12078,24 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
         String(error?.message || error));
     }
   }
-  // Read-only reconciliation of already recorded publication evidence. This
-  // never makes a Graph create request and never converts absent IDs into proof.
-  // Re-read Airtable immediately before marking an output Published.
+  // Evidence-positive reconciliation of previously published Stories whose
+  // Studio status is stale. Require BOTH remote post ID and publication time;
+  // no Graph create is made. Also picks up legacy already-published receipts.
   const evidenced = await listRecords(env, outputTable, {
     limit: Math.max(limit * 3, 18),
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Platform_Output_Type}="Facebook Story",{Publish_Error_Stage}="FACEBOOK_STORY_RATE_LIMIT_368",OR({Published_At}!="",{Platform_Post_ID}!="",{Platform_Post_URL}!=""))',
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Platform_Output_Type}="Facebook Story",{Published_At}!="",{Platform_Post_ID}!="",OR({Publish_Status}!="Published",{Output_Status}!="Published",{Publish_Error_Stage}!=""))',
   }).catch(() => []);
   const evidenceHealed = [];
   for (const candidate of evidenced || []) {
     if (evidenceHealed.length >= limit) break;
     const latest = await airtableFetch(env, outputTable, candidate.id).catch(() => null);
-    if (!latest || String(f(latest, "Publish_Error_Stage") || "") !== "FACEBOOK_STORY_RATE_LIMIT_368") continue;
-    if (!["Published", "Posted"].includes(String(f(latest, "Publish_Status") || "")) &&
-        ![f(latest, "Published_At"), f(latest, "Platform_Post_ID"), f(latest, "Platform_Post_URL")].some(Boolean)) continue;
+    if (!latest || String(f(latest, "Platform") || "") !== "Facebook"
+        || String(f(latest, "Platform_Output_Type") || "") !== "Facebook Story"
+        || f(latest, "Test_Run_ID") || f(latest, "Do_Not_Publish")) continue;
+    if (!f(latest, "Published_At") || !/^\\d{6,30}$/.test(String(f(latest, "Platform_Post_ID") || ""))) continue;
+    if (f(latest, "Publish_Status") === "Published"
+        && f(latest, "Output_Status") === "Published"
+        && !f(latest, "Publish_Error_Stage")) continue;
     if (f(latest, "Publish_Locked_By") || f(latest, "Publish_Locked_At")) continue;
     const note = String(f(latest, "Studio_Publish_Dispatch_Note") || "").slice(0, 440);
     try {
@@ -12099,6 +12103,7 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
         method: "PATCH",
         body: JSON.stringify({ fields: {
           Publish_Status: "Published", Output_Status: "Published",
+          FB_Publish_Status: "Published",
           Publish_Error_Stage: "", Publish_Error_Message: "",
           Publish_Retry_Eligible: false, Publish_Next_Retry_At: null,
           Auto_Publish_Enabled: false,
@@ -12167,6 +12172,23 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
     } catch (error) {
       blocked.write_failed = (blocked.write_failed || 0) + 1;
       console.warn("Facebook preapproval recovery failed", candidate.id, String(error?.message || error));
+    }
+  }
+  // Recovery evidence must survive overwritten Studio notes. If Airtable's
+  // event append failed after a successful reconciliation, backfill verified
+  // outputs bearing the earlier recovery marker. Each event key is deduped.
+  const noteRecoveryCandidates = await listRecords(env, outputTable, {
+    limit: Math.max(12, limit * 3),
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Platform_Output_Type}="Facebook Story",{Publish_Status}="Published",{Output_Status}="Published",{Platform_Post_ID}!="",FIND("QA-AUTOVERIFY-RECOVERED:",{Studio_Publish_Dispatch_Note}&"")>0)',
+  }).catch(() => []);
+  for (const row of noteRecoveryCandidates) {
+    try {
+      await persistVerifiedRecoveryInAirtable(env, row, {
+        source: "airtable_existing_publication_receipt",
+        post_id: f(row, "Platform_Post_ID"),
+      }, { listRecords, airtableFetch });
+    } catch (error) {
+      console.warn("QA recovery ledger backfill deferred", row.id, String(error?.message || error));
     }
   }
   if (recovered.length || evidenceHealed.length || remoteHealed.length || Object.keys(blocked).length) {
