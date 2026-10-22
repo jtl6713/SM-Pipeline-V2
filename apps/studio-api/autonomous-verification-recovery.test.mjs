@@ -152,6 +152,20 @@ test("autonomous exact-Meta positive recovery is GET-only and ledger writes once
   }, result.evidence), /does not match/);
 });
 
+test("durable ledger accepts exact Meta Page feed post identities", () => {
+  const output = record(rid(12), {
+    Platform_Output_Type: "Facebook Photo Set",
+    Output_Status: "Published", Publish_Status: "Published",
+    Platform_Post_ID: "831080826745798_122147173317022170",
+  });
+  const fields = verifiedRecoveryLedgerFields(output, {
+    source: "airtable_existing_publication_receipt",
+    post_id: "831080826745798_122147173317022170",
+  });
+  assert.equal(fields.Post_ID, "831080826745798_122147173317022170");
+  assert.equal(recoveredOutcomesFromLedger([{ fields }], { nowMs: Date.parse(fields.Reconciled_At) }).length, 1);
+});
+
 test("Worker and Factory wire durable events while preserving the Story attempt ceiling", () => {
   const worker = fs.readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
   const publisher = fs.readFileSync(new URL("./worker-functions-03.mjs", import.meta.url), "utf8");

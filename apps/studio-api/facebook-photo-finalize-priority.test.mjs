@@ -73,5 +73,8 @@ test("light cadence invokes FB3 existing-post finalize separately from heavy pub
   const fn=ops.slice(ops.indexOf("export async function studioReconcileFacebookPhotoFinalizes("),
     ops.indexOf("/*__STUDIO_WORKER_END:studioReconcileFacebookPhotoFinalizes__*/"));
   assert.match(fn,/studioPulseFb3\(env, latest\)/);
+  assert.match(fn,/persistVerifiedRecoveryInAirtable/);
+  assert.match(fn,/airtable_existing_publication_receipt/);
+  assert.match(fn,/durable_recovery_recorded/);
   assert.doesNotMatch(fn,/studioPulseFb0|studioPulseFb1|studioPulseFb2\(/);
 });

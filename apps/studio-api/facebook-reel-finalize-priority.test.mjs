@@ -43,6 +43,9 @@ test("oldest unpolled eligible Reels first, bounded and no new upload",()=>{
   const fn=ops.slice(ops.indexOf("export async function studioReconcileFacebookReelFinalizes("),
     ops.indexOf("/*__STUDIO_WORKER_END:studioReconcileFacebookReelFinalizes__*/"));
   assert.match(fn,/studioPulseFbs4\(env, latest\)/);
+  assert.match(fn,/persistVerifiedRecoveryInAirtable/);
+  assert.match(fn,/airtable_existing_publication_receipt/);
+  assert.match(fn,/durable_recovery_recorded/);
   assert.doesNotMatch(fn,/studioPulseFbs3|studioPulseFbs2|studioPulseFb2\(/);
   const cron=worker.slice(worker.indexOf("const cadence = studioCronAirtableCadence(cadenceNow"),
     worker.indexOf("await factoryBatchCronResume(env, ctx)",worker.indexOf("const cadence = studioCronAirtableCadence(cadenceNow")));

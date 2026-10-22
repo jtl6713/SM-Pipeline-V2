@@ -2,7 +2,7 @@ import { summarizeAutonomousVerification } from "./autonomous-verification-recov
 import { FACEBOOK_PENDING_FINALIZE_FORMULA, fb3FinalizeEligible, selectFb3FinalizeBatch } from "./facebook-photo-finalize-priority.mjs";
 import { FACEBOOK_REEL_POLL_FORMULA, facebookReelPollVideoId, facebookReelPollEligible, selectFacebookReelPollBatch } from "./facebook-reel-finalize-priority.mjs";
 import { scanApprovedPastDueOutputs, classifyApprovedPastDue, STALE_PUBLISHED_RECEIPT_FORMULA, publishedReceiptRepairReason } from "./approved-past-due-quality.mjs";
-import { QUALITY_RECOVERY_LEDGER_TABLE } from "./qa-recovery-ledger.mjs";
+import { QUALITY_RECOVERY_LEDGER_TABLE, persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { scanOutstandingFailedOutputs, describeFailedOutput, facebookRateLimitResetReason } from "./failed-output-monitor.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
@@ -1057,9 +1057,20 @@ export async function studioReconcileFacebookPhotoFinalizes(env, options = {}) {
         f(verified, "Publish_Status") === "Published" &&
         f(verified, "Published_At") &&
         /^https:\/\/(?:www\.)?facebook\.com\//i.test(String(f(verified, "Platform_Post_URL") || "")));
+      const durable = completed
+        ? await persistVerifiedRecoveryInAirtable(env, verified, {
+          source: "airtable_existing_publication_receipt",
+          post_id: f(verified, "Platform_Post_ID"),
+        }, { listRecords, airtableFetch }).catch((error) => {
+          console.warn("FB3 verified recovery ledger append deferred", candidate.id,
+            String(error?.message || error));
+          return { recorded: false };
+        })
+        : { recorded: false };
       results.push({ id: candidate.id, output_id: f(latest, "Output_ID") || null,
         status: completed ? "verified_published" : result?.skipped || result?.message || "pending_remote_evidence",
-        post_id: String(f(latest, "Platform_Post_ID") || ""), no_graph_create: true });
+        post_id: String(f(latest, "Platform_Post_ID") || ""), no_graph_create: true,
+        durable_recovery_recorded: durable.recorded === true });
     } catch (error) {
       results.push({ id: candidate.id, output_id: f(latest, "Output_ID") || null,
         status: "stage_unavailable", error: String(error?.message || error).slice(0, 180),
@@ -1100,9 +1111,20 @@ export async function studioReconcileFacebookReelFinalizes(env, options = {}) {
         f(verified, "Output_Status") === "Published" &&
         f(verified, "Published_At") &&
         String(f(verified, "Platform_Post_URL") || "").includes("/reel/" + videoId + "/"));
+      const durable = completed
+        ? await persistVerifiedRecoveryInAirtable(env, verified, {
+          source: "airtable_existing_publication_receipt",
+          post_id: f(verified, "Platform_Post_ID"),
+        }, { listRecords, airtableFetch }).catch((error) => {
+          console.warn("FBS4 verified recovery ledger append deferred", candidate.id,
+            String(error?.message || error));
+          return { recorded: false };
+        })
+        : { recorded: false };
       results.push({id: candidate.id, output_id: f(latest, "Output_ID") || null,
         status: completed ? "verified_published" : poll?.skipped || "existing_video_still_processing",
-        video_id: videoId, no_reel_create: true});
+        video_id: videoId, no_reel_create: true,
+        durable_recovery_recorded: durable.recorded === true});
     } catch (error) {
       results.push({id: candidate.id, output_id: f(latest, "Output_ID") || null,
         status: "poll_unavailable", error: String(error?.message || error).slice(0, 150),

@@ -12,6 +12,9 @@
 export const QUALITY_RECOVERY_LEDGER_TABLE = "Quality Agent Recovery Ledger";
 export const QUALITY_RECOVERY_OUTCOME = "reconciled_published";
 const recordPattern = /^rec[A-Za-z0-9]{14}$/;
+// Meta Page feed posts use page_id_post_id while Reels and Stories may use a
+// single numeric ID. Both are authoritative provider identities.
+const metaPostIdPattern = /^\d{6,30}(?:_\d{6,30})?$/;
 const get = (row, key) => row?.fields?.[key] ?? row?.[key] ?? null;
 const val = (row, key) => String(get(row, key) ?? "").trim();
 const profileId = (row) => {
@@ -30,7 +33,7 @@ export function verifiedRecoveryLedgerFields(record, evidence = {}, { at = new D
   const media = val(record, "Platform_Media_ID");
   const source = String(evidence.source || "").trim();
   if (val(record, "Publish_Status") !== "Published" || val(record, "Output_Status") !== "Published"
-      || !/^\d{6,30}$/.test(remotePost) || (evidence.post_id && String(evidence.post_id) !== remotePost))
+      || !metaPostIdPattern.test(remotePost) || (evidence.post_id && String(evidence.post_id) !== remotePost))
     throw new Error("Quality Agent recovery requires authoritative Published read-back with matching remote post ID");
   if (source === "meta_page_stories_exact_media_id"
       && (!/^\d{6,30}$/.test(media) || media !== String(evidence.media_id || "")))
@@ -91,7 +94,7 @@ export function recoveredOutcomesFromLedger(rows = [], {
     if (!recordPattern.test(id) || key !== qualityRecoveryEventKey(id)
         || outcome !== QUALITY_RECOVERY_OUTCOME
         || !Number.isFinite(reconciledAt) || reconciledAt < periodStart || reconciledAt > nowMs
-        || !/^\d{6,30}$/.test(val(row, "Post_ID"))
+        || !metaPostIdPattern.test(val(row, "Post_ID"))
         || !["meta_page_stories_exact_media_id", "airtable_existing_publication_receipt"].includes(val(row, "Evidence_Source")))
       continue;
     const prior = events.get(id);
