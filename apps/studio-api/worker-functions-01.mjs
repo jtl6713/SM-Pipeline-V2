@@ -12044,12 +12044,13 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !Array.isArray(payload?.data)) return null;
       stories.push(...payload.data);
-      const match = verifiedFacebookStoryMatch(stories, mediaId);
-      if (match) return match;
-      if (!payload?.paging?.next) break;
+      // Never trust the first match before examining the complete pagination:
+      // a later page could contain a conflicting media ID / post identity.
+      if (!payload?.paging?.next) return verifiedFacebookStoryMatch(stories, mediaId);
       url = new URL(String(payload.paging.next));
     }
-    // Absence is inconclusive, even if all pages succeeded: Stories expire.
+    // Incomplete Graph pagination is inconclusive, even if an early page matched.
+    // Absence remains inconclusive even with a complete scan: Stories expire.
     return null;
   }
   for (const record of rows || []) {
