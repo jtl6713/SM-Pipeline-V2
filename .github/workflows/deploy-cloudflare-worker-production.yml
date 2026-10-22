@@ -554,7 +554,7 @@ jobs:
                 : overview ? "/api/profiles/overview" + (generation ? "?min_generation=" + encodeURIComponent(generation) : "")
                 : factoryDesk ? "/api/factory/desk"
                 : failedOutputCensus ? "/api/factory/approval-batches?scope=all&quality_only=1"
-                : globalCanary ? "/api/factory/approval-batches?scope=all"
+                : globalCanary ? "/api/factory/approval-batches?scope=all&status_only=1"
                 : chicagoCanary ? "/api/factory/approval-batches?profile=recT2rbKX3MF7cVFU"
                 : factoryStatus ? "/api/factory/approval-batches?profile=recF7UAn0LkMZZrWZ" : "/api/session";
               const method = (overviewRefresh || summaryReconcile || qualityFacebookPreview) ? "POST" : "GET";
@@ -827,33 +827,24 @@ jobs:
           GLOBAL_CODE=000
           for i in 1 2 3 4 5; do
             GLOBAL_CODE=$(curl -sS --max-time 60 -o /tmp/factory-batch-global.json -w '%{http_code}' "$GLOBAL_URL" || true)
-            if [[ "$GLOBAL_CODE" == "200" ]] && jq -e --arg stage "$EXPECTED_STAGE" --argjson total "$EXPECTED_TOTAL" --argjson per "$EXPECTED_PER_PROFILE" '.ok==true and .scope=="all" and .global_rollout.enabled==true and .global_rollout.stage==$stage and .global_rollout.max_total==$total and .global_rollout.max_per_profile==$per and .global_rollout.allowed_platforms==["Instagram","Facebook","TikTok","YouTube"] and .global_rollout.allowed_output_types_by_platform=={"Instagram":["Reel","Story","Single Image","Carousel"],"Facebook":["Reel","Story","Single Image","Multi-Image Post","Slideshow Reel"],"TikTok":["Video Draft","Story","Single Photo","Multi-Photo"],"YouTube":["Short","Standard Video","Slideshow Video"]}' /tmp/factory-batch-global.json >/dev/null 2>&1; then
+            if [[ "$GLOBAL_CODE" == "200" ]] && jq -e --arg stage "$EXPECTED_STAGE" --argjson total "$EXPECTED_TOTAL" --argjson per "$EXPECTED_PER_PROFILE" '.ok==true and .scope=="all" and .status_only==true and .read_only==true and .history_checked==false and .storage_probe.ok==true and .storage_probe.bounded==true and .approvals_enabled==true and .global_rollout.enabled==true and .global_rollout.stage==$stage and .global_rollout.max_total==$total and .global_rollout.max_per_profile==$per and .global_rollout.allowed_platforms==["Instagram","Facebook","TikTok","YouTube"] and .global_rollout.allowed_output_types_by_platform=={"Instagram":["Reel","Story","Single Image","Carousel"],"Facebook":["Reel","Story","Single Image","Multi-Image Post","Slideshow Reel"],"TikTok":["Video Draft","Story","Single Photo","Multi-Photo"],"YouTube":["Short","Standard Video","Slideshow Video"]}' /tmp/factory-batch-global.json >/dev/null 2>&1; then
               break
             fi
             sleep 3
           done
-          jq -e --arg stage "$EXPECTED_STAGE" --argjson total "$EXPECTED_TOTAL" --argjson per "$EXPECTED_PER_PROFILE" '.ok==true and .scope=="all" and .global_rollout.enabled==true and .global_rollout.stage==$stage and .global_rollout.max_total==$total and .global_rollout.max_per_profile==$per and .global_rollout.allowed_platforms==["Instagram","Facebook","TikTok","YouTube"] and .global_rollout.allowed_output_types_by_platform=={"Instagram":["Reel","Story","Single Image","Carousel"],"Facebook":["Reel","Story","Single Image","Multi-Image Post","Slideshow Reel"],"TikTok":["Video Draft","Story","Single Photo","Multi-Photo"],"YouTube":["Short","Standard Video","Slideshow Video"]}' /tmp/factory-batch-global.json >/dev/null || { echo "Global Factory read-only canary failed (HTTP $GLOBAL_CODE)" >&2; exit 1; }
+          jq -e --arg stage "$EXPECTED_STAGE" --argjson total "$EXPECTED_TOTAL" --argjson per "$EXPECTED_PER_PROFILE" '.ok==true and .scope=="all" and .status_only==true and .read_only==true and .history_checked==false and .storage_probe.ok==true and .storage_probe.bounded==true and .approvals_enabled==true and .global_rollout.enabled==true and .global_rollout.stage==$stage and .global_rollout.max_total==$total and .global_rollout.max_per_profile==$per and .global_rollout.allowed_platforms==["Instagram","Facebook","TikTok","YouTube"] and .global_rollout.allowed_output_types_by_platform=={"Instagram":["Reel","Story","Single Image","Carousel"],"Facebook":["Reel","Story","Single Image","Multi-Image Post","Slideshow Reel"],"TikTok":["Video Draft","Story","Single Photo","Multi-Photo"],"YouTube":["Short","Standard Video","Slideshow Video"]}' /tmp/factory-batch-global.json >/dev/null || { echo "Global Factory read-only canary failed (HTTP $GLOBAL_CODE)" >&2; exit 1; }
           echo "factory_global_read_only_canary=PASS signed_stage=$EXPECTED_STAGE total=$EXPECTED_TOTAL per_profile=$EXPECTED_PER_PROFILE"
-          # Sanitize operational counts from the same authorized read-only call.
-          # Nothing here posts approvals, schedules, publishes or writes to R2.
-          jq -c '{
-            observed_at: now | todateiso8601,
-            totals,
-            active_batches: [.batches[]? | {
-              status, created_at, updated_at, total, approved_count, pending_count, failed_count,
-              children: [.children[]? | {
-                profile_id, status, updated_at, total, approved_count, pending_count, failed_count
-              }]
-            }]
-          }' /tmp/factory-batch-global.json | sed 's/^/factory_global_progress_snapshot=/'
-
-          # Read-only sanitized acceptance snapshot: expose real pending progress
-          # without logging output identifiers or changing approval state.
-          jq -c '{evidence:"factory_active_backlog",totals:(.totals // {}),
-            batches:[(.batches // [])[] | {status,created_at,updated_at,approved_count,pending_count,failed_count}],
-            quality_codes:[(.quality_signals // [])[] | .code],
-            partial_history:(.history_complete == false)}' /tmp/factory-batch-global.json
-
+          # Global rollout health is deliberately bounded to one authoritative
+          # R2 LIST (limit=1). Unlike Factory activity history it cannot
+          # dereference thousands of ledgers and time out the release gate.
+          # Activity/failure monitoring remains independently exercised below.
+          jq -c '{verification:"factory_global_rollout_health",status_only,
+            storage_probe,history_checked,approvals_enabled,
+            stage:.global_rollout.stage,
+            max_total:.global_rollout.max_total,
+            max_per_profile:.global_rollout.max_per_profile}' /tmp/factory-batch-global.json
+          echo "Factory global read-only rollout verification passed without a history scan."
+          
           FAILED_OUTPUT_URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/failed-output-census"
           curl -fsS --max-time 70 "$FAILED_OUTPUT_URL" -o /tmp/failed-output-census.json
           jq -e '.ok==true and .scope=="all" and .quality_only==true

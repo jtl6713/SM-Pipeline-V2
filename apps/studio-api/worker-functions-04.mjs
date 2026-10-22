@@ -49,6 +49,7 @@ import {
   readyProductionSelectJobs,
 } from "./ready-production-queue.mjs";
 import { factoryGlobalPolicy, factoryGlobalAcceptsOutput } from "./factory-batch-global-policy.mjs";
+import { readFactoryGlobalRolloutHealth } from "./factory-global-rollout-health.mjs";
 import {
   factoryApprovalGroupPlan, factoryApprovalGroupEnqueue, factoryApprovalGroupRead,
   factoryApprovalGroupResume, factoryApprovalGroupStatus, factoryApprovalGroupRetryFailures,
@@ -14899,6 +14900,17 @@ export async function getStudioLibraryIntakeStatus(request, env, url) {
 export async function factoryBatchStatusRoute(request, env, authorization) {
   const url = new URL(request.url);
   if (url.searchParams.get("scope") === "all") {
+    // Deployment health does not need to enumerate up to 5,000 R2 history
+    // objects and dereference child jobs. Verify the live signed rollout tuple
+    // and a bounded durable-store read instead; keep the full UI history route
+    // unchanged and separately available.
+    if (url.searchParams.get("status_only") === "1") {
+      const snapshot = await readFactoryGlobalRolloutHealth(env.STUDIO_MEDIA, {
+        rollout: factoryBatchRolloutPolicy(env),
+        globalRollout: factoryGlobalPolicy(env),
+      });
+      return respond(request, env, snapshot);
+    }
     // Exact-id recovery is separate from completed-history browsing. This
     // preserves idempotent POST recovery even if a small group already finished.
     const exactRequest = String(url.searchParams.get("request_id") || "").trim();
