@@ -54,7 +54,7 @@ test("fail closed on publication ambiguity, exhausted sends, account issues and 
   ]) assert.equal(reason(patch), expected, JSON.stringify(patch));
 });
 
-test("preapproval patch retains media and counters, disables automatic send and removes old schedule", () => {
+test("preapproval patch preserves durable slot until next atomic MAE approval", () => {
   const fields = facebookPreapprovalRecoveryFields(row({
     Scheduled_Post_Date: "2026-10-24T01:00:00Z", Final_File_URL: "https://media/video.mp4",
     Studio_Publish_Dispatch_Note: "Graph 368 rejection at dispatch",
@@ -64,12 +64,12 @@ test("preapproval patch retains media and counters, disables automatic send and 
   assert.equal(fields.Publish_Status, "Not Ready");
   assert.equal(fields.Auto_Publish_Enabled, false);
   assert.equal(fields.Publish_Retry_Eligible, false);
-  assert.equal(fields.Scheduled_Post_Date, null);
+  assert.equal(Object.hasOwn(fields, "Scheduled_Post_Date"), false);
   assert.equal(fields.Studio_Scheduled_At, null);
   assert.match(fields.Studio_Publish_Dispatch_Note, /QA-FB-RATE-LIMIT-TO-REVIEW/);
   for (const key of ["Final_File_URL", "Publish_Asset_URL", "Publish_Attempt_Count",
     "Studio_Publish_Dispatch_Count", "Published_At", "Platform_Post_ID",
-    "Publish_Next_Retry_At", "Render_Status"]) {
+    "Publish_Next_Retry_At", "Render_Status", "Scheduled_Post_Date"]) {
     assert.equal(Object.hasOwn(fields, key), false, key + " must remain unchanged");
   }
 });
