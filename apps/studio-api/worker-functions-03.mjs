@@ -11379,11 +11379,27 @@ export async function studioPublishFacebookPageStory(env, record) {
   const start = await startResponse.json().catch(() => ({}));
   if (!startResponse.ok || !start.video_id || !start.upload_url) {
     console.warn("facebook story start failed", startResponse.status, start?.error?.message || "");
-    return { ok: false, error: start?.error?.message || `start ${startResponse.status}` };
+    return { ok: false, story_phase: "start_refused",
+      error: start?.error?.message || `start ${startResponse.status}` };
+  }
+
+  // Persist Meta's immutable video ID BEFORE uploading/finishing. If finish is
+  // ambiguous, QA can reconcile /page/stories by this ID without another create.
+  // Never initiate upload after an unrecorded start.
+  try {
+    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
+      method: "PATCH", body: JSON.stringify({ fields: {
+        Platform_Media_ID: String(start.video_id),
+        Studio_Publish_Dispatch_Note: "FB-STORY-GRAPH: started media_id=" + String(start.video_id),
+      }, typecast: true }),
+    });
+  } catch (error) {
+    console.warn("facebook story start receipt not persisted", record.id, error);
+    return { ok: false, story_phase: "start_receipt_failed", error: "Could not persist Story media ID; Graph finish safely blocked" };
   }
 
   const mediaResponse = await fetch(preview, { headers: { "User-Agent": "chicagoshining-studio-api/publish-dispatch" } });
-  if (!mediaResponse.ok) return { ok: false, error: `cdn ${mediaResponse.status}` };
+  if (!mediaResponse.ok) return { ok: false, story_phase: "asset_download_failed", error: `cdn ${mediaResponse.status}` };
   const videoBytes = await mediaResponse.arrayBuffer();
   const uploadResponse = await fetch(start.upload_url, {
     method: "POST",
@@ -11398,7 +11414,7 @@ export async function studioPublishFacebookPageStory(env, record) {
   const upload = await uploadResponse.json().catch(() => ({}));
   if (!uploadResponse.ok || upload.success === false) {
     console.warn("facebook story upload failed", uploadResponse.status, upload?.debug_info?.message || upload?.error?.message || "");
-    return { ok: false, error: upload?.debug_info?.message || upload?.error?.message || `upload ${uploadResponse.status}` };
+    return { ok: false, story_phase: "upload_failed", error: upload?.debug_info?.message || upload?.error?.message || `upload ${uploadResponse.status}` };
   }
 
   const finishParams = {
@@ -11424,7 +11440,7 @@ export async function studioPublishFacebookPageStory(env, record) {
   }
   if (!finishResponse.ok || finish.success !== true) {
     console.warn("facebook story finish failed", finishResponse.status, finish?.error?.message || "");
-    return { ok: false, error: finish?.error?.message || `finish ${finishResponse.status}` };
+    return { ok: false, story_phase: "finish_uncertain", error: finish?.error?.message || `finish ${finishResponse.status}` };
   }
 
   const postId = String(finish.post_id || start.video_id);
@@ -12542,6 +12558,7 @@ export function studioPublishDispatchNote(result) {
   return [
     `target=${result.target || result.plan?.target || "?"}`,
     result.ok ? `webhook=ok ${result.status || result.permalink || ""}`.trim() : `webhook=FAILED ${result.status || result.error || ""}`.trim(),
+    result.story_phase ? `story_phase=${result.story_phase}` : "",
     armed ? `armed=${armed}` : "",
     result.ap0 ? `ap0=${result.ap0.skipped || (result.ap0.ok ? "ok" : "failed")}` : "",
   ].filter(Boolean).join(" | ");
