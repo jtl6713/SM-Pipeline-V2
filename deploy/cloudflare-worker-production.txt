@@ -606,3 +606,5 @@ Deploy Worker: complete paginated MAE occupancy for safe Facebook Quality Agent 
 2026-10-21: PR #1048 authoritative Home bucket parity for historical Failed, Approved No Date and Approved Past Due Pipeline drilldowns. Airtable write authority preserved; no publishing actions, no Phase 6.
 
 2026-10-21: Deploy Worker 0.10.673-autonomous-verification-recovery for Issue #1050. Preserves PR #1045 Story cooldown and eight-dispatch safety; reconciles confirmed existing published evidence without a Graph send; classifies exhausted holds as verification pending, not manual; Factory/Desk metrics report recovered versus genuine human challenge with partial-data warning. Airtable stays authoritative.
+
+2026-10-21: Deploy merged PR #1052 Factory status_only bounded global R2 rollout health to resolve 60s verification timeout; enforce live signed rollout, single-R2 LIST and all existing Chicago pilot, Quality Agent and NYC Needs Eyes checks. Rollback on any failing verification. Includes merged PR #1038 Facebook FB0 Helpdesk signature.
