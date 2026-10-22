@@ -11410,6 +11410,9 @@ export async function studioPublishFacebookPageStory(env, record) {
         Publish_Error_Stage: "", Publish_Error_Message: "",
         Publish_Retry_Eligible: false, Publish_Next_Retry_At: null,
         Auto_Publish_Enabled: false,
+        Studio_Publish_Dispatch_Note: (String(f(latest, "Studio_Publish_Dispatch_Note") || "").slice(0, 400) +
+          " | QA-AUTOVERIFY-RECOVERED:" + new Date().toISOString() +
+          " exact Meta media_id; no duplicate Graph send").slice(0, 900),
       } }),
     });
     return { ok: true, post_id: evidence.post_id, reused_existing_remote_story: true };
@@ -11488,7 +11491,7 @@ export async function studioPublishFacebookPageStory(env, record) {
   // The media ID is not a Story post ID. If Graph did not return post_id,
   // leave a verifiable hold rather than fabricating a public Story link.
   const postId = String(finish.post_id || "").trim();
-  if (!/^\\d{6,30}$/.test(postId)) return { ok: false, skipped: "finish_missing_post_id" };
+  if (!/^\d{6,30}$/.test(postId)) return { ok: false, skipped: "finish_missing_post_id" };
   const remote = await verifyFacebookStoryByMediaId({
     pageId, token, version, mediaId: String(start.video_id), maxPages: 2,
   });
