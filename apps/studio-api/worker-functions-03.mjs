@@ -11355,6 +11355,12 @@ export async function studioPublishInstagramFeedPhotoInner(env, record) {
 /*__STUDIO_WORKER_END:studioPublishInstagramFeedPhotoInner__*/
 
 export async function studioPublishFacebookPageStory(env, record) {
+  // A previously started Graph container may have published despite a lost
+  // finish response. Only read-only QA reconciliation may touch it now.
+  if (f(record, "Platform_Media_ID") || f(record, "Platform_Post_ID") ||
+      f(record, "Published_At")) {
+    return { ok: false, skipped: "facebook-story-remote-verification-required" };
+  }
   const preview = String(f(record, "Publish_Asset_URL") || f(record, "Studio_Preview_URL") || "").trim();
   if (!preview.startsWith("https://media.chicagoshining.com/")) {
     return { ok: false, skipped: "missing-cdn-preview" };
@@ -11390,6 +11396,8 @@ export async function studioPublishFacebookPageStory(env, record) {
     await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
       method: "PATCH", body: JSON.stringify({ fields: {
         Platform_Media_ID: String(start.video_id),
+        Auto_Publish_Enabled: false,
+        Publish_Retry_Eligible: false,
         Studio_Publish_Dispatch_Note: "FB-STORY-GRAPH: started media_id=" + String(start.video_id),
       }, typecast: true }),
     });
