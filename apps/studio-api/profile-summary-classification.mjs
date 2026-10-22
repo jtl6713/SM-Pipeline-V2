@@ -97,6 +97,25 @@ export function homeApprovedUnpublished(row, _now = Date.now()) {
   return true;
 }
 
+/**
+ * The exact Home buckets used for both overview counts and Pipeline drill-down.
+ * Approved failed outputs belong only to the Quality Agent failure count.
+ */
+export function homeApprovedExceptionKind(row, now = Date.now()) {
+  if (!row || !HOME_PLATFORMS.includes(row.platform) || !homeApprovedUnpublished(row)) return "";
+  const due = Date.parse(String(row.scheduled_post_date || ""));
+  if (!Number.isFinite(due) || due <= 0) return "approved_missing_date";
+  return due <= now ? "approved_past_due" : "";
+}
+
+export function homeIsUnpublishedFailure(row) {
+  if (!row) return false;
+  const failed = String(row.studio_state || "").trim().toLowerCase() === "failed"
+    || String(row.output_status || "").trim().toLowerCase() === "failed"
+    || String(row.publish_status || "").trim().toLowerCase() === "failed";
+  return failed && !row.published_at && !row.platform_post_url && !row.manual_published_url;
+}
+
 export function homeOutputContribution(row, now = Date.now()) {
   const result = emptyHomeContribution();
   if (!row) return result;
@@ -109,14 +128,10 @@ export function homeOutputContribution(row, now = Date.now()) {
   result.overdue_unpublished = Number(dueAt > 0 && dueAt <= now);
   const state = String(row.studio_state || "").trim();
   result.manual_action_required = Number(state === "Manual Action Required");
-  // Publish_Status=Failed can occur while Studio_State remains Approved.
-  // Those records are Quality Agent failures, not schedulable no-date rows.
-  const failed = state === "Failed"
-    || String(row.publish_status || "").trim().toLowerCase() === "failed"
-    || String(row.output_status || "").trim().toLowerCase() === "failed";
-  const published = Boolean(row.published_at || row.platform_post_url || row.manual_published_url);
-  result.failed_outputs = Number(failed && !published);
-  result.attention_outputs = Number((failed && !published) || ["Retry Pending", "Manual Action Required"].includes(state));
+  // Failed and the Historical Pipeline drill-down share one predicate.
+  const failed = homeIsUnpublishedFailure(row);
+  result.failed_outputs = Number(failed);
+  result.attention_outputs = Number(failed || ["Retry Pending", "Manual Action Required"].includes(state));
   result.published_outputs = Number(state === "Published");
   result.active_outputs = Number(!failed && !["Published", "Skipped"].includes(state));
   if (isQueuedForPlatformDispatch(row)) result.scheduled[row.platform] = 1;
