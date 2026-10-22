@@ -30,10 +30,10 @@ export function verifiedRecoveryLedgerFields(record, evidence = {}, { at = new D
   const media = val(record, "Platform_Media_ID");
   const source = String(evidence.source || "").trim();
   if (val(record, "Publish_Status") !== "Published" || val(record, "Output_Status") !== "Published"
-      || !/^\\d{6,30}$/.test(remotePost) || (evidence.post_id && String(evidence.post_id) !== remotePost))
+      || !/^\d{6,30}$/.test(remotePost) || (evidence.post_id && String(evidence.post_id) !== remotePost))
     throw new Error("Quality Agent recovery requires authoritative Published read-back with matching remote post ID");
   if (source === "meta_page_stories_exact_media_id"
-      && (!/^\\d{6,30}$/.test(media) || media !== String(evidence.media_id || "")))
+      && (!/^\d{6,30}$/.test(media) || media !== String(evidence.media_id || "")))
     throw new Error("Exact Meta recovery evidence does not match the stored media identity");
   if (!["meta_page_stories_exact_media_id", "airtable_existing_publication_receipt"].includes(source))
     throw new Error("Quality Agent recovery evidence source is not authoritative");
@@ -91,7 +91,7 @@ export function recoveredOutcomesFromLedger(rows = [], {
     if (!recordPattern.test(id) || key !== qualityRecoveryEventKey(id)
         || outcome !== QUALITY_RECOVERY_OUTCOME
         || !Number.isFinite(reconciledAt) || reconciledAt < periodStart || reconciledAt > nowMs
-        || !/^\\d{6,30}$/.test(val(row, "Post_ID"))
+        || !/^\d{6,30}$/.test(val(row, "Post_ID"))
         || !["meta_page_stories_exact_media_id", "airtable_existing_publication_receipt"].includes(val(row, "Evidence_Source")))
       continue;
     const prior = events.get(id);
