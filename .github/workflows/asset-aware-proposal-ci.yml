@@ -4,6 +4,8 @@ on:
     paths:
       - 'apps/studio-api/scripted-short-asset-policy.mjs'
       - 'apps/studio-api/scripted-short-asset-policy.test.mjs'
+      - 'apps/studio-api/scripted-short-title.mjs'
+      - 'apps/studio-api/scripted-short-title.test.mjs'
       - 'apps/studio-api/worker-functions-02.mjs'
       - 'apps/studio-api/quality-checks.mjs'
       - 'apps/studio-api/quality-checks.test.mjs'
@@ -23,6 +25,7 @@ jobs:
       - name: Syntax and location-aware asset regression
         run: |
           set -euo pipefail
+          node --check apps/studio-api/scripted-short-title.mjs
           node --check apps/studio-api/scripted-short-asset-policy.mjs
           node --check apps/studio-api/worker-functions-02.mjs
-          node --test apps/studio-api/scripted-short-asset-policy.test.mjs apps/studio-api/quality-checks.test.mjs
+          node --test apps/studio-api/scripted-short-asset-policy.test.mjs apps/studio-api/quality-checks.test.mjs apps/studio-api/scripted-short-title.test.mjs

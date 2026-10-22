@@ -1,3 +1,4 @@
+import { scriptedShortPublishableTitle } from "./scripted-short-title.mjs";
 import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
 import { parseScriptedShortAssetPolicy, libraryAssetSatisfiesPolicy, recoverScriptedShortAssets, validateScriptedShortAssets } from "./scripted-short-asset-policy.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
@@ -11552,6 +11553,7 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
     timeline,
     duration_seconds: timeline.duration_seconds,
     scene_count: timeline.segments.length,
+    suggested_title: scriptedShortPublishableTitle(prompt, timeline, profileMarket),
     owned_count: owned,
     suggestion_count: suggestions,
     asset_policy: assetPolicy,
@@ -11595,7 +11597,10 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
       throw new HttpError(409, "Quality Agent blocked a missing, wrong-profile, or wrong-location library asset. Propose again to repair the assignments.");
     }
   }
-  const title = prompt.slice(0, 160);
+  // The prompt is creative direction. Persist a concise title based on the
+  // actual narration; preserve the full instructions in Idea_Summary.
+  const profileMarket = String(f(profile, "Market_Name") || "").trim();
+  const title = scriptedShortPublishableTitle(prompt, timeline, profileMarket);
   const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, "", {
     method: "POST",
     body: JSON.stringify({
