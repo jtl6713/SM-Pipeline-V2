@@ -1060,7 +1060,7 @@ export function classifyFacebookStoryRateLimit(row, nowMs = Date.now()) {
     class: "transient",
     record_id: recordId || null,
     fingerprint: fingerprint("facebook_story_rate_limit", recordId, "graph_368_story"),
-    actor: blocked === "remote_verification_required" ? "desk_agent" : "worker_heal",
+    actor: "worker_heal",
     blocker: blocked,
     diagnosis: dispatchCount >= 3
       ? "Facebook Story Graph 368 (spam/rate limit), " + dispatchCount
