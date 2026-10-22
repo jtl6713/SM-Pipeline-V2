@@ -1,0 +1,63 @@
+/**
+ * Script a Short title suggestion based on the accepted narration and prompt.
+ * The prompt is creative direction, never a publishable headline.
+ * Pure, cheap and deterministic: no extra model call and no invented landmarks.
+ */
+const MAX_TITLE_LENGTH = 90;
+const instructionWords = /\b(?:utilize|uploaded|you don't|please|don't have to|system|write|generate|create\s+(?:a|an)|make\s+(?:a|an)|caption|hashtags|voiceover|script|use\s+(?:the|my|our))\b/i;
+const readable = (value) => String(value || "").replace(/\s+/g, " ").replace(/[“”]/g, '"').replace(/[‘’]/g, "'").trim();
+
+function subjectFromNarration(timeline) {
+  const scenes = Array.isArray(timeline?.segments) ? timeline.segments : [];
+  const opening = readable(scenes[0]?.voiceover_text);
+  const match = /\b(?:welcome to|explore|discover|visit|step inside|take a look at|take a tour of)\s+(.+?)(?=\s*(?:[—–:,.!?;]|\bwhere\b|\bwith\b|$))/i.exec(opening);
+  if (!match) return "";
+  return match[1].trim();
+}
+
+function subjectFromPrompt(prompt) {
+  const sentence = readable(prompt).split(/[.!?]/)[0] || "";
+  const match = /\b(?:history|story|origins|evolution|past)\s+of\s+(.*)/i.exec(sentence)
+    || /\b(?:about|explore|discover|feature|visit|showcase)\s+(.*)/i.exec(sentence)
+    || /\b(?:guide to|tour of|walk through)\s+(.*)/i.exec(sentence);
+  if (!match) return "";
+  return match[1]
+    .replace(/\s+(?:area|neighborhood|district)\s+of\b.*$/i, "")
+    .replace(/\s+(?:using|utilizing|with|featuring|including)\b.*$/i, "")
+    .trim();
+}
+
+function validSubject(value) {
+  let text = readable(value).replace(/^[\s"']*(?:the|a|an)\s+/i, "").replace(/[\s.,:;—–-]+$/g, "");
+  if (!text || text.length > 65 || text.split(" ").length > 9 || instructionWords.test(text)) return "";
+  // For two related places, ampersand creates a concise, readable title.
+  if (text.split(" ").length >= 5) text = text.replace(/\s+and\s+/gi, " & ");
+  return text;
+}
+
+/**
+ * Return the best safe short headline using what the story actually covers.
+ * Reject copy-pasted instructions and never use an arbitrary truncated prompt.
+ */
+export function scriptedShortPublishableTitle(prompt, timeline, market = "") {
+  const source = readable(prompt);
+  const narrated = validSubject(subjectFromNarration(timeline));
+  const topic = narrated || validSubject(subjectFromPrompt(source));
+  const spoken = (Array.isArray(timeline?.segments) ? timeline.segments : [])
+    .map((scene) => readable(scene?.voiceover_text)).join(" ");
+  const history = /\b(?:history|historic|past|centur(?:y|ies)|origins|evolution)\b/i.test(source + " " + spoken);
+  const waterfront = /\b(?:river|riverside|waterfront|shoreline|coast|harbor|hudson|lakefront|bay|esplanade)\b/i.test(spoken);
+  const manhattan = /\b(?:manhattan|new york)\b/i.test(source + " " + spoken);
+  const subject = topic || validSubject(market) || "A Story Worth Exploring";
+  let suffix = "";
+  if (history && waterfront) suffix = manhattan ? "Manhattan's Waterfront Story" : "A Waterfront Through Time";
+  else if (history) suffix = "Then and Now";
+  else if (waterfront) suffix = "Life Along the Waterfront";
+  else if (/\b(?:guide|tips|how to|visit)\b/i.test(source)) suffix = "What to Know Before You Go";
+  else suffix = "A Closer Look";
+  let title = subject === "A Story Worth Exploring" ? subject : subject + ": " + suffix;
+  // Do not truncate the prompt into a fake headline. Shorten the suffix instead.
+  if (title.length > MAX_TITLE_LENGTH) title = subject + ": A Closer Look";
+  if (title.length > MAX_TITLE_LENGTH) title = subject.slice(0, MAX_TITLE_LENGTH).trim();
+  return title;
+}
