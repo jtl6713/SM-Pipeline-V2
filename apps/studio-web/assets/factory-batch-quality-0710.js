@@ -161,6 +161,20 @@
     const failures = data.output_failures;
     const censusOk = failures?.status === "ok" && Array.isArray(failures.items);
     const allFailures = censusOk ? failures.items : [];
+    const verification = failures?.verification_recovery;
+    const recoveryCounts = verification?.counts;
+    const verificationMarkup = censusOk && recoveryCounts
+      ? '<section class="factory-quality-progress" aria-label="Autonomous verification recovery totals">' +
+        '<div class="factory-quality-progress-heading"><strong>Autonomous verification recovery</strong>' +
+        '<span>Published recoveries: last ' + esc(verification.recovered_window_days || 7) + ' days</span></div>' +
+        '<p class="factory-quality-progress-counts">' +
+        esc(recoveryCounts.recovered_automatically == null ? "Unavailable" : recoveryCounts.recovered_automatically) + ' published and verified automatically · ' +
+        esc(recoveryCounts.awaiting_cooldown) + ' awaiting cooldown · ' +
+        esc(recoveryCounts.investigating) + ' being investigated · ' +
+        esc(recoveryCounts.human_action_required) + ' genuinely need human action</p>' +
+        (verification.status !== "ok" ? '<small>Published recovery audit unavailable; the recovery count is unknown.</small>' : '') +
+        '</section>'
+      : (censusOk ? '<p class="factory-batch-quality-unavailable">Verification recovery totals unavailable.</p>' : '');
     const visibleFailures = [...allFailures];
     const seen = new Set(visibleFailures.map(item => item.record_id));
     // Retain the original output cards while saving and after a fresh census
@@ -176,6 +190,7 @@
         ? '<p class="factory-batch-quality-heading">Unresolved output failures across all profiles: ' +
           (Number(failures.count) || 0) + '</p>'
         : '<p class="factory-batch-quality-unavailable">Failed-output Quality Agent status unavailable. Unresolved output count is unknown; do not treat this as zero.</p>') +
+      verificationMarkup +
       recoveryProgressMarkup() +
       (censusOk && eligible.length ? '<p class="factory-quality-bulk"><button type="button" class="secondary-button" data-qa-reapprove-all ' +
         (state.recovering ? 'disabled aria-disabled="true"' : '') + '>Return all ' + eligible.length +
