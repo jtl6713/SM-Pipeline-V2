@@ -288,6 +288,8 @@ export function qualityRecapCopy(kind, row = {}) {
 
 export function qualityRecapStatus({ actor, class: klass, open, blocker, kind } = {}) {
   if (!open) return { label: "Handled", tone: "ok" };
+  if (blocker === "remote_verification_required") return { label: "Investigating publication", tone: "work" };
+  if (blocker === "cooldown") return { label: "Waiting for cooldown", tone: "work" };
   if (blocker === "youtube_quota" || kind === "youtube_cover_quota") return { label: "Waiting on YouTube", tone: "work" };
   if (klass === "infra_down") return { label: "Service is down", tone: "alert" };
   if (klass === "code_bug" || klass === "data_repair" || actor === "desk_agent") {
