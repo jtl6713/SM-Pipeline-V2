@@ -61,3 +61,108 @@ test("a known video identity must be checked by exact provider GET; unknown stay
   assert.match(unknown.action_required, /Escalate/);
   assert.equal(unknown.graph_create_authorized, false);
 });
+
+test("missing or invalid safety hold remains blocked and is flagged", () => {
+  const now = Date.parse("2026-10-24T13:00:00Z");
+  const missingHold = reel368Decision(row(2457, { Do_Not_Publish: false, Publish_Retry_Eligible: true }), now);
+  assert.equal(missingHold.hold_integrity, "missing_or_invalid");
+  assert.equal(missingHold.safety_blocked, true);
+  assert.equal(missingHold.graph_create_authorized, false);
+});
+
+test("Airtable read failure causes fail-closed rejection before audit write", async () => {
+  let writes = 0;
+  const fetcher = async (_env, table, _path, options = {}) => {
+    if (options.method === "PATCH") writes++;
+    if (table === "Platform Outputs") throw new Error("airtable 429");
+    return { records: [] };
+  };
+  await assert.rejects(auditReel368Holds({}, { airtableFetch: fetcher }), /airtable 429/);
+  assert.equal(writes, 0);
+});
+
+test("incomplete ledger read fails closed without recording a fake recovery", async () => {
+  const fetcher = async (_env, table, path) => {
+    if (table === "Platform Outputs") {
+      const id = Number(decodeURIComponent(path).match(/Output_ID}=([0-9]+)/)?.[1]);
+      return { records: [row(id)] };
+    }
+    return { error: "ledger unavailable" };
+  };
+  await assert.rejects(auditReel368Holds({}, { airtableFetch: fetcher }), /ledger lookup incomplete/);
+});
+
+test("duplicate or missing output records never authorize a publish or audit a false identity", async () => {
+  const writes = [];
+  const fetcher = async (_env, table, path, options = {}) => {
+    if (options.method === "PATCH") writes.push(path);
+    if (table === "Platform Outputs") return { records: [] };
+    return { records: [] };
+  };
+  const outcomes = await auditReel368Holds({}, { airtableFetch: fetcher });
+  assert.equal(outcomes.length, 3);
+  assert.ok(outcomes.every(x => x.outcome === "record_unavailable" && x.graph_create_authorized === false));
+  assert.equal(writes.length, 0);
+});
+
+test("authorized exact-ID provider read verifies identity but never reconciles without separate publication receipt", async () => {
+  const writes = [];
+  const fetcher = async (_env, table, path, opts = {}) => {
+    if (table === "Platform Outputs") {
+      const id = Number(decodeURIComponent(path).match(/Output_ID}=([0-9]+)/)?.[1]);
+      return { records: [row(id, id === 2457 ? { FB_Slideshow_Meta_Video_ID:"123456789012345" } : {})] };
+    }
+    if (opts.method === "PATCH") {
+      writes.push(JSON.parse(opts.body).records[0].fields);
+      return { records: [{ id: "rec12345678901234" }] };
+    }
+    return { records: [] };
+  };
+  const requests = [];
+  const results = await auditReel368Holds({}, {
+    airtableFetch: fetcher,
+    nowMs: Date.parse("2026-10-24T13:00:00Z"),
+    metaCredentialsForRow: async () => ({token:"read-only-token",version:"v25.0"}),
+    metaFetch: async (url, options) => {
+      requests.push({url, method:options.method});
+      return {ok:true,json:async()=>({id:"123456789012345",status:"PUBLISHED",
+        permalink_url:"https://www.facebook.com/reel/123456789012345/",created_time:"2026-10-21T12:00:00Z"})};
+    },
+  });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].method, "GET");
+  assert.equal(results[0].outcome, "remote_identity_confirmed_pending_reconciliation");
+  assert.equal(results[0].graph_create_authorized,false);
+  assert.equal(writes.length,3);
+  assert.equal(writes[0].Outcome,"remote_identity_confirmed_pending_reconciliation");
+  assert.ok(writes.every(x=>!x.Published_At&&!x.Platform_Post_ID&&!x.Publish_Status));
+});
+
+test("overlapping half-hour audits use a stable upsert key and never call Meta create", async () => {
+  const saved = new Map(), writes = [];
+  const fetcher = async (_env, table, path, options = {}) => {
+    if (table === "Platform Outputs") {
+      const id = Number(decodeURIComponent(path).match(/Output_ID}=([0-9]+)/)?.[1]);
+      return { records: [row(id)] };
+    }
+    if (options.method === "PATCH") {
+      const payload=JSON.parse(options.body);
+      assert.deepEqual(payload.performUpsert.fieldsToMergeOn, ["Event_Key"]);
+      const data=payload.records[0].fields;
+      writes.push(data.Event_Key);
+      saved.set(data.Event_Key, data);
+      return { records: [{fields:data}] };
+    }
+    const key=decodeURIComponent(path).match(/Event_Key}="([^"]+)"/)?.[1];
+    return {records:key&&saved.has(key)?[{fields:saved.get(key)}]:[]};
+  };
+  const nowMs=Date.parse("2026-10-24T13:00:00Z");
+  const [left,right]=await Promise.all([
+    auditReel368Holds({}, {airtableFetch:fetcher, nowMs}),
+    auditReel368Holds({}, {airtableFetch:fetcher, nowMs})
+  ]);
+  assert.equal(left.length,3); assert.equal(right.length,3);
+  assert.equal(new Set(writes).size,3);
+  assert.equal(saved.size,3);
+  assert.ok([...saved.values()].every(x=>JSON.parse(x.Details_JSON).graph_create_authorized===false));
+});
