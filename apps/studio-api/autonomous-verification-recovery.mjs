@@ -1,3 +1,4 @@
+import { recoveredOutcomesFromLedger } from "./qa-recovery-ledger.mjs";
 /**
  * QA-AUTOVERIFY-1050: pure, fail-closed verification assessment and census.
  *
@@ -57,26 +58,28 @@ export function assessAutonomousVerification(record, { nowMs = Date.now() } = {}
     reason: string(record, "Platform_Media_ID")
       ? "Meta Page Story exact upload identity is checked read-only; no repeat Graph create."
       : "Legacy Story dispatch lacks saved upload identity; retry remains fenced." };
+  // Retry exhaustion takes precedence over cooldown. A countdown may be
+  // shown for context but must never imply that these Stories will repost.
+  if (attempts >= 3) return { ...base, outcome: "pending_verification",
+    safety_blocked: true, cooldown_until: Number.isFinite(retryAt) ? new Date(retryAt).toISOString() : null,
+    next_check_at: new Date(nowMs + 30 * 60 * 1000).toISOString(),
+    reason: "Retry cap reached; exact remote proof is required. Cooldown expiry does not authorize another Graph create." };
   const expired = Number.isFinite(retryAt) && retryAt <= nowMs;
   if (!expired) return { ...base, outcome: "cooldown_waiting",
     next_check_at: Number.isFinite(retryAt) ? new Date(retryAt).toISOString() : null,
     reason: Number.isFinite(retryAt) ? "Graph cooldown has not elapsed" : "No reliable retry window; verification remains pending" };
-  if (attempts >= 3) return { ...base, outcome: "pending_verification",
-    safety_blocked: true, next_check_at: new Date(nowMs + 30 * 60 * 1000).toISOString(),
-    reason: "Retry limit reached; verify every remote dispatch before a new Graph create. Missing post ID is not proof of nonpublication." };
   return { ...base, outcome: "guarded_rearm",
     reason: "Cooldown elapsed; existing approval, asset, locks and original schedule must pass the PR #1045 gate" };
 }
 
 /**
- * Counts are unique Platform Output records. Historic recoveries are counted
- * only when a timestamped recovery marker still exists in Airtable; absence
- * of a marker cannot establish that no earlier recovery took place.
+ * Current blockers come from live Platform Outputs; confirmed recoveries come
+ * exclusively from durable, append-only Airtable Quality Agent Recovery Ledger
+ * events. Dispatch-note markers are no longer counted: they are overwritable.
  */
-export function summarizeAutonomousVerification(rows = [], recoveredRows = [], {
-  nowMs = Date.now(), periodDays = 7, recoveredScanStatus = "ok",
+export function summarizeAutonomousVerification(rows = [], ledgerRows = [], {
+  nowMs = Date.now(), periodDays = 7, ledgerScanStatus = "ok",
 } = {}) {
-  const periodStartMs = nowMs - periodDays * 86400000;
   const byId = new Map();
   for (const row of rows) {
     if (!row?.id || byId.has(row.id)) continue;
@@ -99,23 +102,25 @@ export function summarizeAutonomousVerification(rows = [], recoveredRows = [], {
     else if (decision.outcome === "safety_blocked") increment("safety_blocked", decision.profile_id);
     if (decision.safety_blocked) increment("safety_blocked", decision.profile_id);
   }
-  const recoveryIds = new Set();
-  if (recoveredScanStatus === "ok") for (const row of recoveredRows) {
-    if (!row?.id || recoveryIds.has(row.id) || byId.has(row.id)) continue;
-    const at = recoveredAtFromNote(string(row, "Studio_Publish_Dispatch_Note"));
-    if (!at || Date.parse(at) > nowMs || Date.parse(at) < periodStartMs) continue;
-    recoveryIds.add(row.id);
-    const profile = field(row, "Content_Profile");
-    increment("recovered_automatically", Array.isArray(profile) ? String(profile[0] || "") : null);
+  const confirmed = ledgerScanStatus === "ok"
+    ? recoveredOutcomesFromLedger(ledgerRows, { nowMs, periodDays })
+    : [];
+  for (const event of confirmed) {
+    // An open blocker and a successful recovery cannot both count as resolved.
+    if (!byId.has(event.record_id)) increment("recovered_automatically", event.profile_id);
   }
   return {
-    status: recoveredScanStatus === "ok" ? "ok" : "partial",
+    status: ledgerScanStatus === "ok" ? "ok" : "partial",
     scanned_at: new Date(nowMs).toISOString(),
-    period_start: new Date(periodStartMs).toISOString(),
+    period_start: new Date(nowMs - periodDays * 86400000).toISOString(),
     period_days: periodDays,
-    coverage: "Current Airtable records bearing timestamped recovery markers; historical markers can be overwritten.",
-    counts: { ...counted },
+    metrics_source: "airtable_quality_agent_recovery_ledger",
+    coverage: ledgerScanStatus === "ok"
+      ? "Durable confirmed publication reconciliations only; unique outputs, not scans, attempts or overwritten notes."
+      : "Recovery ledger unavailable; recovered count is UNKNOWN, not zero.",
+    counts: { ...counted, ...(ledgerScanStatus !== "ok" ? { recovered_automatically: null } : {}) },
     per_profile: perProfile,
+    recovered_items: confirmed.filter((item) => !byId.has(item.record_id)),
     items: [...byId.values()],
   };
 }
