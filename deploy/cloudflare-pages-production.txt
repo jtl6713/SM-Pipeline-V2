@@ -494,3 +494,4 @@ Deploy Pages UI 0.6.737: corrected Factory QA release contract gate and retained
 2026-10-21: Deploy Studio UI 0.6.741-approved-exception-links (PR #1044). Make Approved No Date and Approved Past Due profile rows clickable into exact Pipeline exception filters, without changing publish or schedule states.
 2026-10-21: Deploy profile-scoped historical Approved No Date / Past Due Pipeline drill-down fix; cached app asset query scope=historical-count-match-v2, preserve UI version and asset ownership.
 2026-10-21: Retry Studio Pages approved exception historical drilldown PR #1046 after retaining existing Pipeline local-tab test contract; 90/91 last run passed.
+2026-10-21: UI 0.6.742-approved-exception-scope deploy; required monotonic version bump after Approved No Date / Past Due scoped historical drilldown, 91/91 Pages tests prior to release gate. Preserve all platform publication state.
