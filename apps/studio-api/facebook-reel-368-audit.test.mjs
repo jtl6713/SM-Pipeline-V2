@@ -15,7 +15,7 @@ test("all three Reels remain blocked after cooldown with no implied negative pro
     const before = reel368Decision(row(id), Date.parse("2026-10-23T22:00:00Z"));
     const after = reel368Decision(row(id), Date.parse("2026-10-24T12:00:00Z"));
     assert.equal(before.outcome, "cooldown_waiting");
-    assert.equal(after.outcome, "verification_unknown");
+    assert.equal(after.outcome, "pending_verification");
     assert.equal(after.graph_create_authorized, false);
     assert.equal(before.safety_blocked, true);
     assert.equal(after.safety_blocked, true);
@@ -45,6 +45,19 @@ test("audit writes at most once per output/half-hour bucket and does not publish
   assert.equal(first.length, 3);
   assert.equal(second.length, 3);
   assert.equal(written.length, 3);
-  assert.ok(written.every(item => item.Outcome === "verification_unknown"));
+  assert.ok(written.every(item => item.Outcome === "pending_verification"));
   assert.ok(written.every(item => JSON.parse(item.Details_JSON).no_meta_graph_create));
+});
+
+test("a known video identity must be checked by exact provider GET; unknown stays blocked", () => {
+  const now = Date.parse("2026-10-24T13:00:00Z");
+  const known = reel368Decision(row(2457, { FB_Slideshow_Meta_Video_ID: "123456789012345" }), now);
+  assert.equal(known.outcome, "pending_exact_provider_verification");
+  assert.equal(known.graph_create_authorized, false);
+  assert.equal(known.safety_blocked, true);
+  assert.match(known.action_required, /Graph GET/);
+  const unknown = reel368Decision(row(2762), now);
+  assert.equal(unknown.outcome, "pending_verification");
+  assert.match(unknown.action_required, /Escalate/);
+  assert.equal(unknown.graph_create_authorized, false);
 });
