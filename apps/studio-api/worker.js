@@ -5545,6 +5545,7 @@ const STUDIO_PUBLISH_RECONCILE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:studioReconcileYoutubePublishes__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileTiktokDrafts__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookPhotoFinalizes__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookReelFinalizes__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookPhotos__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileInstagramCarousels__*/
 // Scheduled posts are a hard deadline. This rescue deliberately ignores the normal
