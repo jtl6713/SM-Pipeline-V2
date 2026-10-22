@@ -1578,6 +1578,8 @@ export async function enqueueStudioSideEffectOutbox(env, entry) {
 // These content packages were deleted from Airtable. Supabase and the Pipeline
 // R2 snapshot are read copies and do not drop a row just because Airtable did.
 const DELETED_DUPLICATE_OUTPUT_IDS = [
+  // Output 7894 deleted at user request; guard against a stale Supabase mirror row.
+  "recAlU4bLFmWDBV4H",
   "recKihcIDRMvDub6c", "recXBDHnArAuMgUj1", "recLFFt4f8qff6BOX", "recgOAq8BEp2CKIdo", "recfluZUndAj5r1ba", "recfTLNJNxKnFVU7z",
   "recCK6MIgH5kx1KmE", "recVjxZ2wGT4ifTjf", "recfmUJxEawPLQBu8", "recQqRR2KSvQSJp4X", "reczThEQbfzBozo55", "recf8NpYdYRk2EQ6U",
   "recGZ604BJTbnnJkJ", "recLKy5NHNghaH8G0", "recaIvISU0njbjH0G", "recTi10DHWXL0KK4K", "recTfwH2D15rub7LG", "recsxyG5HgyKL9S6W",
