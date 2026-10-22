@@ -47,6 +47,22 @@ test("rotate across four-item windows without resetting attempts or blocking lat
   assert.equal(new Set([...first,...second,...third,...fourth].map(x=>x.id)).size,13);
 });
 
+test("FB3 is launched independently before Factory recovery and gated by cooldown", () => {
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  const worker = fs.readFileSync(path.join(dir, "worker.js"), "utf8");
+  const start = worker.indexOf("const cadence = studioCronAirtableCadence(cadenceNow");
+  const end = worker.indexOf("// --- LIGHT (every 5 min):", start);
+  assert.ok(start >= 0 && end > start);
+  const light = worker.slice(start, end);
+  const fb3 = light.indexOf("studioReconcileFacebookPhotoFinalizes(env, { limit: 4 })");
+  const factory = light.indexOf("await factoryBatchCronResume(env, ctx)");
+  assert.ok(fb3 > 0 && factory > 0 && fb3 < factory, "FB3 must not wait behind Factory batch recovery");
+  assert.match(light, /ctx\.waitUntil\(studioReconcileFacebookPhotoFinalizes/);
+  assert.match(light, /fb3CooldownMs > AIRTABLE_SLOT_FAIL_FAST_MS/);
+  assert.match(light, /creates: 0/);
+  assert.equal((light.match(/studioReconcileFacebookPhotoFinalizes\(env/g) || []).length, 1);
+});
+
 test("light cadence invokes FB3 existing-post finalize separately from heavy publishing", () => {
   const dir=path.dirname(fileURLToPath(import.meta.url));
   const worker=fs.readFileSync(path.join(dir,"worker.js"),"utf8");

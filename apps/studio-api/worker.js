@@ -2479,6 +2479,26 @@ export default {
     const cronInstant = Number(event?.scheduledTime);
     const cadenceNow = Number.isFinite(cronInstant) && cronInstant > 1e12 ? new Date(cronInstant) : new Date();
     const cadence = studioCronAirtableCadence(cadenceNow, event?.cron || "");
+    // Run the FB3 existing-post verifier independently from Factory's R2 batch
+    // recovery. Factory can scan/process hundreds of objects and previously
+    // blocked this later task for whole light cron ticks. This separate
+    // waitUntil is bounded (max four Graph GETs) and never creates a post.
+    if (!cadence.heavy) {
+      const fb3CooldownMs = airtableCooldownWaitMs();
+      if (fb3CooldownMs > AIRTABLE_SLOT_FAIL_FAST_MS) {
+        console.warn("FB3 existing-post verifier skipped: Airtable cooldown", { waitMs: fb3CooldownMs });
+      } else {
+        ctx.waitUntil(studioReconcileFacebookPhotoFinalizes(env, { limit: 4 })
+          .then((results) => console.info("FB3 independent cron result", JSON.stringify({
+            checked: results.length,
+            verified: results.filter((row) => row.status === "verified_published").length,
+            pending: results.filter((row) => row.status !== "verified_published").length,
+            results,
+            creates: 0,
+          })))
+          .catch((error) => console.warn("FB3 independent cron failed", error)));
+      }
+    }
     ctx.waitUntil((async () => {
       // Fail-safe Factory recovery before the Airtable cooldown return so a busy
       // approve wave cannot strand accepted children until cooling fully clears.
@@ -2508,16 +2528,6 @@ export default {
         }
       }
 
-      // FB3 is read-only Graph lookup of an existing recorded Page post.
-      // Keep this bounded independent lane on light ticks: the old heavy
-      // sequence was leaving October posts Pending Finalize without a poll.
-      if (!cadence.heavy) {
-        ctx.waitUntil(studioReconcileFacebookPhotoFinalizes(env, { limit: 4 })
-          .then((result) => {
-            if (result.length) console.info("FB3 pending-finalize priority recovery", JSON.stringify(result));
-          })
-          .catch((error) => console.warn("FB3 priority reconcile unavailable", error)));
-      }
       // --- LIGHT (every 5 min): due-publish + stuck produce/render only ---
       // Stamp MAE onto approved rows that Factory left blank BEFORE reconcile.
       // A blank Scheduled_Post_Date matches the due-publish formula and goes out now.
