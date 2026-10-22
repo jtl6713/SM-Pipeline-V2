@@ -8,9 +8,10 @@ import { facebookStoryRateLimitRearmReason } from "./failed-output-monitor.mjs";
 
 export const VERIFICATION_REARM_MARKER =
   "QA-FB-STORY-368-RETRY-PENDING: cooldown elapsed; rearmed original schedule";
+export const VERIFICATION_REMOTE_MARKER = "QA-FB-STORY-REMOTE-PUBLISHED";
 export const VERIFICATION_RECOVERED_DAYS = 7;
 export const VERIFICATION_RECOVERED_FORMULA =
-  'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Platform_Output_Type}="Facebook Story",{Published_At}!=BLANK(),{Platform_Post_ID}!=BLANK(),IS_AFTER({Published_At},DATEADD(NOW(),-7,"days")),FIND("QA-FB-STORY-368-RETRY-PENDING: cooldown elapsed; rearmed original schedule",{Studio_Publish_Dispatch_Note}&"")>0)';
+  'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Platform_Output_Type}="Facebook Story",{Published_At}!=BLANK(),{Platform_Post_ID}!=BLANK(),IS_AFTER({Published_At},DATEADD(NOW(),-7,"days")),OR(FIND("QA-FB-STORY-368-RETRY-PENDING: cooldown elapsed; rearmed original schedule",{Studio_Publish_Dispatch_Note}&"")>0,FIND("QA-FB-STORY-REMOTE-PUBLISHED",{Studio_Publish_Dispatch_Note}&"")>0))';
 
 const field = (row, key) => row?.fields?.[key] ?? row?.[key];
 const value = (row, key) => String(field(row, key) ?? "").trim();
@@ -71,7 +72,7 @@ export function buildVerificationRecoveryReport({ outstanding = [], publishedRec
     value(row, "Platform") === "Facebook" &&
     value(row, "Platform_Output_Type") === "Facebook Story" &&
     Boolean(value(row, "Published_At") && value(row, "Platform_Post_ID")) &&
-    value(row, "Studio_Publish_Dispatch_Note").includes(VERIFICATION_REARM_MARKER) &&
+    (value(row, "Studio_Publish_Dispatch_Note").includes(VERIFICATION_REARM_MARKER) || value(row, "Studio_Publish_Dispatch_Note").includes(VERIFICATION_REMOTE_MARKER)) &&
     nowMs - Date.parse(value(row, "Published_At")) <= VERIFICATION_RECOVERED_DAYS * 86400000 &&
     Date.parse(value(row, "Published_At")) <= nowMs
   );
@@ -80,4 +81,25 @@ export function buildVerificationRecoveryReport({ outstanding = [], publishedRec
     recovered_window_days: VERIFICATION_RECOVERED_DAYS,
     recovered_definition: "Verified published Facebook Stories retaining the QA rearm audit marker and a platform post ID; excludes merely rearmed posts.",
     counts: statuses, outstanding_count: items.length, items };
+}
+
+/**
+ * Positive-only verification from Meta's Page /stories edge. A missing row,
+ * expired Story, incomplete cursor or archived status is NEVER no-create proof.
+ * Multiple matches fail closed rather than arbitrarily selecting a post.
+ */
+export function verifiedFacebookStoryMatch(stories, mediaId) {
+  const needle = String(mediaId || "").trim();
+  if (!/^[0-9]+$/.test(needle)) return null;
+  const matches = (Array.isArray(stories) ? stories : []).filter((story) =>
+    String(story?.media_id || "").trim() === needle &&
+    String(story?.status || "").toUpperCase() === "PUBLISHED" &&
+    /^[0-9_]+$/.test(String(story?.post_id || "").trim()));
+  if (matches.length !== 1) return null;
+  const story = matches[0];
+  return { post_id: String(story.post_id), media_id: needle,
+    published_at: Number.isFinite(Date.parse(String(story.creation_time || "")))
+      ? new Date(story.creation_time).toISOString() : null,
+    url: /^https:\/\/(?:www\.)?facebook\.com\//i.test(String(story.url || ""))
+      ? String(story.url) : "https://www.facebook.com/stories/" + story.post_id };
 }
