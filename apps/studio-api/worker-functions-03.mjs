@@ -1,4 +1,5 @@
 import { withPhase5SyncLease } from "./supabase-sync-lease.mjs";
+import { homeApprovedExceptionKind, homeIsUnpublishedFailure } from "./profile-summary-classification.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
   studioReadSource,
@@ -1847,16 +1848,16 @@ export async function mergeLatestPipelineWithManualRows(env, profile, recent = [
 
 export async function listOutputs(request, env, url, authorization, ctx = null) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
-  // Home exception/failed drill-down must NOT use the newest-250 or open-pack
-  // caches. Older rate-limited Stories fall outside those lists while Home's
-  // complete per-profile scan still counts them. Filter at the Airtable source
-  // (the Phase 5 authoritative write store) and scope to the selected profile.
+  // This history-scoped read and Home share the SAME record-level classifier.
+  // A normal newest-250 snapshot cannot answer older Failed/Past Due/No Date
+  // clicks, and an Airtable prefilter alone can include the wrong state.
   const focusedMode = String(url.searchParams.get("mode") || "");
-  if (focusedMode === "approved_exceptions" || focusedMode === "failed") {
+  if (["approved_exceptions", "approved_past_due", "approved_missing_date", "failed"].includes(focusedMode)) {
     const profileFormula = contentProfileFilterFormula(profile);
     const exceptionFormula = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Review_Status}="Approved",'
       + '{Output_Status}!="Published",{Publish_Status}!="Published",'
       + '{Published_At}=BLANK(),{Platform_Post_URL}=BLANK(),'
+      + '{Manual_Published_URL}=BLANK(),'
       + 'OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())))';
     const failureFormula = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,'
       + 'OR({Output_Status}="Failed",{Publish_Status}="Failed",{Render_Status}="Failed"))';
@@ -1872,15 +1873,30 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
     });
     const labels = await pipelineContentLabelsById(
       env, profile, studioPipelineContentIdsFromOutputs(rows));
-    const mapped = rows.map((record) => mapOutput(
-      record, null, null,
-      labels.get(studioFirstLinkedId(f(record, "Content_Item"))) || null));
+    const observedAt = Date.now();
+    const mapped = rows.map((record) => {
+      const output = mapOutput(
+        record, null, null,
+        labels.get(studioFirstLinkedId(f(record, "Content_Item"))) || null);
+      return {
+        ...output,
+        home_exception_kind: homeApprovedExceptionKind(output, observedAt),
+        home_failed: homeIsUnpublishedFailure(output),
+      };
+    });
+    const matched = stripDeletedDuplicateOutputRecords(mapped).filter((row) => (
+      focusedMode === "failed" ? row.home_failed
+        : focusedMode === "approved_exceptions" ? Boolean(row.home_exception_kind)
+        : row.home_exception_kind === focusedMode
+    ));
     return respond(request, env, {
       ok: true,
-      records: stripDeletedDuplicateOutputRecords(mapped),
+      records: matched,
+      count: matched.length,
       profile: mapStudioContentProfile(profile),
       read_source: "airtable",
       complete: rows.length < 500,
+      scanned_at: new Date(observedAt).toISOString(),
       mode: focusedMode,
     });
   }
