@@ -28,12 +28,14 @@ jobs:
           node --check apps/studio-api/factory-approval-queue.mjs
           node --check apps/studio-api/factory-approval-groups.mjs
           node --check apps/studio-api/factory-batch-global-policy.mjs
+          node --check apps/studio-api/factory-global-rollout-health.mjs
           node --check apps/studio-api/output-approval-lease.mjs
           node --check apps/studio-web/assets/factory-desk.js
       - name: Factory single and batch approval regressions
         run: |
           node --check apps/studio-api/schedule-occupancy-90-day.test.mjs
           node --test apps/studio-api/failed-output-monitor.test.mjs
+          node --test apps/studio-api/factory-global-rollout-health.test.mjs
           node --test apps/studio-api/facebook-held-finalize.test.mjs
           node --test apps/studio-api/approved-exception-drilldown.test.mjs
           node --test apps/studio-api/home-pipeline-exception-parity.test.mjs
