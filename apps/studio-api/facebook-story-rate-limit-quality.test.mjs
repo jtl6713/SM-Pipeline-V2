@@ -83,8 +83,8 @@ test("Quality and Helpdesk keep the exact signature and restrained action", () =
   const service = healing.slice(healing.indexOf("export async function studioHealFacebookRateLimitRearm("),
     healing.indexOf("/*__STUDIO_WORKER_END:studioHealFacebookRateLimitRearm__*/"));
   assert.match(service, /FACEBOOK_STORY_RATE_LIMIT_368/);
-  assert.match(service, /facebookPreapprovalRecoveryReason\\(latest\\)/);
-  assert.match(service, /facebookPreapprovalRecoveryFields\\(latest\\)/);
+  assert.ok(service.includes("facebookPreapprovalRecoveryReason(latest)"));
+  assert.ok(service.includes("facebookPreapprovalRecoveryFields(latest)"));
   assert.match(service, /scanOutstandingFailedOutputs/);
   assert.doesNotMatch(service, /studioDispatchApprovedPublishNow/);
   assert.doesNotMatch(service, /Studio_Publish_Dispatch_Count:\\s*0/);
