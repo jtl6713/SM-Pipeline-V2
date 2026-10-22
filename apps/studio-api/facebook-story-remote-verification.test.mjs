@@ -97,4 +97,9 @@ test("live publishing always persists upload identity before upload/finish and n
   assert.match(section, /FB_STORY_REMOTE_VERIFIED_PUBLISHED/);
   assert.match(section, /reconciled_without_post/);
   assert.match(section, /facebookStoryRateLimitRearmReason\(authoritative\)/);
+  const dispatch = worker.slice(worker.indexOf("export async function studioDispatchApprovedPublishAndSchedule("),
+    worker.indexOf("/*__STUDIO_WORKER_END:studioDispatchApprovedPublishAndSchedule__*/"));
+  assert.match(dispatch, /reused_existing_remote_story/);
+  assert.match(dispatch, /Keep its QA recovery audit marker/);
+
 });
