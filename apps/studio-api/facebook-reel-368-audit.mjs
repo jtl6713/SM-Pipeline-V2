@@ -13,13 +13,17 @@ export function reel368Decision(row, nowMs = Date.now()) {
       || f.Publish_Error_Stage !== "FBS3_RATE_LIMIT") return null;
   const due = Date.parse(f.Publish_Next_Retry_At || "");
   const held = f.Do_Not_Publish === true && f.Publish_Retry_Eligible !== true;
-  const evidence = f.Platform_Post_ID || f.Platform_Media_ID || "";
+  const evidence = f.Platform_Post_ID || f.Platform_Media_ID || f.FB_Slideshow_Meta_Video_ID || "";
   return {
     output_id: outputId, record_id: row.id,
-    outcome: evidence ? "remote_identity_requires_exact_graph_get"
-      : Number.isFinite(due) && due > nowMs ? "cooldown_waiting" : "verification_unknown",
+    outcome: Number.isFinite(due) && due > nowMs ? "cooldown_waiting"
+      : evidence ? "pending_exact_provider_verification" : "pending_verification",
     next_check_at: new Date(Math.max(nowMs + 30 * 60000, Number.isFinite(due) ? due : 0)).toISOString(),
-    safety_blocked: held,
+    safety_blocked: true,
+    hold_integrity: held ? "intact" : "missing_or_invalid",
+    action_required: Number.isFinite(due) && due > nowMs ? null : evidence
+      ? "Read-only Graph GET of the exact stored video ID; only an exact positive publication match permits reconciliation."
+      : "Escalate no-identity Reel to an operator; provider absence cannot be proven and no fresh Graph create is authorized.",
     evidence_source: evidence ? "airtable_saved_remote_identity_unverified" : "airtable_dispatch_without_remote_identity",
     // Even positive proof requires reconciliation; no state here authorizes Graph creation.
     graph_create_authorized: false,
@@ -48,7 +52,7 @@ export async function auditReel368Holds(env, { airtableFetch, nowMs = Date.now()
         Outcome: verdict.outcome, Evidence_Source: verdict.evidence_source,
         Verified_At: new Date(nowMs).toISOString(), Actor: "studio-quality-agent",
         Details_JSON: JSON.stringify({ ...verdict, observed_at: new Date(nowMs).toISOString(),
-          evidence_confidence: verdict.outcome === "verification_unknown" ? "unknown" : "unverified",
+          evidence_confidence: "unverified",
           no_meta_graph_create: true }),
       } }] }) });
     }
