@@ -110,3 +110,24 @@ export function recoveredOutcomesFromLedger(rows = [], {
   }
   return [...events.values()];
 }
+
+/** Worker adapter: existing Airtable read/writer, no privileged public route. */
+export async function persistVerifiedRecoveryInAirtable(env, record, evidence, {
+  listRecords, airtableFetch, at,
+} = {}) {
+  if (!env || typeof listRecords !== "function" || typeof airtableFetch !== "function")
+    throw new Error("Airtable recovery ledger adapter is unavailable");
+  return appendVerifiedRecoveryEvent(record, evidence, {
+    at,
+    readExisting: (key) => listRecords(env, QUALITY_RECOVERY_LEDGER_TABLE, {
+      limit: 3,
+      filterFormula: `{Event_Key}="${key}"`,
+    }),
+    createEvent: async (fields) => {
+      const saved = await airtableFetch(env, QUALITY_RECOVERY_LEDGER_TABLE, "", {
+        method: "POST", body: JSON.stringify({ fields, typecast: true }),
+      });
+      return saved?.id || null;
+    },
+  });
+}
