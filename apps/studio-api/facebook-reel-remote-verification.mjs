@@ -32,12 +32,12 @@ export async function verifyFacebookReelByVideoId({
   const permalink = String(body.permalink_url || "");
   if (!/^https:\/\/(?:www\.)?facebook\.com\/(?:reel\/|[^?#]*\/videos\/)/i.test(permalink))
     return { verdict: "unknown", reason: "no_authoritative_reel_permalink" };
-  if (status && /ERROR|FAILED|PROCESSING|UPLOADING|IN_PROGRESS|SCHEDULED|PENDING/.test(status))
+  if (!["PUBLISHED", "LIVE", "READY_TO_PUBLISH"].includes(status) || status === "READY_TO_PUBLISH")
     return { verdict: "unknown", reason: "remote_not_confirmed_published" };
   // Exact ID plus a Reel permalink is a positive remote identity receipt;
   // downstream reconciliation must independently verify the same identity and
   // publication timestamp before modifying an Airtable publishing status.
   return { verdict: "remote_identity_confirmed", video_id: id,
-    permalink_url: permalink, provider_status: status || "unspecified",
+    permalink_url: permalink, provider_status: status,
     source: "meta_graph_exact_reel_video_id", publish_authorized: false };
 }
