@@ -73,6 +73,7 @@ export function facebookPreapprovalRecoveryFields(record, now = new Date()) {
     FB_Slideshow_Error_Message: "",
     Studio_Publish_Dispatch_Note: (prior.slice(0, 360) +
       " | QA-FB-RATE-LIMIT-TO-REVIEW:" + stamp +
+      " | QA-AUTOVERIFY-RECOVERED:" + stamp +
       " (" + stage + ", attempts=" + attempts + "); no remote send; approval required; MAE reschedules").slice(0, 900),
   };
 }
