@@ -1,4 +1,4 @@
-import { homeApprovedUnpublished, homeOutputContribution, HOME_PLATFORMS } from "./profile-summary-classification.mjs";
+import { homeApprovedUnpublished, homeApprovedExceptionKind, homeOutputContribution, HOME_PLATFORMS } from "./profile-summary-classification.mjs";
 
 // Calendar uses Scheduled_Post_Date, never dispatch status or provisional approval.
 // Each mapped Platform Output is counted once, including Stories, Reels and carousels.
@@ -17,11 +17,13 @@ export function homeApprovedCalendarCounts(outputs, now = Date.now()) {
       continue;
     }
     if (!homeApprovedUnpublished(row)) continue;
-    const stamp = Date.parse(String(row.scheduled_post_date || ""));
-    if (!Number.isFinite(stamp) || stamp <= 0) {
+    const kind = homeApprovedExceptionKind(row, now);
+    if (kind === "approved_missing_date") {
       missing += 1;
       continue;
     }
+    const stamp = Date.parse(String(row.scheduled_post_date || ""));
+    if (!Number.isFinite(stamp) || stamp <= 0) continue;
     slots[row.platform].push(stamp);
   }
   for (const platform of HOME_PLATFORMS) slots[platform].sort((a, b) => a - b);
