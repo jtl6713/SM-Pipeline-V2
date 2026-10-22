@@ -509,3 +509,49 @@ prompt plus Chicago, New York, Los Angeles and Miami fixtures.
 
 **Rollback:** Revert the Worker asset-policy integration and its catalog entry;
 no Airtable schema migration or mutation is required.
+
+## QA-AUTOVERIFY-LEDGER — durable reconciled publication metrics (Issue #1050)
+
+**Production Airtable schema:** `Quality Agent Recovery Ledger` in the existing
+ChicagoShining AI Content Creator base. Fields: `Event_Key` (deterministic),
+`Output_Record_ID`, `Output_ID`, `Profile_ID`, `Platform`, `Output_Type`,
+`Outcome`, `Evidence_Source`, `Media_ID`, `Post_ID`, `Verified_At`,
+`Reconciled_At`, `Actor`, `Details_JSON`. Times are UTC ISO-8601 strings.
+No sensitive tokens, session URLs or credentials are stored.
+
+A recovered output counts only if the Quality Agent reconciled it from
+**positive** publication evidence, reread authoritative Airtable as
+`Publish_Status=Published` and `Output_Status=Published` with a matching remote
+post ID, and appended an event with `Outcome=reconciled_published`. A cached
+scan or retry attempt is not a recovery. Event keys are deterministic per
+output/outcome, dashboard counts are deduplicated by output record ID and
+reported for a bounded 7-day period. Concurrent repeated inserts are harmless
+to reported counts but should be audited for duplicate event rows.
+
+The valid evidence sources are `meta_page_stories_exact_media_id` (exact
+Graph Story GET match; NO Graph create) and
+`airtable_existing_publication_receipt` (both recorded remote post ID and
+publication timestamp already exist; reconcile stale Studio status only).
+If ledger reads fail, Factory/Desk mark recovery metrics **partial/unknown**;
+never silently translate an unavailable ledger to zero.
+The deployment's read-only Factory canary now requires a healthy production
+ledger query to pass before release is considered safe.
+
+**Exhausted Story classification:** Dispatch cap takes precedence over
+`Publish_Next_Retry_At`; a 48-hour Meta cooldown does not authorize a ninth
+Story send. Twelve October 2026 LA eight-dispatch Stories remain
+`pending_verification` + `safety_blocked` until authoritative proof is
+available, even if shown with a future cooldown date. No reset, speculative
+repost or bypass of original approved schedule/locks.
+
+**Operational canary:** Once the code deploys, observe an existing
+receipt-positive Facebook Story with an inconsistent Studio publication state
+transition to Published *without any new Meta Graph POST*. Verify exactly
+one ledger event for that output, a matching post ID, and Factory/Desk count
+increase by one. Also verify the 12 exhausted LA Story records retain
+dispatch_count=8 and have no new Meta upload identity. A mocked-Graph GET-only
+test is NOT a substitute for live readback. Previous `QA-AUTOVERIFY-RECOVERED:`
+notes are reconciled into the durable ledger when original positive
+publication fields remain present; overwritten notes cannot establish
+historical completeness. Airtable remains authoritative. No Supabase
+Phase 6 write cutover.
