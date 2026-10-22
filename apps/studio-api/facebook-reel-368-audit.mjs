@@ -42,7 +42,7 @@ export async function auditReel368Holds(env, { airtableFetch, nowMs = Date.now()
     const found = await airtableFetch(env, REEL_368_LEDGER, "?filterByFormula=" + encodeURIComponent('{Event_Key}="' + quote(key) + '"') + "&maxRecords=1");
     if (!Array.isArray(found?.records)) throw new Error("QA-1050 ledger lookup incomplete");
     if (!found.records.length) {
-      await airtableFetch(env, REEL_368_LEDGER, "", { method: "POST", body: JSON.stringify({ fields: {
+      await airtableFetch(env, REEL_368_LEDGER, "", { method: "PATCH", body: JSON.stringify({ performUpsert: { fieldsToMergeOn: ["Event_Key"] }, records: [{ fields: {
         Event_Key: key, Output_Record_ID: rows[0].id, Output_ID: outputId,
         Platform: "Facebook", Output_Type: "Facebook Reel",
         Outcome: verdict.outcome, Evidence_Source: verdict.evidence_source,
@@ -50,7 +50,7 @@ export async function auditReel368Holds(env, { airtableFetch, nowMs = Date.now()
         Details_JSON: JSON.stringify({ ...verdict, observed_at: new Date(nowMs).toISOString(),
           evidence_confidence: verdict.outcome === "verification_unknown" ? "unknown" : "unverified",
           no_meta_graph_create: true }),
-      } }) });
+      } }] }) });
     }
     out.push(verdict);
   }
