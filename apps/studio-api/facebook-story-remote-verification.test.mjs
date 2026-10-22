@@ -103,3 +103,41 @@ test("live publishing always persists upload identity before upload/finish and n
   assert.match(dispatch, /Keep its QA recovery audit marker/);
 
 });
+
+
+test("a positive Story match cannot reconcile until all Graph cursor pages complete", async () => {
+  let request = 0;
+  const exact = { post_id: post, media_id: media, status: "PUBLISHED", creation_time: "2026-10-20T21:00:00Z" };
+  const incomplete = await verifyFacebookStoryByMediaId({
+    pageId: page, token: "token", mediaId: media, maxPages: 1,
+    fetcher: async () => {
+      request += 1;
+      return graph([exact], { next: "https://graph.facebook.com/next", cursors: { after: "second" } });
+    },
+  });
+  assert.equal(request, 1);
+  assert.equal(incomplete.verdict, "unknown");
+  assert.equal(incomplete.reason, "incomplete_meta_pagination");
+
+  const ambiguous = await verifyFacebookStoryByMediaId({
+    pageId: page, token: "token", mediaId: media,
+    fetcher: async (url) => {
+      const cursor = new URL(url).searchParams.get("after");
+      return cursor ? graph([{ ...exact, post_id: "999888777666" }]) :
+        graph([exact], { next: "https://graph.facebook.com/next", cursors: { after: "second" } });
+    },
+  });
+  assert.equal(ambiguous.verdict, "unknown");
+  assert.equal(ambiguous.reason, "ambiguous_remote_story");
+
+  const valid = await verifyFacebookStoryByMediaId({
+    pageId: page, token: "token", mediaId: media,
+    fetcher: async (url) => {
+      const cursor = new URL(url).searchParams.get("after");
+      return cursor ? graph([]) :
+        graph([exact], { next: "https://graph.facebook.com/next", cursors: { after: "second" } });
+    },
+  });
+  assert.equal(valid.verdict, "verified_published");
+  assert.equal(valid.pages_read, 2);
+});

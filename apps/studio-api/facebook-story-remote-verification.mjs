@@ -46,6 +46,7 @@ export async function verifyFacebookStoryByMediaId({
   const seen = new Set();
   let after = "";
   let pagesRead = 0;
+  let uniqueMatch = null;
   const limit = Math.min(10, Math.max(1, Number(maxPages) || 4));
   while (pagesRead < limit) {
     if (seen.has(after)) return { verdict: "unknown", reason: "repeated_meta_page_cursor", pages_read: pagesRead };
@@ -67,20 +68,28 @@ export async function verifyFacebookStoryByMediaId({
     if (!response?.ok || !body || !Array.isArray(body.data))
       return { verdict: "unknown", reason: "meta_read_rejected_or_invalid", pages_read: pagesRead };
     pagesRead++;
+    // A first-page positive cannot be final: later pages can disclose an
+    // inconsistent remote identity. Complete the bounded census before repair.
     const matches = body.data.filter((item) => String(item?.media_id || "") === id);
-    if (matches.length > 1) return { verdict: "unknown", reason: "ambiguous_remote_story", pages_read: pagesRead };
+    if (matches.length > 1 || (matches.length && uniqueMatch))
+      return { verdict: "unknown", reason: "ambiguous_remote_story", pages_read: pagesRead };
     if (matches.length === 1) {
       const match = facebookStoryPublishedMatch(matches, id);
-      return match
-        ? { verdict: "verified_published", evidence: match, pages_read: pagesRead }
-        : { verdict: "unknown", reason: "remote_story_not_confirmed_published", pages_read: pagesRead };
+      if (!match)
+        return { verdict: "unknown", reason: "remote_story_not_confirmed_published", pages_read: pagesRead };
+      uniqueMatch = match;
     }
     // Do not follow arbitrary provider paging.next URLs or propagate secrets.
     // A cursor is an untrusted opaque value, but stays on the fixed Graph host.
     const cursor = typeof body.paging?.cursors?.after === "string" ? body.paging.cursors.after : "";
-    if (!body.paging?.next) break;
-    if (!cursor || cursor.length > 1000) return { verdict: "unknown", reason: "invalid_meta_cursor", pages_read: pagesRead };
+    if (!body.paging?.next)
+      return uniqueMatch
+        ? { verdict: "verified_published", evidence: uniqueMatch, pages_read: pagesRead }
+        : { verdict: "unknown", reason: "no_exact_match_not_proof_of_absence", pages_read: pagesRead };
+    if (!cursor || cursor.length > 1000)
+      return { verdict: "unknown", reason: "invalid_meta_cursor", pages_read: pagesRead };
     after = cursor;
   }
-  return { verdict: "unknown", reason: "no_exact_match_not_proof_of_absence", pages_read: pagesRead };
+  // Even a positive match is inconclusive when Graph pagination is truncated.
+  return { verdict: "unknown", reason: "incomplete_meta_pagination", pages_read: pagesRead };
 }
