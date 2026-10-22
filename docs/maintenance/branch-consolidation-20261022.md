@@ -21,6 +21,8 @@
 - `release/qa-publish-ui-0745-20261022` @ `fc490cd4cb4cb72f134f670dbd8abed716478d7a` → `archive/branch-consolidation-20261022/release--qa-publish-ui-0745-20261022`
 - `tmp/qa-publish-1028-rebase-20261021` @ `b31a6661bad420ef17b165ce5485818899a1e55a` → `archive/branch-consolidation-20261022/tmp--qa-publish-1028-rebase-20261021`
 
+- `release/fb3-light-finalize-worker-20261022` @ `2b19e4b728fd6d67209c7e413446a63939cd9a0d` → `archive/branch-consolidation-20261022/release--fb3-light-finalize-worker-20261022` (at main SHA; refuses deletion if it advances)
+
 ## Verification
 
 Require Workflow `Archive and consolidate superseded branches to main (2026-10-22)` to finish SUCCESS and emit `ONE_BRANCH_VERIFIED`, then independently GET the remote branches and open PRs. If a contributor creates a new active branch, the workflow refuses deletion pending review.
