@@ -29,6 +29,12 @@ def create_eligibility_reason(record: dict[str, Any]) -> str | None:
     held = facebook_graph_publish_held_reason()
     if held:
         return held
+    # Graph 368 posting limits must never become an automatic new-Reel retry.
+    # The Quality Agent first waits 48 hours, obtains remote evidence, then
+    # returns the item to operator review before new approval can create again.
+    stage = _ci(field_str(record, "Publish_Error_Stage"))
+    if stage in {"fbs3_rate_limit", "fb_graph_rate_limit", "facebook_story_rate_limit_368"}:
+        return "rate_limit_requires_operator_review"
     status = field_str(record, "FB_Slideshow_Status")
     if _ci(status) == _ci(STATUS_VIDEO_READY) and public_mp4_url(record):
         return None
