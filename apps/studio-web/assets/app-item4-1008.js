@@ -20286,6 +20286,8 @@ function timedScriptAssetLabel(asset, index) {
 
   // Same Home definition: final approved, still unpublished, Scheduled_Post_Date only.
   function pipelineApprovedExceptionKind(record, now = Date.now()) {
+    // Authoritative historical results carry the exact Home classifier.
+    if (typeof record?.home_exception_kind === "string") return record.home_exception_kind;
     if (!record || record.do_not_publish
         || !["Facebook", "Instagram", "TikTok", "YouTube"].includes(record.platform)) return "";
     if (String(record.review_status || "").trim().toLowerCase() !== "approved") return "";
@@ -20332,7 +20334,9 @@ function timedScriptAssetLabel(asset, index) {
     // makes pipelineStudioStateLabel return Published, so the click-through
     // cannot keep a row the overview has already cleared.
     if (filter === "attention" || filter === "manual") return studio === "Manual Action Required";
-    if (filter === "failed") return state === "Failed" || /failed|error/i.test(render) || /failed|error/i.test(publish);
+    if (filter === "failed") return typeof record?.home_failed === "boolean"
+      ? record.home_failed
+      : state === "Failed" || /failed|error/i.test(render) || /failed|error/i.test(publish);
     // Match All-Profiles / dashboard awaiting_approval (studio_state), not the
     // stricter Approve-button gate. mode=review used to fetch Pending Review and
     // leave Review empty while home still showed needs-approval counts.
@@ -22071,7 +22075,7 @@ function timedScriptAssetLabel(asset, index) {
       // Pipeline, especially rate-limited Stories and already-live FB posts.
       const focusedView = ["approved_past_due", "approved_missing_date", "failed"].includes(pipelineViewFilter);
       if (focusedView) {
-        const focusedMode = pipelineViewFilter === "failed" ? "failed" : "approved_exceptions";
+        const focusedMode = pipelineViewFilter; // Same explicit Home bucket on the server.
         const focused = await api("/api/outputs?mode=" + focusedMode, { timeoutMs: 15000, retries: 1 });
         if (profileAtRequest !== selectedProfileId) return;
         if (!Array.isArray(focused?.records)) throw new Error("Pipeline drill-down was not verified");
@@ -22082,7 +22086,7 @@ function timedScriptAssetLabel(asset, index) {
         renderOutputsTable(target, focused.records);
         setPipelineLiveHint(focused.complete === false
           ? "Historical exceptions exceed the safe page limit — more records require pagination."
-          : "Authoritative " + pipelineFilterLabel() + " · refreshed");
+          : "Authoritative " + pipelineFilterLabel() + " · " + focused.records.length + " matching outputs · refreshed");
         return;
       }
       // Start the heavy history read and small live check concurrently; paint
