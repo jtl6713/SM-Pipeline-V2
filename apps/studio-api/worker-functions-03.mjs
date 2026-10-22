@@ -12693,7 +12693,10 @@ export async function studioDispatchApprovedPublishAndSchedule(ctx, env, record)
     await studioStampPublishDispatch(env, record, `dispatch failed: ${message}`);
     return { ok: false, error: message };
   }
-  await studioStampPublishDispatch(env, record, studioPublishDispatchNote(primary));
+  // Verified remote reconciliation is not a new outbound publishing attempt.
+  // Keep its QA recovery audit marker and the original dispatch counter intact.
+  if (!primary?.reused_existing_remote_story)
+    await studioStampPublishDispatch(env, record, studioPublishDispatchNote(primary));
   const tail = studioDispatchApprovedPublishTail(env, record, primary).catch((error) => {
     console.warn("studio publish dispatch tail failed", record?.id, error);
   });
