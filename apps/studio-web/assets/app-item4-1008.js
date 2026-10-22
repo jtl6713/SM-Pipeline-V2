@@ -20292,9 +20292,10 @@ function timedScriptAssetLabel(asset, index) {
     const publish = String(record.publish_status || "").trim().toLowerCase();
     const platformPublish = String(record.platform_publish_status || "").trim().toLowerCase();
     const manual = String(record.manual_completion_status || "").trim().toLowerCase();
+    if (publish === "failed" || String(record.output_status || "").trim().toLowerCase() === "failed") return "";
     if (/published|posted/.test(state)
         || /published|posted|publish complete|publish succeeded/.test(publish)
-        || /published|posted/.test(platformPublish)
+        || /^(published|posted|publish complete|publish succeeded)$/.test(platformPublish)
         || /^(published|posted|completed)$/.test(manual)
         || record.published_at || record.platform_post_url || record.manual_published_url) return "";
     const stamp = Date.parse(String(record.scheduled_post_date || ""));
@@ -22064,6 +22065,24 @@ function timedScriptAssetLabel(asset, index) {
         (value) => ({ ok: true, value }),
         (error) => ({ ok: false, error }),
       );
+      // Strict profile-scoped exception drill-down, not the newest-250 snapshot.
+      // Home sees historical approved records that can otherwise be absent from
+      // Pipeline, especially rate-limited Stories and already-live FB posts.
+      const focusedView = ["approved_past_due", "approved_missing_date", "failed"].includes(pipelineViewFilter);
+      if (focusedView) {
+        const focusedMode = pipelineViewFilter === "failed" ? "failed" : "approved_exceptions";
+        const focused = await api("/api/outputs?mode=" + focusedMode, { timeoutMs: 15000, retries: 1 });
+        if (profileAtRequest !== selectedProfileId) return;
+        if (!Array.isArray(focused?.records)) throw new Error("Pipeline drill-down was not verified");
+        pipelineOutputs = focused.records;
+        pipelineContentRecords = [];
+        pipelineListUnverified = focused.complete === false;
+        renderOutputsTable(target, focused.records);
+        setPipelineLiveHint(focused.complete === false
+          ? "Historical exceptions exceed the safe page limit — more records require pagination."
+          : "Authoritative " + pipelineFilterLabel() + " · refreshed");
+        return;
+      }
       // Start the heavy history read and small live check concurrently; paint
       // the newest outputs without waiting on Airtable's open-pack scan.
       const latestPromise = settled(api("/api/outputs?mode=latest", { timeoutMs: 14000, retries: 1 }));
