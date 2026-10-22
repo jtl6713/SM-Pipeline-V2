@@ -1970,7 +1970,7 @@ export default {
         if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
         assertWriteRequest(request, env);
         requirePermission(authorization, "ideas_create");
-        return proposeScriptedShortRoute(request, env, authorization);
+        return await proposeScriptedShortRoute(request, env, authorization, url);
       }
 
       if (isScriptedShortAcceptRoute) {
@@ -1978,7 +1978,7 @@ export default {
         assertWriteRequest(request, env);
         requirePermission(authorization, "ideas_create");
         requirePermission(authorization, "production_configure");
-        return acceptScriptedShortRoute(request, env, authorization, ctx);
+        return await acceptScriptedShortRoute(request, env, authorization, ctx, url);
       }
 
       if (isIdeaGenerateStatusRoute) {

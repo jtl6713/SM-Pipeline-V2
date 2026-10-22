@@ -11464,7 +11464,7 @@ export function scriptedShortUnassignedMessage(timeline) {
 }
 /*__STUDIO_WORKER_END:scriptedShortUnassignedMessage__*/
 
-export async function proposeScriptedShortRoute(request, env, authorization) {
+export async function proposeScriptedShortRoute(request, env, authorization, url = null) {
   let payload = {};
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const prompt = String(payload?.prompt || "").replace(/\s+/g, " ").trim();
@@ -11478,8 +11478,11 @@ export async function proposeScriptedShortRoute(request, env, authorization) {
       ...(assetPolicy.required ? { Primary_Location: assetPolicy.location } : {}),
     },
   };
-  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url, payload));
   if (profile?.id) synthetic.fields.Content_Profile = [profile.id];
+  // The active Studio profile must also drive the writer market, never default to Chicago.
+  const profileMarket = String(f(profile, "Market_Name") || "").trim();
+  if (profileMarket) synthetic.fields.Market_Name = profileMarket;
   let catalog = [];
   try {
     catalog.push(...(await rankStillsForIdeaPhotoWait(env, synthetic)).map(ideaTimedScriptCatalogRow));
@@ -11560,7 +11563,7 @@ export async function proposeScriptedShortRoute(request, env, authorization) {
 }
 /*__STUDIO_WORKER_END:proposeScriptedShortRoute__*/
 
-export async function acceptScriptedShortRoute(request, env, authorization, ctx = null) {
+export async function acceptScriptedShortRoute(request, env, authorization, ctx = null, url = null) {
   let payload = {};
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const prompt = String(payload?.prompt || "").replace(/\s+/g, " ").trim();
@@ -11570,7 +11573,7 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
     throw new HttpError(400, "Accept needs the proposal timeline.");
   }
   const timeline = buildTimelineFromScenes(incoming.segments);
-  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url, payload));
   // Validate against authoritative Airtable media before any draft is created.
   // This prevents edited or stale proposals bypassing the Quality Agent.
   const acceptPolicy = parseScriptedShortAssetPolicy(prompt);
