@@ -14,7 +14,7 @@ export const QUALITY_HEALS = Object.freeze([
   "stamp_video_draft_then_ttd0",
   "retry_existing_final_mp4_staging",
   "park_six_hours",
-  "rearm_original_story_schedule",
+  "return_to_preapproval_after_cooldown",
   "repair_render_sources",
   "promote_native_photo_review_strand",
   "complete_native_photo_approve",
@@ -264,11 +264,11 @@ export const QUALITY_CHECKS = Object.freeze([
   check({
     id: "facebook_story_rate_limit",
     signature: "QA-FB-STORY-368-RETRY-PENDING",
-    title: "Detect approved Facebook Stories parked by Graph 368 with Ready to Schedule, distinguish safe cooldown rearm from capped dispatch/remote-verification holds",
+    title: "Recover cooled transient Facebook Story 368 rejections to Ready for Review; preserve remote-verification holds and require a fresh MAE approval",
     lane: "service",
     kind: "facebook_story_rate_limit",
     actor: "worker_heal",
-    heal: "rearm_original_story_schedule",
+    heal: "return_to_preapproval_after_cooldown",
   }),
   check({
     id: "tiktok_auth_signature",
