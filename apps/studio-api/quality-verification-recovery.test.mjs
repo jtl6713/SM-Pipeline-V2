@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import { buildVerificationRecoveryReport, verificationRecoveryStatus,
-  VERIFICATION_RECOVERED_FORMULA, VERIFICATION_REARM_MARKER } from "./quality-verification-recovery.mjs";
+  VERIFICATION_RECOVERED_FORMULA, VERIFICATION_REARM_MARKER, verifiedFacebookStoryMatch } from "./quality-verification-recovery.mjs";
 
 const nowMs = Date.parse("2026-10-26T12:00:00Z");
 const base = { Output_ID: 4004, Platform: "Facebook", Platform_Output_Type: "Facebook Story",
@@ -37,14 +37,14 @@ test("only a confirmed interactive security challenge counts as human action", (
 
 test("only confirmed published, timestamped, audited outcomes count as recovered", () => {
   const published = row(4004, {
-    Published_At: "2026-10-26T09:00:00Z", Platform_Post_ID: "123",
+    Published_At: "2026-10-26T09:00:00Z", Studio_Publish_Dispatch_At: "2026-10-26T09:00:00Z", Platform_Post_ID: "123",
     Studio_Publish_Dispatch_Note: "reconcile successful | " + VERIFICATION_REARM_MARKER,
   });
   const sample = [published, published, row(4064, {
-    Published_At: "2026-10-26T09:00:00Z", Platform_Post_ID: "",
+    Published_At: "2026-10-26T09:00:00Z", Studio_Publish_Dispatch_At: "2026-10-26T09:00:00Z", Platform_Post_ID: "",
     Studio_Publish_Dispatch_Note: VERIFICATION_REARM_MARKER,
   }), row(4022, {
-    Published_At: "2026-10-01T09:00:00Z", Platform_Post_ID: "older",
+    Published_At: "2026-10-01T09:00:00Z", Studio_Publish_Dispatch_At: "2026-10-01T09:00:00Z", Platform_Post_ID: "older",
     Studio_Publish_Dispatch_Note: VERIFICATION_REARM_MARKER,
   })];
   const report = buildVerificationRecoveryReport({
@@ -70,4 +70,29 @@ test("the Worker report preserves the audited marker across dispatch note update
   assert.match(desk, /VERIFICATION_RECOVERED_FORMULA/);
   assert.match(desk, /buildVerificationRecoveryReport/);
   assert.match(desk, /verification_recovery/);
+});
+
+test("remote evidence requires an exact unique published media ID and post ID", () => {
+  const story = { media_id: "987654321", post_id: "45678", status: "PUBLISHED",
+    creation_time: "2026-10-26T09:00:00Z", url: "https://www.facebook.com/stories/45678" };
+  assert.equal(verifiedFacebookStoryMatch([story], "987654321")?.post_id, "45678");
+  assert.equal(verifiedFacebookStoryMatch([story], "987654322"), null);
+  assert.equal(verifiedFacebookStoryMatch([{ ...story, status: "ARCHIVED" }], "987654321"), null);
+  assert.equal(verifiedFacebookStoryMatch([story, story], "987654321"), null);
+  assert.equal(verifiedFacebookStoryMatch([{ ...story, post_id: "" }], "987654321"), null);
+  assert.equal(verifiedFacebookStoryMatch([], "987654321"), null);
+});
+test("no post create or counter reset exists in remote-verification block", () => {
+  const worker = fs.readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
+  const start = worker.indexOf('if (blocked === "retry_limit" || blocked === "publication_evidence")');
+  const end = worker.indexOf("if (blocked) continue; // Unverified", start);
+  const readOnlyVerifier = worker.slice(start, end);
+  assert.ok(start > 0 && end > start);
+  assert.match(readOnlyVerifier, /verifyMetaStoryMedia/);
+  assert.doesNotMatch(readOnlyVerifier, /studioDispatchApprovedPublishNow|Publish_Attempt_Count:|Studio_Publish_Dispatch_Count:/);
+  const publisher = fs.readFileSync(new URL("./worker-functions-03.mjs", import.meta.url), "utf8");
+  const storyStart = publisher.slice(publisher.indexOf("export async function studioPublishFacebookPageStory"),
+    publisher.indexOf("/*__STUDIO_WORKER_END:studioPublishFacebookPageStory__*/"));
+  assert.match(storyStart, /Platform_Media_ID: String\(start.video_id\)/);
+  assert.match(storyStart, /story_phase: "finish_uncertain"/);
 });
