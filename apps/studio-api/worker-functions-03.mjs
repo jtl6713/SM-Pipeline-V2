@@ -1,3 +1,4 @@
+import { VERIFICATION_REARM_MARKER } from "./quality-verification-recovery.mjs";
 import { withPhase5SyncLease } from "./supabase-sync-lease.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
@@ -12558,7 +12559,10 @@ export async function studioStampPublishDispatch(env, record, note) {
         fields: {
           Studio_Publish_Dispatch_At: new Date().toISOString(),
           Studio_Publish_Dispatch_Count: count,
-          Studio_Publish_Dispatch_Note: String(note || "").slice(0, 900),
+          Studio_Publish_Dispatch_Note: (
+            String(note || "").slice(0, 900 - (String(f(record, "Studio_Publish_Dispatch_Note") || "").includes(VERIFICATION_REARM_MARKER) ? VERIFICATION_REARM_MARKER.length + 3 : 0))
+            + (String(f(record, "Studio_Publish_Dispatch_Note") || "").includes(VERIFICATION_REARM_MARKER) ? " | " + VERIFICATION_REARM_MARKER : "")
+          ).slice(0, 900),
         },
         typecast: true,
       }),
