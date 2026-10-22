@@ -179,3 +179,30 @@ test("Worker and Factory wire durable events while preserving the Story attempt 
   assert.match(ui, /recovered_automatically/);
   assert.match(worker, /facebookPreapprovalRecoveryReason\(latest\)/);
 });
+
+
+test("QA-1050 FBS3 Reel cooldown remains publication-blocked before and after expiry", () => {
+  for (const id of [2457, 2762, 4018]) {
+    const row = record(rid(id), {
+      Output_ID: id, Platform_Output_Type: "Facebook Reel",
+      Publish_Error_Stage: "FBS3_RATE_LIMIT",
+      Publish_Error_Message: "Facebook rate limit (368/1390008)",
+      Publish_Attempt_Count: 1, Studio_Publish_Dispatch_Count: 1,
+      Publish_Next_Retry_At: "2026-10-24T12:38:03.000Z",
+      Platform_Post_ID: "", Platform_Media_ID: "",
+    });
+    const during = assessAutonomousVerification(row, {
+      nowMs: Date.parse("2026-10-22T17:00:00Z"),
+    });
+    assert.equal(during.outcome, "cooldown_waiting");
+    assert.equal(during.safety_blocked, true);
+    assert.equal(during.next_check_at, "2026-10-24T12:38:03.000Z");
+    const after = assessAutonomousVerification(row, {
+      nowMs: Date.parse("2026-10-24T13:00:00Z"),
+    });
+    assert.equal(after.outcome, "pending_verification");
+    assert.equal(after.safety_blocked, true);
+    assert.match(after.reason, /no FBS3 Graph create/);
+    assert.equal(after.next_check_at, "2026-10-24T13:30:00.000Z");
+  }
+});
