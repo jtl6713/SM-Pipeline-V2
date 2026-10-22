@@ -14,7 +14,7 @@ import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verificati
 
 const nowMs = Date.parse("2026-10-27T20:00:00Z");
 const record = (id, patch = {}) => ({ id, fields: {
-  Output_ID: Number(id.replace(/\\D/g, "")) || 4112,
+  Output_ID: Number(id.replace(/\D/g, "")) || 4112,
   Platform: "Facebook", Platform_Output_Type: "Facebook Story",
   Review_Status: "Approved", Output_Status: "Approved for Publishing",
   Publish_Status: "Ready to Schedule",
@@ -161,7 +161,7 @@ test("Worker and Factory wire durable events while preserving the Story attempt 
   assert.match(publisher, /persistVerifiedRecoveryInAirtable/);
   assert.match(factory, /QUALITY_RECOVERY_LEDGER_TABLE/);
   assert.match(factory, /summarizeAutonomousVerification/);
-  assert.match(factory, /verification_recovery: snapshot\\.verification_recovery/);
+  assert.match(factory, /verification_recovery: snapshot\.verification_recovery/);
   assert.match(ui, /recovered_automatically/);
   assert.match(worker, /facebookPreapprovalRecoveryReason\\(latest\\)/);
 });
