@@ -176,11 +176,14 @@ export function describeFailedOutput(record, nowMs = Date.now()) {
       && !publishedEvidence) {
     signature = "QA-FB-STORY-368-RETRY-PENDING";
     const blocked = facebookStoryRateLimitRearmReason(record, { nowMs });
-    recovery = blocked === null ? "healer_eligible" : blocked === "cooldown" ? "cooldown" : "needs_attention";
+    recovery = blocked === null ? "healer_eligible" : blocked === "cooldown" ? "cooldown"
+      : blocked === "retry_limit" ? "verification_pending" : "needs_attention";
     reason = text(record, "Studio_Publish_Dispatch_Note") || "Facebook Graph 368 stopped the Story; approval and scheduled time are retained.";
     action = blocked === "cooldown" ? "Wait for Facebook's saved retry time; Quality Agent will rearm the original schedule."
       : blocked === null ? "Quality Agent can rearm the approved Story and let the existing publisher send only at its original scheduled time."
-      : "Do not repost blindly. Repair gate: " + blocked + "; verify Facebook and retry eligibility first.";
+      : blocked === "retry_limit"
+        ? "Quality Agent retains the safety hold and rechecks evidence. Do not repost or reset the dispatch counter without reliable remote verification."
+        : "Do not repost blindly. Repair gate: " + blocked + "; verify Facebook and retry eligibility first.";
   }
   // FB0 source verification also diagnoses held outputs with no Publish_Error_Message
   // (e.g. output 7040/7060). No user/manual action is needed for exact 2N
