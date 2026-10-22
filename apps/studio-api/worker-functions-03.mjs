@@ -1847,6 +1847,43 @@ export async function mergeLatestPipelineWithManualRows(env, profile, recent = [
 
 export async function listOutputs(request, env, url, authorization, ctx = null) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
+  // Home exception/failed drill-down must NOT use the newest-250 or open-pack
+  // caches. Older rate-limited Stories fall outside those lists while Home's
+  // complete per-profile scan still counts them. Filter at the Airtable source
+  // (the Phase 5 authoritative write store) and scope to the selected profile.
+  const focusedMode = String(url.searchParams.get("mode") || "");
+  if (focusedMode === "approved_exceptions" || focusedMode === "failed") {
+    const profileFormula = contentProfileFilterFormula(profile);
+    const exceptionFormula = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Review_Status}="Approved",'
+      + '{Output_Status}!="Published",{Publish_Status}!="Published",'
+      + '{Published_At}=BLANK(),{Platform_Post_URL}=BLANK(),'
+      + 'OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())))';
+    const failureFormula = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,'
+      + 'OR({Output_Status}="Failed",{Publish_Status}="Failed",{Render_Status}="Failed"))';
+    const localFormula = focusedMode === "failed" ? failureFormula : exceptionFormula;
+    const filterFormula = profileFormula ? `AND(${profileFormula},${localFormula})` : localFormula;
+    const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      fields: OUTPUT_LIST_FIELDS,
+      filterFormula,
+      sortField: "Output_ID",
+      sortDirection: "desc",
+      limit: 500,
+      airtableEgressSource: "pipeline_exception_drilldown",
+    });
+    const labels = await pipelineContentLabelsById(
+      env, profile, studioPipelineContentIdsFromOutputs(rows));
+    const mapped = rows.map((record) => mapOutput(
+      record, null, null,
+      labels.get(studioFirstLinkedId(f(record, "Content_Item"))) || null));
+    return respond(request, env, {
+      ok: true,
+      records: stripDeletedDuplicateOutputRecords(mapped),
+      profile: mapStudioContentProfile(profile),
+      read_source: "airtable",
+      complete: rows.length < 500,
+      mode: focusedMode,
+    });
+  }
   // QA-PIPELINE-NEWEST-MISSING: bypass potentially stale heavy snapshots with
   // a one-page live read of recent outputs scoped to this content profile.
   if (url.searchParams.get("mode") === "latest") {

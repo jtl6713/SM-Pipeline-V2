@@ -220,6 +220,7 @@
   const item4CropDrafts = new Map();
   let item4CropRequestId = null;
   let pipelineOutputs = [];
+  let pipelineListExceptionScope = false;
   let pipelineListUnverified = false;
   let pipelineContentRecords = [];
   let pipelineScheduleGridRecords = [];
@@ -20292,9 +20293,10 @@ function timedScriptAssetLabel(asset, index) {
     const publish = String(record.publish_status || "").trim().toLowerCase();
     const platformPublish = String(record.platform_publish_status || "").trim().toLowerCase();
     const manual = String(record.manual_completion_status || "").trim().toLowerCase();
+    if (publish === "failed" || String(record.output_status || "").trim().toLowerCase() === "failed") return "";
     if (/published|posted/.test(state)
         || /published|posted|publish complete|publish succeeded/.test(publish)
-        || /published|posted/.test(platformPublish)
+        || /^(published|posted|publish complete|publish succeeded)$/.test(platformPublish)
         || /^(published|posted|completed)$/.test(manual)
         || record.published_at || record.platform_post_url || record.manual_published_url) return "";
     const stamp = Date.parse(String(record.scheduled_post_date || ""));
@@ -22064,6 +22066,25 @@ function timedScriptAssetLabel(asset, index) {
         (value) => ({ ok: true, value }),
         (error) => ({ ok: false, error }),
       );
+      // Strict profile-scoped exception drill-down, not the newest-250 snapshot.
+      // Home sees historical approved records that can otherwise be absent from
+      // Pipeline, especially rate-limited Stories and already-live FB posts.
+      const focusedView = ["approved_past_due", "approved_missing_date", "failed"].includes(pipelineViewFilter);
+      if (focusedView) {
+        const focusedMode = pipelineViewFilter === "failed" ? "failed" : "approved_exceptions";
+        const focused = await api("/api/outputs?mode=" + focusedMode, { timeoutMs: 15000, retries: 1 });
+        if (profileAtRequest !== selectedProfileId) return;
+        if (!Array.isArray(focused?.records)) throw new Error("Pipeline drill-down was not verified");
+        pipelineOutputs = focused.records;
+        pipelineListExceptionScope = true;
+        pipelineContentRecords = [];
+        pipelineListUnverified = focused.complete === false;
+        renderOutputsTable(target, focused.records);
+        setPipelineLiveHint(focused.complete === false
+          ? "Historical exceptions exceed the safe page limit — more records require pagination."
+          : "Authoritative " + pipelineFilterLabel() + " · refreshed");
+        return;
+      }
       // Start the heavy history read and small live check concurrently; paint
       // the newest outputs without waiting on Airtable's open-pack scan.
       const latestPromise = settled(api("/api/outputs?mode=latest", { timeoutMs: 14000, retries: 1 }));
@@ -22108,6 +22129,7 @@ function timedScriptAssetLabel(asset, index) {
       const historyStale = !outputsSettled.ok || Boolean(outputsResult.stale);
       pipelineListUnverified = historyStale;
       pipelineOutputs = records;
+      pipelineListExceptionScope = false;
       if (activeCreativeOutputId && $("creativeOutputMeta")) {
         const freshCreative = records.find((row) => row && row.id === activeCreativeOutputId);
         if (freshCreative) {
@@ -26183,8 +26205,20 @@ function timedScriptAssetLabel(asset, index) {
     button.addEventListener("click", () => {
       pipelineViewFilter = String(button.dataset.pipelineQuickView || "all");
       pipelineOpenSingleOnLoad = false;
-      // Full list is already in memory — re-filter locally so tab counts stay
-      // honest and switching Review→All does not blank the other counts.
+      // Exception/Failed views are a separately scoped historical fetch.
+      // Never reuse those rows for All, other profile tabs, or another
+      // exception view: that was making navigation silently drop outputs.
+      const needsFreshScope = ["approved_missing_date", "approved_past_due", "failed"].includes(pipelineViewFilter)
+        || pipelineListExceptionScope === true;
+      if (needsFreshScope) {
+        pipelineListExceptionScope = false;
+        pipelineOutputs = [];
+        clearPipelineColumnFilters();
+        refreshPipelineOutputs({ force: true });
+        return;
+      }
+      // The normal full list is already in memory; re-filter without
+      // issuing another history read.
       if (pipelineOutputs.length) {
         updatePipelineQuickTabs(pipelineOutputs);
         const target = $("outputsList");
