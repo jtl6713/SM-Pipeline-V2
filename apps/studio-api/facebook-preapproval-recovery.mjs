@@ -66,7 +66,8 @@ export function facebookPreapprovalRecoveryFields(record, now = new Date()) {
     Publish_Status: "Not Ready",
     Auto_Publish_Enabled: false,
     Publish_Retry_Eligible: false,
-    Scheduled_Post_Date: null,
+    // Preserve Scheduled_Post_Date until the next approval atomically moves
+    // its durable reservation. Clear only the suggestion marker so MAE replans.
     Studio_Scheduled_At: null,
     Publish_Error_Stage: "",
     Publish_Error_Message: "",
