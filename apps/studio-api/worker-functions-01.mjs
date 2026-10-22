@@ -12027,8 +12027,8 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
     const cfg = await studioActivePipelineSettings(env,
       ["FACEBOOK_PAGE_ID", "FACEBOOK_PAGE_ACCESS_TOKEN", "FACEBOOK_GRAPH_API_VERSION"], authoritative);
     if (!/^[0-9]+$/.test(String(cfg.FACEBOOK_PAGE_ID || "")) || !cfg.FACEBOOK_PAGE_ACCESS_TOKEN) return null;
-    const version = String(cfg.FACEBOOK_GRAPH_API_VERSION || "v25.0").replace(/^\\/+|\\/+$/g, "");
-    if (!/^v[0-9]+\\.[0-9]+$/.test(version)) return null;
+    const version = String(cfg.FACEBOOK_GRAPH_API_VERSION || "v25.0").replace(/^\/+|\/+$/g, "");
+    if (!/^v[0-9]+\.[0-9]+$/.test(version)) return null;
     const path = `/${version}/${cfg.FACEBOOK_PAGE_ID}/stories`;
     let url = new URL("https://graph.facebook.com" + path);
     url.searchParams.set("fields", "post_id,media_id,status,url,creation_time");
