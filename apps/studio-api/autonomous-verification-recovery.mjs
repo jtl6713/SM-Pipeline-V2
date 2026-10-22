@@ -64,6 +64,22 @@ export function assessAutonomousVerification(record, { nowMs = Date.now() } = {}
     safety_blocked: true, cooldown_until: Number.isFinite(retryAt) ? new Date(retryAt).toISOString() : null,
     next_check_at: new Date(nowMs + 30 * 60 * 1000).toISOString(),
     reason: "Retry cap reached; exact remote proof is required. Cooldown expiry does not authorize another Graph create." };
+  // QA-1050: A provider 368 cooldown expiry is only a verification checkpoint.
+  // In particular, FBS3 Reel creation has no proven idempotent negative receipt
+  // when Meta returns a rate limit without persisting a remote video identity.
+  // Never advertise that a fresh Graph create is authorized after 48 hours.
+  if (stage === "FBS3_RATE_LIMIT" || (base.output_type === "Facebook Reel" && rateLimited)) {
+    const checkAt = Number.isFinite(retryAt)
+      ? Math.max(retryAt, nowMs + 30 * 60 * 1000)
+      : nowMs + 30 * 60 * 1000;
+    return { ...base, outcome: Number.isFinite(retryAt) && retryAt > nowMs
+      ? "cooldown_waiting" : "pending_verification",
+      safety_blocked: true,
+      cooldown_until: Number.isFinite(retryAt) ? new Date(retryAt).toISOString() : null,
+      next_check_at: new Date(checkAt).toISOString(),
+      action_required: null,
+      reason: "Read-only Meta receipt/dispatch verification required after cooldown; no FBS3 Graph create or counter reset without authoritative negative evidence and separate approval." };
+  }
   const expired = Number.isFinite(retryAt) && retryAt <= nowMs;
   if (!expired) return { ...base, outcome: "cooldown_waiting",
     next_check_at: Number.isFinite(retryAt) ? new Date(retryAt).toISOString() : null,
