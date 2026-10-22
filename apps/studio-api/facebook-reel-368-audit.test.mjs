@@ -28,8 +28,10 @@ test("audit writes at most once per output/half-hour bucket and does not publish
       const id = Number(decodeURIComponent(path).match(/Output_ID}=([0-9]+)/)?.[1]);
       return { records: [row(id)] };
     }
-    if (opts.method === "POST") {
-      const fields = JSON.parse(opts.body).fields;
+    if (opts.method === "PATCH") {
+      const body = JSON.parse(opts.body);
+      assert.deepEqual(body.performUpsert.fieldsToMergeOn, ["Event_Key"]);
+      const fields = body.records[0].fields;
       written.push(fields);
       saved.set(fields.Event_Key, fields);
       return { id: "rec12345678901234" };
