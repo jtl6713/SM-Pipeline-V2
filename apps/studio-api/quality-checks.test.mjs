@@ -94,3 +94,14 @@ test("Quality Agent registers exact October 21 Instagram/Factory signatures with
   }
   assert.equal(assertQualityCatalog().ok, true);
 });
+
+
+test("Quality Agent catalogs independent asset-location validation and repair", () => {
+  const check = QUALITY_CHECK_BY_KIND.asset_location_mismatch;
+  assert.ok(check);
+  assert.equal(check.signature, "QA-ASSET-LOCATION-MISMATCH");
+  assert.equal(check.heal, "repair_scripted_short_assets");
+  assert.equal(check.actor, "worker_heal");
+  assert.equal(check.lane, "both");
+  assert.equal(assertQualityCatalog().ok, true);
+});
