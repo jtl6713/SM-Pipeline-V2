@@ -11428,7 +11428,10 @@ export async function studioPublishFacebookPageStory(env, record) {
   // A legacy dispatched Story with no persisted media ID is not safe to
   // replay merely because Graph returned a transient error or the Page list
   // no longer exposes the original Story. Preserve it for evidence review.
-  if (Number(f(record, "Studio_Publish_Dispatch_Count") || 0) > 0) {
+  if (Number(f(record, "Studio_Publish_Dispatch_Count") || 0) > 0 &&
+      /(?:QA-FB-STORY-368|FB-STORY-GRAPH|remote.verification)/i.test(
+        String(f(record, "Studio_Publish_Dispatch_Note") || "") + " " +
+        String(f(record, "Publish_Error_Stage") || ""))) {
     await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
       method: "PATCH", body: JSON.stringify({ typecast: true, fields: {
         Publish_Status: "Failed", Publish_Error_Stage: "FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING",
