@@ -220,6 +220,7 @@
   const item4CropDrafts = new Map();
   let item4CropRequestId = null;
   let pipelineOutputs = [];
+  let pipelineListExceptionScope = false;
   let pipelineListUnverified = false;
   let pipelineContentRecords = [];
   let pipelineScheduleGridRecords = [];
@@ -26227,7 +26228,6 @@ function timedScriptAssetLabel(asset, index) {
       refreshPipelineOutputs({ force: true });
     });
   });
-  let pipelineListExceptionScope = false;
   window.studioOpenPipelineFilter = (filter, options = {}) => {
     const profileId = String(options.profileId || "").trim();
     if (profileId && selectedProfileId !== profileId) {
