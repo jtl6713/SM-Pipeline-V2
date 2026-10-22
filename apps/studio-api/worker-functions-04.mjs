@@ -96,6 +96,7 @@ import {
   classifyPublishLiveFailedStatus,
   classifyTtd0RouteBlankDraft,
   classifyFacebookPublishRateLimit,
+  classifyFacebookStoryRateLimit,
   classifyIgCarouselTooManyChildren,
   classifyIgCarouselChildVerificationRace,
   classifyIgCarouselChildPollFailure,
@@ -8993,6 +8994,7 @@ export function mapDeskInventoryOutput(record, contentToRequest = new Map(), con
     youtube_error: f(record, "YouTube_Error_Message"),
     youtube_video_id: f(record, "YouTube_Video_ID"),
     publish_retry_eligible: Boolean(f(record, "Publish_Retry_Eligible")),
+    publish_next_retry_at: f(record, "Publish_Next_Retry_At"),
     render_error: f(record, "Remotion_Error_Message") || f(record, "Final_File_Error_Message"),
     timing_error: f(record, "Timing_Error_Message"),
     music_error: f(record, "Music_Error_Message"),
@@ -9268,6 +9270,7 @@ export async function gatherStudioDeskInventory(env) {
   for (const record of approvedDispatch || []) {
     push(classifyPublishDispatch(mapOut(record), nowMs));
     push(classifyTikTokAuthSignature(mapOut(record)));
+    push(classifyFacebookStoryRateLimit(mapOut(record), nowMs));
     push(classifyIgCarouselTooManyChildren(mapOut(record)));
     push(classifyPublishFailed(mapOut(record), nowMs));
     push(classifyYoutubeCoverQuota(mapOut(record)));
@@ -9275,7 +9278,7 @@ export async function gatherStudioDeskInventory(env) {
   let failedOutputSnapshot;
   try {
     failedOutputSnapshot = await loadStudioFailedOutputSnapshot(env);
-    scanned("render_failed", "publish_failed_transient", "publish_live_failed_status", "ttd0_route_blank_draft", "facebook_publish_rate_limit", "tiktok_auth_signature", "ig_carousel_too_many_children", "ig_carousel_child_verification_race", "ig_carousel_child_poll_failure", "ig_carousel_rate_limited", "ig_duplicate_slide_sets", "ig_ambiguous_parent", "ig_expired_child_drift", "ig_retry_storm");
+    scanned("render_failed", "publish_failed_transient", "publish_live_failed_status", "ttd0_route_blank_draft", "facebook_publish_rate_limit", "facebook_story_rate_limit", "tiktok_auth_signature", "ig_carousel_too_many_children", "ig_carousel_child_verification_race", "ig_carousel_child_poll_failure", "ig_carousel_rate_limited", "ig_duplicate_slide_sets", "ig_ambiguous_parent", "ig_expired_child_drift", "ig_retry_storm");
     for (const record of failedOutputSnapshot.rows) {
       const mapped = mapOut(record);
       const before = incidents.length;
@@ -9283,6 +9286,7 @@ export async function gatherStudioDeskInventory(env) {
       push(classifyPublishLiveFailedStatus(mapped));
       push(classifyTtd0RouteBlankDraft(mapped));
       push(classifyFacebookPublishRateLimit(mapped));
+      push(classifyFacebookStoryRateLimit(mapped, nowMs));
       push(classifyTikTokAuthSignature(mapped));
       push(classifyIgCarouselTooManyChildren(mapped));
       push(classifyIgCarouselChildVerificationRace(mapped));

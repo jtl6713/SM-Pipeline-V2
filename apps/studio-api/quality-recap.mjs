@@ -34,6 +34,10 @@ const COPY = {
     found: "Facebook temporarily blocked Reel upload because the page hit a post rate limit.",
     action: "Parked the retry for about six hours so Graph is not stormed.",
   },
+  facebook_story_rate_limit: {
+    found: "Facebook temporarily restricted a Story; Studio retained the approval but blocked publishing.",
+    action: "During cooldown, no post is sent. After cooldown, safe low-attempt Stories rearm for their original scheduled time. Stories with many attempts need remote publication verification; counters are not reset automatically.",
+  },
   tiktok_auth_signature: {
     found: "A TikTok draft failed because the city auth Worker rejected the pipeline secret (HTTP 401).",
     action: "Aligned the auth Worker signature, then rearmed and republished the draft once.",

@@ -1,5 +1,5 @@
 /** Complete, read-only failed-output census used by Desk and Factory Quality Agent. */
-export const FAILED_OUTPUT_FORMULA = 'AND({Test_Run_ID}=BLANK(),OR({Output_Status}="Failed",{Render_Status}="Failed",{Publish_Status}="Failed",AND({Publish_Error_Message}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published"),AND({IG_Carousel_Error_Message}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published"),AND({IG_Carousel_Status}="Children Processing",{IG_Carousel_Parent_Response_JSON}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published"),AND({Manual_Fallback_Required}=1,{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published")))';
+export const FAILED_OUTPUT_FORMULA = 'AND({Test_Run_ID}=BLANK(),OR(AND({Publish_Error_Stage}="FACEBOOK_STORY_RATE_LIMIT_368",{Published_At}=BLANK(),{Platform_Post_ID}=BLANK(),{Platform_Post_URL}=BLANK(),{Do_Not_Publish}=0),{Output_Status}="Failed",{Render_Status}="Failed",{Publish_Status}="Failed",AND({Publish_Error_Message}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published"),AND({IG_Carousel_Error_Message}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published"),AND({IG_Carousel_Status}="Children Processing",{IG_Carousel_Parent_Response_JSON}!="",{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published"),AND({Manual_Fallback_Required}=1,{Published_At}=BLANK(),{Output_Status}!="Published",{Publish_Status}!="Published")))';
 
 export async function scanOutstandingFailedOutputs(fetchPage, { pageSize = 100, filterFormula = FAILED_OUTPUT_FORMULA } = {}) {
   const records = [];
@@ -75,6 +75,36 @@ export function facebookRateLimitResetReason(record, { nowMs = Date.now(), maxAt
   return null;
 }
 
+
+/**
+ * QA-FB-STORY-368-RETRY-PENDING: the native Facebook Story Graph path can
+ * leave an approved, future-scheduled output parked with only Publish_Error_Stage
+ * and Studio_Publish_Dispatch_Note. Old FBS3-only rearm cannot see this state.
+ * Pure, fail-closed gate for rearming the existing scheduled publisher. This
+ * does NOT authorize immediate or duplicate publication.
+ */
+export function facebookStoryRateLimitRearmReason(record, { nowMs = Date.now(), maxAttempts = 3 } = {}) {
+  if (text(record, "Platform") !== "Facebook" || text(record, "Platform_Output_Type") !== "Facebook Story") return "not_facebook_story";
+  if (text(record, "Publish_Error_Stage") !== "FACEBOOK_STORY_RATE_LIMIT_368") return "not_story_rate_limit";
+  if (text(record, "Review_Status") !== "Approved" || text(record, "Output_Status") !== "Approved for Publishing") return "approval_not_confirmed";
+  if (!["Ready to Schedule", "Ready to Publish", "Failed"].includes(text(record, "Publish_Status"))) return "unexpected_publish_state";
+  if (text(record, "Test_Run_ID") || truthy(record, "Do_Not_Publish")) return "publication_held";
+  if (["Published", "Posted"].includes(text(record, "FB_Publish_Status"))
+      || text(record, "Published_At") || text(record, "Platform_Post_ID")
+      || text(record, "Platform_Post_URL") || text(record, "Manual_Published_URL")
+      || text(record, "Platform_Media_ID")) return "publication_evidence";
+  const nextRetry = Date.parse(text(record, "Publish_Next_Retry_At"));
+  if (!Number.isFinite(nextRetry)) return "missing_retry_time";
+  if (nextRetry > nowMs) return "cooldown";
+  const scheduleAt = Date.parse(text(record, "Scheduled_Post_Date"));
+  if (!Number.isFinite(scheduleAt)) return "missing_scheduled_date";
+  if (!/^https:\/\/media\.chicagoshining\.com\//i.test(text(record, "Publish_Asset_URL"))) return "missing_public_story_asset";
+  if (Number(text(record, "Publish_Attempt_Count")) >= maxAttempts
+      || Number(text(record, "Studio_Publish_Dispatch_Count")) >= maxAttempts) return "retry_limit";
+  if (text(record, "Publish_Locked_By") || text(record, "Publish_Locked_At")) return "publish_locked";
+  return null;
+}
+
 export function describeFailedOutput(record, nowMs = Date.now()) {
   const outputId = text(record, "Output_ID");
   const output = text(record, "Output_Status");
@@ -140,6 +170,17 @@ export function describeFailedOutput(record, nowMs = Date.now()) {
   } else if (!publishedEvidence && /facebook rate limit|1390008|\\b368\\b/i.test(error)) {
     recovery = "cooldown";
     action = "Honor the Facebook publishing cooldown and rate-limit rearm; never force immediate publication.";
+  }
+  if (text(record, "Publish_Error_Stage") === "FACEBOOK_STORY_RATE_LIMIT_368"
+      && text(record, "Platform") === "Facebook" && text(record, "Platform_Output_Type") === "Facebook Story"
+      && !publishedEvidence) {
+    signature = "QA-FB-STORY-368-RETRY-PENDING";
+    const blocked = facebookStoryRateLimitRearmReason(record, { nowMs });
+    recovery = blocked === null ? "healer_eligible" : blocked === "cooldown" ? "cooldown" : "needs_attention";
+    reason = text(record, "Studio_Publish_Dispatch_Note") || "Facebook Graph 368 stopped the Story; approval and scheduled time are retained.";
+    action = blocked === "cooldown" ? "Wait for Facebook's saved retry time; Quality Agent will rearm the original schedule."
+      : blocked === null ? "Quality Agent can rearm the approved Story and let the existing publisher send only at its original scheduled time."
+      : "Do not repost blindly. Repair gate: " + blocked + "; verify Facebook and retry eligibility first.";
   }
   // FB0 source verification also diagnoses held outputs with no Publish_Error_Message
   // (e.g. output 7040/7060). No user/manual action is needed for exact 2N

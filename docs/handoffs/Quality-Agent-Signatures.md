@@ -322,3 +322,60 @@ can reset a fenced Instagram publishing stage.
 **Native autonomous recovery:** At FB0, only if there are exactly two rows per manifest order and every row belongs solely to the same Platform Output, has the original approved Drive ID, expected asset-family record, Ready public asset and Shared_Asset_Approved=true: select one row per order using the canonical public URL `https://media.chicagoshining.com/studio/previews/lettered/{output_record_id}/{order-1}.jpg`. Repair any mismapped public URL on that kept row; mark only redundant slide row(s) `Deleted From Carousel=true` and remove their `Platform Output` link, preserving original source Drive/media assets and their other platform variants. **Re-read** after changing links: proceed only when exactly N canonical approved slides remain. Otherwise, quarantine and raise Needs Eyes with per-order details. This signature can be automatically classified as `healer_eligible` by Desk/Factory; it is **not** a user-facing Manual Action.
 
 **For pre-existing held outputs:** Quality Agent may rearm only after an approved, not-published, unlocked and exact-manifest preflight; set `FB_Publish_Status=Ready for Assets`, `Manual_Fallback_Required=false`, restore bounded stage retry state, clear FB0 error fields, and leave approved content and publishing schedule intact. Native FB0 will perform the same guarded reconciliation before any Graph publishing. **Never** rearm after an existing Facebook Post ID / Published_At / active lock. Continue to honor scheduled and rate-limit windows, and do not replay already published output.
+
+
+## QA-FB-STORY-368-RETRY-PENDING — Facebook Story approved but anti-spam held (2026-10-21)
+
+**Known example:** Chicago Facebook Story output **4112**, "City Or County?"
+(`recA52Uk9eLyFOEdi`). Airtable preserves `Review_Status=Approved`,
+`Output_Status=Approved for Publishing`, `Publish_Status=Ready to Schedule`,
+`Publish_Error_Stage=FACEBOOK_STORY_RATE_LIMIT_368`,
+`Publish_Next_Retry_At=2026-10-23T21:47:40.627Z`, and
+`Scheduled_Post_Date=2026-10-24T23:40:00.000Z`. The authoritative
+`Studio_Publish_Dispatch_Note` contains Facebook's "We limit how often you can
+post" refusal. No `Platform_Post_ID`, `Published_At`, or public post URL
+is recorded. The Story has an approved public CDN MP4.
+
+**Root cause:** The Facebook Graph Story send path parks a rate-limited Story
+without necessarily changing `Publish_Status` to Failed. The older automated
+`studioHealFacebookRateLimitRearm` detects only Reel error stages
+`FBS3_RATE_LIMIT` and `FB_GRAPH_RATE_LIMIT` with Failed publish state, so a
+Ready to Schedule Story never gets rearmed. The quality failed-output census
+also ignored approved/non-Failed Story error stages.
+
+**Autonomous detection:** Scan `FACEBOOK_STORY_RATE_LIMIT_368` explicitly
+alongside the existing failed census and classify it separately from Reel/FBS3
+rate limiting, regardless of whether Publish_Status is Failed or Ready to
+Schedule. Treat it as a reversible cooldown hold, not an editorial rejection or
+a missing-media/render failure.
+
+**Guarded recovery:** Retain the original approved content, immutable
+`Scheduled_Post_Date`, and all attempt history. Never send during cooldown.
+After the saved retry time, allow the existing Worker continuation to rearm a
+Story **only if** final approval, public CDN media, recorded schedule, no
+Do_Not_Publish, no test identity, no publication evidence, no active lock, and
+both publish/dispatch counters below their original safety threshold. Clear
+only the expired retry/error flags and restore the Ready to Schedule/Ready to
+Publish state. The normal due-time dispatcher, not the QA healer, initiates
+the eventual Facebook send at the *original schedule*.
+
+**Separate exhausted-attempt state:** Los Angeles Story outputs **2036, 4064,
+1133, 2116, 4058, 4004, 1151, 4022, 4034** share the same error stage,
+a saved retry time and **8 dispatch attempts** without a verified Facebook
+post ID. These are **not permanently irrecoverable** but are *not safe for blind
+automatic reposting*. Before any new attempt, reconcile Facebook's publication
+state and confirm provider restrictions are lifted. The QA card must say
+`remote_verification_required` rather than suggesting a generic retry or a
+fresh Approve click. Preserve all counters, refrain from forced reposting,
+and escalate Needs Eyes when remote verification is inconclusive. In
+particular, a Story disappearing from Facebook after 24 hours is **not**
+reliable proof that an earlier create failed. Do not reset an eight-attempt
+limit to bypass platform rate controls.
+
+**Related but distinct:** Facebook Reel output 2457 has
+`FBS3_RATE_LIMIT` and one attempt, and uses the established Reel rearm.
+Instagram AP1C child/parent failures 1023/8221/1076 are unrelated to 368
+and must never be handled by this signature.
+
+**Tests:** `apps/studio-api/failed-output-monitor.test.mjs`,
+`apps/studio-api/facebook-story-rate-limit-quality.test.mjs`.
