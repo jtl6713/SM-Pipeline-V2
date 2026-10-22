@@ -1,0 +1,50 @@
+name: Retire PR 1024 and 951 branches (guarded)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/retire-pr-1024-951-branches-20261022.yml'
+permissions:
+  contents: write
+  pull-requests: read
+concurrency:
+  group: retire-pr-1024-951-branches-20261022
+  cancel-in-progress: false
+jobs:
+  prune:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Lease-check and delete only user-retired PR branch heads
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          while IFS=' ' read -r number branch expected; do
+            [[ -n "$number" ]] || continue
+            pr="$(gh pr view "$number" -R "$GITHUB_REPOSITORY" --json state,mergedAt,headRefName,headRefOid)"
+            state="$(jq -r .state <<<"$pr")"
+            merged="$(jq -r '.mergedAt // empty' <<<"$pr")"
+            source_branch="$(jq -r .headRefName <<<"$pr")"
+            source_sha="$(jq -r .headRefOid <<<"$pr")"
+            if [[ "$state" != CLOSED || -n "$merged" || "$source_branch" != "$branch" || "$source_sha" != "$expected" ]]; then
+              echo "REFUSE_PR_DRIFT pr=$number state=$state branch=$source_branch sha=$source_sha"
+              exit 1
+            fi
+            open_count="$(gh pr list -R "$GITHUB_REPOSITORY" --head "$branch" --state open --json number --jq length)"
+            [[ "$open_count" == 0 ]] || { echo "REFUSE_OPEN_PR pr=$number"; exit 1; }
+            live="$(git ls-remote origin "refs/heads/$branch" | awk '{print $1}')"
+            [[ "$live" == "$expected" ]] || { echo "REFUSE_BRANCH_DRIFT pr=$number branch=$branch"; exit 1; }
+            git push --force-with-lease="refs/heads/$branch:$expected" origin ":refs/heads/$branch"
+            echo "DELETED_RETIRED_PR_BRANCH pr=$number branch=$branch"
+          done <<'BRANCHES'
+          1024 fix/pipeline-tiktok-url-edit-20261021 29b637d8cf425e1484ef5c48ecdae96a68a5546c
+          951 feature/runner-egress-diagnostics-20261020 8549dc9e48d59868b109d7c04b88595b2057fe79
+          BRANCHES
+          echo "RETIRED_PR_BRANCHES_VERIFIED=PASS"
