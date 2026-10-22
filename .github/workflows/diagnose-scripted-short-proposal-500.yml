@@ -27,6 +27,7 @@ jobs:
             async fetch(request,env) {
               if (new URL(request.url).pathname !== "/$TOKEN") return new Response("Not found",{status:404});
               const prompt="Educate on the history of Battery Park City area of lower Manhattan. You don't have to be brief. Utilize the battery park images that are uploaded into the system.";
+              try {
               const response=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/scripted-short/propose",{
                 method:"POST",
                 headers:{
@@ -48,6 +49,7 @@ jobs:
                 required_location:payload.asset_policy?.location||null,
                 verification:payload.asset_validation?.verified??null
               },{headers:{"Cache-Control":"no-store"}});
+              } catch(error) { return Response.json({status:597,ok:false,error:"service_binding_exception: "+String(error?.message||error).slice(0,300)},{headers:{"Cache-Control":"no-store"}}); }
             }
           };
           EOF
@@ -65,8 +67,8 @@ jobs:
           curl -fsS "$API_ROOT/workers/subdomain" -H "$AUTH" -o /tmp/subdomain.json
           SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/subdomain.json)
           URL="https://$DIAG_WORKER.$SUBDOMAIN.workers.dev/$TOKEN"
-          for i in $(seq 1 22); do
-            code=$(curl -sS --max-time 95 -o /tmp/proposal-result.json -w '%{http_code}' "$URL" || true)
+          for i in $(seq 1 12); do
+            code=$(curl -sS --max-time 85 -o /tmp/proposal-result.json -w '%{http_code}' "$URL" || true)
             if [[ "$code" == "200" ]] && jq -e 'has("status")' /tmp/proposal-result.json >/dev/null 2>&1; then break; fi
             sleep 3
           done
