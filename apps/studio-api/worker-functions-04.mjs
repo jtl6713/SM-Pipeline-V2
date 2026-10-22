@@ -1,3 +1,4 @@
+import { buildVerificationRecoveryReport, VERIFICATION_RECOVERED_FORMULA } from "./quality-verification-recovery.mjs";
 import { scanOutstandingFailedOutputs, describeFailedOutput, facebookRateLimitResetReason } from "./failed-output-monitor.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
@@ -9016,10 +9017,18 @@ async function loadStudioFailedOutputSnapshot(env, { fresh = false } = {}) {
   // Ordinary polling still uses a 60-second coalesced Airtable read.
   return studioReadCoalesce(fresh ? "quality-agent-census-fresh:" + Date.now()
     : "quality-agent-failed-output-census", fresh ? 0 : 60000, async () => {
-    const [rows, profiles] = await Promise.all([
+    const [rows, profiles, recoveryAudit] = await Promise.all([
       scanOutstandingFailedOutputs((options) =>
         listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options)),
       listContentProfileRecords(env).catch(() => []),
+      scanOutstandingFailedOutputs((options) =>
+        listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options), {
+          filterFormula: VERIFICATION_RECOVERED_FORMULA,
+        }).then((records) => ({ status: "ok", records }))
+          .catch((error) => {
+            console.warn("Quality Agent verified-recovery audit scan unavailable", error);
+            return { status: "unavailable", records: [] };
+          }),
     ]);
     const profileNames = new Map((profiles || []).map((profile) => [
       profile.id,
@@ -9029,9 +9038,22 @@ async function loadStudioFailedOutputSnapshot(env, { fresh = false } = {}) {
       const item = describeFailedOutput(record);
       return { ...item, profile_name: profileNames.get(item.profile_id) || item.profile_id };
     });
+    const verificationRecovery = buildVerificationRecoveryReport({
+      outstanding: rows, publishedRecoveryEvidence: recoveryAudit.records,
+    });
+    // Never present a missing audit census as zero verified recoveries.
+    if (recoveryAudit.status !== "ok") {
+      verificationRecovery.status = "partial";
+      verificationRecovery.counts.recovered_automatically = null;
+      verificationRecovery.recovered_count_status = "unavailable";
+    }
+    // The full outstanding inventory is already in failed_outputs.items.
+    verificationRecovery.items = verificationRecovery.items.filter((item) =>
+      item.status === "human_action_required").slice(0, 50);
     return {
       status: "ok", scanned_at: new Date().toISOString(),
       count: rows.length, rows, items,
+      verification_recovery: verificationRecovery,
     };
   });
 }
@@ -14955,7 +14977,8 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
             fresh: url.searchParams.get("fresh_output_failures") === "1",
           });
           outputFailures = { status: "ok", count: snapshot.count,
-            scanned_at: snapshot.scanned_at, items: snapshot.items };
+            scanned_at: snapshot.scanned_at, items: snapshot.items,
+            verification_recovery: snapshot.verification_recovery };
         } catch (error) {
           console.warn("Factory failed-output Quality Agent scan degraded", error);
           outputFailures = { status: "unavailable",
