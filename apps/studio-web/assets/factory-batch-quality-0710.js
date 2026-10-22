@@ -171,7 +171,19 @@
     const eligible = allFailures.filter(item => item.can_return_to_approved
       && /^rec[A-Za-z0-9]+$/.test(item.record_id || "")
       && !["success", "uncertain"].includes(recoveryResult(item.record_id)?.status));
+    const verification = failures?.verification_recovery;
+    const counts = verification?.counts;
+    const verificationMarkup = censusOk && counts
+      ? '<p class="factory-batch-quality-heading">Quality verification (last ' +
+        esc(verification.period_days || 7) + ' days): automatically recovered ' +
+        (verification.status === "ok" ? esc(counts.recovered_automatically) : 'unknown (recovery audit unavailable)') +
+        ' · genuine human action ' + esc(counts.human_action_required) +
+        ' · pending verification ' + esc(counts.pending_verification) +
+        ' · cooldown ' + esc(counts.cooldown_waiting) +
+        ' · safety blocked ' + esc(counts.safety_blocked) + '</p>'
+      : '';
     const failureMarkup =
+      verificationMarkup +
       (censusOk
         ? '<p class="factory-batch-quality-heading">Unresolved output failures across all profiles: ' +
           (Number(failures.count) || 0) + '</p>'
