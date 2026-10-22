@@ -43,10 +43,11 @@ export function homeOverdueDueAt(row) {
   const publish = String(row.publish_status || "").trim().toLowerCase();
   const platformPublish = String(row.platform_publish_status || "").trim().toLowerCase();
   const manual = String(row.manual_completion_status || "").trim().toLowerCase();
+  if (publish === "failed" || output === "failed" || state === "failed") return 0;
   if (/published|posted/.test(state)) return 0;
   if (/published|posted|publish complete|publish succeeded/.test(publish)
-    || // Upload/draft handoff success is not public publication.
-    /published|posted/.test(platformPublish)) return 0;
+    || // "Published Pending Finalize" does not prove public publication.
+    /^(published|posted|publish complete|publish succeeded)$/.test(platformPublish)) return 0;
   if (/^(published|posted|completed)$/.test(manual)) return 0;
   if (row.published_at || row.platform_post_url || row.manual_published_url) return 0;
   return when;
@@ -66,7 +67,7 @@ export function homeApprovedUpcomingAt(row) {
   const manual = String(row.manual_completion_status || "").trim().toLowerCase();
   if (/published|posted/.test(state)
     || /published|posted|publish complete|publish succeeded/.test(publish)
-    || /published|posted/.test(platformPublish)
+    || /^(published|posted|publish complete|publish succeeded)$/.test(platformPublish)
     || /^(published|posted|completed)$/.test(manual)
     || row.published_at || row.platform_post_url || row.manual_published_url) return 0;
   return when;
@@ -86,9 +87,11 @@ export function homeApprovedUnpublished(row, _now = Date.now()) {
   const publish = String(row.publish_status || "").trim().toLowerCase();
   const platformPublish = String(row.platform_publish_status || "").trim().toLowerCase();
   const manual = String(row.manual_completion_status || "").trim().toLowerCase();
+  if (String(row.output_status || "").trim().toLowerCase() === "failed"
+    || publish === "failed" || state === "failed") return false;
   if (/published|posted/.test(state)
     || /published|posted|publish complete|publish succeeded/.test(publish)
-    || /published|posted/.test(platformPublish)
+    || /^(published|posted|publish complete|publish succeeded)$/.test(platformPublish)
     || /^(published|posted|completed)$/.test(manual)
     || row.published_at || row.platform_post_url || row.manual_published_url) return false;
   return true;
@@ -106,10 +109,16 @@ export function homeOutputContribution(row, now = Date.now()) {
   result.overdue_unpublished = Number(dueAt > 0 && dueAt <= now);
   const state = String(row.studio_state || "").trim();
   result.manual_action_required = Number(state === "Manual Action Required");
-  result.failed_outputs = Number(state === "Failed");
-  result.attention_outputs = Number(["Failed", "Retry Pending", "Manual Action Required"].includes(state));
+  // Publish_Status=Failed can occur while Studio_State remains Approved.
+  // Those records are Quality Agent failures, not schedulable no-date rows.
+  const failed = state === "Failed"
+    || String(row.publish_status || "").trim().toLowerCase() === "failed"
+    || String(row.output_status || "").trim().toLowerCase() === "failed";
+  const published = Boolean(row.published_at || row.platform_post_url || row.manual_published_url);
+  result.failed_outputs = Number(failed && !published);
+  result.attention_outputs = Number((failed && !published) || ["Retry Pending", "Manual Action Required"].includes(state));
   result.published_outputs = Number(state === "Published");
-  result.active_outputs = Number(!["Published", "Skipped", "Failed"].includes(state));
+  result.active_outputs = Number(!failed && !["Published", "Skipped"].includes(state));
   if (isQueuedForPlatformDispatch(row)) result.scheduled[row.platform] = 1;
 
   if (state !== "Ready for Review" && state !== "Awaiting Approval") return result;
