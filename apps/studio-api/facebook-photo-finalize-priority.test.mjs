@@ -32,6 +32,7 @@ test("only evidence-positive already-posted Facebook candidates can finalize", (
     { Test_Run_ID: "QA-TEST" }, { FB_Publish_Status: "Ready for Photo Media" },
     { Publish_Locked_By: "active", Publish_Locked_At: "2026-10-22T13:55:00Z" },
     { Publish_Locked_By: "invalid", Publish_Locked_At: "" },
+    { Publish_Locked_By: "stale", Publish_Locked_At: "2026-10-01T00:00:00Z" },
   ];
   for (const bad of reject) assert.equal(fb3FinalizeEligible(row(9,bad), now), false, JSON.stringify(bad));
 });
