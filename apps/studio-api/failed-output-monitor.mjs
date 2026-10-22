@@ -95,12 +95,14 @@ export function facebookStoryRateLimitRearmReason(record, { nowMs = Date.now(), 
       || text(record, "Platform_Media_ID")) return "publication_evidence";
   const nextRetry = Date.parse(text(record, "Publish_Next_Retry_At"));
   if (!Number.isFinite(nextRetry)) return "missing_retry_time";
+  // Exhausted dispatches are evidence-blocked even before the cooldown expires.
+  // A future retry timestamp must NEVER suggest that they can be rearmed.
+  if (Number(text(record, "Publish_Attempt_Count")) >= maxAttempts
+      || Number(text(record, "Studio_Publish_Dispatch_Count")) >= maxAttempts) return "retry_limit";
   if (nextRetry > nowMs) return "cooldown";
   const scheduleAt = Date.parse(text(record, "Scheduled_Post_Date"));
   if (!Number.isFinite(scheduleAt)) return "missing_scheduled_date";
   if (!/^https:\/\/media\.chicagoshining\.com\//i.test(text(record, "Publish_Asset_URL"))) return "missing_public_story_asset";
-  if (Number(text(record, "Publish_Attempt_Count")) >= maxAttempts
-      || Number(text(record, "Studio_Publish_Dispatch_Count")) >= maxAttempts) return "retry_limit";
   if (text(record, "Publish_Locked_By") || text(record, "Publish_Locked_At")) return "publish_locked";
   return null;
 }
@@ -180,7 +182,7 @@ export function describeFailedOutput(record, nowMs = Date.now()) {
     recovery = blocked === null ? "healer_eligible" : blocked === "cooldown" ? "cooldown"
       : ["retry_limit", "remote_verification_pending"].includes(blocked) ? "verification_pending" : "needs_attention";
     reason = text(record, "Studio_Publish_Dispatch_Note") || "Facebook Graph 368 stopped the Story; approval and scheduled time are retained.";
-    action = blocked === "cooldown" ? "Wait for Facebook's saved retry time; Quality Agent will rearm the original schedule."
+    action = blocked === "cooldown" ? "Wait for Facebook's saved retry time; Quality Agent may rearm only after all publication-evidence and attempt guards pass."
       : blocked === null ? "Quality Agent can rearm the approved Story and let the existing publisher send only at its original scheduled time."
       : ["retry_limit", "remote_verification_pending"].includes(blocked)
         ? "Quality Agent checks Meta Page Story evidence read-only. Do not repost or reset counters without trustworthy remote verification."
