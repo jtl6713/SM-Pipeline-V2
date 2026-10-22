@@ -1,0 +1,26 @@
+name: Studio Pages Release Version Regression
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-web/**'
+      - '.github/workflows/studio-pages-release-version-regression.yml'
+  push:
+    branches: [fix/studio-pages-0743-release-tests]
+    paths:
+      - '.github/workflows/studio-pages-release-version-regression.yml'
+permissions:
+  contents: read
+jobs:
+  release-version-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: UI version and affected workflow regression
+        run: |
+          node --check apps/studio-web/assets/app-item4-1008.js
+          node apps/studio-web/ui-release-contract.mjs --json
+          node --test apps/studio-web/all-profiles-load.test.mjs apps/studio-web/factory-needs-eyes-layout.test.mjs apps/studio-web/factory-open-navigation.test.mjs apps/studio-web/factory-revision-approval.test.mjs apps/studio-web/pipeline-publish-now.test.mjs apps/studio-web/pipeline-rendering-terminal.test.mjs apps/studio-web/production-render-layout.test.mjs apps/studio-web/production-rendering-request-isolation.test.mjs apps/studio-web/ui-release-contract.test.mjs apps/studio-web/unified-platform-outputs.test.mjs apps/studio-web/vibe-cut-mode.test.mjs apps/studio-web/vibe-cut-passthrough-guard.test.mjs apps/studio-web/scripted-short-profile-routing.test.mjs
