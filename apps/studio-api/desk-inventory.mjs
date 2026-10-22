@@ -1051,7 +1051,7 @@ export function classifyFacebookStoryRateLimit(row, nowMs = Date.now()) {
   const waiting = !Number.isFinite(retryAt) || retryAt > nowMs;
   const dispatchCount = Number(row?.dispatch_count || 0);
   const blocked = dispatchCount >= 3
-    ? "remote_verification_required"
+    ? "pending_verification"
     : waiting ? "cooldown" : "eligible_for_guarded_rearm";
   const recordId = String(row?.id || row?.record_id || "").trim();
   return withDeskIdentity({
@@ -1060,12 +1060,12 @@ export function classifyFacebookStoryRateLimit(row, nowMs = Date.now()) {
     class: "transient",
     record_id: recordId || null,
     fingerprint: fingerprint("facebook_story_rate_limit", recordId, "graph_368_story"),
-    actor: blocked === "remote_verification_required" ? "desk_agent" : "worker_heal",
+    actor: "worker_heal", // exhausted counters are not a human-action verdict
     blocker: blocked,
     diagnosis: dispatchCount >= 3
       ? "Facebook Story Graph 368 (spam/rate limit), " + dispatchCount
         + " dispatches and no verified public post ID. Preserve the 48-hour cooldown and all counters; "
-        + "remote publication must be reconciled before another attempt. Not permanently unrecoverable."
+        + "automatic evidence checks continue; do not create another Graph post without verified absence. Not permanently unrecoverable."
       : "Approved Facebook Story Graph 368 hold; Quality Agent can rearm the original schedule only after "
         + "the saved cooldown, public asset and duplicate/lock guards pass. Never publish early.",
   }, row);
