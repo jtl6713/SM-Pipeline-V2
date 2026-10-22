@@ -1,3 +1,4 @@
+import { verifiedFacebookStoryMatch, VERIFICATION_REMOTE_MARKER } from "./quality-verification-recovery.mjs";
 import { scanOutstandingFailedOutputs, failedOutputRetryGate, facebookStoryRateLimitRearmReason } from "./failed-output-monitor.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
@@ -12008,18 +12009,87 @@ export async function studioHealFacebookRateLimitRearm(env, options = {}) {
   // a future Story schedule, double-post or erase evidence of a live post.
   const limit = Math.max(1, Math.min(8, Number(options.limit || 4)));
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
-  const rows = await listRecords(env, outputTable, {
-    limit: Math.max(limit * 3, 18),
-    sortField: "Output_ID",
-    sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Published_At}=BLANK(),{Do_Not_Publish}=0,OR(AND({Publish_Status}="Failed",OR({Publish_Error_Stage}="FBS3_RATE_LIMIT",{Publish_Error_Stage}="FB_GRAPH_RATE_LIMIT")),AND({Publish_Error_Stage}="FACEBOOK_STORY_RATE_LIMIT_368",OR({Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish",{Publish_Status}="Failed"))),OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))',
-  }).catch(() => []);
+  const filterFormula = 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Published_At}=BLANK(),{Do_Not_Publish}=0,OR(AND({Publish_Status}="Failed",OR({Publish_Error_Stage}="FBS3_RATE_LIMIT",{Publish_Error_Stage}="FB_GRAPH_RATE_LIMIT")),AND({Publish_Error_Stage}="FACEBOOK_STORY_RATE_LIMIT_368",OR({Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish",{Publish_Status}="Failed"))),OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))';
+  // The original newest-N scan missed old exhausted-attempt Stories forever.
+  const rows = await scanOutstandingFailedOutputs(
+    (page) => listRecordsPage(env, outputTable, page), { filterFormula }).catch((error) => {
+      console.warn("Facebook QA complete rearm scan unavailable", error);
+      return [];
+    });
+  rows.sort((a, b) =>
+    (Date.parse(String(f(a, "Publish_Next_Retry_At") || "")) || 0) -
+    (Date.parse(String(f(b, "Publish_Next_Retry_At") || "")) || 0));
   const healed = [];
+  let remoteChecks = 0;
+  async function verifyMetaStoryMedia(authoritative) {
+    const mediaId = String(f(authoritative, "Platform_Media_ID") || "").trim();
+    if (!/^[0-9]+$/.test(mediaId)) return null;
+    const cfg = await studioActivePipelineSettings(env,
+      ["FACEBOOK_PAGE_ID", "FACEBOOK_PAGE_ACCESS_TOKEN", "FACEBOOK_GRAPH_API_VERSION"], authoritative);
+    if (!/^[0-9]+$/.test(String(cfg.FACEBOOK_PAGE_ID || "")) || !cfg.FACEBOOK_PAGE_ACCESS_TOKEN) return null;
+    const version = String(cfg.FACEBOOK_GRAPH_API_VERSION || "v25.0").replace(/^\\/+|\\/+$/g, "");
+    if (!/^v[0-9]+\\.[0-9]+$/.test(version)) return null;
+    const path = `/${version}/${cfg.FACEBOOK_PAGE_ID}/stories`;
+    let url = new URL("https://graph.facebook.com" + path);
+    url.searchParams.set("fields", "post_id,media_id,status,url,creation_time");
+    url.searchParams.set("status", JSON.stringify(["PUBLISHED", "ARCHIVED"]));
+    url.searchParams.set("limit", "100");
+    url.searchParams.set("access_token", cfg.FACEBOOK_PAGE_ACCESS_TOKEN);
+    const seen = new Set(), stories = [];
+    for (let page = 0; page < 4; page += 1) {
+      const target = url.toString();
+      if (seen.has(target) || url.origin !== "https://graph.facebook.com" || url.pathname !== path) return null;
+      seen.add(target);
+      const response = await fetch(target, { method: "GET" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !Array.isArray(payload?.data)) return null;
+      stories.push(...payload.data);
+      const match = verifiedFacebookStoryMatch(stories, mediaId);
+      if (match) return match;
+      if (!payload?.paging?.next) break;
+      url = new URL(String(payload.paging.next));
+    }
+    // Absence is inconclusive, even if all pages succeeded: Stories expire.
+    return null;
+  }
   for (const record of rows || []) {
     if (healed.length >= limit) break;
     if (String(f(record, "Publish_Error_Stage") || "") === "FACEBOOK_STORY_RATE_LIMIT_368") {
       const blocked = facebookStoryRateLimitRearmReason(record);
-      if (blocked) continue; // The Quality census reports the exact reason; do not starve other rows.
+      if (blocked === "retry_limit" || blocked === "publication_evidence") {
+        // Read-only remote verification: never issue a new Graph create here.
+        if (remoteChecks >= 2 || !String(f(record, "Platform_Media_ID") || "").trim()) continue;
+        remoteChecks += 1;
+        try {
+          const authoritative = await airtableFetch(env, outputTable, record.id);
+          if (!authoritative || String(f(authoritative, "Publish_Error_Stage") || "") !== "FACEBOOK_STORY_RATE_LIMIT_368"
+            || f(authoritative, "Published_At") || f(authoritative, "Platform_Post_ID")) continue;
+          const match = await verifyMetaStoryMedia(authoritative);
+          if (!match) continue; // Meta absence or error cannot authorize reposting.
+          const verified = await airtableFetch(env, outputTable, record.id);
+          if (!verified || f(verified, "Published_At") || f(verified, "Platform_Post_ID")
+            || String(f(verified, "Platform_Media_ID") || "") !== match.media_id
+            || String(f(verified, "Publish_Error_Stage") || "") !== "FACEBOOK_STORY_RATE_LIMIT_368") continue;
+          await airtableFetch(env, outputTable, record.id, { method: "PATCH", body: JSON.stringify({
+            fields: {
+              Publish_Status: "Published", Output_Status: "Published",
+              Published_At: match.published_at || new Date().toISOString(),
+              Platform_Post_ID: match.post_id, Platform_Post_URL: match.url,
+              FB_Publish_Status: "Published", Publish_Error_Stage: "",
+              Publish_Error_Message: "", Publish_Next_Retry_At: null,
+              Publish_Retry_Eligible: false, Auto_Publish_Enabled: false,
+              Studio_Publish_Dispatch_Note: VERIFICATION_REMOTE_MARKER + " | exact Meta media_id=" + match.media_id,
+            }, typecast: true,
+          }) });
+          healed.push({ key: "FB_STORY_REMOTE_VERIFIED", id: record.id,
+            output_id: f(record, "Output_ID") || null, post_id: match.post_id, action: "reconciled_existing_post_no_create" });
+        } catch (error) {
+          console.warn("Facebook Story remote verification unavailable", record.id,
+            error instanceof Error ? error.message : String(error));
+        }
+        continue;
+      }
+      if (blocked) continue; // Unverified or unsafe state remains parked.
       // Re-read authoritative Airtable state before changing a possibly stale
       // scan row. In particular never overwrite a newly published Story.
       const authoritative = await airtableFetch(env, outputTable, record.id).catch(() => null);
