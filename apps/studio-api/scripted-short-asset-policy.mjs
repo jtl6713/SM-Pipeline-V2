@@ -123,7 +123,10 @@ export function recoverScriptedShortAssets(timeline, catalog, policy, profileId 
     libraryAssetSatisfiesPolicy(row, policy, profileId));
   const byId = new Map(eligible.map((row) => [String(row.id), row]));
   const segments = Array.isArray(timeline?.segments) ? timeline.segments : [];
-  const used = new Set();
+  // Preserve all already-valid scene assignments before choosing repairs.
+  // Otherwise an earlier mismatch could steal the asset of a later scene.
+  const used = new Set(segments.map((scene) => String(scene?.asset_id || scene?.media_asset_id || "").trim())
+    .filter((id) => byId.has(id)));
   let recovered = 0;
   let unresolved = 0;
   const fixed = segments.map((scene) => {
