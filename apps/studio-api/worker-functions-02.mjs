@@ -1,4 +1,5 @@
 import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
+import { parseScriptedShortAssetPolicy, libraryAssetSatisfiesPolicy, recoverScriptedShortAssets, validateScriptedShortAssets } from "./scripted-short-asset-policy.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import { scheduleReservationAuthorityEnabled } from "./schedule-reservation-authority.mjs";
 import { creativeSettingName, parseCreativeGuidance } from "./profile-creative-guidance.mjs";
@@ -11377,6 +11378,7 @@ export function ideaTimedScriptCatalogRow(row) {
     media_kind: video ? "video" : "photo",
     media_type: mimeType || (video ? "video" : "image"),
     duration_seconds: Number(f(record, "Duration_Seconds") || row?.duration_seconds || 0) || null,
+    profile_id: firstLinkedRecordId(f(record, "Content_Profile")),
   };
 }
 /*__STUDIO_WORKER_END:ideaTimedScriptCatalogRow__*/
@@ -11467,11 +11469,13 @@ export async function proposeScriptedShortRoute(request, env, authorization) {
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const prompt = String(payload?.prompt || "").replace(/\s+/g, " ").trim();
   if (prompt.length < 3) throw new HttpError(400, "Describe the short in a sentence.");
+  const assetPolicy = parseScriptedShortAssetPolicy(prompt);
   const synthetic = {
     id: "scripted-short-proposal",
     fields: {
       Candidate_Title: prompt.slice(0, 160),
       Idea_Summary: prompt.slice(0, 2000),
+      ...(assetPolicy.required ? { Primary_Location: assetPolicy.location } : {}),
     },
   };
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
@@ -11493,6 +11497,13 @@ export async function proposeScriptedShortRoute(request, env, authorization) {
     seen.add(row.id);
     return true;
   });
+  // Required uploaded-location instructions are hard constraints. A file ID
+  // alone is not a valid scene match; unscoped assets need place evidence.
+  catalog = catalog.filter((row) => libraryAssetSatisfiesPolicy(row, assetPolicy, profile?.id));
+  if (assetPolicy.required && !catalog.length) {
+    throw new HttpError(409, "No verified " + assetPolicy.location +
+      " assets were found in this profile's library. Check asset names, location tags and profile assignments. Unrelated assets will not be substituted.");
+  }
   const picked = pickTimelineCatalog(catalog);
   const selectedIds = new Set(picked.selected.map((row) => row.id));
   const pool = [
@@ -11517,12 +11528,19 @@ export async function proposeScriptedShortRoute(request, env, authorization) {
     scenes = assignOwnedScenes(fallbackProposalScenes(prompt, pool), pool);
     scenes = ensureRelevantVideoScene(scenes, pool);
   }
-  const timeline = buildTimelineFromScenes(scenes);
+  // Independent Quality Agent guard: repair only from the eligible catalog,
+  // otherwise mark a scene as missing rather than reporting a false match.
+  const recovery = recoverScriptedShortAssets(buildTimelineFromScenes(scenes), pool, assetPolicy, profile?.id);
+  const timeline = buildTimelineFromScenes(recovery.timeline.segments);
+  const assetValidation = validateScriptedShortAssets(timeline, pool, assetPolicy, profile?.id);
+  if (!assetValidation.ok) {
+    throw new HttpError(409, "Quality Agent blocked a mismatched library asset. No proposal was accepted.");
+  }
   if (!scriptedShortProposalReady(timeline)) {
     throw new HttpError(502, "Studio could not write a scripted short from that prompt.");
   }
-  const owned = timeline.segments.length - unassignedSuggestionCount(timeline);
-  const suggestions = unassignedSuggestionCount(timeline);
+  const owned = assetValidation.verified;
+  const suggestions = assetValidation.unassigned;
   return respond(request, env, {
     ok: true,
     source,
@@ -11533,9 +11551,11 @@ export async function proposeScriptedShortRoute(request, env, authorization) {
     scene_count: timeline.segments.length,
     owned_count: owned,
     suggestion_count: suggestions,
+    asset_policy: assetPolicy,
+    asset_validation: { ...assetValidation, recovered_count: recovery.recovered, unresolved_count: recovery.unresolved },
     message: suggestions
-      ? `${timeline.segments.length} scenes. ${owned} use a library file. ${suggestions} still need a photo you create. Estimated times are hints. The recorded voiceover sets the real length.`
-      : `${timeline.segments.length} scenes, all matched to library files. Estimated times are hints. The recorded voiceover sets the real length.`,
+      ? `${timeline.segments.length} scenes. ${owned} verified library matches. ${suggestions} still need an appropriate photo. ${assetPolicy.required ? "Only " + assetPolicy.location + " images are allowed. " : ""}Estimated times are hints. The recorded voiceover sets the real length.`
+      : `${timeline.segments.length} scenes, all verified against ${assetPolicy.required ? assetPolicy.location : "the selected profile"} and matched to library files. Estimated times are hints. The recorded voiceover sets the real length.`,
   });
 }
 /*__STUDIO_WORKER_END:proposeScriptedShortRoute__*/
@@ -11551,6 +11571,27 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
   }
   const timeline = buildTimelineFromScenes(incoming.segments);
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
+  // Validate against authoritative Airtable media before any draft is created.
+  // This prevents edited or stale proposals bypassing the Quality Agent.
+  const acceptPolicy = parseScriptedShortAssetPolicy(prompt);
+  const selectedMediaIds = [...new Set(timeline.segments.map((segment) =>
+    String(segment?.asset_id || "").trim()).filter(Boolean))];
+  if (acceptPolicy.required && !selectedMediaIds.length) {
+    throw new HttpError(409, "This proposal requires uploaded location-specific images, but none are selected. Propose again after reviewing the library.");
+  }
+  if (selectedMediaIds.length) {
+    const mediaRows = await Promise.all(selectedMediaIds.map((id) => {
+      if (!/^rec[A-Za-z0-9]+$/.test(id)) {
+        throw new HttpError(409, "Invalid or stale proposal asset ID. Propose again.");
+      }
+      return airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, id);
+    }));
+    const authoritativeCatalog = mediaRows.map(ideaTimedScriptCatalogRow);
+    const qa = validateScriptedShortAssets(timeline, authoritativeCatalog, acceptPolicy, profile?.id);
+    if (!qa.ok) {
+      throw new HttpError(409, "Quality Agent blocked a missing, wrong-profile, or wrong-location library asset. Propose again to repair the assignments.");
+    }
+  }
   const title = prompt.slice(0, 160);
   const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, "", {
     method: "POST",
