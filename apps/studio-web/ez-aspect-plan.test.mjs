@@ -36,9 +36,9 @@ test("Vibe Cut upload requires confirmed video and explicit Continue", () => {
   const end = app.indexOf("function bindEzWizard(", begin);
   const creation = app.slice(begin, end);
   assert.match(creation, /!uploadResult\?\.ok \|\| !vibeCutPersistedSource\(\)/);
-  assert.match(creation, /action\.hidden = false/);
-  assert.doesNotMatch(creation, /showProductionRequestWorkspace\(\)/);
+  assert.match(creation, /action\.hidden = !vibeCutReadySource\(\)/);
+  assert.doesNotMatch(creation, /action\.hidden = false/);
   const listener = app.slice(app.indexOf("function bindEzIntake("), app.indexOf("function item4SelectedPlatforms("));
-  assert.match(listener, /vibeCutPersistedSource\(\)/);
+  assert.match(listener, /vibeCutReadySource\(\)/);
   assert.match(listener, /showProductionRequestWorkspace\(\)/);
 });

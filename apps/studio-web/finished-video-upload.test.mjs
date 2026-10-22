@@ -37,7 +37,7 @@ test("every finished video uses resumable multipart upload", () => {
   );
   assert.match(decision, /ezIsFinishedVideo\(\) \|\| ezIsAzFinishedPath\(\)/);
   assert.doesNotMatch(decision, /ITEM4_DIRECT_UPLOAD_MAX_BYTES/);
-  assert.match(app, /Array\.isArray\(result\?\.assets\)[\s\S]*item4ApplyAssetsLocally\(result\.assets\)/);
+  assert.match(app, /Array\.isArray\(result\?\.assets\)[\s\S]*item4ApplyAssetsLocally\(result\.assets, \{ assetsStatus: result\.authority_status \}\)/);
 });
 
 

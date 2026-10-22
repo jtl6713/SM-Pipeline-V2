@@ -193,7 +193,7 @@ test("P0 #907 platform filtering imports PR_PLATFORMS across the Worker split", 
   const worker = await readFile(new URL("./worker.js", import.meta.url), "utf8");
   const functions = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(worker, /const PR_PLATFORMS = new Set\(/);
-  assert.match(worker, /\n\s*PR_PLATFORMS,\n/, "worker.js must export canonical PR_PLATFORMS");
+  assert.match(worker, /\r?\n\s*PR_PLATFORMS,\r?\n/, "worker.js must export canonical PR_PLATFORMS");
   const workerImport = functions.match(/import\s*\{([\s\S]*?)\}\s*from "\.\/worker\.js";/);
   assert.ok(workerImport, "extracted module must import from worker.js");
   assert.match(workerImport[1], /\bPR_PLATFORMS\b/,

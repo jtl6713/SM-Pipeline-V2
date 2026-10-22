@@ -19,7 +19,8 @@ test("Vibe Cut source must have a persisted video asset before Continue is enabl
   assert.match(sourceCheck, /id\.startsWith\("local:"\)/);
   const create = section("async function startEzProduction(", "function bindEzWizard(");
   assert.match(create, /!uploadResult\?\.ok \|\| !vibeCutPersistedSource\(\)/);
-  assert.match(create, /action\.hidden = false/);
+  assert.match(create, /action\.hidden = !vibeCutReadySource\(\)/);
+  assert.doesNotMatch(create, /action\.hidden = false/);
   assert.doesNotMatch(create, /Production is ready — outputs match your source video/);
 });
 

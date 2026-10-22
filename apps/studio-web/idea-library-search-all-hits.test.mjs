@@ -11,8 +11,8 @@ test("typed library search is not idea-ranked", async () => {
   const app = await readFile(path.join(here, "assets/app-item4-1008.js"), "utf8");
   const worker = readStudioWorkerSource();
   const html = await readFile(path.join(here, "index.html"), "utf8");
-  assert.match(app, /item4-0.6.731-factory-quality-collapse/);
-  assert.match(html, /UI build 0.6.731/);
+  assert.match(app, /item4-0.6.744-vibe-upload-status/);
+  assert.match(html, /UI build 0.6.744/);
   assert.match(app, /search is not limited to this idea/);
   assert.match(app, /\{ flat: operatorSearch \}/);
   assert.match(app, /\(operatorSearch \|\| quoted\.phrase\) \? \[\] : suggested/);

@@ -125,7 +125,7 @@ test("profile totals use lean overview endpoint and keep timezone helpers", asyn
   assert.doesNotMatch(overview, /\/api\/dashboard\?profile=/);
   assert.match(app, /function workingStudioTimeZone\(\)/);
   assert.match(app, /function studioEffectiveScheduleIso\(record\)/);
-  assert.match(html, /all-profiles-overview-1007\.js\?v=0.6.731-factory-quality-collapse/);
+  assert.match(html, /all-profiles-overview-1007\.js\?v=0.6.744-vibe-upload-status/);
 });
 
 
