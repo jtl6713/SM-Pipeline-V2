@@ -84,7 +84,8 @@ test('automatic match completing after manual stop never writes the manifest', a
   const latest={fields:{Production_Notes:'ez-photo-wait=off'},assets:[]};
   const c=vm.createContext({item4AssetManifest:r=>r.assets, airtableFetch:async()=>latest,
     PRODUCTION_REQUEST_TABLE:'requests',firstLinkedRecordId:()=>null,f:(r,k)=>r.fields?.[k],
-    productionPhotoWaitAutoOff:notes=>notes==='ez-photo-wait=off',item4UpdateRequestState:()=>{writes++;}});
+    productionPhotoWaitAutoOff:notes=>notes==='ez-photo-wait=off',studioIsVibeCut:()=>false,
+    item4UpdateRequestState:()=>{writes++;}});
   vm.runInContext(src,c);
   const result=await c.applyLibraryAssetsToProductionRequest({}, {id:'recA',assets:[{id:'removed'}]}, []);
   assert.equal(result.skipped,true);assert.equal(writes,0);assert.equal(result.assets.length,0);

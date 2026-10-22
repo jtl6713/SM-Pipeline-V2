@@ -100,8 +100,8 @@ test("all-profiles overview shows per-output approved future and past-due totals
     assert.match(host.innerHTML, /<th scope="row">Total<\/th>/);
     assert.doesNotMatch(host.innerHTML, /Chicago \(/);
     assert.match(host.innerHTML, /data-label="Approved future"[^>]*>2<\/td>/);
-    assert.match(host.innerHTML, /data-label="Approved past due"[^>]*>1<\/td>/);
-    assert.match(host.innerHTML, /data-label="Approved no date"[^>]*>1<\/td>/);
+    assert.match(host.innerHTML, /data-label="Approved past due"[^>]*><button[^>]*data-overview-action="approved_past_due"[^>]*>1<\/button><\/td>/);
+    assert.match(host.innerHTML, /data-label="Approved no date"[^>]*><button[^>]*data-overview-action="approved_missing_date"[^>]*>1<\/button><\/td>/);
     assert.match(host.innerHTML, /Approved · Future/);
     assert.match(host.innerHTML, /Approved · Past Due/);
     assert.match(host.innerHTML, /Pipeline · Total/);
@@ -125,7 +125,7 @@ test("profile totals use lean overview endpoint and keep timezone helpers", asyn
   assert.doesNotMatch(overview, /\/api\/dashboard\?profile=/);
   assert.match(app, /function workingStudioTimeZone\(\)/);
   assert.match(app, /function studioEffectiveScheduleIso\(record\)/);
-  assert.match(html, /all-profiles-overview-1007\.js\?v=0.6.731-factory-quality-collapse/);
+  assert.match(html, /all-profiles-overview-1007\.js\?v=0.6.744-vibe-upload-status/);
 });
 
 

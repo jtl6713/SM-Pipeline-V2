@@ -184,6 +184,11 @@
   let item4UploadBatchTotal = 0;
   let item4UploadBatchDone = 0;
   let item4PendingUploads = [];
+  let vibeUploadUi = { phase: "idle", fileName: "", sizeBytes: 0, pct: null, detail: "", activityKey: "" };
+  let vibeUploadStallTimer = 0;
+  let vibeUploadAbortController = null;
+  let vibeUploadRetryRequested = false;
+  let vibeUploadRetryInFlight = false;
   let item4PreparingVariants = false;
   let item4PrepareError = "";
   let item4PrepareClockTimer = 0;
@@ -198,6 +203,7 @@
   const ITEM4_VARIANT_POLL_TIMEOUT_MS = 900000;
   const ITEM4_MASTER_POLL_MS = 3000;
   const ITEM4_MASTER_POLL_TIMEOUT_MS = 180000;
+  const VIBE_UPLOAD_STALL_MS = 60000;
   const ITEM4_PREVIEW_RETRY_MAX = 3;
   const ITEM4_PREVIEW_RETRY_MS = 1200;
   const API_TRANSIENT_RETRY_MAX = 3;
@@ -281,7 +287,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.743-scripted-short-profile-scope";
+  const BUILD_ID = "item4-0.6.744-vibe-upload-status";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -6276,6 +6282,197 @@ function timedScriptAssetLabel(asset, index) {
     return video;
   }
 
+  function clearVibeUploadStallTimer() {
+    if (vibeUploadStallTimer) window.clearTimeout(vibeUploadStallTimer);
+    vibeUploadStallTimer = 0;
+  }
+
+  function resetVibeUploadFeedback() {
+    clearVibeUploadStallTimer();
+    vibeUploadRetryRequested = false;
+    vibeUploadRetryInFlight = false;
+    vibeUploadUi = { phase: "idle", fileName: "", sizeBytes: 0, pct: null, detail: "", activityKey: "" };
+    renderVibeUploadUi(item4Workspace || {});
+  }
+
+  function vibeUploadFileSizeLabel(sizeBytes = vibeUploadUi.sizeBytes) {
+    const bytes = Number(sizeBytes || 0);
+    if (!Number.isFinite(bytes) || bytes <= 0) return "";
+    return `${(bytes / (1024 * 1024)).toFixed(bytes >= 100 * 1024 * 1024 ? 0 : 1)} MB`;
+  }
+
+  function vibeUploadProgressMarkup(status = item4Workspace) {
+    if (!ezIsVibeCut()) return null;
+    const ready = vibeCutReadySource(status);
+    const source = vibeCutPersistedSource(status);
+    const fileName = String(ready?.name || source?.name || vibeUploadUi.fileName || "source video");
+    if (ready) {
+      return {
+        heal: "ready",
+        title: `${fileName} is ready.`,
+        body: "The server confirmed the persisted video is fully processed. Continue is now available.",
+        count: "1 of 1 ready.",
+      };
+    }
+    const phase = String(vibeUploadUi.phase || "idle");
+    if (phase === "idle" && !source) return null;
+    if (phase === "failed") {
+      return {
+        heal: "error",
+        title: `${fileName} failed to upload.`,
+        body: vibeUploadUi.detail || "The video was not persisted. Choose the same file to try again.",
+        count: "0 of 1 ready.",
+      };
+    }
+    if (phase === "stalled") {
+      return {
+        heal: "error",
+        title: "This upload may be stalled.",
+        body: vibeUploadUi.detail || "No upload or processing progress was confirmed for one minute. Retry the same video.",
+        count: source ? "1 uploaded · 0 ready." : "1 selected · 0 ready.",
+      };
+    }
+    if (phase === "selected") {
+      const size = vibeUploadFileSizeLabel();
+      return {
+        heal: "uploading",
+        title: `Selected ${fileName}${size ? ` · ${size}` : ""}.`,
+        body: "Preparing a secure upload. No bytes have been sent yet; keep this tab open.",
+        count: "1 selected · 0 ready.",
+      };
+    }
+    if (phase === "creating") {
+      return {
+        heal: "uploading",
+        title: `Getting ${fileName} ready to upload.`,
+        body: vibeUploadUi.detail || "Creating the Production draft and checking the video metadata. Keep this tab open.",
+        count: "1 selected · 0 ready.",
+      };
+    }
+    if (phase === "uploading") {
+      const pct = Number(vibeUploadUi.pct);
+      const suffix = Number.isFinite(pct) ? ` · ${Math.max(0, Math.min(99, Math.round(pct)))}%` : "";
+      return {
+        heal: "uploading",
+        title: `Uploading ${fileName}${suffix}.`,
+        body: vibeUploadUi.detail || "Keep this tab open until every part reaches the server.",
+        count: "1 uploading · 0 ready.",
+      };
+    }
+    if (phase === "saving") {
+      return {
+        heal: "uploading",
+        title: `Upload complete. Saving ${fileName}.`,
+        body: vibeUploadUi.detail || "The server received every part and is finalizing the persisted video.",
+        count: "1 uploaded · 0 ready.",
+      };
+    }
+    if (phase === "processing" || source) {
+      return {
+        heal: "uploading",
+        title: `Processing ${fileName}.`,
+        body: vibeUploadUi.detail || item4CompressionProgressLabel(status),
+        count: "1 uploaded · 0 ready.",
+      };
+    }
+    return null;
+  }
+
+  function renderVibeUploadUi(status = item4Workspace) {
+    const retryActions = $("ezUploadRetryActions");
+    const retry = $("ezUploadRetry");
+    const needsRetry = ezIsVibeCut() && ["stalled", "failed"].includes(String(vibeUploadUi.phase || ""));
+    if (retryActions) retryActions.hidden = !needsRetry;
+    if (retry) {
+      retry.disabled = vibeUploadRetryInFlight;
+      retry.textContent = vibeUploadRetryInFlight ? "Preparing retry…" : "Retry video upload";
+    }
+    const wizard = $("ezContinue");
+    if (wizard && ezIsVibeCut()) {
+      const source = vibeCutReadySource(status);
+      wizard.hidden = !source;
+      wizard.disabled = !source || item4Uploading || ezStarting;
+    }
+  }
+
+  function setVibeUploadUi(phase, { file = null, pct = null, detail = "", activityKey = "" } = {}) {
+    if (!ezIsVibeCut()) return;
+    const previousKey = String(vibeUploadUi.activityKey || "");
+    const nextKey = String(activityKey || phase || "");
+    if (vibeUploadUi.phase === "stalled" && phase !== "failed" && phase !== "ready" && nextKey === previousKey) {
+      renderVibeUploadUi(item4Workspace);
+      updateItem4MasterProgress(item4Workspace || {});
+      return;
+    }
+    const changed = String(vibeUploadUi.phase || "") !== String(phase || "") || nextKey !== previousKey;
+    vibeUploadUi = {
+      phase: String(phase || "idle"),
+      fileName: String(file?.name || vibeUploadUi.fileName || ""),
+      sizeBytes: Number(file?.size || vibeUploadUi.sizeBytes || 0),
+      pct: Number.isFinite(Number(pct)) ? Number(pct) : null,
+      detail: String(detail || ""),
+      activityKey: nextKey,
+    };
+    if (changed || ["idle", "failed", "ready"].includes(vibeUploadUi.phase)) {
+      clearVibeUploadStallTimer();
+    }
+    if (changed && ["creating", "uploading", "saving", "processing"].includes(vibeUploadUi.phase)) {
+      const expectedKey = nextKey;
+      vibeUploadStallTimer = window.setTimeout(() => {
+        if (vibeCutReadySource() || vibeUploadUi.activityKey !== expectedKey) return;
+        vibeUploadUi = {
+          ...vibeUploadUi,
+          phase: "stalled",
+          detail: "No upload or processing progress was confirmed for one minute. Retry the same video.",
+        };
+        renderVibeUploadUi(item4Workspace);
+        updateItem4MasterProgress(item4Workspace || {});
+      }, VIBE_UPLOAD_STALL_MS);
+    }
+    if (changed || phase === "failed" || phase === "ready") {
+      renderVibeUploadUi(item4Workspace);
+      updateItem4MasterProgress(item4Workspace || {});
+    }
+  }
+
+  function beginVibeUploadFeedback(file) {
+    if (!ezIsVibeCut() || !file) return;
+    paintItem4LocalPreviews([file], { uploading: true });
+    setVibeUploadUi("selected", { file, activityKey: `selected:${file.name}:${file.size}` });
+  }
+
+  function syncVibeUploadUiFromWorkspace(status = item4Workspace) {
+    if (!ezIsVibeCut()) return;
+    const source = vibeCutPersistedSource(status);
+    if (vibeCutReadySource(status)) {
+      setVibeUploadUi("ready", { detail: "The persisted source video is fully processed.", activityKey: `ready:${source?.id || "video"}` });
+      return;
+    }
+    if (item4WorkspaceCompressionFailed(status) || String(status?.assets_status || "") === "Error") {
+      setVibeUploadUi("failed", {
+        detail: String(source?.compression_error || "The server could not finish this video. Retry the same file."),
+        activityKey: `failed:${source?.id || "video"}`,
+      });
+      return;
+    }
+    if (item4WorkspaceNeedsCompression(status)) {
+      const progress = Number(source?.compression_progress || 0);
+      setVibeUploadUi("processing", {
+        pct: progress,
+        detail: item4CompressionProgressLabel(status),
+        activityKey: `processing:${source?.id || "video"}:${Number.isFinite(progress) ? Math.round(progress) : 0}`,
+      });
+      return;
+    }
+    if (source && !item4Uploading) {
+      const readyCount = item4MasterReadyCount(status);
+      setVibeUploadUi("saving", {
+        detail: "The upload is complete. Studio is confirming the saved video before Continue unlocks.",
+        activityKey: `saving:${source.id || "video"}:${readyCount}`,
+      });
+    }
+  }
+
   function renderVibeCutCommitAction(status = item4Workspace) {
     const panel = $("item4VibeCommitActions");
     if (!panel) return;
@@ -6304,11 +6501,12 @@ function timedScriptAssetLabel(asset, index) {
       retry.disabled = item4Uploading || ezStarting;
     }
     const wizard = $("ezContinue");
-    if (wizard && source && editable && vibe) {
+    if (wizard && vibe) {
       wizard.textContent = "Save Video & Continue to Production";
-      wizard.hidden = false;
-      wizard.disabled = false;
+      wizard.hidden = !source || !editable;
+      wizard.disabled = !source || !editable || item4Uploading || ezStarting;
     }
+    renderVibeUploadUi(status);
   }
 
   function ezPersistedKindCounts() {
@@ -6409,7 +6607,15 @@ function timedScriptAssetLabel(asset, index) {
     const existing = (Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [])
       .filter((asset) => asset && !String(asset.id || "").startsWith("local:"));
     incoming.forEach((file) => appendEzLocalPreview(file));
-    ezStagedFiles = [...(Array.isArray(ezStagedFiles) ? ezStagedFiles : []), ...incoming];
+    const staged = Array.isArray(ezStagedFiles) ? ezStagedFiles : [];
+    const stagedKeys = new Set(staged.map((file) => `${file?.name || ""}:${file?.size || 0}:${file?.lastModified || 0}`));
+    const uniqueIncoming = incoming.filter((file) => {
+      const key = `${file?.name || ""}:${file?.size || 0}:${file?.lastModified || 0}`;
+      if (stagedKeys.has(key)) return false;
+      stagedKeys.add(key);
+      return true;
+    });
+    ezStagedFiles = [...staged, ...uniqueIncoming];
     const optimisticNew = item4OptimisticAssetsFromFiles(incoming, []).map((asset, index) => ({
       ...asset,
       id: `local:${existing.length + index}`,
@@ -7421,12 +7627,15 @@ function timedScriptAssetLabel(asset, index) {
     const nextKind = ["multiple-photos", "single-photo", "photos-and-clips", "video-clips", "finished-video", "finished-stills", "vibe-cut"].includes(kind)
       ? kind
       : "single-photo";
+    const previousKind = ezIntakeKind;
     if (resetPlatforms && ezIntakeKind && ezIntakeKind !== nextKind) {
       ezStagedFiles = [];
       revokeEzLocalPreviews();
       renderEzPhotoStrip();
     }
     ezIntakeKind = nextKind;
+    if (previousKind === "vibe-cut" && nextKind !== "vibe-cut") resetVibeUploadFeedback();
+    if (previousKind !== "vibe-cut" && nextKind === "vibe-cut") resetVibeUploadFeedback();
     if ($("ezContinue")) $("ezContinue").hidden = true;
     document.querySelectorAll("[data-ez-input]").forEach((button) => {
       button.classList.toggle("selected", button.dataset.ezInput === ezIntakeKind);
@@ -8515,8 +8724,50 @@ function timedScriptAssetLabel(asset, index) {
     receiveMasterPhotos(queued);
   }
 
+  function retryVibeUpload(inputId = "ezMediaInput") {
+    if (!ezIsVibeCut() || vibeUploadRetryInFlight) return;
+    vibeUploadRetryRequested = true;
+    if (vibeUploadAbortController) vibeUploadAbortController.abort();
+    setVibeUploadUi("stalled", {
+      detail: "Choose the same video again. Studio will clear the incomplete attempt before restarting.",
+      activityKey: `retry:${Date.now()}`,
+    });
+    item4ApplyMediaInputAccept("vibe-cut");
+    $(inputId)?.click();
+  }
+
+  async function replaceIncompleteVibeSourceAndUpload(files) {
+    if (vibeUploadRetryInFlight) return;
+    vibeUploadRetryInFlight = true;
+    renderVibeUploadUi(item4Workspace);
+    try {
+      const source = vibeCutPersistedSource();
+      if (source && !vibeCutReadySource() && activeProductionRequest?.id) {
+        const result = await api(
+          `/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets/${encodeURIComponent(source.id)}`,
+          { method: "DELETE", body: JSON.stringify({}), timeoutMs: 45000, retries: 0 },
+        );
+        if (result?.production_request) activeProductionRequest = result.production_request;
+        item4ApplyAssetsLocally(Array.isArray(result?.assets) ? result.assets : [], { assetsStatus: "None" });
+      }
+      vibeUploadRetryRequested = false;
+      vibeUploadRetryInFlight = false;
+      renderVibeUploadUi(item4Workspace);
+      await uploadItem4Files(files, { preserveOversizedNotice: true });
+    } catch (error) {
+      vibeUploadRetryRequested = false;
+      vibeUploadRetryInFlight = false;
+      setVibeUploadUi("failed", {
+        file: files?.[0],
+        detail: error?.message || "Studio could not clear the incomplete upload. Try again.",
+        activityKey: `retry-failed:${Date.now()}`,
+      });
+      setEzMessage(error?.message || "Studio could not clear the incomplete upload. Try again.", "error-text");
+    }
+  }
+
   function receiveMasterPhotos(fileList) {
-    if ($("ezContinue") && !(ezIsVibeCut() && vibeCutPersistedSource())) $("ezContinue").hidden = true;
+    if ($("ezContinue") && (!ezIsVibeCut() || !vibeCutReadySource())) $("ezContinue").hidden = true;
     const incoming = Array.from(fileList || []);
     item4AdoptKindForIncomingFiles(incoming);
     const unsupportedNote = item4UnsupportedPhotoMessage(incoming);
@@ -8536,11 +8787,17 @@ function timedScriptAssetLabel(asset, index) {
       files = oversizedSplit.allowed;
       if (!files.length) return;
     }
+    if (ezIsVibeCut() && files[0]) beginVibeUploadFeedback(files[0]);
     if (item4Uploading || ezStarting) {
       item4PendingUploads.push(...files);
       if (!item4ShowOversizedClipNotice()) setEzMessage("Adding to the set…");
       return;
     }
+    if (ezIsVibeCut() && vibeUploadRetryRequested && vibeCutPersistedSource() && !vibeCutReadySource()) {
+      replaceIncompleteVibeSourceAndUpload(files);
+      return;
+    }
+    if (ezIsVibeCut()) vibeUploadRetryRequested = false;
     if (activeProductionRequest?.id) {
       uploadItem4Files(files, { preserveOversizedNotice: true });
       return;
@@ -8635,6 +8892,13 @@ function timedScriptAssetLabel(asset, index) {
     ezStarting = true;
     const continueBtn = $("ezContinue");
     if (continueBtn) continueBtn.disabled = true;
+    if (ezIsVibeCut() && nextFiles[0]) {
+      setVibeUploadUi("creating", {
+        file: nextFiles[0],
+        detail: "Creating the Production draft and checking the video metadata. Keep this tab open.",
+        activityKey: `creating:${nextFiles[0].name}:${nextFiles[0].size}`,
+      });
+    }
     if (!item4OversizedClipNotice) {
       setEzMessage(allowEmpty ? "Saving the AI plan…" : "Saving in the background…");
       if (ezIsAzFinishedPath()) setAzFinishedMessage("Uploading your video. You can close this tab after it finishes.");
@@ -8729,6 +8993,13 @@ function timedScriptAssetLabel(asset, index) {
       }
       await ensureProductionRequestMusic();
       const created = await createEzProductionRequest(activeIdea.id, requestPayload);
+      if (ezIsVibeCut() || pending?.inputKind === "vibe-cut") {
+        setVibeUploadUi("creating", {
+          file: nextFiles[0],
+          detail: "Production draft created. Starting the secure video upload now.",
+          activityKey: `draft:${created.record?.id || "created"}`,
+        });
+      }
       setEzAdvancedOpen(false);
       populateProductionRequestForm(created.record, { reveal: false });
       if (ezIsAzFinishedPath()) {
@@ -8759,6 +9030,9 @@ function timedScriptAssetLabel(asset, index) {
           setEzMessage("Uploading originals…");
           if (ezIsAzFinishedPath()) setAzFinishedMessage("Uploading your video. You can close this tab after it finishes.");
         }
+        if (vibeUploadRetryRequested && (ezIsVibeCut() || pending?.inputKind === "vibe-cut")) {
+          throw new Error("Video retry requested. Choose the same file again.");
+        }
         const uploadResult = await uploadItem4Files(nextFiles, { preserveOversizedNotice: true });
         renderEzPhotoStrip();
         if (ezIsAzFinishedPath()) startAzFinishedProgressPolling();
@@ -8771,7 +9045,7 @@ function timedScriptAssetLabel(asset, index) {
           const action = $("ezContinue");
           if (action) {
             action.textContent = "Save Video & Continue to Production";
-            action.hidden = false;
+            action.hidden = !vibeCutReadySource();
             action.disabled = !vibeCutReadySource();
           }
           setEzMessage(vibeCutReadySource() ? "Source video saved and verified. Select Save Video & Continue." : "Video received. Processing must finish before you can continue; Studio will not substitute photos.", "success");
@@ -8797,7 +9071,7 @@ function timedScriptAssetLabel(asset, index) {
       return false;
     } finally {
       ezStarting = false;
-      if (continueBtn) continueBtn.disabled = false;
+      if (continueBtn) continueBtn.disabled = ezIsVibeCut() ? !vibeCutReadySource() : false;
       drainPendingMasterUploads();
     }
   }
@@ -8961,6 +9235,7 @@ function timedScriptAssetLabel(asset, index) {
       revokeEzLocalPreviews();
       ezStagedFiles = [];
       ezIntakeKind = null;
+      resetVibeUploadFeedback();
       ezCaptionDefault = "ai";
       ezSlideCaptionHealDone = false;
       ezCaptionModes.clear();
@@ -9114,14 +9389,24 @@ function timedScriptAssetLabel(asset, index) {
       item4ApplyMediaInputAccept(ezIntakeKind);
       $("ezMediaInput")?.click();
     });
+    $("ezUploadRetry")?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      retryVibeUpload();
+    });
     $("ezChooseClip")?.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
       item4BeginClipPick("ezClipInput");
     });
     $("ezMediaInput")?.addEventListener("change", (event) => {
+      if (!event.target.files?.length && vibeUploadRetryRequested) vibeUploadRetryRequested = false;
       startEzFromFiles(event.target.files);
       event.target.value = "";
+    });
+    $("ezMediaInput")?.addEventListener("cancel", () => {
+      vibeUploadRetryRequested = false;
+      renderVibeUploadUi(item4Workspace || {});
     });
     $("ezClipInput")?.addEventListener("change", (event) => {
       startEzFromFiles(event.target.files);
@@ -10786,6 +11071,8 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function item4MasterProgressMarkup(status) {
+    const vibeMarkup = vibeUploadProgressMarkup(status);
+    if (vibeMarkup) return vibeMarkup;
     const assets = Array.isArray(status?.assets) ? status.assets : [];
     const ready = item4Uploading && item4UploadBatchTotal
       ? item4UploadBatchDone
@@ -10945,6 +11232,7 @@ function timedScriptAssetLabel(asset, index) {
       await loadItem4Workspace(activeProductionRequest);
       if (activeProductionRequest?.id !== requestId || revision !== item4WorkspaceRevision) return;
       const state = String(item4Workspace?.assets_status || "None");
+      syncVibeUploadUiFromWorkspace(item4Workspace || {});
       updateItem4MasterProgress(item4Workspace || {});
       if (item4WorkspaceCompressionFailed(item4Workspace)) {
         stopItem4MasterPolling();
@@ -11287,6 +11575,7 @@ function timedScriptAssetLabel(asset, index) {
 
   function renderItem4Workspace(status) {
     item4Workspace = status || null;
+    syncVibeUploadUiFromWorkspace(status || {});
     renderItem4Assets(status);
     renderItem4Plan(status);
     renderItem4Variants(status);
@@ -11901,6 +12190,11 @@ function timedScriptAssetLabel(asset, index) {
     const partSize = Math.max(5 * 1024 * 1024, Number(session?.part_size || ITEM4_DIRECT_UPLOAD_MAX_BYTES) || (16 * 1024 * 1024));
     if (!assetId) throw new Error("Upload session did not return an asset id");
     if (session?.record) activeProductionRequest = session.record;
+    const uploadController = originKind === "vibe-cut" ? new AbortController() : null;
+    if (uploadController) {
+      vibeUploadAbortController = uploadController;
+      if (vibeUploadRetryRequested) uploadController.abort();
+    }
     const parts = [];
     const totalParts = Math.max(1, Math.ceil(sizeBytes / partSize));
     const report = (doneParts) => {
@@ -11924,6 +12218,7 @@ function timedScriptAssetLabel(asset, index) {
             headers: { "Content-Type": "application/octet-stream" },
             timeoutMs: 300000,
             retries: 0,
+            ...(uploadController ? { signal: uploadController.signal } : {}),
           },
         );
         const etag = String(uploaded?.etag || "").trim();
@@ -11933,6 +12228,9 @@ function timedScriptAssetLabel(asset, index) {
         if (ezIsAzFinishedPath()) {
           setAzFinishedMessage(`Uploading part ${partNumber} of ${totalParts} (${Math.round((partNumber / totalParts) * 100)}%)…`);
         }
+      }
+      if (typeof onProgress === "function") {
+        onProgress({ doneParts: totalParts, totalParts, pct: 100, stage: "saving" });
       }
       const complete = await api(
         `/api/production-requests/${encodeURIComponent(requestId)}/assets/upload-session/${encodeURIComponent(assetId)}/complete`,
@@ -11946,6 +12244,7 @@ function timedScriptAssetLabel(asset, index) {
           }),
           timeoutMs: 300000,
           retries: 0,
+          ...(uploadController ? { signal: uploadController.signal } : {}),
         },
       );
       if (complete?.record) activeProductionRequest = complete.record;
@@ -11958,6 +12257,8 @@ function timedScriptAssetLabel(asset, index) {
         );
       } catch {}
       throw error;
+    } finally {
+      if (vibeUploadAbortController === uploadController) vibeUploadAbortController = null;
     }
   }
 
@@ -12070,6 +12371,14 @@ function timedScriptAssetLabel(asset, index) {
     item4Uploading = true;
     item4UploadBatchTotal = existingCount + files.length;
     item4UploadBatchDone = existingCount;
+    if (ezIsVibeCut() && files[0]) {
+      setVibeUploadUi("uploading", {
+        file: files[0],
+        pct: 0,
+        detail: "Secure upload started. Keep this tab open until every part reaches the server.",
+        activityKey: `upload:${files[0].name}:0`,
+      });
+    }
     const progress = $("item4UploadProgress");
     const button = $("item4BuildPlan");
     files.forEach(item4HoldClipFile);
@@ -12104,26 +12413,47 @@ function timedScriptAssetLabel(asset, index) {
         posterBlobs[index] = poster;
         try {
           const result = await postItem4MasterFile(file, poster, {
-            onProgress: ({ doneParts, totalParts, pct }) => {
+            onProgress: ({ doneParts, totalParts, pct, stage }) => {
               const safePct = Math.max(0, Math.min(99, Number(pct) || 0));
+              if (ezIsVibeCut()) {
+                if (stage === "saving") {
+                  setVibeUploadUi("saving", {
+                    file,
+                    pct: 100,
+                    detail: "All video parts reached the server. Finalizing the persisted source now.",
+                    activityKey: `saving:${file.name}:${totalParts}`,
+                  });
+                } else {
+                  setVibeUploadUi("uploading", {
+                    file,
+                    pct: safePct,
+                    detail: totalParts > 1
+                      ? `Part ${Math.min(doneParts + 1, totalParts)} of ${totalParts}. Keep this tab open.`
+                      : "Keep this tab open until the upload finishes.",
+                    activityKey: `upload:${file.name}:${doneParts}`,
+                  });
+                }
+              }
               const title = `Uploading ${file.name} · ${safePct}%`;
               const detail = totalParts > 1
                 ? `Part ${Math.min(doneParts + 1, totalParts)} of ${totalParts}. Keep this tab open.`
                 : "Keep this tab open until the upload finishes.";
-              ["item4UploadProgress", "ezUploadProgress"].forEach((id) => {
-                const node = $(id);
-                if (!node) return;
-                node.hidden = false;
-                node.dataset.heal = "uploading";
-                node.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(detail)}</span>`;
-              });
+              if (!ezIsVibeCut()) {
+                ["item4UploadProgress", "ezUploadProgress"].forEach((id) => {
+                  const node = $(id);
+                  if (!node) return;
+                  node.hidden = false;
+                  node.dataset.heal = "uploading";
+                  node.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(detail)}</span>`;
+                });
+              }
               setRequestMessage(`${title}. ${detail}`, "success");
               setEzMessage(`${title}. ${detail}`, "success");
             },
           });
           if (result?.record) activeProductionRequest = result.record;
           if (Array.isArray(result?.assets)) {
-            item4ApplyAssetsLocally(result.assets);
+            item4ApplyAssetsLocally(result.assets, { assetsStatus: result.authority_status });
           } else {
             await loadItem4Workspace(activeProductionRequest, { allowAssetChanges: true });
           }
@@ -12132,9 +12462,37 @@ function timedScriptAssetLabel(asset, index) {
           }
           item4UploadBatchDone += 1;
           ezStagedFiles = files.slice(index + 1);
+          if (ezIsVibeCut()) {
+            if (result?.compression_pending || item4WorkspaceNeedsCompression(item4Workspace)) {
+              setVibeUploadUi("processing", {
+                file,
+                detail: "Upload complete. Studio is processing the video before Continue unlocks.",
+                activityKey: `processing:${vibeCutPersistedSource()?.id || file.name}:0`,
+              });
+            } else if (vibeCutReadySource()) {
+              setVibeUploadUi("ready", {
+                file,
+                detail: "The server confirmed the persisted source video is ready.",
+                activityKey: `ready:${vibeCutPersistedSource()?.id || file.name}`,
+              });
+            } else {
+              setVibeUploadUi("saving", {
+                file,
+                detail: "Upload complete. Studio is confirming the saved video before Continue unlocks.",
+                activityKey: `saving:${vibeCutPersistedSource()?.id || file.name}:0`,
+              });
+            }
+          }
           updateItem4MasterProgress(item4Workspace || {});
         } catch (error) {
           failed.push(`${file.name}: ${item4UploadErrorMessage(error, [file])}`);
+          if (ezIsVibeCut()) {
+            setVibeUploadUi("failed", {
+              file,
+              detail: item4UploadErrorMessage(error, [file]),
+              activityKey: `failed:${file.name}:${Date.now()}`,
+            });
+          }
         }
       }
       ezStagedFiles = [];
@@ -12213,6 +12571,13 @@ function timedScriptAssetLabel(asset, index) {
       }
       setRequestMessage(friendly, "error-text");
       setEzMessage(friendly, "error-text");
+      if (ezIsVibeCut()) {
+        setVibeUploadUi("failed", {
+          file: files[0],
+          detail: friendly,
+          activityKey: `failed:${files[0]?.name || "video"}:${Date.now()}`,
+        });
+      }
       return { ok: false, error: friendly };
     } finally {
       item4Uploading = false;
@@ -12226,13 +12591,14 @@ function timedScriptAssetLabel(asset, index) {
   const item4PendingRemoves = new Set();
   let item4RemoveDrain = Promise.resolve();
 
-  function item4ApplyAssetsLocally(assets, { planNeedsRebuild = true } = {}) {
+  function item4ApplyAssetsLocally(assets, { planNeedsRebuild = true, assetsStatus = "" } = {}) {
     const next = (Array.isArray(assets) ? assets : []).map((row, index) => ({
       ...row,
       order: index + 1,
     }));
+    const acknowledgedStatus = String(assetsStatus || "").trim();
     const authority = next.length
-      ? (String(item4Workspace?.assets_status || "").trim() === "Uploading" ? "Uploading" : "Ready")
+      ? (acknowledgedStatus || (String(item4Workspace?.assets_status || "").trim() === "Uploading" ? "Uploading" : "Ready"))
       : "None";
     item4Workspace = {
       ...(item4Workspace || {}),
@@ -14105,7 +14471,7 @@ function timedScriptAssetLabel(asset, index) {
       setRequestMessage("This request is locked. Start a new Vibe Cut to replace the source footage.", "error-text");
       return;
     }
-    item4BeginClipPick("item4ClipInput");
+    retryVibeUpload("item4ClipInput");
   });
   $("item4VibeSaveContinue")?.addEventListener("click", async (event) => {
     event.preventDefault();
@@ -14138,7 +14504,15 @@ function timedScriptAssetLabel(asset, index) {
     item4BeginClipPick("item4ClipInput");
   });
   $("item4MediaInput")?.addEventListener("change", (event) => { uploadItem4Files(event.target.files); event.target.value = ""; });
-  $("item4ClipInput")?.addEventListener("change", (event) => { uploadItem4Files(event.target.files); event.target.value = ""; });
+  $("item4ClipInput")?.addEventListener("change", (event) => {
+    if (ezIsVibeCut() && vibeUploadRetryRequested) receiveMasterPhotos(event.target.files);
+    else uploadItem4Files(event.target.files);
+    event.target.value = "";
+  });
+  $("item4ClipInput")?.addEventListener("cancel", () => {
+    vibeUploadRetryRequested = false;
+    renderVibeUploadUi(item4Workspace || {});
+  });
 
   let item4LibraryItems = [];
   let item4LibrarySelected = new Set();

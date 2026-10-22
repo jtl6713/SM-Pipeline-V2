@@ -114,7 +114,7 @@ test("Awaiting final approval requires every output to be review-ready and unapp
 test("Worker continuously dispatches every Airtable-ready profile but never performs final approval", async () => {
   const worker = await readFile(new URL("./worker.js", import.meta.url), "utf8");
   const functions = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
-  assert.match(worker, /version: "0\.10\.671-quality-failed-output-recovery"/);
+  assert.match(worker, /version: "0\.10\.678-scripted-short-publishable-title"/);
   assert.match(worker, /studio_ready_production_flow_v1: true/);
   const minuteCron = worker.slice(
     worker.indexOf('if (String(event?.cron || "").trim() === "* * * * *")'),
@@ -193,7 +193,7 @@ test("P0 #907 platform filtering imports PR_PLATFORMS across the Worker split", 
   const worker = await readFile(new URL("./worker.js", import.meta.url), "utf8");
   const functions = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(worker, /const PR_PLATFORMS = new Set\(/);
-  assert.match(worker, /\n\s*PR_PLATFORMS,\n/, "worker.js must export canonical PR_PLATFORMS");
+  assert.match(worker, /\r?\n\s*PR_PLATFORMS,\r?\n/, "worker.js must export canonical PR_PLATFORMS");
   const workerImport = functions.match(/import\s*\{([\s\S]*?)\}\s*from "\.\/worker\.js";/);
   assert.ok(workerImport, "extracted module must import from worker.js");
   assert.match(workerImport[1], /\bPR_PLATFORMS\b/,

@@ -132,7 +132,7 @@ test("Home dashboard exposes only actionable counts and filtered destinations", 
   assert.doesNotMatch(app, /label: "Active outputs"/);
   assert.doesNotMatch(app, /label: "Published"/);
   assert.match(app, /if \(filter === "attention" \|\| filter === "manual"\) return studio === "Manual Action Required"/);
-  assert.match(app, /if \(filter === "failed"\) return state === "Failed"/);
+  assert.match(app, /if \(filter === "failed"\) return typeof record\?\.home_failed === "boolean"[\s\S]*?\? record\.home_failed[\s\S]*?: state === "Failed" \|\| \/failed\|error\/i\.test\(render\) \|\| \/failed\|error\/i\.test\(publish\)/);
   assert.match(app, /if \(filter === "approval"\) \{[\s\S]*?const approvalState = studio === "Ready for Review"/);
   assert.match(app, /if \(record\?\.do_not_publish\) return false/);
   assert.match(app, /outputStatus === "skipped" \|\| outputStatus === "cancelled" \|\| outputStatus === "rejected"/);
