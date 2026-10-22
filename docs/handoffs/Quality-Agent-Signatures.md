@@ -379,3 +379,54 @@ and must never be handled by this signature.
 
 **Tests:** `apps/studio-api/failed-output-monitor.test.mjs`,
 `apps/studio-api/facebook-story-rate-limit-quality.test.mjs`.
+
+
+## QA-AUTONOMOUS-VERIFICATION-RECOVERY — Verified Meta Story recovery and truthful counts (2026-10-21)
+
+**Scope:** This extends PR #1045 without bypassing Facebook Graph 368 cooldown, its
+three-attempt automatic rearm threshold, or the existing eight-dispatch evidence
+hold. Airtable is authoritative. Supabase Phase 5 and media ownership are unchanged.
+
+**Flow:**
+1. Every scheduled Worker run pages the full eligible Facebook rate-limit census,
+   rather than stopping at the newest 18 output IDs. Original schedule and
+   approval remain immutable during low-attempt rearm.
+2. New Facebook Story Graph creates persist `Platform_Media_ID` in Airtable
+   immediately after `video_stories: start` returns a video ID and *before*
+   upload or `finish`. Publication auto-dispatch is disarmed at that point
+   until the current attempt is reconciled. A missing receipt aborts the upload.
+   A pre-existing media ID must never trigger a second `start`.
+3. For due, held outputs that have an exact saved media ID, the Worker makes
+   read-only `GET /{page-id}/stories` calls with the profile's existing Meta
+   settings. Scan at most four result pages per output and two capped outputs
+   per Worker continuation. Use published **status, exact media_id, unique
+   post_id** as affirmative evidence; re-read authoritative Airtable before
+   reconciling `Published_At`, `Platform_Post_ID`, `Platform_Post_URL`, and
+   the published status. **No Graph POST is permitted in this recovery branch.**
+4. No match, Graph errors, missing credentials, expired/archived-only Stories,
+   duplicated matches, media ID absence, and incomplete pages are inconclusive.
+   Never infer a safe new create from a missing Story, reset counters, or
+   mark one published on timing/name similarity.
+5. Older exhausted Stories without a durable media ID remain under automated
+   investigation until a provider-side audit is demonstrably necessary. When
+   at least eight attempts occurred, the last attempt was over 48 hours ago,
+   and the provider identity is unavailable, count them as genuine human-action
+   exceptions with explicit instructions to inspect historical Meta activity.
+   This preserves safety rather than fabricating an automatic resolution.
+6. Only exact successful publication plus a retained QA audit marker counts as
+   an **automatically recovered** output, measured over the previous seven days
+   using `Studio_Publish_Dispatch_At`. Rearmed but not published is *not*
+   counted as recovered. The Factory Quality panel and Desk API report four
+   disjoint states: verified automatic recovery (last seven days), cooldown,
+   investigation and human action. If the paginated recovery-audit query fails,
+   the recovered count must be **unknown**, not zero.
+
+**Limits:** The read-only reconciliation can recover ambiguously completed
+Stories if their original Meta video ID was durably saved. Pre-existing
+eight-attempt outputs with no saved ID cannot automatically be declared
+unpublished after Stories expire. Their provider-side audit is a genuine
+exception, not a generic "click retry" instruction. A new create requires
+fresh evidence and its original retry guards, never an eight-attempt reset.
+
+**Tests:** `apps/studio-api/quality-verification-recovery.test.mjs` and
+`apps/studio-web/factory-autonomous-verification.test.mjs`.
