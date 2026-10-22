@@ -1,3 +1,4 @@
+import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
 import { withPhase5SyncLease } from "./supabase-sync-lease.mjs";
 import { homeApprovedExceptionKind, homeIsUnpublishedFailure } from "./profile-summary-classification.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
@@ -11384,6 +11385,36 @@ export async function studioPublishFacebookPageStory(env, record) {
   const version = String(settings.FACEBOOK_GRAPH_API_VERSION || "v25.0").replace(/^\/+|\/+$/g, "");
   if (!pageId || !token) return { ok: false, skipped: "missing-facebook-settings" };
 
+  // Any pre-existing upload session is ambiguous until Meta confirms status.
+  // Never launch a second Graph create after a possibly successful first.
+  const previousMediaId = String(f(record, "Platform_Media_ID") || "").trim();
+  if (previousMediaId) {
+    const result = await verifyFacebookStoryByMediaId({
+      pageId, token, version, mediaId: previousMediaId,
+    });
+    if (result.verdict !== "verified_published") {
+      return { ok: false, skipped: "remote-verification-pending",
+        verification_reason: result.reason || "no_published_story_evidence" };
+    }
+    const latest = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id).catch(() => null);
+    if (!latest || String(f(latest, "Platform_Media_ID") || "").trim() !== previousMediaId
+        || f(latest, "Publish_Locked_By") || f(latest, "Published_At") || f(latest, "Platform_Post_ID"))
+      return { ok: false, skipped: "publication_state_changed" };
+    const evidence = result.evidence;
+    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
+      method: "PATCH", body: JSON.stringify({ typecast: true, fields: {
+        Publish_Status: "Published", Output_Status: "Published",
+        FB_Publish_Status: "Published", Platform_Post_ID: evidence.post_id,
+        ...(evidence.url ? { Platform_Post_URL: evidence.url } : {}),
+        ...(evidence.published_at ? { Published_At: evidence.published_at } : {}),
+        Publish_Error_Stage: "", Publish_Error_Message: "",
+        Publish_Retry_Eligible: false, Publish_Next_Retry_At: null,
+        Auto_Publish_Enabled: false,
+      } }),
+    });
+    return { ok: true, post_id: evidence.post_id, reused_existing_remote_story: true };
+  }
+
   const location = await studioResolvePublishLocation(env, record);
   const storiesUrl = `https://graph.facebook.com/${version}/${pageId}/video_stories`;
   const startResponse = await fetch(storiesUrl, {
@@ -11395,6 +11426,18 @@ export async function studioPublishFacebookPageStory(env, record) {
   if (!startResponse.ok || !start.video_id || !start.upload_url) {
     console.warn("facebook story start failed", startResponse.status, start?.error?.message || "");
     return { ok: false, error: start?.error?.message || `start ${startResponse.status}` };
+  }
+
+  // Persist the upload identity before the first media upload or finish POST.
+  // An Airtable write failure must stop publishing; the next continuation can
+  // safely perform read-only verification of this exact Meta media identity.
+  try {
+    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: { Platform_Media_ID: String(start.video_id) }, typecast: true }),
+    });
+  } catch {
+    return { ok: false, skipped: "upload_identity_not_persisted" };
   }
 
   const mediaResponse = await fetch(preview, { headers: { "User-Agent": "chicagoshining-studio-api/publish-dispatch" } });
@@ -11442,7 +11485,13 @@ export async function studioPublishFacebookPageStory(env, record) {
     return { ok: false, error: finish?.error?.message || `finish ${finishResponse.status}` };
   }
 
-  const postId = String(finish.post_id || start.video_id);
+  // The media ID is not a Story post ID. If Graph did not return post_id,
+  // leave a verifiable hold rather than fabricating a public Story link.
+  const postId = String(finish.post_id || "").trim();
+  if (!/^\\d{6,30}$/.test(postId)) return { ok: false, skipped: "finish_missing_post_id" };
+  const remote = await verifyFacebookStoryByMediaId({
+    pageId, token, version, mediaId: String(start.video_id), maxPages: 2,
+  });
   await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
     method: "PATCH",
     body: JSON.stringify({
@@ -11453,7 +11502,8 @@ export async function studioPublishFacebookPageStory(env, record) {
         Published_At: new Date().toISOString(),
         Platform_Post_ID: postId,
         Platform_Media_ID: String(start.video_id),
-        Platform_Post_URL: `https://www.facebook.com/stories/${postId}`,
+        ...(remote.verdict === "verified_published" && remote.evidence?.url
+          ? { Platform_Post_URL: remote.evidence.url } : {}),
         FB_Publish_Status: "Published",
         Publish_Error_Message: "",
         Publish_Error_Stage: "",
