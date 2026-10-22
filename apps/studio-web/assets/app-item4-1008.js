@@ -281,7 +281,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.742-approved-exception-scope";
+  const BUILD_ID = "item4-0.6.743-scripted-short-profile-scope";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -416,7 +416,9 @@
     if (!selectedProfileId) return path;
     const qIndex = String(path || "").indexOf("?");
     const pathname = qIndex === -1 ? path : path.slice(0, qIndex);
-    const scoped = pathname === "/api/ideas" || pathname.startsWith("/api/ideas/")
+    const scoped = pathname === "/api/scripted-short/propose"
+      || pathname === "/api/scripted-short/accept"
+      || pathname === "/api/ideas" || pathname.startsWith("/api/ideas/")
       || pathname === "/api/production-requests" || pathname.startsWith("/api/production-requests/")
       || pathname === "/api/content"
       || pathname === "/api/outputs"
@@ -2617,6 +2619,10 @@
       setScriptedShortMessage("Describe the short in a sentence.", "error-text");
       return;
     }
+    if (!selectedProfileId) {
+      setScriptedShortMessage("Select a Shining Cities profile before proposing a short.", "error-text");
+      return;
+    }
     if (button) {
       button.disabled = true;
       button.textContent = "Writing…";
@@ -2625,7 +2631,7 @@
     try {
       const result = await api("/api/scripted-short/propose", {
         method: "POST",
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, content_profile_id: selectedProfileId }),
         timeoutMs: 150000,
       });
       scriptedShortProposal = result;
@@ -2663,6 +2669,7 @@
         method: "POST",
         body: JSON.stringify({
           prompt: scriptedShortProposal.prompt || $("scriptedShortPrompt")?.value || "",
+          content_profile_id: selectedProfileId,
           timeline: scriptedShortProposal.timeline,
         }),
         timeoutMs: 150000,
