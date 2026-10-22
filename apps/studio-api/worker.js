@@ -636,6 +636,7 @@ import {
   cadenceSetActive,
   studioTiktokComplete,
 } from "./worker-functions-03.mjs";
+import { auditReel368Holds } from "./facebook-reel-368-audit.mjs";
 import {
   healStaleManualFlagsOnPublishedRecord,
   healYoutubeManualWithLiveVideoRecord,
@@ -2499,6 +2500,17 @@ export default {
           })))
           .catch((error) => console.warn("FB3 independent cron failed", error)));
       }
+    }
+    // QA-1050: half-hour read-only evidence audit, independent of Factory.
+    // Never performs a Meta Graph create or releases safety holds.
+    if (cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(auditReel368Holds(env, { airtableFetch })
+        .then((results) => console.info("QA-1050 reel368 read-only audit", JSON.stringify({
+          outcomes: results.map(({ output_id, outcome, safety_blocked, next_check_at }) =>
+            ({ output_id, outcome, safety_blocked, next_check_at })),
+          graph_creates: 0,
+        })))
+        .catch((error) => console.warn("QA-1050 reel368 audit failed", String(error?.message || error))));
     }
     // Exact-video FBS4 status poll is separate from any Meta Reel creation.
     // Polling can attach a best-effort thumbnail to an EXISTING posted video,

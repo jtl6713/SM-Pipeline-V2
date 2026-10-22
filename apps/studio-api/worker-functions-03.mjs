@@ -11723,6 +11723,12 @@ export async function studioEnsureFacebookSlideshowAsset(env, record) {
 export async function studioPublishFacebookReelNative(env, record) {
   const recordId = String(record?.id || "").trim();
   if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "FBS3-NATIVE" };
+  const latest = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId).catch(() => null);
+  if (!latest?.id || latest.id !== recordId || f(latest, "Do_Not_Publish") === true
+      || String(f(latest, "Publish_Error_Stage") || "") === "FBS3_RATE_LIMIT") {
+    return { ok: false, skipped: "qa_1050_verification_required", target: "FBS3-NATIVE" };
+  }
+
 
   const videoUrl = String(
     f(record, "FB_Slideshow_Public_URL")
@@ -11901,6 +11907,16 @@ export async function studioPublishFacebookReelNative(env, record) {
 export async function studioPulseFbs3(env, record) {
   const recordId = String(record?.id || "").trim();
   if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "FBS3" };
+  // QA-1050: re-read before any FBS3 create/upload attempt. A 368
+  // cooldown expiring does NOT prove the previous Graph request created nothing.
+  const latest = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId).catch(() => null);
+  if (!latest?.id || latest.id !== recordId
+      || f(latest, "Do_Not_Publish") === true
+      || String(f(latest, "Publish_Error_Stage") || "") === "FBS3_RATE_LIMIT"
+      || f(latest, "Publish_Retry_Eligible") === false && String(f(latest, "Publish_Status") || "") === "Failed") {
+    return { ok: false, skipped: "qa_1050_verification_required", target: "FBS3" };
+  }
+
   const { response, payload } = await item4PulsePipelineStage(env, "fbs3", {
     output_record_id: recordId,
   }, "FBS3");
