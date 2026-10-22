@@ -11398,7 +11398,11 @@ export async function studioPublishFacebookPageStory(env, record) {
         Platform_Media_ID: String(start.video_id),
         Auto_Publish_Enabled: false,
         Publish_Retry_Eligible: false,
-        Studio_Publish_Dispatch_Note: "FB-STORY-GRAPH: started media_id=" + String(start.video_id),
+        Studio_Publish_Dispatch_Note: (
+          "FB-STORY-GRAPH: started media_id=" + String(start.video_id)
+          + (String(f(record, "Studio_Publish_Dispatch_Note") || "").includes(VERIFICATION_REARM_MARKER)
+            ? " | " + VERIFICATION_REARM_MARKER : "")
+        ).slice(0, 900),
       }, typecast: true }),
     });
   } catch (error) {
