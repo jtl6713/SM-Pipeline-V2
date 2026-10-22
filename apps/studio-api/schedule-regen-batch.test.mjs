@@ -321,7 +321,7 @@ test("Worker and Pipeline wire durable schedule regeneration", () => {
   assert.match(worker, /leasedProcessing/);
   assert.match(worker, /SCHEDULE_REGEN_LIVE_LEASE_MS/);
   assert.match(worker, /softLeaseMs/);
-  assert.match(worker, /version: "0.10.671-quality-failed-output-recovery"/);
+  assert.match(worker, /version: "0.10.678-scripted-short-publishable-title"/);
   assert.match(worker, /SCHEDULE_REGEN_OVERNIGHT_V1/);
   assert.match(worker, /studioEnqueueOvernightScheduleRegenJobs/);
   assert.match(worker, /studioResumeScheduleRegenJobs/);
