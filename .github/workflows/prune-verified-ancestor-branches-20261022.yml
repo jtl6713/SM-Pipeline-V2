@@ -1,0 +1,61 @@
+name: Prune verified ancestor-only branches (2026-10-22)
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/prune-verified-ancestor-branches-20261022.yml
+permissions:
+  contents: write
+  pull-requests: read
+concurrency:
+  group: prune-verified-ancestor-branches-20261022
+  cancel-in-progress: false
+jobs:
+  prune:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout full ancestry for guarded branch pruning
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Delete only exact unchanged branches fully contained in main
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          while IFS=' ' read -r branch expected; do
+            [[ -z "$branch" ]] && continue
+            echo "CHECK branch=$branch"
+            live="$(git ls-remote origin "refs/heads/$branch" | awk '{print $1}')"
+            if [[ "$live" != "$expected" ]]; then
+              echo "SKIP_SHA_DRIFT branch=$branch live=$live"
+              continue
+            fi
+            if ! git cat-file -e "$expected^{commit}" 2>/dev/null; then
+              git fetch --no-tags origin "$branch"
+            fi
+            if ! git merge-base --is-ancestor "$expected" origin/main; then
+              echo "SKIP_UNMERGED_COMMITS branch=$branch"
+              continue
+            fi
+            open_pr_count="$(gh pr list -R "$GITHUB_REPOSITORY" --head "$branch" --state open --json number --jq 'length')"
+            if [[ "$open_pr_count" != 0 ]]; then
+              echo "SKIP_ACTIVE_PR branch=$branch count=$open_pr_count"
+              continue
+            fi
+            # Lease guards deletion: a concurrent branch update must not be discarded.
+            git push --force-with-lease="refs/heads/$branch:$expected" origin ":refs/heads/$branch"
+            echo "DELETED_ANCESTOR_ONLY branch=$branch"
+          done <<'BRANCHES'
+          fix/pipeline-tiktok-manual-url-failed-recovery bb9e5bda8418ab1a53d7a642476712a9f851bd26
+          fix/quality-recovery-shared-progress-20261021 49c1bb7d4f9fdec2e1be4c4b709490b02ca7de46
+          ops/qa-7043-exact-publish-kick-20261021 0a89c159b6122d58f9c444991a8256cfac879493
+          test/align-ui-v732-remaining-contracts-20261020 93a2b07ef103c6b425aeb66e7d682368085d2848
+          tmp/qa-1028-final-rebase-20261021 e4b49cd3f0b6d571603f929fdbc335808d0450ae
+          BRANCHES
+          echo 'PRUNE_GUARDED_AUDIT_COMPLETE'
