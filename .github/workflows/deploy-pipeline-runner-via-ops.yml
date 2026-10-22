@@ -38,6 +38,7 @@ jobs:
             services/pipeline-runner/tests/test_profile_music_policy.py \
             services/pipeline-runner/tests/test_item4_variant_batch.py \
             services/pipeline-runner/tests/test_fbs2_storage_retry.py \
+            services/pipeline-runner/tests/test_fbs3_rate_limit_guard.py \
             services/pipeline-runner/tests/test_supabase_pipeline_writes.py \
             services/pipeline-runner/tests/test_visual_watermark.py
 
@@ -285,3 +286,5 @@ jobs:
 # 2026-10-21: Deploy PR #1035 verified AP4C expired parent => fresh children on AP1C, protecting output 7856's Oct 23 schedule and all future carousel parents; keep Airtable authoritative and publishing time guards.
 
 # 2026-10-21: Deploy merged PR #1038 FB0 manifest-backed doubled-slide auto-recovery. Airtable remains authoritative; publish idempotency unchanged.
+
+# 2026-10-22: deploy Graph-368 FBS3 no-auto-recreate guard and test through existing Ops runner workflow.

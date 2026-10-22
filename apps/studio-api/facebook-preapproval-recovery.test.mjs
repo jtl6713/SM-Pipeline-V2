@@ -54,6 +54,20 @@ test("fail closed on publication ambiguity, exhausted sends, account issues and 
   ]) assert.equal(reason(patch), expected, JSON.stringify(patch));
 });
 
+test("FBS3 never automatically recreates a Reel after Graph 368", () => {
+  const ops = fs.readFileSync(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+  const start = ops.indexOf("export async function studioReconcileFacebookReels(");
+  const end = ops.indexOf("/*__STUDIO_WORKER_END:studioReconcileFacebookReels__*/", start);
+  const block = ops.slice(start, end);
+  assert.match(block, /rate_limit_requires_operator_review/);
+  assert.match(block, /\{Publish_Error_Stage\}!="FBS3_RATE_LIMIT"/);
+  assert.match(block, /\{Publish_Error_Stage\}!="FB_GRAPH_RATE_LIMIT"/);
+  const runner = fs.readFileSync(new URL("../../services/pipeline-runner/fbs3/eligibility.py", import.meta.url), "utf8");
+  assert.match(runner, /rate_limit_requires_operator_review/);
+  assert.match(runner, /"fbs3_rate_limit"/);
+  assert.match(runner, /"fb_graph_rate_limit"/);
+});
+
 test("preapproval patch preserves durable slot until next atomic MAE approval", () => {
   const fields = facebookPreapprovalRecoveryFields(row({
     Scheduled_Post_Date: "2026-10-24T01:00:00Z", Final_File_URL: "https://media/video.mp4",

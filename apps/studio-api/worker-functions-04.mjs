@@ -2256,7 +2256,7 @@ export async function studioReconcileFacebookReels(env, options = {}) {
     try {
       ready = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
         limit,
-        filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())),OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR(AND({FB_Slideshow_Status}="Video Ready",{FB_Slideshow_Public_URL}!=""),AND({FB_Slideshow_Status}="Retry Pending",OR(FIND("FBS3",UPPER({Publish_Error_Stage}&""))>0,FIND("RATE_LIMIT",UPPER({Publish_Error_Stage}&""))>0))))',
+        filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Publish_Error_Stage}!="FBS3_RATE_LIMIT",{Publish_Error_Stage}!="FB_GRAPH_RATE_LIMIT",OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())),OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR(AND({FB_Slideshow_Status}="Video Ready",{FB_Slideshow_Public_URL}!=""),AND({FB_Slideshow_Status}="Retry Pending",OR(FIND("FBS3",UPPER({Publish_Error_Stage}&""))>0,FIND("RATE_LIMIT",UPPER({Publish_Error_Stage}&""))>0))))',
         sortField: "Scheduled_Post_Date",
         sortDirection: "asc",
       });
@@ -2300,6 +2300,14 @@ export async function studioReconcileFacebookReels(env, options = {}) {
     }
   }
   for (const row of ready) {
+    // Meta Graph 368 is not permission to start a second Reel.
+    // Quality Agent requires 48-hour hold AND renewed operator review.
+    // FBS4 may still verify any already-uploaded remote video independently.
+    if (["FBS3_RATE_LIMIT", "FB_GRAPH_RATE_LIMIT"].includes(
+        String(f(row, "Publish_Error_Stage") || "").trim())) {
+      results.push({ id: row.id, stage: "fbs3", skipped: "rate_limit_requires_operator_review" });
+      continue;
+    }
     if (!studioPublishCanDispatchNow(row)) continue;
     try {
       const pulsed = await studioPulseFbs3(env, row);
