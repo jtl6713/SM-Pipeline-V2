@@ -1,0 +1,55 @@
+name: Quality Agent Autonomous Verification Safety
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/qa-autonomous-verification.yml'
+      - 'apps/studio-api/quality-verification-recovery.mjs'
+      - 'apps/studio-api/quality-verification-recovery.test.mjs'
+      - 'apps/studio-api/facebook-story-rate-limit-quality.test.mjs'
+      - 'apps/studio-api/failed-output-monitor.mjs'
+      - 'apps/studio-api/worker-functions-01.mjs'
+      - 'apps/studio-api/worker-functions-03.mjs'
+      - 'apps/studio-api/worker-functions-04.mjs'
+      - 'apps/studio-api/desk-inventory.mjs'
+      - 'apps/studio-api/quality-recap.mjs'
+      - 'apps/studio-web/assets/factory-batch-quality-0710.js'
+      - 'apps/studio-web/factory-autonomous-verification.test.mjs'
+      - 'apps/studio-web/index.html'
+      - 'docs/handoffs/Quality-Agent-Signatures.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verification:
+    name: Quality Agent verification safety tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate JS syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check apps/studio-api/quality-verification-recovery.mjs
+          node --check apps/studio-api/worker-functions-01.mjs
+          node --check apps/studio-api/worker-functions-03.mjs
+          node --check apps/studio-api/worker-functions-04.mjs
+          node --check apps/studio-web/assets/factory-batch-quality-0710.js
+      - name: Guarded recovery, Factory and release contract regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            apps/studio-api/facebook-story-rate-limit-quality.test.mjs \
+            apps/studio-api/quality-verification-recovery.test.mjs \
+            apps/studio-api/failed-output-monitor.test.mjs \
+            apps/studio-api/quality-checks.test.mjs \
+            apps/studio-web/factory-autonomous-verification.test.mjs \
+            apps/studio-web/ui-release-contract.test.mjs \
+            apps/studio-web/all-profiles-load.test.mjs
