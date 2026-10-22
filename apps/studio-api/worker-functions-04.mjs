@@ -1,5 +1,6 @@
 import { summarizeAutonomousVerification } from "./autonomous-verification-recovery.mjs";
 import { FACEBOOK_PENDING_FINALIZE_FORMULA, fb3FinalizeEligible, selectFb3FinalizeBatch } from "./facebook-photo-finalize-priority.mjs";
+import { FACEBOOK_REEL_POLL_FORMULA, facebookReelPollVideoId, facebookReelPollEligible, selectFacebookReelPollBatch } from "./facebook-reel-finalize-priority.mjs";
 import { scanApprovedPastDueOutputs, classifyApprovedPastDue, STALE_PUBLISHED_RECEIPT_FORMULA, publishedReceiptRepairReason } from "./approved-past-due-quality.mjs";
 import { QUALITY_RECOVERY_LEDGER_TABLE } from "./qa-recovery-ledger.mjs";
 import { scanOutstandingFailedOutputs, describeFailedOutput, facebookRateLimitResetReason } from "./failed-output-monitor.mjs";
@@ -1068,6 +1069,49 @@ export async function studioReconcileFacebookPhotoFinalizes(env, options = {}) {
   return results;
 }
 /*__STUDIO_WORKER_END:studioReconcileFacebookPhotoFinalizes__*/
+
+export async function studioReconcileFacebookReelFinalizes(env, options = {}) {
+  // FBS4 polls an EXISTING Meta video ID and can finalize a published Reel
+  // (including best-effort thumbnail attach); it NEVER starts/uploads/publishes
+  // a new Reel. FBS3 creation is forbidden in this lane.
+  const limit = Math.max(1, Math.min(4, Number(options.limit || 3)));
+  const table = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const rows = await listRecords(env, table, {
+    limit: 36, filterFormula: FACEBOOK_REEL_POLL_FORMULA,
+    sortField: "FB_Slideshow_Last_Checked_At", sortDirection: "asc",
+  });
+  const candidates = selectFacebookReelPollBatch(rows, { limit });
+  const results = [];
+  for (const candidate of candidates) {
+    const latest = await airtableFetch(env, table, candidate.id).catch(() => null);
+    const videoId = facebookReelPollVideoId(candidate);
+    if (!latest || !facebookReelPollEligible(latest) ||
+        facebookReelPollVideoId(latest) !== videoId) {
+      results.push({ id: candidate.id, output_id: f(candidate, "Output_ID") || null,
+        status: "skipped_state_changed", no_reel_create: true });
+      continue;
+    }
+    try {
+      const poll = await studioPulseFbs4(env, latest);
+      const verified = await airtableFetch(env, table, candidate.id).catch(() => null);
+      const completed = Boolean(verified &&
+        facebookReelPollVideoId(verified) === videoId &&
+        f(verified, "Publish_Status") === "Published" &&
+        f(verified, "Output_Status") === "Published" &&
+        f(verified, "Published_At") &&
+        String(f(verified, "Platform_Post_URL") || "").includes("/reel/" + videoId + "/"));
+      results.push({id: candidate.id, output_id: f(latest, "Output_ID") || null,
+        status: completed ? "verified_published" : poll?.skipped || "existing_video_still_processing",
+        video_id: videoId, no_reel_create: true});
+    } catch (error) {
+      results.push({id: candidate.id, output_id: f(latest, "Output_ID") || null,
+        status: "poll_unavailable", error: String(error?.message || error).slice(0, 150),
+        no_reel_create: true});
+    }
+  }
+  return results;
+}
+/*__STUDIO_WORKER_END:studioReconcileFacebookReelFinalizes__*/
 
 export async function studioReconcileFacebookPhotos(env, options = {}) {
   // Graph publish hold blocks creation, NOT finalization of a confirmed
