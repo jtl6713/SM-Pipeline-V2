@@ -1,4 +1,5 @@
 import { summarizeAutonomousVerification } from "./autonomous-verification-recovery.mjs";
+import { scanApprovedPastDueOutputs, classifyApprovedPastDue, STALE_PUBLISHED_RECEIPT_FORMULA, publishedReceiptRepairReason } from "./approved-past-due-quality.mjs";
 import { QUALITY_RECOVERY_LEDGER_TABLE } from "./qa-recovery-ledger.mjs";
 import { scanOutstandingFailedOutputs, describeFailedOutput, facebookRateLimitResetReason } from "./failed-output-monitor.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
@@ -9019,7 +9020,7 @@ async function loadStudioFailedOutputSnapshot(env, { fresh = false } = {}) {
   // Ordinary polling still uses a 60-second coalesced Airtable read.
   return studioReadCoalesce(fresh ? "quality-agent-census-fresh:" + Date.now()
     : "quality-agent-failed-output-census", fresh ? 0 : 60000, async () => {
-    const [rows, profiles, recoveredScan] = await Promise.all([
+    const [rows, profiles, recoveredScan, overdueScan] = await Promise.all([
       scanOutstandingFailedOutputs((options) =>
         listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options)),
       listContentProfileRecords(env).catch(() => []),
@@ -9030,6 +9031,12 @@ async function loadStudioFailedOutputSnapshot(env, { fresh = false } = {}) {
       { filterFormula: 'AND({Outcome}="reconciled_published",{Reconciled_At}!="")' })
         .then((records) => ({ status: "ok", records }))
         .catch((error) => ({ status: "unavailable", records: [], error: String(error?.message || error) })),
+      scanApprovedPastDueOutputs((options) =>
+        listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options))
+        .then((records) => ({ status: "ok", records }))
+        .catch((error) => ({ status: "unavailable", records: [],
+          error: "Past-due reconciliation scan unavailable; count unknown.",
+          detail: String(error?.message || error) })),
     ]);
     const profileNames = new Map((profiles || []).map((profile) => [
       profile.id,
@@ -9045,9 +9052,70 @@ async function loadStudioFailedOutputSnapshot(env, { fresh = false } = {}) {
       verification_recovery: summarizeAutonomousVerification(rows, recoveredScan.records, {
         ledgerScanStatus: recoveredScan.status,
       }),
+      approved_past_due: overdueScan.status === "ok" ? {
+        status: "ok", scanned_at: new Date().toISOString(),
+        count: overdueScan.records.length,
+        items: overdueScan.records.map((record) => {
+          const item = classifyApprovedPastDue(record);
+          return { ...item, profile_name: profileNames.get(item.profile_id) || item.profile_id };
+        }),
+      } : { status: "unavailable", error: overdueScan.error },
     };
   });
 }
+
+export async function studioQualityAuditApprovedPastDue(env, options = {}) {
+  const table = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const limit = Math.max(1, Math.min(12, Number(options.limit || 8)));
+  const overdueRows = await scanApprovedPastDueOutputs((query) => listRecordsPage(env, table, query));
+  const findings = overdueRows.map((row) => classifyApprovedPastDue(row));
+  const byCause = {};
+  for (const item of findings) byCause[item.cause] = (byCause[item.cause] || 0) + 1;
+
+  const stale = await scanOutstandingFailedOutputs(
+    (query) => listRecordsPage(env, table, query),
+    { filterFormula: STALE_PUBLISHED_RECEIPT_FORMULA });
+  const repaired = [];
+  const blocked = [];
+  for (const record of stale) {
+    if (repaired.length >= limit) break;
+    try {
+      // The full current row is required: never apply a cached publication
+      // judgment across an approval, hold or an active publish lock.
+      const current = await airtableFetch(env, table, record.id);
+      const reason = publishedReceiptRepairReason(current);
+      if (reason) {
+        blocked.push({ record_id: record.id, reason });
+        continue;
+      }
+      await airtableFetch(env, table, record.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            Output_Status: "Published",
+            Publish_Status: "Published",
+            Publish_Retry_Eligible: false,
+            Publish_Next_Retry_At: null,
+          },
+          typecast: true,
+        }),
+      });
+      repaired.push({ record_id: record.id, output_id: f(current, "Output_ID") || null });
+    } catch (error) {
+      blocked.push({ record_id: record.id, reason: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  const summary = { signature: "QA-PUBLISH-001", status: "ok",
+    past_due: findings.length, by_cause: byCause,
+    authoritative_receipts_repaired: repaired.length,
+    repaired, blocked };
+  if (findings.length || repaired.length || blocked.length) {
+    console.warn("Quality Agent approved-past-due reconciliation", JSON.stringify(summary));
+  }
+  return summary;
+}
+
+/*__STUDIO_WORKER_END:studioQualityAuditApprovedPastDue__*/
 
 export async function gatherStudioDeskInventory(env) {
   const chicago = chicagoNowParts();
@@ -14975,6 +15043,7 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
           },
         );
         let outputFailures;
+        let approvedPastDue = { status: "unavailable", error: "Past-due scan pending; count unknown." };
         try {
           const snapshot = await loadStudioFailedOutputSnapshot(env, {
             fresh: url.searchParams.get("fresh_output_failures") === "1",
@@ -14982,12 +15051,13 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
           outputFailures = { status: "ok", count: snapshot.count,
             scanned_at: snapshot.scanned_at, items: snapshot.items,
             verification_recovery: snapshot.verification_recovery };
+          approvedPastDue = snapshot.approved_past_due;
         } catch (error) {
           console.warn("Factory failed-output Quality Agent scan degraded", error);
           outputFailures = { status: "unavailable",
             error: "Failed-output monitoring unavailable; the outstanding count is unknown." };
         }
-        return respond(request, env, { ...report, output_failures: outputFailures });
+        return respond(request, env, { ...report, output_failures: outputFailures, approved_past_due: approvedPastDue });
       } catch (error) {
         console.warn("Factory quality read-only R2 monitoring degraded",
           String(error?.code || error?.status || error?.name || "unknown"));
@@ -14999,6 +15069,7 @@ export async function factoryBatchStatusRoute(request, env, authorization) {
           monitored_at: new Date().toISOString(),
           job_id: null, batches: [], quality_signals: [],
           output_failures: { status: "unavailable", error: "Monitoring unavailable; count unknown." },
+          approved_past_due: { status: "unavailable", error: "Monitoring unavailable; past-due count unknown." },
           totals: { batches: 0, pending: 0, failed: 0, findings: 0 },
         });
       }
