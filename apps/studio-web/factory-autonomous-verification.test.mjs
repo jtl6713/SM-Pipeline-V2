@@ -13,5 +13,5 @@ test("Factory surfaces all four verification recovery counts without inventing u
   assert.match(client, /genuinely need human action/);
 });
 test("Factory script is cache-busted with updated verification recovery UI", () => {
-  assert.match(html, /factory-batch-quality-0710\.js\?v=0\.6\.742-qa-autonomous-recovery/);
+  assert.match(html, /factory-batch-quality-0710\.js\?v=0\.6\.741-approved-exception-links[^"'<>]*qa-verification=v1/);
 });
