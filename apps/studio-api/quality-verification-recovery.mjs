@@ -11,7 +11,7 @@ export const VERIFICATION_REARM_MARKER =
 export const VERIFICATION_REMOTE_MARKER = "QA-FB-STORY-REMOTE-PUBLISHED";
 export const VERIFICATION_RECOVERED_DAYS = 7;
 export const VERIFICATION_RECOVERED_FORMULA =
-  'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Platform_Output_Type}="Facebook Story",{Published_At}!=BLANK(),{Platform_Post_ID}!=BLANK(),IS_AFTER({Published_At},DATEADD(NOW(),-7,"days")),OR(FIND("QA-FB-STORY-368-RETRY-PENDING: cooldown elapsed; rearmed original schedule",{Studio_Publish_Dispatch_Note}&"")>0,FIND("QA-FB-STORY-REMOTE-PUBLISHED",{Studio_Publish_Dispatch_Note}&"")>0))';
+  'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Platform_Output_Type}="Facebook Story",{Published_At}!=BLANK(),{Platform_Post_ID}!=BLANK(),IS_AFTER({Studio_Publish_Dispatch_At},DATEADD(NOW(),-7,"days")),OR(FIND("QA-FB-STORY-368-RETRY-PENDING: cooldown elapsed; rearmed original schedule",{Studio_Publish_Dispatch_Note}&"")>0,FIND("QA-FB-STORY-REMOTE-PUBLISHED",{Studio_Publish_Dispatch_Note}&"")>0))';
 
 const field = (row, key) => row?.fields?.[key] ?? row?.[key];
 const value = (row, key) => String(field(row, key) ?? "").trim();
@@ -73,13 +73,13 @@ export function buildVerificationRecoveryReport({ outstanding = [], publishedRec
     value(row, "Platform_Output_Type") === "Facebook Story" &&
     Boolean(value(row, "Published_At") && value(row, "Platform_Post_ID")) &&
     (value(row, "Studio_Publish_Dispatch_Note").includes(VERIFICATION_REARM_MARKER) || value(row, "Studio_Publish_Dispatch_Note").includes(VERIFICATION_REMOTE_MARKER)) &&
-    nowMs - Date.parse(value(row, "Published_At")) <= VERIFICATION_RECOVERED_DAYS * 86400000 &&
-    Date.parse(value(row, "Published_At")) <= nowMs
+    nowMs - Date.parse(value(row, "Studio_Publish_Dispatch_At")) <= VERIFICATION_RECOVERED_DAYS * 86400000 &&
+    Date.parse(value(row, "Studio_Publish_Dispatch_At")) <= nowMs
   );
   statuses.recovered_automatically = recovered.length;
   return { status: "ok", as_of: new Date(nowMs).toISOString(),
     recovered_window_days: VERIFICATION_RECOVERED_DAYS,
-    recovered_definition: "Verified published Facebook Stories retaining the QA rearm audit marker and a platform post ID; excludes merely rearmed posts.",
+    recovered_definition: "Verified published Facebook Stories retaining a QA rearm or remote-reconciliation audit marker and a platform post ID; excludes merely rearmed posts.",
     counts: statuses, outstanding_count: items.length, items };
 }
 
