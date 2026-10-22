@@ -7,8 +7,8 @@ export async function verifyFacebookReelByVideoId({
   videoId, token, version = "v25.0", fetcher = fetch,
 } = {}) {
   const id = String(videoId || "").trim();
-  if (!/^\\d{6,30}$/.test(id)) return { verdict: "unknown", reason: "missing_exact_video_id" };
-  if (!token || !/^v\\d+\\.\\d+$/.test(version))
+  if (!/^\d{6,30}$/.test(id)) return { verdict: "unknown", reason: "missing_exact_video_id" };
+  if (!token || !/^v\d+\.\d+$/.test(version))
     return { verdict: "unknown", reason: "missing_meta_configuration" };
   const url = new URL(`https://graph.facebook.com/${version}/${id}`);
   url.searchParams.set("fields", "id,status,created_time,permalink_url");
@@ -30,7 +30,7 @@ export async function verifyFacebookReelByVideoId({
   const status = String(body.status?.video_status || body.status?.processing_phase?.status || body.status || "").toUpperCase();
   // Processing completion alone is not evidence that the Reel was published.
   const permalink = String(body.permalink_url || "");
-  if (!/^https:\/\/(?:www\\.)?facebook\\.com\/(?:reel\/|[^?#]*\/videos\/)/i.test(permalink))
+  if (!/^https:\/\/(?:www\.)?facebook\.com\/(?:reel\/|[^?#]*\/videos\/)/i.test(permalink))
     return { verdict: "unknown", reason: "no_authoritative_reel_permalink" };
   if (status && /ERROR|FAILED|PROCESSING|UPLOADING|IN_PROGRESS|SCHEDULED|PENDING/.test(status))
     return { verdict: "unknown", reason: "remote_not_confirmed_published" };
