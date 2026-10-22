@@ -36,7 +36,7 @@ jobs:
                   "Origin":"https://studio.chicagoshining.com",
                   "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com"
                 },
-                body:JSON.stringify({prompt,content_profile_id:"recF7UAn0LkMZZrWZ"})
+                body:JSON.stringify({prompt,content_profile_id:"recgtK8Z7eNADNtVy"})
               }));
               let payload={};
               try {payload=await response.json();} catch {}
