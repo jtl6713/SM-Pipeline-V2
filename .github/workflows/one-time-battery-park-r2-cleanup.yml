@@ -1,0 +1,77 @@
+name: Remove orphaned Battery Park mistake R2 previews
+on:
+  push:
+    branches: [cleanup/stray-battery-park-preview-r2-20261022]
+    paths: ['.github/workflows/one-time-battery-park-r2-cleanup.yml']
+permissions:
+  contents: read
+jobs:
+  delete-exact-previews:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Delete only 5 proven orphan R2 preview keys using ephemeral exact-scope Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          SCRIPT="studio-cleanup-battery-park-orphan-previews"
+          TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
+          trap 'curl -sS -X DELETE "$API_ROOT/workers/scripts/$SCRIPT" -H "$AUTH" >/dev/null 2>&1 || true' EXIT
+          curl -fsS "$API_ROOT/workers/scripts/chicagoshining-studio-api/deployments" -H "$AUTH" -o /tmp/deps.json
+          VERSION=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deps.json)
+          curl -fsS "$API_ROOT/workers/scripts/chicagoshining-studio-api/versions/$VERSION" -H "$AUTH" -o /tmp/prod-version.json
+          python - <<'PY'
+          import json
+          r=json.load(open('/tmp/prod-version.json'))['result']
+          b=(r.get('resources') or {}).get('bindings') or []
+          assert any(x.get('name')=='AIRTABLE_BASE_ID' and x.get('text')=='appe33zkZn35yirTL' for x in b), 'Unexpected production base, refuse R2 changes'
+          row=next(x for x in b if x.get('name')=='STUDIO_MEDIA' and x.get('type')=='r2_bucket')
+          bucket=row.get('bucket_name') or row.get('bucket')
+          if not bucket: raise ValueError('Missing production media R2 bucket')
+          json.dump({"main_module":"delete.mjs","compatibility_date":"2026-08-02","bindings":[{"type":"r2_bucket","name":"STUDIO_MEDIA","bucket_name":bucket}]},open('/tmp/meta.json','w'))
+          print('production_media_bucket_binding=VERIFIED')
+          PY
+          cat >/tmp/delete.mjs <<EOF
+          const keys = ["studio/previews/item4/recVnTZYZ8q92Vlnf/ITEM4-VARIANT-fill-crop-v2-recVnTZYZ8q92Vlnf-9a607e02aec641f19f-9x16-1TNehhhnNqcKtD-uOBs6O9aee5K17Fg0S.jpg","studio/previews/item4/recVnTZYZ8q92Vlnf/ITEM4-VARIANT-fill-crop-v2-recVnTZYZ8q92Vlnf-d74c486000e047459d-9x16-1LGidNSjDBL_4Zldo8Y7DYRBYzx-MSOD8.jpg","studio/previews/item4/recVnTZYZ8q92Vlnf/ITEM4-VARIANT-fill-crop-v2-recVnTZYZ8q92Vlnf-013d3bb50fb74063a4-9x16-1yAr4RgBWqjQQLM-xbJUQGHAjq2XRKTRi.jpg","studio/previews/item4/recVnTZYZ8q92Vlnf/ITEM4-VARIANT-fill-crop-v2-recVnTZYZ8q92Vlnf-7b4802930f774d08aa-9x16-1BAdxWCqcmdwQ7BwmRfako5qzuZ7YQts7.jpg","studio/previews/item4/recVnTZYZ8q92Vlnf/ITEM4-VARIANT-fill-crop-v2-recVnTZYZ8q92Vlnf-d1c56d546a754fcda3-9x16-1RsPB7nK-WcB_w1HXx3LVaHPjIp5dHtiR.jpg"];
+          export default {
+            async fetch(request,env) {
+              if(request.method !== "POST" || new URL(request.url).pathname !== "/$TOKEN")
+                return new Response("Not found", {status:404});
+              const result=[];
+              for (const key of keys) {
+                if (!key.startsWith("studio/previews/item4/recVnTZYZ8q92Vlnf/")) throw Error("Wrong request scope");
+                const before=!!(await env.STUDIO_MEDIA.head(key));
+                if(before) await env.STUDIO_MEDIA.delete(key);
+                const after=!!(await env.STUDIO_MEDIA.head(key));
+                result.push({existed:before,absent:!after});
+              }
+              return Response.json({ok:result.every(x=>x.absent),checked:result.length,objects:result},
+                {headers:{"Cache-Control":"no-store"}});
+            }
+          };
+          EOF
+          node --check /tmp/delete.mjs
+          curl -fsS -X PUT "$API_ROOT/workers/scripts/$SCRIPT/content" -H "$AUTH" \
+            -F 'metadata=@/tmp/meta.json;type=application/json' \
+            -F 'delete.mjs=@/tmp/delete.mjs;type=application/javascript+module;filename=delete.mjs' -o /tmp/upload.json
+          jq -e '.success==true' /tmp/upload.json >/dev/null
+          curl -fsS -X POST "$API_ROOT/workers/scripts/$SCRIPT/subdomain" -H "$AUTH" -H 'Content-Type: application/json' \
+            --data '{"enabled":true,"previews_enabled":false}' >/dev/null
+          curl -fsS "$API_ROOT/workers/subdomain" -H "$AUTH" -o /tmp/subdomain.json
+          DOMAIN=$(jq -er '.result.subdomain' /tmp/subdomain.json)
+          URL="https://$SCRIPT.$DOMAIN.workers.dev/$TOKEN"
+          code=000
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -sS --max-time 40 -X POST -o /tmp/result.json -w '%{http_code}' "$URL" || true)
+            if [[ "$code" == "200" ]] && jq -e '.checked==5' /tmp/result.json >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          test "$code" = 200
+          jq -e '.ok==true and .checked==5 and ([.objects[]|select(.absent==true)]|length)==5' /tmp/result.json >/dev/null
+          jq '{verified_absent_count:.checked, existed_before:([.objects[]|select(.existed)]|length)}' /tmp/result.json
+          echo 'orphan_preview_cleanup=PASS'
