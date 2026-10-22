@@ -379,3 +379,47 @@ and must never be handled by this signature.
 
 **Tests:** `apps/studio-api/failed-output-monitor.test.mjs`,
 `apps/studio-api/facebook-story-rate-limit-quality.test.mjs`.
+
+## QA-AUTOVERIFY-1050 — autonomous verification recovery and accounting
+
+Extends QA-FB-STORY-368-RETRY-PENDING from merged PR #1045. The Quality Agent
+no longer labels exhausted Story-368 retries as "Needs you" simply because
+the original attempt counter reached 8. They stay in **pending verification**
+with a read-only retry window; no Graph create or historical counter reset is
+authorized without trustworthy publication evidence.
+
+**Outcomes:** `publication_evidence` means existing remote identifier,
+URL or published timestamp is present; reconcile published status without
+posting again. `cooldown_waiting` means no send before the saved retry time.
+`pending_verification` means attempt cap blocks a repeat and recorded
+evidence is inconclusive. `human_action_required` applies only to an
+explicit Meta security checkpoint; display the concrete checkpoint action.
+`safety_blocked` honors explicit publication holds. `guarded_rearm`
+continues to invoke the original #1045 Worker gate with approval, media, lock,
+schedule and attempt ceilings.
+
+**Evidence limitation:** A missing Facebook Story ID or Graph 368 response is
+not proof that none of several previous creates succeeded. Until a trustworthy
+remote lookup and reconciliation receipts cover the attempts, exhausted Story
+holds cannot be safely rearmed; do not tell operations that they were recovered.
+This version autonomously reconciles records that ALREADY contain a platform
+publication ID/URL/timestamp, and rearms low-attempt cooldowns through the
+original publisher. It does not bypass Meta spam protection or auto-reset the
+eight-dispatch cases.
+
+**Metrics:** Factory Quality API `output_failures.verification_recovery`, and
+Desk Quality API `verification_recovery`, expose unique-output counts for
+`recovered_automatically`, `human_action_required`,
+`pending_verification`, `cooldown_waiting`, and `safety_blocked`,
+with profile breakouts and timestamps. Recoveries are counted from successful
+Worker actions tagged `QA-AUTOVERIFY-RECOVERED:<UTC timestamp>` in the
+Airtable Studio Publish Dispatch Note, within a rolling seven-day period.
+These are observed recoveries only; overwritten historical notes may
+undercount. A missing recovery-audit scan reports `partial`, not a false
+zero. The failed census remains paginated across every profile.
+
+**Deployment:** Cloudflare Worker version
+`0.10.673-autonomous-verification-recovery`, release tested with
+`autonomous-verification-recovery.test.mjs`. Airtable remains write
+authoritative. No Supabase Phase 6 changes. To roll back, deploy previous
+Worker; existing historical attempt counters are never reset.
