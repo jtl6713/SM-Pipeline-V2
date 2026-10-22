@@ -44,4 +44,6 @@ test("Home city-specific counts link to output-specific Pipeline filters", () =>
   assert.match(app, /pipelineViewFilter === "approved_past_due" \|\| pipelineViewFilter === "approved_missing_date"/);
   assert.match(app, /return all\.filter\(\(record\) => pipelineRecordMatchesFilter\(record\)/);
   assert.match(html, /drilldown=approved-exceptions-v1/);
+  assert.match(app, /if \(profileAtRequest !== selectedProfileId\) return;/);
+  assert.match(app, /if \(pipelineViewFilter === "approved_past_due" \|\| pipelineViewFilter === "approved_missing_date"\) return true;/);
 });

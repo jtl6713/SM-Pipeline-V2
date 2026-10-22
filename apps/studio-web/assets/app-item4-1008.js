@@ -20604,6 +20604,7 @@ function timedScriptAssetLabel(asset, index) {
   function isPipelineGroupExpanded(key, { isNewest = false, isArchived = false } = {}) {
     if (pipelineGroupOpen.has(key)) return pipelineGroupOpen.get(key);
     if (isArchived) return false;
+    if (pipelineViewFilter === "approved_past_due" || pipelineViewFilter === "approved_missing_date") return true;
     return Boolean(isNewest);
   }
 
@@ -22046,6 +22047,7 @@ function timedScriptAssetLabel(asset, index) {
     if (!target) return;
     if (silent && pipelinePollInFlight && !force) return;
     pipelinePollInFlight = true;
+    const profileAtRequest = selectedProfileId;
     const cachedRows = pipelineOutputs.length ? pipelineOutputs : readPipelineOutputCache();
     if (cachedRows.length && !target.querySelector("table")) {
       pipelineOutputs = cachedRows;
@@ -22068,6 +22070,7 @@ function timedScriptAssetLabel(asset, index) {
       const fullPromise = settled(api("/api/outputs?limit=250", { timeoutMs: 8000, retries: 1 }));
       const schedulePromise = settled(api(schedulePath, { timeoutMs: 15000, retries: 1 }));
       const latestSettled = await latestPromise;
+      if (profileAtRequest !== selectedProfileId) return;
       const latestRows = latestSettled.ok && Array.isArray(latestSettled.value?.records)
         ? latestSettled.value.records : [];
       if (latestRows.length) {
@@ -22079,6 +22082,7 @@ function timedScriptAssetLabel(asset, index) {
         setPipelineLiveHint("Newest outputs checked live · loading full Pipeline…");
       }
       const [outputsSettled, scheduleSettled] = await Promise.all([fullPromise, schedulePromise]);
+      if (profileAtRequest !== selectedProfileId) return;
       if (!outputsSettled.ok && !latestRows.length) throw outputsSettled.error || new Error("Outputs unavailable");
       const outputsResult = outputsSettled.ok ? outputsSettled.value : { records: [], stale: true };
       const contentResult = { records: [] };
