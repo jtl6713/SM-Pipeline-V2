@@ -423,3 +423,49 @@ zero. The failed census remains paginated across every profile.
 `autonomous-verification-recovery.test.mjs`. Airtable remains write
 authoritative. No Supabase Phase 6 changes. To roll back, deploy previous
 Worker; existing historical attempt counters are never reset.
+
+## QA-FB-STORY-REMOTE-IDENTITY — read-only Meta publication reconciliation (Issue #1050)
+
+**Verifier:** `GET /{page-id}/stories?fields=post_id,media_id,status,url,creation_time`,
+using the Page token and current profile's Facebook destination configuration.
+Bounded pagination uses the returned `paging.cursors.after` but never follows
+an arbitrary `paging.next` URL. No user-access token appears in the query string
+or logs. Only an **exact saved numeric `Platform_Media_ID`** matching a Graph
+`media_id` with published/archived status and a valid numeric `post_id` is
+positive proof. Use Meta's `url` field only if on facebook.com, never compose
+an unverified Story URL.
+
+**Source repair:** The native `studioPublishFacebookPageStory` must write the
+Graph `start.video_id` to Airtable **before uploading bytes or submitting
+finish**. If this write fails, do not send. A later attempt with a saved
+media identity performs read-only verification and either reconciles the
+confirmed published Story or parks in
+`FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING`. No new Graph upload session
+may be created while that identity is unresolved. A legacy Graph-368 retry
+whose dispatch receipt proves an attempted Story but lacks media identity
+also parks rather than posting blindly.
+
+**Autonomous continuation:** The existing Worker Quality Agent cron paginates
+all Facebook Story Graph-368 and explicit remote-verification pending records
+with a saved media ID, uses profile-scoped Meta settings, re-reads the Airtable
+record to validate media identity/lock/status, and reconciles only exact
+positive matches. Set Published and the verified post ID (plus URL and source
+creation time when available), clear stale rate-limit flags, disable repeated
+publishing, and stamp the existing `QA-AUTOVERIFY-RECOVERED` recovery marker
+for Factory/Desk counts.
+
+**Negative evidence is unavailable:** An empty Story listing (especially
+after 24 hours), revoked token, Graph 368/429, incomplete pagination, missing
+media identity, or lookup timeout is **never** proof that no prior Story
+was posted. Existing exhausted-attempt outputs without saved media ID cannot
+be safely reposted automatically from the evidence available. They remain
+pending verification with a specific reason, not a misleading successful
+recovery or a generic manual-action demand. A future provider-supported
+idempotency/authoritative send ledger is required for any verified-not-published
+retry path; no counter reset or override is provided here.
+
+**Safety/rollback:** Airtable remains write authority, and all existing
+approval, asset, lock, schedule, cooldown and retry limits remain intact.
+The new Graph client performs only GETs, never POSTs. If errors increase, roll
+back Worker source and keep saved media IDs and held publication states; never
+erase them to make retries proceed.
