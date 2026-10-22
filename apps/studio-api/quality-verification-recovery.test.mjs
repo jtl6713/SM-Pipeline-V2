@@ -23,6 +23,25 @@ test("exhausted Story attempts stay under autonomous investigation, not falsely 
   }), nowMs).reason, "guarded_rearm_eligible");
 });
 
+test("legacy exhausted Story with unavailable media identity receives specific human-audit instructions", () => {
+  const prior = row(4034, {
+    Studio_Publish_Dispatch_Count: 8, Studio_Publish_Dispatch_At: "2026-10-22T12:00:00Z",
+    Platform_Media_ID: "",
+  });
+  const outcome = verificationRecoveryStatus(prior, nowMs);
+  assert.equal(outcome.status, "human_action_required");
+  assert.equal(outcome.reason, "historical_remote_identity_unavailable");
+  assert.match(outcome.action, /historical Meta Story activity/);
+  assert.equal(verificationRecoveryStatus(row(4034, {
+    Studio_Publish_Dispatch_Count: 8, Studio_Publish_Dispatch_At: "2026-10-26T09:00:00Z",
+    Platform_Media_ID: "",
+  }), nowMs).status, "investigating");
+  assert.equal(verificationRecoveryStatus(row(4034, {
+    Studio_Publish_Dispatch_Count: 8, Studio_Publish_Dispatch_At: "2026-10-22T12:00:00Z",
+    Platform_Media_ID: "123",
+  }), nowMs).status, "investigating");
+});
+
 test("only a confirmed interactive security challenge counts as human action", () => {
   assert.equal(verificationRecoveryStatus(row(4004, {
     Publish_Error_Message: "Meta Security checkpoint: verify your identity",
