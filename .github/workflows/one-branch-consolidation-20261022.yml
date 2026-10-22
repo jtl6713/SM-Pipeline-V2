@@ -1,0 +1,112 @@
+name: Archive and consolidate superseded branches to main (2026-10-22)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/one-branch-consolidation-20261022.yml'
+permissions:
+  contents: write
+  pull-requests: read
+concurrency:
+  group: one-branch-consolidation-20261022
+  cancel-in-progress: false
+jobs:
+  archive-and-prune:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Preserve all exact SHA heads as tags; lease-delete only stale branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, subprocess, urllib.request, urllib.parse, urllib.error, time
+          REPO = "jtl6713/SM-Pipeline-V2"
+          EXPECTED = json.loads("{\"cleanup/stray-battery-park-preview-r2-20261022\":\"2ecaa2b9c2ec6c5b22ec093afd0deb31ff78dfdd\",\"feature/qa-approved-past-due-reconcile-20261021\":\"daefeee5950dfbdac7226af2661e58a3c449bc65\",\"feature/quality-autonomous-verification-recovery-v1\":\"2fa9d7c787dec2b343bc3cfd349f8e6754d99811\",\"fix/factory-content-parent-grouping-20261021\":\"b5522322e158c18cc9b75d9b1d226d95c9e8a7db\",\"fix/quality-agent-all-failed-outputs-20261020\":\"b4e2dfd5bebfc7ff57721129852fa85a9d563561\",\"fix/scripted-short-proposal-500\":\"fd9a28a8214acb7cca5289213db238f1267ffe00\",\"release/qa-publish-ui-0745-20261022\":\"fc490cd4cb4cb72f134f670dbd8abed716478d7a\",\"tmp/qa-publish-1028-rebase-20261021\":\"b31a6661bad420ef17b165ce5485818899a1e55a\",\"release/fb3-light-finalize-worker-20261022\":\"2b19e4b728fd6d67209c7e413446a63939cd9a0d\"}")
+          SELF = "chore/one-branch-consolidation-20261022"
+          if os.getenv("GITHUB_REPOSITORY") != REPO or os.getenv("GITHUB_REF") != "refs/heads/main":
+              raise SystemExit("Wrong repository/ref - no deletion")
+          token = os.environ["GH_TOKEN"]
+          headers = {"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json", "Content-Type": "application/json", "X-GitHub-Api-Version": "2022-11-28"}
+          def api(path, method="GET", body=None):
+              data = None if body is None else json.dumps(body).encode()
+              req = urllib.request.Request("https://api.github.com/repos/" + REPO + "/" + path, headers=headers, method=method, data=data)
+              with urllib.request.urlopen(req, timeout=40) as r:
+                  raw = r.read().decode()
+                  return json.loads(raw) if raw else None
+          def branches():
+              rows = api("branches?per_page=100")
+              if len(rows) >= 100:
+                  raise SystemExit("Refuse possibly incomplete branch listing")
+              return {x["name"]: x for x in rows}
+          def check_no_prs():
+              prs = api("pulls?state=open&per_page=100")
+              if prs:
+                  raise SystemExit("Active PR prevents cleanup: " + ",".join(str(p["number"]) for p in prs))
+          def tag_for(name):
+              return "archive/branch-consolidation-20261022/" + name.replace("/", "--")
+          def archive(name, sha):
+              tag = tag_for(name)
+              path = "git/ref/tags/" + urllib.parse.quote(tag, safe="/")
+              try:
+                  observed = api(path)
+                  if observed["object"]["sha"] != sha:
+                      raise SystemExit("Refuse archive collision: " + name)
+              except urllib.error.HTTPError as e:
+                  if e.code != 404:
+                      raise
+                  api("git/refs", "POST", {"ref": "refs/tags/" + tag, "sha": sha})
+              for _ in range(10):
+                  try:
+                      if api(path)["object"]["sha"] == sha:
+                          print("ARCHIVE_VERIFIED", name, sha, flush=True)
+                          return
+                  except urllib.error.HTTPError as e:
+                      if e.code != 404:
+                          raise
+                  time.sleep(1)
+              raise SystemExit("Refuse unverified archive " + name)
+          check_no_prs()
+          state = branches()
+          if "main" not in state:
+              raise SystemExit("No default main")
+          unknown = set(state) - set(EXPECTED) - {"main", SELF}
+          if unknown:
+              raise SystemExit("Refuse unfamiliar or active branches: " + repr(sorted(unknown)))
+          for name, sha in EXPECTED.items():
+              if name in state and (state[name]["commit"]["sha"] != sha or state[name].get("protected")):
+                  raise SystemExit("Branch changed or protected: " + name)
+          if SELF in state:
+              prs = api("pulls?state=closed&head=jtl6713:" + urllib.parse.quote(SELF, safe="/") + "&per_page=30")
+              merged = [p for p in prs if p.get("merged_at") and p["head"]["ref"] == SELF]
+              if len(merged) != 1 or state[SELF].get("protected") or state[SELF]["commit"]["sha"] != merged[0]["head"]["sha"]:
+                  raise SystemExit("Unverified cleanup PR head; keep branch")
+              EXPECTED[SELF] = state[SELF]["commit"]["sha"]
+          # Everything in the inventory is now archived and reverified BEFORE deletion.
+          for name, sha in EXPECTED.items():
+              if name in state:
+                  archive(name, sha)
+          print("FULL_ARCHIVE_PREFLIGHT_PASS", flush=True)
+          for name, sha in EXPECTED.items():
+              if name not in state:
+                  continue
+              check_no_prs()
+              current = api("branches/" + urllib.parse.quote(name, safe="/"))
+              if current.get("protected") or current["commit"]["sha"] != sha:
+                  raise SystemExit("Refuse race/changed head: " + name)
+              ref = "refs/heads/" + name
+              subprocess.run(["git", "push", "--force-with-lease=" + ref + ":" + sha, "origin", ":" + ref], check=True, timeout=60)
+              print("DELETED_EXACT_SHA", name, flush=True)
+          result = branches()
+          check_no_prs()
+          if set(result) != {"main"}:
+              raise SystemExit("Remaining branches: " + repr(sorted(result)))
+          print("ONE_BRANCH_VERIFIED main=" + result["main"]["commit"]["sha"], flush=True)
+          PY
