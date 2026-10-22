@@ -163,5 +163,5 @@ test("Worker and Factory wire durable events while preserving the Story attempt 
   assert.match(factory, /summarizeAutonomousVerification/);
   assert.match(factory, /verification_recovery: snapshot\.verification_recovery/);
   assert.match(ui, /recovered_automatically/);
-  assert.match(worker, /facebookPreapprovalRecoveryReason\\(latest\\)/);
+  assert.match(worker, /facebookPreapprovalRecoveryReason\(latest\)/);
 });
