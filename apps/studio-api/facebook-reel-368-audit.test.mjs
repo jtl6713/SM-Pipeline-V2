@@ -126,7 +126,7 @@ test("authorized exact-ID provider read verifies identity but never reconciles w
     metaFetch: async (url, options) => {
       requests.push({url, method:options.method});
       return {ok:true,json:async()=>({id:"123456789012345",status:"PUBLISHED",
-        permalink_url:"https://www.facebook.com/reel/123456789012345/"})};
+        permalink_url:"https://www.facebook.com/reel/123456789012345/",created_time:"2026-10-21T12:00:00Z"})};
     },
   });
   assert.equal(requests.length, 1);
