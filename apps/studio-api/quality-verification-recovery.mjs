@@ -34,6 +34,18 @@ export function verificationRecoveryStatus(row, nowMs = Date.now()) {
     if (block === "cooldown") {
       return { status: "awaiting_cooldown", reason: block, action: "Recheck automatically after the saved retry time." };
     }
+    // Older exhausted Stories with no durable Meta video ID cannot be
+    // safely associated with a post after their visibility window. Only these
+    // evidence-impossible cases require an operator's provider-side audit.
+    const attempts = Math.max(Number(field(row, "Studio_Publish_Dispatch_Count") || 0),
+      Number(field(row, "Publish_Attempt_Count") || 0));
+    const attemptedAt = Date.parse(value(row, "Studio_Publish_Dispatch_At"));
+    if (block === "retry_limit" && attempts >= 8 &&
+        !value(row, "Platform_Media_ID") &&
+        Number.isFinite(attemptedAt) && nowMs - attemptedAt > 48 * 3600000) {
+      return { status: "human_action_required", reason: "historical_remote_identity_unavailable",
+        action: "Check the historical Meta Story activity for this exact output and attach the post ID if published; a new create needs explicit approval after that audit." };
+    }
     if (block === "retry_limit" || block === "publication_evidence") {
       return { status: "investigating", reason: block,
         action: "Reconcile authoritative Facebook publication evidence; do not create another Story or reset attempt counters." };
