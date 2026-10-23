@@ -5,6 +5,9 @@ on:
     paths:
       - 'apps/studio-api/conversational-producer-plan.*'
       - 'apps/studio-api/factory-producer-feedback.*'
+      - 'apps/studio-api/idea-producer-direction.*'
+      - 'apps/studio-api/worker-functions-02.mjs'
+      - 'apps/studio-web/index.html'
       - 'apps/studio-api/factory-producer-media-edits.*'
       - 'apps/studio-api/factory-producer-render-evidence.*'
       - 'apps/studio-api/factory-producer-library-append.*'
@@ -33,6 +36,8 @@ jobs:
         run: |
           node --check apps/studio-api/conversational-producer-plan.mjs
           node --check apps/studio-api/factory-producer-feedback.mjs
+          node --check apps/studio-api/idea-producer-direction.mjs
+          node --check apps/studio-api/worker-functions-02.mjs
           node --check apps/studio-api/factory-producer-media-edits.mjs
           node --check apps/studio-api/factory-producer-render-evidence.mjs
           node --check apps/studio-api/factory-producer-library-append.mjs
@@ -40,4 +45,4 @@ jobs:
           node --check apps/studio-api/worker.js
           node --check apps/studio-web/assets/factory-desk.js
       - name: Run producer and Factory contracts
-        run: node --test apps/studio-api/conversational-producer-plan.test.mjs apps/studio-api/factory-producer-feedback.test.mjs apps/studio-api/factory-producer-media-edits.test.mjs apps/studio-api/factory-producer-render-evidence.test.mjs apps/studio-api/factory-producer-library-append.test.mjs apps/studio-api/factory-producer-workflow.test.mjs apps/studio-api/factory-producer-dispatch.test.mjs apps/studio-api/factory-producer-execution-lock.test.mjs apps/studio-web/factory-review-feedback.test.mjs
+        run: node --test apps/studio-api/conversational-producer-plan.test.mjs apps/studio-api/idea-producer-direction.test.mjs apps/studio-api/idea-producer-direction-contract.test.mjs apps/studio-api/factory-producer-feedback.test.mjs apps/studio-api/factory-producer-media-edits.test.mjs apps/studio-api/factory-producer-render-evidence.test.mjs apps/studio-api/factory-producer-library-append.test.mjs apps/studio-api/factory-producer-workflow.test.mjs apps/studio-api/factory-producer-dispatch.test.mjs apps/studio-api/factory-producer-execution-lock.test.mjs apps/studio-web/factory-review-feedback.test.mjs
