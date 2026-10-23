@@ -76,7 +76,7 @@ test("exact rearm writes no publish data, uses upsert ledger and independently r
       row={...row,fields:{...row.fields,...body.fields}};
       return row;
     }
-    if(path.startsWith("?"))return {records:[row]};
+    if(path.startsWith("?"))return {records:["Creating Children","Creating Parent"].includes(row.fields.IG_Carousel_Status)?[row]:[]};
     return row;
   };
   const env={AIRTABLE_OUTPUT_TABLE_ID:"Platform Outputs"};
@@ -101,6 +101,6 @@ test("Airtable or stale readback errors fail closed without fake recovery",async
     return record({Do_Not_Publish:true});
   };
   const result=await qaInstagramCarouselMaintenance({AIRTABLE_OUTPUT_TABLE_ID:"Platform Outputs"},{airtableFetch:fetcher,nowMs:NOW});
-  assert.equal(result[0].outcome,"not_eligible");
+  assert.equal(result.length,0);
   assert.equal(writes,0);
 });
