@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { webcrypto } from "node:crypto";
 import { interpretFactoryProducerFeedback } from "./factory-producer-feedback.mjs";
+import { appendVerifiedLibraryAssets } from "./factory-producer-library-append.mjs";
 import { applyGroundedMediaEdits } from "./factory-producer-media-edits.mjs";
 import { validateProducerPlan, planSelectiveRework } from "./conversational-producer-plan.mjs";
 import { verifyFactoryRenderedMedia } from "./factory-producer-render-evidence.mjs";
@@ -25,11 +26,16 @@ const movie = {id:"video000000000001",order:2,name:"original clip",media_kind:"v
 const photo = {id:"photo000000000001",order:1,name:"original still",media_kind:"photo",mime_type:"image/jpeg",google_drive_file_id:"drive-original-photo",media_asset_record_id:"recAssetPhoto0001"};
 
 function harness() {
-  const env = {AIRTABLE_OUTPUT_TABLE_ID:"outputs",AIRTABLE_CONTENT_TABLE_ID:"contents",AIRTABLE_IDEA_TABLE_ID:"ideas",STUDIO_MEDIA:{}};
+  const env = {AIRTABLE_OUTPUT_TABLE_ID:"outputs",AIRTABLE_MEDIA_TABLE_ID:"media",AIRTABLE_CONTENT_TABLE_ID:"contents",AIRTABLE_IDEA_TABLE_ID:"ideas",STUDIO_MEDIA:{}};
   const request = {id:REQUEST,fields:{Request_Status:"Promoted",Promoted_Content_Item:[CONTENT],Idea_Candidate:[IDEA],Production_Notes:"",Studio_Master_Assets_JSON:JSON.stringify([photo,movie])}};
   const outputs = [{id:OUTPUT,fields:{Production_Request:[REQUEST],Content_Item:[CONTENT],Enabled:true,Output_Status:"Ready for Review",Render_Status:"Rendered",Publish_Status:"Not Ready",Review_Status:"Review Sent",Do_Not_Publish:false,Final_File_URL:"https://example.test/old.mp4",Studio_Preview_URL:"https://example.test/old-preview.mp4"}}];
   const parent = {id:CONTENT,fields:{}};
-  const records = new Map([[REQUEST,request],[CONTENT,parent],[OUTPUT,outputs[0]],[IDEA,{id:IDEA,fields:{}}]]);
+  const media = {id:"rec12345678901234",fields:{
+    Content_Profile:["recProfile0000001"],"Asset Name":"Chicago River Night",
+    Media_Class:"Image",MIME_Type:"image/jpeg",Classification_Status:"Classified",
+    "Google Drive File ID":"verified-photo-drive-3","Google Drive URL":"https://drive.google.com/file/d/verified-photo-drive-3/view",
+  }};
+  const records = new Map([[REQUEST,request],[CONTENT,parent],[OUTPUT,outputs[0]],[IDEA,{id:IDEA,fields:{}}],[media.id,media]]);
   const f = (r,name)=>r?.fields?.[name];
   const links = v => Array.isArray(v) ? v[0] : null;
   const patch=(row,options)=>{Object.assign(row.fields,JSON.parse(options.body).fields);return row;};
@@ -46,14 +52,19 @@ function harness() {
     outputAlreadyApprovedForPublishing:()=>false,
     item4ProductionProfileRecord:async (_env,record)=>{ assert.equal(record.id,REQUEST,"Profile must resolve from Production Request, not output"); return {id:"recProfile0000001"}; },
     item4AssetManifest:row=>JSON.parse(f(row,"Studio_Master_Assets_JSON")||"[]"),
-    applyGroundedMediaEdits,validateProducerPlan,planSelectiveRework,verifyFactoryRenderedMedia,
+    applyGroundedMediaEdits,appendVerifiedLibraryAssets,validateProducerPlan,planSelectiveRework,verifyFactoryRenderedMedia,
     factoryLatestReviewFeedback:()=>null,
     factoryAppendFeedback:(before,note)=>[before,`[factory-review-feedback]\n${note}\n[/factory-review-feedback]`].filter(Boolean).join("\n"),
     withFactoryRevisionOpen:notes=>notes+"\n[factory-revision-open]",
-    listRecords:async ()=>[request],
+    listRecords:async (_env,table)=>table==="media"?[media]:[request],
+    googleDriveFileId:row=>f(row,"Google Drive File ID"),
+    studioProfileRequiresChicagoWatermark:()=>false,
+    studioAssetHasChicagoWatermark:()=>true,
+    studioAssetSourceDriveId:()=>null,
+    ideaLibraryRejectReason:row=>f(row,"Classification_Status")==="Classified"?null:"Unclassified",
   };
   const api=runInNewContext(functions+"\n({factorySendBackContent,factoryVerifyProducerRevisions})",ctx);
-  return {api,env,request,outputs,parent,records};
+  return {api,env,request,outputs,parent,records,media};
 }
 
 test("Factory → persisted Producer media changes → isolated render evidence → independent QA → human review",async()=>{
@@ -163,4 +174,47 @@ test("Unmatched named asset rejects before changing Airtable",async()=>{
  );
  assert.equal(JSON.stringify(request.fields),old);
  assert.equal(outputs[0].fields.Do_Not_Publish,false);
+});
+
+test("Factory appends a unique profile-owned classified library still and independently verifies a fresh render",async()=>{
+ const {api,env,request,outputs}=harness();
+ const note="Add library photo named: Chicago River Night";
+ const producer=interpretFactoryProducerFeedback(note);
+ assert.equal(producer.automatic,true);
+ const receipt=await api.factorySendBackContent(env,REQUEST,[OUTPUT],"staging",note,producer);
+ assert.equal(receipt.producer_queued,true);
+ assert.equal(request.fields.Studio_Master_Asset_Count,3);
+ const assets=JSON.parse(request.fields.Studio_Master_Assets_JSON);
+ assert.equal(assets.length,3);
+ assert.equal(assets[2].media_asset_record_id,"rec12345678901234");
+ assert.equal(assets[2].google_drive_file_id,"verified-photo-drive-3");
+ assert.equal(outputs[0].fields.Do_Not_Publish,true);
+ const job=JSON.parse(request.fields.Studio_Production_Job_JSON);
+ assert.deepEqual(job.producer_changes,["add_photos"]);
+ assert.deepEqual(job.producer_changed_asset_ids,[assets[2].id]);
+ // The production runner supplies final-file and source-selection evidence.
+ request.fields.Request_Status="Promoted";
+ request.fields.Studio_Production_Job_JSON=JSON.stringify({...job,step:"done"});
+ outputs[0].fields.Output_Status="Ready for Review";
+ outputs[0].fields.Render_Status="Rendered";
+ outputs[0].fields.Final_File_URL="https://example.test/new.mp4";
+ outputs[0].fields.Selected_Assets_JSON=JSON.stringify({
+  production_request_record_id:REQUEST,
+  selected_clips:assets.map(a=>({source_asset_id:a.id,media_asset_record_id:a.media_asset_record_id})),
+ });
+ const res=await api.factoryVerifyProducerRevisions(env);
+ assert.deepEqual(JSON.parse(JSON.stringify(res)),[{request_id:REQUEST,quality:"passed"}]);
+ assert.equal(outputs[0].fields.Do_Not_Publish,false);
+ assert.equal(outputs[0].fields.Publish_Status,"Not Ready");
+ assert.notEqual(outputs[0].fields.Review_Status,"Approved");
+});
+test("cross-city library media is rejected BEFORE any Factory output is held",async()=>{
+ const {api,env,request,outputs,media}=harness();
+ media.fields.Content_Profile=["recWrongProfile00"];
+ const notes=JSON.stringify(request.fields);
+ await assert.rejects(()=>api.factorySendBackContent(env,REQUEST,[OUTPUT],"staging",
+  "Include library photo: rec12345678901234",
+  interpretFactoryProducerFeedback("Include library photo: rec12345678901234")),/not owned by this content profile/);
+ assert.equal(outputs[0].fields.Do_Not_Publish,false);
+ assert.equal(JSON.stringify(request.fields),notes);
 });
