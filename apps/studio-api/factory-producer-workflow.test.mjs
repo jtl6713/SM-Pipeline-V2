@@ -134,7 +134,7 @@ test("Named creative direction → authoritative asset IDs → revision job → 
  outputs[0].fields.Render_Status="Rendered";
  outputs[0].fields.Final_File_URL="https://example.test/new-render.mp4";
  const completed=await api.factoryVerifyProducerRevisions(env);
- assert.equal(completed[0].quality,"passed");
+ assert.equal(completed[0].quality,"passed",JSON.stringify(JSON.parse(request.fields.Studio_Production_Job_JSON).producer_quality));
  assert.equal(outputs[0].fields.Publish_Status,"Not Ready");
  assert.notEqual(outputs[0].fields.Review_Status,"Approved");
 });
