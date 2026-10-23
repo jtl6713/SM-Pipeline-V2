@@ -16,7 +16,7 @@ test("Engagement nav page and assets ship with UI 0.6.553", () => {
   assert.match(html, /id="page-engagement"/);
   assert.match(html, /engagement-1008\.js\?v=0.6.754-producer-conversation/);
   assert.match(html, /engagement-1008\.css\?v=0.6.754-producer-conversation/);
-  assert.match(html, /UI build 0.6.752/);
+  assert.match(html, /UI build 0.6.754/);
   assert.match(app, /BUILD_ID = "item4-0.6.754-producer-conversation"/);
   assert.match(app, /page === "engagement"/);
   assert.match(app, /StudioEngagement/);
