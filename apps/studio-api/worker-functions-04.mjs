@@ -10895,6 +10895,7 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
           previous_outputs: targets.map((row) => ({
             id: row.id,
             output_status: String(f(row, "Output_Status") || ""),
+            review_status: String(f(row, "Review_Status") || ""),
             render_status: String(f(row, "Render_Status") || ""),
           })),
           route: null,
@@ -10973,10 +10974,10 @@ async function factoryAdvanceProducerRevision(env, requestId, revisionId, ctx = 
       id: row.id,
       fields: {
         Output_Status: "Ready for Review",
-        Review_Status: "Pending Review",
-        Render_Status: row.render_status || "Complete",
+        Review_Status: row.review_status && row.review_status !== "Approved" ? row.review_status : "Review Sent",
+        Render_Status: row.render_status || "Rendered",
         Publish_Status: "Not Ready",
-        Do_Not_Publish: true,
+        Do_Not_Publish: false,
         Review_Decision_At: null,
       },
     })), { typecast: true });
