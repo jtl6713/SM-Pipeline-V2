@@ -73,3 +73,5 @@ test("global admin API accepts targeted setting write without altering schedulin
   assert.match(source, /GLOBAL_IDEA_TARGET_SETTING/);
   assert.match(source, /studioUpsertSetting\(env, GLOBAL_IDEA_TARGET_SETTING/);
 });
+
+// Release 0.6.746 regression checkpoint: shared target is a single cross-profile ceiling.
