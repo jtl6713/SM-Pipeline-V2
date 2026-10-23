@@ -1,4 +1,5 @@
 import { readStudioWorkerSource } from "./worker-source-reader.mjs";
+import { ideaProducerDirection } from "./idea-producer-direction.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -77,6 +78,7 @@ test("legacy idea platforms cannot prevent Vizcaya's five-photo production draft
       .map(value => ({ "YouTube Shorts": "YouTube" }[value] || value)))],
     PR_PLATFORMS: new Set(["Instagram", "Facebook", "TikTok", "YouTube", "X", "Lemon8"]),
     autonomousDefaultVoiceoverSeconds: () => 20,
+    ideaProducerDirection,
     suggestPrimaryLocationFromIdea: () => ({ name: "Vizcaya Museum" }),
   });
   const vizcaya = {
