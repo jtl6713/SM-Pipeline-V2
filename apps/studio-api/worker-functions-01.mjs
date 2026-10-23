@@ -7109,12 +7109,12 @@ export async function attachItem4LibraryAssets(request, env, url, authorization)
 }
 /*__STUDIO_WORKER_END:attachItem4LibraryAssets__*/
 
-export async function attachItem4LibraryAssetIds(env, recordId, mediaAssetIds, authorization) {
+export async function attachItem4LibraryAssetIds(env, recordId, mediaAssetIds, authorization, options = {}) {
   const url = new URL(`https://studio.chicagoshining.com/api/production-requests/${recordId}/assets/library`);
   const request = new Request(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ media_asset_ids: mediaAssetIds }),
+    body: JSON.stringify({ media_asset_ids: mediaAssetIds, allow_video: options.allow_video === true }),
   });
   return attachItem4LibraryAssets(request, env, url, authorization);
 }
