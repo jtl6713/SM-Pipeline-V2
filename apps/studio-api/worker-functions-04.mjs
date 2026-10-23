@@ -10784,6 +10784,9 @@ export async function factorySendBackOutput(env, id, actor, note, requestedProdu
 export async function factorySendBackContent(env, productionRequestId, outputIds, actor, note, producer = null) {
   const requestId = String(productionRequestId || "").trim();
   if (!/^rec[A-Za-z0-9]+$/.test(requestId)) throw new HttpError(400, "Production Request is required");
+  // Serialize durable acceptance for this Production Request. The same lease
+  // also fences cron kickoff, preventing two rapid clicks from creating jobs.
+  return withOutputApprovalLock(env.STUDIO_MEDIA, requestId, async () => {
   const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
 
   const suppliedIds = [...new Set((Array.isArray(outputIds) ? outputIds : [])
@@ -10941,6 +10944,7 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
       ? `Producer revision accepted for ${patches.length} output${patches.length === 1 ? "" : "s"}. Automatic rework is queued; fresh review will be required.`
       : `Sent the full content package (${patches.length} output${patches.length === 1 ? "" : "s"}) back to Production. Make changes and Approve to rerender.`,
   };
+  });
 }
 /*__STUDIO_WORKER_END:factorySendBackContent__*/
 
