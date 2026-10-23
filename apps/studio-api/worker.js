@@ -699,6 +699,7 @@ import {
   getFactoryDesk,
   mutateFactoryDesk,
   factoryResumeProducerRevisions,
+  factoryVerifyProducerRevisions,
   pauseStudioOperationsQueueItem,
   reorderStudioOperationsRenderQueue,
   prepareIdeaToReview,
@@ -2653,6 +2654,11 @@ export default {
         await factoryResumeProducerRevisions(env, ctx);
       } catch (error) {
         console.warn("Factory Producer revision recovery failed", error);
+      }
+      try {
+        await factoryVerifyProducerRevisions(env);
+      } catch (error) {
+        console.warn("Factory Producer revision QA failed", error);
       }
       try {
         await resumeStaleStudioProductionJobs(env);
@@ -5974,6 +5980,7 @@ let studioAiApiPreferenceCache = { preferred: "OpenAI", failoverEnabled: true, a
 /*__STUDIO_WORKER_EXTRACT:factorySendBackOutput__*/
 /*__STUDIO_WORKER_EXTRACT:factorySendBackContent__*/
 /*__STUDIO_WORKER_EXTRACT:factoryResumeProducerRevisions__*/
+/*__STUDIO_WORKER_EXTRACT:factoryVerifyProducerRevisions__*/
 /*__STUDIO_WORKER_EXTRACT:studioAtomicVacateSkippedOutput__*/
 /*__STUDIO_WORKER_EXTRACT:factoryDeleteDeskItem__*/
 /*__STUDIO_WORKER_EXTRACT:mutateFactoryDesk__*/
