@@ -6,6 +6,7 @@ on:
       - 'apps/studio-api/conversational-producer-plan.*'
       - 'apps/studio-api/factory-producer-feedback.*'
       - 'apps/studio-api/factory-producer-media-edits.*'
+      - 'apps/studio-api/factory-producer-workflow.test.mjs'
       - 'apps/studio-api/factory-producer-dispatch.test.mjs'
       - 'apps/studio-api/factory-producer-execution-lock.test.mjs'
       - 'apps/studio-api/worker-functions-04.mjs'
@@ -35,4 +36,4 @@ jobs:
           node --check apps/studio-api/worker.js
           node --check apps/studio-web/assets/factory-desk.js
       - name: Run producer and Factory contracts
-        run: node --test apps/studio-api/conversational-producer-plan.test.mjs apps/studio-api/factory-producer-feedback.test.mjs apps/studio-api/factory-producer-media-edits.test.mjs apps/studio-api/factory-producer-dispatch.test.mjs apps/studio-api/factory-producer-execution-lock.test.mjs apps/studio-web/factory-review-feedback.test.mjs
+        run: node --test apps/studio-api/conversational-producer-plan.test.mjs apps/studio-api/factory-producer-feedback.test.mjs apps/studio-api/factory-producer-media-edits.test.mjs apps/studio-api/factory-producer-workflow.test.mjs apps/studio-api/factory-producer-dispatch.test.mjs apps/studio-api/factory-producer-execution-lock.test.mjs apps/studio-web/factory-review-feedback.test.mjs
