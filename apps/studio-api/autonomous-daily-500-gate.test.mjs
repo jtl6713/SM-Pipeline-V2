@@ -34,11 +34,11 @@ test("scheduled daily runner requires fresh authoritative counts before batch cr
   const end = source.indexOf("async function runStudioDailyIdeas(", start);
   assert.ok(start >= 0 && end > start);
   const run = source.slice(start, end);
-  assert.match(run, /studioLoadAutonomousRefillScores\(env, profiles, \{\s*refresh: true, requireLive: true/);
-  assert.match(run, /scheduledInventory\?\.source === "live"/);
-  assert.match(run, /skipped: "inventory_unavailable"/);
-  assert.match(run, /autonomousDailyIdeaBudget\(score, requested\)/);
-  assert.ok(run.indexOf("skipped: \"inventory_unavailable\"") < run.indexOf("studioIdeaCreateBatch("));
+  assert.match(run, /studioGlobalAutomaticIdeaInventory\(env\)/);
+  assert.match(run, /skipped: "global_inventory_unavailable"/);
+  assert.match(run, /globalAutomaticIdeaBudget\(/);
+  assert.match(run, /global_idea_target_met/);
+  assert.ok(run.indexOf("global_inventory_unavailable") < run.indexOf("studioIdeaCreateBatch("));
   const module = fs.readFileSync(join(dirname(fileURLToPath(import.meta.url)), "worker-functions-04.mjs"), "utf8");
   assert.match(module, /if \(requireLive \|\| summaryEnabled \|\| !rows\.length\) return \{ scores: \{\}/);
 });
