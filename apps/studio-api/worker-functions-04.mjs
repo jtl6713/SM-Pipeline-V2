@@ -10908,6 +10908,8 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
             output_status: String(f(row, "Output_Status") || ""),
             review_status: String(f(row, "Review_Status") || ""),
             render_status: String(f(row, "Render_Status") || ""),
+            final_file_url: String(f(row, "Final_File_URL") || ""),
+            studio_preview_url: String(f(row, "Studio_Preview_URL") || ""),
           })),
           route: null,
           step: "themes",
@@ -10976,6 +10978,8 @@ async function factoryAdvanceProducerRevision(env, requestId, revisionId, ctx = 
     for (const row of previous) {
       const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
       if (String(f(updated, "Output_Caption") || "").trim() !== caption
+        || String(f(updated, "Final_File_URL") || "") !== String(row.final_file_url || "")
+        || String(f(updated, "Studio_Preview_URL") || "") !== String(row.studio_preview_url || "")
         || String(f(updated, "Publish_Status") || "") !== "Not Ready"
         || f(updated, "Do_Not_Publish") !== true) {
         throw new Error("Independent metadata Quality Agent check failed");
