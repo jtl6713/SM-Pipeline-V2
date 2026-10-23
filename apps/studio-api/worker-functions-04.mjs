@@ -10865,7 +10865,10 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
   if (producer?.automatic) {
     // No external asset references are inferred for text-only revisions. Resolve
     // the existing profile from the actual output before validating the plan.
-    const profile = await item4ProductionProfileRecord(env, targets[0]);
+    // The Production Request's linked Idea is the authoritative profile.
+    // Output records often do not carry Content_Profile, so resolving from an
+    // output can incorrectly reject safe revisions or lose tenant isolation.
+    const profile = await item4ProductionProfileRecord(env, requestRecord);
     if (!profile?.id) throw new HttpError(409, "Producer could not verify the output's content profile");
     let grounded = null;
     const sourceAssets = item4AssetManifest(requestRecord);
