@@ -48,19 +48,18 @@ export function parseScriptedShortAssetPolicy(prompt) {
   const generic = new Set(["uploaded", "existing", "library", "available", "stock", "own", "same", "selected", "these", "those", "all", "more", "new"]);
   const words = location.split(" ");
   if (words.length > 8 || words.every((word) => generic.has(word)) || location.length < 3) location = "";
+  // Prefer a clearly named title subject before inferring a broad "story of..."
+  // phrase, which may describe a whole sentence rather than an asset label.
   let topic = location;
+  if (!topic) {
+    const titled = source.match(/\btitled\s+(?:\*\*|["'“])?([a-z][a-z0-9 '&/-]{2,60}?)(?=\s*:|["'”]|\*\*|[.,;]|$)/i);
+    if (titled) topic = extractPlace(titled[1]);
+  }
   if (!topic) {
     const topicMatch = source.match(/\b(?:about|featuring|covering|guide to|history of|story of)\s+(?:the\s+)?([a-z0-9][a-z0-9 '’&/-]{2,80}?)(?=[.,;!?]|$|\s+(?:using|use|start|include|show|explain|narrat|produce|for\s+(?:instagram|facebook|tiktok|youtube))\b)/i);
     topic = extractPlace(topicMatch?.[1] || "");
     const topicWords = topic.split(" ");
     if (topicWords.length > 10 || topicWords.every((word) => generic.has(word)) || topic.length < 3) topic = "";
-  }
-  // If an instruction describes a variety of media rather than a place,
-  // a named documentary title can still provide a real subject constraint.
-  // "titled **Tribeca: ...**" requires Tribeca media, never generic B-roll.
-  if (!topic) {
-    const titled = source.match(/\btitled\s+(?:\*\*|["'“])?([a-z][a-z0-9 '&/-]{2,60}?)(?=\s*:|["'”]|\*\*|[.,;]|$)/i);
-    if (titled) topic = extractPlace(titled[1]);
   }
   return {
     required: Boolean(location),
