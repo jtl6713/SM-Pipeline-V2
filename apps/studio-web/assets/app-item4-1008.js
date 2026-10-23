@@ -287,7 +287,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.746-global-idea-limit";
+  const BUILD_ID = "item4-0.6.747-global-admin-tab";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -24342,7 +24342,7 @@ function timedScriptAssetLabel(asset, index) {
     });
   }
 
-  const OPS_CONTROL_TABS = ["desk", "queue", "profiles", "produce", "intake", "analytics", "schedule", "publish", "oversized", "repair"];
+  const OPS_CONTROL_TABS = ["desk", "queue", "profiles", "global", "produce", "intake", "analytics", "schedule", "publish", "oversized", "repair"];
   let operationsQueueRows = [];
   let operationsQueueBundles = { rendering: [], publishing: [], end_to_end: [] };
   let operationsQueueCanEdit = false;
