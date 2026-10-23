@@ -8,7 +8,7 @@ export const GLOBAL_IDEA_TARGET_SETTING = "STUDIO_GLOBAL_AUTOMATIC_IDEA_TARGET";
 export const GLOBAL_IDEA_TARGET_MAX = 10000;
 /** Missing setting preserves the existing default; a malformed saved setting fails closed. */
 export function parseGlobalIdeaTarget(raw) {
-  if (raw === undefined || raw === null || raw === "") return 500;
+  if (raw === undefined || raw === null) return 500;
   const value = typeof raw === "number" ? raw : Number(String(raw).trim());
   return Number.isSafeInteger(value) && value >= 1 && value <= GLOBAL_IDEA_TARGET_MAX ? value : null;
 }
