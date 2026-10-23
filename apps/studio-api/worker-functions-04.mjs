@@ -10854,6 +10854,11 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
     return { production_request_id: requestId, already_accepted: true,
       message: "This Producer revision was already accepted.", producer_queued: true };
   }
+  // Never supersede an in-flight Producer job with a second concurrent note.
+  // The first request must reach review (or a visible exception) before a new revision.
+  if (producer?.automatic && /\[factory-producer-revision id=fpr-[a-f0-9]+ state=pending\]/.test(String(f(requestRecord, "Production_Notes") || ""))) {
+    throw new HttpError(409, "A Producer revision is already in progress for this content. Review its status before sending another request.");
+  }
   const stamp = new Date().toISOString();
   const productionNotes = factoryAppendFeedback(f(requestRecord, "Production_Notes"), note, {
     actor, stamp, scope: "content",
