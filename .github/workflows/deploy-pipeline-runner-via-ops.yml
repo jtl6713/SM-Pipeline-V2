@@ -40,7 +40,8 @@ jobs:
             services/pipeline-runner/tests/test_fbs2_storage_retry.py \
             services/pipeline-runner/tests/test_fbs3_rate_limit_guard.py \
             services/pipeline-runner/tests/test_supabase_pipeline_writes.py \
-            services/pipeline-runner/tests/test_visual_watermark.py
+            services/pipeline-runner/tests/test_visual_watermark.py \
+            services/pipeline-runner/tests/test_apc_cover_selection_qa1050.py
 
       - name: Deploy Pipeline Runner through allowlisted Ops action
         shell: bash
@@ -291,3 +292,5 @@ jobs:
 
 # Step 2 existing-media reconciliation: 2026-10-22 restart runner through audited Ops deploy action.
 # Existing YouTube YT2 video IDs and TikTok TTD2 publish IDs must be polled, NEVER uploaded/created twice.
+
+# 2026-10-22 QA #1050 source PR #1089: deploy approved-cover retention when C9 final-slides view omitted cover and verify cover regressions.
