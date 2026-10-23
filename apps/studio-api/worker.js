@@ -2288,7 +2288,11 @@ export default {
         if (request.method === "PATCH") {
           assertWriteRequest(request, env);
           requirePermission(authorization, "production_configure");
-          return await updateProductionRequest(request, env, url, authorization);
+          const requestId = url.pathname.match(/^\/api\/production-requests\/(rec[A-Za-z0-9]+)$/)?.[1];
+          if (!requestId) throw new HttpError(400, "Invalid Production Request");
+          return withOutputApprovalLock(env.STUDIO_MEDIA, requestId, () =>
+            updateProductionRequest(request, env, url, authorization)
+          );
         }
         const response = await getProductionRequest(request, env, url, authorization, ctx);
         cadenceScheduleSync(ctx, env);
