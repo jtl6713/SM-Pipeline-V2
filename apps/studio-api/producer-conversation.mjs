@@ -115,8 +115,6 @@ export function appendProducerThreadMessage(notes, input, options = {}) {
   const source = String(notes ?? "");
   const current = readProducerThread(source);
   const expectedRevision = Number(input?.expected_revision);
-  if (!Number.isSafeInteger(expectedRevision) || expectedRevision !== current.revision)
-    throw new Error("Producer conversation has changed; reload before submitting");
   const id = text(input?.message_id);
   if (!/^[a-zA-Z0-9_-]{12,96}$/.test(id)) throw new Error("A unique message id is required");
   const body = text(input?.message);
@@ -126,6 +124,8 @@ export function appendProducerThreadMessage(notes, input, options = {}) {
     if (duplicate.content !== body) throw new Error("Duplicate message id has different content");
     return {notes: source, thread: current, replay: true};
   }
+  if (!Number.isSafeInteger(expectedRevision) || expectedRevision !== current.revision)
+    throw new Error("Producer conversation has changed; reload before submitting");
   const proposal = planConversationalSceneRevision(body, options.producer_plan);
   const next = {schema: "studio.producer-thread.1", revision: current.revision + 1,
     messages: [...current.messages, {id, role: "user", content: body,
@@ -138,4 +138,34 @@ export function appendProducerThreadMessage(notes, input, options = {}) {
   if (output.length > 9750) throw new RangeError(
     "Production notes have reached the Airtable conversation limit; no message was discarded or saved");
   return {notes: output, thread: next, replay: false};
+}
+
+/**
+ * Factory already persists its review turns in the same Airtable notes field.
+ * Surface those existing immutable feedback blocks in the ongoing transcript;
+ * do not copy them or alter Factory execution and approval semantics.
+ */
+export function producerConversationHistory(notes) {
+  const source = String(notes || "");
+  const thread = readProducerThread(source);
+  const factory = [];
+  const pattern = /\[factory-review-feedback at=([^\s\]]+) scope=([^\s\]]+) actor=([^\]]+)\]\r?\n([\s\S]*?)\r?\n\[\/factory-review-feedback\]/g;
+  for (const match of source.matchAll(pattern)) {
+    factory.push({
+      id: "factory-feedback-" + factory.length,
+      role: "user",
+      at: match[1],
+      source: "factory",
+      content: String(match[4] || "").trim(),
+    });
+  }
+  const messages = [...thread.messages, ...factory]
+    .sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
+  const state = [...source.matchAll(/\[factory-producer-revision id=(fpr-[a-f0-9]+) state=([a-z_]+)\]/g)]
+    .at(-1);
+  return {
+    ...thread,
+    messages,
+    factory_revision_status: state ? {id: state[1], status: state[2]} : null,
+  };
 }
