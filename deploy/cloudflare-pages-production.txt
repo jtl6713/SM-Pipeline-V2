@@ -520,3 +520,4 @@ Deploy UI 0.6.751-profile-first: profile selector visible on first paint, profil
 2026-10-23: Retry UI 0.6.752 with Chromium-only mobile heading smoke after run #806 showed WebKit library gaps; full regression, production preflight and live verification remain mandatory.
 2026-10-23: Deploy UI 0.6.753-factory-hidden-controls. Hide inactive Factory Close, Previous, Next and other [hidden] activity controls.
 2026-10-23: Retry UI 0.6.753 Pages deploy after aligning all release-locked regression assertions with the new cache key.
+2026-10-23: UI 0.6.753 Pages deploy retry after correcting escaped cache-key regex in release-contract regression.
