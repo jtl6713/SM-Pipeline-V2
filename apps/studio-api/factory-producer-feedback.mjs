@@ -6,17 +6,28 @@ import { parseGroundedMediaDirective } from "./factory-producer-media-edits.mjs"
 export function interpretFactoryProducerFeedback(note) {
   const raw = String(note || "").trim();
   if (!raw || raw.length > 3000) return { automatic: false, reason: "Review instructions are required (maximum 3000 characters)." };
-  const media = /\b(add|insert|replace|remove|swap|find|use|include|reorder|change)\b[^\n.]{0,110}\b(photo|image|picture|still|clip|shot|scene|slide|transition|video|music|track|timing|duration|pace|opening|closing)\b/i;
-  // Keep ambiguous media edits fail-closed; exact overall duration is handled
-  // below, after parsing a complete unambiguous instruction.
-  if (media.test(raw) && !/^(?:set|change|adjust)\s+(?:the\s+)?(?:video|final video|overall)\s+duration\s+(?:to|at)|^make\s+(?:the\s+)?video\s+\d{1,3}\s*(?:seconds?|secs?)\s*long/i.test(raw)) {
-    return { automatic: false, reason: "Media and timeline changes require asset-grounded revision planning." };
-  }
   const lines = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
   const fields = {};
   const directives = [];
   const mediaEdits = [];
+  const mediaRequests = [];
   for (const line of lines) {
+    // Explicit operator directions are grounded later against exactly one
+    // classified, same-profile Media Asset before any Factory state changes.
+    const named = line.match(/^(?:add|include|insert)\\s+(?:library\\s+)?(photo|still|image|video clip|clip)\\s+(?:named|called)\\s*:\\s*(.{3,120})$/i);
+    const byId = line.match(/^(?:add|include|insert)\\s+(?:library\\s+)?(photo|still|image|video clip|clip)s?\\s*:\\s*(rec[A-Za-z0-9]{14})$/i);
+    if (named || byId) {
+      const kind = /clip/i.test((named || byId)[1]) ? "clip" : "photo";
+      const reference = (named || byId)[2].trim();
+      if (named) {
+        const name = reference.replace(/^["']|["']$/g, "");
+        if (!/^[\\p{L}\\p{N} _().,'&-]{3,120}$/u.test(name))
+          return { automatic: false, reason: "Library asset name contains unsupported characters." };
+        mediaRequests.push({kind,name});
+      } else mediaRequests.push({kind,id:reference});
+      directives.push(kind === "clip" ? "add_clip" : "add_photos");
+      continue;
+    }
     const mediaEdit = parseGroundedMediaDirective(line);
     if (mediaEdit) {
       mediaEdits.push(mediaEdit);
@@ -54,5 +65,7 @@ export function interpretFactoryProducerFeedback(note) {
   }
   if (!directives.length || Object.values(fields).some(value => !value))
     return { automatic: false, reason: "Provide explicit replacement text after a colon." };
-  return { automatic: true, fields, media_edits: mediaEdits, changes: [...new Set(directives)] };
+  if (mediaRequests.length > 3) return { automatic: false, reason: "Choose up to three library assets per revision." };
+  if (mediaRequests.length && mediaEdits.length) return { automatic: false, reason: "Add library media and reorder/trim existing scenes in separate revisions." };
+  return { automatic: true, fields, media_edits: mediaEdits, media_requests: mediaRequests, changes: [...new Set(directives)] };
 }
