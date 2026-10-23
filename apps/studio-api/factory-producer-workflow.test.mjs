@@ -133,6 +133,13 @@ test("Named creative direction → authoritative asset IDs → revision job → 
  outputs[0].fields.Output_Status="Ready for Review";
  outputs[0].fields.Render_Status="Rendered";
  outputs[0].fields.Final_File_URL="https://example.test/new-render.mp4";
+ outputs[0].fields.Selected_Assets_JSON=JSON.stringify({
+   production_request_record_id:REQUEST,
+   selected_clips:[
+     {source_asset_id:movie.id,media_asset_record_id:movie.media_asset_record_id},
+     {source_asset_id:photo.id,media_asset_record_id:photo.media_asset_record_id},
+   ],
+ });
  const completed=await api.factoryVerifyProducerRevisions(env);
  assert.equal(completed[0].quality,"passed",JSON.stringify(JSON.parse(request.fields.Studio_Production_Job_JSON).producer_quality));
  assert.equal(outputs[0].fields.Publish_Status,"Not Ready");
