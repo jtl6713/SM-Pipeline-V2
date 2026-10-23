@@ -24,3 +24,20 @@ test("do not silently accept missing media, timeline requests, or ambiguous dire
    assert.equal(interpret(note).automatic, false, note);
  }
 });
+
+test("one or more explicit library photos and clips are executable planned changes", () => {
+ const photo = interpret("Add library photos: rec12345678901234, rec98765432109876");
+ assert.equal(photo.automatic, true);
+ assert.deepEqual(photo.media_asset_ids, ["rec12345678901234", "rec98765432109876"]);
+ assert.deepEqual(photo.changes, ["add_photos"]);
+ assert.equal(photo.allow_video, false);
+ const video = interpret("Include library clip: rec12345678901234");
+ assert.equal(video.automatic, true);
+ assert.equal(video.allow_video, true);
+ assert.deepEqual(video.changes, ["add_clip"]);
+});
+test("unnamed, ungrounded or nonlibrary media remains blocked", () => {
+ for (const note of ["Add three nice river photos", "Include a clip of the train", "Add library photo: recBAD", "Replace any photo"]) {
+  assert.equal(interpret(note).automatic, false, note);
+ }
+});
