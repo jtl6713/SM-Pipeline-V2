@@ -14,10 +14,10 @@ export function interpretFactoryProducerFeedback(note) {
   for (const line of lines) {
     // Explicit, classified Airtable library references are executable without
     // hallucinating filenames or searching another city's collection.
-    const addPhoto = line.match(/^(?:add|include|insert)\\s+(?:library\\s+)?(?:photo|still|image)s?\\s*:\\s*(rec[A-Za-z0-9]{14}(?:\\s*[,;]\\s*rec[A-Za-z0-9]{14})*)$/i);
-    const addClip = line.match(/^(?:add|include|insert)\\s+(?:library\\s+)?(?:video\\s+)?clips?\\s*:\\s*(rec[A-Za-z0-9]{14}(?:\\s*[,;]\\s*rec[A-Za-z0-9]{14})*)$/i);
+    const addPhoto = line.match(/^(?:add|include|insert)\s+(?:library\s+)?(?:photo|still|image)s?\s*:\s*(rec[A-Za-z0-9]{14}(?:\s*[,;]\s*rec[A-Za-z0-9]{14})*)$/i);
+    const addClip = line.match(/^(?:add|include|insert)\s+(?:library\s+)?(?:video\s+)?clips?\s*:\s*(rec[A-Za-z0-9]{14}(?:\s*[,;]\s*rec[A-Za-z0-9]{14})*)$/i);
     if (addPhoto || addClip) {
-      for (const id of (addPhoto || addClip)[1].split(/\\s*[,;]\\s*/)) media_asset_ids.push(id);
+      for (const id of (addPhoto || addClip)[1].split(/\s*[,;]\s*/)) media_asset_ids.push(id);
       if (addClip) allow_video = true;
       directives.push(addClip ? "add_clip" : "add_photos");
       continue;
