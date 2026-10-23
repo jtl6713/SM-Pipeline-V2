@@ -1,4 +1,5 @@
 import { verifyFactoryRenderedMedia } from "./factory-producer-render-evidence.mjs";
+import { appendVerifiedLibraryAssets } from "./factory-producer-library-append.mjs";
 import { applyGroundedMediaEdits } from "./factory-producer-media-edits.mjs";
 import { validateProducerPlan, planSelectiveRework } from "./conversational-producer-plan.mjs";
 import { interpretFactoryProducerFeedback } from "./factory-producer-feedback.mjs";
@@ -623,6 +624,10 @@ import {
   ideaLibraryIntakeDate,
   ideaLibraryIsEligibleImage,
   item4ProductionProfileRecord,
+  ideaLibraryRejectReason,
+  studioProfileRequiresChicagoWatermark,
+  studioAssetHasChicagoWatermark,
+  studioAssetSourceDriveId,
   attachItem4LibraryAssetIds,
   studioScheduleMs,
   studioOccupiedRowMatchesProfile,
@@ -10873,14 +10878,80 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
     let grounded = null;
     const sourceAssets = item4AssetManifest(requestRecord);
     const requiredIds = (producer.media_edits || []).map(edit => edit.asset_id);
-    if (requiredIds.length) {
+    const mediaRequests = Array.isArray(producer.media_requests) ? producer.media_requests : [];
+    const libraryInventory = [];
+    if (mediaRequests.length) {
+      if (mediaRequests.length > 3 || (producer.media_edits || []).length) {
+        throw new HttpError(409, "Producer requires up to three library assets per revision; reorder/trim separately");
+      }
+      const already = new Set(sourceAssets.map(a => String(a.media_asset_record_id || "")).filter(Boolean));
+      const resolved = new Set();
+      for (const requested of mediaRequests) {
+        const kind = requested?.kind === "clip" ? "video" : "photo";
+        let media;
+        if (requested?.id && /^rec[A-Za-z0-9]{14}$/.test(String(requested.id))) {
+          media = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, requested.id);
+        } else if (requested?.name) {
+          const name = String(requested.name).trim();
+          if (!/^[\\p{L}\\p{N} _().,'&-]{3,120}$/u.test(name)) throw new HttpError(400, "Invalid library asset name");
+          // Exact name lookup only, then verify profile and kind on the returned
+          // records. Never take the first fuzzy/ambiguous media search result.
+          const matches = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
+            limit: 15,
+            filterFormula: `LOWER({Asset Name}&"")="${name.toLowerCase()}"`,
+          });
+          const scoped = matches.filter(row => {
+            const profiles = arrayOrEmpty(f(row, "Content_Profile"));
+            const mime = String(f(row, "MIME_Type") || "").toLowerCase();
+            const rowKind = String(f(row, "Media_Class") || "").toLowerCase() === "video" || mime.startsWith("video/") ? "video" : "photo";
+            return profiles.length === 1 && profiles[0] === profile.id
+              && rowKind === kind && String(f(row, "Asset Name") || "").trim().toLowerCase() === name.toLowerCase();
+          });
+          if (matches.length >= 15 || scoped.length !== 1) throw new HttpError(409,
+            `Library ${kind} "${name}" needs one unique classified match in this profile`);
+          media = scoped[0];
+        } else throw new HttpError(400, "Producer library asset needs its exact ID or classified name");
+        const owners = arrayOrEmpty(f(media, "Content_Profile"));
+        if (owners.length !== 1 || owners[0] !== profile.id) throw new HttpError(409, "Library media is not owned by this content profile");
+        const mediaId = String(media.id || "");
+        if (!mediaId || already.has(mediaId) || resolved.has(mediaId)) throw new HttpError(409, "Library media is already used or duplicated");
+        resolved.add(mediaId);
+        const mime = String(f(media, "MIME_Type") || "").toLowerCase();
+        const mediaKind = String(f(media, "Media_Class") || "").toLowerCase() === "video" || mime.startsWith("video/") ? "video" : "photo";
+        if (mediaKind !== kind) throw new HttpError(409, "Library media type does not match the requested photo/clip");
+        const rejection = ideaLibraryRejectReason(media, { allowVideo: mediaKind === "video" });
+        if (rejection) throw new HttpError(409, rejection);
+        if (studioProfileRequiresChicagoWatermark(profile) && !studioAssetHasChicagoWatermark(media)) {
+          throw new HttpError(409, "Chicago photo must be watermarked through the Production library before automatic rework");
+        }
+        const driveId = String(googleDriveFileId(media) || "");
+        if (!driveId) throw new HttpError(409, "Library media lacks an authoritative Google Drive master");
+        libraryInventory.push({
+          media_asset_record_id: mediaId, profile_id: profile.id,
+          google_drive_file_id: driveId,
+          source_google_drive_file_id: studioAssetSourceDriveId(media),
+          google_drive_url: String(f(media, "Google Drive URL") || "") || null,
+          name: String(f(media, "Asset Name") || ""), mime_type: mime,
+          media_kind: mediaKind, duration_seconds: Number(f(media, "Duration_Seconds") || 0),
+          source_format: String(f(media, "File_Extension") || ""),
+        });
+        requiredIds.push(mediaId);
+      }
+      try {
+        const appended = appendVerifiedLibraryAssets(sourceAssets, libraryInventory, profile.id,
+          () => crypto.randomUUID().replace(/-/g, "").slice(0, 18));
+        grounded = { assets: appended.assets, changed_asset_ids: appended.added_asset_ids };
+      } catch (error) { throw new HttpError(409, "Producer cannot attach library media: " + (error?.message || error)); }
+    }
+    if ((producer.media_edits || []).length) {
       try { grounded = applyGroundedMediaEdits(sourceAssets, producer.media_edits); }
       catch (error) { throw new HttpError(409, "Producer cannot execute this media change: " + (error?.message || error)); }
     }
     const validated = validateProducerPlan({
       original_prompt: note, profile_id: profile.id,
       changes: producer.changes, required_asset_ids: requiredIds, excluded_asset_ids: [],
-    }, sourceAssets.map(asset => ({ ...asset, profile_id: profile.id })));
+    }, [...sourceAssets.map(asset => ({ ...asset, profile_id: profile.id })),
+        ...libraryInventory.map(media => ({ id: media.media_asset_record_id, profile_id: profile.id }))]);
     if (!validated.valid) throw new HttpError(409, "Producer Plan validation failed");
     producer = { ...producer, execution_plan: planSelectiveRework(validated), grounded_media: grounded };
     // Metadata and timing changes can only reuse complete verified source media.
@@ -10977,6 +11048,16 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
         ...(producer?.automatic && producer?.grounded_media ? {
           Studio_Master_Assets_JSON: JSON.stringify(producer.grounded_media.assets),
           Studio_Master_Asset_Count: producer.grounded_media.assets.length,
+          ...(libraryInventory.length ? {
+            Studio_Master_Media_Assets: [...new Set(producer.grounded_media.assets
+              .map(a => String(a.media_asset_record_id || "")).filter(Boolean))],
+            Studio_Master_Asset_Status: "Ready",
+            Studio_Item4_State: "Assets Ready",
+            Studio_Variant_Status: "None",
+            Studio_Variant_Manifest_JSON: null,
+            Studio_Variant_Updated_At: null,
+            Studio_Variant_Error: null,
+          } : {}),
         } : {}),
         ...(producer?.automatic && producer?.changes?.includes("rewrite_narration") ? { Voiceover_Mode: "Yes" } : {}),
         Production_Notes: [withFactoryRevisionOpen(productionNotes, { actor, stamp }), producerMarker].filter(Boolean).join("\n"),
@@ -11173,7 +11254,7 @@ export async function factoryVerifyProducerRevisions(env) {
     const changes = Array.isArray(job.producer_changes) ? job.producer_changes : [];
     const requireNarration = changes.includes("rewrite_narration");
     const requireDuration = changes.includes("adjust_timing");
-    const requiresMedia = changes.includes("reorder_media") || changes.includes("trim_clip");
+    const requiresMedia = changes.some(change => ["reorder_media", "trim_clip", "add_photos", "add_clip"].includes(change));
     const exactScript = String(f(row, "Requested_Script") || "").trim();
     const requestedDuration = Number(f(row, "Video_Duration_Seconds") || 0);
     if (job.step !== "done") failures.push("Runner did not complete successfully");
