@@ -3,6 +3,34 @@
 import { firstLinkedRecordId } from "./asset-library.mjs";
 import { IDEA_LIBRARY_NAMED_PLACES } from "./idea-photo-wait.mjs";
 
+/** One Airtable Pipeline Setting shared by every Shining Cities profile. */
+export const GLOBAL_IDEA_TARGET_SETTING = "STUDIO_GLOBAL_AUTOMATIC_IDEA_TARGET";
+export const GLOBAL_IDEA_TARGET_MAX = 10000;
+/** Missing setting preserves the existing default; a malformed saved setting fails closed. */
+export function parseGlobalIdeaTarget(raw) {
+  if (raw === undefined || raw === null) return 500;
+  const value = typeof raw === "number" ? raw : Number(String(raw).trim());
+  return Number.isSafeInteger(value) && value >= 1 && value <= GLOBAL_IDEA_TARGET_MAX ? value : null;
+}
+/** Sum verified scheduled + awaiting-review outputs for ALL active city profiles. */
+export function globalIdeaPipelineLoad(scores, profileIds) {
+  if (!scores || !Array.isArray(profileIds) || !profileIds.length) return null;
+  let total = 0;
+  for (const id of profileIds) {
+    const value = scores[id]?.pipeline_load;
+    if (value === null || value === undefined || !Number.isSafeInteger(Number(value)) || Number(value) < 0) return null;
+    total += Number(value);
+  }
+  return Number.isSafeInteger(total) ? total : null;
+}
+/** Estimate five output slots per new idea; never create when global inventory is unverified. */
+export function globalAutomaticIdeaBudget(globalLoad, target) {
+  if (!Number.isSafeInteger(globalLoad) || globalLoad < 0) return 0;
+  const limit = parseGlobalIdeaTarget(target);
+  if (limit === null) return 0;
+  return Math.max(0, Math.ceil((limit - globalLoad) / AUTONOMOUS_EXPECTED_OUTPUTS_PER_IDEA));
+}
+
 /** All-Profiles load per city: keep Scheduled + Awaiting Approval at or above this. */
 export const AUTONOMOUS_SCHEDULED_TARGET = 500;
 /** Planning estimate only: actual output inventory is always rechecked. */
