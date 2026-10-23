@@ -195,7 +195,7 @@
  <section class="panel" id="scriptedShortPanel">
  <div class="panel-heading"><div><h2>Script a short</h2><p>One prompt. Studio writes the spoken scenes and estimated timings, and either attaches a library file or leaves a shot you still need to create. Decline throws it away. Accept saves a Draft with the six short outputs, the default voice, and the default music. Approve stays locked until every scene has a photo. This does not publish.</p></div></div>
  <form id="scriptedShortForm" class="idea-form">
- <label class="form-field"><span>Prompt</span><textarea id="scriptedShortPrompt" maxlength="500" rows="3" placeholder="Staten Island Ferry tricks" required></textarea></label>
+ <label class="form-field"><span>Tell the Producer what to make</span><textarea id="scriptedShortPrompt" maxlength="500" rows="3" placeholder="Create a 30-second vertical short about Staten Island Ferry. Start with the skyline, use my uploaded ferry photos, explain where to sit, and keep the narration friendly." required></textarea></label>
  <div class="idea-generate-actions"><button type="submit" class="primary-button" id="scriptedShortPropose">Propose</button></div>
  </form>
  <div class="form-message" id="scriptedShortMessage" aria-live="polite"></div>
@@ -234,7 +234,7 @@
  </div>
  <div id="ideaManualFields" class="idea-path-pane" hidden>
  <label class="form-field"><span>Idea title</span><input id="ideaTitle" name="title" maxlength="160" placeholder="e.g. Chicago Riverwalk at sunset"></label>
- <label class="form-field"><span>Summary <em>optional</em></span><textarea id="ideaSummary" name="summary" maxlength="5000" rows="5" placeholder="What should this content be about?"></textarea></label>
+ <label class="form-field"><span>Creative direction — tell the Producer what to make <em>optional</em></span><textarea id="ideaSummary" name="summary" maxlength="5000" rows="5" placeholder="Describe your ideal video or slides: subject, preferred uploaded photos/clips, scenes and order, narration, mood, duration, and anything to avoid. You can dictate using your keyboard microphone."></textarea><small class="subtle">Saved with the idea and carried into Production. Requested media must still match approved assets.</small></label>
  </div>
  <div class="form-message" id="ideaFormMessage" aria-live="polite"></div>
  <div class="form-actions"><button type="button" class="secondary-button" id="cancelIdeaButton">Cancel</button><button type="submit" class="primary-button" id="createIdeaButton">Continue with selected idea</button></div>
@@ -263,8 +263,8 @@
  <label class="form-field"><span>Title</span>
  <input id="ezIdeaTitle" maxlength="160" placeholder="e.g. Chicago Theatre marquee at dusk" autocomplete="off">
  </label>
- <label class="form-field"><span>Idea description <em>optional</em></span>
- <textarea id="ezIdeaSummary" maxlength="5000" rows="3" placeholder="What should this content be about?"></textarea>
+ <label class="form-field"><span>Creative direction for the Producer <em>optional</em></span>
+ <textarea id="ezIdeaSummary" maxlength="5000" rows="3" placeholder="Tell the Producer how to make it: use my uploaded photos or clips, describe scene order, narration, mood and timing. Dictation works too."></textarea>
  </label>
  <label class="form-field"><span>Primary location <em>optional</em></span>
  <input id="ezPrimaryLocation" maxlength="200" placeholder="e.g. Andersonville" autocomplete="off" list="ezPrimaryLocationSuggestions">
@@ -2292,7 +2292,7 @@
  <p id="factoryFeedbackScope" class="factory-feedback-scope"></p>
  <p id="factoryFeedbackIntro">Describe exactly what needs to change. Your notes will be saved with the Production Request and the returned outputs for the production manager to review.</p>
  <label for="factoryFeedbackNotes" class="factory-feedback-label">Requested changes <span aria-hidden="true">*</span></label>
- <textarea id="factoryFeedbackNotes" rows="7" maxlength="3000" required placeholder="Example: Shorten the first scene to 3 seconds, replace the cover photo, and use the exact narration from the updated script."></textarea>
+ <textarea id="factoryFeedbackNotes" rows="7" maxlength="3000" required placeholder="Tell the Producer what to revise. Examples: Please make it 20 seconds. / Please include the photo named Chicago River Night. / Replace narration with: Here is the Chicago River at sunset."></textarea>
  <div class="factory-feedback-hints"><span id="factoryFeedbackHintsText">Producer support for verified exact-text revisions.</span><span id="factoryFeedbackCount">0 / 3000</span></div>
  <p id="factoryFeedbackError" class="factory-feedback-error" role="alert" hidden></p>
  </div>
