@@ -160,7 +160,7 @@
     if (!/^rec[A-Za-z0-9]+$/.test(String(id || ""))) return;
     const panel = initPanel();
     if (!panel) return;
-    if (activeRequestId === id && !force && !panel.hidden) return;
+    // Reopening the same request must refresh Factory changes, not retain stale history.
     activeRequestId = id;
     panel.hidden = false;
     setMessage("Loading conversation…");
@@ -175,6 +175,7 @@
     if (!container) return;
     container.replaceChildren(create("p","subtle","Loading previous Producer feedback…"));
     if (!/^rec[A-Za-z0-9]+$/.test(String(id||""))) return;
+    container.hidden = false;
     try {
       const data = await api("/api/production-requests/"+encodeURIComponent(id)+"/producer-conversation");
       if ($("factoryFeedbackBackdrop")?.hidden) return;
