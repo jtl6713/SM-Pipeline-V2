@@ -44,7 +44,7 @@ function harness() {
     loadContentPlatformOutputs:async ()=>outputs,
     arrayOrEmpty:v=>Array.isArray(v)?v:[],
     outputAlreadyApprovedForPublishing:()=>false,
-    item4ProductionProfileRecord:async ()=>({id:"recProfile0000001"}),
+    item4ProductionProfileRecord:async (_env,record)=>{ assert.equal(record.id,REQUEST,"Profile must resolve from Production Request, not output"); return {id:"recProfile0000001"}; },
     item4AssetManifest:row=>JSON.parse(f(row,"Studio_Master_Assets_JSON")||"[]"),
     applyGroundedMediaEdits,validateProducerPlan,planSelectiveRework,verifyFactoryRenderedMedia,
     factoryLatestReviewFeedback:()=>null,
