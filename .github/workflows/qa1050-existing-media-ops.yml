@@ -1,0 +1,78 @@
+name: QA1050 Existing Video and Draft Poll via Ops
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/qa1050-existing-media-ops.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa1050-step2-existing-media-single-poll
+  cancel-in-progress: false
+
+jobs:
+  existing-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify exact-identity stage allowlist and target count
+        shell: bash
+        run: |
+          set -euo pipefail
+          script='deploy/local-services/qa1050-step2-exact-existing-poll.ps1'
+          test -f "$script"
+          test "$(grep -c "^  @('" "$script")" -eq 11
+          grep -q "Invoke-ExactStage 'yts2'" "$script"
+          grep -q "Invoke-ExactStage 'ttd2'" "$script"
+          grep -q "Invoke-ExactStage 'yts3'" "$script"
+          grep -q "Invoke-ExactStage 'ttd3'" "$script"
+          if grep -Ein "Invoke-ExactStage '(yt0|ytp1|yts1|ttd0|ttd1|fbs3|fb2)'" "$script"; then
+            echo "Unsafe new-upload/creation stage blocked"; exit 7
+          fi
+      - name: Run exact saved-identity status stages via audited Ops shell
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://ops.chicagoshining.com'
+          selected=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null 2>&1; then
+              selected="$candidate"; break
+            fi
+          done
+          test -n "$selected"
+          jq -Rs '{command:.,confirm:true}' < deploy/local-services/qa1050-step2-exact-existing-poll.ps1 > /tmp/exact-poll.json
+          code=$(curl -sS --max-time 30 -o /tmp/response.json -w '%{http_code}' \
+            -X POST "$BASE/api/shell" -H "Authorization: Bearer $selected" \
+            -H "Content-Type: application/json" --data-binary @/tmp/exact-poll.json || true)
+          test "$code" = "202"
+          jq -e '.ok==true and .job.action=="shell" and .job.id!=null' /tmp/response.json >/dev/null
+          JOB=$(jq -r '.job.id' /tmp/response.json)
+          echo "Authenticated Ops exact-stage job submitted."
+          for i in $(seq 1 135); do
+            code=$(curl -sS --max-time 20 -o /tmp/job.json -w '%{http_code}' \
+              -H "Authorization: Bearer $selected" "$BASE/api/jobs/$JOB" || true)
+            if [[ "$code" == "200" ]]; then
+              status=$(jq -r '.job.status // empty' /tmp/job.json)
+              if [[ "$status" == "ok" || "$status" == "failed" ]]; then
+                jq -r '.job.log // ""' /tmp/job.json \
+                  | grep -E '"output_id"|QA1050 exact-item|PROVIDER_STAGE_ERROR' || true
+                jq -c '{ok,job:{status:.job.status,exitCode:.job.exitCode}}' /tmp/job.json
+                test "$status" = "ok"
+                exit 0
+              fi
+            fi
+            sleep 2
+          done
+          echo "Ops stage job did not reach a terminal result"; exit 9
