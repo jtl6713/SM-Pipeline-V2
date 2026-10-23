@@ -18,33 +18,40 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: true
-      - name: Merge latest production main, report conflicts without overwriting code
+      - name: Preserve both validated deployment triggers during main merge
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git fetch origin main
-          if git merge-base --is-ancestor origin/main HEAD; then
-            echo 'MAIN_ALREADY_CONTAINED'
-          else
+          if ! git merge-base --is-ancestor origin/main HEAD; then
             git merge --no-commit --no-ff origin/main || true
           fi
-          conflicts="$(git diff --name-only --diff-filter=U)"
-          if [[ -n "$conflicts" ]]; then
-            echo 'CONFLICT_FILES_BEGIN'
-            printf '%s\n' "$conflicts"
-            echo 'CONFLICT_FILES_END'
-            while IFS= read -r file; do
-              echo "CONFLICT_DETAIL $file"
-              grep -n -C 6 '^<<<<<<<\|^=======\|^>>>>>>>' "$file" | head -180 || true
-            done <<< "$conflicts"
-            echo 'REFUSING_UNSAFE_MERGE'
-            exit 1
-          fi
-          # Remove the one-time maintenance workflow from the merge commit.
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          conflicts = subprocess.check_output(['git','diff','--name-only','--diff-filter=U'],text=True).splitlines()
+          expected = {'deploy/cloudflare-pages-production.txt', 'deploy/cloudflare-worker-production.txt'}
+          if set(conflicts) != expected:
+              raise SystemExit('Refuse unexpected conflicting paths: ' + repr(conflicts))
+          producer = 'Deploy Conversational Producer Factory revision bridge PR #1093, merge 845c4bf3841094641f25f903d6c43ef0d17ff682. Preserve Airtable write authority and QA/publish fences.'
+          for name in sorted(expected):
+              ours = subprocess.check_output(['git','show',':2:'+name],text=True)
+              theirs = subprocess.check_output(['git','show',':3:'+name],text=True)
+              marker = '2026-10-23 PR #1095: Deploy'
+              if marker not in ours or marker in theirs or producer not in theirs or producer in ours:
+                  raise SystemExit('Refuse unexpected deploy-note conflict: '+name)
+              if ours.count(marker) != 1 or theirs.count(producer) != 1:
+                  raise SystemExit('Refuse duplicate note: '+name)
+              combined = ours.rstrip()+'\n'+producer+'\n'
+              Path(name).write_text(combined,encoding='utf-8')
+              print('PRESERVED_BOTH_NOTES',name,flush=True)
+          PY
+          git add deploy/cloudflare-pages-production.txt deploy/cloudflare-worker-production.txt
+          test -z "$(git diff --name-only --diff-filter=U)" || { echo 'Unresolved conflicts'; exit 1; }
           rm -f .github/workflows/global-idea-sync-main-20261023.yml
           git add -A
-          git commit -m 'merge: reconcile Conversational Producer and global idea setting; retire sync workflow'
+          git commit -m 'merge: preserve Conversational Producer and global idea limit deploy contracts'
           git push origin HEAD:refs/heads/feature/global-idea-target-admin-20261023
           echo 'GLOBAL_IDEA_MAIN_RECONCILED'
