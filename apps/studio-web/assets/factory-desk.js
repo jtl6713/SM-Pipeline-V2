@@ -1173,10 +1173,10 @@
     const intro = $("factoryFeedbackIntro");
     const hints = document.querySelector("#factoryFeedbackHintsText");
     if (intro) intro.textContent = auto
-      ? "Tell the Producer what needs changing. Explicit caption or voiceover replacements can be queued automatically; media and editing requests need a verified production plan."
+      ? "Tell the Producer what to change in everyday language. Precise caption, narration, duration and uniquely identified photo/clip instructions can restart production automatically. Other creative requests are saved for guided editing."
       : "Describe exactly what needs to change. Studio saves these review notes with the linked Production Request.";
     if (hints) hints.textContent = auto
-      ? "Automatic now: 'Set the caption to: …' or 'Replace the voiceover script with: …'. Other requests are saved for manual review, never falsely marked produced."
+      ? "Examples: Please make it 20 seconds. · Add the photo named Chicago River Night. · Replace narration with: Welcome to Chicago. Unresolved photos/clips stay on hold for selection."
       : "This send-back opens Production for manual editing and approval.";
     if (error) { error.hidden = true; error.textContent = ""; }
     textarea.value = "";
