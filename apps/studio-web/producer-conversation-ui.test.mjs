@@ -27,3 +27,16 @@ test("Authenticated Worker path remains only proposed, never publish",()=>{
  assert.match(worker,/Production_Notes: updated\.notes/);
  assert.doesNotMatch(read("./assets/producer-conversation-ui.js"),/Publish_Status\s*:/);
 });
+
+test("Script a short visibly offers a two-stage conversational Producer flow on mobile and desktop", () => {
+ const html=read("./index.html");
+ const ui=read("./assets/producer-conversation-ui.js");
+ assert.match(html,/id="scriptedShortProducerIntro"/);
+ assert.match(html,/<h3>Talk to Your Producer<\/h3>/);
+ assert.match(html,/id="scriptedShortFollowup"/);
+ assert.match(html,/id="scriptedShortRevise"/);
+ assert.match(ui,/Producer follow-up:/);
+ assert.match(ui,/form\.requestSubmit\(\)/);
+ assert.match(ui,/nextBrief\.length > 5000/);
+ assert.match(html,/Nothing publishes automatically/);
+});

@@ -189,5 +189,40 @@
       });
     } catch(e) {container.replaceChildren(create("p","error-text",e.message));}
   }
+  function initScriptedShortRevision() {
+    const button = $("scriptedShortRevise");
+    const prompt = $("scriptedShortPrompt");
+    const form = $("scriptedShortForm");
+    const field = $("scriptedShortFollowup");
+    const status = $("scriptedShortRevisionStatus");
+    if (!button || !prompt || !form || !field || !status) return;
+    button.addEventListener("click", () => {
+      if ($("scriptedShortResult")?.hidden) return;
+      if ($("scriptedShortPropose")?.disabled) {
+        status.textContent = "The Producer is still preparing the current proposal.";
+        return;
+      }
+      const direction = field.value.trim();
+      if (!direction) {
+        status.textContent = "Describe the change you would like to make first.";
+        field.focus();
+        return;
+      }
+      const nextBrief = prompt.value.trim() + "\n\nProducer follow-up: " + direction;
+      if (nextBrief.length > 5000) {
+        status.textContent = "The combined brief exceeds 5,000 characters. Shorten your instructions before revising.";
+        field.focus();
+        return;
+      }
+      prompt.value = nextBrief;
+      prompt.dispatchEvent(new Event("input", { bubbles: true }));
+      field.value = "";
+      status.textContent = "Preparing a revised proposal with your original brief and follow-up directions. The proposal is not saved until Accept.";
+      form.requestSubmit();
+    });
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initScriptedShortRevision, { once: true });
+  else initScriptedShortRevision();
+
   window.StudioProducerConversation = {open,showFactoryHistory};
 })();

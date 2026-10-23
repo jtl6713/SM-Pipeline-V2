@@ -9,3 +9,12 @@
 #factoryProducerTranscript{max-height:180px;overflow:auto;margin:10px 0;padding:8px;background:var(--surface-subtle,#f7f8fa);border-radius:8px}
 #factoryProducerTranscript p{font-size:.85rem;line-height:1.4;margin:4px 0}
 @media(max-width:600px){.studio-producer-chat{padding:12px}.studio-producer-chat-heading{align-items:flex-start}}
+
+.scripted-short-producer-intro{margin:12px 0 16px;padding:14px 16px;border:1px solid var(--border,#d7dce5);border-radius:12px}
+.scripted-short-producer-intro h3{font-size:1.04rem;margin:0 0 6px}
+.scripted-short-producer-intro p{margin:0;line-height:1.5}
+.scripted-short-producer-revision{display:grid;gap:10px;margin:18px 0;padding:14px 16px;border:1px solid var(--border,#d7dce5);border-radius:12px}
+.scripted-short-producer-revision textarea{display:block;width:100%;min-height:92px;max-width:100%;box-sizing:border-box}
+.scripted-short-producer-revision button{justify-self:start}
+.scripted-short-producer-revision p{margin:0}
+@media(max-width:600px){.scripted-short-producer-intro,.scripted-short-producer-revision{padding:12px}.scripted-short-producer-revision button{width:100%}}
