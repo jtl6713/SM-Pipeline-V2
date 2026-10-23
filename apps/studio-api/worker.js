@@ -1,5 +1,5 @@
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
-import { readProducerThread, appendProducerThreadMessage } from "./producer-conversation.mjs";
+import { readProducerThread, appendProducerThreadMessage, producerConversationHistory } from "./producer-conversation.mjs";
 import { scriptedShortProducerPlanFromNotes } from "./scripted-short-producer-plan.mjs";
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 import {
@@ -2246,7 +2246,7 @@ export default {
         if (request.method === "GET") {
           const data = await view();
           return respond(request, env, {ok: true, production_request_id: requestId,
-            thread: data.thread, producer_plan: data.producer_plan,
+            thread: producerConversationHistory(data.notes), producer_plan: data.producer_plan,
             original_creative_brief_location: "linked_idea.Idea_Summary"});
         }
         let payload;
@@ -2277,7 +2277,7 @@ export default {
           }
           return respond(request, env, {
             ok: true, production_request_id: requestId,
-            thread: updated.thread, replay: updated.replay,
+            thread: producerConversationHistory(updated.notes), replay: updated.replay,
             message: updated.replay ? "Message already recorded." :
               "Creative feedback saved. Scene changes are proposed, not executed or approved.",
           }, updated.replay ? 200 : 201);
