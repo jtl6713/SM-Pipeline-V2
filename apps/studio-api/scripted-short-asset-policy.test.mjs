@@ -68,6 +68,14 @@ test("generic variety instruction is not a fabricated location lock", () => {
   assert.equal(libraryAssetSatisfiesPolicy({ id: "recTribeca", name: "Tribeca 14", profile_id: nyc }, parsed, nyc), true);
 });
 
+test("realistic Tribeca documentary wording resolves the named location despite a story sentence", () => {
+  const brief = "Create a visually rich documentary titled **Tribeca: From Industrial Grit to Manhattan Glamour.** Tell the fascinating story of how Tribeca evolved from a bustling warehouse district. Use a wide variety of relevant library assets.";
+  const parsed = parseScriptedShortAssetPolicy(brief);
+  assert.equal(parsed.location, null);
+  assert.equal(parsed.subject, "tribeca");
+  assert.equal(parsed.mode, "required_topic_match");
+});
+
 test("explicit named Tribeca upload requirements remain strict", () => {
   const parsed = parseScriptedShortAssetPolicy("Use the Tribeca images uploaded to the library.");
   assert.equal(parsed.required, true);
