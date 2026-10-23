@@ -41,7 +41,7 @@ test("natural scene descriptions resolve only uniquely attached Drive originals"
    {...vid,name:"Navy Pier Boat Approach.mp4",order:3},
  ];
  const directive = parse("Put the Chicago River Skyline Sunset photo first");
- assert.deepEqual(directive,{operation:"reorder",asset_name:"Chicago River Skyline Sunset",position:"first"});
+ assert.deepEqual(directive,{operation:"reorder",asset_name:"Chicago River Skyline Sunset",asset_kind:"photo",position:"first"});
  const reordered = apply(named,[parse("Move the Ohio Street Beach photo to position 1")]);
  assert.deepEqual(reordered.assets.map(x=>x.id),["asset0002","asset0001","vid00001"]);
  assert.deepEqual(reordered.changed_asset_ids,["asset0002"]);
