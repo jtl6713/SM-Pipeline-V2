@@ -8,7 +8,7 @@ export function interpretFactoryProducerFeedback(note) {
   const media = /\b(add|insert|replace|remove|swap|find|use|include|reorder|change)\b[^\n.]{0,110}\b(photo|image|picture|still|clip|shot|scene|slide|transition|video|music|track|timing|duration|pace|opening|closing)\b/i;
   // Keep ambiguous media edits fail-closed; exact overall duration is handled
   // below, after parsing a complete unambiguous instruction.
-  if (media.test(raw) && !/^(?:set|change|adjust)\\s+(?:the\\s+)?(?:video|final video|overall)\\s+duration\\s+(?:to|at)|^make\\s+(?:the\\s+)?video\\s+\\d{1,3}\\s*(?:seconds?|secs?)\\s*long/i.test(raw)) {
+  if (media.test(raw) && !/^(?:set|change|adjust)\s+(?:the\s+)?(?:video|final video|overall)\s+duration\s+(?:to|at)|^make\s+(?:the\s+)?video\s+\d{1,3}\s*(?:seconds?|secs?)\s*long/i.test(raw)) {
     return { automatic: false, reason: "Media and timeline changes require asset-grounded revision planning." };
   }
   const lines = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
@@ -32,8 +32,8 @@ export function interpretFactoryProducerFeedback(note) {
     // A precise whole-video duration is safe to send to the existing Studio
     // timing/render pipeline. Vague instructions such as "slow the transitions"
     // still require a real timeline plan and remain manual.
-    match = line.match(/^(?:set|change|adjust)\\s+(?:the\\s+)?(?:video|final video|overall)\\s+duration\\s+(?:to|at)\\s*:?\\s*(\\d{1,3})\\s*(?:seconds?|secs?|s)$/i)
-      || line.match(/^make\\s+(?:the\\s+)?video\\s+(\\d{1,3})\\s*(?:seconds?|secs?)\\s*long$/i);
+    match = line.match(/^(?:set|change|adjust)\s+(?:the\s+)?(?:video|final video|overall)\s+duration\s+(?:to|at)\s*:?\s*(\d{1,3})\s*(?:seconds?|secs?|s)$/i)
+      || line.match(/^make\s+(?:the\s+)?video\s+(\d{1,3})\s*(?:seconds?|secs?)\s*long$/i);
     if (match) {
       const seconds = Number(match[1]);
       if (!Number.isInteger(seconds) || seconds < 5 || seconds > 600)
