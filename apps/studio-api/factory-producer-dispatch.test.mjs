@@ -7,7 +7,11 @@ const entry = read("./worker.js");
 
 test("Factory Producer submission holds request-level lock over the complete durable write", () => {
   assert.match(worker, /const submitContentRevision = \(\) => factorySendBackContent\(/);
-  assert.match(worker, /await withOutputApprovalLock\(\s*env\.STUDIO_MEDIA, String\(payload\?\.production_request_id \|\| ""\), submitContentRevision/);
+  // Only the inner factorySendBackContent transaction owns this lease; the
+  // action dispatch must never try to reacquire it with the same request id.
+  const entry = worker.slice(worker.indexOf("export async function mutateFactoryDesk("));
+  assert.match(worker, /return withOutputApprovalLock\\(env\\.STUDIO_MEDIA, requestId, async/);
+  assert.doesNotMatch(entry, /await withOutputApprovalLock\\(\\s*env\\.STUDIO_MEDIA, String\\(payload\\?\\.production_request_id/);
   assert.match(worker, /Request_Status: "Draft"/);
   assert.match(worker, /Studio_Production_Job_JSON: revisionId \? JSON\.stringify\(/);
 });
