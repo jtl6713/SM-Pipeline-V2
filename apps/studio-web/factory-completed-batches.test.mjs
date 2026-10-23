@@ -69,6 +69,9 @@ test("completed history shows a 24-output batch when active activity has no rows
   const emptyActive = { view:"active",batches:[],totals:{batches:0,active:0,pending:0,approved:0,failed:0} };
   render(emptyActive);
   assert.equal(nodes.factoryBatchCompletedClose.hidden, true, "Close button stays hidden in active view");
+  assert.equal(nodes.factoryBatchCompletedPrev.hidden, true, "Previous stays hidden in active view");
+  assert.equal(nodes.factoryBatchCompletedNext.hidden, true, "Next stays hidden in active view");
+  assert.equal(nodes.factoryBatchCompletedPage.hidden, true, "Pagination label stays hidden in active view");
   assert.match(nodes.factoryBatchRecentList.innerHTML, /No active approval batches/);
   assert.equal(nodes.factoryBatchMetricValue.textContent,"0");
 
@@ -155,4 +158,13 @@ test("completed header Close control is wired to the shared active-view transiti
   assert.match(html, /id="factoryBatchCompletedClose"[^>]*aria-label="Close completed approvals and return to active approvals"[^>]*hidden/);
   assert.match(source, /\$\("factoryBatchCompletedClose"\)\?\.addEventListener\("click", \(\) => setFactoryCompletedOpen\(false\)\)/);
   assert.match(source, /\$\("factoryBatchCompletedToggle"\)\?\.addEventListener\("click", \(\) => setFactoryCompletedOpen\(!state\.completedOpen\)\)/);
+});
+
+test("Factory action controls are visually hidden when the DOM hidden property is set", () => {
+  const css = readFileSync(join(here, "assets/factory-layout-0680.css"), "utf8");
+  const html = readFileSync(join(here, "index.html"), "utf8");
+  assert.match(css, /#page-factory\s+\.factory-batch-activity\s+\[hidden\]\s*\{\s*display:\s*none\s*!important;\s*\}/);
+  for (const id of ["factoryBatchCompletedClose", "factoryBatchCompletedPrev", "factoryBatchCompletedNext", "factoryBatchCompletedPage"]) {
+    assert.match(html, new RegExp(`id="${id}"[^>]*\\bhidden\\b`), `${id} must start hidden before the first activity fetch`);
+  }
 });

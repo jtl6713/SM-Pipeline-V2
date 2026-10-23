@@ -436,6 +436,9 @@
 
 
 /* Factory Batch Approval: top-level server activity and selection controls. */
+/* Shared .secondary-button has display:inline-flex; [hidden] must still suppress inactive Factory controls. */
+#page-factory .factory-batch-activity [hidden] { display: none !important; }
+
 #page-factory .factory-batch-activity{
   box-sizing:border-box;width:100%;min-width:0;display:grid;gap:8px;
   padding:14px 16px;border:1px solid #ccdae9;border-radius:13px;
