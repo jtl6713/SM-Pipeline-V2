@@ -37,6 +37,13 @@ export function parseScriptedShortAssetPolicy(prompt) {
     location = extractPlace(match[1]);
     if (location) break;
   }
+  // A creative direction like "use a wide variety of relevant library assets" is
+  // not a named-place upload requirement. Reject descriptive quantities and
+  // quality adjectives before treating a parsed phrase as an asset location.
+  if (/^(?:(?:a|an|the)\\s+)?(?:wide|broad|good|great|large|diverse|varied|rich|relevant|available|variety|selection|mix|range|number|collection|assortment)\\b/i.test(location) ||
+      /\\b(?:variety|selection|mix|range|assortment|number|relevant|library|uploaded|available)\\b/i.test(location)) {
+    location = "";
+  }
   // Non-geographic "use uploaded images" must not become a bogus place lock.
   const generic = new Set(["uploaded", "existing", "library", "available", "stock", "own", "same", "selected", "these", "those", "all", "more", "new"]);
   const words = location.split(" ");
