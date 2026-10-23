@@ -76,6 +76,6 @@ test("Variant GET remains safe if no manifest has been stored yet", () => {
 });
 
 test("Production's lazy loader points at the corrected cached asset", () => {
-  assert.match(app, /BUILD_ID = "item4-0\.6\.746-global-idea-limit"/);
-  assert.match(index, /app-item4-1008\.js\?v=0\.6\.746-global-idea-limit/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.747-global-admin-tab"/);
+  assert.match(index, /app-item4-1008\.js\?v=0\.6\.747-global-admin-tab/);
 });
