@@ -14,5 +14,5 @@ test("profile picker survives /api/profiles outages with session cache and retri
   assert.match(app, /api\("\/api\/profiles", \{ retries: 2, timeoutMs: 12000 \}\)/);
   assert.match(app, /Loading profiles…/);
   assert.match(app, /scheduleStudioProfileListRetry\(\)/);
-  assert.match(app, /wrap\.hidden = !loading && !studioProfiles\.length/);
+  assert.match(app, /wrap\.hidden = false/);\n  assert.match(app, /Profile list may be stale/);
 });
