@@ -10837,7 +10837,7 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
   // the persisted revision lifecycle. This is an exact replay check, not a
   // semantic duplicate detector for later intentional revisions.
   if (producer?.automatic && priorFeedback?.instructions === note
-      && /\\[factory-producer-revision id=/.test(String(f(requestRecord, "Production_Notes") || ""))) {
+      && /\[factory-producer-revision id=/.test(String(f(requestRecord, "Production_Notes") || ""))) {
     return { production_request_id: requestId, already_accepted: true,
       message: "This Producer revision was already accepted.", producer_queued: true };
   }
@@ -10939,7 +10939,7 @@ export async function factoryResumeProducerRevisions(env, ctx = null) {
   const outcomes = [];
   for (const row of rows) {
     const notes = String(f(row, "Production_Notes") || "");
-    const revisionId = notes.match(/\\[factory-producer-revision id=(fpr-[a-f0-9]+) state=pending\\]/)?.[1];
+    const revisionId = notes.match(/\[factory-producer-revision id=(fpr-[a-f0-9]+) state=pending\]/)?.[1];
     if (!revisionId) continue;
     try {
       outcomes.push(await factoryAdvanceProducerRevision(env, row.id, revisionId, ctx));
