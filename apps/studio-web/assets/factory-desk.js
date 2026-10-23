@@ -917,7 +917,7 @@
     }
     if (card.kind === "output" && (canReviewActions(card, { pile, candidate }) || lane === "needs_eyes")) {
       actions.push(`<button type="button" class="primary-button" data-factory-approve="${esc(card.id)}">Approve</button>`);
-      actions.push(`<button type="button" class="secondary-button" data-factory-send-back="${esc(card.id)}">Send back</button>`);
+      actions.push(`<button type="button" class="secondary-button" data-factory-send-back="${esc(card.id)}">Request Changes</button>`);
     }
     if (canDelete(card, { candidate })) {
       actions.push(`<button type="button" class="secondary-button factory-delete" data-factory-delete="${esc(card.id)}">Delete</button>`);
@@ -1396,15 +1396,33 @@
           setStatus("Send back failed: card not found in desk payload.", true);
           return;
         }
+        // A content revision changes the shared render; the individual-row
+        // review button must invoke the same durable Producer contract as
+        // the grouped Request Changes action whenever a linked PR exists.
+        const requestId = String(card.production_request_id || "").trim();
+        const siblingCards = (state.desk?.lanes?.needs_eyes || [])
+          .filter((item) => contentGroupKey(item) === contentGroupKey(card));
+        const ready = readyContentCards({ cards: siblingCards });
+        const producerAvailable = /^rec[A-Za-z0-9]+$/.test(requestId) && ready.length > 0;
         openFactoryFeedback({
           title: card.title || cardLabel(card),
-          scope: [card.platform, card.studio_output_type, "Selected output only"].filter(Boolean).join(" · "),
-          payload: {
-            action: "send_back",
-            id: card.id,
-            kind: card.kind || "output",
-            production_request_id: card.production_request_id || null,
-          },
+          scope: producerAvailable
+            ? `Entire content package · ${ready.length} ready output${ready.length === 1 ? "" : "s"}`
+            : [card.platform, card.studio_output_type, "Selected output only"].filter(Boolean).join(" · "),
+          payload: producerAvailable
+            ? {
+                action: "request_changes_content",
+                id: card.id,
+                kind: "output",
+                production_request_id: requestId,
+                output_ids: ready.map((item) => item.id),
+              }
+            : {
+                action: "send_back",
+                id: card.id,
+                kind: card.kind || "output",
+                production_request_id: card.production_request_id || null,
+              },
         });
       });
     });
