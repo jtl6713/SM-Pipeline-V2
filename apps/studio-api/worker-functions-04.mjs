@@ -12047,7 +12047,7 @@ export async function studioLoadAutonomousLastRun(env) {
 }
 /*__STUDIO_WORKER_END:studioLoadAutonomousLastRun__*/
 
-export async function studioLoadAutonomousRefillScores(env, profiles, { refresh = false, requireLive = false } = {}) {
+export async function studioLoadAutonomousRefillScores(env, profiles, { refresh = false, requireLive = false, target = AUTONOMOUS_SCHEDULED_TARGET } = {}) {
   const enabled = (Array.isArray(profiles) ? profiles : []).filter((row) => row?.id);
   if (!enabled.length) return { scores: {}, overview: [], source: "empty" };
   const summaryEnabled = env?.STUDIO_REFILL_PROFILE_SUMMARY_READS === "true";
@@ -12057,8 +12057,8 @@ export async function studioLoadAutonomousRefillScores(env, profiles, { refresh 
       if (validVerifiedStudioSummary(summary, enabled.map((row) => row.id))) {
         const overview = summary.records.filter((row) => enabled.some((profile) => profile.id === row.id));
         return {
-          scores: autonomousRefillScoresFromOverview(overview, AUTONOMOUS_SCHEDULED_TARGET),
-          overview, source: "durable_summary", target: AUTONOMOUS_SCHEDULED_TARGET,
+          scores: autonomousRefillScoresFromOverview(overview, target),
+          overview, source: "durable_summary", target,
         };
       }
     } catch (error) {
@@ -12100,10 +12100,10 @@ export async function studioLoadAutonomousRefillScores(env, profiles, { refresh 
   const byEnabled = new Set(enabled.map((row) => String(row.id)));
   const overview = (rows || []).filter((row) => byEnabled.has(String(row?.id || "")));
   return {
-    scores: autonomousRefillScoresFromOverview(overview, AUTONOMOUS_SCHEDULED_TARGET),
+    scores: autonomousRefillScoresFromOverview(overview, target),
     overview,
     source,
-    target: AUTONOMOUS_SCHEDULED_TARGET,
+    target,
   };
 }
 /*__STUDIO_WORKER_END:studioLoadAutonomousRefillScores__*/
@@ -13202,7 +13202,11 @@ export async function fillAutonomousScheduledHour(env, authorization, {
     });
     return { terminal: true, created_count: 0, last: saved, result: saved };
   }
-  const refillMeta = await studioLoadAutonomousRefillScores(env, profiles);
+  // Per-city deficit ranking uses the shared target; no separate 500/city gate.
+  // The aggregate budget remains the binding stop for all cities together.
+  const refillMeta = await studioLoadAutonomousRefillScores(env, profiles, {
+    target: globalInventory.target,
+  });
   const loadedScores = refillMeta?.scores || {};
   const scoreCount = Object.keys(loadedScores).length;
   let refillScores = null;
@@ -13227,7 +13231,7 @@ export async function fillAutonomousScheduledHour(env, authorization, {
       slot,
       status: "skipped",
       skip_reason: skipReason,
-      scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
+      scheduled_target: globalInventory.target,
       scheduled_skip_above: AUTONOMOUS_SCHEDULED_SKIP_ABOVE,
       ideas_per_hour: AUTONOMOUS_IDEAS_PER_HOUR,
       refill: Object.values(refillScores),
@@ -13251,7 +13255,7 @@ export async function fillAutonomousScheduledHour(env, authorization, {
       slot,
       status: "skipped",
       skip_reason: skipReason,
-      scheduled_target: AUTONOMOUS_SCHEDULED_TARGET,
+      scheduled_target: globalInventory.target,
       ideas_per_hour: AUTONOMOUS_IDEAS_PER_HOUR,
       hour_complete: skipReason === "hour_quota_met",
       ideas_by_profile: sameSlot ? (last?.ideas_by_profile || {}) : {},
