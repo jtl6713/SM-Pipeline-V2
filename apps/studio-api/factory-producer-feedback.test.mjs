@@ -88,10 +88,14 @@ test("everyday Factory conversations become precise, grounded Producer jobs", ()
  assert.equal(duration.fields.Video_Duration_Seconds, 20);
  const shorter = interpret("Could you shorten the video to 15 seconds?");
  // Questions may include question marks: no silent guess if unsupported.
- assert.equal(shorter.automatic, false);
+ assert.equal(shorter.automatic, true);
+ assert.equal(shorter.fields.Video_Duration_Seconds, 15);
  const named = interpret("Please include the photo named Chicago River Night");
  assert.equal(named.automatic, true);
  assert.deepEqual(named.media_requests, [{kind:"photo",name:"Chicago River Night"}]);
+ const colloquial = interpret("Please include the Chicago River Night photo");
+ assert.equal(colloquial.automatic, true);
+ assert.deepEqual(colloquial.media_requests, [{kind:"photo",name:"Chicago River Night"}]);
  const narration = interpret("Can you replace the narration with: Welcome aboard.");
  assert.equal(narration.automatic, true);
  assert.equal(narration.fields.Requested_Script, "Welcome aboard.");
