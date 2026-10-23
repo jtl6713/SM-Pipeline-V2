@@ -287,7 +287,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.753-factory-hidden-controls";
+  const BUILD_ID = "item4-0.6.754-producer-conversation";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -13870,6 +13870,10 @@ function timedScriptAssetLabel(asset, index) {
     voiceUserPicked = false;
     activeProductionRequest = record;
     productionOutputMatrixLoaded = false;
+    // Open the Airtable-authoritative conversation when a distinct request opens.
+    if (reveal && ezEntryPath !== "content" && /^rec[A-Za-z0-9]+$/.test(String(record?.id || ""))) {
+      window.StudioProducerConversation?.open(record.id);
+    }
     if (reveal && ezEntryPath !== "content") {
       showProductionRequestWorkspace();
     } else {

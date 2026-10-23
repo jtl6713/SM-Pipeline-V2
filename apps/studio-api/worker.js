@@ -1,4 +1,7 @@
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
+import { readProducerThread, appendProducerThreadMessage, producerConversationHistory } from "./producer-conversation.mjs";
+import { scriptedShortProducerPlanFromNotes } from "./scripted-short-producer-plan.mjs";
+import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 import {
   readStudioProfileSummary,
   notifyStudioProfileSummary,
@@ -769,6 +772,7 @@ export default {
       const isScriptedShortAcceptRoute = url.pathname === "/api/scripted-short/accept";
       const isIdeaGenerateStatusRoute = /^\/api\/ideas\/generate\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isProductionRequestRecordRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+$/.test(url.pathname);
+      const isProducerConversationRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/producer-conversation$/.test(url.pathname);
       const isProductionRequestPromoteRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/promote$/.test(url.pathname);
       const isProductionRequestBridgePreflightRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/bridge-preflight$/.test(url.pathname);
       const isProductionRequestSyncDirectivesRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/sync-directives$/.test(url.pathname);
@@ -908,6 +912,7 @@ export default {
       const isProductionRequestCreateWrite =
         (isIdeaProductionRequestRoute || isProductionRequestCollectionRoute) && request.method === "POST";
       const isProductionRequestEditWrite = isProductionRequestRecordRoute && request.method === "PATCH";
+      const isProducerConversationWrite = isProducerConversationRoute && request.method === "POST";
       const isProductionRequestPromoteWrite = isProductionRequestPromoteRoute && request.method === "POST";
       const isProductionRequestSyncDirectivesWrite = isProductionRequestSyncDirectivesRoute && request.method === "POST";
       const isProductionRequestTimedScriptWrite = isProductionRequestTimedScriptRoute && request.method === "POST";
@@ -980,6 +985,7 @@ export default {
         isIdeaTimedScriptWrite ||
         isProductionRequestCreateWrite ||
         isProductionRequestEditWrite ||
+        isProducerConversationWrite ||
         isProductionRequestPromoteWrite ||
         isProductionRequestSyncDirectivesWrite ||
         isProductionRequestTimedScriptWrite ||
@@ -1087,7 +1093,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.680-scripted-short-plan" + "-home-v6-fast-cache" + "-home-summary-v6-shadow",
+          version: "0.10.681-producer-conversation" + "-home-v6-fast-cache" + "-home-summary-v6-shadow",
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
           quality_durable_recovery_ledger_v1: true,
@@ -2223,11 +2229,70 @@ export default {
         return response;
       }
 
+      if (isProducerConversationRoute) {
+        requirePermission(authorization, "production_configure");
+        if (!["GET", "POST"].includes(request.method)) throw new HttpError(405, "Method not allowed");
+        if (request.method === "POST") assertWriteRequest(request, env);
+        const requestId = url.pathname.match(/\/rec[A-Za-z0-9]+\//)?.[0].slice(1, -1);
+        if (!requestId) throw new HttpError(400, "Invalid Production Request");
+        const view = async () => {
+          const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+          const notes = String(record?.fields?.Production_Notes || "");
+          let thread;
+          try { thread = readProducerThread(notes); }
+          catch { throw new HttpError(409, "Producer conversation needs repair before new messages can be saved"); }
+          return {record, notes, thread, producer_plan: scriptedShortProducerPlanFromNotes(notes)};
+        };
+        if (request.method === "GET") {
+          const data = await view();
+          return respond(request, env, {ok: true, production_request_id: requestId,
+            thread: producerConversationHistory(data.notes), producer_plan: data.producer_plan,
+            original_creative_brief_location: "linked_idea.Idea_Summary"});
+        }
+        let payload;
+        try { payload = await request.json(); }
+        catch { throw new HttpError(400, "Request body must be JSON"); }
+        return withOutputApprovalLock(env.STUDIO_MEDIA, requestId, async () => {
+          const current = await view();
+          let updated;
+          try {
+            updated = appendProducerThreadMessage(current.notes, payload, {
+              producer_plan: current.producer_plan,
+            });
+          } catch (error) {
+            const message = String(error?.message || "Invalid Producer message");
+            const status = /changed|limit|conversation record/i.test(message) ? 409 : 400;
+            throw new HttpError(status, message);
+          }
+          if (!updated.replay) {
+            await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId, {
+              method: "PATCH",
+              body: JSON.stringify({fields: {Production_Notes: updated.notes}}),
+            });
+            const verified = await view();
+            if (verified.thread.revision !== updated.thread.revision ||
+                verified.thread.messages.at(-1)?.id !== String(payload?.message_id || "").trim()) {
+              throw new HttpError(409, "Producer message save could not be verified; refresh before retrying");
+            }
+          }
+          return respond(request, env, {
+            ok: true, production_request_id: requestId,
+            thread: producerConversationHistory(updated.notes), replay: updated.replay,
+            message: updated.replay ? "Message already recorded." :
+              "Creative feedback saved. Scene changes are proposed, not executed or approved.",
+          }, updated.replay ? 200 : 201);
+        });
+      }
+
       if (isProductionRequestRecordRoute) {
         if (request.method === "PATCH") {
           assertWriteRequest(request, env);
           requirePermission(authorization, "production_configure");
-          return await updateProductionRequest(request, env, url, authorization);
+          const requestId = url.pathname.match(/^\/api\/production-requests\/(rec[A-Za-z0-9]+)$/)?.[1];
+          if (!requestId) throw new HttpError(400, "Invalid Production Request");
+          return withOutputApprovalLock(env.STUDIO_MEDIA, requestId, () =>
+            updateProductionRequest(request, env, url, authorization)
+          );
         }
         const response = await getProductionRequest(request, env, url, authorization, ctx);
         cadenceScheduleSync(ctx, env);

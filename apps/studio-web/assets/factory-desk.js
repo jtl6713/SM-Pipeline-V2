@@ -1185,6 +1185,11 @@
     const submit = $("factoryFeedbackSubmit");
     if (submit) { submit.disabled = false; submit.textContent = payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
     backdrop.hidden = false;
+    const transcript = $("factoryProducerTranscript");
+    if (transcript) transcript.hidden = !auto;
+    if (auto && /^rec[A-Za-z0-9]+$/.test(String(payload?.production_request_id || ""))) {
+      window.StudioProducerConversation?.showFactoryHistory(payload.production_request_id);
+    }
     textarea.focus();
   }
 

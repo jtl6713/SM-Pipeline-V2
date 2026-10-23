@@ -13,7 +13,7 @@ const app = fs.readFileSync(
 );
 
 test("health advertises current worker build with faster-frames helpers", () => {
-  assert.match(worker, /version: "0.10.680-scripted-short-plan"/);
+  assert.match(worker, /version: "0.10.681-producer-conversation"/);
   assert.match(worker, /airtableBatchCreate/);
   assert.match(worker, /mapProductionRequestLight/);
 });
@@ -123,7 +123,8 @@ test("fractional video duration is stored as a whole-number cap and save errors 
     worker.indexOf("if (isProductionRequestRecordRoute) {"),
     worker.indexOf("if (isIdeaPromoteRoute) {")
   );
-  assert.match(route, /return await updateProductionRequest\(request, env, url, authorization\)/);
+  assert.match(route, /return withOutputApprovalLock/);
+  assert.match(route, /updateProductionRequest/);
   const outputs = worker.slice(
     worker.indexOf("if (isProductionRequestOutputsRoute) {"),
     worker.indexOf("if (isProductionRequestOutputRecordRoute) {")
@@ -166,5 +167,5 @@ test("UI polls GET /variants during Prepare and skips Save reload waterfall", ()
 test("Worker heals orphan Ready to Render into Ready for Render", () => {
   assert.match(worker, /R4_READY_TO_RENDER_TYPO/);
   assert.match(worker, /Render_Status\}="Ready to Render"/);
-  assert.match(worker, /0.10.680-scripted-short-plan/);
+  assert.match(worker, /0.10.681-producer-conversation/);
 });

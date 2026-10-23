@@ -247,6 +247,7 @@ import {
   youtubePublishedAfterIso,
 } from "./autonomous-produce.mjs";
 import { ideaAutoListenContentType, ideaManagePhotoPauseActive, ideaProductionConfigFields, mergeIdeaProductionNotes, mergeProductionRequestNotes, parseIdeaMachineNotes, parseIdeaNotedMediaIds, productionNotesForPromotionHandoff, productionPhotoWaitAutoOff, productionPhotoWaitRejectedIds, shouldAttachPhotoWaitAssets, withIdeaManagePhotoPause, withoutIdeaManagePhotoPause, withProductionPhotoWaitManual } from "./idea-photo-wait.mjs";
+import { preserveProducerThreadOnEdit } from "./producer-conversation.mjs";
 import {
   STUDIO_PUBLISH_RECONCILE_SCHEDULE_FORMULA,
   STUDIO_TIKTOK_INBOX_DUE_FORMULA,
@@ -3656,9 +3657,10 @@ export async function updateProductionRequest(request, env, url, authorization) 
   }
 
   const input = await cleanProductionRequestPayload({ ...mapProductionRequest(existing), ...payload }, env);
-  input.production_notes = mergeProductionRequestNotes(
-    stripFactoryRevisionNote(f(existing, "Production_Notes")),
-    input.production_notes
+  const latestProductionNotes = stripFactoryRevisionNote(f(existing, "Production_Notes"));
+  input.production_notes = preserveProducerThreadOnEdit(
+    latestProductionNotes,
+    mergeProductionRequestNotes(latestProductionNotes, input.production_notes)
   );
   if (studioIsVibeCut(input.production_notes)) {
     input.production_notes = sanitizeVibeCutSourceNotes(input.production_notes);

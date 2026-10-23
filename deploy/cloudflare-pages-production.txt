@@ -521,3 +521,5 @@ Deploy UI 0.6.751-profile-first: profile selector visible on first paint, profil
 2026-10-23: Deploy UI 0.6.753-factory-hidden-controls. Hide inactive Factory Close, Previous, Next and other [hidden] activity controls.
 2026-10-23: Retry UI 0.6.753 Pages deploy after aligning all release-locked regression assertions with the new cache key.
 2026-10-23: UI 0.6.753 Pages deploy retry after correcting escaped cache-key regex in release-contract regression.
+
+Deploy UI 0.6.754-producer-conversation: Script-a-Short Production conversation, scene-scoped proposal review and Factory prior-feedback history; protected Pages rollout; no automatic publish.
