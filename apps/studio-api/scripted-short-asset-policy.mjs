@@ -40,8 +40,8 @@ export function parseScriptedShortAssetPolicy(prompt) {
   // A creative direction like "use a wide variety of relevant library assets" is
   // not a named-place upload requirement. Reject descriptive quantities and
   // quality adjectives before treating a parsed phrase as an asset location.
-  if (/^(?:(?:a|an|the)\\s+)?(?:wide|broad|good|great|large|diverse|varied|rich|relevant|available|variety|selection|mix|range|number|collection|assortment)\\b/i.test(location) ||
-      /\\b(?:variety|selection|mix|range|assortment|number|relevant|library|uploaded|available)\\b/i.test(location)) {
+  if (/^(?:(?:a|an|the)\s+)?(?:wide|broad|good|great|large|diverse|varied|rich|relevant|available|variety|selection|mix|range|number|collection|assortment)\b/i.test(location) ||
+      /\b(?:variety|selection|mix|range|assortment|number|relevant|library|uploaded|available)\b/i.test(location)) {
     location = "";
   }
   // Non-geographic "use uploaded images" must not become a bogus place lock.
@@ -59,7 +59,7 @@ export function parseScriptedShortAssetPolicy(prompt) {
   // a named documentary title can still provide a real subject constraint.
   // "titled **Tribeca: ...**" requires Tribeca media, never generic B-roll.
   if (!topic) {
-    const titled = source.match(/\\btitled\\s+(?:\\*\\*|["'“])?([a-z][a-z0-9 '&/-]{2,60}?)(?=\\s*:|["'”]|\\*\\*|[.,;]|$)/i);
+    const titled = source.match(/\btitled\s+(?:\*\*|["'“])?([a-z][a-z0-9 '&/-]{2,60}?)(?=\s*:|["'”]|\*\*|[.,;]|$)/i);
     if (titled) topic = extractPlace(titled[1]);
   }
   return {
