@@ -11417,13 +11417,9 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
         note,
         producer,
       );
-      // Serialize submissions by authoritative Production Request identity.
-      // Two browser retries must never fork distinct Producer jobs.
-      resultExtra = action === "request_changes_content"
-        ? await withOutputApprovalLock(
-          env.STUDIO_MEDIA, String(payload?.production_request_id || ""), submitContentRevision,
-        )
-        : await submitContentRevision();
+      // factorySendBackContent itself owns the request-level reservation lease.
+      // Acquiring it again here deadlocks every natural-language submission.
+      resultExtra = await submitContentRevision();
       if (resultExtra.producer_queued && !resultExtra.already_accepted && ctx?.waitUntil) {
         ctx.waitUntil(factoryAdvanceProducerRevision(
           env, resultExtra.production_request_id, resultExtra.producer_revision_id, ctx,
