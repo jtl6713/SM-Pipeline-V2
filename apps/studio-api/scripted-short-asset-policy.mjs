@@ -55,6 +55,13 @@ export function parseScriptedShortAssetPolicy(prompt) {
     const topicWords = topic.split(" ");
     if (topicWords.length > 10 || topicWords.every((word) => generic.has(word)) || topic.length < 3) topic = "";
   }
+  // If an instruction describes a variety of media rather than a place,
+  // a named documentary title can still provide a real subject constraint.
+  // "titled **Tribeca: ...**" requires Tribeca media, never generic B-roll.
+  if (!topic) {
+    const titled = source.match(/\\btitled\\s+(?:\\*\\*|["'“])?([a-z][a-z0-9 '&/-]{2,60}?)(?=\\s*:|["'”]|\\*\\*|[.,;]|$)/i);
+    if (titled) topic = extractPlace(titled[1]);
+  }
   return {
     required: Boolean(location),
     location: location || null,
