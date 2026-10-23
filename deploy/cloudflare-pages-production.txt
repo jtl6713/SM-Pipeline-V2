@@ -510,3 +510,4 @@ Deploy Conversational Producer Factory revision bridge PR #1093, merge 845c4bf38
 
 2026-10-23 PR #1100: Deploy UI build 0.6.747-global-admin-tab. Fix Operations Global Admin click/deep link through native tab registry, preserving configurable automatic idea limit and all existing settings. Validate protected release version and custom-domain Pages asset.
 Deploy UI 0.6.748 from latest main: make Factory Producer Request Changes visible and cache-busted. Preserve global idea-threshold admin and other merged Producer revisions.
+2026-10-23 PR #1107: Deploy UI 0.6.749-producer-ideas from current main; expose human creative direction at Idea, EZ and Script-a-Short entry and conversational Factory revisions. Preserve #1095 global idea target, dedicated output approval and scheduling safeguards; require verified custom-domain newness.
