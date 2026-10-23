@@ -8,7 +8,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const app = fs.readFileSync(path.join(here, "assets/app-item4-1008.js"), "utf8");
 
 test("UI build advertises no-home-recent-outputs", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.752-script-a-short-plan"/);
+  assert.match(app, /BUILD_ID = "item4-0.6.755-producer-entry"/);
 });
 
 test("api() backs off longer on Airtable 429 / cooling-down", () => {
@@ -23,18 +23,17 @@ test("api() backs off longer on Airtable 429 / cooling-down", () => {
   assert.doesNotMatch(apiFn, /await sleepMs\(API_TRANSIENT_RETRY_MS\);/);
 });
 
-test("checkHealth paints Worker/API before loading profiles", () => {
+test("checkHealth paints Worker/API without waiting for profile loading", () => {
   const start = app.indexOf("async function checkHealth()");
   assert.ok(start >= 0);
   const end = app.indexOf("\n  let dashboardInflight", start);
   const fn = app.slice(start, end);
   const paintWorker = fn.indexOf("workerBuildLabel.textContent = formatWorkerBuild");
   const paintApi = fn.indexOf('apiStatus").textContent');
-  const loadProfiles = fn.indexOf("loadStudioProfiles({ quiet: true })");
+  const loadProfiles = app.indexOf("loadStudioProfiles({ quiet: true }).catch(() => {});", end);
   assert.ok(paintWorker >= 0, "must paint workerBuildLabel");
   assert.ok(paintApi >= 0, "must paint apiStatus");
-  assert.ok(loadProfiles >= 0, "must still kick profile load");
-  assert.ok(paintWorker < loadProfiles, "worker label before profiles");
-  assert.ok(paintApi < loadProfiles, "api status before profiles");
+  assert.ok(loadProfiles >= 0, "startup must kick profile load");
+  assert.match(app.slice(loadProfiles, loadProfiles + 160), /checkHealth\(\)\.finally\(\(\) => loadDashboard\(\)\)/);
   assert.doesNotMatch(fn, /await loadStudioProfiles/);
 });

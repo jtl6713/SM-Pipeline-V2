@@ -10,11 +10,11 @@ const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
 const css = fs.readFileSync(path.join(here, "assets/styles-phase7-0621.css"), "utf8");
 
 test("UI 0.6.516 preserves hamburger off-canvas nav on every viewport", () => {
-  assert.match(app, /BUILD_ID = "item4-0.6.752-script-a-short-plan"/);
-  assert.match(html, /UI build 0.6.752/);
-  assert.match(html, /app-item4-1008\.js\?v=0.6.752-script-a-short-plan/);
-  assert.match(html, /styles-phase7-0621\.css\?v=0.6.752-script-a-short-plan/);
-  assert.match(html, /UI build 0.6.752/);
+  assert.match(app, /BUILD_ID = "item4-0.6.755-producer-entry"/);
+  assert.match(html, /UI build 0.6.755/);
+  assert.match(html, /app-item4-1008\.js\?v=0.6.755-producer-entry/);
+  assert.match(html, /styles-phase7-0621\.css\?v=0.6.755-producer-entry/);
+  assert.match(html, /UI build 0.6.755/);
   assert.match(html, /id="studioNavToggle"/);
   assert.match(html, /id="studioSidebar"/);
   assert.match(html, /id="studioNavBackdrop"/);
@@ -46,7 +46,7 @@ test("New Profile and Operations paint with the drawer before session/profiles r
   assert.match(html, /id="footerOperations"(?! [^>]*\bhidden\b)[^>]*>Operations</);
   assert.match(app, /function applyPrivilegedNavFailOpen\(/);
   assert.match(app, /function applyNewProfileNavVisibility\(/);
-  assert.match(app, /applyPrivilegedNavFailOpen\(\);\s*\n\s*checkHealth\(/);
+  assert.match(app, /applyPrivilegedNavFailOpen\(\);[\s\S]{0,240}loadStudioProfiles\(/);
   assert.match(app, /applyPrivilegedNavFailOpen\(\);\s*\n\s*try \{/);
   const newProfile = fs.readFileSync(path.join(here, "assets/new-profile-1009.js"), "utf8");
   assert.match(newProfile, /function applyNewProfileNavFailOpen\(/);

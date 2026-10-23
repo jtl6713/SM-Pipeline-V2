@@ -36,8 +36,8 @@ test("script modal is refreshed when creative review state changes", () => {
 });
 
 test("visual script editor is lazy-loaded with Pipeline and keeps the current production build marker", () => {
-  assert.match(html, /visual-script-editor\.css\?v=0\.6\.752-script-a-short-plan/);
-  assert.match(html, /"outputs": \[[\s\S]*visual-script-editor\.js\?v=0\.6\.752-script-a-short-plan/);
+  assert.match(html, /visual-script-editor\.css\?v=0\.6\.755-producer-entry/);
+  assert.match(html, /"outputs": \[[\s\S]*visual-script-editor\.js\?v=0\.6\.755-producer-entry/);
 });
 
 

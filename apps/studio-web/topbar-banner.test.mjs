@@ -13,7 +13,7 @@ test("Studio topbar loads skyline banner after existing styles", () => {
   const banner = html.indexOf("/assets/topbar-banner-0618.css");
   assert.ok(sticky >= 0);
   assert.ok(banner > sticky);
-  assert.match(html, /topbar-banner-0618\.css\?v=0.6.752-script-a-short-plan/);
+  assert.match(html, /topbar-banner-0618\.css\?v=0.6.755-producer-entry/);
   assert.match(css, /STUDIO_TOPBAR_CITY_BANNER_20261007/);
   assert.match(css, /data:image\/webp;base64,/);
 });
