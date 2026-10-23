@@ -28,7 +28,8 @@ jobs:
       - name: Install isolated headless Chromium
         run: |
           npm install --no-save playwright@1.58.2
-          npx playwright install --with-deps chromium
+          # These tests launch headless Chromium only; avoid installing the unused full browser.
+          npx playwright install --with-deps --only-shell chromium
       - name: Validate all canonical Factory Quality Agent signals in operator UI
         run: node --test apps/studio-web/factory-batch-quality-agent.test.mjs
       - name: Validate desktop mobile tablet selection, status, and Quality Agent with 20 audited output IDs

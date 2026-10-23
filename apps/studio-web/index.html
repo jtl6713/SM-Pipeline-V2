@@ -2283,7 +2283,7 @@
  <div class="factory-feedback-dialog" role="dialog" aria-modal="true" aria-labelledby="factoryFeedbackHeading" aria-describedby="factoryFeedbackIntro">
  <form id="factoryFeedbackForm">
  <header class="factory-feedback-header">
- <div><p class="factory-feedback-kicker">Factory review</p><h2 id="factoryFeedbackHeading">Send back to Production</h2></div>
+ <div><p class="factory-feedback-kicker">Factory review</p><h2 id="factoryFeedbackHeading">Request Changes</h2></div>
  <button type="button" class="factory-feedback-close" id="factoryFeedbackClose" aria-label="Close review notes">×</button>
  </header>
  <div class="factory-feedback-body">
@@ -2292,12 +2292,12 @@
  <p id="factoryFeedbackIntro">Describe exactly what needs to change. Your notes will be saved with the Production Request and the returned outputs for the production manager to review.</p>
  <label for="factoryFeedbackNotes" class="factory-feedback-label">Requested changes <span aria-hidden="true">*</span></label>
  <textarea id="factoryFeedbackNotes" rows="7" maxlength="3000" required placeholder="Example: Shorten the first scene to 3 seconds, replace the cover photo, and use the exact narration from the updated script."></textarea>
- <div class="factory-feedback-hints"><span>These notes are instructions for a future revision agent, but do not trigger AI changes today.</span><span id="factoryFeedbackCount">0 / 3000</span></div>
+ <div class="factory-feedback-hints"><span id="factoryFeedbackHintsText">Producer support for verified exact-text revisions.</span><span id="factoryFeedbackCount">0 / 3000</span></div>
  <p id="factoryFeedbackError" class="factory-feedback-error" role="alert" hidden></p>
  </div>
  <footer class="factory-feedback-actions">
  <button type="button" class="secondary-button" id="factoryFeedbackCancel">Cancel</button>
- <button type="submit" class="primary-button" id="factoryFeedbackSubmit">Send back with notes</button>
+ <button type="submit" class="primary-button" id="factoryFeedbackSubmit">Submit Changes</button>
  </footer>
  </form>
  </div>

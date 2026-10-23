@@ -1075,7 +1075,7 @@
         <span class="factory-content-chevron" aria-hidden="true">${expanded ? "▾" : "▸"}</span>
         <span class="factory-content-label"><strong class="factory-content-title">${esc(title)}</strong><span class="factory-content-meta">${esc(meta)}</span></span>
       </button>
-      ${ready.length ? `<button type="button" class="secondary-button factory-content-send-back" data-factory-send-back-content="${esc(group.key)}">Send back to Production</button>` : ""}
+      ${ready.length ? `<button type="button" class="secondary-button factory-content-send-back" data-factory-send-back-content="${esc(group.key)}">Request Changes</button>` : ""}
       ${approveAll}
     </div>`;
   }
@@ -1169,12 +1169,21 @@
     const error = $("factoryFeedbackError");
     if (heading) heading.textContent = title || "Untitled content";
     if (detail) detail.textContent = scope || "Review changes";
+    const auto = payload?.action === "request_changes_content";
+    const intro = $("factoryFeedbackIntro");
+    const hints = document.querySelector("#factoryFeedbackHintsText");
+    if (intro) intro.textContent = auto
+      ? "Tell the Producer what needs changing. Explicit caption or voiceover replacements can be queued automatically; media and editing requests need a verified production plan."
+      : "Describe exactly what needs to change. Studio saves these review notes with the linked Production Request.";
+    if (hints) hints.textContent = auto
+      ? "Automatic now: 'Set the caption to: …' or 'Replace the voiceover script with: …'. Other requests are saved for manual review, never falsely marked produced."
+      : "This send-back opens Production for manual editing and approval.";
     if (error) { error.hidden = true; error.textContent = ""; }
     textarea.value = "";
     const count = $("factoryFeedbackCount");
     if (count) count.textContent = "0 / 3000";
     const submit = $("factoryFeedbackSubmit");
-    if (submit) { submit.disabled = false; submit.textContent = "Send back with notes"; }
+    if (submit) { submit.disabled = false; submit.textContent = payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
     backdrop.hidden = false;
     textarea.focus();
   }
@@ -1206,6 +1215,10 @@
       const desk = await mutateDesk({ ...pending.payload, note: notes });
       const requestId = String(desk?.result?.production_request_id || pending.payload.production_request_id || "").trim();
       closeFactoryFeedback();
+      if (desk?.result?.producer_queued) {
+        setStatus(desk.result.message || "Producer revision accepted. Production continues without this page.");
+        return;
+      }
       if (requestId && typeof window.StudioOpenProductionRequestById === "function") {
         try {
           await window.StudioOpenProductionRequestById(requestId);
@@ -1217,7 +1230,7 @@
         setStatus("Review notes saved. Open the returned item in Production for changes.");
       }
     } catch (err) {
-      if (submit) { submit.disabled = false; submit.textContent = "Send back with notes"; }
+      if (submit) { submit.disabled = false; submit.textContent = pending.payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
       if (error) { error.hidden = false; error.textContent = String(err?.message || err); }
       setStatus("Could not send back: " + (err?.message || err), true);
     }
@@ -1304,7 +1317,7 @@
           title,
           scope: `Entire content package · ${ready.length} ready output${ready.length === 1 ? "" : "s"}`,
           payload: {
-            action: "send_back_content",
+            action: "request_changes_content",
             kind: "output",
             id: ready[0].id,
             production_request_id: productionRequestId,
@@ -1462,6 +1475,7 @@
     approve: "Approved for publishing.",
     send_back: "Sent back to production.",
     send_back_content: "Content sent back to Production.",
+    request_changes_content: "Producer revision submitted.",
     delete: "Deleted / skipped.",
   };
 
@@ -1596,6 +1610,12 @@
     const savedMessage = desk.message || ACTION_STATUS[payload.action] || "Updated.";
     if (desk.lanes) {
       renderDesk(desk);
+    } else if (desk.ok && payload.action === "request_changes_content") {
+      // The Airtable write is already committed; do not block acceptance on
+      // a slow Factory queue read or convert a successful POST into an error.
+      setStatus(savedMessage);
+      loadFactoryDesk(true).catch(() => {});
+      return desk;
     } else if (desk.ok) {
       const refreshed = await loadFactoryDesk(true);
       if (!refreshed) {
