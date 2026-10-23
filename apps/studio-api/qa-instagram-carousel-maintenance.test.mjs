@@ -95,12 +95,14 @@ test("Airtable or stale readback errors fail closed without fake recovery",async
   let writes=0;
   const fetcher=async(_env,table,path,opts={})=>{
     if(table==="Carousel Slides")return {records:slides()};
-    if(table==="Quality Agent Recovery Ledger")throw Error("should not write ledger");
+    if(table==="Quality Agent Recovery Ledger")return {records:[{id:"rec98765432101234"}]};
     if(opts.method==="PATCH"){writes++;return {};}
     if(path.startsWith("?"))return {records:[record({Do_Not_Publish:true})]};
     return record({Do_Not_Publish:true});
   };
   const result=await qaInstagramCarouselMaintenance({AIRTABLE_OUTPUT_TABLE_ID:"Platform Outputs"},{airtableFetch:fetcher,nowMs:NOW});
-  assert.equal(result.length,0);
+  assert.equal(result.length,1);
+  assert.equal(result[0].outcome,"human_review_required");
+  assert.equal(result[0].reason,"publishing_hold");
   assert.equal(writes,0);
 });
