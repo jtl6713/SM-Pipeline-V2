@@ -1075,7 +1075,7 @@
         <span class="factory-content-chevron" aria-hidden="true">${expanded ? "▾" : "▸"}</span>
         <span class="factory-content-label"><strong class="factory-content-title">${esc(title)}</strong><span class="factory-content-meta">${esc(meta)}</span></span>
       </button>
-      ${ready.length ? `<button type="button" class="secondary-button factory-content-send-back" data-factory-send-back-content="${esc(group.key)}">Send back to Production</button>` : ""}
+      ${ready.length ? `<button type="button" class="secondary-button factory-content-send-back" data-factory-send-back-content="${esc(group.key)}">Request Changes</button>` : ""}
       ${approveAll}
     </div>`;
   }
@@ -1174,7 +1174,7 @@
     const count = $("factoryFeedbackCount");
     if (count) count.textContent = "0 / 3000";
     const submit = $("factoryFeedbackSubmit");
-    if (submit) { submit.disabled = false; submit.textContent = "Send back with notes"; }
+    if (submit) { submit.disabled = false; submit.textContent = payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
     backdrop.hidden = false;
     textarea.focus();
   }
@@ -1206,6 +1206,10 @@
       const desk = await mutateDesk({ ...pending.payload, note: notes });
       const requestId = String(desk?.result?.production_request_id || pending.payload.production_request_id || "").trim();
       closeFactoryFeedback();
+      if (desk?.result?.producer_queued) {
+        setStatus(desk.result.message || "Producer revision accepted. Production continues without this page.");
+        return;
+      }
       if (requestId && typeof window.StudioOpenProductionRequestById === "function") {
         try {
           await window.StudioOpenProductionRequestById(requestId);
@@ -1304,7 +1308,7 @@
           title,
           scope: `Entire content package · ${ready.length} ready output${ready.length === 1 ? "" : "s"}`,
           payload: {
-            action: "send_back_content",
+            action: "request_changes_content",
             kind: "output",
             id: ready[0].id,
             production_request_id: productionRequestId,
@@ -1462,6 +1466,7 @@
     approve: "Approved for publishing.",
     send_back: "Sent back to production.",
     send_back_content: "Content sent back to Production.",
+    request_changes_content: "Producer revision submitted.",
     delete: "Deleted / skipped.",
   };
 
@@ -1596,6 +1601,12 @@
     const savedMessage = desk.message || ACTION_STATUS[payload.action] || "Updated.";
     if (desk.lanes) {
       renderDesk(desk);
+    } else if (desk.ok && payload.action === "request_changes_content") {
+      // The Airtable write is already committed; do not block acceptance on
+      // a slow Factory queue read or convert a successful POST into an error.
+      setStatus(savedMessage);
+      loadFactoryDesk(true).catch(() => {});
+      return desk;
     } else if (desk.ok) {
       const refreshed = await loadFactoryDesk(true);
       if (!refreshed) {
