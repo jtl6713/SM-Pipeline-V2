@@ -523,3 +523,4 @@ Deploy UI 0.6.751-profile-first: profile selector visible on first paint, profil
 2026-10-23: UI 0.6.753 Pages deploy retry after correcting escaped cache-key regex in release-contract regression.
 
 Deploy UI 0.6.754-producer-conversation: Script-a-Short Production conversation, scene-scoped proposal review and Factory prior-feedback history; protected Pages rollout; no automatic publish.
+2026-10-23: Deploy UI 0.6.755-producer-entry to surface Talk to Your Producer directly in Script a short; support revision instruction before Accept; retain persistent conversation on Production Request, protected rollout, no autopublish.
