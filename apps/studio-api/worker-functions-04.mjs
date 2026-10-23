@@ -10950,6 +10950,7 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
  * validated exact-text directives enter this automatic path.
  */
 async function factoryAdvanceProducerRevision(env, requestId, revisionId, ctx = null) {
+  return withOutputApprovalLock(env.STUDIO_MEDIA, requestId, async () => {
   const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
   const notes = String(f(requestRecord, "Production_Notes") || "");
   if (!notes.includes(`[factory-producer-revision id=${revisionId} state=pending]`)) {
@@ -11026,6 +11027,7 @@ async function factoryAdvanceProducerRevision(env, requestId, revisionId, ctx = 
     throw new Error("Factory Producer revision routing was blocked");
   }
   return { queued: true, request_id: requestId, revision_id: revisionId };
+  });
 }
 
 export async function factoryResumeProducerRevisions(env, ctx = null) {
@@ -11045,6 +11047,10 @@ export async function factoryResumeProducerRevisions(env, ctx = null) {
       outcomes.push(await factoryAdvanceProducerRevision(env, row.id, revisionId, ctx));
     } catch (error) {
       const reason = String(error?.message || error).slice(0, 250);
+      if (error?.status === 409 && /approval already in progress|concurrent output approval/i.test(reason)) {
+        outcomes.push({ request_id: row.id, already_running: true });
+        continue;
+      }
       console.warn("Factory Producer revision resume failed", row.id, reason);
       // Bounded recovery: unresolvable revisions must become visible rather
       // than monopolize the three-job cron quota indefinitely.
