@@ -33,8 +33,8 @@ jobs:
         run: |
           set -euo pipefail
           npm install --prefix "$RUNNER_TEMP/studio-layout" --no-save playwright@1.56.1
-          "$RUNNER_TEMP/studio-layout/node_modules/.bin/playwright" install chromium webkit
-          NODE_PATH="$RUNNER_TEMP/studio-layout/node_modules" node apps/studio-web/pipeline-mobile-headings.browser.cjs
+          "$RUNNER_TEMP/studio-layout/node_modules/.bin/playwright" install chromium
+          STUDIO_LAYOUT_CHROMIUM_ONLY=1 NODE_PATH="$RUNNER_TEMP/studio-layout/node_modules" node apps/studio-web/pipeline-mobile-headings.browser.cjs
 
       - name: Regression tests for published outputs excluded from Rendering
         shell: bash
