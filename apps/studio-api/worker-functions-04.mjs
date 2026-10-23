@@ -10844,6 +10844,12 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
     }, []);
     if (!validated.valid) throw new HttpError(409, "Producer Plan validation failed");
     producer = { ...producer, execution_plan: planSelectiveRework(validated) };
+    // A metadata-only revision reuses finished media. Incomplete sibling
+    // outputs need the full Production editor rather than a false quick pass.
+    if (producer.changes.length === 1 && producer.changes[0] === "metadata_only"
+        && targets.some(row => String(f(row, "Output_Status") || "") !== "Ready for Review")) {
+      producer = { automatic: false, reason: "Finish the content package before a metadata-only revision." };
+    }
   }
   const priorFeedback = factoryLatestReviewFeedback(f(requestRecord, "Production_Notes"));
   // Duplicate POSTs must not create another render after the request has entered
@@ -10927,6 +10933,8 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
     output_ids: patches.map((row) => row.id),
     producer_queued: Boolean(revisionId),
     producer_revision_id: revisionId,
+    needs_interpretation: Boolean(producer && !producer.automatic),
+    producer_reason: producer && !producer.automatic ? producer.reason : null,
     message: revisionId
       ? `Producer revision accepted for ${patches.length} output${patches.length === 1 ? "" : "s"}. Automatic rework is queued; fresh review will be required.`
       : `Sent the full content package (${patches.length} output${patches.length === 1 ? "" : "s"}) back to Production. Make changes and Approve to rerender.`,
@@ -11021,6 +11029,8 @@ export async function factoryResumeProducerRevisions(env, ctx = null) {
     limit: 3,
     fields: ["Production_Notes", "Request_Status", "Idea_Candidate", "Promoted_Content_Item"],
     filterFormula: 'AND({Request_Status}="Draft",FIND("[factory-producer-revision id=",{Production_Notes})>0)',
+    sortField: "Updated_At",
+    sortDirection: "asc",
   });
   const outcomes = [];
   for (const row of rows) {
@@ -11030,7 +11040,37 @@ export async function factoryResumeProducerRevisions(env, ctx = null) {
     try {
       outcomes.push(await factoryAdvanceProducerRevision(env, row.id, revisionId, ctx));
     } catch (error) {
-      console.warn("Factory Producer revision resume failed", row.id, String(error?.message || error).slice(0, 250));
+      const reason = String(error?.message || error).slice(0, 250);
+      console.warn("Factory Producer revision resume failed", row.id, reason);
+      // Bounded recovery: unresolvable revisions must become visible rather
+      // than monopolize the three-job cron quota indefinitely.
+      try {
+        const live = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, row.id);
+        const prior = JSON.parse(String(f(live, "Studio_Production_Job_JSON") || "{}"));
+        if (prior.job_id === revisionId) {
+          const attempts = Math.max(0, Number(prior.producer_retry_count) || 0) + 1;
+          const exhausted = attempts >= 5;
+          const fields = {
+            Studio_Production_Job_JSON: JSON.stringify({
+              ...prior, producer_retry_count: attempts,
+              step: exhausted ? "blocked" : prior.step,
+              error: exhausted ? reason : null,
+              detail: exhausted ? "Needs attention: Producer revision cannot be completed" : "Producer revision retry pending",
+              updated_at: new Date().toISOString(),
+            }),
+            Updated_At: new Date().toISOString(),
+          };
+          if (exhausted) fields.Production_Notes = String(f(live, "Production_Notes") || "").replace(
+            `[factory-producer-revision id=${revisionId} state=pending]`,
+            `[factory-producer-revision id=${revisionId} state=needs_attention]`,
+          );
+          await airtableFetch(env, PRODUCTION_REQUEST_TABLE, row.id, {
+            method: "PATCH", body: JSON.stringify({ fields, typecast: false }),
+          });
+        }
+      } catch (persistError) {
+        console.warn("Factory Producer recovery could not persist retry", row.id, persistError);
+      }
       outcomes.push({ request_id: row.id, retry_pending: true });
     }
   }
@@ -11242,8 +11282,8 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
           env, resultExtra.production_request_id, resultExtra.producer_revision_id, ctx,
         ).catch(error => console.warn("Factory Producer kickoff deferred to cron", String(error?.message || error).slice(0, 250))));
       }
-      if (producer && !producer.automatic) {
-        resultExtra.message += " Automatic rework is held: " + producer.reason;
+      if ((producer && !producer.automatic) || resultExtra.needs_interpretation) {
+        resultExtra.message += " Automatic rework is held: " + (resultExtra.producer_reason || producer?.reason || "manual review required");
         resultExtra.needs_interpretation = true;
       }
     } else {
