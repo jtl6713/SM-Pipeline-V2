@@ -48,3 +48,10 @@ test("oversized content, corrupted thread and unknown identity fail closed",()=>
  assert.throws(()=>readProducerThread("[studio-producer-thread]{not JSON}[/studio-producer-thread]"),/decoded/);
  assert.throws(()=>appendProducerThreadMessage("",{message:"ok",expected_revision:0,message_id:"x"}),/message id/);
 });
+
+test("embedded thread delimiters remain literal text and cannot truncate saved messages",()=>{
+ const value="Keep the on-screen text [studio-producer-thread] and [/studio-producer-thread] as narration.";
+ const sent=submit("",0,value,"producer-msg-injection");
+ assert.equal(readProducerThread(sent.notes).messages[0].content,value);
+ assert.equal(sent.notes.match(/\[studio-producer-thread\]/g)?.length,1);
+});
