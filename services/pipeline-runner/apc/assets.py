@@ -92,7 +92,8 @@ def list_finished_children(client: AirtableClient, output_id: str) -> list[dict[
 
 
 def list_ready_public_assets(client: AirtableClient, output_id: str) -> list[dict[str, Any]]:
-    return list_output_slides(client, output_id, extra=f'{{IG_Public_Asset_Status}}="{ASSET_READY}"')
+    return list_output_slides(client, output_id, extra=f'{{IG_Public_Asset_Status}}="{ASSET_READY}"',
+                              max_records=max(40, MAX_SLIDES * 4))
 
 
 def current_order(slide: dict[str, Any]) -> int:
