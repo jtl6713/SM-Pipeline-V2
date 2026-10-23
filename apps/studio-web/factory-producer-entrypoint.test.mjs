@@ -24,7 +24,7 @@ test("Discoverable entry point leads to the real durable content-level Producer 
 });
 
 test("individual Factory review uses durable Producer submission for linked content", () => {
- assert.match(desk, /const producerAvailable = \/\\^rec/);
+ assert.ok(desk.includes("const producerAvailable = /^rec[A-Za-z0-9]+$/.test(requestId)"));
  assert.match(desk, /action: "request_changes_content"/);
  assert.match(desk, /output_ids: ready\.map\(\(item\) => item\.id\)/);
  assert.match(desk, /action: "send_back"/);
