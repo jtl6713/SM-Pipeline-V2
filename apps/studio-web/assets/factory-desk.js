@@ -1737,6 +1737,26 @@
   $("factoryDeskRefresh")?.addEventListener("click", () => {
     loadFactoryDesk(true).catch(() => {});
   });
+  // Explicit entry point: all Factory streams default to collapsed, so a
+  // contextual Request Changes action alone was easy to miss.
+  $("factoryProducerOpen")?.addEventListener("click", () => {
+    const body = $("factoryBandBodyNeedsEyes");
+    const band = body?.closest(".factory-band");
+    if (!band) {
+      setStatus("Factory review is unavailable. Reload Studio and try again.", true);
+      return;
+    }
+    band.classList.remove("is-collapsed");
+    const toggle = band.querySelector("[data-factory-band-toggle]");
+    toggle?.setAttribute("aria-expanded", "true");
+    const chevron = toggle?.querySelector(".factory-band-chevron");
+    if (chevron) chevron.textContent = "▾";
+    band.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    const reviewCount = Number($("factoryCountNeedsEyes")?.textContent || 0);
+    setStatus(reviewCount > 0
+      ? "Choose a content item under Needs eyes, then select Request Changes to instruct the Producer."
+      : "No Ready for Review content is available yet. Request Changes appears when a content item reaches Needs eyes.");
+  });
   $("factoryPreviewClose")?.addEventListener("click", () => closeFactoryPreview());
   $("factoryPreviewBackdrop")?.addEventListener("click", (event) => {
     if (event.target === $("factoryPreviewBackdrop")) closeFactoryPreview();
