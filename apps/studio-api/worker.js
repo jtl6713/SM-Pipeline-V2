@@ -5986,6 +5986,7 @@ let studioAiApiPreferenceCache = { preferred: "OpenAI", failoverEnabled: true, a
  * Prefer the overview snapshot so hourly autonomous does not add a full scan.
  */
 /*__STUDIO_WORKER_EXTRACT:studioLoadAutonomousRefillScores__*/
+/*__STUDIO_WORKER_EXTRACT:studioGlobalAutomaticIdeaInventory__*/
 /*__STUDIO_WORKER_EXTRACT:harvestAutonomousNewsHeadlines__*/
 /*__STUDIO_WORKER_EXTRACT:harvestAutonomousYoutube__*/
 /*__STUDIO_WORKER_EXTRACT:harvestAutonomousLibraryCatalog__*/
