@@ -3162,7 +3162,8 @@ export function productionRequestDefaultsFromIdea(idea) {
     script_mode: "AI decides",
     requested_script: "",
     primary_location: suggestPrimaryLocationFromIdea(idea).name || "",
-    // Carry Idea creative direction into Production without claiming exact media.\n    production_notes: ideaProducerDirection(f(idea, "Idea_Summary")),
+    // Carry Idea creative direction into Production without claiming exact media.
+    production_notes: ideaProducerDirection(f(idea, "Idea_Summary")),
   };
 }
 /*__STUDIO_WORKER_END:productionRequestDefaultsFromIdea__*/
