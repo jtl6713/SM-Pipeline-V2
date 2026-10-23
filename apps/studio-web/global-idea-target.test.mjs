@@ -20,3 +20,12 @@ test("control loads persisted value and independently PUTs only global automatic
   assert.match(js, /verified\.global_automatic_idea_target !== value/);
   assert.doesNotMatch(js, /scheduling_horizon_days:/);
 });
+
+test("native Operations tab navigator accepts Global Admin and the #global deep link", () => {
+  const app = fs.readFileSync(path.join(here,"assets/app-item4-1008.js"),"utf8");
+  assert.match(app, /const OPS_CONTROL_TABS = \[[^\]]*"global"/);
+  assert.match(app, /if \(OPS_CONTROL_TABS\.includes\(raw\)\)/);
+  assert.match(app, /if \(OPS_CONTROL_TABS\.includes\(tab\)\) operationsControlTab = tab/);
+  assert.match(html, /data-ops-tab="global"/);
+  assert.match(html, /data-ops-tab-panel="global"/);
+});
