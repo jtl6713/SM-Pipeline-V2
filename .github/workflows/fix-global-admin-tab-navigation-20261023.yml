@@ -1,0 +1,74 @@
+name: One-time Global Admin navigation fix
+on:
+  push:
+    branches:
+      - fix/global-admin-tab-navigation-20261023
+    paths:
+      - .github/workflows/fix-global-admin-tab-navigation-20261023.yml
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.ref == 'refs/heads/fix/global-admin-tab-navigation-20261023'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fix native Operations global tab and increment Pages cache contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const root = 'apps/studio-web';
+          const oldKey='0.6.746-global-idea-limit', nextKey='0.6.747-global-admin-tab';
+          let changed = [];
+          const paths = ['index.html','assets/app-item4-1008.js'];
+          for (const name of fs.readdirSync(root)) if (name.endsWith('.test.mjs')) paths.push(name);
+          for (const p of paths) {
+            const file=path.join(root,p);
+            const old=fs.readFileSync(file,'utf8');
+            let next=old.replaceAll(oldKey,nextKey).replaceAll('0.6.746','0.6.747').replaceAll('0\\.6\\.746','0\\.6\\.747');
+            if (p==='assets/app-item4-1008.js') {
+              const anchor='const OPS_CONTROL_TABS = ["desk", "queue", "profiles", "produce",';
+              if (!next.includes(anchor)) throw Error('missing native Operations tab registry');
+              next=next.replace(anchor,'const OPS_CONTROL_TABS = ["desk", "queue", "profiles", "global", "produce",');
+            }
+            if (p==='global-idea-target.test.mjs') {
+              next+=`
+test("native Operations tab navigator accepts Global Admin and the #global deep link", () => {
+  const app = fs.readFileSync(path.join(here,"assets/app-item4-1008.js"),"utf8");
+  assert.match(app, /const OPS_CONTROL_TABS = \\[[^\\]]*"global"/);
+  assert.match(app, /if \\(OPS_CONTROL_TABS\\.includes\\(raw\\)\\)/);
+  assert.match(app, /if \\(OPS_CONTROL_TABS\\.includes\\(tab\\)\\) operationsControlTab = tab/);
+  assert.match(html, /data-ops-tab="global"/);
+  assert.match(html, /data-ops-tab-panel="global"/);
+});
+`;
+            }
+            if(next!==old){fs.writeFileSync(file,next);changed.push(p);}
+          }
+          const app=fs.readFileSync(root+'/assets/app-item4-1008.js','utf8');
+          const html=fs.readFileSync(root+'/index.html','utf8');
+          if (!app.includes('const BUILD_ID = "item4-'+nextKey+'"')|| !html.includes('UI build 0.6.747')) throw Error('mismatched release versions');
+          if(!app.includes('"profiles", "global", "produce"'))throw Error('Global Admin registration missing');
+          console.log('Changed files:', changed.length,changed.join(', '));
+          NODE
+          node apps/studio-web/ui-release-contract.mjs --json
+          node --test apps/studio-web/global-idea-target.test.mjs apps/studio-web/ui-release-contract.test.mjs
+      - name: Commit fix without retaining one-time workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/fix-global-admin-tab-navigation-20261023.yml
+          git config user.name 'Studio Engineering Automation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/studio-web .github/workflows/fix-global-admin-tab-navigation-20261023.yml
+          git commit -m "fix(studio): make Global Admin a native Operations tab (UI 0.6.747)"
+          git push origin HEAD:fix/global-admin-tab-navigation-20261023
