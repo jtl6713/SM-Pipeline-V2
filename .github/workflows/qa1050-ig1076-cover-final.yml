@@ -1,0 +1,62 @@
+name: QA1050 IG1076 Final Bounded Cover Repair Ops
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/qa1050-ig1076-cover-final.yml'
+permissions:
+  contents: read
+concurrency:
+  group: qa1050-ig1076-final-cover-repair-20261022
+  cancel-in-progress: false
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate exact record and nonpublic stages
+        shell: bash
+        run: |
+          set -euo pipefail
+          file='deploy/local-services/qa1050-ig1076-cover-repair.ps1'
+          grep -q 'recsq0S1FeqDP0pZb' "$file"
+          grep -Fq "Exact 'ap1c'" "$file"
+          grep -Fq "Exact 'ap2c'" "$file"
+          grep -Fq "Exact 'ap3c'" "$file"
+          if grep -Ein "Exact '(ap4c|ap4r|ap5c|ap0c|yt0|ttd0)'" "$file"; then exit 8; fi
+      - name: Recover only the failed existing cover through Ops
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://ops.chicagoshining.com'
+          token=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null 2>&1; then token="$candidate"; break; fi
+          done
+          test -n "$token"
+          jq -Rs '{command:.,confirm:true}' < deploy/local-services/qa1050-ig1076-cover-repair.ps1 > /tmp/payload.json
+          code=$(curl -sS --max-time 30 -o /tmp/submit.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $token" -H 'Content-Type: application/json' --data-binary @/tmp/payload.json || true)
+          test "$code" == 202
+          jq -e '.ok==true and .job.id!=null' /tmp/submit.json >/dev/null
+          job=$(jq -r '.job.id' /tmp/submit.json)
+          for i in $(seq 1 135); do
+            code=$(curl -sS --max-time 20 -o /tmp/job.json -w '%{http_code}' -H "Authorization: Bearer $token" "$BASE/api/jobs/$job" || true)
+            if [[ "$code" == 200 ]]; then
+              status=$(jq -r '.job.status // empty' /tmp/job.json)
+              if [[ "$status" == ok || "$status" == failed ]]; then
+                jq -r '.job.log // ""' /tmp/job.json | grep -E '"id"|QA1050_IG1076|Exception|failed' || true
+                jq -c '{ok,job:{status:.job.status,exitCode:.job.exitCode}}' /tmp/job.json
+                test "$status" == ok
+                exit 0
+              fi
+            fi
+            sleep 2
+          done
+          exit 9
