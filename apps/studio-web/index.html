@@ -1979,6 +1979,17 @@
  <p class="subtle" id="operationsScheduleSettingsMeta" style="margin:0">Default 30 days. Morning 5:00–7:00, Afternoon 10:30–12:30, Evening 4:00–6:00. Blackout 8:00 PM–3:30 AM profile-local.</p>
  </div>
  </section>
+ <section class="ops-schedule-settings" aria-labelledby="operationsGlobalIdeaTargetHeading" style="margin:1rem 0 1.5rem;padding:1rem 0;border-bottom:1px solid rgba(0,0,0,.08)">
+ <h3 id="operationsGlobalIdeaTargetHeading" style="margin:0 0 .35rem">Global automatic idea limit</h3>
+ <p class="subtle" style="margin:0 0 .75rem">One total across every active Shining Cities profile: future Scheduled outputs plus rendered Awaiting Approval. The overnight and hourly automatic idea generators stop creating ideas when the combined inventory reaches the limit. Manual idea generation is unchanged.</p>
+ <label class="form-field" for="operationsGlobalIdeaTarget" style="max-width:16rem"><span>Combined inventory target (all cities)</span>
+ <input type="number" id="operationsGlobalIdeaTarget" min="1" max="10000" step="1" value="500" inputmode="numeric" aria-describedby="operationsGlobalIdeaTargetStatus">
+ </label>
+ <div class="ops-inline-form" style="margin-top:.75rem">
+ <button type="button" class="secondary-button" id="operationsSaveGlobalIdeaTarget">Save global idea limit</button>
+ <p class="subtle" id="operationsGlobalIdeaTargetStatus" role="status" aria-live="polite" style="margin:0">Default: 500 across all profiles. Stored in Pipeline Settings.</p>
+ </div>
+ </section>
  </div>
  <div class="ops-tab-panel" id="operationsProducePanel" data-ops-tab-panel="produce" role="tabpanel" aria-labelledby="operationsTabProduce" hidden>
  <div class="panel-heading"><div><h2>Autonomous produce</h2><p>When a profile toggle is on, Studio overviews unused library stills, picks 5–10 related photos that have not been used on a platform output, writes the idea and caption, produces the standard template, and stops at Ready for Review. Nothing publishes. Scheduled around 8:00 a.m. and 4:00 p.m. Chicago, or run on demand here or from Ideas.</p></div>
@@ -2987,6 +2998,7 @@
  <script defer src="/assets/factory-batch-quality-0710.js?v=0.6.745-qa-past-due&global=factory-v1&monitor=lightweight-quality-20261018&output-failures=quality-v2"></script>
  <script src="/assets/studio-lazy-pages.js?v=0.6.745-qa-past-due"></script>
  <script defer src="/assets/profile-admin-creative.js?v=0.6.745-qa-past-due"></script>
+ <script defer src="/assets/global-idea-target.js?v=global-idea-target-v1-20261023"></script>
  <script>window.StudioLazyLoad.boot();</script>
 <script>
 (function(){
