@@ -25,6 +25,19 @@ export function interpretFactoryProducerFeedback(note) {
     const named = line.match(/^(?:add|include|insert|use)\s+(?:(?:the|a|an)\s+)?(?:library\s+)?(photo|still|image|video clip|clip)\s+(?:named|called)\s*:?\s*(.{3,120})$/i)
       || line.match(/^(?:add|include|insert|use)\s+(?:(?:the|a|an)\s+)?(?:library\s+)?(photo|still|image|video clip|clip)\s+["“](.{3,120})["”]$/i);
     const byId = line.match(/^(?:add|include|insert)\s+(?:library\s+)?(photo|still|image|video clip|clip)s?\s*:\s*(rec[A-Za-z0-9]{14})$/i);
+    // "Include the Chicago River Night photo" is safe only when that string
+    // later resolves to exactly one classified Media Asset in this profile.
+    const colloquialName = !named && !byId
+      ? line.match(/^(?:add|include|insert|use)\s+the\s+(.{3,110}?)\s+(photo|still|image|video clip|clip)[.!?]?$/i)
+      : null;
+    if (colloquialName && !/^(?:\d+|some|more|another)\s/i.test(colloquialName[1])) {
+      mediaRequests.push({
+        kind: /clip/i.test(colloquialName[2]) ? "clip" : "photo",
+        name: colloquialName[1].trim(),
+      });
+      directives.push(/clip/i.test(colloquialName[2]) ? "add_clip" : "add_photos");
+      continue;
+    }
     if (named || byId) {
       const kind = /clip/i.test((named || byId)[1]) ? "clip" : "photo";
       const reference = (named || byId)[2].trim();
@@ -59,8 +72,8 @@ export function interpretFactoryProducerFeedback(note) {
     }
     // Common conversational timing requests: precise duration only, never
     // interpret "a little shorter" as an arbitrary number.
-    match = line.match(/^(?:make|shorten|lengthen|adjust)\s+(?:the|this|it)?\s*(?:video|short|reel|clip)?\s*(?:to|at)\s*(\d{1,3})\s*(?:seconds?|secs?|s)\.?$/i)
-      || line.match(/^make\s+(?:this|it|the\s+video)\s+(\d{1,3})\s*(?:seconds?|secs?)\s*(?:long)?\.?$/i);
+    match = line.match(/^(?:make|shorten|lengthen|adjust)\s+(?:the|this|it)?\s*(?:video|short|reel|clip)?\s*(?:to|at)\s*(\d{1,3})\s*(?:seconds?|secs?|s)[.!?]?$/i)
+      || line.match(/^make\s+(?:this|it|the\s+video)\s+(\d{1,3})\s*(?:seconds?|secs?)\s*(?:long)?[.!?]?$/i);
     if (match) {
       const seconds = Number(match[1]);
       if (seconds < 5 || seconds > 600) return { automatic: false, reason: "Video duration must be between 5 and 600 seconds." };
