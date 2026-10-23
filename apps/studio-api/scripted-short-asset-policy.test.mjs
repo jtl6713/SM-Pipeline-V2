@@ -60,9 +60,10 @@ test("ordinary topical prompts require relevant media without pretending they re
 });
 
 test("generic variety instruction is not a fabricated location lock", () => {
-  const brief = "Create a cinematic documentary titled Tribeca: From Industrial Grit to Manhattan Glamour. Use a wide variety of relevant library assets, with Tribeca imagery throughout.";
+  const brief = "Create a cinematic documentary titled **Tribeca: From Industrial Grit to Manhattan Glamour. Use a wide variety of relevant library assets, with Tribeca imagery throughout.";
   const parsed = parseScriptedShortAssetPolicy(brief);
   assert.equal(parsed.location, null);
+  assert.equal(parsed.subject, "tribeca");
   assert.equal(parsed.required, false);
   assert.equal(libraryAssetSatisfiesPolicy({ id: "recTribeca", name: "Tribeca 14", profile_id: nyc }, parsed, nyc), true);
 });
