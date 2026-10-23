@@ -1247,9 +1247,9 @@ input, select, textarea, button {
 #outputsList .pipeline-archived-section-meta{font-size:.78rem;font-weight:600;opacity:.72}
 #outputsList .pipeline-archived-group .pipeline-group-row td{background:#eef2f1;color:var(--ink-soft)}
 @media(max-width:760px){
-  #outputsList .data-table thead{display:block;border-bottom:1px solid var(--line)}
-  #outputsList .data-table thead tr{display:flex;flex-wrap:wrap;gap:4px;padding:8px 12px}
-  #outputsList .data-table thead th{width:auto;border:0;padding:0}
+  #outputsList .data-table:not(.pipeline-compact-table) thead{display:block;border-bottom:1px solid var(--line)}
+  #outputsList .data-table:not(.pipeline-compact-table) thead tr{display:flex;flex-wrap:wrap;gap:4px;padding:8px 12px}
+  #outputsList .data-table:not(.pipeline-compact-table) thead th{width:auto;border:0;padding:0}
   #outputsList .pipeline-group-row{background:#f4f8f8;padding:10px 12px 6px}
 }
 .creative-editor-shell.watch-only .creative-global-card,
@@ -5123,3 +5123,21 @@ body.nav-collapsed .sidebar{
 #outputsList .pipeline-content-download-cover{display:flex;align-items:center;justify-content:center;box-sizing:border-box;width:100%;min-height:26px;padding:4px 3px;border:1px solid #b7cce7;border-radius:6px;background:#fff;color:#0753b4;font-size:.56rem;font-weight:750;line-height:1.12;text-decoration:none;text-align:center;white-space:normal;cursor:pointer}
 #outputsList .pipeline-content-download-cover:hover{background:#edf4ff;border-color:#7ca8db}
 #outputsList .pipeline-content-download-cover:focus-visible{outline:2px solid #075fd8;outline-offset:2px}
+
+
+/* PIPELINE_MOBILE_HEADINGS: retain native column alignment and calendar context. */
+@media(max-width:760px){
+  #outputsList .pipeline-compact-table thead tr{display:table-row}
+  #page-outputs .pipeline-schedule-collapsed .pipeline-schedule-overview-heading{
+    display:block;
+  }
+  #page-outputs .pipeline-schedule-collapsed .pipeline-schedule-overview-heading h2{
+    display:block;
+    margin:0 0 6px;
+    font-size:1rem;
+  }
+  #page-outputs .pipeline-schedule-overview-actions{
+    margin-top:10px;
+    justify-content:flex-start;
+  }
+}
