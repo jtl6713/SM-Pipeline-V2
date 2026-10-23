@@ -15,3 +15,15 @@ export function ideaProducerDirection(raw) {
     .slice(0, 4500);
   return "Idea creative direction (human-authored; never an asset authorization):\n" + safe;
 }
+
+/** Keep explicit Production settings and original Idea direction together.
+ * Fail closed on an overlong record; never silently discard user instructions.
+ */
+export function mergeIdeaProducerDirection(existingNotes, originalIdeaText) {
+  const old = String(existingNotes || "").trim();
+  const direction = ideaProducerDirection(originalIdeaText);
+  if (!direction || old.includes(direction)) return old;
+  const joined = [old, direction].filter(Boolean).join("\n\n");
+  if (joined.length > 9750) throw new RangeError("Production notes cannot fit the original creative direction");
+  return joined;
+}
