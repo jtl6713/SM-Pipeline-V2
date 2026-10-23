@@ -18,9 +18,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 14
     env:
-      OPS_TOKEN_A: \${{ secrets.OPS_DASHBOARD_TOKEN }}
-      OPS_TOKEN_B: \${{ secrets.DASHBOARD_TOKEN }}
-      OPS_TOKEN_C: \${{ secrets.OPS_TOKEN }}
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
     steps:
       - uses: actions/checkout@v6
       - name: Verify exact-identity stage allowlist and target count
@@ -43,7 +43,7 @@ jobs:
           set -euo pipefail
           BASE='https://ops.chicagoshining.com'
           selected=''
-          for candidate in "\${OPS_TOKEN_A:-}" "\${OPS_TOKEN_B:-}" "\${OPS_TOKEN_C:-}"; do
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
             test -n "$candidate" || continue
             code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' \
               -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
