@@ -10856,7 +10856,7 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
   // the persisted revision lifecycle. This is an exact replay check, not a
   // semantic duplicate detector for later intentional revisions.
   if (producer?.automatic && priorFeedback?.instructions === note
-      && /\[factory-producer-revision id=/.test(String(f(requestRecord, "Production_Notes") || ""))) {
+      && /\[factory-producer-revision id=fpr-[a-f0-9]+ state=pending\]/.test(String(f(requestRecord, "Production_Notes") || ""))) {
     return { production_request_id: requestId, already_accepted: true,
       message: "This Producer revision was already accepted.", producer_queued: true };
   }
@@ -11269,7 +11269,7 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
       requirePermission(authorization, "outputs_review");
       const producer = action === "request_changes_content"
         ? interpretFactoryProducerFeedback(note) : null;
-      resultExtra = await factorySendBackContent(
+      const submitContentRevision = () => factorySendBackContent(
         env,
         payload?.production_request_id,
         payload?.output_ids,
@@ -11277,6 +11277,13 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
         note,
         producer,
       );
+      // Serialize submissions by authoritative Production Request identity.
+      // Two browser retries must never fork distinct Producer jobs.
+      resultExtra = action === "request_changes_content"
+        ? await withOutputApprovalLock(
+          env.STUDIO_MEDIA, String(payload?.production_request_id || ""), submitContentRevision,
+        )
+        : await submitContentRevision();
       if (resultExtra.producer_queued && !resultExtra.already_accepted && ctx?.waitUntil) {
         ctx.waitUntil(factoryAdvanceProducerRevision(
           env, resultExtra.production_request_id, resultExtra.producer_revision_id, ctx,
