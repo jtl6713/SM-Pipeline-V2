@@ -54,3 +54,21 @@ test("creative asset descriptions without known inventory identifiers remain man
   assert.match(value.reason,/verified asset ID|guided asset selection|interpretation|asset-grounded/i);
  }
 });
+
+test("accepts exact classified library names or explicit record IDs for new stills and clips",()=>{
+ const photo=interpret("Add library photo named: Chicago River Night");
+ assert.equal(photo.automatic,true);
+ assert.deepEqual(photo.changes,["add_photos"]);
+ assert.deepEqual(photo.media_requests,[{kind:"photo",name:"Chicago River Night"}]);
+ const movie=interpret("Include library clip: rec12345678901234");
+ assert.equal(movie.automatic,true);
+ assert.deepEqual(movie.media_requests,[{kind:"clip",id:"rec12345678901234"}]);
+});
+test("ambiguous asset language and mixed explicit-inventory edits are not auto-executed",()=>{
+ for(const note of [
+  "Add three more Chicago River photos",
+  "Insert a clip of a boat",
+  "Add library photo: recBAD",
+  "Add library photo named: Chicago River Night\\nMove asset video000000000001 to position 1",
+ ]) assert.equal(interpret(note).automatic,false,note);
+});
