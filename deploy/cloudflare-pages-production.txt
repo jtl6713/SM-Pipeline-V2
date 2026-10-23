@@ -507,3 +507,5 @@ Deploy Pages UI 0.6.737: corrected Factory QA release contract gate and retained
 
 2026-10-23 PR #1095: Deploy UI build 0.6.746-global-idea-limit, Operations > Global Admin editable shared automatic idea target across all cities; guarded API PUT with persisted GET readback. Preserve all existing creative, scheduling and publishing behavior; enforce monotonic UI release gate.
 Deploy Conversational Producer Factory revision bridge PR #1093, merge 845c4bf3841094641f25f903d6c43ef0d17ff682. Preserve Airtable write authority and QA/publish fences.
+
+2026-10-23 PR #1100: Deploy UI build 0.6.747-global-admin-tab. Fix Operations Global Admin click/deep link through native tab registry, preserving configurable automatic idea limit and all existing settings. Validate protected release version and custom-domain Pages asset.
