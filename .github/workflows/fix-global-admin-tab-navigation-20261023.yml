@@ -34,7 +34,7 @@ jobs:
           for (const p of paths) {
             const file=path.join(root,p);
             const old=fs.readFileSync(file,'utf8');
-            let next=old.replaceAll(oldKey,nextKey).replaceAll('0.6.746','0.6.747').replaceAll('0\\.6\\.746','0\\.6\\.747');
+            let next=old.replaceAll(oldKey,nextKey).replaceAll('0.6.746','0.6.747').replaceAll('0\\.6\\.746','0\\.6\\.747').replaceAll('0[.]6[.]746','0[.]6[.]747');
             if (p==='assets/app-item4-1008.js') {
               const anchor='const OPS_CONTROL_TABS = ["desk", "queue", "profiles", "produce",';
               if (!next.includes(anchor)) throw Error('missing native Operations tab registry');
