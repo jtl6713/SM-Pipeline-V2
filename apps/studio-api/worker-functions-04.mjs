@@ -224,6 +224,7 @@ import {
   AUTONOMOUS_CITY_CREATE_MS,
   AUTONOMOUS_IDEAS_PER_HOUR,
   autonomousIdeasForOutputDeficit,
+  autonomousDailyIdeaBudget,
   AUTONOMOUS_LIBRARY_SCAN_CAP,
   AUTONOMOUS_HOUR_ASSET_DRAIN,
   AUTONOMOUS_OPEN_IDEAS_CAP,
@@ -12023,11 +12024,11 @@ export async function studioLoadAutonomousLastRun(env) {
 }
 /*__STUDIO_WORKER_END:studioLoadAutonomousLastRun__*/
 
-export async function studioLoadAutonomousRefillScores(env, profiles, { refresh = false } = {}) {
+export async function studioLoadAutonomousRefillScores(env, profiles, { refresh = false, requireLive = false } = {}) {
   const enabled = (Array.isArray(profiles) ? profiles : []).filter((row) => row?.id);
   if (!enabled.length) return { scores: {}, overview: [], source: "empty" };
   const summaryEnabled = env?.STUDIO_REFILL_PROFILE_SUMMARY_READS === "true";
-  if (summaryEnabled) {
+  if (summaryEnabled && !requireLive) {
     try {
       const summary = await readStudioProfileSummary(env);
       if (validVerifiedStudioSummary(summary, enabled.map((row) => row.id))) {
@@ -12052,7 +12053,7 @@ export async function studioLoadAutonomousRefillScores(env, profiles, { refresh 
   const age = snapshot?.at ? Date.now() - snapshot.at : Infinity;
   const missingProfiles = enabled.some((profile) => !rows.some((row) => row.id === profile.id));
   const stale = !rows.length || missingProfiles || age > Math.max(STUDIO_PROFILES_OVERVIEW_CACHE_MS, 15 * 60 * 1000);
-  if (refresh || stale) {
+  if (refresh || requireLive || stale) {
     try {
       // The hourly runner passes display-mapped profiles. Resolve their IDs
       // back to full Airtable records before matching outputs and Ideas.
@@ -12069,7 +12070,7 @@ export async function studioLoadAutonomousRefillScores(env, profiles, { refresh 
       source = "live";
     } catch (error) {
       console.warn("autonomous refill overview load failed", error);
-      if (summaryEnabled || !rows.length) return { scores: {}, overview: [], source: "error", error: String(error?.message || error).slice(0, 180) };
+      if (requireLive || summaryEnabled || !rows.length) return { scores: {}, overview: [], source: "error", error: String(error?.message || error).slice(0, 180) };
       source = "stale_snapshot";
     }
   }
@@ -13927,6 +13928,37 @@ export async function executeStudioDailyIdeas(env, ctx, options = {}) {
     return { skipped: "no_enabled_profiles", chicago_date: chicago.date, profiles: [] };
   }
 
+  // A scheduled I1 run must honor the same 500 Scheduled + Awaiting Approval
+  // target as hourly refill. Do not use a cached/stale overview for admission:
+  // if the authoritative scan fails, fail closed without creating any batch.
+  // Explicit manual generation is independent of the automatic inventory gate.
+  let scheduledInventory = null;
+  if (options.scheduled) {
+    try {
+      scheduledInventory = await studioLoadAutonomousRefillScores(env, profiles, {
+        refresh: true, requireLive: true,
+      });
+    } catch (error) {
+      console.warn("Daily I1 inventory scan failed; skipping generation", error);
+    }
+    const scores = scheduledInventory?.scores || {};
+    const verified = scheduledInventory?.source === "live"
+      && profiles.every((profile) =>
+        Object.prototype.hasOwnProperty.call(scores, profile.id)
+        && Number.isFinite(Number(scores[profile.id]?.pipeline_load))
+        && scores[profile.id]?.pipeline_load != null);
+    if (!verified) {
+      console.warn("Daily I1 skipped: authoritative 500-target inventory unavailable", scheduledInventory?.source);
+      return {
+        started: false,
+        skipped: "inventory_unavailable",
+        chicago_date: chicago.date,
+        target: AUTONOMOUS_SCHEDULED_TARGET,
+        errors: [scheduledInventory?.error || "Live per-profile inventory could not be verified"],
+      };
+    }
+  }
+
   let authorization = options.authorization;
   if (!authorization?.user?.record_id) {
     authorization = await resolveStudioCronAuthorization(env).catch(() => authorization || null);
@@ -13936,7 +13968,21 @@ export async function executeStudioDailyIdeas(env, ctx, options = {}) {
   const skipped = [];
   const errors = [];
   for (const profile of profiles) {
-    const count = Math.max(1, Math.min(10, Number(profile.daily_idea_limit) || 5));
+    const requested = Math.max(1, Math.min(10, Number(profile.daily_idea_limit) || 5));
+    const score = scheduledInventory?.scores?.[profile.id];
+    const count = options.scheduled
+      ? autonomousDailyIdeaBudget(score, requested)
+      : requested;
+    if (options.scheduled && count === 0) {
+      skipped.push({
+        profile_id: profile.id,
+        name: profile.name,
+        reason: "scheduled_target_met",
+        pipeline_load: Number(score.pipeline_load),
+        target: AUTONOMOUS_SCHEDULED_TARGET,
+      });
+      continue;
+    }
     let batch = null;
     try {
       if (!options.force) {

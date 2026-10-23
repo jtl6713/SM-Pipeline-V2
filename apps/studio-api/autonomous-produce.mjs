@@ -12,6 +12,23 @@ export function autonomousIdeasForOutputDeficit(deficit, outputsPerIdea = AUTONO
   const yieldPerIdea = Math.max(1, Math.floor(Number(outputsPerIdea) || AUTONOMOUS_EXPECTED_OUTPUTS_PER_IDEA));
   return Math.ceil(remaining / yieldPerIdea);
 }
+/**
+ * Bound the scheduled 1 a.m. I1 run to the SAME per-city inventory target as
+ * the hourly refill: future Scheduled + rendered Awaiting Approval.
+ * Missing or invalid inventory is not permission to generate more Ideas.
+ * One idea is estimated to become five platform outputs; this is a planning
+ * bound, and the authoritative inventory is rechecked on the next run.
+ * Manual user-requested generation is deliberately a separate path.
+ */
+export function autonomousDailyIdeaBudget(score, dailyLimit, target = AUTONOMOUS_SCHEDULED_TARGET) {
+  if (score?.pipeline_load == null) return 0;
+  const load = Number(score.pipeline_load);
+  const ceiling = Number(target);
+  if (!Number.isFinite(load) || load < 0 || !Number.isFinite(ceiling) || ceiling < 1) return 0;
+  const requested = Math.max(0, Math.min(10, Math.trunc(Number(dailyLimit) || 0)));
+  return Math.min(requested, autonomousIdeasForOutputDeficit(ceiling - load));
+}
+
 /** Combined load above this skips that city for the Chicago hour. 500–509 holds. */
 export const AUTONOMOUS_SCHEDULED_SKIP_ABOVE = 509;
 /** Distinct-subject ideas to open per city per Chicago hour while Scheduled+Awaiting Approval is under target. */
