@@ -50,6 +50,21 @@ def list_final_slides(client: AirtableClient, output_id: str) -> list[dict[str, 
         view=C9_FINAL_SLIDES_VIEW,
         max_records=max(40, MAX_SLIDES * 4),
     )
+    # The C9 view can omit a separately approved cover while still returning
+    # MAX_SLIDES other rows. If so, AP1C would publish slides 1..10 without the
+    # actual cover (QA1050 / output 1076). Prefer the canonical approved,
+    # public-ready set ONLY when it has one explicit cover, a unique contiguous
+    # Current Order and an approved source for every selected slide.
+    if not any(bool(field(row, "Is Cover")) for row in rows[:MAX_SLIDES]):
+        ready = list_ready_public_assets(client, output_id)
+        ordered = ready[:MAX_SLIDES]
+        orders = [current_order(row) for row in ordered]
+        covers = [row for row in ordered if bool(field(row, "Is Cover"))]
+        if (len(ordered) >= 2 and len(covers) == 1
+                and current_order(covers[0]) == 1
+                and orders == list(range(1, len(ordered) + 1))
+                and all(bool(field(row, "Approved For Final")) for row in ordered)):
+            return ordered
     return rows[:MAX_SLIDES]
 
 
