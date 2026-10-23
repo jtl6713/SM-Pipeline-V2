@@ -45,7 +45,7 @@ jobs:
           ]) if(!html.includes(marker)) throw Error('Production Factory UI missing marker: '+marker);
           const m=html.match(/\/assets\/factory-desk\.js\?[^"\\\s]+/);
           if(!m) throw Error('Production UI lacks cache-busted Factory script');
-          const build=html.match(/UI build (\\d+\\.\\d+\\.\\d+)/);
+          const build=html.match(/UI build ([0-9]+[.][0-9]+[.][0-9]+)/);
           if(!build) throw Error('Live Studio build label missing');
           const version=build[1];
           const parts=version.split('.').map(Number);
