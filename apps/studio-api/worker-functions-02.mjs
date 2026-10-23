@@ -6519,11 +6519,16 @@ export function item4PlanItemForOutput(requestRecord, outputRow) {
 
 export function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, effective, sourcePackage) {
   const planItem = item4PlanItemForOutput(requestRecord, outputRow) || {};
+  const producerPending = /\[factory-producer-revision id=fpr-[a-f0-9]+ state=pending\]/.test(
+    String(f(requestRecord, "Production_Notes") || "")
+  );
   const revisionReset = productionRequestRevisionOpen(requestRecord)
     ? {
         Review_Status: "Pending Review",
         Publish_Status: "Not Ready",
-        Do_Not_Publish: false,
+        // Producer requests stay held until independent post-render QA releases
+        // them. Legacy human-controlled Factory revisions retain their route.
+        Do_Not_Publish: producerPending,
         Review_Decision_At: null,
         Final_File_URL: null,
         Final_File_ID: null,
