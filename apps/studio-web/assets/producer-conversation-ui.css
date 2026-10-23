@@ -9,3 +9,7 @@
 #factoryProducerTranscript{max-height:180px;overflow:auto;margin:10px 0;padding:8px;background:var(--surface-subtle,#f7f8fa);border-radius:8px}
 #factoryProducerTranscript p{font-size:.85rem;line-height:1.4;margin:4px 0}
 @media(max-width:600px){.studio-producer-chat{padding:12px}.studio-producer-chat-heading{align-items:flex-start}}
+
+.studio-producer-entry-mode{margin:5px 0 8px;letter-spacing:.01em}
+.studio-producer-chat-jump{max-width:100%;white-space:normal}
+@media(max-width:600px){.studio-producer-chat-jump{font-size:.85rem;padding:8px 10px}}

@@ -117,6 +117,16 @@
     const formHost = $("productionRequestForm");
     if (formHost) formHost.before(panel);
     else workspace.append(panel);
+    const jump = $("productionProducerChatButton");
+    if (jump) {
+      jump.hidden = false;
+      jump.addEventListener("click", () => {
+        if (!activeRequestId) return;
+        panel.hidden = false;
+        panel.scrollIntoView?.({behavior:"smooth",block:"start"});
+        $("studioProducerChatMessage")?.focus?.({preventScroll:true});
+      });
+    }
     return panel;
   }
   function draw(data) {
