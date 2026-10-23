@@ -59,6 +59,22 @@ test("ordinary topical prompts require relevant media without pretending they re
   assert.equal(libraryAssetSatisfiesPolicy({ id: "recBrooklyn", name: "Brooklyn Bridge dusk", profile_id: nyc }, noLock, nyc), true);
 });
 
+test("generic variety instruction is not a fabricated location lock", () => {
+  const brief = "Create a cinematic documentary titled Tribeca: From Industrial Grit to Manhattan Glamour. Use a wide variety of relevant library assets, with Tribeca imagery throughout.";
+  const parsed = parseScriptedShortAssetPolicy(brief);
+  assert.equal(parsed.location, null);
+  assert.equal(parsed.required, false);
+  assert.equal(libraryAssetSatisfiesPolicy({ id: "recTribeca", name: "Tribeca 14", profile_id: nyc }, parsed, nyc), true);
+});
+
+test("explicit named Tribeca upload requirements remain strict", () => {
+  const parsed = parseScriptedShortAssetPolicy("Use the Tribeca images uploaded to the library.");
+  assert.equal(parsed.required, true);
+  assert.equal(parsed.location, "tribeca");
+  assert.equal(libraryAssetSatisfiesPolicy({ id: "recTribeca", name: "Tribeca 14", profile_id: nyc }, parsed, nyc), true);
+  assert.equal(libraryAssetSatisfiesPolicy({ id: "recOther", name: "Chicago River", profile_id: nyc }, parsed, nyc), false);
+});
+
 test("Quality Agent never treats a valid but irrelevant media ID as a match", () => {
   const initial = timeline(["recChicago1", "recBattery1"]);
   const qa = validateScriptedShortAssets(initial, [northPond, battery], policy, nyc);
