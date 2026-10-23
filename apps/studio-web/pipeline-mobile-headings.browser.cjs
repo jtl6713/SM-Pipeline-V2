@@ -9,7 +9,8 @@ const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8')
   .replace(/<link[^>]*href="\/assets\/([^"?]+)[^>]*>/g, (_, file) =>
     '<style>' + fs.readFileSync(path.join(root, 'assets', file), 'utf8') + '</style>');
 (async () => {
-  for (const [name, engine] of Object.entries({ chromium, webkit })) {
+  const engines = process.env.STUDIO_LAYOUT_CHROMIUM_ONLY === '1' ? { chromium } : { chromium, webkit };
+  for (const [name, engine] of Object.entries(engines)) {
     const browser = await engine.launch({ headless: true });
     try {
       for (const width of [375, 390, 430, 768, 1280]) {
