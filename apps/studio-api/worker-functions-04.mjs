@@ -10864,7 +10864,37 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
   if (producer?.automatic) {
     const profile = await item4ProductionProfileRecord(env, requestRecord);
     if (!profile?.id) throw new HttpError(409, "Producer could not verify the Production Request's content profile");
-    const mediaIds = Array.isArray(producer.media_asset_ids) ? producer.media_asset_ids : [];
+    const resolvedIds = [...(Array.isArray(producer.media_asset_ids) ? producer.media_asset_ids : [])];
+    const nameQueries = Array.isArray(producer.media_queries) ? producer.media_queries : [];
+    if (resolvedIds.length + nameQueries.length > 3) {
+      throw new HttpError(409, "Producer accepts up to three exact library assets per revision");
+    }
+    for (const query of nameQueries) {
+      const name = String(query?.name || "").trim();
+      if (!name || name.length > 120 || !/^[\\p{L}\\p{N} _().,'&-]+$/u.test(name)) {
+        throw new HttpError(409, "Producer library asset name is invalid");
+      }
+      const escapedName = name.toLowerCase().replace(/"/g, "");
+      const matches = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
+        limit: 20,
+        filterFormula: `LOWER({Asset Name}&"")="${escapedName}"`,
+      });
+      const scoped = matches.filter(media => {
+        const owners = arrayOrEmpty(f(media, "Content_Profile")).map(String);
+        const kind = String(f(media, "Media_Class") || "").toLowerCase();
+        const mime = String(f(media, "MIME_Type") || "").toLowerCase();
+        const video = kind === "video" || mime.startsWith("video/");
+        return owners.length === 1 && owners[0] === profile.id
+          && (query.kind === "clip" ? video : !video)
+          && String(f(media, "Asset Name") || "").trim().toLowerCase() === name.toLowerCase();
+      });
+      if (scoped.length !== 1 || matches.length >= 20) {
+        throw new HttpError(409, `Producer needs a unique classified ${query.kind} named "${name}" in this profile; choose the exact library asset before retrying`);
+      }
+      resolvedIds.push(scoped[0].id);
+    }
+    const mediaIds = [...new Set(resolvedIds)];
+    producer = { ...producer, media_asset_ids: mediaIds };
     if (mediaIds.length > 3) throw new HttpError(409, "Producer accepts up to three exact library media IDs per revision");
     const verifiedAssets = [];
     const existingMedia = new Set(item4AssetManifest(requestRecord)
