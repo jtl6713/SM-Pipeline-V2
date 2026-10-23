@@ -13870,6 +13870,10 @@ function timedScriptAssetLabel(asset, index) {
     voiceUserPicked = false;
     activeProductionRequest = record;
     productionOutputMatrixLoaded = false;
+    // Open the Airtable-authoritative conversation when a distinct request opens.
+    if (reveal && ezEntryPath !== "content" && /^rec[A-Za-z0-9]+$/.test(String(record?.id || ""))) {
+      window.StudioProducerConversation?.open(record.id);
+    }
     if (reveal && ezEntryPath !== "content") {
       showProductionRequestWorkspace();
     } else {
