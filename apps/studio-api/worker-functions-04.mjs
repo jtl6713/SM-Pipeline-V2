@@ -1,3 +1,4 @@
+import { verifyFactoryRenderedMedia } from "./factory-producer-render-evidence.mjs";
 import { applyGroundedMediaEdits } from "./factory-producer-media-edits.mjs";
 import { validateProducerPlan, planSelectiveRework } from "./conversational-producer-plan.mjs";
 import { interpretFactoryProducerFeedback } from "./factory-producer-feedback.mjs";
@@ -10864,7 +10865,10 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
   if (producer?.automatic) {
     // No external asset references are inferred for text-only revisions. Resolve
     // the existing profile from the actual output before validating the plan.
-    const profile = await item4ProductionProfileRecord(env, targets[0]);
+    // The Production Request's linked Idea is the authoritative profile.
+    // Output records often do not carry Content_Profile, so resolving from an
+    // output can incorrectly reject safe revisions or lose tenant isolation.
+    const profile = await item4ProductionProfileRecord(env, requestRecord);
     if (!profile?.id) throw new HttpError(409, "Producer could not verify the output's content profile");
     let grounded = null;
     const sourceAssets = item4AssetManifest(requestRecord);
@@ -10945,6 +10949,7 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
           job_id: revisionId,
           producer_changes: producer.changes,
           producer_stages: producer.execution_plan?.stages || [],
+          producer_changed_asset_ids: producer.grounded_media?.changed_asset_ids || [],
           producer_media_expectations: producer.grounded_media
             ? producer.grounded_media.assets.map(asset => ({
                 id: asset.id, order: asset.order,
@@ -11222,6 +11227,20 @@ export async function factoryVerifyProducerRevisions(env) {
         failures.push("Media revision reused a superseded render");
       }
     }
+    if (requiresMedia) {
+      // Independent evidence from the ACTUAL per-output source selection, not
+      // merely the mutable Production Request manifest or a changed MP4 URL.
+      failures.push(...verifyFactoryRenderedMedia({
+        expectedAssets: item4AssetManifest(row),
+        outputs: targets.map(output => ({
+          id: output.id,
+          selected_assets_json: f(output, "Selected_Assets_JSON"),
+        })),
+        requestId: row.id,
+        changes,
+        changedAssetIds: Array.isArray(job.producer_changed_asset_ids) ? job.producer_changed_asset_ids : [],
+      }));
+    }
     if (!failures.length) {
       await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID, targets.map(x => ({
         id: x.id, fields: { Do_Not_Publish: false },
@@ -11246,7 +11265,7 @@ export async function factoryVerifyProducerRevisions(env) {
               checks: [
                 ...(requireNarration ? ["requested_script", "generated_audio"] : []),
                 ...(requireDuration ? ["rendered_video_duration"] : []),
-                ...(requiresMedia ? ["authoritative_media_manifest", "fresh_renders"] : []),
+                ...(requiresMedia ? ["authoritative_media_manifest", "rendered_source_selection", "fresh_renders"] : []),
                 "output_renders", "publish_hold",
               ],
             },

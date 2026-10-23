@@ -6,6 +6,7 @@ import { webcrypto } from "node:crypto";
 import { interpretFactoryProducerFeedback } from "./factory-producer-feedback.mjs";
 import { applyGroundedMediaEdits } from "./factory-producer-media-edits.mjs";
 import { validateProducerPlan, planSelectiveRework } from "./conversational-producer-plan.mjs";
+import { verifyFactoryRenderedMedia } from "./factory-producer-render-evidence.mjs";
 
 // Evaluates the actual production functions using hermetic Airtable/R2/runner
 // adapters. No real Airtable records, scheduled posts, or external calls.
@@ -43,9 +44,9 @@ function harness() {
     loadContentPlatformOutputs:async ()=>outputs,
     arrayOrEmpty:v=>Array.isArray(v)?v:[],
     outputAlreadyApprovedForPublishing:()=>false,
-    item4ProductionProfileRecord:async ()=>({id:"recProfile0000001"}),
+    item4ProductionProfileRecord:async (_env,record)=>{ assert.equal(record.id,REQUEST,"Profile must resolve from Production Request, not output"); return {id:"recProfile0000001"}; },
     item4AssetManifest:row=>JSON.parse(f(row,"Studio_Master_Assets_JSON")||"[]"),
-    applyGroundedMediaEdits,validateProducerPlan,planSelectiveRework,
+    applyGroundedMediaEdits,validateProducerPlan,planSelectiveRework,verifyFactoryRenderedMedia,
     factoryLatestReviewFeedback:()=>null,
     factoryAppendFeedback:(before,note)=>[before,`[factory-review-feedback]\n${note}\n[/factory-review-feedback]`].filter(Boolean).join("\n"),
     withFactoryRevisionOpen:notes=>notes+"\n[factory-revision-open]",
@@ -79,6 +80,13 @@ test("Factory → persisted Producer media changes → isolated render evidence 
   outputs[0].fields.Output_Status="Ready for Review";
   outputs[0].fields.Render_Status="Rendered";
   outputs[0].fields.Final_File_URL="https://example.test/new.mp4";
+  outputs[0].fields.Selected_Assets_JSON=JSON.stringify({
+    production_request_record_id: REQUEST,
+    selected_clips: [
+      {source_asset_id:movie.id,media_asset_record_id:movie.media_asset_record_id},
+      {source_asset_id:photo.id,media_asset_record_id:photo.media_asset_record_id},
+    ],
+  });
   const completed=await api.factoryVerifyProducerRevisions(env);
   assert.deepEqual(JSON.parse(JSON.stringify(completed)),[{request_id:REQUEST,quality:"passed"}]);
   assert.equal(outputs[0].fields.Publish_Status,"Not Ready");
