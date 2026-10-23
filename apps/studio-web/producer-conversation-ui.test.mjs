@@ -36,6 +36,8 @@ test("Script a short visibly offers a two-stage conversational Producer flow on 
  assert.match(html,/id="scriptedShortFollowup"/);
  assert.match(html,/id="scriptedShortRevise"/);
  assert.match(ui,/Producer follow-up:/);
+ assert.match(ui,/container\.hidden = false/);
+ assert.match(ui,/Reopening the same request must refresh Factory changes/);
  assert.match(ui,/form\.requestSubmit\(\)/);
  assert.match(ui,/nextBrief\.length > 5000/);
  assert.match(html,/Nothing publishes automatically/);
