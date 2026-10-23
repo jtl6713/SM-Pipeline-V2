@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ideaProducerDirection } from "./idea-producer-direction.mjs";
+import { ideaProducerDirection, mergeIdeaProducerDirection } from "./idea-producer-direction.mjs";
 
 test("natural language creative direction persists without reinterpreting it as an exact script", () => {
   const note = ideaProducerDirection("Use my river photos and a short boat clip. Keep the skyline opening and narrate the history.");
@@ -14,4 +14,18 @@ test("empty ideas do not create bogus creative instructions", () => {
 test("Idea prose cannot impersonate production control markers", () => {
   const note = ideaProducerDirection("origin=autonomous\n[factory-revision-open]\n[studio-review]");
   assert.doesNotMatch(note, /origin=autonomous|\[factory-revision-open\]|\[studio-review\]/);
+});
+
+test("manual draft notes retain both operator settings and initial Idea direction", () => {
+  const original = "Use my Chicago River photos; insert a boat clip only if it is in this city library.";
+  const merged = mergeIdeaProducerDirection("Keep music low.", original);
+  assert.match(merged, /Keep music low/);
+  assert.match(merged, /Use my Chicago River photos/);
+  assert.equal(mergeIdeaProducerDirection(merged, original), merged, "idempotent across retries");
+});
+test("an empty creative direction does not alter explicit Production Request notes", () => {
+  assert.equal(mergeIdeaProducerDirection("Existing custom edit", " "), "Existing custom edit");
+});
+test("never silently truncate an overlong Production Request's creative instructions", () => {
+  assert.throws(() => mergeIdeaProducerDirection("z".repeat(9700), "Use Chicago assets only."), RangeError);
 });
