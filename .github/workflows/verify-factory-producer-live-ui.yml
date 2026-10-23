@@ -42,11 +42,15 @@ jobs:
             'id="factoryFeedbackForm"',
             'id="factoryFeedbackNotes"',
             'id="factoryFeedbackSubmit"',
-            'UI build 0.6.749',
           ]) if(!html.includes(marker)) throw Error('Production Factory UI missing marker: '+marker);
           const m=html.match(/\/assets\/factory-desk\.js\?[^"\\\s]+/);
           if(!m) throw Error('Production UI lacks cache-busted Factory script');
-          if(!m[0].includes('v=0.6.749-producer-ideas')) throw Error('Unexpected Factory script cache version');
+          const build=html.match(/UI build (\\d+\\.\\d+\\.\\d+)/);
+          if(!build) throw Error('Live Studio build label missing');
+          const version=build[1];
+          const parts=version.split('.').map(Number);
+          if(parts[0]!==0 || parts[1]!==6 || parts[2]<749) throw Error('Producer UI build is older than 0.6.749: '+version);
+          if(!m[0].includes('v='+version+'-')) throw Error('Factory script cache key does not match live UI build '+version);
           process.stdout.write(m[0]);
           NODE
           )
