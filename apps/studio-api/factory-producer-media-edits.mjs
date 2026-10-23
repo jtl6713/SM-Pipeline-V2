@@ -4,9 +4,9 @@
  */
 const cleanId = v => String(v || "").trim();
 const fileStem = value => String(value || "")
-  .trim().replace(/\\.(?:jpe?g|png|webp|heic|heif|mov|mp4|m4v|webm)$/i, "")
-  .normalize("NFKD").replace(/[\\u0300-\\u036f]/g, "")
-  .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\\s+/g, " ");
+  .trim().replace(/\.(?:jpe?g|png|webp|heic|heif|mov|mp4|m4v|webm)$/i, "")
+  .normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+  .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
 const cleanName = value => String(value || "").trim().replace(/^(?:"|'|“)|(?:"|'|”)$/g, "").trim();
 function resolveNamedAsset(source, rawName) {
   const name = fileStem(cleanName(rawName));
@@ -31,15 +31,15 @@ export function parseGroundedMediaDirective(line) {
   if (m) return { operation: "trim_clip", asset_id: m[1], in_seconds: Number(m[2]), out_seconds: Number(m[3]) };
   // Natural-language shortcuts must still resolve against the *attached*
   // authoritative masters; a description alone never authorizes new media.
-  m = /^(?:move|put|place|reorder)\\s+(?:the\\s+)?(?:existing\\s+)?(?:asset|photo|image|still|clip)\\s+named\\s+(.{3,140}?)\\s+to\\s+(?:scene\\s+)?position\\s+(\\d{1,2})$/i.exec(source);
+  m = /^(?:move|put|place|reorder)\s+(?:the\s+)?(?:existing\s+)?(?:asset|photo|image|still|clip)\s+named\s+(.{3,140}?)\s+to\s+(?:scene\s+)?position\s+(\d{1,2})$/i.exec(source);
   if (m) return { operation: "reorder", asset_name: cleanName(m[1]), position: Number(m[2]) };
-  m = /^(?:move|put|place)\\s+(?:the\\s+)?(.{3,120}?)\\s+(?:photo|image|still|clip|scene)\\s+(?:to\\s+)?(?:the\\s+)?(first|last)\\s*(?:scene|position)?$/i.exec(source);
+  m = /^(?:move|put|place)\s+(?:the\s+)?(.{3,120}?)\s+(?:photo|image|still|clip|scene)\s+(?:to\s+)?(?:the\s+)?(first|last)\s*(?:scene|position)?$/i.exec(source);
   if (m) return { operation: "reorder", asset_name: cleanName(m[1]), position: m[2].toLowerCase() };
-  m = /^(?:move|put|place|reorder)\\s+(?:the\\s+)?(.{3,120}?)\\s+(?:photo|image|still|clip|scene)\\s+to\\s+(?:scene\\s+)?position\\s+(\\d{1,2})$/i.exec(source);
+  m = /^(?:move|put|place|reorder)\s+(?:the\s+)?(.{3,120}?)\s+(?:photo|image|still|clip|scene)\s+to\s+(?:scene\s+)?position\s+(\d{1,2})$/i.exec(source);
   if (m) return { operation: "reorder", asset_name: cleanName(m[1]), position: Number(m[2]) };
-  m = /^trim\\s+(?:the\\s+)?(?:existing\\s+)?clip\\s+named\\s+(.{3,140}?)\\s+from\\s+(\\d+(?:\\.\\d{1,2})?)\\s+to\\s+(\\d+(?:\\.\\d{1,2})?)\\s+seconds?$/i.exec(source);
+  m = /^trim\s+(?:the\s+)?(?:existing\s+)?clip\s+named\s+(.{3,140}?)\s+from\s+(\d+(?:\.\d{1,2})?)\s+to\s+(\d+(?:\.\d{1,2})?)\s+seconds?$/i.exec(source);
   if (m) return { operation: "trim_clip", asset_name: cleanName(m[1]), in_seconds: Number(m[2]), out_seconds: Number(m[3]) };
-  m = /^trim\\s+(?:the\\s+)?(.{3,120}?)\\s+clip\\s+from\\s+(\\d+(?:\\.\\d{1,2})?)\\s+to\\s+(\\d+(?:\\.\\d{1,2})?)\\s+seconds?$/i.exec(source);
+  m = /^trim\s+(?:the\s+)?(.{3,120}?)\s+clip\s+from\s+(\d+(?:\.\d{1,2})?)\s+to\s+(\d+(?:\.\d{1,2})?)\s+seconds?$/i.exec(source);
   if (m) return { operation: "trim_clip", asset_name: cleanName(m[1]), in_seconds: Number(m[2]), out_seconds: Number(m[3]) };
   return null;
 }
