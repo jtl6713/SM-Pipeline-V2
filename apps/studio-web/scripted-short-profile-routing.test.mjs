@@ -49,6 +49,6 @@ test("Script a Short proposal and acceptance carry explicit selected profile and
 
 test("Pages index and app build version match and cache bust stale JS", () => {
   assert.match(html, /UI build 0\.6\.748/);
-  assert.match(html, /\/assets\/app-item4-1008\.js\?v=0\.6\.748-global-admin-tab/);
-  assert.match(app, /const BUILD_ID = "item4-0\.6\.748-global-admin-tab"/);
+  assert.match(html, /\/assets\/app-item4-1008\.js\?v=0\.6\.748-producer-visible/);
+  assert.match(app, /const BUILD_ID = "item4-0\.6\.748-producer-visible"/);
 });
