@@ -1,0 +1,65 @@
+name: Verify Factory Producer live UI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-factory-producer-live-ui.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  read-only-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - name: Verify actual authenticated production Factory entry point
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CF_ACCESS_CLIENT_ID:-}"
+          test -n "${CF_ACCESS_CLIENT_SECRET:-}"
+          ACCESS=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET")
+          curl --fail --silent --show-error --location "${ACCESS[@]}" \
+            "https://studio.chicagoshining.com/?producer_smoke=$GITHUB_SHA" \
+            -o /tmp/producer-live-index.html
+          FACTORY_URL=$(node - <<'NODE'
+          const fs=require('fs');
+          const html=fs.readFileSync('/tmp/producer-live-index.html','utf8');
+          for(const marker of [
+            'id="factoryProducerOpen"',
+            'Review &amp; Request Changes',
+            'id="factoryBandBodyNeedsEyes"',
+            'id="factoryFeedbackForm"',
+            'id="factoryFeedbackNotes"',
+            'id="factoryFeedbackSubmit"',
+            'UI build 0.6.748',
+          ]) if(!html.includes(marker)) throw Error('Production Factory UI missing marker: '+marker);
+          const m=html.match(/\/assets\/factory-desk\.js\?[^"\\\s]+/);
+          if(!m) throw Error('Production UI lacks cache-busted Factory script');
+          if(!m[0].includes('v=0.6.748-producer-visible')) throw Error('Unexpected Factory script cache version');
+          process.stdout.write(m[0]);
+          NODE
+          )
+          curl --fail --silent --show-error --location "${ACCESS[@]}" \
+            "https://studio.chicagoshining.com$FACTORY_URL" \
+            -o /tmp/producer-live-factory.js
+          node - <<'NODE'
+          const fs=require('fs');
+          const factory=fs.readFileSync('/tmp/producer-live-factory.js','utf8');
+          for(const marker of [
+            'factoryProducerOpen',
+            'factoryBandBodyNeedsEyes',
+            'action: "request_changes_content"',
+            'factoryFeedbackSubmit',
+            'desk?.result?.producer_queued',
+            'loadFactoryDesk(true)',
+          ]) if(!factory.includes(marker)) throw Error('Live Factory JS missing Producer wiring: '+marker);
+          if(!factory.includes('band.classList.remove("is-collapsed")')) throw Error('Producer button does not open Needs eyes');
+          console.log('producer_live_ui=PASS verified Factory entry, JS revision action and submission receipt');
+          NODE
