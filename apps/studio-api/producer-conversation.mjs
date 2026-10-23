@@ -169,3 +169,28 @@ export function producerConversationHistory(notes) {
     factory_revision_status: state ? {id: state[1], status: state[2]} : null,
   };
 }
+
+
+/**
+ * A Production Save may submit stale notes from an already-open form. Preserve
+ * the latest durable thread from the authoritative record under the same
+ * request-level lease used for POST conversation writes. No blind truncation.
+ */
+export function preserveProducerThreadOnEdit(authoritativeNotes, submittedNotes) {
+  const current = String(authoritativeNotes ?? "");
+  const submitted = String(submittedNotes ?? "");
+  const start = current.indexOf(PRODUCER_THREAD_OPEN);
+  if (start < 0) return submitted;
+  readProducerThread(current);
+  const end = current.indexOf(PRODUCER_THREAD_CLOSE, start);
+  if (end < 0) throw new Error("Cannot preserve an incomplete Producer thread");
+  const block = current.slice(start, end + PRODUCER_THREAD_CLOSE.length);
+  const pattern = /\[studio-producer-thread\][\s\S]*?\[\/studio-producer-thread\]/g;
+  const cleaned = submitted.replace(pattern, "").trim();
+  if (cleaned.includes(PRODUCER_THREAD_OPEN) || cleaned.includes(PRODUCER_THREAD_CLOSE))
+    throw new Error("Submitted Producer thread is incomplete or malformed");
+  const combined = [cleaned, block].filter(Boolean).join("\n");
+  if (combined.length > 9750)
+    throw new RangeError("Production notes limit reached; changes were not saved and the Producer thread is intact");
+  return combined;
+}
