@@ -50,11 +50,13 @@ test("hard asset constraints and profile isolation work across all four Shining 
   }
 });
 
-test("ordinary prompts do not force a location lock", () => {
+test("ordinary topical prompts require relevant media without pretending they require an upload", () => {
   const noLock = parseScriptedShortAssetPolicy("Explain the history of the Brooklyn Bridge.");
   assert.equal(noLock.required, false);
-  assert.equal(libraryAssetSatisfiesPolicy(battery, noLock, nyc), true);
+  assert.equal(noLock.subject, "brooklyn bridge");
+  assert.equal(libraryAssetSatisfiesPolicy(battery, noLock, nyc), false);
   assert.equal(libraryAssetSatisfiesPolicy(northPond, noLock, nyc), false);
+  assert.equal(libraryAssetSatisfiesPolicy({ id: "recBrooklyn", name: "Brooklyn Bridge dusk", profile_id: nyc }, noLock, nyc), true);
 });
 
 test("Quality Agent never treats a valid but irrelevant media ID as a match", () => {

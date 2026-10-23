@@ -10941,6 +10941,9 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
           name: String(f(media, "Asset Name") || ""), mime_type: mime,
           media_kind: mediaKind, duration_seconds: Number(f(media, "Duration_Seconds") || 0),
           source_format: String(f(media, "File_Extension") || ""),
+          location: String(f(media, "Location") || "").trim() || null,
+          topic: String(f(media, "Topic") || "").trim() || null,
+          description: String(f(media, "Asset_Description") || "").trim().slice(0, 500) || null,
         });
         requiredIds.push(mediaId);
       }

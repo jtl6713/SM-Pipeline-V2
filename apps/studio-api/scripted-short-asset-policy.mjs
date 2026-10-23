@@ -41,11 +41,20 @@ export function parseScriptedShortAssetPolicy(prompt) {
   const generic = new Set(["uploaded", "existing", "library", "available", "stock", "own", "same", "selected", "these", "those", "all", "more", "new"]);
   const words = location.split(" ");
   if (words.length > 8 || words.every((word) => generic.has(word)) || location.length < 3) location = "";
+  let topic = location;
+  if (!topic) {
+    const topicMatch = source.match(/\b(?:about|featuring|covering|guide to|history of|story of)\s+(?:the\s+)?([a-z0-9][a-z0-9 '’&/-]{2,80}?)(?=[.,;!?]|$|\s+(?:using|use|start|include|show|explain|narrat|produce|for\s+(?:instagram|facebook|tiktok|youtube))\b)/i);
+    topic = extractPlace(topicMatch?.[1] || "");
+    const topicWords = topic.split(" ");
+    if (topicWords.length > 10 || topicWords.every((word) => generic.has(word)) || topic.length < 3) topic = "";
+  }
   return {
     required: Boolean(location),
     location: location || null,
+    subject: topic || null,
+    requires_uploaded_assets: Boolean(location),
     signature: ASSET_LOCATION_SIGNATURE,
-    mode: location ? "required_library_location" : "prefer_relevant_library",
+    mode: location ? "required_library_location" : (topic ? "required_topic_match" : "prefer_relevant_library"),
   };
 }
 
@@ -74,8 +83,8 @@ export function libraryAssetSatisfiesPolicy(row, policy, profileId = "") {
   if (!row || !String(row.id || "").trim()) return false;
   const owner = linkedProfile(row);
   if (profileId && owner && owner !== String(profileId)) return false;
-  if (!policy?.required) return true;
-  const target = policy.location || "";
+  const target = policy?.subject || policy?.location || "";
+  if (!target) return true;
   return Boolean(target && [
     row.name, row.location, row.topic, row.description,
     row?.fields?.["Asset Name"], row?.fields?.Location,
@@ -110,6 +119,7 @@ export function validateScriptedShortAssets(timeline, catalog, policy, profileId
     unassigned,
     mismatches,
     required_location: policy?.required ? policy.location : null,
+    required_subject: policy?.subject || policy?.location || null,
   };
 }
 

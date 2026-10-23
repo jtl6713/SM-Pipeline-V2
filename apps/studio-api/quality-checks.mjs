@@ -61,6 +61,15 @@ function check(row) {
 /** Precise operator sentences. `kind` matches a classifier or tester assertion. */
 export const QUALITY_CHECKS = Object.freeze([
   check({
+    id: "scripted_short_producer_constraints",
+    signature: "QA-SCRIPTED-SHORT-PRODUCER-CONSTRAINTS",
+    title: "Block scripted-short production when the saved Producer Plan, required uploads, scene assignments, profile, or requested topic no longer match",
+    lane: "both",
+    kind: "scripted_short_producer_constraints",
+    actor: "worker_heal",
+    heal: "repair_scripted_short_assets",
+  }),
+  check({
     id: "asset_location_mismatch",
     signature: "QA-ASSET-LOCATION-MISMATCH",
     title: "Detect and safely repair scripted short library media that violates the requested location or profile",

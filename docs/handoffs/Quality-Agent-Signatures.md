@@ -510,6 +510,29 @@ prompt plus Chicago, New York, Los Angeles and Miami fixtures.
 **Rollback:** Revert the Worker asset-policy integration and its catalog entry;
 no Airtable schema migration or mutation is required.
 
+## QA-SCRIPTED-SHORT-PRODUCER-CONSTRAINTS — Durable brief and production-plan fence
+
+**Signature:** A Script-a-Short draft reaches Production without its structured
+Producer Plan, crosses content profiles, loses a required uploaded Media Asset,
+replaces a scene's required asset without an explicit revision, leaves a scene
+unassigned, or selects media whose saved name/location/topic/description does
+not support the requested place or topic.
+
+**Prevent / repair:** Proposal and Accept independently validate authoritative
+Media Asset rows. Accept stores the exact original brief on the linked Idea and
+a structured Producer Plan on the Production Request. Production bridge
+preflight and Approve validate the saved plan again against the authoritative
+master manifest and timed scene order. A missing asset stays blocked with a
+scene-specific remediation message. Restore the required upload, select a
+verified match, or make an explicit Producer/Factory revision; never silently
+substitute unrelated media.
+
+**Factory connection:** Producer Plan notes remain attached while the existing
+Factory Request Changes workflow creates a revision job, holds publishing,
+rerenders, and runs independent post-render evidence checks. A revision cannot
+erase or bypass the initial constraints implicitly. Fresh human review remains
+required after a completed revision.
+
 ## QA-AUTOVERIFY-LEDGER — durable reconciled publication metrics (Issue #1050)
 
 **Production Airtable schema:** `Quality Agent Recovery Ledger` in the existing

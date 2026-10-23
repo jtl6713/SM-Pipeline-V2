@@ -12,7 +12,7 @@ test("Factory approve and schedule regen skip the in-lock mirror and keep one af
   const worker = readStudioWorkerSource();
 
   assert.match(worker, /skipSupabaseWriteThrough !== true/);
-  assert.match(worker, /version: "0.10.679-facebook-recovery-ledger"/);
+  assert.match(worker, /version: "0.10.680-scripted-short-plan"/);
 
   const approveStart = functions04.indexOf("export async function approveOutputRecordForPublishing");
   const approveEnd = functions04.indexOf("/*__STUDIO_WORKER_END:approveOutputRecordForPublishing__*/", approveStart);

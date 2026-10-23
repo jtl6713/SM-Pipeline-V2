@@ -515,3 +515,4 @@ Deploy UI 0.6.748 from latest main: make Factory Producer Request Changes visibl
 Deploy UI 0.6.750-mobile-headings: preserve native Pipeline table column headings on phones and show collapsed calendar heading. Pages only.
 
 Deploy UI 0.6.751-profile-first: profile selector visible on first paint, profiles requested before health/session checks, recoverable independent retry after timeout. Pages only.
+2026-10-23: Deploy Studio UI 0.6.752-script-a-short-plan. Script a Short now accepts a 5,000-character typed or dictated brief and shows actionable Producer Plan constraints, missing assets, exclusions, duration, narration, scene order, and target platforms before Accept.

@@ -287,7 +287,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.751-profile-first";
+  const BUILD_ID = "item4-0.6.752-script-a-short-plan";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -2582,6 +2582,34 @@
     node.className = `form-message${kind ? ` ${kind}` : ""}`;
   }
 
+  function renderScriptedShortProducerPlan(plan) {
+    const panel = $("scriptedShortPlan");
+    const body = $("scriptedShortPlanBody");
+    if (!panel || !body) return;
+    if (!plan) {
+      panel.hidden = true;
+      body.innerHTML = "";
+      return;
+    }
+    const requirement = Array.isArray(plan.media_requirements) ? plan.media_requirements[0] : null;
+    const requiredAssets = Array.isArray(plan.required_uploaded_assets) ? plan.required_uploaded_assets : [];
+    const missing = Array.isArray(plan.missing_assets) ? plan.missing_assets : [];
+    const exclusions = Array.isArray(plan.exclusions) && plan.exclusions.length ? plan.exclusions.join("; ") : "None specified";
+    const platforms = Array.isArray(plan.target_platforms) ? plan.target_platforms.join(", ") : "Instagram, Facebook, TikTok, YouTube";
+    const subject = requirement?.subject
+      ? `${requirement.source === "uploaded_library" ? "Required uploaded media" : "Matching profile media"}: ${requirement.subject}`
+      : "Use relevant media from the selected profile";
+    panel.hidden = false;
+    body.innerHTML = `<div class="scripted-short-plan-grid">
+      <div class="scripted-short-plan-item"><strong>Media requirement</strong><span>${escapeHtml(subject)}. Silent substitution is not allowed.</span></div>
+      <div class="scripted-short-plan-item"><strong>Required uploads</strong><span>${escapeHtml(requiredAssets.length ? requiredAssets.map((asset) => asset.name || asset.media_asset_record_id).join(", ") : "No verified upload selected yet")}</span></div>
+      <div class="scripted-short-plan-item"><strong>Narration and order</strong><span>Exact scene voiceover · ${Number(plan.scene_order?.length || 0)} ordered scenes</span></div>
+      <div class="scripted-short-plan-item"><strong>Duration</strong><span>${Number(plan.duration?.target_seconds || 0)} seconds target</span></div>
+      <div class="scripted-short-plan-item"><strong>Exclusions</strong><span>${escapeHtml(exclusions)}</span></div>
+      <div class="scripted-short-plan-item"><strong>Target platforms</strong><span>${escapeHtml(platforms)}</span></div>
+    </div>${missing.length ? `<ul class="scripted-short-remediation">${missing.map((row) => `<li>Scene ${Number(row.scene || 0)}: ${escapeHtml(row.requirement || "Matching media is missing")}. ${escapeHtml(row.remediation || "Upload or select a verified match.")}</li>`).join("")}</ul>` : ""}`;
+  }
+
   function renderScriptedShortProposal(proposal) {
     const result = $("scriptedShortResult");
     const meta = $("scriptedShortMeta");
@@ -2591,6 +2619,7 @@
       result.hidden = true;
       host.innerHTML = "";
       if (meta) meta.textContent = "";
+      renderScriptedShortProducerPlan(null);
       return;
     }
     result.hidden = false;
@@ -2599,6 +2628,7 @@
     if (meta) {
       meta.textContent = `${proposal.scene_count || proposal.timeline.segments.length} scenes · about ${seconds.toFixed(0)} seconds estimated · ${suggestions} shot${suggestions === 1 ? "" : "s"} still to create. The recorded voiceover sets the real length.`;
     }
+    renderScriptedShortProducerPlan(proposal.producer_plan || null);
     host.innerHTML = proposal.timeline.segments.map((segment, index) => {
       const owned = Boolean(String(segment.asset_id || "").trim()) && segment.shot_status !== "suggestion";
       const clock = window.StudioTimedScript
@@ -2615,6 +2645,82 @@
     scriptedShortProposal = null;
     renderScriptedShortProposal(null);
   }
+
+  function updateScriptedShortCharacterCount() {
+    const prompt = $("scriptedShortPrompt");
+    const count = $("scriptedShortCharacterCount");
+    if (count) count.textContent = `${Number(prompt?.value?.length || 0).toLocaleString()} / 5,000`;
+  }
+
+  function initializeScriptedShortDictation() {
+    const button = $("scriptedShortDictate");
+    const status = $("scriptedShortDictationStatus");
+    const prompt = $("scriptedShortPrompt");
+    if (!button || !status || !prompt) return;
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) {
+      button.disabled = true;
+      button.title = "Speech dictation is not available in this browser";
+      status.textContent = "Dictation is not available in this browser. You can type or paste the brief.";
+      return;
+    }
+    const recognition = new Recognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = document.documentElement.lang || "en-US";
+    let listening = false;
+    let startingText = "";
+    let finalTranscript = "";
+    const finish = (message) => {
+      listening = false;
+      button.textContent = "Start dictation";
+      button.setAttribute("aria-pressed", "false");
+      status.textContent = message;
+    };
+    recognition.onstart = () => {
+      listening = true;
+      button.textContent = "Stop dictation";
+      button.setAttribute("aria-pressed", "true");
+      status.textContent = "Listening… Speak naturally; Studio will append your words.";
+    };
+    recognition.onresult = (event) => {
+      let interim = "";
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const transcript = String(event.results[index][0]?.transcript || "");
+        if (event.results[index].isFinal) finalTranscript += transcript + " ";
+        else interim += transcript;
+      }
+      const separator = startingText && !/\s$/.test(startingText) ? " " : "";
+      const next = `${startingText}${separator}${finalTranscript}${interim}`.slice(0, 5000);
+      prompt.value = next;
+      updateScriptedShortCharacterCount();
+      if (next.length >= 5000) {
+        status.textContent = "The 5,000-character limit was reached. Review the brief, then Propose.";
+        recognition.stop();
+      }
+    };
+    recognition.onerror = (event) => {
+      const denied = event?.error === "not-allowed" || event?.error === "service-not-allowed";
+      finish(denied ? "Microphone access was unavailable. You can keep typing or paste the brief." : "Dictation stopped. Your captured words are preserved; you can keep typing.");
+    };
+    recognition.onend = () => {
+      if (listening) finish("Dictation stopped. Review the brief, then Propose.");
+    };
+    button.addEventListener("click", () => {
+      if (listening) {
+        recognition.stop();
+        return;
+      }
+      startingText = prompt.value;
+      finalTranscript = "";
+      try { recognition.start(); }
+      catch { finish("Dictation could not start. You can keep typing or paste the brief."); }
+    });
+  }
+
+  $("scriptedShortPrompt")?.addEventListener("input", updateScriptedShortCharacterCount);
+  updateScriptedShortCharacterCount();
+  initializeScriptedShortDictation();
 
   $("scriptedShortForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -2674,6 +2780,7 @@
         method: "POST",
         body: JSON.stringify({
           prompt: scriptedShortProposal.prompt || $("scriptedShortPrompt")?.value || "",
+          creative_brief: scriptedShortProposal.creative_brief || scriptedShortProposal.prompt || $("scriptedShortPrompt")?.value || "",
           content_profile_id: selectedProfileId,
           timeline: scriptedShortProposal.timeline,
         }),

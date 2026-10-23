@@ -2,6 +2,14 @@ import { ideaProducerDirection, mergeIdeaProducerDirection } from "./idea-produc
 import { scriptedShortPublishableTitle } from "./scripted-short-title.mjs";
 import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
 import { parseScriptedShortAssetPolicy, libraryAssetSatisfiesPolicy, recoverScriptedShortAssets, validateScriptedShortAssets } from "./scripted-short-asset-policy.mjs";
+import {
+  normalizeScriptedShortBrief,
+  buildScriptedShortProducerPlan,
+  bindScriptedShortPlanToProductionAssets,
+  serializeScriptedShortProducerPlan,
+  scriptedShortProducerPlanFromNotes,
+  validateScriptedShortProductionConstraints,
+} from "./scripted-short-producer-plan.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import { scheduleReservationAuthorityEnabled } from "./schedule-reservation-authority.mjs";
 import { creativeSettingName, parseCreativeGuidance } from "./profile-creative-guidance.mjs";
@@ -2784,6 +2792,7 @@ export function mapProductionRequest(record, ideaTitle = null) {
     requested_script: f(record, "Requested_Script"),
     primary_location: String(f(record, "Primary_Location") || "").trim() || null,
     production_notes: stripFactoryRevisionNote(f(record, "Production_Notes")),
+    producer_plan: scriptedShortProducerPlanFromNotes(f(record, "Production_Notes")),
     factory_review_feedback: factoryLatestReviewFeedback(f(record, "Production_Notes")),
     revision_open: productionRequestRevisionOpen(record),
     created_at: f(record, "Created_At"),
@@ -3806,6 +3815,7 @@ export async function item4SourceToProductionBridgePreflight(env, requestRecord,
   const proposalNotes = String(f(requestRecord, "Production_Notes") || "");
   if (/scripted-short=proposal/i.test(proposalNotes)) {
     const proposalTimeline = timedScriptFromNotes(proposalNotes);
+    const producerPlan = scriptedShortProducerPlanFromNotes(proposalNotes);
     addCheck(
       "scripted_short_timeline_present",
       Boolean(proposalTimeline?.segments?.length),
@@ -3814,6 +3824,15 @@ export async function item4SourceToProductionBridgePreflight(env, requestRecord,
     if (proposalTimeline?.segments?.length) {
       const unassigned = scriptedShortUnassignedMessage(proposalTimeline);
       addCheck("scripted_short_scenes_assigned", !unassigned, unassigned || null);
+      const constraintCheck = validateScriptedShortProductionConstraints({
+        plan: producerPlan,
+        timeline: proposalTimeline,
+        assets: masterAssets,
+        profileId: String(arrayOrEmpty(f(ideaRecord, "Content_Profile"))[0] || producerPlan?.profile_id || ""),
+      });
+      const remediation = constraintCheck.errors?.[0]?.remediation
+        || "Return to Script a short and propose again so Studio can rebuild the Producer Plan.";
+      addCheck("scripted_short_producer_constraints", constraintCheck.ok, constraintCheck.ok ? null : `Quality Agent blocked production: ${remediation}`);
     }
   }
 
@@ -10451,6 +10470,18 @@ export async function promoteProductionRequestViaI3I4(request, env, url, authori
     }
     const unassigned = scriptedShortUnassignedMessage(proposalTimeline);
     if (unassigned) throw new HttpError(409, unassigned);
+    const producerPlan = scriptedShortProducerPlanFromNotes(proposalNotes);
+    const constraintCheck = validateScriptedShortProductionConstraints({
+      plan: producerPlan,
+      timeline: proposalTimeline,
+      assets: item4AssetManifest(requestRecord),
+      profileId: producerPlan?.profile_id || "",
+    });
+    if (!constraintCheck.ok) {
+      const remediation = constraintCheck.errors?.[0]?.remediation
+        || "Return to Script a short and propose again so Studio can rebuild the Producer Plan.";
+      throw new HttpError(409, `Quality Agent blocked production: ${remediation}`);
+    }
   }
 
   const ideaLinks = Array.isArray(f(requestRecord, "Idea_Candidate")) ? f(requestRecord, "Idea_Candidate") : [];
@@ -11478,7 +11509,10 @@ export function scriptedShortUnassignedMessage(timeline) {
 export async function proposeScriptedShortRoute(request, env, authorization, url = null) {
   let payload = {};
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
-  const prompt = String(payload?.prompt || "").replace(/\s+/g, " ").trim();
+  let creativeBrief = "";
+  try { creativeBrief = normalizeScriptedShortBrief(payload?.prompt); }
+  catch (error) { throw new HttpError(400, error?.message || "Creative brief is too long"); }
+  const prompt = creativeBrief.replace(/\s+/g, " ").trim();
   if (prompt.length < 3) throw new HttpError(400, "Describe the short in a sentence.");
   const assetPolicy = parseScriptedShortAssetPolicy(prompt);
   const synthetic = {
@@ -11555,10 +11589,19 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   }
   const owned = assetValidation.verified;
   const suggestions = assetValidation.unassigned;
+  const producerPlan = buildScriptedShortProducerPlan({
+    brief: creativeBrief,
+    timeline,
+    catalog: pool,
+    assetPolicy,
+    profileId: profile?.id,
+    profileName: profileMarket,
+  });
   return respond(request, env, {
     ok: true,
     source,
     prompt,
+    creative_brief: creativeBrief,
     markdown: formatTimedScriptMarkdown(timeline),
     timeline,
     duration_seconds: timeline.duration_seconds,
@@ -11568,6 +11611,7 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
     suggestion_count: suggestions,
     asset_policy: assetPolicy,
     asset_validation: { ...assetValidation, recovered_count: recovery.recovered, unresolved_count: recovery.unresolved },
+    producer_plan: producerPlan,
     message: suggestions
       ? `${timeline.segments.length} scenes. ${owned} verified library matches. ${suggestions} still need an appropriate photo. ${assetPolicy.required ? "Only " + assetPolicy.location + " images are allowed. " : ""}Estimated times are hints. The recorded voiceover sets the real length.`
       : `${timeline.segments.length} scenes, all verified against ${assetPolicy.required ? assetPolicy.location : "the selected profile"} and matched to library files. Estimated times are hints. The recorded voiceover sets the real length.`,
@@ -11578,7 +11622,10 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
 export async function acceptScriptedShortRoute(request, env, authorization, ctx = null, url = null) {
   let payload = {};
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
-  const prompt = String(payload?.prompt || "").replace(/\s+/g, " ").trim();
+  let creativeBrief = "";
+  try { creativeBrief = normalizeScriptedShortBrief(payload?.creative_brief || payload?.prompt); }
+  catch (error) { throw new HttpError(400, error?.message || "Creative brief is too long"); }
+  const prompt = creativeBrief.replace(/\s+/g, " ").trim();
   if (prompt.length < 3) throw new HttpError(400, "Describe the short in a sentence.");
   const incoming = payload?.timeline;
   if (!scriptedShortProposalReady(incoming)) {
@@ -11594,6 +11641,7 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
   if (acceptPolicy.required && !selectedMediaIds.length) {
     throw new HttpError(409, "This proposal requires uploaded location-specific images, but none are selected. Propose again after reviewing the library.");
   }
+  let authoritativeCatalog = [];
   if (selectedMediaIds.length) {
     const mediaRows = await Promise.all(selectedMediaIds.map((id) => {
       if (!/^rec[A-Za-z0-9]+$/.test(id)) {
@@ -11601,7 +11649,7 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
       }
       return airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, id);
     }));
-    const authoritativeCatalog = mediaRows.map(ideaTimedScriptCatalogRow);
+    authoritativeCatalog = mediaRows.map(ideaTimedScriptCatalogRow);
     const qa = validateScriptedShortAssets(timeline, authoritativeCatalog, acceptPolicy, profile?.id);
     if (!qa.ok) {
       throw new HttpError(409, "Quality Agent blocked a missing, wrong-profile, or wrong-location library asset. Propose again to repair the assignments.");
@@ -11610,13 +11658,21 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
   // The prompt is creative direction. Persist a concise title based on the
   // actual narration; preserve the full instructions in Idea_Summary.
   const profileMarket = String(f(profile, "Market_Name") || "").trim();
+  let producerPlan = buildScriptedShortProducerPlan({
+    brief: creativeBrief,
+    timeline,
+    catalog: authoritativeCatalog,
+    assetPolicy: acceptPolicy,
+    profileId: profile?.id,
+    profileName: profileMarket,
+  });
   const title = scriptedShortPublishableTitle(prompt, timeline, profileMarket);
   const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, "", {
     method: "POST",
     body: JSON.stringify({
       fields: {
         Candidate_Title: title,
-        Idea_Summary: prompt.slice(0, 2000),
+        Idea_Summary: creativeBrief,
         Candidate_Status: "Approved",
         Batch_Date: new Date().toISOString().slice(0, 10),
         Content_Profile: [profile.id],
@@ -11625,6 +11681,8 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
         Production_Include_Background_Music: "Yes",
         Production_Include_Thumbnail: "Yes",
         Production_Video_Clip_Count: timeline.segments.length,
+        Suggested_Platforms: producerPlan.target_platforms,
+        Production_Target_Platforms: producerPlan.target_platforms,
       },
       typecast: true,
     }),
@@ -11655,6 +11713,7 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
         segment.shot_status = "suggestion";
       }
     });
+    producerPlan = bindScriptedShortPlanToProductionAssets(producerPlan, orderedAssets);
   } else {
     timeline.segments.forEach((segment) => {
       segment.asset_id = "";
@@ -11663,7 +11722,10 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
   }
   const script = exactVoiceoverText(timeline);
   const notes = withProductionPhotoWaitManual(mergeTimedScriptNotes("", timeline));
-  const stampedNotes = `${notes}\nidea-vo-timeline=1\nscripted-short=proposal`.trim();
+  const stampedNotes = `${notes}\n${serializeScriptedShortProducerPlan(producerPlan)}\nidea-vo-timeline=1\nscripted-short=proposal`.trim();
+  if (stampedNotes.length > 10000) {
+    throw new HttpError(409, "The detailed Producer Plan is too large to save safely. Shorten the brief or scene count, then propose again.");
+  }
   const duration = Math.max(5, Math.round(Number(timeline.duration_seconds) || 0));
   const missing = unassignedSuggestionCount(timeline);
   const scriptedMusicId = pickAutonomousMusicAssetId(
@@ -11690,9 +11752,9 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
   });
   try {
     const planCall = studioInternalJsonRequest(`/api/production-requests/${requestRecord.id}/plan`, {
-      platforms: [...AUTONOMOUS_STANDARD_PLATFORMS],
+      platforms: producerPlan.target_platforms,
       overrides: autonomousPlanOverrides("Vertical Short Video"),
-      extras: autonomousPlanExtras(),
+      extras: autonomousPlanExtras().filter((extra) => producerPlan.target_platforms.includes(extra.platform)),
       package: "video",
       skip_fbs1_guard: true,
     });
@@ -11718,6 +11780,8 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
     ok: true,
     suggestion_count: missing,
     scene_count: timeline.segments.length,
+    creative_brief: creativeBrief,
+    producer_plan: producerPlan,
     record: mapIdea(idea),
     production_request: mapProductionRequest(requestRecord),
     message: missing
