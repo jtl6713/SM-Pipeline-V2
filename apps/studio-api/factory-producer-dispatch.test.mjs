@@ -15,7 +15,7 @@ test("Factory Producer submission holds request-level lock over the complete dur
 test("Replay prevention covers pending revisions and does not mistake completed work for an in-flight job", () => {
   const fragment = worker.slice(worker.indexOf("const priorFeedback = factoryLatestReviewFeedback"), worker.indexOf("const stamp = new Date().toISOString();", worker.indexOf("const priorFeedback = factoryLatestReviewFeedback")));
   assert.match(fragment, /state=pending/);
-  assert.doesNotMatch(fragment, /&& \/\\\[factory-producer-revision id=\/\.test/);
+  assert.ok(!fragment.includes('&& /\\[factory-producer-revision id=/.test'), "completed revisions must not trigger an old broad replay match");
 });
 
 test("Cron can resume persisted Factory revisions and runner kickoff occurs after persistence", () => {
