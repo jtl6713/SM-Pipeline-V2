@@ -17,14 +17,14 @@ export function interpretFactoryProducerFeedback(note) {
   for (const line of lines) {
     // Explicit operator directions are grounded later against exactly one
     // classified, same-profile Media Asset before any Factory state changes.
-    const named = line.match(/^(?:add|include|insert)\\s+(?:library\\s+)?(photo|still|image|video clip|clip)\\s+(?:named|called)\\s*:\\s*(.{3,120})$/i);
-    const byId = line.match(/^(?:add|include|insert)\\s+(?:library\\s+)?(photo|still|image|video clip|clip)s?\\s*:\\s*(rec[A-Za-z0-9]{14})$/i);
+    const named = line.match(/^(?:add|include|insert)\s+(?:library\s+)?(photo|still|image|video clip|clip)\s+(?:named|called)\s*:\s*(.{3,120})$/i);
+    const byId = line.match(/^(?:add|include|insert)\s+(?:library\s+)?(photo|still|image|video clip|clip)s?\s*:\s*(rec[A-Za-z0-9]{14})$/i);
     if (named || byId) {
       const kind = /clip/i.test((named || byId)[1]) ? "clip" : "photo";
       const reference = (named || byId)[2].trim();
       if (named) {
         const name = reference.replace(/^["']|["']$/g, "");
-        if (!/^[\\p{L}\\p{N} _().,'&-]{3,120}$/u.test(name))
+        if (!/^[\p{L}\p{N} _().,'&-]{3,120}$/u.test(name))
           return { automatic: false, reason: "Library asset name contains unsupported characters." };
         mediaRequests.push({kind,name});
       } else mediaRequests.push({kind,id:reference});
