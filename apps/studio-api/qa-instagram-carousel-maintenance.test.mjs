@@ -15,7 +15,7 @@ const record = (override={}) => ({
 const slides=(n=10) => Array.from({length:n},(_,i)=>({
   id:"rec"+String(i+1).padStart(14,"0"),
   fields: { "Current Order":i+1, "Is Cover":i===0, "Approved For Final":true,
-    IG_Child_Container_ID:String(17907026169575604+i),
+    IG_Child_Container_ID:String(17907026169575604n + BigInt(i)),
     IG_Child_Container_Status:"FINISHED",
   },
 }));
