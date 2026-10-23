@@ -10,10 +10,21 @@ export function interpretFactoryProducerFeedback(note) {
   const fields = {};
   const directives = [];
   const media_asset_ids = [];
+  const media_queries = [];
   let allow_video = false;
   for (const line of lines) {
     // Explicit, classified Airtable library references are executable without
     // hallucinating filenames or searching another city's collection.
+    const named = line.match(/^(?:add|include|insert)\\s+(?:library\\s+)?(photo|still|image|clip|video clip)\\s+(?:named|called)\\s*:\\s*(.{3,120})$/i);
+    if (named) {
+      const kind = /clip/i.test(named[1]) ? "clip" : "photo";
+      const name = named[2].trim().replace(/^["']|["']$/g, "");
+      if (!name || !/^[\\p{L}\\p{N} _().,'&-]{3,120}$/u.test(name)) return { automatic: false, reason: "Library asset name contains unsupported characters." };
+      media_queries.push({ kind, name });
+      if (kind === "clip") allow_video = true;
+      directives.push(kind === "clip" ? "add_clip" : "add_photos");
+      continue;
+    }
     const addPhoto = line.match(/^(?:add|include|insert)\s+(?:library\s+)?(?:photo|still|image)s?\s*:\s*(rec[A-Za-z0-9]{14}(?:\s*[,;]\s*rec[A-Za-z0-9]{14})*)$/i);
     const addClip = line.match(/^(?:add|include|insert)\s+(?:library\s+)?(?:video\s+)?clips?\s*:\s*(rec[A-Za-z0-9]{14}(?:\s*[,;]\s*rec[A-Za-z0-9]{14})*)$/i);
     if (addPhoto || addClip) {
@@ -42,5 +53,5 @@ export function interpretFactoryProducerFeedback(note) {
   }
   if (!directives.length || Object.values(fields).some(value => !value))
     return { automatic: false, reason: "Provide explicit replacement text after a colon." };
-  return { automatic: true, fields, changes: [...new Set(directives)], media_asset_ids: [...new Set(media_asset_ids)], allow_video };
+  return { automatic: true, fields, changes: [...new Set(directives)], media_asset_ids: [...new Set(media_asset_ids)], media_queries, allow_video };
 }
