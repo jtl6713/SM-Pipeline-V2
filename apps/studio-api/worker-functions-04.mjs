@@ -11263,14 +11263,6 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
   )
     ? await writeFactoryDeskControls(env, next, actor)
     : next;
-  if (action === "request_changes_content") {
-    // This is a committed Airtable revision. An expensive Factory refresh must
-    // never turn durable acceptance into a timeout and duplicate submission.
-    return respond(request, env, {
-      ok: true, page: "factory-desk", action, result: resultExtra,
-      message: resultExtra.message || "Revision accepted.", refresh_required: true,
-    });
-  }
   if (action === "approve") {
     // The Airtable write above is the authoritative approval transaction.
     // A later queue/idea fetch may fail or exceed request limits; do not turn
