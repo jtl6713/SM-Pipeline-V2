@@ -56,7 +56,7 @@ test("creative asset descriptions without known inventory identifiers remain man
 });
 
 test("Producer parses ordinary named photo/clip direction alongside exact narration", () => {
- const result=interpret("Move the Chicago River Skyline Sunset photo to position 1\\nTrim the Navy Pier Boat Approach clip from 2 to 5 seconds\\nReplace narration with: Sailing on the river.");
+ const result=interpret("Move the Chicago River Skyline Sunset photo to position 1\nTrim the Navy Pier Boat Approach clip from 2 to 5 seconds\nReplace narration with: Sailing on the river.");
  assert.equal(result.automatic,true);
  assert.deepEqual(result.changes,["reorder_media","trim_clip","rewrite_narration"]);
  assert.equal(result.media_edits[0].asset_name,"Chicago River Skyline Sunset");
