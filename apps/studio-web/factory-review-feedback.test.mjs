@@ -69,6 +69,10 @@ test("Producer content revisions return durable queue acceptance independent of 
   assert.match(worker, /factoryAdvanceProducerRevision/);
   assert.match(worker, /factoryResumeProducerRevisions/);
   assert.match(worker, /await factoryResumeProducerRevisions\(env, ctx\)/);
+  assert.match(worker, /factoryVerifyProducerRevisions/);
+  assert.match(worker, /await factoryVerifyProducerRevisions\(env\)/);
+  assert.match(worker, /producer_quality: \{ passed: true/);
+  assert.match(worker, /Do_Not_Publish: producerPending/);
   assert.match(factory, /desk\?\.result\?\.producer_queued/);
   assert.match(factory, /loadFactoryDesk\(true\)\.catch/);
 });
