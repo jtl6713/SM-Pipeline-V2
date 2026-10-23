@@ -637,6 +637,7 @@ import {
   studioTiktokComplete,
 } from "./worker-functions-03.mjs";
 import { auditReel368Holds } from "./facebook-reel-368-audit.mjs";
+import { qaInstagramCarouselMaintenance } from "./qa-instagram-carousel-maintenance.mjs";
 import { studioActivePipelineSettings } from "./worker-functions-03.mjs";
 import {
   healStaleManualFlagsOnPublishedRecord,
@@ -2517,6 +2518,19 @@ export default {
           graph_creates: 0,
         })))
         .catch((error) => console.warn("QA-1050 reel368 audit failed", String(error?.message || error))));
+    }
+    // Quality Agent runs on every half-hour maintenance tick, independently of
+    // Factory and ordinary carousel dispatch. It ONLY re-arms existing child-ID
+    // AP2C verification after exact slide checks; it never creates IG media.
+    if (cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(qaInstagramCarouselMaintenance(env, { airtableFetch, limit: 6 })
+        .then((results) => console.info("QA-1050 IG carousel maintenance", JSON.stringify({
+          checked: results.length,
+          rearmed: results.filter((x) => x.rearm).length,
+          human_review: results.filter((x) => x.outcome === "human_review_required").length,
+          graph_creates: 0,
+        })))
+        .catch((error) => console.warn("QA-1050 IG carousel maintenance failed", String(error?.message || error))));
     }
     // Exact-video FBS4 status poll is separate from any Meta Reel creation.
     // Polling can attach a best-effort thumbnail to an EXISTING posted video,
