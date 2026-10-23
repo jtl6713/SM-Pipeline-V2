@@ -1,0 +1,51 @@
+name: One-time update of old UI release assertions for global idea limit
+on:
+  push:
+    branches: [feature/global-idea-target-admin-20261023]
+    paths: [.github/workflows/temporary-align-global-idea-ui-tests.yml]
+permissions:
+  contents: write
+concurrency:
+  group: global-idea-limit-test-pin-migration
+  cancel-in-progress: false
+jobs:
+  align:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2' && github.ref == 'refs/heads/feature/global-idea-target-admin-20261023'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 1
+      - name: Update only stale pinned release assertions, then remove this one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          roots = [Path('apps/studio-api'), Path('apps/studio-web')]
+          touched = []
+          for root in roots:
+              for path in sorted(root.rglob('*.test.mjs')):
+                  original = path.read_text(encoding='utf-8')
+                  updated = original.replace('0.6.745-qa-past-due', '0.6.746-global-idea-limit')
+                  updated = updated.replace('0\\.6\\.745-qa-past-due', '0\\.6\\.746-global-idea-limit')
+                  updated = updated.replace('0[.]6[.]745-qa-past-due', '0[.]6[.]746-global-idea-limit')
+                  updated = updated.replace('0.6.745', '0.6.746')
+                  updated = updated.replace('0\\.6\\.745', '0\\.6\\.746')
+                  updated = updated.replace('0[.]6[.]745', '0[.]6[.]746')
+                  if updated != original:
+                      path.write_text(updated, encoding='utf-8')
+                      touched.append(str(path))
+          temporary = Path('.github/workflows/temporary-align-global-idea-ui-tests.yml')
+          temporary.unlink()
+          print('UPDATED_TESTS', len(touched), *touched, sep='\n', flush=True)
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/studio-api apps/studio-web .github/workflows/temporary-align-global-idea-ui-tests.yml
+          git diff --cached --quiet && { echo 'No changes, skip commit'; exit 0; }
+          git diff --cached --name-only | grep -vE '^(apps/studio-api/.*\.test\.mjs|apps/studio-web/.*\.test\.mjs|\.github/workflows/temporary-align-global-idea-ui-tests\.yml)$' && { echo 'Refuse out-of-scope change'; exit 1; } || true
+          git commit -m 'test: align pinned UI version contracts with 0.6.746; retire one-shot migration'
+          git push origin HEAD:refs/heads/feature/global-idea-target-admin-20261023
