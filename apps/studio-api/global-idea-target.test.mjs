@@ -75,3 +75,5 @@ test("global admin API accepts targeted setting write without altering schedulin
 });
 
 // Release 0.6.746 regression checkpoint: shared target is a single cross-profile ceiling.
+
+// Integration merge checkpoint: PR1095 includes latest main Conversational Producer work.
