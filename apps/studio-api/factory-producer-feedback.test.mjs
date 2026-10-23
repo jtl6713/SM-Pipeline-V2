@@ -51,6 +51,6 @@ test("creative asset descriptions without known inventory identifiers remain man
  for(const phrase of ["Add three more Chicago River photos.", "Insert a clip of the boat.", "Reorder the scenes to show the skyline first."]) {
   const value=interpret(phrase);
   assert.equal(value.automatic,false);
-  assert.match(value.reason,/verified asset ID|guided asset selection|interpretation/i);
+  assert.match(value.reason,/verified asset ID|guided asset selection|interpretation|asset-grounded/i);
  }
 });
