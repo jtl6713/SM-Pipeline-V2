@@ -31,7 +31,8 @@ test("Authenticated Worker path remains only proposed, never publish",()=>{
 test("Talk to Your Producer is discoverable from Script a short and saved Production", () => {
  const html=read("./index.html");
  const ui=read("./assets/producer-conversation-ui.js");
- assert.match(html,/id="scriptedShortPanel"[\\s\\S]*?<h2>Talk to Your Producer<\\/h2>/);
+ assert.ok(html.includes("<h2>Talk to Your Producer</h2>"));
+ assert.ok(html.indexOf('id="scriptedShortPanel"') < html.indexOf("<h2>Talk to Your Producer</h2>"));
  assert.match(html,/Accept saves a Draft, then opens Production/);
  assert.match(html,/id="productionProducerChatButton"[^>]*aria-controls="studioProducerChatPanel"/);
  assert.match(ui,/jump\.hidden = false/);
