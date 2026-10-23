@@ -1,3 +1,4 @@
+import { interpretFactoryProducerFeedback } from "./factory-producer-feedback.mjs";
 import { summarizeAutonomousVerification } from "./autonomous-verification-recovery.mjs";
 import { FACEBOOK_PENDING_FINALIZE_FORMULA, fb3FinalizeEligible, selectFb3FinalizeBatch } from "./facebook-photo-finalize-priority.mjs";
 import { FACEBOOK_REEL_POLL_FORMULA, facebookReelPollVideoId, facebookReelPollEligible, selectFacebookReelPollBatch } from "./facebook-reel-finalize-priority.mjs";
@@ -10761,8 +10762,19 @@ export async function factorySendBackOutput(env, id, actor, note, requestedProdu
           Request_Status: "Draft",
           Active: true,
           Submitted_At: null,
-          Studio_Production_Job_JSON: null,
-          Production_Notes: withFactoryRevisionOpen(productionNotes, { actor, stamp }),
+          Studio_Production_Job_JSON: revisionId ? JSON.stringify({
+            schema_version: "studio.production-job.1",
+            job_id: revisionId,
+            route: null,
+            step: "themes",
+            attempt: 1,
+            updated_at: stamp,
+            detail: "Factory Producer revision accepted",
+            percent: 0,
+            error: null,
+          }) : null,
+          ...((producer?.automatic && producer?.fields) ? producer.fields : {}),
+          Production_Notes: [withFactoryRevisionOpen(productionNotes, { actor, stamp }), producerMarker].filter(Boolean).join("\\n"),
           Updated_At: stamp,
         },
         typecast: true,
@@ -10778,7 +10790,7 @@ export async function factorySendBackOutput(env, id, actor, note, requestedProdu
 }
 /*__STUDIO_WORKER_END:factorySendBackOutput__*/
 
-export async function factorySendBackContent(env, productionRequestId, outputIds, actor, note) {
+export async function factorySendBackContent(env, productionRequestId, outputIds, actor, note, producer = null) {
   const requestId = String(productionRequestId || "").trim();
   if (!/^rec[A-Za-z0-9]+$/.test(requestId)) throw new HttpError(400, "Production Request is required");
   const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
@@ -10830,13 +10842,24 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
     );
   }
 
+  const priorFeedback = factoryLatestReviewFeedback(f(requestRecord, "Production_Notes"));
+  // Duplicate POSTs must not create another render after the request has entered
+  // the persisted revision lifecycle. This is an exact replay check, not a
+  // semantic duplicate detector for later intentional revisions.
+  if (producer?.automatic && priorFeedback?.instructions === note
+      && /\\[factory-producer-revision id=/.test(String(f(requestRecord, "Production_Notes") || ""))) {
+    return { production_request_id: requestId, already_accepted: true,
+      message: "This Producer revision was already accepted.", producer_queued: true };
+  }
   const stamp = new Date().toISOString();
   const productionNotes = factoryAppendFeedback(f(requestRecord, "Production_Notes"), note, {
     actor, stamp, scope: "content",
   });
+  const revisionId = producer?.automatic ? `fpr-${crypto.randomUUID().replace(/-/g, "")}` : null;
+  const producerMarker = revisionId ? `[factory-producer-revision id=${revisionId} state=pending]` : "";
   const line = `Factory content send-back by ${actor || "operator"} at ${stamp}.${note ? ` ${note}` : ""}`;
-  // Hold the last render for reference. Do not start any production work until
-  // the operator explicitly clicks Approve after making revisions.
+  // Hold superseded outputs. An accepted Producer directive may advance these
+  // through the existing guarded re-promotion path without human reapproval.
   const patches = targets.map((existing) => {
     const existingNotes = String(f(existing, "Review_Notes") || "").trim();
     return {
@@ -10874,10 +10897,59 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
     content_item_id: contentId,
     output_count: patches.length,
     output_ids: patches.map((row) => row.id),
-    message: `Sent the full content package (${patches.length} output${patches.length === 1 ? "" : "s"}) back to Production. Make changes and Approve to rerender.`,
+    producer_queued: Boolean(revisionId),
+    producer_revision_id: revisionId,
+    message: revisionId
+      ? `Producer revision accepted for ${patches.length} output${patches.length === 1 ? "" : "s"}. Automatic rework is queued; fresh review will be required.`
+      : `Sent the full content package (${patches.length} output${patches.length === 1 ? "" : "s"}) back to Production. Make changes and Approve to rerender.`,
   };
 }
 /*__STUDIO_WORKER_END:factorySendBackContent__*/
+
+/**
+ * Advance a persisted Factory revision through the existing I3/I4 routing and
+ * studio-produce runner path. Never invent new media here: only interpreter-
+ * validated exact-text directives enter this automatic path.
+ */
+async function factoryAdvanceProducerRevision(env, requestId, revisionId, ctx = null) {
+  const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+  const notes = String(f(requestRecord, "Production_Notes") || "");
+  if (!notes.includes(`[factory-producer-revision id=${revisionId} state=pending]`)) {
+    return { skipped: "superseded_or_complete" };
+  }
+  if (!productionRequestRevisionOpen(requestRecord)) return { skipped: "revision_closed" };
+  const ideaId = studioFirstLinkedId(f(requestRecord, "Idea_Candidate"));
+  if (!ideaId) throw new Error("Factory Producer revision has no linked Idea Candidate");
+  const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId);
+  if (!promotionCompleted(idea)) throw new Error("Factory Producer revision requires an already-promoted Idea");
+  const finalized = await finalizeProductionRequestPromotion(env, requestId, idea, ctx);
+  if (finalized?.supersededByRequestId || (Number(finalized?.outputFanout?.blocked_count) || 0)) {
+    throw new Error("Factory Producer revision routing was blocked");
+  }
+  return { queued: true, request_id: requestId, revision_id: revisionId };
+}
+
+export async function factoryResumeProducerRevisions(env, ctx = null) {
+  const rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    limit: 3,
+    fields: ["Production_Notes", "Request_Status", "Idea_Candidate", "Promoted_Content_Item"],
+    filterFormula: 'AND({Request_Status}="Draft",FIND("[factory-producer-revision id=",{Production_Notes})>0)',
+  });
+  const outcomes = [];
+  for (const row of rows) {
+    const notes = String(f(row, "Production_Notes") || "");
+    const revisionId = notes.match(/\\[factory-producer-revision id=(fpr-[a-f0-9]+) state=pending\\]/)?.[1];
+    if (!revisionId) continue;
+    try {
+      outcomes.push(await factoryAdvanceProducerRevision(env, row.id, revisionId, ctx));
+    } catch (error) {
+      console.warn("Factory Producer revision resume failed", row.id, String(error?.message || error).slice(0, 250));
+      outcomes.push({ request_id: row.id, retry_pending: true });
+    }
+  }
+  return outcomes;
+}
+/*__STUDIO_WORKER_END:factoryResumeProducerRevisions__*/
 
 export async function studioAtomicVacateSkippedOutput(env, row, fields, operationId) {
   const current = row?.id
@@ -11053,7 +11125,7 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
     next = result.controls;
   } else if (action === "unpin_needs_assets") {
     next = unpinFactoryNeedsAssets(controls, payload?.id || payload?.item?.id).controls;
-  } else if (action === "approve" || action === "send_back" || action === "send_back_content" || action === "delete") {
+  } else if (action === "approve" || action === "send_back" || action === "send_back_content" || action === "request_changes_content" || action === "delete") {
     const id = String(payload?.id || payload?.item?.id || "").trim();
     const kind = String(payload?.kind || payload?.item?.kind || "output").trim().toLowerCase();
     const note = String(payload?.note || payload?.notes || "").trim().slice(0, 3000);
@@ -11066,15 +11138,27 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
       if (kind !== "output") throw new HttpError(400, "Send back is only for outputs");
       requirePermission(authorization, "outputs_review");
       resultExtra = await factorySendBackOutput(env, id, actor, note, payload?.production_request_id);
-    } else if (action === "send_back_content") {
+    } else if (action === "send_back_content" || action === "request_changes_content") {
       requirePermission(authorization, "outputs_review");
+      const producer = action === "request_changes_content"
+        ? interpretFactoryProducerFeedback(note) : null;
       resultExtra = await factorySendBackContent(
         env,
         payload?.production_request_id,
         payload?.output_ids,
         actor,
         note,
+        producer,
       );
+      if (resultExtra.producer_queued && !resultExtra.already_accepted && ctx?.waitUntil) {
+        ctx.waitUntil(factoryAdvanceProducerRevision(
+          env, resultExtra.production_request_id, resultExtra.producer_revision_id, ctx,
+        ).catch(error => console.warn("Factory Producer kickoff deferred to cron", String(error?.message || error).slice(0, 250))));
+      }
+      if (producer && !producer.automatic) {
+        resultExtra.message += " Automatic rework is held: " + producer.reason;
+        resultExtra.needs_interpretation = true;
+      }
     } else {
       if (kind === "idea") requirePermission(authorization, "ideas_delete");
       else requireAnyPermission(authorization, ["outputs_review", "publishing_control", "tenant_admin"]);
@@ -11082,7 +11166,7 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
       next = unpinFactoryNeedsAssets(next, id).controls;
     }
   } else {
-    throw new HttpError(400, "action must be pin_needs_assets, unpin_needs_assets, approve, send_back, send_back_content, or delete");
+    throw new HttpError(400, "action must be pin_needs_assets, unpin_needs_assets, approve, send_back, send_back_content, request_changes_content, or delete");
   }
 
   const saved = (
@@ -11100,6 +11184,14 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
       ok: true, page: "factory-desk", action, result: resultExtra,
       message: resultExtra.message || "Approved.", refresh_required: true,
     });
+  }
+  if (action === "request_changes_content") {
+    // Durable acceptance must not depend on the expensive Factory Desk query,
+    // which can time out after the authoritative Airtable commit.
+    return respond(request, env, {
+      ok: true, page: "factory-desk", action, result: resultExtra,
+      message: resultExtra.message, refresh_required: true,
+    }, resultExtra.producer_queued ? 202 : 200);
   }
   return factoryDeskRefreshPayload(request, env, authorization, saved, action, {
     result: resultExtra,
