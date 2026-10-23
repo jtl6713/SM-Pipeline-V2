@@ -42,6 +42,7 @@ jobs:
           set -euo pipefail
           node --check apps/studio-web/assets/app-item4-1008.js
           node --test \
+            apps/studio-web/profile-selector-startup.test.mjs \
             apps/studio-web/factory-open-navigation.test.mjs \
             apps/studio-web/factory-revision-approval.test.mjs \
             apps/studio-web/production-record-identity.test.mjs \
@@ -563,4 +564,5 @@ jobs:
             "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
             -d "$PAYLOAD" >/tmp/github-pages-deploy-status.json
           jq -e '.context=="production/studio-pages" and (.state=="success" or .state=="failure")' /tmp/github-pages-deploy-status.json >/dev/null
+
 

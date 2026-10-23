@@ -16,6 +16,10 @@ const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8')
         const page = await browser.newPage({ viewport: { width, height: 844 } });
         await page.route('**/*', route => route.abort());
         await page.setContent(html);
+        const profile = page.locator('#studioProfileSelect');
+        assert.ok(await profile.isVisible(), `${name} ${width}: profile selector visible before JavaScript`);
+        const profileBox = await profile.boundingBox();
+        assert.ok(profileBox.x >= 0 && profileBox.x + profileBox.width <= width, `${name} ${width}: profile fits viewport`);
         await page.evaluate(() => {
           document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
           document.querySelector('#page-outputs').classList.add('active');
@@ -45,3 +49,4 @@ const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8')
     } finally { await browser.close(); }
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });
+

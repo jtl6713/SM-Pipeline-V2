@@ -513,3 +513,5 @@ Deploy UI 0.6.748 from latest main: make Factory Producer Request Changes visibl
 2026-10-23 PR #1107: Deploy UI 0.6.749-producer-ideas from current main; expose human creative direction at Idea, EZ and Script-a-Short entry and conversational Factory revisions. Preserve #1095 global idea target, dedicated output approval and scheduling safeguards; require verified custom-domain newness.
 
 Deploy UI 0.6.750-mobile-headings: preserve native Pipeline table column headings on phones and show collapsed calendar heading. Pages only.
+
+Deploy UI 0.6.751-profile-first: profile selector visible on first paint, profiles requested before health/session checks, recoverable independent retry after timeout. Pages only.

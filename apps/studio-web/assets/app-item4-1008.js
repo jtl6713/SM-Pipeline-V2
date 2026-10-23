@@ -287,7 +287,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.750-mobile-headings";
+  const BUILD_ID = "item4-0.6.751-profile-first";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -335,7 +335,7 @@
   }
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   const PROFILE_LIST_CACHE_KEY = "studio.content_profiles_cache_v1";
-  const PROFILE_LIST_RETRY_MS = 45000;
+  const PROFILE_LIST_RETRY_MS = 15000;
   let selectedProfileId = "";
   let studioProfiles = [];
   let studioProfilesLoadInFlight = null;
@@ -685,11 +685,11 @@
       if (!select) return;
       select.innerHTML = placeholder;
       if (selectedProfileId) select.value = selectedProfileId;
-      select.disabled = Boolean(loading && !studioProfiles.length);
+      select.disabled = !studioProfiles.length;
     });
     const wrap = $("studioProfileWrap");
     if (wrap) {
-      wrap.hidden = !loading && !studioProfiles.length;
+      wrap.hidden = false;
       wrap.title = stale
         ? "Profile list may be stale — Studio will retry when Airtable is less busy."
         : "";
@@ -700,7 +700,8 @@
     if (studioProfilesLoadInFlight) return studioProfilesLoadInFlight;
     studioProfilesLoadInFlight = (async () => {
       if (!studioProfiles.length) hydrateStudioProfilesFromCache();
-      if (!quiet) renderStudioProfileSelects({ loading: true });
+      // A background refresh must still paint the profile control on a cold load.
+      renderStudioProfileSelects({ loading: true });
       try {
         const data = await api("/api/profiles", { retries: 2, timeoutMs: 12000 });
         studioProfiles = Array.isArray(data.records) ? data.records : [];
@@ -727,8 +728,9 @@
           scheduleStudioProfileListRetry();
           return;
         }
-        const sessionReady = Boolean(studioSession?.authorized || studioSession?.authenticated);
-        if (sessionReady) {
+        // Profile navigation must survive session timeouts too. Keep a visible
+        // unavailable state and retry independently of the health/session checks.
+        {
           const wrap = $("studioProfileWrap");
           const select = $("studioProfileSelect");
           if (wrap) {
@@ -742,8 +744,6 @@
           scheduleStudioProfileListRetry();
           return;
         }
-        renderStudioProfileSelects();
-        throw error;
       }
     })();
     try {
@@ -2141,7 +2141,6 @@
       } else {
         $("apiStatus").textContent = sessionResult.status === "rejected" ? "API connected · session retrying" : "API connected";
       }
-      loadStudioProfiles({ quiet: true }).catch(() => {});
     } catch (e) {
       $("apiStatus").textContent = "API unavailable";
       refreshOperationsNavFromSession({ failOpen: true }).catch(() => {});
@@ -26957,6 +26956,8 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   applyPrivilegedNavFailOpen();
+  // Start profiles before health/session or dashboard work. Neither gates navigation.
+  loadStudioProfiles({ quiet: true }).catch(() => {});
   checkHealth().finally(() => loadDashboard());
   $("studioProfileSelect")?.addEventListener("change", (event) => {
     const profile = studioProfiles.find((item) => item.id === event.target.value);
@@ -26971,4 +26972,5 @@ function timedScriptAssetLabel(asset, index) {
     startDisplayTextRepair();
   }
 })();
+
 
