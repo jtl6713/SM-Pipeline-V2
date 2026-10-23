@@ -34,3 +34,11 @@ test("Revisions revoke publishing approval and hold the old media before restart
   assert.match(body, /Review_Status: "Changes Requested"/);
   assert.match(body, /await airtableBatchUpdate\(env, env\.AIRTABLE_OUTPUT_TABLE_ID, patches/);
 });
+
+test("Recovery and post-render QA scans only select pending revisions", () => {
+  const recover = worker.slice(worker.indexOf("export async function factoryResumeProducerRevisions"), worker.indexOf("/*__STUDIO_WORKER_END:factoryResumeProducerRevisions__*/"));
+  const verify = worker.slice(worker.indexOf("export async function factoryVerifyProducerRevisions"), worker.indexOf("/*__STUDIO_WORKER_END:factoryVerifyProducerRevisions__*/"));
+  for (const scan of [recover, verify]) {
+    assert.match(scan, /filterFormula:.*FIND\("state=pending\]",\{Production_Notes\}\)>0/);
+  }
+});
