@@ -1169,6 +1169,15 @@
     const error = $("factoryFeedbackError");
     if (heading) heading.textContent = title || "Untitled content";
     if (detail) detail.textContent = scope || "Review changes";
+    const auto = payload?.action === "request_changes_content";
+    const intro = $("factoryFeedbackIntro");
+    const hints = document.querySelector("#factoryFeedbackHintsText");
+    if (intro) intro.textContent = auto
+      ? "Tell the Producer what needs changing. Explicit caption or voiceover replacements can be queued automatically; media and editing requests need a verified production plan."
+      : "Describe exactly what needs to change. Studio saves these review notes with the linked Production Request.";
+    if (hints) hints.textContent = auto
+      ? "Automatic now: 'Set the caption to: …' or 'Replace the voiceover script with: …'. Other requests are saved for manual review, never falsely marked produced."
+      : "This send-back opens Production for manual editing and approval.";
     if (error) { error.hidden = true; error.textContent = ""; }
     textarea.value = "";
     const count = $("factoryFeedbackCount");
@@ -1221,7 +1230,7 @@
         setStatus("Review notes saved. Open the returned item in Production for changes.");
       }
     } catch (err) {
-      if (submit) { submit.disabled = false; submit.textContent = "Send back with notes"; }
+      if (submit) { submit.disabled = false; submit.textContent = pending.payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
       if (error) { error.hidden = false; error.textContent = String(err?.message || err); }
       setStatus("Could not send back: " + (err?.message || err), true);
     }
