@@ -1090,7 +1090,12 @@ export async function runWaitingIdeaPhotoMatches(env, { limit = 8 } = {}) {
     // Enumerate the lean waiting queue before choosing eight. An unsorted
     // LIMIT 8 repeatedly selected the same rows; Idea #1255 was 53rd of 63.
     // Small field projection keeps this read bounded as the backlog grows.
-    limit: 500,
+    // Scan a broader fair queue. The previous 500-row cap permanently hid
+    // older waiting ideas once the backlog crossed 500, regardless of how
+    // many matching classified images were subsequently uploaded.
+    // This is a lean two-field projection; downstream matching refreshes
+    // the selected idea before attaching anything.
+    limit: 2000,
     fields: ["Studio_Photo_Match_JSON", "Production_Config_Notes"],
     filterFormula: "AND({Studio_Photo_Wait_Status}='Waiting',{Promoted_Content_Record_ID}=BLANK(),{Candidate_Status}!='On Hold')",
   });
