@@ -10906,6 +10906,7 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
           error: null,
         }) : null,
         ...((producer?.automatic && producer?.fields) ? producer.fields : {}),
+        ...(producer?.automatic && producer?.changes?.includes("rewrite_narration") ? { Voiceover_Mode: "Yes" } : {}),
         Production_Notes: [withFactoryRevisionOpen(productionNotes, { actor, stamp }), producerMarker].filter(Boolean).join("\n"),
         Updated_At: stamp,
       },
@@ -10997,6 +10998,68 @@ async function factoryAdvanceProducerRevision(env, requestId, revisionId, ctx = 
       }, typecast: true }),
     });
     return { queued: false, completed: true, request_id: requestId, revision_id: revisionId };
+  }
+  const originalFeedback = factoryLatestReviewFeedback(notes)?.instructions || "";
+  const producer = interpretFactoryProducerFeedback(originalFeedback);
+  if (!producer.automatic) throw new Error("Factory Producer cannot execute unvalidated instructions");
+  // Metadata-only captions update authoritative Content and Platform Outputs
+  // without invoking paid Remotion work. No media/source artifact is changed.
+  if (producer.changes.length === 1 && producer.changes[0] === "metadata_only") {
+    const contentId = studioFirstLinkedId(f(requestRecord, "Promoted_Content_Item"));
+    if (!contentId) throw new Error("Producer caption revision has no promoted Content Item");
+    const rows = await loadContentPlatformOutputs(env, contentId);
+    const targets = rows.filter(row => String(f(row, "Output_Status") || "") === "Changes Requested"
+      && String(f(row, "Review_Status") || "") === "Changes Requested");
+    if (!targets.length) throw new Error("Producer caption revision has no held outputs to update");
+    if (rows.some(row => outputAlreadyApprovedForPublishing(row) || Boolean(f(row, "Published_At")))) {
+      throw new Error("Producer caption revision conflicts with a published or approved output");
+    }
+    if (targets.some(row => !studioOutputIsNativePhoto(row)
+        && !String(f(row, "Final_File_URL") || "").trim())) {
+      throw new Error("Caption-only revision cannot reuse an output without a finished media file");
+    }
+    const caption = String(producer.fields.Requested_Caption || "");
+    await syncProductionRequestDirectivesToContentItem(env, requestRecord, contentId);
+    await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId, {
+      method: "PATCH", body: JSON.stringify({ fields: { Caption: caption }, typecast: true }),
+    });
+    await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID,
+      targets.map(row => ({
+        id: row.id,
+        fields: {
+          Output_Caption: caption,
+          Output_Status: "Ready for Review",
+          Review_Status: "Pending Review",
+          Render_Status: studioOutputIsNativePhoto(row) ? "Native Photo Route" : "Rendered",
+          Publish_Status: "Not Ready",
+          Review_Decision_At: null, Do_Not_Publish: false,
+          Scheduled_Post_Date: null,
+        },
+      })), { typecast: true });
+    // Verify the actual authoritative records, not just Airtable write success.
+    const confirmed = await Promise.all(targets.map(row => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id)));
+    if (!confirmed.every(row => String(f(row, "Output_Caption") || "") === caption
+        && String(f(row, "Output_Status") || "") === "Ready for Review"
+        && String(f(row, "Publish_Status") || "") === "Not Ready")) {
+      throw new Error("Factory Producer caption verification failed");
+    }
+    const pendingMarker = "[factory-producer-revision id=" + revisionId + " state=pending]";
+    const completeMarker = "[factory-producer-revision id=" + revisionId + " state=completed]";
+    const completedNotes = stripFactoryRevisionNote(notes).replace(pendingMarker, completeMarker);
+    await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: {
+          Request_Status: "Promoted",
+          Production_Notes: completedNotes,
+          Studio_Production_Job_JSON: null,
+          Updated_At: new Date().toISOString(),
+        },
+        typecast: true,
+      }),
+    });
+    return { completed: true, metadata_only: true, request_id: requestId,
+      revision_id: revisionId, outputs_ready_for_review: confirmed.length };
   }
   const ideaId = studioFirstLinkedId(f(requestRecord, "Idea_Candidate"));
   if (!ideaId) throw new Error("Factory Producer revision has no linked Idea Candidate");
