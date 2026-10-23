@@ -76,3 +76,11 @@ test("Producer content revisions return durable queue acceptance independent of 
   assert.match(factory, /desk\?\.result\?\.producer_queued/);
   assert.match(factory, /loadFactoryDesk\(true\)\.catch/);
 });
+
+test("Factory Producer is visible before expanding a collapsed lane", () => {
+  assert.match(html, /id="factoryProducerOpen"[^>]*>Review &amp; Request Changes<\/button>/);
+  assert.match(html, /id="factoryBandBodyNeedsEyes"/);
+  assert.match(factory, /\$\("factoryProducerOpen"\)\?\.addEventListener\("click"/);
+  assert.match(factory, /band\.classList\.remove\("is-collapsed"\)/);
+  assert.match(factory, /Request Changes appears when a content item reaches Needs eyes/);
+});
