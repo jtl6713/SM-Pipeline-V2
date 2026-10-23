@@ -18,6 +18,9 @@ const stale = (timestamp, nowMs) => {
 export function qaCarouselMaintenanceDecision(row, slides, nowMs = Date.now()) {
   const outputId = Number(val(row, "Output_ID") || 0);
   const state = str(row, "IG_Carousel_Status");
+  if (val(row,"Do_Not_Publish") === true && str(row,"Test_Run_ID") === ""
+      && ["Creating Children","Creating Parent","Assets Ready","Parent Ready"].includes(state))
+    return {outcome:"human_review_required",reason:"publishing_hold",output_id:outputId,rearm:false,graph_creates:0};
   const blocked = !recordIdValid(row?.id) || !outputId
     || str(row, "Platform") !== "Instagram"
     || str(row, "Platform_Output_Type") !== "Instagram Carousel"
@@ -61,13 +64,19 @@ export function qaCarouselMaintenanceDecision(row, slides, nowMs = Date.now()) {
 
 export async function qaInstagramCarouselMaintenance(env, { airtableFetch, nowMs=Date.now(), limit=4 }={}) {
   if (typeof airtableFetch !== "function") throw new Error("Quality Agent needs authoritative Airtable access");
-  const filter='AND({Platform_Output_Type}="Instagram Carousel",OR({IG_Carousel_Status}="Creating Children",{IG_Carousel_Status}="Creating Parent"),{Test_Run_ID}=BLANK(),{Do_Not_Publish}=0)';
+  const filter='AND({Platform_Output_Type}="Instagram Carousel",OR({IG_Carousel_Status}="Creating Children",{IG_Carousel_Status}="Creating Parent",AND({Do_Not_Publish}=1,OR({IG_Carousel_Status}="Assets Ready",{IG_Carousel_Status}="Parent Ready"))),{Test_Run_ID}=BLANK())';
   const source=await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID || "Platform Outputs",
-    "?filterByFormula="+encodeURIComponent(filter)+"&maxRecords="+Math.min(12,Math.max(1,limit)));
+    "?filterByFormula="+encodeURIComponent(filter)+"&maxRecords="+Math.min(60,Math.max(12,limit*8)));
   if (!Array.isArray(source?.records)) throw new Error("Quality Agent carousel scan incomplete");
   const bucket=new Date(Math.floor(nowMs / 1800000)*1800000).toISOString();
   const out=[];
-  for (const row of source.records.slice(0,Math.min(12,Math.max(1,limit)))) {
+  // Rotate the bounded review window so a persistent human-hold at the front
+  // cannot starve other profiles for every future half-hour tick.
+  const n = Math.max(1, Math.min(12, limit));
+  const groups = Math.max(1, Math.ceil(source.records.length / n));
+  const selectedGroup = Math.floor(nowMs / 1800000) % groups;
+  const selectedRows = source.records.slice(selectedGroup * n, (selectedGroup + 1) * n);
+  for (const row of selectedRows) {
     const id = String(row?.id||"");
     if (!recordIdValid(id)) continue;
     const outputId=Number(val(row,"Output_ID")||0);
