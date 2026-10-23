@@ -15,11 +15,11 @@ export function interpretFactoryProducerFeedback(note) {
   for (const line of lines) {
     // Explicit, classified Airtable library references are executable without
     // hallucinating filenames or searching another city's collection.
-    const named = line.match(/^(?:add|include|insert)\\s+(?:library\\s+)?(photo|still|image|clip|video clip)\\s+(?:named|called)\\s*:\\s*(.{3,120})$/i);
+    const named = line.match(/^(?:add|include|insert)\s+(?:library\s+)?(photo|still|image|clip|video clip)\s+(?:named|called)\s*:\s*(.{3,120})$/i);
     if (named) {
       const kind = /clip/i.test(named[1]) ? "clip" : "photo";
       const name = named[2].trim().replace(/^["']|["']$/g, "");
-      if (!name || !/^[\\p{L}\\p{N} _().,'&-]{3,120}$/u.test(name)) return { automatic: false, reason: "Library asset name contains unsupported characters." };
+      if (!name || !/^[\p{L}\p{N} _().,'&-]{3,120}$/u.test(name)) return { automatic: false, reason: "Library asset name contains unsupported characters." };
       media_queries.push({ kind, name });
       if (kind === "clip") allow_video = true;
       directives.push(kind === "clip" ? "add_clip" : "add_photos");
