@@ -3862,6 +3862,8 @@ export async function getScheduleRegenJobStatus(request, env, authorization, ctx
 
 export async function getStudioScheduleSettings(request, env, authorization) {
   const horizonDays = await studioScheduleHorizonDays(env);
+  const globalRow = await studioSettingsByName(env, GLOBAL_IDEA_TARGET_SETTING);
+  const globalTarget = parseGlobalIdeaTarget(globalRow ? f(globalRow, "Setting_Value") : undefined);
   return respond(request, env, {
     ok: true,
     scheduling_horizon_days: horizonDays,
@@ -3869,27 +3871,43 @@ export async function getStudioScheduleSettings(request, env, authorization) {
     setting_name: MAE_SCHEDULE_HORIZON_SETTING,
     mae_windows: [...MAE_PRIORITY_SCHEDULE_WINDOWS],
     blackout: "20:00-03:30",
+    global_automatic_idea_target: globalTarget,
+    global_automatic_idea_target_default: 500,
+    global_automatic_idea_setting_name: GLOBAL_IDEA_TARGET_SETTING,
+    global_automatic_idea_target_invalid: globalTarget === null,
   });
 }
 /*__STUDIO_WORKER_END:getStudioScheduleSettings__*/
 
 export async function putStudioScheduleSettings(request, env, authorization) {
   const payload = await readJsonBody(request);
-  const horizonDays = maeNormalizeHorizonDays(
-    payload.scheduling_horizon_days ?? payload.horizon_days ?? payload.horizonDays,
-    MAE_SUGGEST_HORIZON_DAYS,
-  );
-  await studioUpsertSetting(
-    env,
-    MAE_SCHEDULE_HORIZON_SETTING,
-    String(horizonDays),
-    "Global scheduling horizon in days (MAE-first / balanced overflow)",
-  );
-  return respond(request, env, {
-    ok: true,
-    scheduling_horizon_days: horizonDays,
-    message: `Scheduling horizon set to ${horizonDays} days. Existing schedules are unchanged; later approvals and regenerations use the new horizon.`,
-  });
+  const hasIdeas = Object.prototype.hasOwnProperty.call(payload || {}, "global_automatic_idea_target");
+  const hasHorizon = ["scheduling_horizon_days", "horizon_days", "horizonDays"]
+    .some((key) => Object.prototype.hasOwnProperty.call(payload || {}, key));
+  if (!hasIdeas && !hasHorizon) throw new HttpError(400, "No global settings supplied");
+  const response = { ok: true };
+  if (hasIdeas) {
+    const raw = payload.global_automatic_idea_target;
+    const target = raw == null || String(raw).trim() === "" ? null : parseGlobalIdeaTarget(raw);
+    if (target === null) throw new HttpError(400, "Global automatic idea target must be a whole number from 1 to 10000");
+    await studioUpsertSetting(env, GLOBAL_IDEA_TARGET_SETTING, String(target),
+      "One shared automatic idea inventory target across all active Shining Cities");
+    response.global_automatic_idea_target = target;
+    response.global_automatic_idea_setting_name = GLOBAL_IDEA_TARGET_SETTING;
+  }
+  if (hasHorizon) {
+    const horizonDays = maeNormalizeHorizonDays(
+      payload.scheduling_horizon_days ?? payload.horizon_days ?? payload.horizonDays,
+      MAE_SUGGEST_HORIZON_DAYS,
+    );
+    await studioUpsertSetting(env, MAE_SCHEDULE_HORIZON_SETTING, String(horizonDays),
+      "Global scheduling horizon in days (MAE-first / balanced overflow)");
+    response.scheduling_horizon_days = horizonDays;
+  }
+  response.message = hasIdeas
+    ? `Global automatic idea target saved at ${response.global_automatic_idea_target} combined scheduled + awaiting-approval outputs. Automatic generation across all cities obeys this setting.`
+    : `Scheduling horizon set to ${response.scheduling_horizon_days} days. Existing schedules are unchanged; later approvals and regenerations use the new horizon.`;
+  return respond(request, env, response);
 }
 
 /*__STUDIO_WORKER_END:putStudioScheduleSettings__*/
