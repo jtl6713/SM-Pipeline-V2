@@ -32,17 +32,21 @@ jobs:
           const fs=require('fs');
           const html=fs.readFileSync('/tmp/producer-live-index.html','utf8');
           for(const marker of [
+            'id="ideaSummary"',
+            'id="ezIdeaSummary"',
+            'id="scriptedShortPrompt"',
+            'Creative direction',
             'id="factoryProducerOpen"',
             'Review &amp; Request Changes',
             'id="factoryBandBodyNeedsEyes"',
             'id="factoryFeedbackForm"',
             'id="factoryFeedbackNotes"',
             'id="factoryFeedbackSubmit"',
-            'UI build 0.6.748',
+            'UI build 0.6.749',
           ]) if(!html.includes(marker)) throw Error('Production Factory UI missing marker: '+marker);
           const m=html.match(/\/assets\/factory-desk\.js\?[^"\\\s]+/);
           if(!m) throw Error('Production UI lacks cache-busted Factory script');
-          if(!m[0].includes('v=0.6.748-producer-visible')) throw Error('Unexpected Factory script cache version');
+          if(!m[0].includes('v=0.6.749-producer-ideas')) throw Error('Unexpected Factory script cache version');
           process.stdout.write(m[0]);
           NODE
           )
