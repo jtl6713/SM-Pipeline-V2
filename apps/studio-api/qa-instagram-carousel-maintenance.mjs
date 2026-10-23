@@ -72,7 +72,7 @@ export async function qaInstagramCarouselMaintenance(env, { airtableFetch, nowMs
     if (!recordIdValid(id)) continue;
     const outputId=Number(val(row,"Output_ID")||0);
     const slidesResult=await airtableFetch(env,"Carousel Slides",
-      "?filterByFormula="+encodeURIComponent('FIND("'+escapeFormula(String(outputId))+'",ARRAYJOIN({PO_Output_ID}))>0')+"&maxRecords=40");
+      "?filterByFormula="+encodeURIComponent('ARRAYJOIN({PO_Output_ID})="'+escapeFormula(String(outputId))+'"')+"&maxRecords=40");
     if (!Array.isArray(slidesResult?.records)) throw new Error("Quality Agent slide scan incomplete");
     let decision=qaCarouselMaintenanceDecision(row,slidesResult.records,nowMs);
     if (decision.rearm) {
