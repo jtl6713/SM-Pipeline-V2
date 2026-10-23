@@ -1,3 +1,4 @@
+import { applyGroundedMediaEdits } from "./factory-producer-media-edits.mjs";
 import { validateProducerPlan, planSelectiveRework } from "./conversational-producer-plan.mjs";
 import { interpretFactoryProducerFeedback } from "./factory-producer-feedback.mjs";
 import { summarizeAutonomousVerification } from "./autonomous-verification-recovery.mjs";
@@ -10865,22 +10866,31 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
     // the existing profile from the actual output before validating the plan.
     const profile = await item4ProductionProfileRecord(env, targets[0]);
     if (!profile?.id) throw new HttpError(409, "Producer could not verify the output's content profile");
+    let grounded = null;
+    const sourceAssets = item4AssetManifest(requestRecord);
+    const requiredIds = (producer.media_edits || []).map(edit => edit.asset_id);
+    if (requiredIds.length) {
+      try { grounded = applyGroundedMediaEdits(sourceAssets, producer.media_edits); }
+      catch (error) { throw new HttpError(409, "Producer cannot execute this media change: " + (error?.message || error)); }
+    }
     const validated = validateProducerPlan({
       original_prompt: note, profile_id: profile.id,
-      changes: producer.changes, required_asset_ids: [], excluded_asset_ids: [],
-    }, []);
+      changes: producer.changes, required_asset_ids: requiredIds, excluded_asset_ids: [],
+    }, sourceAssets.map(asset => ({ ...asset, profile_id: profile.id })));
     if (!validated.valid) throw new HttpError(409, "Producer Plan validation failed");
-    producer = { ...producer, execution_plan: planSelectiveRework(validated) };
+    producer = { ...producer, execution_plan: planSelectiveRework(validated), grounded_media: grounded };
     // Metadata and timing changes can only reuse complete verified source media.
     // A half-produced Story must not be silently sent through the fast path.
     if (producer.changes.some(change => ["metadata_only", "adjust_timing"].includes(change))
         && targets.some(row => String(f(row, "Output_Status") || "") !== "Ready for Review")) {
       producer = { automatic: false, reason: "Finish the content package before a timing or caption revision." };
     }
-    if (producer?.automatic && producer.changes.includes("adjust_timing")
-        && targets.some(row => String(f(row, "Render_Status") || "") !== "Rendered"
+    if (producer?.automatic && producer.changes.some(change =>
+          ["adjust_timing", "reorder_media", "trim_clip"].includes(change))
+        && targets.some(row => String(f(row, "Output_Status") || "") !== "Ready for Review"
+          || String(f(row, "Render_Status") || "") !== "Rendered"
           || !String(f(row, "Final_File_URL") || "").trim())) {
-      producer = { automatic: false, reason: "Exact duration rework requires completed video renders on all outputs." };
+      producer = { automatic: false, reason: "Precise timing and media revisions require completed video renders on every output." };
     }
   }
   const priorFeedback = factoryLatestReviewFeedback(f(requestRecord, "Production_Notes"));
@@ -10935,6 +10945,13 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
           job_id: revisionId,
           producer_changes: producer.changes,
           producer_stages: producer.execution_plan?.stages || [],
+          producer_media_expectations: producer.grounded_media
+            ? producer.grounded_media.assets.map(asset => ({
+                id: asset.id, order: asset.order,
+                in_seconds: asset.in_seconds ?? null,
+                out_seconds: asset.out_seconds ?? null,
+                google_drive_file_id: asset.google_drive_file_id,
+              })) : null,
           previous_outputs: targets.map((row) => ({
             id: row.id,
             output_status: String(f(row, "Output_Status") || ""),
@@ -10952,6 +10969,10 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
           error: null,
         }) : null,
         ...((producer?.automatic && producer?.fields) ? producer.fields : {}),
+        ...(producer?.automatic && producer?.grounded_media ? {
+          Studio_Master_Assets_JSON: JSON.stringify(producer.grounded_media.assets),
+          Studio_Master_Asset_Count: producer.grounded_media.assets.length,
+        } : {}),
         ...(producer?.automatic && producer?.changes?.includes("rewrite_narration") ? { Voiceover_Mode: "Yes" } : {}),
         Production_Notes: [withFactoryRevisionOpen(productionNotes, { actor, stamp }), producerMarker].filter(Boolean).join("\n"),
         Updated_At: stamp,
@@ -11129,7 +11150,7 @@ export async function factoryResumeProducerRevisions(env, ctx = null) {
 export async function factoryVerifyProducerRevisions(env) {
   const rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
     limit: 3,
-    fields: ["Production_Notes", "Request_Status", "Studio_Production_Job_JSON", "Promoted_Content_Item", "Requested_Script", "Video_Duration_Seconds"],
+    fields: ["Production_Notes", "Request_Status", "Studio_Production_Job_JSON", "Promoted_Content_Item", "Requested_Script", "Video_Duration_Seconds", "Studio_Master_Assets_JSON"],
     filterFormula: 'AND({Request_Status}="Promoted",FIND("[factory-producer-revision id=",{Production_Notes})>0,FIND("state=pending]",{Production_Notes})>0)',
     sortField: "Updated_At",
     sortDirection: "asc",
@@ -11147,6 +11168,7 @@ export async function factoryVerifyProducerRevisions(env) {
     const changes = Array.isArray(job.producer_changes) ? job.producer_changes : [];
     const requireNarration = changes.includes("rewrite_narration");
     const requireDuration = changes.includes("adjust_timing");
+    const requiresMedia = changes.includes("reorder_media") || changes.includes("trim_clip");
     const exactScript = String(f(row, "Requested_Script") || "").trim();
     const requestedDuration = Number(f(row, "Video_Duration_Seconds") || 0);
     if (job.step !== "done") failures.push("Runner did not complete successfully");
@@ -11154,6 +11176,18 @@ export async function factoryVerifyProducerRevisions(env) {
     if (requireNarration && !exactScript) failures.push("Missing required exact narration");
     if (requireDuration && (!Number.isInteger(requestedDuration) || requestedDuration < 5 || requestedDuration > 600))
       failures.push("Invalid requested video duration");
+    if (requiresMedia) {
+      const expected = Array.isArray(job.producer_media_expectations) ? job.producer_media_expectations : [];
+      const manifest = item4AssetManifest(row).slice().sort((a,b) => Number(a.order||0)-Number(b.order||0));
+      if (!expected.length || manifest.length !== expected.length || expected.some((asset,index) => {
+        const actual = manifest[index];
+        return !actual || String(actual.id) !== String(asset.id)
+          || Number(actual.order) !== Number(asset.order)
+          || String(actual.google_drive_file_id||"") !== String(asset.google_drive_file_id||"")
+          || Number(actual.in_seconds??0) !== Number(asset.in_seconds??0)
+          || Number(actual.out_seconds??0) !== Number(asset.out_seconds??0);
+      })) failures.push("Media manifest does not match the requested scene order and trim");
+    }
     let outputs = [];
     if (contentId) {
       const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId);
@@ -11181,6 +11215,13 @@ export async function factoryVerifyProducerRevisions(env) {
       const expected = platformOverride > 0 ? platformOverride : requestedDuration;
       return !Number.isFinite(actual) || Math.abs(actual - expected) > 0.5;
     })) failures.push("Revised rendered video duration did not match the request");
+    if (requiresMedia) {
+      const previous = new Map((Array.isArray(job.previous_outputs) ? job.previous_outputs : []).map(x => [x.id,x]));
+      if (targets.some(output => String(f(output,"Final_File_URL")||"").trim()
+          === String(previous.get(output.id)?.final_file_url||"").trim())) {
+        failures.push("Media revision reused a superseded render");
+      }
+    }
     if (!failures.length) {
       await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID, targets.map(x => ({
         id: x.id, fields: { Do_Not_Publish: false },
@@ -11205,6 +11246,7 @@ export async function factoryVerifyProducerRevisions(env) {
               checks: [
                 ...(requireNarration ? ["requested_script", "generated_audio"] : []),
                 ...(requireDuration ? ["rendered_video_duration"] : []),
+                ...(requiresMedia ? ["authoritative_media_manifest", "fresh_renders"] : []),
                 "output_renders", "publish_hold",
               ],
             },

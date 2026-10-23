@@ -37,3 +37,20 @@ test("exact whole-video timing changes are actionable and bounded", () => {
   assert.equal(interpret(text).automatic, false, text);
  }
 });
+
+test("specific existing media actions are interpreted as executable Producer revisions", () => {
+ const result = interpret("Move existing asset photo000000000001 to position 1.\nTrim existing clip clip000000000001 from 2 to 5.5 seconds.");
+ assert.equal(result.automatic, true);
+ assert.deepEqual(result.changes, ["reorder_media", "trim_clip"]);
+ assert.deepEqual(result.media_edits, [
+   {operation:"reorder",asset_id:"photo000000000001",position:1},
+   {operation:"trim_clip",asset_id:"clip000000000001",in_seconds:2,out_seconds:5.5},
+ ]);
+});
+test("creative asset descriptions without known inventory identifiers remain manual",()=>{
+ for(const phrase of ["Add three more Chicago River photos.", "Insert a clip of the boat.", "Reorder the scenes to show the skyline first."]) {
+  const value=interpret(phrase);
+  assert.equal(value.automatic,false);
+  assert.match(value.reason,/verified asset ID|guided asset selection|interpretation/i);
+ }
+});
