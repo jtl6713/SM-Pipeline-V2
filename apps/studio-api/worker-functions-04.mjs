@@ -11082,6 +11082,108 @@ export async function factoryResumeProducerRevisions(env, ctx = null) {
 }
 /*__STUDIO_WORKER_END:factoryResumeProducerRevisions__*/
 
+/**
+ * Independent post-render fence for narration revisions. Output routing leaves
+ * Do_Not_Publish set; only verified authoritative results clear that hold.
+ * The Producer's claimed result is never treated as QA evidence.
+ */
+export async function factoryVerifyProducerRevisions(env) {
+  const rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    limit: 3,
+    fields: ["Production_Notes", "Request_Status", "Studio_Production_Job_JSON", "Promoted_Content_Item", "Requested_Script"],
+    filterFormula: 'AND({Request_Status}="Promoted",FIND("[factory-producer-revision id=",{Production_Notes})>0)',
+    sortField: "Updated_At",
+    sortDirection: "asc",
+  });
+  const results = [];
+  for (const row of rows) {
+    const notes = String(f(row, "Production_Notes") || "");
+    const rev = notes.match(/\[factory-producer-revision id=(fpr-[a-f0-9]+) state=pending\]/)?.[1];
+    if (!rev) continue;
+    let job;
+    try { job = JSON.parse(String(f(row, "Studio_Production_Job_JSON") || "{}")); } catch { job = {}; }
+    if (job.job_id !== rev || !["done", "blocked", "escalated"].includes(String(job.step || ""))) continue;
+    const failures = [];
+    const contentId = studioFirstLinkedId(f(row, "Promoted_Content_Item"));
+    const exactScript = String(f(row, "Requested_Script") || "").trim();
+    if (job.step !== "done") failures.push("Runner did not complete successfully");
+    if (!contentId || !exactScript) failures.push("Missing promoted content or required narration");
+    let outputs = [];
+    if (contentId) {
+      const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId);
+      if (String(f(parent, "Voiceover_Script") || "").trim() !== exactScript) {
+        failures.push("Rendered script does not match the exact requested narration");
+      }
+      if (!String(f(parent, "Voiceover_URL") || "").trim()) failures.push("Voiceover audio is missing");
+      outputs = await loadContentPlatformOutputs(env, contentId);
+    }
+    const targetIds = new Set((Array.isArray(job.previous_outputs) ? job.previous_outputs : []).map(x => x.id));
+    const targets = outputs.filter(x => targetIds.has(x.id));
+    if (!targets.length || targets.length !== targetIds.size) failures.push("The expected output set is incomplete");
+    if (targets.some(x => String(f(x, "Output_Status") || "") !== "Ready for Review"
+        || String(f(x, "Render_Status") || "") !== "Rendered"
+        || !String(f(x, "Final_File_URL") || "").trim())) {
+      failures.push("Required revised renders are incomplete");
+    }
+    if (targets.some(x => String(f(x, "Publish_Status") || "") !== "Not Ready"
+        || f(x, "Do_Not_Publish") !== true)) failures.push("Revision publishing hold is not intact");
+    if (!failures.length) {
+      await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID, targets.map(x => ({
+        id: x.id, fields: { Do_Not_Publish: false },
+      })), { typecast: true });
+      for (const output of targets) {
+        const checked = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, output.id);
+        if (f(checked, "Do_Not_Publish") !== false
+            || String(f(checked, "Publish_Status") || "") !== "Not Ready") {
+          throw new Error("Producer QA could not verify output release");
+        }
+      }
+      await airtableFetch(env, PRODUCTION_REQUEST_TABLE, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields: {
+          Production_Notes: notes.replace(
+            `[factory-producer-revision id=${rev} state=pending]`,
+            `[factory-producer-revision id=${rev} state=completed]`,
+          ),
+          Studio_Production_Job_JSON: JSON.stringify({
+            ...job, producer_quality: {
+              passed: true, checked_at: new Date().toISOString(),
+              checks: ["requested_script", "generated_audio", "output_renders", "publish_hold"],
+            },
+          }),
+          Updated_At: new Date().toISOString(),
+        }, typecast: false }),
+      });
+      results.push({ request_id: row.id, quality: "passed" });
+      continue;
+    }
+    // A terminal runner error is nonrecoverable by simple QA; surface it.
+    // A "done" job with incomplete evidence gets a few bounded checks first.
+    const attempts = Math.max(0, Number(job.producer_quality_attempts) || 0) + 1;
+    const exhausted = attempts >= 5 || job.step !== "done";
+    await airtableFetch(env, PRODUCTION_REQUEST_TABLE, row.id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: {
+        Production_Notes: exhausted ? notes.replace(
+          `[factory-producer-revision id=${rev} state=pending]`,
+          `[factory-producer-revision id=${rev} state=needs_attention]`,
+        ) : notes,
+        Studio_Production_Job_JSON: JSON.stringify({
+          ...job, producer_quality_attempts: attempts,
+          producer_quality: { passed: false, errors: failures },
+          step: exhausted ? "blocked" : job.step,
+          error: exhausted ? "Producer QA: " + failures.join("; ") : null,
+          updated_at: new Date().toISOString(),
+        }),
+        Updated_At: new Date().toISOString(),
+      }, typecast: false }),
+    });
+    results.push({ request_id: row.id, quality: exhausted ? "needs_attention" : "retry_pending" });
+  }
+  return results;
+}
+/*__STUDIO_WORKER_END:factoryVerifyProducerRevisions__*/
+
 export async function studioAtomicVacateSkippedOutput(env, row, fields, operationId) {
   const current = row?.id
     ? await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id)
