@@ -130,7 +130,7 @@ export function appendProducerThreadMessage(notes, input, options = {}) {
   const next = {schema: "studio.producer-thread.1", revision: current.revision + 1,
     messages: [...current.messages, {id, role: "user", content: body,
       at: text(input?.at) || new Date().toISOString(), proposal}]};
-  const block = PRODUCER_THREAD_OPEN + JSON.stringify(next).replace(/\[/g, "\\u005b").replace(/\]/g, "\\u005d") + PRODUCER_THREAD_CLOSE;
+  const block = PRODUCER_THREAD_OPEN + JSON.stringify(next).replaceAll(PRODUCER_THREAD_OPEN, "\\u005bstudio-producer-thread\\u005d").replaceAll(PRODUCER_THREAD_CLOSE, "\\u005b/studio-producer-thread\\u005d") + PRODUCER_THREAD_CLOSE;
   const start = source.indexOf(PRODUCER_THREAD_OPEN);
   const end = start < 0 ? -1 : source.indexOf(PRODUCER_THREAD_CLOSE, start);
   const output = start < 0 ? [source, block].filter(Boolean).join("\n") :
