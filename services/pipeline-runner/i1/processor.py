@@ -198,18 +198,33 @@ def process_request(
             skipped_duplicate_titles.append(title)
             continue
         seen_titles.add(title_key)
-        created = client.create_records(
-            SOURCE_CANDIDATES_TABLE,
-            [
-                _candidate_fields(
-                    idea,
-                    profile_id=profile["id"],
-                    batch_id=batch_record_id,
-                    test_run_id=test_run_id,
-                )
-            ],
-            typecast=True,
-        )
+        try:
+            created = client.create_records(
+                SOURCE_CANDIDATES_TABLE,
+                [
+                    _candidate_fields(
+                        idea,
+                        profile_id=profile["id"],
+                        batch_id=batch_record_id,
+                        test_run_id=test_run_id,
+                    )
+                ],
+                typecast=True,
+            )
+        except Exception as exc:
+            # Preserve acknowledged writes. A timed-out write may also have
+            # succeeded remotely, so the caller must reconcile before retrying.
+            preview["created_record_ids"] = created_ids
+            preview["created_count"] = len(created_ids)
+            preview["missing_count"] = max(0, remaining - len(created_ids))
+            preview["retry_requires_reconciliation"] = True
+            return {
+                "processed": bool(created_ids),
+                "partial_failure": True,
+                "reason": "candidate_create_failed",
+                "error": str(exc),
+                **preview,
+            }
         if created:
             created_ids.append(created[0]["id"])
 
