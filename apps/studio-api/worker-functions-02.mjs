@@ -1,3 +1,4 @@
+import { ideaProducerDirection, mergeIdeaProducerDirection } from "./idea-producer-direction.mjs";
 import { scriptedShortPublishableTitle } from "./scripted-short-title.mjs";
 import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
 import { parseScriptedShortAssetPolicy, libraryAssetSatisfiesPolicy, recoverScriptedShortAssets, validateScriptedShortAssets } from "./scripted-short-asset-policy.mjs";
@@ -3161,7 +3162,8 @@ export function productionRequestDefaultsFromIdea(idea) {
     script_mode: "AI decides",
     requested_script: "",
     primary_location: suggestPrimaryLocationFromIdea(idea).name || "",
-    production_notes: "",
+    // Carry Idea creative direction into Production without claiming exact media.
+    production_notes: ideaProducerDirection(f(idea, "Idea_Summary")),
   };
 }
 /*__STUDIO_WORKER_END:productionRequestDefaultsFromIdea__*/
@@ -3334,6 +3336,9 @@ export async function createDraftForIdea(env, idea, authorization, input = null,
     }
   }
   const cleaned = input || await cleanProductionRequestPayload(defaults, env);
+  // An explicit draft payload may override defaults; never let that silently
+  // drop the Idea's original human creative direction.
+  cleaned.production_notes = mergeIdeaProducerDirection(cleaned.production_notes, f(idea, "Idea_Summary"));
   if (!String(cleaned.primary_location || "").trim() && defaults.primary_location) {
     cleaned.primary_location = defaults.primary_location;
   }

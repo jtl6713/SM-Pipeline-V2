@@ -917,7 +917,7 @@
     }
     if (card.kind === "output" && (canReviewActions(card, { pile, candidate }) || lane === "needs_eyes")) {
       actions.push(`<button type="button" class="primary-button" data-factory-approve="${esc(card.id)}">Approve</button>`);
-      actions.push(`<button type="button" class="secondary-button" data-factory-send-back="${esc(card.id)}">Send back</button>`);
+      actions.push(`<button type="button" class="secondary-button" data-factory-send-back="${esc(card.id)}">Request Changes</button>`);
     }
     if (canDelete(card, { candidate })) {
       actions.push(`<button type="button" class="secondary-button factory-delete" data-factory-delete="${esc(card.id)}">Delete</button>`);
@@ -1173,10 +1173,10 @@
     const intro = $("factoryFeedbackIntro");
     const hints = document.querySelector("#factoryFeedbackHintsText");
     if (intro) intro.textContent = auto
-      ? "Tell the Producer what needs changing. Explicit caption or voiceover replacements can be queued automatically; media and editing requests need a verified production plan."
+      ? "Tell the Producer what to change in everyday language. Precise caption, narration, duration and uniquely identified photo/clip instructions can restart production automatically. Other creative requests are saved for guided editing."
       : "Describe exactly what needs to change. Studio saves these review notes with the linked Production Request.";
     if (hints) hints.textContent = auto
-      ? "Automatic now: 'Set the caption to: …' or 'Replace the voiceover script with: …'. Other requests are saved for manual review, never falsely marked produced."
+      ? "Examples: Please make it 20 seconds. · Add the photo named Chicago River Night. · Replace narration with: Welcome to Chicago. Unresolved photos/clips stay on hold for selection."
       : "This send-back opens Production for manual editing and approval.";
     if (error) { error.hidden = true; error.textContent = ""; }
     textarea.value = "";
@@ -1396,15 +1396,33 @@
           setStatus("Send back failed: card not found in desk payload.", true);
           return;
         }
+        // A content revision changes the shared render; the individual-row
+        // review button must invoke the same durable Producer contract as
+        // the grouped Request Changes action whenever a linked PR exists.
+        const requestId = String(card.production_request_id || "").trim();
+        const siblingCards = (state.desk?.lanes?.needs_eyes || [])
+          .filter((item) => contentGroupKey(item) === contentGroupKey(card));
+        const ready = readyContentCards({ cards: siblingCards });
+        const producerAvailable = /^rec[A-Za-z0-9]+$/.test(requestId) && ready.length > 0;
         openFactoryFeedback({
           title: card.title || cardLabel(card),
-          scope: [card.platform, card.studio_output_type, "Selected output only"].filter(Boolean).join(" · "),
-          payload: {
-            action: "send_back",
-            id: card.id,
-            kind: card.kind || "output",
-            production_request_id: card.production_request_id || null,
-          },
+          scope: producerAvailable
+            ? `Entire content package · ${ready.length} ready output${ready.length === 1 ? "" : "s"}`
+            : [card.platform, card.studio_output_type, "Selected output only"].filter(Boolean).join(" · "),
+          payload: producerAvailable
+            ? {
+                action: "request_changes_content",
+                id: card.id,
+                kind: "output",
+                production_request_id: requestId,
+                output_ids: ready.map((item) => item.id),
+              }
+            : {
+                action: "send_back",
+                id: card.id,
+                kind: card.kind || "output",
+                production_request_id: card.production_request_id || null,
+              },
         });
       });
     });
