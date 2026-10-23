@@ -34,10 +34,10 @@ function Invoke-ExactStage([string]$stage,[string]$number,[string]$recordId) {
       needs_finalize=$run.needs_finalize; still_processing=$run.still_processing
       needs_email=$run.needs_email; terminal=$run.terminal
     }
-    Write-Output ($safe | ConvertTo-Json -Compress)
+    Write-Host ($safe | ConvertTo-Json -Compress)
     return $response.status -in @('ok','skipped','deferred')
   } catch {
-    Write-Output ("PROVIDER_STAGE_ERROR output=" + $number + " stage=" + $stage + " exception=" + $_.Exception.GetType().Name)
+    Write-Host ("PROVIDER_STAGE_ERROR output=" + $number + " stage=" + $stage + " exception=" + $_.Exception.GetType().Name)
     return $false
   }
 }
