@@ -1,0 +1,85 @@
+name: QA1050 One-time Chicago IG Parent Release
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/qa1050-ig-publish-20261023.yml'
+      - 'deploy/local-services/qa1050-ig-publish-once-20261023.ps1'
+  schedule:
+    - cron: '35 10 23 10 *'
+    - cron: '10 11 23 10 *'
+permissions:
+  contents: read
+concurrency:
+  group: qa1050-ig-published-parent-release
+  cancel-in-progress: false
+jobs:
+  safety-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Parse exact-window PowerShell and verify provider stage allowlist
+        shell: pwsh
+        run: |
+          $file='deploy/local-services/qa1050-ig-publish-once-20261023.ps1'
+          $tokens=$null; $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($file,[ref]$tokens,[ref]$errors)
+          if($errors.Count -gt 0){$errors|Out-String|Write-Error;exit 1}
+          $source=Get-Content -LiteralPath $file -Raw
+          foreach($term in @('rec8okeb4bPKvt6FP','recsq0S1FeqDP0pZb','17907026859575604','17907047976575604','2026-10-23','Central Standard Time',"Run-Stage 'ap4c'","Run-Stage 'ap5c'")) {
+            if(-not $source.Contains($term)){ throw "Missing required guard: $term" }
+          }
+          if($source -match "Run-Stage '(ap0c|ap1c|ap2c|ap3c|ap3p|yt0|ttd0)'"){throw 'New media/container stages are not allowed in publishing step'}
+          if($source.Length -gt 7800){throw 'Ops shell length limit would be exceeded'}
+  release:
+    if: github.event_name == 'schedule'
+    needs: safety-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+      THE_SCHEDULE: ${{ github.event.schedule }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run only authorized once-per-output Meta parent publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          now_utc="$(date -u +%Y-%m-%d)"
+          test "$now_utc" = "2026-10-23"
+          case "$THE_SCHEDULE" in
+            "35 10 23 10 *") target=1023 ;;
+            "10 11 23 10 *") target=1076 ;;
+            *) echo "Unexpected schedule"; exit 7 ;;
+          esac
+          BASE='https://ops.chicagoshining.com'
+          token=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            test -n "$candidate" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null 2>&1; then token="$candidate"; break; fi
+          done
+          test -n "$token"
+          jq -Rs --arg t "$target" '{command:("$TargetId = \u0027"+$t+"\u0027\n"+.),confirm:true}' < deploy/local-services/qa1050-ig-publish-once-20261023.ps1 > /tmp/publish.json
+          code=$(curl -sS --max-time 30 -o /tmp/submit.json -w '%{http_code}' -X POST "$BASE/api/shell" \
+            -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary @/tmp/publish.json || true)
+          test "$code" = 202
+          jq -e '.ok==true and .job.action=="shell" and .job.id!=null' /tmp/submit.json >/dev/null
+          job=$(jq -r '.job.id' /tmp/submit.json)
+          echo "Submitted guarded one-time Meta parent publication for #$target."
+          for i in $(seq 1 135); do
+            code=$(curl -sS --max-time 20 -o /tmp/job.json -w '%{http_code}' -H "Authorization: Bearer $token" "$BASE/api/jobs/$job" || true)
+            if [[ "$code" == "200" ]]; then
+              status=$(jq -r '.job.status // empty' /tmp/job.json)
+              if [[ "$status" == "ok" || "$status" == "failed" ]]; then
+                jq -r '.job.log // ""' /tmp/job.json | grep -E '^QA1050|QA1050_PUBLISHED_CONFIRMED|QA1050_SAFE_HOLD|QA1050_HOLD_RESTORE|Unconfirmed Meta|Preflight did not|Not in exact authorized' || true
+                jq -c '{ok,job:{status:.job.status,exitCode:.job.exitCode}}' /tmp/job.json
+                test "$status" = ok
+                exit 0
+              fi
+            fi
+            sleep 2
+          done
+          echo "Ops did not report publication/hold result"; exit 9
