@@ -55,6 +55,6 @@ test("Accept persists suggested headline, not truncated prompt; original instruc
   assert.doesNotMatch(accept, /const title = prompt\.slice\(0, 160\)/);
   assert.match(accept, /Candidate_Title: title/);
   assert.match(accept, /Requested_Title: title/);
-  assert.match(accept, /Idea_Summary: prompt\.slice\(0, 2000\)/);
+  assert.match(accept, /Idea_Summary: creativeBrief/);
   assert.match(propose, /suggested_title: scriptedShortPublishableTitle\(prompt, timeline,/);
 });
