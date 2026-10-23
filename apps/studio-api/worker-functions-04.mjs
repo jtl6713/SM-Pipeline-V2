@@ -621,6 +621,7 @@ import {
   ideaLibraryIntakeDate,
   ideaLibraryIsEligibleImage,
   item4ProductionProfileRecord,
+  ideaLibraryRejectReason,
   attachItem4LibraryAssetIds,
   studioScheduleMs,
   studioOccupiedRowMatchesProfile,
@@ -10805,7 +10806,7 @@ export async function factorySendBackOutput(env, id, actor, note, requestedProdu
 }
 /*__STUDIO_WORKER_END:factorySendBackOutput__*/
 
-export async function factorySendBackContent(env, productionRequestId, outputIds, actor, note, producer = null) {
+export async function factorySendBackContent(env, productionRequestId, outputIds, actor, note, producer = null, authorization = null) {
   const requestId = String(productionRequestId || "").trim();
   if (!/^rec[A-Za-z0-9]+$/.test(requestId)) throw new HttpError(400, "Production Request is required");
   // Serialize durable acceptance for this Production Request. The same lease
@@ -10861,14 +10862,39 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
   }
 
   if (producer?.automatic) {
-    // No external asset references are inferred for text-only revisions. Resolve
-    // the existing profile from the actual output before validating the plan.
-    const profile = await item4ProductionProfileRecord(env, targets[0]);
-    if (!profile?.id) throw new HttpError(409, "Producer could not verify the output's content profile");
+    const profile = await item4ProductionProfileRecord(env, requestRecord);
+    if (!profile?.id) throw new HttpError(409, "Producer could not verify the Production Request's content profile");
+    const mediaIds = Array.isArray(producer.media_asset_ids) ? producer.media_asset_ids : [];
+    if (mediaIds.length > 3) throw new HttpError(409, "Producer accepts up to three exact library media IDs per revision");
+    const verifiedAssets = [];
+    const existingMedia = new Set(item4AssetManifest(requestRecord)
+      .map(asset => String(asset?.media_asset_record_id || "").trim()).filter(Boolean));
+    for (const mediaId of mediaIds) {
+      if (!/^rec[A-Za-z0-9]{14}$/.test(mediaId) || existingMedia.has(mediaId)) {
+        throw new HttpError(409, "Producer media reference is invalid or already part of this content");
+      }
+      const media = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, mediaId);
+      const owners = arrayOrEmpty(f(media, "Content_Profile")).map(x => String(x || ""));
+      if (owners.length !== 1 || owners[0] !== profile.id) {
+        throw new HttpError(409, "Producer media must belong to this exact Shining Cities profile");
+      }
+      const mime = String(f(media, "MIME_Type") || "").toLowerCase();
+      const kind = String(f(media, "Media_Class") || "").toLowerCase();
+      const isVideo = kind === "video" || mime.startsWith("video/");
+      if (isVideo && !producer.changes.includes("add_clip")
+        || !isVideo && !producer.changes.includes("add_photos")) {
+        throw new HttpError(409, "Producer media type does not match requested photo/clip change");
+      }
+      const reject = ideaLibraryRejectReason(media, { allowVideo: isVideo });
+      if (reject || !googleDriveFileId(media)) {
+        throw new HttpError(409, reject || "Producer media requires an authoritative Google Drive master");
+      }
+      verifiedAssets.push({ id: mediaId, profile_id: profile.id });
+    }
     const validated = validateProducerPlan({
       original_prompt: note, profile_id: profile.id,
-      changes: producer.changes, required_asset_ids: [], excluded_asset_ids: [],
-    }, []);
+      changes: producer.changes, required_asset_ids: mediaIds, excluded_asset_ids: [],
+    }, verifiedAssets);
     if (!validated.valid) throw new HttpError(409, "Producer Plan validation failed");
     producer = { ...producer, execution_plan: planSelectiveRework(validated) };
     // A metadata-only revision reuses finished media. Incomplete sibling
@@ -10930,6 +10956,7 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
           job_id: revisionId,
           producer_changes: producer.changes,
           producer_stages: producer.execution_plan?.stages || [],
+          producer_media_asset_ids: producer.media_asset_ids || [],
           previous_outputs: targets.map((row) => ({
             id: row.id,
             output_status: String(f(row, "Output_Status") || ""),
@@ -10954,6 +10981,40 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
       typecast: true,
     }),
   });
+
+  // Real media modifications use the same authenticated library attachment
+  // and plan generation routes as the Production editor. This is deliberately
+  // after the authoritative Do_Not_Publish hold and before cron kickoff.
+  if (revisionId && producer?.media_asset_ids?.length) {
+    if (!authorization) throw new HttpError(403, "Media revision requires an authenticated Factory reviewer");
+    const attached = await attachItem4LibraryAssetIds(
+      env, requestId, producer.media_asset_ids, authorization,
+      { allow_video: producer.allow_video === true },
+    );
+    const added = await attached.json().catch(() => ({}));
+    if (!attached.ok || Number(added.attached || 0) !== producer.media_asset_ids.length) {
+      throw new HttpError(409, added?.message || "Requested media was not attached completely");
+    }
+    const oldPlan = item4ParseJson(f(requestRecord, "Studio_Output_Plan_JSON"), {});
+    const planItems = Array.isArray(oldPlan?.items) ? oldPlan.items : [];
+    if (!planItems.length) throw new HttpError(409, "No existing platform plan to preserve for this revision");
+    const platforms = [...new Set(planItems.map(item => String(item.platform || "")).filter(Boolean))];
+    const overrides = Object.fromEntries(planItems
+      .filter(item => !item.companion && !/story/i.test(String(item.output_type || "")))
+      .map(item => [item.platform, item.output_type]));
+    const extras = planItems.filter(item => item.companion || /story/i.test(String(item.output_type || "")))
+      .map(item => `${item.platform}::${item.output_type}`);
+    const url = new URL(`https://studio.chicagoshining.com/api/production-requests/${requestId}/plan`);
+    const planned = await buildItem4OutputPlan(new Request(url, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ platforms, overrides, extras, package: oldPlan?.package_id || "" }),
+    }), env, url, authorization);
+    const result = await planned.json().catch(() => ({}));
+    if (!planned.ok || result?.plan?.status === "Needs Review"
+       || result?.production_request?.studio_output_plan_status === "Needs Review") {
+      throw new HttpError(409, result?.message || "Producer media plan needs human review");
+    }
+  }
 
   return {
     production_request_id: requestId,
@@ -11416,6 +11477,7 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
         actor,
         note,
         producer,
+        authorization,
       );
       // Serialize submissions by authoritative Production Request identity.
       // Two browser retries must never fork distinct Producer jobs.
