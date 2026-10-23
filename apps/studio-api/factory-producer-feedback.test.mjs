@@ -24,3 +24,16 @@ test("do not silently accept missing media, timeline requests, or ambiguous dire
    assert.equal(interpret(note).automatic, false, note);
  }
 });
+
+test("exact whole-video timing changes are actionable and bounded", () => {
+ const result = interpret("Set video duration to: 24 seconds");
+ assert.equal(result.automatic, true);
+ assert.equal(result.fields.Video_Duration_Seconds, 24);
+ assert.deepEqual(result.changes, ["adjust_timing"]);
+ const withNarration = interpret("Make the video 30 seconds long\\nReplace narration with: Hello again.");
+ assert.equal(withNarration.automatic, true);
+ assert.deepEqual(withNarration.changes, ["adjust_timing", "rewrite_narration"]);
+ for (const text of ["Set video duration to 4 seconds", "Set video duration to 601 seconds", "Slow down transitions", "Use 20 seconds of new video"]) {
+  assert.equal(interpret(text).automatic, false, text);
+ }
+});
