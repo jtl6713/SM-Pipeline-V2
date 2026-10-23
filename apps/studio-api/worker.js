@@ -698,6 +698,7 @@ import {
   getStudioOperationsQueue,
   getFactoryDesk,
   mutateFactoryDesk,
+  factoryResumeProducerRevisions,
   pauseStudioOperationsQueueItem,
   reorderStudioOperationsRenderQueue,
   prepareIdeaToReview,
@@ -2645,6 +2646,13 @@ export default {
         await studioResumeScheduleRegenJobs(env, ctx);
       } catch (error) {
         console.warn("studio schedule-regen resume failed", error);
+      }
+      // Bound Producer recovery to three authoritative draft requests per tick.
+      // Do not depend on Factory remaining open after a feedback submission.
+      try {
+        await factoryResumeProducerRevisions(env, ctx);
+      } catch (error) {
+        console.warn("Factory Producer revision recovery failed", error);
       }
       try {
         await resumeStaleStudioProductionJobs(env);
@@ -5958,13 +5966,14 @@ let studioAiApiPreferenceCache = { preferred: "OpenAI", failoverEnabled: true, a
 /*__STUDIO_WORKER_EXTRACT:getFactoryDesk__*/
 /*__STUDIO_WORKER_EXTRACT:factoryDeskRefreshPayload__*/
 /*__STUDIO_WORKER_EXTRACT:factoryApproveOutput__*/
-// Factory revision feedback stays human-readable in Production_Notes and
-// machine-parsable for a future opt-in revision agent. It is never executed here.
+// Factory feedback remains auditable in Production_Notes; explicitly supported
+// text revisions can be queued through the existing guarded production path.
 /*__STUDIO_WORKER_EXTRACT:factoryFeedbackBlock__*/
 /*__STUDIO_WORKER_EXTRACT:factoryAppendFeedback__*/
 /*__STUDIO_WORKER_EXTRACT:factoryLatestReviewFeedback__*/
 /*__STUDIO_WORKER_EXTRACT:factorySendBackOutput__*/
 /*__STUDIO_WORKER_EXTRACT:factorySendBackContent__*/
+/*__STUDIO_WORKER_EXTRACT:factoryResumeProducerRevisions__*/
 /*__STUDIO_WORKER_EXTRACT:studioAtomicVacateSkippedOutput__*/
 /*__STUDIO_WORKER_EXTRACT:factoryDeleteDeskItem__*/
 /*__STUDIO_WORKER_EXTRACT:mutateFactoryDesk__*/
