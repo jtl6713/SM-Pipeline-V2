@@ -1,0 +1,50 @@
+name: Reconcile global idea target branch with live main (one-shot)
+on:
+  push:
+    branches: [feature/global-idea-target-admin-20261023]
+    paths: ['.github/workflows/global-idea-sync-main-20261023.yml']
+permissions:
+  contents: write
+concurrency:
+  group: global-idea-sync-main-20261023
+  cancel-in-progress: false
+jobs:
+  reconcile:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2' && github.ref == 'refs/heads/feature/global-idea-target-admin-20261023'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Merge latest production main, report conflicts without overwriting code
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin main
+          if git merge-base --is-ancestor origin/main HEAD; then
+            echo 'MAIN_ALREADY_CONTAINED'
+          else
+            git merge --no-commit --no-ff origin/main || true
+          fi
+          conflicts="$(git diff --name-only --diff-filter=U)"
+          if [[ -n "$conflicts" ]]; then
+            echo 'CONFLICT_FILES_BEGIN'
+            printf '%s\n' "$conflicts"
+            echo 'CONFLICT_FILES_END'
+            while IFS= read -r file; do
+              echo "CONFLICT_DETAIL $file"
+              grep -n -C 6 '^<<<<<<<\|^=======\|^>>>>>>>' "$file" | head -180 || true
+            done <<< "$conflicts"
+            echo 'REFUSING_UNSAFE_MERGE'
+            exit 1
+          fi
+          # Remove the one-time maintenance workflow from the merge commit.
+          rm -f .github/workflows/global-idea-sync-main-20261023.yml
+          git add -A
+          git commit -m 'merge: reconcile Conversational Producer and global idea setting; retire sync workflow'
+          git push origin HEAD:refs/heads/feature/global-idea-target-admin-20261023
+          echo 'GLOBAL_IDEA_MAIN_RECONCILED'
