@@ -42,15 +42,15 @@ jobs:
             }
             if (p==='global-idea-target.test.mjs') {
               next+=`
-test("native Operations tab navigator accepts Global Admin and the #global deep link", () => {
-  const app = fs.readFileSync(path.join(here,"assets/app-item4-1008.js"),"utf8");
-  assert.match(app, /const OPS_CONTROL_TABS = \\[[^\\]]*"global"/);
-  assert.match(app, /if \\(OPS_CONTROL_TABS\\.includes\\(raw\\)\\)/);
-  assert.match(app, /if \\(OPS_CONTROL_TABS\\.includes\\(tab\\)\\) operationsControlTab = tab/);
-  assert.match(html, /data-ops-tab="global"/);
-  assert.match(html, /data-ops-tab-panel="global"/);
-});
-`;
+          test("native Operations tab navigator accepts Global Admin and the #global deep link", () => {
+            const app = fs.readFileSync(path.join(here,"assets/app-item4-1008.js"),"utf8");
+            assert.match(app, /const OPS_CONTROL_TABS = \\[[^\\]]*"global"/);
+            assert.match(app, /if \\(OPS_CONTROL_TABS\\.includes\\(raw\\)\\)/);
+            assert.match(app, /if \\(OPS_CONTROL_TABS\\.includes\\(tab\\)\\) operationsControlTab = tab/);
+            assert.match(html, /data-ops-tab="global"/);
+            assert.match(html, /data-ops-tab-panel="global"/);
+          });
+          `;
             }
             if(next!==old){fs.writeFileSync(file,next);changed.push(p);}
           }
