@@ -10,8 +10,8 @@ test("Factory Producer submission holds request-level lock over the complete dur
   // Only the inner factorySendBackContent transaction owns this lease; the
   // action dispatch must never try to reacquire it with the same request id.
   const entry = worker.slice(worker.indexOf("export async function mutateFactoryDesk("));
-  assert.match(worker, /return withOutputApprovalLock\\(env\\.STUDIO_MEDIA, requestId, async/);
-  assert.doesNotMatch(entry, /await withOutputApprovalLock\\(\\s*env\\.STUDIO_MEDIA, String\\(payload\\?\\.production_request_id/);
+  assert.match(worker, /return withOutputApprovalLock\(env\.STUDIO_MEDIA, requestId, async/);
+  assert.doesNotMatch(entry, /await withOutputApprovalLock\(\s*env\.STUDIO_MEDIA, String\(payload\?\.production_request_id/);
   assert.match(worker, /Request_Status: "Draft"/);
   assert.match(worker, /Studio_Production_Job_JSON: revisionId \? JSON\.stringify\(/);
 });
@@ -19,7 +19,7 @@ test("Factory Producer submission holds request-level lock over the complete dur
 test("Replay prevention covers pending revisions and does not mistake completed work for an in-flight job", () => {
   const fragment = worker.slice(worker.indexOf("const priorFeedback = factoryLatestReviewFeedback"), worker.indexOf("const stamp = new Date().toISOString();", worker.indexOf("const priorFeedback = factoryLatestReviewFeedback")));
   assert.match(fragment, /state=pending/);
-  assert.ok(!fragment.includes('&& /\\[factory-producer-revision id=/.test'), "completed revisions must not trigger an old broad replay match");
+  assert.ok(!fragment.includes('&& /\[factory-producer-revision id=/.test'), "completed revisions must not trigger an old broad replay match");
 });
 
 test("Cron can resume persisted Factory revisions and runner kickoff occurs after persistence", () => {
