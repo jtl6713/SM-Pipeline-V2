@@ -3162,7 +3162,7 @@ export function productionRequestDefaultsFromIdea(idea) {
     script_mode: "AI decides",
     requested_script: "",
     primary_location: suggestPrimaryLocationFromIdea(idea).name || "",
-    // Preserve the operator\u0027s free-form intent from Ideas through to the\n    // authoritative Production Request. This is guidance, not an exact script.\n    production_notes: ideaProducerDirection(f(idea, "Idea_Summary")),
+    // Carry Idea creative direction into Production without claiming exact media.\n    production_notes: ideaProducerDirection(f(idea, "Idea_Summary")),
   };
 }
 /*__STUDIO_WORKER_END:productionRequestDefaultsFromIdea__*/
