@@ -11032,7 +11032,7 @@ export async function factoryResumeProducerRevisions(env, ctx = null) {
   const rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
     limit: 3,
     fields: ["Production_Notes", "Request_Status", "Idea_Candidate", "Promoted_Content_Item"],
-    filterFormula: 'AND({Request_Status}="Draft",FIND("[factory-producer-revision id=",{Production_Notes})>0)',
+    filterFormula: 'AND({Request_Status}="Draft",FIND("[factory-producer-revision id=",{Production_Notes})>0,FIND("state=pending]",{Production_Notes})>0)',
     sortField: "Updated_At",
     sortDirection: "asc",
   });
@@ -11091,7 +11091,7 @@ export async function factoryVerifyProducerRevisions(env) {
   const rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
     limit: 3,
     fields: ["Production_Notes", "Request_Status", "Studio_Production_Job_JSON", "Promoted_Content_Item", "Requested_Script"],
-    filterFormula: 'AND({Request_Status}="Promoted",FIND("[factory-producer-revision id=",{Production_Notes})>0)',
+    filterFormula: 'AND({Request_Status}="Promoted",FIND("[factory-producer-revision id=",{Production_Notes})>0,FIND("state=pending]",{Production_Notes})>0)',
     sortField: "Updated_At",
     sortDirection: "asc",
   });
