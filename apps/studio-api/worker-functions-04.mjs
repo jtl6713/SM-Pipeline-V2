@@ -1,3 +1,4 @@
+import { validateProducerPlan, planSelectiveRework } from "./conversational-producer-plan.mjs";
 import { interpretFactoryProducerFeedback } from "./factory-producer-feedback.mjs";
 import { summarizeAutonomousVerification } from "./autonomous-verification-recovery.mjs";
 import { FACEBOOK_PENDING_FINALIZE_FORMULA, fb3FinalizeEligible, selectFb3FinalizeBatch } from "./facebook-photo-finalize-priority.mjs";
@@ -10832,6 +10833,18 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
     );
   }
 
+  if (producer?.automatic) {
+    // No external asset references are inferred for text-only revisions. Resolve
+    // the existing profile from the actual output before validating the plan.
+    const profile = await item4ProductionProfileRecord(env, targets[0]);
+    if (!profile?.id) throw new HttpError(409, "Producer could not verify the output's content profile");
+    const validated = validateProducerPlan({
+      original_prompt: note, profile_id: profile.id,
+      changes: producer.changes, required_asset_ids: [], excluded_asset_ids: [],
+    }, []);
+    if (!validated.valid) throw new HttpError(409, "Producer Plan validation failed");
+    producer = { ...producer, execution_plan: planSelectiveRework(validated) };
+  }
   const priorFeedback = factoryLatestReviewFeedback(f(requestRecord, "Production_Notes"));
   // Duplicate POSTs must not create another render after the request has entered
   // the persisted revision lifecycle. This is an exact replay check, not a
@@ -10877,6 +10890,13 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
         Studio_Production_Job_JSON: revisionId ? JSON.stringify({
           schema_version: "studio.production-job.1",
           job_id: revisionId,
+          producer_changes: producer.changes,
+          producer_stages: producer.execution_plan?.stages || [],
+          previous_outputs: targets.map((row) => ({
+            id: row.id,
+            output_status: String(f(row, "Output_Status") || ""),
+            render_status: String(f(row, "Render_Status") || ""),
+          })),
           route: null,
           step: "themes",
           attempt: 1,
@@ -10919,6 +10939,65 @@ async function factoryAdvanceProducerRevision(env, requestId, revisionId, ctx = 
     return { skipped: "superseded_or_complete" };
   }
   if (!productionRequestRevisionOpen(requestRecord)) return { skipped: "revision_closed" };
+  let job = null;
+  try { job = JSON.parse(String(f(requestRecord, "Studio_Production_Job_JSON") || "")); } catch {}
+  if (job?.job_id !== revisionId) return { skipped: "stale_revision_job" };
+  if (Array.isArray(job.producer_changes) && job.producer_changes.length === 1
+      && job.producer_changes[0] === "metadata_only") {
+    const caption = String(f(requestRecord, "Requested_Caption") || "").trim();
+    const contentId = studioFirstLinkedId(f(requestRecord, "Promoted_Content_Item"));
+    if (!caption || !contentId) throw new Error("Metadata revision is missing its caption or promoted content");
+    const previous = Array.isArray(job.previous_outputs) ? job.previous_outputs : [];
+    if (!previous.length || previous.some(row => row.output_status !== "Ready for Review")) {
+      throw new Error("Metadata-only revision requires fully reviewed source outputs");
+    }
+    // Stage metadata first, without altering media or declaring outputs ready.
+    await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID, previous.map(row => ({
+      id: row.id, fields: { Output_Caption: caption },
+    })), { typecast: true });
+    await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId, {
+      method: "PATCH", body: JSON.stringify({ fields: { Caption: caption }, typecast: true }),
+    });
+    for (const row of previous) {
+      const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
+      if (String(f(updated, "Output_Caption") || "").trim() !== caption
+        || String(f(updated, "Publish_Status") || "") !== "Not Ready"
+        || f(updated, "Do_Not_Publish") !== true) {
+        throw new Error("Independent metadata Quality Agent check failed");
+      }
+    }
+    // The deterministic QA gate passed. Restore the original finished media,
+    // keep publication held, and demand a new explicit human approval.
+    await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID, previous.map(row => ({
+      id: row.id,
+      fields: {
+        Output_Status: "Ready for Review",
+        Review_Status: "Pending Review",
+        Render_Status: row.render_status || "Complete",
+        Publish_Status: "Not Ready",
+        Do_Not_Publish: true,
+        Review_Decision_At: null,
+      },
+    })), { typecast: true });
+    const completeNotes = notes.replace(
+      `[factory-producer-revision id=${revisionId} state=pending]`,
+      `[factory-producer-revision id=${revisionId} state=completed]`,
+    );
+    await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: {
+        Request_Status: "Promoted",
+        Production_Notes: stripFactoryRevisionNote(completeNotes),
+        Studio_Production_Job_JSON: JSON.stringify({
+          ...job, step: "done", detail: "Metadata validated; awaiting human review",
+          percent: 100, updated_at: new Date().toISOString(),
+          producer_quality: { passed: true, checks: ["caption", "publish_hold", "media_preserved"] },
+        }),
+        Updated_At: new Date().toISOString(),
+      }, typecast: true }),
+    });
+    return { queued: false, completed: true, request_id: requestId, revision_id: revisionId };
+  }
   const ideaId = studioFirstLinkedId(f(requestRecord, "Idea_Candidate"));
   if (!ideaId) throw new Error("Factory Producer revision has no linked Idea Candidate");
   const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId);
