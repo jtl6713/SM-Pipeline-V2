@@ -6,6 +6,8 @@
 const changeStages = Object.freeze({
   add_photos: ["media_selection", "timeline", "render", "quality"],
   replace_media: ["media_selection", "timeline", "render", "quality"],
+  reorder_media: ["media_selection", "timeline", "render", "quality"],
+  trim_clip: ["timeline", "render", "quality"],
   add_clip: ["media_selection", "timeline", "render", "quality"],
   adjust_timing: ["timeline", "audio_sync", "render", "quality"],
   rewrite_narration: ["script", "voiceover", "audio_sync", "timeline", "render", "quality"],

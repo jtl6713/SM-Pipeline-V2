@@ -1,3 +1,4 @@
+import { parseGroundedMediaDirective } from "./factory-producer-media-edits.mjs";
 /**
  * Conservative conversational Factory bridge. No LLM guesses and no silent
  * media substitution: only explicit exact-text changes can auto-execute.
@@ -14,7 +15,14 @@ export function interpretFactoryProducerFeedback(note) {
   const lines = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
   const fields = {};
   const directives = [];
+  const mediaEdits = [];
   for (const line of lines) {
+    const mediaEdit = parseGroundedMediaDirective(line);
+    if (mediaEdit) {
+      mediaEdits.push(mediaEdit);
+      directives.push(mediaEdit.operation === "reorder" ? "reorder_media" : "trim_clip");
+      continue;
+    }
     let match = line.match(/^(?:set|change|replace|update)\s+(?:the\s+)?(?:post\s+)?caption\s+(?:to|with)\s*:\s*(.+)$/i);
     if (match) {
       fields.Caption_Mode = "Force exact";
@@ -46,5 +54,5 @@ export function interpretFactoryProducerFeedback(note) {
   }
   if (!directives.length || Object.values(fields).some(value => !value))
     return { automatic: false, reason: "Provide explicit replacement text after a colon." };
-  return { automatic: true, fields, changes: [...new Set(directives)] };
+  return { automatic: true, fields, media_edits: mediaEdits, changes: [...new Set(directives)] };
 }
