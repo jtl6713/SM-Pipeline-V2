@@ -78,6 +78,28 @@
     padding: 12px;
   }
 
+  /* Keep the thumbnail inside its 60px grid track; the base 72px
+     preview otherwise intrudes into the adjacent photo title. */
+  #productionRequestWorkspace .production-render-frame-preview {
+    width: 60px;
+    height: 60px;
+    max-width: 100%;
+  }
+
+  #productionRequestWorkspace .production-render-frame-meta {
+    min-width: 0;
+  }
+
+  #productionRequestWorkspace .production-render-frame-meta strong {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
+
   #productionRequestWorkspace .production-render-frame-card .form-field {
     min-width: 0;
   }
@@ -142,6 +164,17 @@
   #productionRequestWorkspace .production-render-frame-card {
     grid-template-columns: 56px minmax(0, 1fr);
     gap: 10px;
+  }
+
+  #productionRequestWorkspace .production-render-frame-preview {
+    width: 56px;
+    height: 56px;
+    max-width: 100%;
+  }
+
+  #productionRequestWorkspace .production-render-frame-meta strong {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   #productionRequestWorkspace .production-render-frame-card .form-field,
