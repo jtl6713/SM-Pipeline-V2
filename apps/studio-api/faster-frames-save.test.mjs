@@ -123,7 +123,8 @@ test("fractional video duration is stored as a whole-number cap and save errors 
     worker.indexOf("if (isProductionRequestRecordRoute) {"),
     worker.indexOf("if (isIdeaPromoteRoute) {")
   );
-  assert.match(route, /return await updateProductionRequest\(request, env, url, authorization\)/);
+  assert.match(route, /return withOutputApprovalLock/);
+  assert.match(route, /updateProductionRequest/);
   const outputs = worker.slice(
     worker.indexOf("if (isProductionRequestOutputsRoute) {"),
     worker.indexOf("if (isProductionRequestOutputRecordRoute) {")
