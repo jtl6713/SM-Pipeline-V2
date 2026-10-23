@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {readProducerThread, appendProducerThreadMessage, planConversationalSceneRevision} from "./producer-conversation.mjs";
+import {readProducerThread, appendProducerThreadMessage, planConversationalSceneRevision, preserveProducerThreadOnEdit} from "./producer-conversation.mjs";
 const plan = {scene_order: Array.from({length:6},(_,i)=>({scene:i+1,media_asset_record_id:"rec"+String(i).repeat(14)}))};
 const submit=(notes,revision,message,id="producer-msg-00000001")=>appendProducerThreadMessage(notes,{expected_revision:revision,message,message_id:id,at:"2026-10-23T00:00:00Z"},{producer_plan:plan});
 test("scene four through six daylight preserves unaffected plan, narration and required media",()=>{
@@ -54,4 +54,21 @@ test("embedded thread delimiters remain literal text and cannot truncate saved m
  const sent=submit("",0,value,"producer-msg-injection");
  assert.equal(readProducerThread(sent.notes).messages[0].content,value);
  assert.equal(sent.notes.match(/\[studio-producer-thread\]/g)?.length,1);
+});
+
+test("concurrent ordinary Production Save cannot overwrite latest Producer thread",()=>{
+ const authoritative=submit("The original Producer Plan",0,"Make scene 4 sunnier");
+ const staleFormNotes="User changed music direction yesterday";
+ const preserved=preserveProducerThreadOnEdit(authoritative.notes,staleFormNotes);
+ assert.match(preserved,/User changed music direction yesterday/);
+ assert.equal(readProducerThread(preserved).revision,1);
+ assert.equal(readProducerThread(preserved).messages[0].content,"Make scene 4 sunnier");
+ const stillOlder=submit("The original Producer Plan",0,"Older note");
+ const next=preserveProducerThreadOnEdit(authoritative.notes,stillOlder.notes);
+ assert.equal(readProducerThread(next).messages[0].content,"Make scene 4 sunnier");
+});
+test("Producer thread preservation rejects corrupt client tags and overflowing Production notes",()=>{
+ const authoritative=submit("Production",0,"Keep narration in scenes 5–6");
+ assert.throws(()=>preserveProducerThreadOnEdit(authoritative.notes,"[studio-producer-thread]bad"),/malformed/);
+ assert.throws(()=>preserveProducerThreadOnEdit(authoritative.notes,"x".repeat(9749)),/limit/);
 });
