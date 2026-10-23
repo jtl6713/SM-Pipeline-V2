@@ -2505,6 +2505,16 @@ export default {
           .catch((error) => console.warn("FB3 independent cron failed", error)));
       }
     }
+    // Recover waiting ideas between the heavy sweeps. The matcher uses the same
+    // ranked library evaluation as "Find Images Now" and persists its scan
+    // result, which advances the fair backlog queue even on a failed attempt.
+    // Keep this deliberately small: Airtable subrequest pressure previously
+    // caused 429 cooldowns when too many light-cron jobs ran together.
+    if (!cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(runWaitingIdeaPhotoMatches(env, { limit: 2 })
+        .then((result) => console.info("Light-cadence photo matching", result))
+        .catch((error) => console.warn("Light-cadence photo matching failed", error)));
+    }
     // QA-1050: half-hour read-only evidence audit, independent of Factory.
     // Never performs a Meta Graph create or releases safety holds.
     if (cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
