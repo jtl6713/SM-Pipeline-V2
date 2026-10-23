@@ -9,10 +9,10 @@ test("every new Production Request carries Idea creative direction without publi
   const defaults = worker.slice(worker.indexOf("export function productionRequestDefaultsFromIdea"),
                                 worker.indexOf("/*__STUDIO_WORKER_END:productionRequestDefaultsFromIdea__*/"));
   assert.match(defaults, /production_notes:\s*ideaProducerDirection\(f\(idea,\s*"Idea_Summary"\)\)/);
-  assert.match(worker, /import \\{ ideaProducerDirection, mergeIdeaProducerDirection \\}/);
+  assert.ok(worker.includes('import { ideaProducerDirection, mergeIdeaProducerDirection }'));
   assert.match(defaults, /^    production_notes: ideaProducerDirection/m);
-  assert.match(worker, /cleaned\\.production_notes = mergeIdeaProducerDirection\\(/);
-  assert.match(worker, /\\.\\.\\.productionRequestFields\\(cleaned, now\\)/);
+  assert.ok(worker.includes('cleaned.production_notes = mergeIdeaProducerDirection('));
+  assert.ok(worker.includes('...productionRequestFields(cleaned, now)'));
 });
 
 test("manual Idea, EZ intake and Script a Short explicitly invite conversational direction", () => {
