@@ -121,3 +121,46 @@ test("Quality gate never releases the publish hold for a stale render",async()=>
  assert.equal(outputs[0].fields.Do_Not_Publish,true);
  assert.equal(JSON.parse(request.fields.Studio_Production_Job_JSON).producer_quality.passed,false);
 });
+
+test("Named creative direction → authoritative asset IDs → revision job → fresh render verification",async()=>{
+ const {api,env,request,outputs}=harness();
+ const note="Move the original still photo to position 2";
+ const directive=interpretFactoryProducerFeedback(note);
+ assert.equal(directive.automatic,true);
+ assert.equal(directive.media_edits[0].asset_name,"original still");
+ const receipt=await api.factorySendBackContent(env,REQUEST,[OUTPUT],"staging-user",note,directive);
+ assert.equal(receipt.producer_queued,true);
+ const manifest=JSON.parse(request.fields.Studio_Master_Assets_JSON);
+ assert.deepEqual(manifest.map(x=>x.id),["video000000000001","photo000000000001"]);
+ const job=JSON.parse(request.fields.Studio_Production_Job_JSON);
+ assert.deepEqual(job.producer_changes,["reorder_media"]);
+ assert.equal(job.producer_media_expectations[0].id,"video000000000001");
+ assert.equal(outputs[0].fields.Do_Not_Publish,true);
+ request.fields.Request_Status="Promoted";
+ request.fields.Studio_Production_Job_JSON=JSON.stringify({...job,step:"done"});
+ outputs[0].fields.Output_Status="Ready for Review";
+ outputs[0].fields.Render_Status="Rendered";
+ outputs[0].fields.Final_File_URL="https://example.test/new-render.mp4";
+ outputs[0].fields.Selected_Assets_JSON=JSON.stringify({
+   production_request_record_id:REQUEST,
+   selected_clips:[
+     {source_asset_id:movie.id,media_asset_record_id:movie.media_asset_record_id},
+     {source_asset_id:photo.id,media_asset_record_id:photo.media_asset_record_id},
+   ],
+ });
+ const completed=await api.factoryVerifyProducerRevisions(env);
+ assert.equal(completed[0].quality,"passed",JSON.stringify(JSON.parse(request.fields.Studio_Production_Job_JSON).producer_quality));
+ assert.equal(outputs[0].fields.Publish_Status,"Not Ready");
+ assert.notEqual(outputs[0].fields.Review_Status,"Approved");
+});
+test("Unmatched named asset rejects before changing Airtable",async()=>{
+ const {api,env,request,outputs}=harness();
+ const old=JSON.stringify(request.fields);
+ const note="Move the missing skyline photo to position 1";
+ await assert.rejects(
+  ()=>api.factorySendBackContent(env,REQUEST,[OUTPUT],"staging-user",note,interpretFactoryProducerFeedback(note)),
+  /not uniquely resolved/
+ );
+ assert.equal(JSON.stringify(request.fields),old);
+ assert.equal(outputs[0].fields.Do_Not_Publish,false);
+});

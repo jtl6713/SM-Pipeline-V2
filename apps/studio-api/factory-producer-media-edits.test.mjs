@@ -33,3 +33,31 @@ test("rejects unresolved assets, unknown authority, invalid bounds, and photo tr
 test("rejects duplicate conflicting asset operations",()=>{
  assert.throws(()=>apply(inventory,[parse("Move asset photo001 to position 3"),parse("Move asset photo001 to position 2")]),/Multiple edits/);
 });
+
+test("natural scene descriptions resolve only uniquely attached Drive originals", () => {
+ const named = [
+   {...img("asset0001"),name:"Chicago River Skyline Sunset.JPG",order:1},
+   {...img("asset0002"),name:"Ohio Street Beach.png",order:2},
+   {...vid,name:"Navy Pier Boat Approach.mp4",order:3},
+ ];
+ const directive = parse("Put the Chicago River Skyline Sunset photo first");
+ assert.deepEqual(directive,{operation:"reorder",asset_name:"Chicago River Skyline Sunset",asset_kind:"photo",position:"first"});
+ const reordered = apply(named,[parse("Move the Ohio Street Beach photo to position 1")]);
+ assert.deepEqual(reordered.assets.map(x=>x.id),["asset0002","asset0001","vid00001"]);
+ assert.deepEqual(reordered.changed_asset_ids,["asset0002"]);
+ const trim = apply(named,[parse("Trim the Navy Pier Boat Approach clip from 1.25 to 5 seconds")]);
+ assert.equal(trim.assets[2].out_seconds,5);
+ assert.equal(trim.assets[2].in_seconds,1.25);
+ assert.equal(trim.assets[2].google_drive_file_id,vid.google_drive_file_id);
+});
+test("no name-based silent substitution or global/cross-profile library search", () => {
+ const named = [
+   {...img("asset0001"),name:"Chicago River Skyline Sunset.jpg",order:1},
+   {...img("asset0002"),name:"Chicago River Skyline Sunset.png",order:2},
+   {...vid,name:"Navy Pier Boat Approach.mp4",order:3},
+ ];
+ assert.throws(()=>apply(named,[parse("Put the Chicago River Skyline Sunset photo first")]),/ambiguous/);
+ assert.throws(()=>apply(named,[parse("Put the Navy Pier photo first")]),/not uniquely resolved/);
+ assert.throws(()=>apply(named,[parse("Put the Skyline photo first")]),/not uniquely resolved/);
+ assert.equal(parse("Add a new boat clip"),null);
+});

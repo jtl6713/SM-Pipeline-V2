@@ -6,12 +6,9 @@ import { parseGroundedMediaDirective } from "./factory-producer-media-edits.mjs"
 export function interpretFactoryProducerFeedback(note) {
   const raw = String(note || "").trim();
   if (!raw || raw.length > 3000) return { automatic: false, reason: "Review instructions are required (maximum 3000 characters)." };
-  const media = /\b(add|insert|replace|remove|swap|find|use|include|reorder|change)\b[^\n.]{0,110}\b(photo|image|picture|still|clip|shot|scene|slide|transition|video|music|track|timing|duration|pace|opening|closing)\b/i;
-  // Keep ambiguous media edits fail-closed; exact overall duration is handled
-  // below, after parsing a complete unambiguous instruction.
-  if (media.test(raw) && !/^(?:set|change|adjust)\s+(?:the\s+)?(?:video|final video|overall)\s+duration\s+(?:to|at)|^make\s+(?:the\s+)?video\s+\d{1,3}\s*(?:seconds?|secs?)\s*long/i.test(raw)) {
-    return { automatic: false, reason: "Media and timeline changes require asset-grounded revision planning." };
-  }
+  // Each instruction is parsed independently below. This allows mixed exact
+  // narration/timing directives and uniquely grounded named-asset edits without
+  // treating a generic media request as executable.
   const lines = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
   const fields = {};
   const directives = [];
@@ -50,7 +47,8 @@ export function interpretFactoryProducerFeedback(note) {
       directives.push("adjust_timing");
       continue;
     }
-    return { automatic: false, reason: "This instruction needs Producer interpretation or media selection before it can execute safely." };
+    return { automatic: false, reason:
+      "Media and creative changes need a unique attached asset name, an explicit asset ID, or guided asset selection before execution." };
   }
   if (!directives.length || Object.values(fields).some(value => !value))
     return { automatic: false, reason: "Provide explicit replacement text after a colon." };

@@ -10872,11 +10872,14 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
     if (!profile?.id) throw new HttpError(409, "Producer could not verify the output's content profile");
     let grounded = null;
     const sourceAssets = item4AssetManifest(requestRecord);
-    const requiredIds = (producer.media_edits || []).map(edit => edit.asset_id);
-    if (requiredIds.length) {
+    // Name-based instructions are resolved to unique existing IDs against this
+    // Production Request's own Drive-authoritative manifest before plan validation.
+    // Never treat a human-readable filename as an asset ID or discover globally.
+    if (Array.isArray(producer.media_edits) && producer.media_edits.length) {
       try { grounded = applyGroundedMediaEdits(sourceAssets, producer.media_edits); }
       catch (error) { throw new HttpError(409, "Producer cannot execute this media change: " + (error?.message || error)); }
     }
+    const requiredIds = grounded?.changed_asset_ids || [];
     const validated = validateProducerPlan({
       original_prompt: note, profile_id: profile.id,
       changes: producer.changes, required_asset_ids: requiredIds, excluded_asset_ids: [],
