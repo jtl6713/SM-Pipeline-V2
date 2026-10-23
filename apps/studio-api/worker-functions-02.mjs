@@ -1,4 +1,4 @@
-import { ideaProducerDirection } from "./idea-producer-direction.mjs";
+import { ideaProducerDirection, mergeIdeaProducerDirection } from "./idea-producer-direction.mjs";
 import { scriptedShortPublishableTitle } from "./scripted-short-title.mjs";
 import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
 import { parseScriptedShortAssetPolicy, libraryAssetSatisfiesPolicy, recoverScriptedShortAssets, validateScriptedShortAssets } from "./scripted-short-asset-policy.mjs";
@@ -3335,6 +3335,9 @@ export async function createDraftForIdea(env, idea, authorization, input = null,
     }
   }
   const cleaned = input || await cleanProductionRequestPayload(defaults, env);
+  // An explicit draft payload may override defaults; never let that silently
+  // drop the Idea's original human creative direction.
+  cleaned.production_notes = mergeIdeaProducerDirection(cleaned.production_notes, f(idea, "Idea_Summary"));
   if (!String(cleaned.primary_location || "").trim() && defaults.primary_location) {
     cleaned.primary_location = defaults.primary_location;
   }
