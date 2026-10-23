@@ -10871,11 +10871,16 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
     }, []);
     if (!validated.valid) throw new HttpError(409, "Producer Plan validation failed");
     producer = { ...producer, execution_plan: planSelectiveRework(validated) };
-    // A metadata-only revision reuses finished media. Incomplete sibling
-    // outputs need the full Production editor rather than a false quick pass.
-    if (producer.changes.length === 1 && producer.changes[0] === "metadata_only"
+    // Metadata and timing changes can only reuse complete verified source media.
+    // A half-produced Story must not be silently sent through the fast path.
+    if (producer.changes.some(change => ["metadata_only", "adjust_timing"].includes(change))
         && targets.some(row => String(f(row, "Output_Status") || "") !== "Ready for Review")) {
-      producer = { automatic: false, reason: "Finish the content package before a metadata-only revision." };
+      producer = { automatic: false, reason: "Finish the content package before a timing or caption revision." };
+    }
+    if (producer?.automatic && producer.changes.includes("adjust_timing")
+        && targets.some(row => String(f(row, "Render_Status") || "") !== "Rendered"
+          || !String(f(row, "Final_File_URL") || "").trim())) {
+      producer = { automatic: false, reason: "Exact duration rework requires completed video renders on all outputs." };
     }
   }
   const priorFeedback = factoryLatestReviewFeedback(f(requestRecord, "Production_Notes"));
@@ -11124,7 +11129,7 @@ export async function factoryResumeProducerRevisions(env, ctx = null) {
 export async function factoryVerifyProducerRevisions(env) {
   const rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
     limit: 3,
-    fields: ["Production_Notes", "Request_Status", "Studio_Production_Job_JSON", "Promoted_Content_Item", "Requested_Script"],
+    fields: ["Production_Notes", "Request_Status", "Studio_Production_Job_JSON", "Promoted_Content_Item", "Requested_Script", "Video_Duration_Seconds"],
     filterFormula: 'AND({Request_Status}="Promoted",FIND("[factory-producer-revision id=",{Production_Notes})>0,FIND("state=pending]",{Production_Notes})>0)',
     sortField: "Updated_At",
     sortDirection: "asc",
@@ -11139,16 +11144,25 @@ export async function factoryVerifyProducerRevisions(env) {
     if (job.job_id !== rev || !["done", "blocked", "escalated"].includes(String(job.step || ""))) continue;
     const failures = [];
     const contentId = studioFirstLinkedId(f(row, "Promoted_Content_Item"));
+    const changes = Array.isArray(job.producer_changes) ? job.producer_changes : [];
+    const requireNarration = changes.includes("rewrite_narration");
+    const requireDuration = changes.includes("adjust_timing");
     const exactScript = String(f(row, "Requested_Script") || "").trim();
+    const requestedDuration = Number(f(row, "Video_Duration_Seconds") || 0);
     if (job.step !== "done") failures.push("Runner did not complete successfully");
-    if (!contentId || !exactScript) failures.push("Missing promoted content or required narration");
+    if (!contentId) failures.push("Missing promoted content");
+    if (requireNarration && !exactScript) failures.push("Missing required exact narration");
+    if (requireDuration && (!Number.isInteger(requestedDuration) || requestedDuration < 5 || requestedDuration > 600))
+      failures.push("Invalid requested video duration");
     let outputs = [];
     if (contentId) {
       const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId);
-      if (String(f(parent, "Voiceover_Script") || "").trim() !== exactScript) {
-        failures.push("Rendered script does not match the exact requested narration");
+      if (requireNarration) {
+        if (String(f(parent, "Voiceover_Script") || "").trim() !== exactScript) {
+          failures.push("Rendered script does not match the exact requested narration");
+        }
+        if (!String(f(parent, "Voiceover_URL") || "").trim()) failures.push("Voiceover audio is missing");
       }
-      if (!String(f(parent, "Voiceover_URL") || "").trim()) failures.push("Voiceover audio is missing");
       outputs = await loadContentPlatformOutputs(env, contentId);
     }
     const targetIds = new Set((Array.isArray(job.previous_outputs) ? job.previous_outputs : []).map(x => x.id));
@@ -11161,6 +11175,12 @@ export async function factoryVerifyProducerRevisions(env) {
     }
     if (targets.some(x => String(f(x, "Publish_Status") || "") !== "Not Ready"
         || f(x, "Do_Not_Publish") !== true)) failures.push("Revision publishing hold is not intact");
+    if (requireDuration && targets.some(x => {
+      const platformOverride = Number(f(x, "Video_Duration_Seconds_Override") || 0);
+      const actual = Number(f(x, "Studio_Effective_Video_Duration_Seconds") || 0);
+      const expected = platformOverride > 0 ? platformOverride : requestedDuration;
+      return !Number.isFinite(actual) || Math.abs(actual - expected) > 0.5;
+    })) failures.push("Revised rendered video duration did not match the request");
     if (!failures.length) {
       await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID, targets.map(x => ({
         id: x.id, fields: { Do_Not_Publish: false },
@@ -11182,7 +11202,11 @@ export async function factoryVerifyProducerRevisions(env) {
           Studio_Production_Job_JSON: JSON.stringify({
             ...job, producer_quality: {
               passed: true, checked_at: new Date().toISOString(),
-              checks: ["requested_script", "generated_audio", "output_renders", "publish_hold"],
+              checks: [
+                ...(requireNarration ? ["requested_script", "generated_audio"] : []),
+                ...(requireDuration ? ["rendered_video_duration"] : []),
+                "output_renders", "publish_hold",
+              ],
             },
           }),
           Updated_At: new Date().toISOString(),
@@ -11417,13 +11441,9 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
         note,
         producer,
       );
-      // Serialize submissions by authoritative Production Request identity.
-      // Two browser retries must never fork distinct Producer jobs.
-      resultExtra = action === "request_changes_content"
-        ? await withOutputApprovalLock(
-          env.STUDIO_MEDIA, String(payload?.production_request_id || ""), submitContentRevision,
-        )
-        : await submitContentRevision();
+      // factorySendBackContent itself owns the request-level reservation lease.
+      // Acquiring it again here deadlocks every natural-language submission.
+      resultExtra = await submitContentRevision();
       if (resultExtra.producer_queued && !resultExtra.already_accepted && ctx?.waitUntil) {
         ctx.waitUntil(factoryAdvanceProducerRevision(
           env, resultExtra.production_request_id, resultExtra.producer_revision_id, ctx,
