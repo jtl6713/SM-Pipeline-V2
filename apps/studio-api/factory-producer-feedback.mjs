@@ -6,7 +6,6 @@ export function interpretFactoryProducerFeedback(note) {
   const raw = String(note || "").trim();
   if (!raw || raw.length > 3000) return { automatic: false, reason: "Review instructions are required (maximum 3000 characters)." };
   const media = /\b(add|insert|replace|remove|swap|find|use|include|reorder|change)\b[^\n.]{0,110}\b(photo|image|picture|still|clip|shot|scene|slide|transition|video|music|track|timing|duration|pace|opening|closing)\b/i;
-  if (media.test(raw)) return { automatic: false, reason: "Media and timeline changes require asset-grounded revision planning." };
   const lines = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
   const fields = {};
   const directives = [];
@@ -37,7 +36,9 @@ export function interpretFactoryProducerFeedback(note) {
       directives.push("rewrite_narration");
       continue;
     }
-    return { automatic: false, reason: "This instruction needs Producer interpretation or media selection before it can execute safely." };
+    return { automatic: false, reason: media.test(line)
+      ? "Unresolved media or timeline direction requires a grounded Producer Plan."
+      : "This instruction needs Producer interpretation before it can execute safely." };
   }
   if (!directives.length || Object.values(fields).some(value => !value))
     return { automatic: false, reason: "Provide explicit replacement text after a colon." };
