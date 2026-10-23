@@ -517,3 +517,4 @@ Deploy UI 0.6.750-mobile-headings: preserve native Pipeline table column heading
 Deploy UI 0.6.751-profile-first: profile selector visible on first paint, profiles requested before health/session checks, recoverable independent retry after timeout. Pages only.
 2026-10-23: Deploy Studio UI 0.6.752-script-a-short-plan. Script a Short now accepts a 5,000-character typed or dictated brief and shows actionable Producer Plan constraints, missing assets, exclusions, duration, narration, scene order, and target platforms before Accept.
 2026-10-23: Retry Studio UI 0.6.752-script-a-short-plan after fixing Pages browser prerequisite installation timeout (run #805); preserve existing production safeguards and verify live build identity.
+2026-10-23: Retry UI 0.6.752 with Chromium-only mobile heading smoke after run #806 showed WebKit library gaps; full regression, production preflight and live verification remain mandatory.
