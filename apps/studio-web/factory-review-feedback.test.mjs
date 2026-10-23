@@ -28,7 +28,7 @@ test("Factory Send back opens mobile review-notes dialog without changing status
   assert.match(factory, /function openFactoryFeedback/);
   assert.match(factory, /function submitFactoryFeedback/);
   assert.match(factory, /\.\.\.pending\.payload, note: notes/);
-  assert.match(factory, /action: "send_back_content"/);
+  assert.match(factory, /action: "request_changes_content"/);
   assert.match(factory, /action: "send_back"/);
   assert.match(css, /\.factory-feedback-backdrop/);
   assert.match(css, /@media\(max-width:520px\)/);
@@ -60,4 +60,19 @@ test("Returned Production item visibly advertises review notes and opens them fr
   assert.match(css, /\.production-see-review-notes\[hidden\]/);
   assert.match(css, /border:2px solid #ba3038/);
   assert.match(css, /@media\(max-width:760px\)/);
+});
+
+test("Producer content revisions return durable queue acceptance independent of Factory refresh", () => {
+  assert.match(worker, /action === "request_changes_content"/);
+  assert.match(worker, /Studio_Production_Job_JSON: revisionId \?/);
+  assert.match(worker, /producer_queued: Boolean\(revisionId\)/);
+  assert.match(worker, /factoryAdvanceProducerRevision/);
+  assert.match(worker, /factoryResumeProducerRevisions/);
+  assert.match(worker, /await factoryResumeProducerRevisions\(env, ctx\)/);
+  assert.match(worker, /factoryVerifyProducerRevisions/);
+  assert.match(worker, /await factoryVerifyProducerRevisions\(env\)/);
+  assert.match(worker, /producer_quality:\s*\{\s*passed:\s*true/);
+  assert.match(worker, /Do_Not_Publish: producerPending/);
+  assert.match(factory, /desk\?\.result\?\.producer_queued/);
+  assert.match(factory, /loadFactoryDesk\(true\)\.catch/);
 });

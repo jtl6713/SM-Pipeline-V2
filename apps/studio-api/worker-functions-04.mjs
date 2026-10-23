@@ -1,3 +1,5 @@
+import { validateProducerPlan, planSelectiveRework } from "./conversational-producer-plan.mjs";
+import { interpretFactoryProducerFeedback } from "./factory-producer-feedback.mjs";
 import { summarizeAutonomousVerification } from "./autonomous-verification-recovery.mjs";
 import { FACEBOOK_PENDING_FINALIZE_FORMULA, fb3FinalizeEligible, selectFb3FinalizeBatch } from "./facebook-photo-finalize-priority.mjs";
 import { FACEBOOK_REEL_POLL_FORMULA, facebookReelPollVideoId, facebookReelPollEligible, selectFacebookReelPollBatch } from "./facebook-reel-finalize-priority.mjs";
@@ -663,6 +665,7 @@ import {
   item4SourceToProductionBridgePreflight,
   stripFactoryRevisionNote,
   withFactoryRevisionOpen,
+  productionRequestRevisionOpen,
   loadContentPlatformOutputs,
   outputAlreadyApprovedForPublishing,
   arrayOrEmpty,
@@ -10779,9 +10782,12 @@ export async function factorySendBackOutput(env, id, actor, note, requestedProdu
 }
 /*__STUDIO_WORKER_END:factorySendBackOutput__*/
 
-export async function factorySendBackContent(env, productionRequestId, outputIds, actor, note) {
+export async function factorySendBackContent(env, productionRequestId, outputIds, actor, note, producer = null) {
   const requestId = String(productionRequestId || "").trim();
   if (!/^rec[A-Za-z0-9]+$/.test(requestId)) throw new HttpError(400, "Production Request is required");
+  // Serialize durable acceptance for this Production Request. The same lease
+  // also fences cron kickoff, preventing two rapid clicks from creating jobs.
+  return withOutputApprovalLock(env.STUDIO_MEDIA, requestId, async () => {
   const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
 
   const suppliedIds = [...new Set((Array.isArray(outputIds) ? outputIds : [])
@@ -10831,13 +10837,47 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
     );
   }
 
+  if (producer?.automatic) {
+    // No external asset references are inferred for text-only revisions. Resolve
+    // the existing profile from the actual output before validating the plan.
+    const profile = await item4ProductionProfileRecord(env, targets[0]);
+    if (!profile?.id) throw new HttpError(409, "Producer could not verify the output's content profile");
+    const validated = validateProducerPlan({
+      original_prompt: note, profile_id: profile.id,
+      changes: producer.changes, required_asset_ids: [], excluded_asset_ids: [],
+    }, []);
+    if (!validated.valid) throw new HttpError(409, "Producer Plan validation failed");
+    producer = { ...producer, execution_plan: planSelectiveRework(validated) };
+    // A metadata-only revision reuses finished media. Incomplete sibling
+    // outputs need the full Production editor rather than a false quick pass.
+    if (producer.changes.length === 1 && producer.changes[0] === "metadata_only"
+        && targets.some(row => String(f(row, "Output_Status") || "") !== "Ready for Review")) {
+      producer = { automatic: false, reason: "Finish the content package before a metadata-only revision." };
+    }
+  }
+  const priorFeedback = factoryLatestReviewFeedback(f(requestRecord, "Production_Notes"));
+  // Duplicate POSTs must not create another render after the request has entered
+  // the persisted revision lifecycle. This is an exact replay check, not a
+  // semantic duplicate detector for later intentional revisions.
+  if (producer?.automatic && priorFeedback?.instructions === note
+      && /\[factory-producer-revision id=fpr-[a-f0-9]+ state=pending\]/.test(String(f(requestRecord, "Production_Notes") || ""))) {
+    return { production_request_id: requestId, already_accepted: true,
+      message: "This Producer revision was already accepted.", producer_queued: true };
+  }
+  // Never supersede an in-flight Producer job with a second concurrent note.
+  // The first request must reach review (or a visible exception) before a new revision.
+  if (producer?.automatic && /\[factory-producer-revision id=fpr-[a-f0-9]+ state=pending\]/.test(String(f(requestRecord, "Production_Notes") || ""))) {
+    throw new HttpError(409, "A Producer revision is already in progress for this content. Review its status before sending another request.");
+  }
   const stamp = new Date().toISOString();
   const productionNotes = factoryAppendFeedback(f(requestRecord, "Production_Notes"), note, {
     actor, stamp, scope: "content",
   });
+  const revisionId = producer?.automatic ? `fpr-${crypto.randomUUID().replace(/-/g, "")}` : null;
+  const producerMarker = revisionId ? `[factory-producer-revision id=${revisionId} state=pending]` : "";
   const line = `Factory content send-back by ${actor || "operator"} at ${stamp}.${note ? ` ${note}` : ""}`;
-  // Hold the last render for reference. Do not start any production work until
-  // the operator explicitly clicks Approve after making revisions.
+  // Hold superseded outputs. An accepted Producer directive may advance these
+  // through the existing guarded re-promotion path without human reapproval.
   const patches = targets.map((existing) => {
     const existingNotes = String(f(existing, "Review_Notes") || "").trim();
     return {
@@ -10862,8 +10902,30 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
         Request_Status: "Draft",
         Active: true,
         Submitted_At: null,
-        Studio_Production_Job_JSON: null,
-        Production_Notes: withFactoryRevisionOpen(productionNotes, { actor, stamp }),
+        Studio_Production_Job_JSON: revisionId ? JSON.stringify({
+          schema_version: "studio.production-job.1",
+          job_id: revisionId,
+          producer_changes: producer.changes,
+          producer_stages: producer.execution_plan?.stages || [],
+          previous_outputs: targets.map((row) => ({
+            id: row.id,
+            output_status: String(f(row, "Output_Status") || ""),
+            review_status: String(f(row, "Review_Status") || ""),
+            render_status: String(f(row, "Render_Status") || ""),
+            final_file_url: String(f(row, "Final_File_URL") || ""),
+            studio_preview_url: String(f(row, "Studio_Preview_URL") || ""),
+          })),
+          route: null,
+          step: "themes",
+          attempt: 1,
+          updated_at: stamp,
+          detail: "Factory Producer revision accepted",
+          percent: 0,
+          error: null,
+        }) : null,
+        ...((producer?.automatic && producer?.fields) ? producer.fields : {}),
+        ...(producer?.automatic && producer?.changes?.includes("rewrite_narration") ? { Voiceover_Mode: "Yes" } : {}),
+        Production_Notes: [withFactoryRevisionOpen(productionNotes, { actor, stamp }), producerMarker].filter(Boolean).join("\n"),
         Updated_At: stamp,
       },
       typecast: true,
@@ -10875,10 +10937,263 @@ export async function factorySendBackContent(env, productionRequestId, outputIds
     content_item_id: contentId,
     output_count: patches.length,
     output_ids: patches.map((row) => row.id),
-    message: `Sent the full content package (${patches.length} output${patches.length === 1 ? "" : "s"}) back to Production. Make changes and Approve to rerender.`,
+    producer_queued: Boolean(revisionId),
+    producer_revision_id: revisionId,
+    needs_interpretation: Boolean(producer && !producer.automatic),
+    producer_reason: producer && !producer.automatic ? producer.reason : null,
+    message: revisionId
+      ? `Producer revision accepted for ${patches.length} output${patches.length === 1 ? "" : "s"}. Automatic rework is queued; fresh review will be required.`
+      : `Sent the full content package (${patches.length} output${patches.length === 1 ? "" : "s"}) back to Production. Make changes and Approve to rerender.`,
   };
+  });
 }
 /*__STUDIO_WORKER_END:factorySendBackContent__*/
+
+/**
+ * Advance a persisted Factory revision through the existing I3/I4 routing and
+ * studio-produce runner path. Never invent new media here: only interpreter-
+ * validated exact-text directives enter this automatic path.
+ */
+async function factoryAdvanceProducerRevision(env, requestId, revisionId, ctx = null) {
+  return withOutputApprovalLock(env.STUDIO_MEDIA, requestId, async () => {
+  const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+  const notes = String(f(requestRecord, "Production_Notes") || "");
+  if (!notes.includes(`[factory-producer-revision id=${revisionId} state=pending]`)) {
+    return { skipped: "superseded_or_complete" };
+  }
+  if (!productionRequestRevisionOpen(requestRecord)) return { skipped: "revision_closed" };
+  let job = null;
+  try { job = JSON.parse(String(f(requestRecord, "Studio_Production_Job_JSON") || "")); } catch {}
+  if (job?.job_id !== revisionId) return { skipped: "stale_revision_job" };
+  if (Array.isArray(job.producer_changes) && job.producer_changes.length === 1
+      && job.producer_changes[0] === "metadata_only") {
+    const caption = String(f(requestRecord, "Requested_Caption") || "").trim();
+    const contentId = studioFirstLinkedId(f(requestRecord, "Promoted_Content_Item"));
+    if (!caption || !contentId) throw new Error("Metadata revision is missing its caption or promoted content");
+    const previous = Array.isArray(job.previous_outputs) ? job.previous_outputs : [];
+    if (!previous.length || previous.some(row => row.output_status !== "Ready for Review")) {
+      throw new Error("Metadata-only revision requires fully reviewed source outputs");
+    }
+    // Stage metadata first, without altering media or declaring outputs ready.
+    await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID, previous.map(row => ({
+      id: row.id, fields: { Output_Caption: caption },
+    })), { typecast: true });
+    await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId, {
+      method: "PATCH", body: JSON.stringify({ fields: { Caption: caption }, typecast: true }),
+    });
+    for (const row of previous) {
+      const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
+      if (String(f(updated, "Output_Caption") || "").trim() !== caption
+        || String(f(updated, "Final_File_URL") || "") !== String(row.final_file_url || "")
+        || String(f(updated, "Studio_Preview_URL") || "") !== String(row.studio_preview_url || "")
+        || String(f(updated, "Publish_Status") || "") !== "Not Ready"
+        || f(updated, "Do_Not_Publish") !== true) {
+        throw new Error("Independent metadata Quality Agent check failed");
+      }
+    }
+    // The deterministic QA gate passed. Restore the original finished media,
+    // keep publication held, and demand a new explicit human approval.
+    await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID, previous.map(row => ({
+      id: row.id,
+      fields: {
+        Output_Status: "Ready for Review",
+        Review_Status: row.review_status && row.review_status !== "Approved" ? row.review_status : "Review Sent",
+        Render_Status: row.render_status || "Rendered",
+        Publish_Status: "Not Ready",
+        Do_Not_Publish: false,
+        Review_Decision_At: null,
+      },
+    })), { typecast: true });
+    const completeNotes = notes.replace(
+      `[factory-producer-revision id=${revisionId} state=pending]`,
+      `[factory-producer-revision id=${revisionId} state=completed]`,
+    );
+    await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: {
+        Request_Status: "Promoted",
+        Production_Notes: stripFactoryRevisionNote(completeNotes),
+        Studio_Production_Job_JSON: JSON.stringify({
+          ...job, step: "done", detail: "Metadata validated; awaiting human review",
+          percent: 100, updated_at: new Date().toISOString(),
+          producer_quality: { passed: true, checks: ["caption", "publish_hold", "media_preserved"] },
+        }),
+        Updated_At: new Date().toISOString(),
+      }, typecast: true }),
+    });
+    return { queued: false, completed: true, request_id: requestId, revision_id: revisionId };
+  }
+  const ideaId = studioFirstLinkedId(f(requestRecord, "Idea_Candidate"));
+  if (!ideaId) throw new Error("Factory Producer revision has no linked Idea Candidate");
+  const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId);
+  if (!promotionCompleted(idea)) throw new Error("Factory Producer revision requires an already-promoted Idea");
+  const finalized = await finalizeProductionRequestPromotion(env, requestId, idea, ctx);
+  if (finalized?.supersededByRequestId || (Number(finalized?.outputFanout?.blocked_count) || 0)) {
+    throw new Error("Factory Producer revision routing was blocked");
+  }
+  return { queued: true, request_id: requestId, revision_id: revisionId };
+  });
+}
+
+export async function factoryResumeProducerRevisions(env, ctx = null) {
+  const rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    limit: 3,
+    fields: ["Production_Notes", "Request_Status", "Idea_Candidate", "Promoted_Content_Item"],
+    filterFormula: 'AND({Request_Status}="Draft",FIND("[factory-producer-revision id=",{Production_Notes})>0,FIND("state=pending]",{Production_Notes})>0)',
+    sortField: "Updated_At",
+    sortDirection: "asc",
+  });
+  const outcomes = [];
+  for (const row of rows) {
+    const notes = String(f(row, "Production_Notes") || "");
+    const revisionId = notes.match(/\[factory-producer-revision id=(fpr-[a-f0-9]+) state=pending\]/)?.[1];
+    if (!revisionId) continue;
+    try {
+      outcomes.push(await factoryAdvanceProducerRevision(env, row.id, revisionId, ctx));
+    } catch (error) {
+      const reason = String(error?.message || error).slice(0, 250);
+      if (error?.status === 409 && /approval already in progress|concurrent output approval/i.test(reason)) {
+        outcomes.push({ request_id: row.id, already_running: true });
+        continue;
+      }
+      console.warn("Factory Producer revision resume failed", row.id, reason);
+      // Bounded recovery: unresolvable revisions must become visible rather
+      // than monopolize the three-job cron quota indefinitely.
+      try {
+        const live = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, row.id);
+        const prior = JSON.parse(String(f(live, "Studio_Production_Job_JSON") || "{}"));
+        if (prior.job_id === revisionId) {
+          const attempts = Math.max(0, Number(prior.producer_retry_count) || 0) + 1;
+          const exhausted = attempts >= 5;
+          const fields = {
+            Studio_Production_Job_JSON: JSON.stringify({
+              ...prior, producer_retry_count: attempts,
+              step: exhausted ? "blocked" : prior.step,
+              error: exhausted ? reason : null,
+              detail: exhausted ? "Needs attention: Producer revision cannot be completed" : "Producer revision retry pending",
+              updated_at: new Date().toISOString(),
+            }),
+            Updated_At: new Date().toISOString(),
+          };
+          if (exhausted) fields.Production_Notes = String(f(live, "Production_Notes") || "").replace(
+            `[factory-producer-revision id=${revisionId} state=pending]`,
+            `[factory-producer-revision id=${revisionId} state=needs_attention]`,
+          );
+          await airtableFetch(env, PRODUCTION_REQUEST_TABLE, row.id, {
+            method: "PATCH", body: JSON.stringify({ fields, typecast: false }),
+          });
+        }
+      } catch (persistError) {
+        console.warn("Factory Producer recovery could not persist retry", row.id, persistError);
+      }
+      outcomes.push({ request_id: row.id, retry_pending: true });
+    }
+  }
+  return outcomes;
+}
+/*__STUDIO_WORKER_END:factoryResumeProducerRevisions__*/
+
+/**
+ * Independent post-render fence for narration revisions. Output routing leaves
+ * Do_Not_Publish set; only verified authoritative results clear that hold.
+ * The Producer's claimed result is never treated as QA evidence.
+ */
+export async function factoryVerifyProducerRevisions(env) {
+  const rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    limit: 3,
+    fields: ["Production_Notes", "Request_Status", "Studio_Production_Job_JSON", "Promoted_Content_Item", "Requested_Script"],
+    filterFormula: 'AND({Request_Status}="Promoted",FIND("[factory-producer-revision id=",{Production_Notes})>0,FIND("state=pending]",{Production_Notes})>0)',
+    sortField: "Updated_At",
+    sortDirection: "asc",
+  });
+  const results = [];
+  for (const row of rows) {
+    const notes = String(f(row, "Production_Notes") || "");
+    const rev = notes.match(/\[factory-producer-revision id=(fpr-[a-f0-9]+) state=pending\]/)?.[1];
+    if (!rev) continue;
+    let job;
+    try { job = JSON.parse(String(f(row, "Studio_Production_Job_JSON") || "{}")); } catch { job = {}; }
+    if (job.job_id !== rev || !["done", "blocked", "escalated"].includes(String(job.step || ""))) continue;
+    const failures = [];
+    const contentId = studioFirstLinkedId(f(row, "Promoted_Content_Item"));
+    const exactScript = String(f(row, "Requested_Script") || "").trim();
+    if (job.step !== "done") failures.push("Runner did not complete successfully");
+    if (!contentId || !exactScript) failures.push("Missing promoted content or required narration");
+    let outputs = [];
+    if (contentId) {
+      const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId);
+      if (String(f(parent, "Voiceover_Script") || "").trim() !== exactScript) {
+        failures.push("Rendered script does not match the exact requested narration");
+      }
+      if (!String(f(parent, "Voiceover_URL") || "").trim()) failures.push("Voiceover audio is missing");
+      outputs = await loadContentPlatformOutputs(env, contentId);
+    }
+    const targetIds = new Set((Array.isArray(job.previous_outputs) ? job.previous_outputs : []).map(x => x.id));
+    const targets = outputs.filter(x => targetIds.has(x.id));
+    if (!targets.length || targets.length !== targetIds.size) failures.push("The expected output set is incomplete");
+    if (targets.some(x => String(f(x, "Output_Status") || "") !== "Ready for Review"
+        || String(f(x, "Render_Status") || "") !== "Rendered"
+        || !String(f(x, "Final_File_URL") || "").trim())) {
+      failures.push("Required revised renders are incomplete");
+    }
+    if (targets.some(x => String(f(x, "Publish_Status") || "") !== "Not Ready"
+        || f(x, "Do_Not_Publish") !== true)) failures.push("Revision publishing hold is not intact");
+    if (!failures.length) {
+      await airtableBatchUpdate(env, env.AIRTABLE_OUTPUT_TABLE_ID, targets.map(x => ({
+        id: x.id, fields: { Do_Not_Publish: false },
+      })), { typecast: true });
+      for (const output of targets) {
+        const checked = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, output.id);
+        if (f(checked, "Do_Not_Publish") !== false
+            || String(f(checked, "Publish_Status") || "") !== "Not Ready") {
+          throw new Error("Producer QA could not verify output release");
+        }
+      }
+      await airtableFetch(env, PRODUCTION_REQUEST_TABLE, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields: {
+          Production_Notes: notes.replace(
+            `[factory-producer-revision id=${rev} state=pending]`,
+            `[factory-producer-revision id=${rev} state=completed]`,
+          ),
+          Studio_Production_Job_JSON: JSON.stringify({
+            ...job, producer_quality: {
+              passed: true, checked_at: new Date().toISOString(),
+              checks: ["requested_script", "generated_audio", "output_renders", "publish_hold"],
+            },
+          }),
+          Updated_At: new Date().toISOString(),
+        }, typecast: false }),
+      });
+      results.push({ request_id: row.id, quality: "passed" });
+      continue;
+    }
+    // A terminal runner error is nonrecoverable by simple QA; surface it.
+    // A "done" job with incomplete evidence gets a few bounded checks first.
+    const attempts = Math.max(0, Number(job.producer_quality_attempts) || 0) + 1;
+    const exhausted = attempts >= 5 || job.step !== "done";
+    await airtableFetch(env, PRODUCTION_REQUEST_TABLE, row.id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: {
+        Production_Notes: exhausted ? notes.replace(
+          `[factory-producer-revision id=${rev} state=pending]`,
+          `[factory-producer-revision id=${rev} state=needs_attention]`,
+        ) : notes,
+        Studio_Production_Job_JSON: JSON.stringify({
+          ...job, producer_quality_attempts: attempts,
+          producer_quality: { passed: false, errors: failures },
+          step: exhausted ? "blocked" : job.step,
+          error: exhausted ? "Producer QA: " + failures.join("; ") : null,
+          updated_at: new Date().toISOString(),
+        }),
+        Updated_At: new Date().toISOString(),
+      }, typecast: false }),
+    });
+    results.push({ request_id: row.id, quality: exhausted ? "needs_attention" : "retry_pending" });
+  }
+  return results;
+}
+/*__STUDIO_WORKER_END:factoryVerifyProducerRevisions__*/
 
 export async function studioAtomicVacateSkippedOutput(env, row, fields, operationId) {
   const current = row?.id
@@ -11054,7 +11369,7 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
     next = result.controls;
   } else if (action === "unpin_needs_assets") {
     next = unpinFactoryNeedsAssets(controls, payload?.id || payload?.item?.id).controls;
-  } else if (action === "approve" || action === "send_back" || action === "send_back_content" || action === "delete") {
+  } else if (action === "approve" || action === "send_back" || action === "send_back_content" || action === "request_changes_content" || action === "delete") {
     const id = String(payload?.id || payload?.item?.id || "").trim();
     const kind = String(payload?.kind || payload?.item?.kind || "output").trim().toLowerCase();
     const note = String(payload?.note || payload?.notes || "").trim().slice(0, 3000);
@@ -11067,15 +11382,34 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
       if (kind !== "output") throw new HttpError(400, "Send back is only for outputs");
       requirePermission(authorization, "outputs_review");
       resultExtra = await factorySendBackOutput(env, id, actor, note, payload?.production_request_id);
-    } else if (action === "send_back_content") {
+    } else if (action === "send_back_content" || action === "request_changes_content") {
       requirePermission(authorization, "outputs_review");
-      resultExtra = await factorySendBackContent(
+      const producer = action === "request_changes_content"
+        ? interpretFactoryProducerFeedback(note) : null;
+      const submitContentRevision = () => factorySendBackContent(
         env,
         payload?.production_request_id,
         payload?.output_ids,
         actor,
         note,
+        producer,
       );
+      // Serialize submissions by authoritative Production Request identity.
+      // Two browser retries must never fork distinct Producer jobs.
+      resultExtra = action === "request_changes_content"
+        ? await withOutputApprovalLock(
+          env.STUDIO_MEDIA, String(payload?.production_request_id || ""), submitContentRevision,
+        )
+        : await submitContentRevision();
+      if (resultExtra.producer_queued && !resultExtra.already_accepted && ctx?.waitUntil) {
+        ctx.waitUntil(factoryAdvanceProducerRevision(
+          env, resultExtra.production_request_id, resultExtra.producer_revision_id, ctx,
+        ).catch(error => console.warn("Factory Producer kickoff deferred to cron", String(error?.message || error).slice(0, 250))));
+      }
+      if ((producer && !producer.automatic) || resultExtra.needs_interpretation) {
+        resultExtra.message += " Automatic rework is held: " + (resultExtra.producer_reason || producer?.reason || "manual review required");
+        resultExtra.needs_interpretation = true;
+      }
     } else {
       if (kind === "idea") requirePermission(authorization, "ideas_delete");
       else requireAnyPermission(authorization, ["outputs_review", "publishing_control", "tenant_admin"]);
@@ -11083,7 +11417,7 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
       next = unpinFactoryNeedsAssets(next, id).controls;
     }
   } else {
-    throw new HttpError(400, "action must be pin_needs_assets, unpin_needs_assets, approve, send_back, send_back_content, or delete");
+    throw new HttpError(400, "action must be pin_needs_assets, unpin_needs_assets, approve, send_back, send_back_content, request_changes_content, or delete");
   }
 
   const saved = (
@@ -11101,6 +11435,14 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
       ok: true, page: "factory-desk", action, result: resultExtra,
       message: resultExtra.message || "Approved.", refresh_required: true,
     });
+  }
+  if (action === "request_changes_content") {
+    // Durable acceptance must not depend on the expensive Factory Desk query,
+    // which can time out after the authoritative Airtable commit.
+    return respond(request, env, {
+      ok: true, page: "factory-desk", action, result: resultExtra,
+      message: resultExtra.message, refresh_required: true,
+    }, resultExtra.producer_queued ? 202 : 200);
   }
   return factoryDeskRefreshPayload(request, env, authorization, saved, action, {
     result: resultExtra,

@@ -47,7 +47,7 @@ const eligible=new Function("f","studioIsFinishedPassthrough","studioFinishedOri
  eligibleSource+"\nreturn studioOutputReadyForPublishApproval")(
  lookup,()=>false,()=>"",()=>false,
 );
-const approvalSource=extract("async function factoryApproveOutput(", "// Factory revision feedback");
+const approvalSource=extract("async function factoryApproveOutput(", "function factoryFeedbackBlock(");
 class MemoryR2{
  constructor(){this.objects=new Map();this.version=0}
  async get(key){const row=this.objects.get(key);return row?{etag:row.etag,text:async()=>JSON.stringify(row.value)}:null}

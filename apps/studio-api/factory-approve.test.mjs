@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 
 const worker = readStudioWorkerSource();
 const start = worker.indexOf("async function factoryApproveOutput(");
-const end = worker.indexOf("// Factory revision feedback", start);
+const end = worker.indexOf("function factoryFeedbackBlock(", start);
 assert.ok(start > 0 && end > start, "Factory approval implementation exists");
 const source = worker.slice(start, end);
 
