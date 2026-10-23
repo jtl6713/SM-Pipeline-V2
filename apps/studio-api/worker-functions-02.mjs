@@ -11520,7 +11520,7 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
     fields: {
       Candidate_Title: prompt.slice(0, 160),
       Idea_Summary: prompt.slice(0, 2000),
-      ...(assetPolicy.required ? { Primary_Location: assetPolicy.location } : {}),
+      ...(assetPolicy.subject ? { Primary_Location: assetPolicy.subject } : {}),
     },
   };
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url, payload));
