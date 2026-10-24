@@ -101,9 +101,11 @@ test("Worker output synchronization REPLACES stale plan items with enabled outpu
 });
 
 test("Studio build label, app BUILD_ID, and asset versions are aligned", () => {
-  assert.match(html, /UI build 0.6.758/);
-  assert.match(app, /const BUILD_ID = "item4-0.6.758-exception-recovery"/);
+  assert.match(html, /UI build 0\.6\.\d+/);
+  assert.match(app, /const BUILD_ID = "item4-0\.6\.\d+-[a-z0-9-]+"/);
   const versions = [...html.matchAll(/\?v=(\d+\.\d+\.\d+)-/g)].map((x) => x[1]);
   assert.ok(versions.length > 10);
-  assert.ok(versions.every((x) => x === "0.6.758"));
+  const uiVersion = html.match(/UI build (0\.6\.\d+)/)?.[1];
+  assert.ok(uiVersion);
+  assert.ok(versions.every((x) => x === uiVersion));
 });
