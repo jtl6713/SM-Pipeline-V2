@@ -64,9 +64,20 @@ try {
     values["PROFILE_"+profile.id+"_"+n]||values["LA_"+n]||""]));
   report.receipt=await verifyAuthenticatedYouTubeReceipt(authenticatedRow,{settings,expectedChannelId:profile.fields.YouTube_Channel_ID});
   const after=await get(base+plain.AIRTABLE_OUTPUT_TABLE_ID+"/"+row.id,airtableHeaders);
+  // Provider verification can take time. Re-read BOTH ownership links and
+  // normalize the display-only lookup before validating the receipt contract.
+  if(contentIdForRecoveryOutput(after)!==chain.content_id)
+    throw new Error("canary_output_content_link_changed_during_readback");
+  const afterContent=await get(base+plain.AIRTABLE_CONTENT_TABLE_ID+"/"+chain.content_id,airtableHeaders);
+  const afterProfile=await get(base+"tblNYg2QB0BmmVACy/"+chain.profile_id,airtableHeaders);
+  const afterChain=verifyRecoveryProfileChain(after,afterContent,afterProfile);
+  if(!afterChain.ok || afterChain.profile_id!==chain.profile_id)
+    throw new Error("canary_profile_ownership_changed_during_readback");
+  const normalizedAfter=withVerifiedRecoveryProfile(after,afterChain);
   report.authoritative_state_unchanged=JSON.stringify(recoverySnapshot(after))===JSON.stringify(report.before);
-  report.blocked_reason=recoveryBlock(after,Date.now())||receiptBlock(after,report.receipt,Date.now())||
-    (!report.authoritative_state_unchanged?"authoritative_state_changed":null);
+  report.blocked_reason=(!report.authoritative_state_unchanged?"authoritative_state_changed":null)
+    ||recoveryBlock(normalizedAfter,Date.now())
+    ||receiptBlock(normalizedAfter,report.receipt,Date.now());
   report.delivery_verified=report.receipt.verified_delivery===true
     && report.receipt.ownership_verified===true ? 1 : 0;
   report.public_visibility_verified=report.receipt.verified_public===true ? 1 : 0;
