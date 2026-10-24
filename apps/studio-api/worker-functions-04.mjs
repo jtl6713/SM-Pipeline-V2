@@ -12175,8 +12175,14 @@ function readyProductionExistingDraftEligible(idea, requestRecord) {
   if (!["Draft", "Ready", "Submitted"].includes(String(f(requestRecord, "Request_Status") || "").trim())) return false;
   if (String(f(requestRecord, "Studio_Master_Asset_Status") || "").trim() !== "Ready") return false;
   if (!(Number(f(requestRecord, "Studio_Master_Asset_Count") || 0) > 0)) return false;
-  if (!/(?:^|\s)origin=(?:autonomous|prepare-to-review)(?:\s|$)/i.test(String(f(requestRecord, "Production_Notes") || ""))) return false;
-  return true;
+  const notes = String(f(requestRecord, "Production_Notes") || "");
+  if (productionNotesRevisionOpen(notes)) return false;
+  if (/(?:^|\s)origin=(?:autonomous|prepare-to-review)(?:\s|$)/i.test(notes)) return true;
+  // An approved Idea with verified master images is itself authority to begin
+  // planning, regardless of whether the timed-script editor added an origin
+  // stamp. Explicit auto-off and open human revisions remain authoritative.
+  return String(f(idea, "Candidate_Status") || "").trim() === "Approved"
+    && !productionPhotoWaitAutoOff(notes);
 }
 
 function readyProductionIdeaEligible(idea, requestRecord = null) {
@@ -12229,7 +12235,7 @@ async function discoverAssetReadyProductionDrafts(env, { limit = 120 } = {}) {
     limit: Math.max(1, Math.min(150, Number(limit) || 120)),
     sortField: "Created_At",
     sortDirection: "asc",
-    filterFormula: "AND({Test_Run_ID}=BLANK(),{Active}=1,OR({Request_Status}='Draft',{Request_Status}='Ready',{Request_Status}='Submitted'),{Studio_Master_Asset_Status}='Ready',{Studio_Master_Asset_Count}>0,FIND('origin=autonomous',{Production_Notes}&'')>0)",
+    filterFormula: "AND({Test_Run_ID}=BLANK(),{Active}=1,OR({Request_Status}='Draft',{Request_Status}='Ready',{Request_Status}='Submitted'),{Studio_Master_Asset_Status}='Ready',{Studio_Master_Asset_Count}>0)",
     fields: [
       "Idea_Candidate",
       "Request_Status",
@@ -12357,6 +12363,26 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
       completed_reason: promoted ? "promoted_elsewhere" : "no_longer_eligible",
       production_request_id: requestRecord?.id || null,
     });
+  }
+
+  // Human-configured Approved requests are automatic only for profiles that
+  // explicitly enable autonomous production. The record and reciprocal link
+  // were already rechecked, including active status and operator holds.
+  const requestNotes = String(f(requestRecord, "Production_Notes") || "");
+  const manuallyConfigured = String(f(idea, "Studio_Photo_Wait_Status") || "").trim() !== "Ready"
+    && !/(?:^|\s)origin=(?:autonomous|prepare-to-review)(?:\s|$)/i.test(requestNotes);
+  if (manuallyConfigured) {
+    const profileId = firstLinkedRecordId(f(idea, "Content_Profile"));
+    const profile = profileId
+      ? await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId).catch(() => null)
+      : null;
+    if (!profile?.id || !f(profile, "Active") || !f(profile, "Autonomous_Produce_Enabled")) {
+      return readyProductionFinishClaim(env.STUDIO_MEDIA, lease, {
+        status: "blocked", stage: "profile_auto_produce_disabled",
+        completed_reason: "profile_auto_produce_disabled",
+        production_request_id: requestRecord?.id || null,
+      });
+    }
   }
 
   const plan = readyProductionIdeaPlan(idea);
