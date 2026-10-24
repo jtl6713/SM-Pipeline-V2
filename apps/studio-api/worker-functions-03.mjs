@@ -1,6 +1,6 @@
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
 import { readyProductionEnqueue } from "./ready-production-queue.mjs";
-import { ideaPhotoMatchingSlaFinding } from "./idea-photo-wait.mjs";
+import { ideaPhotoMatchingSlaFinding, selectProfileFairIdeaPhotoCandidates } from "./idea-photo-wait.mjs";
 import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { withPhase5SyncLease } from "./supabase-sync-lease.mjs";
 import { homeApprovedExceptionKind, homeIsUnpublishedFailure } from "./profile-summary-classification.mjs";
@@ -1223,10 +1223,14 @@ export async function runWaitingIdeaPhotoMatches(env, { limit = 8 } = {}) {
     // This is a lean two-field projection; downstream matching refreshes
     // the selected idea before attaching anything.
     limit: 2000,
-    fields: ["Studio_Photo_Match_JSON", "Production_Config_Notes"],
+    fields: ["Content_Profile", "Studio_Photo_Match_JSON", "Production_Config_Notes"],
     filterFormula: "AND({Studio_Photo_Wait_Status}='Waiting',{Promoted_Content_Record_ID}=BLANK(),{Candidate_Status}!='On Hold')",
   });
-  const records = prioritizeWaitingIdeaPhotoScans(candidates, { limit });
+  // Share the same profile-fair selection as blank-state listener recovery.
+  // Airtable/library lookups stay profile-scoped; only the queue is fair.
+  const records = selectProfileFairIdeaPhotoCandidates(candidates, {
+    limit, rotation: Math.floor(Date.now() / 60000),
+  });
   const authorization = records.length ? await resolveStudioCronAuthorization(env) : null;
   const results = [];
   for (const idea of records) {
