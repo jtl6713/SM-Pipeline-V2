@@ -54,7 +54,7 @@ try {
   for(let attempt=0;attempt<30;attempt++) {
    const res=await fetch('https://'+bridge+'.'+subdomain+'.workers.dev/'+token+'/'+route,{method:'GET',redirect:'error',signal:AbortSignal.timeout(60000)});
    const text=await res.text();
-   if(text.includes('error code: 1042')){await new Promise(r=>setTimeout(r,3000));continue;}
+   if(text.includes('error code: 1042') || (res.status===404 && !text.trim().startsWith('{'))){await new Promise(r=>setTimeout(r,3000));continue;}
    let body;try{body=JSON.parse(text);}catch{throw new Error('verification_bridge_non_json_'+res.status);}
    return {status:res.status,body};
   }

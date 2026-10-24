@@ -7,7 +7,7 @@ on:
       - '.github/workflows/publication-recovery-readonly-canary.yml'
   workflow_dispatch:
   workflow_run:
-    workflows: [Deploy Studio API Worker Production]
+    workflows: [Deploy Studio API Worker Production, Deploy Studio Pages Production]
     types: [completed]
 permissions:
   contents: read
