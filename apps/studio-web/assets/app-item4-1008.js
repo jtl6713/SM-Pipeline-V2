@@ -287,7 +287,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.756-factory-batch-nav";
+  const BUILD_ID = "item4-0.6.757-idea-id-list";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -15888,7 +15888,9 @@ function timedScriptAssetLabel(asset, index) {
     const timeline = !r.is_on_hold && (!ideaIsPromoted(r) || ideaDraftNeedsTimeline(r))
       ? `<button type="button" class="manage-button find-images-row-button" data-idea-timeline="${escapeHtml(r.id)}">${ideaTimelineRowButtonLabel(r)}</button>`
       : "";
-    const title = `${value(r.title)}${listeningForPhotos ? ' <span class="subtle">(Listening for photos)</span>' : ""}`;
+    const numericIdeaId = Number(r?.candidate_id);
+    const ideaIdPrefix = Number.isSafeInteger(numericIdeaId) && numericIdeaId > 0 ? `${numericIdeaId} – ` : "";
+    const title = `${ideaIdPrefix}${value(r.title)}${listeningForPhotos ? ' <span class="subtle">(Listening for photos)</span>' : ""}`;
     return `<tr class="${r.is_on_hold ? "idea-row-held" : ""}" data-idea-row="${escapeHtml(r.id)}"><td><div class="title-cell">${title}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${ideaStructureLabel(r)}</td><td><div class="subtle">${escapeHtml(ideaProductionLabel(r))}</div></td><td><div class="idea-row-actions">${promote}<div class="idea-row-action-stack"><button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button>${findImages}${timeline}</div></div></td></tr>`;
   }
 
