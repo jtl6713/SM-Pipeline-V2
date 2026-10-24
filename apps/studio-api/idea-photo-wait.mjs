@@ -277,6 +277,59 @@ export function prioritizeWaitingIdeaPhotoScans(records, { limit = 8, nowMs = Da
     .slice(0, quota);
 }
 
+/**
+ * Fair, bounded scan across every connected content profile. The old
+ * global oldest-two query let a broken Idea/profile hold the same two slots
+ * forever, starving Chicago/Miami while New York recovered.
+ * No fixed city names or profile IDs appear in this selector.
+ */
+export function selectProfileFairIdeaPhotoCandidates(records, {
+  limit = 2, rotation = 0, nowMs = Date.now(),
+} = {}) {
+  const quota = Math.max(1, Math.min(20, Math.floor(Number(limit) || 2)));
+  const byProfile = new Map();
+  for (const row of records || []) {
+    if (!row?.id || ideaManagePhotoPauseActive(row.fields?.Production_Config_Notes, nowMs)) continue;
+    const link = row.fields?.Content_Profile;
+    const profileId = String(Array.isArray(link) ? link[0] || "" : link || "").trim();
+    // An unscoped Idea needs explicit operator assignment, never infer a city.
+    if (!profileId) continue;
+    if (!byProfile.has(profileId)) byProfile.set(profileId, []);
+    byProfile.get(profileId).push(row);
+  }
+  const lastAttemptMs = (row) => {
+    try {
+      const raw = row.fields?.Studio_Photo_Match_JSON;
+      const data = typeof raw === "string" ? JSON.parse(raw) : raw;
+      return Date.parse(String(data?.evaluated_at || "")) || 0;
+    } catch { return 0; }
+  };
+  const profiles = [...byProfile.keys()].sort();
+  for (const group of byProfile.values()) {
+    group.sort((a, b) => lastAttemptMs(a) - lastAttemptMs(b)
+      || String(a.createdTime || "").localeCompare(String(b.createdTime || ""))
+      || a.id.localeCompare(b.id));
+  }
+  if (!profiles.length) return [];
+  const offset = ((Math.trunc(Number(rotation) || 0) % profiles.length) + profiles.length) % profiles.length;
+  const ordered = [...profiles.slice(offset), ...profiles.slice(0, offset)];
+  const selected = [];
+  while (selected.length < quota) {
+    let progressed = false;
+    for (const profile of ordered) {
+      const next = byProfile.get(profile).shift();
+      if (!next) continue;
+      selected.push(next);
+      progressed = true;
+      if (selected.length >= quota) break;
+    }
+    if (!progressed) break;
+  }
+  return selected;
+}
+
+export const selectLegacyIdeaListenerCandidates = selectProfileFairIdeaPhotoCandidates;
+
 export function ideaPhotoWaitApplies(input = {}) {
   const contentType = String(input.content_type || "").trim();
   const mode = String(input.carousel_slide_count_mode || "").trim();
