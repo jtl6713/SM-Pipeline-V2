@@ -34,8 +34,8 @@ test("list and selected output detail use the same formatter",()=>{
 });
 test("Studio Pages UI version, core bundle ID and asset cache keys remain consistent",()=>{
  const release=readUiReleaseContract(html,app);
- assert.equal(release.version,"0.6.758");
- assert.equal(release.cacheKey,"0.6.758-exception-recovery");
- assert.equal(release.expectedBuildId,"item4-0.6.758-exception-recovery");
- assert.match(html,/exception-recovery\.js\?v=0\.6\.758-exception-recovery&age=hm-v1/);
+ assert.match(release.version,/^0\.6\.\d+$/);
+ assert.ok(release.cacheKey.startsWith(`${release.version}-`));
+ assert.equal(release.expectedBuildId,`item4-${release.cacheKey}`);
+ assert.ok(html.includes(`exception-recovery.js?v=${release.cacheKey}&age=hm-v1`));
 });

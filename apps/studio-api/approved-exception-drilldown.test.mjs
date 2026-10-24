@@ -67,5 +67,5 @@ test("Home count cell keeps exact profile when navigating to Pipeline", () => {
   assert.match(overview,/studioOpenPipelineFilter\(view, \{ profileId: profileId \|\| "" \}\)/);
   assert.match(bundle,/window\.studioOpenPipelineFilter = \(filter, options = \{\}\)/);
   assert.match(bundle,/showStudioPage\("outputs", \{ pipelineFilter:/);
-  assert.match(html,/scope=historical-count-match-v2/);
+  assert.match(html,/all-profiles-overview-1007\.js\?v=[^"\s]+&drilldown=approved-exceptions-v1/);
 });
