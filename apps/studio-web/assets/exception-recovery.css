@@ -62,3 +62,12 @@
 .erc-receipt {border-top:1px solid var(--border,#ccc);margin-top:1rem;padding-top:.7rem}
 .erc-receipt h4 {margin:.5rem 0}
 .erc-receipt .erc-actions [hidden] {display:none!important}
+
+.erc-history-entry { border:1px solid var(--border,#ccc); border-radius:.7rem; padding:.8rem; margin:.6rem 0; overflow-wrap:anywhere }
+.erc-history-entry summary { cursor:pointer; font-weight:600 }
+.erc-history-entry dl { display:grid; grid-template-columns:minmax(90px,140px) minmax(0,1fr); gap:.45rem; font-size:.84rem }
+.erc-history-entry dd { margin:0; white-space:pre-wrap; overflow-wrap:anywhere }
+.erc-history-entry pre { max-height:400px; overflow:auto; white-space:pre-wrap; font-size:.75rem }
+.erc-history-entry button { margin:.5rem }
+.erc-toolbar input { min-height:38px; max-width:220px; padding:.5rem; border:1px solid var(--border,#ccc); border-radius:.5rem }
+.erc-toolbar button[aria-pressed="true"] { border:2px solid var(--accent,#4f77a4) }
