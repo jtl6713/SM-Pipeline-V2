@@ -1,3 +1,4 @@
+import { publishedReceiptRepairReason } from "./approved-past-due-quality.mjs";
 import { fb3FinalizeEligible } from "./facebook-photo-finalize-priority.mjs";
 /**
  * Read-only recovery preflight. Reads a fresh authoritative Platform Output;
@@ -48,6 +49,7 @@ export function assessRecoveryPreflight(row, {nowMs=Date.now()}={}) {
     lock_active:locked,cooldown_until:cooldown?new Date(nextRetry).toISOString():null,
     attempts,attempt_limit_reached:retryExhausted,category:core,
     fb3_existing_post_eligible:fb3FinalizeEligible(row),
+    verified_receipt_status_repair_candidate:publishedReceiptRepairReason(row)===null,
     publish_status:stage||null,output_status:outputStatus||null,
     actions:action,as_of:new Date(nowMs).toISOString(),
   };
