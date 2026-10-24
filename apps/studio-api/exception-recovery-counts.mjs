@@ -7,7 +7,7 @@ import {homeApprovedExceptionKind,homeIsUnpublishedFailure,homeOutputContributio
 const bool=v=>v===true;
 const mappedProfile=row=>Array.isArray(row?.fields?.Content_Profile) ? String(row.fields.Content_Profile[0]||"") : "";
 const blank=()=>({outputs:0,approved_past_due:0,approved_missing_date:0,failed:0,manual_action_required:0,held_deferred:0});
-export function reconcileExceptionCensus(rawRows,mapOutput,{atMs=Date.now(),qaFailed=[],qaPastDue=[]}={}) {
+export function reconcileExceptionCensus(rawRows,mapOutput,{atMs=Date.now(),qaFailed=null,qaPastDue=null}={}) {
   if(!Array.isArray(rawRows)||typeof mapOutput!=="function") throw new Error("Complete Airtable output census required");
   const totals=blank(),byProfile=new Map(),seen=new Set();
   const homeFailed=new Set(),homeDue=new Set();
