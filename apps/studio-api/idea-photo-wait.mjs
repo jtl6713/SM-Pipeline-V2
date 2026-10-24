@@ -283,7 +283,7 @@ export function prioritizeWaitingIdeaPhotoScans(records, { limit = 8, nowMs = Da
  * forever, starving Chicago/Miami while New York recovered.
  * No fixed city names or profile IDs appear in this selector.
  */
-export function selectLegacyIdeaListenerCandidates(records, {
+export function selectProfileFairIdeaPhotoCandidates(records, {
   limit = 2, rotation = 0, nowMs = Date.now(),
 } = {}) {
   const quota = Math.max(1, Math.min(20, Math.floor(Number(limit) || 2)));
@@ -327,6 +327,8 @@ export function selectLegacyIdeaListenerCandidates(records, {
   }
   return selected;
 }
+
+export const selectLegacyIdeaListenerCandidates = selectProfileFairIdeaPhotoCandidates;
 
 export function ideaPhotoWaitApplies(input = {}) {
   const contentType = String(input.content_type || "").trim();
