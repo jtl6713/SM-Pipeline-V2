@@ -55,7 +55,7 @@ for(const [name,change] of [
 });
 for(const [name,change] of [
   ["wrong identity",{remote_id:"abcdefghijk"}],["wrong profile",{profile_id:"recCCCCCCCCCCCCCC"}],
-  ["no ownership",{ownership_verified:false}],["private",{verified_public:false}],
+  ["no ownership",{ownership_verified:false}],
   ["stale evidence",{checked_at:"2026-10-24T11:58:00Z"}],["no provider timestamp",{published_at:null}],
 ]) test(name+" fails closed",async()=>{
   const f=fixture();Object.assign(f.receipt,change);
@@ -67,6 +67,20 @@ test("public visibility without authenticated delivery ownership never authorize
   assert.equal(result.outcome,"Needs Decision");
   assert.equal(result.reason,"delivery_ownership_unverified");
   assert.equal(f.writes,0);
+});
+test("exact privately uploaded YouTube video counts as Studio delivery, never as public publication",async()=>{
+  const f=fixture();
+  f.receipt.verified_public=false;
+  f.receipt.published_at=null;
+  f.receipt.summary={privacy_status:"private",upload_status:"processed"};
+  const result=await reconcilePublication(f.deps);
+  assert.equal(result.outcome,"Corrected");
+  assert.equal(f.writes,1);
+  assert.equal(f.row.fields.Output_Status,"Published");
+  assert.equal(f.row.fields.Publish_Status,"Published");
+  assert.equal(f.row.fields.Published_At,undefined);
+  assert.equal(f.state.terminal,true);
+  assert.equal(f.audits[0].provider_visibility,"private");
 });
 test("dry run obtains proof but never writes",async()=>{
   const f=fixture();f.deps.policy.mutate=false;
