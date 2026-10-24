@@ -44,8 +44,9 @@ export function recoveryBlock(row, nowMs) {
   if(p.held) return "intentional_hold";
   if(!p.approved) return "approval_changed";
   if(p.lock_active) return "active_publish_lock";
-  if(p.cooldown_until) return "provider_cooldown";
-  if(p.attempt_limit_reached) return "existing_retry_ceiling";
+  // Provider dispatch retry ceilings/cooldowns block REMOTE publishing, not
+  // read-only verification and an authenticated status-only reconciliation.
+  // This engine never calls upload or dispatch and does not reset those counters.
   if(!Array.isArray(row.fields.Content_Profile) || row.fields.Content_Profile.length !== 1)
     return "ambiguous_profile";
   if(str(row,"Platform") !== "YouTube") return "provider_not_enabled_for_autonomous_correction";
@@ -103,7 +104,7 @@ export async function reconcilePublication({
   if(prior?.pending && complete(row)) {
     const expected=prior.pending.after;
     const preserved=Object.entries(prior.pending.before).filter(([k])=>!(k in expected));
-    if(Object.entries(expected).every(([k,v])=>JSON.stringify(row.fields[k])===JSON.stringify(v)) &&
+    if(Object.entries(expected).every(([k,v])=>JSON.stringify(row.fields[k]??null)===JSON.stringify(v??null)) &&
        preserved.every(([k,v])=>JSON.stringify(row.fields[k]??null)===JSON.stringify(v))) {
       const recovered={...prior.pending, outcome:"Corrected", phase:"outcome",
         after:recoverySnapshot(row), corrected_at:new Date(now()).toISOString(),
@@ -177,7 +178,7 @@ export async function reconcilePublication({
   try {
     await patchStatus(final,fields);
     const after=await readOutput(recordId);
-    if(after?.id!==recordId || !Object.entries(fields).every(([k,v])=>after.fields[k]===v) ||
+    if(after?.id!==recordId || !Object.entries(fields).every(([k,v])=> (after.fields[k]??null)===(v??null)) ||
        receiptBlock(after,receipt,now())) throw new Error("readback_unconfirmed");
     return await finish("Corrected","authoritative_airtable_readback_confirmed",{
       after:recoverySnapshot(after),corrected_at:new Date(now()).toISOString()});
