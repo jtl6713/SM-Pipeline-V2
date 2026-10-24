@@ -112,11 +112,11 @@ function canonicalPublicReceipt(value, platform) {
       : (pieces.length===2&&["shorts","live"].includes(pieces[0])?pieces[1]:null);
     return /^[A-Za-z0-9_-]{11}$/.test(String(id||""))?"youtube:"+id:null;
   }
-  const path=u.pathname.replace(/\\/g,"/").replace(/\\/+$/,"")||"/";
-  if(platform==="Facebook"&&/^\\/(?:permalink|story)\\.php$/i.test(path)){
+  const path=u.pathname.replace(/\/+$/,"")||"/";
+  if(platform==="Facebook"&&/^\/(?:permalink|story)\.php$/i.test(path)){
     const post=u.searchParams.get("story_fbid");
     const page=u.searchParams.get("id");
-    if(!/^\\d{6,35}$/.test(String(post||""))||!/^\\d{6,35}$/.test(String(page||"")))return null;
+    if(!/^\d{6,35}$/.test(String(post||""))||!/^\d{6,35}$/.test(String(page||"")))return null;
     return "facebook.com"+path.toLowerCase()+"?story_fbid="+post+"&id="+page;
   }
   // Query strings cannot establish another identity for ordinary post paths.
