@@ -246,7 +246,7 @@ import {
   summarizeObservations,
   youtubePublishedAfterIso,
 } from "./autonomous-produce.mjs";
-import { ideaAutoListenContentType, ideaManagePhotoPauseActive, ideaProductionConfigFields, mergeIdeaProductionNotes, mergeProductionRequestNotes, parseIdeaMachineNotes, parseIdeaNotedMediaIds, productionNotesForPromotionHandoff, productionPhotoWaitAutoOff, productionPhotoWaitRejectedIds, shouldAttachPhotoWaitAssets, withIdeaManagePhotoPause, withoutIdeaManagePhotoPause, withProductionPhotoWaitManual } from "./idea-photo-wait.mjs";
+import { selectLegacyIdeaListenerCandidates, ideaAutoListenContentType, ideaManagePhotoPauseActive, ideaProductionConfigFields, mergeIdeaProductionNotes, mergeProductionRequestNotes, parseIdeaMachineNotes, parseIdeaNotedMediaIds, productionNotesForPromotionHandoff, productionPhotoWaitAutoOff, productionPhotoWaitRejectedIds, shouldAttachPhotoWaitAssets, withIdeaManagePhotoPause, withoutIdeaManagePhotoPause, withProductionPhotoWaitManual } from "./idea-photo-wait.mjs";
 import { preserveProducerThreadOnEdit } from "./producer-conversation.mjs";
 import {
   STUDIO_PUBLISH_RECONCILE_SCHEDULE_FORMULA,
@@ -11246,7 +11246,11 @@ export function ideaHasExplicitPhotoProductionConfig(idea) {
 
 export async function autoListenOpenPhotoIdeas(env, { limit = 12, initializeOnly = false } = {}) {
   const candidates = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
-    limit: Math.max(1, Number(limit) || 12),
+    // Query a lean shared set first; choose a tiny fair per-profile slice
+    // afterwards. LIMIT 2 directly on the oldest global records starved
+    // Chicago/Miami when the same older candidates repeatedly errored.
+    limit: Math.min(250, Math.max(80, (Number(limit) || 2) * 40)),
+    fields: ["Content_Profile", "Studio_Photo_Match_JSON", "Production_Config_Notes"],
     sortField: "Create_Date",
     // New Ideas are kicked immediately. Drain the oldest legacy unscanned
     // backlog first so a steady influx cannot starve months-old Ideas.
@@ -11256,7 +11260,9 @@ export async function autoListenOpenPhotoIdeas(env, { limit = 12, initializeOnly
     filterFormula: "AND({Studio_Photo_Wait_Status}=BLANK(),{Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK(),{Production Requests}=BLANK(),{Test_Run_ID}=BLANK(),OR({Candidate_Status}='Generated',{Candidate_Status}='Sent for Review'),{Production_Content_Type}=BLANK(),{Production_Carousel_Image_Mode}=BLANK(),{Production_Carousel_Slide_Count_Mode}=BLANK(),{Production_Carousel_Slide_Count}=BLANK(),{Production_Carousel_Slide_Count_Min}=BLANK(),{Production_Carousel_Slide_Count_Max}=BLANK())",
   });
 
-  const eligible = candidates.filter((idea) => !ideaHasExplicitPhotoProductionConfig(idea));
+  const eligible = selectLegacyIdeaListenerCandidates(candidates, {
+    limit, rotation: Math.floor(Date.now() / 60000),
+  });
   if (!eligible.length) return { evaluated: candidates.length, started: 0, ready: 0 };
 
   const authorization = initializeOnly ? null : await resolveStudioCronAuthorization(env);
@@ -11308,7 +11314,34 @@ export async function autoListenOpenPhotoIdeas(env, { limit = 12, initializeOnly
       }));
     } catch (error) {
       console.warn("idea automatic photo listening failed", idea.id, error);
-      results.push({ action: "error", idea_id: idea.id, error: error?.message || String(error) });
+      // Persist only a class/stage, never a raw provider response. This
+      // advances failed Ideas behind unattempted Ideas in the SAME city, so
+      // one bad record cannot occupy that city's next recovery slot forever.
+      try {
+        const latest = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id);
+        if (!String(f(latest, "Studio_Photo_Wait_Status") || "").trim()
+          && ["Generated", "Sent for Review"].includes(String(f(latest, "Candidate_Status") || "").trim())
+          && !linkedRecordIds(f(latest, "Production Requests")).length
+          && !linkedRecordIds(f(latest, "Content Items")).length
+          && !ideaManagePhotoPauseActive(f(latest, "Production_Config_Notes"))) {
+          await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+            method: "PATCH",
+            body: JSON.stringify({ fields: {
+              Studio_Photo_Match_JSON: JSON.stringify({
+                evaluated_at: new Date().toISOString(),
+                action: "error", reason: "listener_error",
+                error_stage: "initialize_listener",
+                error_name: ["TypeError", "ReferenceError", "SyntaxError", "HttpError"].includes(error?.name)
+                  ? error.name : "Error",
+                error_http_status: Number(error?.status || error?.statusCode || 0) || null,
+              }),
+            } }),
+          });
+        }
+      } catch (diagnosticError) {
+        console.warn("Idea listener failure diagnostic unavailable", idea.id, diagnosticError?.name || "Error");
+      }
+      results.push({ action: "error", idea_id: idea.id, error_name: error?.name || "Error" });
     }
   }
   return {
