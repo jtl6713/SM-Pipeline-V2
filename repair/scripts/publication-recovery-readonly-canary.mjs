@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import {verifyAuthenticatedYouTubeReceipt} from "../../apps/studio-api/exception-recovery-authenticated-receipt.mjs";
 import {recoveryBlock,receiptBlock,recoverySnapshot} from "../../apps/studio-api/exception-recovery-autonomous.mjs";
+import {contentIdForRecoveryOutput,verifyRecoveryProfileChain,withVerifiedRecoveryProfile} from "../../apps/studio-api/exception-recovery-profile-chain.mjs";
 const report={read_only:true,output_id:4092,inspected:0,verified:0,corrected:0,blocked:0,
   mutations_attempted:0,started_at:new Date().toISOString()};
 const get=async(url,headers)=>{
@@ -32,9 +33,22 @@ try {
   const row=found.records[0];report.inspected=1;report.record_id=row.id;report.before=recoverySnapshot(row);
   if(row.fields.YouTube_Video_ID!=="hc1heQnfn6k" && row.fields.Platform_Post_ID!=="hc1heQnfn6k")
     throw new Error("reference_video_identity_changed");
-  const profiles=row.fields.Content_Profile;
-  if(profiles?.length!==1)throw new Error("canary_profile_ambiguous");
-  const profile=await get(base+"tblNYg2QB0BmmVACy/"+profiles[0],airtableHeaders);
+  // Platform Output.Content_Profile is a display-only LOOKUP. The canonical
+  // ownership chain is Output.Content_Item -> Content Item.Content_Profile.
+  const contentId=contentIdForRecoveryOutput(row);
+  if(!contentId)throw new Error("canary_content_item_identity_missing_or_ambiguous");
+  if(!plain.AIRTABLE_CONTENT_TABLE_ID)throw new Error("production_content_table_binding_missing");
+  const content=await get(base+plain.AIRTABLE_CONTENT_TABLE_ID+"/"+contentId,airtableHeaders);
+  const links=content.fields?.Content_Profile;
+  if(!Array.isArray(links)||links.length!==1||!/^rec[A-Za-z0-9]{14}$/.test(String(links[0]||"")))
+    throw new Error("canary_content_profile_link_missing_or_ambiguous");
+  const profile=await get(base+"tblNYg2QB0BmmVACy/"+links[0],airtableHeaders);
+  const chain=verifyRecoveryProfileChain(row,content,profile);
+  if(!chain.ok)throw new Error("canary_"+chain.reason);
+  const authenticatedRow=withVerifiedRecoveryProfile(row,chain);
+  report.profile_identity_verified=true;
+  report.content_record_id=chain.content_id;
+  report.profile_record_id=chain.profile_id;
   const theme=String(profile.fields.Profile_Key||"").toLowerCase();
   const name=String(profile.fields.Profile_Name||"");
   if(theme!=="la"&&!/los angeles/i.test(name))throw new Error("canary_not_los_angeles");
@@ -48,7 +62,7 @@ try {
   const values=Object.fromEntries(settingsRows.records.map(r=>[r.fields.Setting_Name,r.fields.Setting_Value]));
   const settings=Object.fromEntries(names.map(n=>[n,
     values["PROFILE_"+profile.id+"_"+n]||values["LA_"+n]||""]));
-  report.receipt=await verifyAuthenticatedYouTubeReceipt(row,{settings,expectedChannelId:profile.fields.YouTube_Channel_ID});
+  report.receipt=await verifyAuthenticatedYouTubeReceipt(authenticatedRow,{settings,expectedChannelId:profile.fields.YouTube_Channel_ID});
   const after=await get(base+plain.AIRTABLE_OUTPUT_TABLE_ID+"/"+row.id,airtableHeaders);
   report.authoritative_state_unchanged=JSON.stringify(recoverySnapshot(after))===JSON.stringify(report.before);
   report.blocked_reason=recoveryBlock(after,Date.now())||receiptBlock(after,report.receipt,Date.now())||
