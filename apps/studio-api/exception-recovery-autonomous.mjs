@@ -181,6 +181,9 @@ export async function reconcilePublication({
     if(after?.id!==recordId || !Object.entries(fields).every(([k,v])=> (after.fields[k]??null)===(v??null)) ||
        receiptBlock(after,receipt,now())) throw new Error("readback_unconfirmed");
     return await finish("Corrected","authoritative_airtable_readback_confirmed",{
+      completion_kind:receipt.verified_public?"public_publication_verified":"studio_delivery_completed",
+      provider_visibility:receipt.summary?.privacy_status||null,
+      provider_scheduled_at:receipt.scheduled_at||null,
       after:recoverySnapshot(after),corrected_at:new Date(now()).toISOString()});
   } catch {
     // Keep the intent pending. Never turn a timeout into another PATCH.
