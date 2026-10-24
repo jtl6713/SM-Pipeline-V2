@@ -16,7 +16,7 @@ test("background matcher checks pending intake batches in bounded groups", () =>
   assert.doesNotMatch(check, /for \(const batchId of unique\.slice\(0, 20\)\)/);
   const evalStart = source.indexOf("export async function evaluateAndMaybeAttachWaitingIdeaPhotos(");
   const evalEnd = source.indexOf("/*__STUDIO_WORKER_END:evaluateAndMaybeAttachWaitingIdeaPhotos__*/");
-  assert.match(source.slice(evalStart, evalEnd), /force \? \[\] : await unfinishedIntakeBatchIds/);
+  assert.match(source.slice(evalStart, evalEnd), /force \? \[\] : await ideaPhotoWaitStage\("intake_batches", \(\) => unfinishedIntakeBatchIds/);
 });
 
 test("matcher persists HTTP class without logging credentials into Idea match status", () => {
