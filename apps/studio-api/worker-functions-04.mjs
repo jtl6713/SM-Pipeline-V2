@@ -16,6 +16,7 @@ import { assessRecoveryPreflight } from "./exception-recovery-preflight.mjs";
 import { withExceptionConversationLock } from "./exception-recovery-lock.mjs";
 import { verifyExistingProviderReceipt } from "./exception-recovery-receipt.mjs";
 import { reconcileExceptionCensus } from "./exception-recovery-counts.mjs";
+import { compareHomeSnapshotToExceptionCensus } from "./exception-recovery-home-parity.mjs";
 import { FB3_ACTION, RECEIPT_REPAIR_ACTION, executeFb3AdminRecovery, executeApprovedReceiptRepair } from "./exception-recovery-actions.mjs";
 import { actionApprovalAudit, actionOutcomeAudit } from "./exception-recovery-action-audit.mjs";
 import { exceptionRecoveryMutationsEnabled } from "./exception-recovery-rollout.mjs";
@@ -9968,16 +9969,26 @@ export async function getStudioExceptionRecoveryCounts(request, env) {
   // Cache for five minutes except an explicit manual Force reconciliation.
   const data=await studioReadCoalesce(fresh?"exception-counts:"+Date.now():
     "exception-recovery-full-census",fresh?0:300000,async()=>{
+      // Pin the Home R2 snapshot generation on both sides of the source census.
+      // When Home uses summary reads, R2 is not the visible source and parity
+      // remains explicitly unavailable rather than comparing the wrong cache.
+      const homeBefore=env?.STUDIO_HOME_PROFILE_SUMMARY_READS==="true"?null:
+        await readStudioProfilesOverviewSnapshotFromR2(env).catch(()=>null);
       const all=await scanOutstandingFailedOutputs((options)=>
         listRecordsPage(env,env.AIRTABLE_OUTPUT_TABLE_ID,options),{
           filterFormula:"{Test_Run_ID}=BLANK()",pageSize:100,requireUnique:true,
         });
       const qa=await loadStudioFailedOutputSnapshot(env,{fresh});
+      const scanAtMs=Date.now();
       const counts=reconcileExceptionCensus(all,mapOutput,{
-        atMs:Date.now(),qaFailed:qa?.items||null,
+        atMs:scanAtMs,qaFailed:qa?.items||null,
         qaPastDue:qa?.approved_past_due?.status==="ok" ? qa.approved_past_due.items : null,
       });
-      return {...counts,quality_agent_scan_at:qa?.scanned_at||null};
+      const homeAfter=env?.STUDIO_HOME_PROFILE_SUMMARY_READS==="true"?null:
+        await readStudioProfilesOverviewSnapshotFromR2(env).catch(()=>null);
+      const home_snapshot_comparison=compareHomeSnapshotToExceptionCensus(
+        counts,homeBefore,homeAfter,{scanAtMs});
+      return {...counts,quality_agent_scan_at:qa?.scanned_at||null,home_snapshot_comparison};
     });
   return respond(request,env,data);
 }
