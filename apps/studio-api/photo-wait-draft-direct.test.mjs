@@ -48,6 +48,7 @@ test("cron enumerates waiting queue before selecting a bounded fair slice",()=>{
   const end=source.indexOf("/*__STUDIO_WORKER_END:runWaitingIdeaPhotoMatches__*/",start);
   const segment=source.slice(start,end);
   assert.doesNotMatch(segment,/limit: 500/);
-  assert.match(segment,/prioritizeWaitingIdeaPhotoScans\(candidates, \{ limit \}\)/);
-  assert.match(segment,/fields: \["Studio_Photo_Match_JSON", "Production_Config_Notes"\]/);
+  assert.match(segment,/selectProfileFairIdeaPhotoCandidates\(candidates, \{/);
+  assert.match(segment,/rotation: Math\.floor\(Date\.now\(\) \/ 60000\)/);
+  assert.match(segment,/fields: \["Content_Profile", "Studio_Photo_Match_JSON", "Production_Config_Notes"\]/);
 });
