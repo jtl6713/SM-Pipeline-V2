@@ -21,6 +21,7 @@ from asset.constants import (
 )
 from asset.helpers import as_bool, drive_video_duration_seconds, parse_bytes
 from asset.routing import a2_route_fields, classify_intake_file
+from asset.visual_screen import screen_asset, screening_note
 from audio.leading_silence import STATUS_FAILED, apply_drive_leading_silence, is_voiceover_audio
 from audio.wav_to_mp3 import apply_drive_wav_to_mp3
 from carousel.timeutil import chicago_now, iso_ms
@@ -98,7 +99,8 @@ def _intake_fields(file: dict[str, Any], *, share_url: str, batch_id: str) -> di
         "Intake_Batch_ID": batch_id,
         "Classification_Status": "Needs Classification",
         "Active": True,
-        "Do_Not_Use": False,
+        # Fail closed while the visual preflight is pending.
+        "Do_Not_Use": classify_intake_file(str(file.get("name") or ""), str(file.get("mimeType") or "")) in {"image", "video", "branding"},
         "Capture_Source": "Self Filmed",
         "Rights_Status": "Owned",
         "Drive_Access_Status": "Public",
@@ -272,6 +274,32 @@ def _intake_pass(
                 moved = drive.move_file(file_id, dest, remove_parent_id=GDRIVE_INGESTION_FOLDER)
                 moved_id = str(moved.get("id") or file_id)
                 overlay = a2_route_fields(route, name, moved_id)
+                if route in {"image", "video", "branding"}:
+                    # A2 never publishes or releases visual media before this check.
+                    # Keep the Drive source even if flagged; Do_Not_Use gates selection.
+                    try:
+                        source_bytes, _source_mime = drive.download_file(moved_id)
+                        screen = screen_asset(
+                            content=source_bytes, filename=name,
+                            mime_type=mime or _source_mime,
+                        )
+                    except Exception:
+                        logger.exception("A2 visual provenance scan failed for %s", moved_id)
+                        screen = {
+                            "decision": "review",
+                            "indicators": [],
+                            "evidence": "Visual screen could not inspect the source",
+                            "frames_checked": 0,
+                        }
+                    overlay["Do_Not_Use"] = screen["decision"] != "clean"
+                    overlay["Potential_Match_Notes"] = screening_note(screen)
+                    if screen["decision"] != "clean":
+                        overlay["Raw_Source_Eligibility"] = (
+                            "Ineligible" if screen["decision"] == "blocked" else "Needs Review"
+                        )
+                        overlay["Exclusion_Reasons"] = (
+                            ["Watermarked/Branded"] if screen["indicators"] else ["Other"]
+                        )
                 if route == "audio":
                     try:
                         converted = apply_drive_wav_to_mp3(drive, moved_id, filename=name, mime_type=mime)
