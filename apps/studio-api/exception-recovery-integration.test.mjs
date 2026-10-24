@@ -125,3 +125,23 @@ test("read-only deployment cannot trigger approved FB3 or status-repair mutation
  assert.match(ui,/const fb3=rolloutOn&&exact/);
  assert.match(ui,/const statusRepair=rolloutOn&&exact/);
 });
+
+test("complete canonical census populates administrator list without authorizing publication",()=>{
+ assert.match(ui,/function applyCanonicalCensus\(census\)/);
+ assert.match(ui,/Array\.isArray\(census\.exception_items\)/);
+ assert.match(ui,/getJson\("\/api\/admin\/exception-recovery\/counts"\)/);
+ assert.match(ui,/actions_enabled:false/);
+ assert.match(ui,/qa_only_unreconciled/);
+ assert.match(html,/value="remote_identity_unverified"/);
+ assert.match(html,/value="held_deferred"/);
+});
+test("reconciliation captures stable Home generation before and after full census",()=>{
+ assert.match(service,/compareHomeSnapshotToExceptionCensus/);
+ const section=service.slice(service.indexOf("export async function getStudioExceptionRecoveryCounts"),
+   service.indexOf("/*__STUDIO_WORKER_END:getStudioExceptionRecoveryCounts__*/"));
+ const before=section.indexOf("const homeBefore=");
+ const scan=section.indexOf("scanOutstandingFailedOutputs(");
+ const after=section.indexOf("const homeAfter=");
+ const comparison=section.indexOf("compareHomeSnapshotToExceptionCensus(");
+ assert.ok(before>0&&before<scan&&scan<after&&after<comparison);
+});
