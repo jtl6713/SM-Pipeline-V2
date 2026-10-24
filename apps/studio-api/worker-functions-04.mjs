@@ -1,3 +1,4 @@
+import { matchNewlyCreatedIdeaPhotos } from "./worker-functions-03.mjs";
 import { verifyFactoryRenderedMedia } from "./factory-producer-render-evidence.mjs";
 import { appendVerifiedLibraryAssets } from "./factory-producer-library-append.mjs";
 import { applyGroundedMediaEdits } from "./factory-producer-media-edits.mjs";
