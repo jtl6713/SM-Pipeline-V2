@@ -12180,9 +12180,10 @@ function readyProductionExistingDraftEligible(idea, requestRecord) {
   if (/(?:^|\s)origin=(?:autonomous|prepare-to-review)(?:\s|$)/i.test(notes)) return true;
   // Approved, ready-master requests also qualify even when an older
   // timed-script/manual proposal omitted the autonomous origin stamp.
-  // A manual photo-auto-off is authoritative and remains excluded.
-  return String(f(idea, "Candidate_Status") || "").trim() === "Approved"
-    && !productionPhotoWaitAutoOff(notes);
+  // ez-photo-wait=off protects the operator-selected image set from
+  // automatic re-matching. It does NOT forbid autonomous production of an
+  // explicitly Approved Idea whose masters are already Ready.
+  return String(f(idea, "Candidate_Status") || "").trim() === "Approved";
 }
 
 function readyProductionIdeaEligible(idea, requestRecord = null) {
@@ -12389,10 +12390,19 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
   }
 
   const plan = readyProductionIdeaPlan(idea, requestRecord);
-  // The PR is authoritative for uploaded masters when hourly photo-wait was
-  // disabled. Do not needlessly block a linked request with Ready assets.
-  if (!plan.libraryIds.length && requestRecord) {
-    plan.libraryIds = autonomousMasterMediaIds(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []));
+  const manualAssetSelection = Boolean(requestRecord
+    && String(f(idea, "Candidate_Status") || "").trim() === "Approved"
+    && productionPhotoWaitAutoOff(f(requestRecord, "Production_Notes")));
+  const selectedMasterIds = requestRecord
+    ? autonomousMasterMediaIds(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []))
+    : [];
+  // For explicitly photo-auto-off Approved requests the existing, verified
+  // master asset manifest is the ONLY media authority. Do not replace or
+  // augment operator selections with an old Idea-level match list.
+  if (manualAssetSelection) {
+    plan.libraryIds = selectedMasterIds;
+  } else if (!plan.libraryIds.length && requestRecord) {
+    plan.libraryIds = selectedMasterIds;
   }
   if (!plan.libraryIds.length) {
     return readyProductionFinishClaim(env.STUDIO_MEDIA, lease, {
@@ -12416,7 +12426,9 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
     };
     requestRecord = await createDraftForIdea(env, idea, authorization, input);
   }
-  await attachItem4LibraryAssetIds(env, requestRecord.id, plan.libraryIds, authorization);
+  if (!manualAssetSelection) {
+    await attachItem4LibraryAssetIds(env, requestRecord.id, plan.libraryIds, authorization);
+  }
   requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
   const notes = String(f(requestRecord, "Production_Notes") || "");
   if (!/origin=(prepare-to-review|autonomous|az-finished-video)/i.test(notes)) {
