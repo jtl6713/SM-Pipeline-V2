@@ -48,3 +48,49 @@ test("bulk preview limits selection and uses only read-only output preflight",()
  assert.match(ui,/inspection only; publishing and state changes remain disabled/);
  assert.doesNotMatch(ui,/fetch\([^)]*\/publish/);
 });
+
+test("live receipt and full-count endpoints stay administrator-only GET",()=>{
+ for(const [key,handler] of [
+  ["isAdminExceptionReceiptRoute","getStudioExceptionRecoveryReceipt"],
+  ["isAdminExceptionCountsRoute","getStudioExceptionRecoveryCounts"],
+ ]) {
+  const start=worker.indexOf("if ("+key+") {");
+  const end=worker.indexOf("\n      if (",start+5);
+  assert.ok(start>0&&end>start);
+  const route=worker.slice(start,end);
+  assert.match(route,/requirePermission\(authorization, "tenant_admin"\)/);
+  assert.match(route,/request.method !== "GET"/);
+  assert.ok(route.includes(handler));
+  assert.doesNotMatch(route,/assertWriteRequest|PATCH|POST/);
+ }
+});
+test("mutating FB3 route requires POST, admin, origin safety and no other stage",()=>{
+ const start=worker.indexOf("if (isAdminExceptionActionRoute) {");
+ const end=worker.indexOf("\n      if (",start+5);
+ assert.ok(start>0&&end>start);
+ const code=worker.slice(start,end);
+ assert.match(code,/requirePermission\(authorization, "tenant_admin"\)/);
+ assert.match(code,/request.method !== "POST"/);
+ assert.match(code,/assertWriteRequest\(request, env\)/);
+ assert.match(code,/runStudioExceptionRecoveryAction\(request, env, authorization\)/);
+ const handler=service.slice(service.indexOf("export async function runStudioExceptionRecoveryAction"),service.indexOf("/*__STUDIO_WORKER_END:runStudioExceptionRecoveryAction__*/"));
+ assert.match(handler,/withOutputApprovalLock\(env.STUDIO_MEDIA/);
+ assert.match(handler,/verifyRemote:async\(row\)=>exceptionRecoveryReadProvider/);
+ assert.match(handler,/finalizeExistingPost:async\(row\)=>studioPulseFb3\(env,row\)/);
+ assert.match(handler,/persistVerifiedRecoveryInAirtable/);
+ assert.doesNotMatch(handler,/studioPulseFb0|studioPulseFb1|studioPulseFb2|studioPublish|DELETE/);
+});
+test("canonical output scan paginates full Airtable table with Home mapping",()=>{
+ const code=service.slice(service.indexOf("export async function getStudioExceptionRecoveryCounts"),service.indexOf("/*__STUDIO_WORKER_END:getStudioExceptionRecoveryCounts__*/"));
+ assert.match(code,/scanOutstandingFailedOutputs/);
+ assert.match(code,/listRecordsPage\(env,env.AIRTABLE_OUTPUT_TABLE_ID/);
+ assert.match(code,/reconcileExceptionCensus\(all,mapOutput/);
+ assert.doesNotMatch(code,/limit:\s*250|method:\s*"PATCH"|method:\s*"POST"/);
+});
+test("UI requires explicit receipt inspection and post-ID confirmation before FB3",()=>{
+ assert.match(html,/id="ercReconcileCounts"/);
+ assert.match(ui,/ercReconcileCounts.*addEventListener\("click",reconcileAllCounts\)/);
+ assert.match(ui,/Verify live provider receipt/);
+ assert.match(ui,/window.confirm\("Confirm finalization ONLY of existing Facebook output #"/);
+ assert.match(ui,/action:"finalize_existing_facebook_post",confirm_output_id:outputId,confirm_post_id:postId/);
+});
