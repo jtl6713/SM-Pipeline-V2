@@ -557,6 +557,7 @@ import {
   waitForPromotionResult,
 } from "./worker-functions-02.mjs";
 import {
+  matchNewlyCreatedIdeaPhotos,
   respondStudioMappedList,
   libraryProfileScopeFormula,
   assetLibraryFilterFormula,
@@ -3672,7 +3673,7 @@ export function cleanIdeaCreatePayload(payload) {
 }
 /*__STUDIO_WORKER_END:cleanIdeaCreatePayload__*/
 
-export async function createIdea(request, env, authorization) {
+export async function createIdea(request, env, authorization, ctx = null) {
   let payload;
   try {
     payload = await request.json();
@@ -3697,6 +3698,15 @@ export async function createIdea(request, env, authorization) {
     Production_Include_Voiceover: "Yes",
     Production_Include_Background_Music: "Yes",
     Production_Include_Thumbnail: "Yes",
+    // Persist waiting in the SAME create write. If kickoff fails, the fair
+    // background queue can recover this Idea without another operator click.
+    Production_Content_Type: "Carousel",
+    Production_Carousel_Image_Mode: "Manual Upload",
+    Production_Carousel_Slide_Count_Mode: "Target range",
+    Production_Carousel_Slide_Count_Min: 5,
+    Production_Carousel_Slide_Count_Max: 8,
+    Production_Carousel_Slide_Count: 8,
+    Studio_Photo_Wait_Status: "Waiting",
   };
   if (input.summary) fields.Idea_Summary = input.summary;
   const inferredLocation = suggestPrimaryLocationFromIdea({
@@ -3713,6 +3723,13 @@ export async function createIdea(request, env, authorization) {
     method: "POST",
     body: JSON.stringify({ fields, typecast: false }),
   });
+  // Never convert a successful Idea create into a 500 merely because image
+  // matching fails. Cron's Waiting scan owns bounded retries.
+  if (ctx?.waitUntil) {
+    ctx.waitUntil(matchNewlyCreatedIdeaPhotos(env, created, authorization).catch((error) => {
+      console.warn("New Idea immediate photo match failed", created.id, String(error?.message || error).slice(0, 180));
+    }));
+  }
 
   return respond(request, env, {
     ok: true,

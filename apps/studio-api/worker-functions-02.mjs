@@ -11248,7 +11248,9 @@ export async function autoListenOpenPhotoIdeas(env, { limit = 12 } = {}) {
   const candidates = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
     limit: Math.max(1, Number(limit) || 12),
     sortField: "Create_Date",
-    sortDirection: "desc",
+    // New Ideas are kicked immediately. Drain the oldest legacy unscanned
+    // backlog first so a steady influx cannot starve months-old Ideas.
+    sortDirection: "asc",
     filterFormula: "AND({Studio_Photo_Wait_Status}=BLANK(),{Promoted_Content_Record_ID}=BLANK(),OR({Candidate_Status}='Generated',{Candidate_Status}='Sent for Review'))",
   });
 
@@ -11259,8 +11261,18 @@ export async function autoListenOpenPhotoIdeas(env, { limit = 12 } = {}) {
   const results = [];
   for (const idea of eligible) {
     try {
-      const contentType = ideaPhotoAutoListenContentType(idea);
-      const range = ideaPhotoWatchRange(idea, contentType);
+      // Re-check just before mutating: an operator may have attached selected
+      // media, opened Production, or placed a hold after discovery.
+      const live = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id);
+      const liveStatus = String(f(live, "Candidate_Status") || "").trim();
+      if (String(f(live, "Studio_Photo_Wait_Status") || "").trim()
+          || liveStatus === "On Hold" || liveStatus === "Rejected"
+          || liveStatus === "Promoted"
+          || String(f(live, "Promoted_Content_Record_ID") || "").trim()
+          || linkedRecordIds(f(live, "Content Items")).length
+          || ideaHasExplicitPhotoProductionConfig(live)) continue;
+      const contentType = ideaPhotoAutoListenContentType(live);
+      const range = ideaPhotoWatchRange(live, contentType);
       const updatedIdea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
         method: "PATCH",
         body: JSON.stringify({

@@ -582,6 +582,7 @@ import {
   createIdeaTimedScriptRoute,
 } from "./worker-functions-02.mjs";
 import {
+  scanIdeaPhotoMatchingQuality,
   runWaitingIdeaPhotoMatches,
   listContent,
   listOutputScheduleGrid,
@@ -2004,7 +2005,7 @@ export default {
         if (request.method === "POST") {
           assertWriteRequest(request, env);
           requirePermission(authorization, "ideas_create");
-          return createIdea(request, env, authorization);
+          return createIdea(request, env, authorization, ctx);
         }
         return listIdeas(request, env, url, authorization, ctx);
       }
@@ -2576,6 +2577,18 @@ export default {
     // Keep this deliberately small: Airtable subrequest pressure previously
     // caused 429 cooldowns when too many light-cron jobs ran together.
     if (!cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      // Newly generated Ideas receive an immediate kickoff. This bounded
+      // legacy sweep also discovers blank-state Ideas that predate that hook.
+      // Keep it separate from image matching so a failed listener does not
+      // prevent the Waiting queue from draining.
+      ctx.waitUntil(autoListenOpenPhotoIdeas(env, { limit: 2 })
+        .then((result) => console.info("Light-cadence legacy Idea listening", result))
+        .catch((error) => console.warn("Light-cadence legacy Idea listening failed", error)));
+      ctx.waitUntil(scanIdeaPhotoMatchingQuality(env, { limit: 150 })
+        .then((result) => console.info("Quality Agent photo matching scan", {
+          scanned: result.scanned, findings: result.finding_count,
+        }))
+        .catch((error) => console.warn("Quality Agent photo matching scan failed", error)));
       ctx.waitUntil(runWaitingIdeaPhotoMatches(env, { limit: 2 })
         .then((result) => console.info("Light-cadence photo matching", result))
         .catch((error) => console.warn("Light-cadence photo matching failed", error)));
@@ -4791,6 +4804,8 @@ const STUDIO_TRISTATE = new Set(["Use Profile Default", "Yes", "No"]);
 /*__STUDIO_WORKER_EXTRACT:unfinishedIntakeBatchIds__*/
 /*__STUDIO_WORKER_EXTRACT:applyLibraryAssetsToProductionRequest__*/
 /*__STUDIO_WORKER_EXTRACT:evaluateAndMaybeAttachWaitingIdeaPhotos__*/
+/*__STUDIO_WORKER_EXTRACT:matchNewlyCreatedIdeaPhotos__*/
+/*__STUDIO_WORKER_EXTRACT:scanIdeaPhotoMatchingQuality__*/
 /*__STUDIO_WORKER_EXTRACT:runWaitingIdeaPhotoMatches__*/
 /*__STUDIO_WORKER_EXTRACT:listContent__*/
 const OUTPUT_LIST_FIELDS = [
