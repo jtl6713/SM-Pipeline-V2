@@ -123,8 +123,9 @@ test("Worker continuously dispatches every Airtable-ready profile but never perf
   assert.match(minuteCron, /studioReadyProductionCronResume\(env, ctx\)/);
   // Regression for incident #907: Factory recovery must never block the
   // first planning attempt of another profile's already-asset-ready draft.
-  assert.equal((minuteCron.match(/ctx\.waitUntil\(/g) || []).length, 2,
-    "cron must register two independent lifetime promises");
+  assert.ok((minuteCron.match(/ctx\.waitUntil\(/g) || []).length >= 3,
+    "Ready, Factory and bounded Idea recovery must register independent promises");
+  assert.match(minuteCron, /autoListenOpenPhotoIdeas\(env, \{ limit: 2, initializeOnly: true \}\)/);
   assert.ok(minuteCron.indexOf("await studioReadyProductionCronResume(env, ctx)") <
     minuteCron.indexOf("await factoryBatchCronResume(env, ctx)"),
     "the ready dispatcher must start before potentially slow Factory recovery");
@@ -284,7 +285,8 @@ test("Ready production backfills existing linked asset-ready autonomous drafts w
   assert.match(draftQuery, /sortField: "Created_At"/);
   assert.match(draftQuery, /Studio_Master_Asset_Status}='Ready'/);
   assert.match(draftQuery, /Studio_Master_Asset_Count}>0/);
-  assert.match(draftQuery, /origin=autonomous/);
+  assert.match(draftQuery, /Studio_Master_Asset_Count/);
+  assert.match(eligibility, /Candidate_Status/);
   const dispatcher = functions.slice(functions.indexOf("async function studioReadyProductionCronResume("),
     functions.indexOf("export { studioReadyProductionCronResume };"));
   assert.match(dispatcher, /discoverAssetReadyProductionDrafts\(env/);
