@@ -541,3 +541,4 @@ Deploy Studio UI 0.6.759 Recovery History with version/cache-bust increment afte
 Deploy UI 0.6.759 with aligned application BUILD_ID and release contract tests.
 
 Deploy UI 0.6.759 normalized core asset URL; retry release after cache contract repair.
+Deploy read-only Exception Recovery History Studio UI 0.6.759 after merged #1137 tests repaired (run verified), 2026-10-24. Keep EXCEPTION_RECOVERY_ACTIONS_ENABLED OFF; no autonomous mutation canary. Deploy via the standard Cloudflare Pages CI gate and verify production UI footer.
