@@ -74,3 +74,26 @@ test("unknown rows never inherit commands or internal provider evidence", () => 
   assert.equal(result.items[0].tokens, undefined);
   assert.equal(result.items[0].actions_enabled, false);
 });
+
+test("profile, platform and category filters affect rows, not unverified global metrics", () => {
+  const current = snap({
+    items: [
+      failed("recAAAAAAAAAAAAAA", {profile_id: "recChicagoProfile", platform: "YouTube"}),
+      failed("recCCCCCCCCCCCCCC", {profile_id: "recMiamiProfile", platform: "Instagram"}),
+    ],
+    approved_past_due: {status: "ok", items: [
+      pastDue("recAAAAAAAAAAAAAA", {profile_id: "recChicagoProfile"}),
+    ]},
+  });
+  const result = buildExceptionRecoveryCenter(current, {
+    profile_id: "recChicagoProfile", platform: "youtube", category: "approved_past_due",
+  });
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].record_id, "recAAAAAAAAAAAAAA");
+  assert.equal(result.visible_count, 1);
+  assert.equal(result.metrics.failed.observed, 2);
+  assert.equal(result.metric_scope, "all_profiles_unfiltered");
+  assert.deepEqual(result.filters, {
+    profile_id: "recChicagoProfile", platform: "youtube", category: "approved_past_due",
+  });
+});
