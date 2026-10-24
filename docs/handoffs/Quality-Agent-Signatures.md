@@ -578,3 +578,11 @@ notes are reconciled into the durable ledger when original positive
 publication fields remain present; overwritten notes cannot establish
 historical completeness. Airtable remains authoritative. No Supabase
 Phase 6 write cutover.
+
+
+## QA-IDEA-PHOTO-SLA — automatic matching / production handoff
+
+- **Detect:** On bounded five-minute Worker scans, classify eligible unpromoted non-held Ideas older than two hours with (a) no photo-matching attempt, (b) Waiting and last attempt older than two hours, or (c) Ready with no linked Production Request. Classifier: `ideaPhotoMatchingSlaFinding` in `apps/studio-api/idea-photo-wait.mjs`.
+- **Evidence:** `studio/state/quality/idea-photo-matching/latest.json` in the Worker `STUDIO_MEDIA` R2 binding; records the scan timestamp, finding counts, exact Idea record IDs, and profile IDs.
+- **Safe recovery:** Only the existing bounded automatic listener, photo matcher, and idempotent ready-production queue may mutate eligible Ideas. Respect manually paused/held/rejected/promoted Ideas and preserve manually selected photo deletions.
+- **Escalate:** Repeat offenders that remain stale after the next successful, non-cooldown match attempt, or any result lacking authoritative profile-scoped media. Never create platform posts, bypass final human approval, or repeatedly manufacture a Production Request to clear this signature.
