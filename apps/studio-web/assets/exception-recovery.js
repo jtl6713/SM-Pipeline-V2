@@ -239,8 +239,23 @@
       const data=await getJson("/api/admin/exception-recovery/counts?fresh=1");
       if(data.status!=="complete_census"||!data.read_only)throw new Error("Complete authoritative scan was not proven");
       const t=data.totals;
+      const home=data.home_snapshot_comparison||{status:"unavailable"};
       summary.textContent="Full Airtable census completed "+date(data.scan_completed_at)+
-        ". "+data.source_row_count+" production outputs; same classification functions as Home/Pipeline. Live Home cache-generation parity is not yet proven.";
+        ". "+data.source_row_count+" production outputs. Home comparison: "+
+        (home.status||"unavailable")+".";
+      host.append(elem("p","Home cache generation: "+(home.snapshot_generation||"unavailable")+
+        " · Snapshot: "+(home.snapshot_at?date(home.snapshot_at):"unknown")+
+        " · Compared profiles: "+(home.compared_profiles??0)+
+        " · "+(home.note||"No verified Home parity evidence"),"erc-note"));
+      const differences=Array.isArray(home.differences)?home.differences:[];
+      for(const delta of differences.slice(0,20)) {
+        host.append(elem("p","Home difference · "+delta.profile_id+" · "+delta.metric+
+          " · Airtable "+delta.airtable+" · Home "+delta.home,"erc-note"));
+      }
+      if(home.missing_in_home?.length||home.missing_in_census?.length)
+        host.append(elem("p","Profile scope differs · Missing in Home: "+
+          (home.missing_in_home||[]).length+" · Missing in census: "+
+          (home.missing_in_census||[]).length,"erc-note"));
       const table=elem("table",null,"erc-count-table");
       const header=elem("tr");
       for(const name of ["Scope","Outputs","Past due","No date","Failed","Manual action","Held"])header.append(elem("th",name));
