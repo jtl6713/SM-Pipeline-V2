@@ -14,6 +14,9 @@ import { buildExceptionRecoveryCenter } from "./exception-recovery-center.mjs";
 import { EXCEPTION_MESSAGES_TABLE, RECOVERY_RECORD_ID, prepareRecoveryConversationMessage, normalizeRecoveryConversation } from "./exception-recovery-conversation.mjs";
 import { assessRecoveryPreflight } from "./exception-recovery-preflight.mjs";
 import { withExceptionConversationLock } from "./exception-recovery-lock.mjs";
+import { verifyExistingProviderReceipt } from "./exception-recovery-receipt.mjs";
+import { reconcileExceptionCensus } from "./exception-recovery-counts.mjs";
+import { FB3_ACTION, executeFb3AdminRecovery } from "./exception-recovery-actions.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
 import { readStudioProfileSummary, validVerifiedStudioSummary } from "./profile-summary-controller.mjs";
@@ -9916,6 +9919,92 @@ export async function getStudioExceptionRecoveryPreflight(request, env) {
   return respond(request,env,assessRecoveryPreflight(current));
 }
 /*__STUDIO_WORKER_END:getStudioExceptionRecoveryPreflight__*/
+
+function exceptionRecoveryRecordIdFromPath(pathname, suffix) {
+  const pattern = new RegExp("^/api/admin/exception-recovery/(rec[A-Za-z0-9]{14})/" + suffix + "$");
+  const id = String(pathname || "").match(pattern)?.[1];
+  if (!RECOVERY_RECORD_ID.test(String(id || ""))) throw new HttpError(400, "Invalid output record ID");
+  return id;
+}
+async function exceptionRecoveryReadProvider(env, row) {
+  const platform = String(f(row, "Platform") || "");
+  let names = [];
+  if (platform === "Facebook" || platform === "Instagram")
+    names = ["FACEBOOK_PAGE_ACCESS_TOKEN","FACEBOOK_GRAPH_API_VERSION"];
+  else if (platform === "YouTube") names = ["YOUTUBE_API_KEY"];
+  const settings = names.length ? await studioActivePipelineSettings(env,names,row).catch(()=>({})) : {};
+  return verifyExistingProviderReceipt(row,{settings:{
+    ...settings,
+    FACEBOOK_PAGE_ACCESS_TOKEN:settings.FACEBOOK_PAGE_ACCESS_TOKEN || env.FACEBOOK_PAGE_ACCESS_TOKEN,
+    YOUTUBE_API_KEY:settings.YOUTUBE_API_KEY || env.YOUTUBE_API_KEY,
+  }});
+}
+/** Provider GET only. No persisted publication change from this endpoint. */
+export async function getStudioExceptionRecoveryReceipt(request, env) {
+  const id=exceptionRecoveryRecordIdFromPath(new URL(request.url).pathname,"receipt");
+  const row=await airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id);
+  if(!row?.id || row.id!==id) throw new HttpError(404,"Output not found");
+  const receipt=await exceptionRecoveryReadProvider(env,row);
+  return respond(request,env,{
+    ...receipt,record_id:id,output_id:f(row,"Output_ID")||null,
+    instruction:receipt.verified_public
+      ? "Verified remote identity. This GET has not changed the publication record."
+      : "No public publication has been verified. Do not upload or repost on this evidence.",
+  });
+}
+/*__STUDIO_WORKER_END:getStudioExceptionRecoveryReceipt__*/
+
+export async function getStudioExceptionRecoveryCounts(request, env) {
+  const url=new URL(request.url);
+  const fresh=url.searchParams.get("fresh")==="1";
+  // Complete pagination; never use the newest-250 Pipeline display window.
+  // Cache for five minutes except an explicit manual Force reconciliation.
+  const data=await studioReadCoalesce(fresh?"exception-counts:"+Date.now():
+    "exception-recovery-full-census",fresh?0:300000,async()=>{
+      const all=await scanOutstandingFailedOutputs((options)=>
+        listRecordsPage(env,env.AIRTABLE_OUTPUT_TABLE_ID,options),{
+          filterFormula:"{Test_Run_ID}=BLANK()",pageSize:100,
+        });
+      const qa=await loadStudioFailedOutputSnapshot(env,{fresh});
+      const counts=reconcileExceptionCensus(all,mapOutput,{
+        atMs:Date.now(),qaFailed:qa?.items||null,
+        qaPastDue:qa?.approved_past_due?.status==="ok" ? qa.approved_past_due.items : null,
+      });
+      return {...counts,quality_agent_scan_at:qa?.scanned_at||null};
+    });
+  return respond(request,env,data);
+}
+/*__STUDIO_WORKER_END:getStudioExceptionRecoveryCounts__*/
+
+/**
+ * Only existing FB3 Page-photo finalization is permitted here.
+ * Admin provides both the exact Studio output ID and the existing remote post ID.
+ * Existing Factory/Pipeline lock, current Airtable preflight, provider Graph GET,
+ * existing FB3 engine and durable verified-recovery ledger are reused.
+ */
+export async function runStudioExceptionRecoveryAction(request, env, authorization) {
+  const id=exceptionRecoveryRecordIdFromPath(new URL(request.url).pathname,"actions");
+  const input=await readJsonBody(request);
+  if(input?.action!==FB3_ACTION)throw new HttpError(409,"Action not enabled. This center never blindly retries, republishes, deletes or releases holds.");
+  const confirmPost=String(input?.confirm_post_id||"").trim();
+  const confirmOutput=String(input?.confirm_output_id||"").trim();
+  if(!/^\d{6,30}(?:_\d{6,30})?$/.test(confirmPost)||!/^\d+$/.test(confirmOutput))
+    throw new HttpError(400,"Exact output and existing Facebook post ID confirmations are required");
+  const result=await withOutputApprovalLock(env.STUDIO_MEDIA,id,async()=>
+    executeFb3AdminRecovery({
+      recordId:id,approval:{action:FB3_ACTION,confirm_post_id:confirmPost,confirm_output_id:confirmOutput},
+      readOutput:async(recordId)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,recordId),
+      verifyRemote:async(row)=>exceptionRecoveryReadProvider(env,row),
+      finalizeExistingPost:async(row)=>studioPulseFb3(env,row),
+      appendLedger:async(row,evidence)=>persistVerifiedRecoveryInAirtable(env,row,evidence,{listRecords,airtableFetch}),
+    }),{owner:"exception-fb3:"+(authorization?.user?.email||authorization?.email||"administrator")}
+  );
+  return respond(request,env,{...result,action:FB3_ACTION,no_new_post:true,
+    explanation:result.status==="verified_published" ? "Existing Facebook Page post was finalized and read back in Airtable.":
+      "No new Facebook post was created. Verify current provider and Studio status before another action."
+  },result.status==="blocked"?409:result.status==="pending_verification"?202:200);
+}
+/*__STUDIO_WORKER_END:runStudioExceptionRecoveryAction__*/
 
 export async function getStudioDeskInventory(request, env) {
   const payload = await gatherStudioDeskInventory(env);
