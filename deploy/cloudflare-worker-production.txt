@@ -656,3 +656,5 @@ Deploy Conversational Producer Factory revision bridge PR #1093, merge 845c4bf38
 2026-10-23: Follow-up Script a Short parser correction after live Tribeca proposal. Fix escaped regex literals, resolve titled **Tribeca** ahead of broad story text, and retain named subject matching. No Airtable SoR, media authority, QA, publishing or schedule changes. Deploy Worker with protected validation.
 
 Deploy API 0.10.681-producer-conversation: authenticated Production Request Producer thread and scene revision proposals, Airtable-authoritative; no changes to publishing authority.
+
+2026-10-23: Deploy merged PR #1109 light-cadence photo matching (bounded two per light tick; heavy cron retained), plus main's latest Studio fixes. Deploy merged PR #1108 I1 partial-create reporting in the runner separately. Preserve Airtable write authority, live global inventory gate, media/hold fences, existing Worker bindings and rollback. Require protected source/health verification before claiming success.

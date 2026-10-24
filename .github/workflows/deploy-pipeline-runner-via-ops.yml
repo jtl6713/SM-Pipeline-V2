@@ -30,6 +30,7 @@ jobs:
           PYTHONPATH=services/pipeline-runner python -m pytest -q \
             services/pipeline-runner/tests/test_a2b_existing_lookup.py \
             services/pipeline-runner/tests/test_i1_title_uniqueness.py \
+            services/pipeline-runner/tests/test_i1_partial_creation.py \
             services/pipeline-runner/tests/test_idea_chain.py \
             services/pipeline-runner/tests/test_airtable_atomic_upsert.py \
             services/pipeline-runner/tests/test_airtable_egress_monitor.py \
@@ -294,3 +295,5 @@ jobs:
 # Existing YouTube YT2 video IDs and TikTok TTD2 publish IDs must be polled, NEVER uploaded/created twice.
 
 # 2026-10-22 QA #1050 source PR #1089: deploy approved-cover retention when C9 final-slides view omitted cover and verify cover regressions.
+
+# 2026-10-23: release I1 partial-create recovery (#1108) with predeployment tests and health readback.
