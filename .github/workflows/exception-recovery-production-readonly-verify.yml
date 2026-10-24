@@ -1,0 +1,73 @@
+name: Verify Exception Recovery Production Read-Only
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/exception-recovery-production-readonly-verify.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: exception-recovery-readonly-verification
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - name: Verify current Worker has no enabled Exception Recovery mutations
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          BASE="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api"
+          curl -fsS --max-time 30 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$BASE/deployments" -o /tmp/recovery-deployments.json
+          jq -e '.success == true' /tmp/recovery-deployments.json >/dev/null
+          VERSION=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/recovery-deployments.json)
+          curl -fsS --max-time 30 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$BASE/versions/$VERSION" -o /tmp/recovery-version.json
+          jq -e '.success == true' /tmp/recovery-version.json >/dev/null
+          python - <<'PY'
+          import json
+          info=json.load(open('/tmp/recovery-version.json'))['result']
+          bindings=(info.get('resources') or {}).get('bindings') or []
+          if not bindings:
+              raise SystemExit('Live Worker bindings unavailable; cannot prove safe rollout posture')
+          flags=[x for x in bindings if x.get('name')=='EXCEPTION_RECOVERY_ACTIONS_ENABLED']
+          if len(flags)>1:
+              raise SystemExit('Duplicate recovery gate bindings; refusing to verify read-only posture')
+          if flags and (flags[0].get('type')!='plain_text' or str(flags[0].get('text',''))=='true'):
+              raise SystemExit('Recovery mutations could be enabled in the current Worker. Fail closed.')
+          print('live_worker_exception_recovery_mutations=OFF')
+          print('live_worker_binding_inspection=PASS')
+          PY
+      - name: Verify protected custom-domain UI version and administrator route denials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CF_ACCESS_CLIENT_ID"
+          test -n "$CF_ACCESS_CLIENT_SECRET"
+          HEADERS=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET")
+          BASE="https://studio.chicagoshining.com"
+          code=$(curl -sS --max-time 25 "${HEADERS[@]}" -o /tmp/recovery-index -w '%{http_code}' "$BASE/?exception_readonly_verify=1")
+          test "$code" = "200"
+          grep -Fq 'UI build 0.6.758' /tmp/recovery-index
+          grep -Fq 'exception-recovery.js?v=0.6.758-exception-recovery' /tmp/recovery-index
+          grep -Fq 'id="navExceptionRecovery" hidden' /tmp/recovery-index
+          code=$(curl -sS --max-time 25 "${HEADERS[@]}" -o /tmp/recovery-js -w '%{http_code}' "$BASE/assets/exception-recovery.js?v=0.6.758-exception-recovery")
+          test "$code" = "200"
+          grep -Fq 'function applyCanonicalCensus' /tmp/recovery-js
+          for path in /api/admin/exception-recovery /api/admin/exception-recovery/counts; do
+            code=$(curl -sS --max-time 25 "${HEADERS[@]}" -o /tmp/recovery-denied -w '%{http_code}' "$BASE$path")
+            if [[ "$code" != "401" && "$code" != "403" ]]; then
+              echo "::error::Admin route responded $code without a Studio user session; fail closed."
+              exit 1
+            fi
+            echo "anonymous_studio_admin_denied=$path:$code"
+          done
+          echo "custom_domain_exception_recovery_readonly=PASS"
