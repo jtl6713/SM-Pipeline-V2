@@ -6,7 +6,8 @@ const str = (r,k) => String(r?.fields?.[k] ?? "").trim();
 const snapshotFields = ["Output_ID","Output_Title","Title_Text","Content_Profile","Platform",
   "Output_Status","Publish_Status","Review_Status","Do_Not_Publish","Test_Run_ID",
   "Platform_Post_ID","YouTube_Video_ID","Platform_Media_ID","Platform_Post_URL",
-  "Manual_Published_URL","Published_At","Scheduled_Post_Date","Publish_Locked_By",
+  "Manual_Published_URL","Published_At","Scheduled_Post_Date","YouTube_Scheduled_Publish_At",
+  "YouTube_Privacy_Status","YouTube_Upload_Status","YouTube_Processing_Status","Publish_Locked_By",
   "Publish_Locked_At","Publish_Next_Retry_At","Publish_Attempt_Count","Studio_Publish_Dispatch_Count"];
 export const recoverySnapshot = row => Object.fromEntries(
   snapshotFields.map(key => [key,row?.fields?.[key] ?? null]));
