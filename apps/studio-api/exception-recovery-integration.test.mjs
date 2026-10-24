@@ -37,8 +37,8 @@ test("administrator UI is permission-gated and escapes messages through DOM text
  assert.match(ui,/can\s*run|are disabled|actions remain disabled/);
 });
 test("recovery UI JS/CSS follows the existing Studio release key",()=>{
- assert.match(html,/exception-recovery\.css\?v=0\.6\.757-idea-id-list/);
- assert.match(html,/exception-recovery\.js\?v=0\.6\.757-idea-id-list/);
+ assert.match(html,/exception-recovery\.css\?v=0\.6\.758-exception-recovery/);
+ assert.match(html,/exception-recovery\.js\?v=0\.6\.758-exception-recovery/);
 });
 
 test("bulk preview limits selection and uses only read-only output preflight",()=>{
