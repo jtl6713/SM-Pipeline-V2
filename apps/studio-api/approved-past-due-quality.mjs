@@ -18,6 +18,7 @@ export function approvedPastDueFormula(nowMs = Date.now(), graceMs = PAST_DUE_GR
   return 'AND({Test_Run_ID}=BLANK(),{Review_Status}="Approved",{Do_Not_Publish}=0,'
     + '{Scheduled_Post_Date}!="",IS_BEFORE({Scheduled_Post_Date},"' + before + '"),'
     + '{Output_Status}!="Published",{Publish_Status}!="Published",'
+    + '{Output_Status}!="Failed",{Publish_Status}!="Failed",'
     + '{Published_At}=BLANK(),{Platform_Post_URL}=BLANK(),'
     + '{Manual_Published_URL}=BLANK())';
 }

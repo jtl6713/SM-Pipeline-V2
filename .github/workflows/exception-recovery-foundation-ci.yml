@@ -1,0 +1,34 @@
+name: Exception Recovery Center CI
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-api/exception-recovery-*'
+      - 'apps/studio-api/worker.js'
+      - 'apps/studio-api/worker-functions-04.mjs'
+      - 'apps/studio-api/failed-output-monitor.mjs'
+      - 'apps/studio-api/approved-past-due-quality.mjs'
+      - 'apps/studio-api/approved-past-due-quality.test.mjs'
+      - 'apps/studio-web/assets/exception-recovery.*'
+      - 'apps/studio-web/index.html'
+      - '.github/workflows/exception-recovery-foundation-ci.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  exception-center-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax
+        run: |
+          node --check apps/studio-api/worker.js
+          node --check apps/studio-api/worker-functions-04.mjs
+          node --check apps/studio-api/failed-output-monitor.mjs
+          node --check apps/studio-web/assets/exception-recovery.js
+          for file in apps/studio-api/exception-recovery-*.mjs; do node --check "$file"; done
+      - name: Census, conversation, preflight, lease, and UI security
+        run: node --test apps/studio-api/exception-recovery-*.test.mjs apps/studio-api/approved-past-due-quality.test.mjs

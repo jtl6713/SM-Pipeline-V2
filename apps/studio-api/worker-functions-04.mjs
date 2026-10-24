@@ -10,6 +10,17 @@ import { FACEBOOK_REEL_POLL_FORMULA, facebookReelPollVideoId, facebookReelPollEl
 import { scanApprovedPastDueOutputs, classifyApprovedPastDue, STALE_PUBLISHED_RECEIPT_FORMULA, publishedReceiptRepairReason } from "./approved-past-due-quality.mjs";
 import { QUALITY_RECOVERY_LEDGER_TABLE, persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { scanOutstandingFailedOutputs, describeFailedOutput, facebookRateLimitResetReason } from "./failed-output-monitor.mjs";
+import { buildExceptionRecoveryCenter } from "./exception-recovery-center.mjs";
+import { EXCEPTION_MESSAGES_TABLE, RECOVERY_RECORD_ID, prepareRecoveryConversationMessage, normalizeRecoveryConversation } from "./exception-recovery-conversation.mjs";
+import { assessRecoveryPreflight } from "./exception-recovery-preflight.mjs";
+import { withExceptionConversationLock } from "./exception-recovery-lock.mjs";
+import { verifyExistingProviderReceipt } from "./exception-recovery-receipt.mjs";
+import { reconcileExceptionCensus } from "./exception-recovery-counts.mjs";
+import { compareHomeSnapshotToExceptionCensus } from "./exception-recovery-home-parity.mjs";
+import { readExceptionRecoveryCensusCache, persistExceptionRecoveryCensusCache } from "./exception-recovery-census-cache.mjs";
+import { FB3_ACTION, RECEIPT_REPAIR_ACTION, executeFb3AdminRecovery, executeApprovedReceiptRepair } from "./exception-recovery-actions.mjs";
+import { actionApprovalAudit, actionOutcomeAudit } from "./exception-recovery-action-audit.mjs";
+import { exceptionRecoveryMutationsEnabled } from "./exception-recovery-rollout.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
 import { readStudioProfileSummary, validVerifiedStudioSummary } from "./profile-summary-controller.mjs";
@@ -9809,6 +9820,279 @@ export async function gatherStudioDeskInventory(env) {
   };
 }
 /*__STUDIO_WORKER_END:gatherStudioDeskInventory__*/
+
+/**
+ * Read-only, shared Quality Agent snapshot. No new scan loop or publisher.
+ * Authorization is enforced by the /api/admin/exception-recovery route.
+ */
+export async function getStudioExceptionRecoveryCenter(request, env) {
+  try {
+    const snapshot = await loadStudioFailedOutputSnapshot(env);
+    const url = new URL(request.url);
+    const view = buildExceptionRecoveryCenter(snapshot, {
+      profile_id: url.searchParams.get("profile_id"),
+      platform: url.searchParams.get("platform"),
+      category: url.searchParams.get("category"),
+    });
+    return respond(request, env, view, view.status === "unavailable" ? 503 : 200);
+  } catch (error) {
+    console.warn("Exception Recovery Center read-only census unavailable", String(error?.message || error));
+    return respond(request, env, {
+      status: "unavailable", as_of: null, read_only: true, items: [],
+      metrics: {}, error: "Authoritative Quality Agent scan unavailable. Counts are unknown.",
+    }, 503);
+  }
+}
+/*__STUDIO_WORKER_END:getStudioExceptionRecoveryCenter__*/
+
+/**
+ * Every conversation read is scoped by a validated Airtable Platform Output ID.
+ * The persisted store is append-only and separate from publish/production notes.
+ */
+async function studioExceptionConversationRead(env, outputRecordId) {
+  const formula = '{Output_Record_ID}="' + outputRecordId + '"';
+  const rows = await scanOutstandingFailedOutputs((options) =>
+    listRecordsPage(env, EXCEPTION_MESSAGES_TABLE, options),
+    {filterFormula:formula});
+  if (rows.length > 1000) throw new HttpError(409, "Conversation exceeded the supported page budget; no messages were discarded");
+  return normalizeRecoveryConversation(rows);
+}
+export async function getStudioExceptionRecoveryConversation(request, env, authorization) {
+  const url = new URL(request.url);
+  const outputRecordId = url.pathname.match(/^\/api\/admin\/exception-recovery\/(rec[A-Za-z0-9]{14})\/conversation$/)?.[1];
+  if (!RECOVERY_RECORD_ID.test(String(outputRecordId || ""))) throw new HttpError(400, "Invalid output record ID");
+  // Never use a stale snapshot to validate the target of a new administrator message.
+  const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputRecordId);
+  if (!authoritative?.id || authoritative.id !== outputRecordId) throw new HttpError(404, "Output unavailable");
+  if (request.method === "GET") {
+    const messages = await studioExceptionConversationRead(env, outputRecordId);
+    return respond(request, env, {status:"ok",record_id:outputRecordId,messages,
+      read_only:false,publish_actions_enabled:false});
+  }
+  if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+  const input=await readJsonBody(request);
+  let prepared;
+  try {
+    const diagnosis=describeFailedOutput(authoritative);
+    prepared=prepareRecoveryConversationMessage({
+      recordId:outputRecordId,
+      clientId:input?.client_request_id,
+      message:input?.message,
+      actor:authorization?.user?.email||authorization?.email,
+      signature:diagnosis?.signature,
+      diagnosis:diagnosis?.action,
+    });
+  } catch (error) { throw new HttpError(400,String(error?.message||error)); }
+  // R2 CAS fence serializes messages for this record across Worker isolates.
+  // A failed lock or uncertain Airtable write must fail closed and never affect publishing.
+  try {
+    return await withExceptionConversationLock(env.STUDIO_MEDIA,outputRecordId,async()=>{
+      const current=await studioExceptionConversationRead(env,outputRecordId);
+      const keys=prepared.records.map(row=>row.fields.Event_Key);
+      if (keys.every(key=>current.some(message=>message.event_key===key))) {
+        return respond(request,env,{status:"ok",replay:true,record_id:outputRecordId,
+          intent:prepared.intent,messages:current,publish_actions_enabled:false});
+      }
+      if (keys.some(key=>current.some(message=>message.event_key===key)))
+        throw new HttpError(409,"Conversation has a partially persisted exchange. Inspect messages before resubmitting; no output action executed.");
+      const saved=await airtableFetch(env,EXCEPTION_MESSAGES_TABLE,"",{
+        method:"POST",body:JSON.stringify({records:prepared.records,typecast:true})
+      });
+      if (!Array.isArray(saved?.records)||saved.records.length!==2)
+        throw new HttpError(503,"Conversation persistence not confirmed. Check history before retrying.");
+      const messages=await studioExceptionConversationRead(env,outputRecordId);
+      if (!keys.every(key=>messages.some(message=>message.event_key===key)))
+        throw new HttpError(503,"Conversation readback incomplete. Do not assume an action occurred.");
+      return respond(request,env,{status:"ok",replay:false,record_id:outputRecordId,
+        intent:prepared.intent,messages,publish_actions_enabled:false});
+    });
+  } catch(error) {
+    if (Number(error?.status)===409||Number(error?.status)===503)
+      throw new HttpError(Number(error.status),String(error?.message||"Conversation unavailable"));
+    throw error;
+  }
+}
+/*__STUDIO_WORKER_END:getStudioExceptionRecoveryConversation__*/
+
+export async function getStudioExceptionRecoveryPreflight(request, env) {
+  const url=new URL(request.url);
+  const outputRecordId=url.pathname.match(/^\/api\/admin\/exception-recovery\/(rec[A-Za-z0-9]{14})\/preflight$/)?.[1];
+  if (!RECOVERY_RECORD_ID.test(String(outputRecordId||""))) throw new HttpError(400,"Invalid output record ID");
+  const current=await airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,outputRecordId);
+  if (!current?.id||current.id!==outputRecordId) throw new HttpError(404,"Output unavailable");
+  // A successful preflight never itself authorizes a write: live mutations are
+  // independently disabled unless an explicit Worker rollout flag is enabled.
+  return respond(request,env,{
+    ...assessRecoveryPreflight(current),
+    administrator_recovery_actions_enabled:exceptionRecoveryMutationsEnabled(env),
+  });
+}
+/*__STUDIO_WORKER_END:getStudioExceptionRecoveryPreflight__*/
+
+function exceptionRecoveryRecordIdFromPath(pathname, suffix) {
+  const pattern = new RegExp("^/api/admin/exception-recovery/(rec[A-Za-z0-9]{14})/" + suffix + "$");
+  const id = String(pathname || "").match(pattern)?.[1];
+  if (!RECOVERY_RECORD_ID.test(String(id || ""))) throw new HttpError(400, "Invalid output record ID");
+  return id;
+}
+async function exceptionRecoveryReadProvider(env, row) {
+  const platform = String(f(row, "Platform") || "");
+  let names = [];
+  if (platform === "Facebook" || platform === "Instagram")
+    names = ["FACEBOOK_PAGE_ACCESS_TOKEN","FACEBOOK_GRAPH_API_VERSION"];
+  else if (platform === "YouTube") names = ["YOUTUBE_API_KEY"];
+  const settings = names.length ? await studioActivePipelineSettings(env,names,row).catch(()=>({})) : {};
+  return verifyExistingProviderReceipt(row,{settings:{
+    ...settings,
+    FACEBOOK_PAGE_ACCESS_TOKEN:settings.FACEBOOK_PAGE_ACCESS_TOKEN || env.FACEBOOK_PAGE_ACCESS_TOKEN,
+    YOUTUBE_API_KEY:settings.YOUTUBE_API_KEY || env.YOUTUBE_API_KEY,
+  }});
+}
+/** Provider GET only. No persisted publication change from this endpoint. */
+export async function getStudioExceptionRecoveryReceipt(request, env) {
+  const id=exceptionRecoveryRecordIdFromPath(new URL(request.url).pathname,"receipt");
+  const row=await airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id);
+  if(!row?.id || row.id!==id) throw new HttpError(404,"Output not found");
+  const receipt=await exceptionRecoveryReadProvider(env,row);
+  return respond(request,env,{
+    ...receipt,record_id:id,output_id:f(row,"Output_ID")||null,
+    instruction:receipt.verified_public
+      ? "Verified remote identity. This GET has not changed the publication record."
+      : "No public publication has been verified. Do not upload or repost on this evidence.",
+  });
+}
+/*__STUDIO_WORKER_END:getStudioExceptionRecoveryReceipt__*/
+
+export async function getStudioExceptionRecoveryCounts(request, env) {
+  const url=new URL(request.url);
+  const fresh=url.searchParams.get("fresh")==="1";
+  // Normal page navigation never triggers the 8k-record, cursor-paginated
+  // Airtable census. Only the administrator's explicit Reconcile action does.
+  if(!fresh){
+    const cached=await readExceptionRecoveryCensusCache(env.STUDIO_MEDIA);
+    if(!cached) return respond(request,env,{
+      status:"unavailable",read_only:true,error:
+        "No fresh verified census cache is available. Select Reconcile all-profile counts to run an explicit read-only scan.",
+    },503);
+    return respond(request,env,cached);
+  }
+  const data=await studioReadCoalesce("exception-recovery-fresh-census",0,async()=>{
+    // Pin the Home R2 snapshot generation on both sides of the source census.
+    // If Home uses summary reads, R2 is not the visible source and this
+    // comparison stays unavailable instead of claiming the wrong cache.
+    const homeBefore=env?.STUDIO_HOME_PROFILE_SUMMARY_READS==="true"?null:
+      await readStudioProfilesOverviewSnapshotFromR2(env).catch(()=>null);
+    const all=await scanOutstandingFailedOutputs((options)=>
+      listRecordsPage(env,env.AIRTABLE_OUTPUT_TABLE_ID,options),{
+        filterFormula:"{Test_Run_ID}=BLANK()",pageSize:100,requireUnique:true,
+      });
+    const qa=await loadStudioFailedOutputSnapshot(env,{fresh:true});
+    const scanAtMs=Date.now();
+    const counts=reconcileExceptionCensus(all,mapOutput,{
+      atMs:scanAtMs,qaFailed:qa?.items||null,
+      qaPastDue:qa?.approved_past_due?.status==="ok" ? qa.approved_past_due.items : null,
+    });
+    const homeAfter=env?.STUDIO_HOME_PROFILE_SUMMARY_READS==="true"?null:
+      await readStudioProfilesOverviewSnapshotFromR2(env).catch(()=>null);
+    const home_snapshot_comparison=compareHomeSnapshotToExceptionCensus(
+      counts,homeBefore,homeAfter,{scanAtMs});
+    return {...counts,quality_agent_scan_at:qa?.scanned_at||null,home_snapshot_comparison};
+  });
+  const cached=await persistExceptionRecoveryCensusCache(env.STUDIO_MEDIA,data);
+  return respond(request,env,{...data,census_cache_status:cached.status,
+    census_cache_note:cached.status==="durable_verified"
+      ? "Next navigation can reuse this verified census without rescanning Airtable."
+      : "Census completed, but durable cache could not be verified; later navigation will show unavailable."});
+}
+/*__STUDIO_WORKER_END:getStudioExceptionRecoveryCounts__*/
+
+/**
+ * Only existing FB3 Page-photo finalization is permitted here.
+ * Admin provides both the exact Studio output ID and the existing remote post ID.
+ * Existing Factory/Pipeline lock, current Airtable preflight, provider Graph GET,
+ * existing FB3 engine and durable verified-recovery ledger are reused.
+ */
+export async function runStudioExceptionRecoveryAction(request, env, authorization) {
+  // Deliberately before body parsing, approval audit, locks, or provider
+  // readback: shipping the read-only Center can never enable a mutation.
+  if(!exceptionRecoveryMutationsEnabled(env))
+    throw new HttpError(409,"Exception Recovery actions are disabled for this Worker deployment.");
+  const id=exceptionRecoveryRecordIdFromPath(new URL(request.url).pathname,"actions");
+  const input=await readJsonBody(request);
+  const action=String(input?.action||"");
+  if(![FB3_ACTION,RECEIPT_REPAIR_ACTION].includes(action))
+    throw new HttpError(409,"Action not enabled. This center never blindly retries, republishes, deletes or releases holds.");
+  const confirmPost=String(input?.confirm_post_id||"").trim();
+  const confirmOutput=String(input?.confirm_output_id||"").trim();
+  if(!/^[A-Za-z0-9_-]{6,70}$/.test(confirmPost)||!/^\d+$/.test(confirmOutput)
+      ||(action===FB3_ACTION&&!/^\d{6,30}(?:_\d{6,30})?$/.test(confirmPost)))
+    throw new HttpError(400,"Exact output and existing remote post ID confirmations are required");
+  const actor=String(authorization?.user?.email||authorization?.email||"administrator");
+  let approvalAudit;
+  try{
+    approvalAudit=actionApprovalAudit({
+      record_id:id,client_request_id:input?.client_request_id,
+      action,output_id:confirmOutput,post_id:confirmPost,actor,
+    });
+  }catch(error){throw new HttpError(400,String(error?.message||error));}
+  const result=await withOutputApprovalLock(env.STUDIO_MEDIA,id,async()=>{
+    // Persist and read back the administrator's exact approved action before
+    // invoking any existing recovery engine. A repeated request ID is never
+    // dispatched again, including following an uncertain HTTP response.
+    const existing=await studioExceptionConversationRead(env,id);
+    if(existing.some(item=>item.event_key===approvalAudit.Event_Key)){
+      return {status:"already_processed_request",reason:"approval_key_already_saved_inspect_state",record_id:id};
+    }
+    const committed=await airtableFetch(env,EXCEPTION_MESSAGES_TABLE,"",{
+      method:"POST",body:JSON.stringify({records:[{fields:approvalAudit}],typecast:true}),
+    });
+    if(!Array.isArray(committed?.records)||committed.records.length!==1)
+      throw new HttpError(503,"Administrator approval audit could not be confirmed. Recovery action was not invoked.");
+    const readback=await studioExceptionConversationRead(env,id);
+    if(!readback.some(item=>item.event_key===approvalAudit.Event_Key))
+      throw new HttpError(503,"Administrator approval readback failed. Recovery action was not invoked.");
+    const deps={
+      recordId:id,approval:{action,confirm_post_id:confirmPost,confirm_output_id:confirmOutput},
+      readOutput:async(recId)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,recId),
+      verifyRemote:async(row)=>exceptionRecoveryReadProvider(env,row),
+      appendLedger:async(row,evidence)=>persistVerifiedRecoveryInAirtable(env,row,evidence,{listRecords,airtableFetch}),
+    };
+    let outcome;
+    try {
+      outcome=action===FB3_ACTION
+        ? await executeFb3AdminRecovery({...deps,
+          finalizeExistingPost:async(row)=>studioPulseFb3(env,row),
+        })
+        : await executeApprovedReceiptRepair({...deps,
+          patchStatus:async(row,fields)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,row.id,{
+            method:"PATCH",body:JSON.stringify({fields,typecast:true}),
+          }),
+        });
+    } catch(error) {
+      // A provider or Airtable error can leave finalization uncertain. Persist
+      // the uncertainty when possible; never retry a remote stage blindly.
+      outcome={status:"outcome_unconfirmed",reason:String(error?.message||"stage_failed").slice(0,160),record_id:id};
+    }
+    let auditOutcomeRecorded=false;
+    try{
+      const event=actionOutcomeAudit(approvalAudit,{status:outcome.status,reason:outcome.reason});
+      const saved=await airtableFetch(env,EXCEPTION_MESSAGES_TABLE,"",{
+        method:"POST",body:JSON.stringify({records:[{fields:event}],typecast:true}),
+      });
+      auditOutcomeRecorded=Array.isArray(saved?.records)&&saved.records.length===1;
+    }catch(error){
+      console.warn("Exception approved-action outcome audit deferred",String(error?.message||error).slice(0,120));
+    }
+    return {...outcome,admin_approval_recorded:true,admin_outcome_recorded:auditOutcomeRecorded};
+  },{owner:"exception:"+actor+":"+action});
+  return respond(request,env,{...result,action,no_new_post:true,
+    explanation:result.status==="verified_published"
+      ? "Existing remote publication was verified and the Studio status was read back."
+      : "No new remote post was created. Inspect the latest provider and Studio status before another action.",
+  },result.status==="blocked"||result.status==="already_processed_request"?409:
+    ["pending_verification","outcome_unconfirmed"].includes(result.status)?202:200);
+}
+/*__STUDIO_WORKER_END:runStudioExceptionRecoveryAction__*/
 
 export async function getStudioDeskInventory(request, env) {
   const payload = await gatherStudioDeskInventory(env);
