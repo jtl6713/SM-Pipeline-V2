@@ -132,7 +132,10 @@
     if(info.remote_identity_exists&&!info.remote_publication_verified) statuses.push("Remote verification required");
     if(info.lock_active) statuses.push("Publisher lock active");
     if(info.attempt_limit_reached) statuses.push("Attempt cap reached");
-    return "Safety preflight: "+statuses.join(" · ")+". All output-mutating actions remain disabled.";
+    return "Safety preflight: "+statuses.join(" · ")+". "+
+      (info.administrator_recovery_actions_enabled===true
+        ? "Only verified existing-publication corrections may be requested with explicit approval; retries, reschedules, hold releases and deletion are disabled."
+        : "All recovery mutations are disabled at the deployment level. Provider inspection remains read-only.");
   }
   function renderMessages(recordId) {
     const host=$("ercMessages");
@@ -181,9 +184,11 @@
         const exact=Boolean(result.verified_public&&result.platform===item.platform
           && /^[A-Za-z0-9_-]{6,70}$/.test(String(result.remote_id||""))
           && /^\d+$/.test(String(item.output_id||"")));
-        const fb3=exact&&preflight?.fb3_existing_post_eligible===true
+        const rolloutOn=preflight?.administrator_recovery_actions_enabled===true;
+        if(!rolloutOn) info.textContent+=" Recovery corrections are disabled on this Worker deployment.";
+        const fb3=rolloutOn&&exact&&preflight?.fb3_existing_post_eligible===true
           && item.platform==="Facebook"&&/^\d{6,30}(?:_\d{6,30})?$/.test(result.remote_id||"");
-        const statusRepair=exact&&preflight?.verified_receipt_status_repair_candidate===true;
+        const statusRepair=rolloutOn&&exact&&preflight?.verified_receipt_status_repair_candidate===true;
         finalize.hidden=!fb3;finalize.disabled=!fb3;
         repair.hidden=!statusRepair;repair.disabled=!statusRepair;
       }catch(error){
@@ -191,7 +196,8 @@
       }finally{inspect.disabled=false;}
     });
     async function submitApproved(action,button) {
-      if(!receipt?.verified_public||!state.allowed||state.selected!==recordId||button.disabled)return;
+      if(!receipt?.verified_public||!state.allowed||state.selected!==recordId||button.disabled
+        ||state.preflights.get(recordId)?.administrator_recovery_actions_enabled!==true)return;
       const postId=String(receipt.remote_id||"");
       const outputId=String(item.output_id||"");
       const title=action==="finalize_existing_facebook_post"
