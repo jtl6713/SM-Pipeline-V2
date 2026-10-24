@@ -644,3 +644,33 @@ export function ideaPhotoMatchingSlaFinding(idea, { nowMs = Date.now(), slaMs = 
     last_attempt_at: Number.isFinite(lastAttempt) ? new Date(lastAttempt).toISOString() : null,
   } : null;
 }
+
+/**
+ * Operator-safe diagnostics for matching failures. Never persist raw
+ * authorization headers, query URLs or unbounded provider responses to Ideas.
+ */
+export function describeIdeaPhotoMatchError(error) {
+  const rawStatus = Number(error?.status || error?.statusCode || 0);
+  const status = Number.isInteger(rawStatus) && rawStatus >= 100 && rawStatus <= 599
+    ? rawStatus : null;
+  const raw = String(error?.message || error || "Matcher failed");
+  const category = status === 429 || /rate limit|too many requests|cooldown/i.test(raw)
+    ? "rate_limited"
+    : status === 422 || status === 400 || /invalid formula|unknown field|invalid filter/i.test(raw)
+      ? "invalid_query"
+      : status === 401 || status === 403 || /unauthoriz|permission denied|forbidden/i.test(raw)
+        ? "authorization"
+        : status >= 500 || /service unavailable|gateway/i.test(raw)
+          ? "upstream_unavailable"
+          : /timeout|timed out|abort|network/i.test(raw)
+            ? "timeout"
+            : /not defined|is not a function|typeerror|referenceerror|syntaxerror/i.test(raw)
+              ? "runtime_error"
+              : "unknown";
+  const detail = raw
+    .replace(/https?:\/\/[^\s]+/gi, "[url]")
+    .replace(/(?:Bearer\s+|pat[A-Za-z0-9_.-]{10,}|sk[-_][A-Za-z0-9_.-]{10,}|key[-_][A-Za-z0-9_.-]{10,})/gi, "[redacted]")
+    .replace(/[\r\n\t]+/g, " ")
+    .slice(0, 180);
+  return { error_category: category, error_status: status, error_detail: detail };
+}
