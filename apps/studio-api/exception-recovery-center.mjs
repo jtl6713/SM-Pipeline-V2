@@ -64,7 +64,10 @@ function mergeItem(target, item) {
  * Builds a fail-closed, unfiltered census view from the existing authoritative
  * and cursor-paginated Quality Agent snapshot. No provider calls or writes.
  */
-export function buildExceptionRecoveryCenter(snapshot) {
+export function buildExceptionRecoveryCenter(snapshot, filters = {}) {
+  const profileFilter = str(filters.profile_id).slice(0, 80);
+  const platformFilter = str(filters.platform).toLowerCase().slice(0, 80);
+  const categoryFilter = str(filters.category).slice(0, 80);
   if (!snapshot || snapshot.status !== "ok" || !Array.isArray(snapshot.items)) {
     return { status: "unavailable", as_of: null, read_only: true, items: [],
       metrics: {}, error: "Quality Agent authoritative census unavailable; counts are unknown." };
@@ -117,6 +120,10 @@ export function buildExceptionRecoveryCenter(snapshot) {
     ...item, held: heldIds.has(item.record_id),
   })).sort((a,b) => (b.minutes_past_due || 0) - (a.minutes_past_due || 0)
       || Number(b.output_id || 0) - Number(a.output_id || 0));
+  const visibleItems = items.filter((item) =>
+    (!profileFilter || item.profile_id === profileFilter)
+    && (!platformFilter || str(item.platform).toLowerCase() === platformFilter)
+    && (!categoryFilter || item.categories.includes(categoryFilter)));
   return {
     status: pastDueOk && verificationOk ? "provisional" : "partial",
     as_of: asOf, read_only: true, source_of_truth: "airtable",
@@ -125,7 +132,10 @@ export function buildExceptionRecoveryCenter(snapshot) {
       verified_recovery: verificationOk ? "ledger_subset" : "unavailable",
       home_pipeline_parity: "unverified",
     },
-    metrics, items,
+    metrics, metric_scope: "all_profiles_unfiltered", items: visibleItems,
+    visible_count: visibleItems.length,
+    filters: { profile_id: profileFilter || null, platform: platformFilter || null,
+      category: categoryFilter || null },
     warning: "Observed figures are not canonical Home counts. Never interpret absent or unavailable data as zero.",
   };
 }
