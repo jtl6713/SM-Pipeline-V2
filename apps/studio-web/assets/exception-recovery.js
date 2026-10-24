@@ -11,7 +11,8 @@
     ["needs_decision","Needs my decision"], ["automatically_recovering","Automatically recovering"],
     ["awaiting_verification","Awaiting verification"], ["approved_past_due","Approved past due"],
     ["failed","Failed"], ["suspected_duplicates","Suspected duplicates"],
-    ["held_deferred","Held / deferred"], ["resolved_last_7_days","Resolved · 7 days"],
+    ["held_deferred","Held / deferred"], ["remote_identity_unverified","Remote IDs · no receipt"],
+    ["resolved_last_7_days","Resolved · 7 days"],
   ];
   const state = { allowed:false, loading:false, payload:null, selected:"", serial:0, threadSerial:0, threadMessages:new Map(), preflights:new Map(), posting:false, pendingRequest:null, selectedBulk:new Set(), bulkBusy:false };
   const elem = (tag, text, cls) => {
@@ -41,9 +42,9 @@
     card.type="button";
     const observed = info?.observed;
     card.append(elem("strong", observed == null ? "—" : observed),
-      elem("span",label),elem("small", info?.status === "provisional" ? "Observed · not Home parity" : info?.status === "unavailable" ? "Unavailable" : info?.status === "not_implemented" ? "Not yet connected" : String(info?.status || "Unknown")));
+      elem("span",label),elem("small", info?.status === "canonical_census" ? "Complete Airtable census" : info?.status === "provisional" ? "Observed · not Home parity" : info?.status === "unavailable" ? "Unavailable" : info?.status === "not_implemented" ? "Not yet connected" : String(info?.status || "Unknown")));
     card.title = info?.note || "Count is not yet available";
-    const byKey = {approved_past_due:"approved_past_due",failed:"failed",held_deferred:"held_deferred"};
+    const byKey = {approved_past_due:"approved_past_due",failed:"failed",held_deferred:"held_deferred",remote_identity_unverified:"remote_identity_unverified"};
     if (byKey[key]) card.addEventListener("click",() => {
       category.value = category.value === byKey[key] ? "" : byKey[key];
       render();
@@ -238,6 +239,7 @@
     try{
       const data=await getJson("/api/admin/exception-recovery/counts?fresh=1");
       if(data.status!=="complete_census"||!data.read_only)throw new Error("Complete authoritative scan was not proven");
+      applyCanonicalCensus(data);
       const t=data.totals;
       const home=data.home_snapshot_comparison||{status:"unavailable"};
       summary.textContent="Full Airtable census completed "+date(data.scan_completed_at)+
@@ -376,6 +378,44 @@
     for(const [id,name] of list) profiles.add(new Option(name,id));
     if([...profiles.options].some(o=>o.value===value)) profiles.value=value;
   }
+  function applyCanonicalCensus(census) {
+    if(census?.status!=="complete_census"||!census.read_only||!Array.isArray(census.exception_items))
+      throw new Error("Canonical exception items require a complete read-only census");
+    const current=state.payload||{items:[],metrics:{},read_only:true};
+    const qaById=new Map((current.items||[]).map(item=>[item.record_id,item]));
+    const authoritative=census.exception_items.map(item=>{
+      const qa=qaById.get(item.record_id);
+      return {...item,
+        title:item.title||qa?.title||null,
+        profile_name:qa?.profile_name||item.profile_name||null,
+        diagnosis:qa?.diagnosis||item.diagnosis,
+        recommendation:qa?.recommendation||item.recommendation,
+        recovery:qa?.recovery||item.recovery||null,
+        actions_enabled:false,
+      };
+    });
+    const seen=new Set(authoritative.map(item=>item.record_id));
+    const qaOnly=(current.items||[]).filter(item=>!seen.has(item.record_id)).map(item=>({
+      ...item,categories:[...new Set([...(item.categories||[]),"qa_only_unreconciled"])],
+      actions_enabled:false,
+    }));
+    const metric=(count,note)=>({observed:count,count,status:"canonical_census",source:"complete_airtable_scan",note});
+    const total=census.totals||{};
+    state.payload={...current,items:[...authoritative,...qaOnly],
+      as_of:census.scan_completed_at,
+      status:"complete_census",read_only:true,
+      metrics:{...current.metrics,
+        approved_past_due:metric(total.approved_past_due,"Home canonical predicate, complete Airtable census"),
+        failed:metric(total.failed,"Home failure predicate, complete Airtable census"),
+        held_deferred:metric(total.held_deferred,"Complete Airtable do-not-publish census"),
+        remote_identity_unverified:metric(census.unverified_remote_ids,
+          "Saved remote identity without authoritative public publication receipt")},
+      warning:census.exception_items_truncated
+        ?"Exception item list is truncated. Canonical totals remain complete."
+        :"Canonical Airtable exception records loaded; provider publication proof must still be verified."};
+    updateProfileOptions(state.payload.items);
+    render();
+  }
   function render() {
     const data=state.payload;
     metrics.replaceChildren();listing.replaceChildren();
@@ -401,7 +441,16 @@
       if(serial!==state.serial)return;
       if(!data.read_only)throw new Error("Unexpected API mode: only read-only inventory is supported.");
       state.payload=data;updateProfileOptions(data.items||[]);render();
-      msg(data.warning||"Observed figures are provisional.");
+      msg("Quality Agent scan loaded; reconciling complete Airtable exception inventory…");
+      try {
+        const census=await getJson("/api/admin/exception-recovery/counts");
+        if(serial!==state.serial)return;
+        applyCanonicalCensus(census);
+        msg(state.payload.warning);
+      } catch(censusError) {
+        if(serial===state.serial)msg("Complete source census unavailable. Showing provisional Quality Agent observations only. "+
+          String(censusError.message||censusError),true);
+      }
     }catch(e){
       if(serial!==state.serial)return;
       state.payload=null;render();
