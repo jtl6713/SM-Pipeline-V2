@@ -43,7 +43,7 @@ test("listening ideas have bounded light matching and heavy backlog scans", () =
   assert.ok(heavyGate > 0, "burn-kill light early-return missing");
   const beforeHeavy = scheduledBody.slice(0, heavyGate);
   const afterHeavy = scheduledBody.slice(heavyGate);
-  assert.doesNotMatch(beforeHeavy, /autoListenOpenPhotoIdeas/);
+  assert.match(beforeHeavy, /autoListenOpenPhotoIdeas\\(env, \\{ limit: 2 \\}\\)/);
   assert.match(beforeHeavy, /runWaitingIdeaPhotoMatches\(env, \{ limit: 2 \}\)/);
   assert.match(afterHeavy, /autoListenOpenPhotoIdeas/);
   assert.match(afterHeavy, /runWaitingIdeaPhotoMatches\(env, \{ limit: 12 \}\)/);
