@@ -13,6 +13,7 @@ import { scanOutstandingFailedOutputs, describeFailedOutput, facebookRateLimitRe
 import { buildExceptionRecoveryCenter } from "./exception-recovery-center.mjs";
 import { EXCEPTION_MESSAGES_TABLE, RECOVERY_RECORD_ID, prepareRecoveryConversationMessage, normalizeRecoveryConversation } from "./exception-recovery-conversation.mjs";
 import { assessRecoveryPreflight } from "./exception-recovery-preflight.mjs";
+import { withExceptionConversationLock } from "./exception-recovery-lock.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
 import { readStudioProfileSummary, validVerifiedStudioSummary } from "./profile-summary-controller.mjs";
@@ -9875,24 +9876,34 @@ export async function getStudioExceptionRecoveryConversation(request, env, autho
       diagnosis:diagnosis?.action,
     });
   } catch (error) { throw new HttpError(400,String(error?.message||error)); }
-  const current=await studioExceptionConversationRead(env,outputRecordId);
-  const keys=prepared.records.map(row=>row.fields.Event_Key);
-  if (keys.every(key=>current.some(message=>message.event_key===key))) {
-    return respond(request,env,{status:"ok",replay:true,record_id:outputRecordId,
-      intent:prepared.intent,messages:current,publish_actions_enabled:false});
+  // R2 CAS fence serializes messages for this record across Worker isolates.
+  // A failed lock or uncertain Airtable write must fail closed and never affect publishing.
+  try {
+    return await withExceptionConversationLock(env.STUDIO_MEDIA,outputRecordId,async()=>{
+      const current=await studioExceptionConversationRead(env,outputRecordId);
+      const keys=prepared.records.map(row=>row.fields.Event_Key);
+      if (keys.every(key=>current.some(message=>message.event_key===key))) {
+        return respond(request,env,{status:"ok",replay:true,record_id:outputRecordId,
+          intent:prepared.intent,messages:current,publish_actions_enabled:false});
+      }
+      if (keys.some(key=>current.some(message=>message.event_key===key)))
+        throw new HttpError(409,"Conversation has a partially persisted exchange. Inspect messages before resubmitting; no output action executed.");
+      const saved=await airtableFetch(env,EXCEPTION_MESSAGES_TABLE,"",{
+        method:"POST",body:JSON.stringify({records:prepared.records,typecast:true})
+      });
+      if (!Array.isArray(saved?.records)||saved.records.length!==2)
+        throw new HttpError(503,"Conversation persistence not confirmed. Check history before retrying.");
+      const messages=await studioExceptionConversationRead(env,outputRecordId);
+      if (!keys.every(key=>messages.some(message=>message.event_key===key)))
+        throw new HttpError(503,"Conversation readback incomplete. Do not assume an action occurred.");
+      return respond(request,env,{status:"ok",replay:false,record_id:outputRecordId,
+        intent:prepared.intent,messages,publish_actions_enabled:false});
+    });
+  } catch(error) {
+    if (Number(error?.status)===409||Number(error?.status)===503)
+      throw new HttpError(Number(error.status),String(error?.message||"Conversation unavailable"));
+    throw error;
   }
-  if (keys.some(key=>current.some(message=>message.event_key===key)))
-    throw new HttpError(409,"Conversation has a partially persisted exchange. Inspect messages before resubmitting; no output action executed.");
-  const saved=await airtableFetch(env,EXCEPTION_MESSAGES_TABLE,"",{
-    method:"POST",body:JSON.stringify({records:prepared.records,typecast:true})
-  });
-  if (!Array.isArray(saved?.records)||saved.records.length!==2)
-    throw new HttpError(503,"Conversation persistence not confirmed. Check history before retrying.");
-  const messages=await studioExceptionConversationRead(env,outputRecordId);
-  if (!keys.every(key=>messages.some(message=>message.event_key===key)))
-    throw new HttpError(503,"Conversation readback incomplete. Do not assume an action occurred.");
-  return respond(request,env,{status:"ok",replay:false,record_id:outputRecordId,
-    intent:prepared.intent,messages,publish_actions_enabled:false});
 }
 /*__STUDIO_WORKER_END:getStudioExceptionRecoveryConversation__*/
 
