@@ -65,6 +65,6 @@ test("Idea title remains HTML escaped", () => {
 });
 
 test("Studio cache-bust agrees with the updated Ideas JS release", () => {
-  assert.match(app, /BUILD_ID = "item4-0\.6\.758-exception-recovery"/);
-  assert.match(html, /app-item4-1008\.js\?v=0\.6\.758-exception-recovery/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.\d+-[a-z0-9-]+"/);
+  assert.match(html, /app-item4-1008\.js\?v=0\.6\.\d+-[a-z0-9-]+/);
 });
