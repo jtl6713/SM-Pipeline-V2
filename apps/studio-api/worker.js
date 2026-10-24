@@ -698,6 +698,8 @@ import {
   getStudioExceptionRecoveryPreflight,
   getStudioExceptionRecoveryReceipt,
   getStudioExceptionRecoveryCounts,
+  getStudioPublicationRecoveryHistory,
+  studioPublicationRecoveryCron,
   runStudioExceptionRecoveryAction,
   getStudioDeskActivity,
   getStudioAiApiStatus,
@@ -852,6 +854,7 @@ export default {
       const isAdminExceptionConversationWrite = isAdminExceptionConversationRoute && request.method === "POST";
       const isAdminExceptionReceiptRoute = /^\/api\/admin\/exception-recovery\/rec[A-Za-z0-9]{14}\/receipt$/.test(url.pathname);
       const isAdminExceptionCountsRoute = url.pathname === "/api/admin/exception-recovery/counts";
+      const isAdminPublicationRecoveryHistoryRoute = url.pathname === "/api/admin/exception-recovery/history";
       const isAdminExceptionActionRoute = /^\/api\/admin\/exception-recovery\/rec[A-Za-z0-9]{14}\/actions$/.test(url.pathname);
       const isAdminExceptionActionWrite = isAdminExceptionActionRoute && request.method === "POST";
       const isOpsDeskActivityRoute = url.pathname === "/api/ops/desk/activity";
@@ -1110,7 +1113,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.681-producer-conversation" + "-home-v6-fast-cache" + "-home-summary-v6-shadow",
+          version: "0.10.681-producer-conversation" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1",
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
           quality_durable_recovery_ledger_v1: true,
@@ -1583,6 +1586,11 @@ export default {
         requirePermission(authorization, "tenant_admin");
         if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
         return getStudioExceptionRecoveryCounts(request, env);
+      }
+      if (isAdminPublicationRecoveryHistoryRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        return getStudioPublicationRecoveryHistory(request, env);
       }
       if (isAdminExceptionActionRoute) {
         requirePermission(authorization, "tenant_admin");
@@ -2553,6 +2561,15 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
+    // One bounded listener on the EXISTING minute cron. Independent deployment
+    // flags govern verification and status correction; no publisher is called.
+    if (String(event?.cron || "").trim() === "* * * * *" &&
+        env.PUBLICATION_RECONCILIATION_SCAN_ENABLED === "true" &&
+        airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioPublicationRecoveryCron(env)
+        .then(result => console.info("Publication reconciliation",result))
+        .catch(() => console.warn("Publication reconciliation unavailable; no success assumed")));
+    }
     // Dedicated one-minute Factory recovery and Ready-to-produce dispatch.
     // Do not run the expensive Studio light/heavy cron sweep for these ticks.
     // Both paths retain their own bounded, per-profile concurrency controls.
@@ -6579,3 +6596,4 @@ export {
   TIKTOK_COMPLETE_ERRORS,
   YOUTUBE_COMPLETE_ERRORS,
 };
+

@@ -37,6 +37,101 @@
   };
   const nowOpen = () => root.classList.contains("active");
   const msg = (text, error = false) => { status.textContent = text; status.dataset.error = String(error); };
+  const tabs=elem("div",null,"erc-toolbar");
+  tabs.setAttribute("aria-label","Recovery views");
+  const activePanel=elem("div");
+  const top=root.querySelector(".erc-top");
+  while(top.nextSibling) activePanel.append(top.nextSibling);
+  root.append(tabs,activePanel);
+  const historyPanel=elem("section",null,"erc-history");historyPanel.hidden=true;root.append(historyPanel);
+  state.view="all";state.history=[];state.historyCursor=null;
+  const viewButtons=new Map();
+  for(const [value,label] of [["all","All active"],["recovering","Automatically Recovering"],
+    ["verification","Awaiting Verification"],["decision","Needs Your Decision"],["history","Recovery History"]]) {
+    const b=elem("button",label,"secondary-button");b.type="button";
+    b.addEventListener("click",()=>{
+      state.view=value;activePanel.hidden=value==="history";historyPanel.hidden=value!=="history";
+      for(const [key,button] of viewButtons)button.setAttribute("aria-pressed",String(key===value));
+      if(value==="history")loadHistory(false);else render();
+    });tabs.append(b);viewButtons.set(value,b);
+  }
+  viewButtons.get("all").setAttribute("aria-pressed","true");
+  const historyFilters=elem("div",null,"erc-toolbar");
+  const historyInputs={};
+  for(const [key,label,type,choices] of [
+    ["q","Search output, title or audit","search"],
+    ["from","From","date"],["to","Through","date"],
+    ["profile","Profile","select"],["platform","Platform","select",["YouTube","Facebook","Instagram","TikTok"]],
+    ["outcome","Result","select",["Corrected","Already Reconciled","Awaiting Verification","Blocked","Failed","Needs Decision"]],
+    ["actor","Actor","select",["automatic","manual"]]]) {
+    const wrap=elem("label",label),input=elem(type==="select"?"select":"input");
+    if(type==="select") {
+      input.append(new Option("All",""));
+      for(const value of choices||[])input.append(new Option(value,value));
+    } else input.type=type;
+    input.setAttribute("aria-label",label);wrap.append(input);historyFilters.append(wrap);historyInputs[key]=input;
+  }
+  const historySearch=elem("button","Search history","secondary-button");historySearch.type="button";
+  historySearch.addEventListener("click",()=>loadHistory(false));historyFilters.append(historySearch);
+  const historyStatus=elem("p",null,"erc-status");historyStatus.setAttribute("role","status");
+  const historyResults=elem("div",null,"erc-history-results");
+  const historyMore=elem("button","Next history page","secondary-button");historyMore.type="button";
+  historyMore.addEventListener("click",()=>loadHistory(true));
+  historyPanel.append(historyFilters,historyStatus,historyResults,historyMore);
+  function recoveryLane(item) {
+    const worker=item.recovery_worker, outcome=worker?.last?.outcome;
+    if(item.held || worker?.terminal || outcome==="Needs Decision" || outcome==="Failed")return "decision";
+    const runtime=state.payload?.automation;
+    const heartbeat=Date.parse(runtime?.runtime?.heartbeat?.completed_at||"");
+    const healthy=runtime?.policy?.inspect && Date.now()-heartbeat < 2*runtime.policy.intervalMs;
+    if(healthy && worker && (!worker.next_at || worker.next_at<=Date.now() || worker.pending))return "recovering";
+    return "verification";
+  }
+  async function loadHistory(next) {
+    if(!state.allowed || state.historyLoading)return;
+    state.historyLoading=true;historySearch.disabled=true;historyMore.disabled=true;
+    historyStatus.textContent="Reading permanent Airtable audit history…";
+    const query=new URLSearchParams();
+    for(const [key,input] of Object.entries(historyInputs))if(input.value)
+      query.set(key,key==="to"?input.value+"T23:59:59.999":input.value);
+    if(next&&state.historyCursor)query.set("cursor",state.historyCursor);
+    try {
+      const data=await getJson("/api/admin/exception-recovery/history?"+query);
+      state.history=data.items||[];state.historyCursor=data.next_cursor;
+      historyResults.replaceChildren();
+      for(const item of state.history) {
+        const card=elem("details",null,"erc-history-entry");
+        card.append(elem("summary",(item.output_id?"#"+item.output_id+" · ":"")+
+          (item.title||"Saved audit event")+" · "+item.outcome+" · "+date(item.timestamp)));
+        const dl=elem("dl");
+        for(const [label,value] of [
+          ["Profile",item.profile_id],["Platform",item.platform],["Category",item.category],
+          ["Detected",date(item.detected_at)],["Original state",JSON.stringify(item.before||{})],
+          ["Provider ID",item.receipt?.remote_id],["Verified",date(item.receipt?.checked_at)],
+          ["Action / reason",item.reason],["New state",JSON.stringify(item.after||{})],
+          ["Corrected",item.corrected_at?date(item.corrected_at):"Not confirmed"],
+          ["Duration",item.duration_ms==null?"Unknown":(item.duration_ms/1000).toFixed(1)+"s"],
+          ["Actor",item.actor],["Audit ID",item.audit_id||item.event_key]])detailField(dl,label,value);
+        card.append(dl);
+        const remote=item.receipt?.permalink;
+        if(remote && /^https:\/\/(www\.)?(youtube\.com|youtu\.be|facebook\.com|instagram\.com)\//i.test(remote)) {
+          const a=elem("a","Open verified provider post");a.href=remote;a.target="_blank";a.rel="noopener noreferrer";card.append(a);
+        }
+        const open=elem("button","Open exact Studio output","secondary-button");open.type="button";
+        open.disabled=!/^rec[A-Za-z0-9]{14}$/.test(item.record_id||"");
+        open.addEventListener("click",()=>window.StudioOpenPipelineOutputById?.(item.record_id));
+        card.append(open);
+        const evidence=elem("pre");evidence.textContent=JSON.stringify(item,null,2);card.append(evidence);
+        historyResults.append(card);
+      }
+      historyStatus.textContent=state.history.length+" matching events on this page. "+
+        (data.next_cursor?"More pages remain; continue to search older events.":"End of history.")+
+        " Automation: "+(data.automation?.policy?.inspect?"verification enabled":"disabled")+
+        "; status corrections "+(data.automation?.policy?.mutate?"gated rollout enabled":"disabled")+".";
+      historyMore.hidden=!data.next_cursor;
+    } catch(error) {historyStatus.textContent=error.message;historyResults.replaceChildren();}
+    finally {state.historyLoading=false;historySearch.disabled=false;historyMore.disabled=false;}
+  }
   async function getJson(url) {
     const response = await fetch(url, {credentials:"same-origin",headers:{Accept:"application/json"},cache:"no-store"});
     const result = await response.json().catch(() => ({}));
@@ -357,6 +452,9 @@
     detailField(dl,"Retry",item.retry_at?date(item.retry_at):null);
     detailField(dl,"Attempts",item.attempts);
     detailField(dl,"Signature",item.signature);
+    detailField(dl,"Background recovery",recoveryLane(item));
+    detailField(dl,"Last checked",item.recovery_worker?.last?.completed_at?date(item.recovery_worker.last.completed_at):"Not yet checked");
+    detailField(dl,"Recovery reason",item.recovery_worker?.last?.reason||"Awaiting authenticated provider verification");
     detail.append(dl,elem("h4","Diagnosis"),elem("p",item.diagnosis||"A full provider-level diagnosis is not yet available."),
       elem("h4","Quality Agent recommendation"),elem("p",item.recommendation||"Review existing pipeline evidence before acting."));
     const actions=elem("div",null,"erc-actions");
@@ -387,6 +485,10 @@
     const list=new Map([...fromItems,...fromGlobal].map(i=>[i.id,i.name]));
     profiles.replaceChildren(new Option("All profiles",""));
     for(const [id,name] of list) profiles.add(new Option(name,id));
+    const selectedHistory=historyInputs.profile.value;
+    historyInputs.profile.replaceChildren(new Option("All",""));
+    for(const [id,name] of list)historyInputs.profile.add(new Option(name,id));
+    historyInputs.profile.value=selectedHistory;
     if([...profiles.options].some(o=>o.value===value)) profiles.value=value;
   }
   function applyCanonicalCensus(census) {
@@ -402,6 +504,7 @@
         diagnosis:qa?.diagnosis||item.diagnosis,
         recommendation:qa?.recommendation||item.recommendation,
         recovery:qa?.recovery||item.recovery||null,
+        recovery_worker:qa?.recovery_worker||null,
         actions_enabled:false,
       };
     });
@@ -433,6 +536,7 @@
     if(!data){renderDetail(null);return;}
     for(const [key,label] of METRICS) metrics.append(metricCard(key,label,data.metrics?.[key]));
     const items=(data.items||[]).filter(i=>(!profiles.value||i.profile_id===profiles.value)
+      &&(state.view==="all"||state.view==="history"||recoveryLane(i)===state.view)
       &&(!platform.value||String(i.platform||"").toLowerCase()===platform.value.toLowerCase())
       &&(!category.value||i.categories.includes(category.value)));
     $("ercVisible").textContent=items.length+" visible · "+(data.as_of?"scanned "+date(data.as_of):"scan unavailable");
@@ -493,3 +597,4 @@
     if(state.allowed&&nowOpen())load();
   }).catch(()=>{nav.hidden=true;state.allowed=false;});
 })();
+

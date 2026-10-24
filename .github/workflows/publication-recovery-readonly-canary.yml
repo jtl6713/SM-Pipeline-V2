@@ -1,0 +1,45 @@
+name: Publication Recovery Read-Only Canary
+on:
+  pull_request:
+    paths:
+      - 'repair/scripts/publication-recovery-readonly-canary.mjs'
+      - '.github/workflows/publication-recovery-readonly-canary.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: publication-recovery-readonly-canary
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      RECOVERY_PAT_FILE: /tmp/recovery-pat.txt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Prepare existing read-only audit credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/recovery-key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/recovery-pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/recovery-key.pem -in /tmp/recovery-pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out "$RECOVERY_PAT_FILE"
+      - name: Authenticated original-post readback; no writes or uploads
+        run: node repair/scripts/publication-recovery-readonly-canary.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: publication-recovery-readonly-canary
+          path: /tmp/publication-recovery-canary.json
+          retention-days: 30
+      - name: Remove temporary credentials
+        if: always()
+        run: rm -f /tmp/recovery-key.pem /tmp/recovery-pat.enc /tmp/recovery-pat.txt

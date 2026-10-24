@@ -22,6 +22,10 @@ import { readExceptionRecoveryCensusCache, persistExceptionRecoveryCensusCache }
 import { FB3_ACTION, RECEIPT_REPAIR_ACTION, executeFb3AdminRecovery, executeApprovedReceiptRepair } from "./exception-recovery-actions.mjs";
 import { actionApprovalAudit, actionOutcomeAudit } from "./exception-recovery-action-audit.mjs";
 import { exceptionRecoveryMutationsEnabled } from "./exception-recovery-rollout.mjs";
+import { verifyAuthenticatedYouTubeReceipt } from "./exception-recovery-authenticated-receipt.mjs";
+import { runPublicationRecovery, publicationRecoveryStatus, readRecoveryState, recoveryStateKey } from "./exception-recovery-background.mjs";
+import { recoveryAuditFields, normalizeRecoveryHistory } from "./exception-recovery-history.mjs";
+import { RECOVERY_SIGNATURE, recoverySnapshot } from "./exception-recovery-autonomous.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
 import { readStudioProfileSummary, validVerifiedStudioSummary } from "./profile-summary-controller.mjs";
@@ -9836,7 +9840,12 @@ export async function getStudioExceptionRecoveryCenter(request, env) {
       platform: url.searchParams.get("platform"),
       category: url.searchParams.get("category"),
     });
-    return respond(request, env, view, view.status === "unavailable" ? 503 : 200);
+    const automation=await publicationRecoveryStatus(env).catch(()=>null);
+    const items=await Promise.all((view.items||[]).map(async (item,index)=>({
+      ...item,recovery_worker:index<100?await readRecoveryState(env.STUDIO_MEDIA,recoveryStateKey(item.record_id)).catch(()=>null):null,
+    })));
+    return respond(request, env, {...view,items,automation,
+      automation_items_truncated:(view.items||[]).length>100}, view.status === "unavailable" ? 503 : 200);
   } catch (error) {
     console.warn("Exception Recovery Center read-only census unavailable", String(error?.message || error));
     return respond(request, env, {
@@ -9950,12 +9959,77 @@ async function exceptionRecoveryReadProvider(env, row) {
     YOUTUBE_API_KEY:settings.YOUTUBE_API_KEY || env.YOUTUBE_API_KEY,
   }});
 }
+async function exceptionRecoveryReadAuthenticatedProvider(env,row) {
+  const ids=row.fields?.Content_Profile;
+  if(!Array.isArray(ids)||ids.length!==1) return {verified_public:false,evidence:"ambiguous_profile"};
+  const profile=await airtableFetch(env,STUDIO_IDEA_PROFILE_TABLE_ID,ids[0]);
+  if(profile?.id!==ids[0]) return {verified_public:false,evidence:"authoritative_profile_missing"};
+  const settings=await studioActivePipelineSettings(env,
+    ["YOUTUBE_UPLOAD_SERVICE_URL","YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET"],profile);
+  return verifyAuthenticatedYouTubeReceipt(row,{settings,
+    expectedChannelId:profile.fields?.YouTube_Channel_ID});
+}
+async function appendPublicationRecoveryAudit(env,event) {
+  const fields=recoveryAuditFields(event);
+  const options={filterFormula:'{Event_Key}="'+fields.Event_Key+'"',limit:2};
+  const existing=await listRecordsPage(env,EXCEPTION_MESSAGES_TABLE,options);
+  if(!existing.valid) throw new Error("audit_lookup_unavailable");
+  if(existing.records.length) {
+    let previous={};
+    try { previous=JSON.parse(existing.records[0].fields?.Intent_JSON||"{}"); } catch {}
+    const equivalentConfirmed=event.outcome==="Corrected"&&previous.outcome==="Corrected"&&
+      previous.attempt_id===event.attempt_id&&previous.record_id===event.record_id&&
+      JSON.stringify(previous.before)===JSON.stringify(event.before)&&
+      JSON.stringify(previous.after)===JSON.stringify(event.after);
+    if(existing.records.length!==1 ||
+      (existing.records[0].fields?.Intent_JSON!==fields.Intent_JSON&&!equivalentConfirmed))
+      throw new Error("audit_identity_conflict");
+    return;
+  }
+  await airtableFetch(env,EXCEPTION_MESSAGES_TABLE,"",{
+    method:"POST",body:JSON.stringify({records:[{fields}],typecast:true}),
+  });
+  const readback=await listRecordsPage(env,EXCEPTION_MESSAGES_TABLE,options);
+  if(!readback.valid || readback.records.length!==1 ||
+    readback.records[0].fields?.Intent_JSON!==fields.Intent_JSON)
+    throw new Error("audit_append_readback_failed");
+}
+export async function studioPublicationRecoveryCron(env) {
+  return runPublicationRecovery(env,{
+    discover:async options=>{
+      const page=await listRecordsPage(env,env.AIRTABLE_OUTPUT_TABLE_ID,{...options,limit:100});
+      if(!page.valid) throw new Error("recovery_discovery_incomplete");
+      return page;
+    },
+    readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+    verifyRemote:row=>exceptionRecoveryReadAuthenticatedProvider(env,row),
+    appendAudit:event=>appendPublicationRecoveryAudit(env,event),
+    patchStatus:(row,fields)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,row.id,{
+      method:"PATCH",body:JSON.stringify({fields,typecast:true}),
+    }),
+  });
+}
+export async function getStudioPublicationRecoveryHistory(request,env) {
+  const query=new URL(request.url).searchParams;
+  const page=await listRecordsPage(env,EXCEPTION_MESSAGES_TABLE,{
+    filterFormula:'OR({Exception_Signature}="'+RECOVERY_SIGNATURE+'",{Exception_Signature}="ADMIN_APPROVED_ACTION",{Exception_Signature}="ADMIN_ACTION_OUTCOME")',
+    sortField:"Created_At",sortDirection:"desc",limit:100,
+    offset:query.get("cursor")||undefined,
+  });
+  if(!page.valid) throw new HttpError(503,"Durable recovery history unavailable");
+  const items=normalizeRecoveryHistory(page.records,Object.fromEntries(query));
+  return respond(request,env,{read_only:true,source:"airtable_exception_recovery_audit",
+    items,next_cursor:page.offset||null,filtered_page:true,
+    automation:await publicationRecoveryStatus(env)});
+}
 /** Provider GET only. No persisted publication change from this endpoint. */
 export async function getStudioExceptionRecoveryReceipt(request, env) {
   const id=exceptionRecoveryRecordIdFromPath(new URL(request.url).pathname,"receipt");
   const row=await airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id);
   if(!row?.id || row.id!==id) throw new HttpError(404,"Output not found");
-  const receipt=await exceptionRecoveryReadProvider(env,row);
+  const receipt=new URL(request.url).searchParams.get("authenticated")==="1"
+    ?await exceptionRecoveryReadAuthenticatedProvider(env,row)
+    :await exceptionRecoveryReadProvider(env,row);
   return respond(request,env,{
     ...receipt,record_id:id,output_id:f(row,"Output_ID")||null,
     instruction:receipt.verified_public
@@ -10045,6 +10119,13 @@ export async function runStudioExceptionRecoveryAction(request, env, authorizati
     if(existing.some(item=>item.event_key===approvalAudit.Event_Key)){
       return {status:"already_processed_request",reason:"approval_key_already_saved_inspect_state",record_id:id};
     }
+    const auditBefore=await airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id);
+    const auditContext={output_id:String(f(auditBefore,"Output_ID")||""),
+      title:String(f(auditBefore,"Output_Title")||f(auditBefore,"Title_Text")||""),
+      profile_id:f(auditBefore,"Content_Profile")?.[0]||null,
+      platform:f(auditBefore,"Platform"),before:recoverySnapshot(auditBefore),
+      detected_at:new Date().toISOString()};
+    approvalAudit.Intent_JSON=JSON.stringify({...JSON.parse(approvalAudit.Intent_JSON),...auditContext});
     const committed=await airtableFetch(env,EXCEPTION_MESSAGES_TABLE,"",{
       method:"POST",body:JSON.stringify({records:[{fields:approvalAudit}],typecast:true}),
     });
@@ -10078,10 +10159,16 @@ export async function runStudioExceptionRecoveryAction(request, env, authorizati
     let auditOutcomeRecorded=false;
     try{
       const event=actionOutcomeAudit(approvalAudit,{status:outcome.status,reason:outcome.reason});
+      const auditAfter=await airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id);
+      event.Intent_JSON=JSON.stringify({...JSON.parse(event.Intent_JSON),...auditContext,
+        after:recoverySnapshot(auditAfter),duration_ms:Date.now()-Date.parse(auditContext.detected_at),
+        corrected_at:outcome.status==="verified_published"?new Date().toISOString():null});
       const saved=await airtableFetch(env,EXCEPTION_MESSAGES_TABLE,"",{
         method:"POST",body:JSON.stringify({records:[{fields:event}],typecast:true}),
       });
-      auditOutcomeRecorded=Array.isArray(saved?.records)&&saved.records.length===1;
+      const outcomeReadback=await studioExceptionConversationRead(env,id);
+      auditOutcomeRecorded=Array.isArray(saved?.records)&&saved.records.length===1&&
+        outcomeReadback.some(item=>item.event_key===event.Event_Key);
     }catch(error){
       console.warn("Exception approved-action outcome audit deferred",String(error?.message||error).slice(0,120));
     }
@@ -16947,3 +17034,4 @@ export async function factoryBatchCronResume(env, ctx = null) {
   return selected.length;
 }
 /*__STUDIO_WORKER_END:factoryBatchCronResume__*/
+

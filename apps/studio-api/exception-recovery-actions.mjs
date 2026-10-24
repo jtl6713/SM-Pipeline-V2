@@ -140,7 +140,7 @@ function canonicalPublicReceipt(value, platform) {
     return null;
   return "facebook.com"+path;
 }
-function savedPublicReceiptMatchesProvider(row,remote) {
+export function savedPublicReceiptMatchesProvider(row,remote) {
   const exact=canonicalPublicReceipt(remote?.permalink,remote?.platform);
   return Boolean(exact&&["Platform_Post_URL","Manual_Published_URL"].some(
     name=>canonicalPublicReceipt(field(row,name),remote.platform)===exact));
@@ -210,3 +210,4 @@ export async function executeApprovedReceiptRepair({recordId,approval,readOutput
    provider_evidence:receipt.evidence,durable_recovery_recorded:logged?.recorded===true,
    no_new_post:true};
 }
+
