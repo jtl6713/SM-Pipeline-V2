@@ -7,7 +7,7 @@ export function autonomousPlanOutputSpilloverRepair({ request = {}, plan = null,
   const no = (reason) => ({ repair: false, reason, disableIds: [] });
   const note = String(request.notes || "");
   if (!/(?:^|\n)origin=autonomous(?:\n|$)/i.test(note)) return no("not_autonomous");
-  if (request.revisionOpen || request.promoted || !["Draft", "Ready"].includes(request.status)) {
+  if (request.active !== true || request.revisionOpen || request.promoted || !["Draft", "Ready"].includes(request.status)) {
     return no("operator_or_promotion_gate");
   }
   if (request.masterStatus !== "Ready" || request.planStatus !== "Ready"
