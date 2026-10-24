@@ -156,59 +156,72 @@
     const controls=elem("div",null,"erc-actions");
     const inspect=elem("button","Verify live provider receipt","secondary-button");
     inspect.type="button";
-    const finalize=elem("button","Finalize this existing Facebook post","secondary-button");
-    finalize.type="button";finalize.disabled=true;finalize.hidden=true;
-    controls.append(inspect,finalize);pane.append(info,controls);detail.append(pane);
+    const finalize=elem("button","Finalize existing Facebook post (FB3)","secondary-button");
+    const repair=elem("button","Reconcile saved verified publication status","secondary-button");
+    for(const button of [finalize,repair]){button.type="button";button.disabled=true;button.hidden=true;}
+    controls.append(inspect,finalize,repair);pane.append(info,controls);detail.append(pane);
     let receipt=null;
     const recordId=item.record_id;
+    const hideActions=()=>{for(const button of [finalize,repair]){button.disabled=true;button.hidden=true;}};
     inspect.addEventListener("click",async()=>{
       if(!state.allowed||state.selected!==recordId||inspect.disabled)return;
-      inspect.disabled=true;finalize.disabled=true;finalize.hidden=true;info.textContent="Reading exact remote post from provider (GET only)…";
+      receipt=null;inspect.disabled=true;hideActions();
+      info.textContent="Reading exact remote post from provider (GET only) and refreshing the action preflight…";
       try{
-        const result=await getJson("/api/admin/exception-recovery/"+recordId+"/receipt");
+        const [result,preflight]=await Promise.all([
+          getJson("/api/admin/exception-recovery/"+recordId+"/receipt"),
+          getJson("/api/admin/exception-recovery/"+recordId+"/preflight"),
+        ]);
         if(state.selected!==recordId)return;
+        state.preflights.set(recordId,preflight);
         receipt=result;
         info.textContent=result.verified_public
           ? "Verified provider identity "+(result.remote_id||"")+". "+(result.permalink||"")+" (read-only receipt)."
           : "Not verified: "+(result.evidence||"provider unavailable")+". No repost or state change is authorized.";
-        const preflight=state.preflights.get(recordId);
-        const eligible=preflight?.fb3_existing_post_eligible===true
-          && item.platform==="Facebook"
-          && result.verified_public===true
-          && result.platform==="Facebook"
-          && /^\d{6,30}(?:_\d{6,30})?$/.test(String(result.remote_id||""))
-          && /^\d+$/.test(String(item.output_id||""));
-        finalize.hidden=!eligible;finalize.disabled=!eligible;
-      }catch(error) {
+        const exact=Boolean(result.verified_public&&result.platform===item.platform
+          && /^[A-Za-z0-9_-]{6,70}$/.test(String(result.remote_id||""))
+          && /^\d+$/.test(String(item.output_id||"")));
+        const fb3=exact&&preflight?.fb3_existing_post_eligible===true
+          && item.platform==="Facebook"&&/^\d{6,30}(?:_\d{6,30})?$/.test(result.remote_id||"");
+        const statusRepair=exact&&preflight?.verified_receipt_status_repair_candidate===true;
+        finalize.hidden=!fb3;finalize.disabled=!fb3;
+        repair.hidden=!statusRepair;repair.disabled=!statusRepair;
+      }catch(error){
         info.textContent="Provider readback unavailable: "+String(error.message||error)+". No output action occurred.";
       }finally{inspect.disabled=false;}
     });
-    finalize.addEventListener("click",async()=>{
-      if(!receipt?.verified_public||state.selected!==recordId||finalize.disabled)return;
+    async function submitApproved(action,button) {
+      if(!receipt?.verified_public||!state.allowed||state.selected!==recordId||button.disabled)return;
       const postId=String(receipt.remote_id||"");
       const outputId=String(item.output_id||"");
-      if(!window.confirm("Confirm finalization ONLY of existing Facebook output #"+outputId+
-        " and existing Page post "+postId+
-        ". This calls the existing FB3 verification/finalizer. No new Facebook post will be created."))return;
-      finalize.disabled=true;inspect.disabled=true;
-      info.textContent="Rechecking current Airtable state and provider receipt under an output lock…";
+      const title=action==="finalize_existing_facebook_post"
+        ? "Confirm FB3 finalization ONLY of existing Facebook output"
+        : "Confirm QA-PUBLISH-001 status-only reconciliation of already-published output";
+      const detail=action==="finalize_existing_facebook_post"
+        ? " The existing FB3 engine may finalize this saved post but cannot create a new Facebook post."
+        : " This corrects only Studio publication status after fresh verified public evidence; no upload or remote post is made.";
+      if(!window.confirm(title+" #"+outputId+" and remote post "+postId+"."+detail))return;
+      hideActions();inspect.disabled=true;
+      info.textContent="Revalidating current Airtable state and provider evidence under the existing per-output approval lock…";
       try{
         const response=await fetch("/api/admin/exception-recovery/"+recordId+"/actions",{
           method:"POST",credentials:"same-origin",headers:{Accept:"application/json","Content-Type":"application/json"},
-          body:JSON.stringify({action:"finalize_existing_facebook_post",confirm_output_id:outputId,confirm_post_id:postId}),
+          body:JSON.stringify({action,confirm_output_id:outputId,confirm_post_id:postId}),
         });
         const payload=await response.json().catch(()=>({}));
         info.textContent=response.ok
-          ? "Existing-post finalization: "+(payload.status||"unknown")+
-            (payload.durable_recovery_recorded===true?" · Ledger evidence saved.":" · Check current evidence and ledger.")
-          : "Finalization blocked: "+String(payload.reason||payload.error||response.status)+". No new post was created.";
-        receipt=null;finalize.hidden=true;
-        if(response.ok && payload.status==="verified_published")load();
+          ? "Existing-publication reconciliation: "+(payload.status||"unknown")+
+            (payload.durable_recovery_recorded===true?" · Verified recovery ledger updated.":" · Check current status and ledger.")
+          : "Action blocked: "+String(payload.reason||payload.error||response.status)+". No new post was created.";
+        receipt=null;
+        if(response.ok&&payload.status==="verified_published")load();
       }catch(error){
-        info.textContent="Outcome unconfirmed: "+String(error.message||error)+". Do not retry without a fresh verification.";
-        finalize.hidden=true;
-      }finally{inspect.disabled=false;finalize.disabled=true;}
-    });
+        info.textContent="Outcome uncertain: "+String(error.message||error)+". Inspect the live receipt before attempting another action.";
+        receipt=null;
+      }finally{inspect.disabled=false;hideActions();}
+    }
+    finalize.addEventListener("click",()=>submitApproved("finalize_existing_facebook_post",finalize));
+    repair.addEventListener("click",()=>submitApproved("reconcile_verified_existing_receipt",repair));
   }
 
   async function reconcileAllCounts() {
