@@ -110,3 +110,18 @@ test("action execution is gated by a durable exact-ID admin approval readback",(
  assert.match(handler,/admin_approval_recorded:true/);
  assert.match(ui,/client_request_id:freshClientRequestId\(\)/);
 });
+
+test("read-only deployment cannot trigger approved FB3 or status-repair mutations",()=>{
+ const start=service.indexOf("export async function runStudioExceptionRecoveryAction");
+ const end=service.indexOf("/*__STUDIO_WORKER_END:runStudioExceptionRecoveryAction__*/",start);
+ const handler=service.slice(start,end);
+ const gate=handler.indexOf("if(!exceptionRecoveryMutationsEnabled(env))");
+ const body=handler.indexOf("await readJsonBody(request)");
+ const lock=handler.indexOf("withOutputApprovalLock");
+ const audit=handler.indexOf("actionApprovalAudit(");
+ assert.ok(gate>0&&gate<body&&body<audit&&audit<lock);
+ assert.match(service,/administrator_recovery_actions_enabled:exceptionRecoveryMutationsEnabled\(env\)/);
+ assert.match(ui,/rolloutOn=preflight\?\.administrator_recovery_actions_enabled===true/);
+ assert.match(ui,/const fb3=rolloutOn&&exact/);
+ assert.match(ui,/const statusRepair=rolloutOn&&exact/);
+});
