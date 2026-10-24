@@ -65,7 +65,7 @@ import {
   readyProductionEnqueue,
   readyProductionFailure,
   readyProductionFinishClaim,
-  readyProductionList,
+  readyProductionListPage,
   readyProductionOutputsAwaitingFinalApproval,
   readyProductionSelectJobs,
 } from "./ready-production-queue.mjs";
@@ -12460,10 +12460,48 @@ async function studioReadyProductionCronResume(env, ctx = null, options = {}) {
       profileId: firstLinkedRecordId(f(idea, "Content_Profile")) || null,
       createdAt: f(idea, "Create_Date") || idea.createdTime || null,
     });
-    enqueued.push({ idea_id: idea.id, created: result.created, revived: Boolean(result.revived) });
+    enqueued.push({ idea_id: idea.id, created: result.created, revived: Boolean(result.revived), job: result.job });
   }
   stage = "list";
-  const jobs = await readyProductionList(env.STUDIO_MEDIA, { maxScan: options.maxScan || 500 });
+  // Rotate the bounded R2 scan across minutes. Otherwise only the first 500
+  // lexicographic job keys are considered forever as the backlog grows.
+  const scanKey = "studio/state/ready-production/v1/scan-cursor.json";
+  let scanCursor = null;
+  try {
+    const saved = await env.STUDIO_MEDIA.get(scanKey);
+    if (saved) scanCursor = String(JSON.parse(await saved.text())?.cursor || "").trim() || null;
+  } catch (error) {
+    console.warn("Ready-production scan cursor read failed", String(error?.message || error).slice(0, 140));
+  }
+  let page;
+  try {
+    page = await readyProductionListPage(env.STUDIO_MEDIA, {
+      maxScan: options.maxScan || 500, cursor: scanCursor,
+    });
+  } catch (error) {
+    if (!scanCursor) throw error;
+    // The stored cursor may expire after R2 key churn. Restart safely from
+    // the head rather than losing the entire dispatch pass.
+    console.warn("Ready-production cursor invalid; restarting scan", String(error?.message || error).slice(0, 140));
+    page = await readyProductionListPage(env.STUDIO_MEDIA, { maxScan: options.maxScan || 500 });
+  }
+  const jobs = page.jobs;
+  try {
+    await env.STUDIO_MEDIA.put(scanKey, JSON.stringify({
+      cursor: page.nextCursor, scanned: page.scanned, updated_at: new Date().toISOString(),
+    }), { httpMetadata: { contentType: "application/json" } });
+  } catch (error) {
+    console.warn("Ready-production scan cursor write failed", String(error?.message || error).slice(0, 140));
+  }
+  // A newly discovered photo-ready Idea must enter selection in THIS minute,
+  // even when its R2 job key belongs to another segment. Claims remain
+  // idempotent and still recheck Airtable holds, assets and duplicate requests.
+  const seenJobs = new Set(jobs.map((job) => job.idea_id));
+  for (const entry of enqueued) {
+    if (!entry.job || seenJobs.has(entry.idea_id)) continue;
+    jobs.push(entry.job);
+    seenJobs.add(entry.idea_id);
+  }
   // Backfill at most eight NEW reciprocal, photo-wait-off drafts per minute.
   // Already indexed jobs cost no Airtable per-Idea read, so this remains
   // low-burn under the hourly refill's large existing backlog.
