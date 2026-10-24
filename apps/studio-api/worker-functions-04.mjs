@@ -12371,10 +12371,10 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
 
   // Existing manual Approved candidates need the same autonomous profile gate
   // as ordinary generated ideas. Never reactivate operator-disabled profiles.
-  const notes = String(f(requestRecord, "Production_Notes") || "");
+  const requestNotesForGate = String(f(requestRecord, "Production_Notes") || "");
   if (requestRecord
       && String(f(idea, "Studio_Photo_Wait_Status") || "").trim() !== "Ready"
-      && !/(?:^|\s)origin=(?:autonomous|prepare-to-review)(?:\s|$)/i.test(notes)) {
+      && !/(?:^|\s)origin=(?:autonomous|prepare-to-review)(?:\s|$)/i.test(requestNotesForGate)) {
     const profileId = firstLinkedRecordId(f(idea, "Content_Profile"));
     const profile = profileId
       ? await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId).catch(() => null)
