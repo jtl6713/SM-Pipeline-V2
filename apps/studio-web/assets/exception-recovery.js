@@ -13,7 +13,7 @@
     ["failed","Failed"], ["suspected_duplicates","Suspected duplicates"],
     ["held_deferred","Held / deferred"], ["resolved_last_7_days","Resolved · 7 days"],
   ];
-  const state = { allowed:false, loading:false, payload:null, selected:"", serial:0 };
+  const state = { allowed:false, loading:false, payload:null, selected:"", serial:0, threadSerial:0, threadMessages:new Map(), preflights:new Map(), posting:false, pendingRequest:null };
   const elem = (tag, text, cls) => {
     const node = document.createElement(tag);
     if (text != null) node.textContent = String(text);
@@ -61,8 +61,104 @@
     button.addEventListener("click",()=>{state.selected=item.record_id;render();});
     return button;
   }
+  function freshClientRequestId() {
+    if (typeof crypto?.randomUUID === "function") return crypto.randomUUID().replace(/-/g,"");
+    return String(Date.now())+"ec"+String(Math.random()).slice(2).padEnd(16,"0");
+  }
+  async function readThread(recordId) {
+    if (!/^rec[A-Za-z0-9]{14}$/.test(recordId)) return;
+    const serial=++state.threadSerial;
+    const history=$("ercMessages");
+    const preflight=$("ercPreflight");
+    if (history) history.replaceChildren(elem("p","Loading saved administrator conversation…"));
+    if (preflight) preflight.textContent="Checking live output safety gates…";
+    const uri="/api/admin/exception-recovery/"+recordId;
+    const results=await Promise.allSettled([getJson(uri+"/conversation"),getJson(uri+"/preflight")]);
+    if (serial!==state.threadSerial||state.selected!==recordId) return;
+    if (results[0].status==="fulfilled") {
+      const messages=results[0].value?.messages||[];
+      state.threadMessages.set(recordId,messages);
+      renderMessages(recordId);
+    } else if (history) history.textContent="Conversation currently unavailable. Existing output was not changed.";
+    if (results[1].status==="fulfilled") {
+      state.preflights.set(recordId,results[1].value);
+      if(preflight) preflight.textContent=safePreflightText(results[1].value);
+    } else if(preflight) preflight.textContent="Safety preflight unavailable. No recovery commands can run.";
+  }
+  function safePreflightText(info) {
+    if(!info || info.status!=="read_only") return "Recovery actions remain disabled.";
+    const statuses=[info.category||"requires_review"];
+    if(info.held) statuses.push("Hold retained");
+    if(info.remote_identity_exists&&!info.remote_publication_verified) statuses.push("Remote verification required");
+    if(info.lock_active) statuses.push("Publisher lock active");
+    if(info.attempt_limit_reached) statuses.push("Attempt cap reached");
+    return "Safety preflight: "+statuses.join(" · ")+". All output-mutating actions remain disabled.";
+  }
+  function renderMessages(recordId) {
+    const host=$("ercMessages");
+    if(!host || state.selected!==recordId) return;
+    host.replaceChildren();
+    const messages=state.threadMessages.get(recordId)||[];
+    if(!messages.length)host.append(elem("p","No conversation yet. You can ask Quality Agent about this output or record directions for manual review."));
+    for(const message of messages){
+      const panel=elem("div",null,"erc-thread-message");
+      panel.append(elem("strong",message.role==="quality_agent"?"Quality Agent":"Administrator"),
+        elem("small",message.created_at?date(message.created_at):"Saved"),
+        elem("p",message.message||""));
+      host.append(panel);
+    }
+    host.scrollTop=host.scrollHeight;
+  }
+  function appendConversationPanel(detail,item) {
+    const thread=elem("section",null,"erc-conversation");
+    thread.append(elem("h4","Exception conversation"),elem("p","Messages are saved in Airtable against this output. The Quality Agent records a safety-aware response, but never executes instructions from this conversation.","erc-note"));
+    const preflight=elem("p","Checking live output safety gates…","erc-note");
+    preflight.id="ercPreflight";
+    const messages=elem("div",null,"erc-messages");messages.id="ercMessages";
+    thread.append(preflight,messages);
+    const form=elem("form",null,"erc-conversation-form");
+    const label=elem("label","Message to Quality Agent");
+    label.htmlFor="ercMessageInput";
+    const input=elem("textarea");input.id="ercMessageInput";input.name="message";input.maxLength=2000;
+    input.rows=3;input.placeholder="Example: This output was already published manually. Please check before retrying.";
+    const send=elem("button","Send and save message","secondary-button");send.type="submit";
+    const outcome=elem("p","","erc-note");outcome.setAttribute("role","status");
+    form.append(label,input,send,outcome);thread.append(form);detail.append(thread);
+    form.addEventListener("submit",async(event)=>{
+      event.preventDefault();
+      if(state.posting||state.selected!==item.record_id)return;
+      const message=String(input.value||"").trim();
+      if(!message||message.length>2000){outcome.textContent="Enter a message of 1–2000 characters.";return;}
+      state.posting=true;send.disabled=true;input.disabled=true;
+      const pending=state.pendingRequest?.recordId===item.record_id&&state.pendingRequest?.message===message
+        ? state.pendingRequest : {recordId:item.record_id,message,id:freshClientRequestId()};
+      state.pendingRequest=pending;
+      outcome.textContent="Saving message (no output changes)…";
+      try{
+        const response=await fetch("/api/admin/exception-recovery/"+item.record_id+"/conversation",{
+          method:"POST",credentials:"same-origin",
+          headers:{"Content-Type":"application/json",Accept:"application/json"},
+          body:JSON.stringify({client_request_id:pending.id,message})
+        });
+        const body=await response.json().catch(()=>({}));
+        if(!response.ok)throw new Error(body.error||"Save could not be confirmed ("+response.status+")");
+        state.pendingRequest=null;
+        state.threadMessages.set(item.record_id,body.messages||[]);
+        if(state.selected===item.record_id){
+          input.value="";renderMessages(item.record_id);
+          outcome.textContent=body.replay?"Previously saved message loaded.":"Saved to Airtable; publishing and output state unchanged.";
+        }
+      }catch(error) {
+        outcome.textContent="Save status uncertain: "+String(error.message||error)+". Check conversation history before sending again.";
+      }finally{state.posting=false;send.disabled=false;input.disabled=false;}
+    });
+    const cached=state.threadMessages.get(item.record_id);
+    if(cached)renderMessages(item.record_id);
+    readThread(item.record_id).catch(()=>{});
+  }
   function detailField(dl,label,value) { dl.append(elem("dt",label),elem("dd",value == null || value === "" ? "Unknown" : value)); }
   function renderDetail(item) {
+    ++state.threadSerial;
     detail.replaceChildren();
     if (!item) {detail.append(elem("p","Choose an exception to view its existing Quality Agent diagnosis and recommended next action."));return;}
     detail.append(elem("h3",(item.output_id?"Output #"+item.output_id:"Output")+" — "+(item.title||"Untitled")));
@@ -90,7 +186,8 @@
       }else document.querySelector('[data-page="outputs"]')?.click();
     });
     actions.append(open);
-    detail.append(actions,elem("p","This view is read-only. Publication, retries, holds, deletions, and conversation actions remain disabled until their audited authorization, remote-verification, and persistence paths are complete.","erc-note"));
+    detail.append(actions,elem("p","Recovery actions (publish, retry, hold, reschedule, delete) are disabled until verified provider receipts, locks and administrator confirmations are implemented.","erc-note"));
+    appendConversationPanel(detail,item);
     const evidence=elem("details");
     evidence.append(elem("summary","Technical details and recovery state"));
     const pre=elem("pre");pre.textContent=JSON.stringify({record_id:item.record_id,signature:item.signature,recovery:item.recovery,categories:item.categories},null,2);
