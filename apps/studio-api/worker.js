@@ -854,7 +854,7 @@ export default {
       const isAdminExceptionConversationWrite = isAdminExceptionConversationRoute && request.method === "POST";
       const isAdminExceptionReceiptRoute = /^\/api\/admin\/exception-recovery\/rec[A-Za-z0-9]{14}\/receipt$/.test(url.pathname);
       const isAdminExceptionCountsRoute = url.pathname === "/api/admin/exception-recovery/counts";
-      const isAdminPublicationRecoveryHistoryRoute = url.pathname === "/api/admin/exception-recovery/history";
+      const isAdminExceptionHistoryRoute = url.pathname === "/api/admin/exception-recovery/history";
       const isAdminExceptionActionRoute = /^\/api\/admin\/exception-recovery\/rec[A-Za-z0-9]{14}\/actions$/.test(url.pathname);
       const isAdminExceptionActionWrite = isAdminExceptionActionRoute && request.method === "POST";
       const isOpsDeskActivityRoute = url.pathname === "/api/ops/desk/activity";
@@ -1582,15 +1582,15 @@ export default {
         if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
         return getStudioExceptionRecoveryReceipt(request, env);
       }
+      if (isAdminExceptionHistoryRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        return getStudioPublicationRecoveryHistory(request, env);
+      }
       if (isAdminExceptionCountsRoute) {
         requirePermission(authorization, "tenant_admin");
         if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
         return getStudioExceptionRecoveryCounts(request, env);
-      }
-      if (isAdminPublicationRecoveryHistoryRoute) {
-        requirePermission(authorization, "tenant_admin");
-        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
-        return getStudioPublicationRecoveryHistory(request, env);
       }
       if (isAdminExceptionActionRoute) {
         requirePermission(authorization, "tenant_admin");
@@ -6116,6 +6116,7 @@ const DESK_OUTPUT_IDENTITY_KINDS = new Set([
 /*__STUDIO_WORKER_EXTRACT:getStudioPublicationRecoveryHistory__*/
  /*__STUDIO_WORKER_EXTRACT:getStudioExceptionRecoveryReceipt__*/
  /*__STUDIO_WORKER_EXTRACT:getStudioExceptionRecoveryCounts__*/
+
  /*__STUDIO_WORKER_EXTRACT:runStudioExceptionRecoveryAction__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioDeskInventory__*/
 /*__STUDIO_WORKER_EXTRACT:isStudioTestActivityEvent__*/

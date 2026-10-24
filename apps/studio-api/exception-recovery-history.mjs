@@ -1,4 +1,4 @@
-import { RECOVERY_SIGNATURE } from "./exception-recovery-autonomous.mjs";
+const RECOVERY_SIGNATURE = "AUTONOMOUS-PUBLICATION-RECONCILIATION";
 export function recoveryAuditFields(event) {
   if(!/^rec[A-Za-z0-9]{14}$/.test(event.record_id) ||
     !/^[A-Za-z0-9_-]+:(intent|outcome|uncertain)$/.test(event.audit_id))
