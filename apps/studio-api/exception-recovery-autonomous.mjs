@@ -45,7 +45,7 @@ export function recoveryBlock(row, nowMs) {
   return null;
 }
 export function receiptBlock(row, receipt, nowMs) {
-  if(!receipt?.verified_public || !receipt.ownership_verified) return receipt?.evidence || "public_ownership_unverified";
+  if(!receipt?.verified_delivery || !receipt.ownership_verified) return receipt?.evidence || "delivery_ownership_unverified";
   if(receipt.platform !== str(row,"Platform") || receipt.profile_id !== row.fields.Content_Profile[0])
     return "provider_profile_mismatch";
   const remote = str(row,"YouTube_Video_ID") || str(row,"Platform_Post_ID");
@@ -60,10 +60,12 @@ export function receiptBlock(row, receipt, nowMs) {
     if(str(row,key) && !savedPublicReceiptMatchesProvider({fields:{[key]:str(row,key)}},receipt))
       return "conflicting_saved_permalink";
   }
-  const published=Date.parse(receipt.published_at);
-  if(!Number.isFinite(published) || published > nowMs) return "provider_publication_time_missing";
-  if(str(row,"Published_At") && Date.parse(str(row,"Published_At")) !== published)
-    return "conflicting_publication_timestamp";
+  if(receipt.verified_public) {
+    const published=Date.parse(receipt.published_at);
+    if(!Number.isFinite(published) || published > nowMs) return "provider_publication_time_missing";
+    if(str(row,"Published_At") && Date.parse(str(row,"Published_At")) !== published)
+      return "conflicting_publication_timestamp";
+  }
   return null;
 }
 /**
@@ -133,11 +135,14 @@ export async function reconcilePublication({
     return finish("Blocked","authoritative_state_changed_during_verification");
   const recheck=recoveryBlock(current,now())||receiptBlock(current,receipt,now());
   if(recheck) return finish("Blocked",recheck);
+  // Published is the Studio delivery-complete state. Provider visibility remains
+  // independent: a private/scheduled upload must never acquire a fake public date.
   const fields={Output_Status:"Published",Publish_Status:"Published"};
-  if(!str(current,"Published_At")) fields.Published_At=receipt.published_at;
+  if(receipt.verified_public && !str(current,"Published_At")) fields.Published_At=receipt.published_at;
   if(!str(current,"Platform_Post_URL")) fields.Platform_Post_URL=receipt.permalink;
   const intent={...event,audit_id:attempt+":intent",phase:"intent",outcome:"Awaiting Verification",
-    reason:"verified_status_only_write_intent",after:fields};
+    reason:"verified_status_only_write_intent",
+    provider_visibility:receipt.summary?.privacy_status||null,after:fields};
   await appendAudit(intent);
   await saveState(recordId,{...prior,pending:intent});
   // Evidence may age while the ledger is being written. Fail closed before PATCH.
