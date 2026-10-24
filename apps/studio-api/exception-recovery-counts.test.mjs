@@ -1,5 +1,6 @@
 import test from "node:test";import assert from "node:assert/strict";
 import {reconcileExceptionCensus} from "./exception-recovery-counts.mjs";
+import {scanOutstandingFailedOutputs} from "./failed-output-monitor.mjs";
 const r=(id,f)=>({id,fields:f});
 const mapOutput=row=>({id:row.id,platform:row.fields.Platform||"Facebook",
  review_status:row.fields.Review_Status,output_status:row.fields.Output_Status,
@@ -47,4 +48,12 @@ test("omitted Quality Agent evidence is unavailable rather than an empty QA inve
  assert.equal(actual.comparisons.failed.status,"unavailable");
  assert.equal(actual.comparisons.failed.quality_agent_count,null);
  assert.equal(actual.comparisons.approved_past_due.status,"unavailable");
+});
+
+test("strict paginated census refuses duplicate records rather than hiding them",async()=>{
+ const item=r("recAAAAAAAAAAAAAA",{});
+ let n=0;
+ await assert.rejects(()=>scanOutstandingFailedOutputs(async()=>++n===1
+   ? {records:[item],offset:"next"} : {records:[item]},
+   {filterFormula:"{Test_Run_ID}=BLANK()",requireUnique:true}),/Repeated record identity/);
 });
