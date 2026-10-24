@@ -47,3 +47,8 @@ test("Script a Short proposal and acceptance carry explicit selected profile and
   assert.match(accept, /content_profile_id: selectedProfileId/);
 });
 
+test("Pages index and app build version match and cache bust stale JS", () => {
+  assert.match(html, /UI build 0\.6\.\d+/);
+  assert.match(html, /\/assets\/app-item4-1008\.js\?v=0\.6\.\d+-[a-z0-9-]+/);
+  assert.match(app, /const BUILD_ID = "item4-0\.6\.\d+-[a-z0-9-]+"/);
+});

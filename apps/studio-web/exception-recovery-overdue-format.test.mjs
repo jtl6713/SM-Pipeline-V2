@@ -32,8 +32,10 @@ test("list and selected output detail use the same formatter",()=>{
  assert.match(source,/detailField\(dl,"Overdue",formatOverdueAge\(item\.minutes_past_due\)\)/);
  assert.doesNotMatch(source,/minutes_past_due\+"m overdue"/);
 });
-
-test("Recovery overdue formatter ships with the active cache key",()=>{
+test("Studio Pages UI version, core bundle ID and asset cache keys remain consistent",()=>{
  const release=readUiReleaseContract(html,app);
- assert.ok(html.includes("exception-recovery.js?v="+release.cacheKey+"&age=hm-v1"), "Recovery formatter JS must use this release's cache key");
+ assert.match(release.version,/^0\.6\.\d+$/);
+ assert.ok(release.cacheKey.startsWith(`${release.version}-`));
+ assert.equal(release.expectedBuildId,`item4-${release.cacheKey}`);
+ assert.ok(html.includes(`exception-recovery.js?v=${release.cacheKey}&age=hm-v1`));
 });

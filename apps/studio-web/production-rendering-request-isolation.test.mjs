@@ -97,3 +97,8 @@ test("Production waits for its current workspace before drawing frame cards", ()
   assert.match(variantPoll, /activeProductionRequest\?\.id !== requestId \|\| revision !== item4WorkspaceRevision/);
 });
 
+test("UI and cache-busting strings agree for Production media isolation build", () => {
+  assert.ok(/const BUILD_ID = "item4-0\.6\.\d+-[a-z0-9-]+"/.test(app));
+  assert.ok(/UI build 0\.6\.\d+/.test(index));
+  assert.ok(/app-item4-1008\.js\?v=0\.6\.\d+-[a-z0-9-]+/.test(index));
+});

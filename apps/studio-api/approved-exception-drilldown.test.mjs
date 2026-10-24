@@ -67,5 +67,5 @@ test("Home count cell keeps exact profile when navigating to Pipeline", () => {
   assert.match(overview,/studioOpenPipelineFilter\(view, \{ profileId: profileId \|\| "" \}\)/);
   assert.match(bundle,/window\.studioOpenPipelineFilter = \(filter, options = \{\}\)/);
   assert.match(bundle,/showStudioPage\("outputs", \{ pipelineFilter:/);
-  assert.ok(html.includes("all-profiles-overview-1007.js?v="), "Home overview loader must be linked and cache-busted");
+  assert.match(html,/all-profiles-overview-1007\.js\?v=[^"\s]+&drilldown=approved-exceptions-v1/);
 });

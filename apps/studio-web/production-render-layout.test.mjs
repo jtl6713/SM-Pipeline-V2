@@ -5,8 +5,9 @@ const root = new URL("./", import.meta.url);
 const html = readFileSync(new URL("index.html", root), "utf8");
 const css = readFileSync(new URL("assets/production-render-layout-0678.css", root), "utf8");
 
-test("Rendering layout fix is linked and versioned", () => {
-  assert.ok(html.includes("production-render-layout-0678.css?v="), "Production CSS must be linked and versioned");
+test("Rendering layout fix is linked and shipped with its cache-busted version", () => {
+assert.match(html, /production-render-layout-0678\.css\?v=0\.6\.\d+-[a-z0-9-]+/);
+assert.match(html, /UI build 0\.6\.\d+/);
 });
 test("Production no longer crops a long timed script at an 880px shell", () => {
   assert.match(css, /#page-content\.production-page\s*\{[^}]*max-width:\s*1280px/);
