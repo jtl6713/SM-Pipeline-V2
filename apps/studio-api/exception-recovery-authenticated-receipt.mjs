@@ -43,17 +43,20 @@ export async function verifyAuthenticatedYouTubeReceipt(row, {
     const video = Array.isArray(result.items) && result.items.length === 1 ? result.items[0] : null;
     if(video?.id !== id) return deny("video_missing_deleted_or_inaccessible");
     if(video.snippet?.channelId !== expectedChannelId) return deny("video_channel_mismatch");
-    if(video.status?.privacyStatus !== "public" || video.status?.uploadStatus !== "processed")
-      return deny("private_draft_or_unprocessed");
-    if(video.status?.publishAt || video.snippet?.liveBroadcastContent === "upcoming")
-      return deny("scheduled_publication");
+    if(!["public","private","unlisted"].includes(video.status?.privacyStatus) || video.status?.uploadStatus !== "processed")
+      return deny("upload_not_processed");
+    const publicNow = video.status?.privacyStatus === "public" && !video.status?.publishAt &&
+      video.snippet?.liveBroadcastContent !== "upcoming";
     const published = Date.parse(video.snippet?.publishedAt);
-    if(!Number.isFinite(published) || published > now()) return deny("publication_timestamp_unverified");
-    return {platform:"YouTube", verified_public:true, ownership_verified:true,
+    if(publicNow && (!Number.isFinite(published) || published > now()))
+      return deny("publication_timestamp_unverified");
+    return {platform:"YouTube", verified_public:publicNow, verified_delivery:true, ownership_verified:true,
       profile_id:profiles[0], channel_id:expectedChannelId, remote_id:id,
       permalink:"https://www.youtube.com/watch?v=" + id,
-      published_at:new Date(published).toISOString(), checked_at:new Date(now()).toISOString(),
-      evidence:"oauth_owned_channel_exact_public_processed_video", read_only:true,
+      published_at:publicNow?new Date(published).toISOString():null,
+      scheduled_at:video.status?.publishAt||null, checked_at:new Date(now()).toISOString(),
+      evidence:publicNow?"oauth_owned_channel_exact_public_processed_video":
+        "oauth_owned_channel_exact_processed_delivery", read_only:true,
       summary:{privacy_status:"public", upload_status:"processed", channel_id:expectedChannelId}};
   } catch { return deny("authenticated_provider_unavailable"); }
 }
