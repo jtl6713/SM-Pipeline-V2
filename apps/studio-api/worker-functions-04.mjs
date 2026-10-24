@@ -12,7 +12,6 @@ import { scanApprovedPastDueOutputs, classifyApprovedPastDue, STALE_PUBLISHED_RE
 import { QUALITY_RECOVERY_LEDGER_TABLE, persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { scanOutstandingFailedOutputs, describeFailedOutput, facebookRateLimitResetReason } from "./failed-output-monitor.mjs";
 import { buildExceptionRecoveryCenter } from "./exception-recovery-center.mjs";
-import { normalizeRecoveryHistory } from "./exception-recovery-history.mjs";
 import { EXCEPTION_MESSAGES_TABLE, RECOVERY_RECORD_ID, prepareRecoveryConversationMessage, normalizeRecoveryConversation } from "./exception-recovery-conversation.mjs";
 import { assessRecoveryPreflight } from "./exception-recovery-preflight.mjs";
 import { withExceptionConversationLock } from "./exception-recovery-lock.mjs";
@@ -10044,20 +10043,6 @@ export async function getStudioExceptionRecoveryReceipt(request, env) {
 }
 /*__STUDIO_WORKER_END:getStudioExceptionRecoveryReceipt__*/
 
-export async function getStudioPublicationRecoveryHistory(request,env) {
-  const query=new URL(request.url).searchParams;
-  const page=await listRecordsPage(env,EXCEPTION_MESSAGES_TABLE,{
-    filterFormula:'OR({Exception_Signature}="AUTONOMOUS-PUBLICATION-RECONCILIATION",{Exception_Signature}="ADMIN_APPROVED_ACTION",{Exception_Signature}="ADMIN_ACTION_OUTCOME")',
-    sortField:"Created_At",sortDirection:"desc",limit:100,
-    offset:query.get("cursor")||undefined,
-  });
-  if(!page.valid) throw new HttpError(503,"Durable recovery history unavailable");
-  const items=normalizeRecoveryHistory(page.records,Object.fromEntries(query));
-  return respond(request,env,{read_only:true,source:"airtable_exception_recovery_audit",
-    items,next_cursor:page.offset||null,filtered_page:true,
-    automation:{policy:{inspect:false,mutate:false},runtime:null}});
-}
-/*__STUDIO_WORKER_END:getStudioPublicationRecoveryHistory__*/
 
 export async function getStudioExceptionRecoveryCounts(request, env) {
   const url=new URL(request.url);
