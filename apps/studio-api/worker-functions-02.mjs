@@ -11244,20 +11244,22 @@ export function ideaHasExplicitPhotoProductionConfig(idea) {
 }
 /*__STUDIO_WORKER_END:ideaHasExplicitPhotoProductionConfig__*/
 
-export async function autoListenOpenPhotoIdeas(env, { limit = 12 } = {}) {
+export async function autoListenOpenPhotoIdeas(env, { limit = 12, initializeOnly = false } = {}) {
   const candidates = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
     limit: Math.max(1, Number(limit) || 12),
     sortField: "Create_Date",
     // New Ideas are kicked immediately. Drain the oldest legacy unscanned
     // backlog first so a steady influx cannot starve months-old Ideas.
     sortDirection: "asc",
-    filterFormula: "AND({Studio_Photo_Wait_Status}=BLANK(),{Promoted_Content_Record_ID}=BLANK(),OR({Candidate_Status}='Generated',{Candidate_Status}='Sent for Review'))",
+    // Exclude explicitly configured Ideas in Airtable BEFORE LIMIT, otherwise
+    // one manual blank-state row can hide the rest of the generated backlog.
+    filterFormula: "AND({Studio_Photo_Wait_Status}=BLANK(),{Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK(),{Test_Run_ID}=BLANK(),OR({Candidate_Status}='Generated',{Candidate_Status}='Sent for Review'),{Production_Content_Type}=BLANK(),{Production_Carousel_Image_Mode}=BLANK(),{Production_Carousel_Slide_Count_Mode}=BLANK(),{Production_Carousel_Slide_Count}=BLANK(),{Production_Carousel_Slide_Count_Min}=BLANK(),{Production_Carousel_Slide_Count_Max}=BLANK())",
   });
 
   const eligible = candidates.filter((idea) => !ideaHasExplicitPhotoProductionConfig(idea));
   if (!eligible.length) return { evaluated: candidates.length, started: 0, ready: 0 };
 
-  const authorization = await resolveStudioCronAuthorization(env);
+  const authorization = initializeOnly ? null : await resolveStudioCronAuthorization(env);
   const results = [];
   for (const idea of eligible) {
     try {
@@ -11288,6 +11290,13 @@ export async function autoListenOpenPhotoIdeas(env, { limit = 12 } = {}) {
           typecast: true,
         }),
       });
+      // Minute recovery writes only the Waiting checkpoint; the independent,
+      // fair photo matcher will search/attach assets and create a request once
+      // genuinely sufficient profile-matched photos are verified.
+      if (initializeOnly) {
+        results.push({ action: "listening", idea_id: updatedIdea.id });
+        continue;
+      }
       const draft = await findDraftProductionRequestForIdea(env, idea.id)
         || await createDraftForIdea(env, updatedIdea, authorization);
       results.push(await evaluateAndMaybeAttachWaitingIdeaPhotos(env, updatedIdea, {
