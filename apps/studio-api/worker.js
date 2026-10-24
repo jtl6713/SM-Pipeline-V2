@@ -696,6 +696,9 @@ import {
   getStudioExceptionRecoveryCenter,
   getStudioExceptionRecoveryConversation,
   getStudioExceptionRecoveryPreflight,
+  getStudioExceptionRecoveryReceipt,
+  getStudioExceptionRecoveryCounts,
+  runStudioExceptionRecoveryAction,
   getStudioDeskActivity,
   getStudioAiApiStatus,
   patchStudioAiApiPreference,
@@ -847,6 +850,10 @@ export default {
       const isAdminExceptionConversationRoute = /^\/api\/admin\/exception-recovery\/rec[A-Za-z0-9]{14}\/conversation$/.test(url.pathname);
       const isAdminExceptionPreflightRoute = /^\/api\/admin\/exception-recovery\/rec[A-Za-z0-9]{14}\/preflight$/.test(url.pathname);
       const isAdminExceptionConversationWrite = isAdminExceptionConversationRoute && request.method === "POST";
+      const isAdminExceptionReceiptRoute = /^\/api\/admin\/exception-recovery\/rec[A-Za-z0-9]{14}\/receipt$/.test(url.pathname);
+      const isAdminExceptionCountsRoute = url.pathname === "/api/admin/exception-recovery/counts";
+      const isAdminExceptionActionRoute = /^\/api\/admin\/exception-recovery\/rec[A-Za-z0-9]{14}\/actions$/.test(url.pathname);
+      const isAdminExceptionActionWrite = isAdminExceptionActionRoute && request.method === "POST";
       const isOpsDeskActivityRoute = url.pathname === "/api/ops/desk/activity";
       const isOpsDeskModeRoute = url.pathname === "/api/ops/desk/mode";
       const isOpsSupabaseSyncRoute = url.pathname === "/api/ops/supabase/sync";
@@ -1051,6 +1058,7 @@ export default {
         isOpsMiamiTikTokSecretWrite ||
         isOpsDeskModeWrite ||
         isAdminExceptionConversationWrite ||
+        isAdminExceptionActionWrite ||
         isOpsSupabaseSyncWrite ||
         isAiApiWrite ||
         isOperationsResetRenderUrlsWrite ||
@@ -1564,6 +1572,23 @@ export default {
         requirePermission(authorization, "tenant_admin");
         if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
         return getStudioExceptionRecoveryPreflight(request, env);
+      }
+
+      if (isAdminExceptionReceiptRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        return getStudioExceptionRecoveryReceipt(request, env);
+      }
+      if (isAdminExceptionCountsRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        return getStudioExceptionRecoveryCounts(request, env);
+      }
+      if (isAdminExceptionActionRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        assertWriteRequest(request, env);
+        return runStudioExceptionRecoveryAction(request, env, authorization);
       }
 
       if (isOpsDeskInventoryRoute) {
@@ -6061,6 +6086,9 @@ const DESK_OUTPUT_IDENTITY_KINDS = new Set([
 /*__STUDIO_WORKER_EXTRACT:getStudioExceptionRecoveryCenter__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioExceptionRecoveryConversation__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioExceptionRecoveryPreflight__*/
+ /*__STUDIO_WORKER_EXTRACT:getStudioExceptionRecoveryReceipt__*/
+ /*__STUDIO_WORKER_EXTRACT:getStudioExceptionRecoveryCounts__*/
+ /*__STUDIO_WORKER_EXTRACT:runStudioExceptionRecoveryAction__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioDeskInventory__*/
 /*__STUDIO_WORKER_EXTRACT:isStudioTestActivityEvent__*/
 /*__STUDIO_WORKER_EXTRACT:sortStudioActivityEvents__*/
