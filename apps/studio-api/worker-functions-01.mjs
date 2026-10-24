@@ -557,6 +557,7 @@ import {
   waitForPromotionResult,
 } from "./worker-functions-02.mjs";
 import {
+  matchNewlyCreatedIdeaPhotos,
   respondStudioMappedList,
   libraryProfileScopeFormula,
   assetLibraryFilterFormula,
