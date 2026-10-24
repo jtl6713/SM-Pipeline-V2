@@ -693,6 +693,7 @@ import {
   studioIdeaGenerationStatus,
   chicagoNowParts,
   getStudioDeskInventory,
+  getStudioExceptionRecoveryCenter,
   getStudioDeskActivity,
   getStudioAiApiStatus,
   patchStudioAiApiPreference,
@@ -840,6 +841,7 @@ export default {
       const isOpsAzNavyPierKickRoute = url.pathname === "/api/ops/az-navy-pier-kick";
       const isOpsMiamiTikTokSecretRoute = url.pathname === "/api/ops/tiktok/miami/pipeline-secret";
       const isOpsDeskInventoryRoute = url.pathname === "/api/ops/desk/inventory";
+      const isAdminExceptionRecoveryRoute = url.pathname === "/api/admin/exception-recovery";
       const isOpsDeskActivityRoute = url.pathname === "/api/ops/desk/activity";
       const isOpsDeskModeRoute = url.pathname === "/api/ops/desk/mode";
       const isOpsSupabaseSyncRoute = url.pathname === "/api/ops/supabase/sync";
@@ -1538,6 +1540,12 @@ export default {
           return patchStudioAiApiPreference(request, env);
         }
         throw new HttpError(405, "Method not allowed");
+      }
+
+      if (isAdminExceptionRecoveryRoute) {
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        requirePermission(authorization, "tenant_admin");
+        return getStudioExceptionRecoveryCenter(request, env);
       }
 
       if (isOpsDeskInventoryRoute) {
