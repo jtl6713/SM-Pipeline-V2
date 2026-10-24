@@ -25,6 +25,16 @@
     const ms = Date.parse(String(x || ""));
     return Number.isFinite(ms) ? new Date(ms).toLocaleString() : "Unknown";
   };
+  // UI-only formatting: retain the source minutes for comparison and sorting.
+  const formatOverdueAge = minutes => {
+    if (minutes == null || minutes === "") return null;
+    const total = Number(minutes);
+    if (!Number.isFinite(total) || total < 0) return null;
+    const rounded = Math.floor(total);
+    const hours = Math.floor(rounded / 60);
+    const remainder = rounded % 60;
+    return (hours ? hours + "h " + remainder + "m" : remainder + "m") + " overdue";
+  };
   const nowOpen = () => root.classList.contains("active");
   const msg = (text, error = false) => { status.textContent = text; status.dataset.error = String(error); };
   async function getJson(url) {
@@ -58,7 +68,7 @@
     button.setAttribute("aria-pressed",String(item.record_id===state.selected));
     button.append(elem("strong",(item.output_id ? "#" + item.output_id + " · " : "") + (item.title || "Untitled output")),
       elem("small", [item.profile_name || item.profile_id || "Unknown city",item.platform,item.output_type].filter(Boolean).join(" · ")),
-      elem("small",(item.held ? "Held · " : "")+(item.signature || "Quality Agent") + (item.minutes_past_due != null ? " · "+item.minutes_past_due+"m overdue" : "")));
+      elem("small",(item.held ? "Held · " : "")+(item.signature || "Quality Agent") + (formatOverdueAge(item.minutes_past_due) ? " · "+formatOverdueAge(item.minutes_past_due) : "")));
     button.addEventListener("click",()=>{state.selected=item.record_id;render();});
     const wrap=elem("div",null,"erc-item-wrap");
     const tick=elem("input");tick.type="checkbox";
@@ -343,6 +353,7 @@
     detailField(dl,"Categories",item.categories.join(", "));
     detailField(dl,"Status",[item.output_status,item.publish_status].filter(Boolean).join(" / "));
     detailField(dl,"Due",item.scheduled_at?date(item.scheduled_at):null);
+    if(formatOverdueAge(item.minutes_past_due)) detailField(dl,"Overdue",formatOverdueAge(item.minutes_past_due));
     detailField(dl,"Retry",item.retry_at?date(item.retry_at):null);
     detailField(dl,"Attempts",item.attempts);
     detailField(dl,"Signature",item.signature);
