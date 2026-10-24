@@ -527,3 +527,5 @@ Deploy UI 0.6.754-producer-conversation: Script-a-Short Production conversation,
 2026-10-23 Producer entry discoverability on Script a short and Production conversation jump; Studio UI 0.6.755-producer-entry.
 
 2026-10-23: Deploy UI 0.6.756-factory-batch-nav. Keep active approval counts visible, move navigation above batch rows, collapse/expand active list, limit pagination to completed history.
+
+2026-10-23: Deploy Studio UI 0.6.757-idea-id-list from merged PR #1118 (6f59826a67a3abb97a7d42316dd32872f8f6f628). Ideas table displays numeric Candidate_ID ahead of the title, e.g. 2000 – Marina City Reflections. Current and Archived Ideas and matched-row refresh only; do not change storage names or production/publishing behavior. Verify precise Pages asset cache key, UI release label, and custom-domain production source; human publishing approval remains unchanged.
