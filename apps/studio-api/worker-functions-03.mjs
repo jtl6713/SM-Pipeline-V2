@@ -974,6 +974,15 @@ export async function applyLibraryAssetsToProductionRequest(env, requestRecord, 
 }
 /*__STUDIO_WORKER_END:applyLibraryAssetsToProductionRequest__*/
 
+// Attach only a whitelisted stage to the original error. Do not persist raw
+// exception messages, provider paths, tokens or stack traces into Airtable.
+async function ideaPhotoWaitStage(stage, operation) {
+  try { return await operation(); } catch (error) {
+    if (error && typeof error === "object") error.ideaPhotoStage = stage;
+    throw error;
+  }
+}
+
 export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { authorization = null, force = false, productionRequest = null } = {}) {
   // Always refresh before matching. Manage Idea writes a short-lived pause token and
   // entering Production writes a permanent Not Needed/ez-photo-wait=off lock.
@@ -996,19 +1005,19 @@ export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { autho
   }
 
   let requestRecord = productionRequest
-    || (authorization ? await existingDraftForIdea(env, idea.id, authorization) : null)
-    || await findDraftProductionRequestForIdea(env, idea.id);
+    || (authorization ? await ideaPhotoWaitStage("find_authorized_request", () => existingDraftForIdea(env, idea.id, authorization)) : null)
+    || await ideaPhotoWaitStage("find_draft_request", () => findDraftProductionRequestForIdea(env, idea.id));
   if (requestRecord && productionPhotoWaitAutoOff(f(requestRecord, "Production_Notes"))) {
     return { action: "manual", idea, production_request: requestRecord, skipped: true };
   }
 
   const min = Number(f(idea, "Production_Carousel_Slide_Count_Min") || 0);
   const max = Number(f(idea, "Production_Carousel_Slide_Count_Max") || 0);
-  const matches = await rankStillsForIdeaPhotoWait(env, idea);
+  const matches = await ideaPhotoWaitStage("rank_stills", () => rankStillsForIdeaPhotoWait(env, idea));
   // An explicit Find images now bypasses incomplete intake batches. Do not
   // perform up to 20 serial Airtable batch scans for a forced request: they can
   // exhaust its Worker budget before the already-classified photos attach.
-  const pendingBatchIds = force ? [] : await unfinishedIntakeBatchIds(env, matches.map((row) => row.intake_batch_id));
+  const pendingBatchIds = force ? [] : await ideaPhotoWaitStage("intake_batches", () => unfinishedIntakeBatchIds(env, matches.map((row) => row.intake_batch_id)));
   const decision = selectMatchedPhotos({ matches, min, max, pendingBatchIds, force });
   const evaluatedAt = new Date().toISOString();
   const matchJson = {
@@ -1054,7 +1063,7 @@ export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { autho
 
   if (decision.action === "ready") {
     if (!requestRecord && authorization) {
-      requestRecord = await createDraftForIdea(env, idea, authorization);
+      requestRecord = await ideaPhotoWaitStage("create_draft", () => createDraftForIdea(env, idea, authorization));
     }
     if (!requestRecord) {
       matchJson.action = "wait";
@@ -1073,12 +1082,12 @@ export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { autho
     }
     const attachIds = decision.selected.map((row) => row.id).filter((id) => !rejectedIds.has(id));
     if (shouldAttachPhotoWaitAssets({ action: decision.action, autoOff }) && attachIds.length) {
-      const attached = await applyLibraryAssetsToProductionRequest(
+      const attached = await ideaPhotoWaitStage("attach_assets", () => applyLibraryAssetsToProductionRequest(
         env,
         requestRecord,
         attachIds,
         { replaceWaitAssets: !autoOff, allowManagePaused: force }
-      );
+      ));
       if (attached.skipped) return { action: "manual", idea, production_request: attached.record, skipped: true };
       requestRecord = attached.record;
     }
@@ -1096,7 +1105,7 @@ export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { autho
     });
     // Stamp origin=autonomous so morning resume / Factory Auto High can pick this
     // up — photo Ready alone used to park forever as a blank-notes Draft.
-    requestRecord = await stampPhotoReadyIdeaForAutonomousProduce(env, ideaReady, requestRecord);
+    requestRecord = await ideaPhotoWaitStage("stamp_autonomous", () => stampPhotoReadyIdeaForAutonomousProduce(env, ideaReady, requestRecord));
     // A Ready match is a durable production handoff, not merely a green
     // photo badge. R2 enqueue is idempotent by Idea ID and the one-minute
     // dispatcher still rechecks holds, reciprocal request and asset evidence.
@@ -1241,6 +1250,8 @@ export async function runWaitingIdeaPhotoMatches(env, { limit = 8 } = {}) {
             // Safe structured HTTP class for QA and retry triage; never place
             // provider URLs, secrets or raw exception messages in Airtable.
             error_http_status: Number(error?.status || error?.statusCode || 0) || null,
+            error_stage: String(error?.ideaPhotoStage || "other").slice(0, 40),
+            error_name: ["TypeError", "ReferenceError", "SyntaxError", "RangeError", "HttpError"].includes(String(error?.name || "")) ? error.name : "Error",
           }) } }),
         });
       } catch (diagnosticError) {
