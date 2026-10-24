@@ -6040,6 +6040,7 @@ const DESK_OUTPUT_IDENTITY_KINDS = new Set([
 /*__STUDIO_WORKER_EXTRACT:deskOutputsForRequest__*/
 /*__STUDIO_WORKER_EXTRACT:studioQualityAuditApprovedPastDue__*/
 /*__STUDIO_WORKER_EXTRACT:gatherStudioDeskInventory__*/
+/*__STUDIO_WORKER_EXTRACT:getStudioExceptionRecoveryCenter__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioDeskInventory__*/
 /*__STUDIO_WORKER_EXTRACT:isStudioTestActivityEvent__*/
 /*__STUDIO_WORKER_EXTRACT:sortStudioActivityEvents__*/
