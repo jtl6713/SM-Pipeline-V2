@@ -39,7 +39,7 @@ test("Studio Pages UI version, core bundle ID and asset cache keys remain consis
  assert.ok(compareUiVersions(release.version,"0.6.758") >= 0,
    "Exception Recovery requires Studio UI 0.6.758 or newer");
  assert.equal(release.expectedBuildId,`item4-${release.cacheKey}`);
- const asset=html.match(/\/assets\/exception-recovery\.js\?[^"'<>\\s]+/);
+ const asset=html.match(/\/assets\/exception-recovery\.js\?[^"'<>]+/);
  assert.ok(asset,"Exception Recovery UI asset is missing from Pages");
  const url=new URL(asset[0],"https://studio.invalid");
  assert.equal(url.searchParams.get("v"),release.cacheKey);
