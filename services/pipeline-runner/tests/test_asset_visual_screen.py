@@ -112,3 +112,43 @@ def test_drive_intake_starts_visual_assets_locked():
         assert _intake_fields(item, share_url="https://drive", batch_id="test")["Do_Not_Use"] is True
     item = {"id": "audio1", "name": "voice.mp3", "mimeType": "audio/mpeg", "size": "100"}
     assert _intake_fields(item, share_url="https://drive", batch_id="test")["Do_Not_Use"] is False
+
+
+@pytest.mark.parametrize("decision,expected_hold", [
+    ("clean", False), ("review", True), ("blocked", True),
+])
+def test_drive_intake_preserves_audited_use_hold(monkeypatch, decision, expected_hold):
+    from unittest.mock import MagicMock
+    from a2.processor import _intake_pass
+    from asset.constants import GDRIVE_INGESTION_FOLDER
+    from a2 import processor as intake
+
+    drive = MagicMock()
+    drive.list_files.return_value = [{
+        "id": "driveA", "name": "River.png", "mimeType": "image/png",
+        "size": "120", "parents": [GDRIVE_INGESTION_FOLDER],
+    }]
+    drive.share_anyone_reader.return_value = {"webViewLink": "https://drive.example/river"}
+    drive.move_file.return_value = {"id": "driveA"}
+    drive.download_file.return_value = (_jpeg(), "image/png")
+    client = MagicMock()
+    client.create_records.return_value = [{"id": "recRiver"}]
+
+    monkeypatch.setattr(intake, "GoogleDriveClient", lambda: drive)
+    monkeypatch.setattr(intake, "AirtableClient", lambda: client)
+    monkeypatch.setattr(intake, "existing_intake_match", lambda *a, **kw: None)
+    monkeypatch.setattr(intake, "screen_asset", lambda **kw: {
+        "decision": decision,
+        "indicators": ["watermark"] if decision == "blocked" else [],
+        "evidence": "Visible third-party watermark" if decision == "blocked" else "Reviewed frames",
+        "frames_checked": 1,
+    })
+    result = _intake_pass(trigger_a2b=False)
+    assert result["intaken_count"] == 1
+    initial_fields = client.create_records.call_args.args[1][0]
+    assert initial_fields["Do_Not_Use"] is True  # no pre-scan release window
+    update_fields = client.update_record.call_args.args[2]
+    assert update_fields["Do_Not_Use"] is expected_hold
+    assert "QA-ASSET-THIRD-PARTY-OVERLAY" in update_fields["Potential_Match_Notes"]
+    if expected_hold:
+        assert update_fields["Raw_Source_Eligibility"] in {"Needs Review", "Ineligible"}
