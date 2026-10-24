@@ -1,4 +1,5 @@
 import { matchNewlyCreatedIdeaPhotos } from "./worker-functions-03.mjs";
+import { autonomousPlanOutputSpilloverRepair } from "./autonomous-plan-output-recovery.mjs";
 import { verifyFactoryRenderedMedia } from "./factory-producer-render-evidence.mjs";
 import { appendVerifiedLibraryAssets } from "./factory-producer-library-append.mjs";
 import { applyGroundedMediaEdits } from "./factory-producer-media-edits.mjs";
@@ -534,6 +535,7 @@ import {
   ITEM4_VARIANT_QUEUE_TABLE,
   STUDIO_P1_SCENARIO_ID,
   PRODUCTION_REQUEST_TABLE,
+  PRODUCTION_REQUEST_OUTPUT_TABLE,
   PR_PLATFORMS,
   STUDIO_YOUTUBE_AUTONOMOUS_HARVEST_SETTING,
   STUDIO_YOUTUBE_AUTONOMOUS_HARVEST_TTL_MS,
@@ -12327,6 +12329,67 @@ async function monitorReadyProductionRequest(env, requestRecord) {
   };
 }
 
+async function reconcileAutonomousPlanOutputSpillover(env, requestRecord) {
+  const note = String(f(requestRecord, "Production_Notes") || "");
+  if (!/(?:^|\n)origin=autonomous(?:\n|$)/i.test(note)
+      || productionNotesRevisionOpen(note)) return 0;
+  const rows = await outputRowsForProductionRequest(env, requestRecord.id);
+  const latest = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
+  if (String(f(latest, "Studio_Output_Plan_JSON") || "")
+      !== String(f(requestRecord, "Studio_Output_Plan_JSON") || "")) return 0;
+  const request = {
+    notes: note,
+    active: Boolean(f(latest, "Active")),
+    revisionOpen: productionNotesRevisionOpen(note),
+    status: String(f(latest, "Request_Status") || "").trim(),
+    masterStatus: String(f(latest, "Studio_Master_Asset_Status") || "").trim(),
+    masterAssetCount: Number(f(latest, "Studio_Master_Asset_Count") || 0),
+    planStatus: String(f(latest, "Studio_Output_Plan_Status") || "").trim(),
+    variantStatus: String(f(latest, "Studio_Variant_Status") || "").trim(),
+    promoted: linkedRecordIds(f(latest, "Promoted_Content_Item")).length > 0,
+    createdAt: f(latest, "Created_At") || latest.createdTime,
+  };
+  const decision = autonomousPlanOutputSpilloverRepair({
+    request,
+    plan: item4ParseJson(f(latest, "Studio_Output_Plan_JSON"), null),
+    rows: rows.map((row) => ({
+      id: row.id,
+      platform: String(f(row, "Platform") || "").trim(),
+      outputType: String(f(row, "Output_Type") || "").trim(),
+      enabled: Boolean(f(row, "Enabled")),
+      active: Boolean(f(row, "Active")),
+      status: String(f(row, "Output_Status") || "").trim(),
+      hasPlatformOutput: linkedRecordIds(f(row, "Platform_Output")).length > 0,
+      createdAt: f(row, "Created_At"),
+      updatedAt: f(row, "Updated_At"),
+    })),
+  });
+  if (!decision.repair) return 0;
+  let repaired = 0;
+  for (const id of decision.disableIds) {
+    const original = rows.find((row) => row.id === id);
+    const live = await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, id);
+    if (!original || !f(live, "Active") || !f(live, "Enabled")
+        || String(f(live, "Output_Status") || "").trim() !== "Draft"
+        || String(f(live, "Updated_At") || "") !== String(f(original, "Updated_At") || "")
+        || linkedRecordIds(f(live, "Platform_Output")).length
+        || !linkedRecordIds(f(live, "Production_Request")).includes(requestRecord.id)) {
+      throw new HttpError(409, "Autonomous output choice changed; preserve operator selection");
+    }
+    await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: {
+        Enabled: false, Active: false, Updated_At: new Date().toISOString(),
+      }, typecast: false }),
+    });
+    repaired++;
+  }
+  console.info("Ready-to-produce reconciled untouched autonomous companions", {
+    production_request_id: requestRecord.id, disabled_unplanned_count: repaired,
+  });
+  return repaired;
+}
+
 async function processReadyProductionClaim(env, authorization, ctx, lease, { deferProduce = false } = {}) {
   const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, lease.job.idea_id);
   let requestRecord = await readyProductionRequestForIdea(env, idea);
@@ -12450,6 +12513,9 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
     await buildItem4OutputPlan(planCall.request, env, planCall.url, authorization);
     requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
   }
+  // Align only untouched auto-generated companion rows to the saved photo
+  // plan. Existing media, operator choices and QA holds remain authoritative.
+  await reconcileAutonomousPlanOutputSpillover(env, requestRecord);
   const finished = await finishAutonomousProductionRequest(
     env,
     authorization,
