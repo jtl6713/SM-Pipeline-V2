@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {reconcilePublication,autonomousRecoveryPolicy,receiptBlock} from "./exception-recovery-autonomous.mjs";
 import {verifyAuthenticatedYouTubeReceipt} from "./exception-recovery-authenticated-receipt.mjs";
 import {normalizeRecoveryHistory,recoveryAuditFields} from "./exception-recovery-history.mjs";
+import {homeApprovedExceptionKind} from "./profile-summary-classification.mjs";
+import {approvedPastDueFormula} from "./approved-past-due-quality.mjs";
 const instant=Date.parse("2026-10-24T12:00:00Z");
 const id="recAAAAAAAAAAAAAA", profile="recBBBBBBBBBBBBBB", video="hc1heQnfn6k";
 const channel="UC"+"A".repeat(22);
@@ -254,4 +256,18 @@ test("Airtable omitting cleared null fields still counts as authoritative readba
  const output=await reconcilePublication(f.deps);
  assert.equal(output.outcome,"Corrected");
  assert.equal(f.state.terminal,true);
+});
+
+test("verified private handoff disappears from Home and QA overdue without claiming public release",async()=>{
+ const f=fixture();f.receipt.verified_public=false;f.receipt.published_at=null;
+ f.receipt.summary={privacy_status:"private",upload_status:"processed"};
+ const result=await reconcilePublication(f.deps);
+ assert.equal(result.outcome,"Corrected");
+ assert.equal(f.row.fields.Published_At,undefined);
+ const mapped={platform:"YouTube",review_status:"Approved",studio_state:"Awaiting Public Release",
+   output_status:f.row.fields.Output_Status,publish_status:f.row.fields.Publish_Status,
+   scheduled_post_date:f.row.fields.Scheduled_Post_Date,do_not_publish:false};
+ assert.equal(homeApprovedExceptionKind(mapped,instant),"");
+ const formula=approvedPastDueFormula(instant);
+ assert.match(formula,/\{Publish_Status\}!="Published Privately"/);
 });
