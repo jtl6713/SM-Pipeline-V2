@@ -55,3 +55,27 @@ test("one-minute production dispatch retains leases and human approval gate", ()
   assert.ok(worker.includes("studioReadyProductionCronResume(env, ctx)"));
   assert.ok(worker.includes("runWaitingIdeaPhotoMatches(env, { limit: 2 })"));
 });
+
+test("Quality Agent monitors >2h unscanned, stale, and ready-without-handoff Ideas without changing them", async () => {
+  const { ideaPhotoMatchingSlaFinding: classify } = await import("./idea-photo-wait.mjs");
+  const nowMs = Date.parse("2026-10-24T01:30:00Z");
+  const row = (fields = {}) => ({
+    id: "rec12345678901234",
+    createdTime: "2026-10-23T21:00:00Z",
+    fields: { Candidate_Status: "Generated", Content_Profile: ["rec12345678901235"], ...fields },
+  });
+  assert.equal(classify(row(), { nowMs }).kind, "idea_photo_never_scanned");
+  assert.equal(classify(row({ Studio_Photo_Wait_Status: "Waiting" }), { nowMs }).kind, "idea_photo_match_stale");
+  assert.equal(classify(row({ Studio_Photo_Wait_Status: "Waiting", Studio_Photo_Match_JSON: JSON.stringify({
+    evaluated_at: "2026-10-24T01:00:00Z",
+  }) }), { nowMs }), null);
+  assert.equal(classify(row({ Studio_Photo_Wait_Status: "Ready" }), { nowMs }).kind, "idea_photo_ready_no_handoff");
+  assert.equal(classify(row({ Candidate_Status: "On Hold" }), { nowMs }), null);
+  assert.equal(classify(row({ Candidate_Status: "Promoted" }), { nowMs }), null);
+  assert.equal(classify(row({ Studio_Photo_Wait_Status: "Not Needed" }), { nowMs }), null);
+  const worker = read("worker.js");
+  assert.ok(worker.includes("scanIdeaPhotoMatchingQuality(env, { limit: 150 })"));
+  assert.ok(worker.includes("autoListenOpenPhotoIdeas(env, { limit: 2 })"));
+  const source = readStudioWorkerSource();
+  assert.ok(source.includes("studio/state/quality/idea-photo-matching/latest.json"));
+});
