@@ -90,3 +90,36 @@ test("secondary ledger outage never converts a verified status repair into unsaf
  assert.equal(result.status,"verified_published");
  assert.equal(result.durable_recovery_recorded,false);
 });
+
+test("status repair rejects unrelated saved post URL even with a matching provider ID",async()=>{
+ const approved={action:RECEIPT_REPAIR_ACTION,confirm_output_id:"3374",confirm_post_id:"123456789_987654321"};
+ const initial=row({Review_Status:"Approved",Published_At:"2026-10-23T00:00:00Z",
+   Platform_Post_URL:"https://www.facebook.com/page/posts/111111111"});
+ let writes=0;
+ const result=await executeApprovedReceiptRepair({recordId:id,approval:approved,
+   readOutput:async()=>initial,
+   verifyRemote:async()=>({verified_public:true,remote_id:approved.confirm_post_id,
+     platform:"Facebook",permalink:"https://www.facebook.com/page/posts/987654321"}),
+   patchStatus:async()=>{writes++;},appendLedger:async()=>{writes++;},
+ });
+ assert.equal(result.status,"blocked");
+ assert.equal(result.reason,"saved_public_receipt_provider_permalink_mismatch");
+ assert.equal(writes,0);
+});
+test("YouTube canonical watch link and youtu.be saved receipt identify the same video",async()=>{
+ const video="dQw4w9WgXcQ";
+ let current=row({Platform:"YouTube",Review_Status:"Approved",Platform_Post_ID:video,
+   YouTube_Video_ID:video,Published_At:"2026-10-23T00:00:00Z",
+   Platform_Post_URL:"https://youtu.be/"+video});
+ let writes=0;
+ const result=await executeApprovedReceiptRepair({recordId:id,
+   approval:{action:RECEIPT_REPAIR_ACTION,confirm_output_id:"3374",confirm_post_id:video},
+   readOutput:async()=>current,
+   verifyRemote:async()=>({verified_public:true,remote_id:video,platform:"YouTube",
+     permalink:"https://www.youtube.com/watch?v="+video,evidence:"youtube_videos_list_exact_id_privacy"}),
+   patchStatus:async(_row,fields)=>{writes++;current=row({...current.fields,...fields});},
+   appendLedger:async()=>({recorded:true}),
+ });
+ assert.equal(result.status,"verified_published");
+ assert.equal(writes,1);
+});
