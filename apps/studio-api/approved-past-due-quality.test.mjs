@@ -177,3 +177,22 @@ test("QA-PUBLISH-001 excludes failed statuses rather than double-count them as o
  assert.match(formula,/\{Output_Status\}!="Failed"/);
  assert.match(formula,/\{Publish_Status\}!="Failed"/);
 });
+
+
+test("approved overdue outputs show their stored titles instead of Untitled output",()=>{
+  for(const [platform,title,id] of [
+    ["YouTube","Crandon Park Nature Frames","3374"],
+    ["Instagram","NYC beyond Manhattan","7864"],
+    ["Facebook","Buckingham Fountain Closeup","8295"],
+    ["TikTok","OMNY Tap Mistakes","3385"],
+  ]){
+    const actual=classifyApprovedPastDue(record("rec"+id,{
+      Platform:platform,Output_ID:Number(id),Output_Title:title,
+    }),now);
+    assert.equal(actual.title,title);
+    assert.equal(actual.output_id,id);
+  }
+  assert.equal(classifyApprovedPastDue(record("rec100",{
+    Output_Title:"",Title_Text:"Title from alternate source",
+  }),now).title,"Title from alternate source");
+});
