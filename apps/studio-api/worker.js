@@ -2576,6 +2576,13 @@ export default {
     // Keep this deliberately small: Airtable subrequest pressure previously
     // caused 429 cooldowns when too many light-cron jobs ran together.
     if (!cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      // Newly generated Ideas receive an immediate kickoff. This bounded
+      // legacy sweep also discovers blank-state Ideas that predate that hook.
+      // Keep it separate from image matching so a failed listener does not
+      // prevent the Waiting queue from draining.
+      ctx.waitUntil(autoListenOpenPhotoIdeas(env, { limit: 2 })
+        .then((result) => console.info("Light-cadence legacy Idea listening", result))
+        .catch((error) => console.warn("Light-cadence legacy Idea listening failed", error)));
       ctx.waitUntil(runWaitingIdeaPhotoMatches(env, { limit: 2 })
         .then((result) => console.info("Light-cadence photo matching", result))
         .catch((error) => console.warn("Light-cadence photo matching failed", error)));
