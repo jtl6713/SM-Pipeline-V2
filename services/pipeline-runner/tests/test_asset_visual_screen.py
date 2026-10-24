@@ -157,3 +157,38 @@ def test_drive_intake_preserves_audited_use_hold(monkeypatch, decision, expected
     assert "QA-ASSET-THIRD-PARTY-OVERLAY" in update_fields["Potential_Match_Notes"]
     if expected_hold:
         assert update_fields["Raw_Source_Eligibility"] in {"Needs Review", "Ineligible"}
+
+
+@pytest.mark.parametrize("decision,expected_hold", [
+    ("clean", False), ("review", True), ("blocked", True),
+])
+def test_video_folder_backfill_requires_clean_screen(monkeypatch, decision, expected_hold):
+    from unittest.mock import MagicMock
+    from a2b import processor as backfill
+    drive = MagicMock()
+    item = {
+        "id": "videoDrive", "name": "Clip.mp4", "mimeType": "video/mp4",
+        "size": "2000", "fileExtension": "mp4",
+    }
+    drive.list_files.return_value = [item]
+    drive.get_file.return_value = item
+    drive.download_file.return_value = (b"video", "video/mp4")
+    client = MagicMock()
+    client.list_records.return_value = []
+    client.upsert_record.return_value = ({"id": "recVideo"}, True)
+    monkeypatch.setattr(backfill, "GoogleDriveClient", lambda: drive)
+    monkeypatch.setattr(backfill, "AirtableClient", lambda: client)
+    monkeypatch.setattr(backfill, "screen_asset", lambda **kwargs: {
+        "decision": decision, "indicators": ["watermark"] if decision == "blocked" else [],
+        "evidence": "Third-party overlay" if decision == "blocked" else "Frames reviewed",
+        "frames_checked": 5,
+    })
+    result = backfill.process_request(trigger_a3=False)
+    assert result["backfill_count"] == 1
+    fields = client.upsert_record.call_args.args[1]
+    assert fields["Do_Not_Use"] is expected_hold
+    assert "QA-ASSET-THIRD-PARTY-OVERLAY" in fields["Potential_Match_Notes"]
+    if expected_hold:
+        drive.share_anyone_reader.assert_not_called()
+    else:
+        drive.share_anyone_reader.assert_called_once_with("videoDrive")
