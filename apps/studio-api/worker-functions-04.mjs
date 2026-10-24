@@ -9988,7 +9988,13 @@ async function exceptionRecoveryReadAuthenticatedProvider(env,row) {
   let source;
   try {source=await exceptionRecoveryReadVerifiedOutput(env,row.id);}
   catch {return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"authoritative_profile_unavailable"};}
-  if(JSON.stringify(recoverySnapshot(source.row))!==JSON.stringify(recoverySnapshot(row)))
+  // The interactive authenticated GET receives the raw Airtable lookup;
+  // the background reconciler already receives the normalized record.
+  // Neither may skip the fresh output-to-content identity comparison.
+  if(contentIdForRecoveryOutput(row)!==contentIdForRecoveryOutput(source.row))
+    return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"output_content_changed_before_provider_get"};
+  const comparableRow=withVerifiedRecoveryProfile(row,{ok:true,profile_id:source.profile_id});
+  if(JSON.stringify(recoverySnapshot(source.row))!==JSON.stringify(recoverySnapshot(comparableRow)))
     return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"output_state_changed_before_provider_get"};
   let settings;
   try {
