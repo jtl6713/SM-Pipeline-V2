@@ -54,3 +54,11 @@
 #ercBulkResults { display:grid; gap:.5rem; margin:.7rem 0 }
 .erc-bulk-row { border:1px solid var(--border,#ccc); border-radius:.55rem; padding:.6rem }
 .erc-bulk-row p { font-size:.8rem; margin:.25rem 0 0 }
+
+.erc-reconcile { border:1px solid var(--border,#ccc); padding:.8rem; border-radius:.7rem; margin:.8rem 0 }
+#ercReconciliationResult { max-height:300px;overflow:auto }
+.erc-count-table { border-collapse:collapse; width:100%; margin:.6rem 0; font-size:.8rem }
+.erc-count-table th,.erc-count-table td { border-bottom:1px solid var(--border,#ddd); padding:.5rem .45rem; text-align:left; white-space:nowrap }
+.erc-receipt {border-top:1px solid var(--border,#ccc);margin-top:1rem;padding-top:.7rem}
+.erc-receipt h4 {margin:.5rem 0}
+.erc-receipt .erc-actions [hidden] {display:none!important}
