@@ -1088,6 +1088,32 @@ export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { autho
 }
 /*__STUDIO_WORKER_END:evaluateAndMaybeAttachWaitingIdeaPhotos__*/
 
+/**
+ * New Ideas are already marked Waiting in their creation write. Evaluate the
+ * exact new record immediately without asking the operator to click Find Images
+ * Now. No forced matching: profile isolation, holds, manual deletion locks and
+ * high-confidence asset requirements remain enforced by the shared evaluator.
+ * The regular fair waiting queue is the durable retry if this kickoff fails.
+ */
+export async function matchNewlyCreatedIdeaPhotos(env, created, authorization) {
+  if (!created?.id) return { action: "invalid" };
+  const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, created.id);
+  if (String(f(idea, "Studio_Photo_Wait_Status") || "") !== "Waiting") {
+    return { action: "skipped", idea_id: created.id };
+  }
+  const status = String(f(idea, "Candidate_Status") || "").trim();
+  if (["On Hold", "Rejected", "Promoted"].includes(status)
+      || String(f(idea, "Promoted_Content_Record_ID") || "").trim()
+      || linkedRecordIds(f(idea, "Content Items")).length) {
+    return { action: "skipped", idea_id: created.id };
+  }
+  return evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, {
+    authorization,
+    force: false,
+  });
+}
+/*__STUDIO_WORKER_END:matchNewlyCreatedIdeaPhotos__*/
+
 export async function runWaitingIdeaPhotoMatches(env, { limit = 8 } = {}) {
   const candidates = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
     // Enumerate the lean waiting queue before choosing eight. An unsorted
