@@ -42,3 +42,7 @@
 .erc-conversation-form label { font-size:.8rem; font-weight:600 }
 .erc-conversation-form textarea { width:100%; min-height:78px; padding:.65rem; border:1px solid var(--border,#ccc); border-radius:.55rem; background:var(--panel-bg,transparent); color:inherit; font:inherit }
 .erc-conversation-form button { justify-self:start }
+
+/* Do not let generic Studio .nav-item or .page display styles override gated visibility. */
+#navExceptionRecovery[hidden] { display:none !important }
+#page-exception-recovery:not(.active) { display:none !important }
