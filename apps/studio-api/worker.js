@@ -582,6 +582,7 @@ import {
   createIdeaTimedScriptRoute,
 } from "./worker-functions-02.mjs";
 import {
+  scanIdeaPhotoMatchingQuality,
   runWaitingIdeaPhotoMatches,
   listContent,
   listOutputScheduleGrid,
