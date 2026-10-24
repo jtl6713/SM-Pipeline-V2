@@ -962,6 +962,13 @@ export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { autho
   // entering Production writes a permanent Not Needed/ez-photo-wait=off lock.
   idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id).catch(() => idea);
   const waitStatusNow = String(f(idea, "Studio_Photo_Wait_Status") || "").trim();
+  // Cron discovery can race an operator Hold, Reject or Promotion. Fail closed
+  // before ranking and again before attaching matched media.
+  if (["On Hold", "Rejected", "Promoted"].includes(String(f(idea, "Candidate_Status") || "").trim())
+      || String(f(idea, "Promoted_Content_Record_ID") || "").trim()
+      || linkedRecordIds(f(idea, "Content Items")).length) {
+    return { action: "skipped", idea, production_request: productionRequest || null, skipped: true };
+  }
   // Manage Idea pauses background matching so deleted/unselected photos stay authoritative.
   // An explicit Find images now request is user-directed and may bypass only this temporary pause.
   if (!force && ideaManagePhotoPauseActive(f(idea, "Production_Config_Notes"))) {
@@ -1007,6 +1014,11 @@ export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { autho
   // Re-check after ranking because the operator may have opened Manage Idea or
   // entered Production while the library scan was running.
   idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id).catch(() => idea);
+  if (["On Hold", "Rejected", "Promoted"].includes(String(f(idea, "Candidate_Status") || "").trim())
+      || String(f(idea, "Promoted_Content_Record_ID") || "").trim()
+      || linkedRecordIds(f(idea, "Content Items")).length) {
+    return { ...decision, action: "skipped", idea, production_request: requestRecord, skipped: true };
+  }
   if (!force && ideaManagePhotoPauseActive(f(idea, "Production_Config_Notes"))) {
     return { ...decision, action: "paused", idea, production_request: requestRecord, skipped: true };
   }
