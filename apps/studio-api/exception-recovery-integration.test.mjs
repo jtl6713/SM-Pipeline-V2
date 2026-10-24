@@ -40,3 +40,11 @@ test("recovery UI JS/CSS follows the existing Studio release key",()=>{
  assert.match(html,/exception-recovery\.css\?v=0\.6\.757-idea-id-list/);
  assert.match(html,/exception-recovery\.js\?v=0\.6\.757-idea-id-list/);
 });
+
+test("bulk preview limits selection and uses only read-only output preflight",()=>{
+ assert.match(html,/id="ercPreviewSelected" disabled/);
+ assert.match(ui,/state\.selectedBulk\.size>=5/);
+ assert.match(ui,/getJson\("\/api\/admin\/exception-recovery\/"\+id\+"\/preflight"\)/);
+ assert.match(ui,/inspection only; publishing and state changes remain disabled/);
+ assert.doesNotMatch(ui,/fetch\([^)]*\/publish/);
+});
