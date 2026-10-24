@@ -2203,16 +2203,22 @@
    </div>
   </div>
   <div class="factory-global-history">
-   <div class="factory-batch-heading"><strong id="factoryBatchListHeading">Active approvals</strong><span id="factoryBatchUpdated">Current actionable batches</span><button type="button" class="secondary-button" id="factoryBatchCompletedClose" aria-label="Close completed approvals and return to active approvals" hidden>× Close</button></div>
+   <div class="factory-batch-heading">
+    <div class="factory-batch-heading-copy"><strong id="factoryBatchListHeading">Active approvals</strong><span id="factoryBatchUpdated">Current actionable batches</span></div>
+    <div class="factory-batch-actions" role="group" aria-label="Approval batch navigation">
+     <button type="button" class="secondary-button" id="factoryBatchRefresh">Refresh activity</button>
+     <button type="button" class="secondary-button" id="factoryBatchCompletedToggle" aria-pressed="false">Completed Batches</button>
+     <button type="button" class="secondary-button" id="factoryBatchActiveCollapse" aria-expanded="true" aria-controls="factoryBatchRecentList factoryBatchDetails">Collapse list</button>
+     <button type="button" class="secondary-button" id="factoryBatchCompletedClose" aria-label="Close completed approvals and return to active approvals" hidden>× Close</button>
+     <button type="button" class="secondary-button" id="factoryBatchCompletedPrev" hidden>Previous</button>
+     <span id="factoryBatchCompletedPage" class="subtle" hidden></span>
+     <button type="button" class="secondary-button" id="factoryBatchCompletedNext" hidden>Next</button>
+    </div>
+   </div>
    <div id="factoryBatchRecentList" class="factory-batch-recent-list" aria-live="polite"></div>
-   <div class="factory-batch-actions">
+   <div class="factory-batch-secondary-actions">
     <button type="button" class="secondary-button" id="factoryBatchInspect" aria-expanded="false" aria-controls="factoryBatchDetails" hidden>View batch details</button>
     <button type="button" class="secondary-button" id="factoryBatchRetry" hidden>Retry Failed</button>
-    <button type="button" class="secondary-button" id="factoryBatchRefresh">Refresh activity</button>
-    <button type="button" class="secondary-button" id="factoryBatchCompletedToggle" aria-pressed="false">Completed Batches</button>
-    <button type="button" class="secondary-button" id="factoryBatchCompletedPrev" hidden>Previous</button>
-    <span id="factoryBatchCompletedPage" class="subtle" hidden></span>
-    <button type="button" class="secondary-button" id="factoryBatchCompletedNext" hidden>Next</button>
    </div>
    <div id="factoryBatchDetails" hidden></div>
   </div>
