@@ -206,7 +206,7 @@
       try{
         const response=await fetch("/api/admin/exception-recovery/"+recordId+"/actions",{
           method:"POST",credentials:"same-origin",headers:{Accept:"application/json","Content-Type":"application/json"},
-          body:JSON.stringify({action,confirm_output_id:outputId,confirm_post_id:postId}),
+          body:JSON.stringify({action,confirm_output_id:outputId,confirm_post_id:postId,client_request_id:freshClientRequestId()}),
         });
         const payload=await response.json().catch(()=>({}));
         info.textContent=response.ok
