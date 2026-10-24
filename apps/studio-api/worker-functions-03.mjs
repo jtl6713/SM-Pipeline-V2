@@ -1,4 +1,5 @@
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
+import { readyProductionEnqueue } from "./ready-production-queue.mjs";
 import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { withPhase5SyncLease } from "./supabase-sync-lease.mjs";
 import { homeApprovedExceptionKind, homeIsUnpublishedFailure } from "./profile-summary-classification.mjs";
@@ -1067,6 +1068,25 @@ export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { autho
     // Stamp origin=autonomous so morning resume / Factory Auto High can pick this
     // up — photo Ready alone used to park forever as a blank-notes Draft.
     requestRecord = await stampPhotoReadyIdeaForAutonomousProduce(env, ideaReady, requestRecord);
+    // A Ready match is a durable production handoff, not merely a green
+    // photo badge. R2 enqueue is idempotent by Idea ID and the one-minute
+    // dispatcher still rechecks holds, reciprocal request and asset evidence.
+    if (env.STUDIO_MEDIA) {
+      try {
+        const queued = await readyProductionEnqueue(env.STUDIO_MEDIA, {
+          ideaId: ideaReady.id,
+          profileId: firstLinkedRecordId(f(ideaReady, "Content_Profile")) || null,
+          createdAt: f(ideaReady, "Create_Date") || ideaReady.createdTime || null,
+        });
+        matchJson.production_queued_at = new Date().toISOString();
+        matchJson.production_queued = Boolean(queued?.job);
+      } catch (error) {
+        // The one-minute discovery pass can recover a failed R2 enqueue.
+        // Photo matches remain committed, without a duplicated request.
+        console.warn("Photo-ready production enqueue deferred", ideaReady.id,
+          String(error?.message || error).slice(0, 180));
+      }
+    }
     return { ...decision, idea: ideaReady, production_request: requestRecord, match: matchJson };
   }
 
