@@ -149,6 +149,11 @@ def test_drive_intake_preserves_audited_use_hold(monkeypatch, decision, expected
     assert initial_fields["Do_Not_Use"] is True  # no pre-scan release window
     update_fields = client.update_record.call_args.args[2]
     assert update_fields["Do_Not_Use"] is expected_hold
+    if expected_hold:
+        drive.share_anyone_reader.assert_not_called()
+        assert update_fields["Drive_Access_Status"] == "Private"
+    else:
+        drive.share_anyone_reader.assert_called_once_with("driveA")
     assert "QA-ASSET-THIRD-PARTY-OVERLAY" in update_fields["Potential_Match_Notes"]
     if expected_hold:
         assert update_fields["Raw_Source_Eligibility"] in {"Needs Review", "Ineligible"}
