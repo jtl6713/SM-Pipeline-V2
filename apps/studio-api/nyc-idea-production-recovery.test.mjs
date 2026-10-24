@@ -57,3 +57,27 @@ test("approved ready-master requests reach the dispatcher without overriding man
   assert.match(claim, /readyProductionIdeaEligible\(idea, requestRecord\)/);
   assert.doesNotMatch(claim, /Review_Status:\s*"Approved"/);
 });
+
+test("background matcher probes intake batches in bounded groups rather than 20 serial calls", () => {
+  const source = read("worker-functions-03.mjs");
+  const check = source.slice(
+    source.indexOf("export async function unfinishedIntakeBatchIds("),
+    source.indexOf("/*__STUDIO_WORKER_END:unfinishedIntakeBatchIds__*/"),
+  );
+  assert.match(check, /start \+= 4/);
+  assert.match(check, /fields: \["Intake_Batch_ID"\]/);
+  assert.match(check, /AND\(OR\(/);
+  assert.match(check, /rows\.length >= 100/);
+  assert.match(check, /pending\.add\(id\)/);
+  assert.doesNotMatch(check, /for \(const batchId of unique\.slice\(0, 20\)\)/);
+  const matcher = source.slice(
+    source.indexOf("export async function evaluateAndMaybeAttachWaitingIdeaPhotos("),
+    source.indexOf("/*__STUDIO_WORKER_END:evaluateAndMaybeAttachWaitingIdeaPhotos__*/"),
+  );
+  assert.match(matcher, /force \? \[\] : await unfinishedIntakeBatchIds/);
+  const sweep = source.slice(
+    source.indexOf("export async function runWaitingIdeaPhotoMatches("),
+    source.indexOf("/*__STUDIO_WORKER_END:runWaitingIdeaPhotoMatches__*/"),
+  );
+  assert.match(sweep, /error_http_status:/);
+});
