@@ -11277,8 +11277,8 @@ export async function autoListenOpenPhotoIdeas(env, { limit = 12, initializeOnly
           || liveStatus === "On Hold" || liveStatus === "Rejected"
           || liveStatus === "Promoted"
           || String(f(live, "Promoted_Content_Record_ID") || "").trim()
-          || linkedRecordIds(f(live, "Content Items")).length
-          || linkedRecordIds(f(live, "Production Requests")).length
+          || firstLinkedRecordId(f(live, "Content Items"))
+          || firstLinkedRecordId(f(live, "Production Requests"))
           || ideaManagePhotoPauseActive(f(live, "Production_Config_Notes"))
           || ideaHasExplicitPhotoProductionConfig(live)) continue;
       const contentType = ideaPhotoAutoListenContentType(live);
@@ -11321,8 +11321,8 @@ export async function autoListenOpenPhotoIdeas(env, { limit = 12, initializeOnly
         const latest = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id);
         if (!String(f(latest, "Studio_Photo_Wait_Status") || "").trim()
           && ["Generated", "Sent for Review"].includes(String(f(latest, "Candidate_Status") || "").trim())
-          && !linkedRecordIds(f(latest, "Production Requests")).length
-          && !linkedRecordIds(f(latest, "Content Items")).length
+          && !firstLinkedRecordId(f(latest, "Production Requests"))
+          && !firstLinkedRecordId(f(latest, "Content Items"))
           && !ideaManagePhotoPauseActive(f(latest, "Production_Config_Notes"))) {
           await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
             method: "PATCH",
