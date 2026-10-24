@@ -116,7 +116,7 @@ def _backfill_fields(file: dict[str, Any], *, batch_id: str, screen: dict[str, A
         "Intake_Status": "Created",
         "Intake_Date": iso_ms(),
         "Intake_Batch_ID": batch_id,
-        "Drive_Access_Status": "Public",
+        "Drive_Access_Status": "Public" if approved else "Unknown",
         "Classification_Status": "Needs Classification",
         "Asset_Status": "Available",
         "Active": True,
@@ -129,7 +129,7 @@ def _backfill_fields(file: dict[str, Any], *, batch_id: str, screen: dict[str, A
             "A2B backfilled this file from ChicagoShining / Assets / Video because it existed "
             "in the destination video folder instead of being processed through the Ingestion "
             "Folder. Send through A3 for classification before R2 uses it."
-        ) + ("\\n" + screening_note(screen) if screen else "\\nQA-ASSET-THIRD-PARTY-OVERLAY: REVIEW; scan missing"),
+        ) + ("\n" + screening_note(screen) if screen else "\nQA-ASSET-THIRD-PARTY-OVERLAY: REVIEW; scan missing"),
     }
 
 
