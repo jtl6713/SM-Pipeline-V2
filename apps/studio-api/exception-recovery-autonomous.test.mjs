@@ -82,6 +82,31 @@ test("exact privately uploaded YouTube video counts as Studio delivery, never as
   assert.equal(f.state.terminal,true);
   assert.equal(f.audits[0].provider_visibility,"private");
 });
+test("an authenticated scheduled private YouTube upload completes Studio without changing its schedule",async()=>{
+  const f=fixture();
+  f.row.fields.YouTube_Scheduled_Publish_At="2026-11-01T14:00:00Z";
+  f.row.fields.YouTube_Privacy_Status="private";
+  f.row.fields.YouTube_Upload_Status="Uploaded";
+  f.receipt.verified_public=false;
+  f.receipt.published_at=null;
+  f.receipt.scheduled_at="2026-11-01T14:00:00Z";
+  f.receipt.summary={privacy_status:"private",upload_status:"processed"};
+  const output=await reconcilePublication(f.deps);
+  assert.equal(output.outcome,"Corrected");
+  assert.equal(f.row.fields.YouTube_Scheduled_Publish_At,"2026-11-01T14:00:00Z");
+  assert.equal(f.row.fields.YouTube_Privacy_Status,"private");
+  assert.equal(f.row.fields.Published_At,undefined);
+  assert.equal(f.writes,1);
+});
+test("privacy or scheduled date changed during provider read blocks any status correction",async()=>{
+  for(const [field,change] of [["YouTube_Privacy_Status","private"],["YouTube_Scheduled_Publish_At","2026-11-01T14:00:00Z"]]){
+    const f=fixture();
+    f.deps.verifyRemote=async()=>{f.row.fields[field]=change;return f.receipt;};
+    const output=await reconcilePublication(f.deps);
+    assert.equal(output.outcome,"Blocked");
+    assert.equal(f.writes,0);
+  }
+});
 test("dry run obtains proof but never writes",async()=>{
   const f=fixture();f.deps.policy.mutate=false;
   assert.equal((await reconcilePublication(f.deps)).reason,"verified_publication_mutation_not_authorized");
