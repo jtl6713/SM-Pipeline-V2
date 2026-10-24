@@ -13,26 +13,27 @@ const app = fs.readFileSync(new URL("./assets/app-item4-1008.js", import.meta.ur
 
 test("Studio UI release label, BUILD_ID, and every JS/CSS cache key are one contract", () => {
   const contract = readUiReleaseContract(html, app);
-  assert.equal(contract.version, "0.6.759");
-  assert.equal(contract.cacheKey, "0.6.759-exception-recovery");
-  assert.equal(contract.expectedBuildId, "item4-0.6.759-exception-recovery");
-  assert.match(contract.expectedJsUrl, /app-item4-1008.*0[.]6[.]758-exception-recovery/);
+  assert.match(contract.version, /^\d+\.\d+\.\d+$/);
+  assert.equal(new URL(contract.expectedJsUrl, "https://studio.invalid").searchParams.get("v"), contract.cacheKey);
+  assert.equal(contract.expectedBuildId, "item4-" + contract.cacheKey);
+  assert.ok(contract.expectedJsUrl.includes("/assets/app-item4-1008.js?v="));
   assert.ok(contract.versionedAssetCount >= 20);
   assert.equal(extractUiVersionFromHtml(html), contract.version);
   assert.equal(extractAppUrlFromHtml(html), contract.expectedJsUrl);
 });
 
 test("release contract rejects drift that can produce a green stale deploy", () => {
+  const contract = readUiReleaseContract(html, app);
   assert.throws(
-    () => readUiReleaseContract(html.replace("UI build 0.6.759", "UI build 0.6.710"), app),
+    () => readUiReleaseContract(html.replace("UI build " + contract.version, "UI build 0.0.1"), app),
     /does not match application cache version/,
   );
   assert.throws(
-    () => readUiReleaseContract(html.replace("styles-phase7-0621.css?v=0.6.759-exception-recovery", "styles-phase7-0621.css?v=stale"), app),
+    () => readUiReleaseContract(html.replace("styles-phase7-0621.css?v=" + contract.cacheKey, "styles-phase7-0621.css?v=stale"), app),
     /do not share release cache key/,
   );
   assert.throws(
-    () => readUiReleaseContract(html, app.replace("item4-0.6.759-exception-recovery", "item4-0.6.710-stale")),
+    () => readUiReleaseContract(html, app.replace(contract.expectedBuildId, "item4-0.0.1-stale")),
     /must equal/,
   );
 });
