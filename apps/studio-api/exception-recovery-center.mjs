@@ -54,7 +54,7 @@ function mergeItem(target, item) {
   const categories = [...new Set([...target.categories, ...item.categories])];
   // Existing failed-output details include title/error; past-due includes due age.
   const merged = { ...target, ...item, categories };
-  for (const field of ["title", "scheduled_at", "minutes_past_due", "retry_at", "diagnosis", "recommendation", "signature"]) {
+  for (const field of ["title", "profile_id", "profile_name", "platform", "output_type", "output_status", "publish_status", "scheduled_at", "minutes_past_due", "retry_at", "diagnosis", "recommendation", "signature"]) {
     if (item[field] == null || item[field] === "") merged[field] = target[field];
   }
   return merged;
@@ -99,7 +99,7 @@ export function buildExceptionRecoveryCenter(snapshot, filters = {}) {
   const verificationRows = verificationOk ? verification.items : [];
   const pending = verificationRows.filter((x) =>
     x?.outcome === "pending_verification" || x?.outcome === "cooldown_waiting");
-  const resolved = verificationOk && Number.isFinite(Number(verification?.counts?.recovered_automatically))
+  const resolved = verificationOk && verification?.counts?.recovered_automatically != null && Number.isFinite(Number(verification.counts.recovered_automatically))
     ? Number(verification.counts.recovered_automatically) : null;
   const metrics = {
     needs_decision: unknown("Awaiting one authoritative administrator-decision inbox; cannot infer decisions from failure flags."),
