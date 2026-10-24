@@ -10,7 +10,7 @@ import {
 
 const source = () => readFileSync(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
 
-function pagedBucket(count = 12) {
+function pagedBucket(count = 12, pageSize = 3) {
   const rows = new Map();
   for (let i = 0; i < count; i += 1) {
     const ideaId = `recReadyScan${String(i).padStart(6, "0")}`;
@@ -31,7 +31,7 @@ function pagedBucket(count = 12) {
     async list({ prefix, limit = 1000, cursor = null }) {
       const keys = [...rows.keys()].filter((key) => key.startsWith(prefix)).sort();
       const start = cursor ? Number(cursor) : 0;
-      const end = Math.min(keys.length, start + Math.min(limit, 3));
+      const end = Math.min(keys.length, start + Math.min(limit, pageSize));
       return {
         objects: keys.slice(start, end).map((key) => ({ key })),
         truncated: end < keys.length,
@@ -60,6 +60,19 @@ test("bounded job pages rotate through every R2 key, including beyond 500", asyn
   const fromLastPage = readyProductionSelectJobs((await readyProductionListPage(bucket, { maxScan: 3, cursor: "9" })).jobs);
   assert.ok(fromLastPage.some((row) => row.idea_id === "recReadyScan000009"),
     "late-page photo-ready jobs must become claimable");
+});
+
+test("production jobs beyond the first 500 R2 keys are reached by the next pass", async () => {
+  const bucket = pagedBucket(510, 250);
+  const first = await readyProductionListPage(bucket, { maxScan: 500 });
+  assert.equal(first.scanned, 500);
+  assert.equal(first.jobs.length, 500);
+  assert.ok(first.nextCursor);
+  const second = await readyProductionListPage(bucket, { maxScan: 500, cursor: first.nextCursor });
+  assert.equal(second.jobs.length, 10);
+  assert.equal(second.nextCursor, null);
+  assert.ok(second.jobs.some((job) => job.idea_id === "recReadyScan000509"),
+    "the latest photo-ready Idea is reachable even after the 500-key window");
 });
 
 test("cron persists a rolling R2 cursor and checks just-discovered jobs on the same tick", () => {
