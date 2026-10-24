@@ -82,18 +82,48 @@ def normalize_screen_result(raw: Any, *, frames_checked: int) -> dict[str, Any]:
     }
 
 
-def _photo_jpeg(data: bytes) -> bytes:
-    with Image.open(io.BytesIO(data)) as source:
-        source.seek(0)
-        image = ImageOps.exif_transpose(source)
-        if image.width * image.height > MAX_IMAGE_PIXELS:
-            raise ValueError("Image dimensions exceed safe visual-screen limit")
-        image.thumbnail((1280, 1280))
-        if image.mode != "RGB":
-            image = image.convert("RGB")
-        output = io.BytesIO()
-        image.save(output, format="JPEG", quality=78)
-        return output.getvalue()
+def media_requires_screen(filename: str, mime_type: str, route: str = "") -> bool:
+    """Catch mislabeled octet-stream photos and intended branding assets too."""
+    ext = Path(str(filename or "")).suffix.lower()
+    mime = str(mime_type or "").lower()
+    return (
+        route == "branding"
+        or mime.startswith(("image/", "video/"))
+        or ext in {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif",
+                   ".gif", ".avif", ".mp4", ".mov", ".m4v", ".webm"}
+    )
+
+
+def _photo_jpeg(data: bytes, filename: str = "") -> bytes:
+    try:
+        with Image.open(io.BytesIO(data)) as source:
+            source.seek(0)
+            image = ImageOps.exif_transpose(source)
+            if image.width * image.height > MAX_IMAGE_PIXELS:
+                raise ValueError("Image dimensions exceed safe visual-screen limit")
+            image.thumbnail((1280, 1280))
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+            output = io.BytesIO()
+            image.save(output, format="JPEG", quality=78)
+            return output.getvalue()
+    except (UnidentifiedImageError, OSError):
+        # Pillow may lack HEIC/HEIF/AVIF codecs on a runner; ffmpeg is bundled.
+        if Path(filename or "").suffix.lower() not in {".heic", ".heif", ".avif"}:
+            raise
+        with tempfile.TemporaryDirectory(prefix="studio-image-screen-") as folder:
+            source = Path(folder) / ("source" + Path(filename).suffix.lower())
+            source.write_bytes(data)
+            frame = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-loglevel", "error",
+                 "-i", str(source), "-frames:v", "1", "-vf",
+                 "scale='min(1280,iw)':-2", "-f", "image2pipe",
+                 "-vcodec", "mjpeg", "-"],
+                capture_output=True, timeout=45, check=True,
+            )
+            if not frame.stdout:
+                raise ValueError("HEIC image could not be decoded for screen")
+            return frame.stdout
 
 
 def _video_jpegs(content: bytes, filename: str) -> list[bytes]:
@@ -138,12 +168,12 @@ def screen_asset(*, content: bytes, filename: str, mime_type: str = "",
     extension = Path(filename or "").suffix.lower()
     is_video = mime.startswith("video/") or extension in {".mp4", ".mov", ".m4v", ".webm"}
     is_image = mime.startswith("image/") or extension in {
-        ".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".gif",
+        ".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".gif", ".avif",
     }
     if not content or not (is_video or is_image):
         return _review("Missing or unsupported visual media")
     try:
-        frames = _video_jpegs(content, filename) if is_video else [_photo_jpeg(content)]
+        frames = _video_jpegs(content, filename) if is_video else [_photo_jpeg(content, filename)]
         if not frames:
             return _review("No usable visual frames could be sampled")
         images = ["data:image/jpeg;base64," + base64.b64encode(frame).decode("ascii")
