@@ -54,3 +54,28 @@ The admin API adapter must enforce \`tenant_admin\` on the server and retain the
 5. Confirm full CI, Worker dry-run, deployment gates and verified production health. Leave the PR draft until these gates are met.
 
 *Production status*: no deployment or merge verified for PR #1120. Airtable table creation is a schema-level preparation, not a deployed feature.
+
+## Admin-approved action bridges and provider receipts (October 23 follow-up)
+
+Two explicit, allow-listed administrator POST actions are connected to existing recovery paths under the **existing** per-output Factory/Pipeline R2 approval mutex:
+
+1. \`finalize_existing_facebook_post\`: existing FB3 Page photo/post finalizer. Requires an exact current output ID, saved Facebook Page post ID, eligible FB3 state, no hold or active lock, and a fresh Meta Graph GET matching the saved ID and confirmed public permalink. Revalidates Airtable after the Graph call. Calls **FB3 only**, never FB0/FB1/FB2/create.
+2. \`reconcile_verified_existing_receipt\`: reuse QA-PUBLISH-001 \`publishedReceiptRepairReason\` and its *status-only* repair fields for an already-stored \`Published_At\` and trusted public URL. Requires administrator confirmation, exact saved remote ID, live read-only provider verification, no hold/active lock, and a second fresh Airtable preflight after provider latency. Patches only \`Output_Status\`, \`Publish_Status\`, \`Publish_Retry_Eligible\`, \`Publish_Next_Retry_At\`. Re-reads Airtable before asserting success. Reuses the verified Quality Agent Recovery Ledger. No remote upload/post creation.
+
+Every other mutation remains disabled: general retry, repost, reschedule, hold release, Producer rework, duplicate deletion and archival.
+
+Provider receipt probe \`GET /api/admin/exception-recovery/:recordId/receipt\` performs *read-only* Meta Graph and YouTube \`videos.list\` lookups with profile-scoped existing credentials. Facebook requires exact Graph post ID, trusted permalink and \`is_published === true\`. Instagram requires an exact published media ID and trusted permalink. YouTube requires an exact ID and \`privacyStatus=public\`. Unsupported TikTok or missing credentials return "unavailable," not "published." OAuth/Graph credentials are never returned. Remote visibility was **not verified against a deployed Worker**; fake fetchers are used for hermetic tests and a production-side authenticated canary is still mandatory.
+
+Authoritative counts endpoint \`GET /api/admin/exception-recovery/counts?fresh=1\` runs the existing complete cursor-paginated Airtable scan (no newest-250 truncation) and imports **the same** \`mapOutput\`, \`homeApprovedExceptionKind\`, \`homeIsUnpublishedFailure\`, and \`homeOutputContribution\` used by Home and Pipeline. It counts all profiles, approved past due, approved without date, failed, manual-action and held outputs, and returns exact ID-symmetric differences against the existing QA formula scan. It explicitly does **not** claim matching cache-generation parity with the live Home widget until independently verified.
+
+### Live source-side audit (read-only)
+
+A separate connected Airtable pagination scan at **2026-10-24 03:56:47 UTC** examined all **8,084** Platform Output records in **nine** pages, including three Test_Run_ID records excluded from production metrics. Simplified raw-field source inventory: 25 approved past due (17 YouTube, eight Instagram); five Failed; 49 Do_Not_Publish held; zero approved with missing date; 23 saved remote identities with no saved public publication evidence; and no matching FB3 pending-finalize candidate. These are **raw-field source counts, not established Home-normalized or live QA parity**. Airtable records may have changed since this snapshot.
+
+### Remaining mandatory production gates
+
+- Check current admin membership and forbidden access (401/403) on the deployed Worker.
+- Run live provider GET with profile-scoped credentials on a safe known existing private/published output and verify explicit privacy evidence; **no live provider receipt call was performed in this development session**.
+- Validate complete/full census API against Home/Pipeline/Factory counts with matching generation and record-ID diff. Test 8k-row pagination time under Worker limits.
+- Execute safe **existing-post-only** canary with a suitable eligible record, followed by exact provider and Airtable readback, verified recovery-ledger append, and no new remote creation. Snapshot had no FB3 eligible candidate; do not fabricate one.
+- Confirm all CI including Worker dry-run, regression, protected deployment and footer/Worker versions. Keep PR draft and do not deploy until gates satisfied.
