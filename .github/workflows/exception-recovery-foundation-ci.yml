@@ -5,6 +5,7 @@ on:
       - 'apps/studio-api/exception-recovery-*'
       - 'apps/studio-api/worker.js'
       - 'apps/studio-api/worker-functions-04.mjs'
+      - 'apps/studio-api/failed-output-monitor.mjs'
       - 'apps/studio-web/assets/exception-recovery.*'
       - 'apps/studio-web/index.html'
       - '.github/workflows/exception-recovery-foundation-ci.yml'
@@ -24,6 +25,7 @@ jobs:
         run: |
           node --check apps/studio-api/worker.js
           node --check apps/studio-api/worker-functions-04.mjs
+          node --check apps/studio-api/failed-output-monitor.mjs
           node --check apps/studio-web/assets/exception-recovery.js
           for file in apps/studio-api/exception-recovery-*.mjs; do node --check "$file"; done
       - name: Census, conversation, preflight, lease, and UI security
