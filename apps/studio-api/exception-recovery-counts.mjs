@@ -50,7 +50,7 @@ export function reconcileExceptionCensus(rawRows,mapOutput,{atMs=Date.now(),qaFa
     ];
     if(categories.length)exceptionItems.push({
       record_id:row.id,output_id:String(fields.Output_ID||mapped.output_id||"")||null,
-      title:String(mapped.output_title||fields.Output_Title||fields.Title||"")||null,
+      title:String(fields.Output_Title||mapped.output_title||fields.Title_Text||fields.Studio_Effective_Requested_Title||"")||null,
       profile_id:profile==="unassigned"?null:profile,platform,output_type:String(mapped.output_type||fields.Studio_Output_Type||fields.Platform_Output_Type||"")||null,
       output_status:String(fields.Output_Status||"")||null,
       publish_status:String(fields.Publish_Status||"")||null,
