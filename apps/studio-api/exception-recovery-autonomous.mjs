@@ -7,11 +7,19 @@ const snapshotFields = ["Output_ID","Output_Title","Title_Text","Content_Profile
   "Output_Status","Publish_Status","Review_Status","Do_Not_Publish","Test_Run_ID",
   "Platform_Post_ID","YouTube_Video_ID","Platform_Media_ID","Platform_Post_URL",
   "Manual_Published_URL","Published_At","Scheduled_Post_Date","YouTube_Scheduled_Publish_At",
-  "YouTube_Privacy_Status","YouTube_Upload_Status","YouTube_Processing_Status","Publish_Locked_By",
+  "YouTube_Privacy_Status","YouTube_Upload_Status","YouTube_Processing_Status","YouTube_Stage",
+  "Publish_Retry_Eligible","Publish_Locked_By",
   "Publish_Locked_At","Publish_Next_Retry_At","Publish_Attempt_Count","Studio_Publish_Dispatch_Count"];
 export const recoverySnapshot = row => Object.fromEntries(
   snapshotFields.map(key => [key,row?.fields?.[key] ?? null]));
-const complete = row => str(row,"Output_Status")==="Published" && str(row,"Publish_Status")==="Published";
+// Delivery completion is distinct from provider public release. Airtable's
+// existing "Awaiting Public Release" / "Published Privately" pair closes the
+// Studio handoff without fabricating a public publication or timestamp.
+const complete = row =>
+  (str(row,"Output_Status")==="Published" && str(row,"Publish_Status")==="Published") ||
+  (str(row,"Platform")==="YouTube" &&
+   str(row,"Output_Status")==="Awaiting Public Release" &&
+   str(row,"Publish_Status")==="Published Privately");
 export function autonomousRecoveryPolicy(env = {}) {
   const number = (key, fallback, max) => {
     const n = Number(env[key]);
@@ -41,8 +49,6 @@ export function recoveryBlock(row, nowMs) {
   if(!Array.isArray(row.fields.Content_Profile) || row.fields.Content_Profile.length !== 1)
     return "ambiguous_profile";
   if(str(row,"Platform") !== "YouTube") return "provider_not_enabled_for_autonomous_correction";
-  if(!str(row,"Platform_Post_URL") && !str(row,"Manual_Published_URL"))
-    return "saved_public_permalink_required";
   return null;
 }
 export function receiptBlock(row, receipt, nowMs) {
@@ -55,12 +61,22 @@ export function receiptBlock(row, receipt, nowMs) {
   const checked = Date.parse(receipt.checked_at);
   if(!Number.isFinite(checked) || nowMs-checked > 60000 || checked > nowMs+1000)
     return "stale_provider_evidence";
-  if(!savedPublicReceiptMatchesProvider(row,receipt)) return "saved_permalink_mismatch";
+  // A failed Studio finalization frequently has no saved permalink at all.
+  // The channel-owned exact remote ID and authenticated provider GET establish
+  // identity; absent URLs can be recovered, but conflicting URLs still block.
+  if((str(row,"Platform_Post_URL") || str(row,"Manual_Published_URL")) &&
+     !savedPublicReceiptMatchesProvider(row,receipt)) return "saved_permalink_mismatch";
   // Every saved URL must agree; one good URL cannot mask conflicting evidence.
   for(const key of ["Platform_Post_URL","Manual_Published_URL"]) {
     if(str(row,key) && !savedPublicReceiptMatchesProvider({fields:{[key]:str(row,key)}},receipt))
       return "conflicting_saved_permalink";
   }
+  const expectedSchedule=Date.parse(str(row,"YouTube_Scheduled_Publish_At"));
+  const actualSchedule=Date.parse(receipt.scheduled_at);
+  if(Number.isFinite(expectedSchedule) && (!Number.isFinite(actualSchedule) ||
+      Math.abs(actualSchedule-expectedSchedule)>1000)) return "scheduled_handoff_mismatch";
+  if(!receipt.verified_public && str(row,"Published_At"))
+    return "saved_publication_time_conflicts_with_private_delivery";
   if(receipt.verified_public) {
     const published=Date.parse(receipt.published_at);
     if(!Number.isFinite(published) || published > nowMs) return "provider_publication_time_missing";
@@ -136,11 +152,18 @@ export async function reconcilePublication({
     return finish("Blocked","authoritative_state_changed_during_verification");
   const recheck=recoveryBlock(current,now())||receiptBlock(current,receipt,now());
   if(recheck) return finish("Blocked",recheck);
-  // Published is the Studio delivery-complete state. Provider visibility remains
-  // independent: a private/scheduled upload must never acquire a fake public date.
-  const fields={Output_Status:"Published",Publish_Status:"Published"};
+  // Use the real existing Airtable states. Private/scheduled upload proves
+  // Studio delivery, NOT a public publication. Leave Published_At empty until
+  // the provider establishes an actual public release.
+  const fields=receipt.verified_public
+    ? {Output_Status:"Published",Publish_Status:"Published"}
+    : {Output_Status:"Awaiting Public Release",
+       Publish_Status:"Published Privately",YouTube_Stage:"Complete"};
+  fields.Publish_Retry_Eligible=false;
+  fields.Publish_Next_Retry_At=null;
   if(receipt.verified_public && !str(current,"Published_At")) fields.Published_At=receipt.published_at;
-  if(!str(current,"Platform_Post_URL")) fields.Platform_Post_URL=receipt.permalink;
+  if(receipt.verified_public && !str(current,"Platform_Post_URL"))
+    fields.Platform_Post_URL=receipt.permalink;
   const intent={...event,audit_id:attempt+":intent",phase:"intent",outcome:"Awaiting Verification",
     reason:"verified_status_only_write_intent",
     provider_visibility:receipt.summary?.privacy_status||null,after:fields};
