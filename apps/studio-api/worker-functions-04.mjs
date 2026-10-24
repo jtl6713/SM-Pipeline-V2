@@ -18,6 +18,7 @@ import { verifyExistingProviderReceipt } from "./exception-recovery-receipt.mjs"
 import { reconcileExceptionCensus } from "./exception-recovery-counts.mjs";
 import { FB3_ACTION, RECEIPT_REPAIR_ACTION, executeFb3AdminRecovery, executeApprovedReceiptRepair } from "./exception-recovery-actions.mjs";
 import { actionApprovalAudit, actionOutcomeAudit } from "./exception-recovery-action-audit.mjs";
+import { exceptionRecoveryMutationsEnabled } from "./exception-recovery-rollout.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
 import { readStudioProfileSummary, validVerifiedStudioSummary } from "./profile-summary-controller.mjs";
@@ -9917,7 +9918,12 @@ export async function getStudioExceptionRecoveryPreflight(request, env) {
   if (!RECOVERY_RECORD_ID.test(String(outputRecordId||""))) throw new HttpError(400,"Invalid output record ID");
   const current=await airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,outputRecordId);
   if (!current?.id||current.id!==outputRecordId) throw new HttpError(404,"Output unavailable");
-  return respond(request,env,assessRecoveryPreflight(current));
+  // A successful preflight never itself authorizes a write: live mutations are
+  // independently disabled unless an explicit Worker rollout flag is enabled.
+  return respond(request,env,{
+    ...assessRecoveryPreflight(current),
+    administrator_recovery_actions_enabled:exceptionRecoveryMutationsEnabled(env),
+  });
 }
 /*__STUDIO_WORKER_END:getStudioExceptionRecoveryPreflight__*/
 
@@ -9984,6 +9990,10 @@ export async function getStudioExceptionRecoveryCounts(request, env) {
  * existing FB3 engine and durable verified-recovery ledger are reused.
  */
 export async function runStudioExceptionRecoveryAction(request, env, authorization) {
+  // Deliberately before body parsing, approval audit, locks, or provider
+  // readback: shipping the read-only Center can never enable a mutation.
+  if(!exceptionRecoveryMutationsEnabled(env))
+    throw new HttpError(409,"Exception Recovery actions are disabled for this Worker deployment.");
   const id=exceptionRecoveryRecordIdFromPath(new URL(request.url).pathname,"actions");
   const input=await readJsonBody(request);
   const action=String(input?.action||"");
