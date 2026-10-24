@@ -12,7 +12,7 @@ function fixture() {
     YouTube_Video_ID:video,Platform_Post_URL:"https://www.youtube.com/shorts/"+video,
     Scheduled_Post_Date:"2026-10-23T12:00:00Z"}};
   let state=null, writes=0,reads=0;const audits=[];
-  const receipt={platform:"YouTube",verified_public:true,ownership_verified:true,
+  const receipt={platform:"YouTube",verified_public:true,verified_delivery:true,ownership_verified:true,
     profile_id:profile,remote_id:video,channel_id:channel,
     permalink:"https://www.youtube.com/watch?v="+video,
     published_at:"2026-10-23T13:00:00.000Z",checked_at:new Date(instant).toISOString()};
@@ -60,6 +60,13 @@ for(const [name,change] of [
 ]) test(name+" fails closed",async()=>{
   const f=fixture();Object.assign(f.receipt,change);
   assert.notEqual((await reconcilePublication(f.deps)).outcome,"Corrected");assert.equal(f.writes,0);
+});
+test("public visibility without authenticated delivery ownership never authorizes a status correction",async()=>{
+  const f=fixture();f.receipt.verified_delivery=false;
+  const result=await reconcilePublication(f.deps);
+  assert.equal(result.outcome,"Needs Decision");
+  assert.equal(result.reason,"delivery_ownership_unverified");
+  assert.equal(f.writes,0);
 });
 test("dry run obtains proof but never writes",async()=>{
   const f=fixture();f.deps.policy.mutate=false;
