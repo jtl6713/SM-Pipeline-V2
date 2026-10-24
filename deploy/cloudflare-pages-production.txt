@@ -535,3 +535,5 @@ Deploy UI 0.6.754-producer-conversation: Script-a-Short Production conversation,
 2026-10-24: Deploy PR #1134 (6656ed083328bd02f6f9e7b800c5c3ffc724d971). Exception Recovery Center formats overdue ages as 2h 37m overdue, keeps raw minutes unchanged. Scoped new script cache query age=hm-v1; retain core Studio UI 0.6.758 and build ID, only allow exact first-time live HTML cache URL change. Recovery mutations remain default OFF, no Worker changes or publishing. Verify secure Pages version, custom domain content and new script before marking live.
 
 Deploy read-only Recovery History UI PR #1136, commit 63910a83. No autonomous corrections.
+
+Deploy Studio UI 0.6.759 Recovery History with version/cache-bust increment after prior unchanged-release guard.
