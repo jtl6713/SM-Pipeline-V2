@@ -992,7 +992,7 @@ export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { autho
   // before ranking and again before attaching matched media.
   if (["On Hold", "Rejected", "Promoted"].includes(String(f(idea, "Candidate_Status") || "").trim())
       || String(f(idea, "Promoted_Content_Record_ID") || "").trim()
-      || linkedRecordIds(f(idea, "Content Items")).length) {
+      || firstLinkedRecordId(f(idea, "Content Items"))) {
     return { action: "skipped", idea, production_request: productionRequest || null, skipped: true };
   }
   // Manage Idea pauses background matching so deleted/unselected photos stay authoritative.
@@ -1042,7 +1042,7 @@ export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { autho
   idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id).catch(() => idea);
   if (["On Hold", "Rejected", "Promoted"].includes(String(f(idea, "Candidate_Status") || "").trim())
       || String(f(idea, "Promoted_Content_Record_ID") || "").trim()
-      || linkedRecordIds(f(idea, "Content Items")).length) {
+      || firstLinkedRecordId(f(idea, "Content Items"))) {
     return { ...decision, action: "skipped", idea, production_request: requestRecord, skipped: true };
   }
   if (!force && ideaManagePhotoPauseActive(f(idea, "Production_Config_Notes"))) {
@@ -1162,7 +1162,7 @@ export async function matchNewlyCreatedIdeaPhotos(env, created, authorization) {
   const status = String(f(idea, "Candidate_Status") || "").trim();
   if (["On Hold", "Rejected", "Promoted"].includes(status)
       || String(f(idea, "Promoted_Content_Record_ID") || "").trim()
-      || linkedRecordIds(f(idea, "Content Items")).length) {
+      || firstLinkedRecordId(f(idea, "Content Items"))) {
     return { action: "skipped", idea_id: created.id };
   }
   return evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, {
