@@ -59,3 +59,13 @@ test("integration uses existing cron, authenticated admin history and no publish
   assert.ok(!/studioPulse|upload|publish-kick|finalizeExistingPost/.test(section));
   assert.match(section,/method:"PATCH"/);
 });
+
+test("discovery only scans approved YouTube outputs with an existing remote identity and no completed handoff",()=>{
+ const formula=publicationDiscoveryFormula(Date.parse("2026-10-24T12:00:00Z"));
+ assert.match(formula,/\{Platform\}="YouTube"/);
+ assert.match(formula,/\{Review_Status\}="Approved"/);
+ assert.match(formula,/\{Do_Not_Publish\}=0/);
+ assert.match(formula,/\{YouTube_Video_ID\}!=""|\{Platform_Post_ID\}!=""/);
+ assert.match(formula,/\{Publish_Status\}!="Published Privately"/);
+ assert.match(formula,/\{Output_Status\}!="Awaiting Public Release"/);
+});
