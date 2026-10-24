@@ -23,7 +23,7 @@ import { FB3_ACTION, RECEIPT_REPAIR_ACTION, executeFb3AdminRecovery, executeAppr
 import { actionApprovalAudit, actionOutcomeAudit } from "./exception-recovery-action-audit.mjs";
 import { exceptionRecoveryMutationsEnabled } from "./exception-recovery-rollout.mjs";
 import { verifyAuthenticatedYouTubeReceipt } from "./exception-recovery-authenticated-receipt.mjs";
-import { contentIdForRecoveryOutput, verifyRecoveryProfileChain, withVerifiedRecoveryProfile } from "./exception-recovery-profile-chain.mjs";
+import { contentIdForRecoveryOutput, verifyRecoveryProfileChain, withVerifiedRecoveryProfile, verifiedRecoveryChannelId } from "./exception-recovery-profile-chain.mjs";
 import { runPublicationRecovery, publicationRecoveryStatus, readRecoveryState, recoveryStateKey } from "./exception-recovery-background.mjs";
 import { recoveryAuditFields, normalizeRecoveryHistory } from "./exception-recovery-history.mjs";
 import { RECOVERY_SIGNATURE, recoverySnapshot } from "./exception-recovery-autonomous.mjs";
@@ -10001,12 +10001,10 @@ async function exceptionRecoveryReadAuthenticatedProvider(env,row) {
     settings=await studioActivePipelineSettings(env,
       ["YOUTUBE_UPLOAD_SERVICE_URL","YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET","YOUTUBE_CHANNEL_ID"],source.profile);
   }catch {return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"profile_settings_unavailable"};}
-  const profileChannel=String(source.profile?.fields?.YouTube_Channel_ID||"").trim();
-  const scopedChannel=String(settings?.YOUTUBE_CHANNEL_ID||"").trim();
-  if(profileChannel&&scopedChannel&&profileChannel!==scopedChannel)
-    return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"profile_channel_setting_conflict"};
-  const expectedChannelId=profileChannel||scopedChannel;
-  return verifyAuthenticatedYouTubeReceipt(source.row,{settings,expectedChannelId});
+  const channel=verifiedRecoveryChannelId(source.profile,settings);
+  if(!channel.ok)
+    return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:channel.reason};
+  return verifyAuthenticatedYouTubeReceipt(source.row,{settings,expectedChannelId:channel.channel_id});
 }
 
 async function appendPublicationRecoveryAudit(env,event) {
