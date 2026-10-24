@@ -685,3 +685,5 @@ Deploy read-only Exception Recovery History PR #1136, commit 63910a83. Autonomou
 2026-10-24: Deploy autonomous publication recovery and History integration PR #1142. All publication mutation flags remain OFF. Preserve production bindings and rollback; run deployed authenticated GET-only #4092 canary before any separately approved status correction. Airtable remains authoritative; no remote publishing, upload or hold release.
 
 2026-10-24: Deploy existing global uploader transport-credential resolution for authenticated recovery GETs. Require exactly one active setting; URL and channel remain profile-scoped. All recovery mutation flags OFF; rerun production read-only canary.
+
+2026-10-24: Deploy PR #1146 read-only authenticated uploader GET transport diagnostics (sanitized stage, HTTP status, redirect/timeout/network/JSON class only). Require exact LA #4092 channel/video proof via existing deployed canary before any status correction. Keep all four recovery mutation flags absent/OFF; preserve worker bindings, protected rollback, Airtable authoritative state, and no remote writes.
