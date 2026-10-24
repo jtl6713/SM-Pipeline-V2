@@ -32,4 +32,4 @@ jobs:
           node --check apps/studio-web/assets/exception-recovery.js
           for file in apps/studio-api/exception-recovery-*.mjs; do node --check "$file"; done
       - name: Census, conversation, preflight, lease, and UI security
-        run: node --test apps/studio-api/exception-recovery-*.test.mjs apps/studio-api/approved-past-due-quality.test.mjs
+        run: node --test apps/studio-api/exception-recovery-*.test.mjs apps/studio-api/approved-past-due-quality.test.mjs apps/studio-web/exception-recovery-overdue-format.test.mjs
