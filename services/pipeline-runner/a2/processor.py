@@ -21,7 +21,7 @@ from asset.constants import (
 )
 from asset.helpers import as_bool, drive_video_duration_seconds, parse_bytes
 from asset.routing import a2_route_fields, classify_intake_file
-from asset.visual_screen import screen_asset, screening_note
+from asset.visual_screen import media_requires_screen, screen_asset, screening_note
 from audio.leading_silence import STATUS_FAILED, apply_drive_leading_silence, is_voiceover_audio
 from audio.wav_to_mp3 import apply_drive_wav_to_mp3
 from carousel.timeutil import chicago_now, iso_ms
@@ -100,7 +100,7 @@ def _intake_fields(file: dict[str, Any], *, share_url: str, batch_id: str) -> di
         "Classification_Status": "Needs Classification",
         "Active": True,
         # Fail closed while the visual preflight is pending.
-        "Do_Not_Use": classify_intake_file(str(file.get("name") or ""), str(file.get("mimeType") or "")) in {"image", "video", "branding"},
+        "Do_Not_Use": media_requires_screen(str(file.get("name") or ""), str(file.get("mimeType") or ""), classify_intake_file(str(file.get("name") or ""), str(file.get("mimeType") or ""))),
         "Capture_Source": "Self Filmed",
         "Rights_Status": "Owned",
         "Drive_Access_Status": "Public",
@@ -274,7 +274,7 @@ def _intake_pass(
                 moved = drive.move_file(file_id, dest, remove_parent_id=GDRIVE_INGESTION_FOLDER)
                 moved_id = str(moved.get("id") or file_id)
                 overlay = a2_route_fields(route, name, moved_id)
-                if route in {"image", "video", "branding"}:
+                if media_requires_screen(name, mime, route):
                     # A2 never publishes or releases visual media before this check.
                     # Keep the Drive source even if flagged; Do_Not_Use gates selection.
                     try:
