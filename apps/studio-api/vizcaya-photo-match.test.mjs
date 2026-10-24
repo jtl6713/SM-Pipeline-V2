@@ -55,7 +55,7 @@ test("Vizcaya Garden Textures ranks at least five newly classified Vizcaya Garde
 
 test("manual matching skips unnecessary unfinished-intake scans and errors leave durable diagnostics", () => {
   const worker = readStudioWorkerSource();
-  assert.match(worker, /const pendingBatchIds = force \? \[\] : await unfinishedIntakeBatchIds/);
+  assert.match(worker, /const pendingBatchIds = force \? \[\] : await ideaPhotoWaitStage\("intake_batches", \(\) => unfinishedIntakeBatchIds/);
   assert.match(worker, /reason: "manual_match_failed"/);
   assert.match(worker, /reason: "matcher_error"/);
   assert.match(worker, /idea photo-wait error diagnostic write failed/);
