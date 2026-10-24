@@ -44,7 +44,7 @@ jobs:
           npm install --no-save --prefix /tmp/p0-diagnostic wrangler@4.123.0 >/tmp/wrangler-install.log 2>&1
           BUCKET=$(cat /tmp/r2-bucket.txt)
           mkdir -p /tmp/ready-jobs
-          for id in recnviDYIh1G5o4ba rec4k3Jevbal4GphK recDRsvCYnlpGNPZc recjeoGFgKv5GnUrQ; do
+          for id in recnviDYIh1G5o4ba rec4k3Jevbal4GphK recDRsvCYnlpGNPZc recjeoGFgKv5GnUrQ rec50va78ELDGH2v1 recpTy1IPsSfLCxBv recI69eD9p2wFhOLx recPHwvlpgCq4GRFc rec3SdYyP422Aw9q2 recBOkvjPo7peqpsq recDW9veIC4ckWmDH; do
             KEY="studio/state/ready-production/v1/jobs/$id.json"
             if /tmp/p0-diagnostic/node_modules/.bin/wrangler r2 object get "$BUCKET/$KEY" --remote --file="/tmp/ready-jobs/$id.json" >/tmp/ready-job-command.log 2>&1; then
               echo "r2_job_read=$id:success"
@@ -53,6 +53,27 @@ jobs:
               cat /tmp/ready-job-command.log | tail -c 240 | sed 's/[[:cntrl:]]/ /g'
             fi
           done
+          for key in studio/state/ready-production/v1/last-run.json studio/state/ready-production/v1/scan-cursor.json; do
+            file="/tmp/ready-jobs/$(basename "$key")"
+            if /tmp/p0-diagnostic/node_modules/.bin/wrangler r2 object get "$BUCKET/$key" --remote --file="$file" >/tmp/ready-meta-command.log 2>&1; then
+              echo "ready_queue_metadata=$(basename "$key"):available"
+            else
+              echo "ready_queue_metadata=$(basename "$key"):unavailable"
+            fi
+          done
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for name in ['last-run.json','scan-cursor.json']:
+            file=Path('/tmp/ready-jobs')/name
+            if not file.exists(): continue
+            try:
+              data=json.loads(file.read_text())
+              allowed=['started_at','updated_at','status','stage','discovered','enqueued','claimed','results','cursor','scanned']
+              print(json.dumps({'metadata':name,**{k:data.get(k) for k in allowed if k in data}}))
+            except Exception as exc:
+              print('ready_metadata_parse_error='+type(exc).__name__)
+          PY
           python - <<'PY'
           import json
           from pathlib import Path
