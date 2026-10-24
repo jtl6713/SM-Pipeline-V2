@@ -11244,20 +11244,22 @@ export function ideaHasExplicitPhotoProductionConfig(idea) {
 }
 /*__STUDIO_WORKER_END:ideaHasExplicitPhotoProductionConfig__*/
 
-export async function autoListenOpenPhotoIdeas(env, { limit = 12 } = {}) {
+export async function autoListenOpenPhotoIdeas(env, { limit = 12, initializeOnly = false } = {}) {
   const candidates = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
     limit: Math.max(1, Number(limit) || 12),
     sortField: "Create_Date",
     // New Ideas are kicked immediately. Drain the oldest legacy unscanned
     // backlog first so a steady influx cannot starve months-old Ideas.
     sortDirection: "asc",
-    filterFormula: "AND({Studio_Photo_Wait_Status}=BLANK(),{Promoted_Content_Record_ID}=BLANK(),OR({Candidate_Status}='Generated',{Candidate_Status}='Sent for Review'))",
+    // Exclude operator-configured candidates before LIMIT so old manually
+    // configured rows cannot indefinitely crowd out newer unscanned Ideas.
+    filterFormula: "AND({Studio_Photo_Wait_Status}=BLANK(),{Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK(),{Production Requests}=BLANK(),{Test_Run_ID}=BLANK(),OR({Candidate_Status}='Generated',{Candidate_Status}='Sent for Review'),{Production_Content_Type}=BLANK(),{Production_Carousel_Image_Mode}=BLANK(),{Production_Carousel_Slide_Count_Mode}=BLANK(),{Production_Carousel_Slide_Count}=BLANK(),{Production_Carousel_Slide_Count_Min}=BLANK(),{Production_Carousel_Slide_Count_Max}=BLANK())",
   });
 
   const eligible = candidates.filter((idea) => !ideaHasExplicitPhotoProductionConfig(idea));
   if (!eligible.length) return { evaluated: candidates.length, started: 0, ready: 0 };
 
-  const authorization = await resolveStudioCronAuthorization(env);
+  const authorization = initializeOnly ? null : await resolveStudioCronAuthorization(env);
   const results = [];
   for (const idea of eligible) {
     try {
@@ -11270,6 +11272,8 @@ export async function autoListenOpenPhotoIdeas(env, { limit = 12 } = {}) {
           || liveStatus === "Promoted"
           || String(f(live, "Promoted_Content_Record_ID") || "").trim()
           || linkedRecordIds(f(live, "Content Items")).length
+          || linkedRecordIds(f(live, "Production Requests")).length
+          || ideaManagePhotoPauseActive(f(live, "Production_Config_Notes"))
           || ideaHasExplicitPhotoProductionConfig(live)) continue;
       const contentType = ideaPhotoAutoListenContentType(live);
       const range = ideaPhotoWatchRange(live, contentType);
@@ -11288,6 +11292,13 @@ export async function autoListenOpenPhotoIdeas(env, { limit = 12 } = {}) {
           typecast: true,
         }),
       });
+      // The one-minute safe backlog sweep ONLY initializes matching. The
+      // existing waiting matcher performs ranking, source verification, and
+      // idempotent production enqueue on its own bounded cadence.
+      if (initializeOnly) {
+        results.push({ action: "listening", idea_id: updatedIdea.id });
+        continue;
+      }
       const draft = await findDraftProductionRequestForIdea(env, idea.id)
         || await createDraftForIdea(env, updatedIdea, authorization);
       results.push(await evaluateAndMaybeAttachWaitingIdeaPhotos(env, updatedIdea, {

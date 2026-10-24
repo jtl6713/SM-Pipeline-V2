@@ -2590,6 +2590,15 @@ export default {
           console.warn("Factory one-minute recovery failed", error);
         }
       })());
+      // The separate light cron can be skipped under heavy queue/cooldown
+      // pressure. Keep a low-cost listener on the reliable minute cadence:
+      // it ONLY marks two legacy unscanned Ideas as Waiting; ranked library
+      // matching and production remain guarded separate jobs.
+      if (airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+        ctx.waitUntil(autoListenOpenPhotoIdeas(env, { limit: 2, initializeOnly: true })
+          .then((outcome) => console.info("Minute legacy Idea listener", outcome))
+          .catch((error) => console.warn("Minute legacy Idea listener failed", error)));
+      }
       return;
     }
     // 2026-10-11 burn-kill: light ticks were still running ~25 platform reconciles
