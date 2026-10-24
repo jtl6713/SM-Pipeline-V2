@@ -1592,11 +1592,6 @@ export default {
         if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
         return getStudioExceptionRecoveryCounts(request, env);
       }
-      if (isAdminPublicationRecoveryHistoryRoute) {
-        requirePermission(authorization, "tenant_admin");
-        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
-        return getStudioPublicationRecoveryHistory(request, env);
-      }
       if (isAdminExceptionActionRoute) {
         requirePermission(authorization, "tenant_admin");
         if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
