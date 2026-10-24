@@ -65,7 +65,14 @@ export async function executeFb3AdminRecovery({
    reason:response?.skipped||"existing_fb3_finalization_not_yet_verified",
    remote_id:remote.remote_id,
  };
- const durable=await appendLedger(after,{source:"airtable_existing_publication_receipt",post_id:remote.remote_id});
+ let durable={recorded:false};
+ try {
+   durable=await appendLedger(after,{source:"airtable_existing_publication_receipt",post_id:remote.remote_id});
+ } catch {
+   // Verified published output is authoritative even if secondary ledger write
+   // fails. Never turn this into an HTTP failure inviting another FB3 click.
+   durable={recorded:false};
+ }
  return {status:"verified_published",record_id:recordId,remote_id:remote.remote_id,
    published_at:field(after,"Published_At"),durable_recovery_recorded:durable?.recorded===true,
    provider_evidence:remote.evidence, no_graph_create:true};
@@ -135,7 +142,13 @@ export async function executeApprovedReceiptRepair({recordId,approval,readOutput
    &&field(after,"Published_At")
    &&safeHost(field(after,"Platform_Post_URL")||field(after,"Manual_Published_URL"),receipt.platform);
  if(!complete)return {status:"pending_verification",record_id:recordId,reason:"authoritative_status_readback_not_confirmed"};
- const logged=await appendLedger(after,{source:"airtable_existing_publication_receipt",post_id:receipt.remote_id});
+ let logged={recorded:false};
+ try{
+   logged=await appendLedger(after,{source:"airtable_existing_publication_receipt",post_id:receipt.remote_id});
+ }catch{
+   // Status repair committed; do not re-run because a secondary ledger failed.
+   logged={recorded:false};
+ }
  return {status:"verified_published",record_id:recordId,remote_id:receipt.remote_id,
    provider_evidence:receipt.evidence,durable_recovery_recorded:logged?.recorded===true,
    no_new_post:true};
