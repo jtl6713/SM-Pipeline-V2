@@ -79,3 +79,23 @@ A separate connected Airtable pagination scan at **2026-10-24 03:56:47 UTC** exa
 - Validate complete/full census API against Home/Pipeline/Factory counts with matching generation and record-ID diff. Test 8k-row pagination time under Worker limits.
 - Execute safe **existing-post-only** canary with a suitable eligible record, followed by exact provider and Airtable readback, verified recovery-ledger append, and no new remote creation. Snapshot had no FB3 eligible candidate; do not fabricate one.
 - Confirm all CI including Worker dry-run, regression, protected deployment and footer/Worker versions. Keep PR draft and do not deploy until gates satisfied.
+
+
+## Read-only release candidate — October 24, 2026
+
+PR #1120 now has **two separately gated release surfaces**. The administrator-only inspection UI, provider **GET-only** receipts, Quality Agent diagnosis, and complete-source count reconciliation are available as read-only code. Both publication-state mutation bridges remain **disabled by default**: `EXCEPTION_RECOVERY_ACTIONS_ENABLED` must equal the literal string `true` in the deployed Worker's environment to permit either action. There is no API/query/user override. Keep this flag absent/OFF for a first read-only rollout; do not enable it without fresh authenticated provider evidence, lock/audit proof and an eligible controlled canary.
+
+### Airtable cost and durable inventory policy
+
+- Passive page visits use the existing lightweight Quality Agent inventory and optionally load a **verified R2 complete-census cache**. The regular `GET /api/admin/exception-recovery/counts` **never performs** the 8k-row Airtable pagination when the cache is absent or older than 15 minutes. An unavailable cache returns HTTP 503/unknown; the UI continues showing explicitly provisional QA findings, **never** a fabricated zero.
+- An administrator explicitly selects **Reconcile all-profile counts (read-only)** to call `GET /api/admin/exception-recovery/counts?fresh=1`, perform the full filtered Airtable census and verify/read back its durable cache. Cross-page repeated identities are fatal. Missing/partial data cannot become a complete count. The full census returns item-level cases as well as totals; intentionally held and remote-ID-without-receipt cases appear as clickable outputs, with their existing safety gates intact.
+- The comparison reads the durable Home R2 snapshot before and after the census. Only an unchanged, recent Home generation with complete profile scope may report `counts_match_stable_generation`. Differences, snapshot expiry, changed generation or unavailable Home summary source remain explicit; this is **not** an atomic same-moment database snapshot.
+- The separate Quality Agent past-due formula was corrected to exclude already-failed Output_Status and Publish_Status. Production raw-field follow-up identified TikTok output #3385 as Failed and previously overlapping the QA overdue formula; it must not inflate the 25 non-failed approved-past-due count.
+
+### Follow-up live source audit (read only)
+
+At **2026-10-24 04:21:42 UTC**, the connected Airtable base reported **8,090 Platform Output records**, read across three connected-API cursor pages with no repeated IDs or cursors. Three test outputs are excluded. Raw-field counts: **25 non-failed overdue (17 YouTube, eight Instagram), five Failed (four Facebook, one TikTok), 49 intentionally held, 23 saved remote IDs without saved public receipt, zero eligible Facebook FB3 finalization cases**. A simple uncorrected overdue condition found 26 because TikTok #3385 was also Failed; Home-style exclusion produces 25. These are a source audit, **not verified against the deployed Home cache generation**.
+
+### Release decision boundary
+
+A read-only staged release can be evaluated with `EXCEPTION_RECOVERY_ACTIONS_ENABLED` OFF, even though live mutation/provider canary gates remain outstanding. However, **do not claim a deployed release merely from PR or CI passing**. Verify the actual Worker and Pages artifacts, admin-only authentication, 401/403 exclusions, endpoint latency, banner/footer versions, cached census reuse, and read-only provider GET receipts. The mutation flag remains OFF until a separate controlled approval, provider proof, and verified audit/ledger readback. No publishing, retries, releases, deletion or reposts are authorized by this document.
