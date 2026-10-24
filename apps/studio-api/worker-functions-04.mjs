@@ -17,6 +17,7 @@ import { withExceptionConversationLock } from "./exception-recovery-lock.mjs";
 import { verifyExistingProviderReceipt } from "./exception-recovery-receipt.mjs";
 import { reconcileExceptionCensus } from "./exception-recovery-counts.mjs";
 import { compareHomeSnapshotToExceptionCensus } from "./exception-recovery-home-parity.mjs";
+import { readExceptionRecoveryCensusCache, persistExceptionRecoveryCensusCache } from "./exception-recovery-census-cache.mjs";
 import { FB3_ACTION, RECEIPT_REPAIR_ACTION, executeFb3AdminRecovery, executeApprovedReceiptRepair } from "./exception-recovery-actions.mjs";
 import { actionApprovalAudit, actionOutcomeAudit } from "./exception-recovery-action-audit.mjs";
 import { exceptionRecoveryMutationsEnabled } from "./exception-recovery-rollout.mjs";
@@ -9965,32 +9966,43 @@ export async function getStudioExceptionRecoveryReceipt(request, env) {
 export async function getStudioExceptionRecoveryCounts(request, env) {
   const url=new URL(request.url);
   const fresh=url.searchParams.get("fresh")==="1";
-  // Complete pagination; never use the newest-250 Pipeline display window.
-  // Cache for five minutes except an explicit manual Force reconciliation.
-  const data=await studioReadCoalesce(fresh?"exception-counts:"+Date.now():
-    "exception-recovery-full-census",fresh?0:300000,async()=>{
-      // Pin the Home R2 snapshot generation on both sides of the source census.
-      // When Home uses summary reads, R2 is not the visible source and parity
-      // remains explicitly unavailable rather than comparing the wrong cache.
-      const homeBefore=env?.STUDIO_HOME_PROFILE_SUMMARY_READS==="true"?null:
-        await readStudioProfilesOverviewSnapshotFromR2(env).catch(()=>null);
-      const all=await scanOutstandingFailedOutputs((options)=>
-        listRecordsPage(env,env.AIRTABLE_OUTPUT_TABLE_ID,options),{
-          filterFormula:"{Test_Run_ID}=BLANK()",pageSize:100,requireUnique:true,
-        });
-      const qa=await loadStudioFailedOutputSnapshot(env,{fresh});
-      const scanAtMs=Date.now();
-      const counts=reconcileExceptionCensus(all,mapOutput,{
-        atMs:scanAtMs,qaFailed:qa?.items||null,
-        qaPastDue:qa?.approved_past_due?.status==="ok" ? qa.approved_past_due.items : null,
+  // Normal page navigation never triggers the 8k-record, cursor-paginated
+  // Airtable census. Only the administrator's explicit Reconcile action does.
+  if(!fresh){
+    const cached=await readExceptionRecoveryCensusCache(env.STUDIO_MEDIA);
+    if(!cached) return respond(request,env,{
+      status:"unavailable",read_only:true,error:
+        "No fresh verified census cache is available. Select Reconcile all-profile counts to run an explicit read-only scan.",
+    },503);
+    return respond(request,env,cached);
+  }
+  const data=await studioReadCoalesce("exception-recovery-fresh-census",0,async()=>{
+    // Pin the Home R2 snapshot generation on both sides of the source census.
+    // If Home uses summary reads, R2 is not the visible source and this
+    // comparison stays unavailable instead of claiming the wrong cache.
+    const homeBefore=env?.STUDIO_HOME_PROFILE_SUMMARY_READS==="true"?null:
+      await readStudioProfilesOverviewSnapshotFromR2(env).catch(()=>null);
+    const all=await scanOutstandingFailedOutputs((options)=>
+      listRecordsPage(env,env.AIRTABLE_OUTPUT_TABLE_ID,options),{
+        filterFormula:"{Test_Run_ID}=BLANK()",pageSize:100,requireUnique:true,
       });
-      const homeAfter=env?.STUDIO_HOME_PROFILE_SUMMARY_READS==="true"?null:
-        await readStudioProfilesOverviewSnapshotFromR2(env).catch(()=>null);
-      const home_snapshot_comparison=compareHomeSnapshotToExceptionCensus(
-        counts,homeBefore,homeAfter,{scanAtMs});
-      return {...counts,quality_agent_scan_at:qa?.scanned_at||null,home_snapshot_comparison};
+    const qa=await loadStudioFailedOutputSnapshot(env,{fresh:true});
+    const scanAtMs=Date.now();
+    const counts=reconcileExceptionCensus(all,mapOutput,{
+      atMs:scanAtMs,qaFailed:qa?.items||null,
+      qaPastDue:qa?.approved_past_due?.status==="ok" ? qa.approved_past_due.items : null,
     });
-  return respond(request,env,data);
+    const homeAfter=env?.STUDIO_HOME_PROFILE_SUMMARY_READS==="true"?null:
+      await readStudioProfilesOverviewSnapshotFromR2(env).catch(()=>null);
+    const home_snapshot_comparison=compareHomeSnapshotToExceptionCensus(
+      counts,homeBefore,homeAfter,{scanAtMs});
+    return {...counts,quality_agent_scan_at:qa?.scanned_at||null,home_snapshot_comparison};
+  });
+  const cached=await persistExceptionRecoveryCensusCache(env.STUDIO_MEDIA,data);
+  return respond(request,env,{...data,census_cache_status:cached.status,
+    census_cache_note:cached.status==="durable_verified"
+      ? "Next navigation can reuse this verified census without rescanning Airtable."
+      : "Census completed, but durable cache could not be verified; later navigation will show unavailable."});
 }
 /*__STUDIO_WORKER_END:getStudioExceptionRecoveryCounts__*/
 
