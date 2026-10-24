@@ -10001,6 +10001,16 @@ async function exceptionRecoveryReadAuthenticatedProvider(env,row) {
     settings=await studioActivePipelineSettings(env,
       ["YOUTUBE_UPLOAD_SERVICE_URL","YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET","YOUTUBE_CHANNEL_ID"],source.profile);
   }catch {return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"profile_settings_unavailable"};}
+  // The deployment may keep the uploader authentication key in the existing
+  // global Pipeline Setting rather than a Worker binding. This key is only
+  // transport authentication: destination URL and channel remain scoped.
+  if(!settings.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET && !env.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET) {
+    const keys=await listRecords(env,"Pipeline Settings",{limit:2,
+      filterFormula:'AND({Active}=1,{Setting_Name}="YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET")'});
+    if(keys.length!==1 || !String(f(keys[0],"Setting_Value")||"").trim())
+      return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"profile_service_auth_missing"};
+    settings={...settings,YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET:String(f(keys[0],"Setting_Value")).trim()};
+  }
   const channel=verifiedRecoveryChannelId(source.profile,settings);
   if(!channel.ok)
     return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:channel.reason};

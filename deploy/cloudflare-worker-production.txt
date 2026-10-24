@@ -683,3 +683,5 @@ Deploy API 0.10.681-producer-conversation: authenticated Production Request Prod
 Deploy read-only Exception Recovery History PR #1136, commit 63910a83. Autonomous corrections remain disabled.
 
 2026-10-24: Deploy autonomous publication recovery and History integration PR #1142. All publication mutation flags remain OFF. Preserve production bindings and rollback; run deployed authenticated GET-only #4092 canary before any separately approved status correction. Airtable remains authoritative; no remote publishing, upload or hold release.
+
+2026-10-24: Deploy existing global uploader transport-credential resolution for authenticated recovery GETs. Require exactly one active setting; URL and channel remain profile-scoped. All recovery mutation flags OFF; rerun production read-only canary.
