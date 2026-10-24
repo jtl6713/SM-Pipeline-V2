@@ -31,3 +31,14 @@
 .erc-detail details { margin-top:1rem }
 .erc-detail summary { cursor:pointer }
 @media(max-width:800px) { .erc-columns { grid-template-columns:1fr } .erc-list-scroll { max-height:300px } }
+
+.erc-conversation { border-top:1px solid var(--border,#ccc); margin-top:1.2rem; padding-top:.85rem }
+.erc-conversation h4 { margin:.5rem 0 }
+.erc-messages { display:grid; gap:.5rem; max-height:340px; overflow:auto; padding:.4rem 0 }
+.erc-thread-message { border:1px solid var(--border,#ddd); border-radius:.6rem; padding:.6rem }
+.erc-thread-message small { display:block; margin-top:.15rem; opacity:.7; font-size:.72rem }
+.erc-thread-message p { white-space:pre-wrap; margin:.45rem 0 0 }
+.erc-conversation-form { display:grid; gap:.5rem; margin-top:.85rem }
+.erc-conversation-form label { font-size:.8rem; font-weight:600 }
+.erc-conversation-form textarea { width:100%; min-height:78px; padding:.65rem; border:1px solid var(--border,#ccc); border-radius:.55rem; background:var(--panel-bg,transparent); color:inherit; font:inherit }
+.erc-conversation-form button { justify-self:start }
