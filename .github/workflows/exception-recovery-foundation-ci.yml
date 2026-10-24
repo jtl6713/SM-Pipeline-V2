@@ -1,0 +1,32 @@
+name: Exception Recovery Center Foundation CI
+
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-api/exception-recovery-center.mjs'
+      - 'apps/studio-api/exception-recovery-center.test.mjs'
+      - 'apps/studio-api/exception-recovery-route.test.mjs'
+      - 'apps/studio-api/worker.js'
+      - 'apps/studio-api/worker-functions-04.mjs'
+      - '.github/workflows/exception-recovery-foundation-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  read-only-security-and-snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax
+        run: |
+          node --check apps/studio-api/exception-recovery-center.mjs
+          node --check apps/studio-api/worker.js
+          node --check apps/studio-api/worker-functions-04.mjs
+      - name: Read-only census and admin auth contracts
+        run: node --test apps/studio-api/exception-recovery-center.test.mjs apps/studio-api/exception-recovery-route.test.mjs
