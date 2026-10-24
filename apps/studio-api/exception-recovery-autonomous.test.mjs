@@ -45,7 +45,7 @@ for(const [name,change] of [
   ["hold",{Do_Not_Publish:true}],["approval",{Review_Status:"Rejected"}],
   ["test",{Test_Run_ID:"test"}],["lock",{Publish_Locked_By:"publisher",Publish_Locked_At:new Date(instant).toISOString()}],
   ["cooldown",{Publish_Next_Retry_At:new Date(instant+60000).toISOString()}],
-  ["retry ceiling",{Publish_Attempt_Count:3}],["missing saved URL",{Platform_Post_URL:""}],
+  ["retry ceiling",{Publish_Attempt_Count:3}],
   ["conflicting URL",{Manual_Published_URL:"https://www.youtube.com/watch?v=abcdefghijk"}],
   ["conflicting ID",{Platform_Post_ID:"abcdefghijk"}],["conflicting time",{Published_At:"2026-10-23T14:00:00Z"}],
   ["wrong provider",{Platform:"Instagram"}],
@@ -76,8 +76,9 @@ test("exact privately uploaded YouTube video counts as Studio delivery, never as
   const result=await reconcilePublication(f.deps);
   assert.equal(result.outcome,"Corrected");
   assert.equal(f.writes,1);
-  assert.equal(f.row.fields.Output_Status,"Published");
-  assert.equal(f.row.fields.Publish_Status,"Published");
+  assert.equal(f.row.fields.Output_Status,"Awaiting Public Release");
+  assert.equal(f.row.fields.Publish_Status,"Published Privately");
+  assert.equal(f.row.fields.YouTube_Stage,"Complete");
   assert.equal(f.row.fields.Published_At,undefined);
   assert.equal(f.state.terminal,true);
   assert.equal(f.audits[0].provider_visibility,"private");
@@ -95,6 +96,8 @@ test("an authenticated scheduled private YouTube upload completes Studio without
   assert.equal(output.outcome,"Corrected");
   assert.equal(f.row.fields.YouTube_Scheduled_Publish_At,"2026-11-01T14:00:00Z");
   assert.equal(f.row.fields.YouTube_Privacy_Status,"private");
+  assert.equal(f.row.fields.Output_Status,"Awaiting Public Release");
+  assert.equal(f.row.fields.Publish_Status,"Published Privately");
   assert.equal(f.row.fields.Published_At,undefined);
   assert.equal(f.writes,1);
 });
@@ -181,4 +184,48 @@ test("missing channel configuration and inaccessible provider fail closed",async
   assert.equal(p.requests.length,0);
   p.options.expectedChannelId=channel;p.options.fetcher=async()=>({ok:false});
   assert.equal((await verifyAuthenticatedYouTubeReceipt(p.f.row,p.options)).verified_public,false);
+});
+
+test("missing saved public URL is repaired from authenticated public receipt, without a second upload",async()=>{
+  const f=fixture();delete f.row.fields.Platform_Post_URL;
+  const done=await reconcilePublication(f.deps);
+  assert.equal(done.outcome,"Corrected");assert.equal(f.writes,1);
+  assert.equal(f.row.fields.Platform_Post_URL,"https://www.youtube.com/watch?v="+video);
+  assert.equal(f.row.fields.Published_At,f.receipt.published_at);
+});
+test("private processed delivery with no public URL closes Studio handoff, never fabricates publication",async()=>{
+  const f=fixture();delete f.row.fields.Platform_Post_URL;
+  f.receipt.verified_public=false;f.receipt.published_at=null;
+  f.receipt.summary={privacy_status:"private",upload_status:"processed"};
+  const done=await reconcilePublication(f.deps);
+  assert.equal(done.outcome,"Corrected");
+  assert.equal(f.row.fields.Output_Status,"Awaiting Public Release");
+  assert.equal(f.row.fields.Publish_Status,"Published Privately");
+  assert.equal(f.row.fields.YouTube_Stage,"Complete");
+  assert.equal(f.row.fields.Published_At,undefined);
+  assert.equal(f.row.fields.Platform_Post_URL,undefined);
+  assert.equal(f.row.fields.Publish_Retry_Eligible,false);
+  assert.equal(f.writes,1);
+  assert.equal((await reconcilePublication(f.deps)).outcome,"Already Reconciled");
+});
+test("provider scheduled handoff mismatch blocks automatic correction",async()=>{
+  const f=fixture();
+  f.row.fields.YouTube_Scheduled_Publish_At="2026-11-01T14:00:00Z";
+  f.receipt.verified_public=false;f.receipt.published_at=null;
+  f.receipt.scheduled_at="2026-11-02T14:00:00Z";
+  assert.equal((await reconcilePublication(f.deps)).reason,"scheduled_handoff_mismatch");
+  assert.equal(f.writes,0);
+});
+test("authenticated YouTube provider reports true privacy mode and rejects mismatched schedule",async()=>{
+  const p=providerFixture({status:{privacyStatus:"private",uploadStatus:"processed",publishAt:"2026-11-01T14:00:00Z"}});
+  p.f.row.fields.YouTube_Scheduled_Publish_At="2026-11-01T14:00:00Z";
+  const receipt=await verifyAuthenticatedYouTubeReceipt(p.f.row,p.options);
+  assert.equal(receipt.verified_delivery,true);
+  assert.equal(receipt.verified_public,false);
+  assert.equal(receipt.summary.privacy_status,"private");
+  assert.equal(receipt.scheduled_at,"2026-11-01T14:00:00Z");
+  p.f.row.fields.YouTube_Scheduled_Publish_At="2026-11-03T14:00:00Z";
+  const mismatch=await verifyAuthenticatedYouTubeReceipt(p.f.row,p.options);
+  assert.equal(mismatch.verified_delivery,undefined);
+  assert.equal(mismatch.evidence,"scheduled_handoff_mismatch");
 });
