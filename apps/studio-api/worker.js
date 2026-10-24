@@ -2583,6 +2583,11 @@ export default {
       ctx.waitUntil(autoListenOpenPhotoIdeas(env, { limit: 2 })
         .then((result) => console.info("Light-cadence legacy Idea listening", result))
         .catch((error) => console.warn("Light-cadence legacy Idea listening failed", error)));
+      ctx.waitUntil(scanIdeaPhotoMatchingQuality(env, { limit: 150 })
+        .then((result) => console.info("Quality Agent photo matching scan", {
+          scanned: result.scanned, findings: result.finding_count,
+        }))
+        .catch((error) => console.warn("Quality Agent photo matching scan failed", error)));
       ctx.waitUntil(runWaitingIdeaPhotoMatches(env, { limit: 2 })
         .then((result) => console.info("Light-cadence photo matching", result))
         .catch((error) => console.warn("Light-cadence photo matching failed", error)));
@@ -4799,6 +4804,7 @@ const STUDIO_TRISTATE = new Set(["Use Profile Default", "Yes", "No"]);
 /*__STUDIO_WORKER_EXTRACT:applyLibraryAssetsToProductionRequest__*/
 /*__STUDIO_WORKER_EXTRACT:evaluateAndMaybeAttachWaitingIdeaPhotos__*/
 /*__STUDIO_WORKER_EXTRACT:matchNewlyCreatedIdeaPhotos__*/
+/*__STUDIO_WORKER_EXTRACT:scanIdeaPhotoMatchingQuality__*/
 /*__STUDIO_WORKER_EXTRACT:runWaitingIdeaPhotoMatches__*/
 /*__STUDIO_WORKER_EXTRACT:listContent__*/
 const OUTPUT_LIST_FIELDS = [
