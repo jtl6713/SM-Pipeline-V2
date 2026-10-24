@@ -45,7 +45,7 @@ for(const [name,change] of [
   ["hold",{Do_Not_Publish:true}],["approval",{Review_Status:"Rejected"}],
   ["test",{Test_Run_ID:"test"}],["lock",{Publish_Locked_By:"publisher",Publish_Locked_At:new Date(instant).toISOString()}],
   ["cooldown",{Publish_Next_Retry_At:new Date(instant+60000).toISOString()}],
-  ["retry ceiling",{Publish_Attempt_Count:3}],
+  
   ["conflicting URL",{Manual_Published_URL:"https://www.youtube.com/watch?v=abcdefghijk"}],
   ["conflicting ID",{Platform_Post_ID:"abcdefghijk"}],["conflicting time",{Published_At:"2026-10-23T14:00:00Z"}],
   ["wrong provider",{Platform:"Instagram"}],
@@ -228,4 +228,27 @@ test("authenticated YouTube provider reports true privacy mode and rejects misma
   const mismatch=await verifyAuthenticatedYouTubeReceipt(p.f.row,p.options);
   assert.equal(mismatch.verified_delivery,undefined);
   assert.equal(mismatch.evidence,"scheduled_handoff_mismatch");
+});
+
+test("existing publisher retry ceiling and cooldown do not block authenticated STATUS-only reconciliation",async()=>{
+ const f=fixture();
+ f.row.fields.Publish_Attempt_Count=9;
+ f.row.fields.Studio_Publish_Dispatch_Count=9;
+ f.row.fields.Publish_Next_Retry_At=new Date(instant+60_000).toISOString();
+ const result=await reconcilePublication(f.deps);
+ assert.equal(result.outcome,"Corrected");
+ assert.equal(f.row.fields.Publish_Attempt_Count,9);
+ assert.equal(f.row.fields.Studio_Publish_Dispatch_Count,9);
+ assert.equal(f.row.fields.Publish_Next_Retry_At,null);
+ assert.equal(f.writes,1);
+});
+test("Airtable omitting cleared null fields still counts as authoritative readback",async()=>{
+ const f=fixture();
+ f.deps.patchStatus=async(_,fields)=>{
+   Object.assign(f.row.fields,fields);
+   for(const key of ["Publish_Next_Retry_At"])if(f.row.fields[key]===null)delete f.row.fields[key];
+ };
+ const output=await reconcilePublication(f.deps);
+ assert.equal(output.outcome,"Corrected");
+ assert.equal(f.state.terminal,true);
 });
