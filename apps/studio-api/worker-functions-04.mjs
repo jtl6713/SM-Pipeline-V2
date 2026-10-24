@@ -11,6 +11,8 @@ import { scanApprovedPastDueOutputs, classifyApprovedPastDue, STALE_PUBLISHED_RE
 import { QUALITY_RECOVERY_LEDGER_TABLE, persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { scanOutstandingFailedOutputs, describeFailedOutput, facebookRateLimitResetReason } from "./failed-output-monitor.mjs";
 import { buildExceptionRecoveryCenter } from "./exception-recovery-center.mjs";
+import { EXCEPTION_MESSAGES_TABLE, RECOVERY_RECORD_ID, prepareRecoveryConversationMessage, normalizeRecoveryConversation } from "./exception-recovery-conversation.mjs";
+import { assessRecoveryPreflight } from "./exception-recovery-preflight.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
 import { readStudioProfileSummary, validVerifiedStudioSummary } from "./profile-summary-controller.mjs";
@@ -9834,6 +9836,75 @@ export async function getStudioExceptionRecoveryCenter(request, env) {
   }
 }
 /*__STUDIO_WORKER_END:getStudioExceptionRecoveryCenter__*/
+
+/**
+ * Every conversation read is scoped by a validated Airtable Platform Output ID.
+ * The persisted store is append-only and separate from publish/production notes.
+ */
+async function studioExceptionConversationRead(env, outputRecordId) {
+  const formula = '{Output_Record_ID}="' + outputRecordId + '"';
+  const rows = await scanOutstandingFailedOutputs((options) =>
+    listRecordsPage(env, EXCEPTION_MESSAGES_TABLE, options),
+    {filterFormula:formula});
+  if (rows.length > 1000) throw new HttpError(409, "Conversation exceeded the supported page budget; no messages were discarded");
+  return normalizeRecoveryConversation(rows);
+}
+export async function getStudioExceptionRecoveryConversation(request, env, authorization) {
+  const url = new URL(request.url);
+  const outputRecordId = url.pathname.match(/^\/api\/admin\/exception-recovery\/(rec[A-Za-z0-9]{14})\/conversation$/)?.[1];
+  if (!RECOVERY_RECORD_ID.test(String(outputRecordId || ""))) throw new HttpError(400, "Invalid output record ID");
+  // Never use a stale snapshot to validate the target of a new administrator message.
+  const authoritative = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputRecordId);
+  if (!authoritative?.id || authoritative.id !== outputRecordId) throw new HttpError(404, "Output unavailable");
+  if (request.method === "GET") {
+    const messages = await studioExceptionConversationRead(env, outputRecordId);
+    return respond(request, env, {status:"ok",record_id:outputRecordId,messages,
+      read_only:false,publish_actions_enabled:false});
+  }
+  if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+  const input=await readJsonBody(request);
+  let prepared;
+  try {
+    const diagnosis=describeFailedOutput(authoritative);
+    prepared=prepareRecoveryConversationMessage({
+      recordId:outputRecordId,
+      clientId:input?.client_request_id,
+      message:input?.message,
+      actor:authorization?.user?.email||authorization?.email,
+      signature:diagnosis?.signature,
+      diagnosis:diagnosis?.action,
+    });
+  } catch (error) { throw new HttpError(400,String(error?.message||error)); }
+  const current=await studioExceptionConversationRead(env,outputRecordId);
+  const keys=prepared.records.map(row=>row.fields.Event_Key);
+  if (keys.every(key=>current.some(message=>message.event_key===key))) {
+    return respond(request,env,{status:"ok",replay:true,record_id:outputRecordId,
+      intent:prepared.intent,messages:current,publish_actions_enabled:false});
+  }
+  if (keys.some(key=>current.some(message=>message.event_key===key)))
+    throw new HttpError(409,"Conversation has a partially persisted exchange. Inspect messages before resubmitting; no output action executed.");
+  const saved=await airtableFetch(env,EXCEPTION_MESSAGES_TABLE,"",{
+    method:"POST",body:JSON.stringify({records:prepared.records,typecast:true})
+  });
+  if (!Array.isArray(saved?.records)||saved.records.length!==2)
+    throw new HttpError(503,"Conversation persistence not confirmed. Check history before retrying.");
+  const messages=await studioExceptionConversationRead(env,outputRecordId);
+  if (!keys.every(key=>messages.some(message=>message.event_key===key)))
+    throw new HttpError(503,"Conversation readback incomplete. Do not assume an action occurred.");
+  return respond(request,env,{status:"ok",replay:false,record_id:outputRecordId,
+    intent:prepared.intent,messages,publish_actions_enabled:false});
+}
+/*__STUDIO_WORKER_END:getStudioExceptionRecoveryConversation__*/
+
+export async function getStudioExceptionRecoveryPreflight(request, env) {
+  const url=new URL(request.url);
+  const outputRecordId=url.pathname.match(/^\/api\/admin\/exception-recovery\/(rec[A-Za-z0-9]{14})\/preflight$/)?.[1];
+  if (!RECOVERY_RECORD_ID.test(String(outputRecordId||""))) throw new HttpError(400,"Invalid output record ID");
+  const current=await airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,outputRecordId);
+  if (!current?.id||current.id!==outputRecordId) throw new HttpError(404,"Output unavailable");
+  return respond(request,env,assessRecoveryPreflight(current));
+}
+/*__STUDIO_WORKER_END:getStudioExceptionRecoveryPreflight__*/
 
 export async function getStudioDeskInventory(request, env) {
   const payload = await gatherStudioDeskInventory(env);
