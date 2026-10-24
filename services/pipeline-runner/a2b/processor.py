@@ -18,6 +18,7 @@ from asset.constants import (
 )
 from asset.helpers import as_bool, parse_bytes, uc_download_url
 from asset.routing import a2b_capture_source, a2b_route
+from asset.visual_screen import screen_asset, screening_note
 from carousel.timeutil import chicago_now, iso_ms
 from integrations.google_drive import GoogleDriveClient
 from render.fields import field_str
@@ -100,9 +101,10 @@ def _existing_drive_ids(client: AirtableClient, candidate_ids: Iterable[str]) ->
     return found
 
 
-def _backfill_fields(file: dict[str, Any], *, batch_id: str) -> dict[str, Any]:
+def _backfill_fields(file: dict[str, Any], *, batch_id: str, screen: dict[str, Any] | None = None) -> dict[str, Any]:
     file_id = str(file.get("id") or "")
     name = str(file.get("name") or "")
+    approved = bool(screen and screen.get("decision") == "clean")
     return {
         "Asset Name": name,
         "Media_Class": "Video",
@@ -118,16 +120,16 @@ def _backfill_fields(file: dict[str, Any], *, batch_id: str) -> dict[str, Any]:
         "Classification_Status": "Needs Classification",
         "Asset_Status": "Available",
         "Active": True,
-        "Do_Not_Use": False,
+        "Do_Not_Use": not approved,
         "Capture_Source": a2b_capture_source(name),
         "Rights_Status": "Owned",
         "Asset_Role": "Raw Footage",
-        "Raw_Source_Eligibility": "Needs Review",
+        "Raw_Source_Eligibility": "Needs Review" if approved else ("Ineligible" if screen and screen.get("decision") == "blocked" else "Needs Review"),
         "Potential_Match_Notes": (
             "A2B backfilled this file from ChicagoShining / Assets / Video because it existed "
             "in the destination video folder instead of being processed through the Ingestion "
             "Folder. Send through A3 for classification before R2 uses it."
-        ),
+        ) + ("\\n" + screening_note(screen) if screen else "\\nQA-ASSET-THIRD-PARTY-OVERLAY: REVIEW; scan missing"),
     }
 
 
@@ -195,13 +197,27 @@ def process_request(
                 skipped.append(file_id)
                 continue
             meta = drive.get_file(file_id)
-            drive.share_anyone_reader(file_id)
+            try:
+                content, downloaded_mime = drive.download_file(file_id)
+                screen = screen_asset(
+                    content=content,
+                    filename=str(meta.get("name") or item.get("name") or "video.mp4"),
+                    mime_type=str(meta.get("mimeType") or downloaded_mime or "video/mp4"),
+                )
+            except Exception:
+                screen = {
+                    "decision": "review", "indicators": [],
+                    "evidence": "Video backfill visual preflight unavailable",
+                    "frames_checked": 0,
+                }
+            if screen.get("decision") == "clean":
+                drive.share_anyone_reader(file_id)
             try:
                 # performUpsert is atomic at Airtable. Even concurrent A2B workers
                 # cannot both insert the same Google Drive File ID.
                 record, was_created = client.upsert_record(
                     MEDIA_ASSETS_TABLE,
-                    _backfill_fields(meta, batch_id=batch_id),
+                    _backfill_fields(meta, batch_id=batch_id, screen=screen),
                     merge_field="Google Drive File ID",
                     typecast=True,
                 )
