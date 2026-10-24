@@ -38,3 +38,13 @@ test("duplicate, test and invalid inputs fail closed rather than count zeros",()
  assert.throws(()=>reconcileExceptionCensus([r("recBBBBBBBBBBBBBB",{Test_Run_ID:"test"})],mapOutput),/Nonproduction/);
  assert.throws(()=>reconcileExceptionCensus(null,mapOutput),/Complete/);
 });
+
+test("omitted Quality Agent evidence is unavailable rather than an empty QA inventory",()=>{
+ const rows=[r("recAAAAAAAAAAAAAA",{Platform:"Instagram",Publish_Status:"Failed",
+   Output_Status:"Failed"})];
+ const actual=reconcileExceptionCensus(rows,mapOutput);
+ assert.equal(actual.totals.failed,1);
+ assert.equal(actual.comparisons.failed.status,"unavailable");
+ assert.equal(actual.comparisons.failed.quality_agent_count,null);
+ assert.equal(actual.comparisons.approved_past_due.status,"unavailable");
+});
