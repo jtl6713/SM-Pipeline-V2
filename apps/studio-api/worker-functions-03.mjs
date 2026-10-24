@@ -846,16 +846,32 @@ export async function rankVideosForScriptedShortProposal(env, idea) {
 /*__STUDIO_WORKER_END:rankVideosForScriptedShortProposal__*/
 
 export async function unfinishedIntakeBatchIds(env, batchIds) {
-  const unique = [...new Set((batchIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
-  const pending = [];
-  for (const batchId of unique.slice(0, 20)) {
+  const unique = [...new Set((batchIds || []).map((id) => String(id || "").trim()).filter(Boolean))].slice(0, 20);
+  const pending = new Set();
+  // Background matching formerly made up to TWENTY SERIAL Airtable queries
+  // here, while the operator's forced Find Images Now skipped this entirely.
+  // Batch four IDs per query and project only the needed field. Never treat a
+  // truncated result as evidence a batch is finished; fail closed instead.
+  for (let start = 0; start < unique.length; start += 4) {
+    const group = unique.slice(start, start + 4);
+    const anyBatch = group.map((id) => `{Intake_Batch_ID}="${ideaLibraryAirtableEscape(id)}"`).join(",");
     const rows = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
-      limit: 5,
-      filterFormula: `AND({Intake_Batch_ID}="${ideaLibraryAirtableEscape(batchId)}",OR({Classification_Status}='Needs Classification',{Classification_Status}='Processing'))`,
+      limit: 100,
+      fields: ["Intake_Batch_ID"],
+      filterFormula: `AND(OR(${anyBatch}),OR({Classification_Status}='Needs Classification',{Classification_Status}='Processing'))`,
     });
-    if (rows.length) pending.push(batchId);
+    if (rows.length >= 100) {
+      // An incomplete scan may hide another pending batch: retry later.
+      group.forEach((id) => pending.add(id));
+      continue;
+    }
+    const groupSet = new Set(group);
+    for (const row of rows) {
+      const id = String(f(row, "Intake_Batch_ID") || "").trim();
+      if (groupSet.has(id)) pending.add(id);
+    }
   }
-  return pending;
+  return [...pending];
 }
 /*__STUDIO_WORKER_END:unfinishedIntakeBatchIds__*/
 
@@ -1222,6 +1238,9 @@ export async function runWaitingIdeaPhotoMatches(env, { limit = 8 } = {}) {
             evaluated_at: new Date().toISOString(),
             action: "error",
             reason: "matcher_error",
+            // Safe structured HTTP class for QA and retry triage; never place
+            // provider URLs, secrets or raw exception messages in Airtable.
+            error_http_status: Number(error?.status || error?.statusCode || 0) || null,
           }) } }),
         });
       } catch (diagnosticError) {
