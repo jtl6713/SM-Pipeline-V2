@@ -55,11 +55,26 @@ unavailable state is shown as awaiting verification, never as active automation.
 YouTube uses the existing profile uploader GET /youtube/oauth/status and
 GET /youtube/videos/:id, authenticated with its existing service credential.
 The authenticated channel and video snippet channel must both match the fresh
-Content Profile YouTube_Channel_ID. Exact saved video ID, every saved public
-URL, public privacy, processed upload, nonscheduled publication and provider
-publication time are mandatory. Missing profile channel configuration is a
-blocker, not permission to infer ownership. Existing conflicting timestamps
-require a decision.
+Content Profile YouTube_Channel_ID. Exact saved video ID, channel ownership, successful provider processing,
+and matching explicit provider scheduling (when Studio has a saved YouTube
+schedule) are mandatory. A saved public URL is NOT required: it is frequently
+missing precisely because Studio failed to finish its own status update.
+Existing URLs must still agree with the authenticated provider identity.
+
+There are two distinct successful Studio completion outcomes:
+
+- **Already public:** Output_Status=Published, Publish_Status=Published, provider
+  public URL and actual verified publication timestamp. No second upload.
+- **Delivered privately/unlisted or scheduled:** Output_Status=Awaiting Public
+  Release, Publish_Status=Published Privately, YouTube_Stage=Complete.
+  Studio handoff is completed and excluded from the overdue/error recovery
+  queue, but it is **not** counted as publicly published. Do not synthesize
+  Published_At or populate a missing public URL from a private video.
+
+For both outcomes clear the Studio publish-retry eligibility and retry clock
+only after successful authoritative readback. The external YouTube schedule
+must remain intact. Missing channel identity, conflicting saved permalinks,
+mismatched provider schedule, or incomplete upload/processing block correction.
 
 Facebook, Instagram, TikTok and other destinations remain decision-only for
 autonomous correction. Existing read-only receipt UI remains available. Their
