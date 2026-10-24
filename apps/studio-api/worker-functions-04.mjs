@@ -12175,8 +12175,14 @@ function readyProductionExistingDraftEligible(idea, requestRecord) {
   if (!["Draft", "Ready", "Submitted"].includes(String(f(requestRecord, "Request_Status") || "").trim())) return false;
   if (String(f(requestRecord, "Studio_Master_Asset_Status") || "").trim() !== "Ready") return false;
   if (!(Number(f(requestRecord, "Studio_Master_Asset_Count") || 0) > 0)) return false;
-  if (!/(?:^|\s)origin=(?:autonomous|prepare-to-review)(?:\s|$)/i.test(String(f(requestRecord, "Production_Notes") || ""))) return false;
-  return true;
+  const notes = String(f(requestRecord, "Production_Notes") || "");
+  if (productionNotesRevisionOpen(notes)) return false;
+  if (/(?:^|\s)origin=(?:autonomous|prepare-to-review)(?:\s|$)/i.test(notes)) return true;
+  // Approved, ready-master requests also qualify even when an older
+  // timed-script/manual proposal omitted the autonomous origin stamp.
+  // A manual photo-auto-off is authoritative and remains excluded.
+  return String(f(idea, "Candidate_Status") || "").trim() === "Approved"
+    && !productionPhotoWaitAutoOff(notes);
 }
 
 function readyProductionIdeaEligible(idea, requestRecord = null) {
@@ -12229,7 +12235,9 @@ async function discoverAssetReadyProductionDrafts(env, { limit = 120 } = {}) {
     limit: Math.max(1, Math.min(150, Number(limit) || 120)),
     sortField: "Created_At",
     sortDirection: "asc",
-    filterFormula: "AND({Test_Run_ID}=BLANK(),{Active}=1,OR({Request_Status}='Draft',{Request_Status}='Ready',{Request_Status}='Submitted'),{Studio_Master_Asset_Status}='Ready',{Studio_Master_Asset_Count}>0,FIND('origin=autonomous',{Production_Notes}&'')>0)",
+    // Authoritative reciprocal Idea gate runs before enqueue; the Airtable
+    // query itself can include older Approved drafts without origin stamps.
+    filterFormula: "AND({Test_Run_ID}=BLANK(),{Active}=1,OR({Request_Status}='Draft',{Request_Status}='Ready',{Request_Status}='Submitted'),{Studio_Master_Asset_Status}='Ready',{Studio_Master_Asset_Count}>0)",
     fields: [
       "Idea_Candidate",
       "Request_Status",
@@ -12263,18 +12271,20 @@ async function readyProductionRequestForIdea(env, idea) {
   })[0] || null;
 }
 
-function readyProductionIdeaPlan(idea) {
+function readyProductionIdeaPlan(idea, requestRecord = null) {
   // Existing ready Ideas may still carry retired historical platform values
   // (for example Threads). Do not let one unsupported suggestion block all
   // of a photo-ready draft's valid platform output planning.
   const platforms = autonomousItem4Platforms(canonicalProductionPlatforms(
     (Array.isArray(f(idea, "Production_Target_Platforms")) && f(idea, "Production_Target_Platforms").length)
       ? f(idea, "Production_Target_Platforms")
-      : ((Array.isArray(f(idea, "Suggested_Platforms")) && f(idea, "Suggested_Platforms").length)
-        ? f(idea, "Suggested_Platforms")
-        : AUTONOMOUS_STANDARD_PLATFORMS)
+      : ((Array.isArray(f(requestRecord, "Target_Platforms")) && f(requestRecord, "Target_Platforms").length)
+        ? f(requestRecord, "Target_Platforms")
+        : ((Array.isArray(f(idea, "Suggested_Platforms")) && f(idea, "Suggested_Platforms").length)
+          ? f(idea, "Suggested_Platforms")
+          : AUTONOMOUS_STANDARD_PLATFORMS))
   ).filter((platform) => PR_PLATFORMS.has(platform)));
-  const contentType = String(f(idea, "Production_Content_Type") || "Vertical Short Video").trim()
+  const contentType = String(f(idea, "Production_Content_Type") || f(requestRecord, "Master_Content_Type") || "Vertical Short Video").trim()
     || "Vertical Short Video";
   const libraryIds = [...new Set([
     ...linkedRecordIds(f(idea, "Studio_Matched_Media_Assets")),
@@ -12359,7 +12369,26 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
     });
   }
 
-  const plan = readyProductionIdeaPlan(idea);
+  // Existing manual Approved candidates need the same autonomous profile gate
+  // as ordinary generated ideas. Never reactivate operator-disabled profiles.
+  const notes = String(f(requestRecord, "Production_Notes") || "");
+  if (requestRecord
+      && String(f(idea, "Studio_Photo_Wait_Status") || "").trim() !== "Ready"
+      && !/(?:^|\s)origin=(?:autonomous|prepare-to-review)(?:\s|$)/i.test(notes)) {
+    const profileId = firstLinkedRecordId(f(idea, "Content_Profile"));
+    const profile = profileId
+      ? await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId).catch(() => null)
+      : null;
+    if (!f(profile, "Active") || !f(profile, "Autonomous_Produce_Enabled")) {
+      return readyProductionFinishClaim(env.STUDIO_MEDIA, lease, {
+        status: "blocked", stage: "profile_auto_produce_disabled",
+        completed_reason: "profile_auto_produce_disabled",
+        production_request_id: requestRecord.id,
+      });
+    }
+  }
+
+  const plan = readyProductionIdeaPlan(idea, requestRecord);
   // The PR is authoritative for uploaded masters when hourly photo-wait was
   // disabled. Do not needlessly block a linked request with Ready assets.
   if (!plan.libraryIds.length && requestRecord) {
