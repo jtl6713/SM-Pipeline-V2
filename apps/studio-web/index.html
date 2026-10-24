@@ -2196,6 +2196,8 @@
    <label>Exception category <select id="ercCategory"><option value="">All categories</option><option value="failed">Failed</option><option value="approved_past_due">Approved past due</option><option value="held_deferred">Held / deferred</option></select></label>
   </div>
   <p id="ercStatus" class="erc-status" role="status" aria-live="polite">Checking administrator permissions…</p>
+  <div class="erc-bulk-preview"><button type="button" class="secondary-button" id="ercPreviewSelected" disabled>Preview selected safety gates (0/5)</button><p id="ercBulkStatus" class="erc-status" role="status">Select up to five outputs. Preview never runs a recovery action.</p></div>
+  <div id="ercBulkResults" aria-live="polite"></div>
   <div id="ercMetrics" class="erc-metrics" aria-label="Observed exception counts"></div>
   <div class="erc-columns">
     <section class="erc-list" aria-label="Exception inventory">
