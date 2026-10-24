@@ -2590,6 +2590,17 @@ export default {
           console.warn("Factory one-minute recovery failed", error);
         }
       })());
+      // Give pre-immediate-match Ideas their missing photo-listening checkpoint.
+      // This runs independently of Factory and the ready-production dispatcher:
+      // only two Airtable Ideas per five-minute tick, no media matching, no
+      // renders and no publishing. Do not add work during an Airtable cooldown.
+      const scheduledMinuteMs = Number(event?.scheduledTime) || Date.now();
+      if (Math.floor(scheduledMinuteMs / 60000) % 5 === 0
+          && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+        ctx.waitUntil(autoListenOpenPhotoIdeas(env, { limit: 2, initializeOnly: true })
+          .then((result) => console.info("One-minute cadence legacy Idea listening", result))
+          .catch((error) => console.warn("One-minute cadence legacy Idea listening failed", error)));
+      }
       return;
     }
     // 2026-10-11 burn-kill: light ticks were still running ~25 platform reconciles
