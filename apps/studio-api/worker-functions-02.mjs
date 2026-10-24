@@ -11271,8 +11271,8 @@ export async function autoListenOpenPhotoIdeas(env, { limit = 12, initializeOnly
           || liveStatus === "On Hold" || liveStatus === "Rejected"
           || liveStatus === "Promoted"
           || String(f(live, "Promoted_Content_Record_ID") || "").trim()
-          || linkedRecordIds(f(live, "Content Items")).length
-          || linkedRecordIds(f(live, "Production Requests")).length
+          || firstLinkedRecordId(f(live, "Content Items"))
+          || firstLinkedRecordId(f(live, "Production Requests"))
           || ideaManagePhotoPauseActive(f(live, "Production_Config_Notes"))
           || ideaHasExplicitPhotoProductionConfig(live)) continue;
       const contentType = ideaPhotoAutoListenContentType(live);
