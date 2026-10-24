@@ -1,0 +1,114 @@
+"""Regression checks for the provenance gate: ambiguous/error = fail closed."""
+
+import io
+
+import pytest
+from PIL import Image
+
+from a2.processor import _intake_fields
+from asset.visual_screen import normalize_screen_result, screen_asset, screening_note
+from studio_library.processor import ingest_studio_library_asset
+
+
+def _jpeg():
+    output = io.BytesIO()
+    Image.new("RGB", (24, 20), "white").save(output, format="JPEG")
+    return output.getvalue()
+
+
+def test_clean_photo_uses_actual_pixels_and_allows_first_party_mark(monkeypatch):
+    seen = []
+
+    def model(prompt, *, image_urls, max_output_tokens):
+        seen.append((prompt, image_urls, max_output_tokens))
+        return {"parsed": {"decision": "clean", "indicators": [],
+                           "evidence": "No embedded third-party overlays visible"}}
+
+    monkeypatch.setattr("asset.visual_screen.classify_asset", model)
+    result = screen_asset(content=_jpeg(), filename="river.jpg",
+                          mime_type="image/jpeg", profile_name="ChicagoShining")
+    assert result["decision"] == "clean"
+    assert result["frames_checked"] == 1
+    assert seen[0][1][0].startswith("data:image/jpeg;base64,")
+    assert "ChicagoShining" in seen[0][0]
+
+
+def test_third_party_overlay_is_held(monkeypatch):
+    monkeypatch.setattr("asset.visual_screen.classify_asset", lambda *args, **kwargs: {
+        "parsed": {
+            "decision": "blocked", "indicators": ["watermark", "source_url"],
+            "evidence": "Stock source watermark on center and footer",
+        }
+    })
+    result = screen_asset(content=_jpeg(), filename="stock.jpg", mime_type="image/jpeg")
+    assert result["decision"] == "blocked"
+    assert "watermark" in screening_note(result)
+
+
+def test_uncertain_overlay_requires_review(monkeypatch):
+    monkeypatch.setattr("asset.visual_screen.classify_asset", lambda *args, **kwargs: {
+        "parsed": {
+            "decision": "review", "indicators": ["logo"],
+            "evidence": "Partially obscured lower-right logo",
+        }
+    })
+    assert screen_asset(content=_jpeg(), filename="scene.jpg")["decision"] == "review"
+
+
+def test_malformed_model_results_cannot_approve():
+    for raw in (
+        {"decision": "clean", "indicators": ["watermark"], "evidence": "logo"},
+        {"decision": "clean", "indicators": [], "evidence": ""},
+        {"decision": "allow", "indicators": [], "evidence": "yes"},
+        {"decision": "blocked", "indicators": [], "evidence": ""},
+        {"decision": "clean", "indicators": "none", "evidence": "none"},
+        None,
+    ):
+        assert normalize_screen_result(raw, frames_checked=1)["decision"] == "review"
+
+
+def test_model_outage_requires_review(monkeypatch):
+    def broken(*args, **kwargs):
+        raise RuntimeError("temporary model outage")
+    monkeypatch.setattr("asset.visual_screen.classify_asset", broken)
+    assert screen_asset(content=_jpeg(), filename="upload.jpg")["decision"] == "review"
+
+
+def test_video_sampling_is_checked(monkeypatch):
+    monkeypatch.setattr("asset.visual_screen._video_jpegs",
+                        lambda content, filename: [_jpeg(), _jpeg(), _jpeg()])
+    seen = []
+    def model(prompt, *, image_urls, max_output_tokens):
+        seen.append(len(image_urls))
+        return {"parsed": {"decision": "review", "indicators": ["social_handle"],
+                           "evidence": "Visible social handle on frame three"}}
+    monkeypatch.setattr("asset.visual_screen.classify_asset", model)
+    result = screen_asset(content=b"fake-video", filename="clip.mp4")
+    assert result["decision"] == "review"
+    assert result["frames_checked"] == 3
+    assert seen == [3]
+
+
+def test_studio_refuses_suspicious_upload_before_any_drive_write(monkeypatch):
+    monkeypatch.setattr("studio_library.processor.screen_asset", lambda **kwargs: {
+        "decision": "blocked", "indicators": ["copyright_credit"],
+        "evidence": "Third-party photographer credit", "frames_checked": 1,
+    })
+    monkeypatch.setattr(
+        "studio_library.processor.GoogleDriveClient",
+        lambda: (_ for _ in ()).throw(AssertionError("Drive must not be called")),
+    )
+    with pytest.raises(ValueError, match="No asset was uploaded"):
+        ingest_studio_library_asset(
+            content=_jpeg(), filename="bad.jpg", mime_type="image/jpeg",
+            profile_name="New York Shining",
+        )
+
+
+def test_drive_intake_starts_visual_assets_locked():
+    for name, mime in (("photo.jpg", "image/jpeg"),
+                       ("clip.mp4", "video/mp4"), ("ChicagoShining Logo.png", "image/png")):
+        item = {"id": "drive1", "name": name, "mimeType": mime, "size": "100"}
+        assert _intake_fields(item, share_url="https://drive", batch_id="test")["Do_Not_Use"] is True
+    item = {"id": "audio1", "name": "voice.mp3", "mimeType": "audio/mpeg", "size": "100"}
+    assert _intake_fields(item, share_url="https://drive", batch_id="test")["Do_Not_Use"] is False
