@@ -1,4 +1,5 @@
 name: PR 1135 Conflict Resolution
+# Re-run after aligning status-only policy and canonical history route tests.
 on:
   push:
     branches: [feature/autonomous-publication-recovery-20261024]
