@@ -17,6 +17,7 @@ import { withExceptionConversationLock } from "./exception-recovery-lock.mjs";
 import { verifyExistingProviderReceipt } from "./exception-recovery-receipt.mjs";
 import { reconcileExceptionCensus } from "./exception-recovery-counts.mjs";
 import { FB3_ACTION, RECEIPT_REPAIR_ACTION, executeFb3AdminRecovery, executeApprovedReceiptRepair } from "./exception-recovery-actions.mjs";
+import { actionApprovalAudit, actionOutcomeAudit } from "./exception-recovery-action-audit.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
 import { readStudioProfileSummary, validVerifiedStudioSummary } from "./profile-summary-controller.mjs";
@@ -9994,29 +9995,69 @@ export async function runStudioExceptionRecoveryAction(request, env, authorizati
       ||(action===FB3_ACTION&&!/^\d{6,30}(?:_\d{6,30})?$/.test(confirmPost)))
     throw new HttpError(400,"Exact output and existing remote post ID confirmations are required");
   const actor=String(authorization?.user?.email||authorization?.email||"administrator");
+  let approvalAudit;
+  try{
+    approvalAudit=actionApprovalAudit({
+      record_id:id,client_request_id:input?.client_request_id,
+      action,output_id:confirmOutput,post_id:confirmPost,actor,
+    });
+  }catch(error){throw new HttpError(400,String(error?.message||error));}
   const result=await withOutputApprovalLock(env.STUDIO_MEDIA,id,async()=>{
+    // Persist and read back the administrator's exact approved action before
+    // invoking any existing recovery engine. A repeated request ID is never
+    // dispatched again, including following an uncertain HTTP response.
+    const existing=await studioExceptionConversationRead(env,id);
+    if(existing.some(item=>item.event_key===approvalAudit.Event_Key)){
+      return {status:"already_processed_request",reason:"approval_key_already_saved_inspect_state",record_id:id};
+    }
+    const committed=await airtableFetch(env,EXCEPTION_MESSAGES_TABLE,"",{
+      method:"POST",body:JSON.stringify({records:[{fields:approvalAudit}],typecast:true}),
+    });
+    if(!Array.isArray(committed?.records)||committed.records.length!==1)
+      throw new HttpError(503,"Administrator approval audit could not be confirmed. Recovery action was not invoked.");
+    const readback=await studioExceptionConversationRead(env,id);
+    if(!readback.some(item=>item.event_key===approvalAudit.Event_Key))
+      throw new HttpError(503,"Administrator approval readback failed. Recovery action was not invoked.");
     const deps={
       recordId:id,approval:{action,confirm_post_id:confirmPost,confirm_output_id:confirmOutput},
       readOutput:async(recId)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,recId),
       verifyRemote:async(row)=>exceptionRecoveryReadProvider(env,row),
       appendLedger:async(row,evidence)=>persistVerifiedRecoveryInAirtable(env,row,evidence,{listRecords,airtableFetch}),
     };
-    if(action===FB3_ACTION){
-      return executeFb3AdminRecovery({...deps,
-        finalizeExistingPost:async(row)=>studioPulseFb3(env,row),
-      });
+    let outcome;
+    try {
+      outcome=action===FB3_ACTION
+        ? await executeFb3AdminRecovery({...deps,
+          finalizeExistingPost:async(row)=>studioPulseFb3(env,row),
+        })
+        : await executeApprovedReceiptRepair({...deps,
+          patchStatus:async(row,fields)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,row.id,{
+            method:"PATCH",body:JSON.stringify({fields,typecast:true}),
+          }),
+        });
+    } catch(error) {
+      // A provider or Airtable error can leave finalization uncertain. Persist
+      // the uncertainty when possible; never retry a remote stage blindly.
+      outcome={status:"outcome_unconfirmed",reason:String(error?.message||"stage_failed").slice(0,160),record_id:id};
     }
-    return executeApprovedReceiptRepair({...deps,
-      patchStatus:async(row,fields)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,row.id,{
-        method:"PATCH",body:JSON.stringify({fields,typecast:true}),
-      }),
-    });
+    let auditOutcomeRecorded=false;
+    try{
+      const event=actionOutcomeAudit(approvalAudit,{status:outcome.status,reason:outcome.reason});
+      const saved=await airtableFetch(env,EXCEPTION_MESSAGES_TABLE,"",{
+        method:"POST",body:JSON.stringify({records:[{fields:event}],typecast:true}),
+      });
+      auditOutcomeRecorded=Array.isArray(saved?.records)&&saved.records.length===1;
+    }catch(error){
+      console.warn("Exception approved-action outcome audit deferred",String(error?.message||error).slice(0,120));
+    }
+    return {...outcome,admin_approval_recorded:true,admin_outcome_recorded:auditOutcomeRecorded};
   },{owner:"exception:"+actor+":"+action});
   return respond(request,env,{...result,action,no_new_post:true,
     explanation:result.status==="verified_published"
       ? "Existing remote publication was verified and the Studio status was read back."
       : "No new remote post was created. Inspect the latest provider and Studio status before another action.",
-  },result.status==="blocked"?409:result.status==="pending_verification"?202:200);
+  },result.status==="blocked"||result.status==="already_processed_request"?409:
+    ["pending_verification","outcome_unconfirmed"].includes(result.status)?202:200);
 }
 /*__STUDIO_WORKER_END:runStudioExceptionRecoveryAction__*/
 
