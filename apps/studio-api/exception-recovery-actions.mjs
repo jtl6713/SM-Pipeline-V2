@@ -47,8 +47,12 @@ export async function executeFb3AdminRecovery({
    ||!fbUrl(remote.permalink)){
    return {status:"blocked",reason:remote?.evidence||"remote_publication_not_verified",record_id:recordId};
  }
+ // Recheck authoritative state after provider latency; a new hold or lock blocks.
+ const beforeStage=await readOutput(recordId);
+ const changed=validateFb3Approval(beforeStage,approval);
+ if(changed)return {status:"blocked",reason:"state_changed_before_finalization:"+changed,record_id:recordId};
  // Existing FB3 can mutate only local finalization state for a preexisting post.
- const response=await finalizeExistingPost(current);
+ const response=await finalizeExistingPost(beforeStage);
  const after=await readOutput(recordId);
  const completed=after?.id===recordId
    && field(after,"Platform_Post_ID")===remote.remote_id
@@ -114,8 +118,13 @@ export async function executeApprovedReceiptRepair({recordId,approval,readOutput
     ||receipt.platform!==field(current,"Platform")
     ||!safeHost(receipt.permalink,receipt.platform))
    return {status:"blocked",reason:receipt?.evidence||"remote_publication_not_verified",record_id:recordId};
- // QA-PUBLISH-001 has already required a saved canonical receipt and approved state.
- await patchStatus(current,{
+ // Recheck after provider latency. A new hold, lock, approval change or
+ // cleared publication receipt must never permit a stale status repair.
+ const beforeWrite=await readOutput(recordId);
+ const changed=validateApprovedReceiptRepair(beforeWrite,approval);
+ if(changed)return {status:"blocked",reason:"state_changed_before_repair:"+changed,record_id:recordId};
+ // QA-PUBLISH-001 required a saved public receipt plus approved state.
+ await patchStatus(beforeWrite,{
    Output_Status:"Published",Publish_Status:"Published",Publish_Retry_Eligible:false,
    Publish_Next_Retry_At:null,
  });
