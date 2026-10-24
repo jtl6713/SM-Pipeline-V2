@@ -54,7 +54,7 @@ test("integration uses existing cron, authenticated admin history and no publish
   const worker=fs.readFileSync(new URL("./worker.js",import.meta.url),"utf8");
   const source=fs.readFileSync(new URL("./worker-functions-04.mjs",import.meta.url),"utf8");
   assert.match(worker,/ctx\.waitUntil\(studioPublicationRecoveryCron\(env\)/);
-  assert.match(worker,/if \(isAdminPublicationRecoveryHistoryRoute\) \{\s*requirePermission\(authorization, "tenant_admin"\)/);
+  assert.match(worker,/if \(isAdminExceptionHistoryRoute\) \{\s*requirePermission\(authorization, "tenant_admin"\)/);
   const section=source.slice(source.indexOf("export async function studioPublicationRecoveryCron"),source.indexOf("export async function getStudioPublicationRecoveryHistory"));
   assert.ok(!/studioPulse|upload|publish-kick|finalizeExistingPost/.test(section));
   assert.match(section,/method:"PATCH"/);
