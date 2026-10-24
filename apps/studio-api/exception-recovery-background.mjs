@@ -13,7 +13,13 @@ export async function writeRecoveryState(bucket,key,value) {
   if(JSON.stringify(read)!==body) throw new Error("recovery_journal_readback_failed");
 }
 export function publicationDiscoveryFormula(nowMs=Date.now()) {
-  return 'AND({Test_Run_ID}=BLANK(),OR({Output_Status}!="Published",{Publish_Status}!="Published"),'
+  // Only inspect approved YouTube outputs with an existing saved video ID.
+  // This prevents a full-table queue of unrelated unfinished Studio outputs.
+  // Completed Studio handoffs are terminal even before public release.
+  return 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Review_Status}="Approved",{Do_Not_Publish}=0,'
+    +'OR({YouTube_Video_ID}!="",{Platform_Post_ID}!=""),'
+    +'OR({Output_Status}!="Published",{Publish_Status}!="Published"),'
+    +'{Output_Status}!="Awaiting Public Release",{Publish_Status}!="Published Privately",'
     +'OR({Output_Status}="Failed",{Publish_Status}="Failed",{Published_At}!=BLANK(),'
     +'AND({Scheduled_Post_Date}!=BLANK(),IS_BEFORE({Scheduled_Post_Date},"'
     +new Date(nowMs-15*60000).toISOString()+'"))))';
