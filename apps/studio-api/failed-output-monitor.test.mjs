@@ -265,3 +265,15 @@ test("FB0 cannot automatically repair an incomplete or published Facebook output
   }));
   assert.notEqual(published.signature,"QA-FB0-DOUBLE-SLIDE-SETS");
 });
+
+
+test("failed-output diagnostic uses actual title and safe stored fallback",()=>{
+ const actual=describeFailedOutput(record("recExample",{
+   Output_ID:3374,Output_Title:"Crandon Park Nature Frames",Publish_Status:"Failed",
+ }));
+ assert.equal(actual.title,"Crandon Park Nature Frames");
+ const fallback=describeFailedOutput(record("recExample",{
+   Output_Title:"",Title_Text:"Alternative stored title",Publish_Status:"Failed",
+ }));
+ assert.equal(fallback.title,"Alternative stored title");
+});
