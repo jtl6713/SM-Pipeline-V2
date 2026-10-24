@@ -11,6 +11,7 @@ import {
   ideaPhotoWaitApplies,
   ideaManagePhotoPauseActive,
   prioritizeWaitingIdeaPhotoScans,
+  selectLegacyIdeaListenerCandidates,
   ideaManagePhotoPauseUntil,
   ideaProductionConfigFields,
   mergeIdeaProductionNotes,
@@ -559,4 +560,55 @@ test("photo wait fairness skips Manage Idea pause and picks oldest evaluated fir
   ];
   const selected=prioritizeWaitingIdeaPhotoScans(items,{limit:2,nowMs});
   assert.deepEqual(selected.map(row=>row.id),["recOldestSeen0000","recRecentlySeen000"]);
+});
+
+test("legacy image matching recovery rotates equitably across all city profiles", () => {
+  const profiles = ["recChicago0000001", "recNewYork0000001", "recLosAngel0000001", "recMiami00000001"];
+  const rows = profiles.flatMap((profile, pi) => [0, 1, 2].map((n) => ({
+    id: `recIdea${pi}${n}`,
+    createdTime: `2026-10-23T06:${String(pi).padStart(2, "0")}:${String(n).padStart(2, "0")}Z`,
+    fields: { Content_Profile: [profile] },
+  })));
+  const selected = new Set();
+  for (let rotation = 0; rotation < 4; rotation += 1) {
+    const batch = selectLegacyIdeaListenerCandidates(rows, { limit: 2, rotation });
+    assert.equal(batch.length, 2);
+    const pickedProfiles = batch.map((row) => row.fields.Content_Profile[0]);
+    assert.equal(new Set(pickedProfiles).size, 2, "a city's older queue must not occupy both slots");
+    for (const profile of pickedProfiles) selected.add(profile);
+  }
+  assert.deepEqual([...selected].sort(), [...profiles].sort(), "every profile gets a recovery slot");
+});
+
+test("one repeatedly failing Idea rotates behind untouched Ideas of the same profile", () => {
+  const rows = [
+    { id: "recOldFailure", createdTime: "2026-10-21T00:00:00Z",
+      fields: { Content_Profile: ["recChicago0000001"], Studio_Photo_Match_JSON:
+        JSON.stringify({ evaluated_at: "2026-10-24T12:00:00Z", action: "error" }) } },
+    { id: "recUntouched", createdTime: "2026-10-23T00:00:00Z",
+      fields: { Content_Profile: ["recChicago0000001"] } },
+    { id: "recOtherProfile", createdTime: "2026-10-22T00:00:00Z",
+      fields: { Content_Profile: ["recMiami00000001"] } },
+  ];
+  const picked = selectLegacyIdeaListenerCandidates(rows, { limit: 2, rotation: 0 });
+  assert.ok(picked.some((row) => row.id === "recUntouched"));
+  assert.ok(!picked.some((row) => row.id === "recOldFailure"));
+});
+
+test("legacy listener ignores unresolved profile assignment and live operator pause", () => {
+  const records = [
+    { id: "recUnassigned", fields: {} },
+    { id: "recPaused", fields: {
+      Content_Profile: ["recChicago0000001"],
+      Production_Config_Notes: "ez-photo-manage-pause=2026-10-24T14:00:00Z",
+    } },
+    { id: "recEligible", fields: { Content_Profile: ["recMiami00000001"] } },
+  ];
+  assert.deepEqual(
+    selectLegacyIdeaListenerCandidates(records, {
+      limit: 3,
+      nowMs: Date.parse("2026-10-24T13:00:00Z"),
+    }).map((row) => row.id),
+    ["recEligible"],
+  );
 });
