@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import {verifyAuthenticatedYouTubeReceipt} from "../../apps/studio-api/exception-recovery-authenticated-receipt.mjs";
 import {recoveryBlock,receiptBlock,recoverySnapshot} from "../../apps/studio-api/exception-recovery-autonomous.mjs";
-import {contentIdForRecoveryOutput,verifyRecoveryProfileChain,withVerifiedRecoveryProfile} from "../../apps/studio-api/exception-recovery-profile-chain.mjs";
+import {contentIdForRecoveryOutput,verifyRecoveryProfileChain,withVerifiedRecoveryProfile,verifiedRecoveryChannelId} from "../../apps/studio-api/exception-recovery-profile-chain.mjs";
 const report={read_only:true,output_id:4092,inspected:0,verified:0,corrected:0,blocked:0,
   mutations_attempted:0,started_at:new Date().toISOString()};
 const get=async(url,headers)=>{
@@ -52,8 +52,8 @@ try {
   const theme=String(profile.fields.Profile_Key||"").toLowerCase();
   const name=String(profile.fields.Profile_Name||"");
   if(theme!=="la"&&!/los angeles/i.test(name))throw new Error("canary_not_los_angeles");
-  report.profile_name=name;report.expected_channel_id=profile.fields.YouTube_Channel_ID;
-  const names=["YOUTUBE_UPLOAD_SERVICE_URL","YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET"];
+  report.profile_name=name;
+  const names=["YOUTUBE_UPLOAD_SERVICE_URL","YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET","YOUTUBE_CHANNEL_ID"];
   const all=names.flatMap(n=>["LA_"+n,"PROFILE_"+profile.id+"_"+n]);
   const settingsQuery=new URLSearchParams({filterByFormula:
     "AND({Active}=1,OR("+all.map(n=>"{Setting_Name}='"+n+"'").join(",")+"))",pageSize:"100"});
@@ -62,7 +62,10 @@ try {
   const values=Object.fromEntries(settingsRows.records.map(r=>[r.fields.Setting_Name,r.fields.Setting_Value]));
   const settings=Object.fromEntries(names.map(n=>[n,
     values["PROFILE_"+profile.id+"_"+n]||values["LA_"+n]||""]));
-  report.receipt=await verifyAuthenticatedYouTubeReceipt(authenticatedRow,{settings,expectedChannelId:profile.fields.YouTube_Channel_ID});
+  const channel=verifiedRecoveryChannelId(profile,settings);
+  if(!channel.ok)throw new Error("canary_"+channel.reason);
+  report.expected_channel_id=channel.channel_id;
+  report.receipt=await verifyAuthenticatedYouTubeReceipt(authenticatedRow,{settings,expectedChannelId:channel.channel_id});
   const after=await get(base+plain.AIRTABLE_OUTPUT_TABLE_ID+"/"+row.id,airtableHeaders);
   // Provider verification can take time. Re-read BOTH ownership links and
   // normalize the display-only lookup before validating the receipt contract.
