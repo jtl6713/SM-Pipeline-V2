@@ -539,3 +539,5 @@ Deploy read-only Recovery History UI PR #1136, commit 63910a83. No autonomous co
 Deploy Studio UI 0.6.759 Recovery History with version/cache-bust increment after prior unchanged-release guard.
 
 Deploy UI 0.6.759 with aligned application BUILD_ID and release contract tests.
+
+Deploy UI 0.6.759 normalized core asset URL; retry release after cache contract repair.
