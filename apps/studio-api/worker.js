@@ -2004,7 +2004,7 @@ export default {
         if (request.method === "POST") {
           assertWriteRequest(request, env);
           requirePermission(authorization, "ideas_create");
-          return createIdea(request, env, authorization);
+          return createIdea(request, env, authorization, ctx);
         }
         return listIdeas(request, env, url, authorization, ctx);
       }
