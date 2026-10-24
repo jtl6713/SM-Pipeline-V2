@@ -1,5 +1,5 @@
 import test from "node:test";import assert from "node:assert/strict";
-import {executeFb3AdminRecovery,validateFb3Approval,FB3_ACTION} from "./exception-recovery-actions.mjs";
+import {executeFb3AdminRecovery,validateFb3Approval,FB3_ACTION,RECEIPT_REPAIR_ACTION,validateApprovedReceiptRepair,executeApprovedReceiptRepair} from "./exception-recovery-actions.mjs";
 const id="recAAAAAAAAAAAAAA";
 const row=(extra={})=>({id,fields:{Output_ID:3374,Platform:"Facebook",FB_Publish_Status:"Published Pending Finalize",Publish_Status:"Publishing",
  Output_Status:"Approved for Publishing",Platform_Post_ID:"123456789_987654321",Test_Run_ID:"",Do_Not_Publish:false,
@@ -36,4 +36,44 @@ test("pending after FB3 does not falsely assert published or write ledger",async
   appendLedger:async()=>{ledger++;},
  });
  assert.equal(r.status,"pending_verification");assert.equal(ledger,0);
+});
+
+test("QA-PUBLISH-001 existing receipt repair requires saved public evidence and approval",async()=>{
+ const original=row({Review_Status:"Approved",Published_At:"2026-10-23T00:00:00Z",Platform_Post_URL:"https://www.facebook.com/page/posts/987654321"});
+ const approve={action:RECEIPT_REPAIR_ACTION,confirm_output_id:"3374",confirm_post_id:"123456789_987654321"};
+ assert.equal(validateApprovedReceiptRepair(original,approve),null);
+ assert.equal(validateApprovedReceiptRepair(row({Review_Status:"Approved"}),approve),"no_authoritative_published_timestamp");
+ assert.equal(validateApprovedReceiptRepair(row({...original.fields,Do_Not_Publish:true}),approve),"publication_held");
+});
+test("admin-only receipt repair patches statuses, no publisher or asset fields",async()=>{
+ let current=row({Review_Status:"Approved",Published_At:"2026-10-23T00:00:00Z",Platform_Post_URL:"https://www.facebook.com/page/posts/987654321"});
+ let patched,ledger=0;
+ const response=await executeApprovedReceiptRepair({
+  recordId:id,approval:{action:RECEIPT_REPAIR_ACTION,confirm_output_id:"3374",confirm_post_id:"123456789_987654321"},
+  readOutput:async()=>current,
+  verifyRemote:async()=>({verified_public:true,remote_id:"123456789_987654321",platform:"Facebook",
+    permalink:"https://www.facebook.com/page/posts/987654321",evidence:"graph_exact"}),
+  patchStatus:async(_row,fields)=>{patched=fields;current=row({...current.fields,...fields});},
+  appendLedger:async()=>{ledger++;return {recorded:true};},
+ });
+ assert.equal(response.status,"verified_published");assert.equal(ledger,1);
+ assert.deepEqual(Object.keys(patched).sort(),["Output_Status","Publish_Next_Retry_At","Publish_Retry_Eligible","Publish_Status"].sort());
+ assert.equal(response.no_new_post,true);
+});
+test("receipt repair refuses private, missing-ID, held and untrusted URL cases",async()=>{
+ const approve={action:RECEIPT_REPAIR_ACTION,confirm_output_id:"3374",confirm_post_id:"123456789_987654321"};
+ let writes=0;
+ for(const fields of [
+  {Do_Not_Publish:true},
+  {Platform_Post_URL:"https://www.facebook.com.evil.test/page/12"},
+  {Platform_Post_ID:"9999999999"}
+ ]) {
+  const current=row({Review_Status:"Approved",Published_At:"2026-10-23T00:00:00Z",
+    Platform_Post_URL:"https://www.facebook.com/page/posts/987654321",...fields});
+  const result=await executeApprovedReceiptRepair({recordId:id,approval:approve,readOutput:async()=>current,
+    verifyRemote:async()=>({verified_public:true,remote_id:approve.confirm_post_id,platform:"Facebook",permalink:"https://www.facebook.com/post/12"}),
+    patchStatus:async()=>{writes++;},appendLedger:async()=>{writes++;}});
+  assert.equal(result.status,"blocked");
+ }
+ assert.equal(writes,0);
 });
