@@ -40,7 +40,7 @@ export async function verifyAuthenticatedYouTubeReceipt(row, {
     stage = nextStage;
     let response;
     try {
-      response = await fetcher(base.href.replace(/\\/$/,"") + path, {
+      response = await fetcher(base.href.replace(/\/$/,"") + path, {
         method:"GET", redirect:"manual", signal:AbortSignal.timeout(10000),
         headers:{"X-SM-Pipeline-Key":secret, Accept:"application/json"},
       });
