@@ -239,7 +239,8 @@ export function describeFailedOutput(record, nowMs = Date.now()) {
   }
   return {
     signature,
-    record_id: record.id, output_id: outputId || null, title: text(record, "Output_Title") || null,
+    record_id: record.id, output_id: outputId || null,
+    title: text(record, "Output_Title") || text(record, "Title_Text") || text(record, "Studio_Effective_Requested_Title") || null,
     platform: text(record, "Platform") || null, output_type: text(record, "Studio_Output_Type") || text(record, "Platform_Output_Type") || null,
     profile_id: firstLinkedId(record?.fields?.Content_Profile) || null,
     output_status: output || null, render_status: render || null, publish_status: publish || null,
