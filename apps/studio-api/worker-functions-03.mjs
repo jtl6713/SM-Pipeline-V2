@@ -1,5 +1,6 @@
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
 import { readyProductionEnqueue } from "./ready-production-queue.mjs";
+import { ideaPhotoMatchingSlaFinding } from "./idea-photo-wait.mjs";
 import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { withPhase5SyncLease } from "./supabase-sync-lease.mjs";
 import { homeApprovedExceptionKind, homeIsUnpublishedFailure } from "./profile-summary-classification.mjs";
@@ -1145,6 +1146,46 @@ export async function matchNewlyCreatedIdeaPhotos(env, created, authorization) {
   });
 }
 /*__STUDIO_WORKER_END:matchNewlyCreatedIdeaPhotos__*/
+
+/**
+ * Read-only Quality Agent watch for the photo-matching SLA. Recoveries happen
+ * in the independently leased listener/matcher/ready-production queues.
+ * This auditor never attaches media, changes approval or dispatches posts.
+ */
+export async function scanIdeaPhotoMatchingQuality(env, { limit = 150 } = {}) {
+  const ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+    limit: Math.min(250, Math.max(1, Number(limit) || 150)),
+    sortField: "Create_Date",
+    sortDirection: "desc",
+    fields: [
+      "Create_Date", "Candidate_Status", "Content_Profile",
+      "Studio_Photo_Wait_Status", "Studio_Photo_Match_JSON",
+      "Production Requests", "Production_Config_Notes",
+      "Promoted_Content_Record_ID", "Content Items", "Test_Run_ID",
+    ],
+    filterFormula: "AND({Test_Run_ID}=BLANK(),{Promoted_Content_Record_ID}=BLANK(),{Candidate_Status}!='On Hold',{Candidate_Status}!='Rejected',{Candidate_Status}!='Promoted')",
+  });
+  const findings = ideas.map((row) => ideaPhotoMatchingSlaFinding(row)).filter(Boolean);
+  const counts = Object.create(null);
+  for (const row of findings) counts[row.kind] = (counts[row.kind] || 0) + 1;
+  const snapshot = {
+    schema: "studio.idea-photo-quality.1",
+    checked_at: new Date().toISOString(),
+    scanned: ideas.length,
+    finding_count: findings.length,
+    counts,
+    findings: findings.slice(0, 20),
+    publishing_actions: 0,
+  };
+  if (env.STUDIO_MEDIA) {
+    await env.STUDIO_MEDIA.put("studio/state/quality/idea-photo-matching/latest.json", JSON.stringify(snapshot), {
+      httpMetadata: { contentType: "application/json" },
+    }).catch((error) => console.warn("Idea photo quality journal failed", String(error?.message || error).slice(0, 160)));
+  }
+  if (findings.length) console.warn("Quality Agent idea photo-matching SLA", JSON.stringify(snapshot));
+  return snapshot;
+}
+/*__STUDIO_WORKER_END:scanIdeaPhotoMatchingQuality__*/
 
 export async function runWaitingIdeaPhotoMatches(env, { limit = 8 } = {}) {
   const candidates = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
