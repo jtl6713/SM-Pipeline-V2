@@ -16,6 +16,7 @@
  <link rel="stylesheet" href="/assets/production-tablet-0622.css?v=0.6.757-idea-id-list">
  <link rel="stylesheet" href="/assets/insights-0622.css?v=0.6.757-idea-id-list">
  <link rel="stylesheet" href="/assets/clean-enterprise.css?v=0.6.757-idea-id-list">
+ <link rel="stylesheet" href="/assets/exception-recovery.css?v=erc-readonly-1">
  <link rel="stylesheet" href="/assets/ai-api-footer.css?v=0.6.757-idea-id-list">
  <link rel="stylesheet" href="/assets/sticky-footer-scroll.css?v=0.6.757-idea-id-list">
  <link rel="stylesheet" href="/assets/topbar-banner-0618.css?v=0.6.757-idea-id-list">
@@ -71,6 +72,7 @@
  <button class="nav-item" data-page="profiles" id="navNewProfile">New Profile</button>
  <button class="nav-item" data-page="operations" id="navOperations">Operations <span class="ops-nav-badge" id="navOperationsBadge" hidden></span></button>
  <button class="nav-item" data-page="factory" id="navFactory">Factory</button>
+ <button class="nav-item" data-page="exception-recovery" id="navExceptionRecovery" hidden>Exception Recovery</button>
  <button class="nav-item nav-item-footer-only" data-page="support">Help</button>
  </nav>
 
@@ -2183,6 +2185,27 @@
  </section>
 
 
+ <section id="page-exception-recovery" class="page" aria-label="Administrator exception recovery">
+  <div class="erc-top">
+   <div><span class="eyebrow">Administrator</span><h1>Exception Recovery</h1><p class="erc-subtitle">Unified Quality Agent diagnostics, using the existing authoritative recovery census. Counts are provisional until parity is verified.</p></div>
+   <button type="button" class="secondary-button" id="ercRefresh">Refresh inventory</button>
+  </div>
+  <div class="erc-toolbar" aria-label="Exception filters">
+   <label>City <select id="ercProfile"><option value="">All profiles</option></select></label>
+   <label>Platform <select id="ercPlatform"><option value="">All platforms</option><option>Facebook</option><option>Instagram</option><option>TikTok</option><option>YouTube</option></select></label>
+   <label>Exception category <select id="ercCategory"><option value="">All categories</option><option value="failed">Failed</option><option value="approved_past_due">Approved past due</option><option value="held_deferred">Held / deferred</option></select></label>
+  </div>
+  <p id="ercStatus" class="erc-status" role="status" aria-live="polite">Checking administrator permissions…</p>
+  <div id="ercMetrics" class="erc-metrics" aria-label="Observed exception counts"></div>
+  <div class="erc-columns">
+    <section class="erc-list" aria-label="Exception inventory">
+     <strong>Active exceptions</strong><p id="ercVisible" class="erc-status">No inventory loaded</p><div id="ercList" class="erc-list-scroll"></div>
+    </section>
+    <section class="erc-detail" id="ercDetail" aria-label="Selected exception details">
+      <p>Select an exception to inspect its diagnosis and next safe action.</p>
+    </section>
+  </div>
+ </section>
  <section id="page-factory" class="page">
  <div class="page-heading factory-global-heading">
  <div><span class="eyebrow">Global operations</span><h1>Factory</h1><p>Review and approve work across every city in one place.</p></div>
@@ -3012,6 +3035,7 @@
  <script defer src="/assets/profile-admin-creative.js?v=0.6.757-idea-id-list"></script>
  <script defer src="/assets/global-idea-target.js?v=0.6.757-idea-id-list"></script>
  <script defer src="/assets/producer-conversation-ui.js?v=0.6.757-idea-id-list"></script>
+ <script defer src="/assets/exception-recovery.js?v=erc-readonly-1"></script>
  <script>window.StudioLazyLoad.boot();</script>
 <script>
 (function(){
