@@ -149,6 +149,105 @@
     }
     host.scrollTop=host.scrollHeight;
   }
+  function appendLiveReceiptPanel(detail,item) {
+    const pane=elem("section",null,"erc-receipt");
+    pane.append(elem("h4","Live provider receipt"));
+    const info=elem("p","No provider readback performed yet. A saved remote ID is not proof of public posting.","erc-note");
+    const controls=elem("div",null,"erc-actions");
+    const inspect=elem("button","Verify live provider receipt","secondary-button");
+    inspect.type="button";
+    const finalize=elem("button","Finalize this existing Facebook post","secondary-button");
+    finalize.type="button";finalize.disabled=true;finalize.hidden=true;
+    controls.append(inspect,finalize);pane.append(info,controls);detail.append(pane);
+    let receipt=null;
+    const recordId=item.record_id;
+    inspect.addEventListener("click",async()=>{
+      if(!state.allowed||state.selected!==recordId||inspect.disabled)return;
+      inspect.disabled=true;finalize.disabled=true;finalize.hidden=true;info.textContent="Reading exact remote post from provider (GET only)…";
+      try{
+        const result=await getJson("/api/admin/exception-recovery/"+recordId+"/receipt");
+        if(state.selected!==recordId)return;
+        receipt=result;
+        info.textContent=result.verified_public
+          ? "Verified provider identity "+(result.remote_id||"")+". "+(result.permalink||"")+" (read-only receipt)."
+          : "Not verified: "+(result.evidence||"provider unavailable")+". No repost or state change is authorized.";
+        const preflight=state.preflights.get(recordId);
+        const eligible=preflight?.fb3_existing_post_eligible===true
+          && item.platform==="Facebook"
+          && result.verified_public===true
+          && result.platform==="Facebook"
+          && /^\d{6,30}(?:_\d{6,30})?$/.test(String(result.remote_id||""))
+          && /^\d+$/.test(String(item.output_id||""));
+        finalize.hidden=!eligible;finalize.disabled=!eligible;
+      }catch(error) {
+        info.textContent="Provider readback unavailable: "+String(error.message||error)+". No output action occurred.";
+      }finally{inspect.disabled=false;}
+    });
+    finalize.addEventListener("click",async()=>{
+      if(!receipt?.verified_public||state.selected!==recordId||finalize.disabled)return;
+      const postId=String(receipt.remote_id||"");
+      const outputId=String(item.output_id||"");
+      if(!window.confirm("Confirm finalization ONLY of existing Facebook output #"+outputId+
+        " and existing Page post "+postId+
+        ". This calls the existing FB3 verification/finalizer. No new Facebook post will be created."))return;
+      finalize.disabled=true;inspect.disabled=true;
+      info.textContent="Rechecking current Airtable state and provider receipt under an output lock…";
+      try{
+        const response=await fetch("/api/admin/exception-recovery/"+recordId+"/actions",{
+          method:"POST",credentials:"same-origin",headers:{Accept:"application/json","Content-Type":"application/json"},
+          body:JSON.stringify({action:"finalize_existing_facebook_post",confirm_output_id:outputId,confirm_post_id:postId}),
+        });
+        const payload=await response.json().catch(()=>({}));
+        info.textContent=response.ok
+          ? "Existing-post finalization: "+(payload.status||"unknown")+
+            (payload.durable_recovery_recorded===true?" · Ledger evidence saved.":" · Check current evidence and ledger.")
+          : "Finalization blocked: "+String(payload.reason||payload.error||response.status)+". No new post was created.";
+        receipt=null;finalize.hidden=true;
+        if(response.ok && payload.status==="verified_published")load();
+      }catch(error){
+        info.textContent="Outcome unconfirmed: "+String(error.message||error)+". Do not retry without a fresh verification.";
+        finalize.hidden=true;
+      }finally{inspect.disabled=false;finalize.disabled=true;}
+    });
+  }
+
+  async function reconcileAllCounts() {
+    const button=$("ercReconcileCounts"),summary=$("ercReconciliationStatus"),host=$("ercReconciliationResult");
+    if(!state.allowed||button.disabled)return;
+    button.disabled=true;summary.textContent="Scanning all production Platform Outputs, then comparing the existing Home predicates with Quality Agent results…";
+    host.replaceChildren();
+    try{
+      const data=await getJson("/api/admin/exception-recovery/counts?fresh=1");
+      if(data.status!=="complete_census"||!data.read_only)throw new Error("Complete authoritative scan was not proven");
+      const t=data.totals;
+      summary.textContent="Full Airtable census completed "+date(data.scan_completed_at)+
+        ". "+data.source_row_count+" production outputs; same classification functions as Home/Pipeline. Live Home cache-generation parity is not yet proven.";
+      const table=elem("table",null,"erc-count-table");
+      const header=elem("tr");
+      for(const name of ["Scope","Outputs","Past due","No date","Failed","Manual action","Held"])header.append(elem("th",name));
+      const thead=elem("thead");thead.append(header);table.append(thead);
+      const tbody=elem("tbody");
+      for(const [name,counts] of [["All profiles",t],...Object.entries(data.by_profile||{})]){
+        const row=elem("tr");
+        for(const val of [name,counts.outputs,counts.approved_past_due,counts.approved_missing_date,
+          counts.failed,counts.manual_action_required,counts.held_deferred])row.append(elem("td",val));
+        tbody.append(row);
+      }
+      table.append(tbody);host.append(table);
+      const checks=data.comparisons||{};
+      for(const [label,key] of [["Failed","failed"],["Past due","approved_past_due"]]){
+        const diff=checks[key]||{};
+        host.append(elem("p",label+" QA comparison: "+(diff.status||"unknown")+
+          " · Home predicate "+(diff.home_count??"unknown")+" · QA scan "+(diff.quality_agent_count??"unknown")+
+          " · Missing in QA "+(diff.missing_in_quality_agent??"unknown")+
+          " · Extra QA-only "+(diff.extra_quality_agent??"unknown"),"erc-note"));
+      }
+    }catch(error){
+      summary.textContent="Canonical count reconciliation unavailable: "+String(error.message||error)+
+        ". Counts remain unknown; no partial scan is treated as zero.";
+    }finally{button.disabled=false;}
+  }
+
   function appendConversationPanel(detail,item) {
     const thread=elem("section",null,"erc-conversation");
     thread.append(elem("h4","Exception conversation"),elem("p","Messages are saved in Airtable against this output. The Quality Agent records a safety-aware response, but never executes instructions from this conversation.","erc-note"));
@@ -227,6 +326,7 @@
     });
     actions.append(open);
     detail.append(actions,elem("p","Recovery actions (publish, retry, hold, reschedule, delete) are disabled until verified provider receipts, locks and administrator confirmations are implemented.","erc-note"));
+    appendLiveReceiptPanel(detail,item);
     appendConversationPanel(detail,item);
     const evidence=elem("details");
     evidence.append(elem("summary","Technical details and recovery state"));
@@ -288,6 +388,7 @@
   for(const select of [profiles,platform,category])select.addEventListener("change",render);
   refresh.addEventListener("click",load);
   $("ercPreviewSelected")?.addEventListener("click",previewSelected);
+  $("ercReconcileCounts")?.addEventListener("click",reconcileAllCounts);
   // Light role check; server-side authorization still gates every data endpoint.
   getJson("/api/session").then(session=>{
     const permissions=session?.permissions;
