@@ -12,7 +12,7 @@ test("read-only center API is server-side admin only", () => {
   const declaration = 'const isAdminExceptionRecoveryRoute = url.pathname === "/api/admin/exception-recovery";';
   assert.ok(worker.includes(declaration));
   const routeStart = worker.indexOf("if (isAdminExceptionRecoveryRoute) {");
-  const routeEnd = worker.indexOf("if (isOpsDeskInventoryRoute)", routeStart);
+  const routeEnd = worker.indexOf("if (isAdminExceptionConversationRoute)", routeStart);
   assert.ok(routeStart > 0 && routeEnd > routeStart);
   const route = worker.slice(routeStart,routeEnd);
   assert.match(route,/request\.method !== "GET"/);
