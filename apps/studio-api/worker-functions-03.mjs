@@ -1,6 +1,6 @@
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
 import { readyProductionEnqueue } from "./ready-production-queue.mjs";
-import { ideaPhotoMatchingSlaFinding } from "./idea-photo-wait.mjs";
+import { ideaPhotoMatchingSlaFinding, describeIdeaPhotoMatchError } from "./idea-photo-wait.mjs";
 import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { withPhase5SyncLease } from "./supabase-sync-lease.mjs";
 import { homeApprovedExceptionKind, homeIsUnpublishedFailure } from "./profile-summary-classification.mjs";
@@ -1228,6 +1228,7 @@ export async function runWaitingIdeaPhotoMatches(env, { limit = 8 } = {}) {
       }));
     } catch (error) {
       console.warn("idea photo-wait evaluate failed", idea.id, error);
+      const safeFailure = describeIdeaPhotoMatchError(error);
       // A failed attempt must advance the fair queue too. Otherwise the same
       // failing unscanned ideas monopolize the next 12 slots forever, while
       // their failure is invisible in Studio_Photo_Match_JSON.
@@ -1240,7 +1241,9 @@ export async function runWaitingIdeaPhotoMatches(env, { limit = 8 } = {}) {
             reason: "matcher_error",
             // Safe structured HTTP class for QA and retry triage; never place
             // provider URLs, secrets or raw exception messages in Airtable.
-            error_http_status: Number(error?.status || error?.statusCode || 0) || null,
+            error_http_status: safeFailure.error_status,
+            error_category: safeFailure.error_category,
+            error_detail: safeFailure.error_detail,
           }) } }),
         });
       } catch (diagnosticError) {
