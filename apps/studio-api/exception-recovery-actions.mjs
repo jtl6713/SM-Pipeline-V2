@@ -1,3 +1,4 @@
+import { publishedReceiptRepairReason } from "./approved-past-due-quality.mjs";
 /**
  * Explicitly administrator-approved existing Facebook post finalization.
  * Delegates only to the existing FB3 stage (Graph GET / status reconcile).
@@ -64,4 +65,69 @@ export async function executeFb3AdminRecovery({
  return {status:"verified_published",record_id:recordId,remote_id:remote.remote_id,
    published_at:field(after,"Published_At"),durable_recovery_recorded:durable?.recorded===true,
    provider_evidence:remote.evidence, no_graph_create:true};
+}
+
+export const RECEIPT_REPAIR_ACTION="reconcile_verified_existing_receipt";
+const safeHost=(value,platform)=>{
+  try {
+    const u=new URL(String(value||""));
+    if(u.protocol!=="https:")return false;
+    const h=u.hostname.toLowerCase();
+    if(platform==="Facebook")return h==="facebook.com"||h==="www.facebook.com"||h==="m.facebook.com";
+    if(platform==="Instagram")return h==="instagram.com"||h==="www.instagram.com";
+    if(platform==="YouTube")return h==="youtube.com"||h==="www.youtube.com"||h==="m.youtube.com"||h==="youtu.be";
+    return false;
+  }catch{return false;}
+};
+const currentRemoteId=(row)=>{
+ const p=field(row,"Platform");
+ return p==="YouTube" ? field(row,"YouTube_Video_ID")||field(row,"Platform_Post_ID")
+   : p==="Instagram" ? field(row,"Platform_Media_ID")||field(row,"Platform_Post_ID")
+   : field(row,"Platform_Post_ID");
+};
+export function validateApprovedReceiptRepair(row, approval) {
+ if(approval?.action!==RECEIPT_REPAIR_ACTION)return "unsupported_action";
+ if(!row?.id||!/^rec[A-Za-z0-9]{14}$/.test(row.id))return "missing_current_output";
+ const output=field(row,"Output_ID");
+ if(!output||String(approval?.confirm_output_id||"")!==output)return "output_id_confirmation_mismatch";
+ const remote=currentRemoteId(row);
+ if(!remote||String(approval?.confirm_post_id||"")!==remote)return "remote_post_confirmation_mismatch";
+ const reason=publishedReceiptRepairReason(row);
+ if(reason)return reason;
+ if(!safeHost(field(row,"Platform_Post_URL")||field(row,"Manual_Published_URL"),field(row,"Platform")))
+   return "trusted_saved_public_url_required";
+ return null;
+}
+/**
+ * Existing QA-PUBLISH-001 status-only repair, scoped to one verified remote ID.
+ * The caller must own the pre-existing output approval lease. No new post is made.
+ */
+export async function executeApprovedReceiptRepair({recordId,approval,readOutput,verifyRemote,patchStatus,appendLedger}={}) {
+ if(!/^rec[A-Za-z0-9]{14}$/.test(String(recordId||"")))throw Object.assign(new Error("Invalid output record ID"),{status:400});
+ for(const fn of [readOutput,verifyRemote,patchStatus,appendLedger])
+   if(typeof fn!=="function")throw Object.assign(new Error("Safe receipt repair dependency unavailable"),{status:503});
+ const current=await readOutput(recordId);
+ const reason=validateApprovedReceiptRepair(current,approval);
+ if(reason)return {status:"blocked",reason,record_id:recordId};
+ const receipt=await verifyRemote(current);
+ if(!receipt?.verified_public||receipt.remote_id!==currentRemoteId(current)
+    ||receipt.platform!==field(current,"Platform")
+    ||!safeHost(receipt.permalink,receipt.platform))
+   return {status:"blocked",reason:receipt?.evidence||"remote_publication_not_verified",record_id:recordId};
+ // QA-PUBLISH-001 has already required a saved canonical receipt and approved state.
+ await patchStatus(current,{
+   Output_Status:"Published",Publish_Status:"Published",Publish_Retry_Eligible:false,
+   Publish_Next_Retry_At:null,
+ });
+ const after=await readOutput(recordId);
+ const complete=after?.id===recordId&&currentRemoteId(after)===receipt.remote_id
+   &&field(after,"Output_Status")==="Published"
+   &&field(after,"Publish_Status")==="Published"
+   &&field(after,"Published_At")
+   &&safeHost(field(after,"Platform_Post_URL")||field(after,"Manual_Published_URL"),receipt.platform);
+ if(!complete)return {status:"pending_verification",record_id:recordId,reason:"authoritative_status_readback_not_confirmed"};
+ const logged=await appendLedger(after,{source:"airtable_existing_publication_receipt",post_id:receipt.remote_id});
+ return {status:"verified_published",record_id:recordId,remote_id:receipt.remote_id,
+   provider_evidence:receipt.evidence,durable_recovery_recorded:logged?.recorded===true,
+   no_new_post:true};
 }
