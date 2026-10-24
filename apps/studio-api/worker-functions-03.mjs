@@ -3010,6 +3010,12 @@ export async function uploadAssetLibraryItems(request, env, authorization, ctx) 
       contentType: item4NormalizedMimeType(file),
       profileName: f(uploadProfile, "Profile_Name") || "",
     });
+    if (drive?.provenance_screen?.decision !== "clean") {
+      throw new HttpError(
+        503,
+        "Asset intake safety check was not confirmed by Pipeline Runner. The asset was not added to the Studio library."
+      );
+    }
     if (studioProfileRequiresChicagoWatermark(uploadProfile) && !drive?.watermarked) {
       throw new HttpError(
         503,
