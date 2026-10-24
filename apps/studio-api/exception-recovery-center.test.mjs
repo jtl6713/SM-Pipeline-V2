@@ -110,3 +110,15 @@ test("overlapping past-due row with missing profile does not erase failed identi
  assert.equal(result.items[0].profile_name,"Chicago");
  assert.equal(result.items[0].profile_id,"recChicagoProfile");
 });
+
+
+test("overdue title from Quality Agent appears on the list and detail item",()=>{
+ const result=buildExceptionRecoveryCenter(snap({
+   items:[],
+   approved_past_due:{status:"ok",items:[
+     pastDue("recAAAAAAAAAAAAAA",{title:"Crandon Park Nature Frames"}),
+   ]},
+ }));
+ assert.equal(result.items[0].title,"Crandon Park Nature Frames");
+ assert.equal(result.items[0].output_id,"3374");
+});
