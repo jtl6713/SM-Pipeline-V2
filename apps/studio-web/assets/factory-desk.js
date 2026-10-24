@@ -11,6 +11,7 @@
     batch: null,
     completedBatch: null,
     completedOpen: false,
+    activeCollapsed: false,
     completedOffset: 0,
     completedLoading: false,
     batchTimer: null,
@@ -419,6 +420,8 @@
     const details = $("factoryBatchDetails");
     const updated = $("factoryBatchUpdated");
     const listHeading = $("factoryBatchListHeading");
+    const collapse = $("factoryBatchActiveCollapse");
+    const actions = $("factoryBatchActions");
     const toggle = $("factoryBatchCompletedToggle");
     const close = $("factoryBatchCompletedClose");
     const prev = $("factoryBatchCompletedPrev");
@@ -439,15 +442,25 @@
     };
     if (count) count.textContent = String(state.batch?.totals?.batches || 0);
     if (listHeading) listHeading.textContent = state.completedOpen ? "Completed approvals" : "Active approvals";
+    const activeListHidden = !state.completedOpen && state.activeCollapsed;
+    if (recent) recent.hidden = activeListHidden;
+    if (actions) actions.hidden = activeListHidden;
+    if (collapse) {
+      collapse.hidden = state.completedOpen;
+      collapse.textContent = state.activeCollapsed ? "Expand" : "Collapse";
+      collapse.setAttribute("aria-expanded", String(!state.activeCollapsed));
+      collapse.setAttribute("aria-label", state.activeCollapsed ? "Expand active approvals list" : "Collapse active approvals list");
+    }
     if (toggle) {
       toggle.textContent = state.completedOpen ? "Back to Active Batches" : "Completed Batches";
       toggle.setAttribute("aria-pressed", String(state.completedOpen));
     }
+    if (toggle) toggle.hidden = state.completedOpen;
     if (close) close.hidden = !state.completedOpen;
     if (prev) prev.hidden = !state.completedOpen || state.completedOffset === 0;
     if (next) next.hidden = !state.completedOpen || !viewed?.has_more;
     if (page) {
-      page.hidden = !state.completedOpen || !viewed;
+      page.hidden = !state.completedOpen || !viewed || !(state.completedOffset > 0 || viewed.has_more);
       page.textContent = "Page " + (1 + Math.floor(state.completedOffset / 20));
     }
     summary.textContent = `${Number(totals.active) || 0} active · ${Number(totals.approved) || 0} approved · ${Number(totals.pending) || 0} pending · ${Number(totals.failed) || 0} failed`;
@@ -497,7 +510,7 @@
       retry.hidden = !(latest?.failed_count > 0 && latest?.can_retry);
       retry.disabled = state.submittingBatch;
     }
-    details.hidden = !state.batchDetailsOpen || !latest;
+    details.hidden = activeListHidden || !state.batchDetailsOpen || !latest;
     const items = Array.isArray(latest?.items) ? latest.items : [];
     const children = Array.isArray(latest?.children) ? latest.children : [];
     const childrenHtml = children.length ? `<div class="factory-batch-child-grid">${children.map(child => {
@@ -1708,6 +1721,11 @@
       refreshFactoryCompletedBatches(0).catch(() => {});
     } else renderFactoryBatchActivity(state.batch);
   }
+  $("factoryBatchActiveCollapse")?.addEventListener("click", () => {
+    if (state.completedOpen) return;
+    state.activeCollapsed = !state.activeCollapsed;
+    renderFactoryBatchActivity(state.batch);
+  });
   $("factoryBatchCompletedToggle")?.addEventListener("click", () => setFactoryCompletedOpen(!state.completedOpen));
   $("factoryBatchCompletedClose")?.addEventListener("click", () => setFactoryCompletedOpen(false));
   $("factoryBatchCompletedPrev")?.addEventListener("click", () => {

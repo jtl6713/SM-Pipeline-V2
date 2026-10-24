@@ -22,7 +22,7 @@ function viewHarness() {
     "factoryBatchSummary", "factoryBatchMetricValue", "factoryBatchRecentList",
     "factoryBatchInspect", "factoryBatchRetry", "factoryBatchDetails",
     "factoryBatchUpdated", "factoryBatchListHeading", "factoryBatchCompletedToggle",
-    "factoryBatchCompletedClose",
+    "factoryBatchCompletedClose", "factoryBatchActiveCollapse", "factoryBatchActions",
     "factoryBatchCompletedPrev", "factoryBatchCompletedNext", "factoryBatchCompletedPage",
   ];
   const nodes = Object.fromEntries(ids.map(id => [id, {
@@ -42,7 +42,7 @@ function viewHarness() {
     return buttons;
   };
   const state = {
-    completedOpen: false, completedBatch: null, completedLoading: false,
+    completedOpen: false, activeCollapsed: false, completedBatch: null, completedLoading: false,
     completedOffset: 0, batch: null, batchDetailsOpen: true,
     inspectedBatchKey: "", submittingBatch: false,
   };
@@ -167,4 +167,45 @@ test("Factory action controls are visually hidden when the DOM hidden property i
   for (const id of ["factoryBatchCompletedClose", "factoryBatchCompletedPrev", "factoryBatchCompletedNext", "factoryBatchCompletedPage"]) {
     assert.match(html, new RegExp(`id="${id}"[^>]*\\bhidden\\b`), `${id} must start hidden before the first activity fetch`);
   }
+});
+
+test("active approvals list can collapse without hiding the metric or navigation", () => {
+  const {state,nodes,render} = viewHarness();
+  const active={view:"active",batches:[{...job("fg_activeOne","A"),status:"running",pending_count:10}],totals:{batches:11,active:11,pending:88,approved:14,failed:0}};
+  render(active);
+  assert.equal(nodes.factoryBatchActiveCollapse.hidden,false);
+  assert.equal(nodes.factoryBatchRecentList.hidden,false);
+  assert.equal(nodes.factoryBatchActions.hidden,false);
+  assert.equal(nodes.factoryBatchCompletedToggle.hidden,false);
+  state.activeCollapsed=true;
+  render(active); // polling must preserve the user's collapsed preference
+  assert.equal(nodes.factoryBatchRecentList.hidden,true);
+  assert.equal(nodes.factoryBatchActions.hidden,true);
+  assert.equal(nodes.factoryBatchDetails.hidden,true);
+  assert.equal(nodes.factoryBatchActiveCollapse.textContent,"Expand");
+  assert.equal(nodes.factoryBatchMetricValue.textContent,"11");
+  assert.match(nodes.factoryBatchSummary.textContent,/88 pending/);
+  assert.equal(nodes.factoryBatchCompletedToggle.hidden,false);
+  state.completedOpen=true;
+  render({view:"completed",batches:[job("fg_completedOne","Done")],totals:{batches:1},has_more:false});
+  assert.equal(nodes.factoryBatchActiveCollapse.hidden,true);
+  assert.equal(nodes.factoryBatchCompletedToggle.hidden,true);
+  assert.equal(nodes.factoryBatchCompletedClose.hidden,false);
+  assert.equal(nodes.factoryBatchRecentList.hidden,false,"Completed history is always expanded");
+  assert.equal(nodes.factoryBatchCompletedPage.hidden,true,"Single-page history has no pagination");
+  state.completedOpen=false;
+  render(active);
+  assert.equal(nodes.factoryBatchRecentList.hidden,true,"Returning to active restores prior collapse");
+});
+
+test("Factory navigation appears above the long list and collapse is wired", () => {
+  const html=readFileSync(join(here,"index.html"),"utf8");
+  const head=html.indexOf('id="factoryBatchListHeading"');
+  const recent=html.indexOf('id="factoryBatchRecentList"');
+  for (const id of ["factoryBatchActiveCollapse","factoryBatchRefresh","factoryBatchCompletedToggle","factoryBatchCompletedClose"]) {
+    const at=html.indexOf('id="'+id+'"');
+    assert.ok(at>head && at<recent,id+" should be accessible before long batch list");
+  }
+  assert.match(html,/id="factoryBatchActiveCollapse"[^>]*aria-expanded="true"[^>]*aria-controls="factoryBatchRecentList factoryBatchActions factoryBatchDetails"/);
+  assert.match(source,/\$\("factoryBatchActiveCollapse"\)\?\.addEventListener\("click"/);
 });

@@ -450,6 +450,9 @@
 }
 #page-factory #factoryBatchSummary{margin:0;overflow-wrap:anywhere;font-size:.87rem}
 #page-factory #factoryBatchUpdated{font-size:.73rem;color:#596a80;overflow-wrap:anywhere}
+#page-factory .factory-batch-heading-title{display:flex;flex-direction:column;gap:3px;min-width:0}
+#page-factory .factory-batch-header-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:6px}
+#page-factory .factory-batch-header-actions button{min-height:34px;font-size:.73rem;padding:5px 9px}
 #page-factory .factory-batch-actions{display:flex;gap:8px;flex-wrap:wrap}
 #page-factory .factory-batch-actions button{min-height:36px}
 #page-factory .factory-batch-toolbar{
@@ -499,6 +502,8 @@
  #page-factory .factory-batch-toolbar button{flex:1 1 125px;white-space:normal}
  #page-factory .factory-batch-toolbar #factoryBatchSelectionCount{flex-basis:100%}
  #page-factory .factory-batch-activity{padding:12px}
+ #page-factory .factory-batch-header-actions{justify-content:flex-start;width:100%}
+ #page-factory .factory-batch-heading{align-items:flex-start}
  #page-factory .factory-band-eyes .factory-content-bar{grid-template-columns:52px minmax(0,1fr)}
  #page-factory .factory-band-eyes .factory-content-batch-select{min-width:0;font-size:.57rem}
 }
