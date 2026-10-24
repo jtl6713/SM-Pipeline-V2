@@ -167,7 +167,7 @@ function providerFixture(change={}) {
 test("YouTube adapter reuses only authenticated GETs and exact owned public video",async()=>{
   const p=providerFixture();const r=await verifyAuthenticatedYouTubeReceipt(p.f.row,p.options);
   assert.equal(r.verified_public,true);assert.equal(r.ownership_verified,true);
-  assert.equal(p.requests.length,2);assert.ok(p.requests.every(r=>r.options.method==="GET"&&r.options.redirect==="error"));
+  assert.equal(p.requests.length,2);assert.ok(p.requests.every(r=>r.options.method==="GET"&&r.options.redirect==="manual"));
   assert.ok(!JSON.stringify(r).includes("test-secret"));
 });
 test("a formerly scheduled video that is now public does not require obsolete publishAt",async()=>{
@@ -196,6 +196,37 @@ test("missing channel configuration and inaccessible provider fail closed",async
   assert.equal((await verifyAuthenticatedYouTubeReceipt(p.f.row,p.options)).verified_public,false);
 });
 
+test("authenticated uploader returns sanitized transport diagnostics and never follows redirects",async()=>{
+  for(const [name,fetcher,expected] of [
+    ["oauth rejection",async()=>({ok:false,status:401}),
+      {stage:"oauth_status",category:"http_rejected",http_status:401,redirect:false}],
+    ["redirect",async()=>({ok:false,status:302,headers:{get:()=>"/login"}}),
+      {stage:"oauth_status",category:"redirect_rejected",http_status:302,redirect:true}],
+    ["network",async()=>{throw new TypeError("secret: network details");},
+      {stage:"oauth_status",category:"network_or_transport_error",http_status:null,redirect:false}],
+    ["timeout",async()=>{throw Object.assign(new Error("secret: timed out"),{name:"TimeoutError"});},
+      {stage:"oauth_status",category:"timeout",http_status:null,redirect:false}],
+    ["malformed JSON",async()=>({ok:true,status:200,json:async()=>{throw Error("secret: HTML");}}),
+      {stage:"oauth_status",category:"invalid_json",http_status:200,redirect:false}],
+    ["malformed body",async()=>({ok:true,status:200,json:async()=>({})}),
+      {stage:"oauth_status",category:"invalid_response_shape",http_status:null,redirect:false}],
+  ]) {
+    const p=providerFixture();p.options.fetcher=fetcher;
+    const result=await verifyAuthenticatedYouTubeReceipt(p.f.row,p.options);
+    assert.equal(result.evidence,"authenticated_provider_unavailable",name);
+    assert.deepEqual(result.provider_diagnostic,expected,name);
+    assert.equal(result.ownership_verified,false);
+    assert.ok(!JSON.stringify(result).includes("secret"),name);
+    assert.ok(!JSON.stringify(result).includes("/login"),name);
+  }
+  const p=providerFixture();
+  p.options.fetcher=async(url)=>url.endsWith("/oauth/status")
+    ?{ok:true,status:200,json:async()=>({refresh_ok:true,channel_identity_ok:true,channel_id:channel})}
+    :{ok:false,status:503};
+  const video=await verifyAuthenticatedYouTubeReceipt(p.f.row,p.options);
+  assert.deepEqual(video.provider_diagnostic,
+    {stage:"video_details",category:"http_rejected",http_status:503,redirect:false});
+});
 test("missing saved public URL is repaired from authenticated public receipt, without a second upload",async()=>{
   const f=fixture();delete f.row.fields.Platform_Post_URL;
   const done=await reconcilePublication(f.deps);
