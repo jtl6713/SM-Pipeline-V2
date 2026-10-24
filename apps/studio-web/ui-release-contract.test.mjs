@@ -13,10 +13,10 @@ const app = fs.readFileSync(new URL("./assets/app-item4-1008.js", import.meta.ur
 
 test("Studio UI release label, BUILD_ID, and every JS/CSS cache key are one contract", () => {
   const contract = readUiReleaseContract(html, app);
-  assert.equal(contract.version, "0.6.756");
-  assert.equal(contract.cacheKey, "0.6.756-factory-batch-nav");
-  assert.equal(contract.expectedBuildId, "item4-0.6.756-factory-batch-nav");
-  assert.match(contract.expectedJsUrl, /app-item4-1008.*0[.]6[.]756-factory-batch-nav/);
+  assert.equal(contract.version, "0.6.757");
+  assert.equal(contract.cacheKey, "0.6.757-idea-id-list");
+  assert.equal(contract.expectedBuildId, "item4-0.6.757-idea-id-list");
+  assert.match(contract.expectedJsUrl, /app-item4-1008.*0[.]6[.]757-idea-id-list/);
   assert.ok(contract.versionedAssetCount >= 20);
   assert.equal(extractUiVersionFromHtml(html), contract.version);
   assert.equal(extractAppUrlFromHtml(html), contract.expectedJsUrl);
@@ -24,15 +24,15 @@ test("Studio UI release label, BUILD_ID, and every JS/CSS cache key are one cont
 
 test("release contract rejects drift that can produce a green stale deploy", () => {
   assert.throws(
-    () => readUiReleaseContract(html.replace("UI build 0.6.756", "UI build 0.6.710"), app),
+    () => readUiReleaseContract(html.replace("UI build 0.6.757", "UI build 0.6.710"), app),
     /does not match application cache version/,
   );
   assert.throws(
-    () => readUiReleaseContract(html.replace("styles-phase7-0621.css?v=0.6.756-factory-batch-nav", "styles-phase7-0621.css?v=stale"), app),
+    () => readUiReleaseContract(html.replace("styles-phase7-0621.css?v=0.6.757-idea-id-list", "styles-phase7-0621.css?v=stale"), app),
     /do not share release cache key/,
   );
   assert.throws(
-    () => readUiReleaseContract(html, app.replace("item4-0.6.756-factory-batch-nav", "item4-0.6.710-stale")),
+    () => readUiReleaseContract(html, app.replace("item4-0.6.757-idea-id-list", "item4-0.6.710-stale")),
     /must equal/,
   );
 });
