@@ -14,10 +14,10 @@ export function recoveryIntent(message) {
     return { intent:"duplicate_removal", risk:"irreversible", requires_approval:true };
   if (/\b(already|manually|i)\b.*\b(published|posted|live)\b/.test(text))
     return { intent:"claimed_publication", risk:"remote_identity", requires_approval:true };
-  if (/\b(hold|stop publishing|do not publish)\b/.test(text))
-    return { intent:"hold", risk:"policy_change", requires_approval:true };
   if (/\b(release hold|unhold|resume held)\b/.test(text))
     return { intent:"release_hold", risk:"policy_change", requires_approval:true };
+  if (/\b(hold|stop publishing|do not publish)\b/.test(text))
+    return { intent:"hold", risk:"policy_change", requires_approval:true };
   if (/\b(reschedule|schedule|next week|tomorrow)\b/.test(text))
     return { intent:"reschedule", risk:"schedule_change", requires_approval:true };
   if (/\b(rework|repair (the )?video|additional photos|add (a )?clip|producer)\b/.test(text))
