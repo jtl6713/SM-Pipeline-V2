@@ -10,6 +10,7 @@ import { FACEBOOK_REEL_POLL_FORMULA, facebookReelPollVideoId, facebookReelPollEl
 import { scanApprovedPastDueOutputs, classifyApprovedPastDue, STALE_PUBLISHED_RECEIPT_FORMULA, publishedReceiptRepairReason } from "./approved-past-due-quality.mjs";
 import { QUALITY_RECOVERY_LEDGER_TABLE, persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { scanOutstandingFailedOutputs, describeFailedOutput, facebookRateLimitResetReason } from "./failed-output-monitor.mjs";
+import { buildExceptionRecoveryCenter } from "./exception-recovery-center.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
 import { readStudioProfileSummary, validVerifiedStudioSummary } from "./profile-summary-controller.mjs";
@@ -9809,6 +9810,25 @@ export async function gatherStudioDeskInventory(env) {
   };
 }
 /*__STUDIO_WORKER_END:gatherStudioDeskInventory__*/
+
+/**
+ * Read-only, shared Quality Agent snapshot. No new scan loop or publisher.
+ * Authorization is enforced by the /api/admin/exception-recovery route.
+ */
+export async function getStudioExceptionRecoveryCenter(request, env) {
+  try {
+    const snapshot = await loadStudioFailedOutputSnapshot(env);
+    const view = buildExceptionRecoveryCenter(snapshot);
+    return respond(request, env, view, view.status === "unavailable" ? 503 : 200);
+  } catch (error) {
+    console.warn("Exception Recovery Center read-only census unavailable", String(error?.message || error));
+    return respond(request, env, {
+      status: "unavailable", as_of: null, read_only: true, items: [],
+      metrics: {}, error: "Authoritative Quality Agent scan unavailable. Counts are unknown.",
+    }, 503);
+  }
+}
+/*__STUDIO_WORKER_END:getStudioExceptionRecoveryCenter__*/
 
 export async function getStudioDeskInventory(request, env) {
   const payload = await gatherStudioDeskInventory(env);
