@@ -143,6 +143,7 @@ export function classifyApprovedPastDue(row, nowMs = Date.now()) {
   return {
     signature: QA_APPROVED_PAST_DUE,
     record_id: row?.id || null, output_id: value(row, "Output_ID") || null,
+    title: value(row, "Output_Title") || value(row, "Title_Text") || value(row, "Studio_Effective_Requested_Title") || null,
     profile_id: profileId || null, platform, output_type:
       value(row, "Studio_Output_Type") || value(row, "Platform_Output_Type"),
     scheduled_at: value(row, "Scheduled_Post_Date"), minutes_past_due: lagMinutes,

@@ -78,3 +78,14 @@ test("full census supplies deduplicated click-through held and unverified-identi
  assert.ok(due.categories.includes("approved_past_due"));
  assert.equal(due.minutes_past_due,4320);
 });
+
+
+test("canonical case display title uses Airtable Output_Title even when mapper omits it",()=>{
+ const rows=[r("recAAAAAAAAAAAAAA",{Output_ID:7864,Output_Title:"NYC beyond Manhattan",
+   Platform:"Instagram",Review_Status:"Approved",Output_Status:"Approved for Publishing",
+   Publish_Status:"Publishing",Scheduled_Post_Date:"2026-10-20T00:00:00Z"})];
+ const result=reconcileExceptionCensus(rows,mapOutput,{atMs:Date.parse("2026-10-23T00:00:00Z")});
+ assert.equal(result.exception_items[0].title,"NYC beyond Manhattan");
+ assert.equal(result.exception_items[0].output_id,"7864");
+ assert.equal(result.exception_items[0].actions_enabled,false);
+});
