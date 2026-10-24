@@ -1,3 +1,4 @@
+import { fb3FinalizeEligible } from "./facebook-photo-finalize-priority.mjs";
 /**
  * Read-only recovery preflight. Reads a fresh authoritative Platform Output;
  * does not verify remote publication, mutate any stage or authorize a replay.
@@ -46,6 +47,7 @@ export function assessRecoveryPreflight(row, {nowMs=Date.now()}={}) {
     provider_receipt_needed:identityRisk||(!publicProof&&!testing),
     lock_active:locked,cooldown_until:cooldown?new Date(nextRetry).toISOString():null,
     attempts,attempt_limit_reached:retryExhausted,category:core,
+    fb3_existing_post_eligible:fb3FinalizeEligible(row),
     publish_status:stage||null,output_status:outputStatus||null,
     actions:action,as_of:new Date(nowMs).toISOString(),
   };
