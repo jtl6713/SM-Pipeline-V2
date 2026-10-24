@@ -2198,6 +2198,11 @@
   <p id="ercStatus" class="erc-status" role="status" aria-live="polite">Checking administrator permissions…</p>
   <div class="erc-bulk-preview"><button type="button" class="secondary-button" id="ercPreviewSelected" disabled>Preview selected safety gates (0/5)</button><p id="ercBulkStatus" class="erc-status" role="status">Select up to five outputs. Preview never runs a recovery action.</p></div>
   <div id="ercBulkResults" aria-live="polite"></div>
+  <div class="erc-reconcile">
+    <button type="button" class="secondary-button" id="ercReconcileCounts">Reconcile all-profile counts (read-only)</button>
+    <p id="ercReconciliationStatus" class="erc-status" role="status">Canonical counts require a complete Airtable scan; Quality Agent cards above are provisional.</p>
+    <div id="ercReconciliationResult" aria-live="polite"></div>
+  </div>
   <div id="ercMetrics" class="erc-metrics" aria-label="Observed exception counts"></div>
   <div class="erc-columns">
     <section class="erc-list" aria-label="Exception inventory">
