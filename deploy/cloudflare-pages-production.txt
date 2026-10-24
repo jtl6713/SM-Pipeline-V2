@@ -537,3 +537,5 @@ Deploy UI 0.6.754-producer-conversation: Script-a-Short Production conversation,
 Deploy read-only Recovery History UI PR #1136, commit 63910a83. No autonomous corrections.
 
 Deploy Studio UI 0.6.759 Recovery History with version/cache-bust increment after prior unchanged-release guard.
+
+Deploy UI 0.6.759 with aligned application BUILD_ID and release contract tests.
