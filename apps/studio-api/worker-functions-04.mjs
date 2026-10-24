@@ -16,7 +16,7 @@ import { assessRecoveryPreflight } from "./exception-recovery-preflight.mjs";
 import { withExceptionConversationLock } from "./exception-recovery-lock.mjs";
 import { verifyExistingProviderReceipt } from "./exception-recovery-receipt.mjs";
 import { reconcileExceptionCensus } from "./exception-recovery-counts.mjs";
-import { FB3_ACTION, executeFb3AdminRecovery } from "./exception-recovery-actions.mjs";
+import { FB3_ACTION, RECEIPT_REPAIR_ACTION, executeFb3AdminRecovery, executeApprovedReceiptRepair } from "./exception-recovery-actions.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
 import { readStudioProfileSummary, validVerifiedStudioSummary } from "./profile-summary-controller.mjs";
@@ -9985,23 +9985,37 @@ export async function getStudioExceptionRecoveryCounts(request, env) {
 export async function runStudioExceptionRecoveryAction(request, env, authorization) {
   const id=exceptionRecoveryRecordIdFromPath(new URL(request.url).pathname,"actions");
   const input=await readJsonBody(request);
-  if(input?.action!==FB3_ACTION)throw new HttpError(409,"Action not enabled. This center never blindly retries, republishes, deletes or releases holds.");
+  const action=String(input?.action||"");
+  if(![FB3_ACTION,RECEIPT_REPAIR_ACTION].includes(action))
+    throw new HttpError(409,"Action not enabled. This center never blindly retries, republishes, deletes or releases holds.");
   const confirmPost=String(input?.confirm_post_id||"").trim();
   const confirmOutput=String(input?.confirm_output_id||"").trim();
-  if(!/^\d{6,30}(?:_\d{6,30})?$/.test(confirmPost)||!/^\d+$/.test(confirmOutput))
-    throw new HttpError(400,"Exact output and existing Facebook post ID confirmations are required");
-  const result=await withOutputApprovalLock(env.STUDIO_MEDIA,id,async()=>
-    executeFb3AdminRecovery({
-      recordId:id,approval:{action:FB3_ACTION,confirm_post_id:confirmPost,confirm_output_id:confirmOutput},
-      readOutput:async(recordId)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,recordId),
+  if(!/^[A-Za-z0-9_-]{6,70}$/.test(confirmPost)||!/^\d+$/.test(confirmOutput)
+      ||(action===FB3_ACTION&&!/^\d{6,30}(?:_\d{6,30})?$/.test(confirmPost)))
+    throw new HttpError(400,"Exact output and existing remote post ID confirmations are required");
+  const actor=String(authorization?.user?.email||authorization?.email||"administrator");
+  const result=await withOutputApprovalLock(env.STUDIO_MEDIA,id,async()=>{
+    const deps={
+      recordId:id,approval:{action,confirm_post_id:confirmPost,confirm_output_id:confirmOutput},
+      readOutput:async(recId)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,recId),
       verifyRemote:async(row)=>exceptionRecoveryReadProvider(env,row),
-      finalizeExistingPost:async(row)=>studioPulseFb3(env,row),
       appendLedger:async(row,evidence)=>persistVerifiedRecoveryInAirtable(env,row,evidence,{listRecords,airtableFetch}),
-    }),{owner:"exception-fb3:"+(authorization?.user?.email||authorization?.email||"administrator")}
-  );
-  return respond(request,env,{...result,action:FB3_ACTION,no_new_post:true,
-    explanation:result.status==="verified_published" ? "Existing Facebook Page post was finalized and read back in Airtable.":
-      "No new Facebook post was created. Verify current provider and Studio status before another action."
+    };
+    if(action===FB3_ACTION){
+      return executeFb3AdminRecovery({...deps,
+        finalizeExistingPost:async(row)=>studioPulseFb3(env,row),
+      });
+    }
+    return executeApprovedReceiptRepair({...deps,
+      patchStatus:async(row,fields)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,row.id,{
+        method:"PATCH",body:JSON.stringify({fields,typecast:true}),
+      }),
+    });
+  },{owner:"exception:"+actor+":"+action});
+  return respond(request,env,{...result,action,no_new_post:true,
+    explanation:result.status==="verified_published"
+      ? "Existing remote publication was verified and the Studio status was read back."
+      : "No new remote post was created. Inspect the latest provider and Studio status before another action.",
   },result.status==="blocked"?409:result.status==="pending_verification"?202:200);
 }
 /*__STUDIO_WORKER_END:runStudioExceptionRecoveryAction__*/
