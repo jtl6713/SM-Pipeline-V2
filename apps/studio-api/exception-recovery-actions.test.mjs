@@ -123,3 +123,35 @@ test("YouTube canonical watch link and youtu.be saved receipt identify the same 
  assert.equal(result.status,"verified_published");
  assert.equal(writes,1);
 });
+
+test("Facebook photo links with different fbid values are not the same receipt",async()=>{
+ const approved={action:RECEIPT_REPAIR_ACTION,confirm_output_id:"3374",confirm_post_id:"123456789_987654321"};
+ const initial=row({Review_Status:"Approved",Published_At:"2026-10-23T00:00:00Z",
+   Platform_Post_URL:"https://www.facebook.com/photo.php?fbid=111111111"});
+ let writes=0;
+ const result=await executeApprovedReceiptRepair({recordId:id,approval:approved,
+   readOutput:async()=>initial,
+   verifyRemote:async()=>({verified_public:true,remote_id:approved.confirm_post_id,
+     platform:"Facebook",permalink:"https://www.facebook.com/photo.php?fbid=222222222"}),
+   patchStatus:async()=>{writes++;},appendLedger:async()=>{writes++;},
+ });
+ assert.equal(result.status,"blocked");
+ assert.equal(result.reason,"saved_public_receipt_provider_permalink_mismatch");
+ assert.equal(writes,0);
+});
+test("a matching profile homepage is not a valid Instagram published media receipt",async()=>{
+ const media="17900000000000111";
+ const initial=row({Platform:"Instagram",Platform_Post_ID:media,Platform_Media_ID:media,
+   Review_Status:"Approved",Published_At:"2026-10-23T00:00:00Z",
+   Platform_Post_URL:"https://www.instagram.com/example"});
+ let writes=0;
+ const result=await executeApprovedReceiptRepair({recordId:id,
+   approval:{action:RECEIPT_REPAIR_ACTION,confirm_output_id:"3374",confirm_post_id:media},
+   readOutput:async()=>initial,
+   verifyRemote:async()=>({verified_public:true,remote_id:media,platform:"Instagram",
+     permalink:"https://www.instagram.com/example"}),
+   patchStatus:async()=>{writes++;},appendLedger:async()=>{writes++;},
+ });
+ assert.equal(result.status,"blocked");
+ assert.equal(writes,0);
+});
