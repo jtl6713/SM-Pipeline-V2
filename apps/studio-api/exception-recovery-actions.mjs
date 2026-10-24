@@ -113,15 +113,32 @@ function canonicalPublicReceipt(value, platform) {
     return /^[A-Za-z0-9_-]{11}$/.test(String(id||""))?"youtube:"+id:null;
   }
   const path=u.pathname.replace(/\/+$/,"")||"/";
-  if(platform==="Facebook"&&/^\/(?:permalink|story)\.php$/i.test(path)){
-    const post=u.searchParams.get("story_fbid");
-    const page=u.searchParams.get("id");
-    if(!/^\d{6,35}$/.test(String(post||""))||!/^\d{6,35}$/.test(String(page||"")))return null;
-    return "facebook.com"+path.toLowerCase()+"?story_fbid="+post+"&id="+page;
+  if(platform==="Instagram"){
+    // A profile homepage or unrelated site path is not a media permalink.
+    return /^\/(?:p|reel|tv)\/[A-Za-z0-9_-]+$/i.test(path)?"instagram.com"+path:null;
   }
-  // Query strings cannot establish another identity for ordinary post paths.
-  // Avoid comparing fbclid/utm trackers, but require an exact path match.
-  return (platform==="Facebook"?"facebook.com":"instagram.com")+path;
+  // Facebook query parameters can identify a DIFFERENT post at the very
+  // same path (photo.php?fbid=..., watch?v=..., permalink.php?story_fbid=...).
+  // Retain those identifiers rather than dropping them with tracking fields.
+  const page=u.searchParams.get("id");
+  const story=u.searchParams.get("story_fbid");
+  if(/^\/(?:permalink|story)\.php$/i.test(path)){
+    if(!/^\d{6,35}$/.test(String(story||""))||!/^\d{6,35}$/.test(String(page||"")))return null;
+    return "facebook.com"+path.toLowerCase()+"?story_fbid="+story+"&id="+page;
+  }
+  if(/^\/photo(?:\.php)?$/i.test(path)){
+    const photo=u.searchParams.get("fbid");
+    return /^\d{6,35}$/.test(String(photo||""))?"facebook.com/photo?fbid="+photo:null;
+  }
+  if(path.toLowerCase()==="/watch"){
+    const video=u.searchParams.get("v");
+    return /^\d{6,35}$/.test(String(video||""))?"facebook.com/watch?v="+video:null;
+  }
+  // Other Facebook paths must contain a concrete post, reel, video or
+  // shared-post path segment. Matching only a Page URL is not sufficient.
+  if(!/^\/(?:.+\/)?(?:posts|videos|reels|reel|photos|share\/p|share\/v)\/[^/]+$/i.test(path))
+    return null;
+  return "facebook.com"+path;
 }
 function savedPublicReceiptMatchesProvider(row,remote) {
   const exact=canonicalPublicReceipt(remote?.permalink,remote?.platform);
