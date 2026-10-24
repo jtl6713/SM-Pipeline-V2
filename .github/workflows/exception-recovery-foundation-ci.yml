@@ -6,6 +6,8 @@ on:
       - 'apps/studio-api/worker.js'
       - 'apps/studio-api/worker-functions-04.mjs'
       - 'apps/studio-api/failed-output-monitor.mjs'
+      - 'apps/studio-api/approved-past-due-quality.mjs'
+      - 'apps/studio-api/approved-past-due-quality.test.mjs'
       - 'apps/studio-web/assets/exception-recovery.*'
       - 'apps/studio-web/index.html'
       - '.github/workflows/exception-recovery-foundation-ci.yml'
@@ -29,4 +31,4 @@ jobs:
           node --check apps/studio-web/assets/exception-recovery.js
           for file in apps/studio-api/exception-recovery-*.mjs; do node --check "$file"; done
       - name: Census, conversation, preflight, lease, and UI security
-        run: node --test apps/studio-api/exception-recovery-*.test.mjs
+        run: node --test apps/studio-api/exception-recovery-*.test.mjs apps/studio-api/approved-past-due-quality.test.mjs
