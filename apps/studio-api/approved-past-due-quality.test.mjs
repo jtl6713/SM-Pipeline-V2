@@ -171,3 +171,9 @@ test("quality reports, cron and Factory UI are wired to one signature", () => {
   assert.match(factory, /approved_past_due/);
   assert.match(factory, /QA-PUBLISH-001/);
 });
+
+test("QA-PUBLISH-001 excludes failed statuses rather than double-count them as overdue",()=>{
+ const formula=approvedPastDueFormula(now);
+ assert.match(formula,/\{Output_Status\}!="Failed"/);
+ assert.match(formula,/\{Publish_Status\}!="Failed"/);
+});
