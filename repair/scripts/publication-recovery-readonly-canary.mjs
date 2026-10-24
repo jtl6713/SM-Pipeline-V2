@@ -53,7 +53,10 @@ try {
   report.authoritative_state_unchanged=JSON.stringify(recoverySnapshot(after))===JSON.stringify(report.before);
   report.blocked_reason=recoveryBlock(after,Date.now())||receiptBlock(after,report.receipt,Date.now())||
     (!report.authoritative_state_unchanged?"authoritative_state_changed":null);
-  report.verified=report.receipt.verified_public?1:0;
+  report.delivery_verified=report.receipt.verified_delivery===true
+    && report.receipt.ownership_verified===true ? 1 : 0;
+  report.public_visibility_verified=report.receipt.verified_public===true ? 1 : 0;
+  report.verified=report.delivery_verified; // Studio completion is delivery, not necessarily public visibility.
   report.blocked=report.blocked_reason?1:0;
   report.canary_status=report.blocked_reason?"blocked":"verified_eligible_pending_explicit_approval";
 } catch(error) {
