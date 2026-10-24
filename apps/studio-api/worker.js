@@ -6112,6 +6112,8 @@ const DESK_OUTPUT_IDENTITY_KINDS = new Set([
 /*__STUDIO_WORKER_EXTRACT:getStudioExceptionRecoveryCenter__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioExceptionRecoveryConversation__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioExceptionRecoveryPreflight__*/
+/*__STUDIO_WORKER_EXTRACT:studioPublicationRecoveryCron__*/
+/*__STUDIO_WORKER_EXTRACT:getStudioPublicationRecoveryHistory__*/
  /*__STUDIO_WORKER_EXTRACT:getStudioExceptionRecoveryReceipt__*/
  /*__STUDIO_WORKER_EXTRACT:getStudioExceptionRecoveryCounts__*/
  /*__STUDIO_WORKER_EXTRACT:runStudioExceptionRecoveryAction__*/
