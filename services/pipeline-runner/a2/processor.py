@@ -259,41 +259,44 @@ def _intake_pass(
                             )
                             skipped_errors.append(file_id)
                     continue
-                shared = drive.share_anyone_reader(file_id)
-                share_url = str(shared.get("webContentLink") or shared.get("webViewLink") or "")
                 if size > MAX_FILE_BYTES:
                     skipped_oversize.append(file_id)
                     continue
-                created = create_intake_records(
-                    client,
-                    _intake_fields(item, share_url=share_url, batch_id=batch_id),
-                )
-                record_id = created[0]["id"] if created else ""
                 route = classify_intake_file(name, mime)
-                dest = GDRIVE_FOLDERS[route]
-                moved = drive.move_file(file_id, dest, remove_parent_id=GDRIVE_INGESTION_FOLDER)
-                moved_id = str(moved.get("id") or file_id)
-                overlay = a2_route_fields(route, name, moved_id)
+                screen = None
                 if media_requires_screen(name, mime, route):
-                    # A2 never publishes or releases visual media before this check.
-                    # Keep the Drive source even if flagged; Do_Not_Use gates selection.
+                    # Preflight BEFORE sharing the original publicly or moving it.
                     try:
-                        source_bytes, _source_mime = drive.download_file(moved_id)
+                        source_bytes, _source_mime = drive.download_file(file_id)
                         screen = screen_asset(
                             content=source_bytes, filename=name,
                             mime_type=mime or _source_mime,
                         )
                     except Exception:
-                        logger.exception("A2 visual provenance scan failed for %s", moved_id)
+                        logger.exception("A2 visual provenance scan failed for %s", file_id)
                         screen = {
                             "decision": "review",
                             "indicators": [],
                             "evidence": "Visual screen could not inspect the source",
                             "frames_checked": 0,
                         }
-                    overlay["Do_Not_Use"] = screen["decision"] != "clean"
+                approved_visual = screen is None or screen["decision"] == "clean"
+                shared = drive.share_anyone_reader(file_id) if approved_visual else {}
+                share_url = str(shared.get("webContentLink") or shared.get("webViewLink") or "")
+                created = create_intake_records(
+                    client,
+                    _intake_fields(item, share_url=share_url, batch_id=batch_id),
+                )
+                record_id = created[0]["id"] if created else ""
+                dest = GDRIVE_FOLDERS[route]
+                moved = drive.move_file(file_id, dest, remove_parent_id=GDRIVE_INGESTION_FOLDER)
+                moved_id = str(moved.get("id") or file_id)
+                overlay = a2_route_fields(route, name, moved_id)
+                if screen is not None:
+                    overlay["Do_Not_Use"] = not approved_visual
                     overlay["Potential_Match_Notes"] = screening_note(screen)
-                    if screen["decision"] != "clean":
+                    if not approved_visual:
+                        overlay["Drive_Access_Status"] = "Private"
                         overlay["Raw_Source_Eligibility"] = (
                             "Ineligible" if screen["decision"] == "blocked" else "Needs Review"
                         )
