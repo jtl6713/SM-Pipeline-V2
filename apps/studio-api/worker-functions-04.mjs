@@ -23,6 +23,7 @@ import { FB3_ACTION, RECEIPT_REPAIR_ACTION, executeFb3AdminRecovery, executeAppr
 import { actionApprovalAudit, actionOutcomeAudit } from "./exception-recovery-action-audit.mjs";
 import { exceptionRecoveryMutationsEnabled } from "./exception-recovery-rollout.mjs";
 import { verifyAuthenticatedYouTubeReceipt } from "./exception-recovery-authenticated-receipt.mjs";
+import { contentIdForRecoveryOutput, verifyRecoveryProfileChain, withVerifiedRecoveryProfile } from "./exception-recovery-profile-chain.mjs";
 import { runPublicationRecovery, publicationRecoveryStatus, readRecoveryState, recoveryStateKey } from "./exception-recovery-background.mjs";
 import { recoveryAuditFields, normalizeRecoveryHistory } from "./exception-recovery-history.mjs";
 import { RECOVERY_SIGNATURE, recoverySnapshot } from "./exception-recovery-autonomous.mjs";
@@ -9959,16 +9960,49 @@ async function exceptionRecoveryReadProvider(env, row) {
     YOUTUBE_API_KEY:settings.YOUTUBE_API_KEY || env.YOUTUBE_API_KEY,
   }});
 }
-async function exceptionRecoveryReadAuthenticatedProvider(env,row) {
-  const ids=row.fields?.Content_Profile;
-  if(!Array.isArray(ids)||ids.length!==1) return {verified_public:false,evidence:"ambiguous_profile"};
-  const profile=await airtableFetch(env,STUDIO_IDEA_PROFILE_TABLE_ID,ids[0]);
-  if(profile?.id!==ids[0]) return {verified_public:false,evidence:"authoritative_profile_missing"};
-  const settings=await studioActivePipelineSettings(env,
-    ["YOUTUBE_UPLOAD_SERVICE_URL","YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET"],profile);
-  return verifyAuthenticatedYouTubeReceipt(row,{settings,
-    expectedChannelId:profile.fields?.YouTube_Channel_ID});
+/**
+ * Resolve the authoritative Airtable identity chain, never the
+ * Platform Output.Content_Profile lookup label:
+ * Platform Output.Content_Item -> Content Item.Content_Profile -> Profile.
+ * Every read of an output for the autonomous status-only reconciler uses this.
+ */
+async function exceptionRecoveryReadVerifiedOutput(env,recordId) {
+  const row=await airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,recordId);
+  if(!row?.id||row.id!==recordId)throw new Error("authoritative_recovery_output_unavailable");
+  const contentId=contentIdForRecoveryOutput(row);
+  if(!contentId)throw new Error("recovery_content_link_missing_or_ambiguous");
+  const content=await airtableFetch(env,env.AIRTABLE_CONTENT_TABLE_ID,contentId);
+  const links=content?.fields?.Content_Profile;
+  if(!Array.isArray(links)||links.length!==1||!RECOVERY_RECORD_ID.test(String(links[0]||"")))
+    throw new Error("recovery_profile_link_missing_or_ambiguous");
+  const profile=await airtableFetch(env,STUDIO_IDEA_PROFILE_TABLE_ID,links[0]);
+  const chain=verifyRecoveryProfileChain(row,content,profile);
+  if(!chain.ok)throw new Error(chain.reason||"authoritative_profile_link_unverified");
+  return {row:withVerifiedRecoveryProfile(row,chain),profile,profile_id:chain.profile_id};
 }
+async function exceptionRecoveryReadAuthenticatedProvider(env,row) {
+  if(!row?.id||!RECOVERY_RECORD_ID.test(row.id))
+    return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"invalid_output_identity"};
+  // Re-fetch the output and its ownership chain after any queued-worker delay.
+  // A stale discovery row must never authorize a different profile's token.
+  let source;
+  try {source=await exceptionRecoveryReadVerifiedOutput(env,row.id);}
+  catch {return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"authoritative_profile_unavailable"};}
+  if(JSON.stringify(recoverySnapshot(source.row))!==JSON.stringify(recoverySnapshot(row)))
+    return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"output_state_changed_before_provider_get"};
+  let settings;
+  try {
+    settings=await studioActivePipelineSettings(env,
+      ["YOUTUBE_UPLOAD_SERVICE_URL","YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET","YOUTUBE_CHANNEL_ID"],source.profile);
+  }catch {return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"profile_settings_unavailable"};}
+  const profileChannel=String(source.profile?.fields?.YouTube_Channel_ID||"").trim();
+  const scopedChannel=String(settings?.YOUTUBE_CHANNEL_ID||"").trim();
+  if(profileChannel&&scopedChannel&&profileChannel!==scopedChannel)
+    return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"profile_channel_setting_conflict"};
+  const expectedChannelId=profileChannel||scopedChannel;
+  return verifyAuthenticatedYouTubeReceipt(source.row,{settings,expectedChannelId});
+}
+
 async function appendPublicationRecoveryAudit(env,event) {
   const fields=recoveryAuditFields(event);
   const options={filterFormula:'{Event_Key}="'+fields.Event_Key+'"',limit:2};
@@ -10001,7 +10035,7 @@ export async function studioPublicationRecoveryCron(env) {
       if(!page.valid) throw new Error("recovery_discovery_incomplete");
       return page;
     },
-    readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+    readOutput:async id=>(await exceptionRecoveryReadVerifiedOutput(env,id)).row,
     verifyRemote:row=>exceptionRecoveryReadAuthenticatedProvider(env,row),
     appendAudit:event=>appendPublicationRecoveryAudit(env,event),
     patchStatus:(row,fields)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,row.id,{
