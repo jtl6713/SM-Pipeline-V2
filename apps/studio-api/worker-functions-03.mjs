@@ -1241,7 +1241,7 @@ export async function runWaitingIdeaPhotoMatches(env, { limit = 8 } = {}) {
             reason: "matcher_error",
             // Safe structured HTTP class for QA and retry triage; never place
             // provider URLs, secrets or raw exception messages in Airtable.
-            error_http_status: safeFailure.error_status,
+            error_http_status: Number(error?.status || error?.statusCode || 0) || null,
             error_category: safeFailure.error_category,
             error_detail: safeFailure.error_detail,
           }) } }),
