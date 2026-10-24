@@ -4791,6 +4791,7 @@ const STUDIO_TRISTATE = new Set(["Use Profile Default", "Yes", "No"]);
 /*__STUDIO_WORKER_EXTRACT:unfinishedIntakeBatchIds__*/
 /*__STUDIO_WORKER_EXTRACT:applyLibraryAssetsToProductionRequest__*/
 /*__STUDIO_WORKER_EXTRACT:evaluateAndMaybeAttachWaitingIdeaPhotos__*/
+/*__STUDIO_WORKER_EXTRACT:matchNewlyCreatedIdeaPhotos__*/
 /*__STUDIO_WORKER_EXTRACT:runWaitingIdeaPhotoMatches__*/
 /*__STUDIO_WORKER_EXTRACT:listContent__*/
 const OUTPUT_LIST_FIELDS = [
