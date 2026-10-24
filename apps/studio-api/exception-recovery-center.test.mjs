@@ -97,3 +97,16 @@ test("profile, platform and category filters affect rows, not unverified global 
     profile_id: "recChicagoProfile", platform: "youtube", category: "approved_past_due",
   });
 });
+
+test("verified recovery missing value stays unknown even when scan claims ok", () => {
+ const partial=snap({
+  verification_recovery:{status:"ok",items:[],counts:{recovered_automatically:null}},
+ });
+ assert.equal(buildExceptionRecoveryCenter(partial).metrics.resolved_last_7_days.observed,null);
+});
+test("overlapping past-due row with missing profile does not erase failed identity",()=>{
+ const data=snap({items:[failed("recAAAAAAAAAAAAAA",{profile_id:"recChicagoProfile",profile_name:"Chicago"})]});
+ const result=buildExceptionRecoveryCenter(data);
+ assert.equal(result.items[0].profile_name,"Chicago");
+ assert.equal(result.items[0].profile_id,"recChicagoProfile");
+});
