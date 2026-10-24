@@ -173,6 +173,7 @@ def test_repeating_a2b_does_not_create_second_asset(monkeypatch):
             "mimeType": "video/mp4", "size": "1200", "fileExtension": "mp4"}
     drive.list_files.return_value = [item]
     drive.get_file.return_value = item
+    drive.download_file.return_value = (b"sample video", "video/mp4")
     airtable = MagicMock()
     existing = set()
 
