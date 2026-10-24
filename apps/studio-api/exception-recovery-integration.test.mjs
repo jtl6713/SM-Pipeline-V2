@@ -91,6 +91,8 @@ test("UI requires explicit receipt inspection and post-ID confirmation before FB
  assert.match(html,/id="ercReconcileCounts"/);
  assert.match(ui,/ercReconcileCounts.*addEventListener\("click",reconcileAllCounts\)/);
  assert.match(ui,/Verify live provider receipt/);
- assert.match(ui,/window.confirm\("Confirm finalization ONLY of existing Facebook output #"/);
- assert.match(ui,/action:"finalize_existing_facebook_post",confirm_output_id:outputId,confirm_post_id:postId/);
+ assert.match(ui,/window.confirm\(title\+" #"/);
+ assert.match(ui,/action,confirm_output_id:outputId,confirm_post_id:postId/);
+ assert.match(ui,/submitApproved\("finalize_existing_facebook_post",finalize\)/);
+ assert.match(ui,/submitApproved\("reconcile_verified_existing_receipt",repair\)/);
 });
