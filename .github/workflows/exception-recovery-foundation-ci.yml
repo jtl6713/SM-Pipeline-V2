@@ -9,6 +9,7 @@ on:
       - 'apps/studio-api/approved-past-due-quality.mjs'
       - 'apps/studio-api/approved-past-due-quality.test.mjs'
       - 'apps/studio-web/assets/exception-recovery.*'
+      - 'apps/studio-web/exception-recovery-overdue-format.test.mjs'
       - 'apps/studio-web/index.html'
       - '.github/workflows/exception-recovery-foundation-ci.yml'
   workflow_dispatch:
