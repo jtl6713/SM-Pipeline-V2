@@ -94,3 +94,40 @@ Before release verify Worker bundling, Pages, actual live deployment versions,
 all effective gates, the history authorization boundary and persisted audit
 readback. Keep production corrections disabled until explicit canary approval.
 Do not claim the mock suite proves live provider success.
+
+## October 24 read-only integration verification and cleanup
+
+- PR #1120 (read-only Exception Center) is merged. PR #1136 added the
+  Recovery History view; PR #1141 released the Studio 0.6.759 read-only UI.
+  This mainline PR #1142 remains draft until its independent gates pass.
+- Live Airtable output #4092 still has the saved YouTube video
+  `hc1heQnfn6k`, `Review_Status=Approved`, and Publishing/Approved for
+  Publishing states, with the October 23 scheduled handoff date.
+  **These Airtable fields do not independently prove authenticated delivery.**
+- Real record links confirm that Platform Outputs.Content_Profile is a
+  **multipleLookupValues display field**, not the actual Content Profiles
+  link. Before each status-only action, resolve
+  Output.Content_Item → Content Items.Content_Profile → Content Profiles,
+  verify all record IDs, and normalize the ownership identity.
+- The LA Content Profile lacks a populated YouTube_Channel_ID, but active
+  `LA_YOUTUBE_CHANNEL_ID` exists in Pipeline Settings. The Worker and the
+  read-only canary now use the same fail-closed scoped channel resolver; any
+  conflict between both sources blocks the action.
+- The GET-only canary also repeats the authoritative output/content/profile
+  checks after provider readback. If a link or output state changed while
+  the GET was in flight, it blocks rather than treating stale proof as valid.
+- **Unresolved deployment prerequisite:** GitHub Actions cannot currently
+  prepare the Airtable credential for the live read-only canary.
+  The repository secret `AIRTABLE_PAT` must be provisioned with read-only
+  scope (or the maintained encrypted envelope fixed). Never embed a PAT
+  in the workflow, logs, repository, or a ChatGPT conversation.
+  A credential-setup failure is **not** a failed provider GET or evidence
+  of a recovered output.
+- The repository currently contains other long-lived divergent feature
+  branches. Do not delete those solely for a cleaner branch list; independently
+  prove their changes merged or are superseded. Obsolete self-patching
+  workflows were already retired in merged PR #1140.
+
+Do not enable `PUBLICATION_RECONCILIATION_ENABLED`,
+`PUBLICATION_RECONCILIATION_BOUNDED_ENABLED` or administrator action
+mutations on the basis of local mocks or Airtable state alone.
