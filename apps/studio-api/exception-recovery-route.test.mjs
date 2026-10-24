@@ -27,7 +27,7 @@ test("adapter reuses the Quality Agent snapshot without another scheduler", () =
   assert.ok(from > 0 && to > from);
   const section = service.slice(from,to);
   assert.match(section,/loadStudioFailedOutputSnapshot\(env\)/);
-  assert.match(section,/buildExceptionRecoveryCenter\(snapshot\)/);
+  assert.match(section,/buildExceptionRecoveryCenter\(snapshot,\s*\{/);
   assert.doesNotMatch(section,/method:\s*"(PATCH|POST|DELETE)"|airtableFetch|setInterval|studioPublish|retryLimit/);
   assert.match(section,/503/);
 });
