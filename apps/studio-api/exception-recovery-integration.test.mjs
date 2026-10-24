@@ -145,3 +145,15 @@ test("reconciliation captures stable Home generation before and after full censu
  const comparison=section.indexOf("compareHomeSnapshotToExceptionCensus(");
  assert.ok(before>0&&before<scan&&scan<after&&after<comparison);
 });
+
+test("ordinary inventory load uses R2 without launching a full Airtable census",()=>{
+ const section=service.slice(service.indexOf("export async function getStudioExceptionRecoveryCounts"),
+   service.indexOf("/*__STUDIO_WORKER_END:getStudioExceptionRecoveryCounts__*/"));
+ const skip=section.indexOf("if(!fresh)");
+ const cache=section.indexOf("readExceptionRecoveryCensusCache(");
+ const scan=section.indexOf("scanOutstandingFailedOutputs(");
+ assert.ok(skip>0&&cache>skip&&cache<scan);
+ assert.match(section,/No fresh verified census cache is available/);
+ assert.match(section,/persistExceptionRecoveryCensusCache\(env\.STUDIO_MEDIA,data\)/);
+ assert.match(section,/filterFormula:"\{Test_Run_ID\}=BLANK\(\)",pageSize:100,requireUnique:true/);
+});
