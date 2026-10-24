@@ -12339,6 +12339,7 @@ async function reconcileAutonomousPlanOutputSpillover(env, requestRecord) {
       !== String(f(requestRecord, "Studio_Output_Plan_JSON") || "")) return 0;
   const request = {
     notes: note,
+    active: Boolean(f(latest, "Active")),
     revisionOpen: productionNotesRevisionOpen(note),
     status: String(f(latest, "Request_Status") || "").trim(),
     masterStatus: String(f(latest, "Studio_Master_Asset_Status") || "").trim(),
