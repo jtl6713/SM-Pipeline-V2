@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readUiReleaseContract } from "./ui-release-contract.mjs";
+import { readUiReleaseContract, compareUiVersions } from "./ui-release-contract.mjs";
 
 const dir=path.dirname(fileURLToPath(import.meta.url));
 const source=fs.readFileSync(path.join(dir,"assets/exception-recovery.js"),"utf8");
@@ -32,10 +32,17 @@ test("list and selected output detail use the same formatter",()=>{
  assert.match(source,/detailField\(dl,"Overdue",formatOverdueAge\(item\.minutes_past_due\)\)/);
  assert.doesNotMatch(source,/minutes_past_due\+"m overdue"/);
 });
-test("Studio Pages UI version, core bundle ID and asset cache keys remain consistent",()=>{
+test("Studio Pages UI version, core bundle ID and asset cache keys remain consistent",()=> {
  const release=readUiReleaseContract(html,app);
- assert.equal(release.version,"0.6.758");
- assert.equal(release.cacheKey,"0.6.758-exception-recovery");
- assert.equal(release.expectedBuildId,"item4-0.6.758-exception-recovery");
- assert.match(html,/exception-recovery\.js\?v=0\.6\.758-exception-recovery&age=hm-v1/);
+ // Require the Exception Recovery release or newer. Do not pin an old
+ // exact version and block every subsequent legitimate Pages release.
+ assert.ok(compareUiVersions(release.version,"0.6.758") >= 0,
+   "Exception Recovery requires Studio UI 0.6.758 or newer");
+ assert.equal(release.expectedBuildId,`item4-${release.cacheKey}`);
+ const asset=html.match(/\/assets\/exception-recovery\.js\?[^"'<>\\s]+/);
+ assert.ok(asset,"Exception Recovery UI asset is missing from Pages");
+ const url=new URL(asset[0],"https://studio.invalid");
+ assert.equal(url.searchParams.get("v"),release.cacheKey);
+ assert.equal(url.searchParams.get("age"),"hm-v1",
+   "Elapsed overdue age formatter must retain cache invalidation parameter");
 });
