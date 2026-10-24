@@ -45,7 +45,8 @@ test("Approved ready-master requests join idempotent dispatch without overriding
   assert.match(eligibility, /Studio_Master_Asset_Count/);
   assert.match(eligibility, /productionNotesRevisionOpen/);
   assert.match(eligibility, /Candidate_Status/);
-  assert.match(eligibility, /productionPhotoWaitAutoOff/);
+  assert.doesNotMatch(eligibility, /&& !productionPhotoWaitAutoOff/,
+    "photo-auto-off must not block Approved ready-master production");
   assert.doesNotMatch(eligibility, /FIND\('origin=autonomous'/);
   const plan = code.slice(
     code.indexOf("function readyProductionIdeaPlan("),
@@ -59,6 +60,10 @@ test("Approved ready-master requests join idempotent dispatch without overriding
   );
   assert.match(claim, /Autonomous_Produce_Enabled/);
   assert.match(claim, /profile_auto_produce_disabled/);
+  assert.match(claim, /manualAssetSelection/);
+  assert.match(claim, /plan\.libraryIds = selectedMasterIds/);
+  assert.match(claim, /if \(!manualAssetSelection\) \{/);
+  assert.match(claim, /productionPhotoWaitAutoOff/);
   assert.match(claim, /readyProductionRequestForIdea/);
   assert.match(claim, /readyProductionFinishClaim/);
 });
