@@ -164,12 +164,25 @@ jobs:
           const previous = fs.readFileSync('/tmp/predeploy-live-index.html', 'utf8');
           const next = fs.readFileSync('apps/studio-web/index.html', 'utf8');
           const marker = 'factory-desk.js?v=0.6.723-profile-fast-music&retry=visible-failed-892&';
-          if (!next.includes(marker) || previous.includes(marker)) {
-            throw new Error('Same-version release is permitted only for the first Factory retry #892 cache change');
+          const oneTimeFactory = next.includes(marker) && !previous.includes(marker)
+            && previous.includes('factory-desk.js?v=0.6.723-profile-fast-music&');
+          // Exception Center is a new admin-only route and two new static assets.
+          // Existing UI bundle and cache key are unchanged, so the only
+          // same-version allowance is the FIRST introduction of these new
+          // paths. A subsequent deployment must increment the UI version.
+          const exceptionJs='exception-recovery.js?v=0.6.757-idea-id-list';
+          const exceptionCss='exception-recovery.css?v=0.6.757-idea-id-list';
+          const oneTimeExceptionCenter = next.includes(exceptionJs)
+            && next.includes(exceptionCss)
+            && !previous.includes('exception-recovery.js?')
+            && !previous.includes('exception-recovery.css?')
+            && next.includes('id="navExceptionRecovery" hidden')
+            && next.includes('id="page-exception-recovery"');
+          if (!oneTimeFactory && !oneTimeExceptionCenter) {
+            throw new Error('Refusing unchanged UI release without a verified first-time additive asset exception');
           }
-          if (!previous.includes('factory-desk.js?v=0.6.723-profile-fast-music&')) {
-            throw new Error('Unexpected live Factory asset; refusing same-version release');
-          }
+          console.log('same_version_first_time_additive_asset='+
+            (oneTimeExceptionCenter?'exception_recovery':'factory_retry'));
           NODE
           else
             node apps/studio-web/ui-release-contract.mjs --assert-newer-than "$LIVE_UI_VERSION"
