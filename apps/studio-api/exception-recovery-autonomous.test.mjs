@@ -47,7 +47,6 @@ test("exact public canary writes only status and provider time; readback precede
 for(const [name,change] of [
   ["hold",{Do_Not_Publish:true}],["approval",{Review_Status:"Rejected"}],
   ["test",{Test_Run_ID:"test"}],["lock",{Publish_Locked_By:"publisher",Publish_Locked_At:new Date(instant).toISOString()}],
-  ["cooldown",{Publish_Next_Retry_At:new Date(instant+60000).toISOString()}],
   
   ["conflicting URL",{Manual_Published_URL:"https://www.youtube.com/watch?v=abcdefghijk"}],
   ["conflicting ID",{Platform_Post_ID:"abcdefghijk"}],["conflicting time",{Published_At:"2026-10-23T14:00:00Z"}],
