@@ -13,7 +13,7 @@
     ["failed","Failed"], ["suspected_duplicates","Suspected duplicates"],
     ["held_deferred","Held / deferred"], ["resolved_last_7_days","Resolved · 7 days"],
   ];
-  const state = { allowed:false, loading:false, payload:null, selected:"", serial:0, threadSerial:0, threadMessages:new Map(), preflights:new Map(), posting:false, pendingRequest:null };
+  const state = { allowed:false, loading:false, payload:null, selected:"", serial:0, threadSerial:0, threadMessages:new Map(), preflights:new Map(), posting:false, pendingRequest:null, selectedBulk:new Set(), bulkBusy:false };
   const elem = (tag, text, cls) => {
     const node = document.createElement(tag);
     if (text != null) node.textContent = String(text);
@@ -59,7 +59,47 @@
       elem("small", [item.profile_name || item.profile_id || "Unknown city",item.platform,item.output_type].filter(Boolean).join(" · ")),
       elem("small",(item.held ? "Held · " : "")+(item.signature || "Quality Agent") + (item.minutes_past_due != null ? " · "+item.minutes_past_due+"m overdue" : "")));
     button.addEventListener("click",()=>{state.selected=item.record_id;render();});
-    return button;
+    const wrap=elem("div",null,"erc-item-wrap");
+    const tick=elem("input");tick.type="checkbox";
+    tick.setAttribute("aria-label","Select output "+(item.output_id||item.record_id)+" for safety preview");
+    tick.checked=state.selectedBulk.has(item.record_id);
+    tick.addEventListener("change",()=>{
+      if(tick.checked&&state.selectedBulk.size>=5) {tick.checked=false; $("ercBulkStatus").textContent="At most five outputs per safety preview.";return;}
+      if(tick.checked)state.selectedBulk.add(item.record_id);
+      else state.selectedBulk.delete(item.record_id);
+      updateBulkButton();
+    });
+    wrap.append(tick,button);
+    return wrap;
+  }
+  function updateBulkButton() {
+    const button=$("ercPreviewSelected");
+    if(!button)return;
+    button.disabled=state.bulkBusy||!state.selectedBulk.size||!state.allowed;
+    button.textContent="Preview selected safety gates ("+state.selectedBulk.size+"/5)";
+  }
+  async function previewSelected() {
+    if(state.bulkBusy||!state.allowed||!state.selectedBulk.size)return;
+    const ids=[...state.selectedBulk].slice(0,5);
+    const host=$("ercBulkResults");const msgHost=$("ercBulkStatus");
+    host.replaceChildren();state.bulkBusy=true;updateBulkButton();
+    msgHost.textContent="Inspecting "+ids.length+" live outputs; no actions are executed…";
+    let unknown=0;
+    for(const id of ids) {
+      const row=elem("div",null,"erc-bulk-row");
+      try{
+        const data=await getJson("/api/admin/exception-recovery/"+id+"/preflight");
+        row.append(elem("strong",(data.output_id?"#"+data.output_id:"Output")+" · "+(data.category||"Unknown")),
+          elem("p",safePreflightText(data)));
+      }catch(error) {
+        unknown++;
+        row.append(elem("strong","Output safety unavailable"),
+          elem("p","Preflight failed for "+id+". No action is authorized. "+String(error.message||error)));
+      }
+      host.append(row);
+    }
+    state.bulkBusy=false;updateBulkButton();
+    msgHost.textContent="Reviewed "+ids.length+" outputs ("+unknown+" unavailable). This is inspection only; publishing and state changes remain disabled.";
   }
   function freshClientRequestId() {
     if (typeof crypto?.randomUUID === "function") return crypto.randomUUID().replace(/-/g,"");
@@ -215,6 +255,7 @@
     if(!items.length)state.selected="";
     if(!items.length)listing.append(elem("p","No results in the observed inventory. Some categories are not yet connected."));
     for(const item of items)listing.append(listItem(item));
+    updateBulkButton();
     renderDetail(items.find(i=>i.record_id===state.selected)||null);
   }
   async function load() {
@@ -246,6 +287,7 @@
   });
   for(const select of [profiles,platform,category])select.addEventListener("change",render);
   refresh.addEventListener("click",load);
+  $("ercPreviewSelected")?.addEventListener("click",previewSelected);
   // Light role check; server-side authorization still gates every data endpoint.
   getJson("/api/session").then(session=>{
     const permissions=session?.permissions;
