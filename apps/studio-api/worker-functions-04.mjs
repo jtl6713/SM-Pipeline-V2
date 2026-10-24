@@ -12,7 +12,6 @@ import { scanApprovedPastDueOutputs, classifyApprovedPastDue, STALE_PUBLISHED_RE
 import { QUALITY_RECOVERY_LEDGER_TABLE, persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { scanOutstandingFailedOutputs, describeFailedOutput, facebookRateLimitResetReason } from "./failed-output-monitor.mjs";
 import { buildExceptionRecoveryCenter } from "./exception-recovery-center.mjs";
-import { normalizeRecoveryHistory } from "./exception-recovery-history.mjs";
 import { EXCEPTION_MESSAGES_TABLE, RECOVERY_RECORD_ID, prepareRecoveryConversationMessage, normalizeRecoveryConversation } from "./exception-recovery-conversation.mjs";
 import { assessRecoveryPreflight } from "./exception-recovery-preflight.mjs";
 import { withExceptionConversationLock } from "./exception-recovery-lock.mjs";
@@ -23,6 +22,11 @@ import { readExceptionRecoveryCensusCache, persistExceptionRecoveryCensusCache }
 import { FB3_ACTION, RECEIPT_REPAIR_ACTION, executeFb3AdminRecovery, executeApprovedReceiptRepair } from "./exception-recovery-actions.mjs";
 import { actionApprovalAudit, actionOutcomeAudit } from "./exception-recovery-action-audit.mjs";
 import { exceptionRecoveryMutationsEnabled } from "./exception-recovery-rollout.mjs";
+import { verifyAuthenticatedYouTubeReceipt } from "./exception-recovery-authenticated-receipt.mjs";
+import { contentIdForRecoveryOutput, verifyRecoveryProfileChain, withVerifiedRecoveryProfile, verifiedRecoveryChannelId } from "./exception-recovery-profile-chain.mjs";
+import { runPublicationRecovery, publicationRecoveryStatus, readRecoveryState, recoveryStateKey } from "./exception-recovery-background.mjs";
+import { recoveryAuditFields, normalizeRecoveryHistory } from "./exception-recovery-history.mjs";
+import { RECOVERY_SIGNATURE, recoverySnapshot, recoveryBlock, receiptBlock } from "./exception-recovery-autonomous.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
 import { readStudioProfileSummary, validVerifiedStudioSummary } from "./profile-summary-controller.mjs";
@@ -9837,7 +9841,12 @@ export async function getStudioExceptionRecoveryCenter(request, env) {
       platform: url.searchParams.get("platform"),
       category: url.searchParams.get("category"),
     });
-    return respond(request, env, view, view.status === "unavailable" ? 503 : 200);
+    const automation=await publicationRecoveryStatus(env).catch(()=>null);
+    const items=await Promise.all((view.items||[]).map(async (item,index)=>({
+      ...item,recovery_worker:index<100?await readRecoveryState(env.STUDIO_MEDIA,recoveryStateKey(item.record_id)).catch(()=>null):null,
+    })));
+    return respond(request, env, {...view,items,automation,
+      automation_items_truncated:(view.items||[]).length>100}, view.status === "unavailable" ? 503 : 200);
   } catch (error) {
     console.warn("Exception Recovery Center read-only census unavailable", String(error?.message || error));
     return respond(request, env, {
@@ -9951,25 +9960,105 @@ async function exceptionRecoveryReadProvider(env, row) {
     YOUTUBE_API_KEY:settings.YOUTUBE_API_KEY || env.YOUTUBE_API_KEY,
   }});
 }
-/** Provider GET only. No persisted publication change from this endpoint. */
-export async function getStudioExceptionRecoveryReceipt(request, env) {
-  const id=exceptionRecoveryRecordIdFromPath(new URL(request.url).pathname,"receipt");
-  const row=await airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id);
-  if(!row?.id || row.id!==id) throw new HttpError(404,"Output not found");
-  const receipt=await exceptionRecoveryReadProvider(env,row);
-  return respond(request,env,{
-    ...receipt,record_id:id,output_id:f(row,"Output_ID")||null,
-    instruction:receipt.verified_public
-      ? "Verified remote identity. This GET has not changed the publication record."
-      : "No public publication has been verified. Do not upload or repost on this evidence.",
+/**
+ * Resolve the authoritative Airtable identity chain, never the
+ * Platform Output.Content_Profile lookup label:
+ * Platform Output.Content_Item -> Content Item.Content_Profile -> Profile.
+ * Every read of an output for the autonomous status-only reconciler uses this.
+ */
+async function exceptionRecoveryReadVerifiedOutput(env,recordId) {
+  const row=await airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,recordId);
+  if(!row?.id||row.id!==recordId)throw new Error("authoritative_recovery_output_unavailable");
+  const contentId=contentIdForRecoveryOutput(row);
+  if(!contentId)throw new Error("recovery_content_link_missing_or_ambiguous");
+  const content=await airtableFetch(env,env.AIRTABLE_CONTENT_TABLE_ID,contentId);
+  const links=content?.fields?.Content_Profile;
+  if(!Array.isArray(links)||links.length!==1||!RECOVERY_RECORD_ID.test(String(links[0]||"")))
+    throw new Error("recovery_profile_link_missing_or_ambiguous");
+  const profile=await airtableFetch(env,STUDIO_IDEA_PROFILE_TABLE_ID,links[0]);
+  const chain=verifyRecoveryProfileChain(row,content,profile);
+  if(!chain.ok)throw new Error(chain.reason||"authoritative_profile_link_unverified");
+  return {row:withVerifiedRecoveryProfile(row,chain),profile,profile_id:chain.profile_id};
+}
+async function exceptionRecoveryReadAuthenticatedProvider(env,row) {
+  if(!row?.id||!RECOVERY_RECORD_ID.test(row.id))
+    return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"invalid_output_identity"};
+  // Re-fetch the output and its ownership chain after any queued-worker delay.
+  // A stale discovery row must never authorize a different profile's token.
+  let source;
+  try {source=await exceptionRecoveryReadVerifiedOutput(env,row.id);}
+  catch {return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"authoritative_profile_unavailable"};}
+  // The interactive authenticated GET receives the raw Airtable lookup;
+  // the background reconciler already receives the normalized record.
+  // Neither may skip the fresh output-to-content identity comparison.
+  if(contentIdForRecoveryOutput(row)!==contentIdForRecoveryOutput(source.row))
+    return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"output_content_changed_before_provider_get"};
+  const comparableRow=withVerifiedRecoveryProfile(row,{ok:true,profile_id:source.profile_id});
+  if(JSON.stringify(recoverySnapshot(source.row))!==JSON.stringify(recoverySnapshot(comparableRow)))
+    return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"output_state_changed_before_provider_get"};
+  let settings;
+  try {
+    settings=await studioActivePipelineSettings(env,
+      ["YOUTUBE_UPLOAD_SERVICE_URL","YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET","YOUTUBE_CHANNEL_ID"],source.profile);
+  }catch {return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"profile_settings_unavailable"};}
+  const channel=verifiedRecoveryChannelId(source.profile,settings);
+  if(!channel.ok)
+    return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:channel.reason};
+  // Match the existing uploader client credential resolution. The URL and
+  // expected channel stay profile-scoped; this service key authenticates the
+  // configured uploader and never substitutes another profile's channel.
+  return verifyAuthenticatedYouTubeReceipt(source.row,{settings:{
+    ...settings,YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET:
+      settings.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET||env.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET||"",
+  },expectedChannelId:channel.channel_id});
+}
+
+async function appendPublicationRecoveryAudit(env,event) {
+  const fields=recoveryAuditFields(event);
+  const options={filterFormula:'{Event_Key}="'+fields.Event_Key+'"',limit:2};
+  const existing=await listRecordsPage(env,EXCEPTION_MESSAGES_TABLE,options);
+  if(!existing.valid) throw new Error("audit_lookup_unavailable");
+  if(existing.records.length) {
+    let previous={};
+    try { previous=JSON.parse(existing.records[0].fields?.Intent_JSON||"{}"); } catch {}
+    const equivalentConfirmed=event.outcome==="Corrected"&&previous.outcome==="Corrected"&&
+      previous.attempt_id===event.attempt_id&&previous.record_id===event.record_id&&
+      JSON.stringify(previous.before)===JSON.stringify(event.before)&&
+      JSON.stringify(previous.after)===JSON.stringify(event.after);
+    if(existing.records.length!==1 ||
+      (existing.records[0].fields?.Intent_JSON!==fields.Intent_JSON&&!equivalentConfirmed))
+      throw new Error("audit_identity_conflict");
+    return;
+  }
+  await airtableFetch(env,EXCEPTION_MESSAGES_TABLE,"",{
+    method:"POST",body:JSON.stringify({records:[{fields}],typecast:true}),
+  });
+  const readback=await listRecordsPage(env,EXCEPTION_MESSAGES_TABLE,options);
+  if(!readback.valid || readback.records.length!==1 ||
+    readback.records[0].fields?.Intent_JSON!==fields.Intent_JSON)
+    throw new Error("audit_append_readback_failed");
+}
+export async function studioPublicationRecoveryCron(env) {
+  return runPublicationRecovery(env,{
+    discover:async options=>{
+      const page=await listRecordsPage(env,env.AIRTABLE_OUTPUT_TABLE_ID,{...options,limit:100});
+      if(!page.valid) throw new Error("recovery_discovery_incomplete");
+      return page;
+    },
+    readOutput:async id=>(await exceptionRecoveryReadVerifiedOutput(env,id)).row,
+    verifyRemote:row=>exceptionRecoveryReadAuthenticatedProvider(env,row),
+    appendAudit:event=>appendPublicationRecoveryAudit(env,event),
+    patchStatus:(row,fields)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,row.id,{
+      method:"PATCH",body:JSON.stringify({fields,typecast:true}),
+    }),
   });
 }
-/*__STUDIO_WORKER_END:getStudioExceptionRecoveryReceipt__*/
+/*__STUDIO_WORKER_END:studioPublicationRecoveryCron__*/
 
 export async function getStudioPublicationRecoveryHistory(request,env) {
   const query=new URL(request.url).searchParams;
   const page=await listRecordsPage(env,EXCEPTION_MESSAGES_TABLE,{
-    filterFormula:'OR({Exception_Signature}="AUTONOMOUS-PUBLICATION-RECONCILIATION",{Exception_Signature}="ADMIN_APPROVED_ACTION",{Exception_Signature}="ADMIN_ACTION_OUTCOME")',
+    filterFormula:'OR({Exception_Signature}="'+RECOVERY_SIGNATURE+'",{Exception_Signature}="ADMIN_APPROVED_ACTION",{Exception_Signature}="ADMIN_ACTION_OUTCOME")',
     sortField:"Created_At",sortDirection:"desc",limit:100,
     offset:query.get("cursor")||undefined,
   });
@@ -9977,9 +10066,38 @@ export async function getStudioPublicationRecoveryHistory(request,env) {
   const items=normalizeRecoveryHistory(page.records,Object.fromEntries(query));
   return respond(request,env,{read_only:true,source:"airtable_exception_recovery_audit",
     items,next_cursor:page.offset||null,filtered_page:true,
-    automation:{policy:{inspect:false,mutate:false},runtime:null}});
+    automation:await publicationRecoveryStatus(env)});
 }
 /*__STUDIO_WORKER_END:getStudioPublicationRecoveryHistory__*/
+
+/** Provider GET only. No persisted publication change from this endpoint. */
+export async function getStudioExceptionRecoveryReceipt(request, env) {
+  const id=exceptionRecoveryRecordIdFromPath(new URL(request.url).pathname,"receipt");
+  const row=await airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id);
+  if(!row?.id || row.id!==id) throw new HttpError(404,"Output not found");
+  const receipt=new URL(request.url).searchParams.get("authenticated")==="1"
+    ?await exceptionRecoveryReadAuthenticatedProvider(env,row)
+    :await exceptionRecoveryReadProvider(env,row);
+  let verification=null;
+  if(new URL(request.url).searchParams.get("authenticated")==="1") {
+    const after=(await exceptionRecoveryReadVerifiedOutput(env,id)).row;
+    const before=withVerifiedRecoveryProfile(row,{ok:true,profile_id:after.fields.Content_Profile[0]});
+    const unchanged=JSON.stringify(recoverySnapshot(before))===JSON.stringify(recoverySnapshot(after));
+    const blockedReason=!unchanged?"authoritative_state_changed":
+      recoveryBlock(after,Date.now())||receiptBlock(after,receipt,Date.now());
+    verification={authoritative_state_unchanged:unchanged,before:recoverySnapshot(before),
+      after:recoverySnapshot(after),eligible:!blockedReason,blocked_reason:blockedReason,
+      no_output_write:true};
+  }
+  return respond(request,env,{
+    ...receipt,record_id:id,output_id:f(row,"Output_ID")||null,verification,
+    instruction:receipt.verified_public
+      ? "Verified remote identity. This GET has not changed the publication record."
+      : "No public publication has been verified. Do not upload or repost on this evidence.",
+  });
+}
+/*__STUDIO_WORKER_END:getStudioExceptionRecoveryReceipt__*/
+
 
 export async function getStudioExceptionRecoveryCounts(request, env) {
   const url=new URL(request.url);
@@ -10061,6 +10179,13 @@ export async function runStudioExceptionRecoveryAction(request, env, authorizati
     if(existing.some(item=>item.event_key===approvalAudit.Event_Key)){
       return {status:"already_processed_request",reason:"approval_key_already_saved_inspect_state",record_id:id};
     }
+    const auditBefore=await airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id);
+    const auditContext={output_id:String(f(auditBefore,"Output_ID")||""),
+      title:String(f(auditBefore,"Output_Title")||f(auditBefore,"Title_Text")||""),
+      profile_id:f(auditBefore,"Content_Profile")?.[0]||null,
+      platform:f(auditBefore,"Platform"),before:recoverySnapshot(auditBefore),
+      detected_at:new Date().toISOString()};
+    approvalAudit.Intent_JSON=JSON.stringify({...JSON.parse(approvalAudit.Intent_JSON),...auditContext});
     const committed=await airtableFetch(env,EXCEPTION_MESSAGES_TABLE,"",{
       method:"POST",body:JSON.stringify({records:[{fields:approvalAudit}],typecast:true}),
     });
@@ -10094,10 +10219,16 @@ export async function runStudioExceptionRecoveryAction(request, env, authorizati
     let auditOutcomeRecorded=false;
     try{
       const event=actionOutcomeAudit(approvalAudit,{status:outcome.status,reason:outcome.reason});
+      const auditAfter=await airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id);
+      event.Intent_JSON=JSON.stringify({...JSON.parse(event.Intent_JSON),...auditContext,
+        after:recoverySnapshot(auditAfter),duration_ms:Date.now()-Date.parse(auditContext.detected_at),
+        corrected_at:outcome.status==="verified_published"?new Date().toISOString():null});
       const saved=await airtableFetch(env,EXCEPTION_MESSAGES_TABLE,"",{
         method:"POST",body:JSON.stringify({records:[{fields:event}],typecast:true}),
       });
-      auditOutcomeRecorded=Array.isArray(saved?.records)&&saved.records.length===1;
+      const outcomeReadback=await studioExceptionConversationRead(env,id);
+      auditOutcomeRecorded=Array.isArray(saved?.records)&&saved.records.length===1&&
+        outcomeReadback.some(item=>item.event_key===event.Event_Key);
     }catch(error){
       console.warn("Exception approved-action outcome audit deferred",String(error?.message||error).slice(0,120));
     }
@@ -16963,3 +17094,5 @@ export async function factoryBatchCronResume(env, ctx = null) {
   return selected.length;
 }
 /*__STUDIO_WORKER_END:factoryBatchCronResume__*/
+
+

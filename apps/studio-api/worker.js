@@ -699,6 +699,7 @@ import {
   getStudioExceptionRecoveryReceipt,
   getStudioExceptionRecoveryCounts,
   getStudioPublicationRecoveryHistory,
+  studioPublicationRecoveryCron,
   runStudioExceptionRecoveryAction,
   getStudioDeskActivity,
   getStudioAiApiStatus,
@@ -1112,7 +1113,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.681-producer-conversation" + "-home-v6-fast-cache" + "-home-summary-v6-shadow",
+          version: "0.10.681-producer-conversation" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1",
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
           quality_durable_recovery_ledger_v1: true,
@@ -2560,6 +2561,15 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
+    // One bounded listener on the EXISTING minute cron. Independent deployment
+    // flags govern verification and status correction; no publisher is called.
+    if (String(event?.cron || "").trim() === "* * * * *" &&
+        env.PUBLICATION_RECONCILIATION_SCAN_ENABLED === "true" &&
+        airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioPublicationRecoveryCron(env)
+        .then(result => console.info("Publication reconciliation",result))
+        .catch(() => console.warn("Publication reconciliation unavailable; no success assumed")));
+    }
     // Dedicated one-minute Factory recovery and Ready-to-produce dispatch.
     // Do not run the expensive Studio light/heavy cron sweep for these ticks.
     // Both paths retain their own bounded, per-profile concurrency controls.
@@ -6104,6 +6114,7 @@ const DESK_OUTPUT_IDENTITY_KINDS = new Set([
 /*__STUDIO_WORKER_EXTRACT:getStudioExceptionRecoveryPreflight__*/
  /*__STUDIO_WORKER_EXTRACT:getStudioExceptionRecoveryReceipt__*/
  /*__STUDIO_WORKER_EXTRACT:getStudioExceptionRecoveryCounts__*/
+/*__STUDIO_WORKER_EXTRACT:studioPublicationRecoveryCron__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioPublicationRecoveryHistory__*/
  /*__STUDIO_WORKER_EXTRACT:runStudioExceptionRecoveryAction__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioDeskInventory__*/
@@ -6587,3 +6598,4 @@ export {
   TIKTOK_COMPLETE_ERRORS,
   YOUTUBE_COMPLETE_ERRORS,
 };
+
