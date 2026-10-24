@@ -548,7 +548,7 @@ jobs:
               if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !failedOutputCensus && !qualityFacebookPreview && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic && !summary && !summaryReconcile) return new Response("Not found", {status:404});
               const generation = String(url.searchParams.get("generation") || "");
               const path = qualityFacebookPreview ? "/api/operations/outputs/" + previewOutputId + "/schedule"
-                : readyProductionDiagnostic ? "/api/admin/ready-production-diagnostic"
+                : readyProductionDiagnostic ? "/api/admin/ready-production-diagnostic" + (url.searchParams.get("ideas") ? "?ideas=" + encodeURIComponent(url.searchParams.get("ideas")) : "")
                 : overviewRefresh ? "/api/profiles/overview/refresh"
                 : overviewStatus ? "/api/profiles/overview/refresh-status"
                 : summaryReconcile ? "/api/profiles/overview/summary/reconcile"
@@ -937,6 +937,16 @@ jobs:
           # Never claim incident closure based on an accessible diagnostic route.
           # The heartbeat may be absent: that is precisely the runtime evidence.
           jq -c '{heartbeat, jobs}' /tmp/ready-production-diagnostic.json
+          # Read existing R2 jobs for each key profile without mutating records.
+          # In particular, these three master-ready Drafts should not be marked
+          # healthy merely because the old completed canaries are healthy.
+          TARGETS="rec0vF6sXMezZIhWQ,rec7YWfCWZEMA7sCd,recI69eD9p2wFhOLx,recjeoGFgKv5GnUrQ"
+          CODE=$(curl -sS --max-time 60 -o /tmp/ready-production-city-jobs.json -w '%{http_code}' "${URL}?ideas=${TARGETS}" || true)
+          if [[ "$CODE" != "200" ]] || ! jq -e '.ok==true and .read_only==true and (.jobs|length)==4' /tmp/ready-production-city-jobs.json >/dev/null 2>&1; then
+            echo "Multi-profile Ready-production read-only diagnostic unavailable http=$CODE" >&2
+            exit 1
+          fi
+          jq -c '{multi_profile_job_evidence:[.jobs[]|{idea_id,found,status,stage,attempts,last_error,updated_at,next_attempt_ms}], cron:{status:.heartbeat.status,stage:.heartbeat.stage,claimed:.heartbeat.claimed,discovered:.heartbeat.discovered,results:.heartbeat.results}}' /tmp/ready-production-city-jobs.json
 
       - name: Delete functional verification bridge
         if: always()
