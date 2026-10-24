@@ -4,7 +4,7 @@
  * A bucket is NOT a canonical Home metric until classification parity is proved.
  */
 const str = (x) => String(x ?? "").trim();
-const finite = (x) => Number.isFinite(Number(x)) ? Number(x) : null;
+const finite = (x) => x == null || x === "" ? null : (Number.isFinite(Number(x)) ? Number(x) : null);
 const has = (x) => Boolean(str(x));
 const isHeld = (row) => row?.fields?.Do_Not_Publish === true || row?.Do_Not_Publish === true;
 
