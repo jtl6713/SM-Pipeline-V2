@@ -192,7 +192,10 @@ def test_repeating_a2b_does_not_create_second_asset(monkeypatch):
     airtable.upsert_record.side_effect = upsert
     monkeypatch.setattr("a2b.processor.GoogleDriveClient", lambda: drive)
     monkeypatch.setattr("a2b.processor.AirtableClient", lambda: airtable)
-
+    monkeypatch.setattr("a2b.processor.screen_asset", lambda **_kw: {
+        "decision": "clean", "indicators": [],
+        "evidence": "No embedded overlays", "frames_checked": 5,
+    })
     first = process_request()
     second = process_request()
     assert first["backfill_count"] == 1
