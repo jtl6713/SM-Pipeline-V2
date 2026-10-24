@@ -171,3 +171,60 @@ test("Factory action controls are visually hidden when the DOM hidden property i
     assert.match(html, new RegExp(`id="${id}"[^>]*\\bhidden\\b`), `${id} must start hidden before the first activity fetch`);
   }
 });
+
+test("Factory navigation stays above active rows; collapsing preserves live totals", () => {
+  const html = readFileSync(join(here, "index.html"), "utf8");
+  const panel = html.slice(html.indexOf('id="factoryBatchActivity"'), html.indexOf('id="factoryBatchQuality"'));
+  const rowAt = panel.indexOf('id="factoryBatchRecentList"');
+  assert.ok(rowAt > 0);
+  for (const id of ["factoryBatchRefresh", "factoryBatchCompletedToggle", "factoryBatchActiveCollapse",
+    "factoryBatchCompletedClose", "factoryBatchCompletedPrev", "factoryBatchCompletedNext"]) {
+    const at = panel.indexOf('id="' + id + '"');
+    assert.ok(at >= 0 && at < rowAt, id + " must precede the batch list");
+  }
+  assert.match(panel, /id="factoryBatchActiveCollapse"[^>]*aria-expanded="true"[^>]*aria-controls="factoryBatchRecentList factoryBatchDetails"/);
+  assert.ok(source.includes('$("factoryBatchActiveCollapse")?.addEventListener("click"'));
+  const {state,nodes,render} = viewHarness();
+  const active = {view:"active",batches:[{...job("fg_active","First"), status:"running", pending_count:4}],
+    totals:{batches:1,active:1,approved:20,pending:4,failed:0}};
+  render(active);
+  assert.equal(nodes.factoryBatchRecentList.hidden,false);
+  state.activeApprovalsCollapsed = true;
+  render(active);
+  assert.equal(nodes.factoryBatchRecentList.hidden,true);
+  assert.equal(nodes.factoryBatchDetails.hidden,true);
+  assert.equal(nodes.factoryBatchInspect.hidden,true);
+  assert.equal(nodes.factoryBatchRetry.hidden,true);
+  assert.equal(nodes.factoryBatchActiveCollapse.textContent,"Expand list");
+  assert.match(nodes.factoryBatchSummary.textContent,/4 pending/);
+  assert.equal(nodes.factoryBatchMetricValue.textContent,"1");
+  render(active); // Status polling must not expand the list.
+  assert.equal(nodes.factoryBatchRecentList.hidden,true);
+  state.completedOpen=true;
+  render({view:"completed",batches:[job("fg_complete","Done")],has_more:false});
+  assert.equal(nodes.factoryBatchRecentList.hidden,false);
+  assert.equal(nodes.factoryBatchCompletedPage.hidden,true,"No pagination for a single completed page");
+  assert.equal(nodes.factoryBatchCompletedClose.hidden,false);
+  state.completedOpen=false;
+  render(active);
+  assert.equal(nodes.factoryBatchRecentList.hidden,true,"Returning to active restores collapsed state");
+  state.activeApprovalsCollapsed=false;
+  render(active);
+  assert.equal(nodes.factoryBatchRecentList.hidden,false);
+  assert.equal(nodes.factoryBatchActiveCollapse.textContent,"Collapse list");
+});
+
+test("Completed pagination is only visible when more than one page exists", () => {
+  const {state,nodes,render}=viewHarness();
+  render({view:"active",batches:[],totals:{batches:0}});
+  state.completedOpen=true;
+  render({view:"completed",batches:[job("fg_one","Completed")],has_more:true});
+  assert.equal(nodes.factoryBatchCompletedPage.hidden,false);
+  assert.equal(nodes.factoryBatchCompletedNext.hidden,false);
+  assert.equal(nodes.factoryBatchCompletedPrev.hidden,true);
+  state.completedOffset=20;
+  render({view:"completed",batches:[job("fg_two","Older")],has_more:false});
+  assert.equal(nodes.factoryBatchCompletedPage.hidden,false);
+  assert.equal(nodes.factoryBatchCompletedNext.hidden,true);
+  assert.equal(nodes.factoryBatchCompletedPrev.hidden,false);
+});
