@@ -9818,7 +9818,12 @@ export async function gatherStudioDeskInventory(env) {
 export async function getStudioExceptionRecoveryCenter(request, env) {
   try {
     const snapshot = await loadStudioFailedOutputSnapshot(env);
-    const view = buildExceptionRecoveryCenter(snapshot);
+    const url = new URL(request.url);
+    const view = buildExceptionRecoveryCenter(snapshot, {
+      profile_id: url.searchParams.get("profile_id"),
+      platform: url.searchParams.get("platform"),
+      category: url.searchParams.get("category"),
+    });
     return respond(request, env, view, view.status === "unavailable" ? 503 : 200);
   } catch (error) {
     console.warn("Exception Recovery Center read-only census unavailable", String(error?.message || error));
