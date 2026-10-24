@@ -34,6 +34,7 @@ test("default gates are OFF and existing administrator gate cannot activate auto
 test("exact public canary writes only status and provider time; readback precedes success",async()=>{
   const f=fixture();const result=await reconcilePublication(f.deps);
   assert.equal(result.outcome,"Corrected");assert.equal(f.writes,1);assert.equal(f.reads,4);
+  assert.equal(result.completion_kind,"public_publication_verified");
   assert.equal(f.row.fields.Scheduled_Post_Date,"2026-10-23T12:00:00Z");
   assert.equal(f.row.fields.Published_At,f.receipt.published_at);
   assert.equal(f.audits[0].phase,"intent");assert.equal(f.audits[1].outcome,"Corrected");
@@ -199,6 +200,8 @@ test("private processed delivery with no public URL closes Studio handoff, never
   f.receipt.summary={privacy_status:"private",upload_status:"processed"};
   const done=await reconcilePublication(f.deps);
   assert.equal(done.outcome,"Corrected");
+  assert.equal(done.completion_kind,"studio_delivery_completed");
+  assert.equal(done.provider_visibility,"private");
   assert.equal(f.row.fields.Output_Status,"Awaiting Public Release");
   assert.equal(f.row.fields.Publish_Status,"Published Privately");
   assert.equal(f.row.fields.YouTube_Stage,"Complete");
