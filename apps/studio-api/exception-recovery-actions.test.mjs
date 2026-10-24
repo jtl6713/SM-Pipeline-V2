@@ -77,3 +77,16 @@ test("receipt repair refuses private, missing-ID, held and untrusted URL cases",
  }
  assert.equal(writes,0);
 });
+
+test("secondary ledger outage never converts a verified status repair into unsafe retry",async()=>{
+ let current=row({Review_Status:"Approved",Published_At:"2026-10-23T00:00:00Z",Platform_Post_URL:"https://www.facebook.com/page/posts/987654321"});
+ const result=await executeApprovedReceiptRepair({
+  recordId:id,approval:{action:RECEIPT_REPAIR_ACTION,confirm_output_id:"3374",confirm_post_id:"123456789_987654321"},
+  readOutput:async()=>current,
+  verifyRemote:async()=>({verified_public:true,remote_id:"123456789_987654321",platform:"Facebook",permalink:"https://www.facebook.com/page/posts/987654321"}),
+  patchStatus:async(_r,fields)=>{current=row({...current.fields,...fields});},
+  appendLedger:async()=>{throw Error("Airtable ledger temporary outage");},
+ });
+ assert.equal(result.status,"verified_published");
+ assert.equal(result.durable_recovery_recorded,false);
+});
