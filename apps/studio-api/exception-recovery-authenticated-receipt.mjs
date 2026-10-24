@@ -7,8 +7,9 @@ export async function verifyAuthenticatedYouTubeReceipt(row, {
   settings = {}, expectedChannelId, fetcher = fetch, now = Date.now,
 } = {}) {
   const at = new Date(now()).toISOString();
-  const deny = evidence => ({verified_public:false, ownership_verified:false,
-    platform:"YouTube", evidence, checked_at:at, read_only:true});
+  const deny = (evidence, provider_diagnostic) => ({verified_public:false, ownership_verified:false,
+    platform:"YouTube", evidence, checked_at:at, read_only:true,
+    ...(provider_diagnostic ? {provider_diagnostic} : {})});
   const f = row?.fields || {};
   const profiles = f.Content_Profile;
   if(f.Platform !== "YouTube") return deny("provider_not_enabled");
@@ -27,19 +28,46 @@ export async function verifyAuthenticatedYouTubeReceipt(row, {
   } catch { return deny("profile_service_unavailable"); }
   const secret = settings.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET;
   if(!secret) return deny("profile_service_auth_missing");
-  const get = async path => {
-    const response = await fetcher(base.href.replace(/\/$/,"") + path, {
-      method:"GET", redirect:"error", signal:AbortSignal.timeout(10000),
-      headers:{"X-SM-Pipeline-Key":secret, Accept:"application/json"},
-    });
-    if(!response.ok) throw new Error("provider_readback_rejected");
-    return response.json();
+  // HTTP, redirect, timeout and JSON failures must be distinguishable without
+  // ever returning credentials, response headers/locations, or upstream bodies.
+  let stage = "oauth_status";
+  const safe = (category, http_status = null, redirect = false) =>
+    ({stage, category, http_status, redirect});
+  const fault = (category, status = null, redirect = false) =>
+    Object.assign(new Error("authenticated_provider_read_failed"),
+      {safe_diagnostic:safe(category, status, redirect)});
+  const get = async (path, nextStage) => {
+    stage = nextStage;
+    let response;
+    try {
+      response = await fetcher(base.href.replace(/\/$/,"") + path, {
+        method:"GET", redirect:"manual", signal:AbortSignal.timeout(10000),
+        headers:{"X-SM-Pipeline-Key":secret, Accept:"application/json"},
+      });
+    } catch (error) {
+      throw fault(["TimeoutError","AbortError"].includes(error?.name)
+        ? "timeout" : "network_or_transport_error");
+    }
+    const status = Number.isInteger(response?.status) ? response.status : null;
+    // Never follow redirects: they can cross an authentication boundary.
+    if(response?.type === "opaqueredirect" || (status >= 300 && status < 400))
+      throw fault("redirect_rejected",status,true);
+    if(response?.ok !== true) throw fault("http_rejected",status);
+    let result;
+    try { result = await response.json(); }
+    catch { throw fault("invalid_json",status); }
+    if(!result || typeof result !== "object" || Array.isArray(result))
+      throw fault("invalid_response_shape",status);
+    return result;
   };
   try {
-    const owner = await get("/youtube/oauth/status");
+    const owner = await get("/youtube/oauth/status","oauth_status");
+    if(typeof owner.refresh_ok !== "boolean" || typeof owner.channel_identity_ok !== "boolean" ||
+       typeof owner.channel_id !== "string") throw fault("invalid_response_shape");
     if(owner.refresh_ok !== true || owner.channel_identity_ok !== true ||
        owner.channel_id !== expectedChannelId) return deny("authenticated_channel_mismatch");
-    const result = await get("/youtube/videos/" + id);
+    const result = await get("/youtube/videos/" + id,"video_details");
+    if(!Array.isArray(result.items)) throw fault("invalid_response_shape");
     const video = Array.isArray(result.items) && result.items.length === 1 ? result.items[0] : null;
     if(video?.id !== id) return deny("video_missing_deleted_or_inaccessible");
     if(video.snippet?.channelId !== expectedChannelId) return deny("video_channel_mismatch");
@@ -70,6 +98,8 @@ export async function verifyAuthenticatedYouTubeReceipt(row, {
         "oauth_owned_channel_exact_processed_delivery", read_only:true,
       summary:{privacy_status:video.status.privacyStatus,upload_status:video.status.uploadStatus,
         scheduled_at:video.status?.publishAt||null,channel_id:expectedChannelId}};
-  } catch { return deny("authenticated_provider_unavailable"); }
+  } catch (error) {
+    return deny("authenticated_provider_unavailable",error?.safe_diagnostic || safe("unexpected_failure"));
+  }
 }
 
