@@ -179,11 +179,20 @@ jobs:
             && !previous.includes('exception-recovery.css?')
             && next.includes('id="navExceptionRecovery" hidden')
             && next.includes('id="page-exception-recovery"');
-          if (!oneTimeFactory && !oneTimeExceptionCenter) {
+          // One-time in-place Exception Recovery UI refresh. The only HTML
+          // change must be its cache URL: old app bundle, UI version, CSS,
+          // navigation and every other asset remain byte-for-byte identical.
+          const olderAgeTag='exception-recovery.js?v=0.6.758-exception-recovery"';
+          const newerAgeTag='exception-recovery.js?v=0.6.758-exception-recovery&age=hm-v1"';
+          const oneTimeOverdueFormat=previous.includes(olderAgeTag)
+            && !previous.includes(newerAgeTag)
+            && next.includes(newerAgeTag)
+            && next.replace(newerAgeTag,olderAgeTag)===previous;
+          if (!oneTimeFactory && !oneTimeExceptionCenter && !oneTimeOverdueFormat) {
             throw new Error('Refusing unchanged UI release without a verified first-time additive asset exception');
           }
           console.log('same_version_first_time_additive_asset='+
-            (oneTimeExceptionCenter?'exception_recovery':'factory_retry'));
+            (oneTimeOverdueFormat?'exception_overdue_format':oneTimeExceptionCenter?'exception_recovery':'factory_retry'));
           NODE
           else
             node apps/studio-web/ui-release-contract.mjs --assert-newer-than "$LIVE_UI_VERSION"
