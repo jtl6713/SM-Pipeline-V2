@@ -12825,7 +12825,7 @@ export async function studioAutonomousOpenAiPick(env, prompt) {
 }
 /*__STUDIO_WORKER_END:studioAutonomousOpenAiPick__*/
 
-export async function createAutonomousIdea(env, profile, pick) {
+export async function createAutonomousIdea(env, profile, pick, ctx = null) {
   const duplicateTitle = await studioFindRecentDuplicateTitle(pick.candidate_title, (kind, formula, field) => {
     const table = kind === "idea" ? env.AIRTABLE_IDEA_TABLE_ID : env.AIRTABLE_CONTENT_TABLE_ID;
     if (!table) throw new HttpError(503, "Title history unavailable: autonomous creation blocked");
@@ -12854,13 +12854,30 @@ export async function createAutonomousIdea(env, profile, pick) {
     Production_Include_Thumbnail: "Yes",
     Production_Config_Notes: `origin=autonomous\nmedia_asset_ids=${(pick.media_asset_ids || []).join(",")}\ncited_trend=${pick.cited_trend || ""}\ncluster=${pick.cluster_label || ""}\n${pick.why_this_should_work || ""}`.slice(0, 3000),
   };
-  if (pick.needs_assets || !(pick.media_asset_ids || []).length) {
+  const missingLibraryAssets = !(pick.media_asset_ids || []).length;
+  if (pick.needs_assets || missingLibraryAssets) {
     fields.Studio_Photo_Wait_Status = "Waiting";
+    fields.Production_Carousel_Image_Mode = "Manual Upload";
+    fields.Production_Carousel_Slide_Count_Mode = "Target range";
+    fields.Production_Carousel_Slide_Count_Min = pick.content_type === "Feed Post" ? 1 : 5;
+    fields.Production_Carousel_Slide_Count_Max = pick.content_type === "Carousel" ? 8 : 10;
+    fields.Production_Carousel_Slide_Count = fields.Production_Carousel_Slide_Count_Max;
   }
-  return airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, "", {
+  const created = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, "", {
     method: "POST",
     body: JSON.stringify({ fields, typecast: true }),
   });
+  // Preserve any explicitly picked media. An idea with no library assets
+  // gets an immediate search; the Waiting queue retries in case of cooldown.
+  if (missingLibraryAssets && ctx?.waitUntil) {
+    ctx.waitUntil((async () => {
+      const authorization = await resolveStudioCronAuthorization(env);
+      return matchNewlyCreatedIdeaPhotos(env, created, authorization);
+    })().catch((error) => {
+      console.warn("Autonomous new Idea photo match failed", created.id, String(error?.message || error).slice(0, 180));
+    }));
+  }
+  return created;
 }
 /*__STUDIO_WORKER_END:createAutonomousIdea__*/
 
@@ -13591,7 +13608,7 @@ export async function fillAutonomousCityIdeas(env, authorization, {
     let savedThis = false;
     for (let attempt = 0; attempt < 3 && !savedThis; attempt += 1) {
       try {
-        if (!idea) idea = await createAutonomousIdea(env, profile, pick);
+        if (!idea) idea = await createAutonomousIdea(env, profile, pick, ctx);
         if ((pick.media_asset_ids || []).length) {
           if (!requestRecord) {
             const defaults = productionRequestDefaultsFromIdea(idea);
@@ -14395,7 +14412,7 @@ export async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     return result;
   }
 
-  const idea = await createAutonomousIdea(env, profile, pick);
+  const idea = await createAutonomousIdea(env, profile, pick, ctx);
   const defaults = productionRequestDefaultsFromIdea(idea);
   const profileSettings = mapOperationsProfile(profile);
   const narration = resolveAutonomousNarrationVoice(profileSettings, {
