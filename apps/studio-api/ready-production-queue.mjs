@@ -179,17 +179,24 @@ export async function readyProductionRead(bucket, ideaId) {
   return (await read(bucket, readyProductionJobKey(ideaId)))?.value || null;
 }
 
-export async function readyProductionList(bucket, { maxScan = 500 } = {}) {
+/**
+ * Scan one bounded segment of the durable job index. A persistent cursor in the
+ * dispatcher rotates segments between minutes; always reading the first 500
+ * objects stranded jobs once the index grew beyond that size.
+ */
+export async function readyProductionListPage(bucket, { maxScan = 500, cursor = null } = {}) {
   assertBucket(bucket);
   const prefix = `${READY_PRODUCTION_PREFIX}/jobs/`;
   const jobs = [];
-  let cursor;
+  const cap = Math.max(1, Math.min(1000, Math.trunc(Number(maxScan) || 500)));
+  let scanCursor = String(cursor || "").trim() || null;
+  let nextCursor = null;
   let scanned = 0;
   do {
     const page = await bucket.list({
       prefix,
-      limit: Math.min(1000, Math.max(1, maxScan - scanned)),
-      ...(cursor ? { cursor } : {}),
+      limit: Math.min(1000, cap - scanned),
+      ...(scanCursor ? { cursor: scanCursor } : {}),
     });
     const objects = page.objects || [];
     scanned += objects.length;
@@ -197,15 +204,27 @@ export async function readyProductionList(bucket, { maxScan = 500 } = {}) {
     for (const entry of loaded) {
       if (entry?.value?.schema === READY_PRODUCTION_SCHEMA) jobs.push(entry.value);
     }
-    if (!page.truncated || scanned >= maxScan) break;
-    if (!page.cursor || page.cursor === cursor) throw Error("Ready-to-produce R2 listing cursor stalled");
-    cursor = page.cursor;
-  } while (cursor);
-  return jobs.sort((left, right) => {
+    if (!page.truncated) {
+      nextCursor = null; // Full pass completed; next minute starts at the head.
+      break;
+    }
+    if (!page.cursor || page.cursor === scanCursor) {
+      throw Error("Ready-to-produce R2 listing cursor stalled");
+    }
+    scanCursor = page.cursor;
+    nextCursor = scanCursor;
+  } while (scanned < cap);
+  jobs.sort((left, right) => {
     const a = Date.parse(left.created_at || left.updated_at || "") || 0;
     const b = Date.parse(right.created_at || right.updated_at || "") || 0;
     return a - b || String(left.idea_id).localeCompare(String(right.idea_id));
   });
+  return { jobs, nextCursor, scanned };
+}
+
+/** Backwards-compatible list for callers that need the first bounded page. */
+export async function readyProductionList(bucket, options = {}) {
+  return (await readyProductionListPage(bucket, options)).jobs;
 }
 
 export function readyProductionSelectJobs(jobs, {
