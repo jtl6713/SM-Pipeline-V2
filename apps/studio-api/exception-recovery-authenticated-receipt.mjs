@@ -50,6 +50,17 @@ export async function verifyAuthenticatedYouTubeReceipt(row, {
     const published = Date.parse(video.snippet?.publishedAt);
     if(publicNow && (!Number.isFinite(published) || published > now()))
       return deny("publication_timestamp_unverified");
+    // A private, processed video is a valid Studio handoff. If Studio has
+    // already recorded an explicit YouTube schedule, the provider must confirm
+    // the same publishAt; successful upload alone cannot prove scheduling.
+    const expectedSchedule=Date.parse(f.YouTube_Scheduled_Publish_At||"");
+    const providerSchedule=Date.parse(video.status?.publishAt||"");
+    if(Number.isFinite(expectedSchedule) && (
+      !Number.isFinite(providerSchedule) ||
+      Math.abs(providerSchedule-expectedSchedule)>1000))
+      return deny("scheduled_handoff_mismatch");
+    if(Number.isFinite(providerSchedule) && providerSchedule<=now() && !publicNow)
+      return deny("provider_scheduled_release_overdue");
     return {platform:"YouTube", verified_public:publicNow, verified_delivery:true, ownership_verified:true,
       profile_id:profiles[0], channel_id:expectedChannelId, remote_id:id,
       permalink:"https://www.youtube.com/watch?v=" + id,
@@ -57,6 +68,7 @@ export async function verifyAuthenticatedYouTubeReceipt(row, {
       scheduled_at:video.status?.publishAt||null, checked_at:new Date(now()).toISOString(),
       evidence:publicNow?"oauth_owned_channel_exact_public_processed_video":
         "oauth_owned_channel_exact_processed_delivery", read_only:true,
-      summary:{privacy_status:"public", upload_status:"processed", channel_id:expectedChannelId}};
+      summary:{privacy_status:video.status.privacyStatus,upload_status:video.status.uploadStatus,
+        scheduled_at:video.status?.publishAt||null,channel_id:expectedChannelId}};
   } catch { return deny("authenticated_provider_unavailable"); }
 }
