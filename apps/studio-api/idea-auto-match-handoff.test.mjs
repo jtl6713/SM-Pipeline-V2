@@ -3,58 +3,55 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 
-const root = new URL("./", import.meta.url);
-const read = (file) => readFileSync(new URL(file, root), "utf8");
+const read = (name) => readFileSync(new URL(name, import.meta.url), "utf8");
 
-test("manual Idea creation persists Waiting before async kickoff and retains successful create on error", () => {
+test("manual creation persists Waiting and schedules safe matching", () => {
   const source = read("worker-functions-01.mjs");
   const fn = source.split("export async function createIdea(")[1].split("/*__STUDIO_WORKER_END:createIdea__*/")[0];
-  assert.match(fn, /Studio_Photo_Wait_Status: "Waiting"/);
-  assert.match(fn, /Production_Carousel_Slide_Count_Min: 5/);
-  assert.ok(fn.indexOf('Studio_Photo_Wait_Status: "Waiting"') < fn.indexOf("const created = await airtableFetch"));
-  assert.match(fn, /ctx\\?\\.waitUntil\\(matchNewlyCreatedIdeaPhotos\\(env, created, authorization\\)/);
-  assert.match(fn, /New Idea immediate photo match failed/);
-  assert.match(read("worker.js"), /return createIdea\\(request, env, authorization, ctx\\);/);
+  assert.ok(fn.includes('Studio_Photo_Wait_Status: "Waiting"'));
+  assert.ok(fn.includes('Production_Carousel_Slide_Count_Min: 5'));
+  assert.ok(fn.indexOf('Studio_Photo_Wait_Status: "Waiting"') < fn.indexOf('const created = await airtableFetch'));
+  assert.ok(fn.includes('ctx.waitUntil(matchNewlyCreatedIdeaPhotos(env, created, authorization)'));
+  assert.ok(fn.includes('New Idea immediate photo match failed'));
+  assert.ok(read("worker.js").includes("return createIdea(request, env, authorization, ctx);"));
 });
 
-test("assetless automatic generation receives same immediate matching without replacing chosen assets", () => {
+test("assetless autonomous generation matches immediately but retains chosen media", () => {
   const source = read("worker-functions-04.mjs");
   const fn = source.split("export async function createAutonomousIdea(")[1]
     .split("/*__STUDIO_WORKER_END:createAutonomousIdea__*/")[0];
-  assert.match(fn, /const missingLibraryAssets = !\\(pick\\.media_asset_ids/);
-  assert.match(fn, /Studio_Photo_Wait_Status = "Waiting"/);
-  assert.match(fn, /if \\(missingLibraryAssets && ctx\\?\\.waitUntil\\)/);
-  assert.match(fn, /matchNewlyCreatedIdeaPhotos\\(env, created, authorization\\)/);
-  assert.match(source, /createAutonomousIdea\\(env, profile, pick, ctx\\)/);
+  assert.ok(fn.includes('const missingLibraryAssets = !(pick.media_asset_ids || []).length;'));
+  assert.ok(fn.includes('Studio_Photo_Wait_Status = "Waiting"'));
+  assert.ok(fn.includes('if (missingLibraryAssets && ctx?.waitUntil)'));
+  assert.ok(fn.includes('matchNewlyCreatedIdeaPhotos(env, created, authorization)'));
+  assert.ok(source.includes('createAutonomousIdea(env, profile, pick, ctx)'));
 });
 
-test("matching reuses the guarded evaluator and sends Ready into idempotent production queue", () => {
+test("guarded matcher performs idempotent handoff to ready production queue", () => {
   const source = read("worker-functions-03.mjs");
   const fn = source.split("export async function matchNewlyCreatedIdeaPhotos(")[1]
     .split("/*__STUDIO_WORKER_END:matchNewlyCreatedIdeaPhotos__*/")[0];
-  assert.match(fn, /Candidate_Status/);
-  assert.match(fn, /Promoted_Content_Record_ID/);
-  assert.match(fn, /force: false/);
-  assert.match(fn, /evaluateAndMaybeAttachWaitingIdeaPhotos/);
+  for(const key of ["Candidate_Status", "Promoted_Content_Record_ID", "force: false", "evaluateAndMaybeAttachWaitingIdeaPhotos"]) {
+    assert.ok(fn.includes(key), key);
+  }
   const evaluator = source.split("export async function evaluateAndMaybeAttachWaitingIdeaPhotos(")[1]
     .split("/*__STUDIO_WORKER_END:evaluateAndMaybeAttachWaitingIdeaPhotos__*/")[0];
-  assert.match(evaluator, /shouldAttachPhotoWaitAssets/);
-  assert.match(evaluator, /readyProductionEnqueue\\(env\\.STUDIO_MEDIA/);
-  assert.match(evaluator, /ideaId: ideaReady\\.id/);
-  assert.match(evaluator, /Photo-ready production enqueue deferred/);
+  for(const key of ["shouldAttachPhotoWaitAssets", "readyProductionEnqueue(env.STUDIO_MEDIA", "ideaId: ideaReady.id", "Photo-ready production enqueue deferred"]) {
+    assert.ok(evaluator.includes(key), key);
+  }
   const output = readStudioWorkerSource();
-  assert.match(output, /matchNewlyCreatedIdeaPhotos/);
-  assert.match(output, /readyProductionEnqueue/);
+  assert.ok(output.includes("matchNewlyCreatedIdeaPhotos"));
+  assert.ok(output.includes("readyProductionEnqueue"));
 });
 
-test("cron retains retry and human-only final publishing approval", () => {
+test("one-minute production dispatch retains leases and human approval gate", () => {
   const source = read("worker-functions-04.mjs");
   const fn = source.split("async function studioReadyProductionCronResume(")[1]
     .split("export { studioReadyProductionCronResume };")[0];
-  assert.match(fn, /readyProductionClaim/);
-  assert.match(fn, /processReadyProductionClaim/);
-  assert.match(fn, /final_approval: "human_only"/);
+  for(const key of ["readyProductionClaim", "processReadyProductionClaim", 'final_approval: "human_only"']) {
+    assert.ok(fn.includes(key), key);
+  }
   const worker = read("worker.js");
-  assert.match(worker, /studioReadyProductionCronResume\\(env, ctx\\)/);
-  assert.match(worker, /runWaitingIdeaPhotoMatches\\(env, \\{ limit: 2 \\}\\)/);
+  assert.ok(worker.includes("studioReadyProductionCronResume(env, ctx)"));
+  assert.ok(worker.includes("runWaitingIdeaPhotoMatches(env, { limit: 2 })"));
 });
