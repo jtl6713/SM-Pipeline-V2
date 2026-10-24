@@ -25,6 +25,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Verify authoritative output-to-profile ownership contract
+        run: node --test apps/studio-api/exception-recovery-profile-chain.test.mjs apps/studio-api/exception-recovery-autonomous.test.mjs
+
       - name: Prepare existing read-only audit credentials
         shell: bash
         run: |
