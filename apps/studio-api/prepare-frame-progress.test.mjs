@@ -76,6 +76,11 @@ test("Variant GET remains safe if no manifest has been stored yet", () => {
 });
 
 test("Production's lazy loader points at the corrected cached asset", () => {
-  assert.match(app, /BUILD_ID = "item4-0\.6\.755-producer-entry"/);
-  assert.match(index, /app-item4-1008\.js\?v=0\.6\.755-producer-entry/);
+  // The UI build increments independently of the Prepare progress feature.
+  // The compiled module and lazy URL must carry the SAME cache identity.
+  const moduleBuild = app.match(/BUILD_ID\s*=\s*"item4-(0\.6\.[^"]+)"/)?.[1];
+  const lazyBuild = index.match(/app-item4-1008\.js\?v=(0\.6\.[^&"'\s]+)/)?.[1];
+  assert.ok(moduleBuild, "Prepare progress module should declare its release BUILD_ID");
+  assert.ok(lazyBuild, "Studio should point to a versioned Prepare progress module");
+  assert.equal(lazyBuild, moduleBuild);
 });
