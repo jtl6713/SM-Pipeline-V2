@@ -10009,6 +10009,8 @@ export async function studioPublicationRecoveryCron(env) {
     }),
   });
 }
+/*__STUDIO_WORKER_END:studioPublicationRecoveryCron__*/
+
 export async function getStudioPublicationRecoveryHistory(request,env) {
   const query=new URL(request.url).searchParams;
   const page=await listRecordsPage(env,EXCEPTION_MESSAGES_TABLE,{
@@ -10022,6 +10024,8 @@ export async function getStudioPublicationRecoveryHistory(request,env) {
     items,next_cursor:page.offset||null,filtered_page:true,
     automation:await publicationRecoveryStatus(env)});
 }
+/*__STUDIO_WORKER_END:getStudioPublicationRecoveryHistory__*/
+
 /** Provider GET only. No persisted publication change from this endpoint. */
 export async function getStudioExceptionRecoveryReceipt(request, env) {
   const id=exceptionRecoveryRecordIdFromPath(new URL(request.url).pathname,"receipt");
