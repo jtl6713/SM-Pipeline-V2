@@ -448,8 +448,9 @@
         applyCanonicalCensus(census);
         msg(state.payload.warning);
       } catch(censusError) {
-        if(serial===state.serial)msg("Complete source census unavailable. Showing provisional Quality Agent observations only. "+
-          String(censusError.message||censusError),true);
+        if(serial===state.serial)msg("Displaying provisional Quality Agent findings. "+
+          "For a complete source inventory, select Reconcile all-profile counts (read-only). "+
+          String(censusError.message||censusError));
       }
     }catch(e){
       if(serial!==state.serial)return;
