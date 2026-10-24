@@ -44,11 +44,10 @@ export function recoveryBlock(row, nowMs) {
   if(p.held) return "intentional_hold";
   if(!p.approved) return "approval_changed";
   if(p.lock_active) return "active_publish_lock";
-  // Never change status during an authoritative provider cooldown. Read-only
-  // verification remains available, but the publisher's retry clock is preserved.
-  if(p.cooldown_until) return "provider_cooldown";
-  // Publisher attempt counts are never reset or incremented by this
-  // status-only reconciler; this path never dispatches a remote upload.
+  // Dispatch cooldowns and retry ceilings remain authoritative to the
+  // publisher. Status-only reconciliation may close an already-delivered
+  // original post after fresh authenticated identity/ownership verification;
+  // it never uploads/retries or resets publisher attempt counters.
   if(!Array.isArray(row.fields.Content_Profile) || row.fields.Content_Profile.length !== 1)
     return "ambiguous_profile";
   if(str(row,"Platform") !== "YouTube") return "provider_not_enabled_for_autonomous_correction";
