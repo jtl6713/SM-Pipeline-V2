@@ -11,6 +11,7 @@
     batch: null,
     completedBatch: null,
     completedOpen: false,
+    activeApprovalsCollapsed: false,
     completedOffset: 0,
     completedLoading: false,
     batchTimer: null,
@@ -420,6 +421,7 @@
     const updated = $("factoryBatchUpdated");
     const listHeading = $("factoryBatchListHeading");
     const toggle = $("factoryBatchCompletedToggle");
+    const collapse = $("factoryBatchActiveCollapse");
     const close = $("factoryBatchCompletedClose");
     const prev = $("factoryBatchCompletedPrev");
     const next = $("factoryBatchCompletedNext");
@@ -440,14 +442,21 @@
     if (count) count.textContent = String(state.batch?.totals?.batches || 0);
     if (listHeading) listHeading.textContent = state.completedOpen ? "Completed approvals" : "Active approvals";
     if (toggle) {
-      toggle.textContent = state.completedOpen ? "Back to Active Batches" : "Completed Batches";
+      toggle.hidden = state.completedOpen;
+      toggle.textContent = "Completed Batches";
       toggle.setAttribute("aria-pressed", String(state.completedOpen));
+    }
+    const listCollapsed = !state.completedOpen && state.activeApprovalsCollapsed;
+    if (collapse) {
+      collapse.hidden = state.completedOpen;
+      collapse.textContent = listCollapsed ? "Expand list" : "Collapse list";
+      collapse.setAttribute("aria-expanded", String(!listCollapsed));
     }
     if (close) close.hidden = !state.completedOpen;
     if (prev) prev.hidden = !state.completedOpen || state.completedOffset === 0;
     if (next) next.hidden = !state.completedOpen || !viewed?.has_more;
     if (page) {
-      page.hidden = !state.completedOpen || !viewed;
+      page.hidden = !state.completedOpen || !viewed || !(state.completedOffset > 0 || viewed.has_more);
       page.textContent = "Page " + (1 + Math.floor(state.completedOffset / 20));
     }
     summary.textContent = `${Number(totals.active) || 0} active · ${Number(totals.approved) || 0} approved · ${Number(totals.pending) || 0} pending · ${Number(totals.failed) || 0} failed`;
@@ -458,6 +467,7 @@
     if (state.inspectedBatchKey && !batches.some(row => row.job_id === state.inspectedBatchKey)) {
       state.inspectedBatchKey = latest?.job_id || "";
     }
+    if (recent) recent.hidden = listCollapsed;
     if (recent) recent.innerHTML = batches.length
       ? batches.slice(0, state.completedOpen ? 20 : 40).map(row => {
         const item = (row.items || [])[0] || {};
@@ -490,14 +500,14 @@
         ? (state.completedLoading ? "Loading completed batches…" : "No completed batches in this page.")
         : "No active approval batches. All clear.") + '</p>';
     if (inspect) {
-      inspect.hidden = !latest;
+      inspect.hidden = !latest || listCollapsed;
       inspect.setAttribute("aria-expanded", String(state.batchDetailsOpen));
     }
     if (retry) {
-      retry.hidden = !(latest?.failed_count > 0 && latest?.can_retry);
+      retry.hidden = listCollapsed || !(latest?.failed_count > 0 && latest?.can_retry);
       retry.disabled = state.submittingBatch;
     }
-    details.hidden = !state.batchDetailsOpen || !latest;
+    details.hidden = listCollapsed || !state.batchDetailsOpen || !latest;
     const items = Array.isArray(latest?.items) ? latest.items : [];
     const children = Array.isArray(latest?.children) ? latest.children : [];
     const childrenHtml = children.length ? `<div class="factory-batch-child-grid">${children.map(child => {
@@ -1709,6 +1719,11 @@
     } else renderFactoryBatchActivity(state.batch);
   }
   $("factoryBatchCompletedToggle")?.addEventListener("click", () => setFactoryCompletedOpen(!state.completedOpen));
+  $("factoryBatchActiveCollapse")?.addEventListener("click", () => {
+    if (state.completedOpen) return;
+    state.activeApprovalsCollapsed = !state.activeApprovalsCollapsed;
+    renderFactoryBatchActivity(state.batch);
+  });
   $("factoryBatchCompletedClose")?.addEventListener("click", () => setFactoryCompletedOpen(false));
   $("factoryBatchCompletedPrev")?.addEventListener("click", () => {
     refreshFactoryCompletedBatches(Math.max(0, state.completedOffset - 20)).catch(() => {});
