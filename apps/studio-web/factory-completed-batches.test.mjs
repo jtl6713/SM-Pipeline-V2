@@ -22,7 +22,7 @@ function viewHarness() {
     "factoryBatchSummary", "factoryBatchMetricValue", "factoryBatchRecentList",
     "factoryBatchInspect", "factoryBatchRetry", "factoryBatchDetails",
     "factoryBatchUpdated", "factoryBatchListHeading", "factoryBatchCompletedToggle",
-    "factoryBatchCompletedClose",
+    "factoryBatchCompletedClose", "factoryBatchActiveCollapse",
     "factoryBatchCompletedPrev", "factoryBatchCompletedNext", "factoryBatchCompletedPage",
   ];
   const nodes = Object.fromEntries(ids.map(id => [id, {
@@ -42,7 +42,7 @@ function viewHarness() {
     return buttons;
   };
   const state = {
-    completedOpen: false, completedBatch: null, completedLoading: false,
+    completedOpen: false, activeApprovalsCollapsed: false, completedBatch: null, completedLoading: false,
     completedOffset: 0, batch: null, batchDetailsOpen: true,
     inspectedBatchKey: "", submittingBatch: false,
   };
@@ -69,6 +69,7 @@ test("completed history shows a 24-output batch when active activity has no rows
   const emptyActive = { view:"active",batches:[],totals:{batches:0,active:0,pending:0,approved:0,failed:0} };
   render(emptyActive);
   assert.equal(nodes.factoryBatchCompletedClose.hidden, true, "Close button stays hidden in active view");
+  assert.equal(nodes.factoryBatchActiveCollapse.hidden, false, "Active collapse control is visible");
   assert.equal(nodes.factoryBatchCompletedPrev.hidden, true, "Previous stays hidden in active view");
   assert.equal(nodes.factoryBatchCompletedNext.hidden, true, "Next stays hidden in active view");
   assert.equal(nodes.factoryBatchCompletedPage.hidden, true, "Pagination label stays hidden in active view");
@@ -80,6 +81,8 @@ test("completed history shows a 24-output batch when active activity has no rows
     totals:{batches:1,active:0,approved:24,pending:0,failed:0},has_more:false };
   render(completed);
   assert.equal(nodes.factoryBatchCompletedClose.hidden, false, "Completed view exposes header close button");
+  assert.equal(nodes.factoryBatchActiveCollapse.hidden, true, "Completed history hides active collapse control");
+  assert.equal(nodes.factoryBatchCompletedToggle.hidden, true, "Completed history uses Close rather than duplicate Back button");
   assert.match(nodes.factoryBatchRecentList.innerHTML,/24 approved/);
   assert.match(nodes.factoryBatchRecentList.innerHTML,/24 outputs/);
   assert.doesNotMatch(nodes.factoryBatchRecentList.innerHTML,/No completed batches/);
