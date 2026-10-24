@@ -6,7 +6,7 @@ import { autonomousPlanOutputSpilloverRepair } from "./autonomous-plan-output-re
 const stamp = "2026-10-23T20:27:08.669Z";
 const request = {
   notes: "origin=autonomous\nQuick carousel map of local art\nez-photo-wait=off",
-  revisionOpen: false, promoted: false, status: "Draft",
+  revisionOpen: false, promoted: false, active: true, status: "Draft",
   masterStatus: "Ready", planStatus: "Ready", variantStatus: "Ready",
   masterAssetCount: 8, createdAt: "2026-10-23T20:25:08.669Z",
 };
