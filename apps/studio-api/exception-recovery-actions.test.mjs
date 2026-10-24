@@ -155,3 +155,21 @@ test("a matching profile homepage is not a valid Instagram published media recei
  assert.equal(result.status,"blocked");
  assert.equal(writes,0);
 });
+
+test("a saved permalink changed after provider GET blocks the status patch",async()=>{
+ const approved={action:RECEIPT_REPAIR_ACTION,confirm_output_id:"3374",confirm_post_id:"123456789_987654321"};
+ let reads=0,writes=0;
+ const result=await executeApprovedReceiptRepair({recordId:id,approval:approved,
+   readOutput:async()=>{
+     reads++;
+     return row({Review_Status:"Approved",Published_At:"2026-10-23T00:00:00Z",
+       Platform_Post_URL:"https://www.facebook.com/page/posts/"+(reads===1?"987654321":"111111111")});
+   },
+   verifyRemote:async()=>({verified_public:true,remote_id:approved.confirm_post_id,
+     platform:"Facebook",permalink:"https://www.facebook.com/page/posts/987654321"}),
+   patchStatus:async()=>{writes++;},appendLedger:async()=>{writes++;},
+ });
+ assert.equal(result.status,"blocked");
+ assert.equal(result.reason,"saved_public_receipt_provider_permalink_mismatch");
+ assert.equal(writes,0);
+});
