@@ -29,3 +29,19 @@ export function withVerifiedRecoveryProfile(output, chain) {
     throw new Error("authoritative_profile_link_unverified");
   return {...output,fields:{...output.fields,Content_Profile:[chain.profile_id]}};
 }
+
+/**
+ * A profile may inherit a city-scoped YOUTUBE_CHANNEL_ID when the linked
+ * Content Profiles.YouTube_Channel_ID field is blank. Two different configured
+ * IDs are never arbitrarily preferred: require an explicit administrator fix.
+ */
+export function verifiedRecoveryChannelId(profile, settings = {}) {
+  const direct=String(profile?.fields?.YouTube_Channel_ID||"").trim();
+  const scoped=String(settings?.YOUTUBE_CHANNEL_ID||"").trim();
+  if(direct&&scoped&&direct!==scoped)
+    return {ok:false,reason:"profile_channel_setting_conflict"};
+  const channel_id=direct||scoped;
+  if(!/^UC[A-Za-z0-9_-]{22}$/.test(channel_id))
+    return {ok:false,reason:"expected_profile_channel_not_configured"};
+  return {ok:true,channel_id};
+}
