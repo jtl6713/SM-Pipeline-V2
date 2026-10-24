@@ -1,0 +1,41 @@
+name: Asset third-party overlay screen
+
+on:
+  pull_request:
+    paths:
+      - "services/pipeline-runner/asset/visual_screen.py"
+      - "services/pipeline-runner/studio_library/processor.py"
+      - "services/pipeline-runner/a2/processor.py"
+      - "services/pipeline-runner/a2b/processor.py"
+      - "services/pipeline-runner/tests/test_asset_visual_screen.py"
+      - "services/pipeline-runner/tests/test_studio_library.py"
+      - "services/pipeline-runner/tests/test_a2b_existing_lookup.py"
+      - "apps/studio-api/worker-functions-03.mjs"
+      - "apps/studio-api/asset-third-party-overlay.test.mjs"
+      - ".github/workflows/asset-third-party-overlay-screen.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: |
+          python -m pip install --quiet pytest
+          python -m pip install --quiet -r services/pipeline-runner/requirements.txt
+      - name: Check syntax and targeted Python regressions
+        run: |
+          python -m compileall -q services/pipeline-runner/asset/visual_screen.py services/pipeline-runner/studio_library/processor.py services/pipeline-runner/a2/processor.py services/pipeline-runner/a2b/processor.py
+          PYTHONPATH=services/pipeline-runner python -m pytest -q services/pipeline-runner/tests/test_asset_visual_screen.py services/pipeline-runner/tests/test_studio_library.py services/pipeline-runner/tests/test_a2_intake_dedupe.py services/pipeline-runner/tests/test_a2b_existing_lookup.py
+      - name: Check Studio catalog receipt guard
+        run: node --test apps/studio-api/asset-third-party-overlay.test.mjs

@@ -3010,6 +3010,12 @@ export async function uploadAssetLibraryItems(request, env, authorization, ctx) 
       contentType: item4NormalizedMimeType(file),
       profileName: f(uploadProfile, "Profile_Name") || "",
     });
+    if (drive?.provenance_screen?.decision !== "clean") {
+      throw new HttpError(
+        503,
+        "Asset intake safety check was not confirmed by Pipeline Runner. The asset was not added to the Studio library."
+      );
+    }
     if (studioProfileRequiresChicagoWatermark(uploadProfile) && !drive?.watermarked) {
       throw new HttpError(
         503,
@@ -3044,6 +3050,10 @@ export async function uploadAssetLibraryItems(request, env, authorization, ctx) 
             Asset_Role: isVideo ? "Raw Footage" : "Other",
             Raw_Source_Eligibility: isVideo ? "Eligible" : "Not Applicable",
             Location: location || null,
+            Potential_Match_Notes: drive.provenance_screen?.decision === "clean"
+              ? "QA-ASSET-THIRD-PARTY-OVERLAY: CLEAN; source reviewed before watermark/Drive upload; " +
+                String(drive.provenance_screen?.evidence || "").slice(0, 250)
+              : "QA-ASSET-THIRD-PARTY-OVERLAY: Review required — missing clean receipt",
             Asset_Description: [
               description,
               drive.watermarked

@@ -11,6 +11,7 @@ from asset.constants import GDRIVE_STUDIO_INTAKE_FOLDER, GDRIVE_VIDEO_FOLDER
 from asset.helpers import drive_video_duration_seconds
 from branding.watermark import brand_watermark_bytes, profile_requires_watermark, watermark_media_bytes
 from integrations.google_drive import GoogleDriveClient
+from asset.visual_screen import screen_asset, screening_note
 
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
 MAX_VIDEO_BYTES = 200 * 1024 * 1024
@@ -132,6 +133,19 @@ def ingest_studio_library_asset(
     if len(payload) > spec["max_bytes"]:
         raise ValueError(f"{filename or 'File'} exceeds the upload limit")
 
+    # Screen the source *before* creating a public Drive object or applying our branding.
+    # A suspicious or unscreenable upload remains local and never enters the library.
+    screen = screen_asset(
+        content=payload, filename=filename, mime_type=spec["mime_type"],
+        profile_name=profile_name,
+    )
+    if screen["decision"] != "clean":
+        raise ValueError(
+            f"Asset held for third-party overlay review ({screen['decision']}): "
+            f"{screening_note(screen)}. No asset was uploaded. "
+            "Use a clean source or arrange a manual rights/visual review."
+        )
+
     duration = probe_library_video_duration(payload, filename) if spec["kind"] == "video" else None
     drive = GoogleDriveClient()
     source_file_id = ""
@@ -189,6 +203,7 @@ def ingest_studio_library_asset(
         "source_web_view_link": source_web_view_link or None,
         "source_filename": filename or "asset",
         "source_file_size_bytes": len(payload),
+        "provenance_screen": screen,
     }
 
 
@@ -211,6 +226,15 @@ def watermark_existing_drive_asset(
         }
     content, detected_mime = GoogleDriveClient().download_file(drive_id)
     effective_mime = str(mime_type or detected_mime or "application/octet-stream")
+    screen = screen_asset(
+        content=content, filename=filename, mime_type=effective_mime,
+        profile_name=profile_name,
+    )
+    if screen["decision"] != "clean":
+        raise ValueError(
+            f"Asset held for third-party overlay review ({screen['decision']}): "
+            f"{screening_note(screen)}. No branded derivative was created."
+        )
     spec = classify_library_file(filename=filename or "asset", mime_type=effective_mime)
     branded = _watermark_payload(
         content=content,

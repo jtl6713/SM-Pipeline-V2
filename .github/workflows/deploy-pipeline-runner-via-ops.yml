@@ -297,3 +297,6 @@ jobs:
 # 2026-10-22 QA #1050 source PR #1089: deploy approved-cover retention when C9 final-slides view omitted cover and verify cover regressions.
 
 # 2026-10-23: release I1 partial-create recovery (#1108) with predeployment tests and health readback.
+
+# 2026-10-24: Trigger protected runner rollout for mandatory third-party
+# asset overlay preflight. Health version must prove new code before Studio API cutover.

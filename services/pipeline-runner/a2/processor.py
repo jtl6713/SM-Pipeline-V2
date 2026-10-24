@@ -21,6 +21,7 @@ from asset.constants import (
 )
 from asset.helpers import as_bool, drive_video_duration_seconds, parse_bytes
 from asset.routing import a2_route_fields, classify_intake_file
+from asset.visual_screen import media_requires_screen, screen_asset, screening_note
 from audio.leading_silence import STATUS_FAILED, apply_drive_leading_silence, is_voiceover_audio
 from audio.wav_to_mp3 import apply_drive_wav_to_mp3
 from carousel.timeutil import chicago_now, iso_ms
@@ -98,7 +99,8 @@ def _intake_fields(file: dict[str, Any], *, share_url: str, batch_id: str) -> di
         "Intake_Batch_ID": batch_id,
         "Classification_Status": "Needs Classification",
         "Active": True,
-        "Do_Not_Use": False,
+        # Fail closed while the visual preflight is pending.
+        "Do_Not_Use": media_requires_screen(str(file.get("name") or ""), str(file.get("mimeType") or ""), classify_intake_file(str(file.get("name") or ""), str(file.get("mimeType") or ""))),
         "Capture_Source": "Self Filmed",
         "Rights_Status": "Owned",
         "Drive_Access_Status": "Public",
@@ -257,21 +259,50 @@ def _intake_pass(
                             )
                             skipped_errors.append(file_id)
                     continue
-                shared = drive.share_anyone_reader(file_id)
-                share_url = str(shared.get("webContentLink") or shared.get("webViewLink") or "")
                 if size > MAX_FILE_BYTES:
                     skipped_oversize.append(file_id)
                     continue
+                route = classify_intake_file(name, mime)
+                screen = None
+                if media_requires_screen(name, mime, route):
+                    # Preflight BEFORE sharing the original publicly or moving it.
+                    try:
+                        source_bytes, _source_mime = drive.download_file(file_id)
+                        screen = screen_asset(
+                            content=source_bytes, filename=name,
+                            mime_type=mime or _source_mime,
+                        )
+                    except Exception:
+                        logger.exception("A2 visual provenance scan failed for %s", file_id)
+                        screen = {
+                            "decision": "review",
+                            "indicators": [],
+                            "evidence": "Visual screen could not inspect the source",
+                            "frames_checked": 0,
+                        }
+                approved_visual = screen is None or screen["decision"] == "clean"
+                shared = drive.share_anyone_reader(file_id) if approved_visual else {}
+                share_url = str(shared.get("webContentLink") or shared.get("webViewLink") or "")
                 created = create_intake_records(
                     client,
                     _intake_fields(item, share_url=share_url, batch_id=batch_id),
                 )
                 record_id = created[0]["id"] if created else ""
-                route = classify_intake_file(name, mime)
                 dest = GDRIVE_FOLDERS[route]
                 moved = drive.move_file(file_id, dest, remove_parent_id=GDRIVE_INGESTION_FOLDER)
                 moved_id = str(moved.get("id") or file_id)
                 overlay = a2_route_fields(route, name, moved_id)
+                if screen is not None:
+                    overlay["Do_Not_Use"] = not approved_visual
+                    overlay["Potential_Match_Notes"] = screening_note(screen)
+                    if not approved_visual:
+                        overlay["Drive_Access_Status"] = "Private"
+                        overlay["Raw_Source_Eligibility"] = (
+                            "Ineligible" if screen["decision"] == "blocked" else "Needs Review"
+                        )
+                        overlay["Exclusion_Reasons"] = (
+                            ["Watermarked/Branded"] if screen["indicators"] else ["Other"]
+                        )
                 if route == "audio":
                     try:
                         converted = apply_drive_wav_to_mp3(drive, moved_id, filename=name, mime_type=mime)

@@ -71,6 +71,10 @@ def test_chicagoshining_profile_requires_watermark_only_for_chicago_brand():
 
 
 def test_chicago_library_ingest_preserves_source_and_catalogs_watermarked_derivative(monkeypatch):
+    monkeypatch.setattr("studio_library.processor.screen_asset", lambda **_kwargs: {
+        "decision": "clean", "indicators": [],
+        "evidence": "No overlays found", "frames_checked": 1,
+    })
     calls = []
 
     class _Drive:
@@ -114,6 +118,10 @@ def test_chicago_library_ingest_preserves_source_and_catalogs_watermarked_deriva
 
 
 def test_existing_chicago_asset_gets_watermarked_derivative(monkeypatch):
+    monkeypatch.setattr("studio_library.processor.screen_asset", lambda **_kwargs: {
+        "decision": "clean", "indicators": [],
+        "evidence": "No overlays found", "frames_checked": 1,
+    })
     class _Drive:
         def download_file(self, file_id):
             assert file_id == "rawDrive1"
