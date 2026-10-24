@@ -112,7 +112,30 @@ jobs:
           if "<<<<<<<" in text or ">>>>>>>" in text:
               raise SystemExit("HTML conflict marker remains")
           Path(html).write_text(text)
-          print("resolved=history_constant,worker_cron_and_admin_route,latest_ui_plus_recovery_assets")
+          # A clean textual merge can still introduce duplicate module imports
+          # or two definitions of the same function. Keep the PR's working
+          # autonomous history implementation, not the older disabled stub.
+          api="apps/studio-api/worker-functions-04.mjs"
+          text=Path(api).read_text()
+          duplicate='import { normalizeRecoveryHistory } from "./exception-recovery-history.mjs";\n'
+          combined='import { recoveryAuditFields, normalizeRecoveryHistory } from "./exception-recovery-history.mjs";'
+          if text.count(duplicate)!=1 or text.count(combined)!=1:
+              raise SystemExit("Unexpected autonomous history import layout")
+          text=text.replace(duplicate,"",1)
+          history_pattern=re.compile(
+              r'(?s)export async function getStudioPublicationRecoveryHistory\(request,env\) \{\n'
+              r'.*?\n\}\n/\*__STUDIO_WORKER_END:getStudioPublicationRecoveryHistory__\*/\n')
+          blocks=list(history_pattern.finditer(text))
+          if len(blocks)!=2:
+              raise SystemExit("Expected exactly old read-only stub and new durable-history handler")
+          old=[m for m in blocks if 'automation:{policy:{inspect:false,mutate:false},runtime:null}' in m.group()]
+          new=[m for m in blocks if 'automation:await publicationRecoveryStatus(env)' in m.group()]
+          if len(old)!=1 or len(new)!=1:raise SystemExit("History implementation changed unexpectedly")
+          text=text[:old[0].start()]+text[old[0].end():]
+          if text.count("export async function getStudioPublicationRecoveryHistory(")!=1:
+              raise SystemExit("Duplicate history handler remains")
+          Path(api).write_text(text)
+          print("resolved=history_constant,worker_cron_and_admin_route,latest_ui_plus_recovery_assets,history_api_stub")
           PY
           git add -A
           test -z "$(git diff --name-only --diff-filter=U)"
