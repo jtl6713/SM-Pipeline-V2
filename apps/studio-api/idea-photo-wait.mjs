@@ -609,3 +609,38 @@ export function ideaProductionConfigFields(payload, existingNotes = "", photoWai
 
   return fields;
 }
+
+/**
+ * Quality Agent photo matching SLA evidence. Read-only classification of an
+ * authoritative Idea record: never auto-clears holds, retries publications, or
+ * infers missing photos when an intake is still being classified.
+ */
+export function ideaPhotoMatchingSlaFinding(idea, { nowMs = Date.now(), slaMs = 2 * 60 * 60 * 1000 } = {}) {
+  const fields = idea?.fields || {};
+  const id = String(idea?.id || "").trim();
+  if (!id || String(fields.Test_Run_ID || "").trim()) return null;
+  const status = String(fields.Candidate_Status || "").trim();
+  if (["On Hold", "Rejected", "Promoted", "Deleted", "Expired"].includes(status)) return null;
+  if (String(fields.Promoted_Content_Record_ID || "").trim()
+      || (Array.isArray(fields["Content Items"]) && fields["Content Items"].length)) return null;
+  if (ideaManagePhotoPauseActive(fields.Production_Config_Notes, nowMs)) return null;
+  const createdAt = Date.parse(String(fields.Create_Date || idea.createdTime || ""));
+  if (!Number.isFinite(createdAt) || nowMs - createdAt < slaMs) return null;
+  const wait = String(fields.Studio_Photo_Wait_Status || "").trim();
+  if (wait === "Not Needed") return null;
+  let match = {};
+  try { match = JSON.parse(String(fields.Studio_Photo_Match_JSON || "{}")); } catch {}
+  const lastAttempt = Date.parse(String(match.evaluated_at || match.last_attempted_at || ""));
+  const stale = !Number.isFinite(lastAttempt) || nowMs - lastAttempt >= slaMs;
+  let kind = null;
+  if (!wait && stale) kind = "idea_photo_never_scanned";
+  else if (wait === "Waiting" && stale) kind = "idea_photo_match_stale";
+  else if (wait === "Ready" && !Array.isArray(fields["Production Requests"])) kind = "idea_photo_ready_no_handoff";
+  else if (wait === "Ready" && !fields["Production Requests"]?.length) kind = "idea_photo_ready_no_handoff";
+  return kind ? {
+    kind, idea_id: id,
+    profile_id: Array.isArray(fields.Content_Profile) ? (fields.Content_Profile[0] || null) : null,
+    created_at: new Date(createdAt).toISOString(),
+    last_attempt_at: Number.isFinite(lastAttempt) ? new Date(lastAttempt).toISOString() : null,
+  } : null;
+}
