@@ -59,7 +59,8 @@ export async function executeFb3AdminRecovery({
    && field(after,"Output_Status")==="Published"
    && field(after,"Publish_Status")==="Published"
    && Boolean(field(after,"Published_At"))
-   && fbUrl(field(after,"Platform_Post_URL"));
+   && fbUrl(field(after,"Platform_Post_URL"))
+   && savedPublicReceiptMatchesProvider(after,remote);
  if(!completed) return {
    status:"pending_verification",record_id:recordId,
    reason:response?.skipped||"existing_fb3_finalization_not_yet_verified",
@@ -90,6 +91,43 @@ const safeHost=(value,platform)=>{
     return false;
   }catch{return false;}
 };
+/**
+ * Status-only recovery must prove that the *saved* public receipt refers to
+ * the very same post returned by the provider. A trusted host alone is not
+ * enough: it could point to an entirely different published item.
+ *
+ * URL variants are deliberately conservative. Ambiguous/mismatched links
+ * require manual investigation rather than a speculative status repair.
+ */
+function canonicalPublicReceipt(value, platform) {
+  if (!safeHost(value,platform)) return null;
+  let u;
+  try { u=new URL(value); } catch { return null; }
+  if(u.username||u.password||(u.port&&u.port!=="443"))return null;
+  if(platform==="YouTube"){
+    const host=u.hostname.toLowerCase();
+    const pieces=u.pathname.split("/").filter(Boolean);
+    const id=host==="youtu.be" ? (pieces.length===1?pieces[0]:null)
+      : u.pathname==="/watch" ? u.searchParams.get("v")
+      : (pieces.length===2&&["shorts","live"].includes(pieces[0])?pieces[1]:null);
+    return /^[A-Za-z0-9_-]{11}$/.test(String(id||""))?"youtube:"+id:null;
+  }
+  const path=u.pathname.replace(/\\/g,"/").replace(/\\/+$/,"")||"/";
+  if(platform==="Facebook"&&/^\\/(?:permalink|story)\\.php$/i.test(path)){
+    const post=u.searchParams.get("story_fbid");
+    const page=u.searchParams.get("id");
+    if(!/^\\d{6,35}$/.test(String(post||""))||!/^\\d{6,35}$/.test(String(page||"")))return null;
+    return "facebook.com"+path.toLowerCase()+"?story_fbid="+post+"&id="+page;
+  }
+  // Query strings cannot establish another identity for ordinary post paths.
+  // Avoid comparing fbclid/utm trackers, but require an exact path match.
+  return (platform==="Facebook"?"facebook.com":"instagram.com")+path;
+}
+function savedPublicReceiptMatchesProvider(row,remote) {
+  const exact=canonicalPublicReceipt(remote?.permalink,remote?.platform);
+  return Boolean(exact&&["Platform_Post_URL","Manual_Published_URL"].some(
+    name=>canonicalPublicReceipt(field(row,name),remote.platform)===exact));
+}
 const currentRemoteId=(row)=>{
  const p=field(row,"Platform");
  return p==="YouTube" ? field(row,"YouTube_Video_ID")||field(row,"Platform_Post_ID")
@@ -130,6 +168,8 @@ export async function executeApprovedReceiptRepair({recordId,approval,readOutput
  const beforeWrite=await readOutput(recordId);
  const changed=validateApprovedReceiptRepair(beforeWrite,approval);
  if(changed)return {status:"blocked",reason:"state_changed_before_repair:"+changed,record_id:recordId};
+ if(!savedPublicReceiptMatchesProvider(beforeWrite,receipt))
+   return {status:"blocked",reason:"saved_public_receipt_provider_permalink_mismatch",record_id:recordId};
  // QA-PUBLISH-001 required a saved public receipt plus approved state.
  await patchStatus(beforeWrite,{
    Output_Status:"Published",Publish_Status:"Published",Publish_Retry_Eligible:false,
@@ -140,7 +180,7 @@ export async function executeApprovedReceiptRepair({recordId,approval,readOutput
    &&field(after,"Output_Status")==="Published"
    &&field(after,"Publish_Status")==="Published"
    &&field(after,"Published_At")
-   &&safeHost(field(after,"Platform_Post_URL")||field(after,"Manual_Published_URL"),receipt.platform);
+   &&savedPublicReceiptMatchesProvider(after,receipt);
  if(!complete)return {status:"pending_verification",record_id:recordId,reason:"authoritative_status_readback_not_confirmed"};
  let logged={recorded:false};
  try{
