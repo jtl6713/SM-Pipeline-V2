@@ -116,13 +116,9 @@ Do not claim the mock suite proves live provider success.
 - The GET-only canary also repeats the authoritative output/content/profile
   checks after provider readback. If a link or output state changed while
   the GET was in flight, it blocks rather than treating stale proof as valid.
-- **Unresolved deployment prerequisite:** GitHub Actions cannot currently
-  prepare the Airtable credential for the live read-only canary.
-  The repository secret `AIRTABLE_PAT` must be provisioned with read-only
-  scope (or the maintained encrypted envelope fixed). Never embed a PAT
-  in the workflow, logs, repository, or a ChatGPT conversation.
-  A credential-setup failure is **not** a failed provider GET or evidence
-  of a recovered output.
+- The Actions canary now uses the established temporary Cloudflare service-binding
+  bridge to call the deployed Worker's fixed read-only endpoints. It does not
+  copy or decrypt Airtable credentials. The bridge is deleted in cleanup.
 - The repository currently contains other long-lived divergent feature
   branches. Do not delete those solely for a cleaner branch list; independently
   prove their changes merged or are superseded. Obsolete self-patching
@@ -131,3 +127,19 @@ Do not claim the mock suite proves live provider success.
 Do not enable `PUBLICATION_RECONCILIATION_ENABLED`,
 `PUBLICATION_RECONCILIATION_BOUNDED_ENABLED` or administrator action
 mutations on the basis of local mocks or Airtable state alone.
+
+
+## Authenticated live reference proof — 2026-10-24 22:08 UTC
+
+Read-only Airtable output/content/profile checks and authenticated uploader GETs
+verified output #4092, “E Line To Beach,” against video `hc1heQnfn6k`, owned by
+LA channel `UCVt3nBxRfPuuxxduuxmz9sw`. YouTube returned processed/public and
+publication time `2026-10-23T12:40:01Z`. Airtable still read Approved for
+Publishing / Publishing and was unchanged after provider verification.
+Inspected: 1; verified: 1; corrected: 0; remote writes: 0.
+
+The real response exposed an obsolete schedule check: public videos no longer
+need a future `publishAt`. The adapter now requires schedule matching only for
+nonpublic delivery. The deployed Worker canary must independently reproduce the
+proof and verify History authorization before requesting the first correction.
+This reference proof does not authorize a production status mutation.

@@ -54,7 +54,9 @@ test("background and read-only canary use the same canonical output/profile/chan
   assert.match(worker,/contentIdForRecoveryOutput\(row\)/);
   assert.match(worker,/verifyRecoveryProfileChain\(row,content,profile\)/);
   assert.match(worker,/verifiedRecoveryChannelId\(source\.profile,settings\)/);
-  assert.match(canary,/verifiedRecoveryChannelId\(profile,settings\)/);
-  assert.match(canary,/receiptBlock\(normalizedAfter,report\.receipt/);
+  assert.match(canary,/receipt\?authenticated=1/);
+  assert.match(canary,/env\.STUDIO_API\.fetch/);
+  assert.match(worker,/recoveryBlock\(after,Date\.now\(\)\)\|\|receiptBlock\(after,receipt,Date\.now\(\)\)/);
   assert.doesNotMatch(canary,/const profiles=row\.fields\.Content_Profile/);
 });
+

@@ -170,6 +170,14 @@ test("YouTube adapter reuses only authenticated GETs and exact owned public vide
   assert.equal(p.requests.length,2);assert.ok(p.requests.every(r=>r.options.method==="GET"&&r.options.redirect==="error"));
   assert.ok(!JSON.stringify(r).includes("test-secret"));
 });
+test("a formerly scheduled video that is now public does not require obsolete publishAt",async()=>{
+  const p=providerFixture();
+  p.f.row.fields.YouTube_Scheduled_Publish_At="2026-10-23T12:30:00Z";
+  const receipt=await verifyAuthenticatedYouTubeReceipt(p.f.row,p.options);
+  assert.equal(receipt.verified_public,true);
+  assert.equal(receipt.scheduled_at,null);
+  assert.equal(receiptBlock(p.f.row,receipt,instant),null);
+});
 for(const [name,change] of [
   ["private",{status:{privacyStatus:"private",uploadStatus:"processed"}}],
   ["draft",{status:{privacyStatus:"public",uploadStatus:"uploaded"}}],
@@ -278,3 +286,4 @@ test("cooldown does not authorize repair without fresh authenticated provider id
   assert.notEqual(result.outcome,"Corrected");
   assert.equal(f.writes,0);
 });
+

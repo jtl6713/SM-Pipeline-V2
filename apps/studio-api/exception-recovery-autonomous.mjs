@@ -3,7 +3,7 @@ import { assessRecoveryPreflight } from "./exception-recovery-preflight.mjs";
 
 export const RECOVERY_SIGNATURE = "AUTONOMOUS-PUBLICATION-RECONCILIATION";
 const str = (r,k) => String(r?.fields?.[k] ?? "").trim();
-const snapshotFields = ["Output_ID","Output_Title","Title_Text","Content_Profile","Platform",
+const snapshotFields = ["Output_ID","Output_Title","Title_Text","Content_Item","Content_Profile","Platform",
   "Output_Status","Publish_Status","Review_Status","Do_Not_Publish","Test_Run_ID",
   "Platform_Post_ID","YouTube_Video_ID","Platform_Media_ID","Platform_Post_URL",
   "Manual_Published_URL","Published_At","Scheduled_Post_Date","YouTube_Scheduled_Publish_At",
@@ -75,7 +75,7 @@ export function receiptBlock(row, receipt, nowMs) {
   }
   const expectedSchedule=Date.parse(str(row,"YouTube_Scheduled_Publish_At"));
   const actualSchedule=Date.parse(receipt.scheduled_at);
-  if(Number.isFinite(expectedSchedule) && (!Number.isFinite(actualSchedule) ||
+  if(!receipt.verified_public && Number.isFinite(expectedSchedule) && (!Number.isFinite(actualSchedule) ||
       Math.abs(actualSchedule-expectedSchedule)>1000)) return "scheduled_handoff_mismatch";
   if(!receipt.verified_public && str(row,"Published_At"))
     return "saved_publication_time_conflicts_with_private_delivery";
@@ -194,3 +194,4 @@ export async function reconcilePublication({
     return uncertain;
   }
 }
+

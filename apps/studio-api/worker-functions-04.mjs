@@ -26,7 +26,7 @@ import { verifyAuthenticatedYouTubeReceipt } from "./exception-recovery-authenti
 import { contentIdForRecoveryOutput, verifyRecoveryProfileChain, withVerifiedRecoveryProfile, verifiedRecoveryChannelId } from "./exception-recovery-profile-chain.mjs";
 import { runPublicationRecovery, publicationRecoveryStatus, readRecoveryState, recoveryStateKey } from "./exception-recovery-background.mjs";
 import { recoveryAuditFields, normalizeRecoveryHistory } from "./exception-recovery-history.mjs";
-import { RECOVERY_SIGNATURE, recoverySnapshot } from "./exception-recovery-autonomous.mjs";
+import { RECOVERY_SIGNATURE, recoverySnapshot, recoveryBlock, receiptBlock } from "./exception-recovery-autonomous.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { selectTargetedScheduleOverages } from "./targeted-schedule-selection.mjs";
 import { readStudioProfileSummary, validVerifiedStudioSummary } from "./profile-summary-controller.mjs";
@@ -10004,7 +10004,13 @@ async function exceptionRecoveryReadAuthenticatedProvider(env,row) {
   const channel=verifiedRecoveryChannelId(source.profile,settings);
   if(!channel.ok)
     return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:channel.reason};
-  return verifyAuthenticatedYouTubeReceipt(source.row,{settings,expectedChannelId:channel.channel_id});
+  // Match the existing uploader client credential resolution. The URL and
+  // expected channel stay profile-scoped; this service key authenticates the
+  // configured uploader and never substitutes another profile's channel.
+  return verifyAuthenticatedYouTubeReceipt(source.row,{settings:{
+    ...settings,YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET:
+      settings.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET||env.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET||"",
+  },expectedChannelId:channel.channel_id});
 }
 
 async function appendPublicationRecoveryAudit(env,event) {
@@ -10072,8 +10078,19 @@ export async function getStudioExceptionRecoveryReceipt(request, env) {
   const receipt=new URL(request.url).searchParams.get("authenticated")==="1"
     ?await exceptionRecoveryReadAuthenticatedProvider(env,row)
     :await exceptionRecoveryReadProvider(env,row);
+  let verification=null;
+  if(new URL(request.url).searchParams.get("authenticated")==="1") {
+    const after=(await exceptionRecoveryReadVerifiedOutput(env,id)).row;
+    const before=withVerifiedRecoveryProfile(row,{ok:true,profile_id:after.fields.Content_Profile[0]});
+    const unchanged=JSON.stringify(recoverySnapshot(before))===JSON.stringify(recoverySnapshot(after));
+    const blockedReason=!unchanged?"authoritative_state_changed":
+      recoveryBlock(after,Date.now())||receiptBlock(after,receipt,Date.now());
+    verification={authoritative_state_unchanged:unchanged,before:recoverySnapshot(before),
+      after:recoverySnapshot(after),eligible:!blockedReason,blocked_reason:blockedReason,
+      no_output_write:true};
+  }
   return respond(request,env,{
-    ...receipt,record_id:id,output_id:f(row,"Output_ID")||null,
+    ...receipt,record_id:id,output_id:f(row,"Output_ID")||null,verification,
     instruction:receipt.verified_public
       ? "Verified remote identity. This GET has not changed the publication record."
       : "No public publication has been verified. Do not upload or repost on this evidence.",
@@ -17077,4 +17094,5 @@ export async function factoryBatchCronResume(env, ctx = null) {
   return selected.length;
 }
 /*__STUDIO_WORKER_END:factoryBatchCronResume__*/
+
 

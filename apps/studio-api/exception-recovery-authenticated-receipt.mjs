@@ -55,7 +55,7 @@ export async function verifyAuthenticatedYouTubeReceipt(row, {
     // the same publishAt; successful upload alone cannot prove scheduling.
     const expectedSchedule=Date.parse(f.YouTube_Scheduled_Publish_At||"");
     const providerSchedule=Date.parse(video.status?.publishAt||"");
-    if(Number.isFinite(expectedSchedule) && (
+    if(!publicNow && Number.isFinite(expectedSchedule) && (
       !Number.isFinite(providerSchedule) ||
       Math.abs(providerSchedule-expectedSchedule)>1000))
       return deny("scheduled_handoff_mismatch");
@@ -72,3 +72,4 @@ export async function verifyAuthenticatedYouTubeReceipt(row, {
         scheduled_at:video.status?.publishAt||null,channel_id:expectedChannelId}};
   } catch { return deny("authenticated_provider_unavailable"); }
 }
+
