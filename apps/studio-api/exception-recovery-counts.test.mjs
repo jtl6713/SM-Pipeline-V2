@@ -57,3 +57,24 @@ test("strict paginated census refuses duplicate records rather than hiding them"
    ? {records:[item],offset:"next"} : {records:[item]},
    {filterFormula:"{Test_Run_ID}=BLANK()",requireUnique:true}),/Repeated record identity/);
 });
+
+test("full census supplies deduplicated click-through held and unverified-identity cases",()=>{
+ const rows=[
+   r("recAAAAAAAAAAAAAA",{Output_ID:81,Platform:"Facebook",Do_Not_Publish:true,
+     Platform_Post_ID:"123456789123456"}),
+   r("recBBBBBBBBBBBBBB",{Output_ID:82,Platform:"YouTube",
+     Review_Status:"Approved",Output_Status:"Approved for Publishing",
+     Publish_Status:"Publishing",Scheduled_Post_Date:"2026-10-20T00:00:00Z"}),
+ ];
+ const data=reconcileExceptionCensus(rows,mapOutput,{atMs:Date.parse("2026-10-23T00:00:00Z")});
+ assert.equal(data.exception_items_count,2);
+ assert.equal(data.unverified_remote_ids,1);
+ assert.equal(data.exception_items_truncated,false);
+ const held=data.exception_items.find(x=>x.record_id===rows[0].id);
+ assert.deepEqual(held.categories.sort(),["held_deferred","remote_identity_unverified"].sort());
+ assert.equal(held.actions_enabled,false);
+ assert.equal(held.output_id,"81");
+ const due=data.exception_items.find(x=>x.record_id===rows[1].id);
+ assert.ok(due.categories.includes("approved_past_due"));
+ assert.equal(due.minutes_past_due,4320);
+});
