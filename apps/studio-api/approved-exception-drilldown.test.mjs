@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { homeApprovedCalendarCounts } from "./home-approved-calendar-counts.mjs";
+import { readUiReleaseContract } from "../studio-web/ui-release-contract.mjs";
 import { homeOutputContribution, homeApprovedUnpublished, homeOverdueDueAt } from "./profile-summary-classification.mjs";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -67,5 +68,8 @@ test("Home count cell keeps exact profile when navigating to Pipeline", () => {
   assert.match(overview,/studioOpenPipelineFilter\(view, \{ profileId: profileId \|\| "" \}\)/);
   assert.match(bundle,/window\.studioOpenPipelineFilter = \(filter, options = \{\}\)/);
   assert.match(bundle,/showStudioPage\("outputs", \{ pipelineFilter:/);
-  assert.match(html,/scope=historical-count-match-v2/);
+  const release=readUiReleaseContract(html,bundle);
+  const asset=html.match(/\/assets\/all-profiles-overview-1007\.js\?[^"'<>]+/);
+  assert.ok(asset,"Profile-scoped Home overview script must be included");
+  assert.equal(new URL(asset[0],"https://studio.invalid").searchParams.get("v"),release.cacheKey);
 });
