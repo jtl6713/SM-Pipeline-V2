@@ -46,3 +46,11 @@
 /* Do not let generic Studio .nav-item or .page display styles override gated visibility. */
 #navExceptionRecovery[hidden] { display:none !important }
 #page-exception-recovery:not(.active) { display:none !important }
+
+.erc-item-wrap { display:flex; align-items:flex-start; gap:.6rem }
+.erc-item-wrap > input { margin:.9rem 0 0 .2rem; min-width:18px; min-height:18px; flex-shrink:0 }
+.erc-item-wrap > button { flex:1; min-width:0 }
+.erc-bulk-preview { display:flex; align-items:center; flex-wrap:wrap; gap:.65rem; margin:.4rem 0 }
+#ercBulkResults { display:grid; gap:.5rem; margin:.7rem 0 }
+.erc-bulk-row { border:1px solid var(--border,#ccc); border-radius:.55rem; padding:.6rem }
+.erc-bulk-row p { font-size:.8rem; margin:.25rem 0 0 }
