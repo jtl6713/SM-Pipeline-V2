@@ -542,3 +542,5 @@ Deploy UI 0.6.759 with aligned application BUILD_ID and release contract tests.
 
 Deploy UI 0.6.759 normalized core asset URL; retry release after cache contract repair.
 Deploy read-only Exception Recovery History Studio UI 0.6.759 after merged #1137 tests repaired (run verified), 2026-10-24. Keep EXCEPTION_RECOVERY_ACTIONS_ENABLED OFF; no autonomous mutation canary. Deploy via the standard Cloudflare Pages CI gate and verify production UI footer.
+
+2026-10-24: Deploy autonomous publication recovery and History integration PR #1142. All publication mutation flags remain OFF. Preserve production bindings and rollback; run deployed authenticated GET-only #4092 canary before any separately approved status correction. Airtable remains authoritative; no remote publishing, upload or hold release.
