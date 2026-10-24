@@ -9964,7 +9964,7 @@ export async function getStudioExceptionRecoveryCounts(request, env) {
     "exception-recovery-full-census",fresh?0:300000,async()=>{
       const all=await scanOutstandingFailedOutputs((options)=>
         listRecordsPage(env,env.AIRTABLE_OUTPUT_TABLE_ID,options),{
-          filterFormula:"{Test_Run_ID}=BLANK()",pageSize:100,
+          filterFormula:"{Test_Run_ID}=BLANK()",pageSize:100,requireUnique:true,
         });
       const qa=await loadStudioFailedOutputSnapshot(env,{fresh});
       const counts=reconcileExceptionCensus(all,mapOutput,{
