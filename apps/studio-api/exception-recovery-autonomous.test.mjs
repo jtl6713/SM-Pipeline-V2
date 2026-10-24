@@ -47,7 +47,6 @@ test("exact public canary writes only status and provider time; readback precede
 for(const [name,change] of [
   ["hold",{Do_Not_Publish:true}],["approval",{Review_Status:"Rejected"}],
   ["test",{Test_Run_ID:"test"}],["lock",{Publish_Locked_By:"publisher",Publish_Locked_At:new Date(instant).toISOString()}],
-  ["cooldown",{Publish_Next_Retry_At:new Date(instant+60000).toISOString()}],
   
   ["conflicting URL",{Manual_Published_URL:"https://www.youtube.com/watch?v=abcdefghijk"}],
   ["conflicting ID",{Platform_Post_ID:"abcdefghijk"}],["conflicting time",{Published_At:"2026-10-23T14:00:00Z"}],
@@ -270,4 +269,12 @@ test("verified private handoff disappears from Home and QA overdue without claim
  assert.equal(homeApprovedExceptionKind(mapped,instant),"");
  const formula=approvedPastDueFormula(instant);
  assert.match(formula,/\{Publish_Status\}!="Published Privately"/);
+});
+test("cooldown does not authorize repair without fresh authenticated provider identity",async()=>{
+  const f=fixture();
+  f.row.fields.Publish_Next_Retry_At=new Date(instant+60000).toISOString();
+  f.receipt.ownership_verified=false;
+  const result=await reconcilePublication(f.deps);
+  assert.notEqual(result.outcome,"Corrected");
+  assert.equal(f.writes,0);
 });
