@@ -96,3 +96,17 @@ test("UI requires explicit receipt inspection and post-ID confirmation before FB
  assert.match(ui,/submitApproved\("finalize_existing_facebook_post",finalize\)/);
  assert.match(ui,/submitApproved\("reconcile_verified_existing_receipt",repair\)/);
 });
+
+test("action execution is gated by a durable exact-ID admin approval readback",()=>{
+ const start=service.indexOf("export async function runStudioExceptionRecoveryAction");
+ const end=service.indexOf("/*__STUDIO_WORKER_END:runStudioExceptionRecoveryAction__*/",start);
+ const handler=service.slice(start,end);
+ const approved=handler.indexOf("actionApprovalAudit(");
+ const persistent=handler.indexOf("records:[{fields:approvalAudit}]");
+ const readback=handler.indexOf("readback.some(item=>item.event_key===approvalAudit.Event_Key)");
+ const engine=handler.indexOf("executeFb3AdminRecovery(");
+ assert.ok(approved>=0&&persistent>approved&&readback>persistent&&engine>readback);
+ assert.match(handler,/already_processed_request/);
+ assert.match(handler,/admin_approval_recorded:true/);
+ assert.match(ui,/client_request_id:freshClientRequestId\(\)/);
+});
