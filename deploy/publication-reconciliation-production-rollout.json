@@ -1,6 +1,6 @@
 {
   "schema": "publication-reconciliation-rollout-v1",
-  "stage": "read_only",
+  "stage": "canary",
   "approval": "user-authorized-background-verified-status-only-reconciliation-2026-10-24",
   "canary_record_id": "rec6cEb39ptQyTyrF",
   "canary_output_id": 8570,
