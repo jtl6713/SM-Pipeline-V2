@@ -10,7 +10,7 @@ import { FACEBOOK_PENDING_FINALIZE_FORMULA, fb3FinalizeEligible, selectFb3Finali
 import { FACEBOOK_REEL_POLL_FORMULA, facebookReelPollVideoId, facebookReelPollEligible, selectFacebookReelPollBatch } from "./facebook-reel-finalize-priority.mjs";
 import { scanApprovedPastDueOutputs, classifyApprovedPastDue, STALE_PUBLISHED_RECEIPT_FORMULA, publishedReceiptRepairReason } from "./approved-past-due-quality.mjs";
 import { QUALITY_RECOVERY_LEDGER_TABLE, persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
-import { scanOutstandingFailedOutputs, describeFailedOutput, facebookRateLimitResetReason } from "./failed-output-monitor.mjs";
+import { scanOutstandingFailedOutputs, describeFailedOutput, facebookRateLimitResetReason, facebookSpamHeldRescheduleReason } from "./failed-output-monitor.mjs";
 import { buildExceptionRecoveryCenter } from "./exception-recovery-center.mjs";
 import { EXCEPTION_MESSAGES_TABLE, RECOVERY_RECORD_ID, prepareRecoveryConversationMessage, normalizeRecoveryConversation } from "./exception-recovery-conversation.mjs";
 import { assessRecoveryPreflight } from "./exception-recovery-preflight.mjs";
@@ -15402,14 +15402,21 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const value = String(payload?.scheduled_post_date || "").trim();
   const qualityRecovery = payload?.quality_rate_limit_recovery === true;
-  if (qualityRecovery && (value || payload?.publish_now || payload?.manual_schedule_override))
+  const holdReschedule = payload?.quality_rate_limit_hold_reschedule === true;
+  if (qualityRecovery && holdReschedule)
+    throw new HttpError(400,"Choose either publication rearm or held scheduling, not both");
+  if ((qualityRecovery || holdReschedule) && (value || payload?.publish_now || payload?.manual_schedule_override))
     throw new HttpError(400, "Quality recovery must use a cooldown-paced automatic MAE slot");
   const existing = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]);
   if (qualityRecovery) {
     const blocked = facebookRateLimitResetReason(existing);
     if (blocked) throw new HttpError(409, "Return to Approved blocked: " + blocked);
   }
-  if (Boolean(f(existing, "Do_Not_Publish"))) {
+  if (holdReschedule) {
+    const blocked = facebookSpamHeldRescheduleReason(existing);
+    if (blocked) throw new HttpError(409,"Held spam reschedule blocked: "+blocked);
+  }
+  if (Boolean(f(existing, "Do_Not_Publish")) && !holdReschedule) {
     throw new HttpError(409, "Do_Not_Publish outputs cannot be rescheduled");
   }
   const published = /published/i.test(String(f(existing, "Publish_Status") || ""))
@@ -15437,7 +15444,7 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
   // and MAE calculation. Never reserves a slot, patches a row, or publishes.
   // Keep it in the existing authenticated schedule route: no new service.
   if (payload?.quality_rate_limit_preview === true) {
-    if (!qualityRecovery) throw new HttpError(400, "Preview requires guarded Facebook recovery");
+    if (!qualityRecovery && !holdReschedule) throw new HttpError(400, "Preview requires guarded Facebook recovery");
     let stage = "read_profile";
     try {
       const profile = reservationProfile
@@ -15485,25 +15492,31 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
       operation_id: String(
         qualityRecovery
           ? `quality-facebook-reset:${match[1]}:${String(f(existing, "Publish_Attempt_Count") || "0")}:${previousRaw || "blank"}`
-          : (payload?.schedule_operation_id
-            || `schedule:${match[1]}:${previousRaw || "blank"}->${value || (publishNowImmediate ? "immediate" : "auto")}`)
+          : (holdReschedule
+            ? `quality-facebook-held-slot:${match[1]}:${String(f(existing, "Publish_Attempt_Count") || "0")}:${previousRaw || "blank"}`
+            : (payload?.schedule_operation_id
+            || `schedule:${match[1]}:${previousRaw || "blank"}->${value || (publishNowImmediate ? "immediate" : "auto")}`))
       ).replace(/[^A-Za-z0-9._:>+-]+/g, "_").slice(0, 180),
     }, {
       legacy: async () => {
         throw new HttpError(503, "Atomic schedule transaction unexpectedly entered legacy mode");
       },
       plan: async ({ occupied_reservations: durableReservations }) => {
-        const authoritative = qualityRecovery
+        const authoritative = (qualityRecovery || holdReschedule)
           ? await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1])
           : existing;
         if (qualityRecovery) {
           const blocked = facebookRateLimitResetReason(authoritative);
           if (blocked) throw new HttpError(409, "Return to Approved blocked: " + blocked);
         }
+        if (holdReschedule) {
+          const blocked = facebookSpamHeldRescheduleReason(authoritative);
+          if (blocked) throw new HttpError(409,"Held spam reschedule blocked: "+blocked);
+        }
         studioInvalidateOccupiedScheduleCache();
         const fresh = await studioOccupiedSchedulesOrEmpty(env, {
           excludeIds: [match[1]],
-          profile, platform: qualityRecovery ? platform : "", requireComplete: true });
+          profile, platform: (qualityRecovery || holdReschedule) ? platform : "", requireComplete: true });
         let platformOccupiedMs = studioOccupiedForPlatform(fresh, platform).slice();
         for (const reservation of durableReservations || []) {
           const ms = Date.parse(String(reservation?.scheduled_iso || ""));
@@ -15522,7 +15535,7 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
           }
         }
 
-        const recoveryIso = qualityRecovery
+        const recoveryIso = (qualityRecovery || holdReschedule)
           ? qualityFacebookRecoverySlot(authoritative, platformOccupiedMs, timeZone,
             await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS))
           : "";
@@ -15532,7 +15545,7 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
           {
             occupiedMs: publishNowImmediate ? null : platformOccupiedMs,
             forceWrite: true,
-            exactOverride: manualScheduleOverride || qualityRecovery,
+            exactOverride: manualScheduleOverride || qualityRecovery || holdReschedule,
             timeZone,
           },
         );
@@ -15540,7 +15553,16 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
         if (String(f(existing, "Review_Status") || "").trim() === "Approved") {
           fields.Output_Status = "Approved for Publishing";
         }
-        fields.Publish_Error_Message = "";
+        if (!holdReschedule) fields.Publish_Error_Message = "";
+        if (holdReschedule) Object.assign(fields,{
+          Do_Not_Publish: true, Publish_Retry_Eligible: false,
+          Publish_Status: "Failed", Output_Status: "Approved for Publishing",
+          Publish_Error_Stage: "FBS3_RATE_LIMIT",
+          Publish_Error_Message: String(f(authoritative,"Publish_Error_Message")||""),
+          Studio_Output_Notes: String(f(authoritative,"Studio_Output_Notes")||"")+
+            "\\nSPAM_COOLDOWN_RESCHEDULE_PENDING_VERIFICATION | "+recoveryIso+
+            " | Existing upload may have completed despite Meta 368; no Graph create authorized.",
+        });
         if (qualityRecovery) Object.assign(fields, {
           Review_Status: "Approved", Output_Status: "Approved for Publishing",
           Publish_Status: "Ready to Schedule", Publish_Method: "Automated",
@@ -15588,6 +15610,11 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
             throw error;
           }
         }
+        if (holdReschedule && (f(authoritative,"Do_Not_Publish")!==true ||
+            f(authoritative,"Publish_Status")!=="Failed" ||
+            !String(f(authoritative,"Studio_Output_Notes")||"").includes("SPAM_COOLDOWN_RESCHEDULE_PENDING_VERIFICATION"))) {
+          throw new HttpError(409,"Held reschedule guard did not survive Airtable readback");
+        }
         written.__atomic_verified_record = authoritative;
         return new Date(storedMs).toISOString();
       },
@@ -15611,11 +15638,11 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
       : await studioOccupiedSchedulesOrEmpty(env, {
         excludeIds: [match[1]],
         profile: await item4ProductionProfileRecord(env, existing).catch(() => null),
-        platform: qualityRecovery ? platform : "",
+        platform: (qualityRecovery || holdReschedule) ? platform : "",
         requireComplete: true,
       });
     const timeZone = await studioScheduleTimeZoneForRecord(env, existing, payload);
-    const recoveryIso = qualityRecovery
+    const recoveryIso = (qualityRecovery || holdReschedule)
       ? qualityFacebookRecoverySlot(existing, studioOccupiedForPlatform(occupied, platform), timeZone,
         await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS))
       : "";
@@ -15625,7 +15652,7 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
       {
         occupiedMs: publishNowImmediate ? null : studioOccupiedForPlatform(occupied, platform),
         forceWrite: true,
-        exactOverride: manualScheduleOverride || qualityRecovery,
+        exactOverride: manualScheduleOverride || qualityRecovery || holdReschedule,
         timeZone,
       },
     );
@@ -15633,7 +15660,15 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
     if (String(f(existing, "Review_Status") || "").trim() === "Approved") {
       fields.Output_Status = "Approved for Publishing";
     }
-    fields.Publish_Error_Message = "";
+    if (!holdReschedule) fields.Publish_Error_Message = "";
+    if (holdReschedule) Object.assign(fields,{
+      Do_Not_Publish:true,Publish_Retry_Eligible:false,Publish_Status:"Failed",
+      Publish_Error_Stage:"FBS3_RATE_LIMIT",
+      Publish_Error_Message:String(f(existing,"Publish_Error_Message")||""),
+      Studio_Output_Notes:String(f(existing,"Studio_Output_Notes")||"")+
+        "\\nSPAM_COOLDOWN_RESCHEDULE_PENDING_VERIFICATION | "+recoveryIso+
+        " | No Graph create authorized; require verified absence before unholding.",
+    });
     if (qualityRecovery) Object.assign(fields, {
       Review_Status: "Approved", Output_Status: "Approved for Publishing",
       Publish_Status: "Ready to Schedule", Publish_Method: "Automated",
@@ -15656,18 +15691,19 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
   const approved = String(f(updated, "Output_Status") || "").trim() === "Approved for Publishing"
     || String(f(updated, "Review_Status") || "").trim() === "Approved";
   let dispatch = null;
-  if (due && approved && (payload?.publish_now === true || !value || value.toLowerCase() === "immediate")) {
+  if (!holdReschedule && due && approved && (payload?.publish_now === true || !value || value.toLowerCase() === "immediate")) {
     dispatch = await studioDispatchApprovedPublishNow(env, updated);
     if (ctx && typeof ctx.waitUntil === "function") {
       ctx.waitUntil(studioDispatchApprovedPublishTail(env, updated, dispatch).catch((error) => {
         console.warn("schedule publish-now tail failed", match[1], error);
       }));
     }
-  } else if (due) {
+  } else if (due && !holdReschedule) {
     cadenceScheduleSync(ctx, env, { startPublish: true });
   }
   return respond(request, env, {
     ok: true,
+    held_spam_rescheduled_pending_verification: holdReschedule,
     record: mapOperationsOutput(
       await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]).catch(() => updated)
     ),
