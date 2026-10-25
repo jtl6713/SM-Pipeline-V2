@@ -90,7 +90,7 @@ test("approved single-canary deployment never scans or processes unrelated backl
  assert.equal(result.corrected,0);
 });
 
-test("bounded recovery inspects four exact existing receipts once before resuming ordinary queue",async()=>{
+test("bounded recovery visits nine prioritized remote-ID candidates once before ordinary queue",async()=>{
  const store=bucket();let now=Date.parse("2026-10-25T03:30:00Z");
  const env={STUDIO_MEDIA:store,PUBLICATION_RECONCILIATION_SCAN_ENABLED:"true",
    PUBLICATION_RECONCILIATION_ENABLED:"true",PUBLICATION_RECONCILIATION_BOUNDED_ENABLED:"true",
@@ -100,24 +100,21 @@ test("bounded recovery inspects four exact existing receipts once before resumin
    readOutput:async id=>{observed.push(id);return {id,fields:{
      Platform:"TikTok",Review_Status:"Approved",Content_Profile:["recBBBBBBBBBBBBBB"]
    }};},
-   appendAudit:async()=>{},verifyRemote:async()=>{throw Error("No provider call for unsupported destination");},
-   patchStatus:async()=>{throw Error("Never modify an unverified output");}};
- const first=await runPublicationRecovery(env,deps);
- assert.equal(first.inspected,2);
- assert.deepEqual(observed,PRIORITY_VERIFIED_EXISTING_POSTS.slice(0,2));
- now+=16*60000;
- const second=await runPublicationRecovery(env,deps);
- assert.equal(second.inspected,2);
- assert.deepEqual(observed,PRIORITY_VERIFIED_EXISTING_POSTS);
- now+=16*60000;
- const third=await runPublicationRecovery(env,deps);
- assert.equal(third.inspected,0,
-   "After the one-time priority pass the ordinary queue resumes; terminal records are skipped");
+   appendAudit:async()=>{},verifyRemote:async()=>{throw Error("Never call unsupported provider");},
+   patchStatus:async()=>{throw Error("Never modify unverified output");}};
+ for(let i=0;i<Math.ceil(PRIORITY_VERIFIED_EXISTING_POSTS.length/2);i++){
+   const outcome=await runPublicationRecovery(env,deps);
+   assert.ok(outcome.inspected>=1&&outcome.inspected<=2);
+   assert.deepEqual(observed,PRIORITY_VERIFIED_EXISTING_POSTS.slice(0,(i+1)*2));
+   now+=16*60000;
+ }
+ const idle=await runPublicationRecovery(env,deps);
+ assert.equal(idle.inspected,0,"terminal test records skip once priority cursor exhausts");
  const control=await readRecoveryState(store,"studio/state/publication-reconciliation/v1/control.json");
- assert.equal(control.priority_cursor,4);
+ assert.equal(control.priority_cursor,PRIORITY_VERIFIED_EXISTING_POSTS.length);
 });
 test("read-only and exact-canary stages never select priority records",async()=>{
- assert.equal(PRIORITY_VERIFIED_EXISTING_POSTS.length,4);
+ assert.equal(PRIORITY_VERIFIED_EXISTING_POSTS.length,9);
  for(const id of PRIORITY_VERIFIED_EXISTING_POSTS) assert.match(id,/^rec[A-Za-z0-9]{14}$/);
  const store=bucket(),env={STUDIO_MEDIA:store,
    PUBLICATION_RECONCILIATION_SCAN_ENABLED:"true",
@@ -127,4 +124,14 @@ test("read-only and exact-canary stages never select priority records",async()=>
    readOutput:async id=>{got.push(id);return {id,fields:{Platform:"TikTok",Review_Status:"Approved",Content_Profile:["recBBBBBBBBBBBBBB"]}};},
    appendAudit:async()=>{}});
  assert.deepEqual(got,["recAAAAAAAAAAAAAA"]);
+});
+
+test("accelerated bounded manifest retains five-per-sweep cap and never enables administrator mutations",()=>{
+ const manifest=JSON.parse(fs.readFileSync(new URL("../../deploy/publication-reconciliation-production-rollout.json",import.meta.url),"utf8"));
+ assert.equal(manifest.stage,"bounded");
+ assert.equal(manifest.no_remote_provider_writes,true);
+ assert.equal(manifest.scan_interval_minutes,5);
+ assert.equal(manifest.batch_size,5);
+ assert.ok(manifest.batch_size<=5);
+ assert.ok(manifest.scan_interval_minutes>=5);
 });

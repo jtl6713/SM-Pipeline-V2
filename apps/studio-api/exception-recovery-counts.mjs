@@ -14,6 +14,7 @@ export function reconcileExceptionCensus(rawRows,mapOutput,{atMs=Date.now(),qaFa
   const byPlatform={};
   const exceptionItems=[];
   let unverifiedRemoteIds=0;
+  const overdueRecoveryLanes={};
   for(const row of rawRows) {
     if(!/^rec[A-Za-z0-9]{14}$/.test(String(row?.id||"")))throw new Error("Bad output identity in canonical census");
     if(seen.has(row.id))throw new Error("Repeated output record in canonical census");
@@ -42,6 +43,23 @@ export function reconcileExceptionCensus(rawRows,mapOutput,{atMs=Date.now(),qaFa
     const savedReceipt=Boolean(fields.Published_At||fields.Platform_Post_URL||fields.Manual_Published_URL);
     const remoteUnverified=Boolean(remoteId&&!savedReceipt);
     if(remoteUnverified)unverifiedRemoteIds++;
+    // Disjoint, informational overdue triage. Neither a stored remote ID nor
+    // an old "Publishing" status is proof of a published post or a retry permit.
+    // The only autonomous lane is a candidate for a fresh provider GET and
+    // guarded, status-only write; all other lanes retain the existing publisher
+    // and administrator preflights.
+    const recoveryLane=kind==="approved_past_due"
+      ? held?"intentional_hold"
+      : remoteId && (platform==="YouTube"||platform==="Instagram")
+        ?"verify_existing_post_status_only"
+      : remoteId?"provider_adapter_or_manual_verification_required"
+      : fields.Publish_Status==="Failed" || fields.Output_Status==="Failed"
+        ?"failed_stage_requires_diagnosis"
+      : fields.Publish_Status==="Publishing"
+        ?"inflight_requires_lock_and_receipt_preflight"
+      :"missing_remote_identity_requires_publisher_preflight"
+      :null;
+    if(recoveryLane) overdueRecoveryLanes[recoveryLane]=(overdueRecoveryLanes[recoveryLane]||0)+1;
     const categories=[
       ...(kind?[kind]:[]),
       ...(failed?["failed"]:[]),
@@ -58,6 +76,7 @@ export function reconcileExceptionCensus(rawRows,mapOutput,{atMs=Date.now(),qaFa
       minutes_past_due:kind==="approved_past_due"&&fields.Scheduled_Post_Date
         ?Math.max(0,Math.floor((atMs-Date.parse(fields.Scheduled_Post_Date))/60000)):null,
       held,remote_identity_exists:Boolean(remoteId),public_receipt_recorded:savedReceipt,
+      recovery_lane:recoveryLane,status_only_verification_candidate:recoveryLane==="verify_existing_post_status_only",
       signature:kind==="approved_past_due"?"QA-PUBLISH-001":failed?"HOME-FAILED":held?"INTENTIONAL-HOLD":"REMOTE-ID-UNVERIFIED",
       diagnosis:failed?"Failed publication or production requires Quality Agent inspection."
         :held?"Intentional do-not-publish hold remains authoritative."
@@ -95,6 +114,7 @@ export function reconcileExceptionCensus(rawRows,mapOutput,{atMs=Date.now(),qaFa
     exception_items_count:exceptionItems.length,
     exception_items_truncated:exceptionItems.length>500,
     unverified_remote_ids:unverifiedRemoteIds,
+    overdue_recovery_lanes:overdueRecoveryLanes,
     snapshot_parity_with_home_widget:"not_proven_without_matching_generation",
     read_only:true,
   };

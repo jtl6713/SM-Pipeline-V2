@@ -89,3 +89,32 @@ test("canonical case display title uses Airtable Output_Title even when mapper o
  assert.equal(result.exception_items[0].output_id,"7864");
  assert.equal(result.exception_items[0].actions_enabled,false);
 });
+
+test("overdue lanes are disjoint and no saved ID is treated as proof of a posted item",()=>{
+ const atMs=Date.parse("2026-10-25T12:00:00Z");
+ const fields={Review_Status:"Approved",Output_Status:"Approved for Publishing",
+   Scheduled_Post_Date:"2026-10-24T09:00:00Z"};
+ const rows=[
+  r("recAAAAAAAAAAAAAA",{...fields,Platform:"YouTube",Publish_Status:"Publishing",YouTube_Video_ID:"already-remote"}),
+  r("recBBBBBBBBBBBBBB",{...fields,Platform:"Instagram",Publish_Status:"Publishing",Platform_Post_ID:"ig-remote"}),
+  r("recCCCCCCCCCCCCCC",{...fields,Platform:"Facebook",Publish_Status:"Publishing",Platform_Post_ID:"fb-remote"}),
+  r("recDDDDDDDDDDDDDD",{...fields,Platform:"TikTok",Publish_Status:"Publishing"}),
+  r("recEEEEEEEEEEEEEE",{...fields,Platform:"Instagram",Publish_Status:"Ready to Publish"}),
+  r("recFFFFFFFFFFFFFF",{...fields,Platform:"Facebook",Publish_Status:"Failed"}),
+ ];
+ const actual=reconcileExceptionCensus(rows,mapOutput,{atMs});
+ assert.equal(actual.totals.approved_past_due,5);
+ // Canonical Home predicates report failed cases separately, never double count them as overdue.
+ assert.equal(actual.totals.failed,1);
+ assert.deepEqual(actual.overdue_recovery_lanes,{
+   verify_existing_post_status_only:2,
+   provider_adapter_or_manual_verification_required:1,
+   inflight_requires_lock_and_receipt_preflight:1,
+   missing_remote_identity_requires_publisher_preflight:1,
+ });
+ const yt=actual.exception_items.find(x=>x.record_id===rows[0].id);
+ assert.equal(yt.status_only_verification_candidate,true);
+ assert.equal(yt.public_receipt_recorded,false);
+ assert.equal(yt.actions_enabled,false);
+ assert.equal(actual.exception_items.filter(x=>x.status_only_verification_candidate).length,2);
+});
