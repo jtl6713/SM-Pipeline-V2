@@ -1,10 +1,5 @@
 name: Publication Recovery Read-Only Canary
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'deploy/publication-reconciliation-production-rollout.json'
-      - 'repair/scripts/publication-recovery-readonly-canary.mjs'
   pull_request:
     paths:
       - 'apps/studio-api/exception-recovery-*'
@@ -33,7 +28,7 @@ jobs:
       - run: node --test apps/studio-api/exception-recovery-profile-chain.test.mjs apps/studio-api/exception-recovery-autonomous.test.mjs
   live:
     name: Deployed authenticated GET-only provider verification
-    if: (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    if: (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     needs: contract
     runs-on: ubuntu-latest
     timeout-minutes: 8
