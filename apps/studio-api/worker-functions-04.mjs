@@ -22,7 +22,7 @@ import { readExceptionRecoveryCensusCache, persistExceptionRecoveryCensusCache }
 import { FB3_ACTION, RECEIPT_REPAIR_ACTION, executeFb3AdminRecovery, executeApprovedReceiptRepair } from "./exception-recovery-actions.mjs";
 import { actionApprovalAudit, actionOutcomeAudit } from "./exception-recovery-action-audit.mjs";
 import { exceptionRecoveryMutationsEnabled } from "./exception-recovery-rollout.mjs";
-import { verifyAuthenticatedYouTubeReceipt } from "./exception-recovery-authenticated-receipt.mjs";
+import { verifyAuthenticatedYouTubeReceipt, verifyAuthenticatedInstagramReceipt } from "./exception-recovery-authenticated-receipt.mjs";
 import { contentIdForRecoveryOutput, verifyRecoveryProfileChain, withVerifiedRecoveryProfile, verifiedRecoveryChannelId } from "./exception-recovery-profile-chain.mjs";
 import { runPublicationRecovery, publicationRecoveryStatus, readRecoveryState, recoveryStateKey } from "./exception-recovery-background.mjs";
 import { recoveryAuditFields, normalizeRecoveryHistory } from "./exception-recovery-history.mjs";
@@ -9996,6 +9996,20 @@ async function exceptionRecoveryReadAuthenticatedProvider(env,row) {
   const comparableRow=withVerifiedRecoveryProfile(row,{ok:true,profile_id:source.profile_id});
   if(JSON.stringify(recoverySnapshot(source.row))!==JSON.stringify(recoverySnapshot(comparableRow)))
     return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"output_state_changed_before_provider_get"};
+  if(String(f(source.row,"Platform")||"")==="Instagram") {
+    let scoped;
+    try {
+      scoped=await studioActivePipelineSettings(env,
+        ["INSTAGRAM_BUSINESS_ACCOUNT_ID","META_GRAPH_API_ACCESS_TOKEN","META_GRAPH_API_VERSION"],source.profile);
+    } catch {return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"profile_instagram_settings_unavailable"};}
+    const direct=String(f(source.profile,"Instagram_Business_Account_ID")||"").trim();
+    if(direct && direct!==String(scoped.INSTAGRAM_BUSINESS_ACCOUNT_ID||"").trim())
+      return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"instagram_profile_account_setting_conflict"};
+    return verifyAuthenticatedInstagramReceipt(source.row,{
+      settings:scoped,expectedAccountId:scoped.INSTAGRAM_BUSINESS_ACCOUNT_ID});
+  }
+  if(String(f(source.row,"Platform")||"")!=="YouTube")
+    return {verified_public:false,verified_delivery:false,ownership_verified:false,evidence:"provider_not_enabled"};
   let settings;
   try {
     settings=await studioActivePipelineSettings(env,
