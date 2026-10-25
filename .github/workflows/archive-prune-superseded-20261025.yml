@@ -30,6 +30,9 @@ jobs:
           import urllib.parse, urllib.request, urllib.error
           REPO = "jtl6713/SM-Pipeline-V2"
           SELF = "chore/archive-prune-superseded-branches-20261025"
+          # A separate newly opened priority-recovery PR #1165 is active.
+          # Never archive/delete this branch as part of the old-work sweep.
+          KEEP = {"fix/priority-four-verified-publication-recoveries-20261025"}
           # (exact branch SHA, closed-unmerged PR number). None = no PR.
           CANDIDATES = {
             "feature/autonomous-publication-recovery-20261024": ("7464b1f2c9a652b4307a1507d01df97c5f2228dd", 1135),
@@ -67,18 +70,26 @@ jobs:
               if len(rows) >= 100:
                   raise SystemExit("Refuse: incomplete branch inventory")
               return {x["name"]: x for x in rows}
-          def no_open_prs():
+          def check_active_prs(inventory):
               rows = api("pulls?state=open&per_page=100")
-              if rows:
-                  raise SystemExit("Refuse: new open PR exists; preserve active work")
+              if len(rows) >= 100:
+                  raise SystemExit("Refuse: possibly incomplete open PR list")
+              heads = {p["head"]["ref"] for p in rows
+                       if (p["head"].get("repo") or {}).get("full_name") == REPO}
+              if (set(CANDIDATES) | {SELF}) & heads:
+                  raise SystemExit("Refuse: reviewed cleanup candidate gained an open PR")
+              if (KEEP & set(inventory)) - heads:
+                  raise SystemExit("Refuse: retained branch has no active open PR")
+              return heads
           def branch_path(name):
               return urllib.parse.quote(name, safe="/")
           # Fail closed BEFORE tagging or deletion on new/moving/unexpected branches.
-          no_open_prs()
           inventory = branch_listing()
-          allowed = {"main", SELF} | set(CANDIDATES)
-          if set(inventory) not in (allowed, allowed - {SELF}):
+          required = {"main"} | set(CANDIDATES)
+          allowed = required | {SELF} | KEEP
+          if not required.issubset(inventory) or set(inventory) - allowed:
               raise SystemExit("Refuse: changed inventory " + repr(sorted(set(inventory) ^ allowed)))
+          check_active_prs(inventory)
           for name, (sha, pr_number) in CANDIDATES.items():
               row = inventory[name]
               if row.get("protected") or row["commit"]["sha"] != sha:
@@ -145,7 +156,7 @@ jobs:
               if name not in inventory:
                   print("ALREADY_DELETED " + name, flush=True)
                   continue
-              no_open_prs()
+              check_active_prs(branch_listing())
               current = api("branches/" + branch_path(name))
               if current.get("protected") or current["commit"]["sha"] != sha:
                   raise SystemExit("Refuse: branch moved since archive " + name)
@@ -155,8 +166,10 @@ jobs:
                               "origin", ":" + ref], check=True, timeout=60)
               print("LEASE_DELETED " + name, flush=True)
           final = branch_listing()
-          if set(final) != {"main"}:
+          if set(final) - ({"main"} | KEEP) or "main" not in final:
               raise SystemExit("Unexpected branch inventory after cleanup: " +
                                repr(sorted(final)))
-          print("BRANCH_CLEANUP_COMPLETE only=main archived=" + str(len(heads)))
+          check_active_prs(final)
+          print("BRANCH_CLEANUP_COMPLETE retained=" + ",".join(sorted(final)) +
+                " archived=" + str(len(heads)))
           PY
