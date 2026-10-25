@@ -546,3 +546,5 @@ Deploy read-only Exception Recovery History Studio UI 0.6.759 after merged #1137
 2026-10-24: Deploy autonomous publication recovery and History integration PR #1142. All publication mutation flags remain OFF. Preserve production bindings and rollback; run deployed authenticated GET-only #4092 canary before any separately approved status correction. Airtable remains authoritative; no remote publishing, upload or hold release.
 
 2026-10-24: Deploy UI 0.6.760 publication recovery with consistent fresh asset cache keys and BUILD_ID. Preserve release newness gate; mutation flags remain OFF.
+
+2026-10-24: Deploy UI 0.6.761-guarded-bulk-recovery. Exception Recovery Center sequentially verifies provider receipts and reuses existing per-output admin locked/action-audited status-only corrections; server mutation flag remains OFF/unset. Protected Pages deployment, live version proof and dedicated Exception CI required. No new remote provider publishing or general recovery enablement.
