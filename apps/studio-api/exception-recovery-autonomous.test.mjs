@@ -482,3 +482,43 @@ test("known remote identity or ownership conflicts remain terminal and cannot au
   assert.equal(result.skipped,true);
   assert.equal(f.writes,0);
 });
+
+test("same remote YouTube upload is reprobed after processing cooldown; no republish or premature Published state",async()=>{
+  const f=fixture();
+  f.receipt.verified_delivery=false;f.receipt.verified_public=false;
+  f.receipt.ownership_verified=false;f.receipt.evidence="upload_not_processed";
+  const first=await reconcilePublication(f.deps);
+  assert.equal(first.outcome,"Awaiting Verification");
+  assert.equal(first.reason,"upload_not_processed");
+  assert.equal(f.state.terminal,false);
+  assert.equal(f.writes,0);
+  assert.equal((await reconcilePublication(f.deps)).skipped,true);
+  const old={terminal:true,attempts:1,next_at:instant+3600000,
+    pending:null,last:{outcome:"Needs Decision",reason:"upload_not_processed"}};
+  let clock=instant;f.deps.now=()=>clock;
+  f.deps.readState=async()=>structuredClone(old);
+  f.deps.saveState=async(_,newState)=>{Object.assign(old,structuredClone(newState));};
+  f.deps.verifyRemote=async()=>{throw Error("cooldown must prevent provider poll");};
+  assert.equal((await reconcilePublication(f.deps)).skipped,true);
+  clock+=3600001;
+  f.deps.verifyRemote=async()=>({
+    ...structuredClone(f.receipt),
+    verified_delivery:true,verified_public:true,ownership_verified:true,
+    checked_at:new Date(clock).toISOString(),evidence:"oauth_owned_channel_exact_public_processed_video"
+  });
+  const corrected=await reconcilePublication(f.deps);
+  assert.equal(corrected.outcome,"Corrected");
+  assert.equal(f.writes,1);
+  assert.equal(old.terminal,true);
+  assert.equal(old.last.reason,"authoritative_airtable_readback_confirmed");
+});
+test("processing reprobe respects attempts ceiling and never overrides identity conflicts",async()=>{
+  for(const reason of ["upload_not_processed","remote_identity_mismatch"]){
+   const f=fixture();
+   const old={terminal:true,attempts:5,next_at:instant-1,pending:null,last:{outcome:"Needs Decision",reason}};
+   f.deps.readState=async()=>structuredClone(old);
+   f.deps.verifyRemote=async()=>{throw Error("terminal/limit state must never hit provider");};
+   assert.equal((await reconcilePublication(f.deps)).skipped,true);
+   assert.equal(f.writes,0);
+  }
+});
