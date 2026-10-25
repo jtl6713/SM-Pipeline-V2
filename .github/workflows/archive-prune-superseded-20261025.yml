@@ -1,0 +1,157 @@
+name: Archive and retire superseded branch heads (2026-10-25)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/archive-prune-superseded-20261025.yml'
+permissions:
+  contents: write
+  pull-requests: read
+concurrency:
+  group: archived-branch-cleanup-20261025
+  cancel-in-progress: false
+jobs:
+  archive-and-prune:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Verify exact inactive refs, archive immutable heads, safely prune
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, subprocess, time
+          import urllib.parse, urllib.request, urllib.error
+          REPO = "jtl6713/SM-Pipeline-V2"
+          SELF = "chore/archive-prune-superseded-branches-20261025"
+          # (exact branch SHA, closed-unmerged PR number). None = no PR.
+          CANDIDATES = {
+            "feature/autonomous-publication-recovery-20261024": ("7464b1f2c9a652b4307a1507d01df97c5f2228dd", 1135),
+            "feature/producer-media-revisions-20261023": ("c01b5df5b981c426800383710ae27ef89b00c23c", 1097),
+            "feature/producer-scoped-library-append-20261023": ("18ac8d2ace1cd2157e8edbefe7a1a3090989cbc3", 1103),
+            "fix/exception-recovery-pages-version-contract-20261024": ("cbcdd37282535ed8f972f1af42878821799dcfaa", 1138),
+            "fix/factory-activity-navigation-collapse-20261023": ("dd692d740f9c00c10d17df5ddbab6272a658267e", 1114),
+            "fix/global-matching-fairness-main-sync-20261024": ("33a73affc9e75dc6ba5e63faafa0e1f237c761c2", 1131),
+            "fix/matcher-error-evidence-20261024": ("eab8cc94d29a3fa6764b0a6ad48a67dc57ae1247", 1128),
+            "fix/nyc-idea-photo-handoff-20261024b": ("f3cc3cc457a5c9a5879633f59858e9dc2a8098be", None),
+            "fix/nyc-photo-ready-backlog-20261024": ("bb171b2027feb81bcd6167a41daff1872c449566", 1123),
+            "fix/producer-entry-script-short-20261023": ("22557e460ce7a10b0761fa68ab2e6784ea426bc5", 1113),
+            "release/conversational-producer-ui-0746": ("7f886deb09cc99ac1a7d6e2e0a28b63b5afac733", 1096),
+            "test/instagram-7864-production-readonly-canary-20261024": ("24a89886e8aa5448a6d73816e4116b47619416cf", None),
+          }
+          if os.getenv("GITHUB_REPOSITORY") != REPO or os.getenv("GITHUB_REF") != "refs/heads/main":
+              raise SystemExit("Refuse: wrong repository or ref")
+          headers = {
+              "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+              "Accept": "application/vnd.github+json",
+              "Content-Type": "application/json",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+          def api(path, method="GET", body=None):
+              req = urllib.request.Request(
+                  "https://api.github.com/repos/" + REPO + "/" + path,
+                  headers=headers, method=method,
+                  data=None if body is None else json.dumps(body).encode(),
+              )
+              with urllib.request.urlopen(req, timeout=40) as resp:
+                  data = resp.read().decode()
+                  return json.loads(data) if data else None
+          def branch_listing():
+              rows = api("branches?per_page=100")
+              if len(rows) >= 100:
+                  raise SystemExit("Refuse: incomplete branch inventory")
+              return {x["name"]: x for x in rows}
+          def no_open_prs():
+              rows = api("pulls?state=open&per_page=100")
+              if rows:
+                  raise SystemExit("Refuse: new open PR exists; preserve active work")
+          def branch_path(name):
+              return urllib.parse.quote(name, safe="/")
+          # Fail closed BEFORE tagging or deletion on new/moving/unexpected branches.
+          no_open_prs()
+          inventory = branch_listing()
+          allowed = {"main", SELF} | set(CANDIDATES)
+          if set(inventory) != allowed:
+              raise SystemExit("Refuse: changed inventory " + repr(sorted(set(inventory) ^ allowed)))
+          for name, (sha, pr_number) in CANDIDATES.items():
+              row = inventory[name]
+              if row.get("protected") or row["commit"]["sha"] != sha:
+                  raise SystemExit("Refuse: protected/moved " + name)
+              head_prs = api("pulls?state=all&per_page=100&head=" +
+                            urllib.parse.quote("jtl6713:" + name, safe=""))
+              if pr_number is None:
+                  if head_prs:
+                      raise SystemExit("Refuse: unexpected PR for " + name)
+              elif len(head_prs) != 1 or head_prs[0]["number"] != pr_number or (
+                  head_prs[0]["state"] != "closed" or head_prs[0].get("merged_at") or
+                  head_prs[0]["head"]["ref"] != name
+              ):
+                  raise SystemExit("Refuse: closed PR contract changed " + name)
+          if SELF not in inventory or inventory[SELF].get("protected"):
+              raise SystemExit("Refuse: missing/protected maintenance PR branch")
+          self_prs = api("pulls?state=closed&per_page=100&head=" +
+                        urllib.parse.quote("jtl6713:" + SELF, safe=""))
+          merged_self = [p for p in self_prs if p.get("merged_at") and
+                         p["head"]["ref"] == SELF and
+                         p["head"]["sha"] == inventory[SELF]["commit"]["sha"]]
+          if len(merged_self) != 1:
+              raise SystemExit("Refuse: cleanup PR has not merged at its exact head")
+          # Do not delete a head running jobs: someone may be actively using it.
+          for name in CANDIDATES:
+              runs = api("actions/runs?per_page=30&branch=" +
+                         urllib.parse.quote(name, safe=""))
+              if any(r["status"] not in ("completed",) for r in runs.get("workflow_runs", [])):
+                  raise SystemExit("Refuse: active Actions run on " + name)
+          print("PREFLIGHT_OK branches=" + str(len(CANDIDATES)), flush=True)
+          heads = {name: pair[0] for name, pair in CANDIDATES.items()}
+          heads[SELF] = inventory[SELF]["commit"]["sha"]
+          # Preserve EVERY exact historical commit (including the old maintenance PR
+          # and unique unmerged Producer edits) as a recoverable immutable tag first.
+          for name, sha in heads.items():
+              tag = "archive/branch-cleanup-20261025/" + name.replace("/", "--")
+              path = "git/ref/tags/" + branch_path(tag)
+              try:
+                  existing = api(path)
+                  if existing["object"]["sha"] != sha:
+                      raise SystemExit("Refuse: archive tag collision " + name)
+              except urllib.error.HTTPError as exc:
+                  if exc.code != 404:
+                      raise
+                  api("git/refs", "POST", {"ref": "refs/tags/" + tag, "sha": sha})
+              for attempt in range(12):
+                  try:
+                      if api(path)["object"]["sha"] != sha:
+                          raise SystemExit("Refuse: archive tag mismatch " + name)
+                      break
+                  except urllib.error.HTTPError as exc:
+                      if exc.code != 404:
+                          raise
+                      time.sleep(1)
+              else:
+                  raise SystemExit("Refuse: archive tag not verified " + name)
+              print("ARCHIVED " + name + " -> " + tag, flush=True)
+          print("ALL_HISTORY_ARCHIVED_BEFORE_DELETE", flush=True)
+          # Last-minute checks and lease-guarded remote delete: a new push cannot
+          # silently lose work. Any concurrency drift leaves the affected branch.
+          for name, sha in heads.items():
+              no_open_prs()
+              current = api("branches/" + branch_path(name))
+              if current.get("protected") or current["commit"]["sha"] != sha:
+                  raise SystemExit("Refuse: branch moved since archive " + name)
+              ref = "refs/heads/" + name
+              subprocess.run(["git", "push",
+                              "--force-with-lease=" + ref + ":" + sha,
+                              "origin", ":" + ref], check=True, timeout=60)
+              print("LEASE_DELETED " + name, flush=True)
+          final = branch_listing()
+          if set(final) != {"main"}:
+              raise SystemExit("Unexpected branch inventory after cleanup: " +
+                               repr(sorted(final)))
+          print("BRANCH_CLEANUP_COMPLETE only=main archived=" + str(len(heads)))
+          PY
