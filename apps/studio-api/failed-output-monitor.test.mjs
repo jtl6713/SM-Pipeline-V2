@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { FAILED_OUTPUT_FORMULA, scanOutstandingFailedOutputs, describeFailedOutput, failedOutputRetryGate, facebookRateLimitResetReason } from "./failed-output-monitor.mjs";
+import { FAILED_OUTPUT_FORMULA, scanOutstandingFailedOutputs, describeFailedOutput, failedOutputRetryGate, facebookRateLimitResetReason, facebookSpamHeldRescheduleReason } from "./failed-output-monitor.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const worker = fs.readFileSync(path.join(here, "worker-functions-04.mjs"), "utf8");
@@ -68,7 +68,7 @@ test("known live failure signatures get safe root-cause actions instead of blind
     ["AP1C slide-set mismatch", "needs_attention", /actual carousel slides/i],
     ["Only photo or video can be accepted as media type", "needs_attention", /unsupported carousel slide media/i],
     ["AP3P parent container terminal state", "healer_eligible", /parent-container recreation/i],
-    ["Facebook rate limit 1390008", "cooldown", /publishing cooldown/i],
+    ["Facebook rate limit 1390008", "cooldown", /later MAE Facebook slot/i],
   ];
   for (const [error, recovery, action] of cases) {
     const item = describeFailedOutput(record("recKnown", {
@@ -276,4 +276,35 @@ test("failed-output diagnostic uses actual title and safe stored fallback",()=>{
    Output_Title:"",Title_Text:"Alternative stored title",Publish_Status:"Failed",
  }));
  assert.equal(fallback.title,"Alternative stored title");
+});
+
+test("Facebook Meta 368 protection can reserve a later slot without unholding or reapproval",()=>{
+ const active={Platform:"Facebook",Platform_Output_Type:"Facebook Reel",Review_Status:"Approved",
+  Output_Status:"Approved for Publishing",Publish_Status:"Failed",Render_Status:"Rendered",
+  Publish_Error_Stage:"FBS3_RATE_LIMIT",
+  Publish_Error_Message:"Facebook rate limit (368/1390008): We limit how often you can post.",
+  Studio_Output_Notes:"QA-1050 HARD NO-GRAPH-CREATE HOLD | exact output",
+  Final_File_URL:"https://drive.google.com/file/d/a/view",Publish_Attempt_Count:1,
+  Studio_Publish_Dispatch_Count:1,Do_Not_Publish:true};
+ const row=record("recAAAAAAAAAAAAAA",active);
+ assert.equal(facebookSpamHeldRescheduleReason(row),null);
+ assert.equal(describeFailedOutput(row).can_reschedule_spam_held,true);
+ for(const [change,reason] of [
+   [{Platform_Output_Type:"Facebook Story"},"not_active_facebook_reel"],
+   [{Do_Not_Publish:false},"not_protective_hold"],
+   [{Studio_Output_Notes:"operator other hold"},"unknown_hold_provenance"],
+   [{Studio_Output_Notes:active.Studio_Output_Notes+" SPAM_COOLDOWN_RESCHEDULE_PENDING_VERIFICATION"},"already_rescheduled_pending_verification"],
+   [{Output_Status:"Cancelled",Review_Status:"Skipped"},"not_approved_failed"],
+   [{Platform_Post_ID:"already_posted"},"publication_evidence"],
+   [{Publish_Attempt_Count:3},"retry_limit"],
+   [{Publish_Locked_By:"runner",Publish_Locked_At:new Date().toISOString()},"publish_locked"],
+ ]) assert.equal(facebookSpamHeldRescheduleReason(record("recAAAAAAAAAAAAAA",{...active,...change})),reason);
+});
+test("reschedule-on-hold uses the atomic MAE route but never clears spam error, hold or publishes",()=>{
+ assert.match(worker,/quality_rate_limit_hold_reschedule === true/);
+ assert.match(worker,/facebookSpamHeldRescheduleReason\(authoritative\)/);
+ assert.match(worker,/runAtomicScheduleTransaction/);
+ assert.match(worker,/SPAM_COOLDOWN_RESCHEDULE_PENDING_VERIFICATION/);
+ assert.match(worker,/Do_Not_Publish: true, Publish_Retry_Eligible: false/);
+ assert.match(worker,/if \(!holdReschedule && due/);
 });

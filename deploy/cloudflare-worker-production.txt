@@ -704,3 +704,4 @@ Deploy read-only Exception Recovery History PR #1136, commit 63910a83. Autonomou
 Deploy Worker 0.10.682-idea-lifecycle-live: authoritative fresh Ideas classification; update snapshot from Airtable and prevent stale promoted rows. Targeted lifecycle test gate added.
 2026-10-25 exception recovery: safeguarded five-minute/five-record receipt-only sweep, per-lane overdue census; keep general admin mutations off.
 2026-10-25: Retry authenticated status-only YouTube processing GET after cooldown for existing exact remote ID; never repost. #1885 historical terminal upload_not_processed remains bounded, guarded and readback-only.
+2026-10-25: Meta spam rate-limited Facebook Reel schedule-only reservation under exact QA-1050 hold, 48h cooldown/12h account spacing, preserve hold and failed until duplicate verification; no Graph create. Operator authorized.
