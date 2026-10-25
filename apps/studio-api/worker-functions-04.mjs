@@ -10123,6 +10123,81 @@ export async function getStudioExceptionRecoveryReceipt(request, env) {
 /*__STUDIO_WORKER_END:getStudioExceptionRecoveryReceipt__*/
 
 
+// Project only classification and identity fields for the 8k+ row canonical census.
+// Full media manifests, render timelines, provider responses and other large JSON
+// columns are not needed to count Home/Pipeline publication exceptions.
+// One full projected Airtable census remains authoritative; no publishing writes.
+export const EXCEPTION_CENSUS_FIELDS = Object.freeze([
+  "Test_Run_ID",
+  "Output_ID",
+  "Output_Title",
+  "Title_Text",
+  "Studio_Effective_Requested_Title",
+  "Content_Profile",
+  "Content_Item",
+  "Platform",
+  "Platform_Output_Type",
+  "Studio_Output_Type",
+  "Format",
+  "Output_Status",
+  "Publish_Status",
+  "Review_Status",
+  "Render_Status",
+  "Do_Not_Publish",
+  "Scheduled_Post_Date",
+  "Studio_Scheduled_At",
+  "YouTube_Scheduled_Publish_At",
+  "Published_At",
+  "Platform_Post_URL",
+  "Manual_Published_URL",
+  "Manual_Completion_Status",
+  "FB_Publish_Status",
+  "FB_Slideshow_Status",
+  "IG_Carousel_Status",
+  "IG_Story_Status",
+  "TikTok_Draft_Status",
+  "YouTube_Video_ID",
+  "YouTube_Upload_Status",
+  "YouTube_Processing_Status",
+  "YouTube_Stage",
+  "YouTube_Package_Status",
+  "Publish_Retry_Eligible",
+  "Asset_Selection_Retry_Eligible",
+  "Publish_Error_Message",
+  "Publish_Error_Stage",
+  "IG_Carousel_Error_Message",
+  "Remotion_Error_Message",
+  "Final_File_Error_Message",
+  "Music_Error_Message",
+  "FB_Slideshow_Error_Message",
+  "YouTube_Error_Message",
+  "YouTube_Processing_Failure_Reason",
+  "YouTube_Rejection_Reason",
+  "Music_Status",
+  "Asset_Selection_Status",
+  "Final_File_URL",
+  "Studio_Preview_URL",
+  "Remotion_Job_ID",
+  "Final_File_ID",
+  "Manual_Fallback_Required",
+  "Auto_Publish_Enabled",
+  "Platform_Post_ID",
+  "Platform_Media_ID",
+  "Publish_Asset_URL",
+  "IG_Carousel_Published_Media_ID",
+  "IG_Story_Post_ID",
+  "Studio_Publish_Dispatch_At",
+  "Studio_Publish_Dispatch_Count",
+  "Thumbnail_URL",
+  "Composition_ID",
+  "Publish_Locked_By",
+  "Publish_Locked_At",
+  "Publish_Next_Retry_At",
+  "Output_Notes",
+  "Publish_Method",
+  "Platform_Publish_Status_URL",
+]);
+
 export async function getStudioExceptionRecoveryCounts(request, env) {
   const url=new URL(request.url);
   const fresh=url.searchParams.get("fresh")==="1";
@@ -10143,7 +10218,9 @@ export async function getStudioExceptionRecoveryCounts(request, env) {
     const homeBefore=env?.STUDIO_HOME_PROFILE_SUMMARY_READS==="true"?null:
       await readStudioProfilesOverviewSnapshotFromR2(env).catch(()=>null);
     const all=await scanOutstandingFailedOutputs((options)=>
-      listRecordsPage(env,env.AIRTABLE_OUTPUT_TABLE_ID,options),{
+      listRecordsPage(env,env.AIRTABLE_OUTPUT_TABLE_ID,{
+        ...options,fields:EXCEPTION_CENSUS_FIELDS,
+      }),{
         filterFormula:"{Test_Run_ID}=BLANK()",pageSize:100,requireUnique:true,
       });
     // A source-canonical census must not launch a second expensive QA scan.
