@@ -124,9 +124,12 @@ jobs:
                   raise SystemExit("Refuse: active Actions run on " + name)
           print("PREFLIGHT_OK branches=" + str(len(CANDIDATES)), flush=True)
           heads = {name: pair[0] for name, pair in CANDIDATES.items()}
-          heads[SELF] = self_sha
-          # Preserve EVERY exact historical commit (including the old maintenance PR
-          # and unique unmerged Producer edits) as a recoverable immutable tag first.
+          if SELF in inventory:
+              raise SystemExit("Refuse: cleanup maintenance branch unexpectedly still exists")
+          # Preserve EVERY one of the twelve historical branch heads, including
+          # unique unmerged Producer edits, as a recoverable immutable tag first.
+          # The maintenance PR itself was already merged and auto-deleted by GitHub;
+          # its own commit is retained in PR history, not a separate tag.
           for name, sha in heads.items():
               tag = "archive/branch-cleanup-20261025/" + name.replace("/", "--")
               path = "git/ref/tags/" + branch_path(tag)
