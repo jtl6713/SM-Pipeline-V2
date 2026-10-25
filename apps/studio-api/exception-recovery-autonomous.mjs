@@ -12,6 +12,10 @@ export const RECOVERY_SIGNATURE = "AUTONOMOUS-PUBLICATION-RECONCILIATION";
    "profile_instagram_token_not_configured",
    "profile_service_auth_missing",
  ]);
+ // An already-uploaded YouTube ID can exist before processing completes.
+ // Reprobe the same ID after cooldown, never call the publishing/upload stage.
+ // Prior versions incorrectly made this temporary provider state terminal.
+ const RETRYABLE_PROVIDER_PROCESSING = new Set(["upload_not_processed"]);
 const str = (r,k) => String(r?.fields?.[k] ?? "").trim();
 // Airtable omits unchecked checkbox values on readback. Only for this known
 // checkbox, an omitted value and false are the same stored state.
@@ -192,7 +196,11 @@ export async function reconcilePublication({
   // retain their original terminal protection.
   const oldConfigFailure=prior?.terminal && RETRYABLE_PROVIDER_CONFIG.has(prior?.last?.reason)
     && (prior?.attempts||0)<policy.maxAttempts;
-  if(!prior?.pending && ((prior?.terminal && !oldConfigFailure) ||
+  const processingPending=prior?.terminal &&
+    RETRYABLE_PROVIDER_PROCESSING.has(prior?.last?.reason) &&
+    (prior?.attempts||0)<policy.maxAttempts &&
+    !(Number(prior?.next_at)>now());
+  if(!prior?.pending && ((prior?.terminal && !oldConfigFailure && !processingPending) ||
       (Number(prior?.next_at)>now() && !oldConfigFailure)))
     return {outcome:prior?.last?.outcome || "Awaiting Verification",record_id:recordId,skipped:true};
   const attempt=uuid();
@@ -221,6 +229,7 @@ export async function reconcilePublication({
   event.receipt=receipt;
   const denied=receiptBlock(row,receipt,now());
   if(denied) return finish(RETRYABLE_PROVIDER_CONFIG.has(denied) ||
+    RETRYABLE_PROVIDER_PROCESSING.has(denied) ||
     /unavailable|inaccessible|private|scheduled|stale/.test(denied)
     ?"Awaiting Verification":"Needs Decision",denied);
   if(!policy.mutate || (!policy.broad && policy.canaryRecord!==recordId))
