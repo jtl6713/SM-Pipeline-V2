@@ -10,7 +10,8 @@ const readbackMatches = (key, actual, expected) => key === "Publish_Retry_Eligib
   : JSON.stringify(actual ?? null) === JSON.stringify(expected ?? null);
 const snapshotFields = ["Output_ID","Output_Title","Title_Text","Content_Item","Content_Profile","Platform",
   "Output_Status","Publish_Status","Review_Status","Do_Not_Publish","Test_Run_ID",
-  "Platform_Post_ID","YouTube_Video_ID","Platform_Media_ID","Platform_Post_URL",
+  "Platform_Post_ID","YouTube_Video_ID","Platform_Media_ID","IG_Carousel_Published_Media_ID",
+  "IG_Carousel_Published_At","IG_Story_Post_ID","Platform_Output_Type","Studio_Output_Type","Platform_Post_URL",
   "Manual_Published_URL","Published_At","Scheduled_Post_Date","YouTube_Scheduled_Publish_At",
   "YouTube_Privacy_Status","YouTube_Upload_Status","YouTube_Processing_Status","YouTube_Stage",
   "Publish_Retry_Eligible","Publish_Locked_By",
@@ -55,16 +56,29 @@ export function recoveryBlock(row, nowMs) {
   // it never uploads/retries or resets publisher attempt counters.
   if(!Array.isArray(row.fields.Content_Profile) || row.fields.Content_Profile.length !== 1)
     return "ambiguous_profile";
-  if(str(row,"Platform") !== "YouTube") return "provider_not_enabled_for_autonomous_correction";
+  const platform=str(row,"Platform");
+  if(platform==="Instagram") {
+    if(/story/i.test(str(row,"Platform_Output_Type")||str(row,"Studio_Output_Type")))
+      return "instagram_story_adapter_not_enabled";
+    if(!str(row,"Platform_Post_ID") && !str(row,"IG_Carousel_Published_Media_ID"))
+      return "published_instagram_media_id_required";
+  } else if(platform!=="YouTube") return "provider_not_enabled_for_autonomous_correction";
   return null;
 }
 export function receiptBlock(row, receipt, nowMs) {
   if(!receipt?.verified_delivery || !receipt.ownership_verified) return receipt?.evidence || "delivery_ownership_unverified";
   if(receipt.platform !== str(row,"Platform") || receipt.profile_id !== row.fields.Content_Profile[0])
     return "provider_profile_mismatch";
-  const remote = str(row,"YouTube_Video_ID") || str(row,"Platform_Post_ID");
-  if(receipt.remote_id !== remote || (str(row,"YouTube_Video_ID") && str(row,"Platform_Post_ID") &&
-     str(row,"YouTube_Video_ID") !== str(row,"Platform_Post_ID"))) return "remote_identity_mismatch";
+  const instagram=str(row,"Platform")==="Instagram";
+  const remote=instagram
+    ?(str(row,"Platform_Post_ID")||str(row,"IG_Carousel_Published_Media_ID"))
+    :(str(row,"YouTube_Video_ID")||str(row,"Platform_Post_ID"));
+  const requiredIds=instagram
+    ?[str(row,"Platform_Post_ID"),str(row,"IG_Carousel_Published_Media_ID")]
+    :[str(row,"YouTube_Video_ID"),str(row,"Platform_Post_ID")];
+  if(receipt.remote_id!==remote || new Set(requiredIds.filter(Boolean)).size>1)
+    return "remote_identity_mismatch";
+  if(instagram && !receipt.verified_public) return "instagram_publication_not_verified";
   const checked = Date.parse(receipt.checked_at);
   if(!Number.isFinite(checked) || nowMs-checked > 60000 || checked > nowMs+1000)
     return "stale_provider_evidence";
@@ -80,9 +94,9 @@ export function receiptBlock(row, receipt, nowMs) {
   }
   const expectedSchedule=Date.parse(str(row,"YouTube_Scheduled_Publish_At"));
   const actualSchedule=Date.parse(receipt.scheduled_at);
-  if(!receipt.verified_public && Number.isFinite(expectedSchedule) && (!Number.isFinite(actualSchedule) ||
+  if(!instagram && !receipt.verified_public && Number.isFinite(expectedSchedule) && (!Number.isFinite(actualSchedule) ||
       Math.abs(actualSchedule-expectedSchedule)>1000)) return "scheduled_handoff_mismatch";
-  if(!receipt.verified_public && str(row,"Published_At"))
+  if(!instagram && !receipt.verified_public && str(row,"Published_At"))
     return "saved_publication_time_conflicts_with_private_delivery";
   if(receipt.verified_public) {
     const published=Date.parse(receipt.published_at);
