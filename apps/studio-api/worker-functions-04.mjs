@@ -10148,7 +10148,7 @@ export async function getStudioExceptionRecoveryCounts(request, env) {
       });
     // A source-canonical census must not launch a second expensive QA scan.
     // The 8k+ full-output scan already pages the entire authoritative table;
-    // loadStudioFailedOutputSnapshot(fresh:true) additionally runs multiple
+    // A forced Quality Agent refresh also runs multiple
     // independent Airtable sweeps and has timed out the production request.
     // Do not silently reuse stale QA evidence as if it were same-generation:
     // the source/Quality Agent exact-ID comparison is explicitly unavailable.
