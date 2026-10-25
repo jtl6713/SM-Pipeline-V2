@@ -104,13 +104,24 @@ export async function reconcilePublication({
   // A crash after a successful PATCH is resolved from the durable intent.
   if(prior?.pending && complete(row)) {
     const expected=prior.pending.after;
-    const preserved=Object.entries(prior.pending.before).filter(([k])=>!(k in expected));
-    if(Object.entries(expected).every(([k,v])=>JSON.stringify(row.fields[k]??null)===JSON.stringify(v??null)) &&
-       preserved.every(([k,v])=>JSON.stringify(row.fields[k]??null)===JSON.stringify(v))) {
+    // The publisher/QA may update processing counters after our PATCH. On a
+    // readback retry, compare the fields that THIS transaction intended to
+    // write and its immutable provider/Studio identity, not every unrelated
+    // snapshot field. Never issue a second PATCH for an uncertain write.
+    const identityKeys=["Output_ID","Platform","Content_Item","Content_Profile",
+      "Platform_Post_ID","YouTube_Video_ID","Scheduled_Post_Date",
+      "YouTube_Scheduled_Publish_At"];
+    const same=(a,b)=>JSON.stringify(a??null)===JSON.stringify(b??null);
+    const intendedWritten=Object.entries(expected).every(([k,v])=>same(row.fields[k],v));
+    const identityPreserved=identityKeys.every(k=>same(
+      row.fields[k],prior.pending.before?.[k]));
+    if(intendedWritten && identityPreserved) {
       const recovered={...prior.pending, outcome:"Corrected", phase:"outcome",
+        completion_kind:prior.pending.receipt?.verified_public
+          ?"public_publication_verified":"studio_delivery_completed",
         after:recoverySnapshot(row), corrected_at:new Date(now()).toISOString(),
         duration_ms:now()-Date.parse(prior.pending.detected_at),
-        reason:"authoritative_readback_after_restart"};
+        reason:"authoritative_readback_after_uncertain_write"};
       await appendAudit(recovered);
       await saveState(recordId,{...prior,pending:null,terminal:true,last:recovered});
       return recovered;
