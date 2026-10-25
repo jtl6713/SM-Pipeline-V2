@@ -328,7 +328,7 @@ test("Meta spam held-only MAE picks available overflow instead of claiming 12-ho
   // Explicit model: 3 LA posts/day, all priority slots taken.
   // Twelve-hour spacing cannot fit, but a guarded future reservation at
   // the usual 90-minute platform distance has available overflow.
-  const today=new Date("2026-06-02T20:00:00.000Z");
+  const today=new Date("2026-06-03T11:55:00.000Z");
   const dense=[];
   for(let d=1;d<=7;d++){
     const start=Date.parse("2026-06-03T00:00:00.000Z")+(d-1)*86400000;
