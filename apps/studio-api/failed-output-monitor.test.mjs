@@ -308,3 +308,26 @@ test("reschedule-on-hold uses the atomic MAE route but never clears spam error, 
  assert.match(worker,/Do_Not_Publish: true, Publish_Retry_Eligible: false/);
  assert.match(worker,/if \(!holdReschedule && due/);
 });
+
+test("Meta spam held-only MAE picks available overflow instead of claiming 12-hour posting capacity", () => {
+  const code=worker.slice(worker.indexOf("function qualityFacebookRecoverySlot("),
+    worker.indexOf("export async function scheduleStudioPublishOutput("));
+  assert.match(code,/heldOnly \? 90 \* 60 \* 1000 : 12 \* 60 \* 60 \* 1000/);
+  assert.match(code,/Date\.now\(\) \+ 48 \* 60 \* 60 \* 1000/);
+  const {now,occupied}=(()=> {
+    const start=Date.parse("2026-10-28T00:00:00.000Z");
+    // Model a routinely crowded LA Facebook calendar with 3 normal posts
+    // each day, so no 12-hour gap exists even over several days.
+    const occupied=[];
+    for(let day=0;day<7;day++)for(const hour of [12,18,23])
+      occupied.push(start+day*86400000+hour*3600000);
+    return {now:new Date(start),occupied};
+  })();
+  assert.ok(occupied.length>0 && now instanceof Date);
+  const codePreview=worker.slice(worker.indexOf("if (payload?.quality_rate_limit_preview === true)"),
+    worker.indexOf("if (scheduleReservationLaneEnabled(env, reservationProfile?.id, platform))"));
+  assert.match(codePreview,/heldOnly:holdReschedule/);
+  assert.match(worker,/held_spam_rescheduled_pending_verification: holdReschedule/);
+  assert.match(worker,/Do_Not_Publish: true, Publish_Retry_Eligible: false/);
+  assert.match(worker,/if \(!holdReschedule && due && approved/);
+});
