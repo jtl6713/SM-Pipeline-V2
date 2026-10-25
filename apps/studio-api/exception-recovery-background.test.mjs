@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import {runPublicationRecovery,readRecoveryState,writeRecoveryState,publicationDiscoveryFormula} from "./exception-recovery-background.mjs";
+import {runPublicationRecovery,readRecoveryState,writeRecoveryState,publicationDiscoveryFormula,PRIORITY_VERIFIED_EXISTING_POSTS} from "./exception-recovery-background.mjs";
 function bucket() {
   const data=new Map();let version=0;
   return {
@@ -88,4 +88,43 @@ test("approved single-canary deployment never scans or processes unrelated backl
  assert.equal(result.status,"completed");
  assert.deepEqual(visited,[canary]);
  assert.equal(result.corrected,0);
+});
+
+test("bounded recovery inspects four exact existing receipts once before resuming ordinary queue",async()=>{
+ const store=bucket();let now=Date.parse("2026-10-25T03:30:00Z");
+ const env={STUDIO_MEDIA:store,PUBLICATION_RECONCILIATION_SCAN_ENABLED:"true",
+   PUBLICATION_RECONCILIATION_ENABLED:"true",PUBLICATION_RECONCILIATION_BOUNDED_ENABLED:"true",
+   PUBLICATION_RECONCILIATION_BATCH_SIZE:"2"};
+ const observed=[];
+ const deps={now:()=>now,discover:async()=>({records:[]}),
+   readOutput:async id=>{observed.push(id);return {id,fields:{
+     Platform:"TikTok",Review_Status:"Approved",Content_Profile:["recBBBBBBBBBBBBBB"]
+   }};},
+   appendAudit:async()=>{},verifyRemote:async()=>{throw Error("No provider call for unsupported destination");},
+   patchStatus:async()=>{throw Error("Never modify an unverified output");}};
+ const first=await runPublicationRecovery(env,deps);
+ assert.equal(first.inspected,2);
+ assert.deepEqual(observed,PRIORITY_VERIFIED_EXISTING_POSTS.slice(0,2));
+ now+=16*60000;
+ const second=await runPublicationRecovery(env,deps);
+ assert.equal(second.inspected,2);
+ assert.deepEqual(observed,PRIORITY_VERIFIED_EXISTING_POSTS);
+ now+=16*60000;
+ await runPublicationRecovery(env,deps);
+ assert.deepEqual(observed,PRIORITY_VERIFIED_EXISTING_POSTS,
+   "Priority is exhausted after one bounded pass and never replays blindly");
+ const control=await readRecoveryState(store,"studio/state/publication-reconciliation/v1/control.json");
+ assert.equal(control.priority_cursor,4);
+});
+test("read-only and exact-canary stages never select priority records",async()=>{
+ assert.equal(PRIORITY_VERIFIED_EXISTING_POSTS.length,4);
+ for(const id of PRIORITY_VERIFIED_EXISTING_POSTS) assert.match(id,/^rec[A-Za-z0-9]{14}$/);
+ const store=bucket(),env={STUDIO_MEDIA:store,
+   PUBLICATION_RECONCILIATION_SCAN_ENABLED:"true",
+   PUBLICATION_RECONCILIATION_BATCH_SIZE:"1"};
+ const got=[];
+ await runPublicationRecovery(env,{discover:async()=>({records:[{id:"recAAAAAAAAAAAAAA"}]}),
+   readOutput:async id=>{got.push(id);return {id,fields:{Platform:"TikTok",Review_Status:"Approved",Content_Profile:["recBBBBBBBBBBBBBB"]}};},
+   appendAudit:async()=>{}});
+ assert.deepEqual(got,["recAAAAAAAAAAAAAA"]);
 });
