@@ -39,8 +39,15 @@ export async function runPublicationRecovery(env,deps) {
     // Reserve this interval durably before discovery; a restart retries next tick.
     await writeRecoveryState(bucket,controlKey,{...control,next_at:now()+policy.intervalMs,
       heartbeat:result,policy});
-    const page=await deps.discover({filterFormula:publicationDiscoveryFormula(now()),
-      pageSize:100,...(control.discovery_cursor?{offset:control.discovery_cursor}:{})});
+    // When the mutation gate is scoped to a single approved canary, do not
+    // crawl or process the unrelated backlog. Canary activation must be
+    // deterministic and have an exact Airtable record identity.
+    const canaryOnly=policy.mutate && !policy.broad;
+    if(canaryOnly && !/^rec[A-Za-z0-9]{14}$/.test(policy.canaryRecord))
+      throw new Error("exact_canary_identity_required");
+    const page=canaryOnly?{records:[{id:policy.canaryRecord}],offset:null}
+      :await deps.discover({filterFormula:publicationDiscoveryFormula(now()),
+          pageSize:100,...(control.discovery_cursor?{offset:control.discovery_cursor}:{})});
     if(!Array.isArray(page.records)) throw new Error("authoritative_discovery_unavailable");
     for(const row of page.records) {
       if(!/^rec[A-Za-z0-9]{14}$/.test(String(row.id))) throw new Error("invalid_discovery_identity");
@@ -48,8 +55,10 @@ export async function runPublicationRecovery(env,deps) {
       if(!await readRecoveryState(bucket,key))
         await writeRecoveryState(bucket,key,{record_id:row.id,attempts:0,next_at:0,terminal:false});
     }
-    const listed=await bucket.list({prefix:PREFIX+"outputs/",limit:policy.batch,
-      ...(control.processing_cursor?{cursor:control.processing_cursor}:{})});
+    const listed=canaryOnly
+      ?{objects:[{key:recoveryStateKey(policy.canaryRecord)}],truncated:false,cursor:null}
+      :await bucket.list({prefix:PREFIX+"outputs/",limit:policy.batch,
+          ...(control.processing_cursor?{cursor:control.processing_cursor}:{})});
     for(const object of listed.objects||[]) {
       const id=object.key.slice((PREFIX+"outputs/").length).replace(/\.json$/,"");
       try {
@@ -59,7 +68,7 @@ export async function runPublicationRecovery(env,deps) {
           saveState:(_,state)=>writeRecoveryState(bucket,recoveryStateKey(id),state),
         }),{owner:"publication-reconciliation:"+crypto.randomUUID()});
         if(!outcome.skipped&&!outcome.duplicate) result.inspected++;
-        if(outcome.receipt?.verified_public) result.verified++;
+        if(outcome.receipt?.verified_delivery && outcome.receipt?.ownership_verified) result.verified++;
         if(outcome.outcome==="Corrected") result.corrected++;
         if(outcome.outcome==="Blocked") result.blocked++;
         if(outcome.outcome==="Needs Decision") result.escalated++;
