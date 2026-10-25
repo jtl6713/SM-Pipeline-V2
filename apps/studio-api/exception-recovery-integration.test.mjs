@@ -53,6 +53,28 @@ test("bulk preview limits selection and uses only read-only output preflight",()
  assert.doesNotMatch(ui,/fetch\([^)]*\/publish/);
 });
 
+test("bulk existing-post recovery reuses individually audited admin actions and stops on uncertainty",()=>{
+ assert.match(html,/id="ercRecoverSelected" disabled/);
+ assert.match(ui,/state\.selectedBulk\.size>=5/);
+ assert.match(ui,/ercRecoverSelected.*addEventListener\("click",recoverSelected\)/);
+ const start=ui.indexOf("  async function recoverSelected()");
+ const end=ui.indexOf("  function freshClientRequestId()",start);
+ assert.ok(start>0&&end>start);
+ const bulk=ui.slice(start,end);
+ assert.match(bulk,/window\.confirm\(/);
+ assert.match(bulk,/Promise\.all\(/);
+ assert.match(bulk,/\/preflight"/);
+ assert.match(bulk,/\/receipt"/);
+ assert.match(bulk,/administrator_recovery_actions_enabled!==true/);
+ assert.match(bulk,/receipt\?\.verified_public/);
+ assert.match(bulk,/preflight\.held\|\|preflight\.lock_active/);
+ assert.match(bulk,/finalize_existing_facebook_post/);
+ assert.match(bulk,/reconcile_verified_existing_receipt/);
+ assert.match(bulk,/client_request_id:freshClientRequestId\(\)/);
+ assert.match(bulk,/result\.durable_recovery_recorded!==true/);
+ assert.match(bulk,/break; \/\/ Do not reissue an approval after an uncertain write/);
+ assert.doesNotMatch(bulk,/\/publish|\/delete|\/reschedule|studioPulseFb0|studioPulseFb1|studioPulseFb2/);
+});
 test("live receipt and full-count endpoints stay administrator-only GET",()=>{
  for(const [key,handler] of [
   ["isAdminExceptionReceiptRoute","getStudioExceptionRecoveryReceipt"],
