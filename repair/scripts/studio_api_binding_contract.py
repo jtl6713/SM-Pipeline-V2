@@ -38,6 +38,17 @@ OPTIONAL_BINDINGS = {
     "STUDIO_REFILL_PROFILE_SUMMARY_READS": "plain_text",
     "STUDIO_PROFILE_SUMMARY_CAPTURE_ENABLED": "plain_text",
     "STUDIO_PROFILE_SUMMARY_RECONCILE_ENABLED": "plain_text",
+    # Background publication recovery is status-only. These flag NAMES and
+    # types are allowlisted here; exact stage, canary, and bounded rates are
+    # independently validated by the production deploy manifest.
+    "PUBLICATION_RECONCILIATION_SCAN_ENABLED": "plain_text",
+    "PUBLICATION_RECONCILIATION_ENABLED": "plain_text",
+    "PUBLICATION_RECONCILIATION_BOUNDED_ENABLED": "plain_text",
+    "PUBLICATION_RECONCILIATION_CANARY_RECORD": "plain_text",
+    "PUBLICATION_RECONCILIATION_BATCH_SIZE": "plain_text",
+    "PUBLICATION_RECONCILIATION_INTERVAL_MINUTES": "plain_text",
+    "PUBLICATION_RECONCILIATION_COOLDOWN_MINUTES": "plain_text",
+    "PUBLICATION_RECONCILIATION_MAX_ATTEMPTS": "plain_text",
     # Production rollout flags are allowlisted but validated by live release gates.
     "FACTORY_BATCH_APPROVALS_ENABLED": "plain_text",
     "FACTORY_BATCH_ROLLOUT_MODE": "plain_text",
