@@ -58,6 +58,29 @@ class StudioApiBindingContractTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             assert_live_contract(got, "wrong scheduling allowlist binding type")
 
+    def test_publication_recovery_bindings_are_exact_type_allowlisted(self):
+        got = self.legacy_core()
+        got.update(RESERVATION_BINDINGS)
+        names = (
+            "PUBLICATION_RECONCILIATION_SCAN_ENABLED",
+            "PUBLICATION_RECONCILIATION_ENABLED",
+            "PUBLICATION_RECONCILIATION_BOUNDED_ENABLED",
+            "PUBLICATION_RECONCILIATION_CANARY_RECORD",
+            "PUBLICATION_RECONCILIATION_BATCH_SIZE",
+            "PUBLICATION_RECONCILIATION_INTERVAL_MINUTES",
+            "PUBLICATION_RECONCILIATION_COOLDOWN_MINUTES",
+            "PUBLICATION_RECONCILIATION_MAX_ATTEMPTS",
+        )
+        for name in names:
+            got[name] = "plain_text"
+        self.assertTrue(assert_live_contract(got, "guarded autonomous recovery")["ok"])
+        got["PUBLICATION_RECONCILIATION_ENABLED"] = "secret_text"
+        with self.assertRaises(SystemExit):
+            assert_live_contract(got, "wrong recovery gate binding type")
+        got["PUBLICATION_RECONCILIATION_UNSAFE_BYPASS"] = "plain_text"
+        with self.assertRaises(SystemExit):
+            assert_live_contract(got, "unauthorized recovery binding")
+
     def test_unknown_scheduling_binding_is_still_rejected(self):
         got = self.legacy_core()
         got.update(RESERVATION_BINDINGS)
