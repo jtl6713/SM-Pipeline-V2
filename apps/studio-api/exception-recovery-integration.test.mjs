@@ -122,6 +122,23 @@ test("explicit complete source census avoids a duplicate expensive Quality Agent
  assert.ok(section.includes('quality_agent_scan_at:null'));
  assert.ok(section.includes('home_snapshot_comparison'));
 });
+test("full all-profile source census requests a bounded classification field projection",()=>{
+ const section=service.slice(service.indexOf("export const EXCEPTION_CENSUS_FIELDS"),
+  service.indexOf("/*__STUDIO_WORKER_END:getStudioExceptionRecoveryCounts__*/"));
+ assert.ok(section.includes("fields:EXCEPTION_CENSUS_FIELDS"));
+ assert.ok(section.includes('filterFormula:"{Test_Run_ID}=BLANK()"'));
+ for(const key of ["Output_ID","Content_Profile","Platform","Review_Status","Output_Status",
+   "Publish_Status","Do_Not_Publish","Scheduled_Post_Date","Published_At","Render_Status",
+   "Platform_Post_URL","Manual_Published_URL","Platform_Post_ID",
+   "YouTube_Video_ID","IG_Carousel_Published_Media_ID","Studio_Publish_Dispatch_At"]) {
+   assert.ok(section.includes('"'+key+'"'),"source census omits "+key);
+ }
+ for(const excessive of ["Studio_Photo_Match_JSON","Creative_Render_Manifest_JSON",
+   "Render_Timeline_JSON","Production_Request_JSON","IG_Carousel_Parent_Response_JSON"]) {
+   assert.ok(!section.includes('"'+excessive+'"'),"census fetched large unrelated JSON: "+excessive);
+ }
+ assert.ok(section.includes("qaFailed:null,qaPastDue:null"),"QA parity must remain unavailable without same-generation readback");
+});
 test("UI requires explicit receipt inspection and post-ID confirmation before FB3",()=>{
  assert.match(html,/id="ercReconcileCounts"/);
  assert.match(ui,/ercReconcileCounts.*addEventListener\("click",reconcileAllCounts\)/);
