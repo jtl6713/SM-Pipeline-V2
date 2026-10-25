@@ -2969,7 +2969,7 @@
   }
 
   function ideaIsPromoted(idea) {
-    return Boolean(
+    return String(idea?.status || "").trim() === "Promoted" || Boolean(
       idea?.promoted_content_record_id ||
       (Array.isArray(idea?.content_item_links) && idea.content_item_links.length)
     );
@@ -15993,10 +15993,19 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function refreshIdeaListRow(record) {
+    const before = ideasCache.find((row) => row.id === record?.id);
+    const wasPromoted = before ? ideaIsPromoted(before) : null;
     const next = upsertIdeaInCache(record);
     if (!next?.id) return;
     const list = $("ideasList");
-    const row = list?.querySelector(`[data-idea-row="${next.id}"]`);
+    if (!list) return;
+    // A lifecycle transition changes the Current/Archived partition and both
+    // section counts. Replacing just the old row leaves it in the wrong table.
+    if (wasPromoted === null || wasPromoted !== ideaIsPromoted(next)) {
+      renderIdeasTable(list, ideasCache);
+      return;
+    }
+    const row = list.querySelector(`[data-idea-row="${next.id}"]`);
     if (!row) return;
     const holder = document.createElement("tbody");
     holder.innerHTML = ideaRowHtml(next);
@@ -16310,13 +16319,14 @@ function timedScriptAssetLabel(asset, index) {
     const target = $("ideasList");
     target.innerHTML = '<div class="empty">Loading ideas…</div>';
     try {
-      let result = await api("/api/ideas?limit=100", { timeoutMs: 8000, retries: 1 });
-      if (result?.refreshing && !Array.isArray(result.records)) result = { ...result, records: [] };
-      if (result?.refreshing && !result.records.length) {
-        await new Promise((resolve) => window.setTimeout(resolve, 1200));
-        result = await api("/api/ideas?limit=100", { timeoutMs: 8000, retries: 0 });
+      // The ordinary list route is intentionally stale-while-revalidate.
+      // Intake is an administrative lifecycle screen: never classify a
+      // previously promoted idea from an old R2 snapshot.
+      const result = await api("/api/ideas?limit=100&fresh=1", { timeoutMs: 20000, retries: 1 });
+      if (result?.live !== true || !Array.isArray(result?.records)) {
+        throw new Error("Could not verify live idea statuses. Reopen Ideas to retry; no stale list was shown.");
       }
-      const records = Array.isArray(result?.records) ? result.records : [];
+      const records = result.records;
       ideasCache = records;
       populateIdeaExistingSelect(records);
       renderIdeasTable(target, records);

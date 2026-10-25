@@ -1513,8 +1513,23 @@ export function scheduleMappedListRefresh(ctx, env, memoryKey, snapshotKey, ttlM
 }
 /*__STUDIO_WORKER_END:scheduleMappedListRefresh__*/
 
-export function respondStudioMappedList(request, env, ctx, { memoryKey, snapshotKey, profile, ttlMs, builder, allowRefresh = true, decorate = null }) {
+export function respondStudioMappedList(request, env, ctx, { memoryKey, snapshotKey, profile, ttlMs, builder, allowRefresh = true, decorate = null, forceFresh = false }) {
   const freshMs = Math.max(1000, Number(ttlMs) || STUDIO_READ_SNAPSHOT_FRESH_MS);
+  // Admin lifecycle lists cannot rely on an eventual R2 snapshot after
+  // production promotion. Live reads also refresh the shared snapshot.
+  if (forceFresh) {
+    return Promise.resolve().then(builder).then(async (payload) => {
+      if (!Array.isArray(payload?.records)) throw new Error("Live list did not return records");
+      const save = writeMappedListSnapshot(env, memoryKey, snapshotKey, payload);
+      if (ctx?.waitUntil) ctx.waitUntil(save);
+      else await save;
+      return respond(request, env, {
+        ok: true, live: true, snapshot: false, cached: false, stale: false,
+        refreshing: false, ...payload,
+        profile: payload.profile || mapStudioContentProfile(profile),
+      });
+    });
+  }
   return readMappedListSnapshot(env, memoryKey, snapshotKey).then(async (remembered) => {
     const fresh = studioMappedListSnapshotFresh(remembered, freshMs);
     if (allowRefresh && !fresh) scheduleMappedListRefresh(ctx, env, memoryKey, snapshotKey, freshMs, builder);

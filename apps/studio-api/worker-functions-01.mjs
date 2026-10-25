@@ -2728,6 +2728,7 @@ export async function listIdeas(request, env, url, authorization, ctx = null) {
     profile,
     ttlMs: STUDIO_READ_SNAPSHOT_FRESH_MS,
     allowRefresh: url.searchParams.get("refresh") !== "0",
+    forceFresh: url.searchParams.get("fresh") === "1",
     builder: () => buildIdeasListPayload(env, profile, limit),
   });
 }
