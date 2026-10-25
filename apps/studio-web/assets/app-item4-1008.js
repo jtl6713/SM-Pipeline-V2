@@ -195,6 +195,8 @@
   let item4VariantPolling = false;
   let item4PromoteInFlight = false;
   const item4PromotedRequestIds = new Set();
+  // An ambiguous Approve response must require a read-only check, never an automatic resubmission.
+  const item4PromotionReadbackRequired = new Set();
   let item4VariantPollTimer = null;
   let item4VariantPollStartedAt = 0;
   let item4MasterPollTimer = null;
@@ -287,7 +289,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.761-guarded-bulk-recovery";
+  const BUILD_ID = "item4-0.6.762-approve-500-readback";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -13715,6 +13717,10 @@ function timedScriptAssetLabel(asset, index) {
       } else if (item4PromoteInFlight || promote.dataset.busy === "true") {
         promote.disabled = true;
         promote.textContent = status === "Submitted" ? "Checking…" : "Submitting…";
+      } else if (item4PromotionReadbackRequired.has(recordId)) {
+        promote.disabled = false;
+        promote.textContent = "Check approval status";
+        promote.title = "Read the saved Production Request status without sending another approval.";
       } else if (status === "Promoted") {
         const retryHandoff = item4IsFinishedRequest(record);
         promote.disabled = !retryHandoff;
@@ -15557,12 +15563,85 @@ function timedScriptAssetLabel(asset, index) {
     }
   });
 
+  // Airtable is the authority. A Promoted status is only verified when the
+  // Content Item link is persisted; the Worker writes Promoted after routing
+  // and verifying the expected output fanout.
+  function productionApprovalReadbackState(record, requestId) {
+    if (!record || String(record.id || "") !== String(requestId || "")) return "unverified";
+    const status = String(record.status || "").trim();
+    if (status === "Promoted") {
+      const links = record.promoted_content_item_links;
+      return Array.isArray(links) && links.some(id => /^rec[A-Za-z0-9]{14}$/.test(String(id || "")))
+        ? "promoted" : "incomplete";
+    }
+    if (status === "Submitted") return "processing";
+    if (status === "Cancelled") return "cancelled";
+    if (status === "Draft" || status === "Ready") return "not-confirmed";
+    return "unverified";
+  }
+
+  async function readProductionApprovalAfterError(requestId) {
+    try {
+      const latest = await api(`/api/production-requests/${encodeURIComponent(requestId)}`, {
+        method: "GET",
+        timeoutMs: 15000,
+        retries: 0,
+      });
+      const disposition = productionApprovalReadbackState(latest?.record, requestId);
+      return { disposition, record: disposition !== "unverified" ? latest.record : null };
+    } catch {
+      return { disposition: "unverified", record: null };
+    }
+  }
+
+  function showProductionApprovalReadback(result, requestId) {
+    const outcome = String(result?.disposition || "unverified");
+    if (result?.record && outcome !== "not-confirmed") {
+      activeProductionRequest = result.record;
+      populateProductionRequestForm(result.record);
+    }
+    if (outcome === "promoted") {
+      item4PromotionReadbackRequired.delete(requestId);
+      item4PromotedRequestIds.add(requestId);
+      setRequestMessage("Approved. The saved Production Request is promoted and linked to its Content Item. Open Pipeline for the outputs.", "success");
+      openPipelineAfterPromote();
+    } else if (outcome === "processing") {
+      setRequestMessage("Approval was submitted and is still processing. Check approval status to refresh without submitting it again.", "success");
+    } else if (outcome === "cancelled") {
+      item4PromotionReadbackRequired.delete(requestId);
+      setRequestMessage("This Production Request was cancelled. Open Pipeline / Open Review for the active item; do not approve a duplicate.", "error-text");
+    } else if (outcome === "incomplete") {
+      setRequestMessage("Approval status says Promoted but its Content Item link is missing. Do not approve again; this needs reconciliation.", "error-text");
+    } else if (outcome === "not-confirmed") {
+      setRequestMessage("Approval did not reach a confirmed Promoted or Submitted state. Check approval status once more before deciding whether to retry.", "error-text");
+    } else {
+      setRequestMessage("The server response was uncertain and the saved approval status could not be verified. Use Check approval status; no retry was sent.", "error-text");
+    }
+    setProductionRequestControlState(activeProductionRequest);
+    return outcome;
+  }
+
   $("promoteProductionRequest")?.addEventListener("click", async (event) => {
     event.preventDefault();
     event.stopPropagation();
     if (!activeProductionRequest?.id) return;
     const promoteButton = $("promoteProductionRequest");
     if (item4PromoteInFlight || promoteButton?.dataset.busy === "true" || promoteButton?.disabled) return;
+    const approvalRequestId = String(activeProductionRequest.id);
+    if (item4PromotionReadbackRequired.has(approvalRequestId)) {
+      item4PromoteInFlight = true;
+      if (promoteButton) { promoteButton.disabled = true; promoteButton.dataset.busy = "true"; promoteButton.textContent = "Checking…"; }
+      const readback = await readProductionApprovalAfterError(approvalRequestId);
+      item4PromoteInFlight = false;
+      if (promoteButton) delete promoteButton.dataset.busy;
+      // A fresh, explicit, read-only check may release a Draft/Ready request
+      // for a new human approval; it never re-POSTs by itself.
+      if (readback.disposition === "not-confirmed") item4PromotionReadbackRequired.delete(approvalRequestId);
+      const outcome = showProductionApprovalReadback(readback, approvalRequestId);
+      if (outcome === "not-confirmed") setRequestMessage("The saved request is still Draft/Ready. Review it before explicitly clicking Approve again. No automatic retry was sent.", "error-text");
+      setProductionRequestControlState(activeProductionRequest);
+      return;
+    }
     if (item4PromotedRequestIds.has(String(activeProductionRequest.id)) && activeProductionRequest?.revision_open !== true) return;
 
     if (item4Workspace?.assets?.length && item4Workspace?.plan_status !== "Ready") {
@@ -15616,6 +15695,7 @@ function timedScriptAssetLabel(asset, index) {
         // Background promotion paths never set this flag.
         body: JSON.stringify({ revision_approve: true }),
         timeoutMs: 120000,
+        retries: 0, // Never repeat an ambiguous mutation when an edge/Worker 5xx occurs.
       });
 
       if (result.production_request) {
@@ -15656,34 +15736,17 @@ function timedScriptAssetLabel(asset, index) {
 
       Promise.all([loadProductionRequests(), loadContent(), loadIdeas(), loadDashboard()]).catch(() => {});
     } catch (e) {
-      if (isTimeoutError(e) && activeProductionRequest?.id) {
-        try {
-          const latest = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}`);
-          if (latest?.record) {
-            activeProductionRequest = latest.record;
-            populateProductionRequestForm(latest.record);
-            setProductionRequestControlState(latest.record);
-            const latestStatus = String(latest.record.status || "");
-            if (latestStatus === "Promoted") {
-              item4PromotedRequestIds.add(String(latest.record.id || activeProductionRequest.id));
-              activeProductionRequest = { ...activeProductionRequest, status: "Promoted" };
-              populateProductionRequestForm(activeProductionRequest);
-              setProductionRequestControlState(activeProductionRequest);
-              setRequestMessage("Approved. This request is in production.", "success");
-              item4PromoteInFlight = false;
-              if (promoteButton) delete promoteButton.dataset.busy;
-              openPipelineAfterPromote();
-              return;
-            }
-            if (latestStatus === "Submitted") {
-              setRequestMessage("Promotion is still processing. Click Check promotion status in a moment.", "success");
-              item4PromoteInFlight = false;
-              if (promoteButton) delete promoteButton.dataset.busy;
-              setProductionRequestControlState(activeProductionRequest);
-              return;
-            }
-          }
-        } catch {}
+      // A 5xx may arrive AFTER Airtable stored the Content Item and fanout.
+      // Reconcile timeouts, transport failures and server 5xx the same way.
+      // Keep a read-only verification gate when the result is still uncertain.
+      if ((isTimeoutError(e) || Number(e?.status) >= 500 || e?.transient === true) && activeProductionRequest?.id) {
+        const requestId = String(activeProductionRequest.id);
+        item4PromotionReadbackRequired.add(requestId);
+        const readback = await readProductionApprovalAfterError(requestId);
+        item4PromoteInFlight = false;
+        if (promoteButton) delete promoteButton.dataset.busy;
+        showProductionApprovalReadback(readback, requestId);
+        return;
       }
       item4PromoteInFlight = false;
       if (promoteButton) {
