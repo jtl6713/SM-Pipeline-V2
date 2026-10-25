@@ -68,7 +68,7 @@ test("known live failure signatures get safe root-cause actions instead of blind
     ["AP1C slide-set mismatch", "needs_attention", /actual carousel slides/i],
     ["Only photo or video can be accepted as media type", "needs_attention", /unsupported carousel slide media/i],
     ["AP3P parent container terminal state", "healer_eligible", /parent-container recreation/i],
-    ["Facebook rate limit 1390008", "cooldown", /publishing cooldown/i],
+    ["Facebook rate limit 1390008", "cooldown", /later MAE Facebook slot/i],
   ];
   for (const [error, recovery, action] of cases) {
     const item = describeFailedOutput(record("recKnown", {
