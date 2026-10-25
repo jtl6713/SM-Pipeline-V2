@@ -66,7 +66,7 @@ try {
    };
    const path=routes[url.pathname];if(!path)return new Response('Not found',{status:404});
    const headers={'Accept':'application/json','Origin':'https://studio.chicagoshining.com'};
-   if(!url.pathname.endsWith('/denied'))headers['Cf-Access-Authenticated-User-Email']='joseph.t.logan@gmail.com';
+   if(!url.pathname.endsWith('/denied')&&!url.pathname.endsWith('/conversation-denied'))headers['Cf-Access-Authenticated-User-Email']='joseph.t.logan@gmail.com';
    if(request.method==='POST')headers['Content-Type']='application/json';
    const postBody=request.method==='POST'?await request.text():undefined;
    const response=await env.STUDIO_API.fetch(new Request('https://studio.chicagoshining.com'+path,{method:request.method,headers,...(postBody?{body:postBody}:{})}));
@@ -117,6 +117,8 @@ try {
 
  // One authorized, persistence-only conversation POST. Never touch output or provider.
  // Re-GET twice via distinct requests: the same route the Studio reload uses.
+ let conversationError=null;
+ try {
  const conversationBefore=await probe('conversation');
  if(conversationBefore.status!==200||!Array.isArray(conversationBefore.body?.messages))
    throw new Error('conversation_initial_admin_get_failed');
@@ -142,6 +144,7 @@ try {
  if(recheck.status!==200||recheck.body?.replay!==true)
    throw new Error('conversation_idempotent_replay_failed');
  report.conversation.idempotent_replay=true;
+ } catch(error){conversationError=String(error?.message||error).slice(0,140);report.conversation_error=conversationError;}
  // Inspect each exact outstanding existing YouTube video using only GET.
  const candidates=[
   {route:'yt3374',id:3374,record:'rec9uw6xfRJGXpqz1',video:'BV72YCPUvEg'},
@@ -150,7 +153,8 @@ try {
  ];
  report.youtube_candidates=[];
  for(const candidate of candidates){
-  const response=await probe(candidate.route);
+  let response;
+  try{response=await probe(candidate.route);}catch(error){report.youtube_candidates.push({output_id:candidate.id,status:'unavailable',reason:String(error?.message||error).slice(0,130)});continue;}
   const body=response.body||{};
   report.youtube_candidates.push({
    output_id:candidate.id,http_status:response.status,
@@ -166,13 +170,14 @@ try {
  }
  // Explicit expensive full-source census requested by the administrator.
  // Count parity requires a pinned, stable, fresh Home generation; report honestly.
- const census=await probe('counts');
- const c=census.body||{};
- report.counts={http_status:census.status,status:c.status||null,source_rows:c.source_row_count??null,
+ let census;
+ try{census=await probe('counts');}catch(error){report.counts={status:'unavailable',reason:String(error?.message||error).slice(0,130)};}
+ const c=census?.body||{};
+ if(census)report.counts={http_status:census.status,status:c.status||null,source_rows:c.source_row_count??null,
   totals:c.totals||null,quality_agent_disagreements:c.comparisons||null,
   home_snapshot_comparison:c.home_snapshot_comparison||null,cache_status:c.census_cache_status||null,
   scanned_at:c.scan_completed_at||null};
- if(census.status!==200||c.status!=='complete_census')report.counts.warning='authoritative_complete_census_not_proven';
+ if(census&&(census.status!==200||c.status!=='complete_census'))report.counts.warning='authoritative_complete_census_not_proven';
 
  const ig=await probe('instagram');
  const post=ig.body||{};
@@ -196,6 +201,8 @@ try {
    throw new Error('instagram_canary_authenticated_publication_unverified');
  }
  report.instagram_canary_status='verified_account_owned_publication';
+ if(conversationError)throw new Error('conversation_persistence_unverified_'+conversationError);
+ if(!census||census.status!==200||c.status!=='complete_census')throw new Error('authoritative_census_unverified');
 } catch(error) {
  report.canary_status='unavailable';report.error=String(error.message).slice(0,160);process.exitCode=1;
 } finally {
