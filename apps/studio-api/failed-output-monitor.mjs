@@ -80,6 +80,27 @@ export function facebookRateLimitResetReason(record, { nowMs = Date.now(), maxAt
 
 
 /**
+ * A narrow, operator-approved scheduling-only transition for Facebook Reel
+ * Graph 368 holds. Reserving a date NEVER lifts the hard publication hold.
+ * Retired Stories, general holds, previously posted rows and retry-exhausted
+ * outputs are not eligible.
+ */
+export function facebookSpamHeldRescheduleReason(record) {
+  if (text(record,"Platform")!=="Facebook" ||
+      !/Facebook Reel/i.test(text(record,"Platform_Output_Type")||text(record,"Studio_Output_Type"))) return "not_active_facebook_reel";
+  if (text(record,"Publish_Error_Stage")!=="FBS3_RATE_LIMIT") return "not_spam_rate_limit";
+  if (!truthy(record,"Do_Not_Publish")) return "not_protective_hold";
+  const notes=text(record,"Studio_Output_Notes");
+  if (!/QA-1050 HARD NO-GRAPH-CREATE HOLD/.test(notes)) return "unknown_hold_provenance";
+  if (/SPAM_COOLDOWN_RESCHEDULE_PENDING_VERIFICATION/.test(notes)) return "already_rescheduled_pending_verification";
+  if (text(record,"Output_Status")!=="Approved for Publishing" ||
+      text(record,"Review_Status")!=="Approved" || text(record,"Publish_Status")!=="Failed") return "not_approved_failed";
+  if (text(record,"Test_Run_ID")) return "test_output";
+  const withoutHold={...record,fields:{...(record.fields||{}),Do_Not_Publish:false}};
+  return facebookRateLimitResetReason(withoutHold);
+}
+
+/**
  * QA-FB-STORY-368-RETRY-PENDING: the native Facebook Story Graph path can
  * leave an approved, future-scheduled output parked with only Publish_Error_Stage
  * and Studio_Publish_Dispatch_Note. Old FBS3-only rearm cannot see this state.
@@ -174,7 +195,7 @@ export function describeFailedOutput(record, nowMs = Date.now()) {
     action = "Allow the existing AP3C parent-container recreation path to run within its retry guards; verify the replacement parent before publication.";
   } else if (!publishedEvidence && /facebook rate limit|1390008|\\b368\\b/i.test(error)) {
     recovery = "cooldown";
-    action = "Honor the Facebook publishing cooldown and rate-limit rearm; never force immediate publication.";
+    action = "After cooldown, reserve a later MAE Facebook slot. Keep publication held until read-only Meta duplicate-exclusion and safe rearm; never repost blindly.";
   }
   if (["FACEBOOK_STORY_RATE_LIMIT_368", "FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING"].includes(text(record, "Publish_Error_Stage"))
       && text(record, "Platform") === "Facebook" && text(record, "Platform_Output_Type") === "Facebook Story"
@@ -246,6 +267,8 @@ export function describeFailedOutput(record, nowMs = Date.now()) {
     output_status: output || null, render_status: render || null, publish_status: publish || null,
     error: reason, action, recovery, retry_at: retryAt || null, attempt_count: attempts,
     can_return_to_approved: facebookRateLimitResetReason(record, { nowMs }) === null,
+    can_reschedule_spam_held: facebookSpamHeldRescheduleReason(record) === null,
     return_to_approved_blocked: facebookRateLimitResetReason(record, { nowMs }),
+    spam_held_reschedule_blocked: facebookSpamHeldRescheduleReason(record),
   };
 }
