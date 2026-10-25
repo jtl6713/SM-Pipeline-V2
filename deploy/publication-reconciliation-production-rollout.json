@@ -6,12 +6,12 @@
   "canary_output_id": 8570,
   "canary_video_id": "GOso95PT2UI",
   "canary_channel_id": "UCVt3nBxRfPuuxxduuxmz9sw",
-  "scan_interval_minutes": 15,
-  "batch_size": 2,
+  "scan_interval_minutes": 5,
+  "batch_size": 5,
   "cooldown_minutes": 60,
   "max_attempts": 5,
   "no_remote_provider_writes": true,
   "completed_private_handoff_state": "Awaiting Public Release / Published Privately",
   "canary_corrected_audit_event_key": "publication-recovery:6c9bb68b-a308-427d-8199-59651ab71b5e:outcome",
-  "rollout_reason": "after-authenticated-canary-published-status-and-durable-corrected-history-receipt-only"
+  "rollout_reason": "operator-requested-faster-guarded-receipt-only-backlog-drain-after-four-corrections-confirmed"
 }
