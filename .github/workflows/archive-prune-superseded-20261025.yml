@@ -77,7 +77,7 @@ jobs:
           no_open_prs()
           inventory = branch_listing()
           allowed = {"main", SELF} | set(CANDIDATES)
-          if set(inventory) != allowed:
+          if set(inventory) not in (allowed, allowed - {SELF}):
               raise SystemExit("Refuse: changed inventory " + repr(sorted(set(inventory) ^ allowed)))
           for name, (sha, pr_number) in CANDIDATES.items():
               row = inventory[name]
@@ -93,15 +93,17 @@ jobs:
                   head_prs[0]["head"]["ref"] != name
               ):
                   raise SystemExit("Refuse: closed PR contract changed " + name)
-          if SELF not in inventory or inventory[SELF].get("protected"):
-              raise SystemExit("Refuse: missing/protected maintenance PR branch")
+          if SELF in inventory and inventory[SELF].get("protected"):
+              raise SystemExit("Refuse: protected maintenance PR branch")
           self_prs = api("pulls?state=closed&per_page=100&head=" +
                         urllib.parse.quote("jtl6713:" + SELF, safe=""))
           merged_self = [p for p in self_prs if p.get("merged_at") and
-                         p["head"]["ref"] == SELF and
-                         p["head"]["sha"] == inventory[SELF]["commit"]["sha"]]
+                         p["head"]["ref"] == SELF]
           if len(merged_self) != 1:
-              raise SystemExit("Refuse: cleanup PR has not merged at its exact head")
+              raise SystemExit("Refuse: cleanup PR has not merged")
+          self_sha = merged_self[0]["head"]["sha"]
+          if SELF in inventory and inventory[SELF]["commit"]["sha"] != self_sha:
+              raise SystemExit("Refuse: maintenance branch moved")
           # Do not delete a head running jobs: someone may be actively using it.
           for name in CANDIDATES:
               runs = api("actions/runs?per_page=30&branch=" +
@@ -110,7 +112,7 @@ jobs:
                   raise SystemExit("Refuse: active Actions run on " + name)
           print("PREFLIGHT_OK branches=" + str(len(CANDIDATES)), flush=True)
           heads = {name: pair[0] for name, pair in CANDIDATES.items()}
-          heads[SELF] = inventory[SELF]["commit"]["sha"]
+          heads[SELF] = self_sha
           # Preserve EVERY exact historical commit (including the old maintenance PR
           # and unique unmerged Producer edits) as a recoverable immutable tag first.
           for name, sha in heads.items():
@@ -140,6 +142,9 @@ jobs:
           # Last-minute checks and lease-guarded remote delete: a new push cannot
           # silently lose work. Any concurrency drift leaves the affected branch.
           for name, sha in heads.items():
+              if name not in inventory:
+                  print("ALREADY_DELETED " + name, flush=True)
+                  continue
               no_open_prs()
               current = api("branches/" + branch_path(name))
               if current.get("protected") or current["commit"]["sha"] != sha:
