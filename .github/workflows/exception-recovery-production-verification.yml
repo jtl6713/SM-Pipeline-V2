@@ -48,6 +48,9 @@ jobs:
     needs: contract
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    permissions:
+      contents: read
+      issues: write
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -66,3 +69,40 @@ jobs:
           name: exception-recovery-production-audit
           path: /tmp/exception-recovery-production-audit.json
           retention-days: 14
+
+      - name: Report sanitized production evidence on tracking PR
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs=require('node:fs');
+          let r={error:'audit_artifact_unavailable'};
+          try{r=JSON.parse(fs.readFileSync('/tmp/exception-recovery-production-audit.json','utf8'));}catch{}
+          const clean={
+            at:r.completed_at||null,error:r.error||null,
+            worker_health:r.worker_health||null,rollout_stage:r.rollout_stage||null,
+            action_flag:r.flags?.EXCEPTION_RECOVERY_ACTIONS_ENABLED||'unknown',
+            unauthenticated_history_status:r.unauthenticated_history_status,
+            unauthenticated_conversation_status:r.unauthenticated_conversation_status,
+            administrator_preflight:r.administrator_preflight||null,
+            conversation:r.conversation||null,conversation_post_status:r.conversation_post_status||null,
+            original_youtube_verified:r.verified===1,
+            youtube_candidates:r.youtube_candidates||null,
+            instagram_canary:r.instagram_canary||null,
+            instagram_canary_status:r.instagram_canary_status||null,
+            counts:r.counts||null,
+            bridge_deleted:r.temporary_bridge_deleted===true,
+          };
+          const body='## Production exception verification (automated; no provider writes)\n\n' +
+            '```json\n'+JSON.stringify(clean,null,2).slice(0,15500)+'\n```\n' +
+            '\nIf evidence is absent, the production canary has NOT been proven. Provider verification and full Home generation match are separate gates.';
+          const url='https://api.github.com/repos/'+process.env.GITHUB_REPOSITORY+'/issues/1157/comments';
+          fetch(url,{method:'POST',headers:{Authorization:'Bearer '+process.env.GH_TOKEN,
+            Accept:'application/vnd.github+json','Content-Type':'application/json'},
+            body:JSON.stringify({body})}).then(async v=>{
+              if(!v.ok)throw Error('github_evidence_comment_http_'+v.status);
+              console.log('sanitized_production_evidence_comment=posted');
+            }).catch(e=>{console.error(String(e));process.exitCode=1});
+          NODE
