@@ -263,6 +263,7 @@ jobs:
           active_vars.update(visual_vars)
           # Scoped, Git-reviewed publication reconciliation. An unattended
           # status correction is never enabled by inheriting stale Worker vars.
+          import re
           recovery=json.loads(Path('deploy/publication-reconciliation-production-rollout.json').read_text())
           if recovery.get('schema')!='publication-reconciliation-rollout-v1' or recovery.get('stage') not in ('read_only','canary','bounded'):
               raise SystemExit('Unsupported publication recovery rollout manifest')
