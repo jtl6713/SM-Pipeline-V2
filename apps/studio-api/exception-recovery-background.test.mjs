@@ -71,3 +71,19 @@ test("discovery only scans approved YouTube outputs with an existing remote iden
  assert.match(formula,/\{Publish_Status\}!="Published Privately"/);
  assert.match(formula,/\{Output_Status\}!="Awaiting Public Release"/);
 });
+
+test("approved single-canary deployment never scans or processes unrelated backlog",async()=>{
+ const store=bucket(),canary="recAAAAAAAAAAAAAA";const visited=[];
+ const env={STUDIO_MEDIA:store,PUBLICATION_RECONCILIATION_SCAN_ENABLED:"true",
+   PUBLICATION_RECONCILIATION_ENABLED:"true",PUBLICATION_RECONCILIATION_CANARY_RECORD:canary};
+ const deps={now:()=>Date.parse("2026-10-24T12:00:00Z"),
+   discover:async()=>{throw new Error("canary must not paginate whole Airtable queue");},
+   readOutput:async id=>{visited.push(id);return {id,fields:{
+     Platform:"YouTube",Review_Status:"Approved",Content_Profile:["recBBBBBBBBBBBBBB"]}};},
+   verifyRemote:async()=>{throw new Error("unavailable");},appendAudit:async()=>{},
+   patchStatus:async()=>{throw new Error("not authorized");}};
+ const result=await runPublicationRecovery(env,deps);
+ assert.equal(result.status,"completed");
+ assert.deepEqual(visited,[canary]);
+ assert.equal(result.corrected,0);
+});
