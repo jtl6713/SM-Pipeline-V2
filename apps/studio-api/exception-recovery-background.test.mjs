@@ -110,9 +110,9 @@ test("bounded recovery inspects four exact existing receipts once before resumin
  assert.equal(second.inspected,2);
  assert.deepEqual(observed,PRIORITY_VERIFIED_EXISTING_POSTS);
  now+=16*60000;
- await runPublicationRecovery(env,deps);
- assert.deepEqual(observed,PRIORITY_VERIFIED_EXISTING_POSTS,
-   "Priority is exhausted after one bounded pass and never replays blindly");
+ const third=await runPublicationRecovery(env,deps);
+ assert.equal(third.inspected,0,
+   "After the one-time priority pass the ordinary queue resumes; terminal records are skipped");
  const control=await readRecoveryState(store,"studio/state/publication-reconciliation/v1/control.json");
  assert.equal(control.priority_cursor,4);
 });
