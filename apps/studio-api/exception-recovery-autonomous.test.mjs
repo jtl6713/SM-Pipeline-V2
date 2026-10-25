@@ -446,3 +446,39 @@ test("authenticated Instagram verifier requires exact account-feed membership, o
       permalink:"https://www.instagram.com/not-a-post",timestamp:"2026-10-23T10:51:04+0000"}]})})});
   assert.equal(wrongPermalink.verified_public,false);
 });
+
+
+test("legacy missing Chicago channel configuration is reprobed once after repair, then corrected",async()=>{
+  const f=fixture();
+  const old={terminal:true,attempts:1,next_at:instant+3600000,
+    pending:null,last:{outcome:"Needs Decision",reason:"expected_profile_channel_not_configured"}};
+  f.deps.readState=async()=>structuredClone(old);
+  let saved=null;
+  f.deps.saveState=async(_,state)=>{saved=structuredClone(state);};
+  const result=await reconcilePublication(f.deps);
+  assert.equal(result.outcome,"Corrected");
+  assert.equal(f.writes,1);
+  assert.equal(saved.terminal,true);
+  assert.equal(saved.last.reason,"authoritative_airtable_readback_confirmed");
+});
+test("unfixed channel configuration backs off instead of requiring administrator decisions",async()=>{
+  const f=fixture();
+  f.deps.verifyRemote=async()=>({platform:"YouTube",verified_public:false,verified_delivery:false,
+    ownership_verified:false,evidence:"expected_profile_channel_not_configured"});
+  const result=await reconcilePublication(f.deps);
+  assert.equal(result.outcome,"Awaiting Verification");
+  assert.equal(result.reason,"expected_profile_channel_not_configured");
+  assert.equal(f.state.terminal,false);
+  assert.equal(f.writes,0);
+  assert.equal((await reconcilePublication(f.deps)).skipped,true);
+});
+test("known remote identity or ownership conflicts remain terminal and cannot auto-reprobe",async()=>{
+  const f=fixture();
+  const prior={terminal:true,attempts:1,next_at:instant+3600000,
+    pending:null,last:{outcome:"Needs Decision",reason:"remote_identity_mismatch"}};
+  f.deps.readState=async()=>prior;
+  f.deps.verifyRemote=async()=>{throw new Error("must not probe terminal identity conflict");};
+  const result=await reconcilePublication(f.deps);
+  assert.equal(result.skipped,true);
+  assert.equal(f.writes,0);
+});
