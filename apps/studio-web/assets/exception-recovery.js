@@ -183,6 +183,9 @@
     if(!button)return;
     button.disabled=state.bulkBusy||!state.selectedBulk.size||!state.allowed;
     button.textContent="Preview selected safety gates ("+state.selectedBulk.size+"/5)";
+    const run=$("ercRecoverSelected");
+    if(run){run.disabled=state.bulkBusy||!state.selectedBulk.size||!state.allowed;
+      run.textContent="Verify & recover selected ("+state.selectedBulk.size+"/5)";}
   }
   async function previewSelected() {
     if(state.bulkBusy||!state.allowed||!state.selectedBulk.size)return;
@@ -206,6 +209,69 @@
     }
     state.bulkBusy=false;updateBulkButton();
     msgHost.textContent="Reviewed "+ids.length+" outputs ("+unknown+" unavailable). This is inspection only; publishing and state changes remain disabled.";
+  }
+  async function recoverSelected() {
+    if(!state.allowed||state.bulkBusy||!state.selectedBulk.size)return;
+    const ids=[...state.selectedBulk].slice(0,5);
+    const items=ids.map(id=>(state.payload?.items||[]).find(x=>x.record_id===id));
+    if(items.some(x=>!x||!/^rec[A-Za-z0-9]{14}$/.test(x.record_id)))return;
+    const labels=items.map(x=>"#"+(x.output_id||"unknown")).join(", ");
+    if(!window.confirm("Authorize at most "+ids.length+" individually verified EXISTING-post-only corrections for "+
+      labels+"? The server will repeat identity, receipt, hold, approval, lock and audit checks for each output. "+
+      "No reposts, deletes, rescheduling or hold releases are permitted."))return;
+    state.bulkBusy=true;updateBulkButton();
+    const host=$("ercBulkResults"),statusHost=$("ercBulkStatus");
+    host.replaceChildren();
+    let verified=0,blocked=0,uncertain=0;
+    for(let i=0;i<ids.length;i++){
+      const id=ids[i],item=items[i],line=elem("div",null,"erc-bulk-row");
+      line.append(elem("strong","Output #"+(item.output_id||"unknown")));
+      host.append(line);
+      try{
+        const [preflight,receipt]=await Promise.all([
+          getJson("/api/admin/exception-recovery/"+id+"/preflight"),
+          getJson("/api/admin/exception-recovery/"+id+"/receipt"),
+        ]);
+        const outputId=String(preflight?.output_id||""),remoteId=String(receipt?.remote_id||"");
+        if(preflight?.administrator_recovery_actions_enabled!==true||
+          preflight.held||preflight.lock_active||preflight.attempt_limit_reached||
+          !receipt?.verified_public||receipt.platform!==item.platform||
+          outputId!==String(item.output_id||"")||!/^\d+$/.test(outputId)||
+          !/^[A-Za-z0-9_-]{6,70}$/.test(remoteId))
+          throw Error("Mutation gate, fresh provider receipt, or exact output identity unavailable");
+        const fb3=item.platform==="Facebook"&&preflight.fb3_existing_post_eligible===true
+          &&/^\d{6,30}(?:_\d{6,30})?$/.test(remoteId);
+        const action=fb3?"finalize_existing_facebook_post":
+          preflight.verified_receipt_status_repair_candidate===true
+          ?"reconcile_verified_existing_receipt":null;
+        if(!action)throw Error("No eligible allow-listed existing-publication action");
+        const response=await fetch("/api/admin/exception-recovery/"+id+"/actions",{
+          method:"POST",credentials:"same-origin",
+          headers:{Accept:"application/json","Content-Type":"application/json"},
+          body:JSON.stringify({action,confirm_output_id:outputId,
+            confirm_post_id:remoteId,client_request_id:freshClientRequestId()})
+        });
+        const result=await response.json().catch(()=>({}));
+        if(!response.ok||result.status!=="verified_published"||result.durable_recovery_recorded!==true){
+          uncertain++;
+          line.append(elem("p","Uncertain or blocked action: "+
+            String(result.reason||result.error||result.status||response.status)+
+            ". Stopped. Check Recovery History before further attempts."));
+          break; // Do not reissue an approval after an uncertain write.
+        }
+        verified++;line.append(elem("p","Existing post verified; status and audit readback confirmed."));
+      }catch(error){
+        blocked++;
+        line.append(elem("p","Stopped without proceeding to other outputs: "+
+          String(error.message||error)+". Check History before retrying."));
+        break;
+      }
+    }
+    state.bulkBusy=false;updateBulkButton();
+    statusHost.textContent="Recovery batch: "+verified+" verified, "+blocked+" blocked, "+
+      uncertain+" uncertain, "+(ids.length-verified-blocked-uncertain)+
+      " not submitted. No provider posts were created by this action.";
+    load().catch(()=>{});
   }
   function freshClientRequestId() {
     if (typeof crypto?.randomUUID === "function") return crypto.randomUUID().replace(/-/g,"");
@@ -587,6 +653,7 @@
   for(const select of [profiles,platform,category])select.addEventListener("change",render);
   refresh.addEventListener("click",load);
   $("ercPreviewSelected")?.addEventListener("click",previewSelected);
+  $("ercRecoverSelected")?.addEventListener("click",recoverSelected);
   $("ercReconcileCounts")?.addEventListener("click",reconcileAllCounts);
   // Light role check; server-side authorization still gates every data endpoint.
   getJson("/api/session").then(session=>{
