@@ -103,6 +103,27 @@ try {
    throw new Error('administrator_recovery_mutation_gate_not_proven_off');
  const history=await probe('history');report.history={status:history.status,source:history.body.source,events:history.body.items?.length};
  if(history.status!==200||history.body.source!=='airtable_exception_recovery_audit')throw new Error('durable_history_unavailable');
+ // The live status is R2-backed, not inferred from deployment manifest.
+ // Verify effective policy and show the last persisted sweep. Never require
+ // a nonzero correction count: already-posted / ineligible / held items can
+ // legitimately yield zero and must not be re-dispatched to boost a metric.
+ const livePolicy=history.body.automation?.policy||{};
+ const liveRuntime=history.body.automation?.runtime||null;
+ report.publication_recovery_runtime={
+   policy:{inspect:livePolicy.inspect===true,mutate:livePolicy.mutate===true,
+     broad:livePolicy.broad===true,batch:livePolicy.batch??null,
+     interval_ms:livePolicy.intervalMs??null,cooldown_ms:livePolicy.cooldownMs??null,
+     max_attempts:livePolicy.maxAttempts??null},
+   last_sweep:liveRuntime?.heartbeat||null,
+   priority_cursor:liveRuntime?.priority_cursor??null,
+   next_at:liveRuntime?.next_at?new Date(liveRuntime.next_at).toISOString():null,
+   status:liveRuntime?.heartbeat?.status||'unavailable'
+ };
+ if(rollout.stage==='bounded'&&(
+    livePolicy.inspect!==true||livePolicy.mutate!==true||livePolicy.broad!==true||
+    livePolicy.batch!==rollout.batch_size||
+    livePolicy.intervalMs!==rollout.scan_interval_minutes*60000))
+   throw new Error('effective_publication_recovery_throughput_policy_mismatch');
  const receipt=await probe('receipt');report.inspected=1;report.receipt=receipt.body;
  const data=receipt.body;
  if(receipt.status!==200||Number(data.output_id)!==rollout.canary_output_id||data.remote_id!==rollout.canary_video_id||data.channel_id!==rollout.canary_channel_id)throw new Error('canary_exact_identity_not_verified');
