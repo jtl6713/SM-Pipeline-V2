@@ -177,11 +177,11 @@ function maeCivilWithKey(civil) {
   return { ...civil, key: maeCivilKey(civil.year, civil.month, civil.day) };
 }
 
-function maeDayStandardsCovered(civil, nowMs, blockers, timeZone) {
+function maeDayStandardsCovered(civil, nowMs, blockers, timeZone, gapMs = MAE_SCHEDULE_GAP_MS) {
   for (const window of MAE_PRIORITY_SCHEDULE_WINDOWS) {
     const ms = maeStandardSlotMs(civil, window, timeZone);
     if (ms <= nowMs || maeIsBlackoutLocalTime(ms, timeZone)) continue;
-    if (!maeScheduleConflicts(ms, blockers)) return false;
+    if (!maeScheduleConflicts(ms, blockers, gapMs)) return false;
   }
   return true;
 }
@@ -301,10 +301,10 @@ export function maePlatformSpreadStartIndex(platformIndex, platformCount, horizo
   return Math.floor((index % count) * days / count);
 }
 
-function maeOpenMaeSlot(civil, nowMs, blockers, timeZone) {
+function maeOpenMaeSlot(civil, nowMs, blockers, timeZone, gapMs = MAE_SCHEDULE_GAP_MS) {
   for (const window of MAE_PRIORITY_SCHEDULE_WINDOWS) {
     const ms = maeStandardSlotMs(civil, window, timeZone);
-    if (ms <= nowMs || maeIsBlackoutLocalTime(ms, timeZone) || maeScheduleConflicts(ms, blockers)) continue;
+    if (ms <= nowMs || maeIsBlackoutLocalTime(ms, timeZone) || maeScheduleConflicts(ms, blockers, gapMs)) continue;
     return new Date(ms).toISOString();
   }
   return "";
@@ -325,7 +325,7 @@ function maePickFromCivils(civils, nowMs, blockers, timeZone, avoidCivilKeys, la
   // Primary: Day 1 Morning → Afternoon → Evening, then Day 2, … Day X.
   for (const civil of civils) {
     if (avoid.has(civil.key)) continue;
-    const mae = maeOpenMaeSlot(civil, nowMs, blockers, timeZone);
+    const mae = maeOpenMaeSlot(civil, nowMs, blockers, timeZone, gapMs);
     if (mae) return mae;
   }
 
@@ -334,7 +334,7 @@ function maePickFromCivils(civils, nowMs, blockers, timeZone, avoidCivilKeys, la
   let best = null;
   for (const civil of civils) {
     if (avoid.has(civil.key)) continue;
-    if (!maeDayStandardsCovered(civil, nowMs, blockers, timeZone)) continue;
+    if (!maeDayStandardsCovered(civil, nowMs, blockers, timeZone, gapMs)) continue;
     const extra = maeExtraIsoOnDay(civil, nowMs, blockers, timeZone, gapMs);
     if (!extra) continue;
     const count = maeDayPostCount(civil, countsFrom, timeZone);
