@@ -51,6 +51,7 @@ try {
    const routes={
     '/${token}/health':'/api/health',
     '/${token}/receipt':'/api/admin/exception-recovery/${rollout.canary_record_id}/receipt?authenticated=1',
+    '/${token}/instagram':'/api/admin/exception-recovery/recfTqaYB0h5FCUVi/receipt?authenticated=1',
     '/${token}/history':'/api/admin/exception-recovery/history',
     '/${token}/denied':'/api/admin/exception-recovery/history'
    };
@@ -92,6 +93,29 @@ try {
  report.blocked_reason=data.verification.blocked_reason;
  report.canary_status=report.eligible?'verified_eligible':'provider_verified_not_currently_eligible';
  if(!report.eligible && rollout.stage==='read_only')process.exitCode=1;
+ // Second, independent account-scoped read-only check for NYC IG #7864.
+ // An existing published ID and date are never treated as sufficient proof.
+ const instagram=await probe('instagram');
+ const ig=instagram.body||{};
+ report.instagram={
+   status:instagram.status,output_id:ig.output_id,
+   remote_id:ig.remote_id,platform:ig.platform,
+   verified_public:ig.verified_public===true,
+   ownership_verified:ig.ownership_verified===true,
+   verified_delivery:ig.verified_delivery===true,
+   eligible:ig.verification?.eligible===true,
+   reason:ig.evidence||ig.verification?.blocked_reason||null,
+   read_only:ig.read_only===true,
+   no_output_write:ig.verification?.no_output_write===true
+ };
+ if(instagram.status!==200 || Number(ig.output_id)!==7864 ||
+    ig.platform!=='Instagram' || ig.remote_id!=='18041644475837071' ||
+    ig.verified_public!==true || ig.ownership_verified!==true ||
+    ig.verified_delivery!==true || ig.verification?.eligible!==true ||
+    ig.verification?.authoritative_state_unchanged!==true ||
+    ig.verification?.no_output_write!==true)
+   throw new Error('instagram_7864_authenticated_published_post_unverified_'+
+      String(ig.evidence||ig.verification?.blocked_reason||instagram.status).slice(0,80));
 } catch(error) {
  report.canary_status='unavailable';report.error=String(error.message).slice(0,160);process.exitCode=1;
 } finally {
