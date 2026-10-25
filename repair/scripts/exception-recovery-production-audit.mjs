@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
+import { compareIndependentQaCensus } from '../../apps/studio-api/exception-recovery-qa-parity.mjs';
 const account=process.env.CLOUDFLARE_ACCOUNT_ID;
 const api='https://api.cloudflare.com/client/v4/accounts/'+account;
 const target='chicagoshining-studio-api';
@@ -60,6 +61,7 @@ try {
     '/${token}/conversation-denied':'/api/admin/exception-recovery/${instagramCanaryRecord}/conversation',
     '/${token}/preflight':'/api/admin/exception-recovery/${instagramCanaryRecord}/preflight',
     '/${token}/counts':'/api/admin/exception-recovery/counts?fresh=1',
+    '/${token}/quality':'/api/admin/exception-recovery',
     '/${token}/yt3374':'/api/admin/exception-recovery/rec9uw6xfRJGXpqz1/receipt?authenticated=1',
     '/${token}/yt3241':'/api/admin/exception-recovery/recJOW1OsfNeNhRW4/receipt?authenticated=1',
     '/${token}/yt9308':'/api/admin/exception-recovery/rec4R88s8mlZLE6UO/receipt?authenticated=1'
@@ -80,7 +82,7 @@ try {
  const {subdomain}=await cf('/workers/subdomain');
  async function probe(route, options={}) {
   for(let attempt=0;attempt<30;attempt++) {
-   const res=await fetch('https://'+bridge+'.'+subdomain+'.workers.dev/'+token+'/'+route,{method:options.body?'POST':'GET',headers:options.body?{'Content-Type':'application/json'}:{},...(options.body?{body:JSON.stringify(options.body)}:{}),redirect:'error',signal:AbortSignal.timeout(route==='counts'?150000:60000)});
+   const res=await fetch('https://'+bridge+'.'+subdomain+'.workers.dev/'+token+'/'+route,{method:options.body?'POST':'GET',headers:options.body?{'Content-Type':'application/json'}:{},...(options.body?{body:JSON.stringify(options.body)}:{}),redirect:'error',signal:AbortSignal.timeout(route==='counts'?150000:route==='quality'?120000:60000)});
    const text=await res.text();
    if(text.includes('error code: 1042') || (res.status===404 && !text.trim().startsWith('{'))){await new Promise(r=>setTimeout(r,3000));continue;}
    let body;try{body=JSON.parse(text);}catch{throw new Error('verification_bridge_non_json_'+res.status);}
@@ -178,6 +180,20 @@ try {
   home_snapshot_comparison:c.home_snapshot_comparison||null,cache_status:c.census_cache_status||null,
   scanned_at:c.scan_completed_at||null};
  if(census&&(census.status!==200||c.status!=='complete_census'))report.counts.warning='authoritative_complete_census_not_proven';
+ // Separate, authenticated, GET-only Quality Agent formula scan. Never force
+ // this independent scan inside the 8k-record census: doing so caused 500s.
+ // Full source exception-ID coverage, snapshot skew and QA scope must all pass.
+ try{
+  const quality=await probe('quality');
+  report.quality_agent_parity=quality.status===200
+    ?compareIndependentQaCensus(c,quality.body)
+    :{status:'unavailable',reason:'quality_agent_http_'+quality.status};
+  report.quality_agent_parity.http_status=quality.status;
+ }catch(error){
+  report.quality_agent_parity={status:'unavailable',
+    reason:String(error?.message||error).slice(0,160)};
+ }
+
 
  const ig=await probe('instagram');
  const post=ig.body||{};
