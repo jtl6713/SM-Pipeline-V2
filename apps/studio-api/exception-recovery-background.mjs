@@ -13,11 +13,12 @@ export async function writeRecoveryState(bucket,key,value) {
   if(JSON.stringify(read)!==body) throw new Error("recovery_journal_readback_failed");
 }
 export function publicationDiscoveryFormula(nowMs=Date.now()) {
-  // Only inspect approved YouTube outputs with an existing saved video ID.
-  // This prevents a full-table queue of unrelated unfinished Studio outputs.
+  // Only approved YouTube uploads or Instagram posts with existing published
+  // media IDs. Do not scan unpublished IG containers/Stories or retry posting.
   // Completed Studio handoffs are terminal even before public release.
-  return 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Review_Status}="Approved",{Do_Not_Publish}=0,'
-    +'OR({YouTube_Video_ID}!="",{Platform_Post_ID}!=""),'
+  return 'AND({Test_Run_ID}=BLANK(),{Review_Status}="Approved",{Do_Not_Publish}=0,'
+    +'OR(AND({Platform}="YouTube",OR({YouTube_Video_ID}!="",{Platform_Post_ID}!="")),'
+    +'AND({Platform}="Instagram",OR({Platform_Post_ID}!="",{IG_Carousel_Published_Media_ID}!=""))),'
     +'OR({Output_Status}!="Published",{Publish_Status}!="Published"),'
     +'{Output_Status}!="Awaiting Public Release",{Publish_Status}!="Published Privately",'
     +'OR({Output_Status}="Failed",{Publish_Status}="Failed",{Published_At}!=BLANK(),'
