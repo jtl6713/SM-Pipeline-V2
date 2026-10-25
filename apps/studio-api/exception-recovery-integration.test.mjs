@@ -113,6 +113,15 @@ test("canonical output scan paginates full Airtable table with Home mapping",()=
  assert.match(code,/reconcileExceptionCensus\(all,mapOutput/);
  assert.doesNotMatch(code,/limit:\s*250|method:\s*"PATCH"|method:\s*"POST"/);
 });
+test("explicit complete source census does not trigger another fresh Quality Agent full-table scan",()=>{
+ const section=service.slice(service.indexOf("export async function getStudioExceptionRecoveryCounts"),
+   service.indexOf("/*__STUDIO_WORKER_END:getStudioExceptionRecoveryCounts__*/"));
+ assert.match(section,/filterFormula:"\\{Test_Run_ID\\}=BLANK\\(\\)"/);
+ assert.match(section,/qaFailed:null,qaPastDue:null/);
+ assert.doesNotMatch(section,/loadStudioFailedOutputSnapshot\\(env,\\{fresh:true\\}\\)/);
+ assert.match(section,/quality_agent_scan_at:null/);
+ assert.match(section,/home_snapshot_comparison/);
+});
 test("UI requires explicit receipt inspection and post-ID confirmation before FB3",()=>{
  assert.match(html,/id="ercReconcileCounts"/);
  assert.match(ui,/ercReconcileCounts.*addEventListener\("click",reconcileAllCounts\)/);
