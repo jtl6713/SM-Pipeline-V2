@@ -100,7 +100,7 @@ export function receiptBlock(row, receipt, nowMs) {
  */
 export async function reconcilePublication({
   recordId, policy, readOutput, verifyRemote, patchStatus, appendAudit,
-  readState, saveState, now=Date.now, uuid=()=>crypto.randomUUID(),
+  readState, saveState, readAudit, now=Date.now, uuid=()=>crypto.randomUUID(),
 }) {
   const started=now(), prior=await readState(recordId);
   const row=await readOutput(recordId);
@@ -130,6 +130,35 @@ export async function reconcilePublication({
       await appendAudit(recovered);
       await saveState(recordId,{...prior,pending:null,terminal:true,last:recovered});
       return recovered;
+    }
+  }
+  // Legacy canary retries could mark an uncertain write Needs Decision before
+  // the original durable Corrected outcome was finalized. Reconcile only the
+  // restart journal against that exact independently persisted audit; no PATCH.
+  if(prior?.terminal && !prior.pending &&
+      prior.last?.reason==="uncertain_write_requires_review" && complete(row) && readAudit) {
+    const attempt=String(prior.last.previous_attempt||"");
+    if(/^[A-Za-z0-9_-]+$/.test(attempt)) {
+      const confirmed=await readAudit("publication-recovery:"+attempt+":outcome");
+      const receipt=confirmed?.receipt;
+      const same=(a,b)=>JSON.stringify(a??null)===JSON.stringify(b??null);
+      const ids=["Output_ID","Platform","Content_Item","Content_Profile","Platform_Post_ID",
+        "YouTube_Video_ID","Scheduled_Post_Date","YouTube_Scheduled_Publish_At"];
+      const exactIdentity=ids.every(k=>same(row.fields[k],confirmed?.before?.[k]));
+      const afterMatches=confirmed?.after &&
+        ["Output_Status","Publish_Status","Published_At","Platform_Post_URL",
+          "Publish_Retry_Eligible","Publish_Next_Retry_At"]
+          .every(k=>readbackMatches(k,row.fields[k],confirmed.after[k]));
+      if(confirmed?.outcome==="Corrected" && confirmed?.phase==="outcome" &&
+         confirmed.attempt_id===attempt && confirmed.audit_id===attempt+":outcome" &&
+         confirmed.record_id===recordId && confirmed.authorization==="deployment" &&
+         receipt?.ownership_verified===true && receipt?.verified_delivery===true &&
+         receipt?.remote_id===str(row,"YouTube_Video_ID") &&
+         receipt?.profile_id===row.fields.Content_Profile?.[0] &&
+         exactIdentity && afterMatches) {
+        await saveState(recordId,{...prior,pending:null,terminal:true,last:confirmed});
+        return {...confirmed,journal_reconciled:true};
+      }
     }
   }
   if(complete(row) && !prior?.pending) return {outcome:"Already Reconciled",record_id:recordId,duplicate:true};
