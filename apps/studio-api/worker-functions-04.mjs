@@ -10146,17 +10146,21 @@ export async function getStudioExceptionRecoveryCounts(request, env) {
       listRecordsPage(env,env.AIRTABLE_OUTPUT_TABLE_ID,options),{
         filterFormula:"{Test_Run_ID}=BLANK()",pageSize:100,requireUnique:true,
       });
-    const qa=await loadStudioFailedOutputSnapshot(env,{fresh:true});
+    // A source-canonical census must not launch a second expensive QA scan.
+    // The 8k+ full-output scan already pages the entire authoritative table;
+    // A forced Quality Agent refresh also runs multiple
+    // independent Airtable sweeps and has timed out the production request.
+    // Do not silently reuse stale QA evidence as if it were same-generation:
+    // the source/Quality Agent exact-ID comparison is explicitly unavailable.
     const scanAtMs=Date.now();
     const counts=reconcileExceptionCensus(all,mapOutput,{
-      atMs:scanAtMs,qaFailed:qa?.items||null,
-      qaPastDue:qa?.approved_past_due?.status==="ok" ? qa.approved_past_due.items : null,
+      atMs:scanAtMs,qaFailed:null,qaPastDue:null,
     });
     const homeAfter=env?.STUDIO_HOME_PROFILE_SUMMARY_READS==="true"?null:
       await readStudioProfilesOverviewSnapshotFromR2(env).catch(()=>null);
     const home_snapshot_comparison=compareHomeSnapshotToExceptionCensus(
       counts,homeBefore,homeAfter,{scanAtMs});
-    return {...counts,quality_agent_scan_at:qa?.scanned_at||null,home_snapshot_comparison};
+    return {...counts,quality_agent_scan_at:null,quality_agent_parity_note:"Quality Agent comparison is deferred; no second full source scan ran in this request.",home_snapshot_comparison};
   });
   const cached=await persistExceptionRecoveryCensusCache(env.STUDIO_MEDIA,data);
   return respond(request,env,{...data,census_cache_status:cached.status,
