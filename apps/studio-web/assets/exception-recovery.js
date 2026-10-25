@@ -163,7 +163,8 @@
     button.setAttribute("aria-pressed",String(item.record_id===state.selected));
     button.append(elem("strong",(item.output_id ? "#" + item.output_id + " · " : "") + (item.title || "Untitled output")),
       elem("small", [item.profile_name || item.profile_id || "Unknown city",item.platform,item.output_type].filter(Boolean).join(" · ")),
-      elem("small",item.categories?.includes("qa_only_unreconciled") ? "QA diagnostic · not counted as Home Failed" : (item.held ? "Held · " : "")+(item.signature || "Quality Agent") + (formatOverdueAge(item.minutes_past_due) ? " · "+formatOverdueAge(item.minutes_past_due) : "")));
+      elem("small",(item.held ? "Held · " : "")+(item.signature || "Quality Agent") + (formatOverdueAge(item.minutes_past_due) ? " · "+formatOverdueAge(item.minutes_past_due) : "")));
+    if(item.categories?.includes("qa_only_unreconciled"))button.append(elem("small","QA diagnostic only · not counted as Home Failed"));
     button.addEventListener("click",()=>{state.selected=item.record_id;render();});
     const wrap=elem("div",null,"erc-item-wrap");
     const tick=elem("input");tick.type="checkbox";
