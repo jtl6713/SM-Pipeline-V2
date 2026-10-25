@@ -1,0 +1,15 @@
+{
+  "schema": "publication-reconciliation-rollout-v1",
+  "stage": "read_only",
+  "approval": "user-authorized-background-verified-status-only-reconciliation-2026-10-24",
+  "canary_record_id": "rec6cEb39ptQyTyrF",
+  "canary_output_id": 8570,
+  "canary_video_id": "GOso95PT2UI",
+  "canary_channel_id": "UCVt3nBxRfPuuxxduuxmz9sw",
+  "scan_interval_minutes": 15,
+  "batch_size": 2,
+  "cooldown_minutes": 60,
+  "max_attempts": 5,
+  "no_remote_provider_writes": true,
+  "completed_private_handoff_state": "Awaiting Public Release / Published Privately"
+}
