@@ -3,6 +3,11 @@ import { assessRecoveryPreflight } from "./exception-recovery-preflight.mjs";
 
 export const RECOVERY_SIGNATURE = "AUTONOMOUS-PUBLICATION-RECONCILIATION";
 const str = (r,k) => String(r?.fields?.[k] ?? "").trim();
+// Airtable omits unchecked checkbox values on readback. Only for this known
+// checkbox, an omitted value and false are the same stored state.
+const readbackMatches = (key, actual, expected) => key === "Publish_Retry_Eligible"
+  ? (actual === true) === (expected === true)
+  : JSON.stringify(actual ?? null) === JSON.stringify(expected ?? null);
 const snapshotFields = ["Output_ID","Output_Title","Title_Text","Content_Item","Content_Profile","Platform",
   "Output_Status","Publish_Status","Review_Status","Do_Not_Publish","Test_Run_ID",
   "Platform_Post_ID","YouTube_Video_ID","Platform_Media_ID","Platform_Post_URL",
@@ -95,7 +100,7 @@ export function receiptBlock(row, receipt, nowMs) {
  */
 export async function reconcilePublication({
   recordId, policy, readOutput, verifyRemote, patchStatus, appendAudit,
-  readState, saveState, now=Date.now, uuid=()=>crypto.randomUUID(),
+  readState, saveState, readAudit, now=Date.now, uuid=()=>crypto.randomUUID(),
 }) {
   const started=now(), prior=await readState(recordId);
   const row=await readOutput(recordId);
@@ -112,7 +117,7 @@ export async function reconcilePublication({
       "Platform_Post_ID","YouTube_Video_ID","Scheduled_Post_Date",
       "YouTube_Scheduled_Publish_At"];
     const same=(a,b)=>JSON.stringify(a??null)===JSON.stringify(b??null);
-    const intendedWritten=Object.entries(expected).every(([k,v])=>same(row.fields[k],v));
+    const intendedWritten=Object.entries(expected).every(([k,v])=>readbackMatches(k,row.fields[k],v));
     const identityPreserved=identityKeys.every(k=>same(
       row.fields[k],prior.pending.before?.[k]));
     if(intendedWritten && identityPreserved) {
@@ -125,6 +130,35 @@ export async function reconcilePublication({
       await appendAudit(recovered);
       await saveState(recordId,{...prior,pending:null,terminal:true,last:recovered});
       return recovered;
+    }
+  }
+  // Legacy canary retries could mark an uncertain write Needs Decision before
+  // the original durable Corrected outcome was finalized. Reconcile only the
+  // restart journal against that exact independently persisted audit; no PATCH.
+  if(prior?.terminal && !prior.pending &&
+      prior.last?.reason==="uncertain_write_requires_review" && complete(row) && readAudit) {
+    const attempt=String(prior.last.previous_attempt||"");
+    if(/^[A-Za-z0-9_-]+$/.test(attempt)) {
+      const confirmed=await readAudit("publication-recovery:"+attempt+":outcome");
+      const receipt=confirmed?.receipt;
+      const same=(a,b)=>JSON.stringify(a??null)===JSON.stringify(b??null);
+      const ids=["Output_ID","Platform","Content_Item","Content_Profile","Platform_Post_ID",
+        "YouTube_Video_ID","Scheduled_Post_Date","YouTube_Scheduled_Publish_At"];
+      const exactIdentity=ids.every(k=>same(row.fields[k],confirmed?.before?.[k]));
+      const afterMatches=confirmed?.after &&
+        ["Output_Status","Publish_Status","Published_At","Platform_Post_URL",
+          "Publish_Retry_Eligible","Publish_Next_Retry_At"]
+          .every(k=>readbackMatches(k,row.fields[k],confirmed.after[k]));
+      if(confirmed?.outcome==="Corrected" && confirmed?.phase==="outcome" &&
+         confirmed.attempt_id===attempt && confirmed.audit_id===attempt+":outcome" &&
+         confirmed.record_id===recordId && confirmed.authorization==="deployment" &&
+         receipt?.ownership_verified===true && receipt?.verified_delivery===true &&
+         receipt?.remote_id===str(row,"YouTube_Video_ID") &&
+         receipt?.profile_id===row.fields.Content_Profile?.[0] &&
+         exactIdentity && afterMatches) {
+        await saveState(recordId,{...prior,pending:null,terminal:true,last:confirmed});
+        return {...confirmed,journal_reconciled:true};
+      }
     }
   }
   if(complete(row) && !prior?.pending) return {outcome:"Already Reconciled",record_id:recordId,duplicate:true};
@@ -190,7 +224,7 @@ export async function reconcilePublication({
   try {
     await patchStatus(final,fields);
     const after=await readOutput(recordId);
-    if(after?.id!==recordId || !Object.entries(fields).every(([k,v])=> (after.fields[k]??null)===(v??null)) ||
+    if(after?.id!==recordId || !Object.entries(fields).every(([k,v])=>readbackMatches(k,after.fields[k],v)) ||
        receiptBlock(after,receipt,now())) throw new Error("readback_unconfirmed");
     return await finish("Corrected","authoritative_airtable_readback_confirmed",{
       completion_kind:receipt.verified_public?"public_publication_verified":"studio_delivery_completed",

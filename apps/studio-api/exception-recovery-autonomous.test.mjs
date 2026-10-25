@@ -285,11 +285,12 @@ test("existing publisher retry ceiling and cooldown do not block authenticated S
  assert.equal(f.row.fields.Publish_Next_Retry_At,null);
  assert.equal(f.writes,1);
 });
-test("Airtable omitting cleared null fields still counts as authoritative readback",async()=>{
+test("Airtable omitting cleared null and unchecked checkbox fields still counts as authoritative readback",async()=>{
  const f=fixture();
  f.deps.patchStatus=async(_,fields)=>{
    Object.assign(f.row.fields,fields);
-   for(const key of ["Publish_Next_Retry_At"])if(f.row.fields[key]===null)delete f.row.fields[key];
+   for(const key of ["Publish_Next_Retry_At","Publish_Retry_Eligible"])
+     if(f.row.fields[key]===null||f.row.fields[key]===false)delete f.row.fields[key];
  };
  const output=await reconcilePublication(f.deps);
  assert.equal(output.outcome,"Corrected");
@@ -347,4 +348,31 @@ test("uncertain write with changed immutable YouTube video identity cannot be si
   assert.equal(later.outcome,"Needs Decision");
   assert.equal(later.reason,"uncertain_write_requires_review");
   assert.equal(f.writes,1);
+});
+
+
+test("uncertain canary with omitted unchecked Airtable checkbox finalizes on next readback, without another PATCH",async()=>{
+  const f=fixture(),originalRead=f.deps.readOutput,originalPatch=f.deps.patchStatus;
+  let reads=0;
+  f.deps.patchStatus=async(...args)=>{
+    await originalPatch(...args);
+    delete f.row.fields.Publish_Retry_Eligible;
+    delete f.row.fields.Publish_Next_Retry_At;
+  };
+  f.deps.readOutput=async()=>{
+    if(++reads===4)throw new Error("Airtable readback timeout");
+    return originalRead();
+  };
+  const first=await reconcilePublication(f.deps);
+  assert.equal(first.reason,"status_write_or_audit_uncertain");
+  assert.equal(f.writes,1);
+  assert.ok(f.state.pending);
+  f.deps.readOutput=originalRead;
+  const next=await reconcilePublication(f.deps);
+  assert.equal(next.outcome,"Corrected");
+  assert.equal(next.reason,"authoritative_readback_after_uncertain_write");
+  assert.equal(f.writes,1);
+  assert.equal(f.state.pending,null);
+  assert.equal(f.state.terminal,true);
+  assert.equal(f.audits.filter(x=>x.outcome==="Corrected").length,1);
 });

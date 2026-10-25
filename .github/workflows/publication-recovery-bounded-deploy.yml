@@ -1,0 +1,41 @@
+name: Dispatch protected publication recovery deployment
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/publication-reconciliation-production-rollout.json'
+      - '.github/workflows/publication-recovery-bounded-deploy.yml'
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: publication-recovery-bounded-dispatch
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check out reviewed rollout manifest
+        uses: actions/checkout@v4
+      - name: Validate bounded status-only configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '.schema=="publication-reconciliation-rollout-v1"
+            and .stage=="bounded"
+            and .no_remote_provider_writes==true
+            and .canary_record_id=="rec6cEb39ptQyTyrF"
+            and .canary_video_id=="GOso95PT2UI"
+            and .canary_corrected_audit_event_key=="publication-recovery:6c9bb68b-a308-427d-8199-59651ab71b5e:outcome"
+            and .batch_size==2
+            and .scan_interval_minutes==15
+            and .max_attempts==5' deploy/publication-reconciliation-production-rollout.json
+      - name: Run existing protected Worker deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy-cloudflare-worker-production.yml --ref main
