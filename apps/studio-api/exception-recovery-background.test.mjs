@@ -128,3 +128,13 @@ test("read-only and exact-canary stages never select priority records",async()=>
    appendAudit:async()=>{}});
  assert.deepEqual(got,["recAAAAAAAAAAAAAA"]);
 });
+
+test("accelerated bounded manifest retains five-per-sweep cap and never enables administrator mutations",()=>{
+ const manifest=JSON.parse(fs.readFileSync(new URL("../../deploy/publication-reconciliation-production-rollout.json",import.meta.url),"utf8"));
+ assert.equal(manifest.stage,"bounded");
+ assert.equal(manifest.no_remote_provider_writes,true);
+ assert.equal(manifest.scan_interval_minutes,5);
+ assert.equal(manifest.batch_size,5);
+ assert.ok(manifest.batch_size<=5);
+ assert.ok(manifest.scan_interval_minutes>=5);
+});
