@@ -103,3 +103,85 @@ export async function verifyAuthenticatedYouTubeReceipt(row, {
   }
 }
 
+
+
+/**
+ * Exact published Instagram feed post, proven as a member of the configured
+ * profile's IG Business account media edge. A saved media/container ID or
+ * permalink on its own is NOT publication or account-ownership proof.
+ * This adapter has no Graph mutation capability.
+ */
+export async function verifyAuthenticatedInstagramReceipt(row, {
+  settings = {}, expectedAccountId, fetcher = fetch, now = Date.now,
+} = {}) {
+  const at = new Date(now()).toISOString();
+  const deny = evidence => ({
+    platform:"Instagram",verified_public:false,verified_delivery:false,
+    ownership_verified:false,checked_at:at,evidence,read_only:true,
+  });
+  const f = row?.fields || {};
+  if(f.Platform !== "Instagram") return deny("provider_not_enabled");
+  if(!Array.isArray(f.Content_Profile) || f.Content_Profile.length !== 1)
+    return deny("ambiguous_profile");
+  const type = String(f.Platform_Output_Type || f.Studio_Output_Type || "");
+  if(/story/i.test(type)) return deny("instagram_story_membership_adapter_not_enabled");
+  const candidates = [f.Platform_Post_ID,f.IG_Carousel_Published_Media_ID]
+    .filter(Boolean).map(x => String(x).trim());
+  const ids = [...new Set(candidates)];
+  if(ids.length !== 1 || !/^\d{6,35}$/.test(ids[0]))
+    return deny("exact_published_media_id_required");
+  const id=ids[0], account=String(expectedAccountId || "").trim();
+  if(!/^\d{6,35}$/.test(account)) return deny("profile_instagram_account_not_configured");
+  const token=String(settings.META_GRAPH_API_ACCESS_TOKEN || "").trim();
+  if(!token) return deny("profile_instagram_token_not_configured");
+  const version=/^v\d{1,2}\.\d$/.test(String(settings.META_GRAPH_API_VERSION||""))
+    ?String(settings.META_GRAPH_API_VERSION):"v26.0";
+  const seen=new Set();
+  let cursor="";
+  for(let page=0;page<5;page++){
+    const url=new URL("https://graph.facebook.com/"+version+"/"+account+"/media");
+    url.searchParams.set("fields","id,permalink,timestamp,media_type");
+    url.searchParams.set("limit","100");
+    if(cursor) url.searchParams.set("after",cursor);
+    let response,data;
+    try {
+      response=await fetcher(url.href,{method:"GET",redirect:"manual",
+        signal:AbortSignal.timeout(10000),
+        headers:{Authorization:"Bearer "+token,Accept:"application/json"}});
+      if(response?.ok!==true || response?.status>=300 && response.status<400)
+        return deny("authenticated_account_media_read_rejected");
+      data=await response.json();
+    } catch { return deny("authenticated_account_media_unavailable"); }
+    if(!Array.isArray(data?.data) || data?.error)
+      return deny("authenticated_account_media_invalid");
+    const matches=data.data.filter(x=>String(x?.id||"")===id);
+    if(matches.length>1) return deny("ambiguous_account_media_membership");
+    if(matches.length===1) {
+      const media=matches[0];
+      let permalink;
+      try {
+        permalink=new URL(String(media.permalink||""));
+        if(permalink.protocol!=="https:" ||
+          !["instagram.com","www.instagram.com"].includes(permalink.hostname.toLowerCase()) ||
+          !/^\/(?:p|reel|tv)\/[A-Za-z0-9_-]+\/?$/.test(permalink.pathname) ||
+          permalink.username || permalink.password || permalink.port)
+          return deny("provider_public_permalink_invalid");
+      } catch {return deny("provider_public_permalink_invalid");}
+      const timestamp=Date.parse(String(media.timestamp||""));
+      if(!Number.isFinite(timestamp) || timestamp>now())
+        return deny("provider_publication_timestamp_invalid");
+      return {platform:"Instagram",verified_public:true,verified_delivery:true,
+        ownership_verified:true,profile_id:f.Content_Profile[0],remote_id:id,
+        account_id:account,permalink:permalink.href,
+        published_at:new Date(timestamp).toISOString(),checked_at:new Date(now()).toISOString(),
+        evidence:"account_scoped_graph_media_membership_exact_id_permalink_timestamp",
+        read_only:true,summary:{media_type:String(media.media_type||""),account_id:account}};
+    }
+    const next=String(data.paging?.cursors?.after||"");
+    if(!next) return deny("published_media_not_in_account");
+    if(next.length>1024 || seen.has(next))
+      return deny("account_media_pagination_invalid");
+    seen.add(next);cursor=next;
+  }
+  return deny("published_media_not_within_bounded_account_window");
+}

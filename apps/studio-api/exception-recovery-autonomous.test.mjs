@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {reconcilePublication,autonomousRecoveryPolicy,receiptBlock} from "./exception-recovery-autonomous.mjs";
-import {verifyAuthenticatedYouTubeReceipt} from "./exception-recovery-authenticated-receipt.mjs";
+import {verifyAuthenticatedYouTubeReceipt,verifyAuthenticatedInstagramReceipt} from "./exception-recovery-authenticated-receipt.mjs";
 import {normalizeRecoveryHistory,recoveryAuditFields} from "./exception-recovery-history.mjs";
 import {homeApprovedExceptionKind} from "./profile-summary-classification.mjs";
 import {approvedPastDueFormula} from "./approved-past-due-quality.mjs";
@@ -375,4 +375,74 @@ test("uncertain canary with omitted unchecked Airtable checkbox finalizes on nex
   assert.equal(f.state.pending,null);
   assert.equal(f.state.terminal,true);
   assert.equal(f.audits.filter(x=>x.outcome==="Corrected").length,1);
+});
+
+
+test("exact account-owned Instagram carousel recovers without any remote publish request",async()=>{
+  const f=fixture(),post="18041644475837071";
+  Object.assign(f.row.fields,{Platform:"Instagram",Platform_Output_Type:"Instagram Carousel",
+    Platform_Post_ID:post,Platform_Media_ID:post,IG_Carousel_Published_Media_ID:post,
+    IG_Carousel_Published_At:"2026-10-23T10:51:04Z"});
+  delete f.row.fields.YouTube_Video_ID;delete f.row.fields.Platform_Post_URL;
+  Object.assign(f.receipt,{platform:"Instagram",remote_id:post,account_id:"17841400000000000",
+    permalink:"https://www.instagram.com/p/ABCxyz123/",
+    published_at:"2026-10-23T10:51:04.000Z",verified_public:true});
+  const result=await reconcilePublication(f.deps);
+  assert.equal(result.outcome,"Corrected");
+  assert.equal(result.completion_kind,"public_publication_verified");
+  assert.equal(f.row.fields.Platform_Post_URL,f.receipt.permalink);
+  assert.equal(f.row.fields.Published_At,f.receipt.published_at);
+  assert.equal(f.row.fields.IG_Carousel_Published_Media_ID,post);
+  assert.equal(f.writes,1);
+  assert.equal((await reconcilePublication(f.deps)).outcome,"Already Reconciled");
+});
+test("Instagram containers, stories and mismatched published IDs never authorize a correction",async()=>{
+  for(const mutation of [
+    f=>{f.row.fields.Platform_Post_ID="";f.row.fields.IG_Carousel_Published_Media_ID="";},
+    f=>{f.row.fields.Platform_Output_Type="Instagram Story";},
+    f=>{f.row.fields.IG_Carousel_Published_Media_ID="18041644475837072";},
+  ]) {
+    const f=fixture(),post="18041644475837071";
+    Object.assign(f.row.fields,{Platform:"Instagram",Platform_Output_Type:"Instagram Carousel",
+      Platform_Post_ID:post,IG_Carousel_Published_Media_ID:post});
+    delete f.row.fields.Platform_Post_URL;delete f.row.fields.YouTube_Video_ID;
+    Object.assign(f.receipt,{platform:"Instagram",remote_id:post,permalink:"https://www.instagram.com/p/ABC123/",
+      verified_public:true,published_at:"2026-10-23T10:51:04Z"});
+    mutation(f);
+    assert.notEqual((await reconcilePublication(f.deps)).outcome,"Corrected");
+    assert.equal(f.writes,0);
+  }
+});
+test("authenticated Instagram verifier requires exact account-feed membership, owner and timestamp",async()=>{
+  const post="18041644475837071",account="17841400000000000",profile="recBBBBBBBBBBBBBB",queries=[];
+  const row={fields:{Platform:"Instagram",Platform_Output_Type:"Instagram Carousel",
+    Content_Profile:[profile],Platform_Post_ID:post,IG_Carousel_Published_Media_ID:post}};
+  const settings={META_GRAPH_API_ACCESS_TOKEN:"test-secret",META_GRAPH_API_VERSION:"v26.0"};
+  const fetcher=async(url,opt)=>{
+    queries.push({url,opt});
+    assert.equal(opt.method,"GET");
+    assert.equal(opt.redirect,"manual");
+    assert.equal(opt.headers.Authorization,"Bearer test-secret");
+    assert.equal(new URL(url).pathname,"/v26.0/"+account+"/media");
+    return {ok:true,status:200,json:async()=>({data:[{id:post,permalink:"https://www.instagram.com/p/ABC123/",
+      timestamp:"2026-10-23T10:51:04+0000",media_type:"CAROUSEL_ALBUM"}]})};
+  };
+  const time=()=>Date.parse("2026-10-24T12:00:00Z");
+  const verified=await verifyAuthenticatedInstagramReceipt(row,{settings,expectedAccountId:account,fetcher,now:time});
+  assert.equal(verified.ownership_verified,true);
+  assert.equal(verified.verified_public,true);
+  assert.equal(verified.remote_id,post);
+  assert.equal(verified.profile_id,profile);
+  assert.equal(queries.length,1);
+  assert.equal(queries[0].url.includes("test-secret"),false);
+  const absent=await verifyAuthenticatedInstagramReceipt(row,{settings,expectedAccountId:account,now:time,
+    fetcher:async()=>({ok:true,status:200,json:async()=>({data:[{id:"999999999999999"}]})})});
+  assert.equal(absent.ownership_verified,false);
+  const noToken=await verifyAuthenticatedInstagramReceipt(row,{settings:{},expectedAccountId:account,now:time,
+    fetcher:async()=>{throw Error("should not call provider");}});
+  assert.equal(noToken.verified_public,false);
+  const wrongPermalink=await verifyAuthenticatedInstagramReceipt(row,{settings,expectedAccountId:account,now:time,
+    fetcher:async()=>({ok:true,status:200,json:async()=>({data:[{id:post,
+      permalink:"https://www.instagram.com/not-a-post",timestamp:"2026-10-23T10:51:04+0000"}]})})});
+  assert.equal(wrongPermalink.verified_public,false);
 });

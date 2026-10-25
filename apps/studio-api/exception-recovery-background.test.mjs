@@ -65,6 +65,8 @@ test("integration uses existing cron, authenticated admin history and no publish
 test("discovery only scans approved YouTube outputs with an existing remote identity and no completed handoff",()=>{
  const formula=publicationDiscoveryFormula(Date.parse("2026-10-24T12:00:00Z"));
  assert.match(formula,/\{Platform\}="YouTube"/);
+ assert.match(formula,/\{Platform\}="Instagram"/);
+ assert.match(formula,/\{IG_Carousel_Published_Media_ID\}!=""/);
  assert.match(formula,/\{Review_Status\}="Approved"/);
  assert.match(formula,/\{Do_Not_Publish\}=0/);
  assert.match(formula,/\{YouTube_Video_ID\}!=""|\{Platform_Post_ID\}!=""/);
