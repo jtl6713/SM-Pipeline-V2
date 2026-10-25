@@ -2,6 +2,16 @@ import { savedPublicReceiptMatchesProvider } from "./exception-recovery-actions.
 import { assessRecoveryPreflight } from "./exception-recovery-preflight.mjs";
 
 export const RECOVERY_SIGNATURE = "AUTONOMOUS-PUBLICATION-RECONCILIATION";
+ // Missing account/channel/transport settings are verification dependencies,
+ // not evidence that the previously uploaded post is unsafe or unpublished.
+ // They may be reprobed after an operator fixes the config without requiring
+ // an administrator to clear a terminal "Needs Decision" flag.
+ const RETRYABLE_PROVIDER_CONFIG = new Set([
+   "expected_profile_channel_not_configured",
+   "profile_instagram_account_not_configured",
+   "profile_instagram_token_not_configured",
+   "profile_service_auth_missing",
+ ]);
 const str = (r,k) => String(r?.fields?.[k] ?? "").trim();
 // Airtable omits unchecked checkbox values on readback. Only for this known
 // checkbox, an omitted value and false are the same stored state.
@@ -176,7 +186,14 @@ export async function reconcilePublication({
     }
   }
   if(complete(row) && !prior?.pending) return {outcome:"Already Reconciled",record_id:recordId,duplicate:true};
-  if(!prior?.pending && (prior?.terminal || Number(prior?.next_at)>now()))
+  // Reopen only legacy terminal configuration failures. Once reprobed, a still
+  // missing setting becomes a nonterminal, cooldown-limited verification item.
+  // All identity mismatches, holds, exhausted attempts and uncertain writes
+  // retain their original terminal protection.
+  const oldConfigFailure=prior?.terminal && RETRYABLE_PROVIDER_CONFIG.has(prior?.last?.reason)
+    && (prior?.attempts||0)<policy.maxAttempts;
+  if(!prior?.pending && ((prior?.terminal && !oldConfigFailure) ||
+      (Number(prior?.next_at)>now() && !oldConfigFailure)))
     return {outcome:prior?.last?.outcome || "Awaiting Verification",record_id:recordId,skipped:true};
   const attempt=uuid();
   const event={attempt_id:attempt,audit_id:attempt+":outcome",record_id:recordId,
@@ -203,7 +220,8 @@ export async function reconcilePublication({
   catch { return finish("Awaiting Verification","provider_network_failure"); }
   event.receipt=receipt;
   const denied=receiptBlock(row,receipt,now());
-  if(denied) return finish(/unavailable|inaccessible|private|scheduled|stale/.test(denied)
+  if(denied) return finish(RETRYABLE_PROVIDER_CONFIG.has(denied) ||
+    /unavailable|inaccessible|private|scheduled|stale/.test(denied)
     ?"Awaiting Verification":"Needs Decision",denied);
   if(!policy.mutate || (!policy.broad && policy.canaryRecord!==recordId))
     return finish("Awaiting Verification","verified_publication_mutation_not_authorized");
