@@ -10,6 +10,9 @@ on:
       - 'repair/scripts/exception-recovery-production-audit.mjs'
       - '.github/workflows/exception-recovery-production-verification.yml'
   workflow_dispatch:
+  workflow_run:
+    workflows: [Deploy Studio API Worker Production]
+    types: [completed]
 permissions:
   contents: read
 concurrency:
@@ -44,7 +47,7 @@ jobs:
           NODE
   live:
     name: Authenticated deployed conversation, provider and counts audit
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     needs: contract
     runs-on: ubuntu-latest
     timeout-minutes: 12
