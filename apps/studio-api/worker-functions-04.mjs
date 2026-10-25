@@ -15379,16 +15379,23 @@ export async function kickStudioOutputPublish(request, env, url, authorization, 
 }
 /*__STUDIO_WORKER_END:kickStudioOutputPublish__*/
 
-function qualityFacebookRecoverySlot(row, occupiedMs, timeZone, horizonDays) {
+function qualityFacebookRecoverySlot(row, occupiedMs, timeZone, horizonDays, {heldOnly=false}={}) {
   const retryAt = Date.parse(String(f(row, "Publish_Next_Retry_At") || ""));
-  // Error 368/1390008 has no reliable unblock promise. Give the page 48 hours
-  // or longer if Facebook already supplied a later retry timestamp.
+  // Meta has no reliable 368 unblock promise. Allow no sooner than 48h
+  // from this operator reschedule attempt, or later if retry metadata says so.
   const notBefore = Math.max(Date.now() + 48 * 60 * 60 * 1000,
     Number.isFinite(retryAt) ? retryAt + 60 * 1000 : 0);
+  // Previously applying the 12-hour *posting* gap to the entire existing
+  // Facebook calendar left zero space in 90 days. For scheduling-only,
+  // retained-hard-hold retries, use the ordinary spacing PLUS conservative
+  // 90-minute clearance from each other future Facebook reservation.
+  // This change NEVER permits Graph create: Do_Not_Publish remains true,
+  // retry is disabled and publication stays Failed pending provider proof.
+  // Any future hold release needs a separate verified, operator-approved gate.
   const picked = maeScheduleNextSlot({
     now: new Date(notBefore), timeZone, horizonDays,
     occupiedMs, platformOccupiedMs: occupiedMs,
-    gapMs: 12 * 60 * 60 * 1000,
+    gapMs: heldOnly ? 90 * 60 * 1000 : 12 * 60 * 60 * 1000,
   });
   if (!picked.ok || !picked.iso || Date.parse(picked.iso) <= notBefore)
     throw new HttpError(409, "No MAE Facebook slot after cooldown; failure remains visible");
@@ -15460,7 +15467,7 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
       const timeZone = await studioScheduleTimeZoneForRecord(env, existing, payload);
       const horizonDays = await studioScheduleHorizonDays(env);
       const selectedIso = qualityFacebookRecoverySlot(
-        existing, platformOccupiedMs, timeZone, horizonDays);
+        existing, platformOccupiedMs, timeZone, horizonDays, {heldOnly:holdReschedule});
       return respond(request, env, {
         ok: true, quality_rate_limit_preview: true,
         stage: "planned", output_id: f(existing, "Output_ID"),
@@ -15540,7 +15547,8 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
 
         const recoveryIso = (qualityRecovery || holdReschedule)
           ? qualityFacebookRecoverySlot(authoritative, platformOccupiedMs, timeZone,
-            await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS))
+            await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS),
+            {heldOnly:holdReschedule})
           : "";
         const fields = studioPublishScheduleFields(
           { scheduled_post_date: recoveryIso || value || "immediate", timezone: timeZone },
@@ -15647,7 +15655,8 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
     const timeZone = await studioScheduleTimeZoneForRecord(env, existing, payload);
     const recoveryIso = (qualityRecovery || holdReschedule)
       ? qualityFacebookRecoverySlot(existing, studioOccupiedForPlatform(occupied, platform), timeZone,
-        await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS))
+        await studioScheduleHorizonDays(env).catch(() => MAE_SUGGEST_HORIZON_DAYS),
+        {heldOnly:holdReschedule})
       : "";
     const fields = studioPublishScheduleFields(
       { scheduled_post_date: recoveryIso || value || "immediate", timezone: timeZone },

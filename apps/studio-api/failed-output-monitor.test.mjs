@@ -4,6 +4,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { FAILED_OUTPUT_FORMULA, scanOutstandingFailedOutputs, describeFailedOutput, failedOutputRetryGate, facebookRateLimitResetReason, facebookSpamHeldRescheduleReason } from "./failed-output-monitor.mjs";
+import {maeScheduleNextSlot,maeScheduleConflicts,maeIsBlackoutLocalTime} from "./mae-schedule.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const worker = fs.readFileSync(path.join(here, "worker-functions-04.mjs"), "utf8");
@@ -137,7 +138,7 @@ test("Facebook QA reapproval uses original protected scheduling route and cooldo
   assert.match(worker, /facebookRateLimitResetReason\(authoritative\)/);
   assert.match(worker, /qualityFacebookRecoverySlot\(/);
   assert.match(worker, /48 \* 60 \* 60 \* 1000/);
-  assert.match(worker, /gapMs: 12 \* 60 \* 60 \* 1000/);
+  assert.match(worker, /gapMs: heldOnly \? 90 \* 60 \* 1000 : 12 \* 60 \* 60 \* 1000/);
   assert.match(worker, /Output_Status: "Approved for Publishing"/);
   assert.match(worker, /Publish_Status: "Ready to Schedule"/);
   assert.match(worker, /runAtomicScheduleTransaction/);
@@ -307,4 +308,45 @@ test("reschedule-on-hold uses the atomic MAE route but never clears spam error, 
  assert.match(worker,/SPAM_COOLDOWN_RESCHEDULE_PENDING_VERIFICATION/);
  assert.match(worker,/Do_Not_Publish: true, Publish_Retry_Eligible: false/);
  assert.match(worker,/if \(!holdReschedule && due/);
+});
+
+test("Meta spam held-only MAE picks available overflow instead of claiming 12-hour posting capacity", () => {
+  const code=worker.slice(worker.indexOf("function qualityFacebookRecoverySlot("),
+    worker.indexOf("export async function scheduleStudioPublishOutput("));
+  assert.match(code,/heldOnly \? 90 \* 60 \* 1000 : 12 \* 60 \* 60 \* 1000/);
+  assert.match(code,/Date\.now\(\) \+ 48 \* 60 \* 60 \* 1000/);
+  const {now,occupied}=(()=> {
+    const start=Date.parse("2026-10-28T00:00:00.000Z");
+    // Model a routinely crowded LA Facebook calendar with 3 normal posts
+    // each day, so no 12-hour gap exists even over several days.
+    const occupied=[];
+    for(let day=0;day<7;day++)for(const hour of [12,18,23])
+      occupied.push(start+day*86400000+hour*3600000);
+    return {now:new Date(start),occupied};
+  })();
+  assert.ok(occupied.length>0 && now instanceof Date);
+  // Explicit model: 3 LA posts/day, all priority slots taken.
+  // Twelve-hour spacing cannot fit, but a guarded future reservation at
+  // the usual 90-minute platform distance has available overflow.
+  const today=new Date("2026-06-03T11:55:00.000Z");
+  const dense=[];
+  for(let d=1;d<=7;d++){
+    const start=Date.parse("2026-06-03T00:00:00.000Z")+(d-1)*86400000;
+    for(const [h,m] of [[12,30],[18,30],[23,30]]) dense.push(start+h*3600000+m*60000);
+  }
+  const common={now:today,timeZone:"America/Los_Angeles",horizonDays:7,
+    occupiedMs:dense,platformOccupiedMs:dense};
+  const blocked=maeScheduleNextSlot({...common,gapMs:12*3600000});
+  const held=maeScheduleNextSlot({...common,gapMs:90*60000});
+  assert.equal(blocked.ok,false,"12-hour full-calendar gap should have no capacity");
+  assert.equal(held.ok,true,"guarded held-only 90-minute clearance fits overflow");
+  assert.ok(Date.parse(held.iso)>today.getTime());
+  assert.equal(maeIsBlackoutLocalTime(Date.parse(held.iso),"America/Los_Angeles"),false);
+  assert.equal(maeScheduleConflicts(Date.parse(held.iso),dense,90*60000),false);
+  const codePreview=worker.slice(worker.indexOf("if (payload?.quality_rate_limit_preview === true)"),
+    worker.indexOf("if (scheduleReservationLaneEnabled(env, reservationProfile?.id, platform))"));
+  assert.match(codePreview,/heldOnly:holdReschedule/);
+  assert.match(worker,/held_spam_rescheduled_pending_verification: holdReschedule/);
+  assert.match(worker,/Do_Not_Publish: true, Publish_Retry_Eligible: false/);
+  assert.match(worker,/if \(!holdReschedule && due && approved/);
 });
