@@ -1,0 +1,68 @@
+name: Exception Recovery Production Verification
+on:
+  pull_request:
+    paths:
+      - 'repair/scripts/exception-recovery-production-audit.mjs'
+      - '.github/workflows/exception-recovery-production-verification.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'repair/scripts/exception-recovery-production-audit.mjs'
+      - '.github/workflows/exception-recovery-production-verification.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: exception-recovery-production-verification
+  cancel-in-progress: false
+jobs:
+  contract:
+    name: Audit script syntax and safe scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check repair/scripts/exception-recovery-production-audit.mjs
+      - run: node --test apps/studio-api/exception-recovery-conversation.test.mjs apps/studio-api/exception-recovery-home-parity.test.mjs apps/studio-api/exception-recovery-autonomous.test.mjs
+      - name: Refuse any provider writes or broad output mutations in verification script
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs=require('node:fs');
+          const src=fs.readFileSync('repair/scripts/exception-recovery-production-audit.mjs','utf8');
+          if(!src.includes("const message='Please verify the existing Instagram receipt"))throw Error('persistence-only conversation scope missing');
+          if(!src.includes("request.method==='POST' && url.pathname==="))throw Error('one exact conversation POST guard missing');
+          if(!src.includes("report.counts="))throw Error('counts audit missing');
+          for(const forbidden of ["'/api/outputs/publish'","'/api/admin/exception-recovery/'+", 'method:"PATCH"', 'method:"DELETE"']) {
+            if(src.includes(forbidden))throw Error('unsafe verification mutation: '+forbidden);
+          }
+          console.log('scope=conversation-only-write provider=GET output_mutations=none');
+          NODE
+  live:
+    name: Authenticated deployed conversation, provider and counts audit
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    needs: contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify deployed Worker using temporary service-binding bridge
+        run: node repair/scripts/exception-recovery-production-audit.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exception-recovery-production-audit
+          path: /tmp/exception-recovery-production-audit.json
+          retention-days: 14
