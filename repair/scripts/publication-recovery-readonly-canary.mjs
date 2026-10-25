@@ -3,6 +3,11 @@ import crypto from 'node:crypto';
 const account=process.env.CLOUDFLARE_ACCOUNT_ID;
 const api='https://api.cloudflare.com/client/v4/accounts/'+account;
 const target='chicagoshining-studio-api';
+const rollout=JSON.parse(await fs.readFile(new URL('../../deploy/publication-reconciliation-production-rollout.json',import.meta.url),'utf8'));
+if(!/^rec[A-Za-z0-9]{14}$/.test(String(rollout.canary_record_id)) ||
+   !/^[A-Za-z0-9_-]{11}$/.test(String(rollout.canary_video_id)) ||
+   !/^UC[A-Za-z0-9_-]{22}$/.test(String(rollout.canary_channel_id)) ||
+   !Number.isInteger(rollout.canary_output_id)) throw new Error('invalid_canary_manifest');
 const bridge='studio-publication-readonly-'+String(process.env.GITHUB_RUN_ID||Date.now());
 const token=crypto.randomBytes(32).toString('hex');
 const report={read_only:true,inspected:0,verified:0,corrected:0,remote_writes:0,started_at:new Date().toISOString()};
@@ -25,8 +30,19 @@ try {
   const binding=bindings.find(b=>b.name===name);
   report.flags[name]=binding?binding.type==='plain_text'?binding.text:'non_plain_binding':'absent';
  }
- for(const name of ['PUBLICATION_RECONCILIATION_ENABLED','PUBLICATION_RECONCILIATION_BOUNDED_ENABLED'])
-  if(!['false','absent'].includes(report.flags[name]))throw new Error('autonomous_mutation_gate_not_off');
+ const expectedFlags={
+  PUBLICATION_RECONCILIATION_SCAN_ENABLED:rollout.stage==='read_only'?'false':'true',
+  PUBLICATION_RECONCILIATION_ENABLED:rollout.stage==='read_only'?'false':'true',
+  PUBLICATION_RECONCILIATION_BOUNDED_ENABLED:rollout.stage==='bounded'?'true':'false',
+  PUBLICATION_RECONCILIATION_CANARY_RECORD:rollout.canary_record_id,
+ };
+ for(const [name,value] of Object.entries(expectedFlags)){
+   const bound=bindings.find(b=>b.name===name);
+   // Older read-only deployments can omit dormant flags entirely.
+   if(!bound && rollout.stage==='read_only')continue; // prior live read-only deployment lacks staged bindings
+   if(bound?.type!=='plain_text'||bound?.text!==value)throw new Error('publication_recovery_flag_mismatch_'+name);
+ }
+ report.rollout_stage=rollout.stage;
  // Reuses the production deployment's service-binding verification pattern.
  // The bridge exposes only four fixed GETs behind a random, short-lived path.
  const source=`export default {async fetch(request,env){
@@ -34,7 +50,7 @@ try {
    if(request.method!=='GET')return new Response('Method not allowed',{status:405});
    const routes={
     '/${token}/health':'/api/health',
-    '/${token}/receipt':'/api/admin/exception-recovery/recjpnbFd5SqbrGNM/receipt?authenticated=1',
+    '/${token}/receipt':'/api/admin/exception-recovery/${rollout.canary_record_id}/receipt?authenticated=1',
     '/${token}/history':'/api/admin/exception-recovery/history',
     '/${token}/denied':'/api/admin/exception-recovery/history'
    };
@@ -68,14 +84,14 @@ try {
  if(history.status!==200||history.body.source!=='airtable_exception_recovery_audit')throw new Error('durable_history_unavailable');
  const receipt=await probe('receipt');report.inspected=1;report.receipt=receipt.body;
  const data=receipt.body;
- if(receipt.status!==200||String(data.output_id)!=='4092'||data.remote_id!=='hc1heQnfn6k'||data.channel_id!=='UCVt3nBxRfPuuxxduuxmz9sw')throw new Error('canary_exact_identity_not_verified');
+ if(receipt.status!==200||Number(data.output_id)!==rollout.canary_output_id||data.remote_id!==rollout.canary_video_id||data.channel_id!==rollout.canary_channel_id)throw new Error('canary_exact_identity_not_verified');
  if(data.verified_delivery!==true||data.ownership_verified!==true||data.read_only!==true)throw new Error('authenticated_delivery_unverified');
  report.verified=1;report.public_visibility_verified=data.verified_public===true;
  if(data.verification?.authoritative_state_unchanged!==true||data.verification?.no_output_write!==true)throw new Error('authoritative_readback_failed');
  report.eligible=data.verification.eligible===true;
  report.blocked_reason=data.verification.blocked_reason;
- report.canary_status=report.eligible?'verified_eligible_pending_explicit_approval':'blocked';
- if(!report.eligible)process.exitCode=1;
+ report.canary_status=report.eligible?'verified_eligible':'provider_verified_not_currently_eligible';
+ if(!report.eligible && rollout.stage==='read_only')process.exitCode=1;
 } catch(error) {
  report.canary_status='unavailable';report.error=String(error.message).slice(0,160);process.exitCode=1;
 } finally {
