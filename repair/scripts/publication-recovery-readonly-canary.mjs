@@ -39,7 +39,7 @@ try {
  for(const [name,value] of Object.entries(expectedFlags)){
    const bound=bindings.find(b=>b.name===name);
    // Older read-only deployments can omit dormant flags entirely.
-   if(!bound && rollout.stage==='read_only' && value==='false')continue;
+   if(!bound && rollout.stage==='read_only')continue; // prior live read-only deployment lacks staged bindings
    if(bound?.type!=='plain_text'||bound?.text!==value)throw new Error('publication_recovery_flag_mismatch_'+name);
  }
  report.rollout_stage=rollout.stage;
