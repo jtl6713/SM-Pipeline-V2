@@ -103,13 +103,14 @@ test("overdue lanes are disjoint and no saved ID is treated as proof of a posted
   r("recFFFFFFFFFFFFFF",{...fields,Platform:"Facebook",Publish_Status:"Failed"}),
  ];
  const actual=reconcileExceptionCensus(rows,mapOutput,{atMs});
- assert.equal(actual.totals.approved_past_due,6);
+ assert.equal(actual.totals.approved_past_due,5);
+ // Canonical Home predicates report failed cases separately, never double count them as overdue.
+ assert.equal(actual.totals.failed,1);
  assert.deepEqual(actual.overdue_recovery_lanes,{
    verify_existing_post_status_only:2,
    provider_adapter_or_manual_verification_required:1,
    inflight_requires_lock_and_receipt_preflight:1,
    missing_remote_identity_requires_publisher_preflight:1,
-   failed_stage_requires_diagnosis:1,
  });
  const yt=actual.exception_items.find(x=>x.record_id===rows[0].id);
  assert.equal(yt.status_only_verification_candidate,true);
