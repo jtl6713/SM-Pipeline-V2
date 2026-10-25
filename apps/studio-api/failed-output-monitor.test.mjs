@@ -138,7 +138,7 @@ test("Facebook QA reapproval uses original protected scheduling route and cooldo
   assert.match(worker, /facebookRateLimitResetReason\(authoritative\)/);
   assert.match(worker, /qualityFacebookRecoverySlot\(/);
   assert.match(worker, /48 \* 60 \* 60 \* 1000/);
-  assert.match(worker, /gapMs: 12 \* 60 \* 60 \* 1000/);
+  assert.match(worker, /gapMs: heldOnly \? 90 \* 60 \* 1000 : 12 \* 60 \* 60 \* 1000/);
   assert.match(worker, /Output_Status: "Approved for Publishing"/);
   assert.match(worker, /Publish_Status: "Ready to Schedule"/);
   assert.match(worker, /runAtomicScheduleTransaction/);
