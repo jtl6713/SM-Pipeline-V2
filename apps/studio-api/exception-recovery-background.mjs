@@ -1,6 +1,17 @@
 import { autonomousRecoveryPolicy, reconcilePublication, recoverySnapshot } from "./exception-recovery-autonomous.mjs";
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 const PREFIX="studio/state/publication-reconciliation/v1/";
+// One-time ordered, exact-record handoff checks approved for investigation.
+// This does not authorize a provider post or bypass recoveryPolicy, output
+// lease, ownership/receipt, schedule, holds, audit or readback fences.
+// A persistent cursor makes the list exhaust after two ordinary bounded
+// sweeps, then the existing discovery/processing queue resumes.
+export const PRIORITY_VERIFIED_EXISTING_POSTS = Object.freeze([
+  "rec9uw6xfRJGXpqz1", // YouTube #3374 Miami
+  "recJOW1OsfNeNhRW4", // YouTube #3241 Chicago
+  "rec4R88s8mlZLE6UO", // YouTube #9308 Chicago
+  "recfTqaYB0h5FCUVi", // Instagram #7864 New York
+]);
 export const recoveryStateKey=id=>PREFIX+"outputs/"+id+".json";
 export async function readRecoveryState(bucket,key) {
   const object=await bucket.get(key);
@@ -56,8 +67,29 @@ export async function runPublicationRecovery(env,deps) {
       if(!await readRecoveryState(bucket,key))
         await writeRecoveryState(bucket,key,{record_id:row.id,attempts:0,next_at:0,terminal:false});
     }
+    // Never enlarge the production batch budget. During bounded status-only
+    // recovery, place exactly these provider-verified existing posts at the
+    // front once. The existing reconcilePublication() still authenticates
+    // provider ownership again and fails closed on every conflicting field.
+    // An R2 cursor retires this temporary focus after each reviewed slice.
+    const priorityStart=policy.mutate&&policy.broad
+      ?Math.min(PRIORITY_VERIFIED_EXISTING_POSTS.length,Math.max(0,
+         Math.floor(Number(control.priority_cursor)||0)))
+      :PRIORITY_VERIFIED_EXISTING_POSTS.length;
+    const priorityIds=priorityStart<PRIORITY_VERIFIED_EXISTING_POSTS.length
+      ?PRIORITY_VERIFIED_EXISTING_POSTS.slice(priorityStart,priorityStart+policy.batch)
+      :[];
+    for(const id of priorityIds) {
+      if(!await readRecoveryState(bucket,recoveryStateKey(id)))
+        await writeRecoveryState(bucket,recoveryStateKey(id),{
+          record_id:id,attempts:0,next_at:0,terminal:false,
+        });
+    }
     const listed=canaryOnly
       ?{objects:[{key:recoveryStateKey(policy.canaryRecord)}],truncated:false,cursor:null}
+      :priorityIds.length
+      ?{objects:priorityIds.map(id=>({key:recoveryStateKey(id)})),
+          truncated:false,cursor:null}
       :await bucket.list({prefix:PREFIX+"outputs/",limit:policy.batch,
           ...(control.processing_cursor?{cursor:control.processing_cursor}:{})});
     for(const object of listed.objects||[]) {
@@ -92,7 +124,13 @@ export async function runPublicationRecovery(env,deps) {
     result.completed_at=new Date(now()).toISOString();
     await writeRecoveryState(bucket,controlKey,{
       next_at:now()+policy.intervalMs,discovery_cursor:page.offset||null,
-      processing_cursor:listed.truncated?listed.cursor:null,heartbeat:result,policy,
+      priority_cursor:priorityIds.length
+        ?priorityStart+priorityIds.length
+        :Number(control.priority_cursor)||0,
+      processing_cursor:priorityIds.length
+        ?control.processing_cursor||null
+        :listed.truncated?listed.cursor:null,
+      heartbeat:result,policy,
     });
     return result;
   },{owner:"publication-reconciliation-sweep:"+crypto.randomUUID()});
