@@ -15477,6 +15477,9 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
       }, error?.status || 503);
     }
   }
+  // Never apply a held recovery through the legacy non-atomic scheduler.
+  if (holdReschedule && !scheduleReservationLaneEnabled(env, reservationProfile?.id, platform))
+    throw new HttpError(503,"Held spam reschedule needs the atomic reservation lane");
   if (scheduleReservationLaneEnabled(env, reservationProfile?.id, platform)) {
     const profile = reservationProfile;
     const timeZone = await studioScheduleTimeZoneForRecord(env, existing, payload);
