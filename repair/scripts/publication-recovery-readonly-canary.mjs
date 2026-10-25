@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 const account=process.env.CLOUDFLARE_ACCOUNT_ID;
 const api='https://api.cloudflare.com/client/v4/accounts/'+account;
 const target='chicagoshining-studio-api';
+// Exact known already-published IG canary; no bulk scanning or Graph mutations.
+const instagramCanaryRecord='recfTqaYB0h5FCUVi';
 const rollout=JSON.parse(await fs.readFile(new URL('../../deploy/publication-reconciliation-production-rollout.json',import.meta.url),'utf8'));
 if(!/^rec[A-Za-z0-9]{14}$/.test(String(rollout.canary_record_id)) ||
    !/^[A-Za-z0-9_-]{11}$/.test(String(rollout.canary_video_id)) ||
@@ -44,13 +46,14 @@ try {
  }
  report.rollout_stage=rollout.stage;
  // Reuses the production deployment's service-binding verification pattern.
- // The bridge exposes only four fixed GETs behind a random, short-lived path.
+ // The bridge exposes only exact read-only routes behind a random, short-lived path.
  const source=`export default {async fetch(request,env){
    const url=new URL(request.url);
    if(request.method!=='GET')return new Response('Method not allowed',{status:405});
    const routes={
     '/${token}/health':'/api/health',
     '/${token}/receipt':'/api/admin/exception-recovery/${rollout.canary_record_id}/receipt?authenticated=1',
+    '/${token}/instagram':'/api/admin/exception-recovery/${instagramCanaryRecord}/receipt?authenticated=1',
     '/${token}/history':'/api/admin/exception-recovery/history',
     '/${token}/denied':'/api/admin/exception-recovery/history'
    };
@@ -92,6 +95,31 @@ try {
  report.blocked_reason=data.verification.blocked_reason;
  report.canary_status=report.eligible?'verified_eligible':'provider_verified_not_currently_eligible';
  if(!report.eligible && rollout.stage==='read_only')process.exitCode=1;
+ // The same deployed authenticated GET-only adapter also checks the original
+ // Instagram media under its profile-linked Meta Business account. Never
+ // POST, finalize or write Airtable as part of this diagnostic.
+ const ig=await probe('instagram');
+ const post=ig.body||{};
+ report.instagram_canary={
+  record_id:instagramCanaryRecord,http_status:ig.status,output_id:post.output_id||null,
+  platform:post.platform||null,remote_id:post.remote_id||null,
+  verified_public:post.verified_public===true,
+  ownership_verified:post.ownership_verified===true,
+  read_only:post.read_only===true,
+  no_output_write:post.verification?.no_output_write===true,
+  eligible:post.verification?.eligible===true,
+  blocked_reason:post.verification?.blocked_reason||null,
+  evidence:post.evidence||post.error||null,
+ };
+ if(ig.status!==200 || Number(post.output_id)!==7864 || post.platform!=='Instagram' ||
+    post.read_only!==true || post.verification?.no_output_write!==true)
+   throw new Error('instagram_canary_response_integrity_failed');
+ if(post.remote_id!=='18041644475837071' || post.verified_public!==true ||
+    post.ownership_verified!==true) {
+   report.instagram_canary_status='provider_publication_unverified';
+   throw new Error('instagram_canary_authenticated_publication_unverified');
+ }
+ report.instagram_canary_status='verified_account_owned_publication';
 } catch(error) {
  report.canary_status='unavailable';report.error=String(error.message).slice(0,160);process.exitCode=1;
 } finally {
