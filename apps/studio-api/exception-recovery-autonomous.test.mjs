@@ -318,3 +318,33 @@ test("cooldown does not authorize repair without fresh authenticated provider id
   assert.equal(f.writes,0);
 });
 
+
+test("live canary: successful PATCH plus lost first readback automatically finalizes despite unrelated poller progress",async()=>{
+  const f=fixture(),originalRead=f.deps.readOutput;let reads=0;
+  f.deps.readOutput=async()=>{if(++reads===4)throw new Error("Airtable readback timeout");return originalRead();};
+  const first=await reconcilePublication(f.deps);
+  assert.equal(first.reason,"status_write_or_audit_uncertain");
+  assert.equal(f.writes,1);assert.ok(f.state.pending);
+  f.row.fields.YouTube_Stage="Complete";
+  f.row.fields.YouTube_Processing_Status="Succeeded";
+  f.deps.readOutput=originalRead;
+  const next=await reconcilePublication(f.deps);
+  assert.equal(next.outcome,"Corrected");
+  assert.equal(next.reason,"authoritative_readback_after_uncertain_write");
+  assert.equal(next.completion_kind,"public_publication_verified");
+  assert.equal(f.writes,1);
+  assert.equal(f.state.pending,null);assert.equal(f.state.terminal,true);
+  assert.equal(f.audits.filter(x=>x.outcome==="Corrected").length,1);
+});
+test("uncertain write with changed immutable YouTube video identity cannot be silently finalized or patched again",async()=>{
+  const f=fixture(),originalRead=f.deps.readOutput;let reads=0;
+  f.deps.readOutput=async()=>{if(++reads===4)throw new Error("lost readback");return originalRead();};
+  assert.equal((await reconcilePublication(f.deps)).outcome,"Awaiting Verification");
+  assert.equal(f.writes,1);
+  f.row.fields.YouTube_Video_ID="abcdefghijk";
+  f.deps.readOutput=originalRead;
+  const later=await reconcilePublication(f.deps);
+  assert.equal(later.outcome,"Needs Decision");
+  assert.equal(later.reason,"uncertain_write_requires_review");
+  assert.equal(f.writes,1);
+});
