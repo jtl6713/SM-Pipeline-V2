@@ -2,6 +2,8 @@ import { autonomousRecoveryPolicy, reconcilePublication, recoverySnapshot } from
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 const PREFIX="studio/state/publication-reconciliation/v1/";
 // One-time ordered, exact-record handoff checks approved for investigation.
+// Later entries are unverified candidates with existing remote IDs; inclusion
+// does not assert that they are posted, owner-matched, public or safe to patch.
 // This does not authorize a provider post or bypass recoveryPolicy, output
 // lease, ownership/receipt, schedule, holds, audit or readback fences.
 // A persistent cursor makes the list exhaust after two ordinary bounded
@@ -11,6 +13,14 @@ export const PRIORITY_VERIFIED_EXISTING_POSTS = Object.freeze([
   "recJOW1OsfNeNhRW4", // YouTube #3241 Chicago
   "rec4R88s8mlZLE6UO", // YouTube #9308 Chicago
   "recfTqaYB0h5FCUVi", // Instagram #7864 New York
+  // New due-with-remote-ID candidates, still unverified. Fresh authenticated
+  // provider GET, exact profile/channel ownership, immutable ID and readback
+  // remain mandatory; these IDs alone never authorize a mutation or repost.
+  "rec0MKVEfx5zyLh3L", // Instagram #8121
+  "reczQCBHrHpIyBUBu", // YouTube #8698
+  "recha3rExqOvKwFy1", // YouTube #1885
+  "recqLmTDQRqyB9ytE", // YouTube #3344
+  "recxkZ1hBhREpsJgj", // YouTube #8098
 ]);
 export const recoveryStateKey=id=>PREFIX+"outputs/"+id+".json";
 export async function readRecoveryState(bucket,key) {
