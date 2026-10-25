@@ -100,6 +100,7 @@ jobs:
           set -euo pipefail
           node --check apps/studio-api/engagement-service.mjs
           node --test apps/studio-api/engagement-auth-recovery.test.mjs
+          node --test apps/studio-api/idea-list-authoritative-fresh.test.mjs
           node --test apps/studio-api/production-photo-wait-visibility.test.mjs
           node --test apps/studio-api/production-request-suggested-platforms-fallback.test.mjs
           node --test apps/studio-api/failed-output-monitor.test.mjs

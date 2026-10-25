@@ -1113,7 +1113,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.681-producer-conversation" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1",
+          version: "0.10.682-idea-lifecycle-live" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1",
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
           quality_durable_recovery_ledger_v1: true,
