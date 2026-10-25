@@ -10,7 +10,7 @@
   const METRICS = [
     ["needs_decision","Needs my decision"], ["automatically_recovering","Automatically recovering"],
     ["awaiting_verification","Awaiting verification"], ["approved_past_due","Approved past due"],
-    ["failed","Failed"], ["suspected_duplicates","Suspected duplicates"],
+    ["failed","Failed · Home"], ["qa_diagnostics_only","Other QA diagnostics"], ["suspected_duplicates","Suspected duplicates"],
     ["held_deferred","Held / deferred"], ["remote_identity_unverified","Remote IDs · no receipt"],
     ["resolved_last_7_days","Resolved · 7 days"],
   ];
@@ -149,7 +149,7 @@
     card.append(elem("strong", observed == null ? "—" : observed),
       elem("span",label),elem("small", info?.status === "canonical_census" ? "Complete Airtable census" : info?.status === "provisional" ? "Observed · not Home parity" : info?.status === "unavailable" ? "Unavailable" : info?.status === "not_implemented" ? "Not yet connected" : String(info?.status || "Unknown")));
     card.title = info?.note || "Count is not yet available";
-    const byKey = {approved_past_due:"approved_past_due",failed:"failed",held_deferred:"held_deferred",remote_identity_unverified:"remote_identity_unverified"};
+    const byKey = {approved_past_due:"approved_past_due",failed:"failed",qa_diagnostics_only:"qa_only_unreconciled",held_deferred:"held_deferred",remote_identity_unverified:"remote_identity_unverified"};
     if (byKey[key]) card.addEventListener("click",() => {
       category.value = category.value === byKey[key] ? "" : byKey[key];
       render();
@@ -164,6 +164,7 @@
     button.append(elem("strong",(item.output_id ? "#" + item.output_id + " · " : "") + (item.title || "Untitled output")),
       elem("small", [item.profile_name || item.profile_id || "Unknown city",item.platform,item.output_type].filter(Boolean).join(" · ")),
       elem("small",(item.held ? "Held · " : "")+(item.signature || "Quality Agent") + (formatOverdueAge(item.minutes_past_due) ? " · "+formatOverdueAge(item.minutes_past_due) : "")));
+    if(item.categories?.includes("qa_only_unreconciled"))button.append(elem("small","QA diagnostic only · not counted as Home Failed"));
     button.addEventListener("click",()=>{state.selected=item.record_id;render();});
     const wrap=elem("div",null,"erc-item-wrap");
     const tick=elem("input");tick.type="checkbox";
@@ -575,8 +576,13 @@
       };
     });
     const seen=new Set(authoritative.map(item=>item.record_id));
+    // Never carry a provisional QA "failed" or "approved_past_due" category
+    // into the canonical filters when that output is absent from the complete
+    // Home-canonical exception set. Preserve signals as separate diagnostics.
+    // This prevents the "Failed" card (e.g. 13) opening 25 QA signals.
     const qaOnly=(current.items||[]).filter(item=>!seen.has(item.record_id)).map(item=>({
-      ...item,categories:[...new Set([...(item.categories||[]),"qa_only_unreconciled"])],
+      ...item,qa_original_categories:[...(item.categories||[])],
+      categories:["qa_only_unreconciled"],
       actions_enabled:false,
     }));
     const metric=(count,note)=>({observed:count,count,status:"canonical_census",source:"complete_airtable_scan",note});
@@ -587,6 +593,7 @@
       metrics:{...current.metrics,
         approved_past_due:metric(total.approved_past_due,"Home canonical predicate, complete Airtable census"),
         failed:metric(total.failed,"Home failure predicate, complete Airtable census"),
+        qa_diagnostics_only:metric(qaOnly.length,"Quality Agent flags outside canonical Home exception categories; not extra Failed outputs"),
         held_deferred:metric(total.held_deferred,"Complete Airtable do-not-publish census"),
         remote_identity_unverified:metric(census.unverified_remote_ids,
           "Saved remote identity without authoritative public publication receipt")},

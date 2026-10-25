@@ -209,3 +209,16 @@ test("ordinary inventory load uses R2 without launching a full Airtable census",
  assert.match(section,/persistExceptionRecoveryCensusCache\(env\.STUDIO_MEDIA,data\)/);
  assert.match(section,/filterFormula:"\{Test_Run_ID\}=BLANK\(\)",pageSize:100,requireUnique:true/);
 });
+
+test("canonical Failed count drilldown excludes unmatched QA-only diagnostic cases",()=>{
+ const start=ui.indexOf("  function applyCanonicalCensus(census)");
+ const end=ui.indexOf("  function render()",start);
+ const section=ui.slice(start,end);
+ assert.ok(start>0&&end>start);
+ assert.match(section,/categories:\["qa_only_unreconciled"\]/);
+ assert.match(section,/qa_original_categories:/);
+ assert.match(section,/qa_diagnostics_only:metric\(qaOnly\.length/);
+ assert.match(section,/failed:metric\(total\.failed/);
+ assert.match(ui,/qa_diagnostics_only:"qa_only_unreconciled"/);
+ assert.match(html,/value="qa_only_unreconciled"/);
+});
