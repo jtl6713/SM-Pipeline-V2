@@ -11,6 +11,7 @@ import { FACEBOOK_REEL_POLL_FORMULA, facebookReelPollVideoId, facebookReelPollEl
 import { scanApprovedPastDueOutputs, classifyApprovedPastDue, STALE_PUBLISHED_RECEIPT_FORMULA, publishedReceiptRepairReason } from "./approved-past-due-quality.mjs";
 import { QUALITY_RECOVERY_LEDGER_TABLE, persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { scanOutstandingFailedOutputs, describeFailedOutput, facebookRateLimitResetReason, facebookSpamHeldRescheduleReason } from "./failed-output-monitor.mjs";
+import { META_SPAM_HELD_CANDIDATES, runMetaSpamHeldSchedule } from "./meta-spam-autonomous-schedule.mjs";
 import { buildExceptionRecoveryCenter } from "./exception-recovery-center.mjs";
 import { EXCEPTION_MESSAGES_TABLE, RECOVERY_RECORD_ID, prepareRecoveryConversationMessage, normalizeRecoveryConversation } from "./exception-recovery-conversation.mjs";
 import { assessRecoveryPreflight } from "./exception-recovery-preflight.mjs";
@@ -15771,6 +15772,37 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
   });
 }
 /*__STUDIO_WORKER_END:scheduleStudioPublishOutput__*/
+/**
+ * Autonomous Quality Agent correction stage. Runs on the existing heavy sweep.
+ * Schedules ONLY signed Meta 368 held Reels via the production's own guarded
+ * MAE schedule transaction. It never dispatches a publisher or releases holds.
+ */
+export async function studioQualityScheduleHeldMetaSpam(env, options={}) {
+  const report=await runMetaSpamHeldSchedule({
+    listCandidates: async limit=>listRecords(env,env.AIRTABLE_OUTPUT_TABLE_ID,{
+      limit,filterFormula:META_SPAM_HELD_CANDIDATES,sortField:"Output_ID",sortDirection:"asc",
+    }),
+    readOutput: id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+    eligibility:facebookSpamHeldRescheduleReason,
+    reserve:async id=>{
+      const url=new URL("https://studio.chicagoshining.com/api/operations/outputs/"+id+"/schedule");
+      const request=new Request(url.href,{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({quality_rate_limit_hold_reschedule:true})});
+      const response=await scheduleStudioPublishOutput(request,env,url,null);
+      const body=await response.json();
+      if(!response.ok||body?.ok!==true)
+        throw new Error("MAE scheduling rejected: "+String(body?.error||response.status));
+      return body;
+    },
+    limit:options.limit??2,
+  });
+  if(report.scheduled||report.items.some(x=>x.result==="uncertain_readback"||x.result==="not_verified"))
+    console.info("Quality Agent Meta spam held rescheduling",report);
+  return report;
+}
+/*__STUDIO_WORKER_END:studioQualityScheduleHeldMetaSpam__*/
+
 
 export function isTikTokPostUrl(url) {
   // Keep aligned with apps/studio-api/tiktok-complete.mjs (Worker deploy is this file only).

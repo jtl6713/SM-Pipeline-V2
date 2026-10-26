@@ -726,6 +726,7 @@ import {
   runStudioDailyIdeas,
   kickStudioOutputPublish,
   scheduleStudioPublishOutput,
+  studioQualityScheduleHeldMetaSpam,
   markStudioYoutubeComplete,
   markStudioTiktokComplete,
   resendStudioTiktokDraft,
@@ -2943,6 +2944,14 @@ export default {
         await studioHealFailedStatuses(env, { limit: 6 });
       } catch (error) {
         console.warn("studio failed-status heal failed", error);
+      }
+      // Autonomous QA-368 is scheduling-only. It reserves a later MAE slot
+      // for newly signed, held Facebook Reels; it cannot lift Do_Not_Publish,
+      // clear the failure or create another Meta upload.
+      try {
+        await studioQualityScheduleHeldMetaSpam(env, { limit: 2 });
+      } catch (error) {
+        console.warn("Quality Agent Meta held scheduling unavailable",error);
       }
       try {
         await studioHealIgCarouselTooManyChildren(env, { limit: 4 });
@@ -6257,6 +6266,7 @@ const AUTONOMOUS_OPEN_IDEAS_FORMULA =
 /*__STUDIO_WORKER_EXTRACT:runStudioDailyIdeas__*/
 /*__STUDIO_WORKER_EXTRACT:kickStudioOutputPublish__*/
 /*__STUDIO_WORKER_EXTRACT:scheduleStudioPublishOutput__*/
+/*__STUDIO_WORKER_EXTRACT:studioQualityScheduleHeldMetaSpam__*/
 /*__STUDIO_WORKER_EXTRACT:isTikTokPostUrl__*/
 /*__STUDIO_WORKER_EXTRACT:tiktokCompleteEligibility__*/
 /*__STUDIO_WORKER_EXTRACT:tiktokMusicStatusFromChoice__*/

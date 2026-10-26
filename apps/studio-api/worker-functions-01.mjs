@@ -12257,6 +12257,24 @@ export async function studioHealFailedStatuses(env, options = {}) {
       continue;
     }
     if (isFacebookPublishRateLimitError(err)) {
+      // QA-368: a Reel rejected by Meta might still have a remotely accepted
+      // upload. Park it immediately. The separate Quality Agent scheduling
+      // step can reserve a future MAE slot, but neither step may repost.
+      const facebookReel=String(f(row,"Platform")||"")==="Facebook"
+        && String(f(row,"Platform_Output_Type")||"")==="Facebook Reel";
+      const signedHold=facebookReel
+        && String(f(row,"Output_Status")||"")==="Approved for Publishing"
+        && String(f(row,"Review_Status")||"")==="Approved"
+        && status==="Failed"
+        && !f(row,"Published_At") && !f(row,"Platform_Post_ID")
+        && !f(row,"Platform_Post_URL") && !f(row,"Platform_Media_ID")
+        && !f(row,"Test_Run_ID")
+        && !f(row,"Publish_Locked_By") && !f(row,"Publish_Locked_At")
+        && Math.max(Number(f(row,"Publish_Attempt_Count")||0),
+          Number(f(row,"Studio_Publish_Dispatch_Count")||0))<3;
+      const holdNote=String(f(row,"Studio_Output_Notes")||"");
+      const provenance="QA-1050 HARD NO-GRAPH-CREATE HOLD | automatic Meta 368 response; "+
+        "schedule after cooldown only; verify remote duplicate exclusion before separately authorized rearm.";
       const nextRaw = f(row, "Publish_Next_Retry_At");
       const nextMs = Date.parse(String(nextRaw || ""));
       const parkUntil = Number.isFinite(nextMs) && nextMs > Date.now()
@@ -12270,9 +12288,15 @@ export async function studioHealFailedStatuses(env, options = {}) {
               Publish_Status: "Failed",
               Publish_Error_Stage: "FBS3_RATE_LIMIT",
               Publish_Error_Message: "Facebook rate limit (368/1390008): We limit how often you can post. Retry after cooldown.",
-              // Keep Auto_Publish on for catalog visibility, but honor Next_Retry_At in FBS3 reconcile.
-              Auto_Publish_Enabled: true,
-              Publish_Retry_Eligible: true,
+              // New Reel failures are signed and fenced against Graph create.
+              // Other existing platform recovery paths retain their gates.
+              Auto_Publish_Enabled: signedHold ? false : true,
+              Publish_Retry_Eligible: signedHold ? false : true,
+              ...(signedHold?{
+                Do_Not_Publish:true,
+                Studio_Output_Notes:(holdNote+"\n"+(holdNote.includes("QA-1050 HARD NO-GRAPH-CREATE HOLD")
+                  ?"":"\n"+provenance)).trim(),
+              }:{}),
               Publish_Next_Retry_At: parkUntil,
               Publish_Locked_By: "",
               Publish_Locked_At: null,
