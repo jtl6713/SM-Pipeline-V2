@@ -350,3 +350,21 @@ test("Meta spam held-only MAE picks available overflow instead of claiming 12-ho
   assert.match(worker,/Do_Not_Publish: true, Publish_Retry_Eligible: false/);
   assert.match(worker,/if \(!holdReschedule && due && approved/);
 });
+
+test("Meta 368 scheduling uses existing legacy MAE only when the global atomic authority is off",()=>{
+  const from=worker.indexOf("export async function scheduleStudioPublishOutput(");
+  const to=worker.indexOf("/*__STUDIO_WORKER_END:scheduleStudioPublishOutput__*/",from);
+  const section=worker.slice(from,to);
+  assert.ok(from>0&&to>from);
+  assert.match(section,/holdReschedule && scheduleReservationAuthorityEnabled\(env\)/);
+  assert.match(section,/!scheduleReservationLaneEnabled\(env, reservationProfile\?\.id, platform\)/);
+  assert.match(section,/requireComplete: true/);
+  assert.match(section,/qualityFacebookRecoverySlot\(existing,/);
+  assert.match(section,/if \(holdReschedule\) \{[\s\S]*?const verified = await airtableFetch/);
+  assert.match(section,/actual !== chosen/);
+  assert.match(section,/f\(verified,"Do_Not_Publish"\) !== true/);
+  assert.match(section,/f\(verified,"Publish_Status"\)\|\|""\) !== "Failed"/);
+  assert.match(section,/f\(verified,"Publish_Error_Stage"\)\|\|""\) !== "FBS3_RATE_LIMIT"/);
+  assert.match(section,/if \(!holdReschedule && due && approved/);
+  assert.match(section,/else if \(due && !holdReschedule\)/);
+});
