@@ -151,7 +151,7 @@ test("Facebook QA reapproval uses original protected scheduling route and cooldo
 
 test("Facebook QA preflight cannot mutate or publish and returns diagnostic stage", () => {
   const start = worker.indexOf("if (payload?.quality_rate_limit_preview === true)");
-  const end = worker.indexOf("if (scheduleReservationLaneEnabled(env, reservationProfile?.id, platform))", start);
+  const end = worker.indexOf("if (scheduleReservationLaneEnabled(reservationEnv, reservationProfile?.id, platform))", start);
   assert.ok(start > 0 && end > start);
   const preview = worker.slice(start, end);
   assert.match(preview, /qualityFacebookRecoverySlot/);
@@ -344,7 +344,7 @@ test("Meta spam held-only MAE picks available overflow instead of claiming 12-ho
   assert.equal(maeIsBlackoutLocalTime(Date.parse(held.iso),"America/Los_Angeles"),false);
   assert.equal(maeScheduleConflicts(Date.parse(held.iso),dense,90*60000),false);
   const codePreview=worker.slice(worker.indexOf("if (payload?.quality_rate_limit_preview === true)"),
-    worker.indexOf("if (scheduleReservationLaneEnabled(env, reservationProfile?.id, platform))"));
+    worker.indexOf("if (scheduleReservationLaneEnabled(reservationEnv, reservationProfile?.id, platform))"));
   assert.match(codePreview,/heldOnly:holdReschedule/);
   assert.match(worker,/held_spam_rescheduled_pending_verification: holdReschedule/);
   assert.match(worker,/Do_Not_Publish: true, Publish_Retry_Eligible: false/);
