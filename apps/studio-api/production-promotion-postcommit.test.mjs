@@ -115,7 +115,7 @@ test("a failed Airtable Promoted write remains an error; no success is fabricate
 });
 
 test("HTTP handler protects persisted success from best-effort continuation registration failure", () => {
-  assert.match(entrySource, /const response = await promoteProductionRequestViaI3I4/);
+  assert.match(entrySource, /response = await promoteProductionRequestViaI3I4/);
   assert.match(entrySource, /studio_production_promotion_http_error/);
   assert.match(entrySource, /Studio production continuation registration failed after promotion/);
   assert.match(entrySource, /0\.10\.683-promotion-postcommit-trace/);
