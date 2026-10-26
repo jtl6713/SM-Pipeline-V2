@@ -44,6 +44,6 @@ test("Home, Pipeline, and Ideas list reads never block on a live Airtable scan",
 
   assert.match(app, /BUILD_ID = "item4-0[.]6[.][0-9]+[-a-zA-Z0-9.]*"/);
   assert.match(app, /api\("\/api\/outputs\?limit=250", \{ timeoutMs: 8000, retries: 1 \}/);
-  assert.match(app, /api\("\/api\/ideas\?limit=100", \{ timeoutMs: 8000, retries: 1 \}/);
+  assert.ok(app.includes('api("/api/ideas?limit=100&fresh=1", { timeoutMs: 20000, retries: 1 })'), "fresh Ideas list stays bounded and authenticated");
   assert.match(app, /outputsSettled\.value\?\.refreshing && !outputs\.length/);
 });
