@@ -385,3 +385,30 @@ test("Meta 368 held-only commit acknowledges verified Airtable without invoking 
  assert.match(scoped,/dispatch: null/);
  assert.doesNotMatch(scoped,/studioDispatchApprovedPublishNow|mapOperationsOutput/);
 });
+
+test("held Meta 368 Reels with reserved slots remain blocked but show verification work",()=>{
+ const fields={
+   Output_ID:2762,Platform:"Facebook",Platform_Output_Type:"Facebook Reel",
+   Output_Status:"Approved for Publishing",Review_Status:"Approved",Publish_Status:"Failed",
+   Publish_Error_Stage:"FBS3_RATE_LIMIT",
+   Publish_Error_Message:"Facebook rate limit (368/1390008)",
+   Do_Not_Publish:true,Publish_Attempt_Count:1,Studio_Publish_Dispatch_Count:1,
+   Scheduled_Post_Date:"2026-10-28T14:00:00Z",
+   Studio_Output_Notes:"QA-1050 HARD NO-GRAPH-CREATE HOLD; SPAM_COOLDOWN_RESCHEDULE_PENDING_VERIFICATION"
+ };
+ const item=describeFailedOutput(record("recQjUNjlxZnuODrE",fields),Date.parse("2026-10-26T18:00:00Z"));
+ assert.equal(item.signature,"QA-FB-368-RESCHEDULED-HELD");
+ assert.equal(item.recovery,"verification_pending");
+ assert.equal(item.can_return_to_approved,false);
+ assert.equal(item.return_to_approved_blocked,"publication_held");
+ assert.match(item.reason,/reserved future slot/);
+ assert.match(item.action,/Preserve the hold/);
+ for(const change of [
+   {Studio_Output_Notes:"ordinary editorial hold"},
+   {Platform_Post_ID:"already-published-id"},
+   {Platform_Output_Type:"Facebook Story",Output_Status:"Cancelled"},
+ ]){
+   const altered=describeFailedOutput(record("recQjUNjlxZnuODrE",{...fields,...change}));
+   assert.notEqual(altered.signature,"QA-FB-368-RESCHEDULED-HELD");
+ }
+});
