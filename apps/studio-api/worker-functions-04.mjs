@@ -15715,6 +15715,27 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
           || String(f(verified,"Publish_Error_Stage")||"") !== "FBS3_RATE_LIMIT")
         throw new HttpError(409,"Held Facebook slot/hold authoritative readback mismatch");
       updated = verified;
+      // Airtable is the authoritative write source. In this exceptional
+      // held-only operation, acknowledge the exact verified date/hold before
+      // touching provider dispatch or the large general output serializer.
+      // A failing non-authoritative Supabase mirror is logged, not a false
+      // ambiguous scheduling response after Airtable has already committed.
+      studioInvalidateOccupiedScheduleCache();
+      await studioSupabaseWriteThroughOutput(env, updated, "schedule").catch(error => {
+        console.warn("held spam MAE schedule Supabase mirror failed", match[1], error);
+        return null;
+      });
+      return respond(request, env, {
+        ok: true,
+        held_spam_rescheduled_pending_verification: true,
+        record: {
+          output_id: f(updated, "Output_ID"),
+          scheduled_post_date: f(updated, "Scheduled_Post_Date"),
+          do_not_publish: f(updated, "Do_Not_Publish") === true,
+          publish_status: String(f(updated, "Publish_Status") || ""),
+        },
+        dispatch: null,
+      });
     }
     studioInvalidateOccupiedScheduleCache();
     await studioSupabaseWriteThroughOutput(env, updated, "schedule");

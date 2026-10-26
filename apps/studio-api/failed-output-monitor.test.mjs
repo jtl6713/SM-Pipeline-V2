@@ -368,3 +368,20 @@ test("Meta 368 scheduling uses existing legacy MAE only when the global atomic a
   assert.match(section,/if \(!holdReschedule && due && approved/);
   assert.match(section,/else if \(due && !holdReschedule\)/);
 });
+
+test("Meta 368 held-only commit acknowledges verified Airtable without invoking general publish or output serialization",()=>{
+ const start=worker.indexOf("export async function scheduleStudioPublishOutput(");
+ const end=worker.indexOf("/*__STUDIO_WORKER_END:scheduleStudioPublishOutput__*/",start);
+ const section=worker.slice(start,end);
+ const ack=section.indexOf("held spam MAE schedule Supabase mirror failed");
+ const dispatch=section.indexOf("const due = studioPublishIsDue(updated)");
+ assert.ok(ack>0 && dispatch>ack);
+ const scoped=section.slice(ack,dispatch);
+ assert.match(scoped,/return respond\(request, env, \{/);
+ assert.match(scoped,/held_spam_rescheduled_pending_verification: true/);
+ assert.match(scoped,/scheduled_post_date: f\(updated, "Scheduled_Post_Date"\)/);
+ assert.match(scoped,/do_not_publish: f\(updated, "Do_Not_Publish"\) === true/);
+ assert.match(scoped,/publish_status: String\(f\(updated, "Publish_Status"\) \|\| ""\)/);
+ assert.match(scoped,/dispatch: null/);
+ assert.doesNotMatch(scoped,/studioDispatchApprovedPublishNow|mapOperationsOutput/);
+});
