@@ -1,1 +1,2 @@
 Explicit user authorization, 2026-10-25: one-time four-output held-only safe MAE reschedule after Meta anti-spam 368. Production Worker atomic schedule path, no hold release, no remote publish. Output IDs 2457, 2463, 2762, 4018. Report each authoritative readback. Do not touch retired Facebook Stories.
+2026-10-25 operator-authorized verified unchanged Airtable readback after first failed response. Rerun once with structured diagnostics. Stop on any uncertain write; never release holds.

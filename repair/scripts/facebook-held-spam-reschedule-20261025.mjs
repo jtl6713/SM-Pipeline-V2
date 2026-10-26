@@ -63,8 +63,10 @@ try {
     "const path='/api/operations/outputs/'+ids[Number(seg[3])]+'/schedule';",
     "const payload=seg[2]==='preview'?{quality_rate_limit_hold_reschedule:true,quality_rate_limit_preview:true}:{quality_rate_limit_hold_reschedule:true};",
     "const headers={Accept:'application/json','Content-Type':'application/json',Origin:'https://studio.chicagoshining.com','Cf-Access-Authenticated-User-Email':"+JSON.stringify(operator)+"};",
+    "try {",
     "const upstream=await env.STUDIO_API.fetch(new Request('https://studio.chicagoshining.com'+path,{method:'POST',headers,body:JSON.stringify(payload)}));",
     "return new Response(await upstream.text(),{status:upstream.status,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});",
+    "} catch(error) {return new Response(JSON.stringify({error:'service_binding_upstream_error',reason:String(error?.message||error).slice(0,240)}),{status:502,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});}",
     "}};"
   ].join("\n");
   const form=new FormData();
@@ -89,7 +91,7 @@ try {
         if(stage==="commit")throw Error("uncertain_commit_response_do_not_reissue");
         await new Promise(resolve=>setTimeout(resolve,2500));continue;
       }
-      let data;try{data=JSON.parse(raw)}catch{throw Error(stage==="commit"?"uncertain_nonjson_commit":"preview_nonjson_"+response.status)}
+      let data;try{data=JSON.parse(raw)}catch{throw Error(stage==="commit"?"uncertain_nonjson_commit_http_"+response.status+"_body_"+raw.slice(0,100).replace(/[^a-zA-Z0-9 ._-]/g," "):"preview_nonjson_"+response.status)}
       return {status:response.status,data};
     }
     throw Error("service_binding_route_unavailable");
@@ -108,7 +110,10 @@ try {
       row.do_not_publish=true;
     }catch(error){
       row.status="uncertain_stop";row.reason=String(error.message||error).slice(0,180);
-      row.http_status=committed.status;report.stopped_on_uncertainty=true;break;
+      row.http_status=committed.status;
+      row.service_error=String(committed.data?.error||"").slice(0,120);
+      row.service_reason=String(committed.data?.reason||committed.data?.message||"").slice(0,240);
+      report.stopped_on_uncertainty=true;break;
     }
   }
   if(report.results.some(x=>x.status!=="rescheduled_held_pending_remote_verification"))process.exitCode=1;
