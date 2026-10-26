@@ -15485,8 +15485,14 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
     }
   }
   // Never apply a held recovery through the legacy non-atomic scheduler.
-  if (holdReschedule && !scheduleReservationLaneEnabled(env, reservationProfile?.id, platform))
-    throw new HttpError(503,"Held spam reschedule needs the atomic reservation lane");
+  // An active authority rollout limited to other lanes must never be
+  // bypassed. However, the entire production scheduler currently has its
+  // atomic authority disabled, so an isolated hold-preserving date move uses
+  // the same occupied-calendar-checked legacy scheduler as ordinary outputs.
+  // The hold, Failed status and forbidden Graph create remain authoritative.
+  if (holdReschedule && scheduleReservationAuthorityEnabled(env)
+      && !scheduleReservationLaneEnabled(env, reservationProfile?.id, platform))
+    throw new HttpError(503,"Held spam reschedule needs an enabled atomic reservation lane");
   if (scheduleReservationLaneEnabled(env, reservationProfile?.id, platform)) {
     const profile = reservationProfile;
     const timeZone = await studioScheduleTimeZoneForRecord(env, existing, payload);
@@ -15696,6 +15702,20 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
         typecast: true,
       }),
     });
+    if (holdReschedule) {
+      // The existing legacy route lacks atomic Durable Object reservations.
+      // Fail closed on stale or inconsistent authoritative write readback;
+      // do not release a hold or transform a failed posting into a success.
+      const verified = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]);
+      const chosen = Date.parse(String(f(fields,"Scheduled_Post_Date")||""));
+      const actual = Date.parse(String(f(verified,"Scheduled_Post_Date")||""));
+      if (!Number.isFinite(actual) || actual !== chosen
+          || f(verified,"Do_Not_Publish") !== true
+          || String(f(verified,"Publish_Status")||"") !== "Failed"
+          || String(f(verified,"Publish_Error_Stage")||"") !== "FBS3_RATE_LIMIT")
+        throw new HttpError(409,"Held Facebook slot/hold authoritative readback mismatch");
+      updated = verified;
+    }
     studioInvalidateOccupiedScheduleCache();
     await studioSupabaseWriteThroughOutput(env, updated, "schedule");
   }
