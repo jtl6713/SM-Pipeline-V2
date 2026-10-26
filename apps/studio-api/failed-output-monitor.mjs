@@ -197,6 +197,23 @@ export function describeFailedOutput(record, nowMs = Date.now()) {
     recovery = "cooldown";
     action = "After cooldown, reserve a later MAE Facebook slot. Keep publication held until read-only Meta duplicate-exclusion and safe rearm; never repost blindly.";
   }
+  // An operator-approved future date does not by itself release a Meta hold.
+  // Distinguish a reserved but still held Reel from a newly failed attempt.
+  const heldRescheduled = !publishedEvidence
+    && text(record,"Platform")==="Facebook"
+    && /Facebook Reel/i.test(text(record,"Platform_Output_Type")||text(record,"Studio_Output_Type"))
+    && text(record,"Publish_Error_Stage")==="FBS3_RATE_LIMIT"
+    && truthy(record,"Do_Not_Publish")
+    && /QA-1050 HARD NO-GRAPH-CREATE HOLD/.test(text(record,"Studio_Output_Notes"))
+    && /SPAM_COOLDOWN_RESCHEDULE_PENDING_VERIFICATION/.test(text(record,"Studio_Output_Notes"))
+    && output==="Approved for Publishing" && publish==="Failed"
+    && Number.isFinite(Date.parse(text(record,"Scheduled_Post_Date")));
+  if(heldRescheduled) {
+    signature="QA-FB-368-RESCHEDULED-HELD";
+    recovery="verification_pending";
+    reason="Meta anti-spam failure has a reserved future slot ("+text(record,"Scheduled_Post_Date")+"), but publishing is still held.";
+    action="Verify the original Meta dispatch before that slot and separately authorize safe rearm after excluding a duplicate. Preserve the hold, attempts and error evidence until then.";
+  }
   if (["FACEBOOK_STORY_RATE_LIMIT_368", "FACEBOOK_STORY_REMOTE_VERIFICATION_PENDING"].includes(text(record, "Publish_Error_Stage"))
       && text(record, "Platform") === "Facebook" && text(record, "Platform_Output_Type") === "Facebook Story"
       && !publishedEvidence) {
