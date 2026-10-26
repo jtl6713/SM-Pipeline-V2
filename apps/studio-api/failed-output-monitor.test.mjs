@@ -401,7 +401,7 @@ test("held Meta 368 Reels with reserved slots remain blocked but show verificati
  assert.equal(item.recovery,"verification_pending");
  assert.equal(item.can_return_to_approved,false);
  assert.equal(item.return_to_approved_blocked,"publication_held");
- assert.match(item.reason,/reserved future slot/);
+ assert.match(item.error,/reserved future slot/);
  assert.match(item.action,/Preserve the hold/);
  for(const change of [
    {Studio_Output_Notes:"ordinary editorial hold"},
