@@ -1,0 +1,75 @@
+name: One-time Facebook Spam Hold Reschedule
+
+on:
+  pull_request:
+    paths:
+      - 'repair/scripts/facebook-held-spam-reschedule-20261025.mjs'
+      - '.github/workflows/facebook-held-spam-reschedule-20261025.yml'
+      - 'deploy/facebook-held-spam-reschedule-20261025.txt'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/facebook-held-spam-reschedule-20261025.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-four-held-facebook-reels-20261025
+  cancel-in-progress: false
+
+jobs:
+  safety:
+    name: Four-output held-only safety contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check one-shot bridge syntax and exact output allowlist
+        run: |
+          node --check repair/scripts/facebook-held-spam-reschedule-20261025.mjs
+          node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          const code=fs.readFileSync('repair/scripts/facebook-held-spam-reschedule-20261025.mjs','utf8');
+          for(const id of ['recQjUNjlxZnuODrE','recgVBWFB9CYpfg3i','rech5nXPwtePHE1le','rechHVARC2zRlgNtK']) {
+            if(!code.includes(id))throw Error('Missing exact approved output '+id);
+          }
+          if(!code.includes('quality_rate_limit_hold_reschedule:true') ||
+             !code.includes('held_spam_rescheduled_pending_verification') ||
+             !code.includes('rec.do_not_publish!==true') ||
+             !code.includes('report.temporary_bridge_deleted=true'))throw Error('Held-only safety guard missing');
+          for(const forbidden of ['graph.facebook.com','method:"PATCH"','method:"DELETE",body','/api/outputs/publish','quality_rate_limit_recovery:true']){
+            if(code.includes(forbidden))throw Error('Unexpected provider or hold-release code: '+forbidden);
+          }
+          console.log('Scope 4 exact Meta 368 reels, schedule-only, hold retained, no provider posting');
+          NODE
+      - name: Production schedule guard unit tests
+        run: node --test apps/studio-api/failed-output-monitor.test.mjs
+
+  live:
+    name: Atomic live hold-retained scheduling
+    needs: safety
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Atomically reschedule only four held anti-spam reels via authenticated Worker
+        run: node repair/scripts/facebook-held-spam-reschedule-20261025.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: held-facebook-spam-reschedule-audit
+          path: /tmp/facebook-held-spam-recovery.json
+          retention-days: 21
