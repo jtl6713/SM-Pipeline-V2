@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+// Run the bounded Meta anti-spam autonomous scheduler regression contract in existing QA CI.
+import "./meta-spam-autonomous-schedule.test.mjs";
 import { FAILED_OUTPUT_FORMULA, scanOutstandingFailedOutputs, describeFailedOutput, failedOutputRetryGate, facebookRateLimitResetReason, facebookSpamHeldRescheduleReason } from "./failed-output-monitor.mjs";
 import {maeScheduleNextSlot,maeScheduleConflicts,maeIsBlackoutLocalTime} from "./mae-schedule.mjs";
 
