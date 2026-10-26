@@ -1,2 +1,3 @@
 Explicit user authorization, 2026-10-25: one-time four-output held-only safe MAE reschedule after Meta anti-spam 368. Production Worker atomic schedule path, no hold release, no remote publish. Output IDs 2457, 2463, 2762, 4018. Report each authoritative readback. Do not touch retired Facebook Stories.
 2026-10-25 operator-authorized verified unchanged Airtable readback after first failed response. Rerun once with structured diagnostics. Stop on any uncertain write; never release holds.
+2026-10-25: Canonical Airtable GET confirms #2457 already moved to 2026-11-06T11:31:00Z with hold and failed retained despite HTTP 500. Resume remaining three only, using independent GET after each ambiguous POST; no retries of possibly committed operation.
