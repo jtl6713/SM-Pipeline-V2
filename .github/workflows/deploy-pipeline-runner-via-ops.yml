@@ -306,3 +306,4 @@ jobs:
 
 # 2026-10-26: Release TikTok PHOTO carousel designed grid covers after cover regression tests.
 # service_version=2026-10-26-tiktok-photo-grid-cover
+# 2026-10-26: Rerun gated runner release after handoff email syntax correction.

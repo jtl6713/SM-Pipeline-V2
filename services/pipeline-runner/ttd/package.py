@@ -358,8 +358,8 @@ def cover_text(record: dict[str, Any]) -> str:
             "so you can set the cover in TikTok."
         )
     if photo_cover_attached(record):
-        return f"3D grid cover: Included in carousel and selected as TikTok grid cover. Confirm in-app preview.\\nCover image: {download}"
-    return f"3D grid cover: Not attached to this draft; set it manually in TikTok.\\nDownload cover image: {download}"
+        return f"3D grid cover: Included in carousel and selected as TikTok grid cover. Confirm in-app preview.\nCover image: {download}"
+    return f"3D grid cover: Not attached to this draft; set it manually in TikTok.\nDownload cover image: {download}"
 
 
 def sibling_status_text(record: dict[str, Any]) -> str:
@@ -548,6 +548,11 @@ def handoff_email_html(
         if az
         else ""
     )
+    cover_step_html = (
+        "<li>Confirm the included 3D cover is selected as the TikTok grid cover.</li>"
+        if photo_cover_attached(record)
+        else "<li>Download the 3D cover above and set it as the draft cover in TikTok.</li>"
+    )
     return (
         '<div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#111827;background:#f3f4f6;padding:20px;">'
         '<div style="max-width:820px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:22px;">'
@@ -566,7 +571,7 @@ def handoff_email_html(
         f"{story_note}"
         "<ol><li>Open the TikTok inbox notification from <b>SM Pipeline Social Publisher</b>.</li>"
         "<li>Review and edit the images/video and caption.</li>"
-        ("<li>Confirm the included 3D cover is selected as the TikTok grid cover.</li>" if photo_cover_attached(record) else "<li>Download the 3D cover above and set it as the draft cover in TikTok.</li>")
+        f"{cover_step_html}"
         "<li>Add the suggested location tag in TikTok when available.</li>"
         "<li>Add music in TikTok before posting when music is requested.</li>"
         "<li>Post manually.</li>"
