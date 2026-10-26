@@ -350,3 +350,21 @@ test("Meta spam held-only MAE picks available overflow instead of claiming 12-ho
   assert.match(worker,/Do_Not_Publish: true, Publish_Retry_Eligible: false/);
   assert.match(worker,/if \(!holdReschedule && due && approved/);
 });
+
+test("user-authorized four held Meta 368 outputs get isolated request-local DO lane opt-in",()=>{
+ const start=worker.indexOf("export async function scheduleStudioPublishOutput(");
+ const end=worker.indexOf("/*__STUDIO_WORKER_END:scheduleStudioPublishOutput__*/",start);
+ const section=worker.slice(start,end);
+ for(const id of ["recQjUNjlxZnuODrE","recgVBWFB9CYpfg3i","rech5nXPwtePHE1le","rechHVARC2zRlgNtK"])
+   assert.ok(section.includes(id));
+ assert.match(section,/if\(holdReschedule && !scopedHeld\)/);
+ assert.match(section,/typeof env\?\.STUDIO_SCHEDULE_RESERVATIONS\?\.idFromName==="function"/);
+ assert.match(section,/STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED:"true"/);
+ assert.match(section,/STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST:reservationProfile\.id\+"::facebook"/);
+ assert.match(section,/runAtomicScheduleTransaction\(reservationEnv/);
+ assert.match(section,/scheduleReservationLaneEnabled\(reservationEnv/);
+ assert.match(section,/Do_Not_Publish: true, Publish_Retry_Eligible: false/);
+ assert.match(section,/if \(!holdReschedule && due/);
+ // No change to production-wide runtime flags or to the ordinary schedule route.
+ assert.doesNotMatch(section,/env\.STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED\s*=/);
+});
