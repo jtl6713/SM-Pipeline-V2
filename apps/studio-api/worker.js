@@ -1113,7 +1113,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.682-idea-lifecycle-live" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1",
+          version: "0.10.683-promotion-postcommit-trace" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1",
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
           quality_durable_recovery_ledger_v1: true,
@@ -2284,8 +2284,31 @@ export default {
         requirePermission(authorization, "ideas_promote");
         requirePermission(authorization, "production_configure");
         const requestId = productionRequestPromotionRecordIdFromPath(url);
-        const response = await promoteProductionRequestViaI3I4(request, env, url, authorization, ctx);
-        continueParkedProductionAfterPromote(ctx, env, requestId);
+        const approvalStartedAt = Date.now();
+        let response;
+        try {
+          response = await promoteProductionRequestViaI3I4(request, env, url, authorization, ctx);
+          console.info("studio_production_promotion_http", {
+            request_id: requestId,
+            status: response.status,
+            elapsed_ms: Date.now() - approvalStartedAt,
+          });
+        } catch (error) {
+          console.error("studio_production_promotion_http_error", {
+            request_id: requestId,
+            status: Number(error?.status) || 500,
+            error_name: error?.name || "Error",
+            elapsed_ms: Date.now() - approvalStartedAt,
+          });
+          throw error;
+        }
+        try {
+          continueParkedProductionAfterPromote(ctx, env, requestId);
+        } catch (error) {
+          // The authoritative promotion has already completed. This is
+          // best-effort queue continuation, not a reason to return HTTP 500.
+          console.warn("Studio production continuation registration failed after promotion", requestId, error);
+        }
         return response;
       }
 

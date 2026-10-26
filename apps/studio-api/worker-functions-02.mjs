@@ -10181,6 +10181,14 @@ export async function cancelSiblingProductionRequestsForIdea(env, ideaRecord, wi
 
 export async function finalizeProductionRequestPromotion(env, requestRecordId, ideaRecord, ctx = null) {
   const contentItemId = linkedContentItemRecordId(ideaRecord);
+  const promotionStartedAt = Date.now();
+  const promotionTrace = (stage, extra = {}) => console.info("studio_production_promotion_stage", {
+    request_id: requestRecordId,
+    stage,
+    elapsed_ms: Date.now() - promotionStartedAt,
+    ...extra,
+  });
+  promotionTrace("finalize_start", { has_content_item: Boolean(contentItemId) });
 
   // A promoted Idea has one authoritative Production Request owner. A stale
   // request may finish later, but it must not overwrite directives or fan out
@@ -10249,6 +10257,7 @@ export async function finalizeProductionRequestPromotion(env, requestRecordId, i
     // Platform Pipeline routing is authoritative for a successful promotion.
     // Do it synchronously before stamping Promoted so waitUntil cannot create a
     // false-success state where the Content Item exists but has zero outputs.
+    promotionTrace("output_routing_start");
     const routing = await completeProductionRequestPromotionSideEffects(
       env,
       requestRecordId,
@@ -10260,6 +10269,12 @@ export async function finalizeProductionRequestPromotion(env, requestRecordId, i
     directiveBridge = routing.directiveBridge;
     outputFanout = routing.outputFanout;
     assertProductionRequestFanoutComplete(outputFanout);
+    promotionTrace("output_routing_verified", {
+      enabled: Number(outputFanout?.enabled_output_count || 0),
+      routed: Number(outputFanout?.routed_count || 0),
+      blocked: Number(outputFanout?.blocked_count || 0),
+      remaining: Number(outputFanout?.remaining || 0),
+    });
   }
 
   const revisionOpen = productionRequestRevisionOpen(requestRecord);
@@ -10270,7 +10285,9 @@ export async function finalizeProductionRequestPromotion(env, requestRecordId, i
   };
   if (revisionOpen) fields.Production_Notes = stripFactoryRevisionNote(f(requestRecord, "Production_Notes")) || null;
   if (contentItemId) fields.Promoted_Content_Item = [contentItemId];
+  promotionTrace("promoted_write_start");
   requestRecord = await updateProductionRequestPromotionState(env, requestRecordId, fields);
+  promotionTrace("promoted_write_complete");
 
   if (contentItemId) {
     const continuation = completeProductionRequestPromotionSideEffects(
@@ -10287,20 +10304,41 @@ export async function finalizeProductionRequestPromotion(env, requestRecordId, i
       console.warn("Studio promote post-routing side-effects deferred", requestRecordId, error);
       return null;
     });
-    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(continuation);
-    else await continuation;
+    if (ctx && typeof ctx.waitUntil === "function") {
+      try { ctx.waitUntil(continuation); }
+      catch (error) { console.warn("Studio promote continuation registration failed", requestRecordId, error); }
+    } else await continuation;
   }
 
   // Duplicate Draft/Ready/Submitted PRs for the same Idea must not stay Approvals-ready
   // after one wins (Buckingham Fountain Mist: cancelled duplicate still showed Approve).
-  const cancelledSiblings = await cancelSiblingProductionRequestsForIdea(
+  const siblingCleanup = cancelSiblingProductionRequestsForIdea(
     env,
     ideaRecord,
     requestRecordId
-  ).catch((error) => {
+  ).then((ids) => {
+    promotionTrace("sibling_cleanup_complete", { count: ids.length });
+    return ids;
+  }).catch((error) => {
     console.warn("Studio promote sibling sweep failed", requestRecordId, error);
     return [];
   });
+  let cancelledSiblings = [];
+  let siblingCleanupDeferred = false;
+  if (ctx && typeof ctx.waitUntil === "function") {
+    try {
+      ctx.waitUntil(siblingCleanup);
+      siblingCleanupDeferred = true;
+      promotionTrace("sibling_cleanup_deferred");
+    } catch (error) {
+      // Once Promoted is saved, a failure to register secondary work must not
+      // turn durable success into HTTP 500 or trigger another I3 handoff.
+      console.warn("Studio promote sibling sweep registration failed", requestRecordId, error);
+    }
+  } else {
+    cancelledSiblings = await siblingCleanup;
+  }
+  promotionTrace("response_ready", { sibling_cleanup_deferred: siblingCleanupDeferred });
 
   return {
     requestRecord,
@@ -10308,6 +10346,7 @@ export async function finalizeProductionRequestPromotion(env, requestRecordId, i
     directiveBridge,
     outputFanout,
     cancelled_sibling_request_ids: cancelledSiblings,
+    sibling_cleanup_deferred: siblingCleanupDeferred,
   };
 }
 /*__STUDIO_WORKER_END:finalizeProductionRequestPromotion__*/
