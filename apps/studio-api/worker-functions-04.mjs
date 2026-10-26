@@ -15444,9 +15444,31 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
     && (!value || value.toLowerCase() === "immediate")
   );
   let updated;
-  const reservationProfile = scheduleReservationAuthorityEnabled(env)
+  // User-authorized one-time recovery applies only to these four prior
+  // Meta 368 Reels. Reuse the already-bootstrapped Durable Object namespace
+  // under a request-local lane configuration, NOT a global production flag.
+  // Other LA Facebook outputs keep their existing rollout/legacy semantics.
+  const scopedHeldIds = new Set([
+    "recQjUNjlxZnuODrE", // #2762
+    "recgVBWFB9CYpfg3i", // #2463
+    "rech5nXPwtePHE1le", // #4018
+    "rechHVARC2zRlgNtK", // #2457
+  ]);
+  const scopedHeld = holdReschedule && scopedHeldIds.has(match[1]);
+  if(holdReschedule && !scopedHeld)
+    throw new HttpError(409,"Held anti-spam recovery is not authorized for this output");
+  const reservationProfile = (scheduleReservationAuthorityEnabled(env) || scopedHeld)
     ? await item4ProductionProfileRecord(env, existing).catch(() => null)
     : null;
+  // If the production allowlist does not include this lane, only the exact
+  // held-output path opts in request-locally. DO binding is still mandatory.
+  const scopedAllowed = scopedHeld && reservationProfile?.id && platform==="Facebook" &&
+    typeof env?.STUDIO_SCHEDULE_RESERVATIONS?.idFromName==="function";
+  const reservationEnv = scopedAllowed && !scheduleReservationLaneEnabled(env,reservationProfile.id,platform)
+    ? {...env,
+        STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED:"true",
+        STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST:reservationProfile.id+"::facebook"}
+    : env;
   // Read-only diagnosis of the same recovery eligibility, occupancy, cooldown,
   // and MAE calculation. Never reserves a slot, patches a row, or publishes.
   // Keep it in the existing authenticated schedule route: no new service.
@@ -15485,15 +15507,15 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
     }
   }
   // Never apply a held recovery through the legacy non-atomic scheduler.
-  if (holdReschedule && !scheduleReservationLaneEnabled(env, reservationProfile?.id, platform))
+  if (holdReschedule && !scheduleReservationLaneEnabled(reservationEnv, reservationProfile?.id, platform))
     throw new HttpError(503,"Held spam reschedule needs the atomic reservation lane");
-  if (scheduleReservationLaneEnabled(env, reservationProfile?.id, platform)) {
+  if (scheduleReservationLaneEnabled(reservationEnv, reservationProfile?.id, platform)) {
     const profile = reservationProfile;
     const timeZone = await studioScheduleTimeZoneForRecord(env, existing, payload);
     const previousRaw = String(
       f(existing, "Scheduled_Post_Date") || f(existing, "YouTube_Scheduled_Publish_At") || ""
     ).trim();
-    const transaction = await runAtomicScheduleTransaction(env, {
+    const transaction = await runAtomicScheduleTransaction(reservationEnv, {
       content_profile_id: profile?.id || "",
       platform,
       output_type: outputType,
