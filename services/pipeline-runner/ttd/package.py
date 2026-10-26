@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from ap0.public_cover import graph_fetchable_cover_url
+from ttd.assets import parse_photo_images
 from carousel.timeutil import iso_utc, utc_now
 from config import load_settings
 from p3.helpers import caption_for_notification, caption_with_hashtags
@@ -272,7 +273,7 @@ def _ci(value: Any) -> str:
 def image_count_label(record: dict[str, Any]) -> str:
     if _ci(field_str(record, "TikTok_Draft_Type")) == _ci(DRAFT_TYPE_VIDEO):
         return "Video"
-    return str(field(record, "Image_Count") or field(record, "Assets_Ready_Count") or "1")
+    return str(len(parse_photo_images(record)) or field(record, "Image_Count") or field(record, "Assets_Ready_Count") or "1")
 
 
 def tiktok_photo_sound_required(record: dict[str, Any]) -> bool:
@@ -287,6 +288,14 @@ def tiktok_photo_sound_required(record: dict[str, Any]) -> bool:
     return any(token in combined for token in ("photo", "carousel", "slideshow"))
 
 
+def photo_cover_attached(record: dict[str, Any]) -> bool:
+    if _ci(field_str(record, "TikTok_Draft_Type")) == _ci(DRAFT_TYPE_VIDEO):
+        return False
+    cover = graph_fetchable_cover_url(field_str(record, "Thumbnail_URL"))
+    images = parse_photo_images(record)
+    return bool(cover and cover in images and len(images) > 1)
+
+
 def cover_block(record: dict[str, Any]) -> str:
     raw = field_str(record, "Thumbnail_URL")
     public = graph_fetchable_cover_url(raw)
@@ -298,10 +307,14 @@ def cover_block(record: dict[str, Any]) -> str:
         )
     safe_src = html.escape(download, quote=True)
     safe_text = html.escape(download)
+    message = (
+        "Included in the TikTok carousel and designated as the profile-grid cover. Confirm the preview in the TikTok app."
+        if photo_cover_attached(record)
+        else "The cover is not attached to this draft. Download and select it in TikTok before posting."
+    )
     return (
         '<div style="margin:12px 0;padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;">'
-        '<p style="margin:0 0 8px 0;"><b>3D grid cover</b> — TikTok’s draft API cannot attach this. '
-        "Download the still and set it as the cover in the TikTok app.</p>"
+        f'<p style="margin:0 0 8px 0;"><b>3D grid cover</b> — {html.escape(message)}</p>'
         f'<p style="margin:0 0 10px 0;"><img src="{safe_src}" alt="TikTok 3D grid cover" '
         'style="max-width:280px;width:100%;height:auto;border-radius:6px;border:1px solid #d1d5db;display:block;"></p>'
         f'<p style="margin:0 0 6px 0;"><a href="{safe_src}">Download cover image</a></p>'
@@ -344,10 +357,9 @@ def cover_text(record: dict[str, Any]) -> str:
             "3D grid cover: Not set on this output. Generate the thumbnail before posting "
             "so you can set the cover in TikTok."
         )
-    return (
-        "3D grid cover: TikTok's draft API cannot attach this automatically.\n"
-        f"Download cover image: {download}"
-    )
+    if photo_cover_attached(record):
+        return f"3D grid cover: Included in carousel and selected as TikTok grid cover. Confirm in-app preview.\\nCover image: {download}"
+    return f"3D grid cover: Not attached to this draft; set it manually in TikTok.\\nDownload cover image: {download}"
 
 
 def sibling_status_text(record: dict[str, Any]) -> str:
@@ -466,7 +478,7 @@ def handoff_email_text(
             "POSTING STEPS",
             "1. Open the TikTok inbox notification from SM Pipeline Social Publisher.",
             "2. Review and edit the images/video and caption.",
-            "3. Download the 3D cover above and set it as the draft cover in TikTok.",
+            ("3. Confirm the included 3D cover is selected as the TikTok grid cover." if photo_cover_attached(record) else "3. Download the 3D cover above and set it as the draft cover in TikTok."),
             "4. Add the suggested location tag in TikTok when available.",
             (
                 "5. REQUIRED FOR PHOTO POSTS: Tap Add sound in TikTok and choose music before posting. Do not publish this carousel silent."
@@ -554,7 +566,7 @@ def handoff_email_html(
         f"{story_note}"
         "<ol><li>Open the TikTok inbox notification from <b>SM Pipeline Social Publisher</b>.</li>"
         "<li>Review and edit the images/video and caption.</li>"
-        "<li>Download the 3D cover above and set it as the draft cover in TikTok.</li>"
+        ("<li>Confirm the included 3D cover is selected as the TikTok grid cover.</li>" if photo_cover_attached(record) else "<li>Download the 3D cover above and set it as the draft cover in TikTok.</li>")
         "<li>Add the suggested location tag in TikTok when available.</li>"
         "<li>Add music in TikTok before posting when music is requested.</li>"
         "<li>Post manually.</li>"

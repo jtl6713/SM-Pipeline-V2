@@ -11,7 +11,8 @@ from carousel.timeutil import iso_utc, stamp_minutes
 from item4.settings import PipelineSettings
 from publish.location import resolve_publish_location
 from render.fields import field, field_str
-from ttd.assets import is_video_route, parse_photo_images, video_source_url
+from ttd.assets import is_video_route, parse_photo_images, photo_manifest, video_source_url
+from ttd.cover import TikTokPhotoCoverError, prepare_photo_cover_manifest
 from ttd.client import (
     TikTokDraftClient,
     TikTokDraftError,
@@ -112,13 +113,41 @@ def process_request(
         else:
             images = parse_photo_images(output)
             result["draft_kind"] = "photo"
-            result["photo_count"] = len(images)
+            try:
+                covered_images, cover_index = prepare_photo_cover_manifest(
+                    client,
+                    output,
+                    images,
+                    max_photos=parse_int(settings.get("TIKTOK_DRAFT_MAX_PHOTOS"), 35) or 35,
+                )
+            except TikTokPhotoCoverError as exc:
+                return _init_failure(
+                    client, output, record_id, result,
+                    status_code=422,
+                    body={"error": str(exc)},
+                    stage="TTD1_PHOTO_COVER",
+                    message=str(exc),
+                    attempt=attempt,
+                )
+            # Upgrade already-prepared legacy drafts before the external API call.
+            # Idempotent: an existing cover is selected, never appended twice.
+            if covered_images != images:
+                client.update_record(
+                    PLATFORM_OUTPUTS_TABLE,
+                    record_id,
+                    {
+                        "TikTok_Draft_Assets_JSON": photo_manifest(covered_images),
+                        "Output_Notes": append_note(output, f"TTD1 inserted TikTok grid cover at {stamp_minutes()}."),
+                    },
+                )
+            result["photo_count"] = len(covered_images)
+            result["photo_cover_index"] = cover_index
             status_code, body = api.init_photo(
                 {
                     "title": photo_title(output),
                     "description": photo_description(output, location=location),
-                    "photo_images": images,
-                    "photo_cover_index": 0,
+                    "photo_images": covered_images,
+                    "photo_cover_index": cover_index,
                 }
             )
             stage_prefix = "TTD1_PHOTO_INIT"

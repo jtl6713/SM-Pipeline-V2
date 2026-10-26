@@ -28,6 +28,7 @@ from ttd.assets import (
     video_source_url,
 )
 from ttd.common import append_note, preview, retry_at, unlock_fields, valid_record_id
+from ttd.cover import TikTokPhotoCoverError, prepare_photo_cover_manifest
 from ttd.constants import (
     DEFAULT_MAX_PHOTOS,
     DRAFT_TYPE_VIDEO,
@@ -168,6 +169,31 @@ def process_request(
             )
             return {"processed": True, "retry": True, "reason": "asset_mismatch", **result}
 
+        # Stage cover for TikTok only. Preserve the approved slides and Image_Count.
+        try:
+            urls, cover_index = prepare_photo_cover_manifest(
+                client, output, urls, max_photos=max_photos,
+            )
+        except TikTokPhotoCoverError as exc:
+            client.update_record(
+                PLATFORM_OUTPUTS_TABLE,
+                record_id,
+                {
+                    **unlock_fields(),
+                    "Output_Notes": append_note(output, f"TTD0 cover preparation blocked at {stamp_minutes()}: {exc}"),
+                    "Publish_Status": PUBLISH_STATUS_FAILED,
+                    "Publish_Error_Stage": "TTD0_PHOTO_COVER",
+                    "TikTok_Draft_Status": STATUS_RETRY,
+                    "Publish_Error_Message": str(exc),
+                    "Publish_Next_Retry_At": retry_at(RETRY_MINUTES),
+                    "Publish_Retry_Eligible": True,
+                    "TikTok_Draft_Assets_JSON": "",
+                },
+            )
+            return {"processed": True, "retry": True, "reason": "photo_cover_unavailable", **result}
+        result["draft_photo_count"] = len(urls)
+        result["photo_cover_index"] = cover_index
+
         client.update_record(
             PLATFORM_OUTPUTS_TABLE,
             record_id,
@@ -182,7 +208,7 @@ def process_request(
                         if result.get("quality_signature")
                         else ""
                     )
-                    + f"TTD0 v1.2.4 prepared {actual} ordered 9:16 TikTok photo asset(s) "
+                    + f"TTD0 prepared {actual} ordered 9:16 TikTok photo slide(s); cover selected (draft count {len(urls)}, index {cover_index}) "
                     + f"and stored a stable quoted JSON string array at {stamp_minutes()}.",
                 ),
                 "Publish_Status": PUBLISH_STATUS_READY,
