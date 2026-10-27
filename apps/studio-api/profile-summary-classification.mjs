@@ -1,4 +1,5 @@
 import { isQueuedForPlatformDispatch } from "./overview-dispatch-counts.mjs";
+import { isTikTokEmailedManualHandoff } from "./tiktok-emailed-handoff.mjs";
 
 export const HOME_PLATFORMS = Object.freeze(["Facebook", "Instagram", "TikTok", "YouTube"]);
 export const HOME_METRIC_KEYS = Object.freeze([
@@ -31,7 +32,7 @@ export function emptyHomeContribution() {
  * SQLite even if no Airtable status changes when the deadline passes.
  */
 export function homeOverdueDueAt(row) {
-  if (!row || row.do_not_publish) return 0;
+  if (!row || row.do_not_publish || isTikTokEmailedManualHandoff(row)) return 0;
   const review = String(row.review_status || "").trim().toLowerCase();
   const output = String(row.output_status || "").trim().toLowerCase();
   if (review && review !== "approved") return 0;
@@ -103,6 +104,7 @@ export function homeApprovedUnpublished(row, _now = Date.now()) {
  */
 export function homeApprovedExceptionKind(row, now = Date.now()) {
   if (!row || !HOME_PLATFORMS.includes(row.platform) || !homeApprovedUnpublished(row)) return "";
+  if (isTikTokEmailedManualHandoff(row)) return "";
   const due = Date.parse(String(row.scheduled_post_date || ""));
   if (!Number.isFinite(due) || due <= 0) return "approved_missing_date";
   return due <= now ? "approved_past_due" : "";
