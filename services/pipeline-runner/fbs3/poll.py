@@ -60,9 +60,11 @@ def reel_is_ready(data: dict[str, Any]) -> bool:
     video_status = _ci(status.get("video_status"))
     if video_status in {"processing", "uploading"}:
         return False
+    # Upload completion and a video_status of "ready" prove processing only,
+    # not public Reel publication. This matters for a saved video still labelled
+    # "Uploading Reel": classifying ready as Published would fabricate a post.
+    # Require exact provider publication-phase completion or public permalink.
     if _phase_status(status, "publishing_phase") == "complete":
-        return True
-    if video_status == "ready":
         return True
     return bool(str(data.get("permalink_url") or "").strip())
 
