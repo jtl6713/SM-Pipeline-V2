@@ -647,6 +647,7 @@ import {
   healStaleManualFlagsOnPublishedRecord,
   healYoutubeManualWithLiveVideoRecord,
   studioReconcileYoutubePublishes,
+  studioReconcileYoutubeExistingUploadJobs,
   studioReconcileTiktokDrafts,
   studioReconcileTiktokProcessing,
   studioReconcileFacebookPhotos,
@@ -2708,6 +2709,19 @@ export default {
       ctx.waitUntil(runWaitingIdeaPhotoMatches(env, { limit: 2 })
         .then((result) => console.info("Light-cadence photo matching", result))
         .catch((error) => console.warn("Light-cadence photo matching failed", error)));
+    }
+    // Six overdue YouTube Shorts have an existing upload job but no video ID
+    // and expired YTS1 follow-up. Check uploader.job_status for saved jobs on
+    // the light cron, independently of the heavy Factory/production chain.
+    // No YT0/YTP1 upload and no public post is created by this path.
+    if (!cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioReconcileYoutubeExistingUploadJobs(env, { limit: 3 })
+        .then((results) => console.info("YouTube existing-upload recovery", JSON.stringify({
+          checked: results.length,
+          errors: results.filter(r => r.error || r.status === "poll_failed").length,
+          uploads_created: 0,
+        })))
+        .catch((error) => console.warn("YouTube existing-upload recovery unavailable", error)));
     }
     // QA-1050: half-hour read-only evidence audit, independent of Factory.
     // Never performs a Meta Graph create or releases safety holds.
@@ -5802,6 +5816,7 @@ const STUDIO_PUBLISH_RECONCILE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:healYoutubeManualWithLiveVideoRecord__*/
 /*__STUDIO_WORKER_EXTRACT:studioCloseYoutubeManualWithLiveVideo__*/
 /*__STUDIO_WORKER_EXTRACT:studioRearmDueYoutubeManualPublishes__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcileYoutubeExistingUploadJobs__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileYoutubePublishes__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileTiktokProcessing__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileTiktokDrafts__*/
