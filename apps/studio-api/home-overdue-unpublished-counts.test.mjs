@@ -118,3 +118,21 @@ test("Home V6 force refresh verifies the schema it actually writes and rejects V
   assert.match(remember, /snapshot\?\.schemaVersion \|\| 0\) !== 6/);
   assert.match(reader, /cache\.schemaVersion !== 6/);
 });
+
+
+test("overdue rescue advances past capped and cooling outputs instead of retrying oldest twelve forever", () => {
+  const main = fs.readFileSync(path.join(root, "apps/studio-api/worker.js"), "utf8");
+  const rescue = main.slice(main.indexOf("const STUDIO_OVERDUE_SCHEDULED_FORMULA ="),
+    main.indexOf("/*__STUDIO_WORKER_EXTRACT:studioPublishLockIsStale__*/"));
+  const ordinary = main.slice(main.indexOf("const STUDIO_PUBLISH_RECONCILE_FORMULA ="),
+    main.indexOf("/*__STUDIO_WORKER_EXTRACT:studioResetYoutubeUploadForRetry__*/"));
+  for (const formula of [rescue, ordinary]) {
+    assert.match(formula, /\\{Studio_Publish_Dispatch_Count\\}<8/);
+    assert.match(formula, /DATETIME_DIFF\\(NOW\\(\\),\\{Studio_Publish_Dispatch_At\\},"minutes"\\)>=6/);
+  }
+  assert.match(rescue, /\\{Do_Not_Publish\\}=0/);
+  assert.match(rescue, /\\{Published_At\\}=BLANK\\(\\)/);
+  assert.match(rescue, /\\{Publish_Status\\}="Ready to Schedule"/);
+  // These are selection-only protections. Do not silently relabel exceptions.
+  assert.doesNotMatch(rescue, /Published_At:\\s*new Date|Do_Not_Publish:\\s*false/);
+});
