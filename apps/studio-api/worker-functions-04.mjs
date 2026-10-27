@@ -2360,8 +2360,9 @@ export async function studioReconcileOverdueInstagramReelContainers(env, options
     sortField: "Last_Publish_Attempt_At", sortDirection: "asc",
   });
   const results = [];
+  let resumed = 0;
   for (const candidate of candidates) {
-    if (results.length >= limit) break;
+    if (resumed >= limit) break;
     const recordId = String(candidate?.id || "");
     try {
       const row = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId);
@@ -2396,6 +2397,7 @@ export async function studioReconcileOverdueInstagramReelContainers(env, options
       }
       // Existing AP1-IG runner re-GETs this record and reuses the exact saved
       // Platform_Media_ID; fresh creation is not a recovery action.
+      resumed++;
       const outcome = await studioPulseAp1IgReel(env, row);
       const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId);
       const postId = String(f(current, "Platform_Post_ID") || "").trim();
