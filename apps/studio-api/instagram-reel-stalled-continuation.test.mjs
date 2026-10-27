@@ -21,7 +21,25 @@ test("IG saved Reel containers are reconciled fairly without new media container
   assert.match(scan, /mediaId !== candidateMediaId/);
   assert.match(scan, /studioPulseAp1IgReel\(env, row\)/);
   assert.doesNotMatch(scan, /create_reel|studioPulseAp0PublicAsset/);
-  assert.match(worker, /ctx\.waitUntil\(studioReconcilePublishingInstagramReels\(env, \{ limit: 4 \}\)/);
+  assert.match(worker, /ctx\.waitUntil\(studioReconcilePublishingInstagramReels\(env, \{ limit: 1 \}\)/);
   const cron = worker.slice(worker.indexOf("async scheduled(event, env, ctx)"), worker.indexOf("class HttpError"));
   assert.equal((cron.match(/studioReconcilePublishingInstagramReels\(/g) || []).length, 1);
+});
+
+
+test("IG Reel resumption refuses uncertain or locked remote identities and is canary-bounded", () => {
+  const source = fs.readFileSync(path.join(base, "worker-functions-04.mjs"), "utf8");
+  const start = source.indexOf("export async function studioReconcilePublishingInstagramReels(");
+  const end = source.indexOf("/*__STUDIO_WORKER_END:studioReconcilePublishingInstagramReels__*/", start);
+  const scan = source.slice(start, end);
+  assert.match(scan, /let resumed = 0/);
+  assert.match(scan, /if \(resumed >= limit\) break/);
+  assert.match(scan, /Math\.min\(2, Number\(options\.limit \|\| 1\)\)/);
+  assert.match(scan, /Publish_Attempt_Count/);
+  assert.match(scan, /Publish_Locked_By/);
+  assert.match(scan, /Publish_Locked_At/);
+  assert.match(scan, /lastNotes\.includes\(processingProof\)/);
+  assert.match(scan, /Platform_Post_URL/);
+  assert.match(scan, /mediaId !== candidateMediaId/);
+  assert.match(scan, /studioPulseAp1IgReel\(env, row\)/);
 });
