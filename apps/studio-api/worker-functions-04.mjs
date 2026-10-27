@@ -2307,28 +2307,69 @@ export async function studioReconcileFacebookVideoCovers(env, options = {}) {
 }
 /*__STUDIO_WORKER_END:studioReconcileFacebookVideoCovers__*/
 
+/**
+ * Continue ONLY pre-existing first-class Story containers with persisted proof
+ * that Meta was still processing. The existing runner AP1-IGS-POLL may publish
+ * that exact container after FINISHED. It never creates a second container.
+ * Run on light cron only, removing the old heavy invocation to avoid overlap.
+ */
 export async function studioReconcilePublishingInstagramStories(env, options = {}) {
   if (pipelineStageBackend(env, "AP1_IGS").mode !== "python") return [];
-  const limit = Number(options.limit || 3);
+  const limit = Math.max(1, Math.min(2, Number(options.limit || 1)));
+  const formula = 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Platform_Output_Type}="Instagram Story",'
+    + '{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Published_At}=BLANK(),'
+    + '{Review_Status}="Approved",{Output_Status}="Approved for Publishing",'
+    + '{Publish_Method}="Automated",{IG_Story_Status}="Publishing",'
+    + '{IG_Story_Container_ID}!="",{IG_Story_Post_ID}=BLANK(),{Platform_Post_ID}=BLANK(),'
+    + 'OR({IG_Story_Last_Attempt_At}=BLANK(),DATETIME_DIFF(NOW(),{IG_Story_Last_Attempt_At},"minutes")>=6))';
   let rows = [];
   try {
     rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit,
-      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Do_Not_Publish}=0,{IG_Story_Status}="Publishing",{IG_Story_Container_ID}!="",{IG_Story_Post_ID}=BLANK())',
+      limit: Math.max(limit * 6, 12),
+      filterFormula: formula,
+      sortField: "IG_Story_Last_Attempt_At",
+      sortDirection: "asc",
     });
   } catch (error) {
-    console.warn("instagram story poll reconcile scan failed", error);
+    console.warn("instagram story existing-container continuation scan failed", error);
     return [];
   }
   const results = [];
-  for (const row of rows) {
+  let processed = 0;
+  for (const candidate of rows) {
+    if (processed >= limit) break;
     try {
+      const row = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, candidate.id);
+      const container = String(f(row, "IG_Story_Container_ID") || "");
+      const expected = String(f(candidate, "IG_Story_Container_ID") || "");
+      const reply = String(f(row, "IG_Story_Response_JSON") || "");
+      const checked = Date.parse(String(f(row, "IG_Story_Last_Attempt_At") || ""));
+      // Fail closed on uncertain previous publish; only queued/IN_PROGRESS
+      // evidence authorizes continuation of the identical saved container.
+      if (!container || container !== expected
+          || Boolean(f(row, "IG_Story_Post_ID")) || Boolean(f(row, "Platform_Post_ID"))
+          || Boolean(f(row, "Published_At")) || Boolean(f(row, "Test_Run_ID"))
+          || Boolean(f(row, "Do_Not_Publish")) || !Boolean(f(row, "Auto_Publish_Enabled"))
+          || String(f(row, "Review_Status") || "") !== "Approved"
+          || String(f(row, "Output_Status") || "") !== "Approved for Publishing"
+          || String(f(row, "Publish_Method") || "") !== "Automated"
+          || String(f(row, "Platform_Output_Type") || "") !== "Instagram Story"
+          || String(f(row, "IG_Story_Status") || "") !== "Publishing"
+          || !/container created and queued|container still processing/i.test(reply)
+          || /media_publish failed|publish response|Published Story ID/i.test(reply)
+          || (Number.isFinite(checked) && Date.now() - checked < 6 * 60 * 1000)) {
+        results.push({ id: candidate.id, skipped: "identity_or_prior_publish_uncertain", new_containers: 0 });
+        continue;
+      }
+      processed += 1;
       const pulsed = await studioPulseAp1IgsPoll(env, row);
-      results.push({ id: row.id, ok: pulsed?.ok !== false, still_processing: pulsed?.still_processing || false });
+      results.push({
+        id: candidate.id, output_id: f(row, "Output_ID"),
+        status: pulsed?.ok === false ? "poll_failed" : pulsed?.still_processing ? "still_processing" : pulsed?.post_id ? "story_published" : (pulsed?.skipped || "polled"),
+        exact_container_id: container, new_containers: 0,
+      });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn("instagram story poll reconcile failed", row.id, error);
-      results.push({ id: row.id, error: message });
+      results.push({ id: candidate.id, error: String(error?.message || error).slice(0, 180), new_containers: 0 });
     }
   }
   return results;

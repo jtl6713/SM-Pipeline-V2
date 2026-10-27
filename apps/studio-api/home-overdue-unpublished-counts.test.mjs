@@ -190,3 +190,30 @@ test("YTS1 stale jobs receive independent bounded status polling without duplica
   assert.ok(independent > 0 && independent < heavy);
   assert.match(scheduled.slice(independent - 180, independent), /!cadence.heavy/);
 });
+
+
+test("Instagram saved Story continuation is fair, bounded, and never re-creates a container", () => {
+  const main = fs.readFileSync(path.join(root, "apps/studio-api/worker.js"), "utf8");
+  const workerImpl = fs.readFileSync(path.join(root, "apps/studio-api/worker-functions-04.mjs"), "utf8");
+  const start = workerImpl.indexOf("export async function studioReconcilePublishingInstagramStories(");
+  const end = workerImpl.indexOf("/*__STUDIO_WORKER_END:studioReconcilePublishingInstagramStories__*/", start);
+  assert.ok(start > 0 && end > start);
+  const stage = workerImpl.slice(start, end);
+  assert.ok(stage.includes('sortField: "IG_Story_Last_Attempt_At"'));
+  assert.ok(stage.includes('limit = Math.max(1, Math.min(2,'));
+  assert.ok(stage.includes('container !== expected'));
+  assert.ok(stage.includes('container created and queued|container still processing'));
+  assert.ok(stage.includes('IG_Story_Post_ID'));
+  assert.ok(stage.includes('Platform_Post_ID'));
+  assert.ok(stage.includes('Do_Not_Publish'));
+  assert.ok(stage.includes('Review_Status'));
+  assert.ok(stage.includes('IG_Story_Last_Attempt_At'));
+  assert.ok(stage.includes('studioPulseAp1IgsPoll(env, row)'));
+  assert.doesNotMatch(stage, /studioPulseAp1Igs\(|studioDispatchApprovedPublishNow\(/);
+  const scheduled = main.slice(main.indexOf("async scheduled(event, env, ctx)"), main.indexOf("class HttpError"));
+  const light = scheduled.indexOf('ctx.waitUntil(studioReconcilePublishingInstagramStories(env, { limit: 1 })');
+  const heavy = scheduled.indexOf('if (!cadence.heavy) return;');
+  assert.ok(light > 0 && light < heavy);
+  assert.equal((scheduled.match(/studioReconcilePublishingInstagramStories\(env/g) || []).length, 1);
+  assert.ok(scheduled.slice(light - 130, light).includes("!cadence.heavy"));
+});

@@ -2723,6 +2723,20 @@ export default {
         .then((result) => console.info("Light-cadence photo matching", result))
         .catch((error) => console.warn("Light-cadence photo matching failed", error)));
     }
+    // Stories with saved IN_PROGRESS containers were stuck for days because
+    // AP1-IGS-POLL was buried late in heavy cron. Resume one on a light tick,
+    // exact saved container only; no new container or hold release.
+    // The heavy invocation was removed to prevent two concurrent publishers.
+    if (!cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioReconcilePublishingInstagramStories(env, { limit: 1 })
+        .then((results) => console.info("Instagram saved-Story continuation", JSON.stringify({
+          checked: results.length,
+          published: results.filter((x) => x.status === "story_published").length,
+          processing: results.filter((x) => x.status === "still_processing").length,
+          results, new_containers: 0,
+        })))
+        .catch((error) => console.warn("Instagram saved-Story continuation unavailable", error)));
+    }
     // AP1-IG continuation must not be stranded by heavy Factory/QA. Only
     // already-created Reel media containers are selected; runner rereads
     // approvals, holds, state and container ID before any Graph publishing.
@@ -3050,11 +3064,8 @@ export default {
       } catch (error) {
         console.warn("instagram carousel reconcile cron failed", error);
       }
-      try {
-        await studioReconcilePublishingInstagramStories(env);
-      } catch (error) {
-        console.warn("instagram story poll reconcile cron failed", error);
-      }
+      // Existing Story polling runs independently on light ticks so the
+      // long heavy maintenance sweep cannot strand due containers.
       // Existing Instagram Reel media-ID continuation runs independently on light cron.
       try {
         await studioReconcileFacebookSlideshows(env);
