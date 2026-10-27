@@ -1,4 +1,5 @@
 import { scanOutstandingFailedOutputs } from "./failed-output-monitor.mjs";
+import { TIKTOK_NOT_EMAILED_HANDOFF_AIRTABLE_FORMULA } from "./tiktok-emailed-handoff.mjs";
 
 /**
  * QA-PUBLISH-001: final-approved output remains unconfirmed beyond its
@@ -21,7 +22,7 @@ export function approvedPastDueFormula(nowMs = Date.now(), graceMs = PAST_DUE_GR
     + '{Output_Status}!="Awaiting Public Release",{Publish_Status}!="Published Privately",'
     + '{Output_Status}!="Failed",{Publish_Status}!="Failed",'
     + '{Published_At}=BLANK(),{Platform_Post_URL}=BLANK(),'
-    + '{Manual_Published_URL}=BLANK())';
+    + '{Manual_Published_URL}=BLANK(),' + TIKTOK_NOT_EMAILED_HANDOFF_AIRTABLE_FORMULA + ')';
 }
 
 // A second census detects verified-live receipts that were never reflected
