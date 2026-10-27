@@ -966,6 +966,68 @@ export async function studioReconcileYoutubeUploadProcessing(env, options = {}) 
 }
 /*__STUDIO_WORKER_END:studioReconcileYoutubeUploadProcessing__*/
 
+/**
+ * YTS2 continues only already-uploaded YouTube video IDs. No upload creation,
+ * new video, channel rearm, or guessed public publication. The Python stage
+ * polls an existing YouTube video and may attach its prepared thumbnail.
+ * Run on light cron to keep long heavy maintenance from starving processing.
+ */
+export async function studioReconcileExistingYoutubeProcessing(env, options = {}) {
+  if (pipelineStageBackend(env, "YT0").mode !== "python") return [];
+  const limit = Math.max(1, Math.min(2, Number(options.limit || 2)));
+  const formula = 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,'
+    + '{Review_Status}="Approved",{Output_Status}="Approved for Publishing",{Publish_Status}="Publishing",'
+    + '{Published_At}=BLANK(),{YouTube_Stage}="YT2",{YouTube_Video_ID}!="",'
+    + 'OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())),'
+    + 'OR({YouTube_Last_Checked_At}=BLANK(),DATETIME_DIFF(NOW(),{YouTube_Last_Checked_At},"minutes")>=2))';
+  const candidates = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: Math.max(8, limit * 4), filterFormula: formula,
+    sortField: "YouTube_Last_Checked_At", sortDirection: "asc",
+  });
+  let attempted = 0;
+  const results = [];
+  for (const candidate of candidates) {
+    if (attempted >= limit) break;
+    try {
+      const row = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, candidate.id);
+      const videoId = String(f(row, "YouTube_Video_ID") || "");
+      const firstVideoId = String(f(candidate, "YouTube_Video_ID") || "");
+      const nextRetryMs = Date.parse(String(f(row, "Publish_Next_Retry_At") || ""));
+      const lastCheckMs = Date.parse(String(f(row, "YouTube_Last_Checked_At") || ""));
+      if (!videoId || videoId !== firstVideoId
+          || String(f(row, "YouTube_Stage") || "") !== "YT2"
+          || String(f(row, "Platform") || "") !== "YouTube"
+          || String(f(row, "Review_Status") || "") !== "Approved"
+          || String(f(row, "Output_Status") || "") !== "Approved for Publishing"
+          || String(f(row, "Publish_Status") || "") !== "Publishing"
+          || Boolean(f(row, "Do_Not_Publish")) || Boolean(f(row, "Test_Run_ID"))
+          || Boolean(f(row, "Published_At")) || Boolean(f(row, "Platform_Post_ID"))
+          || !Boolean(f(row, "Auto_Publish_Enabled"))
+          || (Number.isFinite(nextRetryMs) && nextRetryMs > Date.now())
+          || (Number.isFinite(lastCheckMs) && Date.now() - lastCheckMs < 2 * 60 * 1000)) {
+        results.push({ id: candidate.id, status: "skipped_changed_or_cooling" });
+        continue;
+      }
+      attempted++;
+      const poll = await studioPulseYtRecord(env, "yts2", "YTS2", row);
+      const result = {
+        id: candidate.id, output_id: f(row, "Output_ID"),
+        status: poll?.ok === false ? "processing_poll_failed"
+          : poll?.still_processing ? "processing"
+          : poll?.needs_finalize ? "ready_for_existing_video_finalize"
+          : (poll?.skipped || "polled"),
+        video_id: videoId, existing_video_only: true, new_uploads: 0,
+      };
+      results.push(result);
+    } catch (error) {
+      results.push({ id: candidate.id, status: "processing_poll_unavailable",
+        error: String(error?.message || error).slice(0, 160), new_uploads: 0 });
+    }
+  }
+  return results;
+}
+/*__STUDIO_WORKER_END:studioReconcileExistingYoutubeProcessing__*/
+
 export async function studioReconcileYoutubePublishes(env, options = {}) {
   if (pipelineStageBackend(env, "YT0").mode !== "python") return [];
   const limit = Number(options.limit || 3);
