@@ -664,6 +664,7 @@ import {
   studioReconcileFacebookVideoCovers,
   studioReconcilePublishingInstagramStories,
   studioReconcilePublishingInstagramReels,
+  studioReconcileOverdueInstagramReelContainers,
   studioReconcileFacebookSlideshows,
   studioReconcileFacebookReels,
   startScheduleRegenJob,
@@ -2700,6 +2701,19 @@ export default {
           results, new_uploads: 0,
         })))
         .catch((error) => console.warn("YTS1 existing-upload light cron unavailable", error)));
+    }
+    // Unblock approved overdue IG Reels whose original Meta container remains
+    // saved but was still processing on the first attempt. Existing-container
+    // only; do not touch held, unknown or already-posted identity. One max per
+    // light tick to protect Meta rate limits and Airtable request budget.
+    if (!cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioReconcileOverdueInstagramReelContainers(env, { limit: 1 })
+        .then((rows) => console.info("IG Reel existing-container continuation", JSON.stringify({
+          checked: rows.length,
+          verified_published: rows.filter((x) => x.status === "verified_published").length,
+          rows,
+        })))
+        .catch((error) => console.warn("IG Reel existing-container continuation unavailable", error)));
     }
     // Recover waiting ideas between the heavy sweeps. The matcher uses the same
     // ranked library evaluation as "Find Images Now" and persists its scan
@@ -5861,6 +5875,7 @@ const STUDIO_OVERDUE_SCHEDULED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookPublicMake__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookVideoCovers__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcilePublishingInstagramStories__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcileOverdueInstagramReelContainers__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcilePublishingInstagramReels__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookSlideshows__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookReels__*/
