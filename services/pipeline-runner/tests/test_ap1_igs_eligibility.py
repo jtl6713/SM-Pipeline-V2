@@ -100,3 +100,94 @@ def test_ap1_igs_poll_gates():
     record = _publishing(Replace_Transaction_ID="txn-1")
     assert poll_eligibility_reason(record) == "replace_transaction_mismatch"
     assert poll_eligibility_reason(record, replace_transaction_id="txn-1") is None
+
+
+
+def test_published_but_unverified_story_is_fenced_from_repoll_or_repost():
+    record = _publishing(Publish_Error_Stage="AP1_IGS_PUBLISHED_UNVERIFIED")
+    assert poll_eligibility_reason(record) == "requires_published_receipt_verification"
+
+
+def test_meta_published_without_story_id_never_sets_published_or_resends():
+    from ap1_igs.poll import _mark_published_unverified
+
+    class CapturingAirtable:
+        def __init__(self):
+            self.updates = []
+
+        def update_record(self, table, record_id, fields, **options):
+            self.updates.append((table, record_id, fields, options))
+
+    airtable = CapturingAirtable()
+    record = _publishing(
+        Platform_Output_Type="Instagram Story",
+        Output_Notes="Original container created",
+    )
+    _mark_published_unverified(
+        airtable, record,
+        {"status_code": "PUBLISHED", "status": "Published: Media has been successfully published."},
+    )
+    assert len(airtable.updates) == 1
+    fields = airtable.updates[0][2]
+    assert fields["IG_Story_Status"] == "Publishing"
+    assert fields["Publish_Error_Stage"] == "AP1_IGS_PUBLISHED_UNVERIFIED"
+    assert fields["Publish_Retry_Eligible"] is False
+    assert "receipt" in fields["IG_Story_Error_Message"].lower()
+    assert "Published_At" not in fields
+    assert "IG_Story_Post_ID" not in fields
+    assert "Platform_Post_ID" not in fields
+    assert "Publish_Status" not in fields
+
+
+
+def test_published_container_from_graph_does_not_issue_media_publish(monkeypatch):
+    import ap1_igs.poll as poll
+    from ap1_ig.graph import InstagramGraphError
+
+    record = _publishing(
+        Platform_Output_Type="Instagram Story",
+        Publish_Status="Ready to Publish",
+    )
+
+    class FakeAirtable:
+        def __init__(self):
+            self.writes = []
+
+        def get_record(self, table, record_id):
+            assert record_id == record["id"]
+            return record
+
+        def update_record(self, table, record_id, fields, **kwargs):
+            self.writes.append(fields)
+
+    client = FakeAirtable()
+
+    class FakeGraph:
+        def __init__(self, **kwargs):
+            pass
+
+        def wait_for_container(self, container_id):
+            assert container_id == "17890000000000000"
+            raise InstagramGraphError(
+                "Published: Media has been successfully published.",
+                status_code="PUBLISHED",
+                status="Published: Media has been successfully published.",
+            )
+
+        def publish(self, container_id):
+            raise AssertionError("MUST NOT resend media_publish for PUBLISHED")
+
+    monkeypatch.setattr(poll, "AirtableClient", lambda: client)
+    monkeypatch.setattr(poll, "PipelineSettings", lambda c: object())
+    monkeypatch.setattr(poll, "load_instagram_graph_settings", lambda *a, **k: {
+        "ig_user_id": "1234", "token": "test", "version": "v25.0"
+    })
+    monkeypatch.setattr(poll, "InstagramReelClient", FakeGraph)
+
+    response = poll.process_request(output_record_id=record["id"])
+    assert response["reason"] == "existing_story_published_requires_verification"
+    assert response["processed"] is False
+    assert len(client.writes) == 1
+    assert client.writes[0]["Publish_Error_Stage"] == "AP1_IGS_PUBLISHED_UNVERIFIED"
+    assert client.writes[0]["Publish_Retry_Eligible"] is False
+    assert "Published_At" not in client.writes[0]

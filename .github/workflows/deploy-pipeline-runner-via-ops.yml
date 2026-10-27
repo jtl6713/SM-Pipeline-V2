@@ -43,6 +43,7 @@ jobs:
             services/pipeline-runner/tests/test_supabase_pipeline_writes.py \
             services/pipeline-runner/tests/test_visual_watermark.py \
             services/pipeline-runner/tests/test_apc_cover_selection_qa1050.py \
+            services/pipeline-runner/tests/test_ap1_igs_eligibility.py \
             services/pipeline-runner/tests/test_tiktok_photo_cover.py \
             services/pipeline-runner/tests/test_tiktok_photo_sound_guard.py \
             services/pipeline-runner/tests/test_public_cover.py
@@ -307,3 +308,4 @@ jobs:
 # 2026-10-26: Release TikTok PHOTO carousel designed grid covers after cover regression tests.
 # service_version=2026-10-26-tiktok-photo-grid-cover
 # 2026-10-26: Rerun gated runner release after handoff email syntax correction.
+# 2026-10-27: Deploy guarded IG Story PUBLISHED-without-ID no-republish receipt verification; runner version 2026-10-27-ig-story-receipt-guard.

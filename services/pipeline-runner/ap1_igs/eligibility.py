@@ -138,6 +138,8 @@ def poll_eligibility_reason(
         return "review_not_approved"
     if as_bool(field(record, "Do_Not_Publish"), False):
         return "do_not_publish"
+    if _ci(field_str(record, "Publish_Error_Stage")) == "ap1_igs_published_unverified":
+        return "requires_published_receipt_verification"
     if _ci(field_str(record, "IG_Story_Status")) != _ci(STORY_STATUS_PUBLISHING):
         return "story_status_not_publishing"
     if not field_str(record, "IG_Story_Container_ID"):

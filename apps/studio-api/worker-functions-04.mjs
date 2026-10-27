@@ -2321,6 +2321,7 @@ export async function studioReconcilePublishingInstagramStories(env, options = {
     + '{Review_Status}="Approved",{Output_Status}="Approved for Publishing",'
     + '{Publish_Method}="Automated",{IG_Story_Status}="Publishing",'
     + '{IG_Story_Container_ID}!="",{IG_Story_Post_ID}=BLANK(),{Platform_Post_ID}=BLANK(),'
+    + '{Publish_Error_Stage}!="AP1_IGS_PUBLISHED_UNVERIFIED",'
     + 'OR({IG_Story_Last_Attempt_At}=BLANK(),DATETIME_DIFF(NOW(),{IG_Story_Last_Attempt_At},"minutes")>=6))';
   let rows = [];
   try {
@@ -2355,6 +2356,7 @@ export async function studioReconcilePublishingInstagramStories(env, options = {
           || String(f(row, "Publish_Method") || "") !== "Automated"
           || String(f(row, "Platform_Output_Type") || "") !== "Instagram Story"
           || String(f(row, "IG_Story_Status") || "") !== "Publishing"
+          || String(f(row, "Publish_Error_Stage") || "") === "AP1_IGS_PUBLISHED_UNVERIFIED"
           || !/container created and queued|container still processing/i.test(reply)
           || /media_publish failed|publish response|Published Story ID/i.test(reply)
           || (Number.isFinite(checked) && Date.now() - checked < 6 * 60 * 1000)) {
