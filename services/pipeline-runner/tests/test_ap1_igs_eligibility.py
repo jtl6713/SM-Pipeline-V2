@@ -137,3 +137,57 @@ def test_meta_published_without_story_id_never_sets_published_or_resends():
     assert "IG_Story_Post_ID" not in fields
     assert "Platform_Post_ID" not in fields
     assert "Publish_Status" not in fields
+
+
+
+def test_published_container_from_graph_does_not_issue_media_publish(monkeypatch):
+    import ap1_igs.poll as poll
+    from ap1_ig.graph import InstagramGraphError
+
+    record = _publishing(
+        Platform_Output_Type="Instagram Story",
+        Publish_Status="Ready to Publish",
+    )
+
+    class FakeAirtable:
+        def __init__(self):
+            self.writes = []
+
+        def get_record(self, table, record_id):
+            assert record_id == record["id"]
+            return record
+
+        def update_record(self, table, record_id, fields, **kwargs):
+            self.writes.append(fields)
+
+    client = FakeAirtable()
+
+    class FakeGraph:
+        def __init__(self, **kwargs):
+            pass
+
+        def wait_for_container(self, container_id):
+            assert container_id == "17890000000000000"
+            raise InstagramGraphError(
+                "Published: Media has been successfully published.",
+                status_code="PUBLISHED",
+                status="Published: Media has been successfully published.",
+            )
+
+        def publish(self, container_id):
+            raise AssertionError("MUST NOT resend media_publish for PUBLISHED")
+
+    monkeypatch.setattr(poll, "AirtableClient", lambda: client)
+    monkeypatch.setattr(poll, "PipelineSettings", lambda c: object())
+    monkeypatch.setattr(poll, "load_instagram_graph_settings", lambda *a, **k: {
+        "ig_user_id": "1234", "token": "test", "version": "v25.0"
+    })
+    monkeypatch.setattr(poll, "InstagramReelClient", FakeGraph)
+
+    response = poll.process_request(output_record_id=record["id"])
+    assert response["reason"] == "existing_story_published_requires_verification"
+    assert response["processed"] is False
+    assert len(client.writes) == 1
+    assert client.writes[0]["Publish_Error_Stage"] == "AP1_IGS_PUBLISHED_UNVERIFIED"
+    assert client.writes[0]["Publish_Retry_Eligible"] is False
+    assert "Published_At" not in client.writes[0]
