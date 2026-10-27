@@ -17,6 +17,8 @@ test("FBS4 only examines known existing Meta videos after their retry time",()=>
   assert.match(FACEBOOK_REEL_POLL_FORMULA,/FB_Slideshow_Meta_Video_ID/);
   assert.match(FACEBOOK_REEL_POLL_FORMULA,/Publish_Next_Retry_At/);
   assert.equal(facebookReelPollEligible(make(2301),now),true);
+  assert.match(FACEBOOK_REEL_POLL_FORMULA,/FB_Slideshow_Status}="Uploading Reel"/);
+  assert.equal(facebookReelPollEligible(make(2654,{FB_Slideshow_Status:"Uploading Reel"}),now),true);
   for(const fields of [
     {Platform:"Instagram"},{Platform_Output_Type:"Facebook Photo Set"},
     {FB_Slideshow_Status:"Video Ready"},{Publish_Status:"Published"},
