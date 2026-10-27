@@ -648,6 +648,7 @@ import {
   healYoutubeManualWithLiveVideoRecord,
   studioReconcileYoutubePublishes,
   studioReconcileTiktokDrafts,
+  studioReconcileTiktokProcessing,
   studioReconcileFacebookPhotos,
   studioReconcileFacebookPhotoFinalizes,
   studioReconcileFacebookReelFinalizes,
@@ -2671,6 +2672,20 @@ export default {
           })))
           .catch((error) => console.warn("FB3 independent cron failed", error)));
       }
+    }
+    // Existing TikTok draft status GETs are not new uploads. They previously
+    // ran only late in a long heavy sweep: 24 live Processing drafts had one
+    // poll apiece and expired retry timestamps. Poll four oldest-checked first
+    // on independent LIGHT ticks; avoid competing with the heavy TTD2 sweep.
+    if (!cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioReconcileTiktokProcessing(env, { limit: 4 })
+        .then((results) => console.info("TTD2 existing-draft light cron", JSON.stringify({
+          checked: results.length,
+          delivered: results.filter((x) => x.status === "draft_delivered").length,
+          processing: results.filter((x) => x.status === "processing").length,
+          results, new_uploads: 0,
+        })))
+        .catch((error) => console.warn("TTD2 existing-draft light cron unavailable", error)));
     }
     // Recover waiting ideas between the heavy sweeps. The matcher uses the same
     // ranked library evaluation as "Find Images Now" and persists its scan
@@ -5788,6 +5803,7 @@ const STUDIO_PUBLISH_RECONCILE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:studioCloseYoutubeManualWithLiveVideo__*/
 /*__STUDIO_WORKER_EXTRACT:studioRearmDueYoutubeManualPublishes__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileYoutubePublishes__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcileTiktokProcessing__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileTiktokDrafts__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookPhotoFinalizes__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookReelFinalizes__*/

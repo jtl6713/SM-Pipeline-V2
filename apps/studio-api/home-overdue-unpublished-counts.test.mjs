@@ -137,3 +137,29 @@ test("overdue rescue advances past capped and cooling outputs instead of retryin
   assert.ok(rescue.includes('{Publish_Status}="Ready to Schedule"'));
   assert.doesNotMatch(rescue, /Published_At:\s*new Date|Do_Not_Publish:\s*false/);
 });
+
+
+test("TTD2 existing draft polling is independently scheduled, fair and bounded", () => {
+  const cron = fs.readFileSync(path.join(root, "apps/studio-api/worker.js"), "utf8");
+  const impl = fs.readFileSync(path.join(root, "apps/studio-api/worker-functions-04.mjs"), "utf8");
+  const functionStart = impl.indexOf("export async function studioReconcileTiktokProcessing(");
+  const functionEnd = impl.indexOf("/*__STUDIO_WORKER_END:studioReconcileTiktokProcessing__*/", functionStart);
+  assert.ok(functionStart > 0 && functionEnd > functionStart);
+  const stage = impl.slice(functionStart, functionEnd);
+  assert.match(stage, /sortField: "TikTok_Draft_Last_Checked_At", sortDirection: "asc"/);
+  assert.match(stage, /limit = Math.max\(1, Math.min\(4,/);
+  assert.match(stage, /TikTok_Draft_Publish_ID/);
+  assert.match(stage, /Publish_Next_Retry_At/);
+  assert.match(stage, /TikTok_Draft_Last_Checked_At/);
+  assert.match(stage, /studioPulseTtd2\(env, row\)/);
+  assert.doesNotMatch(stage, /studioPulseTtd0|studioPulseTtd1|studioDispatchApprovedPublishNow|studioPublishFacebookPageStory/);
+  assert.match(stage, /Do_Not_Publish/);
+  assert.match(stage, /currentId !== previousId|previousId !== currentId/);
+  const scheduled = cron.slice(cron.indexOf("async scheduled(event, env, ctx)"), cron.indexOf("class HttpError"));
+  const independent = scheduled.indexOf("ctx.waitUntil(studioReconcileTiktokProcessing");
+  const mainWaitUntil = scheduled.indexOf("ctx.waitUntil((async () => {", scheduled.indexOf("// Existing TikTok draft status GETs"));
+  const heavy = scheduled.indexOf("if (!cadence.heavy) return;");
+  assert.ok(independent > 0 && independent < mainWaitUntil && independent < heavy);
+  assert.match(scheduled.slice(independent - 200, independent), /!cadence.heavy/);
+  assert.match(cron, /STUDIO_WORKER_EXTRACT:studioReconcileTiktokProcessing/);
+});
