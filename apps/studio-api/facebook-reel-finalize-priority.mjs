@@ -27,8 +27,17 @@ export function facebookReelPollEligible(row, nowMs = Date.now()) {
       value(row, "Publish_Status") === "Published" ||
       value(row, "Output_Status") === "Published" ||
       value(row, "Published_At") || value(row, "Test_Run_ID") ||
-      field(row, "Do_Not_Publish") === true ||
-      value(row, "Publish_Locked_At") || value(row, "Publish_Locked_By")) return false;
+      field(row, "Do_Not_Publish") === true) return false;
+  // A months-old FBS3 lock must not permanently prevent a GET-only status
+  // check of the exact already-uploaded video. Fresh, future-dated and
+  // unparseable locks still fail closed to prevent racing a live publisher.
+  // This DOES NOT authorize a new FBS3 Graph upload/finish/create.
+  const lockAtRaw = value(row, "Publish_Locked_At");
+  const lockBy = value(row, "Publish_Locked_By");
+  if (lockAtRaw || lockBy) {
+    const lockAt = Date.parse(lockAtRaw);
+    if (!Number.isFinite(lockAt) || nowMs - lockAt < 30 * 60 * 1000) return false;
+  }
   const dueAt = Date.parse(value(row, "Publish_Next_Retry_At"));
   if (Number.isFinite(dueAt) && dueAt > nowMs) return false;
   return Boolean(facebookReelPollVideoId(row));
