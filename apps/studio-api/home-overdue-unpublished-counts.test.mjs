@@ -190,3 +190,27 @@ test("YTS1 stale jobs receive independent bounded status polling without duplica
   assert.ok(independent > 0 && independent < heavy);
   assert.match(scheduled.slice(independent - 180, independent), /!cadence.heavy/);
 });
+
+
+test("uploaded YouTube videos progress on light cadence without new upload or public-state fabrication", () => {
+  const worker = fs.readFileSync(path.join(root, "apps/studio-api/worker.js"), "utf8");
+  const funcs = fs.readFileSync(path.join(root, "apps/studio-api/worker-functions-04.mjs"), "utf8");
+  const start = funcs.indexOf("export async function studioReconcileExistingYoutubeProcessing(");
+  const end = funcs.indexOf("/*__STUDIO_WORKER_END:studioReconcileExistingYoutubeProcessing__*/", start);
+  assert.ok(start > 0 && end > start);
+  const stage = funcs.slice(start, end);
+  assert.match(stage, /studioPulseYtRecord\(env, "yts2", "YTS2", row\)/);
+  assert.match(stage, /Math\.min\(2,/);
+  assert.match(stage, /sortField: "YouTube_Last_Checked_At", sortDirection: "asc"/);
+  assert.match(stage, /videoId !== firstVideoId/);
+  assert.match(stage, /Do_Not_Publish/);
+  assert.match(stage, /Publish_Next_Retry_At/);
+  assert.match(stage, /YouTube_Video_ID/);
+  assert.match(stage, /Published_At/);
+  assert.doesNotMatch(stage, /studioPulseYtRecord\(env, "ytp1"|studioPulseYtRecord\(env, "yts3"|studioEnsureYoutubePublish|start_upload/);
+  const schedule = worker.slice(worker.indexOf("async scheduled(event, env, ctx)"), worker.indexOf("class HttpError"));
+  const idx = schedule.indexOf("ctx.waitUntil(studioReconcileExistingYoutubeProcessing");
+  assert.ok(idx > 0 && idx < schedule.indexOf("if (!cadence.heavy) return;"));
+  assert.match(schedule.slice(idx - 200, idx), /!cadence.heavy/);
+  assert.match(worker, /STUDIO_WORKER_EXTRACT:studioReconcileExistingYoutubeProcessing/);
+});
