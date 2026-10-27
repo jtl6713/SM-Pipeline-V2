@@ -916,6 +916,57 @@ export async function studioRearmDueYoutubeManualPublishes(env, options = {}) {
 
 /*__STUDIO_WORKER_END:studioRearmDueYoutubeManualPublishes__*/
 
+/**
+ * YTS1 status GET for an upload job that already exists. This stage MUST NOT
+ * initiate a replacement upload: the uploader job ID is re-read and compared
+ * before the provider check; the Python YTS1 stage also checks stage/identity.
+ * Poll on non-heavy cron so slow maintenance cannot strand upload receipts.
+ */
+export async function studioReconcileExistingYoutubeUploadJobs(env, options = {}) {
+  if (pipelineStageBackend(env, "YT0").mode !== "python") return [];
+  const limit = Math.max(1, Math.min(3, Number(options.limit || 3)));
+  const formula = 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Published_At}=BLANK(),'
+    + '{Review_Status}="Approved",{Publish_Status}="Publishing",{YouTube_Stage}="YT2",{YouTube_Upload_Job_ID}!="",{YouTube_Video_ID}="",'
+    + 'OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())),'
+    + 'OR({YouTube_Last_Checked_At}=BLANK(),DATETIME_DIFF(NOW(),{YouTube_Last_Checked_At},"minutes")>=2))';
+  const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit, filterFormula: formula,
+    sortField: "YouTube_Last_Checked_At", sortDirection: "asc",
+  });
+  const results = [];
+  for (const candidate of rows) {
+    try {
+      const row = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, candidate.id);
+      const uploadJobId = String(f(row, "YouTube_Upload_Job_ID") || "");
+      const originalJobId = String(f(candidate, "YouTube_Upload_Job_ID") || "");
+      const retryMs = Date.parse(String(f(row, "Publish_Next_Retry_At") || ""));
+      const checkedMs = Date.parse(String(f(row, "YouTube_Last_Checked_At") || ""));
+      if (!uploadJobId || uploadJobId !== originalJobId
+          || String(f(row, "Platform") || "") !== "YouTube"
+          || String(f(row, "YouTube_Stage") || "") !== "YT2"
+          || String(f(row, "Review_Status") || "") !== "Approved"
+          || String(f(row, "Publish_Status") || "") !== "Publishing"
+          || f(row, "Do_Not_Publish") === true
+          || !Boolean(f(row, "Auto_Publish_Enabled"))
+          || Boolean(f(row, "YouTube_Video_ID")) || Boolean(f(row, "Published_At"))
+          || (Number.isFinite(retryMs) && retryMs > Date.now())
+          || (Number.isFinite(checkedMs) && Date.now() - checkedMs < 2 * 60 * 1000)) {
+        results.push({ id: candidate.id, status: "skipped_changed_or_cooling" });
+        continue;
+      }
+      const poll = await studioPulseYtRecord(env, "yts1", "YTS1", row);
+      results.push({ id: candidate.id, output_id: f(row, "Output_ID"),
+        status: poll?.ok === false ? "poll_failed" : (poll?.still_processing ? "upload_processing" : (poll?.needs_processing_poll || poll?.needs_finalize ? "upload_verified" : (poll?.skipped || "polled"))),
+        existing_upload_job_only: true, no_new_upload: true });
+    } catch (error) {
+      results.push({ id: candidate.id, status: "poll_unavailable",
+        error: String(error?.message || error).slice(0, 150), no_new_upload: true });
+    }
+  }
+  return results;
+}
+/*__STUDIO_WORKER_END:studioReconcileExistingYoutubeUploadJobs__*/
+
 export async function studioReconcileYoutubePublishes(env, options = {}) {
   if (pipelineStageBackend(env, "YT0").mode !== "python") return [];
   const limit = Number(options.limit || 3);
