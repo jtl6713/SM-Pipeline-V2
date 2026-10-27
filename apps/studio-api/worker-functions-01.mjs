@@ -2485,6 +2485,7 @@ export function mapOutput(record, job = null, queueMeta = null, contentRecord = 
     studio_publish_dispatch_count: f(record, "Studio_Publish_Dispatch_Count"),
     tiktok_draft_publish_id: f(record, "TikTok_Draft_Publish_ID"),
     tiktok_draft_delivered_at: f(record, "TikTok_Draft_Delivered_At"),
+    tiktok_draft_email_sent_at: f(record, "TikTok_Draft_Email_Sent_At"),
     youtube_upload_completed_at: f(record, "YouTube_Upload_Completed_At"),
     tiktok_draft_status: f(record, "TikTok_Draft_Status"),
     manual_completion_status: f(record, "Manual_Completion_Status"),

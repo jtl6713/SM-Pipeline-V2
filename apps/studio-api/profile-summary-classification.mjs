@@ -1,4 +1,5 @@
 import { isQueuedForPlatformDispatch } from "./overview-dispatch-counts.mjs";
+import { isTikTokEmailedManualHandoff } from "./tiktok-emailed-handoff.mjs";
 
 export const HOME_PLATFORMS = Object.freeze(["Facebook", "Instagram", "TikTok", "YouTube"]);
 export const HOME_METRIC_KEYS = Object.freeze([
@@ -31,7 +32,7 @@ export function emptyHomeContribution() {
  * SQLite even if no Airtable status changes when the deadline passes.
  */
 export function homeOverdueDueAt(row) {
-  if (!row || row.do_not_publish) return 0;
+  if (!row || row.do_not_publish || isTikTokEmailedManualHandoff(row)) return 0;
   const review = String(row.review_status || "").trim().toLowerCase();
   const output = String(row.output_status || "").trim().toLowerCase();
   if (review && review !== "approved") return 0;
@@ -58,7 +59,10 @@ export function homeOverdueDueAt(row) {
  * NOT used by the approved-but-unpublished Home parentheses.
  */
 export function homeApprovedUpcomingAt(row) {
-  if (!row || !HOME_PLATFORMS.includes(row.platform) || !homeApprovedUnpublished(row)) return 0;
+  // V6 indexed calendar dates must use the same manual-handoff rule as Home and QA.
+  // Otherwise the immutable date index keeps counting emailed drafts as overdue.
+  if (!row || !HOME_PLATFORMS.includes(row.platform) || !homeApprovedUnpublished(row)
+      || isTikTokEmailedManualHandoff(row)) return 0;
   const when = Date.parse(String(row.scheduled_post_date || ""));
   if (!Number.isFinite(when) || when <= 0) return 0;
   const state = String(row.studio_state || "").trim().toLowerCase();
@@ -103,6 +107,7 @@ export function homeApprovedUnpublished(row, _now = Date.now()) {
  */
 export function homeApprovedExceptionKind(row, now = Date.now()) {
   if (!row || !HOME_PLATFORMS.includes(row.platform) || !homeApprovedUnpublished(row)) return "";
+  if (isTikTokEmailedManualHandoff(row)) return "";
   const due = Date.parse(String(row.scheduled_post_date || ""));
   if (!Number.isFinite(due) || due <= 0) return "approved_missing_date";
   return due <= now ? "approved_past_due" : "";
@@ -123,7 +128,10 @@ export function homeOutputContribution(row, now = Date.now()) {
   const knownPlatform = HOME_PLATFORMS.includes(row.platform);
   result.calendar_platform = knownPlatform ? row.platform : "";
   result.approved_unpublished = Number(homeApprovedUnpublished(row, now));
-  result.approved_missing_date = Number(knownPlatform && result.approved_unpublished && !homeApprovedUpcomingAt(row));
+  // A completed emailed TikTok handoff has a real scheduled date and belongs in
+  // Manual Needed; excluding its V6 calendar slot must NOT relabel it missing-date.
+  result.approved_missing_date = Number(knownPlatform && result.approved_unpublished
+    && !homeApprovedUpcomingAt(row) && !isTikTokEmailedManualHandoff(row));
   const dueAt = homeOverdueDueAt(row);
   result.overdue_unpublished = Number(dueAt > 0 && dueAt <= now);
   const state = String(row.studio_state || "").trim();

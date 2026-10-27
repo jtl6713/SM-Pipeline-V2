@@ -87,3 +87,28 @@ test("V6 reconciliation and snapshot are wired to the same ledger assembly", () 
   assert.match(controller, /validateStudioProfilesOverviewRows\(expectedRows, profiles\)/);
   assert.match(controller, /validProfileSummaryV6Rows\(summary\.records\)/);
 });
+
+
+test("durable V6 excludes emailed TikTok draft but preserves Manual Needed and unpublished", () => {
+  const draft = {
+    ...approved("TikTok", "2026-10-19T09:00:00Z"),
+    studio_state: "Manual Action Required", manual_completion_status: "Required",
+    tiktok_draft_status: "Draft Delivered — Manual Action Required",
+    tiktok_draft_email_sent_at: "2026-10-20T09:10:00Z",
+  };
+  const stillDue = { ...draft, tiktok_draft_email_sent_at: null };
+  const row = makeV6([draft, approved("Instagram", "2026-10-19T09:00:00Z")], at);
+  assert.equal(row.approved_past_due, 1);
+  assert.equal(row.approved_missing_date, 0);
+  assert.equal(row.manual, 1);
+  assert.equal(row.approved_unpublished, 2);
+  assert.deepEqual(row.approved_calendar_slots.TikTok, []);
+  assert.equal(makeV6([stillDue], at).approved_past_due, 1);
+});
+
+
+test("durable summary version invalidates pre-email-handoff calendar dates", () => {
+  const source = readFileSync(new URL("./profile-summary-do.mjs", import.meta.url), "utf8");
+  assert.match(source, /v6_calendar_tiktok_email_handoff_v2/);
+  assert.match(source, /putMeta\("future_count_reconcile_required", "true"\)/);
+});

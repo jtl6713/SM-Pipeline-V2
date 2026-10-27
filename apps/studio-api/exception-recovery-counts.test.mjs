@@ -7,7 +7,9 @@ const mapOutput=row=>({id:row.id,platform:row.fields.Platform||"Facebook",
  publish_status:row.fields.Publish_Status,studio_state:row.fields.Studio_State||"Scheduled",
  do_not_publish:row.fields.Do_Not_Publish===true,
  scheduled_post_date:row.fields.Scheduled_Post_Date,
- published_at:row.fields.Published_At,platform_post_url:row.fields.Platform_Post_URL});
+ published_at:row.fields.Published_At,platform_post_url:row.fields.Platform_Post_URL,
+ tiktok_draft_status:row.fields.TikTok_Draft_Status,
+ tiktok_draft_email_sent_at:row.fields.TikTok_Draft_Email_Sent_At});
 test("uses Home canonical failure, past due, no date, manual and hold predicates",()=>{
  const rows=[
   r("recAAAAAAAAAAAAAA",{Platform:"Facebook",Review_Status:"Approved",Output_Status:"Approved for Publishing",Publish_Status:"Publishing",Scheduled_Post_Date:"2026-10-20T00:00:00Z"}),
@@ -117,4 +119,20 @@ test("overdue lanes are disjoint and no saved ID is treated as proof of a posted
  assert.equal(yt.public_receipt_recorded,false);
  assert.equal(yt.actions_enabled,false);
  assert.equal(actual.exception_items.filter(x=>x.status_only_verification_candidate).length,2);
+});
+
+
+test("global Exception Recovery census keeps emailed TikTok drafts in Manual Needed, not overdue",()=>{
+ const cutoff=Date.parse("2026-10-27T05:00:00Z");
+ const base={Platform:"TikTok",Review_Status:"Approved",Output_Status:"Approved for Publishing",
+   Publish_Status:"Ready to Publish",Studio_State:"Manual Action Required",
+   Scheduled_Post_Date:"2026-10-25T05:00:00Z",
+   TikTok_Draft_Status:"Draft Delivered — Manual Action Required"};
+ const rows=[r("recAAAAAAAAAAAAAA",{...base,TikTok_Draft_Email_Sent_At:"2026-10-25T05:01:00Z"}),
+   r("recBBBBBBBBBBBBBB",base)];
+ const data=reconcileExceptionCensus(rows,mapOutput,{atMs:cutoff});
+ assert.equal(data.totals.approved_past_due,1);
+ assert.equal(data.totals.manual_action_required,2);
+ assert.equal(data.exception_items.filter(x=>x.categories.includes("approved_past_due")).length,1);
+ assert.equal(data.exception_items.find(x=>x.record_id===rows[0].id),undefined);
 });

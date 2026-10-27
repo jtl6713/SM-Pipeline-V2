@@ -111,3 +111,21 @@ test("Home UI combines future and human-review per platform, not rendering queue
   assert.match(ui,/const pipelineTotal = future \+ awaiting/);
   assert.match(ui,/Math.ceil\(Math.max\(0, 500 - pipelineTotal\) \/ 5\)/);
 });
+
+
+test("calendar Past Due excludes emailed TikTok manual handoff but not undelivered drafts",()=>{
+ const emailed={...approved("TikTok",stampPast,"TikTok Video"),
+   tiktok_draft_status:"Draft Delivered — Manual Action Required",
+   tiktok_draft_email_sent_at:"2026-10-20T11:55:00Z",
+   studio_state:"Manual Action Required",manual_completion_status:"Required"};
+ const unsent={...emailed,tiktok_draft_email_sent_at:""};
+ const processing={...emailed,tiktok_draft_status:"Processing"};
+ const confirmed={...emailed,tiktok_draft_status:"Manual Completion Received"};
+ const records=[emailed,unsent,processing,confirmed,approved("Instagram",stampPast)];
+ const result=homeApprovedCalendarCounts(records,at);
+ assert.equal(result.past_due,3);
+ assert.equal(result.slots.TikTok.length,2);
+ assert.equal(result.slots.Instagram.length,1);
+ assert.equal(homeOutputContribution(emailed,at).manual_action_required,1);
+ assert.equal(homeOutputContribution(emailed,at).approved_unpublished,1);
+});

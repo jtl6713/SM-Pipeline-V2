@@ -10353,6 +10353,7 @@ export const EXCEPTION_CENSUS_FIELDS = Object.freeze([
   "IG_Carousel_Status",
   "IG_Story_Status",
   "TikTok_Draft_Status",
+  "TikTok_Draft_Email_Sent_At",
   "YouTube_Video_ID",
   "YouTube_Upload_Status",
   "YouTube_Processing_Status",

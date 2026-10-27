@@ -196,3 +196,13 @@ test("approved overdue outputs show their stored titles instead of Untitled outp
     Output_Title:"",Title_Text:"Title from alternate source",
   }),now).title,"Title from alternate source");
 });
+
+
+test("QA-PUBLISH-001 excludes only confirmed TikTok emailed-draft handoffs",()=>{
+ const filter=approvedPastDueFormula(now);
+ assert.match(filter,/NOT\(AND\(\{Platform\}="TikTok"/);
+ assert.match(filter,/\{TikTok_Draft_Email_Sent_At\}!=BLANK\(\)/);
+ assert.match(filter,/Draft Delivered — Manual Action Required/);
+ assert.match(filter,/Manual Completion Received/);
+ assert.match(filter,/\{Published_At\}=BLANK\(\)/);
+});

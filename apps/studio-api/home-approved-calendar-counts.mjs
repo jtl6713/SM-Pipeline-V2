@@ -1,4 +1,5 @@
 import { homeApprovedUnpublished, homeApprovedExceptionKind, homeOutputContribution, HOME_PLATFORMS } from "./profile-summary-classification.mjs";
+import { isTikTokEmailedManualHandoff } from "./tiktok-emailed-handoff.mjs";
 
 // Calendar uses Scheduled_Post_Date, never dispatch status or provisional approval.
 // Each mapped Platform Output is counted once, including Stories, Reels and carousels.
@@ -17,6 +18,9 @@ export function homeApprovedCalendarCounts(outputs, now = Date.now()) {
       continue;
     }
     if (!homeApprovedUnpublished(row)) continue;
+    // Emailed TikTok drafts are tracked in Manual Needed, not calendar Past Due.
+    // This is an operational handoff, not a public Published receipt.
+    if (isTikTokEmailedManualHandoff(row)) continue;
     const kind = homeApprovedExceptionKind(row, now);
     if (kind === "approved_missing_date") {
       missing += 1;

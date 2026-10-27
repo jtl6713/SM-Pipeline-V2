@@ -5031,6 +5031,7 @@ const OUTPUT_LIST_FIELDS = [
   "Studio_Publish_Dispatch_Count",
   "TikTok_Draft_Publish_ID",
   "TikTok_Draft_Delivered_At",
+  "TikTok_Draft_Email_Sent_At",
   "YouTube_Upload_Completed_At",
   "Music_Status",
   "Publish_Error_Stage",
