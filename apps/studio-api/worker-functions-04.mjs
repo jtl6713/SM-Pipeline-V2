@@ -1007,6 +1007,55 @@ export async function studioReconcileYoutubePublishes(env, options = {}) {
 }
 /*__STUDIO_WORKER_END:studioReconcileYoutubePublishes__*/
 
+/**
+ * Recovery priority: TTD2 is a provider status GET for an EXISTING draft
+ * publish ID, never a new TikTok upload. Run it separately from new TTD0/TTD1
+ * preparations so expensive sends cannot strand old processing drafts.
+ * Oldest last-checked first; bounded to six per half hour with stored cooldown,
+ * and the runner re-reads authoritative eligibility before its provider GET.
+ */
+export async function studioReconcileTiktokProcessingDrafts(env, options = {}) {
+  if (pipelineStageBackend(env, "TTD0").mode !== "python") return [];
+  const limit = Math.max(1, Math.min(8, Number(options.limit || 6)));
+  const formula = `AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{TikTok_Draft_Publish_ID}!="",${STUDIO_TIKTOK_INBOX_DUE_FORMULA},OR({TikTok_Draft_Status}="Processing",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD2",UPPER({Publish_Error_Stage}&""))>0)),OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))`;
+  let rows;
+  try {
+    rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit, filterFormula: formula,
+      sortField: "TikTok_Draft_Last_Checked_At", sortDirection: "asc",
+    });
+  } catch (error) {
+    console.warn("TikTok TTD2 existing-draft status scan failed", error);
+    return [];
+  }
+  const results = [];
+  for (const row of rows) {
+    try {
+      const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
+      const stage = String(f(current, "TikTok_Draft_Status") || "");
+      const retryStage = String(f(current, "Publish_Error_Stage") || "");
+      const nextRetry = Date.parse(String(f(current, "Publish_Next_Retry_At") || ""));
+      if (!current || Boolean(f(current, "Do_Not_Publish"))
+          || Boolean(f(current, "Published_At")) || Boolean(f(current, "Platform_Post_ID"))
+          || Boolean(f(current, "Test_Run_ID"))
+          || !String(f(current, "TikTok_Draft_Publish_ID") || "").trim()
+          || !(stage === "Processing" || (stage === "Retry Pending" && /TTD2/i.test(retryStage)))
+          || (Number.isFinite(nextRetry) && nextRetry > Date.now())) {
+        results.push({ id: row.id, skipped: "authoritative_state_changed", provider_creates: 0 });
+        continue;
+      }
+      const result = await studioPulseTtd2(env, current);
+      results.push({ id: row.id, ok: result?.ok !== false, skipped: result?.skipped || null,
+        still_processing: Boolean(result?.still_processing), provider_creates: 0 });
+    } catch (error) {
+      console.warn("TikTok TTD2 existing-draft poll failed", row.id, error);
+      results.push({ id: row.id, error: String(error?.message || error), provider_creates: 0 });
+    }
+  }
+  return results;
+}
+/*__STUDIO_WORKER_END:studioReconcileTiktokProcessingDrafts__*/
+
 export async function studioReconcileTiktokDrafts(env, options = {}) {
   if (pipelineStageBackend(env, "TTD0").mode !== "python") return [];
   const limit = Number(options.limit || 3);
@@ -1024,11 +1073,7 @@ export async function studioReconcileTiktokDrafts(env, options = {}) {
       pulse: studioPulseTtd1,
       formula: `AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{TikTok_Draft_Publish_ID}="",${STUDIO_TIKTOK_INBOX_DUE_FORMULA},OR({TikTok_Draft_Status}="Ready for Delivery",AND({TikTok_Draft_Status}="Retry Pending",OR(FIND("TTD1",UPPER({Publish_Error_Stage}&""))>0,{Publish_Error_Stage}="TTD_CAPACITY"))))`,
     },
-    {
-      stage: "ttd2",
-      pulse: studioPulseTtd2,
-      formula: `AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{TikTok_Draft_Publish_ID}!="",${STUDIO_TIKTOK_INBOX_DUE_FORMULA},OR({TikTok_Draft_Status}="Processing",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD2",UPPER({Publish_Error_Stage}&""))>0)))`,
-    },
+    // Existing-draft TTD2 status polls are on the independent high-priority cron.
     {
       stage: "ttd3",
       pulse: studioPulseTtd3,
