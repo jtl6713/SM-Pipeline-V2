@@ -648,6 +648,7 @@ import {
   healYoutubeManualWithLiveVideoRecord,
   studioReconcileYoutubePublishes,
   studioReconcileYoutubeUploadProcessing,
+  studioReconcileExistingYoutubeProcessing,
   studioReconcileTiktokDrafts,
   studioReconcileTiktokProcessing,
   studioReconcileFacebookPhotos,
@@ -2673,6 +2674,19 @@ export default {
           })))
           .catch((error) => console.warn("FB3 independent cron failed", error)));
       }
+    }
+    // Continue ONLY existing uploaded YouTube video processing (YTS2) on
+    // independent light ticks. The prior six YT2 jobs recovered video IDs
+    // but processing had not advanced. Two oldest-first checks per tick;
+    // no fresh upload or YTS3 public-status write.
+    if (!cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioReconcileExistingYoutubeProcessing(env, { limit: 2 })
+        .then((results) => console.info("YTS2 existing-video light cron", JSON.stringify({
+          checked: results.length,
+          ready_for_finalize: results.filter(x => x.status === "ready_for_existing_video_finalize").length,
+          results, new_uploads: 0,
+        })))
+        .catch((error) => console.warn("YTS2 existing-video light cron unavailable", error)));
     }
     // Existing TikTok draft status GETs are not new uploads. They previously
     // ran only late in a long heavy sweep: 24 live Processing drafts had one
@@ -5826,6 +5840,7 @@ const STUDIO_PUBLISH_RECONCILE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:studioCloseYoutubeManualWithLiveVideo__*/
 /*__STUDIO_WORKER_EXTRACT:studioRearmDueYoutubeManualPublishes__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileYoutubeUploadProcessing__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcileExistingYoutubeProcessing__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileYoutubePublishes__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileTiktokProcessing__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileTiktokDrafts__*/
