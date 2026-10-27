@@ -2727,7 +2727,7 @@ export default {
     // already-created Reel media containers are selected; runner rereads
     // approvals, holds, state and container ID before any Graph publishing.
     if (!cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
-      ctx.waitUntil(studioReconcilePublishingInstagramReels(env, { limit: 4 })
+      ctx.waitUntil(studioReconcilePublishingInstagramReels(env, { limit: 1 })
         .then(results => console.info("Instagram saved-Reel continuation", JSON.stringify({
           checked: results.length,
           pending: results.filter(r => !r.post_id).length,
