@@ -94,6 +94,12 @@ def process_request(
         status = graph.wait_for_container(container_id) if wait else graph.container_status(container_id)
     except InstagramGraphError as exc:
         code = str(exc.status_code or "").upper()
+        # PUBLISHED is a valid Meta container state, NOT a failed upload.
+        # It does NOT provide the public Story ID, so never call media_publish
+        # again and never mark the output Published without exact receipt proof.
+        if code == "PUBLISHED":
+            _mark_published_unverified(client, output, {"status_code": code, "status": exc.status})
+            return {"processed": False, "reason": "existing_story_published_requires_verification", **preview}
         if "IN_PROGRESS" in code or "in progress" in str(exc).lower():
             _mark_still_processing(client, output, {"status_code": exc.status_code, "status": exc.status})
             return {"processed": True, "still_processing": True, "error": str(exc), **preview}
@@ -109,6 +115,9 @@ def process_request(
 
     status_blob = f"{status.get('status_code') or ''} {status.get('status') or ''} {status}"
     code = str(status.get("status_code") or "").upper()
+    if code == "PUBLISHED":
+        _mark_published_unverified(client, output, status)
+        return {"processed": False, "reason": "existing_story_published_requires_verification", **preview}
     if "ERROR" in status_blob.upper() or "EXPIRED" in status_blob.upper() or code in {"ERROR", "EXPIRED"}:
         _mark_container_failed(
             client,
@@ -174,6 +183,41 @@ def _mark_still_processing(client: AirtableClient, output: dict[str, Any], statu
             "IG_Story_Attempt_Count": attempt,
             "IG_Story_Response_JSON": response_text,
             "Output_Notes": notes,
+        },
+        typecast=True,
+    )
+
+
+def _mark_published_unverified(
+    client: AirtableClient, output: dict[str, Any], status: dict[str, Any]
+) -> None:
+    """Meta says PUBLISHED, but the container response does not identify the post.
+
+    Halt automatic media_publish / replacement and require an authenticated
+    existing-story receipt before changing Published_At or Platform_Post_ID.
+    """
+    container_id = field_str(output, "IG_Story_Container_ID")
+    message = (
+        f"IG Story container {container_id} reports PUBLISHED. "
+        "Public Story ID is not confirmed. Verify existing Story receipt "
+        "before updating Published or issuing any new media_publish."
+    )
+    client.update_record(
+        PLATFORM_OUTPUTS_TABLE,
+        output["id"],
+        {
+            "IG_Story_Status": "Publishing",
+            "IG_Story_Error_Message": message,
+            "IG_Story_Last_Attempt_At": iso_utc(),
+            "IG_Story_Response_JSON": str(status)[:2000],
+            "Publish_Error_Stage": "AP1_IGS_PUBLISHED_UNVERIFIED",
+            "Publish_Error_Message": message,
+            "Publish_Retry_Eligible": False,
+            "Publish_Next_Retry_At": None,
+            "Output_Notes": _append_notes(
+                field_str(output, "Output_Notes"),
+                f"AP1-IGS-POLL receipt verification required for existing container {container_id} at {stamp_minutes()}. No new post created.",
+            ),
         },
         typecast=True,
     )
