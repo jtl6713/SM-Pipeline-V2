@@ -52,7 +52,7 @@ def poll_eligibility_reason(record: dict[str, Any]) -> str | None:
     if not str(record.get("id") or "").strip():
         return "missing_record_id"
     status = _ci(field_str(record, "FB_Slideshow_Status"))
-    if status not in {_ci(STATUS_PROCESSING), _ci(STATUS_PENDING_FINALIZE)}:
+    if status not in {"uploading reel", _ci(STATUS_PROCESSING), _ci(STATUS_PENDING_FINALIZE)}:
         return "slideshow_status_not_processing"
     if not video_id(record):
         return "missing_facebook_video_id"
