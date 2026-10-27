@@ -163,3 +163,26 @@ test("TTD2 existing draft polling is independently scheduled, fair and bounded",
   assert.match(scheduled.slice(independent - 200, independent), /!cadence.heavy/);
   assert.match(cron, /STUDIO_WORKER_EXTRACT:studioReconcileTiktokProcessing/);
 });
+
+
+test("YTS1 existing-upload polls are safe, oldest first, and independent on light cron", () => {
+  const cron = fs.readFileSync(path.join(root, "apps/studio-api/worker.js"), "utf8");
+  const impl = fs.readFileSync(path.join(root, "apps/studio-api/worker-functions-04.mjs"), "utf8");
+  const start = impl.indexOf("export async function studioReconcileExistingYoutubeUploadJobs(");
+  const end = impl.indexOf("/*__STUDIO_WORKER_END:studioReconcileExistingYoutubeUploadJobs__*/", start);
+  assert.ok(start > 0 && end > start);
+  const stage = impl.slice(start, end);
+  assert.match(stage, /sortField: "YouTube_Last_Checked_At", sortDirection: "asc"/);
+  assert.match(stage, /Math\.min\(3,/);
+  assert.match(stage, /uploadJobId !== originalJobId/);
+  assert.match(stage, /studioPulseYtRecord\(env, "yts1", "YTS1", row\)/);
+  assert.match(stage, /Do_Not_Publish/);
+  assert.match(stage, /YouTube_Video_ID/);
+  assert.match(stage, /Publish_Next_Retry_At/);
+  assert.doesNotMatch(stage, /studioPulseYtRecord\(env, "ytp1"|studioEnsureYoutubePublish|studioDispatchApprovedPublishNow/);
+  const scheduled = cron.slice(cron.indexOf("async scheduled(event, env, ctx)"), cron.indexOf("class HttpError"));
+  const pollIndex = scheduled.indexOf("ctx.waitUntil(studioReconcileExistingYoutubeUploadJobs");
+  assert.ok(pollIndex > 0 && pollIndex < scheduled.indexOf("if (!cadence.heavy) return;"));
+  assert.match(scheduled.slice(pollIndex - 180, pollIndex), /!cadence.heavy/);
+  assert.match(cron, /STUDIO_WORKER_EXTRACT:studioReconcileExistingYoutubeUploadJobs/);
+});
