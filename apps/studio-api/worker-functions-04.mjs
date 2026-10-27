@@ -1075,7 +1075,9 @@ export async function studioReconcileTiktokProcessing(env, options = {}) {
     sortField: "TikTok_Draft_Last_Checked_At", sortDirection: "asc",
   });
   const results = [];
+  let resumed = 0;
   for (const candidate of rows) {
+    if (resumed >= limit) break;
     try {
       const row = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, candidate.id);
       const status = String(f(row, "TikTok_Draft_Status") || "");
@@ -2339,11 +2341,14 @@ export async function studioReconcilePublishingInstagramReels(env, options = {})
   if (pipelineStageBackend(env, "AP1_IG").mode !== "python") return [];
   // Resume only previously created Graph containers. This reconciliation
   // never creates another container or bypasses publication holds.
-  const limit = Math.max(1, Math.min(4, Number(options.limit || 4)));
+  // One canary-sized existing-container continuation per light tick; allow
+  // discovery across the first 24 eligible records so stale/unsafe candidates
+  // do not monopolize the scan. Never select blank media or unknown provenance.
+  const limit = Math.max(1, Math.min(2, Number(options.limit || 1)));
   let rows = [];
   try {
     rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit,
+      limit: Math.max(limit * 8, 24),
       filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Published_At}=BLANK(),'
         + '{Review_Status}="Approved",{Output_Status}="Approved for Publishing",{Publish_Method}="Automated",'
         + '{Platform_Post_ID}="",{Platform_Media_ID}!="",{Platform_Output_Type}="Instagram Reel",'
@@ -2365,8 +2370,16 @@ export async function studioReconcilePublishingInstagramReels(env, options = {})
       const candidateMediaId = String(f(candidate, "Platform_Media_ID") || "");
       const nextRetryMs = Date.parse(String(f(row, "Publish_Next_Retry_At") || ""));
       const lastAttemptMs = Date.parse(String(f(row, "Last_Publish_Attempt_At") || ""));
+      const lockAtMs = Date.parse(String(f(row, "Publish_Locked_At") || ""));
+      const lastNotes = String(f(row, "Output_Notes") || "").slice(-1400);
+      const processingProof = "AP1-IG Instagram container " + mediaId + " still processing";
       if (!mediaId || mediaId !== candidateMediaId
-        || Boolean(f(row, "Platform_Post_ID")) || Boolean(f(row, "Published_At"))
+        || Boolean(f(row, "Platform_Post_ID")) || Boolean(f(row, "Platform_Post_URL")) || Boolean(f(row, "Published_At"))
+        || Boolean(f(row, "Publish_Locked_By"))
+        || Number(f(row, "Publish_Attempt_Count") || 0) >= 8
+        || !lastNotes.includes(processingProof)
+        || /AP1-IG automated Instagram Reel publish completed|Instagram permalink:/i.test(lastNotes)
+        || (Number.isFinite(lockAtMs) && Date.now() - lockAtMs < 15 * 60 * 1000)
         || Boolean(f(row, "Test_Run_ID")) || Boolean(f(row, "Do_Not_Publish"))
         || !Boolean(f(row, "Auto_Publish_Enabled"))
         || String(f(row, "Publish_Method") || "") !== "Automated"
@@ -2381,6 +2394,7 @@ export async function studioReconcilePublishingInstagramReels(env, options = {})
         results.push({ id: candidate.id, skipped: "state_or_container_changed", new_containers: 0 });
         continue;
       }
+      resumed += 1;
       const pulsed = await studioPulseAp1IgReel(env, row);
       results.push({
         id: row.id, ok: pulsed?.ok !== false, skipped: pulsed?.skipped || null,
