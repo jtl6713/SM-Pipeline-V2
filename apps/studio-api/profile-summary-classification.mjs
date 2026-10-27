@@ -59,7 +59,10 @@ export function homeOverdueDueAt(row) {
  * NOT used by the approved-but-unpublished Home parentheses.
  */
 export function homeApprovedUpcomingAt(row) {
-  if (!row || !HOME_PLATFORMS.includes(row.platform) || !homeApprovedUnpublished(row)) return 0;
+  // V6 indexed calendar dates must use the same manual-handoff rule as Home and QA.
+  // Otherwise the immutable date index keeps counting emailed drafts as overdue.
+  if (!row || !HOME_PLATFORMS.includes(row.platform) || !homeApprovedUnpublished(row)
+      || isTikTokEmailedManualHandoff(row)) return 0;
   const when = Date.parse(String(row.scheduled_post_date || ""));
   if (!Number.isFinite(when) || when <= 0) return 0;
   const state = String(row.studio_state || "").trim().toLowerCase();
@@ -125,7 +128,10 @@ export function homeOutputContribution(row, now = Date.now()) {
   const knownPlatform = HOME_PLATFORMS.includes(row.platform);
   result.calendar_platform = knownPlatform ? row.platform : "";
   result.approved_unpublished = Number(homeApprovedUnpublished(row, now));
-  result.approved_missing_date = Number(knownPlatform && result.approved_unpublished && !homeApprovedUpcomingAt(row));
+  // A completed emailed TikTok handoff has a real scheduled date and belongs in
+  // Manual Needed; excluding its V6 calendar slot must NOT relabel it missing-date.
+  result.approved_missing_date = Number(knownPlatform && result.approved_unpublished
+    && !homeApprovedUpcomingAt(row) && !isTikTokEmailedManualHandoff(row));
   const dueAt = homeOverdueDueAt(row);
   result.overdue_unpublished = Number(dueAt > 0 && dueAt <= now);
   const state = String(row.studio_state || "").trim();
