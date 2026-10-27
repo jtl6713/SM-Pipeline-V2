@@ -81,7 +81,7 @@ test("scheduled skips cron while Airtable is cooling down", () => {
   assert.doesNotMatch(scheduled, /purgeDeletedDuplicatePackages/);
 });
 
-test("light ticks only run publish/produce rescue; heavy owns platform heals", () => {
+test("light ticks run bounded existing-ID continuation; heavy owns mutating platform heals", () => {
   const scheduled = scheduledBody();
   assert.match(scheduled, /const cadence = studioCronAirtableCadence/);
   assert.match(scheduled, /if \(!cadence\.heavy\) return;/);
@@ -96,7 +96,7 @@ test("light ticks only run publish/produce rescue; heavy owns platform heals", (
   assert.ok(heavyGate > 0, "missing light early-return");
   const afterHeavy = scheduled.slice(heavyGate);
   assert.match(afterHeavy, /studioReconcileTiktokDrafts/);
-  assert.match(afterHeavy, /studioReconcilePublishingInstagramReels/);
+  // Existing saved Reel container continuation was moved to independent light cadence.
   assert.match(afterHeavy, /studioReconcileFacebookReels/);
   assert.match(afterHeavy, /studioReconcileYoutubePublishes/);
   assert.match(afterHeavy, /studioHealFailedStatuses/);
@@ -114,7 +114,7 @@ test("light ticks only run publish/produce rescue; heavy owns platform heals", (
   assert.match(beforeHeavy, /cronMinute: cadence\.minute/);
   assert.match(scheduled, /event\?\.scheduledTime/);
   assert.doesNotMatch(beforeHeavy, /studioReconcileTiktokDrafts/);
-  assert.doesNotMatch(beforeHeavy, /studioReconcilePublishingInstagramReels/);
+  assert.match(beforeHeavy, /ctx\.waitUntil\(studioReconcilePublishingInstagramReels\(env, \{ limit: 4 \}\)/);
   assert.doesNotMatch(beforeHeavy, /studioReconcileYoutubePublishes/);
   assert.doesNotMatch(beforeHeavy, /studioHealFailedStatuses/);
   assert.doesNotMatch(beforeHeavy, /studioSweepPublishedInsights/);

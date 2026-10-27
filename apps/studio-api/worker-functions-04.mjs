@@ -2337,31 +2337,59 @@ export async function studioReconcilePublishingInstagramStories(env, options = {
 
 export async function studioReconcilePublishingInstagramReels(env, options = {}) {
   if (pipelineStageBackend(env, "AP1_IG").mode !== "python") return [];
-  const limit = Number(options.limit || 4);
+  // Resume only previously created Graph containers. This reconciliation
+  // never creates another container or bypasses publication holds.
+  const limit = Math.max(1, Math.min(4, Number(options.limit || 4)));
   let rows = [];
   try {
     rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit,
-      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Published_At}=BLANK(),{Platform_Post_ID}="",{Platform_Media_ID}!="",OR({Platform_Output_Type}="Instagram Reel",{Studio_Output_Type}="Reel"),OR({Publish_Status}="Publishing",AND({Publish_Status}="Ready to Publish",{Publish_Retry_Eligible}=1)))',
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Published_At}=BLANK(),'
+        + '{Review_Status}="Approved",{Output_Status}="Approved for Publishing",{Publish_Method}="Automated",'
+        + '{Platform_Post_ID}="",{Platform_Media_ID}!="",{Platform_Output_Type}="Instagram Reel",'
+        + 'OR({Publish_Status}="Publishing",AND({Publish_Status}="Ready to Publish",{Publish_Retry_Eligible}=1)),'
+        + 'OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())),'
+        + 'OR({Last_Publish_Attempt_At}=BLANK(),DATETIME_DIFF(NOW(),{Last_Publish_Attempt_At},"minutes")>=2))',
+      sortField: "Last_Publish_Attempt_At",
+      sortDirection: "asc",
     });
   } catch (error) {
-    console.warn("instagram reel in-progress reconcile scan failed", error);
+    console.warn("instagram existing-Reel reconcile scan failed", error);
     return [];
   }
   const results = [];
-  for (const row of rows) {
+  for (const candidate of rows) {
     try {
+      const row = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, candidate.id);
+      const mediaId = String(f(row, "Platform_Media_ID") || "");
+      const candidateMediaId = String(f(candidate, "Platform_Media_ID") || "");
+      const nextRetryMs = Date.parse(String(f(row, "Publish_Next_Retry_At") || ""));
+      const lastAttemptMs = Date.parse(String(f(row, "Last_Publish_Attempt_At") || ""));
+      if (!mediaId || mediaId !== candidateMediaId
+        || Boolean(f(row, "Platform_Post_ID")) || Boolean(f(row, "Published_At"))
+        || Boolean(f(row, "Test_Run_ID")) || Boolean(f(row, "Do_Not_Publish"))
+        || !Boolean(f(row, "Auto_Publish_Enabled"))
+        || String(f(row, "Publish_Method") || "") !== "Automated"
+        || String(f(row, "Platform_Output_Type") || "") !== "Instagram Reel"
+        || String(f(row, "Output_Status") || "") !== "Approved for Publishing"
+        || String(f(row, "Review_Status") || "") !== "Approved"
+        || !(String(f(row, "Publish_Status") || "") === "Publishing"
+          || (String(f(row, "Publish_Status") || "") === "Ready to Publish"
+            && Boolean(f(row, "Publish_Retry_Eligible"))))
+        || (Number.isFinite(nextRetryMs) && nextRetryMs > Date.now())
+        || (Number.isFinite(lastAttemptMs) && Date.now() - lastAttemptMs < 2 * 60 * 1000)) {
+        results.push({ id: candidate.id, skipped: "state_or_container_changed", new_containers: 0 });
+        continue;
+      }
       const pulsed = await studioPulseAp1IgReel(env, row);
       results.push({
-        id: row.id,
-        ok: pulsed?.ok !== false,
-        skipped: pulsed?.skipped || null,
-        post_id: pulsed?.post_id || null,
+        id: row.id, ok: pulsed?.ok !== false, skipped: pulsed?.skipped || null,
+        post_id: pulsed?.post_id || null, new_containers: 0,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn("instagram reel in-progress reconcile failed", row.id, error);
-      results.push({ id: row.id, error: message });
+      console.warn("instagram existing-Reel reconcile failed", candidate.id, error);
+      results.push({ id: candidate.id, error: message, new_containers: 0 });
     }
   }
   return results;

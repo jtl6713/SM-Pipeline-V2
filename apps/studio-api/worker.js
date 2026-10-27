@@ -2723,6 +2723,19 @@ export default {
         .then((result) => console.info("Light-cadence photo matching", result))
         .catch((error) => console.warn("Light-cadence photo matching failed", error)));
     }
+    // AP1-IG continuation must not be stranded by heavy Factory/QA. Only
+    // already-created Reel media containers are selected; runner rereads
+    // approvals, holds, state and container ID before any Graph publishing.
+    if (!cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioReconcilePublishingInstagramReels(env, { limit: 4 })
+        .then(results => console.info("Instagram saved-Reel continuation", JSON.stringify({
+          checked: results.length,
+          pending: results.filter(r => !r.post_id).length,
+          failures: results.filter(r => r.error || r.ok === false).length,
+          new_containers: 0,
+        })))
+        .catch(error => console.warn("Instagram saved-Reel continuation unavailable", error)));
+    }
     // QA-1050: half-hour read-only evidence audit, independent of Factory.
     // Never performs a Meta Graph create or releases safety holds.
     if (cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
@@ -3042,11 +3055,7 @@ export default {
       } catch (error) {
         console.warn("instagram story poll reconcile cron failed", error);
       }
-      try {
-        await studioReconcilePublishingInstagramReels(env);
-      } catch (error) {
-        console.warn("instagram reel in-progress reconcile cron failed", error);
-      }
+      // Existing Instagram Reel media-ID continuation runs independently on light cron.
       try {
         await studioReconcileFacebookSlideshows(env);
       } catch (error) {
