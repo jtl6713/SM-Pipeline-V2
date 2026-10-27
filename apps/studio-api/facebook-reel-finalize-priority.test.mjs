@@ -25,10 +25,28 @@ test("FBS4 only examines known existing Meta videos after their retry time",()=>
     {Output_Status:"Published"},{Published_At:"2026-10-22T15:00Z"},
     {Do_Not_Publish:true},{Test_Run_ID:"test"},
     {Publish_Next_Retry_At:"2026-10-22T18:00Z"},
-    {Publish_Locked_By:"FBS4"},{Publish_Locked_At:"2026-10-22T16:00Z"},
+    {Publish_Locked_By:"FBS4"},{Publish_Locked_At:"2026-10-22T16:45Z"},
     {FB_Slideshow_Meta_Video_ID:"" ,Platform_Post_ID:""},
     {FB_Slideshow_Meta_Video_ID:"29351606447777227",Platform_Post_ID:"wrong"},
   ])assert.equal(facebookReelPollEligible(make(2301,fields),now),false,JSON.stringify(fields));
+});
+test("FBS4 GET-only status polling can recover a stale FBS3 lock on the exact saved video",()=>{
+  const stale=make(2654,{
+    FB_Slideshow_Status:"Uploading Reel",
+    FB_Slideshow_Meta_Video_ID:"1854645858873135",
+    Publish_Locked_By:"FBS3",
+    Publish_Locked_At:"2026-10-20T15:38:41Z",
+  });
+  assert.equal(facebookReelPollEligible(stale,now),true);
+  assert.deepEqual(selectFacebookReelPollBatch([stale],{limit:3,nowMs:now}).map(x=>x.id),[stale.id]);
+  for(const fields of [
+    {Publish_Locked_At:"2026-10-22T16:45Z"},
+    {Publish_Locked_At:"not-a-date"},
+    {Publish_Locked_At:""},
+    {Publish_Locked_At:"2026-10-23T00:00Z"},
+    {Do_Not_Publish:true},
+    {FB_Slideshow_Meta_Video_ID:"",Platform_Post_ID:""},
+  ]) assert.equal(facebookReelPollEligible({...stale,fields:{...stale.fields,...fields}},now),false,JSON.stringify(fields));
 });
 test("FBS4 refuses mismatched remote video identity",()=>{
   assert.equal(facebookReelPollVideoId(make(2301,{Platform_Post_ID:"2301000000000000"})),"2301000000000000");
