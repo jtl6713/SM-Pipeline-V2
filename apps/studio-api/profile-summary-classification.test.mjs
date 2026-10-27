@@ -193,3 +193,24 @@ test("TikTok emailed manual drafts leave only Past Due, not unpublished or Manua
  assert.equal(homeOutputContribution(failed,now).failed_outputs,1);
  assert.equal(homeOutputContribution(failed,now).overdue_unpublished,0);
 });
+
+
+test("email-confirmed TikTok handoff is excluded from the V6 calendar AND missing-date bucket", () => {
+  const at = Date.parse("2026-10-27T05:00:00Z");
+  const row = {
+    platform: "TikTok", review_status: "Approved",
+    output_status: "Approved for Publishing", studio_state: "Manual Action Required",
+    publish_status: "Ready to Publish", manual_completion_status: "Required",
+    scheduled_post_date: "2026-10-26T09:30:00Z",
+    tiktok_draft_status: "Draft Delivered — Manual Action Required",
+    tiktok_draft_email_sent_at: "2026-10-27T01:05:11Z",
+  };
+  assert.equal(homeApprovedUpcomingAt(row), 0, "email handoff must not enter V6 calendar date index");
+  const c = homeOutputContribution(row, at);
+  assert.equal(c.approved_unpublished, 1, "a draft is not a public post");
+  assert.equal(c.approved_missing_date, 0, "email handoff is not an undated approval");
+  assert.equal(c.overdue_unpublished, 0, "email handoff is not Past Due");
+  assert.equal(c.manual_action_required, 1);
+  assert.equal(homeApprovedUpcomingAt({ ...row, tiktok_draft_email_sent_at: null }) > 0, true);
+  assert.equal(homeOutputContribution({ ...row, tiktok_draft_email_sent_at: null }, at).overdue_unpublished, 1);
+});
