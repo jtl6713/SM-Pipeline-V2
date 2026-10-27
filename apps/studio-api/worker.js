@@ -648,6 +648,7 @@ import {
   healYoutubeManualWithLiveVideoRecord,
   studioReconcileYoutubePublishes,
   studioReconcileTiktokDrafts,
+  studioReconcileTiktokProcessingDrafts,
   studioReconcileFacebookPhotos,
   studioReconcileFacebookPhotoFinalizes,
   studioReconcileFacebookReelFinalizes,
@@ -2693,6 +2694,20 @@ export default {
       ctx.waitUntil(runWaitingIdeaPhotoMatches(env, { limit: 2 })
         .then((result) => console.info("Light-cadence photo matching", result))
         .catch((error) => console.warn("Light-cadence photo matching failed", error)));
+    }
+    // P0: the 24 overdue TTD2 drafts all had only one recorded poll. Poll
+    // existing TikTok draft IDs independently on heavy ticks, before the long
+    // Factory/production maintenance chain; TTD2 only checks provider status
+    // and never creates another draft, releases holds or resets counters.
+    if (cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioReconcileTiktokProcessingDrafts(env, { limit: 6 })
+        .then((results) => console.info("TikTok existing-draft recovery", JSON.stringify({
+          checked: results.length,
+          processing: results.filter(r => r.still_processing).length,
+          errors: results.filter(r => r.error || r.ok === false).length,
+          provider_creates: 0,
+        })))
+        .catch((error) => console.warn("TikTok existing-draft recovery unavailable", error)));
     }
     // QA-1050: half-hour read-only evidence audit, independent of Factory.
     // Never performs a Meta Graph create or releases safety holds.
@@ -5788,6 +5803,7 @@ const STUDIO_PUBLISH_RECONCILE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:studioCloseYoutubeManualWithLiveVideo__*/
 /*__STUDIO_WORKER_EXTRACT:studioRearmDueYoutubeManualPublishes__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileYoutubePublishes__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcileTiktokProcessingDrafts__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileTiktokDrafts__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookPhotoFinalizes__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookReelFinalizes__*/
