@@ -1075,9 +1075,7 @@ export async function studioReconcileTiktokProcessing(env, options = {}) {
     sortField: "TikTok_Draft_Last_Checked_At", sortDirection: "asc",
   });
   const results = [];
-  let resumed = 0;
   for (const candidate of rows) {
-    if (resumed >= limit) break;
     try {
       const row = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, candidate.id);
       const status = String(f(row, "TikTok_Draft_Status") || "");
@@ -2363,7 +2361,9 @@ export async function studioReconcilePublishingInstagramReels(env, options = {})
     return [];
   }
   const results = [];
+  let resumed = 0;
   for (const candidate of rows) {
+    if (resumed >= limit) break;
     try {
       const row = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, candidate.id);
       const mediaId = String(f(row, "Platform_Media_ID") || "");
