@@ -916,6 +916,58 @@ export async function studioRearmDueYoutubeManualPublishes(env, options = {}) {
 
 /*__STUDIO_WORKER_END:studioRearmDueYoutubeManualPublishes__*/
 
+/**
+ * Follow up EXISTING YouTube upload jobs early on light cron. YTS1 calls
+ * uploader.job_status(jobId) (GET), never YT0/YTP1 or a fresh upload.
+ * This prevents six stale YT2 jobs being starved behind the heavy maintenance
+ * chain and its new-video preparation, without assuming remote publication.
+ */
+export async function studioReconcileYoutubeExistingUploadJobs(env, options = {}) {
+  if (pipelineStageBackend(env, "YT0").mode !== "python") return [];
+  const limit = Math.max(1, Math.min(4, Number(options.limit || 3)));
+  const formula = 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Published_At}=BLANK(),'
+    + '{Output_Status}="Approved for Publishing",{Review_Status}="Approved",'
+    + '{YouTube_Stage}="YT2",{YouTube_Upload_Job_ID}!="",{YouTube_Video_ID}="",'
+    + 'OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())),'
+    + 'OR({YouTube_Last_Checked_At}=BLANK(),DATETIME_DIFF(NOW(),{YouTube_Last_Checked_At},"minutes")>=2))';
+  const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit, filterFormula: formula,
+    sortField: "YouTube_Last_Checked_At", sortDirection: "asc",
+  });
+  const results = [];
+  for (const candidate of rows) {
+    try {
+      const row = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, candidate.id);
+      const jobId = String(f(row, "YouTube_Upload_Job_ID") || "");
+      const candidateJobId = String(f(candidate, "YouTube_Upload_Job_ID") || "");
+      const nextRetryMs = Date.parse(String(f(row, "Publish_Next_Retry_At") || ""));
+      const lastCheckedMs = Date.parse(String(f(row, "YouTube_Last_Checked_At") || ""));
+      if (!jobId || jobId !== candidateJobId
+        || f(row, "Do_Not_Publish") === true || Boolean(f(row, "Test_Run_ID"))
+        || !Boolean(f(row, "Auto_Publish_Enabled")) || Boolean(f(row, "Published_At"))
+        || Boolean(f(row, "YouTube_Video_ID"))
+        || String(f(row, "YouTube_Stage") || "") !== "YT2"
+        || String(f(row, "Output_Status") || "") !== "Approved for Publishing"
+        || String(f(row, "Review_Status") || "") !== "Approved"
+        || (Number.isFinite(nextRetryMs) && nextRetryMs > Date.now())
+        || (Number.isFinite(lastCheckedMs) && Date.now() - lastCheckedMs < 2 * 60 * 1000)) {
+        results.push({ id: candidate.id, status: "skipped_changed_or_cooling", uploads_created: 0 });
+        continue;
+      }
+      const poll = await studioPulseYtRecord(env, "yts1", "YTS1", row);
+      results.push({ id: row.id, output_id: f(row, "Output_ID"),
+        status: poll?.ok === false ? "poll_failed" : (poll?.still_processing ? "processing" : (poll?.skipped || "polled")),
+        existing_upload_job_only: true, uploads_created: 0 });
+    } catch (error) {
+      console.warn("YouTube existing-upload job poll failed", candidate.id, error);
+      results.push({ id: candidate.id, status: "error",
+        error: String(error?.message || error), uploads_created: 0 });
+    }
+  }
+  return results;
+}
+/*__STUDIO_WORKER_END:studioReconcileYoutubeExistingUploadJobs__*/
+
 export async function studioReconcileYoutubePublishes(env, options = {}) {
   if (pipelineStageBackend(env, "YT0").mode !== "python") return [];
   const limit = Number(options.limit || 3);
@@ -951,11 +1003,7 @@ export async function studioReconcileYoutubePublishes(env, options = {}) {
       target: "YTP1",
       formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{YouTube_Stage}="YT1",{YouTube_Upload_Job_ID}="",{YouTube_Video_ID}="",OR({Publish_Status}!="Manual Publish Required",AND({Publish_Retry_Eligible}=1,OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))),OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))',
     },
-    {
-      stage: "yts1",
-      target: "YTS1",
-      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{YouTube_Stage}="YT2",{YouTube_Upload_Job_ID}!="",{YouTube_Video_ID}="",OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))',
-    },
+    // YTS1 existing-job GET polling runs independently on light cron.
     {
       stage: "yts2",
       target: "YTS2",
