@@ -647,6 +647,7 @@ import {
   healStaleManualFlagsOnPublishedRecord,
   healYoutubeManualWithLiveVideoRecord,
   studioReconcileYoutubePublishes,
+  studioReconcileYoutubeUploadProcessing,
   studioReconcileTiktokDrafts,
   studioReconcileTiktokProcessing,
   studioReconcileFacebookPhotos,
@@ -2686,6 +2687,19 @@ export default {
           results, new_uploads: 0,
         })))
         .catch((error) => console.warn("TTD2 existing-draft light cron unavailable", error)));
+    }
+    // Existing YouTube upload-job YTS1 GET polls were stranded late behind
+    // heavy maintenance. Confirm the EXACT saved job ID; never upload again.
+    // Light-only, bounded and independent of the heavy YTS1 pipeline sweep.
+    if (!cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioReconcileYoutubeUploadProcessing(env, { limit: 3 })
+        .then((results) => console.info("YTS1 existing-upload light cron", JSON.stringify({
+          checked: results.length,
+          video_ids_reconciled: results.filter((x) => x.status === "video_id_reconciled").length,
+          still_uploading: results.filter((x) => x.status === "upload_processing").length,
+          results, new_uploads: 0,
+        })))
+        .catch((error) => console.warn("YTS1 existing-upload light cron unavailable", error)));
     }
     // Recover waiting ideas between the heavy sweeps. The matcher uses the same
     // ranked library evaluation as "Find Images Now" and persists its scan
@@ -5802,6 +5816,7 @@ const STUDIO_PUBLISH_RECONCILE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:healYoutubeManualWithLiveVideoRecord__*/
 /*__STUDIO_WORKER_EXTRACT:studioCloseYoutubeManualWithLiveVideo__*/
 /*__STUDIO_WORKER_EXTRACT:studioRearmDueYoutubeManualPublishes__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcileYoutubeUploadProcessing__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileYoutubePublishes__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileTiktokProcessing__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileTiktokDrafts__*/

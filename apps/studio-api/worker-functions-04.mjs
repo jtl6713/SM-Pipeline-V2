@@ -916,6 +916,56 @@ export async function studioRearmDueYoutubeManualPublishes(env, options = {}) {
 
 /*__STUDIO_WORKER_END:studioRearmDueYoutubeManualPublishes__*/
 
+/**
+ * YTS1 existing-upload job status GET only. Six production Shorts stalled at
+ * YT2/Uploading with persisted job IDs and exactly one prior status poll.
+ * Fair oldest-check-first LIGHT cadence is independent of the heavy sweep.
+ * Never starts an upload, resets a job or publishes a new video.
+ */
+export async function studioReconcileYoutubeUploadProcessing(env, options = {}) {
+  if (pipelineStageBackend(env, "YT0").mode !== "python") return [];
+  const limit = Math.max(1, Math.min(3, Number(options.limit || 3)));
+  const formula = 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,'
+    + '{Published_At}=BLANK(),{YouTube_Stage}="YT2",{YouTube_Upload_Job_ID}!="",{YouTube_Video_ID}="",'
+    + 'OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())),'
+    + 'OR({YouTube_Last_Checked_At}=BLANK(),DATETIME_DIFF(NOW(),{YouTube_Last_Checked_At},"minutes")>=2))';
+  const candidates = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit, filterFormula: formula,
+    sortField: "YouTube_Last_Checked_At", sortDirection: "asc",
+  });
+  const results = [];
+  for (const candidate of candidates) {
+    try {
+      const row = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, candidate.id);
+      const job = String(f(row, "YouTube_Upload_Job_ID") || "");
+      const expected = String(f(candidate, "YouTube_Upload_Job_ID") || "");
+      const nextRetry = Date.parse(String(f(row, "Publish_Next_Retry_At") || ""));
+      const checked = Date.parse(String(f(row, "YouTube_Last_Checked_At") || ""));
+      if (!job || expected !== job
+          || String(f(row, "YouTube_Stage") || "") !== "YT2"
+          || Boolean(f(row, "YouTube_Video_ID")) || Boolean(f(row, "Published_At"))
+          || f(row, "Do_Not_Publish") === true
+          || !Boolean(f(row, "Auto_Publish_Enabled"))
+          || (Number.isFinite(nextRetry) && nextRetry > Date.now())
+          || (Number.isFinite(checked) && Date.now() - checked < 2 * 60 * 1000)) {
+        results.push({ id: candidate.id, status: "skipped_changed_or_cooling" });
+        continue;
+      }
+      const poll = await studioPulseYtRecord(env, "yts1", "YTS1", row);
+      results.push({
+        id: candidate.id, output_id: f(row, "Output_ID"),
+        status: poll?.ok === false ? "poll_failed" : (poll?.still_processing ? "upload_processing" : (poll?.video_id ? "video_id_reconciled" : (poll?.skipped || "polled"))),
+        existing_upload_job_only: true, new_uploads: 0,
+      });
+    } catch (error) {
+      results.push({ id: candidate.id, status: "poll_unavailable",
+        error: String(error?.message || error).slice(0, 150), new_uploads: 0 });
+    }
+  }
+  return results;
+}
+/*__STUDIO_WORKER_END:studioReconcileYoutubeUploadProcessing__*/
+
 export async function studioReconcileYoutubePublishes(env, options = {}) {
   if (pipelineStageBackend(env, "YT0").mode !== "python") return [];
   const limit = Number(options.limit || 3);

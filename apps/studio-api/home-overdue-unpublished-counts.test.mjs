@@ -163,3 +163,30 @@ test("TTD2 existing draft polling is independently scheduled, fair and bounded",
   assert.match(scheduled.slice(independent - 200, independent), /!cadence.heavy/);
   assert.match(cron, /STUDIO_WORKER_EXTRACT:studioReconcileTiktokProcessing/);
 });
+
+
+test("YTS1 stale jobs receive independent bounded status polling without duplicate upload", () => {
+  const cron = fs.readFileSync(path.join(root, "apps/studio-api/worker.js"), "utf8");
+  const impl = fs.readFileSync(path.join(root, "apps/studio-api/worker-functions-04.mjs"), "utf8");
+  const start = impl.indexOf("export async function studioReconcileYoutubeUploadProcessing(");
+  const end = impl.indexOf("/*__STUDIO_WORKER_END:studioReconcileYoutubeUploadProcessing__*/", start);
+  assert.ok(start > 0 && end > start);
+  const stage = impl.slice(start, end);
+  assert.match(stage, /sortField: "YouTube_Last_Checked_At", sortDirection: "asc"/);
+  assert.match(stage, /Math.min\(3, Number\(options.limit/);
+  assert.ok(stage.includes('{YouTube_Upload_Job_ID}!=""'));
+  assert.ok(stage.includes('{YouTube_Video_ID}=""'));
+  assert.ok(stage.includes('{Do_Not_Publish}=0'));
+  assert.ok(stage.includes('{Published_At}=BLANK()'));
+  assert.ok(stage.includes("Publish_Next_Retry_At"));
+  assert.ok(stage.includes("YouTube_Last_Checked_At"));
+  assert.match(stage, /expected !== job/);
+  assert.match(stage, /studioPulseYtRecord\(env, "yts1", "YTS1", row\)/);
+  assert.doesNotMatch(stage, /ytp1|studioDispatchApprovedPublishNow|studioEnsureYoutubePublish/);
+  assert.match(cron, /STUDIO_WORKER_EXTRACT:studioReconcileYoutubeUploadProcessing/);
+  const scheduled = cron.slice(cron.indexOf("async scheduled(event, env, ctx)"), cron.indexOf("class HttpError"));
+  const independent = scheduled.indexOf("ctx.waitUntil(studioReconcileYoutubeUploadProcessing");
+  const heavy = scheduled.indexOf("if (!cadence.heavy) return;");
+  assert.ok(independent > 0 && independent < heavy);
+  assert.match(scheduled.slice(independent - 180, independent), /!cadence.heavy/);
+});
