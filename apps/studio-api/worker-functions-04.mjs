@@ -2335,6 +2335,90 @@ export async function studioReconcilePublishingInstagramStories(env, options = {
 }
 /*__STUDIO_WORKER_END:studioReconcilePublishingInstagramStories__*/
 
+/**
+ * Resume overdue Instagram Reels with an already-authoritative Meta container.
+ * Unlike fresh AP1-IG this path NEVER discovers blank-media rows. Exact-ID,
+ * approval, lock, cooldown, attempt ceiling, and recorded "still processing"
+ * provenance are rechecked just before dispatch. It invokes the existing
+ * AP1-IG stage, which reuses the saved container and only publishes when Meta
+ * itself reports FINISHED. Existing provider uncertainty fails closed.
+ */
+export async function studioReconcileOverdueInstagramReelContainers(env, options = {}) {
+  if (pipelineStageBackend(env, "AP1_IG").mode !== "python") return [];
+  const limit = Math.max(1, Math.min(2, Number(options.limit || 1)));
+  const formula = 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Platform_Output_Type}="Instagram Reel",'
+    + '{Output_Status}="Approved for Publishing",{Review_Status}="Approved",'
+    + '{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Published_At}=BLANK(),'
+    + '{Platform_Post_ID}="",{Platform_Media_ID}!="",{Publish_Status}="Publishing",'
+    + '{Scheduled_Post_Date}!="",IS_BEFORE({Scheduled_Post_Date},NOW()),'
+    + 'OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())),'
+    + 'OR({Publish_Attempt_Count}=BLANK(),{Publish_Attempt_Count}<8),'
+    + 'OR({Publish_Locked_At}=BLANK(),DATETIME_DIFF(NOW(),{Publish_Locked_At},"minutes")>=15),'
+    + 'OR({Last_Publish_Attempt_At}=BLANK(),DATETIME_DIFF(NOW(),{Last_Publish_Attempt_At},"minutes")>=2))';
+  const candidates = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: limit * 4, filterFormula: formula,
+    sortField: "Last_Publish_Attempt_At", sortDirection: "asc",
+  });
+  const results = [];
+  for (const candidate of candidates) {
+    if (results.length >= limit) break;
+    const recordId = String(candidate?.id || "");
+    try {
+      const row = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId);
+      const creationId = String(f(row, "Platform_Media_ID") || "").trim();
+      const priorId = String(f(candidate, "Platform_Media_ID") || "").trim();
+      const notes = String(f(row, "Output_Notes") || "");
+      const lastParagraph = notes.slice(-1400);
+      const next = Date.parse(String(f(row, "Publish_Next_Retry_At") || ""));
+      const last = Date.parse(String(f(row, "Last_Publish_Attempt_At") || ""));
+      const locked = Date.parse(String(f(row, "Publish_Locked_At") || ""));
+      const signature = "AP1-IG Instagram container " + creationId + " still processing";
+      const eligible = creationId && creationId === priorId
+        && String(f(row, "Platform")) === "Instagram"
+        && String(f(row, "Platform_Output_Type")) === "Instagram Reel"
+        && String(f(row, "Review_Status")) === "Approved"
+        && String(f(row, "Output_Status")) === "Approved for Publishing"
+        && String(f(row, "Publish_Status")) === "Publishing"
+        && !f(row, "Do_Not_Publish") && Boolean(f(row, "Auto_Publish_Enabled"))
+        && !f(row, "Published_At") && !f(row, "Platform_Post_ID")
+        && !f(row, "Platform_Post_URL") && !f(row, "Publish_Locked_By")
+        && Number(f(row, "Publish_Attempt_Count") || 0) < 8
+        && lastParagraph.includes(signature)
+        && !/AP1-IG automated Instagram Reel publish completed|Instagram permalink:/i.test(lastParagraph)
+        && Number.isFinite(Date.parse(String(f(row, "Scheduled_Post_Date") || "")))
+        && Date.parse(String(f(row, "Scheduled_Post_Date"))) < Date.now()
+        && (!Number.isFinite(next) || next <= Date.now())
+        && (!Number.isFinite(last) || Date.now() - last >= 2 * 60 * 1000)
+        && (!Number.isFinite(locked) || Date.now() - locked >= 15 * 60 * 1000);
+      if (!eligible) {
+        results.push({ id: recordId, status: "skipped_unsafe_or_changed" });
+        continue;
+      }
+      // Existing AP1-IG runner re-GETs this record and reuses the exact saved
+      // Platform_Media_ID; fresh creation is not a recovery action.
+      const outcome = await studioPulseAp1IgReel(env, row);
+      const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId);
+      const postId = String(f(current, "Platform_Post_ID") || "").trim();
+      const published = postId && Boolean(f(current, "Published_At"))
+        && String(f(current, "Publish_Status")) === "Published"
+        && String(f(current, "Output_Status")) === "Published"
+        && Boolean(f(current, "Platform_Post_URL"))
+        && String(f(current, "Platform_Media_ID") || "").trim() === creationId;
+      results.push({
+        id: recordId, output_id: f(row, "Output_ID"), creation_id: creationId,
+        status: published ? "verified_published"
+          : (outcome?.ok === false ? "poll_failed" : (outcome?.skipped || "pending_provider_confirmation")),
+        reused_container: true,
+      });
+    } catch (error) {
+      results.push({ id: recordId, status: "existing_container_resume_unavailable",
+        error: String(error?.message || error).slice(0, 160) });
+    }
+  }
+  return results;
+}
+/*__STUDIO_WORKER_END:studioReconcileOverdueInstagramReelContainers__*/
+
 export async function studioReconcilePublishingInstagramReels(env, options = {}) {
   if (pipelineStageBackend(env, "AP1_IG").mode !== "python") return [];
   const limit = Number(options.limit || 4);
