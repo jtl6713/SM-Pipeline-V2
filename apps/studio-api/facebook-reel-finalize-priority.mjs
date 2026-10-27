@@ -4,7 +4,7 @@
 export const FACEBOOK_REEL_POLL_FORMULA =
   'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Platform_Output_Type}="Facebook Reel",' +
   '{Do_Not_Publish}=0,{Publish_Status}!="Published",{Published_At}=BLANK(),' +
-  'OR({FB_Slideshow_Status}="Reel Processing",{FB_Slideshow_Status}="Published Pending Finalize"),' +
+  'OR({FB_Slideshow_Status}="Uploading Reel",{FB_Slideshow_Status}="Reel Processing",{FB_Slideshow_Status}="Published Pending Finalize"),' +
   'OR({FB_Slideshow_Meta_Video_ID}!="",{Platform_Post_ID}!=""),' +
   'OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))';
 
@@ -23,7 +23,7 @@ export function facebookReelPollEligible(row, nowMs = Date.now()) {
   if (!/^rec[A-Za-z0-9]{14}$/.test(String(row?.id || ""))) return false;
   if (value(row, "Platform") !== "Facebook" ||
       value(row, "Platform_Output_Type") !== "Facebook Reel" ||
-      !["Reel Processing", "Published Pending Finalize"].includes(value(row, "FB_Slideshow_Status")) ||
+      !["Uploading Reel", "Reel Processing", "Published Pending Finalize"].includes(value(row, "FB_Slideshow_Status")) ||
       value(row, "Publish_Status") === "Published" ||
       value(row, "Output_Status") === "Published" ||
       value(row, "Published_At") || value(row, "Test_Run_ID") ||
