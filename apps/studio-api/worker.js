@@ -5797,9 +5797,16 @@ const STUDIO_PUBLISH_RECONCILE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 // publisher-stage allowlist and looks only for already-approved rows whose scheduled time
 // has passed. That catches downstream-but-not-started states such as Facebook Reel
 // "Video Ready", plus stale TikTok TTD0 "Preparing Assets" locks.
+// The overdue rescue must honor the same eight-dispatch/6-minute budget as
+// normal reconciliation. Without these guards the oldest twelve failing rows
+// consume every five-minute tick and prevent later overdue outputs from running.
+// Exhausted attempts remain visible in the exception census; this is NOT a
+// published-state correction, hold release, or permission to repost.
 const STUDIO_OVERDUE_SCHEDULED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Published_At}=BLANK(),'
   + '{Output_Status}="Approved for Publishing",{Review_Status}="Approved",{Publish_Status}="Ready to Schedule",'
-  + '{Scheduled_Post_Date}!="",IS_BEFORE({Scheduled_Post_Date},NOW()))';
+  + '{Scheduled_Post_Date}!="",IS_BEFORE({Scheduled_Post_Date},NOW()),'
+  + 'OR({Studio_Publish_Dispatch_Count}=BLANK(),{Studio_Publish_Dispatch_Count}<8),'
+  + 'OR({Studio_Publish_Dispatch_At}=BLANK(),DATETIME_DIFF(NOW(),{Studio_Publish_Dispatch_At},"minutes")>=6))';
 
 /*__STUDIO_WORKER_EXTRACT:studioPublishLockIsStale__*/
 /*__STUDIO_WORKER_EXTRACT:studioHealOverdueTikTokPrep__*/
