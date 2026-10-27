@@ -80,6 +80,7 @@ def test_fbs3_caption_and_cache_bust():
 def test_fbs4_poll_gates():
     assert poll_eligibility_reason(_processing()) is None
     assert poll_eligibility_reason(_processing(FB_Slideshow_Status="Published Pending Finalize")) is None
+    assert poll_eligibility_reason(_processing(FB_Slideshow_Status="Uploading Reel")) is None
     assert poll_eligibility_reason(_processing(FB_Slideshow_Status="Video Ready")) == "slideshow_status_not_processing"
     assert poll_eligibility_reason(_processing(FB_Slideshow_Meta_Video_ID="", Platform_Post_ID="")) == (
         "missing_facebook_video_id"
@@ -90,7 +91,7 @@ def test_fbs4_poll_gates():
 def test_fbs4_status_rules():
     assert reel_is_ready({"permalink_url": "https://www.facebook.com/reel/1/"})
     assert reel_is_ready({"status": {"publishing_phase": {"status": "complete"}}})
-    assert reel_is_ready({"status": {"video_status": "ready"}})
+    assert not reel_is_ready({"status": {"video_status": "ready"}})  # ready to upload != publicly published
     assert not reel_is_ready({"status": {"video_status": "processing"}})
     assert not reel_is_ready({
         "permalink_url": "https://www.facebook.com/reel/1/",
