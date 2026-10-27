@@ -1007,6 +1007,69 @@ export async function studioReconcileYoutubePublishes(env, options = {}) {
 }
 /*__STUDIO_WORKER_END:studioReconcileYoutubePublishes__*/
 
+/**
+ * Only polls already-created TikTok draft IDs; it cannot initialize a new
+ * upload, create a remote draft or mark a public publication as complete.
+ * Light cron keeps this independent from the expensive half-hour QA sweep.
+ */
+export async function studioReconcileTiktokProcessing(env, options = {}) {
+  if (pipelineStageBackend(env, "TTD0").mode !== "python") return [];
+  const limit = Math.max(1, Math.min(4, Number(options.limit || 4)));
+  const formula = 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Published_At}=BLANK(),{TikTok_Draft_Publish_ID}!="",'
+    + STUDIO_TIKTOK_INBOX_DUE_FORMULA
+    + ',OR({TikTok_Draft_Status}="Processing",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD2",UPPER({Publish_Error_Stage}&""))>0)),'
+    + 'OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())),'
+    + 'OR({TikTok_Draft_Last_Checked_At}=BLANK(),DATETIME_DIFF(NOW(),{TikTok_Draft_Last_Checked_At},"minutes")>=2))';
+  const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit, filterFormula: formula,
+    sortField: "TikTok_Draft_Last_Checked_At", sortDirection: "asc",
+  });
+  const results = [];
+  for (const candidate of rows) {
+    try {
+      const row = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, candidate.id);
+      const status = String(f(row, "TikTok_Draft_Status") || "");
+      const stage = String(f(row, "Publish_Error_Stage") || "");
+      const previousId = String(f(candidate, "TikTok_Draft_Publish_ID") || "");
+      const currentId = String(f(row, "TikTok_Draft_Publish_ID") || "");
+      const nextRetryMs = Date.parse(String(f(row, "Publish_Next_Retry_At") || ""));
+      const lastCheckedMs = Date.parse(String(f(row, "TikTok_Draft_Last_Checked_At") || ""));
+      if (!currentId || previousId !== currentId
+          || f(row, "Do_Not_Publish") === true
+          || Boolean(f(row, "Published_At"))
+          || !Boolean(f(row, "Auto_Publish_Enabled"))
+          || !(status === "Processing" || (status === "Retry Pending" && /TTD2/i.test(stage)))
+          || (Number.isFinite(nextRetryMs) && nextRetryMs > Date.now())
+          || (Number.isFinite(lastCheckedMs) && Date.now() - lastCheckedMs < 2 * 60 * 1000)) {
+        results.push({ id: candidate.id, status: "skipped_changed_or_cooling" });
+        continue;
+      }
+      const poll = await studioPulseTtd2(env, row);
+      const result = {
+        id: candidate.id, output_id: f(row, "Output_ID"),
+        status: poll?.ok === false ? "poll_failed" : (poll?.still_processing ? "processing" : (poll?.needs_email ? "draft_delivered" : (poll?.skipped || "polled"))),
+        existing_draft_only: true, no_new_upload: true,
+      };
+      if (poll?.ok !== false && poll?.needs_email === true) {
+        const confirmed = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, candidate.id);
+        if (String(f(confirmed, "TikTok_Draft_Publish_ID") || "") === currentId
+            && !f(confirmed, "TikTok_Draft_Email_Sent_At")
+            && String(f(confirmed, "Manual_Completion_Status") || "") === "Required"
+            && /Draft Delivered|Manual Completion Received/i.test(String(f(confirmed, "TikTok_Draft_Status") || ""))) {
+          const email = await studioPulseTtd3(env, confirmed);
+          result.email_handoff = email?.ok !== false ? (email?.skipped || "attempted") : "failed";
+        }
+      }
+      results.push(result);
+    } catch (error) {
+      results.push({ id: candidate.id, status: "poll_unavailable",
+        error: String(error?.message || error).slice(0, 150), no_new_upload: true });
+    }
+  }
+  return results;
+}
+/*__STUDIO_WORKER_END:studioReconcileTiktokProcessing__*/
+
 export async function studioReconcileTiktokDrafts(env, options = {}) {
   if (pipelineStageBackend(env, "TTD0").mode !== "python") return [];
   const limit = Number(options.limit || 3);
