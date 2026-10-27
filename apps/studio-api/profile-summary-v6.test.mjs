@@ -105,3 +105,10 @@ test("durable V6 excludes emailed TikTok draft but preserves Manual Needed and u
   assert.deepEqual(row.approved_calendar_slots.TikTok, []);
   assert.equal(makeV6([stillDue], at).approved_past_due, 1);
 });
+
+
+test("durable summary version invalidates pre-email-handoff calendar dates", () => {
+  const source = readFileSync(new URL("./profile-summary-do.mjs", import.meta.url), "utf8");
+  assert.match(source, /v6_calendar_tiktok_email_handoff_v2/);
+  assert.match(source, /putMeta\("future_count_reconcile_required", "true"\)/);
+});
