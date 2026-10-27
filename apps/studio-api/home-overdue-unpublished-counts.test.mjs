@@ -190,3 +190,35 @@ test("YTS1 stale jobs receive independent bounded status polling without duplica
   assert.ok(independent > 0 && independent < heavy);
   assert.match(scheduled.slice(independent - 180, independent), /!cadence.heavy/);
 });
+
+
+test("IG Reel recovery reuses exact prior container only, with provider and approval fencing", () => {
+  const cron = fs.readFileSync(path.join(root, "apps/studio-api/worker.js"), "utf8");
+  const impl = fs.readFileSync(path.join(root, "apps/studio-api/worker-functions-04.mjs"), "utf8");
+  const start = impl.indexOf("export async function studioReconcileOverdueInstagramReelContainers(");
+  const end = impl.indexOf("/*__STUDIO_WORKER_END:studioReconcileOverdueInstagramReelContainers__*/", start);
+  assert.ok(start > 0 && end > start);
+  const functionBody = impl.slice(start, end);
+  assert.match(functionBody, /sortField: "Last_Publish_Attempt_At", sortDirection: "asc"/);
+  assert.match(functionBody, /Platform_Media_ID/);
+  assert.match(functionBody, /Platform_Post_ID/);
+  assert.match(functionBody, /Platform_Post_URL/);
+  assert.match(functionBody, /previousId|priorId/);
+  assert.match(functionBody, /creationId === priorId/);
+  assert.match(functionBody, /Do_Not_Publish/);
+  assert.match(functionBody, /Publish_Locked_By/);
+  assert.match(functionBody, /Publish_Next_Retry_At/);
+  assert.match(functionBody, /lastParagraph.includes\(signature\)/);
+  assert.match(functionBody, /Publish_Attempt_Count/);
+  assert.match(functionBody, /studioPulseAp1IgReel\(env, row\)/);
+  assert.match(functionBody, /verified_published/);
+  assert.doesNotMatch(functionBody, /create_reel|media_publish|studioDispatchApprovedPublishNow|studioPublishInstagramFeedPhoto/);
+  const source = fs.readFileSync(path.join(root, "services/pipeline-runner/ap1_ig/processor.py"), "utf8");
+  assert.match(source, /creation_id = field_str\(output, "Platform_Media_ID"\)/);
+  assert.match(source, /if creation_id:\s*\n\s*preview\["resumed_container_id"\]/);
+  assert.match(cron, /STUDIO_WORKER_EXTRACT:studioReconcileOverdueInstagramReelContainers/);
+  const scheduled = cron.slice(cron.indexOf("async scheduled(event, env, ctx)"),cron.indexOf("class HttpError"));
+  const idx = scheduled.indexOf("ctx.waitUntil(studioReconcileOverdueInstagramReelContainers");
+  assert.ok(idx > 0 && idx < scheduled.indexOf("if (!cadence.heavy) return;"));
+  assert.match(scheduled.slice(idx - 200, idx), /!cadence.heavy/);
+});
