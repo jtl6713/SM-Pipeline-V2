@@ -647,6 +647,7 @@ import {
   healStaleManualFlagsOnPublishedRecord,
   healYoutubeManualWithLiveVideoRecord,
   studioReconcileYoutubePublishes,
+  studioReconcileExistingYoutubeUploadJobs,
   studioReconcileTiktokDrafts,
   studioReconcileTiktokProcessing,
   studioReconcileFacebookPhotos,
@@ -2672,6 +2673,20 @@ export default {
           })))
           .catch((error) => console.warn("FB3 independent cron failed", error)));
       }
+    }
+    // YTS1 is a provider/status GET for an existing YouTube upload job, not
+    // a replacement upload. Six overdue Shorts had saved upload job IDs but
+    // no video IDs, and had only their initial poll. Rotate three oldest-checked
+    // on LIGHT ticks, separate from the heavy YouTube continuation scanner.
+    if (!cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioReconcileExistingYoutubeUploadJobs(env, { limit: 3 })
+        .then((results) => console.info("YTS1 existing-upload light cron", JSON.stringify({
+          checked: results.length,
+          verified_uploads: results.filter((x) => x.status === "upload_verified").length,
+          still_uploading: results.filter((x) => x.status === "upload_processing").length,
+          results, new_uploads: 0,
+        })))
+        .catch((error) => console.warn("YTS1 existing-upload light cron unavailable", error)));
     }
     // Existing TikTok draft status GETs are not new uploads. They previously
     // ran only late in a long heavy sweep: 24 live Processing drafts had one
@@ -5802,6 +5817,7 @@ const STUDIO_PUBLISH_RECONCILE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:healYoutubeManualWithLiveVideoRecord__*/
 /*__STUDIO_WORKER_EXTRACT:studioCloseYoutubeManualWithLiveVideo__*/
 /*__STUDIO_WORKER_EXTRACT:studioRearmDueYoutubeManualPublishes__*/
+/*__STUDIO_WORKER_EXTRACT:studioReconcileExistingYoutubeUploadJobs__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileYoutubePublishes__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileTiktokProcessing__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileTiktokDrafts__*/
