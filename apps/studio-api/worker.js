@@ -4,6 +4,7 @@ import { CHICAGO_PROFILE_ID } from "./rendering-review-policy.mjs";
 import { handleRenderingReviewFeedbackRequest, reviewFeedbackWriteEnabled } from "./rendering-review-feedback-http.mjs";
 import { handleRenderingReviewEnrollRequest, reviewEnrollmentWriteEnabled } from "./rendering-review-enrollment-http.mjs";
 import { composeRenderingReviewEnrollmentOperations } from "./rendering-review-enrollment-wiring.mjs";
+import { handleReviewProducerProposal, reviewProducerBridgeEnabled } from "./rendering-review-producer-bridge.mjs";
 import { listRecords as reviewListRecords, listRecordsPage as reviewListRecordsPage, resolveAuthorizedContentProfiles as reviewAuthorizedProfiles } from "./worker-functions-01.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { readProducerThread, appendProducerThreadMessage, producerConversationHistory } from "./producer-conversation.mjs";
@@ -1516,6 +1517,36 @@ export default {
 
       if (url.pathname.startsWith("/api/rendering-review/")) {
         requirePermission(authorization, "outputs_review");
+        // Read-only authenticated model proposal handoff. Keep this separate
+        // from user-message writes and every render/approval/publish action.
+        const proposalMatch = /^\\/api\\/rendering-review\\/outputs\\/(rec[A-Za-z0-9]{14})\\/producer-proposal$/.exec(url.pathname);
+        if (proposalMatch && request.method === "POST") {
+          if (!reviewProducerBridgeEnabled(env))
+            throw new HttpError(405, "Rendering Review Producer is not enabled");
+          const chicagoMembership = (await reviewAuthorizedProfiles(env, authorization))
+            .some(profile => profile.id === CHICAGO_PROFILE_ID);
+          if (!chicagoMembership) throw new HttpError(403, "Chicago Rendering Review membership required");
+          let adapter;
+          const authorizeOutput = async outputId => {
+            const view = await adapter.readOutput(outputId);
+            return view.profile_id === CHICAGO_PROFILE_ID &&
+              view.output_type === "Instagram Reel" && view.platform === "Instagram";
+          };
+          adapter = makeRenderingReviewAirtableOperations({
+            env, airtableFetch, listRecords: reviewListRecords, readField: f,
+            withOutputApprovalLock, authorizeReview: authorizeOutput,
+            authorizeEvent: async () => false,
+            revokeScheduleUnderHold: async () => {
+              throw new HttpError(405, "Producer proposals cannot change schedules");
+            },
+            mutationGate: false,
+          });
+          const result = await handleReviewProducerProposal({
+            request, env, authorization, output_id: proposalMatch[1],
+            assertWriteRequest, operations: adapter,
+          });
+          return respond(request, env, result);
+        }
         const enrollmentMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/enroll$/.exec(url.pathname);
         if (enrollmentMatch && request.method === "POST") {
           // Protected, default-OFF path. Neither the Worker nor a client may
