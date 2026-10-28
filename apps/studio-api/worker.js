@@ -1519,7 +1519,7 @@ export default {
         requirePermission(authorization, "outputs_review");
         // Read-only authenticated model proposal handoff. Keep this separate
         // from user-message writes and every render/approval/publish action.
-        const proposalMatch = /^\\/api\\/rendering-review\\/outputs\\/(rec[A-Za-z0-9]{14})\\/producer-proposal$/.exec(url.pathname);
+        const proposalMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/producer-proposal$/.exec(url.pathname);
         if (proposalMatch && request.method === "POST") {
           if (!reviewProducerBridgeEnabled(env))
             throw new HttpError(405, "Rendering Review Producer is not enabled");
