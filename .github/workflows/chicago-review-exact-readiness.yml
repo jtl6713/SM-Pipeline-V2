@@ -60,7 +60,8 @@ jobs:
           for name in names:
             record=found.get(name)
             state='present' if record else 'absent'
-            print('review_binding '+name+'='+state)
+            binding_type=str(record.get("type") or "none") if record else "none"
+            print("review_binding "+name+"="+state+" type="+binding_type)
           PY
       - name: Inspect live Runner exact route without changing records
         shell: bash
