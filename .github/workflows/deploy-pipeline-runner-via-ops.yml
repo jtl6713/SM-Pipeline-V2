@@ -316,3 +316,4 @@ jobs:
 # 2026-10-28: deploy merged PR #1244 exact Chicago review Runner (non-public, guarded), no automatic activation.
 
 # Deploy Rendering Review executable timeline and V3 verified-source support (PR #1245); preserve safety configuration.
+# 2026-10-28: Deploy exact Chicago review source-crop identity verification (PR #1246). No automatic render or publication.
