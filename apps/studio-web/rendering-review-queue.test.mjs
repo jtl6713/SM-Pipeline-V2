@@ -265,12 +265,12 @@ test('frozen render-only plan requires server availability and one explicit butt
   for(let i=0;i<10;i++)await tick();
   const descendants=node=>[node,...node.children.flatMap(descendants)];
   assert.equal(descendants(nodes.rrDetail).filter(n=>
-    n.textContent==='Create next attempt — render only').length,0,
+    n.textContent==='Make the revised video (V2)').length,0,
     'No commit action when protected server gate is disabled');
   enabled=true;await nodes.rrRefresh.listeners.click();
   for(let i=0;i<12;i++)await tick();
   const action=descendants(nodes.rrDetail).find(n=>
-    n.textContent==='Create next attempt — render only');
+    n.textContent==='Make the revised video (V2)');
   assert.ok(action,'Server-approved frozen plan shows the render-only button');
   await action.listeners.click();
   assert.equal(confirmed,1);
@@ -499,7 +499,7 @@ test('held #8447 surfaces a verified Morning alternative and saves correction on
 
 test('Rendering Review does not portray V1 playback as a completed Producer render',()=>{
   assert.match(script,/ORIGINAL V1 — unchanged/);
-  assert.match(script,/NOT RENDERED/);
+  assert.match(script,/I haven\\'t changed the video yet/);
   assert.match(script,/Proposed edits/);
   assert.match(script,/Do these look right/);
   assert.match(script,/Reply to Producer/);
