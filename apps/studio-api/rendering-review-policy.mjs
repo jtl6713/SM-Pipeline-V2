@@ -24,7 +24,6 @@ export const REVIEW_STATES = Object.freeze([
   "queued", "rendering", "validating", "revision_failed",
   "approved", "cancelled",
 ]);
-const ACTIVE_REVIEW = new Set(REVIEW_STATES.filter(s => s !== "approved" && s !== "cancelled"));
 const inProgress = new Set(["queued", "rendering", "validating"]);
 const text = value => String(value ?? "").trim();
 const lower = value => text(value).toLowerCase();
@@ -79,6 +78,7 @@ export function enrollReview(output, hold, policy, { session_id, original_attemp
     review_hold: { id: hold.id, owner: session_id, active: true },
     original_approval: output.approved_attempt_id || null,
     current_attempt_id: original_attempt_id, latest_attempt_number: 1,
+    latest_plan_version: 0,
     approved_attempt_id: null, plan: null, pending_authorization: null,
     active_job: null, messages: [], processed: {}, history: [],
     attempts: [{ id: original_attempt_id, number: 1, parent_id: null,
@@ -142,13 +142,14 @@ export function applyReviewEvent(session, event) {
     if (!["ready_for_review", "discussing", "awaiting_assets", "plan_ready", "revision_failed"].includes(s.state))
       fail("PLAN_NOT_EDITABLE", "Cannot replace a plan while rendering");
     if (!validId(event.plan_hash) || !Number.isSafeInteger(event.plan_version) ||
-        event.plan_version !== (s.plan?.version || 0) + 1 ||
+        event.plan_version !== s.latest_plan_version + 1 ||
         !Array.isArray(event.missing_assets) ||
         event.missing_assets.some(id => !validId(id)))
       fail("INVALID_PLAN", "A newer validated plan version and dependency list are required", 400);
     s.plan = { version: event.plan_version, hash: event.plan_hash, frozen: event.frozen === true,
       missing_assets: [...new Set(event.missing_assets)], source_attempt_id: s.current_attempt_id,
       acceptance_checks: Array.isArray(event.acceptance_checks) ? event.acceptance_checks : [] };
+    s.latest_plan_version = event.plan_version;
     s.pending_authorization = null; // materially changed plan revokes conditional intent
     s.state = s.plan.missing_assets.length ? "awaiting_assets" : s.plan.frozen ? "plan_ready" : "discussing";
   } else if (kind === "ASSET_VALIDATED") {
@@ -179,18 +180,33 @@ export function applyReviewEvent(session, event) {
       s.pending_authorization?.source_attempt_id === s.current_attempt_id;
     if (!humanIntent(event.intent) && !(event.intent === "authorized_after_assets" && conditional))
       fail("COMMIT_NOT_AUTHORIZED", "Explicit authorization is required for this plan");
-    if (!validId(event.attempt_id) || !validId(event.job_id))
-      fail("INVALID_JOB_ID", "Attempt and job identities are required", 400);
+    if (!validId(event.attempt_id) || !validId(event.job_id) ||
+        s.attempts.some(a => a.id === event.attempt_id))
+      fail("INVALID_JOB_ID", "New attempt and unique job identities are required", 400);
     const parent_id = s.current_attempt_id;
     const number = s.latest_attempt_number + 1;
     s.attempts.push({ id: event.attempt_id, number, parent_id, status: "queued",
-      artifact_id: null, plan_version: s.plan.version, job_id: event.job_id,
+      artifact_id: null, plan_version: s.plan.version, job_id: event.job_id, job_history: [event.job_id],
       cleanup_state: "pending" });
     s.current_attempt_id = event.attempt_id;
     s.latest_attempt_number = number;
     s.approved_attempt_id = null;
     s.active_job = { id: event.job_id, attempt_id: event.attempt_id, plan_hash: s.plan.hash };
     s.pending_authorization = null;
+    s.state = "queued";
+  } else if (kind === "RETRY_ATTEMPT") {
+    if (s.state !== "revision_failed" || !s.review_hold.active || !s.plan?.frozen ||
+        s.plan.hash !== event.plan_hash || s.plan.version !== event.plan_version ||
+        event.attempt_id !== s.current_attempt_id ||
+        !validId(event.job_id) || s.attempts.some(a => (a.job_history || [a.job_id]).includes(event.job_id)))
+      fail("RETRY_NOT_ALLOWED", "Retry requires the same failed attempt, unchanged plan and a new job ID");
+    const attempt = current(s);
+    if (!attempt || attempt.status !== "revision_failed" || attempt.artifact_id)
+      fail("RETRY_NOT_ALLOWED", "Only failed attempts without a promoted artifact can retry");
+    attempt.job_history = [...(attempt.job_history || [attempt.job_id]), event.job_id];
+    attempt.job_id = event.job_id;
+    attempt.status = "queued";
+    s.active_job = { id: event.job_id, attempt_id: attempt.id, plan_hash: s.plan.hash };
     s.state = "queued";
   } else if (["RENDER_STARTED", "RENDER_VALIDATING", "RENDER_READY", "RENDER_FAILED"].includes(kind)) {
     if (!s.active_job || s.active_job.id !== event.job_id ||
@@ -208,7 +224,8 @@ export function applyReviewEvent(session, event) {
         if (s.state !== "rendering") ignored = true;
         else s.state = attempt.status = "validating";
       } else if (kind === "RENDER_READY") {
-        if (s.state !== "validating" || event.validation_passed !== true || !validId(event.artifact_id))
+        if (s.state !== "validating" || event.validation_passed !== true ||
+            event.plan_hash !== s.active_job.plan_hash || !validId(event.artifact_id))
           fail("RENDER_NOT_VALIDATED", "A validated immutable artifact is required");
         attempt.artifact_id = event.artifact_id;
         attempt.status = "ready_for_review";
@@ -275,10 +292,11 @@ export function reviewDispatchGate(session, output, candidate) {
   return { allowed: true, reason: null };
 }
 
-export function cleanupCandidates(files, referenceCounts) {
+export function cleanupCandidates(files, referenceCounts, protectedAttemptIds = []) {
   if (!Array.isArray(files)) fail("INVALID_FILES", "Expected generated media inventory", 400);
   return files.filter(f => f?.generated === true && validId(f?.owner_attempt_id) &&
     f.canonical_source !== true && f.published_evidence !== true &&
     f.shared !== true && f.owned_by_attempt === true &&
+    !protectedAttemptIds.includes(f.owner_attempt_id) &&
     Number(referenceCounts?.[f.id]) === 0).map(f => f.id);
 }
