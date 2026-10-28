@@ -413,14 +413,92 @@ test('Producer failure is visible beside Send, preserves direction and reuses re
   assert.ok(!submissions.some(x=>x.publish||x.render));
 });
 
+test('held #8447 surfaces a verified Morning alternative and saves correction only on reviewer click',async()=>{
+  const ids=['page-rendering-review','navRenderingReview','rrQueueList','rrDetail',
+    'rrStatus','rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile'];
+  const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
+  const output='rec0uVrVeiUM6shp9';
+  let notify, savedRevision=false;
+  const calls=[];
+  const night={name:'Gibsons Italia 5',time_of_day:'Night',
+    preview_url:'https://media.chicagoshining.com/studio/previews/item4/night.jpg'};
+  const riverNight={name:'Chicago Riverwalk 10',time_of_day:'Night',
+    preview_url:'https://media.chicagoshining.com/studio/previews/item4/night-river.jpg'};
+  const morning={name:'Chicago Riverwalk 8',time_of_day:'Morning',
+    preview_url:'https://media.chicagoshining.com/studio/previews/item4/morning.jpg'};
+  const originals=[
+    {scene:1,start_seconds:0,end_seconds:3.567,original:night,
+      proposed:savedRevision?morning:night,changed:savedRevision,proposed_ready:true},
+    {scene:5,start_seconds:13.9,end_seconds:17.133,original:riverNight,
+      proposed:morning,changed:true,proposed_ready:true},
+    {scene:7,start_seconds:20.7,end_seconds:24.233,original:morning,
+      proposed:morning,changed:false,proposed_ready:true}];
+  const fetchStub=async (url,options)=>{
+    calls.push({url,method:options.method,body:options.body});
+    if(url==='/api/session')return {ok:true,json:async()=>({
+      ok:true,authenticated:true,authorized:true,permissions:{outputs_review:true}})};
+    if(url.startsWith('/api/rendering-review/queue?'))return {ok:true,json:async()=>({
+      ok:true,flags:{admission_enabled:false,producer_conversation_enabled:true},
+      queue:[{output_id:output,profile_id:'recT2rbKX3MF7cVFU',review_held:true,
+        output_type:'Instagram Reel',output_number:8447,render_status:'Rendered',
+        title:'Chicago held Reel',final_file_url:'https://example.org/old.mp4'}],next_cursor:null})};
+    if(url==='/api/rendering-review/outputs/'+output)
+      return {ok:true,json:async()=>({ok:true,publication_hold_verified:true,
+        flags:{producer_conversation_enabled:true,attempt_commit_enabled:false},
+        session:{version:savedRevision?4:3,state:'discussing',review_hold:{active:true},
+          attempts:[{number:1,status:'ready_for_review',artifact_id:'source1'}],messages:[]},
+        storyboard:originals})};
+    if(url.endsWith('/producer-conversation')){
+      const body=JSON.parse(options.body);
+      assert.equal(body.expected_version,3);
+      assert.match(body.direction,/replace BOTH nighttime scenes/);
+      assert.match(body.direction,/frame 1 .* and frame 5 /);
+      assert.match(body.direction,/Chicago Riverwalk 8/);
+      savedRevision=true;
+      return {ok:true,json:async()=>({ok:true,persisted:true,
+        render_queued:false,plan_ready:true,plan_persisted:true})};
+    }
+    throw new Error('Unexpected request '+url);
+  };
+  const sandbox={
+    document:{getElementById:id=>nodes[id],createElement:tag=>new Node(tag)},
+    window:{location:{href:'https://studio.test/'},CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''}},
+    MutationObserver:class {constructor(fn){notify=fn;}observe(){}},
+    fetch:fetchStub,URL,URLSearchParams,
+    crypto:{randomUUID:()=> 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'},
+  };
+  vm.runInNewContext(script,sandbox,{filename:'rendering-review-queue.js'});
+  await tick();await tick();
+  nodes['page-rendering-review'].classList.add('active');
+  notify();
+  for(let i=0;i<12;i++)await tick();
+  const descendants=root=>[root,...root.children.flatMap(descendants)];
+  const before=descendants(nodes.rrDetail);
+  const fix=before.find(n=>n.tag==='button'&&
+    n.textContent==='Fix both nighttime stills — save Producer plan');
+  assert.ok(fix,'a prominent correction action appears for the held old proposal');
+  assert.ok(before.some(n=>n.textContent==='AVAILABLE MORNING PHOTO · NOT IN SAVED PLAN'),
+    'source owned Morning photo must be visibly distinguished from saved plan');
+  assert.equal(calls.filter(x=>x.method==='POST').length,0,'read never changes the session');
+  await fix.listeners.click();
+  for(let i=0;i<12;i++)await tick();
+  assert.equal(calls.filter(x=>x.method==='POST').length,1);
+  assert.equal(savedRevision,true);
+  assert.ok(!calls.some(x=>/commit-attempt|publish|approve/.test(x.url)));
+  const after=descendants(nodes.rrDetail);
+  assert.ok(!after.some(n=>n.textContent==='Fix both nighttime stills — save Producer plan'));
+  assert.ok(after.some(n=>n.textContent==='Saved proposed replacement · NOT RENDERED'));
+});
+
 test('Rendering Review does not portray V1 playback as a completed Producer render',()=>{
   assert.match(script,/ORIGINAL V1 — unchanged/);
   assert.match(script,/NOT RENDERED/);
   assert.match(script,/Latest Producer proposal — not yet rendered/);
-  assert.match(script,/Request verified replacements for BOTH nighttime frames/);
-  assert.match(script,/composer\.value='Please replace BOTH nighttime scenes/);
-  assert.match(script,/await sendDirection\(composer\.value\)/);
-  assert.match(script,/not render, approve or publish/);
+  assert.match(script,/Fix both nighttime stills — save Producer plan/);
+  assert.match(script,/const direction='Please replace BOTH nighttime scenes/);
+  assert.match(script,/AVAILABLE MORNING PHOTO · NOT IN SAVED PLAN/);
+  assert.match(script,/created\.persisted!==true\|\|created\.render_queued!==false/);
+  assert.match(script,/The original V1 video remains unchanged/);
   assert.match(css,/rr-storyboard-pair/);
   assert.doesNotMatch(script,/showMedia\(.*candidate\.candidate\.timeline/);
 });
