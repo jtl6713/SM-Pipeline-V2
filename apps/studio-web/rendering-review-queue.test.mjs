@@ -93,9 +93,10 @@ test('manual Chicago enrollment and actual Producer exchange require server flag
   let observerCallback;
   let enrolled=false;
   let conversation=false;
+  let admissionActive=true;
   const output='recA1B2C3D4E5F6G7';
   const queue=()=>({ok:true,
-    flags:{admission_enabled:true,producer_conversation_enabled:true,
+    flags:{admission_enabled:admissionActive,producer_conversation_enabled:true,
       automatic_sampling_percent:0},
     queue:[{output_id:output,profile_id:'recT2rbKX3MF7cVFU',
       output_type:'Instagram Reel',manual_admission_enabled:!enrolled,
@@ -158,6 +159,10 @@ test('manual Chicago enrollment and actual Producer exchange require server flag
   await enroll.listeners.click();
   for(let i=0;i<10;i++)await tick();
   assert.equal(enrolled,true);
+  // Operators may pause fresh admissions without losing already-held chats.
+  admissionActive=false;
+  await nodes.rrRefresh.listeners.click();
+  for(let i=0;i<10;i++)await tick();
   const held=descendants(nodes.rrDetail);
   const textarea=held.find(n=>n.tag==='textarea');
   const send=held.find(n=>n.tag==='button'&&n.textContent==='Send to Producer');
