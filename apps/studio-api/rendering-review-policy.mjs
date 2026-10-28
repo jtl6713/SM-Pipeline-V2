@@ -138,7 +138,16 @@ export function applyReviewEvent(session, event) {
       content: text(event.content), at: text(event.at), attempt_id: s.current_attempt_id,
       timestamp_seconds: Number.isFinite(event.timestamp_seconds) &&
         event.timestamp_seconds >= 0 ? event.timestamp_seconds : null });
-    if(event.role==="user"&&s.producer_candidate)s.producer_candidate.stale=true;
+    if(event.role==="user"){
+      if(s.producer_candidate)s.producer_candidate.stale=true;
+      // A revised user instruction invalidates the prior frozen plan and any
+      // conditional authorization, but cannot change an in-flight job.
+      if(["awaiting_assets","plan_ready"].includes(s.state)){
+        if(s.plan)s.plan.frozen=false;
+        s.pending_authorization=null;
+        s.state="discussing";
+      }
+    }
     if (s.state === "ready_for_review") s.state = "discussing";
     // Messages during rendering are feedback for the NEXT attempt, never job mutation.
   } else if (kind === "PRODUCER_CANDIDATE") {
@@ -179,6 +188,8 @@ export function applyReviewEvent(session, event) {
     s.pending_authorization=null;
     s.state="discussing";
   } else if (kind === "PROPOSE_PLAN") {
+    if(s.producer_candidate?.stale)
+      fail("STALE_PRODUCER_CANDIDATE","Refresh the Producer proposal after new creative feedback");
     if (!["ready_for_review", "discussing", "awaiting_assets", "plan_ready", "revision_failed"].includes(s.state))
       fail("PLAN_NOT_EDITABLE", "Cannot replace a plan while rendering");
     if (!validId(event.plan_hash) || !Number.isSafeInteger(event.plan_version) ||
@@ -186,9 +197,22 @@ export function applyReviewEvent(session, event) {
         !Array.isArray(event.missing_assets) ||
         event.missing_assets.some(id => !validId(id)))
       fail("INVALID_PLAN", "A newer validated plan version and dependency list are required", 400);
+    const manifest=event.immutable_manifest;
+    if(manifest!==undefined &&
+       (!manifest || typeof manifest!=="object" || Array.isArray(manifest) ||
+        JSON.stringify(manifest).length>50000 ||
+        manifest.source_attempt_id!==s.current_attempt_id ||
+        manifest.output_id!==s.output_id ||
+        manifest.profile_id!==s.profile_id ||
+        manifest.allow_public_publish!==false ||
+        manifest.allow_platform_upload!==false ||
+        manifest.auto_approve!==false ||
+        s.producer_candidate?.hash!==manifest.candidate_hash))
+      fail("PLAN_SOURCE_UNVERIFIED","Frozen plan identity and publication denial must match",400);
     s.plan = { version: event.plan_version, hash: event.plan_hash, frozen: event.frozen === true,
       missing_assets: [...new Set(event.missing_assets)], source_attempt_id: s.current_attempt_id,
-      acceptance_checks: Array.isArray(event.acceptance_checks) ? event.acceptance_checks : [] };
+      acceptance_checks: Array.isArray(event.acceptance_checks) ? event.acceptance_checks : [],
+      ...(manifest!==undefined?{immutable_manifest:copy(manifest)}:{}) };
     s.latest_plan_version = event.plan_version;
     s.pending_authorization = null; // materially changed plan revokes conditional intent
     s.state = s.plan.missing_assets.length ? "awaiting_assets" : s.plan.frozen ? "plan_ready" : "discussing";
@@ -212,6 +236,8 @@ export function applyReviewEvent(session, event) {
     s.pending_authorization = { plan_hash: s.plan.hash, plan_version: s.plan.version,
       source_attempt_id: s.current_attempt_id };
   } else if (kind === "COMMIT_PLAN") {
+    if(s.producer_candidate?.stale)
+      fail("STALE_PRODUCER_CANDIDATE","Refresh the plan after creative feedback");
     if (s.state !== "plan_ready" || !s.review_hold.active)
       fail("REVIEW_NOT_READY", "Review hold and a ready plan are required");
     requirePlanReady(s, event.plan_version, event.plan_hash);
