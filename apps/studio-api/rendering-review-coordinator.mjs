@@ -188,6 +188,21 @@ export async function mutateReviewSessionCommand({
     const hold=await operations.readHold(outputId);
     if (s.review_hold.active && !authoritativeHoldMatches(hold,outputId,s.id,s.review_hold.id))
       err("HOLD_NOT_VERIFIED", "Cannot change a session without its authoritative hold");
+    // Creative acceptance is never permission to resume publishing. Recheck
+    // the original output under the SAME approval mutex immediately before
+    // recording acceptance, and retain the durable review hold afterwards.
+    if(event?.type==="APPROVE_ATTEMPT"&&event.pilot_creative_only===true){
+      if(typeof operations.readOutput!=="function")
+        err("APPROVAL_OUTPUT_READ_REQUIRED","Authoritative output readback required",503);
+      const original=await operations.readOutput(outputId);
+      if(original?.id!==outputId||original.profile_id!==s.profile_id||
+         original.platform!=="Instagram"||original.output_type!=="Instagram Reel"||
+         original.do_not_publish!==true||original.review_hold_active!==true||
+         original.publish_started_at||original.publish_locked_at||
+         original.publish_locked_by||original.platform_post_id||
+         original.platform_media_id||original.published_at)
+        err("REVIEW_PUBLICATION_FENCE_LOST","Review approval cannot override publication hold");
+    }
     const result=applyReviewEvent(s,event);
     if (result.replay) return result;
     if (result.session.state==="queued" && !result.session.review_hold.active)
