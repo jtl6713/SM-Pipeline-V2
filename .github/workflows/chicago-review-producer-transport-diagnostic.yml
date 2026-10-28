@@ -89,34 +89,33 @@ jobs:
             direction='Create a proposed revision that uses existing Riverwalk stills and preserves the sunrise opening. This is a non-persistent Producer connection canary.'
           } | ConvertTo-Json -Compress
           $sw=[System.Diagnostics.Stopwatch]::StartNew()
+          Add-Type -AssemblyName System.Net.Http
+          $http=[System.Net.Http.HttpClient]::new()
+          $http.Timeout=[TimeSpan]::FromSeconds(145)
           try{
-            $resp=Invoke-WebRequest -UseBasicParsing -Uri 'https://pipeline.chicagoshining.com/jobs/rendering-review/propose' -Method Post -ContentType 'application/json' -Headers @{'X-Pipeline-Secret'=$secret} -Body $body -TimeoutSec 145
+            $req=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post,'https://pipeline.chicagoshining.com/jobs/rendering-review/propose')
+            $req.Content=[System.Net.Http.StringContent]::new($body,[System.Text.Encoding]::UTF8,'application/json')
+            [void]$req.Headers.TryAddWithoutValidation('X-Pipeline-Secret',$secret)
+            $resp=$http.SendAsync($req).GetAwaiter().GetResult()
             $status=[int]$resp.StatusCode
-            $data=$resp.Content | ConvertFrom-Json
-            Write-Output ("producer_probe_http="+$status+" elapsed_sec="+[int]$sw.Elapsed.TotalSeconds+" ok="+[string]$data.ok+" error="+[string]$data.error)
-            if($status -eq 200 -and $data.ok -eq $true -and $data.render_queued -eq $false -and $data.publication_changed -eq $false){
+            $mime=[string]$resp.Content.Headers.ContentType.MediaType
+            $raw=$resp.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            $code='unknown';$ok=$false;$renderQueued='unknown'
+            try{
+              $data=$raw|ConvertFrom-Json
+              $code=[string]$data.error
+              if(-not $code){$code='none'}
+              $ok=($data.ok -eq $true)
+              $renderQueued=[string]$data.render_queued
+            }catch{}
+            Write-Output ("producer_probe_http="+$status+" elapsed_sec="+[int]$sw.Elapsed.TotalSeconds+" mime="+$mime+" code="+$code+" ok="+$ok+" render_queued="+$renderQueued)
+            if($status -eq 200 -and $ok -and $data.render_queued -eq $false -and $data.publication_changed -eq $false){
               Write-Output 'producer_probe_safe_candidate=true no_persistence=true'
             }
           }catch{
-            $status=0
-            try{$status=[int]$_.Exception.Response.StatusCode}catch{}
-            $kind=$_.Exception.GetType().Name
-            $code='unknown'
-            try{
-              if($_.ErrorDetails.Message){$data=$_.ErrorDetails.Message | ConvertFrom-Json; $code=[string]$data.error}
-            }catch{}
-            if($code -eq 'unknown'){
-              try{
-                $stream=$_.Exception.Response.GetResponseStream()
-                if($stream){
-                  $reader=New-Object System.IO.StreamReader($stream)
-                  $body=$reader.ReadToEnd()
-                  $data=$body | ConvertFrom-Json
-                  if($data.error){$code=[string]$data.error}
-                }
-              }catch{}
-            }
-            Write-Output ("producer_probe_failure_http="+$status+" elapsed_sec="+[int]$sw.Elapsed.TotalSeconds+" class="+$kind+" code="+$code)
+            Write-Output ("producer_probe_transport_failure_elapsed="+[int]$sw.Elapsed.TotalSeconds+" class="+$_.Exception.GetType().Name)
+          }finally{
+            $http.Dispose()
           }
           PS1
           python - <<'PY'
