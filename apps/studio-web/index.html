@@ -25,6 +25,7 @@
 <link rel="stylesheet" href="/assets/production-progress-0601.css?v=0.6.763-idea-lifecycle-live">
 <link rel="stylesheet" href="/assets/production-render-layout-0678.css?v=0.6.763-idea-lifecycle-live">
 <link rel="stylesheet" href="/assets/factory-layout-0680.css?v=0.6.763-idea-lifecycle-live">
+<link rel="stylesheet" href="/assets/rendering-review-queue.css?v=0.6.764-rendering-review-readonly">
 <link rel="stylesheet" href="/assets/factory-batch-quality-0710.css?v=0.6.763-idea-lifecycle-live&global=factory-v2-quality-horizontal">
 <link rel="stylesheet" href="/assets/idea-drawer-safe-offset.css?v=0.6.763-idea-lifecycle-live">
 <link rel="stylesheet" href="/assets/visual-timeline-trim.css?v=0.6.763-idea-lifecycle-live">
@@ -73,6 +74,7 @@
  <button class="nav-item" data-page="profiles" id="navNewProfile">New Profile</button>
  <button class="nav-item" data-page="operations" id="navOperations">Operations <span class="ops-nav-badge" id="navOperationsBadge" hidden></span></button>
  <button class="nav-item" data-page="factory" id="navFactory">Factory</button>
+ <button class="nav-item" data-page="rendering-review" id="navRenderingReview" hidden>Rendering Review</button>
  <button class="nav-item" data-page="rendering-review" id="navRenderingReview" hidden>Rendering Review</button>
  <button class="nav-item" data-page="exception-recovery" id="navExceptionRecovery" hidden>Exception Recovery</button>
  <button class="nav-item nav-item-footer-only" data-page="support">Help</button>
@@ -2187,7 +2189,29 @@
  </section>
 
 
- <section id="page-exception-recovery" class="page" aria-label="Administrator exception recovery">
+ <section id="page-rendering-review" class="page" aria-label="Chicago Rendering Review">
+  <header class="page-heading rr-heading">
+    <div><span class="eyebrow">Chicago pilot · read-only</span><h1>Rendering Review</h1>
+      <p>Watch completed Instagram Reels and inspect saved review history. No changes or review holds are created from this page.</p>
+    </div>
+    <button type="button" class="secondary-button" id="rrRefresh">Refresh</button>
+  </header>
+  <p class="rr-status" id="rrStatus" aria-live="polite">Checking access to Rendering Review…</p>
+  <div class="rr-layout">
+    <section class="rr-panel" aria-label="Completed Chicago Reels">
+      <div class="rr-heading"><h2>Completed Reels</h2><span id="rrCount" class="rr-muted">0 loaded</span></div>
+      <div class="rr-list" id="rrQueueList" aria-live="polite"></div>
+      <button type="button" class="secondary-button" id="rrMore" hidden>Load more</button>
+    </section>
+    <section class="rr-panel" aria-label="Selected Reel preview">
+      <div id="rrDetail"><h2>Choose a completed Reel</h2><p>Select a Reel to inspect its original rendering.</p></div>
+      <video id="rrVideo" class="rr-preview" controls playsinline preload="none" hidden aria-label="Selected Chicago Reel video"></video>
+      <a id="rrOpenFile" class="rr-open-file" target="_blank" rel="noopener noreferrer" hidden>Open original file</a>
+    </section>
+  </div>
+</section>
+
+<section id="page-exception-recovery" class="page" aria-label="Administrator exception recovery">
   <div class="erc-top">
    <div><span class="eyebrow">Administrator</span><h1>Exception Recovery</h1><p class="erc-subtitle">Unified Quality Agent diagnostics, using the existing authoritative recovery census. Counts are provisional until parity is verified.</p></div>
    <button type="button" class="secondary-button" id="ercRefresh">Refresh inventory</button>
@@ -3068,6 +3092,7 @@
  <script defer src="/assets/global-idea-target.js?v=0.6.763-idea-lifecycle-live"></script>
  <script defer src="/assets/producer-conversation-ui.js?v=0.6.763-idea-lifecycle-live"></script>
  <script defer src="/assets/exception-recovery.js?v=0.6.763-idea-lifecycle-live&age=hm-v1"></script>
+ <script defer src="/assets/rendering-review-queue.js?v=0.6.764-rendering-review-readonly"></script>
  <script defer src="/assets/rendering-review-queue.js?v=chicago-review-readonly-1"></script>
  <script>window.StudioLazyLoad.boot();</script>
 <script>
