@@ -547,10 +547,17 @@ jobs:
               bundled = live.startswith(b'var __defProp') or b'// worker.js' in live[:500]
               # The entry file is now split into ESM function modules. Compare the
               # bundled live size to the combined source sizes, not the entry alone.
-              source_bytes = len(repo) + sum(p.stat().st_size for p in Path('apps/studio-api').glob('worker-functions-*.mjs'))
+              # The bundle also incorporates imported Rendering Review modules,
+              # so only counting worker-functions files understates source bytes.
+              modules = [*Path('apps/studio-api').glob('worker-functions-*.mjs'),
+                         *Path('apps/studio-api').glob('rendering-review-*.mjs')]
+              source_bytes = len(repo) + sum(p.stat().st_size for p in modules)
               size_ok = abs(len(live) - source_bytes) <= max(int(source_bytes * 0.30), 512000)
               print(f'repo_bytes={len(repo)} modular_source_bytes={source_bytes} live_bytes={len(live)} bundled={bundled} size_ok={size_ok} missing={missing}')
-              if bundled and size_ok and not missing:
+              release_marker = re.search(rb'version:\\s*"(0\\.10\\.[A-Za-z0-9._-]+)"', repo)
+              release_ok = bool(release_marker and release_marker.group(1) in live)
+              print(f'active_release_marker_match={release_ok}')
+              if bundled and size_ok and not missing and release_ok:
                   print('active_source_byte_match=WRANGLER_BUNDLE_EQUIVALENT')
               else:
                   print(f'repo_sha256={hashlib.sha256(norm(repo)).hexdigest()}')
