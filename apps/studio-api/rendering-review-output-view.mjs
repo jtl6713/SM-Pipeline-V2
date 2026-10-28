@@ -32,6 +32,7 @@ export function renderingReviewOutputView(record, readField, holdActiveField) {
     published_at:text(f("Published_At")),
     publish_started_at:text(f("Publish_Started_At")),
     publish_locked_at:text(f("Publish_Locked_At")),
+    publish_locked_by:text(f("Publish_Locked_By")),
     scheduled_post_date:text(f("Scheduled_Post_Date")),
     studio_scheduled_at:text(f("Studio_Scheduled_At")),
     youtube_scheduled_publish_at:text(f("YouTube_Scheduled_Publish_At")),
