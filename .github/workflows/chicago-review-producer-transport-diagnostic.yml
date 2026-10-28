@@ -105,6 +105,17 @@ jobs:
             try{
               if($_.ErrorDetails.Message){$data=$_.ErrorDetails.Message | ConvertFrom-Json; $code=[string]$data.error}
             }catch{}
+            if($code -eq 'unknown'){
+              try{
+                $stream=$_.Exception.Response.GetResponseStream()
+                if($stream){
+                  $reader=New-Object System.IO.StreamReader($stream)
+                  $body=$reader.ReadToEnd()
+                  $data=$body | ConvertFrom-Json
+                  if($data.error){$code=[string]$data.error}
+                }
+              }catch{}
+            }
             Write-Output ("producer_probe_failure_http="+$status+" elapsed_sec="+[int]$sw.Elapsed.TotalSeconds+" class="+$kind+" code="+$code)
           }
           PS1
