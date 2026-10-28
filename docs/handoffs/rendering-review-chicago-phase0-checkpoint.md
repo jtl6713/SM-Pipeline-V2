@@ -25,7 +25,8 @@ Repository: `jtl6713/SM-Pipeline-V2`. Branch: `feature/rendering-review-chicago-
 - Isolated, serializable review messages, frozen plans, explicit/conditional authorization, dependencies, monotonic creative versions and numbered attempts.
 - Same-attempt render job retries, callback ownership fencing, stale callback audit, latest-only attempted approval, verified-scheduler receipt prerequisite for hold release, and safe reference-aware deletion candidate selection.
 - Additional dispatch gate that blocks held, stale, nonapproved or wrong-artifact attempts. **It is not wired into production and must never be described as an active publishing hold.**
-- `apps/studio-api/rendering-review-policy.test.mjs` tests fixtures without creating live Airtable records, side effects, or public posts.
+- `apps/studio-api/rendering-review-coordinator.mjs` defines an injected, server-only enrollment transaction: permissions, shared output lock, authoritative eligibility reread, hold claim/readback, stale schedule revocation, session create-if-absent and independent readback. It deliberately does not clear ambiguous orphaned holds after a failure. Generic state mutation requires authenticated event provenance and atomic versioned persistence; it explicitly refuses approval and hold-release events until real scheduling orchestration is implemented.
+- `apps/studio-api/rendering-review-policy.test.mjs` and `rendering-review-coordinator.test.mjs` exercise isolated fixtures without creating live Airtable records, side effects, or public posts.
 - `.github/workflows/rendering-review-phase0-ci.yml` checks syntax, Phase 0 fixtures, and existing producer/approval-lock regression contracts.
 
 ## Required next integration (not completed by this PR)
