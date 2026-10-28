@@ -95,28 +95,48 @@ test('Chicago completed render queue uses exactly two bounded paginated reads an
   assert.match(calls[0].options.filterFormula,/Final_File_ID/);
 });
 
-test('exact allowlisted Chicago Reel is shown first even when absent from paginated scan',async()=>{
-  const f=fixture();
+test('exact Chicago pilot bypasses the broad queue scan and validates both authoritative records',async()=>{
+  const f=fixture(),reads=[];
   f.args.env.RENDERING_REVIEW_EXACT_OUTPUT_ID=outputId;
   f.args.url=new URL('https://studio.test/api/rendering-review/queue?profile_id='+CHICAGO_PROFILE_ID);
-  const otherId='recZ1B2C3D4E5F6G7';
-  const fields={Content_Item:[f.content.id],Platform:'Instagram',
-    Platform_Output_Type:'Instagram Reel',Final_File_ID:'drive-file',
-    Final_File_URL:'https://drive.google.com/file/d/12345678901234567890/view',
-    Publish_Status:'Ready to Schedule',Render_Status:'Rendered'};
-  f.args.operations.listRecordsPage=async(_env,table)=>table==='outputs'?{
-    valid:true,offset:'next-page',records:[{id:otherId,fields:{...fields,Output_Title:'Other Reel'}}],
-  }:{valid:true,records:[f.content]};
-  let exactReads=0;
+  f.args.operations.listRecordsPage=async()=>{throw Error('Broad output scans are forbidden for an exact pilot');};
+  const exact={id:outputId,fields:{Content_Item:[f.content.id],
+    Platform:'Instagram',Platform_Output_Type:'Instagram Reel',Final_File_ID:'drive-file',
+    Output_ID:8447,Output_Title:'Riverwalk Morning Reflections',Render_Status:'Rendered',
+    Publish_Status:'Ready to Schedule',Output_Status:'Approved for Publishing'}};
   f.args.operations.airtableFetch=async(_env,table,id)=>{
-    assert.equal(table,'outputs');assert.equal(id,outputId);exactReads++;
-    return {id:outputId,fields:{...fields,Output_ID:8447,Output_Title:'Pilot Reel'}};
+    reads.push({table,id});
+    if(table==='outputs'&&id===outputId)return exact;
+    if(table==='tblwzN9AXWvmKVKPs'&&id===f.content.id)return f.content;
+    throw Error('Unexpected Airtable read');
   };
   const result=await read(f.args);
-  assert.deepEqual(result.queue.map(x=>x.output_id),[outputId,otherId]);
+  assert.deepEqual(result.queue.map(x=>x.output_id),[outputId]);
   assert.equal(result.queue[0].output_number,8447);
-  assert.equal(result.next_cursor,'next-page');
-  assert.equal(exactReads,1);
+  assert.equal(result.queue[0].title,'Riverwalk Morning Reflections');
+  assert.equal(result.queue[0].manual_admission_enabled,false);
+  assert.equal(result.next_cursor,null);
+  assert.deepEqual(reads,[{table:'outputs',id:outputId},
+    {table:'tblwzN9AXWvmKVKPs',id:f.content.id}]);
+});
+
+test('exact pilot fails closed on cross-profile links or an existing Instagram container',async()=>{
+  const f=fixture();f.args.env.RENDERING_REVIEW_EXACT_OUTPUT_ID=outputId;
+  f.args.url=new URL('https://studio.test/api/rendering-review/queue');
+  f.output.fields.Platform='Instagram';
+  f.output.fields.Platform_Output_Type='Instagram Reel';
+  f.output.fields.Render_Status='Rendered';
+  f.args.operations.listRecordsPage=async()=>{throw Error('No broad Airtable scan');};
+  f.args.operations.airtableFetch=async(_env,table)=>table==='outputs'?f.output:f.content;
+  f.content.fields.Content_Profile=['recZ1B2C3D4E5F6G7'];
+  await assert.rejects(()=>read(f.args),e=>e.status===403);
+  f.content.fields.Content_Profile=[CHICAGO_PROFILE_ID];
+  f.output.fields.Platform_Media_ID='ig-existing-container';
+  await assert.rejects(()=>read(f.args),e=>e.status===409);
+  delete f.output.fields.Platform_Media_ID;
+  f.output.fields.Final_File_ID='';
+  f.output.fields.Final_File_URL='';
+  await assert.rejects(()=>read(f.args),e=>e.status===409);
 });
 
 test('queue omits other profiles, published, unrelated platforms and malformed links',async()=>{
