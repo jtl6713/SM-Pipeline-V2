@@ -3,8 +3,8 @@ import os
 import unittest
 from unittest.mock import patch
 from flask import Flask
-from rendering_review.media_http import create_review_media_blueprint
-from rendering_review.one_job import OUTPUTS, SESSIONS, ATTEMPTS, ITEMS, CHICAGO
+from rendering_review.media_http import (create_review_media_blueprint,
+    OUTPUTS, SESSIONS, ATTEMPTS, ITEMS, CHICAGO)
 
 OUTPUT="rec0uVrVeiUM6shp9"
 ATTEMPT="rrattempt_1234567890abcdef"
