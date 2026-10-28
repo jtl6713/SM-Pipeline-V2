@@ -131,6 +131,8 @@ def process_request(
         record_id,
         {
             **unlock_fields(),
+            # Release the former send-only hold only as part of the terminal Published update.
+            "Do_Not_Publish": False,
             "Music_Status": music_status,
             "Output_Notes": append_note(output, f"TTD4 manual publication confirmed at {stamp_minutes()}. URL: {url}"),
             "Published_At": now,
