@@ -9,6 +9,7 @@
  */
 import { CHICAGO_PROFILE_ID, REVIEW_SCHEMA } from "./rendering-review-policy.mjs";
 import { renderingReviewOutputView } from "./rendering-review-output-view.mjs";
+import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 
 export const RENDER_REVIEW_TABLES = Object.freeze({
   sessions: "tblHX3UdoNszkoquG",
@@ -71,7 +72,12 @@ export function makeRenderingReviewAirtableOperations({
   const outputTable = text(env?.AIRTABLE_OUTPUT_TABLE_ID);
   if (!outputTable) error("ADAPTER_NOT_CONFIGURED","Authoritative Platform Output table missing",503);
   const f=(record,field)=>readField(record,field);
-  const readRaw = id => airtableFetch(env,outputTable,formulaId(id));
+  const readRaw = async id => {
+    const row = await airtableFetch(env,outputTable,formulaId(id));
+    if(row?.id!==id || !row.fields)
+      error("OUTPUT_IDENTITY_CONFLICT","Authoritative output readback failed",503);
+    return row;
+  };
   const writeEnabled = () => {
     if (mutationGate !== true)
       error("PILOT_WRITE_DISABLED", "Rendering Review writes remain disabled until provider dispatch fencing",403);
@@ -92,13 +98,24 @@ export function makeRenderingReviewAirtableOperations({
     catch {error("BAD_SESSION_JSON","Stored Rendering Review session cannot be read")}
     identity(session);
     if(session.output_id!==recordId || text(f(row,"Output_Record_ID"))!==recordId ||
+       text(f(row,"Session_ID"))!==session.id ||
        Number(f(row,"Row_Version"))!==session.version)
       error("SESSION_IDENTITY_CONFLICT","Airtable session identity or version mismatch");
     return {row,session};
   };
-  const viewOutput = record => renderingReviewOutputView(
-    record,(row,field)=>readField(row,field),RENDER_REVIEW_OUTPUT_FIELDS.hold_active,
-  );
+  const viewOutput = async record => {
+    // Output.Content_Profile is a display lookup. Admission identity comes
+    // exclusively from the authoritative linked Content Item's profile ID.
+    const links=f(record,"Content_Item");
+    if(!Array.isArray(links) || links.length!==1 || !recordRe.test(links[0]))
+      error("CONTENT_IDENTITY_CONFLICT","Review requires exactly one linked Content Item");
+    const content=await airtableFetch(env,"tblwzN9AXWvmKVKPs",links[0]);
+    const profiles=f(content,"Content_Profile");
+    if(content?.id!==links[0] || !Array.isArray(profiles) || profiles.length!==1 || !recordRe.test(profiles[0]))
+      error("PROFILE_IDENTITY_CONFLICT","Review requires one authoritative Content Profile");
+    return {...renderingReviewOutputView(record,readField,RENDER_REVIEW_OUTPUT_FIELDS.hold_active),
+      profile_id:profiles[0]};
+  };
   const readHold=async outputId => {
     const row=await readRaw(outputId);
     return {
@@ -118,7 +135,7 @@ export function makeRenderingReviewAirtableOperations({
     claimHold:async ({output_id,session_id})=>{
       writeEnabled();
       const row=await readRaw(output_id);
-      if(Boolean(f(row,RENDER_REVIEW_OUTPUT_FIELDS.hold_active)))
+      if(renderingReviewHoldPresent(field=>f(row,field)))
         error("ALREADY_HELD","A durable Rendering Review hold already exists");
       if(name(f(row,"Publish_Status")).toLowerCase()==="published" ||
          f(row,"Publish_Started_At") || f(row,"Publish_Locked_At") || f(row,"Published_At") ||
@@ -187,6 +204,11 @@ export function makeRenderingReviewAirtableOperations({
       if(next.output_id!==output_id)error("SESSION_IDENTITY_CONFLICT","Cannot move session to another output");
       const existing=await storedSession(output_id);
       if(!existing || existing.session.version!==expected_version) return false;
+      if(next.version!==expected_version+1 || next.id!==existing.session.id ||
+         next.profile_id!==existing.session.profile_id || next.output_type!==existing.session.output_type ||
+         next.review_hold?.id!==existing.session.review_hold?.id ||
+         next.review_hold?.owner!==existing.session.review_hold?.owner)
+        error("SESSION_IDENTITY_CONFLICT","Session identity and hold ownership are immutable; version must advance once");
       const stamp=new Date().toISOString();
       if(JSON.stringify(next).length>85000)
         error("SESSION_GROWTH_LIMIT","Message history must be externalized to paginated records before continuing");
@@ -207,3 +229,4 @@ export function makeRenderingReviewAirtableOperations({
     metadata:{chicago_profile_id:CHICAGO_PROFILE_ID,table_ids:RENDER_REVIEW_TABLES},
   };
 }
+

@@ -14,7 +14,7 @@ function fake({mutationGate=false}={}){
  const output={
   id:outputId,
   fields:{
-   Content_Profile:[CHICAGO_PROFILE_ID],
+   Content_Profile:["Chicago Shining Studio"],Content_Item:["recC1B2C3D4E5F6G7"],
    Platform:"Instagram",Platform_Output_Type:"Instagram Reel",
    Output_Status:"Ready for Review",Review_Status:"Review Sent",
    Render_Status:"Rendered",Publish_Status:"Not Ready",
@@ -23,10 +23,12 @@ function fake({mutationGate=false}={}){
    Scheduled_Post_Date:null,Studio_Scheduled_At:null,Do_Not_Publish:false,
   },
  };
+ const content={id:"recC1B2C3D4E5F6G7",fields:{Content_Profile:[CHICAGO_PROFILE_ID]}};
  let session=null, writes=0;
  const env={AIRTABLE_OUTPUT_TABLE_ID:"tblrlPeboBthkplH0",STUDIO_MEDIA:{}};
  const readField=(row,k)=>row?.fields?.[k];
  const airtableFetch=async (_env,table,id,opts={})=>{
+  if(table==="tblwzN9AXWvmKVKPs")return clone(content);
   if(table===env.AIRTABLE_OUTPUT_TABLE_ID){
    if(id!==outputId)throw Error("wrong output ID");
    if(opts.method==="PATCH"){
@@ -79,7 +81,7 @@ function fake({mutationGate=false}={}){
   holdIdFactory:()=>"rrhold-00000001",
   mutationGate,
  });
- return {ops,output,get session(){return session},get writes(){return writes}};
+ return {ops,output,content,get session(){return session},get writes(){return writes}};
 }
 
 test("real Airtable table IDs and dedicated fields are independent of other holds",()=>{
@@ -173,4 +175,39 @@ test("new review owns a separate hold and retains evidence of original legacy ho
  assert.equal(f.output.fields.Do_Not_Publish,true);
  assert.equal(f.output.fields.Studio_Render_Review_Hold_Active,true);
  assert.equal(f.output.fields.Studio_Render_Review_Hold_Owner,session.id);
+});
+
+test("lookup spoofing cannot override linked profile and ambiguous links fail closed",async()=>{
+ const f=fake({mutationGate:true});
+ f.output.fields.Content_Profile=[CHICAGO_PROFILE_ID];
+ f.content.fields.Content_Profile=["recZ1B2C3D4E5F6G7"];
+ assert.equal((await f.ops.readOutput(outputId)).profile_id,"recZ1B2C3D4E5F6G7");
+ f.output.fields.Content_Item.push("recD1B2C3D4E5F6G7");
+ await reject(()=>f.ops.readOutput(outputId),"CONTENT_IDENTITY_CONFLICT");
+ assert.equal(f.writes,0);
+});
+
+test("retained review ownership cannot be overwritten when active checkbox is false",async()=>{
+ for(const field of ["Studio_Render_Review_Hold_ID","Studio_Render_Review_Hold_Owner",
+   "Studio_Render_Review_Session_ID","Studio_Review_Hold_ID","Studio_Review_Hold_Owner"]){
+  const f=fake({mutationGate:true});
+  f.output.fields[field]="prior-review-owner";
+  await reject(()=>f.ops.claimHold({output_id:outputId,session_id:args.session_id}),"ALREADY_HELD");
+  assert.equal(f.writes,0);
+  assert.equal(f.output.fields[field],"prior-review-owner");
+ }
+});
+
+test("durable session cannot change identity or skip a version under a current version check",async()=>{
+ const f=fake({mutationGate:true});
+ const {session}=await enrollManualReviewCommand({...args,operations:f.ops});
+ const before=f.writes;
+ for(const patch of [{id:"replacement-session"},{version:4},{profile_id:"recZ1B2C3D4E5F6G7"},
+   {review_hold:{...session.review_hold,id:"replacement-hold"}}]){
+  await reject(()=>f.ops.saveSessionIfVersion({output_id:outputId,expected_version:1,
+    next:{...clone(session),version:2,...patch}}),"SESSION_IDENTITY_CONFLICT");
+ }
+ assert.equal(f.writes,before);
+ f.session.fields.Session_ID="replacement-session";
+ await reject(()=>f.ops.readSession(outputId),"SESSION_IDENTITY_CONFLICT");
 });
