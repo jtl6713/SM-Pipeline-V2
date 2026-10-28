@@ -553,3 +553,5 @@ Deploy read-only Exception Recovery History Studio UI 0.6.759 after merged #1137
 Deploy UI 0.6.763-idea-lifecycle-live: fresh authoritative Ideas list, promoted-row Current/Archived repartition, no stale approval misclassification; Worker 0.10.682 deployed and verified.
 Redeploy Studio UI 0.6.763-idea-lifecycle-live after removing stale Worker version pin in unrelated Home budget regression; production Worker 0.10.682 has verified green.
 2026-10-25: Recovery Center canonical Failed drilldowns exclude unmatched QA-only diagnostics. Retain separate diagnostics card; no publication mutations. Deploy and verify UI.
+
+2026-10-28: Deploy Studio UI 0.6.764-rendering-review-readonly: Chicago-only authenticated Rendering Review page for completed Instagram Reel preview and existing session history. Read-only, no enrollment, chat writes, render revisions, approvals, schedule, holds or publication. Require source/Pages regression, exact new custom-domain UI build/cache/BUILD_ID verification. Worker authenticated queue must be deployed and proven first; preserve production Writer/Airtable authority, all existing public publishing fences and no new publishing canary.
