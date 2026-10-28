@@ -109,6 +109,15 @@ jobs:
               $renderQueued=[string]$data.render_queued
             }catch{}
             Write-Output ("producer_probe_http="+$status+" elapsed_sec="+[int]$sw.Elapsed.TotalSeconds+" mime="+$mime+" code="+$code+" ok="+$ok+" render_queued="+$renderQueued)
+            if($status -eq 200 -and $ok -and $data.proposal.candidate){
+              $candidate=$data.proposal.candidate
+              $details=([string]$candidate.explanation)+' '+(@($candidate.changes) -join ' ')
+              $existingMention=($details -match '(?i)(riverwalk 8|morning riverwalk|existing morning|already owned)')
+              $scenes=@($candidate.timeline)
+              $sourceMorningId='e7eafa73de3e460782'
+              $usesOwnedMorning=@($scenes | Where-Object { @($_.asset_ids) -contains $sourceMorningId }).Count -gt 0
+              Write-Output ("producer_existing_photo_mentioned="+[bool]$existingMention+" timeline_uses_owned_morning="+[bool]$usesOwnedMorning+" scene_count="+[int]$scenes.Count+" requirements="+[int]@($candidate.requirements).Count)
+            }
             if($status -eq 200 -and $ok -and $data.render_queued -eq $false -and $data.publication_changed -eq $false){
               Write-Output 'producer_probe_safe_candidate=true no_persistence=true'
               Write-Output ("producer_probe_timeline_scenes="+[int]@($data.proposal.candidate.timeline).Count+" requirements="+[int]@($data.proposal.candidate.requirements).Count)
