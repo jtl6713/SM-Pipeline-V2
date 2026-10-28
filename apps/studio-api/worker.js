@@ -1,4 +1,5 @@
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
+import { materializeReviewPlan } from "./rendering-review-plan-runtime.mjs";
 import { makeRenderingReviewAirtableOperations } from "./rendering-review-airtable.mjs";
 import { CHICAGO_PROFILE_ID } from "./rendering-review-policy.mjs";
 import { handleRenderingReviewFeedbackRequest, reviewFeedbackWriteEnabled } from "./rendering-review-feedback-http.mjs";
@@ -1713,7 +1714,7 @@ export default {
             env, airtableFetch, listRecords: reviewListRecords, readField: f,
             withOutputApprovalLock, authorizeReview: authorizeOutput,
             authorizeEvent: async (_id, event) =>
-              event?.type === "PRODUCER_CANDIDATE",
+              ["PRODUCER_CANDIDATE","PROPOSE_PLAN"].includes(event?.type),
             revokeScheduleUnderHold: async () => {
               throw new HttpError(405, "Producer conversations cannot change schedules");
             },
@@ -1737,7 +1738,24 @@ export default {
             client_request_id: proposed.client_request_id,
             direction: input.direction, proposal: proposed.proposal,
           });
-          return respond(request, env, result);
+          // A persisted, genuine Producer reply may produce a verified frozen
+          // creative plan. Incomplete facts/visual evidence stays blocked.
+          let plan;
+          try {
+            plan=await materializeReviewPlan({
+              output_id:conversationMatch[1],expected_version:result.session_version,
+              operations:adapter,readField:f,
+              readRaw:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+              readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+              readRequest:id=>airtableFetch(env,"tbl75nxNi6PMUjBQE",id),
+              readMediaAsset:id=>airtableFetch(env,"tblSITCujCsJTNcDe",id),
+            });
+          } catch(error) {
+            plan={ok:false,plan_ready:false,
+              error:String(error?.code||"PLAN_PREPARATION_UNAVAILABLE"),
+              render_queued:false,publication_changed:false};
+          }
+          return respond(request, env, {...result,plan});
         }
         const proposalMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/producer-proposal$/.exec(url.pathname);
         if (proposalMatch && request.method === "POST") {
