@@ -1,0 +1,45 @@
+name: Read-only verify Output 3129 Studio preview media
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-3129-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Install FFmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+      - name: Check exact Output 3129 public Studio preview without changing records
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://media.chicagoshining.com/studio/previews/recrsAx9Ol37f5paS/current.mp4'
+          curl -sSL --fail --retry 2 --max-time 120 -D /tmp/headers -o /tmp/studio3129.mp4 "$URL"
+          grep -iE '^(HTTP/|content-type:|cache-control:|etag:|content-length:|cf-cache-status:)' /tmp/headers || true
+          ffprobe -v error -show_entries format=duration,size:stream=codec_name,width,height,nb_frames -of json /tmp/studio3129.mp4
+          python3 - <<'PY'
+          import itertools, subprocess, statistics
+          sample_times=[2, 7, 12, 16]
+          frames={}
+          for t in sample_times:
+              cmd=['ffmpeg','-hide_banner','-loglevel','error','-ss',str(t),'-i','/tmp/studio3129.mp4','-frames:v','1','-vf','scale=32:32,format=gray','-f','rawvideo','-']
+              out=subprocess.check_output(cmd,timeout=30)
+              if len(out)!=1024:
+                  raise RuntimeError(f'Cannot decode frame at {t}s: {len(out)} bytes')
+              frames[t]=out
+          for a,b in itertools.combinations(sample_times,2):
+              avg=statistics.mean(abs(x-y) for x,y in zip(frames[a],frames[b]))
+              print(f'preview frame-difference {a}s_vs_{b}s average_pixel_delta={avg:.2f}')
+          unique_count=len(set(frames.values()))
+          print(f'preview_exact_unique_frames={unique_count} samples={len(sample_times)}')
+          if unique_count<2:
+              raise SystemExit('FAIL: Studio preview shows only one exact static frame at all sample times')
+          PY
