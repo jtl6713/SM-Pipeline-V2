@@ -9,6 +9,8 @@ on:
       - 'apps/studio-api/rendering-review-job-claim.*'
       - 'apps/studio-api/rendering-review-launch-ledger.*'
       - 'services/pipeline-runner/rendering_review/remote_ledger.py'
+      - 'services/pipeline-runner/rendering_review/outbox_claim.py'
+      - 'services/pipeline-runner/tests/test_rendering_review_outbox_claim.py'
       - 'services/pipeline-runner/tests/test_rendering_review_remote_ledger.py'
       - 'apps/studio-api/rendering-review-outbox-airtable.*'
       - 'apps/studio-api/rendering-review-coordinator.*'
@@ -91,6 +93,8 @@ jobs:
         run: PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_review_dispatch_claim.py' -v
       - name: Protected render ledger HTTP bridge tests
         run: PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_remote_ledger.py' -v
+      - name: Bounded Runner outbox claim stage (OFF by default)
+        run: PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_outbox_claim.py' -v
       - name: Rendering Review read-only Studio interface contracts
         run: |
           node --check apps/studio-web/assets/rendering-review-queue.js
