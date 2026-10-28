@@ -19,3 +19,14 @@
 .rr-preview[hidden],.rr-open-file[hidden]{display:none!important}
 
 #navRenderingReview[hidden],#rrMore[hidden]{display:none!important}
+
+.rr-chat-form{display:grid;gap:10px;margin-top:16px;min-width:0}
+.rr-chat-form textarea{width:100%;max-width:100%;min-width:0;box-sizing:border-box;min-height:108px;padding:12px;border:1px solid var(--line,#d6dce3);border-radius:10px;background:var(--surface,#fff);color:inherit;font:inherit;resize:vertical}
+.rr-chat-form button{justify-self:start;max-width:100%;white-space:normal}
+.rr-candidate{border:1px solid var(--line,#d6dce3);border-radius:10px;padding:12px;margin:12px 0;min-width:0;overflow-wrap:anywhere}
+.rr-candidate summary{cursor:pointer;font-weight:600}
+.rr-draft{white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:760px){.rr-chat-form button{width:100%;justify-self:stretch}.rr-chat-form textarea{font-size:16px}}
+
+.rr-panel[aria-label="Selected Reel preview"]{min-width:0}
+@media(max-width:760px){.rr-panel[aria-label="Selected Reel preview"]{order:-1;display:flex;flex-direction:column}.rr-panel[aria-label="Selected Reel preview"] #rrVideo{order:0}.rr-panel[aria-label="Selected Reel preview"] #rrDetail{order:1}.rr-panel[aria-label="Selected Reel preview"] #rrOpenFile{order:2}}
