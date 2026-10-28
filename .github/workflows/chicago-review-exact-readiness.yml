@@ -1,0 +1,77 @@
+name: Chicago Review Exact Pilot Runtime Readiness
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/chicago-review-exact-readiness.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Inspect active Worker review flags and binding presence without values
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$URL/deployments" -o /tmp/review-deployments.json
+          VERSION=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/review-deployments.json)
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$URL/versions/$VERSION" -o /tmp/review-active.json
+          python - <<'PY'
+          import json
+          v=json.load(open('/tmp/review-active.json'))['result']
+          bs=(v.get('resources') or {}).get('bindings') or []
+          found={x['name']:x for x in bs}
+          flags=[
+            "RENDERING_REVIEW_ENROLL_WRITES_ENABLED",
+            "RENDERING_REVIEW_MANUAL_ADMISSION_ENABLED",
+            "RENDERING_REVIEW_INTEGRATION_VERIFIED",
+            "RENDERING_REVIEW_DISPATCH_FENCE_VERIFIED",
+            "RENDERING_REVIEW_SCHEDULER_VACATE_VERIFIED",
+            "RENDERING_REVIEW_PRODUCER_BRIDGE_ENABLED",
+            "RENDERING_REVIEW_PRODUCER_WRITES_ENABLED",
+            "RENDERING_REVIEW_ATTEMPT_COMMIT_ENABLED",
+            "RENDERING_REVIEW_RENDER_OUTBOX_VERIFIED",
+            "RENDERING_REVIEW_JOB_CLAIM_ENABLED",
+            "RENDERING_REVIEW_LAUNCH_LEDGER_ENABLED",
+            "RENDERING_REVIEW_COMPLETION_ENABLED",
+            "RENDERING_REVIEW_EXACT_RENDER_TRIGGER_ENABLED",
+            "RENDERING_REVIEW_IG_DISPATCH_CLAIM_ENABLED",
+          ]
+          names=[
+            "RENDERING_REVIEW_RENDER_JOB_SHARED_SECRET",
+            "RENDERING_REVIEW_DISPATCH_SHARED_SECRET",
+            "RENDERING_REVIEW_REMOTION_BASE_URL",
+            "PIPELINE_RUNNER_URL",
+            "PIPELINE_RUNNER_SHARED_SECRET",
+            "RENDERING_REVIEW_EXACT_OUTPUT_ID",
+          ]
+          print('active_version_present='+str(bool(v.get('id'))))
+          for name in flags:
+            record=found.get(name)
+            state='on' if record and record.get('type')=='plain_text' and record.get('text')=='true' else 'off'
+            print('review_flag '+name+'='+state)
+          for name in names:
+            record=found.get(name)
+            state='present' if record else 'absent'
+            print('review_binding '+name+'='+state)
+          PY
+      - name: Inspect live Runner exact route without changing records
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 15 "https://pipeline.chicagoshining.com/health" -o /tmp/review-health.json
+          jq -c '{ok,service,version,studio_write_source}' /tmp/review-health.json
+          code=$(curl -sS -L --max-time 15 -o /tmp/review-route-response.txt -w '%{http_code}' \
+            -X POST -H 'Content-Type: application/json' -d '{}' \
+            "https://pipeline.chicagoshining.com/jobs/rendering-review/run-exact" || true)
+          echo "unauthenticated_exact_runner_post_http_status=$code"
+          if [[ "$code" != "401" && "$code" != "405" ]]; then
+            echo "unexpected_runner_route_status=true"; exit 1
+          fi
