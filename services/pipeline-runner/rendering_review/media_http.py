@@ -12,16 +12,28 @@ import re
 
 import requests
 from flask import Blueprint, Response, jsonify, request, stream_with_context
-from airtable.client import AirtableClient
-from integrations.google_drive import GoogleDriveClient
-from rendering_review.one_job import OUTPUTS, SESSIONS, ATTEMPTS, ITEMS, CHICAGO
+# Narrow table constants mirror the deployed one-Job and Worker contracts.
+# Avoid importing render/FFmpeg/voiceover services just to read private bytes.
+OUTPUTS="tblrlPeboBthkplH0"
+SESSIONS="tblHX3UdoNszkoquG"
+ATTEMPTS="tbl7wPOAE26o2coMU"
+ITEMS="tblwzN9AXWvmKVKPs"
+CHICAGO="recT2rbKX3MF7cVFU"
+
+def _client():
+    from airtable.client import AirtableClient
+    return AirtableClient()
+
+def _drive():
+    from integrations.google_drive import GoogleDriveClient
+    return GoogleDriveClient()
 
 _RECORD = re.compile(r"rec[A-Za-z0-9]{14}\Z")
 _ID = re.compile(r"[A-Za-z0-9_-]{8,120}\Z")
 _FILE = re.compile(r"[A-Za-z0-9_-]{20,}\Z")
 
-def create_review_media_blueprint(settings, client_factory=AirtableClient,
-                                  drive_factory=GoogleDriveClient, transport=None):
+def create_review_media_blueprint(settings, client_factory=_client,
+                                  drive_factory=_drive, transport=None):
     blueprint=Blueprint("review_exact_media",__name__)
     transport=transport or requests.get
     def denied(status,code):
