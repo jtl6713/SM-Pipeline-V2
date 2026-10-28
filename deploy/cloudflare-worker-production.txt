@@ -737,3 +737,4 @@ Rendering Review V3 source validation + Producer executable timeline canary code
 2026-10-28: Deploy Chicago Rendering Review verified 9:16 manifest freeze (PR #1246). Preserve all protected flags and publish holds.
 
 # 2026-10-28 Chicago Rendering Review MVP routed Worker, protected Runner and review-only approval rollout. No Instagram posting.
+2026-10-28: Deploy TikTok manual-publication URL under old Do_Not_Publish hold (PR #1261); allow recording only after manual completion required; preserve TikTok new-send gate.
