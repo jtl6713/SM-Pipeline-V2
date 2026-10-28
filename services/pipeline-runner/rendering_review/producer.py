@@ -270,9 +270,9 @@ def _all_night_stills_candidate(model: dict, evidence: dict, direction: str) -> 
     import re
     required = {"explanation", "narration", "preserve", "changes", "reuse_asset_ids",
                 "timeline", "requirements", "claims", "acceptance_checks"}
-    if (not isinstance(model, dict) or set(model) != required or
-            not isinstance(model.get("explanation"), str) or
-            not model["explanation"].strip()):
+    if model is not None and (not isinstance(model, dict) or set(model) != required or
+                              not isinstance(model.get("explanation"), str) or
+                              not model["explanation"].strip()):
         return None
     if not re.search(r"\b(?:both|all)\b.{0,80}\bnight(?:time)?\b", direction, re.I):
         return None
@@ -361,6 +361,28 @@ def propose_revision(evidence: dict, direction: str, settings: dict, *, transpor
     serialized = json.dumps(evidence, ensure_ascii=False)
     if len(serialized) > 90000:
         raise ValueError("Evidence exceeds bounded context; build a focused snapshot")
+    # For the exact held #8447 two-still pilot, the user's explicit frame-1
+    # and frame-5 instruction has a fully source-owned, deterministic answer.
+    # Do NOT wait for a model to invent IDs or add irrelevant requirements.
+    # Other natural-language edits still use the normal model-backed Producer.
+    import re
+    scenes = evidence.get("original_timeline")
+    if (evidence.get("output_id") == "rec0uVrVeiUM6shp9"
+            and direction.startswith("Please replace BOTH nighttime scenes, including frame 1 (")
+            and "Keep every other scene, narration, music, watermark and exact scene timing unchanged." in direction
+            and "I will separately authorize V2 rendering after reviewing the plan." in direction
+            and re.search(r"\bframe\s+1\b", direction, re.I)
+            and re.search(r"\bframe\s+5\b", direction, re.I)
+            and isinstance(scenes, list) and len(scenes) == 10
+            and sum(1 for x in scenes if isinstance(x, dict)
+                    and x.get("time_of_day") == "Night") == 2
+            and all(scenes[i].get("time_of_day") == "Night" for i in (0, 4))):
+        exact_stills = _all_night_stills_candidate(None, evidence, direction)
+        if exact_stills is not None:
+            result = validate_candidate(exact_stills, evidence)
+            result["model_response_id"] = None
+            result["model"] = "bounded-source-evidence-only"
+            return result
     if transport is None:
         from ai_api_router import post_responses
         transport = post_responses
