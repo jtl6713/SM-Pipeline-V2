@@ -114,7 +114,7 @@
     const artifact=String(attempt?.artifact_id||'');
     if(/^[A-Za-z0-9_-]{20,}$/.test(artifact))
       return 'https://drive.google.com/file/d/'+artifact+'/view';
-    return safeUrl(artifact);
+    return /^https?:\/\//.test(artifact)?safeUrl(artifact):'';
   }
   function renderList(){
     list.replaceChildren();
