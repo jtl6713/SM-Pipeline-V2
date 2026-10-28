@@ -748,3 +748,4 @@ Rendering Review V3 source validation + Producer executable timeline canary code
 2026-10-28: Deploy safe Producer upstream error categories for exact held Chicago #8447 conversational review. No new posting, rendering, scheduling or enrollment state changes.
 2026-10-28: Deploy Worker 0.10.684-producer-model-transport: distinguish failed private Producer connection/non-JSON response and safely classify AI HTTP status. Protected exact #8447 only, preserve holds and publishing lock. No automatic V2 or Instagram post.
 2026-10-28: Deploy Worker 0.10.685 producer conversation-first; retain safe blocked-plan result for text-only Producer suggestions. No V2 generation, scheduling or public posts.
+2026-10-28: Deploy Worker 0.10.686 to retain protected Chicago Producer bridge compatibility with Runner v4 existing photo discovery. No posts or render automation.
