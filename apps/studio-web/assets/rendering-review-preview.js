@@ -127,21 +127,17 @@
       message(err.message || "Rendering Review cannot load.", true);
     } finally { busy = false; refresh.disabled = false; next.disabled = false; }
   }
-  function activate() {
-    document.querySelectorAll("main .page").forEach(page =>
-      page.classList.toggle("active", page === root));
-    document.querySelectorAll(".sidebar .nav-item").forEach(button =>
-      button.classList.toggle("active", button === nav));
-    if (!currentPage) load(false);
-    root.scrollIntoView({block:"start"});
-  }
-  nav.addEventListener("click", event => {
-    event.preventDefault(); event.stopImmediatePropagation();
-    if (allowed) activate();
-  }, true);
-  document.querySelectorAll(".sidebar .nav-item").forEach(button => {
-    if (button !== nav) button.addEventListener("click", () => root.classList.remove("active"), true);
+  // Studio's own showStudioPage handles navigation, unsaved-editor guards,
+  // output polling cleanup and sidebar state. Never intercept its clicks.
+  const pageObserver = new MutationObserver(() => {
+    if (root.classList.contains("active")) {
+      load(false);
+    } else {
+      details.querySelector("video")?.pause();
+    }
   });
+  pageObserver.observe(root,{attributes:true,attributeFilter:["class"]});
+  if (root.classList.contains("active")) load(false);
   refresh.addEventListener("click", () => load(false));
   next.addEventListener("click", () => load(true));
   getJson("/api/session").then(session => {
