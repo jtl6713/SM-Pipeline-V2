@@ -326,3 +326,31 @@ test("cleanup only selects unreferenced generated media owned by superseded atte
     unownedF:0,uploadG:0,referencedH:1,
   },["attempt-00000002"]),["generatedA"]);
 });
+
+
+test("new user feedback invalidates a ready plan and conditional authorization",()=>{
+  let s=plan(create(),{missing_assets:["image-required123"]});
+  s=transition(s,"AUTHORIZE_AFTER_ASSETS",{
+    plan_hash:s.plan.hash,plan_version:s.plan.version,intent:"explicit_go_ahead",
+  });
+  assert.ok(s.pending_authorization);
+  s=transition(s,"MESSAGE",{message_id:"message-changed-11111",
+    role:"user",content:"Actually, use a different opening image"});
+  assert.equal(s.pending_authorization,null);
+  assert.equal(s.plan.frozen,false);
+  assert.equal(s.state,"discussing");
+  throws(()=>commit(s),"REVIEW_NOT_READY");
+});
+
+test("frozen manifest must match trusted model candidate and deny publishing",()=>{
+  const s=create();
+  s.producer_candidate={hash:"a".repeat(64),stale:false};
+  const manifest={source_attempt_id:s.current_attempt_id,output_id:s.output_id,
+    profile_id:s.profile_id,candidate_hash:"a".repeat(64),
+    allow_public_publish:false,allow_platform_upload:false,auto_approve:false};
+  const frozen=plan(s,{immutable_manifest:manifest});
+  assert.equal(frozen.plan.immutable_manifest.candidate_hash,"a".repeat(64));
+  throws(()=>plan(s,{immutable_manifest:{...manifest,allow_public_publish:true}}),"PLAN_SOURCE_UNVERIFIED");
+  throws(()=>plan(s,{immutable_manifest:{...manifest,source_attempt_id:"attempt-invalid123"}}),"PLAN_SOURCE_UNVERIFIED");
+  throws(()=>plan(s,{immutable_manifest:{...manifest,candidate_hash:"b".repeat(64)}}),"PLAN_SOURCE_UNVERIFIED");
+});
