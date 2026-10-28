@@ -146,7 +146,7 @@ export async function completeReviewAttempt({request,env,operations,now=()=>new 
     await operations.patchAttempt(a.record_id,suffix);
     await operations.patchJob(j.record_id,{
       Progress_Stage:b.stage,
-      ...(b.stage==="ready"?{Job_State:"completed",Progress_Percent:100}:{}),
+      ...(b.stage==="ready"?{Job_State:"succeeded",Progress_Percent:100}:{}),
     });
     const [after,jobAfter,attemptAfter,holdAfter]=await Promise.all([
       operations.readSession(b.output_id),
@@ -155,7 +155,7 @@ export async function completeReviewAttempt({request,env,operations,now=()=>new 
     ]);
     if(after?.state!==lifecycle.to||
        attemptAfter?.status!==lifecycle.to||
-       (b.stage==="ready"&&(jobAfter?.state!=="completed"||
+       (b.stage==="ready"&&(jobAfter?.state!=="succeeded"||
           attemptAfter.artifact_file_id!==b.artifact_id))||
        holdAfter?.active!==true||holdAfter.owner!==s.id||
        after.review_hold?.active!==true)
