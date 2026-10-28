@@ -1,0 +1,28 @@
+name: Clear stale Chicago #8447 read-only verifier
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/chicago-8447-clear-stale-readonly.yml'
+permissions:
+  actions: write
+  contents: read
+jobs:
+  clear:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Cancel only the superseded Chicago review read-only verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS --max-time 20 -o /tmp/clear.json -w '%{http_code}' \
+            -X POST "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/40764487578/cancel" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json')
+          if [ "$code" != "202" ] && [ "$code" != "409" ]; then
+            echo "stale_readonly_verifier_cancel_not_accepted=$code"; exit 1
+          fi
+          echo "stale_readonly_verifier_cancel_requested=true"
