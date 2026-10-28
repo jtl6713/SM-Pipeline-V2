@@ -32,6 +32,8 @@ class ProducerTests(unittest.TestCase):
         result, calls = self.invoke()
         self.assertEqual(len(calls), 1)
         self.assertIn("creative_direction", calls[0][0]["input"])
+        self.assertIn("Return exactly one JSON object", calls[0][0]["input"])
+        self.assertIn("JSON", calls[0][0]["input"])
         self.assertNotIn("reasoning", calls[0][0], "Producer request must work with Azure deployments")
         self.assertFalse(calls[0][0]["store"])
         self.assertTrue(result["candidate_only"])
