@@ -16,6 +16,8 @@ on:
       - 'services/pipeline-runner/rendering_review/one_job.py'
       - 'services/pipeline-runner/tests/test_rendering_review_variant_binding.py'
       - 'services/pipeline-runner/rendering_review/one_job_http.py'
+      - 'services/pipeline-runner/rendering_review/media_http.py'
+      - 'services/pipeline-runner/tests/test_rendering_review_media_http.py'
       - 'services/pipeline-runner/tests/test_rendering_review_outbox_claim.py'
       - 'services/pipeline-runner/tests/test_rendering_review_remote_ledger.py'
       - 'apps/studio-api/rendering-review-outbox-airtable.*'
@@ -112,10 +114,13 @@ jobs:
         run: PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_outbox_claim.py' -v
       - name: Frozen crop-to-Remotion Runner contract (no live calls)
         run: PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_variant_binding.py' -v
+      - name: Protected V2 Google Drive stream and hold-ownership tests
+        run: PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_media_http.py' -v
       - name: Exact one-Reel Runner and Flask route syntax
         run: |
           python -m py_compile services/pipeline-runner/rendering_review/one_job.py
           python -m py_compile services/pipeline-runner/rendering_review/one_job_http.py
+          python -m py_compile services/pipeline-runner/rendering_review/media_http.py
           python -m py_compile services/pipeline-runner/app.py
       - name: Rendering Review read-only Studio interface contracts
         run: |
