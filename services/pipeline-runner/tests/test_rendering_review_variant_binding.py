@@ -1,8 +1,10 @@
 """Exercise the actual isolated Runner crop binding without importing live clients."""
 import ast
 import json
+import os
 import re
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -60,7 +62,31 @@ def fixture():
         "Do_Not_Use":False,"Content_Profile":[CHICAGO]}})
     return client,request,master,props,plan
 
+def renderer_base():
+    path=Path(__file__).resolve().parents[1]/"rendering_review"/"one_job.py"
+    tree=ast.parse(path.read_text(encoding="utf-8"))
+    fn=next(n for n in tree.body if isinstance(n,ast.FunctionDef)
+            and n.name=="_review_renderer_base")
+    ns={"os":os}
+    exec(compile(ast.Module(body=[fn],type_ignores=[]),str(path),"exec"),ns)
+    return ns["_review_renderer_base"]
+
+
 class VariantContract(unittest.TestCase):
+    def test_exact_renderer_reuses_existing_configured_production_remotion(self):
+        with patch.dict(os.environ,{
+            "RENDERING_REVIEW_REMOTION_BASE_URL":"",
+            "REMOTION_RENDERER_URL":"https://render.chicagoshining.com/",
+        }):
+            self.assertEqual(renderer_base(),"https://render.chicagoshining.com")
+
+    def test_exact_renderer_honors_narrow_override(self):
+        with patch.dict(os.environ,{
+            "RENDERING_REVIEW_REMOTION_BASE_URL":"https://pilot-render.chicagoshining.com/",
+            "REMOTION_RENDERER_URL":"https://render.chicagoshining.com/",
+        }):
+            self.assertEqual(renderer_base(),"https://pilot-render.chicagoshining.com")
+
     def test_real_original_crop_binding_is_accepted(self):
         bound=tested_function()(*fixture())
         self.assertEqual(len(bound),1)
