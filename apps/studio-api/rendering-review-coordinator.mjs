@@ -66,8 +66,14 @@ export async function enrollManualReviewCommand({
   return operations.withOutputLock(outputId, async () => {
     const prior=await operations.loadSession(outputId);
     if (prior) {
-      if (sessionMatches(prior,sessionId,requestId))
+      if (sessionMatches(prior,sessionId,requestId)) {
+        // An idempotent success may only be replayed when the durable hold
+        // is still present. A missing hold is not a valid existing enrollment.
+        const held=await operations.readHold(outputId);
+        if (prior.review_hold?.active && !authoritativeHoldMatches(held,outputId,sessionId))
+          err("HOLD_LOST", "Previous enrollment's publication hold is no longer authoritative");
         return {session:prior,replay:true};
+      }
       err("ALREADY_ENROLLED", "This output already has a different review session");
     }
     const output=await operations.readOutput(outputId);
@@ -100,6 +106,18 @@ export async function enrollManualReviewCommand({
     if (liveOutput.scheduled_post_date || liveOutput.studio_scheduled_at ||
         liveOutput.youtube_scheduled_publish_at || liveOutput.approved_attempt_id)
       err("SCHEDULE_REVOCATION_UNVERIFIED", "Old schedule/approval was not independently cleared");
+
+    // The same output must still have the same completed artifact and profile.
+    // Do not enroll or describe a previous render as the current preview if
+    // a concurrent producer revision or media replacement changed it.
+    if (id(liveOutput.profile_id)!==id(output.profile_id) ||
+        id(liveOutput.output_type)!==id(output.output_type) ||
+        id(liveOutput.platform)!==id(output.platform) ||
+        id(liveOutput.final_file_id || liveOutput.final_file_url)!==
+          id(output.final_file_id || output.final_file_url) ||
+        String(liveOutput.render_status||"").toLowerCase()!=="rendered")
+      err("RENDER_CHANGED_DURING_ENROLLMENT",
+        "Output changed during hold placement; keep the hold for reconciliation");
 
     const session=enrollReview(output,{...hold,verified:true},policy,{
       session_id:sessionId,original_attempt_id,
