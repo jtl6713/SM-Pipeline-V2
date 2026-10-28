@@ -9,6 +9,8 @@ on:
       - 'apps/studio-api/rendering-review-output-view.*'
       - 'apps/studio-api/rendering-review-workspace.*'
       - 'apps/studio-api/rendering-review-feedback.*'
+      - 'apps/studio-api/rendering-review-feedback-http.*'
+      - 'apps/studio-api/worker.js'
       - 'apps/studio-web/rendering-review-ui.test.mjs'
       - 'apps/studio-web/rendering-review-queue.test.mjs'
       - 'apps/studio-web/assets/rendering-review-queue.*'
@@ -41,8 +43,10 @@ jobs:
           node --check apps/studio-api/rendering-review-workspace.test.mjs
           node --check apps/studio-api/rendering-review-feedback.mjs
           node --check apps/studio-api/rendering-review-feedback.test.mjs
+          node --check apps/studio-api/rendering-review-feedback-http.mjs
+          node --check apps/studio-api/rendering-review-feedback-http.test.mjs
       - name: Chicago pilot lifecycle and safety contracts
-        run: node --test apps/studio-api/rendering-review-policy.test.mjs apps/studio-api/rendering-review-coordinator.test.mjs apps/studio-api/rendering-review-airtable.test.mjs apps/studio-api/rendering-review-workspace.test.mjs apps/studio-api/rendering-review-feedback.test.mjs
+        run: node --test apps/studio-api/rendering-review-policy.test.mjs apps/studio-api/rendering-review-coordinator.test.mjs apps/studio-api/rendering-review-airtable.test.mjs apps/studio-api/rendering-review-workspace.test.mjs apps/studio-api/rendering-review-feedback.test.mjs apps/studio-api/rendering-review-feedback-http.test.mjs
       - name: Rendering Review read-only Studio interface contracts
         run: |
           node --check apps/studio-web/assets/rendering-review-queue.js
