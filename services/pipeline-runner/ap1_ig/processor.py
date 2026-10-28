@@ -140,7 +140,7 @@ def process_request(
     # Claim BEFORE the existing Python Airtable lock PATCH or any Graph create.
     # Existing saved-container resumes cannot enroll in Rendering Review and
     # preserve their existing receipt-only path. Other profiles are unchanged.
-    if creating_container and shared_dispatch_claim_required():
+    if creating_container and shared_dispatch_claim_required(output.get("id")):
         try:
             if is_chicago_reel(client, output):
                 claim_receipt = claim_chicago_dispatch(output)
