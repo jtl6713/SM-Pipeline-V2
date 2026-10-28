@@ -368,8 +368,8 @@ def propose_revision(evidence: dict, direction: str, settings: dict, *, transpor
     import re
     scenes = evidence.get("original_timeline")
     if (evidence.get("output_id") == "rec0uVrVeiUM6shp9"
-            and re.search(r"\\bframe\\s+1\\b", direction, re.I)
-            and re.search(r"\\bframe\\s+5\\b", direction, re.I)
+            and re.search(r"\bframe\s+1\b", direction, re.I)
+            and re.search(r"\bframe\s+5\b", direction, re.I)
             and isinstance(scenes, list) and len(scenes) == 10
             and sum(1 for x in scenes if isinstance(x, dict)
                     and x.get("time_of_day") == "Night") == 2
