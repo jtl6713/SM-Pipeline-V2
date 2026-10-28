@@ -104,5 +104,21 @@ class ProducerTests(unittest.TestCase):
                              transport=lambda *args, **kwargs: FailedResponse())
         self.assertEqual(raised.exception.status_code, 400)
         self.assertNotIn("provider_internal_secret", str(raised.exception))
+        self.assertEqual(raised.exception.provider_code, "unknown")
+        self.assertEqual(raised.exception.provider_param, "unknown")
+
+    def test_model_400_returns_machine_readable_provider_details_only(self):
+        class Response:
+            ok = False
+            status_code = 400
+            def json(self):
+                return {"error": {"code": "unsupported_parameter", "param": "text.format",
+                                  "message": "SECRET user text must not escape"}}
+        with self.assertRaises(ProducerModelHTTPError) as raised:
+            propose_revision(EVIDENCE, "Add more Riverwalk still photos", {},
+                             transport=lambda *args, **kwargs: Response())
+        self.assertEqual(raised.exception.provider_code, "unsupported_parameter")
+        self.assertEqual(raised.exception.provider_param, "text.format")
+        self.assertNotIn("SECRET", str(raised.exception))
 
 if __name__ == '__main__': unittest.main()
