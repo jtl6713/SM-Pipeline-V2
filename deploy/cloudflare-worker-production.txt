@@ -745,3 +745,4 @@ Rendering Review V3 source validation + Producer executable timeline canary code
 2026-10-28: Redeploy Chicago #8447 authenticated V1/V2 video streaming, preserving the already active Chicago Instagram scheduling lane in postdeploy verification.
 # 2026-10-28: Deliver protected Chicago #8447 V2 Google Drive streaming through Runner credentials, no public share or Instagram publication.
 2026-10-28: Fix stalled Chicago #8447 Rendering Review queue by exact authorized Airtable output+Content Item reads; bypass broad 40-row scan and retain profile/dispatch checks. No UI assets, schedule, render or Instagram publishing writes.
+2026-10-28: Deploy safe Producer upstream error categories for exact held Chicago #8447 conversational review. No new posting, rendering, scheduling or enrollment state changes.
