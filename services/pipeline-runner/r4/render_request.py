@@ -130,6 +130,66 @@ def expected_clip_count(output: dict[str, Any], clips: Any = None) -> int:
     return int(_num(field(output, "Selected_Clip_Count"), 0))
 
 
+def studio_visual_integrity_error(output: dict[str, Any], payload: dict[str, Any]) -> str | None:
+    """Fail closed before Remotion when a Studio video lost its visual sequence.
+
+    One five-second still can be intentional. An eight-second-or-longer Studio
+    Reel/Short made exclusively from the same still is not a valid multi-scene
+    rendering. Do not apply this to a single source VIDEO (finished video,
+    trimmed source footage), nor to 10-second Story teasers.
+    """
+    if not field_str(output, "Output_Filename").startswith("studio-"):
+        return None
+    kind = field_str(output, "Studio_Output_Type") or field_str(output, "Output_Type")
+    if kind == "Story" or field_str(output, "Format") == "Story":
+        return None
+    clips = payload.get("clips")
+    if not isinstance(clips, list) or not clips:
+        return "Studio render has no valid visual clip sequence."
+    sources: set[str] = set()
+    all_stills = True
+    for index, clip in enumerate(clips, 1):
+        if not isinstance(clip, dict):
+            return f"Studio render clip {index} is malformed."
+        src = str(clip.get("src") or clip.get("url") or "").strip()
+        if not src:
+            return f"Studio render clip {index} is missing its source URL."
+        media_kind = str(clip.get("mediaKind") or clip.get("media_kind") or "").lower()
+        # Old manifests omit mediaKind. Recognize obvious video sources as video.
+        if media_kind == "video" or any(
+            src.lower().split("?", 1)[0].endswith(ext)
+            for ext in (".mp4", ".mov", ".m4v", ".webm")
+        ):
+            all_stills = False
+        key = str(
+            clip.get("googleDriveFileId")
+            or clip.get("mediaAssetRecordId")
+            or clip.get("google_drive_file_id")
+            or src
+        ).strip()
+        sources.add(key)
+    try:
+        selected_count = int(field(output, "Selected_Clip_Count") or 0)
+    except (TypeError, ValueError):
+        selected_count = 0
+    if selected_count > len(clips):
+        return (
+            "Studio visual sequence is incomplete: "
+            f"{selected_count} selected assets but only {len(clips)} render clips."
+        )
+    try:
+        total_frames = int(payload.get("durationInFrames") or 0)
+        fps = float(payload.get("fps") or 30)
+    except (TypeError, ValueError):
+        return "Studio render has invalid duration metadata."
+    if all_stills and fps > 0 and total_frames / fps >= 8 and len(sources) < 2:
+        return (
+            "Studio visual integrity guard: long-form video contains only one "
+            "distinct still image. Restore the requested image sequence before rendering."
+        )
+    return None
+
+
 def voiceover_url(output: dict[str, Any], content_item: dict[str, Any] | None = None) -> str:
     return field_str(output, "Voiceover_URL") or field_str(content_item or {}, "Voiceover_URL")
 
