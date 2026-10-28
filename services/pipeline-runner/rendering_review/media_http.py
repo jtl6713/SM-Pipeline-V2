@@ -116,7 +116,7 @@ def create_review_media_blueprint(settings, client_factory=_client,
             upstream=transport(
                 "https://www.googleapis.com/drive/v3/files/"+file_id,
                 params={"alt":"media","supportsAllDrives":"true"},
-                headers=headers,timeout=(10,90),stream=True,allow_redirects=False)
+                headers=headers,timeout=(10,90),stream=True,allow_redirects=True)
         except Exception:
             return denied(502,"review_media_google_unavailable")
         if upstream.status_code not in (200,206):
