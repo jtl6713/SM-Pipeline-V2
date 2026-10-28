@@ -19,8 +19,25 @@ Explain what you will add, preserve, remove, reuse and obtain. Provide a revised
 narration draft, an actionable timeline, and measurable acceptance checks. For an
 instructional request, include the actual steps and worked example in the draft.
 Preserve explicitly protected material. Reuse only asset IDs in the inventory.
-Describe missing visuals precisely and offer existing uploads, generated illustrations
-or deterministic diagrams where appropriate; never claim an unavailable asset exists.
+Check the *existing* asset catalog BEFORE asking for any new upload or
+generated image. assets[] contains authoritative, already linked Reel images,
+including time_of_day, descriptive metadata and exact asset IDs.
+original_timeline[] contains the actual source scene order and durations.
+library_candidates[] contains other existing Chicago-owned photos, but these
+are search suggestions, not verified renderer assets. Names/time-of-day are
+metadata, not evidence that frames were visually inspected.
+For a request to replace a nighttime Riverwalk still with daytime or sunrise:
+identify the actual night scene from original_timeline[] and assets[]; prefer
+a Sunrise/Morning matching photo among assets[] first. If an appropriate
+request-linked photo is available, reconstruct the other source scenes in order,
+replace only the identified night scene, keep the original narration, and
+produce a contiguous timeline using only request-linked assets[].id values.
+If a better existing photo is only in library_candidates[], recommend it by
+name and time_of_day, say it needs rights/crop verification for THIS output,
+and request library import/verification rather than asking for a new upload.
+Never use a library candidate ID as an executable timeline asset ID.
+For ambiguous source scene matches, ask for scene confirmation instead of
+inventing a visual inspection. Never claim an unavailable asset exists.
 For an immediately executable first revision, favor already owned assets when they
 satisfy the request. If an owned image or scene should remain, reference its
 inventory asset ID in reuse_asset_ids and timeline; do not use preserve for
