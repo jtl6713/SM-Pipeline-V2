@@ -144,6 +144,20 @@ def process_request(
     )
     output["fields"] = {**(output.get("fields") or {}), "Output_Notes": started_notes}
 
+    # A review hold can be claimed after initial eligibility but before our
+    # publish-lock PATCH. Re-read Airtable before any remote Graph create or
+    # resume, not only before media_publish. Once a review wins, do not create
+    # even an unpublished container or overwrite its media identity.
+    try:
+        review_reason = verify_before_reel_publication(
+            client, PLATFORM_OUTPUTS_TABLE, record_id, output
+        )
+    except Exception:
+        review_reason = "review_authority_unavailable"
+    if review_reason:
+        return {"processed": False, "reason": review_reason,
+                "attempt_count": attempt, **preview}
+
     try:
         settings = graph_settings or load_instagram_graph_settings(pipeline_settings, output, client=client)
         graph = InstagramReelClient(
