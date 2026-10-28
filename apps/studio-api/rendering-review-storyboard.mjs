@@ -58,7 +58,7 @@ export function reviewStillStoryboard({output,request,media=[],session}={}){
     Math.abs(s.end_seconds-originals[i].end_seconds)<.007);
   return originals.map((o,i)=>{
     const wanted=aligned?scenes[i].asset_ids[0]:o.id;
-    const target=originals.find(s=>s.id===wanted);
+    const target=aligned?originals.find(s=>s.id===wanted):null;
     // Original source clips are the only storyboard photos; a wider-library
     // candidate has no verified 9:16 image and can never be shown as approved.
     return {scene:i+1,start_seconds:o.start_seconds,end_seconds:o.end_seconds,
