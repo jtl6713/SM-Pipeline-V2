@@ -81,7 +81,9 @@ def create_rendering_review_producer_blueprint(settings, *,
         except ProducerModelHTTPError as error:
             # A bounded provider status is useful for protected diagnostics.
             # Never forward upstream error bodies, credentials, or prompts.
-            return jsonify({"ok": False, "error": "producer_model_http_" + str(error.status_code)}), 502
+            return jsonify({"ok": False, "error": "producer_model_http_" + str(error.status_code),
+                            "provider_error_code": error.provider_code,
+                            "provider_error_param": error.provider_param}), 502
         except Exception:
             return jsonify({"ok": False, "error": "producer_model_unavailable"}), 502
         # Re-read authority AFTER the model call. If a reviewer edited the
