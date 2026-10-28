@@ -1,3 +1,5 @@
+import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
+import { listRecords as reviewListRecords, listRecordsPage as reviewListRecordsPage, resolveAuthorizedContentProfiles as reviewAuthorizedProfiles } from "./worker-functions-01.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { readProducerThread, appendProducerThreadMessage, producerConversationHistory } from "./producer-conversation.mjs";
 import { scriptedShortProducerPlanFromNotes } from "./scripted-short-producer-plan.mjs";
@@ -1505,6 +1507,21 @@ export default {
       }
       if (!authorization.authorized) {
         throw new HttpError(403, authorization.authorization_error || "Studio membership required");
+      }
+
+      if (url.pathname.startsWith("/api/rendering-review/")) {
+        requirePermission(authorization, "outputs_review");
+        if (request.method !== "GET") throw new HttpError(405, "Rendering Review mutations are not enabled");
+        const result = await readRenderingReviewWorkspace({
+          env, url, authorization,
+          operations: {
+            authorizedProfiles: reviewAuthorizedProfiles,
+            listRecords: reviewListRecords,
+            listRecordsPage: reviewListRecordsPage,
+            airtableFetch,
+          },
+        });
+        return respond(request, env, result);
       }
 
       if (isMediaLibraryStillsRoute) {
