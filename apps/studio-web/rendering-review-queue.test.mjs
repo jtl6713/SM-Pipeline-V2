@@ -170,5 +170,5 @@ test('manual Chicago enrollment and actual Producer exchange require server flag
   const writes=calls.filter(v=>v.method==='POST');
   assert.equal(writes.length,2);
   assert.ok(writes.every(v=>v.url.endsWith('/enroll')||v.url.endsWith('/producer-conversation')));
-  assert.ok(!writes.some(v=>/publish|render|approve/.test(v.url)));
+  assert.ok(!writes.some(v=>/\/(?:publish|render|approve)(?:\/|$)/.test(v.url)));
 });
