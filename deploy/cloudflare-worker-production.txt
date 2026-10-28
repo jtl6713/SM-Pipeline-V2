@@ -746,3 +746,4 @@ Rendering Review V3 source validation + Producer executable timeline canary code
 # 2026-10-28: Deliver protected Chicago #8447 V2 Google Drive streaming through Runner credentials, no public share or Instagram publication.
 2026-10-28: Fix stalled Chicago #8447 Rendering Review queue by exact authorized Airtable output+Content Item reads; bypass broad 40-row scan and retain profile/dispatch checks. No UI assets, schedule, render or Instagram publishing writes.
 2026-10-28: Deploy safe Producer upstream error categories for exact held Chicago #8447 conversational review. No new posting, rendering, scheduling or enrollment state changes.
+2026-10-28: Deploy Worker 0.10.684-producer-model-transport: distinguish failed private Producer connection/non-JSON response and safely classify AI HTTP status. Protected exact #8447 only, preserve holds and publishing lock. No automatic V2 or Instagram post.
