@@ -1,7 +1,7 @@
 import copy
 import json
 import unittest
-from rendering_review.evidence import load_evidence, SESSIONS, OUTPUTS, CONTENT, REQUESTS, PROFILES
+from rendering_review.evidence import load_evidence, SESSIONS, OUTPUTS, CONTENT, REQUESTS, PROFILES, MEDIA
 from rendering_review.producer import CHICAGO_PROFILE_ID
 
 OUTPUT = "recA1B2C3D4E5F6G7"
@@ -26,6 +26,10 @@ class EvidenceTests(unittest.TestCase):
             PROFILES: {"id": CHICAGO_PROFILE_ID, "fields": {"Brand_Voice": "Practical"}}}
         class Client:
             def list_records(self, table, **kwargs):
+                if table == MEDIA:
+                    if "RECORD_ID()" in kwargs.get("formula", ""):
+                        return copy.deepcopy(rows.get("linked_media", []))
+                    return copy.deepcopy(rows.get("library_media", []))
                 assert kwargs["max_records"] == 2
                 assert OUTPUT in kwargs["formula"]
                 return copy.deepcopy(rows[table])
@@ -40,6 +44,60 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(e["messages"][0]["content"], "Explain the decision")
         self.assertNotIn("url", e["assets"][0])
         self.assertFalse(e["inspection"]["frames_inspected"])
+
+    def test_existing_morning_still_and_wider_sunrise_photo_available_without_upload(self):
+        client, rows = self.fixture()
+        linked = "rec00000000000001"
+        sunrise = "rec00000000000002"
+        fields = {"Media_Class": "Image", "Asset_Status": "Available",
+                  "Rights_Status": "Owned", "Active": True,
+                  "Content_Profile": [CHICAGO_PROFILE_ID],
+                  "Google Drive File ID": "1ABCDEFGHIJKLMNOPQRSTUV",
+                  "Location": "Chicago Riverwalk"}
+        rows[REQUESTS]["fields"]["Studio_Master_Assets_JSON"] = json.dumps([
+            {"id": "source-morning", "name": "Chicago Riverwalk 8",
+             "media_asset_record_id": linked,
+             "google_drive_file_id": "1ABCDEFGHIJKLMNOPQRSTUV"}])
+        rows[OUTPUTS]["fields"]["Remotion_Props_JSON"] = json.dumps({
+            "compositionId": "ChicagoShiningPhotoSequence", "fps": 30,
+            "clips": [{"mediaAssetRecordId": linked, "startFrame": 0,
+                       "durationFrames": 90}]})
+        rows["linked_media"] = [{"id": linked, "fields": {
+            **fields, "Asset Name": "Chicago Riverwalk 8",
+            "Time_Of_Day": "Morning",
+            "Asset_Description": "Sunny riverwalk photograph.\n[watermarked:Chicago] ID: private"}}]
+        rows["library_media"] = [{"id": sunrise, "fields": {
+            **fields, "Asset Name": "Chicago River Bridge 8",
+            "Time_Of_Day": "Sunrise",
+            "Asset_Description": "Sunrise over downtown Chicago River"}}]
+        e = load_evidence(client, OUTPUT, SESSION, 3)
+        self.assertEqual(e["assets"][0]["time_of_day"], "Morning")
+        self.assertEqual(e["assets"][0]["description"], "Sunny riverwalk photograph.")
+        self.assertNotIn("Google Drive File ID", e["assets"][0])
+        self.assertEqual(e["original_timeline"][0]["asset_id"], "source-morning")
+        self.assertEqual(e["original_timeline"][0]["end_seconds"], 3.0)
+        self.assertEqual(e["library_candidates"][0]["time_of_day"], "Sunrise")
+        self.assertEqual(e["library_candidates"][0]["media_asset_record_id"], sunrise)
+        self.assertFalse(e["inspection"]["frames_inspected"])
+        self.assertFalse(e["library_candidates"][0]["frames_inspected"])
+
+    def test_bad_rights_and_wrong_profile_never_reach_the_model(self):
+        client, rows = self.fixture()
+        rows["library_media"] = [
+            {"id": "rec00000000000003", "fields": {
+                "Asset Name": "Chicago River Bridge 8", "Media_Class": "Image",
+                "Asset_Status": "Available", "Rights_Status": "Unknown", "Active": True,
+                "Content_Profile": [CHICAGO_PROFILE_ID],
+                "Google Drive File ID": "1ABCDEFGHIJKLMNOPQRSTUV",
+                "Time_Of_Day": "Sunrise"}},
+            {"id": "rec00000000000004", "fields": {
+                "Asset Name": "Chicago Riverwalk 6", "Media_Class": "Image",
+                "Asset_Status": "Available", "Rights_Status": "Owned", "Active": True,
+                "Content_Profile": ["rec11111111111111"],
+                "Google Drive File ID": "1ABCDEFGHIJKLMNOPQRSTUV",
+                "Time_Of_Day": "Afternoon"}}]
+        e = load_evidence(client, OUTPUT, SESSION, 3)
+        self.assertEqual(e["library_candidates"], [])
 
     def test_stale_version_denies_before_model(self):
         client, _ = self.fixture()
