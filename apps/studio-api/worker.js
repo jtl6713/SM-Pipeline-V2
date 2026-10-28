@@ -6,6 +6,7 @@ import { handleRenderingReviewEnrollRequest, reviewEnrollmentWriteEnabled } from
 import { composeRenderingReviewEnrollmentOperations } from "./rendering-review-enrollment-wiring.mjs";
 import { handleReviewProducerProposal, reviewProducerBridgeEnabled } from "./rendering-review-producer-bridge.mjs";
 import { persistReviewProducerCandidate, producerConversationWritesEnabled } from "./rendering-review-producer-persist.mjs";
+import { persistReadyReviewPlan } from "./rendering-review-plan-persist.mjs";
 import { listRecords as reviewListRecords, listRecordsPage as reviewListRecordsPage, resolveAuthorizedContentProfiles as reviewAuthorizedProfiles } from "./worker-functions-01.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { readProducerThread, appendProducerThreadMessage, producerConversationHistory } from "./producer-conversation.mjs";
@@ -1713,7 +1714,8 @@ export default {
             env, airtableFetch, listRecords: reviewListRecords, readField: f,
             withOutputApprovalLock, authorizeReview: authorizeOutput,
             authorizeEvent: async (_id, event) =>
-              event?.type === "PRODUCER_CANDIDATE",
+              event?.type === "PRODUCER_CANDIDATE" ||
+              event?.type === "PROPOSE_PLAN",
             revokeScheduleUnderHold: async () => {
               throw new HttpError(405, "Producer conversations cannot change schedules");
             },
@@ -1737,7 +1739,26 @@ export default {
             client_request_id: proposed.client_request_id,
             direction: input.direction, proposal: proposed.proposal,
           });
-          return respond(request, env, result);
+          // Candidate text does not grant render authority. Independently read
+          // the current held Reel, Production Request and owned Drive assets,
+          // then freeze a plan only if every requested scene is ready.
+          let planReceipt = {ready:false,persisted:false,blockers:[]};
+          try {
+            planReceipt = await persistReadyReviewPlan({
+              env, output_id:conversationMatch[1], operations:adapter,
+              readRecord:(table,id)=>airtableFetch(env,table,id),
+              readField:f,
+            });
+          } catch (error) {
+            console.warn("Rendering Review plan not ready",error?.code||"PLAN_UNAVAILABLE");
+            planReceipt = {ready:false,persisted:false,blockers:[],
+              status:"needs_review",reason:error?.code||"PLAN_UNAVAILABLE"};
+          }
+          return respond(request,env,{...result,
+            plan_ready:planReceipt.ready===true,
+            plan_persisted:planReceipt.persisted===true,
+            plan_blockers:planReceipt.blockers||[],
+          });
         }
         const proposalMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/producer-proposal$/.exec(url.pathname);
         if (proposalMatch && request.method === "POST") {
