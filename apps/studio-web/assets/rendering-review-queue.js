@@ -1,6 +1,5 @@
-/* Chicago Rendering Review: read-only discovery and existing session inspection.
- * Admission, producer chat writes, scheduling, approval and publishing are OFF.
- * Never infer permission from a client toggle or bypass a server-side hold.
+/* Chicago Rendering Review: authenticated, exact-output media and review.
+ * Preview never claims a hold or bypasses publication safeguards.
  */
 (() => {
   'use strict';
@@ -78,43 +77,36 @@
     const a = $('rrOpenFile');
     if(a){a.hidden=true;a.removeAttribute('href');}
   }
-  // A Google Drive /view URL is an HTML page, not an MP4 source for <video>.
-  // Use Drive's authenticated embedded viewer; never create arbitrary iframe URLs.
-  function drivePreview(value){
-    try{
-      const u=new URL(value);
-      if(u.protocol!=='https:'||u.hostname!=='drive.google.com')return '';
-      const match=/^\/file\/d\/([A-Za-z0-9_-]{16,})\/(?:view|preview)\/?$/.exec(u.pathname);
-      return match?'https://drive.google.com/file/d/'+match[1]+'/preview':'';
-    }catch{return '';}
+  // Always use the authenticated same-origin MP4 stream. Drive's embedded
+  // /preview page can return HTTP 400 in mobile browsers, despite a real MP4.
+  function originalMedia(entry){
+    return /^rec[A-Za-z0-9]{14}$/.test(String(entry?.output_id||""))
+      ?url('/api/outputs/'+encodeURIComponent(entry.output_id)+'/preview'):'';
+  }
+  function attemptMedia(attempt,entry){
+    if(attempt?.number===1)return originalMedia(entry);
+    if(attempt?.status!=='ready_for_review'||!attempt?.artifact_id||
+       !/^[A-Za-z0-9_-]{8,120}$/.test(String(attempt.id||""))||
+       !/^rec[A-Za-z0-9]{14}$/.test(String(entry?.output_id||"")))return '';
+    return url('/api/rendering-review/outputs/'+encodeURIComponent(entry.output_id)+
+      '/attempts/'+encodeURIComponent(attempt.id)+'/preview');
   }
   function showMedia(mediaValue,label){
     clearMedia();
     const value=safeUrl(mediaValue);
     if(!value)return false;
-    const preview=drivePreview(value);
-    if(preview){
-      const frame=elem('iframe',null,'rr-preview');
-      frame.id='rrDrivePreview';frame.title=label||'Chicago Reel playback';
-      frame.src=preview;frame.loading='lazy';frame.allowFullscreen=true;
-      frame.referrerPolicy='strict-origin-when-cross-origin';
-      frame.style.cssText='display:block;width:100%;max-width:380px;height:min(74vh,670px);border:0;border-radius:12px;';
-      $('rrVideo').insertAdjacentElement('afterend',frame);
-    }else{
-      const video=$('rrVideo');
-      video.src=value;video.hidden=false;
-    }
+    const video=$('rrVideo');
+    video.onerror=()=>{
+      if(video.src===value)say('The video could not load from Studio. Select this Reel again to retry.',true);
+    };
+    video.src=value;
+    video.preload='metadata';
+    video.hidden=false;
+    video.load();
     const link=$('rrOpenFile');
     link.href=value;link.hidden=false;
-    link.textContent=label?'Open '+label+' file':'Open Reel file';
+    link.textContent=label?'Open '+label+' video':'Open Reel video';
     return true;
-  }
-  function attemptMedia(attempt,entry){
-    if(attempt?.number===1)return entry.final_file_url;
-    const artifact=String(attempt?.artifact_id||'');
-    if(/^[A-Za-z0-9_-]{20,}$/.test(artifact))
-      return 'https://drive.google.com/file/d/'+artifact+'/view';
-    return /^https?:\/\//.test(artifact)?safeUrl(artifact):'';
   }
   function renderList(){
     list.replaceChildren();
@@ -184,8 +176,8 @@
     detail.replaceChildren();
     detail.append(elem('h2',entry.title||'Instagram Reel'),
       elem('p','Chicago · Instagram Reel'+(entry.output_number?' · #'+entry.output_number:''),'rr-entry-meta'));
-    if(!showMedia(entry.final_file_url,'original Reel')){
-      detail.append(elem('p','The original render has no verified HTTPS preview URL. Open it through Pipeline or the linked source library.','rr-muted'));
+    if(!showMedia(originalMedia(entry),'original Reel')){
+      detail.append(elem('p','The original render has no authenticated Studio video source.','rr-muted'));
     }
     appendLine(detail,'Render:',entry.render_status||'Completed file recorded');
     appendLine(detail,'Review:',entry.review_held?'Existing hold detected — do not clear automatically':

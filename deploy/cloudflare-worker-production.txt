@@ -740,3 +740,5 @@ Rendering Review V3 source validation + Producer executable timeline canary code
 2026-10-28: Deploy TikTok manual-publication URL under old Do_Not_Publish hold (PR #1261); allow recording only after manual completion required; preserve TikTok new-send gate.
 
 2026-10-28: Deploy exact Chicago Rendering Review pilot #8447 first-page discovery; no admission or publishing flag change.
+
+2026-10-28: Deploy Studio Rendering Review #8447 authenticated V1/V2 MP4 playback (UI 0.6.769); no render or publish action.

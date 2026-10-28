@@ -1,4 +1,5 @@
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
+import { serveReviewAttemptVideo } from "./rendering-review-attempt-video.mjs";
 import { completeReviewAttempt } from "./rendering-review-completion-http.mjs";
 import {applyReviewEvent} from "./rendering-review-policy.mjs";
 import { makeRenderingReviewAirtableOperations } from "./rendering-review-airtable.mjs";
@@ -633,6 +634,8 @@ import {
   mediaAssetImagePreview,
   mediaAssetVideoStream,
   outputPreview,
+  fetchGoogleDriveVideo,
+  copyDriveVideoHeaders,
   listPhase6Voices,
   phase6VoicePreview,
   getOutputCreative,
@@ -832,6 +835,7 @@ export default {
       const isItem4VariantsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/variants$/.test(url.pathname);
       const isProductionRequestOutputRecordRoute = /^\/api\/production-request-outputs\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isOutputPreviewRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/preview$/.test(url.pathname);
+      const isReviewAttemptPreviewRoute = /^\/api\/rendering-review\/outputs\/rec[A-Za-z0-9]{14}\/attempts\/[A-Za-z0-9_-]{8,120}\/preview$/.test(url.pathname);
       const isOutputScheduleGridRoute = url.pathname === "/api/outputs/schedule-grid";
       const isOutputCreativeRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative$/.test(url.pathname);
       const isOutputCreativeReviewRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/review$/.test(url.pathname);
@@ -1013,7 +1017,7 @@ export default {
       const allowedMethod =
         isChicagoReviewPost ||
         request.method === "GET" ||
-        (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isMediaAssetStreamRoute || isPublicBrandWatermarkRoute || isOutputPreviewRoute || isVoicePreviewRoute)) ||
+        (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isMediaAssetStreamRoute || isPublicBrandWatermarkRoute || isOutputPreviewRoute || isReviewAttemptPreviewRoute || isVoicePreviewRoute)) ||
         isProfilesOverviewRefreshWrite ||
         isProfilesOverviewSummaryReconcileWrite ||
         isIdeaCreateRoute ||
@@ -1740,6 +1744,32 @@ export default {
 
       if (url.pathname.startsWith("/api/rendering-review/")) {
         requirePermission(authorization, "outputs_review");
+        // Byte-range MP4 streaming for a completed, exact, held V2+ attempt.
+        // Google Drive iframes return HTTP 400 in some iOS browsers. No
+        // caller-supplied Drive ID is accepted, and this cannot publish.
+        if (isReviewAttemptPreviewRoute) {
+          return serveReviewAttemptVideo({
+            request,env,url,authorization,
+            loadWorkspace: outputId => readRenderingReviewWorkspace({
+              env,
+              url:new URL("/api/rendering-review/outputs/"+outputId,url),
+              authorization,
+              operations:{
+                authorizedProfiles:reviewAuthorizedProfiles,
+                listRecords:reviewListRecords,
+                listRecordsPage:reviewListRecordsPage,
+                airtableFetch,
+              },
+            }),
+            listAttempts:attemptId=>reviewListRecords(env,RENDER_REVIEW_TABLES.attempts,{
+              limit:2,filterFormula:'{Attempt_ID}="'+attemptId+'"',
+              fields:["Attempt_ID","Session_ID","Output_Record_ID",
+                "Attempt_Number","Attempt_Status","Artifact_File_ID"],
+            }),
+            readVideo:fetchGoogleDriveVideo,
+            copyHeaders:copyDriveVideoHeaders,
+          });
+        }
         // Read-only authenticated model proposal handoff. Keep this separate
         // from user-message writes and every render/approval/publish action.
         // Protected Chicago Producer conversation. Only this route may persist
