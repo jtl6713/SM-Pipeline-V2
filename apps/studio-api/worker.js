@@ -12,6 +12,8 @@ import { readProducerThread, appendProducerThreadMessage, producerConversationHi
 import { scriptedShortProducerPlanFromNotes } from "./scripted-short-producer-plan.mjs";
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 import { claimChicagoInstagramDispatch, igDispatchClaimEnabled } from "./rendering-review-ig-dispatch-claim.mjs";
+import { claimReviewRenderJob, reviewRendererJobClaimEnabled } from "./rendering-review-job-claim.mjs";
+import { RENDER_REVIEW_TABLES } from "./rendering-review-airtable.mjs";
 import { commitReviewAttempt, renderAttemptCommitEnabled } from "./rendering-review-attempt-outbox.mjs";
 import { makeRenderingReviewOutboxAirtableOperations } from "./rendering-review-outbox-airtable.mjs";
 import {
@@ -1504,6 +1506,63 @@ export default {
           ok: true,
           ...authorization,
         }, authorization.authenticated ? 200 : 401);
+      }
+
+      // Internal render-worker claim, distinct from the public Studio API and
+      // Instagram publisher. Independent server secret; all flags OFF by default.
+      if (url.pathname === "/internal/rendering-review/claim-render-job") {
+        requireConfig(env);
+        if (!reviewRendererJobClaimEnabled(env))
+          throw new HttpError(405, "Rendering Review Runner claim disabled");
+        let adapter;
+        const authorizeOutput=async outputId=>{
+          const view=await adapter.readOutput(outputId);
+          return view.profile_id===CHICAGO_PROFILE_ID &&
+            view.platform==="Instagram" && view.output_type==="Instagram Reel";
+        };
+        adapter=makeRenderingReviewAirtableOperations({
+          env,airtableFetch,listRecords:reviewListRecords,readField:f,
+          withOutputApprovalLock,authorizeReview:authorizeOutput,
+          authorizeEvent:async()=>false,
+          mutationGate:false,
+          revokeScheduleUnderHold:async()=>{throw new HttpError(405,"Job claim cannot alter schedule")},
+        });
+        const rawJob=async jobId=>{
+          if(!/^[A-Za-z0-9_-]{8,120}$/.test(String(jobId||"")))return null;
+          const rows=await reviewListRecords(env,RENDER_REVIEW_TABLES.jobs,{
+            limit:2,filterFormula:'{Job_ID}="'+jobId+'"',
+            fields:["Job_ID","Output_Record_ID","Session_ID","Attempt_ID",
+              "Plan_Hash","Job_State","Lease_Owner","Lease_Fence"],
+          });
+          if(!Array.isArray(rows)||rows.length!==1)return null;
+          return rows[0];
+        };
+        const receipt=await claimReviewRenderJob({
+          request,env,
+          operations:{
+            withOutputLock:(outputId,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,outputId,fn),
+            readSession:outputId=>adapter.readSession(outputId),
+            readHold:outputId=>adapter.readHold(outputId),
+            readOutput:outputId=>adapter.readOutput(outputId),
+            readJob:async jobId=>{
+              const row=await rawJob(jobId);
+              if(!row)return null;
+              const j=row.fields||{};
+              return {record_id:row.id,job_id:String(j.Job_ID||""),
+                output_id:String(j.Output_Record_ID||""),
+                session_id:String(j.Session_ID||""),
+                attempt_id:String(j.Attempt_ID||""),
+                plan_hash:String(j.Plan_Hash||""),
+                state:String(j.Job_State||""),
+                lease_owner:String(j.Lease_Owner||""),
+                lease_fence:Number(j.Lease_Fence||0)};
+            },
+            patchJob:async(id,fields)=>airtableFetch(env,RENDER_REVIEW_TABLES.jobs,id,{
+              method:"PATCH",body:JSON.stringify({fields,typecast:false}),
+            }),
+          },
+        });
+        return respond(request,env,receipt);
       }
 
       // Internal AP1-IG dispatch claim: never accepts browser authorization.
