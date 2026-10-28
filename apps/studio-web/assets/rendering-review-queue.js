@@ -46,19 +46,33 @@
     });
     const result=await response.json().catch(()=>({}));
     if(!response.ok||result.ok!==true){
-      const error=new Error(result.error||result.message||'Rendering Review request failed ('+response.status+')');
+      const detail=typeof result.error==='string'&&result.error.trim()?result.error:
+        typeof result.message==='string'&&result.message.trim()?result.message:
+        'Rendering Review request failed ('+response.status+')';
+      const error=new Error(detail);
       error.status=response.status;throw error;
     }
     return result;
   }
-  function actionButton(textValue,run){
+  function actionButton(textValue,run,inlineStatus=null){
     const button=elem('button',textValue,'secondary-button');
     button.type='button';
     button.addEventListener('click',async()=>{
       if(state.actionBusy)return;
       state.actionBusy=true;button.disabled=true;
+      if(inlineStatus){
+        inlineStatus.textContent='Sending your request…';
+        inlineStatus.classList.toggle('error-text',false);
+      }
       try{await run();}
-      catch(error){say(error.message||'Review action could not be verified',true);}
+      catch(error){
+        const message=error.message||'Review action could not be verified';
+        say(message,true);
+        if(inlineStatus){
+          inlineStatus.textContent='Not sent: '+message;
+          inlineStatus.classList.toggle('error-text',true);
+        }
+      }
       finally{state.actionBusy=false;button.disabled=false;}
     });
     return button;
@@ -341,20 +355,34 @@
         composer.rows=4;composer.maxLength=3000;
         composer.setAttribute('aria-label','Creative direction for Producer');
         form.append(composer);
+        const feedbackStatus=elem('p','','rr-feedback-status');
+        feedbackStatus.setAttribute('role','status');
+        feedbackStatus.setAttribute('aria-live','polite');
+        let pendingKey='',pendingDirection='';
         form.append(actionButton('Send to Producer',async()=>{
           const content=String(composer.value||'').trim();
           if(!content)throw new Error('Enter creative direction before sending');
+          // Keep an idempotency key for a retry of the same direction. A lost
+          // response must never create duplicate producer messages.
+          if(content!==pendingDirection){
+            pendingKey=safeRequestId();pendingDirection=content;
+          }
+          feedbackStatus.textContent='Checking the saved Reel and preparing a Producer response…';
           say('Checking the saved render context and preparing a Producer response…');
           const created=await post('/api/rendering-review/outputs/'+
             encodeURIComponent(entry.output_id)+'/producer-conversation',{
             direction:content,expected_version:session.version,
-            client_request_id:safeRequestId(),
+            client_request_id:pendingKey,
           });
           if(created.persisted!==true||created.render_queued!==false)
-            throw new Error('Producer conversation receipt could not be verified');
+            throw new Error('Producer response was not confirmed saved. Your text is preserved for retry.');
+          feedbackStatus.textContent='Producer reply saved. Reloading the conversation…';
+          feedbackStatus.classList.toggle('error-text',false);
           say('Producer response saved. No replacement render has been started.');
+          pendingDirection='';pendingKey='';
           await open(entry);
-        }));
+        },feedbackStatus));
+        form.append(feedbackStatus);
         form.append(elem('p','Producer discussion does not launch a render. A separate render-only button appears only for an independently verified frozen plan; Instagram approval and publishing remain disabled.','rr-muted'));
         detail.append(form);
       }
