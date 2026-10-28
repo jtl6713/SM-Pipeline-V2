@@ -40,3 +40,42 @@ def verify_before_reel_publication(client, table, output_id, expected_output):
                 reason = "publication_artifact_changed"
                 break
     return reason
+
+
+def verify_before_reel_creation(client, table, output_id, expected_output, *, require_lock=False):
+    """Fresh authority read before an Instagram media *create* (not just publish).
+
+    This is a defense-in-depth preflight, NOT the common enrollment/dispatch
+    lease. The pilot must remain disabled until the Worker and runner share an
+    irreversible-operation ownership contract. An unsafe or unavailable read
+    never grants permission to create a provider container.
+    """
+    current = client.get_record(table, output_id)
+    reason = rendering_review_reason(current)
+    if reason:
+        return reason
+    if current["id"] != output_id or expected_output.get("id") != output_id:
+        return "review_output_identity_mismatch"
+    fields = current["fields"]
+    expected = expected_output.get("fields") or {}
+    if fields.get("Do_Not_Publish"):
+        return "do_not_publish"
+    if any(fields.get(key) for key in (
+        "Published_At", "Platform_Post_ID", "Platform_Post_URL", "Platform_Media_ID",
+    )):
+        return "remote_publication_already_started"
+    for key in ("Final_File_ID", "Final_File_URL", "Publish_Asset_URL",
+                "Platform", "Platform_Output_Type", "Content_Item"):
+        if fields.get(key) != expected.get(key):
+            return "publication_artifact_changed"
+    if require_lock:
+        for key in ("Publish_Locked_By", "Publish_Locked_At", "Publish_Started_At"):
+            if not expected.get(key) or fields.get(key) != expected.get(key):
+                return "publication_lock_changed"
+        if fields.get("Publish_Status") != expected.get("Publish_Status"):
+            return "publication_lock_changed"
+    elif any(fields.get(key) for key in (
+        "Publish_Locked_By", "Publish_Locked_At", "Publish_Started_At",
+    )):
+        return "publication_lock_already_owned"
+    return None
