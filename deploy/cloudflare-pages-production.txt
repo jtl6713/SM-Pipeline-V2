@@ -557,3 +557,5 @@ Redeploy Studio UI 0.6.763-idea-lifecycle-live after removing stale Worker versi
 2026-10-28: Deploy Studio UI 0.6.764-rendering-review-readonly: Chicago-only authenticated Rendering Review page for completed Instagram Reel preview and existing session history. Read-only, no enrollment, chat writes, render revisions, approvals, schedule, holds or publication. Require source/Pages regression, exact new custom-domain UI build/cache/BUILD_ID verification. Worker authenticated queue must be deployed and proven first; preserve production Writer/Airtable authority, all existing public publishing fences and no new publishing canary.
 2026-10-28 Chicago Rendering Review pilot: deploy merged main UI d777ff58 via protected Pages production workflow; display real Drive previews, retain all render/conversation/publish gates as server-controlled.
 2026-10-28: UI 0.6.765 Rendering Review pilot release correction. Match app BUILD_ID, index cache keys, and release tests; deploy via production Pages workflow.
+
+2026-10-28: Deploy Chicago Rendering Review V2 completion readback and review-only polling UI (#1249). No publish controls added.

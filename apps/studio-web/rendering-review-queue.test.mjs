@@ -283,3 +283,74 @@ test('frozen render-only plan requires server availability and one explicit butt
   assert.match(receiptBody.client_request_id,/^review_/);
   assert.equal(receiptBody.allow_public_publish,undefined);
 });
+
+test('queued Chicago render automatically delivers verified V2 without interrupting V1 during polling',async()=>{
+  const ids=['page-rendering-review','navRenderingReview','rrQueueList','rrDetail',
+    'rrStatus','rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile'];
+  const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
+  const output='recA1B2C3D4E5F6G7';
+  const original='1CAh-mGGiCiv7WKUl9jNeqm1vyQF7PTzq';
+  const revised='1XZ-_ARlXoP5mwILho13f81vmWQlpgTs4';
+  let activate,ready=false,reads=0;
+  const timers=[];
+  const calls=[];
+  const fetchStub=async(url,options)=>{
+    calls.push({url,method:options.method});
+    if(url==='/api/session')return {ok:true,json:async()=>({
+      authenticated:true,authorized:true,permissions:{outputs_review:true}})};
+    if(url.startsWith('/api/rendering-review/queue?'))
+      return {ok:true,json:async()=>({
+        ok:true,flags:{admission_enabled:false,producer_conversation_enabled:false,
+          attempt_commit_enabled:false,automatic_sampling_percent:0},
+        queue:[{output_id:output,profile_id:'recT2rbKX3MF7cVFU',
+          output_type:'Instagram Reel',output_number:8447,
+          title:'Chicago test render',review_held:true,render_status:'Rendered',
+          final_file_url:'https://drive.google.com/file/d/'+original+'/view'}],
+        next_cursor:null})};
+    if(url==='/api/rendering-review/outputs/'+output){
+      reads++;
+      return {ok:true,json:async()=>({
+        ok:true,publication_hold_verified:true,
+        session:{version:ready?4:3,state:ready?'ready_for_review':'queued',
+          latest_attempt_number:2,review_hold:{active:true},
+          attempts:[{number:1,status:'ready_for_review',artifact_id:original},
+            {number:2,status:ready?'ready_for_review':'queued',
+              artifact_id:ready?revised:null}],
+          messages:[]},
+      })};
+    }
+    throw Error('Unexpected '+url);
+  };
+  const sandbox={
+    document:{getElementById:id=>nodes[id],createElement:tag=>{
+      const n=new Node(tag);n.style={};return n;
+    }},
+    window:{location:{href:'https://studio.test/'},
+      CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''},
+      setTimeout:fn=>{timers.push(fn);return timers.length;},
+      clearTimeout:()=>{}},
+    MutationObserver:class{constructor(cb){activate=cb;}observe(){}},
+    fetch:fetchStub,URL,URLSearchParams,
+  };
+  vm.runInNewContext(script,sandbox,{filename:'rendering-review-queue.js'});
+  await tick();await tick();
+  nodes['page-rendering-review'].classList.add('active');activate();
+  for(let i=0;i<10;i++)await tick();
+  assert.equal(reads,1);
+  assert.equal(timers.length,1,'One polling callback for exact held session');
+  assert.equal(nodes.rrOpenFile.href,'https://drive.google.com/file/d/'+original+'/view');
+  await timers[0]();for(let i=0;i<4;i++)await tick();
+  assert.equal(reads,2,'Poll reads authoritative session once');
+  assert.equal(timers.length,2,'Still queued: do not reset the player');
+  assert.equal(nodes.rrOpenFile.href,'https://drive.google.com/file/d/'+original+'/view');
+  ready=true;
+  await timers[1]();for(let i=0;i<5;i++)await tick();
+  assert.equal(nodes.rrOpenFile.href,'https://drive.google.com/file/d/'+revised+'/view');
+  assert.equal(nodes.rrVideo.inserted?.src,
+    'https://drive.google.com/file/d/'+revised+'/preview');
+  const descendants=node=>[node,...node.children.flatMap(descendants)];
+  const versions=descendants(nodes.rrDetail).filter(n=>n.tag==='button'&&
+    /^Attempt [12] ·/.test(n.textContent));
+  assert.equal(versions.length,2,'Both original and revised versions remain selectable');
+  assert.ok(calls.every(c=>c.method==='GET'),'Polling never renders or publishes');
+});
