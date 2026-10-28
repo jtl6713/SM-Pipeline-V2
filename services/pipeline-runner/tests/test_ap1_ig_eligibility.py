@@ -85,3 +85,38 @@ def test_ap1_ig_drive_thumbnail_is_not_graph_cover():
     assert "thumb_offset" not in body
     optional = reel_create_body(record, require_native_cover=False)
     assert optional["thumb_offset"] == 1500
+
+
+def test_ap1_ig_render_review_owned_hold_blocks_even_after_legacy_hold_cleared():
+    assert eligibility_reason(_eligible(
+        Do_Not_Publish=False,
+        Studio_Render_Review_Hold_Active=True,
+    )) == "render_review_hold"
+    assert eligibility_reason(_eligible(
+        Do_Not_Publish=False,
+        Studio_Render_Review_Hold_Active=False,
+        Studio_Render_Review_Hold_ID="rrhold-00000001",
+    )) == "render_review_hold"
+    assert eligibility_reason(_eligible(
+        Do_Not_Publish=False,
+        Studio_Review_Hold_ID="staging-hold-0001",
+    )) == "render_review_hold"
+
+
+def test_ap1_ig_review_hold_blocks_existing_container_resume():
+    blocked = _eligible(
+        Do_Not_Publish=False,
+        Publish_Status="Publishing",
+        Platform_Media_ID="17890000000000000",
+        Studio_Render_Review_Hold_ID="rrhold-00000001",
+    )
+    assert eligibility_reason(blocked) == "render_review_hold"
+    assert not is_eligible(blocked)
+
+
+def test_ap1_ig_absent_review_fields_preserve_existing_publish_eligibility():
+    assert eligibility_reason(_eligible(
+        Studio_Render_Review_Hold_Active=False,
+        Studio_Render_Review_Hold_ID="",
+        Studio_Review_Hold_ID="",
+    )) is None
