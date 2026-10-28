@@ -259,6 +259,94 @@ class ProducerModelHTTPError(RuntimeError):
         super().__init__("Producer model provider returned HTTP " + str(self.status_code))
 
 
+def _all_night_stills_candidate(model: dict, evidence: dict, direction: str) -> dict | None:
+    """Scope a user's explicit BOTH-night-stills instruction to linked photos.
+
+    This is only candidate construction, not visual validation or render
+    authorization. Original frame timestamps and owned image metadata are
+    recorded independently in Airtable and independently rechecked by the
+    immutable plan adapter before a Render button becomes available.
+    """
+    import re
+    if not re.search(r"\\b(?:both|all)\\b.{0,80}\\bnight(?:time)?\\b", direction, re.I):
+        return None
+    if not re.search(r"\\breplace\\b", direction, re.I):
+        return None
+    scenes = evidence.get("original_timeline")
+    assets = evidence.get("assets")
+    if not isinstance(scenes, list) or not 2 <= len(scenes) <= 80 or not isinstance(assets, list):
+        return None
+    available = {a.get("id"): a for a in assets if isinstance(a, dict) and a.get("metadata_verified") is True
+                 and a.get("frames_inspected") is False and isinstance(a.get("id"), str)}
+    if len(available) < 2:
+        return None
+    night = [x for x in scenes if isinstance(x, dict) and
+             available.get(x.get("asset_id"), {}).get("time_of_day") == "Night"]
+    if len(night) < 2:
+        return None
+    morning = [a for a in available.values() if a.get("time_of_day") in ("Sunrise", "Morning", "Midday", "Afternoon")]
+    morning.sort(key=lambda a: (
+        0 if a.get("time_of_day") == "Sunrise" and "river" in str(a.get("name", "")).lower() else
+        1 if a.get("time_of_day") == "Morning" and "riverwalk" in str(a.get("name", "")).lower() else
+        2 if a.get("time_of_day") == "Morning" else 3,
+        str(a.get("name", ""))))
+    if not morning:
+        return None
+    replacement = morning[0]
+    if "river" not in str(replacement.get("name", "")).lower():
+        return None
+    timeline = []
+    previous_end = 0.0
+    replaced = []
+    for idx, scene in enumerate(scenes):
+        if not isinstance(scene, dict):
+            return None
+        start, end = scene.get("start_seconds"), scene.get("end_seconds")
+        original = scene.get("asset_id")
+        if (type(start) not in (float, int) or type(end) not in (float, int)
+                or abs(start - previous_end) > 0.002 or start >= end
+                or original not in available):
+            return None
+        old = available[original]
+        needs_replacement = old.get("time_of_day") == "Night"
+        image = replacement if needs_replacement else old
+        timeline.append({"start_seconds": start, "end_seconds": end,
+                         "direction": "gentle-zoom-in" if needs_replacement else "hold",
+                         "asset_ids": [image["id"]]})
+        if needs_replacement:
+            replaced.append("Scene " + str(idx + 1) + " (" + str(start) + "–" +
+                            str(end) + "s): replace " + str(old.get("name")) +
+                            " (Night) with " + str(image.get("name")) + " (" +
+                            str(image.get("time_of_day")) + ")")
+        previous_end = end
+    if len(replaced) != len(night):
+        return None
+    original_narration = evidence.get("narration")
+    if not isinstance(original_narration, str) or not original_narration.strip():
+        return None
+    selected_ids = list(dict.fromkeys(scene["asset_ids"][0] for scene in timeline))
+    return {
+        "explanation": ("PROPOSED ONLY — not yet rendered. Both recorded Night scenes are "
+                        "replaced in the candidate timeline with the already-linked " +
+                        str(replacement.get("name")) + " (" +
+                        str(replacement.get("time_of_day")) +
+                        "). All other source scenes, their order and their timings are retained. "
+                        "Original narration is reused. Confirm the proposed plan before separately authorizing V2."),
+        "narration": original_narration,
+        "preserve": [],
+        "changes": replaced,
+        "reuse_asset_ids": selected_ids,
+        "timeline": timeline,
+        "requirements": [],
+        "claims": [],
+        "acceptance_checks": [
+            "Neither of the original Night scenes remains in the replacement timeline.",
+            "Both replacement sources have verified existing Chicago-owned 9:16 variants.",
+            "Preserve original scene order, durations, narration, music, and brand watermark.",
+            "Do not publish; a separate user authorization is required before V2 rendering."],
+    }
+
+
 def propose_revision(evidence: dict, direction: str, settings: dict, *, transport=None) -> dict:
     if evidence.get("profile_id") != CHICAGO_PROFILE_ID or evidence.get("output_type") != "Instagram Reel":
         raise ValueError("Producer is restricted to Chicago Instagram Reels")
@@ -291,6 +379,14 @@ def propose_revision(evidence: dict, direction: str, settings: dict, *, transpor
     if not isinstance(raw, str) or len(raw) > 50000:
         raise ValueError("Producer returned invalid or excessive content")
     parsed = json.loads(raw)
+    # A user explicitly choosing to replace ALL Night stills with already
+    # linked Morning/Daytime images need not depend on AI inventing scene IDs,
+    # or on irrelevant factual claims about server-owned source metadata.
+    # This is only a bounded candidate; independent rights/crop/hold verification
+    # and the human Render button remain mandatory.
+    exact_stills = _all_night_stills_candidate(parsed, evidence, direction)
+    if exact_stills is not None:
+        parsed = exact_stills
     try:
         result = validate_candidate(parsed, evidence)
     except ValueError:
