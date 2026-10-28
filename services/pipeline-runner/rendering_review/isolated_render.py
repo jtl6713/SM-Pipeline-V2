@@ -155,6 +155,12 @@ def compile_isolated_render_payload(
         _deny("branding_policy_changed")
     clips = []
     end_frame = 0
+    preserved_instructions = creative.get("preserve") or []
+    if not isinstance(preserved_instructions, list) or any(
+        not isinstance(p, str) or not p.strip() for p in preserved_instructions
+    ):
+        _deny("preservation_instructions_invalid")
+    used_preservation = set()
     for idx, scene in enumerate(timeline):
         if not isinstance(scene, dict):
             _deny("scene_invalid")
@@ -164,41 +170,79 @@ def compile_isolated_render_payload(
         if start_frame != end_frame or finish_frame <= start_frame:
             _deny("scene_timing_gap_or_overlap")
         asset_ids = scene.get("asset_ids")
-        if not isinstance(asset_ids, list) or len(asset_ids) != 1:
-            _deny("scene_requires_exactly_one_verified_asset")
-        asset_id = _str(asset_ids[0])
-        if not IDENTITY.fullmatch(asset_id) or asset_id not in indexed:
-            _deny("scene_asset_unavailable")
-        asset = _verified_drive_asset(indexed[asset_id], asset_id, CHICAGO_PROFILE)
+        preserved = scene.get("preserve_source") is True
+        if preserved:
+            if not isinstance(asset_ids, list) or asset_ids:
+                _deny("preserved_scene_must_use_original_source")
+            instruction = _str(scene.get("preserve_instruction"))
+            matching = [
+                x for x in (observed_source_segments or [])
+                if isinstance(x, dict) and
+                   x.get("timeline_scene_index") == idx and
+                   x.get("preserve_instruction") == instruction
+            ]
+            if (instruction not in preserved_instructions or
+                instruction in used_preservation or len(matching) != 1):
+                _deny("preservation_composition_not_verified")
+            receipt = matching[0]
+            if (receipt.get("verified") is not True or
+                receipt.get("authority") != "server" or
+                receipt.get("source_drive_file_id") != source["drive_file_id"] or
+                receipt.get("source_attempt_id") != source["attempt_id"] or
+                not _str(receipt.get("render_url")).startswith("https://")):
+                _deny("preserved_clip_not_verified")
+            start_source = _finite_seconds(receipt.get("source_start_seconds"))
+            end_source = _finite_seconds(receipt.get("source_end_seconds"))
+            if (end_source <= start_source or
+                abs((end_source-start_source) -
+                    (finish_frame-start_frame) / FPS) > 1.0 / FPS):
+                _deny("preserved_clip_timing_drift")
+            asset_url = receipt["render_url"]
+            asset_file = source["drive_file_id"]
+            asset_kind = "video"
+            asset_id = "source-attempt-" + source["attempt_id"]
+            used_preservation.add(instruction)
+        else:
+            if not isinstance(asset_ids, list) or len(asset_ids) != 1:
+                _deny("scene_requires_exactly_one_verified_asset")
+            asset_id = _str(asset_ids[0])
+            if not IDENTITY.fullmatch(asset_id) or asset_id not in indexed:
+                _deny("scene_asset_unavailable")
+            asset = _verified_drive_asset(indexed[asset_id], asset_id, CHICAGO_PROFILE)
+            asset_url = asset["render_url"]
+            asset_file = asset["drive_file_id"]
+            asset_kind = asset["media_kind"]
         clip = {
             "id": "review-scene-%02d" % (idx + 1),
-            "src": asset["render_url"],
-            "url": asset["render_url"],
+            "src": asset_url,
+            "url": asset_url,
             "startFrame": start_frame,
             "durationFrames": finish_frame - start_frame,
-            "mediaKind": asset["media_kind"],
+            "mediaKind": asset_kind,
             "motionStyle": "none",
             "keepSourceAudio": False,
             "muted": True,
-            "google_drive_file_id": asset["drive_file_id"],
+            "google_drive_file_id": asset_file,
             "source_asset_id": asset_id,
             "timingMode": "authoritative",
             "timingSource": "timed_script",
         }
+        if preserved:
+            clip["inSeconds"] = start_source
+            clip["outSeconds"] = end_source
+            clip["sourceInSeconds"] = start_source
+            clip["sourceOutSeconds"] = end_source
         clips.append(clip)
         end_frame = finish_frame
     if end_frame > MAX_FRAMES or end_frame < FPS:
         _deny("pilot_duration_incompatible")
     if abs(_finite_seconds(voiceover.get("duration_seconds")) - end_frame / FPS) > 2.5:
         _deny("voiceover_timeline_mismatch")
-    if creative.get("preserve"):
-        receipt = observed_source_segments
-        if not isinstance(receipt, list) or not receipt or not all(
-            isinstance(v, dict) and v.get("source_drive_file_id") == source["drive_file_id"]
-            and v.get("verified") is True and v.get("authority") == "server"
-            for v in receipt
-        ):
-            _deny("preserved_clip_not_verified")
+    # A visual observation alone cannot prove that the preserved clip actually
+    # appears in the new edit. Every protected instruction must map to one
+    # exact source segment used by an actual Remotion scene.
+    if len(used_preservation) != len(preserved_instructions):
+        _deny("preservation_composition_not_verified")
     filename = f"review-{output_id}-{attempt_id}-{plan_hash[:12]}.mp4"
     return {
         "filename": filename,
