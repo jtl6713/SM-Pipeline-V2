@@ -108,7 +108,8 @@ class ReviewPublicationTests(unittest.TestCase):
 class ProcessorBoundaryTests(unittest.TestCase):
     def exercise(self, after_poll, *, before_create=None, new_container=False,
                  after_lock=None, before_lock=None, location_failure=False,
-                 after_location_failure=None, fail_at_read=None):
+                 after_location_failure=None, fail_at_read=None,
+                 shared_claim=False, shared_claim_error=None):
         # Execute the real processor function with fixture transports. No
         # provider, Airtable, mirror, media, or scheduling service is contacted.
         source = Path(__file__).parents[1] / "ap1_ig" / "processor.py"
@@ -154,7 +155,18 @@ class ProcessorBoundaryTests(unittest.TestCase):
             def media_meta(self, media_id):
                 return {"permalink": "https://example.test/fixture"}
         field = lambda record, key: record["fields"].get(key)
+        class ClaimError(Exception):
+            pass
+        def fake_claim(output):
+            if shared_claim_error:
+                raise ClaimError("publisher_shared_claim_unverified")
+            counters["shared_claim"] = counters.get("shared_claim", 0) + 1
+            return {"ok": True}
         namespace = {
+            "shared_dispatch_claim_required": lambda: shared_claim,
+            "ReviewDispatchClaimError": ClaimError,
+            "is_chicago_reel": lambda _client, _output: True,
+            "claim_chicago_dispatch": fake_claim,
             "Any": object, "AirtableClient": lambda: client, "RECORD_ID_PREFIX": "rec",
             "PLATFORM_OUTPUTS_TABLE": "outputs", "field": field,
             "field_str": lambda r, k: str(field(r, k) or ""),
@@ -259,6 +271,21 @@ class ProcessorBoundaryTests(unittest.TestCase):
         self.assertEqual(result["reason"], "rendering_review_requires_exact_approval")
         self.assertEqual(calls["create"], 1)
         self.assertEqual(calls["publish"], 0)
+
+    def test_shared_claim_denial_blocks_graph_before_python_lock_patch(self):
+        result, calls, _ = self.exercise(
+            None, new_container=True, shared_claim=True, shared_claim_error=True)
+        self.assertEqual(result["reason"], "publisher_shared_claim_unverified")
+        self.assertEqual(calls["create"], 0)
+        self.assertEqual(calls["publish"], 0)
+        self.assertEqual(calls["writes"], 0)
+
+    def test_verified_chicago_shared_claim_allows_existing_graph_flow(self):
+        result, calls, _ = self.exercise(None, new_container=True, shared_claim=True)
+        self.assertTrue(result["processed"])
+        self.assertEqual(calls["shared_claim"], 1)
+        self.assertEqual(calls["create"], 1)
+        self.assertEqual(calls["publish"], 1)
 
     def test_unheld_new_reel_can_still_create_and_publish(self):
         result, calls, _ = self.exercise(None, new_container=True)
