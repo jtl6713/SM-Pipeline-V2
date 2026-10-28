@@ -23,8 +23,16 @@ class ReviewDispatchClaimError(Exception):
     """A safe, non-Graph denial; do not mutate publishing state on failure."""
 
 
-def shared_dispatch_claim_required() -> bool:
-    return os.environ.get("RENDERING_REVIEW_IG_DISPATCH_CLAIM_REQUIRED", "").strip().lower() == "true"
+def shared_dispatch_claim_required(output_id: str | None = None) -> bool:
+    """The shared publisher claim applies to only one expressly enrolled pilot."""
+    if os.environ.get("RENDERING_REVIEW_IG_DISPATCH_CLAIM_REQUIRED", "").strip().lower() != "true":
+        return False
+    exact = os.environ.get("RENDERING_REVIEW_EXACT_OUTPUT_ID", "").strip()
+    if not RECORD_RE.fullmatch(exact):
+        raise ReviewDispatchClaimError("publisher_exact_pilot_scope_missing")
+    if not isinstance(output_id, str) or not RECORD_RE.fullmatch(output_id):
+        raise ReviewDispatchClaimError("publisher_exact_output_identity_missing")
+    return output_id == exact
 
 
 def is_chicago_reel(client: Any, output: dict) -> bool:
