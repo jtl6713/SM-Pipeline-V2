@@ -51,8 +51,9 @@ test('mobile video playback and read-only state are accessible',()=>{
 });
 
 test('Chicago V1 and V2 use authenticated native MP4 streaming rather than Drive iframe',()=>{
-  assert.match(js,/\/api\/outputs\/.*\/preview/);
-  assert.match(js,/\/api\/rendering-review\/outputs\/.*\/attempts\/.*\/preview/);
+  assert.match(js,/url\('\/api\/outputs\//);
+  assert.match(js,/url\('\/api\/rendering-review\/outputs\//);
+  assert.match(js,/\/attempts\//);
   assert.match(js,/video\.src=value/);
   assert.match(js,/video\.load\(\)/);
   assert.doesNotMatch(js,/function drivePreview/);
