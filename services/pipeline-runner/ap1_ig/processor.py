@@ -27,7 +27,7 @@ from asset.helpers import parse_int
 from carousel.timeutil import chicago_now, iso_utc, stamp_minutes, utc_now
 from item4.settings import PipelineSettings
 from publish.location import resolve_publish_location
-from publish.rendering_review import verify_before_reel_publication
+from publish.rendering_review import verify_before_reel_creation, verify_before_reel_publication
 from render.fields import field, field_str
 
 RECORD_ID_PREFIX = "rec"
@@ -116,6 +116,21 @@ def process_request(
     if dry_run:
         return {"processed": False, "dry_run": True, **preview}
 
+    creating_container = not bool(field_str(output, "Platform_Media_ID"))
+    # The cover, settings and location lookup may take time. Before overwriting
+    # a publishing lock, verify no review has claimed the output since the
+    # initial eligibility snapshot. Existing-container resume keeps its
+    # separate authoritative post-lock verification.
+    if creating_container:
+        try:
+            prelock_reason = verify_before_reel_creation(
+                client, PLATFORM_OUTPUTS_TABLE, record_id, output,
+            )
+        except Exception:
+            prelock_reason = "review_authority_unavailable"
+        if prelock_reason:
+            return {"processed": False, "reason": prelock_reason, **preview}
+
     attempt = (parse_int(field(output, "Publish_Attempt_Count"), 0) or 0) + 1
     started_notes = _append_notes(
         field_str(output, "Output_Notes"),
@@ -142,15 +157,29 @@ def process_request(
         },
         typecast=True,
     )
-    output["fields"] = {**(output.get("fields") or {}), "Output_Notes": started_notes}
+    output["fields"] = {
+        **(output.get("fields") or {}),
+        "Output_Notes": started_notes,
+        "Publish_Locked_By": PUBLISH_LOCKED_BY,
+        "Publish_Locked_At": now,
+        "Publish_Started_At": now,
+        "Publish_Status": PUBLISH_STATUS_PUBLISHING,
+    }
 
     # A review hold can be claimed after initial eligibility but before our
     # publish-lock PATCH. Re-read Airtable before any remote Graph create or
     # resume, not only before media_publish. Once a review wins, do not create
     # even an unpublished container or overwrite its media identity.
     try:
-        review_reason = verify_before_reel_publication(
-            client, PLATFORM_OUTPUTS_TABLE, record_id, output
+        review_reason = (
+            verify_before_reel_creation(
+                client, PLATFORM_OUTPUTS_TABLE, record_id, output,
+                require_lock=True,
+            )
+            if creating_container
+            else verify_before_reel_publication(
+                client, PLATFORM_OUTPUTS_TABLE, record_id, output
+            )
         )
     except Exception:
         review_reason = "review_authority_unavailable"
@@ -177,6 +206,19 @@ def process_request(
                 if body.get("location_id") and "LOCATION" in str(exc).upper():
                     body = {k: v for k, v in body.items() if k != "location_id"}
                     preview["location_tag_dropped"] = str(exc)
+                    # A LOCATION rejection may trigger a second Graph create.
+                    # Recheck the exact hold and lock rather than reusing
+                    # authorization from the first call.
+                    try:
+                        retry_reason = verify_before_reel_creation(
+                            client, PLATFORM_OUTPUTS_TABLE, record_id, output,
+                            require_lock=True,
+                        )
+                    except Exception:
+                        retry_reason = "review_authority_unavailable"
+                    if retry_reason:
+                        return {"processed": False, "reason": retry_reason,
+                                "attempt_count": attempt, **preview}
                     created = graph.create_reel(body)
                 else:
                     raise
