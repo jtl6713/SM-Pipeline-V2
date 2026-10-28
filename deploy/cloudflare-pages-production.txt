@@ -565,3 +565,5 @@ Redeploy Studio UI 0.6.763-idea-lifecycle-live after removing stale Worker versi
 # 2026-10-28 Chicago Rendering Review MVP routed Worker, protected Runner and review-only approval rollout. No Instagram posting.
 
 2026-10-28: release Studio UI 0.6.767 with Chicago MVP V1 feedback, V2 delivery and creative acceptance controls.
+
+2026-10-28 UI 0.6.768: Factory video preview truthfulness for Output 3129; show manual-play instruction and error instead of cover-only still.
