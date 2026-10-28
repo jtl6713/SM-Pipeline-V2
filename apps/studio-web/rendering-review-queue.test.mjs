@@ -355,3 +355,60 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
   assert.equal(versions.length,2,'Both original and revised versions remain selectable');
   assert.ok(calls.every(c=>c.method==='GET'),'Polling never renders or publishes');
 });
+
+
+test('Producer failure is visible beside Send, preserves direction and reuses retry identity',async()=>{
+  const ids=['page-rendering-review','navRenderingReview','rrQueueList','rrDetail',
+    'rrStatus','rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile'];
+  const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
+  const output='recA1B2C3D4E5F6G7';
+  let activate,submissions=[];
+  const fetchStub=async(url,options)=>{
+    if(url==='/api/session')return {ok:true,json:async()=>({
+      authenticated:true,authorized:true,permissions:{outputs_review:true}})};
+    if(url.startsWith('/api/rendering-review/queue?'))return {ok:true,json:async()=>({
+      ok:true,flags:{admission_enabled:true,producer_conversation_enabled:true,
+        attempt_commit_enabled:false,automatic_sampling_percent:0},
+      queue:[{output_id:output,profile_id:'recT2rbKX3MF7cVFU',
+        output_type:'Instagram Reel',output_number:8447,title:'Riverwalk Morning Reflections',
+        render_status:'Rendered',review_held:true,final_file_id:'source-1234567890'}],
+      next_cursor:null})};
+    if(url==='/api/rendering-review/outputs/'+output)return {ok:true,json:async()=>({
+      ok:true,publication_hold_verified:true,session:{
+        version:1,state:'ready_for_review',messages:[],attempts:[]}})};
+    if(url.endsWith('/producer-conversation')){
+      submissions.push(JSON.parse(options.body));
+      return {ok:false,status:502,json:async()=>({
+        ok:false,error:'The Producer returned an invalid revision proposal. Your feedback was not saved; please retry.'})};
+    }
+    throw Error('Unexpected '+url);
+  };
+  const sandbox={
+    document:{getElementById:id=>nodes[id],createElement:tag=>new Node(tag)},
+    window:{location:{href:'https://studio.test/'},
+      CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''}},
+    MutationObserver:class{constructor(cb){activate=cb;}observe(){}},
+    fetch:fetchStub,URL,URLSearchParams,
+    crypto:{randomUUID:()=> '12345678-1234-1234-1234-123456789012'},
+  };
+  vm.runInNewContext(script,sandbox,{filename:'rendering-review-queue.js'});
+  for(let i=0;i<5;i++)await tick();
+  nodes['page-rendering-review'].classList.add('active');activate();
+  for(let i=0;i<10;i++)await tick();
+  const descendants=node=>[node,...node.children.flatMap(descendants)];
+  const composer=descendants(nodes.rrDetail).find(n=>n.tag==='textarea');
+  const send=descendants(nodes.rrDetail).find(n=>n.textContent==='Send to Producer');
+  assert.ok(composer&&send);
+  composer.value='Keep the morning opening, but show three more Riverwalk photos.';
+  await send.listeners.click();
+  const statuses=descendants(nodes.rrDetail).filter(n=>n.className==='rr-feedback-status');
+  assert.equal(statuses.length,1);
+  assert.match(statuses[0].textContent,/Not sent: The Producer returned an invalid revision proposal/);
+  assert.equal(composer.value,'Keep the morning opening, but show three more Riverwalk photos.');
+  assert.equal(send.disabled,false);
+  await send.listeners.click();
+  assert.equal(submissions.length,2);
+  assert.equal(submissions[0].client_request_id,submissions[1].client_request_id);
+  assert.equal(submissions[0].expected_version,1);
+  assert.ok(!submissions.some(x=>x.publish||x.render));
+});
