@@ -5,6 +5,7 @@ import { makeRenderingReviewAirtableOperations } from "./rendering-review-airtab
 import { CHICAGO_PROFILE_ID } from "./rendering-review-policy.mjs";
 import { handleRenderingReviewFeedbackRequest, reviewFeedbackWriteEnabled } from "./rendering-review-feedback-http.mjs";
 import { handleRenderingReviewEnrollRequest, reviewEnrollmentWriteEnabled } from "./rendering-review-enrollment-http.mjs";
+import { acceptReviewCreativeOnly } from "./rendering-review-approval-http.mjs";
 import { composeRenderingReviewEnrollmentOperations } from "./rendering-review-enrollment-wiring.mjs";
 import { handleReviewProducerProposal, reviewProducerBridgeEnabled } from "./rendering-review-producer-bridge.mjs";
 import { persistReviewProducerCandidate, producerConversationWritesEnabled } from "./rendering-review-producer-persist.mjs";
@@ -1920,6 +1921,33 @@ export default {
             assertWriteRequest, operations: adapter,
           });
           return respond(request, env, result);
+        }
+        const acceptMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/approve$/.exec(url.pathname);
+        if (acceptMatch && request.method === "POST") {
+          const permitted = (await reviewAuthorizedProfiles(env,authorization))
+            .some(p=>p.id===CHICAGO_PROFILE_ID);
+          if(!permitted) throw new HttpError(403,"Chicago review membership required");
+          let adapter;
+          const authorizeOutput=async id=>{
+            const view=await adapter.readOutput(id);
+            return view.id===env.RENDERING_REVIEW_EXACT_OUTPUT_ID&&
+              view.profile_id===CHICAGO_PROFILE_ID&&
+              view.platform==="Instagram"&&view.output_type==="Instagram Reel";
+          };
+          adapter=makeRenderingReviewAirtableOperations({
+            env,airtableFetch,listRecords:reviewListRecords,readField:f,
+            withOutputApprovalLock,authorizeReview:authorizeOutput,
+            authorizeEvent:async (_id,event)=>
+              event?.type==="APPROVE_ATTEMPT"&&event?.pilot_creative_only===true,
+            revokeScheduleUnderHold:async()=>{
+              throw new HttpError(405,"Creative acceptance cannot change schedules");
+            },
+            mutationGate:true,
+          });
+          return respond(request,env,await acceptReviewCreativeOnly({
+            request,env,authorization,output_id:acceptMatch[1],
+            assertWriteRequest,operations:adapter,
+          }));
         }
         const enrollmentMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/enroll$/.exec(url.pathname);
         if (enrollmentMatch && request.method === "POST") {
