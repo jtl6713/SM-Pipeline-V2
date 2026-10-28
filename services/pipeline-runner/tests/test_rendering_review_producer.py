@@ -1,7 +1,7 @@
 import copy
 import json
 import unittest
-from rendering_review.producer import CHICAGO_PROFILE_ID, propose_revision
+from rendering_review.producer import CHICAGO_PROFILE_ID, propose_revision, ProducerModelHTTPError
 
 EVIDENCE = {"profile_id": CHICAGO_PROFILE_ID, "output_type": "Instagram Reel",
             "assets": [{"id": "asset-1", "name": "Opening station shot"}], "sources": []}
@@ -32,6 +32,7 @@ class ProducerTests(unittest.TestCase):
         result, calls = self.invoke()
         self.assertEqual(len(calls), 1)
         self.assertIn("creative_direction", calls[0][0]["input"])
+        self.assertNotIn("reasoning", calls[0][0], "Producer request must work with Azure deployments")
         self.assertFalse(calls[0][0]["store"])
         self.assertTrue(result["candidate_only"])
         self.assertFalse(result["visual_inspection_performed"])
@@ -91,5 +92,17 @@ class ProducerTests(unittest.TestCase):
         result, _ = self.invoke(p, {**EVIDENCE, "sources": [source]})
         self.assertEqual(result["source_associations"][0]["sources"], [source])
         self.assertTrue(result["requires_fact_validation"])
+
+
+    def test_model_http_error_has_bounded_status_without_provider_body(self):
+        class FailedResponse:
+            ok = False
+            status_code = 400
+            text = "provider_internal_secret_must_not_escape"
+        with self.assertRaises(ProducerModelHTTPError) as raised:
+            propose_revision(EVIDENCE, "Use more Riverwalk stills", {},
+                             transport=lambda *args, **kwargs: FailedResponse())
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertNotIn("provider_internal_secret", str(raised.exception))
 
 if __name__ == '__main__': unittest.main()

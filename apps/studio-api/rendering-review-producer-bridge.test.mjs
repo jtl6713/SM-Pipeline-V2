@@ -183,3 +183,22 @@ test('Runner producer errors are actionable but never expose upstream private re
       !e.message.includes("NEVER-SHOW-PRIVATE-DETAILS"));
   }
 });
+
+test("Producer maps unreachable, non-JSON and safe model provider failures separately",async()=>{
+  const f=fixture();
+  const request=new Request("https://studio.test/api/rendering-review/outputs/"+OUTPUT+"/producer-proposal",{
+    method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  const ops={authorizeReview:async()=>true,withOutputLock:async(_id,fn)=>fn(),
+    readOutput:async()=>f.output,loadSession:async()=>f.session,readHold:async()=>f.hold};
+  const base={request,env:flags,authorization:auth,output_id:OUTPUT,
+    assertWriteRequest:()=>{},operations:ops};
+  await assert.rejects(()=>handle({...base,request:request.clone(),
+    runnerFetch:async()=>{throw new TypeError("upstream unreachable");}}),
+    e=>e.code==="PRODUCER_CONNECTION_FAILED"&&e.status===503);
+  await assert.rejects(()=>handle({...base,request:request.clone(),
+    runnerFetch:async()=>({status:502,ok:false,json:async()=>{throw new SyntaxError("html")}})}),
+    e=>e.code==="PRODUCER_BAD_HTTP_RESPONSE"&&/HTTP 502/.test(e.message));
+  await assert.rejects(()=>handle({...base,request:request.clone(),
+    runnerFetch:async()=>({status:502,ok:false,json:async()=>({ok:false,error:"producer_model_http_400"})})}),
+    e=>e.code==="PRODUCER_MODEL_HTTP_ERROR"&&/HTTP 400/.test(e.message));
+});

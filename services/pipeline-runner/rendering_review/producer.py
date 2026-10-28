@@ -115,6 +115,13 @@ def validate_candidate(candidate: dict, evidence: dict) -> dict:
             "candidate_only": True, "visual_inspection_performed": False}
 
 
+class ProducerModelHTTPError(RuntimeError):
+    """Safe provider status only; never forward provider prompt/error body."""
+    def __init__(self, status_code: int):
+        self.status_code = status_code if isinstance(status_code, int) else 0
+        super().__init__("Producer model provider returned HTTP " + str(self.status_code))
+
+
 def propose_revision(evidence: dict, direction: str, settings: dict, *, transport=None) -> dict:
     if evidence.get("profile_id") != CHICAGO_PROFILE_ID or evidence.get("output_type") != "Instagram Reel":
         raise ValueError("Producer is restricted to Chicago Instagram Reels")
@@ -129,10 +136,13 @@ def propose_revision(evidence: dict, direction: str, settings: dict, *, transpor
     model = str(settings.get("openai_render_review_model") or settings.get("openai_i1_model") or "gpt-5")
     response = transport(settings, {"model": model, "store": False,
         "instructions": INSTRUCTIONS, "input": json.dumps({"evidence": evidence, "creative_direction": direction}),
-        "reasoning": {"effort": "medium"}, "text": {"format": {"type": "json_object"}}},
+        # Azure's deployment may not accept reasoning controls even when the
+        # primary OpenAI model does. This is a cross-provider Producer request.
+        # Omit optional reasoning and retain strict JSON candidate validation.
+        "text": {"format": {"type": "json_object"}}},
         timeout=120, stage="rendering-review-producer")
     if not response.ok:
-        raise RuntimeError("Producer model request failed (" + str(response.status_code) + ")")
+        raise ProducerModelHTTPError(int(response.status_code))
     payload = response.json()
     raw = payload.get("output_text") or "\n".join(
         part.get("text", "") for item in payload.get("output", []) if isinstance(item, dict)

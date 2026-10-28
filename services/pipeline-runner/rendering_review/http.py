@@ -14,7 +14,7 @@ import re
 from flask import Blueprint, jsonify, request
 
 from rendering_review.evidence import load_evidence
-from rendering_review.producer import propose_revision, canonical_hash
+from rendering_review.producer import propose_revision, canonical_hash, ProducerModelHTTPError
 
 _RECORD = re.compile(r"rec[A-Za-z0-9]{14}\Z")
 _SESSION = re.compile(r"[A-Za-z0-9_-]{8,120}\Z")
@@ -78,6 +78,10 @@ def create_rendering_review_producer_blueprint(settings, *,
             result = producer(evidence, direction, settings)
         except ValueError:
             return jsonify({"ok": False, "error": "producer_proposal_invalid"}), 422
+        except ProducerModelHTTPError as error:
+            # A bounded provider status is useful for protected diagnostics.
+            # Never forward upstream error bodies, credentials, or prompts.
+            return jsonify({"ok": False, "error": "producer_model_http_" + str(error.status_code)}), 502
         except Exception:
             return jsonify({"ok": False, "error": "producer_model_unavailable"}), 502
         # Re-read authority AFTER the model call. If a reviewer edited the
