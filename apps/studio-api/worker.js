@@ -1004,7 +1004,13 @@ export default {
       const isEngagementSettingsWrite = isEngagementSettingsRoute && (request.method === "POST" || request.method === "PATCH");
       const isEngagementDiscoverWrite = isEngagementDiscoverRoute && request.method === "POST";
       const isEngagementActionsWrite = isEngagementActionsRoute && request.method === "POST";
+      // Exact Chicago review writes are authorized again by their protected handlers.
+      // The old global Phase-2A allowlist must not reject them before inspection.
+      const isChicagoReviewPost = request.method === "POST" &&
+        (/^\/api\/rendering-review\/outputs\/rec[A-Za-z0-9]{14}\/(?:enroll|producer-conversation|producer-proposal|commit-attempt|messages|approve)$/.test(url.pathname) ||
+         /^\/(?:api\/)?internal\/rendering-review\/(?:claim-render-job|launch-ledger|complete-attempt|ig-dispatch-claim)$/.test(url.pathname));
       const allowedMethod =
+        isChicagoReviewPost ||
         request.method === "GET" ||
         (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isMediaAssetStreamRoute || isPublicBrandWatermarkRoute || isOutputPreviewRoute || isVoicePreviewRoute)) ||
         isProfilesOverviewRefreshWrite ||
@@ -1135,7 +1141,7 @@ export default {
           ok: true,
           service: "chicagoshining-studio-api",
           version: "0.10.683-promotion-postcommit-trace" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
-          rendering_review: { admission_enabled: false, automatic_sampling_percent: 0, integration_verified: false, publication_guard_version: "2026-10-28-final-readback" },
+          rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
           quality_durable_recovery_ledger_v1: true,
@@ -1514,7 +1520,7 @@ export default {
 
       // Internal render-worker claim, distinct from the public Studio API and
       // Instagram publisher. Independent server secret; all flags OFF by default.
-      if (url.pathname === "/internal/rendering-review/claim-render-job") {
+      if (url.pathname === "/internal/rendering-review/claim-render-job" || url.pathname === "/api/internal/rendering-review/claim-render-job") {
         requireConfig(env);
         if (!reviewRendererJobClaimEnabled(env))
           throw new HttpError(405, "Rendering Review Runner claim disabled");
@@ -1571,7 +1577,7 @@ export default {
 
       // Write-once launch intent/receipt. No Remotion request, media change,
       // dispatch, approval or scheduler mutation in this route. OFF by default.
-      if (url.pathname === "/internal/rendering-review/launch-ledger") {
+      if (url.pathname === "/internal/rendering-review/launch-ledger" || url.pathname === "/api/internal/rendering-review/launch-ledger") {
         requireConfig(env);
         if (!reviewLaunchLedgerEnabled(env))
           throw new HttpError(405, "Rendering Review launch ledger disabled");
@@ -1625,7 +1631,7 @@ export default {
       // A protected, exact, already-claimed review job may report render
       // progress and a validated Drive Attempt 2 without writing the original
       // Platform Output, releasing its hold, scheduling or posting.
-      if (url.pathname === "/internal/rendering-review/complete-attempt") {
+      if (url.pathname === "/internal/rendering-review/complete-attempt" || url.pathname === "/api/internal/rendering-review/complete-attempt") {
         requireConfig(env);
         let adapter;
         const authorizeOutput=async outputId=>{
@@ -1702,7 +1708,7 @@ export default {
       // Internal AP1-IG dispatch claim: never accepts browser authorization.
       // It uses a separate protected server secret and the SAME R2 output
       // lease as manual review enrollment and Factory/approval. Feature OFF.
-      if (url.pathname === "/internal/rendering-review/ig-dispatch-claim") {
+      if (url.pathname === "/internal/rendering-review/ig-dispatch-claim" || url.pathname === "/api/internal/rendering-review/ig-dispatch-claim") {
         requireConfig(env);
         if (!igDispatchClaimEnabled(env))
           throw new HttpError(405, "Internal IG dispatch claim disabled");
