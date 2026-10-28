@@ -84,7 +84,7 @@
     try{
       const u=new URL(value);
       if(u.protocol!=='https:'||u.hostname!=='drive.google.com')return '';
-      const match=/^\\/file\\/d\\/([A-Za-z0-9_-]{16,})\\/(?:view|preview)\\/?$/.exec(u.pathname);
+      const match=/^\/file\/d\/([A-Za-z0-9_-]{16,})\/(?:view|preview)\/?$/.exec(u.pathname);
       return match?'https://drive.google.com/file/d/'+match[1]+'/preview':'';
     }catch{return '';}
   }
