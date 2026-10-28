@@ -268,6 +268,12 @@ def _all_night_stills_candidate(model: dict, evidence: dict, direction: str) -> 
     immutable plan adapter before a Render button becomes available.
     """
     import re
+    required = {"explanation", "narration", "preserve", "changes", "reuse_asset_ids",
+                "timeline", "requirements", "claims", "acceptance_checks"}
+    if (not isinstance(model, dict) or set(model) != required or
+            not isinstance(model.get("explanation"), str) or
+            not model["explanation"].strip()):
+        return None
     if not re.search(r"\b(?:both|all)\b.{0,80}\bnight(?:time)?\b", direction, re.I):
         return None
     if not re.search(r"\breplace\b", direction, re.I):
