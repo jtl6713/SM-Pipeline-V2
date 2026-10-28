@@ -94,3 +94,15 @@ test("Factory Desk is a separate page beside Operations", async () => {
   assert.doesNotMatch(css, /factory-line\{[^}]*max-content/);
   assert.match(css, /overflow-x:hidden/);
 });
+
+
+test("Factory video preview never mislabels an autoplay or stream failure as a one-still render", async () => {
+  const factory = await readFile(path.join(here, "assets/factory-desk.js"), "utf8");
+  assert.match(factory, /Video playback failed — this cover is not the finished render/);
+  assert.match(factory, /Video ready · tap Play to watch the full render/);
+  assert.match(factory, /video\.onplaying =/);
+  assert.match(factory, /video\.controls = true/);
+  const preview = factory.slice(factory.indexOf("function openFactoryPreview"), factory.indexOf("function saveFactorySelection"));
+  assert.doesNotMatch(preview, /showing cover for/);
+  assert.doesNotMatch(preview, /video\.play\?\.\(\)\.catch\(\(\) => \{\}\)/);
+});
