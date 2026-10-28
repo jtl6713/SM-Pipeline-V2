@@ -16,9 +16,30 @@ jobs:
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Require newer release when Studio UI runtime changes
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git cat-file -e "$PR_BASE_SHA^{commit}"
+          git diff --name-only "$PR_BASE_SHA"...HEAD > /tmp/studio-pr-changed-files
+          if ! grep -Eq '^apps/studio-web/(index\.html|assets/.*\.(js|css))$' /tmp/studio-pr-changed-files; then
+            echo 'No Studio runtime asset changes; a release-version bump is not required for this PR.'
+            exit 0
+          fi
+          BASE_INDEX=$(git show "$PR_BASE_SHA:apps/studio-web/index.html")
+          BASE_VERSION=$(printf '%s\n' "$BASE_INDEX" | sed -nE 's/.*<span id="uiBuildLabel">UI build ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' | head -n 1)
+          test -n "$BASE_VERSION"
+          echo "main_ui_version_at_pr_base=$BASE_VERSION"
+          node apps/studio-web/ui-release-contract.mjs --assert-newer-than "$BASE_VERSION"
+          echo "studio_ui_release_increase_verified=true"
       - name: UI version and affected workflow regression
         run: |
           node --check apps/studio-web/assets/app-item4-1008.js
