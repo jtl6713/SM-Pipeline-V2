@@ -76,12 +76,37 @@ async function sourceReceipt({output,session,readField,output_id,loadCompletedAt
     attempt_id:attempt.id,drive_file_id:fileId,
     canonical_media_authority:"google_drive"};
 }
+/**
+ * Reconcile the authoritative Production Request's owned master assets with
+ * its completed 9:16 variant manifest and the exact original Remotion scene.
+ * An owned master Drive file alone does not prove a cropped image is approved.
+ */
+function verifiedReelVariant(entry,variantManifest,originalProps,requestId){
+  if(variantManifest?.production_request_record_id!==requestId||
+     variantManifest?.complete!==true||!Array.isArray(variantManifest.assets)||
+     originalProps?.compositionId!=="ChicagoShiningPhotoSequence"||
+     !Array.isArray(originalProps.clips))return null;
+  const linked=variantManifest.assets.filter(a=>a?.id===entry?.id);
+  const clips=originalProps.clips.filter(c=>c?.mediaAssetRecordId===entry?.media_asset_record_id);
+  if(linked.length!==1||clips.length!==1)return null;
+  const master=linked[0],clip=clips[0],v=master.variants?.["9:16"];
+  const url=str(v?.preview_url),variantFile=str(v?.google_drive_file_id);
+  if(master.media_asset_record_id!==entry.media_asset_record_id||
+     master.google_drive_file_id!==entry.google_drive_file_id||
+     v?.preview_status!=="Ready"||!drive(variantFile)||
+     !/^https:\/\/media\.chicagoshining\.com\/studio\/previews\/item4\//.test(url)||
+     str(clip.url||clip.src)!==url||
+     str(clip.googleDriveFileId)!==variantFile||
+     str(clip.src||clip.url)!==url)return null;
+  return {render_variant_drive_file_id:variantFile,render_url:url};
+}
+
 function requestedIds(candidate){
   const ids=[...(candidate.reuse_asset_ids||[])];
   for(const scene of candidate.timeline||[])ids.push(...(scene.asset_ids||[]));
   return [...new Set(ids)];
 }
-function rightsReceipt(row,entry,readField){
+function rightsReceipt(row,entry,readField,variant){
   const f=name=>readField(row,name);
   const id=str(entry.id);
   const mediaRecordId=str(entry.media_asset_record_id);
@@ -90,7 +115,8 @@ function rightsReceipt(row,entry,readField){
   const rights=label(f("Rights_Status"));
   const kind=label(f("Media_Class"));
   const profiles=f("Content_Profile");
-  if(!/^[A-Za-z0-9_-]{8,120}$/.test(id)||!rec(mediaRecordId)||!drive(fileId)||
+  if(!variant?.render_variant_drive_file_id||!variant?.render_url||
+     !/^[A-Za-z0-9_-]{8,120}$/.test(id)||!rec(mediaRecordId)||!drive(fileId)||
     row?.id!==mediaRecordId||str(f("Google Drive File ID"))!==fileId||
     rights!=="Owned"||status!=="Available"||f("Active")!==true||
     f("Do_Not_Use")===true||!Array.isArray(profiles)||
@@ -101,7 +127,9 @@ function rightsReceipt(row,entry,readField){
     rights_receipt_id:"rrrights_"+mediaRecordId,
     drive_file_id:fileId,profile_id:CHICAGO_PROFILE_ID,
     canonical_media_authority:"google_drive",
-    media_type:kind==="Image"?"image":"video"};
+    media_type:kind==="Image"?"image":"video",
+    render_variant_drive_file_id:variant.render_variant_drive_file_id,
+    render_url:variant.render_url};
 }
 /**
  * Only a trusted Worker handler can call this. Caller supplies an authenticated
@@ -157,6 +185,11 @@ export async function persistReadyReviewPlan({
        byId.has(item.id))fail("REVIEW_ASSET_MANIFEST_INVALID","Duplicate or invalid source asset identity");
     byId.set(item.id,item);
   }
+  let variantManifest,originalProps;
+  try {
+    variantManifest=JSON.parse(str(f(request,"Studio_Variant_Manifest_JSON")));
+    originalProps=JSON.parse(str(f(output,"Remotion_Props_JSON")));
+  } catch { fail("REVIEW_VARIANT_MANIFEST_INVALID","Approved Reel variant manifest and render props required"); }
   const candidate=session.producer_candidate.candidate;
   const ids=requestedIds(candidate);
   if(ids.length>80)fail("REVIEW_ASSET_LIMIT","Too many revision assets");
@@ -165,7 +198,8 @@ export async function persistReadyReviewPlan({
     const entry=byId.get(assetId);
     if(!entry||!rec(entry.media_asset_record_id))continue;
     const row=await exact(readRecord,env.AIRTABLE_MEDIA_TABLE_ID,entry.media_asset_record_id);
-    const receipt=rightsReceipt(row,entry,readField);
+    const variant=verifiedReelVariant(entry,variantManifest,originalProps,reqId);
+    const receipt=rightsReceipt(row,entry,readField,variant);
     if(receipt)assets.push(receipt);
   }
   const result=await inspectReviewPlan({
