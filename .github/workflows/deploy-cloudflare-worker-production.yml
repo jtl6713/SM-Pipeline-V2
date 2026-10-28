@@ -468,7 +468,10 @@ jobs:
           binding_values=after_plain
           if expected_bootstrapped:
               activation=Path('/tmp/schedule-activation-lane.txt').read_text().strip()
-              expected_lanes=[v.strip() for v in expected.get('STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST','').split(',') if v.strip()]
+              # Scheduling rollout is persisted as an active Worker binding, not
+              # part of the unrelated factory/visual expected-release dict.
+              # Preserve every previously activated lane on source deployments.
+              expected_lanes=[v.strip() for v in prior_plain.get('STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST','').split(',') if v.strip()]
               if activation and activation not in expected_lanes:
                   expected_lanes.append(activation)
               expected_enabled = 'true' if expected_lanes else 'false'
