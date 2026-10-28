@@ -1,0 +1,214 @@
+name: Activate Chicago Rendering Review MVP (exact #8447)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/chicago-review-mvp-activate.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: chicago-review-8447-activation
+  cancel-in-progress: false
+jobs:
+  activate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify exact deployed Runner, Remotion, Worker and protected credentials before activation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$OPS_TOKEN"
+          test -n "$CF_ACCESS_CLIENT_ID"
+          test -n "$CF_ACCESS_CLIENT_SECRET"
+          curl -fsS --max-time 20 https://pipeline.chicagoshining.com/health -o /tmp/rr-runner-before.json
+          jq -e '.ok==true and .version=="2026-10-28-chicago-review-exact-publisher-scope-v1"' /tmp/rr-runner-before.json >/dev/null
+          curl -fsS --max-time 20 https://render.chicagoshining.com/health -o /tmp/rr-render-before.json
+          jq -e '.ok==true' /tmp/rr-render-before.json >/dev/null
+          curl -fsS --max-time 20 -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            https://studio.chicagoshining.com/api/health -o /tmp/rr-worker-before.json
+          jq -e '.ok==true and .rendering_review.admission_enabled==false and .rendering_review.integration_verified==false' /tmp/rr-worker-before.json >/dev/null
+          echo "pilot_preflight=PASS exact_runner,remotion,disabled_worker"
+
+      - name: Generate protected matched Runner and Worker configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,os,secrets
+          from pathlib import Path
+          output="rec0uVrVeiUM6shp9"
+          job=secrets.token_hex(32)
+          dispatch=secrets.token_hex(32)
+          updates={
+            "RENDERING_REVIEW_RENDER_JOB_SHARED_SECRET":job,
+            "RENDERING_REVIEW_DISPATCH_SHARED_SECRET":dispatch,
+            "RENDERING_REVIEW_WORKER_BASE_URL":"https://studio.chicagoshining.com",
+            "STUDIO_RENDER_REVIEW_WORKER_URL":"https://studio.chicagoshining.com/api",
+            "RENDERING_REVIEW_REMOTION_BASE_URL":"https://render.chicagoshining.com",
+            "CF_ACCESS_CLIENT_ID":os.environ["CF_ACCESS_CLIENT_ID"],
+            "CF_ACCESS_CLIENT_SECRET":os.environ["CF_ACCESS_CLIENT_SECRET"],
+            "RENDERING_REVIEW_EXACT_OUTPUT_ID":output,
+            "RENDERING_REVIEW_EXACT_RENDER_ENABLED":"true",
+            "RENDERING_REVIEW_PRODUCER_PROPOSALS_ENABLED":"true",
+            "RENDERING_REVIEW_IG_DISPATCH_CLAIM_REQUIRED":"true",
+          }
+          def quote(s): return "'"+str(s).replace("'","''")+"'"
+          values="; ".join(quote(k)+"="+quote(v) for k,v in updates.items())
+          command="""$ErrorActionPreference='Stop'; $p=Join-Path (Get-Location) 'Services\\pipeline-runner\\service\\.env';
+          if(-not (Test-Path -LiteralPath $p)){throw 'runner_env_missing'}
+          $changes=@{"""+values+"""};
+          $lines=[System.Collections.Generic.List[string]]::new();
+          foreach($line in (Get-Content -LiteralPath $p)){$lines.Add([string]$line)}
+          foreach($key in $changes.Keys){
+            $pattern='^\\s*'+[regex]::Escape($key)+'\\s*=';
+            $found=$false;
+            for($i=0;$i -lt $lines.Count;$i++){
+              if($lines[$i] -match $pattern){
+                if($found){throw 'duplicate_review_runtime_key'}
+                $lines[$i]=[string]$key+'='+[string]$changes[$key]; $found=$true
+              }
+            }
+            if(-not $found){$lines.Add([string]$key+'='+[string]$changes[$key])}
+          }
+          [System.IO.File]::WriteAllLines($p,$lines,[System.Text.UTF8Encoding]::new($false));
+          Write-Output 'runner_review_configuration_written=true'"""
+          Path("/tmp/rr-shell.json").write_text(json.dumps({"command":command,"confirm":True}))
+          flags=[
+            "RENDERING_REVIEW_ENROLL_WRITES_ENABLED",
+            "RENDERING_REVIEW_MANUAL_ADMISSION_ENABLED",
+            "RENDERING_REVIEW_INTEGRATION_VERIFIED",
+            "RENDERING_REVIEW_DISPATCH_FENCE_VERIFIED",
+            "RENDERING_REVIEW_SCHEDULER_VACATE_VERIFIED",
+            "RENDERING_REVIEW_FEEDBACK_WRITES_ENABLED",
+            "RENDERING_REVIEW_PRODUCER_BRIDGE_ENABLED",
+            "RENDERING_REVIEW_PRODUCER_WRITES_ENABLED",
+            "RENDERING_REVIEW_ATTEMPT_COMMIT_ENABLED",
+            "RENDERING_REVIEW_RENDER_OUTBOX_VERIFIED",
+            "RENDERING_REVIEW_JOB_CLAIM_ENABLED",
+            "RENDERING_REVIEW_LAUNCH_LEDGER_ENABLED",
+            "RENDERING_REVIEW_COMPLETION_ENABLED",
+            "RENDERING_REVIEW_EXACT_RENDER_TRIGGER_ENABLED",
+            "RENDERING_REVIEW_IG_DISPATCH_CLAIM_ENABLED",
+            "RENDERING_REVIEW_CREATIVE_ACCEPT_ENABLED",
+          ]
+          worker={name:"true" for name in flags}
+          worker.update({
+            "RENDERING_REVIEW_EXACT_OUTPUT_ID":output,
+            "RENDERING_REVIEW_REMOTION_BASE_URL":"https://render.chicagoshining.com",
+            "RENDERING_REVIEW_RENDER_JOB_SHARED_SECRET":job,
+            "RENDERING_REVIEW_DISPATCH_SHARED_SECRET":dispatch,
+          })
+          Path("/tmp/rr-worker.json").write_text(json.dumps(worker))
+          for value in (job,dispatch,os.environ["CF_ACCESS_CLIENT_ID"],os.environ["CF_ACCESS_CLIENT_SECRET"]):
+            print("::add-mask::"+value)
+          print("pilot_config_generated=true exact_output_only=true")
+          PY
+
+      - name: Configure exact Runner environment through protected Ops job
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS --max-time 20 -o /tmp/rr-shell-start.json -w '%{http_code}' \
+            -X POST https://ops.chicagoshining.com/api/shell \
+            -H "Authorization: Bearer $OPS_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/rr-shell.json)
+          test "$code" = "202" -o "$code" = "200"
+          id=$(jq -r '.job.id // .jobId // empty' /tmp/rr-shell-start.json)
+          test -n "$id"
+          finished=0
+          for i in $(seq 1 30); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$id" -o /tmp/rr-shell-job.json
+            status=$(jq -r '.job.status // empty' /tmp/rr-shell-job.json)
+            if [ "$status" = "ok" ]; then finished=1; break; fi
+            if [ "$status" = "failed" ]; then echo "runner_config_job_failed"; exit 1; fi
+            sleep 3
+          done
+          test "$finished" = 1
+          echo "runner_config=PASS"
+
+      - name: Restart deployed Runner through existing allowlisted Ops service
+        shell: bash
+        run: |
+          set -euo pipefail
+          id=""
+          for i in $(seq 1 25); do
+            code=$(curl -sS --max-time 30 -o /tmp/rr-redeploy.json -w '%{http_code}' \
+              -X POST https://ops.chicagoshining.com/api/run \
+              -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' \
+              --data '{"action":"deploy","service":"pipeline-runner","confirm":true}')
+            if [ "$code" = "202" ]; then
+              id=$(jq -r '.job.id // empty' /tmp/rr-redeploy.json); break
+            fi
+            if [ "$code" != "409" ]; then echo "runner_redeploy_not_accepted status=$code"; exit 1; fi
+            sleep 4
+          done
+          test -n "$id"
+          finished=0
+          for i in $(seq 1 65); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$id" -o /tmp/rr-redeploy-job.json
+            status=$(jq -r '.job.status // empty' /tmp/rr-redeploy-job.json)
+            if [ "$status" = "ok" ]; then finished=1; break; fi
+            if [ "$status" = "failed" ]; then echo "runner_redeploy_failed"; exit 1; fi
+            sleep 4
+          done
+          test "$finished" = 1
+          curl -fsS --max-time 20 https://pipeline.chicagoshining.com/health -o /tmp/rr-runner-after.json
+          jq -e '.ok==true and .version=="2026-10-28-chicago-review-exact-publisher-scope-v1"' /tmp/rr-runner-after.json >/dev/null
+          # No authentication token: proves gate is live without starting a render.
+          code=$(curl -sS --max-time 15 -o /tmp/rr-runner-gate.json -w '%{http_code}' \
+            -X POST -H 'Content-Type: application/json' -d '{}' \
+            https://pipeline.chicagoshining.com/jobs/rendering-review/run-exact)
+          test "$code" = "401"
+          echo "runner_pilot_gate=PASS authentication_required=true"
+
+      - name: Activate only exact Chicago pilot Worker bindings via Wrangler
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Cloudflare's bulk secrets operation preserves unrelated bindings.
+          # No main UI asset, Instagram container, platform output or render is written.
+          npx --yes wrangler@4.123.0 secret bulk /tmp/rr-worker.json \
+            --name chicagoshining-studio-api >/tmp/rr-bulk-result.log 2>&1 || {
+              echo "worker_review_binding_activation_failed"; exit 1;
+            }
+          echo "worker_review_bindings_activated=true"
+
+      - name: Verify production review flags and fail-closed Runner/Worker boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          verified=0
+          for i in $(seq 1 15); do
+            code=$(curl -sS --max-time 15 -o /tmp/rr-live-health.json -w '%{http_code}' \
+              -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+              -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+              https://studio.chicagoshining.com/api/health || true)
+            if [ "$code" = "200" ] && jq -e '.ok==true and .rendering_review.admission_enabled==true and .rendering_review.integration_verified==true and .rendering_review.automatic_sampling_percent==0' /tmp/rr-live-health.json >/dev/null 2>&1; then
+              verified=1; break
+            fi
+            sleep 3
+          done
+          test "$verified" = 1
+          # Without the separate review job secret, a claim must fail without mutation.
+          status=$(curl -sS --max-time 15 -o /tmp/rr-claim-denial.json -w '%{http_code}' \
+            -X POST -H 'Content-Type: application/json' \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            -d '{}' https://studio.chicagoshining.com/api/internal/rendering-review/claim-render-job || true)
+          test "$status" = "403" -o "$status" = "401"
+          echo "chicago_8447_review_activation=PASS no_render_no_publish=true"
