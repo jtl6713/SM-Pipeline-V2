@@ -742,3 +742,5 @@ Rendering Review V3 source validation + Producer executable timeline canary code
 2026-10-28: Deploy exact Chicago Rendering Review pilot #8447 first-page discovery; no admission or publishing flag change.
 
 2026-10-28: Deploy Studio Rendering Review #8447 authenticated V1/V2 MP4 playback (UI 0.6.769); no render or publish action.
+
+2026-10-28: Retry Chicago Rendering Review #8447 native MP4 Worker deployment after protected mismatch-key diagnostic; preserve all production bindings, UI 0.6.769.
