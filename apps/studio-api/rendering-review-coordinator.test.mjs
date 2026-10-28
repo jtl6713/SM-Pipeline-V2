@@ -42,6 +42,13 @@ function fixture() {
     },
     loadSession:async()=>session&&clone(session),
     readOutput:async()=>clone(output),
+    assertScheduleRevocationReady:async descriptor=>{
+      assert.equal(descriptor.output_id,outputId);
+      assert.equal(descriptor.profile_id,CHICAGO_PROFILE_ID);
+      assert.equal(descriptor.review_owner,args.session_id);
+      log.push("schedule_preflight");
+      return true;
+    },
     claimHold:async({output_id,session_id})=>{
       if(hold)throw Error("hold already exists");
       assert.equal(output_id,outputId);
@@ -96,7 +103,7 @@ test("manual enrollment holds before schedule revocation, then persists and veri
   assert.equal(outcome.session.output_id,outputId);
   assert.equal(outcome.session.review_hold.active,true);
   assert.equal(outcome.session.original_approval,"attempt-oldapproval");
-  assert.deepEqual(f.log,["lock_acquired","hold_claimed","schedule_revoked","session_created","lock_released"]);
+  assert.deepEqual(f.log,["lock_acquired","schedule_preflight","hold_claimed","schedule_revoked","session_created","lock_released"]);
   assert.equal(f.output.scheduled_post_date,null);
 });
 
@@ -296,3 +303,26 @@ test("hold loss during event persistence cannot return mutation success",async()
   await check(()=>mutateReviewSessionCommand({output_id:outputId,event:messageEvent(),operations:f.ops}),"HOLD_LOST");
 });
 
+
+test("missing or unavailable schedule lane denies enrollment before any held output",async()=>{
+  const f=fixture();
+  f.ops.assertScheduleRevocationReady=async()=>false;
+  await check(()=>enrollManualReviewCommand({...args,operations:f.ops}),"SCHEDULE_REVOCATION_UNAVAILABLE");
+  assert.equal(f.hold,null);
+  assert.equal(f.session,null);
+  assert.deepEqual(f.log,["lock_acquired","lock_released"]);
+  const g=fixture();
+  delete g.ops.assertScheduleRevocationReady;
+  await check(()=>enrollManualReviewCommand({...args,operations:g.ops}),"INTEGRATION_MISSING");
+  assert.equal(g.hold,null);
+  assert.equal(g.log.length,0);
+});
+
+test("schedule readiness cannot be asserted by an untrusted output field",async()=>{
+  const f=fixture();
+  f.output={...f.output, schedule_revocation_ready:true, ready_to_review:true};
+  f.ops.assertScheduleRevocationReady=async()=>false;
+  await check(()=>enrollManualReviewCommand({...args,operations:f.ops}),"SCHEDULE_REVOCATION_UNAVAILABLE");
+  assert.equal(f.hold,null);
+  assert.equal(f.session,null);
+});
