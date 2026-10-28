@@ -1,0 +1,29 @@
+name: Rendering Review Phase 0 CI
+
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-api/rendering-review-policy.*'
+      - '.github/workflows/rendering-review-phase0-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render-review-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check policy and tests syntax
+        run: |
+          node --check apps/studio-api/rendering-review-policy.mjs
+          node --check apps/studio-api/rendering-review-policy.test.mjs
+      - name: Chicago pilot lifecycle and safety contracts
+        run: node --test apps/studio-api/rendering-review-policy.test.mjs
+      - name: Existing producer selective rework regression
+        run: node --test apps/studio-api/conversational-producer-plan.test.mjs apps/studio-api/producer-conversation.test.mjs apps/studio-api/output-approval-lease.test.mjs
