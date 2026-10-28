@@ -101,6 +101,21 @@ function fixture({failJobOnce=false}={}){
     setHold(x){holds={...holds,...x}},
     replaceSession(x){saved=x}};
 }
+test("original attempt source metadata remains valid under model plan",()=>{
+  const x=session().s;
+  const src=x.attempts.find(a=>a.id===x.plan.immutable_manifest.source_attempt_id);
+  assert.deepEqual({
+    current:x.current_attempt_id,
+    source:x.plan.immutable_manifest.source_attempt_id,
+    artifact:src?.artifact_id,
+    planned:x.plan.immutable_manifest.source_artifact_id,
+    status:src?.status,
+    number:src?.number,
+  },{
+    current:"original_12345678",source:"original_12345678",
+    artifact:SOURCE,planned:SOURCE,status:"ready_for_review",number:1,
+  });
+});
 test("every protected flag is required; no source or record mutation when disabled",async()=>{
   assert.equal(enabled({}),false);
   for(const key of Object.keys(flags)){
