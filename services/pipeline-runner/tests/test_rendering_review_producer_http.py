@@ -144,11 +144,13 @@ class ProposalRouteTests(unittest.TestCase):
 
 
     def test_safe_provider_http_code_does_not_expose_provider_response_body(self):
-        client, _ = self.fixture(fail_model=ProducerModelHTTPError(400))
+        client, _ = self.fixture(fail_model=ProducerModelHTTPError(400, "unsupported_parameter", "text.format"))
         with patch.dict("os.environ", {"RENDERING_REVIEW_PRODUCER_PROPOSALS_ENABLED": "true"}):
             result = self.send(client)
         self.assertEqual(result.status_code, 502)
         self.assertEqual(result.json["error"], "producer_model_http_400")
+        self.assertEqual(result.json["provider_error_code"], "unsupported_parameter")
+        self.assertEqual(result.json["provider_error_param"], "text.format")
         self.assertFalse(result.json["ok"])
 
 if __name__ == "__main__":
