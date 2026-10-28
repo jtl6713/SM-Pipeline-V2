@@ -412,3 +412,15 @@ test('Producer failure is visible beside Send, preserves direction and reuses re
   assert.equal(submissions[0].expected_version,1);
   assert.ok(!submissions.some(x=>x.publish||x.render));
 });
+
+test('Rendering Review does not portray V1 playback as a completed Producer render',()=>{
+  assert.match(script,/ORIGINAL V1 — unchanged/);
+  assert.match(script,/NOT RENDERED/);
+  assert.match(script,/Latest Producer proposal — not yet rendered/);
+  assert.match(script,/Prepare corrections for ALL nighttime frames/);
+  assert.match(script,/composer\.value='Please replace BOTH nighttime scenes/);
+  assert.match(script,/Review this instruction, then tap Send to Producer/);
+  assert.match(script,/No render will start/);
+  assert.match(css,/rr-storyboard-pair/);
+  assert.doesNotMatch(script,/showMedia\(.*candidate\.candidate\.timeline/);
+});

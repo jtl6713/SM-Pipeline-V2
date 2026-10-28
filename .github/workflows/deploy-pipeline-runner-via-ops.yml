@@ -348,3 +348,4 @@ jobs:
 # 2026-10-28: Producer JSON mode requires explicit JSON wording inside Responses input (not only instructions), version v2; protected runner only, no render or publication.
 # 2026-10-28: Deploy Chicago #8447 Producer conversation-first validation: unready asset timelines remain conversational only, never render or publish.
 # 2026-10-28: Deploy exact Reel scene/daypart metadata and bounded owned Chicago River library discovery for Producer, no V2 and no publishing.
+# 2026-10-28: Deploy Runner v5 source-metadata scoped BOTH-night-stills candidate. Only user-authorized plan creation; no automatic render or post.

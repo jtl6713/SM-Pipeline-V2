@@ -81,6 +81,56 @@ class ProducerTests(unittest.TestCase):
         self.assertTrue(result["candidate_only"])
         self.assertFalse(result["visual_inspection_performed"])
 
+    def test_explicit_two_night_stills_creates_verified_source_only_candidate_not_v2(self):
+        owned = [
+            {"id": "night-one", "name": "Gibsons Italia 5",
+             "time_of_day": "Night", "metadata_verified": True,
+             "frames_inspected": False},
+            {"id": "day-two", "name": "Chicago Riverwalk 8",
+             "time_of_day": "Morning", "metadata_verified": True,
+             "frames_inspected": False},
+            {"id": "night-three", "name": "Chicago Riverwalk 10",
+             "time_of_day": "Night", "metadata_verified": True,
+             "frames_inspected": False}]
+        evidence = {**EVIDENCE,"assets":owned,
+            "narration":"The Chicago river at sunrise.",
+            "original_timeline":[
+                {"start_seconds":0.0,"end_seconds":3.567,"asset_id":"night-one"},
+                {"start_seconds":3.567,"end_seconds":6.767,"asset_id":"day-two"},
+                {"start_seconds":6.767,"end_seconds":10.0,"asset_id":"night-three"}]}
+        class Response:
+            ok = True
+            def json(self):
+                return {"id":"model-fixture","output_text":json.dumps(PROPOSAL)}
+        result=propose_revision(evidence,
+            "Please replace BOTH nighttime scenes using already owned Riverwalk images. "
+            "Preserve narration, music and scene timing. Do not render V2 yet.",
+            {},transport=lambda *args, **kwargs: Response())
+        c=result["candidate"]
+        self.assertEqual([x["asset_ids"][0] for x in c["timeline"]],
+                         ["day-two","day-two","day-two"])
+        self.assertEqual([x["end_seconds"] for x in c["timeline"]],
+                         [3.567,6.767,10.0])
+        self.assertEqual(c["narration"],evidence["narration"])
+        self.assertEqual(c["requirements"],[])
+        self.assertEqual(c["claims"],[])
+        self.assertEqual(len(c["changes"]),2)
+        self.assertIn("PROPOSED ONLY",c["explanation"])
+        self.assertTrue(result["candidate_only"])
+        self.assertFalse(result["visual_inspection_performed"])
+        self.assertTrue(result["requires_fact_validation"])
+
+    def test_two_night_stills_never_invents_a_source_if_daypart_not_verified(self):
+        evidence={**EVIDENCE,"narration":"Morning river",
+            "assets":[{"id":"night-one","time_of_day":"Night","metadata_verified":True},
+                      {"id":"day-two","time_of_day":"Morning","metadata_verified":False},
+                      {"id":"night-three","time_of_day":"Night","metadata_verified":True}],
+            "original_timeline":[{"start_seconds":0,"end_seconds":3,"asset_id":"night-one"},
+                                 {"start_seconds":3,"end_seconds":6,"asset_id":"day-two"},
+                                 {"start_seconds":6,"end_seconds":9,"asset_id":"night-three"}]}
+        result, _ = self.invoke(evidence=evidence)
+        self.assertEqual(result["candidate"]["narration"],PROPOSAL["narration"])
+
     def test_missing_assets_and_fabricated_sources_rejected(self):
         for key, value in (("reuse_asset_ids", ["invented"]), ("claims", [{"claim": "Invented route", "source_ids": ["invented-source"]}])):
             p = copy.deepcopy(PROPOSAL)

@@ -230,6 +230,52 @@
       }
       const session=saved.session;
       const attempts=Array.isArray(session?.attempts)?session.attempts:[];
+      const storyboard=Array.isArray(saved.storyboard)?saved.storyboard:[];
+      const anyV2=attempts.some(a=>a?.number>1&&a?.status==='ready_for_review');
+      detail.append(elem('p',anyV2?
+        'Video preview: latest completed rendering (check the selected attempt below).':
+        'VIDEO PREVIEW: ORIGINAL V1 — unchanged. The Producer has only proposed edits. No replacement video exists until you separately authorize a render.','rr-v1-warning'));
+      if(storyboard.length){
+        const nightRows=storyboard.filter(frame=>frame?.original?.time_of_day==='Night');
+        const changedRows=storyboard.filter(frame=>frame.changed===true);
+        const toShow=[...new Map([...nightRows,...changedRows].map(r=>[r.scene,r])).values()]
+          .sort((a,b)=>a.scene-b.scene);
+        if(toShow.length){
+          const section=elem('section',null,'rr-proposal-storyboard');
+          section.append(elem('h3','Original stills vs proposed changes'));
+          section.append(elem('p','These are existing source photographs, NOT frames from a newly rendered V2. The original V1 player above remains unchanged.','rr-muted'));
+          for(const frame of toShow){
+            const item=elem('div',null,'rr-storyboard-row');
+            const time=Number(frame.start_seconds).toFixed(2)+'–'+Number(frame.end_seconds).toFixed(2)+'s';
+            item.append(elem('h4','Frame '+frame.scene+' · '+time));
+            const pair=elem('div',null,'rr-storyboard-pair');
+            const imageCard=(heading,photo)=>{
+              const block=elem('div',null,'rr-storyboard-still');
+              block.append(elem('strong',heading));
+              if(photo?.preview_url){
+                const im=elem('img');
+                im.src=photo.preview_url;
+                im.alt=(photo.name||'Studio still')+' ('+(photo.time_of_day||'unknown daypart')+')';
+                im.loading='lazy';
+                block.append(im);
+              }
+              block.append(elem('p',(photo?.name||'Not verified')+
+                ' · '+(photo?.time_of_day||'Unknown'),'rr-muted'));
+              return block;
+            };
+            pair.append(imageCard('Original V1',frame.original),
+              imageCard(frame.changed?'Proposed replacement · NOT RENDERED':
+                'Proposed · still unchanged',frame.proposed||frame.original));
+            item.append(pair);
+            if(frame.original.time_of_day==='Night'&&
+               (!frame.changed||frame.proposed?.time_of_day==='Night')){
+              item.append(elem('p','Nighttime frame still present in the proposed plan.','rr-v1-warning'));
+            }
+            section.append(item);
+          }
+          detail.append(section);
+        }
+      }
       if(attempts.length){
         const heading=elem('h3','Rendering attempts');detail.append(heading);
         const picker=elem('div',null,'rr-attempts');
@@ -321,7 +367,7 @@
       }
       const candidate=session?.producer_candidate;
       if(candidate?.candidate){
-        const heading=elem('h3','Latest Producer proposal');detail.append(heading);
+        const heading=elem('h3','Latest Producer proposal — not yet rendered');detail.append(heading);
         detail.append(elem('p','Candidate only · requires asset/fact checks · does not authorize rendering.','rr-muted'));
         const draft=elem('details',null,'rr-candidate');
         draft.append(elem('summary','Proposed narration and changes'));
@@ -376,13 +422,39 @@
           });
           if(created.persisted!==true||created.render_queued!==false)
             throw new Error('Producer response was not confirmed saved. Your text is preserved for retry.');
-          feedbackStatus.textContent='Producer reply saved. Reloading the conversation…';
+          if(created.plan_ready===true&&created.plan_persisted===true){
+            feedbackStatus.textContent='Render-ready plan saved. You must separately authorize creating V2.';
+          }else if(Array.isArray(created.plan_blockers)&&created.plan_blockers.length){
+            feedbackStatus.textContent='Producer reply saved; V2 not created. Plan requirements: '+
+              created.plan_blockers.slice(0,3).map(x=>x.description).join(' / ');
+          }else{
+            feedbackStatus.textContent='Producer reply saved, but no render-ready V2 plan exists.';
+          }
           feedbackStatus.classList.toggle('error-text',false);
           say('Producer response saved. No replacement render has been started.');
           pendingDirection='';pendingKey='';
           await open(entry);
         },feedbackStatus));
         form.append(feedbackStatus);
+        const unresolvedNight=storyboard.filter(frame=>
+          frame?.original?.time_of_day==='Night'&&
+          (!frame.changed||frame.proposed?.time_of_day==='Night'));
+        if(unresolvedNight.length){
+          form.append(actionButton('Prepare corrections for ALL nighttime frames',async()=>{
+            const listed=unresolvedNight.map(f=>'frame '+f.scene+' ('+
+              Number(f.start_seconds).toFixed(3)+'–'+Number(f.end_seconds).toFixed(3)+'s)').join(' and ');
+            composer.value='Please replace BOTH nighttime scenes, including '+listed+
+              ', using already owned, approved 9:16 Morning/Daytime Chicago River stills such as Chicago Riverwalk 8. '+
+              'Keep every other scene, narration, music, watermark and exact scene timing unchanged. '+
+              'Do not request an upload when a verified existing still is available. '+
+              'Do not claim the video was modified; first produce a complete render-ready plan '+
+              'with zero unresolved requirements and no invented factual claims. '+
+              'I will separately authorize V2 rendering after reviewing the plan.';
+            feedbackStatus.textContent='Both nighttime frames included. Review this instruction, then tap Send to Producer. No render will start.';
+            feedbackStatus.classList.toggle('error-text',false);
+            if(typeof composer.focus==='function')composer.focus();
+          }));
+        }
         form.append(elem('p','Producer discussion does not launch a render. A separate render-only button appears only for an independently verified frozen plan; Instagram approval and publishing remain disabled.','rr-muted'));
         detail.append(form);
       }

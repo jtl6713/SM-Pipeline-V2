@@ -570,3 +570,4 @@ Redeploy Studio UI 0.6.763-idea-lifecycle-live after removing stale Worker versi
 
 2026-10-28: Deploy Studio Rendering Review #8447 authenticated V1/V2 MP4 playback (UI 0.6.769); no render or publish action.
 2026-10-28: Deploy UI 0.6.770-producer-send-feedback. Render Review #8447: show Send to Producer errors beside the button, preserve draft text and request identity on retry. No automatic Producer invocation, rendering or Instagram publishing.
+2026-10-28: Studio UI 0.6.771 review storyboard. Explicit V1 unchanged label, side-by-side source vs proposed stills, no-render two-night-frame Producer instruction. No publish or generated V2.
