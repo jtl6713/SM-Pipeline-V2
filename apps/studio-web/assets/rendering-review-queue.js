@@ -9,7 +9,7 @@
   const nav = $('navRenderingReview');
   if (!root || !nav) return;
   const chicago = 'recT2rbKX3MF7cVFU';
-  const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map()};
+  const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map(),pollTimer:null};
   const list = $('rrQueueList'), detail = $('rrDetail'), status = $('rrStatus');
   const refresh = $('rrRefresh'), more = $('rrMore');
   const elem = (tag,text,cls) => {
@@ -142,7 +142,44 @@
     const line=elem('p',null,'rr-detail-line');
     line.append(elem('strong',label+' '),elem('span',value));parent.append(line);
   }
+  function cancelAttemptPoll(){
+    if(state.pollTimer!==null && typeof window.clearTimeout==='function')
+      window.clearTimeout(state.pollTimer);
+    state.pollTimer=null;
+  }
+  // The exact held review session is polled for completion, never the renderer.
+  // Do not replace the playing preview while a render is still in progress.
+  function watchAttempt(entry,seenState,requestSequence){
+    if(typeof window.setTimeout!=='function')return;
+    cancelAttemptPoll();
+    state.pollTimer=window.setTimeout(async()=>{
+      state.pollTimer=null;
+      if(!root.classList.contains('active')||state.selected!==entry.output_id||
+         state.request!==requestSequence)return;
+      try{
+        const latest=await get('/api/rendering-review/outputs/'+encodeURIComponent(entry.output_id));
+        if(state.selected!==entry.output_id||state.request!==requestSequence)return;
+        if(latest.publication_hold_verified!==true){
+          say('Review hold could not be verified; automatic status checks paused.',true);
+          return;
+        }
+        const nextState=latest.session?.state;
+        if(nextState===seenState){
+          watchAttempt(entry,seenState,requestSequence);
+        }else{
+          await open(entry);
+          if(nextState==='ready_for_review')
+            say('Revised Reel delivered — select V2 or compare with V1.');
+          else if(nextState==='revision_failed')
+            say('Revision needs attention; original Reel is preserved.',true);
+        }
+      }catch(error){
+        say('Could not refresh the render status. Select the Reel to try again.',true);
+      }
+    },12000);
+  }
   async function open(entry) {
+    cancelAttemptPoll();
     state.selected=entry.output_id; renderList();clearMedia();
     detail.replaceChildren();
     detail.append(elem('h2',entry.title||'Instagram Reel'),
@@ -211,6 +248,8 @@
         detail.append(elem('p','Attempt '+session.latest_attempt_number+' · '+
           ({queued:'Queued for isolated renderer',rendering:'Rendering',validating:'Validating media'}[session.state])+
           '. No Instagram publication has been authorized.','rr-notice'));
+        detail.append(actionButton('Check render status',async()=>{await open(entry);}));
+        watchAttempt(entry,session.state,seq);
       }
       const plan=session?.plan;
       if(plan){
@@ -344,12 +383,12 @@
       state.busy=false;refresh.disabled=false;more.disabled=!state.cursor;
     }
   }
-  refresh.addEventListener('click',()=>{state.lastLoad=0;state.selected='';detail.replaceChildren();load(false);});
+  refresh.addEventListener('click',()=>{cancelAttemptPoll();state.lastLoad=0;state.selected='';detail.replaceChildren();load(false);});
   more.addEventListener('click',()=>{if(state.cursor)load(true);});
   nav.addEventListener('click',()=>{ /* Core Studio navigation activates the page; observer loads it. */ });
   const observer = new MutationObserver(()=>{
     if(root.classList.contains('active'))load(false);
-    else {clearMedia();state.lastLoad=0;}
+    else {cancelAttemptPoll();clearMedia();state.lastLoad=0;}
   });
   observer.observe(root,{attributes:true,attributeFilter:['class']});
   async function reveal(){
