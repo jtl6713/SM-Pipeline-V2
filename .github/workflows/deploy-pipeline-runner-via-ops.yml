@@ -330,3 +330,4 @@ jobs:
 # 2026-10-28: Deploy held TikTok manual post URL completion self-service fix (#1261), TTD4 token guard intact, no automatic send.
 # 2026-10-28: exact-output-only Chicago Rendering Review publisher fence; no runtime flag changes.
 # 2026-10-28: redeploy Runner with compatible review publication regression mock.
+# 2026-10-28: Deliver protected Chicago #8447 V2 Google Drive streaming through Runner credentials, no public share or Instagram publication.
