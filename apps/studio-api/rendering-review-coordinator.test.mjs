@@ -222,3 +222,41 @@ test("failed atomic compare-and-set cannot mutate session despite a valid event"
   }),"STALE_SESSION");
   assert.equal(f.session.version,1);
 });
+
+test("idempotent replay fails closed if its original durable hold was lost",async()=>{
+  const f=fixture();
+  await enrollManualReviewCommand({...args,operations:f.ops});
+  f.hold={...f.hold,active:false};
+  await check(()=>enrollManualReviewCommand({...args,operations:f.ops}),"HOLD_LOST");
+  assert.equal(f.session.review_hold.active,true);
+});
+
+test("changing completed artifact after hold claim blocks stale preview enrollment",async()=>{
+  const f=fixture();
+  const claim=f.ops.claimHold;
+  f.ops.claimHold=async(...values)=>{
+    await claim(...values);
+    f.output={...f.output,final_file_id:"drive-newer-000001"};
+  };
+  await check(()=>enrollManualReviewCommand({...args,operations:f.ops}),"RENDER_CHANGED_DURING_ENROLLMENT");
+  assert.equal(f.hold.active,true);
+  assert.equal(f.session,null);
+});
+
+test("profile or output type drift during admission also fails closed",async()=>{
+  for(const change of [
+    {profile_id:"recNYC12345678901"},
+    {output_type:"Instagram Story"},
+    {render_status:"Rendering"},
+  ]){
+    const f=fixture();
+    const claim=f.ops.claimHold;
+    f.ops.claimHold=async(...values)=>{
+      await claim(...values);
+      f.output={...f.output,...change};
+    };
+    await check(()=>enrollManualReviewCommand({...args,operations:f.ops}),"RENDER_CHANGED_DURING_ENROLLMENT");
+    assert.equal(f.hold.active,true);
+    assert.equal(f.session,null);
+  }
+});
