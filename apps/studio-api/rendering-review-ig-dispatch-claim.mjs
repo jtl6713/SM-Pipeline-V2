@@ -79,17 +79,19 @@ export async function claimChicagoInstagramDispatch({
       deny("NOT_CHICAGO_REEL","Shared claim is Chicago Instagram Reels only",403);
     if(text(f.Platform)!=="Instagram"||text(f.Platform_Output_Type)!=="Instagram Reel")
       deny("NOT_INSTAGRAM_REEL","Unsupported publishing output",403);
+    // Prefer explicit hold/owner denials over a generic readiness failure.
+    // This makes a duplicate retry unambiguously non-claimable.
+    if(renderingReviewHoldPresent(k=>f[k]))
+      deny("REVIEW_HOLD_ACTIVE","Review owns publication hold");
+    if(f.Publish_Locked_By||f.Publish_Locked_At||f.Publish_Started_At||
+       f.Published_At||f.Platform_Post_ID||f.Platform_Post_URL||f.Platform_Media_ID)
+      deny("DISPATCH_ALREADY_OWNED","Output already dispatched or owned");
     if(text(f.Output_Status)!=="Approved for Publishing"||
        text(f.Review_Status)!=="Approved"||
        text(f.Publish_Status)!=="Ready to Publish"||
        text(f.Publish_Method)!=="Automated"||
        f.Auto_Publish_Enabled!==true||f.Do_Not_Publish===true)
       deny("OUTPUT_NOT_READY","Existing approval/publishing controls reject claim");
-    if(renderingReviewHoldPresent(k=>f[k]))
-      deny("REVIEW_HOLD_ACTIVE","Review owns publication hold");
-    if(f.Publish_Locked_By||f.Publish_Locked_At||f.Publish_Started_At||
-       f.Published_At||f.Platform_Post_ID||f.Platform_Post_URL||f.Platform_Media_ID)
-      deny("DISPATCH_ALREADY_OWNED","Output already dispatched or owned");
     if(text(f.Publish_Asset_URL)!==input.expected_publish_asset_url||
        text(f.Final_File_ID)!==input.expected_final_file_id||
        !text(f.Final_File_ID||f.Final_File_URL))
