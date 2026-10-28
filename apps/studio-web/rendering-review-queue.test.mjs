@@ -447,7 +447,8 @@ test('held #8447 surfaces a verified Morning alternative and saves correction on
         flags:{producer_conversation_enabled:true,attempt_commit_enabled:false},
         session:{version:savedRevision?4:3,state:'discussing',review_hold:{active:true},
           attempts:[{number:1,status:'ready_for_review',artifact_id:'source1'}],messages:[]},
-        storyboard:originals})};
+        storyboard:savedRevision?originals.map(f=>f.scene===1?
+          {...f,proposed:morning,changed:true}:f):originals})};
     if(url.endsWith('/producer-conversation')){
       const body=JSON.parse(options.body);
       assert.equal(body.expected_version,3);
