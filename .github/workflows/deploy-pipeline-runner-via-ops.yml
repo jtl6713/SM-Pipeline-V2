@@ -317,3 +317,5 @@ jobs:
 
 # Deploy Rendering Review executable timeline and V3 verified-source support (PR #1245); preserve safety configuration.
 # 2026-10-28: Deploy exact Chicago review source-crop identity verification (PR #1246). No automatic render or publication.
+
+# 2026-10-28 deploy exact Chicago Rendering Review Runner protected callback headers and existing Remotion origin fallback.
