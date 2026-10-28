@@ -1860,6 +1860,21 @@ export default {
               env, output_id:conversationMatch[1], operations:adapter,
               readRecord:(table,id)=>airtableFetch(env,table,id),
               readField:f,
+              // A later V3+ revision must independently verify the completed
+              // V2 MP4 projection, never silently fall back to original V1.
+              loadCompletedAttempt:async attemptId=>{
+                if(!/^[A-Za-z0-9_-]{8,120}$/.test(String(attemptId||"")))
+                  throw new HttpError(400,"Invalid source attempt");
+                const rows=await reviewListRecords(env,RENDER_REVIEW_TABLES.attempts,{
+                  limit:2,filterFormula:'{Attempt_ID}="'+attemptId+'"',
+                  fields:["Attempt_ID","Session_ID","Output_Record_ID",
+                    "Attempt_Number","Attempt_Status","Artifact_File_ID",
+                    "Artifact_URL","Validation_Evidence_JSON"],
+                });
+                if(!Array.isArray(rows)||rows.length!==1)
+                  throw new HttpError(409,"Source revision attempt missing or ambiguous");
+                return rows[0];
+              },
             });
           } catch (error) {
             console.warn("Rendering Review plan not ready",error?.code||"PLAN_UNAVAILABLE");
