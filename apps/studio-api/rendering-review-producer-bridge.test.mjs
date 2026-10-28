@@ -157,3 +157,29 @@ test("Worker route has protected reviewer, Chicago scope and NO publish action",
   assert.match(route,/mutationGate: false/);
   assert.doesNotMatch(route,/graph\.publish\(|COMMIT_PLAN|APPROVE_ATTEMPT|publishNow/);
 });
+
+
+test('Runner producer errors are actionable but never expose upstream private response data',async()=>{
+  const f=fixture();
+  const request=new Request("https://studio.test/api/rendering-review/outputs/"+OUTPUT+"/producer-conversation",{
+    method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  const cases=[
+    [405,"producer_proposal_disabled",503,/not enabled/],
+    [422,"producer_proposal_invalid",502,/invalid revision proposal/],
+    [502,"producer_model_unavailable",502,/AI service could not generate/],
+    [503,"review_evidence_unavailable",503,/could not read the saved Reel context/],
+  ];
+  for(const [status,code,wantStatus,pattern] of cases){
+    await assert.rejects(()=>handle({
+      request:request.clone(),env:flags,authorization:auth,output_id:OUTPUT,
+      assertWriteRequest:()=>{},operations:{
+        authorizeReview:async()=>true,withOutputLock:async(_id,fn)=>fn(),
+        readOutput:async()=>f.output,loadSession:async()=>f.session,
+        readHold:async()=>f.hold,
+      },
+      runnerFetch:async()=>({ok:false,status,json:async()=>({ok:false,error:code,
+        debug_secret:"NEVER-SHOW-PRIVATE-DETAILS"})}),
+    }),e=>e.status===wantStatus&&pattern.test(e.message)&&
+      !e.message.includes("NEVER-SHOW-PRIVATE-DETAILS"));
+  }
+});
