@@ -166,7 +166,7 @@ jobs:
             state=$(jq -r '.job.status // empty' /tmp/rr-probe-result.json)
             if [[ "$state" == "ok" || "$state" == "failed" ]]; then
               echo "producer_ops_probe_job=$state"
-              jq -r '.job.log // ""' /tmp/rr-probe-result.json | grep -E '^producer_probe_http=|^producer_probe_transport_failure|^producer_loopback_|^producer_ops_probe_' | tail -10 || true
+              jq -r '.job.log // ""' /tmp/rr-probe-result.json | grep -E '^producer_probe_http=|^producer_existing_photo_mentioned=|^producer_probe_timeline_scenes=|^producer_probe_safe_candidate=|^producer_probe_transport_failure|^producer_loopback_|^producer_ops_probe_' | tail -10 || true
               test "$state" = "ok"
               exit 0
             fi
