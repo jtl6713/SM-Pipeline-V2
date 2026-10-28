@@ -438,7 +438,8 @@ test('held #8447 surfaces a verified Morning alternative and saves correction on
     if(url==='/api/session')return {ok:true,json:async()=>({
       ok:true,authenticated:true,authorized:true,permissions:{outputs_review:true}})};
     if(url.startsWith('/api/rendering-review/queue?'))return {ok:true,json:async()=>({
-      ok:true,flags:{admission_enabled:false,producer_conversation_enabled:true},
+      ok:true,flags:{admission_enabled:false,producer_conversation_enabled:true,
+        automatic_sampling_percent:0},
       queue:[{output_id:output,profile_id:'recT2rbKX3MF7cVFU',review_held:true,
         output_type:'Instagram Reel',output_number:8447,render_status:'Rendered',
         title:'Chicago held Reel',final_file_url:'https://example.org/old.mp4'}],next_cursor:null})};
