@@ -122,3 +122,41 @@ test("unsourced factual claims never become a frozen executable plan",async()=>{
   assert.equal(result.ready,false);
   assert.ok(result.blockers.some(b=>b.kind==="research"));
 });
+
+test("a separately validated V2 MP4 is the source for a V3 plan",async()=>{
+  const f=fixture(),state=f.getSession();
+  const previous=state.current_attempt_id;
+  const revisedId="rrattempt_verified_second_12345678";
+  const revisedFile="1AbCdEfGhIjKlMnOpQrStUvWxYz012345";
+  const proof={sha256:"a".repeat(64),byte_count:840000,mime_type:"video/mp4",
+    width:1080,height:1920,audio_verified:true,watermark_verified:true,
+    google_drive_verified:true};
+  state.attempts.push({id:revisedId,number:2,parent_id:previous,
+    artifact_id:revisedFile,status:"ready_for_review"});
+  state.current_attempt_id=revisedId;
+  state.latest_attempt_number=2;
+  state.producer_candidate.source_attempt_id=revisedId;
+  f.argumentsToPass.loadCompletedAttempt=async id=>({
+    id:"recBBBBBBBBBBBBBB",fields:{Attempt_ID:id,Session_ID:state.id,
+      Output_Record_ID:O,Attempt_Number:2,Attempt_Status:"ready_for_review",
+      Artifact_File_ID:revisedFile,
+      Artifact_URL:"https://drive.google.com/file/d/"+revisedFile+"/view",
+      Validation_Evidence_JSON:JSON.stringify(proof)},
+  });
+  const result=await persistReadyReviewPlan(f.argumentsToPass);
+  assert.equal(result.ready,true);
+  assert.equal(f.getSession().plan.immutable_manifest.source_drive_file_id,revisedFile);
+  assert.equal(f.getSession().plan.immutable_manifest.source_attempt_id,revisedId);
+  assert.equal(f.rows.get(O).fields.Final_File_ID,ORIGINAL);
+});
+test("V3 plan is blocked if independent V2 validation is unavailable",async()=>{
+  const f=fixture(),state=f.getSession();
+  const revisedId="rrattempt_unverified_second_123456";
+  state.attempts.push({id:revisedId,number:2,
+    artifact_id:"1AbCdEfGhIjKlMnOpQrStUvWxYz012345",status:"ready_for_review"});
+  state.current_attempt_id=revisedId;
+  state.producer_candidate.source_attempt_id=revisedId;
+  f.argumentsToPass.loadCompletedAttempt=async()=>null;
+  await assert.rejects(()=>persistReadyReviewPlan(f.argumentsToPass),
+    e=>e.code==="REVIEW_SOURCE_NOT_VERIFIED");
+});
