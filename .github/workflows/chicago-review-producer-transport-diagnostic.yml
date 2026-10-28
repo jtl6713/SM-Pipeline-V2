@@ -70,7 +70,7 @@ jobs:
       - name: Probe exact held Reel with synthetic read-only Producer direction via protected Ops
         shell: bash
         env:
-          OPS_TOKEN: \${{ secrets.OPS_DASHBOARD_TOKEN }}
+          OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
         run: |
           set -euo pipefail
           test -n "$OPS_TOKEN"
