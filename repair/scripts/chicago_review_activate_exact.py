@@ -239,6 +239,10 @@ def main():
     if not all([ACCOUNT,CFTOKEN,OPSTOKEN,ACCESS_ID,ACCESS_SECRET]):
         raise RuntimeError("Required protected GitHub connections missing")
     before=binding_map(bindings())
+    renderer_health=json_request(RENDER+"/health")
+    if renderer_health.get("ok") is not True:
+        raise RuntimeError("Existing Remotion public renderer is not healthy")
+    print("chicago_existing_remotion_health_verified=1",flush=True)
     if before.get("RENDERING_REVIEW_ENROLL_WRITES_ENABLED",{}).get("text")=="true":
         if before.get("RENDERING_REVIEW_EXACT_OUTPUT_ID",{}).get("text")!=PILOT:
             raise RuntimeError("Another pilot is already active")
