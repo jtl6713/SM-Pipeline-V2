@@ -39,7 +39,7 @@ const hasReceipt = v => Boolean(v?.post_id || v?.platform_post_id || v?.publishe
 const isPublished = o => hasReceipt(o) || /^(published|publishing|dispatched)$/i.test(text(o?.output_status)) ||
   /^(published|publishing|dispatched)$/i.test(text(o?.publish_status));
 const isDispatching = o => Boolean(o?.publish_started_at || o?.publish_locked_at ||
-  o?.dispatch_lease_active || o?.irreversible_dispatch_started);
+  o?.platform_media_id || o?.dispatch_lease_active || o?.irreversible_dispatch_started);
 const humanIntent = v => v === "explicit_button" || v === "explicit_go_ahead";
 const current = s => s.attempts.find(a => a.id === s.current_attempt_id);
 const eligible = (o, p) =>
