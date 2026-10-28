@@ -63,6 +63,24 @@ jobs:
             binding_type=str(record.get("type") or "none") if record else "none"
             print("review_binding "+name+"="+state+" type="+binding_type)
           PY
+      - name: Inspect Cloudflare Worker domain registrations read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          account="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/domains"
+          code=$(curl -sS --max-time 15 -o /tmp/review-worker-domains.json -w '%{http_code}' \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$account" || true)
+          echo "worker_domains_api_http=$code"
+          if [[ "$code" == "200" ]]; then
+            jq -r '.result[]? | select(.service == "chicagoshining-studio-api") | "studio_worker_domain="+(.hostname // "")' /tmp/review-worker-domains.json
+          fi
+          code=$(curl -sS --max-time 15 -o /tmp/review-zone.json -w '%{http_code}' \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/zones?name=chicagoshining.com" || true)
+          echo "cloudflare_zone_discovery_http=$code"
+          if [[ "$code" == "200" ]]; then
+            jq -r '.result[]? | select(.name=="chicagoshining.com") | "chicago_zone_present=true"' /tmp/review-zone.json
+          fi
       - name: Resolve Worker internal-route access without credentials
         shell: bash
         run: |
