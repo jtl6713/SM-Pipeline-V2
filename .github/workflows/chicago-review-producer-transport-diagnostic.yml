@@ -85,7 +85,7 @@ jobs:
           $body=@{
             output_id='rec0uVrVeiUM6shp9'
             session_id='rrsession_5db47c3f652bf0f80162c4e933cb8b7a913c92c888fec796'
-            expected_version=1
+            expected_version=2
             direction='There is a still embedded of nighttime view of the river. Please replace that with a daytime view or even better a sunrise view if we have one.'
           } | ConvertTo-Json -Compress
           $sw=[System.Diagnostics.Stopwatch]::StartNew()
