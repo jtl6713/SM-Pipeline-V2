@@ -51,7 +51,7 @@ export async function serveReviewAttemptVideo({
   const probe=request.method==="HEAD"
     ?new Request(request.url,{method:"GET",headers:{"Range":"bytes=0-0"}})
     :request;
-  const upstream=await readVideo(fileId,source,probe,env);
+  const upstream=await readVideo(fileId,source,probe,env,{outputId,attemptId});
   if(!upstream||![200,206].includes(upstream.status))
     fail(502,"Revised video stream unavailable");
   const type=String(upstream.headers.get("Content-Type")||"").toLowerCase();
@@ -73,4 +73,48 @@ export async function serveReviewAttemptVideo({
   return new Response(upstream.body,{
     status:upstream.status===206?206:200,headers,
   });
+}
+
+/** Fetch only from the configured, exact Runner origin; never send Google OAuth
+ * or the reviewer session to the browser. The Runner repeats Airtable hold and
+ * artifact checks and streams with its own authorized Google Drive token.
+ */
+export async function fetchTrustedRunnerReviewMedia({
+  env,outputId,attemptId,request,transport=fetch,
+}){
+  const base=String(env?.PIPELINE_RUNNER_URL||"").trim();
+  const secret=String(env?.PIPELINE_RUNNER_SHARED_SECRET||"").trim();
+  let origin;
+  try{
+    const u=new URL(base);
+    if(u.origin!=="https://pipeline.chicagoshining.com"||
+       (u.pathname!=="/"&&u.pathname!=="")||u.search||u.hash||
+       u.username||u.password)throw Error("wrong origin");
+    origin=u.origin;
+  }catch{fail(503,"Exact Runner preview origin unavailable");}
+  if(!secret||secret.length<24)fail(503,"Protected Runner preview credential unavailable");
+  if(!RECORD.test(outputId)||!TOKEN.test(attemptId))
+    fail(400,"Invalid held review media identity");
+  const headers=new Headers({"X-Pipeline-Secret":secret,"Accept":"video/mp4"});
+  const range=request.headers.get("Range");
+  if(range){
+    if(!/^bytes=\\d+-\\d*$/.test(range))fail(416,"Unsupported video seek range");
+    headers.set("Range",range);
+  }
+  const target=origin+"/jobs/rendering-review/attempt-media/"+
+    encodeURIComponent(outputId)+"/"+encodeURIComponent(attemptId);
+  let response;
+  try{
+    response=await transport(target,{method:"GET",headers,redirect:"manual"});
+  }catch{fail(502,"Protected Runner video stream unavailable");}
+  if(!response||![200,206].includes(response.status)){
+    try{await response?.body?.cancel()}catch{}
+    fail(502,"Runner could not verify the private Drive video");
+  }
+  const mime=String(response.headers.get("Content-Type")||"").toLowerCase();
+  if(!mime.startsWith("video/mp4")&&!mime.startsWith("application/octet-stream")){
+    try{await response.body?.cancel()}catch{}
+    fail(502,"Runner returned an unexpected video type");
+  }
+  return response;
 }
