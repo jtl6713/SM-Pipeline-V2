@@ -235,9 +235,53 @@
       detail.append(elem('p',anyV2?
         'Video preview: latest completed rendering (check the selected attempt below).':
         'VIDEO PREVIEW: ORIGINAL V1 — unchanged. The Producer has only proposed edits. No replacement video exists until you separately authorize a render.','rr-v1-warning'));
+      const nightRows=storyboard.filter(frame=>frame?.original?.time_of_day==='Night');
+      const unresolvedNight=nightRows.filter(frame=>
+        !frame.changed||frame.proposed?.time_of_day==='Night');
+      // Session proposals are durable; a code deployment does not rewrite them.
+      // Place the actual owner-authorized correction in view BEFORE the long
+      // storyboard/history, using the existing guarded Producer endpoint.
+      if(entry.output_id==='rec0uVrVeiUM6shp9'&&nightRows.length===2&&
+         unresolvedNight.length&&saved.publication_hold_verified===true){
+        const correction=elem('section',null,'rr-night-fix');
+        correction.append(elem('h3','Daytime correction not yet saved'));
+        correction.append(elem('p','The saved proposal still contains '+
+          unresolvedNight.map(f=>'frame '+f.scene).join(' and ')+
+          '. The existing Chicago Riverwalk 8 Morning image is available. '+
+          'The original V1 video remains unchanged.','rr-notice'));
+        if(saved.flags?.producer_conversation_enabled===true&&
+           ['ready_for_review','discussing','awaiting_assets','plan_ready','revision_failed'].includes(session?.state)){
+          let requestId='';
+          correction.append(actionButton('Fix both nighttime stills — save Producer plan',async()=>{
+            if(!requestId)requestId=safeRequestId();
+            const listed=nightRows.map(f=>'frame '+f.scene+' ('+
+              Number(f.start_seconds).toFixed(3)+'–'+Number(f.end_seconds).toFixed(3)+'s)').join(' and ');
+            const direction='Please replace BOTH nighttime scenes, including '+listed+
+              ', using already owned, approved 9:16 Morning/Daytime Chicago River stills such as Chicago Riverwalk 8. '+
+              'Keep every other scene, narration, music, watermark and exact scene timing unchanged. '+
+              'Do not request an upload when a verified existing still is available. '+
+              'Do not claim the video was modified; first produce a complete render-ready plan '+
+              'with zero unresolved requirements and no invented factual claims. '+
+              'I will separately authorize V2 rendering after reviewing the plan.';
+            const created=await post('/api/rendering-review/outputs/'+
+              encodeURIComponent(entry.output_id)+'/producer-conversation',{
+              direction,expected_version:session.version,client_request_id:requestId,
+            });
+            if(created.persisted!==true||created.render_queued!==false)
+              throw new Error('Producer revision was not verified as saved; no render started.');
+            say(created.plan_ready===true&&created.plan_persisted===true?
+              'Two nighttime frames replaced in the saved plan. Render V2 only when you choose.':
+              'Producer reply saved, but the render plan still has unresolved checks.');
+            await open(entry);
+          }));
+        }
+        detail.append(correction);
+      }
       if(storyboard.length){
-        const nightRows=storyboard.filter(frame=>frame?.original?.time_of_day==='Night');
         const changedRows=storyboard.filter(frame=>frame.changed===true);
+        const availableMorning=storyboard.map(frame=>frame?.original).find(source=>
+          source?.time_of_day==='Morning'&&/riverwalk/i.test(source.name||'')&&
+          typeof source.preview_url==='string'&&source.preview_url.length>0);
         const toShow=[...new Map([...nightRows,...changedRows].map(r=>[r.scene,r])).values()]
           .sort((a,b)=>a.scene-b.scene);
         if(toShow.length){
@@ -263,15 +307,21 @@
                 ' · '+(photo?.time_of_day||'Unknown'),'rr-muted'));
               return block;
             };
+            const suggested=frame.original.time_of_day==='Night'&&
+              (!frame.changed||frame.proposed?.time_of_day==='Night')&&
+              availableMorning&&frame.original.name!==availableMorning.name?
+              availableMorning:null;
             pair.append(imageCard('Original V1',frame.original),
-              imageCard(!frame.proposed_ready?'No verified replacement proposed yet':
-                frame.changed?'Proposed replacement · NOT RENDERED':
-                'Proposed · still unchanged',frame.proposed));
+              imageCard(suggested?'AVAILABLE MORNING PHOTO · NOT IN SAVED PLAN':
+                !frame.proposed_ready?'No verified replacement proposed yet':
+                frame.changed?'Saved proposed replacement · NOT RENDERED':
+                'Saved proposal · still unchanged',suggested||frame.proposed));
             item.append(pair);
             if(frame.original.time_of_day==='Night'&&
                (!frame.changed||frame.proposed?.time_of_day==='Night')){
-              item.append(elem('p',frame.proposed_ready?
-                'Nighttime frame still present in the proposed plan.':
+              item.append(elem('p',suggested?
+                'Available replacement shown above is NOT in the saved plan. Use the correction action above to save it.':
+                frame.proposed_ready?'Nighttime frame still present in the saved proposal.':
                 'No verified daytime replacement has been proposed for this frame.','rr-v1-warning'));
             }
             section.append(item);
@@ -440,25 +490,6 @@
         };
         form.append(actionButton('Send to Producer',async()=>sendDirection(composer.value),feedbackStatus));
         form.append(feedbackStatus);
-        const unresolvedNight=storyboard.filter(frame=>
-          frame?.original?.time_of_day==='Night'&&
-          (!frame.changed||frame.proposed?.time_of_day==='Night'));
-        if(unresolvedNight.length){
-          form.append(actionButton('Request verified replacements for BOTH nighttime frames',async()=>{
-            const listed=unresolvedNight.map(f=>'frame '+f.scene+' ('+
-              Number(f.start_seconds).toFixed(3)+'–'+Number(f.end_seconds).toFixed(3)+'s)').join(' and ');
-            composer.value='Please replace BOTH nighttime scenes, including '+listed+
-              ', using already owned, approved 9:16 Morning/Daytime Chicago River stills such as Chicago Riverwalk 8. '+
-              'Keep every other scene, narration, music, watermark and exact scene timing unchanged. '+
-              'Do not request an upload when a verified existing still is available. '+
-              'Do not claim the video was modified; first produce a complete render-ready plan '+
-              'with zero unresolved requirements and no invented factual claims. '+
-              'I will separately authorize V2 rendering after reviewing the plan.';
-            // This explicit reviewer click sends one revision request; it does
-            // not render, approve or publish. Never silently re-run on page GET.
-            await sendDirection(composer.value);
-          }));
-        }
         form.append(elem('p','Producer discussion does not launch a render. A separate render-only button appears only for an independently verified frozen plan; Instagram approval and publishing remain disabled.','rr-muted'));
         detail.append(form);
       }
