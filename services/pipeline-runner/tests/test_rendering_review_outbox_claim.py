@@ -76,7 +76,7 @@ class OutboxClaimTests(unittest.TestCase):
         self.assertFalse(first["public_post_created"])
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0][0],
-                         "https://studio.example/internal/rendering-review/claim-render-job")
+                         "https://studio.example/api/internal/rendering-review/claim-render-job")
         self.assertEqual(calls[0][2]["X-Rendering-Review-Job-Secret"], SECRET)
         self.assertEqual(set(calls[0][1]),
                          {"output_id", "job_id", "client_request_id"})
