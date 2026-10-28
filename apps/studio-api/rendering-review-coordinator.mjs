@@ -49,8 +49,8 @@ export async function enrollManualReviewCommand({
 }) {
   requireOperations(operations, [
     "authorizeReview", "withOutputLock", "readOutput", "loadSession",
-    "claimHold", "readHold", "clearStaleSchedule", "createSessionIfAbsent",
-    "readSession",
+    "assertScheduleRevocationReady", "claimHold", "readHold",
+    "clearStaleSchedule", "createSessionIfAbsent", "readSession",
   ]);
   const outputId=id(output_id), sessionId=id(session_id), requestId=id(idempotency_key);
   if (!/^rec[A-Za-z0-9]{14}$/.test(outputId))
@@ -83,6 +83,23 @@ export async function enrollManualReviewCommand({
     const eligibility=reviewEligibility(output,policy);
     if (!eligibility.allowed)
       err(eligibility.reason, "Current output cannot enter the Chicago manual pilot");
+
+    // A selected Reel may already occupy an MAE slot. Before creating ANY
+    // potentially orphaned publication hold, verify that the protected
+    // scheduler can vacate this exact output under the same ownership context.
+    // This is a read-only readiness check, not a promise that the later
+    // revocation succeeded. The actual revocation still requires readback.
+    const revocationReady=await operations.assertScheduleRevocationReady({
+      output_id:outputId,profile_id:output.profile_id,platform:output.platform,
+      output_type:output.output_type,review_owner:sessionId,
+      scheduled_post_date:output.scheduled_post_date || null,
+      studio_scheduled_at:output.studio_scheduled_at || null,
+      youtube_scheduled_publish_at:output.youtube_scheduled_publish_at || null,
+      approved_attempt_id:output.approved_attempt_id || null,
+    });
+    if(revocationReady!==true)
+      err("SCHEDULE_REVOCATION_UNAVAILABLE",
+        "Protected schedule revocation is not ready; no review hold was created",503);
 
     // First write: hold ownership. If the next operation crashes, the hold
     // remains, blocking publishing until audited recovery.

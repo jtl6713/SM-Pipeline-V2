@@ -10,7 +10,7 @@ const args={output_id:outputId,session_id:"session-12345678",
   policy:{...REVIEW_PILOT,enabled:true}};
 const clone=x=>JSON.parse(JSON.stringify(x));
 const reject=(fn,code)=>assert.rejects(fn,e=>e.code===code);
-function fake({mutationGate=false}={}){
+function fake({mutationGate=false,scheduleRevocationReady=true}={}){
  const output={
   id:outputId,
   fields:{
@@ -65,6 +65,11 @@ function fake({mutationGate=false}={}){
   },
   authorizeReview:async()=>true,
   authorizeEvent:async()=>true,
+  scheduleRevocationReady:scheduleRevocationReady ? async descriptor=>{
+    assert.equal(descriptor.output_id,outputId);
+    assert.equal(descriptor.profile_id,CHICAGO_PROFILE_ID);
+    return true;
+  } : null,
   revokeScheduleUnderHold:async ({output_id,review_hold_id,review_owner})=>{
     assert.equal(output_id,outputId);
     assert.equal(output.fields.Studio_Render_Review_Hold_Active,true);
@@ -210,4 +215,19 @@ test("durable session cannot change identity or skip a version under a current v
  assert.equal(f.writes,before);
  f.session.fields.Session_ID="replacement-session";
  await reject(()=>f.ops.readSession(outputId),"SESSION_IDENTITY_CONFLICT");
+});
+
+test("unconfigured scheduling revocation prevents orphaned hold before any writes",async()=>{
+ const f=fake({mutationGate:true,scheduleRevocationReady:false});
+ f.output.fields.Scheduled_Post_Date="2026-12-07T17:30:00Z";
+ await reject(()=>enrollManualReviewCommand({...args,operations:f.ops}),"SCHEDULE_REVOCATION_UNAVAILABLE");
+ assert.equal(f.writes,0);
+ assert.equal(f.output.fields.Studio_Render_Review_Hold_ID,undefined);
+ assert.equal(f.session,null);
+});
+test("unconfigured scheduler still denies the entirely unscheduled path before holding",async()=>{
+ const f=fake({mutationGate:true,scheduleRevocationReady:false});
+ await reject(()=>enrollManualReviewCommand({...args,operations:f.ops}),"SCHEDULE_REVOCATION_UNAVAILABLE");
+ assert.equal(f.writes,0);
+ assert.equal(f.session,null);
 });
