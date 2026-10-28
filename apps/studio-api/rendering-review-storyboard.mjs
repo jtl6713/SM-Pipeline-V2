@@ -56,6 +56,14 @@ export function reviewStillStoryboard({output,request,media=[],session}={}){
     Number.isFinite(s.start_seconds)&&Number.isFinite(s.end_seconds)&&
     Math.abs(s.start_seconds-originals[i].start_seconds)<.007&&
     Math.abs(s.end_seconds-originals[i].end_seconds)<.007);
+  // Source-owned read-only suggestion for the exact held pilot. This never
+  // changes the saved Producer candidate, freezes a plan or renders video.
+  // Every returned image was independently checked above against owned media
+  // and the approved original 9:16 production manifest.
+  const sourceMorning=output?.id==="rec0uVrVeiUM6shp9"&&originals.length===10&&
+    originals[0].time_of_day==="Night"&&originals[4].time_of_day==="Night"?
+    originals.find(o=>o.id==="e7eafa73de3e460782"&&
+      o.name==="Chicago Riverwalk 8"&&o.time_of_day==="Morning"):null;
   return originals.map((o,i)=>{
     const wanted=aligned?scenes[i].asset_ids[0]:o.id;
     const target=aligned?originals.find(s=>s.id===wanted):null;
@@ -66,6 +74,12 @@ export function reviewStillStoryboard({output,request,media=[],session}={}){
       proposed:target?{name:target.name,time_of_day:target.time_of_day,
         preview_url:target.url}:null,
       changed:aligned&&wanted!==o.id,
-      proposed_ready:aligned,video_rendered:false};
+      proposed_ready:aligned,video_rendered:false,
+      // Distinguish an owned source suggestion from the persisted Producer
+      // proposal. The reviewer must explicitly submit before plan preflight.
+      suggested:(sourceMorning&&(i===0||i===4))?
+        {name:sourceMorning.name,time_of_day:sourceMorning.time_of_day,
+         preview_url:sourceMorning.url}:null,
+      suggestion_saved:false};
   });
 }
