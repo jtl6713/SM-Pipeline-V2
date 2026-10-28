@@ -48,6 +48,7 @@ from ttd.constants import (
     VIDEO_RETRY_MINUTES,
 )
 from ttd.eligibility import ttd0_eligibility_reason
+from ttd.video_integrity import verify_public_video_matches_drive
 
 
 def _music_fields(record: dict[str, Any]) -> dict[str, str]:
@@ -227,10 +228,16 @@ def process_request(
 
     if video:
         source_url = video_source_url(output)
-        if not is_public_publish_url(source_url):
+        master_id = field_str(output, "Final_File_ID")
+        plan = asset_plan(output)
+        # Do not let TikTok pull a mutable sibling Studio preview (e.g. current.mp4).
+        # Stage a URL keyed to this exact output and immutable Drive final instead.
+        needs_owned_copy = bool(master_id and source_url != plan["publish_asset_url"])
+        if not is_public_publish_url(source_url) or needs_owned_copy:
             try:
-                plan = asset_plan(output)
-                source_url = ensure_public_mp4_url(client, output, plan)
+                source_url = ensure_public_mp4_url(
+                    client, output, plan, force_final_master=needs_owned_copy,
+                )
                 client.update_record(
                     PLATFORM_OUTPUTS_TABLE,
                     record_id,
@@ -264,9 +271,20 @@ def process_request(
                 return {"processed": True, "retry": True, "reason": "video_public_stage_failed", **result}
         result["source_url"] = source_url
         try:
-            response = requests.get(source_url, headers={"Range": "bytes=0-0"}, timeout=60)
-            status_code = response.status_code
-        except requests.RequestException as exc:
+            if master_id:
+                # Full CDN body must match the approved Drive MP4, not just byte zero.
+                receipt = verify_public_video_matches_drive(source_url, master_id)
+                result["verified_full_bytes"] = receipt["bytes"]
+                status_code = 200
+            else:
+                # Legacy R2-only videos lack a Drive master for an exact comparison.
+                # Preserve their original route; they do not receive a full-file receipt.
+                with requests.get(
+                    source_url, headers={"Range": "bytes=0-0"},
+                    allow_redirects=False, timeout=60, stream=True,
+                ) as response:
+                    status_code = response.status_code
+        except Exception as exc:
             client.update_record(
                 PLATFORM_OUTPUTS_TABLE,
                 record_id,
@@ -288,7 +306,7 @@ def process_request(
             return {"processed": True, "retry": True, "reason": "video_validate_error", **result}
 
         result["http_status"] = status_code
-        if status_code < 200 or status_code > 399:
+        if status_code != 200 and status_code != 206:
             client.update_record(
                 PLATFORM_OUTPUTS_TABLE,
                 record_id,
@@ -310,7 +328,12 @@ def process_request(
             {
                 **unlock_fields(),
                 **_music_fields(output),
-                "Output_Notes": append_note(output, f"TTD0 validated the public video draft asset at {stamp_minutes()}."),
+                "Output_Notes": append_note(
+                    output,
+                    (f"TTD0 verified full public MP4 equals Drive master ({result['verified_full_bytes']} bytes)"
+                     if result.get("verified_full_bytes") else "TTD0 performed legacy range check on R2-only video")
+                    + f" at {stamp_minutes()}.",
+                ),
                 "Publish_Status": PUBLISH_STATUS_READY,
                 "TikTok_Draft_Type": DRAFT_TYPE_VIDEO,
                 "Publish_Error_Stage": "",
