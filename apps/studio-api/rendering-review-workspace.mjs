@@ -1,6 +1,8 @@
 /** Authenticated, Airtable-authoritative read API. Never enrolls on preview. */
 import { RENDER_REVIEW_TABLES, RENDER_REVIEW_OUTPUT_FIELDS } from './rendering-review-airtable.mjs';
 import { REVIEW_SCHEMA } from './rendering-review-policy.mjs';
+import { reviewEnrollmentWriteEnabled } from './rendering-review-enrollment-http.mjs';
+import { producerConversationWritesEnabled } from './rendering-review-producer-persist.mjs';
 
 const text=x=>String(x??'').trim();
 const rec=x=>/^rec[A-Za-z0-9]{14}$/.test(text(x));
@@ -23,7 +25,14 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
   const requested=text(url.searchParams.get('profile_id'));
   if(requested&&!allowed.has(requested))fail(403,'Content Profile is not available for this membership');
   const scope=requested?[requested]:[...allowed];
-  const flags={admission_enabled:false,automatic_sampling_percent:0,integration_verified:false};
+  // These capabilities come ONLY from the protected deployment environment.
+  // No Airtable settings, request headers or UI toggles can activate them.
+  const flags={
+    admission_enabled:reviewEnrollmentWriteEnabled(env),
+    producer_conversation_enabled:producerConversationWritesEnabled(env),
+    automatic_sampling_percent:0,
+    integration_verified:env?.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true",
+  };
   // Bounded read-only discovery of completed Chicago Instagram Reels. This is
   // NOT an admission or approval endpoint. Validate the linked Content Item
   // before returning even a title or asset URL to prevent cross-profile leaks.
@@ -98,7 +107,9 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
         render_status:text(f.Render_Status),final_file_id:text(f.Final_File_ID)||null,
         final_file_url:text(f.Final_File_URL)||null,
         review_held:held,dispatch_started:Boolean(f.Publish_Started_At||f.Publish_Locked_At||f.Publish_Locked_By),
-        manual_admission_enabled:false,
+        manual_admission_enabled:flags.admission_enabled&&!held&&
+          !f.Publish_Started_At&&!f.Publish_Locked_At&&
+          text(f.Render_Status).toLowerCase()==="rendered",
       });
     }
     return {ok:true,queue,next_cursor:page.offset||null,as_of:new Date().toISOString(),flags};
