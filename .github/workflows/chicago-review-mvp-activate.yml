@@ -1,0 +1,54 @@
+name: Activate Chicago Rendering Review MVP #8447
+on:
+  pull_request:
+    paths:
+      - 'repair/scripts/chicago_review_activate_exact.py'
+      - '.github/workflows/chicago-review-mvp-activate.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/chicago-review-mvp-activation.txt'
+permissions:
+  contents: read
+concurrency:
+  group: chicagoshining-studio-api-production-deploy
+  cancel-in-progress: false
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate exact, no-render activation source syntax
+        run: |
+          python -m py_compile repair/scripts/chicago_review_activate_exact.py
+          grep -q 'PILOT = "rec0uVrVeiUM6shp9"' repair/scripts/chicago_review_activate_exact.py
+          grep -q 'def fail_closed' repair/scripts/chicago_review_activate_exact.py
+  activate:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify required protected integration is connected
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$OPS_TOKEN"
+          test -n "$CF_ACCESS_CLIENT_ID"
+          test -n "$CF_ACCESS_CLIENT_SECRET"
+          python -m py_compile repair/scripts/chicago_review_activate_exact.py
+      - name: Activate exact Chicago Reel without enrolling or rendering
+        shell: bash
+        run: |
+          set -euo pipefail
+          python repair/scripts/chicago_review_activate_exact.py
