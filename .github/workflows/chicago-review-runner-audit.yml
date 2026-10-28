@@ -1,0 +1,54 @@
+name: Chicago Review Runner Secret Presence Audit
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/chicago-review-runner-audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Check exact Runner environment key presence, never values
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' > /tmp/review-audit-body.json
+          import json
+          command=r'''$p=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'; $keys=@('PIPELINE_RUNNER_SHARED_SECRET','RENDERING_REVIEW_RENDER_JOB_SHARED_SECRET','RENDERING_REVIEW_WORKER_BASE_URL','STUDIO_RENDER_REVIEW_WORKER_URL','RENDERING_REVIEW_REMOTION_BASE_URL','CF_ACCESS_CLIENT_ID','CF_ACCESS_CLIENT_SECRET','RENDERING_REVIEW_EXACT_OUTPUT_ID','RENDERING_REVIEW_EXACT_RENDER_ENABLED','RENDERING_REVIEW_PRODUCER_PROPOSALS_ENABLED','RENDERING_REVIEW_IG_DISPATCH_CLAIM_REQUIRED'); $lines=if(Test-Path $p){@(Get-Content $p)}else{@()}; Write-Output ('runner_env_file_exists='+[bool](Test-Path $p)); foreach($key in $keys){ $matched=@($lines|Where-Object {$_ -match ('^\s*'+[regex]::Escape($key)+'\s*=\s*\S+')}); Write-Output ('runner_key '+$key+'='+(if($matched.Count -gt 0){'present'}else{'absent'})) }'''
+          # A single self-contained, read-only command; logs contain only status.
+          command=command.replace("+(if($matched.Count -gt 0){'present'}else{'absent'})", "+$(if($matched.Count -gt 0){'present'}else{'absent'})")
+          print(json.dumps({"command":command,"confirm":True}))
+          PY
+          code=$(curl -sS --max-time 20 -w '%{http_code}' -o /tmp/review-shell-start.json \
+            -X POST 'https://ops.chicagoshining.com/api/shell' \
+            -H "Authorization: Bearer $OPS_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/review-audit-body.json)
+          if [[ "$code" != "202" && "$code" != "200" ]]; then
+            echo "ops_readonly_audit_not_started=$code"; exit 1
+          fi
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/review-shell-start.json)
+          test -n "$job"
+          for n in {1..24}; do
+            curl -sS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/review-shell-job.json
+            state=$(jq -r '.job.status // empty' /tmp/review-shell-job.json)
+            if [[ "$state" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/review-shell-job.json \
+                | grep -E '^runner_(env_file_exists|key) ' || true
+              jq -r '.job.log // ""' /tmp/review-shell-job.json \
+                | grep '^runner_env_file_exists=' || true
+              exit 0
+            fi
+            if [[ "$state" == "failed" ]]; then
+              echo "ops_runner_audit_failed"; exit 1
+            fi
+            sleep 3
+          done
+          echo "ops_runner_audit_incomplete"; exit 1
