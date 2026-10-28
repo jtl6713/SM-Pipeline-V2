@@ -137,6 +137,20 @@ def load_evidence(client, output_id, session_id, expected_version):
     # and descriptive metadata: the model must not infer daylight from filenames.
     inventory = []
     linked_ids = set()
+    source_ids = sorted({a.get("media_asset_record_id") for a in assets[:80]
+                         if isinstance(a, dict) and isinstance(a.get("media_asset_record_id"), str)
+                         and re.fullmatch(r"rec[A-Za-z0-9]{14}", a["media_asset_record_id"])})
+    # One bounded authoritative read avoids ten sequential Airtable round trips
+    # both before and after the model's long-running request.
+    source_rows = {}
+    if source_ids:
+        formula = 'OR(' + ','.join('RECORD_ID()="' + i + '"' for i in source_ids) + ')'
+        rows = client.list_records(MEDIA, formula=formula, max_records=80,
+                                   fields=["Asset Name", "Media_Class", "Google Drive File ID",
+                                           "Asset_Status", "Rights_Status", "Active", "Do_Not_Use",
+                                           "Content_Profile", "Time_Of_Day",
+                                           "Asset_Description", "Location"])
+        source_rows = {a["id"]: a for a in rows if isinstance(a, dict) and a.get("id") in source_ids}
     for asset in assets[:80]:
         if not isinstance(asset, dict) or not isinstance(asset.get("id"), str):
             continue
@@ -146,8 +160,8 @@ def load_evidence(client, output_id, session_id, expected_version):
         file_id = asset.get("google_drive_file_id")
         if (isinstance(media_id, str) and re.fullmatch(r"rec[A-Za-z0-9]{14}", media_id)
                 and isinstance(file_id, str)):
-            row = client.get_record(MEDIA, media_id)
-            if row.get("id") == media_id and _owned_chicago_image(row, expected_file=file_id):
+            row = source_rows.get(media_id)
+            if row and _owned_chicago_image(row, expected_file=file_id):
                 item.update({k: v for k, v in _summary(row).items()
                              if k in ("time_of_day", "description", "location", "metadata_verified",
                                       "frames_inspected")})
