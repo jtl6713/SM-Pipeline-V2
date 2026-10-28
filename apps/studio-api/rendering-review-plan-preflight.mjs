@@ -51,7 +51,8 @@ export async function inspectReviewPlan({
 }){
   const {attempt,p}=validSession(session);
   const c=p.candidate;
-  if(!source||source.output_id!==session.output_id||
+  if(!source||source.verified!==true||source.authority!=="server"||
+     source.output_id!==session.output_id||
      source.profile_id!==CHICAGO_PROFILE_ID||
      source.artifact_id!==attempt.artifact_id||
      source.attempt_id!==attempt.id||
@@ -65,17 +66,86 @@ export async function inspectReviewPlan({
     err("CANDIDATE_INCOMPLETE","An actionable script, timeline and acceptance checks are required");
   const blockers=[];
   const need=(kind,description,id)=>{if(!blockers.some(b=>b.id===id))blockers.push({id,kind,description});};
+  // The isolated Remotion compiler requires a contiguous, one-asset-per-scene
+  // timeline. Check that contract before a plan can be marked ready, not after
+  // an immutable Job has been committed.
   const resolved=[];
   const references=new Set(c.reuse_asset_ids);
-  for(const scene of c.timeline){
-    if(!scene||typeof scene!=="object"||!Array.isArray(scene.asset_ids))
-      err("TIMELINE_INVALID","Every proposed scene requires an asset list");
+  const timeline=[];
+  let previousEnd=0;
+  for(const [i,scene] of c.timeline.entries()){
+    if(!scene||typeof scene!=="object"||!Array.isArray(scene.asset_ids)||
+       typeof scene.start_seconds!=="number"||
+       typeof scene.end_seconds!=="number"||
+       !Number.isFinite(scene.start_seconds)||
+       !Number.isFinite(scene.end_seconds)||
+       Math.abs(scene.start_seconds-previousEnd)>1e-6||
+       scene.end_seconds<=scene.start_seconds||scene.end_seconds>180)
+      err("TIMELINE_INVALID","Every proposed scene must be contiguous and within 180 seconds");
+    if(scene.asset_ids.length>1)
+      err("TIMELINE_INVALID","The isolated replacement accepts one visual source per scene");
+    previousEnd=scene.end_seconds;
+    timeline.push({...scene});
     for(const assetId of scene.asset_ids)references.add(assetId);
+  }
+  const preservation=[];
+  if(c.preserve.length){
+    const observed=visualReceipt?.observed_segments;
+    const trustworthy=visualReceipt?.verified===true&&
+      visualReceipt?.authority==="server"&&
+      visualReceipt?.source_attempt_id===attempt.id&&
+      visualReceipt?.source_drive_file_id===source.drive_file_id&&
+      Array.isArray(observed)&&observed.length===c.preserve.length;
+    let valid=trustworthy;
+    if(valid){
+      const found=new Set(),sceneIndices=new Set();
+      for(const segment of observed){
+        const i=segment?.timeline_scene_index;
+        const instruction=segment?.preserve_instruction;
+        const scene=timeline[i];
+        const sourceStart=segment?.source_start_seconds;
+        const sourceEnd=segment?.source_end_seconds;
+        if(!Number.isSafeInteger(i)||!scene||!c.preserve.includes(instruction)||
+           found.has(instruction)||sceneIndices.has(i)||scene.asset_ids.length||
+           segment?.verified!==true||segment?.authority!=="server"||
+           segment?.source_drive_file_id!==source.drive_file_id||
+           segment?.source_attempt_id!==attempt.id||
+           typeof segment.render_url!=="string"||
+           !segment.render_url.startsWith("https://")||
+           !Number.isFinite(sourceStart)||!Number.isFinite(sourceEnd)||
+           sourceStart<0||sourceEnd<=sourceStart||
+           Math.abs((sourceEnd-sourceStart)-
+             (scene.end_seconds-scene.start_seconds))>1/30){
+          valid=false;break;
+        }
+        found.add(instruction);sceneIndices.add(i);
+        timeline[i]={...scene,preserve_source:true,
+          preserve_instruction:instruction};
+        preservation.push({timeline_scene_index:i,preserve_instruction:instruction,
+          source_start_seconds:sourceStart,source_end_seconds:sourceEnd,
+          source_drive_file_id:source.drive_file_id,
+          source_attempt_id:attempt.id});
+      }
+      if(found.size!==c.preserve.length)valid=false;
+    }
+    if(!valid){
+      preservation.length=0;
+      need("visual_verification",
+        "Verify each protected source clip against one exact replacement timeline scene",
+        "rrvisual_"+(await digest([p.hash,attempt.id])).slice(0,48));
+    }
+  }
+  for(const [i,scene] of timeline.entries()){
+    if(scene.asset_ids.length===0&&!scene.preserve_source){
+      need("asset","Scene "+(i+1)+" needs an authorized visual or a verified preserved clip",
+        "rrscene_"+(await digest([p.hash,i])).slice(0,48));
+    }
   }
   for(const assetId of references){
     if(!validId(assetId))err("ASSET_ID_INVALID","Candidate asset identity is malformed");
     const a=assets.find(x=>x?.id===assetId);
     if(!a||a.verified!==true||a.rights_clear!==true||
+       a.authority!=="server"||!str(a.rights_receipt_id)||
        !str(a.drive_file_id)||a.canonical_media_authority!=="google_drive"||
        !(a.profile_id===CHICAGO_PROFILE_ID||a.cross_profile_authorized===true)){
       need("asset","Selected media must be independently verified in Drive", "rrasset_"+(await digest([p.hash,assetId])).slice(0,48));
@@ -102,14 +172,6 @@ export async function inspectReviewPlan({
     if(!receipt)need("research","Independently verify factual claim: "+claim.claim.slice(0,300),
       "rrfact_"+(await digest([p.hash,i,claim.claim])).slice(0,48));
   }
-  if(c.preserve.length&&!(visualReceipt?.verified===true&&
-     visualReceipt?.authority==="server"&&
-     visualReceipt?.source_attempt_id===attempt.id&&
-     visualReceipt?.source_drive_file_id===source.drive_file_id&&
-     Array.isArray(visualReceipt?.observed_segments)&&visualReceipt.observed_segments.length>0)){
-    need("visual_verification","Verify footage and exact segment(s) that must remain",
-      "rrvisual_"+(await digest([p.hash,attempt.id])).slice(0,48));
-  }
   const duration=Number(c.timeline.at(-1)?.end_seconds);
   if(!Number.isFinite(duration)||duration<=0||duration>180)
     err("DURATION_INCOMPATIBLE","The Instagram Reel plan must end within 180 seconds");
@@ -123,10 +185,10 @@ export async function inspectReviewPlan({
     profile_id:CHICAGO_PROFILE_ID,output_id:session.output_id,
     output_type:"Instagram Reel",creative:{
       narration:c.narration,changes:c.changes,preserve:c.preserve,
-      timeline:c.timeline,acceptance_checks:c.acceptance_checks,
+      timeline,acceptance_checks:c.acceptance_checks,
       target_duration_seconds:duration,
     },
-    asset_manifest:resolved,
+    asset_manifest:resolved,preservation_manifest:preservation,
     factual_receipt_count:factReceipts.filter(r=>r?.verified===true&&
       r?.candidate_hash===p.hash&&r?.source_attempt_id===attempt.id).length,
     blockers,
