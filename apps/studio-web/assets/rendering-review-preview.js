@@ -83,10 +83,10 @@
         details.append(element("p", "Saved review history is unavailable.", "subtle"));
     }
   }
-  async function load(next = false) {
+  async function load(nextPage = false) {
     if (!allowed || busy) return;
     busy = true; refresh.disabled = true; next.disabled = true;
-    const cursor = next ? nextCursor : null;
+    const cursor = nextPage ? nextCursor : null;
     message("Reading completed Chicago Instagram Reels…");
     try {
       const path = "/api/rendering-review/queue?profile_id=" + chicago +
@@ -115,7 +115,7 @@
       if (!queue.length) list.append(element("p",
         "No eligible preview items in this page of the Chicago Reel inventory.", "subtle"));
       nextCursor = typeof data.next_cursor === "string" ? data.next_cursor : null;
-      currentPage = next ? currentPage + 1 : 1;
+      currentPage = nextPage ? currentPage + 1 : 1;
       pageLabel.textContent = "Source page " + currentPage;
       next.hidden = !nextCursor;
       details.replaceChildren(element("p",
