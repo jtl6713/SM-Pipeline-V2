@@ -15,7 +15,7 @@ const keys=[
   "RENDERING_REVIEW_DISPATCH_FENCE_VERIFIED",
   "RENDERING_REVIEW_SCHEDULER_VACATE_VERIFIED",
 ];
-const flags=Object.fromEntries(keys.map(x=>[x,"true"]));
+const flags={...Object.fromEntries(keys.map(x=>[x,"true"])),RENDERING_REVIEW_EXACT_OUTPUT_ID:outputId};
 const auth={authenticated:true,authorized:true,user:{record_id:actor},
   permissions:{outputs_review:true}};
 const data={client_request_id:"chicago-review-request-0001"};
