@@ -45,7 +45,7 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual([x[1]["action"] for x in calls],
                          ["read_authority","reserve_intent","read_intent",
                           "persist_receipt","read_receipt"])
-        self.assertTrue(all(x[0]=="https://studio.example/internal/rendering-review/launch-ledger"
+        self.assertTrue(all(x[0]=="https://studio.example/api/internal/rendering-review/launch-ledger"
                             for x in calls))
         self.assertTrue(all(x[1]["job_id"]==job and x[1]["lease_owner"]==CLAIM["lease_owner"]
                             for x in calls))
