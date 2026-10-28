@@ -1,0 +1,46 @@
+name: Chicago Review MVP Protected Route Preflight
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/chicago-review-route-preflight.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ACCESS_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      ACCESS_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - name: Probe exact Studio Worker review routing through existing Access
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ACCESS_ID"
+          test -n "$ACCESS_SECRET"
+          BASE="https://studio.chicagoshining.com"
+          for path in "/api/health" "/api/rendering-review/queue?profile_id=recT2rbKX3MF7cVFU"; do
+            code=$(curl -sS --max-time 15 -o /tmp/review-route.json -w '%{http_code}' \
+              -H "CF-Access-Client-Id: $ACCESS_ID" \
+              -H "CF-Access-Client-Secret: $ACCESS_SECRET" \
+              -H "Accept: application/json" "$BASE$path" || true)
+            echo "route=$path status=$code content_type=$(file -b --mime-type /tmp/review-route.json)"
+            if jq -e 'type=="object"' /tmp/review-route.json >/dev/null 2>&1; then
+              echo "response_json=true error_code=$(jq -r '.code//.error_code//.error//empty' /tmp/review-route.json | head -c 100)"
+            else
+              echo "response_json=false"
+            fi
+          done
+          for path in "/internal/rendering-review/claim-render-job" "/api/internal/rendering-review/claim-render-job"; do
+            code=$(curl -sS --max-time 15 -o /tmp/review-route.json -w '%{http_code}' \
+              -X POST -H "CF-Access-Client-Id: $ACCESS_ID" \
+              -H "CF-Access-Client-Secret: $ACCESS_SECRET" \
+              -H "Content-Type: application/json" -d '{}' "$BASE$path" || true)
+            echo "route=$path status=$code json=$(jq -e 'type=="object"' /tmp/review-route.json >/dev/null 2>&1 && echo true || echo false)"
+            if jq -e 'type=="object"' /tmp/review-route.json >/dev/null 2>&1; then
+              jq -r '{error:(.error//.message//.code//null),ok:(.ok//false)}' /tmp/review-route.json
+            fi
+          done
