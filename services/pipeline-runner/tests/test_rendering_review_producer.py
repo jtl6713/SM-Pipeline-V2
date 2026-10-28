@@ -115,7 +115,7 @@ class ProducerTests(unittest.TestCase):
         self.assertEqual(c["requirements"],[])
         self.assertEqual(c["claims"],[])
         self.assertEqual(len(c["changes"]),2)
-        self.assertIn("PROPOSED ONLY",c["explanation"])
+        self.assertIn("haven\'t made the revised video",c["explanation"])
         self.assertTrue(result["candidate_only"])
         self.assertFalse(result["visual_inspection_performed"])
         self.assertTrue(result["requires_fact_validation"])
@@ -170,6 +170,52 @@ class ProducerTests(unittest.TestCase):
         self.assertFalse(result["visual_inspection_performed"])
         self.assertIsNone(result["model_response_id"])
         self.assertEqual(result["model"], "bounded-source-evidence-only")
+
+    def test_8447_plain_language_photo_acceptance_preserves_actual_reply(self):
+        day = {"id": "day-morning", "name": "Chicago Riverwalk 8",
+               "time_of_day": "Morning", "metadata_verified": True,
+               "frames_inspected": False}
+        n1 = {"id": "night-one", "name": "Gibsons Italia 5",
+              "time_of_day": "Night", "metadata_verified": True,
+              "frames_inspected": False}
+        n5 = {"id": "night-five", "name": "Chicago Riverwalk 10",
+              "time_of_day": "Night", "metadata_verified": True,
+              "frames_inspected": False}
+        bounds = [0, 3.567, 6.767, 10.3, 13.9, 17.133, 20.7,
+                  24.233, 27.433, 30.967, 34.467]
+        original = [{"start_seconds": bounds[i], "end_seconds": bounds[i+1],
+                     "asset_id": (n1 if i == 0 else n5 if i == 4 else day)["id"]}
+                    for i in range(10)]
+        evidence = {**EVIDENCE, "output_id": "rec0uVrVeiUM6shp9",
+                    "session_version": 3, "assets": [n1, day, n5],
+                    "narration": "The original narration", "original_timeline": original,
+                    "messages": [{"role": "producer", "content": "I found a morning Riverwalk photo."}]}
+        def no_model(*args, **kwargs):
+            raise AssertionError("Accepting exact source-backed images must not call model")
+        for direction in ("Yes", "Yes, those look good.", "Looks good", "Use these"):
+            result = propose_revision(evidence, direction, {}, transport=no_model)
+            candidate = result["candidate"]
+            self.assertEqual([scene["asset_ids"][0] for scene in candidate["timeline"]],
+                             ["day-morning"] * 10)
+            self.assertEqual(len(candidate["changes"]), 2)
+            self.assertEqual(candidate["requirements"], [])
+            self.assertEqual(candidate["narration"], evidence["narration"])
+            self.assertTrue(result["candidate_only"])
+            self.assertFalse(result["visual_inspection_performed"])
+            self.assertEqual(result["model"], "bounded-confirmed-photo-suggestion")
+
+        # Qualified or negative responses stay genuinely conversational.
+        class Response:
+            ok = True
+            def json(self):
+                return {"id": "normal-model", "output_text": json.dumps(PROPOSAL)}
+        seen = []
+        def model(settings, data, **options):
+            seen.append(data)
+            return Response()
+        propose_revision(evidence, "Yes, but use a different image for the opener",
+                         {}, transport=model)
+        self.assertEqual(len(seen), 1)
 
     def test_8447_other_creative_requests_keep_model_conversation(self):
         evidence = {**EVIDENCE, "output_id": "rec0uVrVeiUM6shp9"}
