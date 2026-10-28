@@ -41,6 +41,6 @@ Repository: `jtl6713/SM-Pipeline-V2`. Branch: `feature/rendering-review-chicago-
 
 ## Safety and rollback
 
-This Phase 0 PR changes no Worker route, UI, deployment trigger, Airtable schema, production data, media, schedule, runner, or publishing worker. Merging is code-only; pilot remains inaccessible. Do not enable feature from a UI toggle or `Do_Not_Publish` mutation while dispatch and hold integration remains incomplete.
+This PR changes no Worker route, UI, deployment trigger, Platform Output data, media, schedule, runner or publishing worker. The six **empty additive review tables** have been provisioned separately in the same authoritative Airtable base (see `rendering-review-chicago-airtable-schema.md`). No live output has been enrolled, and merging this code does not activate the pilot. Do not enable feature from a UI toggle or `Do_Not_Publish` mutation while dispatch and hold integration remains incomplete.
 
 For the complete desired product, refer to the user's October 27, 2026 Rendering Review and Conversational Producer implementation handoff.
