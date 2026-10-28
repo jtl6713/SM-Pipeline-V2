@@ -238,44 +238,63 @@
       const nightRows=storyboard.filter(frame=>frame?.original?.time_of_day==='Night');
       const unresolvedNight=nightRows.filter(frame=>
         !frame.changed||frame.proposed?.time_of_day==='Night');
-      // Session proposals are durable; a code deployment does not rewrite them.
-      // Place the actual owner-authorized correction in view BEFORE the long
-      // storyboard/history, using the existing guarded Producer endpoint.
-      if(entry.output_id==='rec0uVrVeiUM6shp9'&&nightRows.length===2&&
-         unresolvedNight.length&&saved.publication_hold_verified===true){
-        const correction=elem('section',null,'rr-night-fix');
-        correction.append(elem('h3','Daytime correction not yet saved'));
-        correction.append(elem('p','The saved proposal still contains '+
-          unresolvedNight.map(f=>'frame '+f.scene).join(' and ')+
-          '. The existing Chicago Riverwalk 8 Morning image is available. '+
-          'The original V1 video remains unchanged.','rr-notice'));
-        if(saved.flags?.producer_conversation_enabled===true&&
-           ['ready_for_review','discussing','awaiting_assets','plan_ready','revision_failed'].includes(session?.state)){
-          let requestId='';
-          correction.append(actionButton('Fix both nighttime stills — save Producer plan',async()=>{
-            if(!requestId)requestId=safeRequestId();
-            const listed=nightRows.map(f=>'frame '+f.scene+' ('+
-              Number(f.start_seconds).toFixed(3)+'–'+Number(f.end_seconds).toFixed(3)+'s)').join(' and ');
-            const direction='Please replace BOTH nighttime scenes, including '+listed+
-              ', using already owned, approved 9:16 Morning/Daytime Chicago River stills such as Chicago Riverwalk 8. '+
-              'Keep every other scene, narration, music, watermark and exact scene timing unchanged. '+
-              'Do not request an upload when a verified existing still is available. '+
-              'Do not claim the video was modified; first produce a complete render-ready plan '+
-              'with zero unresolved requirements and no invented factual claims. '+
-              'I will separately authorize V2 rendering after reviewing the plan.';
+      // Show the Producer's creative suggestion in plain language, not the
+      // internal distinction between an unsaved draft and a render manifest.
+      // This message is grounded in source images from the held, verified
+      // storyboard. Neither previewing nor typing implicitly edits a plan.
+      const reviewNightOffer=entry.output_id==='rec0uVrVeiUM6shp9'&&
+        nightRows.length===2&&unresolvedNight.length>0&&
+        saved.publication_hold_verified===true;
+      const reviewCanTalk=saved.flags?.producer_conversation_enabled===true&&
+        ['ready_for_review','discussing','awaiting_assets','plan_ready','revision_failed'].includes(session?.state);
+      if(reviewNightOffer){
+        const offer=elem('section',null,'rr-night-fix');
+        offer.append(elem('strong','Your Producer','rr-producer-label'));
+        const morning=storyboard.map(frame=>frame?.original).find(photo=>
+          photo?.time_of_day==='Morning'&&/riverwalk/i.test(photo.name||'')&&
+          typeof photo.preview_url==='string'&&photo.preview_url.length>0);
+        offer.append(elem('p',morning?
+          'I found a morning Chicago Riverwalk photo that could replace both nighttime shots. '+
+          'You can see it next to the originals below. Do these look right? '+
+          'Tell me if you would prefer a different photo for either shot.':
+          'I can see two nighttime shots. I haven\'t found a suitable verified daytime replacement yet. '+
+          'Tell me which existing photo you would like me to try.'));
+        offer.append(elem('p','I haven\'t changed the video yet.','rr-muted'));
+        if(reviewCanTalk){
+          const conversation=elem('div',null,'rr-chat-form');
+          const reply=elem('textarea');
+          reply.rows=3;reply.maxLength=3000;
+          reply.placeholder='For example: Yes, those look good. Or: Try a different photo for the first shot.';
+          reply.setAttribute('aria-label','Reply to your Producer');
+          conversation.append(reply);
+          const feedback=elem('p','','rr-feedback-status');
+          feedback.setAttribute('role','status');
+          feedback.setAttribute('aria-live','polite');
+          let pendingKey='',pendingReply='';
+          conversation.append(actionButton('Reply to Producer',async()=>{
+            const direction=String(reply.value||'').trim();
+            if(!direction)throw new Error('Tell your Producer what you think of these photos.');
+            if(direction!==pendingReply){
+              pendingReply=direction;pendingKey=safeRequestId();
+            }
+            feedback.textContent='Sending your feedback to the Producer…';
             const created=await post('/api/rendering-review/outputs/'+
               encodeURIComponent(entry.output_id)+'/producer-conversation',{
-              direction,expected_version:session.version,client_request_id:requestId,
+              direction,expected_version:session.version,client_request_id:pendingKey,
             });
             if(created.persisted!==true||created.render_queued!==false)
-              throw new Error('Producer revision was not verified as saved; no render started.');
-            say(created.plan_ready===true&&created.plan_persisted===true?
-              'Two nighttime frames replaced in the saved plan. Render V2 only when you choose.':
-              'Producer reply saved, but the render plan still has unresolved checks.');
+              throw new Error('I couldn\'t save your reply. Your words are still here so you can retry.');
+            feedback.textContent=created.plan_ready&&created.plan_persisted?
+              'I saved your choices. You can review them before making the new video.':
+              'I saved your feedback. Tell me if you would like another change.';
+            pendingReply='';pendingKey='';
+            say('Your Producer has your feedback. No new video has been made.');
             await open(entry);
-          }));
+          },feedback));
+          conversation.append(feedback);
+          offer.append(conversation);
         }
-        detail.append(correction);
+        detail.append(offer);
       }
       if(storyboard.length){
         const changedRows=storyboard.filter(frame=>frame.changed===true);
@@ -286,8 +305,8 @@
           .sort((a,b)=>a.scene-b.scene);
         if(toShow.length){
           const section=elem('section',null,'rr-proposal-storyboard');
-          section.append(elem('h3','Original stills vs proposed changes'));
-          section.append(elem('p','These are existing source photographs, NOT frames from a newly rendered V2. The original V1 player above remains unchanged.','rr-muted'));
+          section.append(elem('h3','Take a look at these photos'));
+          section.append(elem('p','Here are the original shots alongside the photos I suggest using. The video has not changed.','rr-muted'));
           for(const frame of toShow){
             const item=elem('div',null,'rr-storyboard-row');
             const time=Number(frame.start_seconds).toFixed(2)+'–'+Number(frame.end_seconds).toFixed(2)+'s';
@@ -311,18 +330,17 @@
               (!frame.changed||frame.proposed?.time_of_day==='Night')&&
               availableMorning&&frame.original.name!==availableMorning.name?
               availableMorning:null;
-            pair.append(imageCard('Original V1',frame.original),
-              imageCard(suggested?'AVAILABLE MORNING PHOTO · NOT IN SAVED PLAN':
-                !frame.proposed_ready?'No verified replacement proposed yet':
-                frame.changed?'Saved proposed replacement · NOT RENDERED':
-                'Saved proposal · still unchanged',suggested||frame.proposed));
+            pair.append(imageCard('Original photo',frame.original),
+              imageCard(suggested?'Suggested morning photo':
+                !frame.proposed_ready?'Replacement not found yet':
+                frame.changed?'Suggested replacement':
+                'Original photo',suggested||frame.proposed));
             item.append(pair);
             if(frame.original.time_of_day==='Night'&&
                (!frame.changed||frame.proposed?.time_of_day==='Night')){
-              item.append(elem('p',suggested?
-                'Available replacement shown above is NOT in the saved plan. Use the correction action above to save it.':
-                frame.proposed_ready?'Nighttime frame still present in the saved proposal.':
-                'No verified daytime replacement has been proposed for this frame.','rr-v1-warning'));
+              if(!suggested){
+                item.append(elem('p','I still need a suitable replacement for this shot.','rr-v1-warning'));
+              }
             }
             section.append(item);
           }
@@ -400,7 +418,7 @@
         if(Array.isArray(plan.missing_assets)&&plan.missing_assets.length)
           detail.append(elem('p',plan.missing_assets.length+' requirements must be resolved before rendering.','rr-notice'));
         if(ready){
-          detail.append(actionButton('Create next attempt — render only',async()=>{
+          detail.append(actionButton('Make the revised video (V2)',async()=>{
             if(!window.confirm('Render one replacement Reel from the frozen plan? This will NOT upload or publish to Instagram.'))return;
             const identity=entry.output_id+':'+plan.hash+':'+plan.version;
             if(!state.commitKeys.has(identity))state.commitKeys.set(identity,safeRequestId());
@@ -420,8 +438,8 @@
       }
       const candidate=session?.producer_candidate;
       if(candidate?.candidate){
-        const heading=elem('h3','Latest Producer proposal — not yet rendered');detail.append(heading);
-        detail.append(elem('p','Candidate only · requires asset/fact checks · does not authorize rendering.','rr-muted'));
+        const heading=elem('h3','Proposed edits');detail.append(heading);
+        detail.append(elem('p','These changes are suggestions until we agree on them. No new video has been made.','rr-muted'));
         const draft=elem('details',null,'rr-candidate');
         draft.append(elem('summary','Proposed narration and changes'));
         draft.append(elem('p',candidate.candidate.narration||'', 'rr-draft'));
@@ -436,7 +454,7 @@
       }
       const messages=Array.isArray(saved.session?.messages)?saved.session.messages:[];
       if(messages.length){
-        const heading=elem('h3','Saved conversation (read-only)');detail.append(heading);
+        const heading=elem('h3','Our conversation');detail.append(heading);
         const thread=elem('div',null,'rr-thread');
         for(const message of messages.slice(-30)){
           const line=elem('article',null,'rr-message');
@@ -446,7 +464,7 @@
         }
         detail.append(thread);
       }
-      if(state.flags.producer_conversation_enabled===true &&
+      if(!reviewNightOffer&&state.flags.producer_conversation_enabled===true &&
          ['ready_for_review','discussing','awaiting_assets','plan_ready','revision_failed'].includes(session.state)){
         const form=elem('div',null,'rr-chat-form');
         const composer=elem('textarea');

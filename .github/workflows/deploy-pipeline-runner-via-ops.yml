@@ -353,3 +353,4 @@ jobs:
 # 2026-10-28: Deploy Runner v6 exact #8447 frame-1 and frame-5 source-only Producer correction; read-only proposals, no render or publication.
 
 # 2026-10-28: verified output-owned MP4 TikTok inbox fallback + TTD3 email regression; no draft re-init.
+# 2026-10-28: Deploy Runner v7 natural-language two-photo confirmation for held #8447; separate render authorization and publication hold remain mandatory.

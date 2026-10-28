@@ -48,3 +48,11 @@
 .rr-night-fix h3{margin:0;font-size:1.05rem}
 .rr-night-fix .rr-notice{margin:0}
 .rr-night-fix button{width:100%;max-width:100%;white-space:normal;min-height:50px;font-weight:700}
+
+/* A single conversational response sits with the Producer's photo offer.
+   Other output details remain available farther down the review workspace. */
+.rr-night-fix{border-width:1px;gap:8px}
+.rr-night-fix .rr-producer-label{font-size:.95rem}
+.rr-night-fix>p{margin:4px 0;line-height:1.5}
+.rr-night-fix .rr-chat-form{margin-top:4px}
+.rr-night-fix .rr-chat-form button{min-height:44px;font-weight:600}
