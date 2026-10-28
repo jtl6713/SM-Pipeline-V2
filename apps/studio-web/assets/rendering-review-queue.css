@@ -17,3 +17,5 @@
 @media(max-width:760px){.rr-layout{grid-template-columns:minmax(0,1fr)}.rr-panel{padding:12px}.rr-list{max-height:340px}.rr-preview{max-height:440px}}
 
 .rr-preview[hidden],.rr-open-file[hidden]{display:none!important}
+
+#navRenderingReview[hidden],#rrMore[hidden]{display:none!important}
