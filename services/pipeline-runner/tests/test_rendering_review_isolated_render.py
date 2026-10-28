@@ -169,17 +169,42 @@ class IsolatedRenderTests(unittest.TestCase):
             self.denied(lambda:compile_isolated_render_payload(**parts),
                         "scene_timing_gap_or_overlap|scene_timing_invalid")
 
-    def test_preserved_clip_requires_independent_segment_proof(self):
+    def test_preserved_clip_requires_actual_original_segment_in_new_timeline(self):
         parts=fixture()
         parts["plan"]["creative"]["preserve"]=["Keep the opening clip"]
         self.denied(lambda:compile_isolated_render_payload(**parts),
-                    "preserved_clip_not_verified")
-        parts["observed_source_segments"]=[{
+                    "preservation_composition_not_verified")
+        parts["plan"]["creative"]["timeline"][0]={
+            "start_seconds":0,"end_seconds":5,"asset_ids":[],
+            "preserve_source":True,"preserve_instruction":"Keep the opening clip",
+        }
+        self.denied(lambda:compile_isolated_render_payload(**parts),
+                    "preservation_composition_not_verified")
+        receipt={
             "verified":True,"authority":"server",
             "source_drive_file_id":"drive-original-123",
-            "start_seconds":0,"end_seconds":3,
-        }]
-        self.assertEqual(self.compile(parts)["expectedClipCount"],2)
+            "source_attempt_id":"rroriginal_12345678",
+            "timeline_scene_index":0,
+            "preserve_instruction":"Keep the opening clip",
+            "render_url":"https://bridge.test/original.mp4",
+            "source_start_seconds":0,"source_end_seconds":5,
+        }
+        parts["observed_source_segments"]=[receipt]
+        result=self.compile(parts)
+        self.assertEqual(result["expectedClipCount"],2)
+        self.assertEqual(result["clips"][0]["google_drive_file_id"],"drive-original-123")
+        self.assertEqual(result["clips"][0]["inSeconds"],0)
+        self.assertEqual(result["clips"][0]["outSeconds"],5)
+        self.assertEqual(result["clips"][0]["mediaKind"],"video")
+        self.assertEqual(result["clips"][1]["google_drive_file_id"],"drive-photo-2")
+        drift=deepcopy(parts)
+        drift["observed_source_segments"][0]["source_end_seconds"]=4
+        self.denied(lambda:compile_isolated_render_payload(**drift),
+                    "preserved_clip_timing_drift")
+        missing=deepcopy(parts)
+        missing["plan"]["creative"]["timeline"][0]["preserve_source"]=False
+        self.denied(lambda:compile_isolated_render_payload(**missing),
+                    "scene_requires_exactly_one_verified_asset")
 
     def test_unverified_watermark_policy_never_gets_silently_replaced(self):
         parts=fixture()
