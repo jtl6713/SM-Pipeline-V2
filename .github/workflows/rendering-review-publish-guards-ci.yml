@@ -1,0 +1,41 @@
+name: Rendering Review Publish Hold Guards CI
+
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-api/rendering-review-publication-hold.*'
+      - 'apps/studio-api/rendering-review-publish-entrypoints.test.mjs'
+      - 'apps/studio-api/worker-functions-03.mjs'
+      - 'apps/studio-api/worker-functions-04.mjs'
+      - 'services/pipeline-runner/ap1_ig/eligibility.py'
+      - 'services/pipeline-runner/tests/test_ap1_ig_eligibility.py'
+      - '.github/workflows/rendering-review-publish-guards-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  review-publisher-guards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Node guard and source syntax checks
+        run: |
+          node --check apps/studio-api/rendering-review-publication-hold.mjs
+          node --check apps/studio-api/worker-functions-03.mjs
+          node --check apps/studio-api/worker-functions-04.mjs
+          node --test apps/studio-api/rendering-review-publication-hold.test.mjs apps/studio-api/rendering-review-publish-entrypoints.test.mjs
+      - name: Python AP1-IG eligibility regression
+        env:
+          PYTHONPATH: services/pipeline-runner
+        run: |
+          pip install pytest
+          python -m pytest -q services/pipeline-runner/tests/test_ap1_ig_eligibility.py
