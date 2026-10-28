@@ -500,8 +500,8 @@ test('one click sends BOTH original Night frames even if saved scene 5 is alread
   for(let i=0;i<10;i++)await tick();
   assert.equal(posts.length,1);
   assert.equal(posts[0].expected_version,3);
-  assert.match(posts[0].direction,/frame 1 \\(0\\.000/);
-  assert.match(posts[0].direction,/frame 5 \\(13\\.900/);
+  assert.ok(posts[0].direction.includes('frame 1 (0.000'));
+  assert.ok(posts[0].direction.includes('frame 5 (13.900'));
   assert.match(posts[0].direction,/Preserve|Keep every other scene, narration, music, watermark/);
   assert.ok(!posts[0].direction.includes('publish'));
   assert.equal(updated,true);
