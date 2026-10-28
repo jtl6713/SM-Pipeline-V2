@@ -42,6 +42,21 @@ class ClaimTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             self.assertFalse(shared_dispatch_claim_required())
 
+    def test_exact_pilot_output_is_the_only_claimed_chicago_reel(self):
+        with patch.dict(os.environ, {
+            "RENDERING_REVIEW_IG_DISPATCH_CLAIM_REQUIRED": "true",
+            "RENDERING_REVIEW_EXACT_OUTPUT_ID": OUTPUT_ID,
+        }, clear=True):
+            self.assertTrue(shared_dispatch_claim_required(OUTPUT_ID))
+            self.assertFalse(shared_dispatch_claim_required("recB1B2B3B4B5B6B7"))
+            with self.assertRaisesRegex(ReviewDispatchClaimError, "identity_missing"):
+                shared_dispatch_claim_required(None)
+        with patch.dict(os.environ, {
+            "RENDERING_REVIEW_IG_DISPATCH_CLAIM_REQUIRED": "true",
+        }, clear=True):
+            with self.assertRaisesRegex(ReviewDispatchClaimError, "scope_missing"):
+                shared_dispatch_claim_required(OUTPUT_ID)
+
     def test_chicago_scope_uses_exact_linked_content_profile(self):
         self.assertTrue(is_chicago_reel(Client(), OUTPUT))
         self.assertFalse(is_chicago_reel(Client("recO1T2H3E4R5P6R7"), OUTPUT))
