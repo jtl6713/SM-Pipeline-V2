@@ -62,7 +62,7 @@ function identity(session) {
 export function makeRenderingReviewAirtableOperations({
   env, airtableFetch, listRecords, readField,
   withOutputApprovalLock, authorizeReview, authorizeEvent,
-  revokeScheduleUnderHold,
+  revokeScheduleUnderHold, scheduleRevocationReady = null,
   mutationGate = false, holdIdFactory = () => "rrhold-" + crypto.randomUUID(),
 }) {
   for (const [k,v] of Object.entries({
@@ -132,6 +132,13 @@ export function makeRenderingReviewAirtableOperations({
     readHold,
     loadSession:async outputId=>(await storedSession(outputId))?.session || null,
     readSession:async outputId=>(await storedSession(outputId))?.session || null,
+    // Advisory availability is checked under the same output lease before
+    // placing a persistent hold. No fallback to an unverified legacy scheduler.
+    assertScheduleRevocationReady:async descriptor=>{
+      writeEnabled();
+      if(typeof scheduleRevocationReady!=="function")return false;
+      return (await scheduleRevocationReady({env,...descriptor}))===true;
+    },
     claimHold:async ({output_id,session_id})=>{
       writeEnabled();
       const row=await readRaw(output_id);
