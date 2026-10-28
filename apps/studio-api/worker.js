@@ -1774,7 +1774,40 @@ export default {
             expected_version:body.expected_version,plan_version:body.plan_version,
             plan_hash:body.plan_hash,client_request_id:body.client_request_id,
           });
-          return respond(request,env,receipt);
+          // Only the exact, already held and committed Chicago pilot may
+          // ask the authenticated Runner to begin one render. The Runner
+          // independently claims the Job and enforces its own allowlist.
+          // Failure leaves a durable queued Job for reconciliation, never a
+          // public publish or an automatic second Remotion request.
+          let renderTrigger={render_triggered:false};
+          if(receipt.ok===true&&receipt.hold_active===true&&
+             receipt.public_post_created===false&&
+             env.RENDERING_REVIEW_EXACT_RENDER_TRIGGER_ENABLED==="true"&&
+             commitAttemptMatch[1]===env.RENDERING_REVIEW_EXACT_OUTPUT_ID){
+            const base=String(env.PIPELINE_RUNNER_URL||"").trim().replace(/\/+$/,"");
+            const secret=String(env.PIPELINE_RUNNER_SHARED_SECRET||"").trim();
+            if(/^https:\/\//.test(base)&&secret.length>=24){
+              try{
+                const fired=await fetch(base+"/jobs/rendering-review/run-exact",{
+                  method:"POST",redirect:"error",
+                  headers:{"Content-Type":"application/json","X-Pipeline-Secret":secret},
+                  body:JSON.stringify({output_id:commitAttemptMatch[1],
+                    job_id:receipt.job_id}),
+                  signal:AbortSignal.timeout(12000),
+                });
+                const status=await fired.json();
+                renderTrigger={
+                  render_triggered:fired.status===202&&status?.accepted===true&&
+                    status.job_id===receipt.job_id&&
+                    status.output_id===commitAttemptMatch[1],
+                };
+              }catch{
+                renderTrigger={render_triggered:false,
+                  render_trigger_status:"RUNNER_ACK_UNVERIFIED"};
+              }
+            }
+          }
+          return respond(request,env,{...receipt,...renderTrigger});
         }
         const conversationMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/producer-conversation$/.exec(url.pathname);
         if (conversationMatch && request.method === "POST") {
