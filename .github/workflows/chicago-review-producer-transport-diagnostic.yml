@@ -66,3 +66,74 @@ jobs:
           else
             echo "runner_with_access_response_non_json=true"
           fi
+
+      - name: Probe exact held Reel with synthetic read-only Producer direction via protected Ops
+        shell: bash
+        env:
+          OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          cat >/tmp/rr-probe.ps1 <<'PS1'
+          $ErrorActionPreference='Stop'
+          $p=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+          if(-not (Test-Path -LiteralPath $p)){throw 'protected_runner_env_missing'}
+          $line=Get-Content -LiteralPath $p | Where-Object {$_ -match '^PIPELINE_RUNNER_SHARED_SECRET\s*='} | Select-Object -First 1
+          if(-not $line){throw 'protected_runner_secret_missing'}
+          $secret=($line -split '=',2)[1].Trim().Trim('"').Trim([char]39)
+          if($secret.Length -lt 24){throw 'protected_runner_secret_not_set'}
+          $body=@{
+            output_id='rec0uVrVeiUM6shp9'
+            session_id='rrsession_5db47c3f652bf0f80162c4e933cb8b7a913c92c888fec796'
+            expected_version=1
+            direction='Create a proposed revision that uses existing Riverwalk stills and preserves the sunrise opening. This is a non-persistent Producer connection canary.'
+          } | ConvertTo-Json -Compress
+          $sw=[System.Diagnostics.Stopwatch]::StartNew()
+          try{
+            $resp=Invoke-WebRequest -UseBasicParsing -Uri 'https://pipeline.chicagoshining.com/jobs/rendering-review/propose' -Method Post -ContentType 'application/json' -Headers @{'X-Pipeline-Secret'=$secret} -Body $body -TimeoutSec 145
+            $status=[int]$resp.StatusCode
+            $data=$resp.Content | ConvertFrom-Json
+            Write-Output ("producer_probe_http="+$status+" elapsed_sec="+[int]$sw.Elapsed.TotalSeconds+" ok="+[string]$data.ok+" error="+[string]$data.error)
+            if($status -eq 200 -and $data.ok -eq $true -and $data.render_queued -eq $false -and $data.publication_changed -eq $false){
+              Write-Output 'producer_probe_safe_candidate=true no_persistence=true'
+            }
+          }catch{
+            $status=0
+            try{$status=[int]$_.Exception.Response.StatusCode}catch{}
+            $kind=$_.Exception.GetType().Name
+            $code='unknown'
+            try{
+              if($_.ErrorDetails.Message){$data=$_.ErrorDetails.Message | ConvertFrom-Json; $code=[string]$data.error}
+            }catch{}
+            Write-Output ("producer_probe_failure_http="+$status+" elapsed_sec="+[int]$sw.Elapsed.TotalSeconds+" class="+$kind+" code="+$code)
+          }
+          PS1
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/rr-probe-job.json').write_text(json.dumps({
+            "command":Path('/tmp/rr-probe.ps1').read_text(),"confirm":True}))
+          PY
+          status=$(curl -sS --max-time 20 -o /tmp/rr-probe-start.json -w '%{http_code}' \
+            -X POST 'https://ops.chicagoshining.com/api/shell' \
+            -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/rr-probe-job.json || true)
+          echo "producer_ops_probe_submit_http=$status"
+          test "$status" = "202" -o "$status" = "200"
+          JOB=$(jq -r '.job.id // .jobId // empty' /tmp/rr-probe-start.json)
+          test -n "$JOB"
+          for i in $(seq 1 65); do
+            curl -fsS --max-time 15 -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$JOB" -o /tmp/rr-probe-result.json
+            state=$(jq -r '.job.status // empty' /tmp/rr-probe-result.json)
+            if [[ "$state" == "ok" || "$state" == "failed" ]]; then
+              echo "producer_ops_probe_job=$state"
+              jq -r '.job.log // ""' /tmp/rr-probe-result.json | grep -E 'producer_probe_|producer_ops_probe_' | tail -10 || true
+              test "$state" = "ok"
+              exit 0
+            fi
+            sleep 4
+          done
+          echo 'producer_ops_probe_job_timeout=true'
+          exit 1
+
