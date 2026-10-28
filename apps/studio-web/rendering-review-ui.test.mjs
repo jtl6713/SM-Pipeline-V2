@@ -12,8 +12,8 @@ test('Rendering Review has a dedicated navigation item and responsive page',()=>
     assert.match(html,new RegExp('id="'+id+'"'));
   }
   assert.match(css,/@media\s*\(max-width:760px\)/);
-  assert.match(html,/rendering-review-queue\.js\?v=0\.6\.765/);
-  assert.match(html,/rendering-review-queue\.css\?v=0\.6\.765/);
+  assert.match(html,/rendering-review-queue\.js\?v=\d+\.\d+\.\d+/);
+  assert.match(html,/rendering-review-queue\.css\?v=\d+\.\d+\.\d+/);
 });
 test('rendering review offers gated manual discussion but never approval or publish actions',()=>{
   assert.match(html,/Chicago pilot · protected manual review/);

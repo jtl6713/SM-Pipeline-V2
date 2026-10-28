@@ -559,3 +559,5 @@ Redeploy Studio UI 0.6.763-idea-lifecycle-live after removing stale Worker versi
 2026-10-28: UI 0.6.765 Rendering Review pilot release correction. Match app BUILD_ID, index cache keys, and release tests; deploy via production Pages workflow.
 
 2026-10-28: Deploy Chicago Rendering Review V2 completion readback and review-only polling UI (#1249). No publish controls added.
+
+2026-10-28 UI 0.6.766: exact Chicago V2 review delivery and versioned Pages cache rollout; fixes unchanged-version release rejection.
