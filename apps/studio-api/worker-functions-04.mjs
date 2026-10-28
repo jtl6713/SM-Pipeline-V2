@@ -1,4 +1,5 @@
 import { matchNewlyCreatedIdeaPhotos } from "./worker-functions-03.mjs";
+import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 import { autonomousPlanOutputSpilloverRepair } from "./autonomous-plan-output-recovery.mjs";
 import { verifyFactoryRenderedMedia } from "./factory-producer-render-evidence.mjs";
 import { appendVerifiedLibraryAssets } from "./factory-producer-library-append.mjs";
@@ -2424,6 +2425,7 @@ export async function studioReconcilePublishingInstagramReels(env, options = {})
         || /AP1-IG automated Instagram Reel publish completed|Instagram permalink:/i.test(lastNotes)
         || (Number.isFinite(lockAtMs) && Date.now() - lockAtMs < 15 * 60 * 1000)
         || Boolean(f(row, "Test_Run_ID")) || Boolean(f(row, "Do_Not_Publish"))
+        || renderingReviewHoldPresent(field => f(row, field))
         || !Boolean(f(row, "Auto_Publish_Enabled"))
         || String(f(row, "Publish_Method") || "") !== "Automated"
         || String(f(row, "Platform_Output_Type") || "") !== "Instagram Reel"
@@ -2899,17 +2901,12 @@ export async function approveOutputRecordForPublishing(env, existing, note, stam
   // Approve, and Factory batch cannot concurrently commit two approvals for
   // the same record. Never trust a caller's earlier Ready for Review snapshot.
   const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
-  // Review ownership survives Factory clearing Do_Not_Publish. Until exact
-  // attempt approval is orchestrated, legacy approval must not bypass it.
-  if (["Studio_Render_Review_Hold_Active", "Studio_Render_Review_Hold_ID",
-       "Studio_Render_Review_Hold_Owner", "Studio_Render_Review_Session_ID",
-       "Studio_Review_Hold_ID", "Studio_Review_Hold_Owner"]
-      .some(key => Boolean(f(current, key)))) {
-    throw new HttpError(409, "Rendering Review requires exact-attempt approval");
-  }
   const currentOutput = String(f(current, "Output_Status") || "").trim();
   const currentPublish = String(f(current, "Publish_Status") || "").trim();
   const currentReview = String(f(current, "Review_Status") || "").trim();
+  if (renderingReviewHoldPresent(field => f(current, field))) {
+    throw new HttpError(409, "Rendering Review has an active owned hold; this attempt cannot be approved");
+  }
   if (currentOutput === "Published" || currentPublish === "Published" ||
       currentOutput === "Approved for Publishing" || currentReview === "Approved") {
     return { ...current, __already_approved: true };

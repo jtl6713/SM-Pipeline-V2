@@ -1,4 +1,5 @@
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
+import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 import { readyProductionEnqueue } from "./ready-production-queue.mjs";
 import { ideaPhotoMatchingSlaFinding, selectProfileFairIdeaPhotoCandidates } from "./idea-photo-wait.mjs";
 import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
@@ -10913,12 +10914,9 @@ export async function studioPulseFacebookPublicMake(env, record) {
 /*__STUDIO_WORKER_END:studioPulseFacebookPublicMake__*/
 
 export function studioPublishDispatchTarget(record) {
-  // A partial or unexpectedly cleared review hold must not become a legacy
-  // dispatch. Retained session ownership requires review-aware authorization.
-  if (["Studio_Render_Review_Hold_Active", "Studio_Render_Review_Hold_ID",
-       "Studio_Render_Review_Hold_Owner", "Studio_Render_Review_Session_ID",
-       "Studio_Review_Hold_ID", "Studio_Review_Hold_Owner"]
-      .some(key => Boolean(f(record, key)))) return null;
+  // The review-owned hold is independent of Do_Not_Publish and remains
+  // effective even when new enrollments are disabled or Factory clears DNP.
+  if (renderingReviewHoldPresent(field => f(record, field))) return null;
   const platform = String(f(record, "Platform") || "").trim();
   const outputType = String(f(record, "Studio_Output_Type") || "").trim();
   const mapping = String(f(record, "Platform_Output_Type") || "").trim();
@@ -11768,6 +11766,10 @@ export async function studioPulseAp0PublicAsset(env, record) {
 /*__STUDIO_WORKER_END:studioPulseAp0PublicAsset__*/
 
 export async function studioPulseAp1IgReel(env, record) {
+  // Early guard for callers carrying the latest Airtable record. The local
+  // AP1-IG runner performs an independent authoritative eligibility read.
+  if (renderingReviewHoldPresent(field => f(record, field)))
+    return { ok: true, skipped: "render_review_hold", target: "AP1-IG" };
   const recordId = String(record?.id || "").trim();
   if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "AP1-IG" };
   const { response, payload } = await item4PulsePipelineStage(env, "ap1_ig", {

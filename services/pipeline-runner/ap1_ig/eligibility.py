@@ -13,7 +13,6 @@ from ap1_ig.constants import (
 )
 from asset.helpers import as_bool
 from render.fields import field, field_str
-from publish.rendering_review import rendering_review_reason
 
 
 def _ci(value: Any) -> str:
@@ -29,9 +28,6 @@ def eligibility_reason(
     """Return a skip reason, or None when Make AP1-IG would pass the eligibility filter."""
     if not str(record.get("id") or "").strip():
         return "missing_record_id"
-    review_reason = rendering_review_reason(record)
-    if review_reason:
-        return review_reason
     if _ci(field_str(record, "Platform")) != _ci(PLATFORM):
         return "not_instagram"
     if _ci(field_str(record, "Platform_Output_Type")) != _ci(PLATFORM_OUTPUT_TYPE):
@@ -46,6 +42,18 @@ def eligibility_reason(
         return "auto_publish_disabled"
     if as_bool(field(record, "Do_Not_Publish"), False):
         return "do_not_publish"
+    # Review-owned hold survives unrelated Factory/QA mutation of the generic
+    # Do_Not_Publish flag. Never permit initial or saved-container publication
+    # while either the production or staging hold identity remains present.
+    if (
+        as_bool(field(record, "Studio_Render_Review_Hold_Active"), False)
+        or field_str(record, "Studio_Render_Review_Hold_ID")
+        or field_str(record, "Studio_Review_Hold_ID")
+        or field_str(record, "Studio_Render_Review_Hold_Owner")
+        or field_str(record, "Studio_Render_Review_Session_ID")
+        or field_str(record, "Studio_Review_Hold_Owner")
+    ):
+        return "render_review_hold"
     if field_str(record, "Published_At"):
         return "already_published"
     if field_str(record, "Platform_Post_ID"):
