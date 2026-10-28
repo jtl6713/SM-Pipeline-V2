@@ -35,7 +35,12 @@ function events(job){
   if(!Array.isArray(parsed)||parsed.length>40)
     deny("RENDER_LEDGER_INVALID","Launch receipt not bounded",503);
   const launch=parsed.filter(x=>x?.kind==="review_remotion_launch_receipt");
-  if(launch.length!==1)return null;
+  const reserved=parsed.filter(x=>x?.kind==="review_remotion_launch_intent");
+  if(launch.length!==1||reserved.length!==1||
+     launch[0].payload_hash!==reserved[0].payload_hash||
+     launch[0].job_id!==reserved[0].job_id||
+     launch[0].attempt_id!==reserved[0].attempt_id||
+     launch[0].lease_fence!==reserved[0].lease_fence)return null;
   return launch[0];
 }
 function validateReadyEvidence(b,receipt){
@@ -95,7 +100,8 @@ export async function completeReviewAttempt({request,env,operations,now=()=>new 
        o.platform_post_id||o.platform_media_id||o.published_at||
        !j||j.output_id!==b.output_id||j.job_id!==b.job_id||
        j.session_id!==s.id||j.attempt_id!==b.attempt_id||
-       j.plan_hash!==b.plan_hash||j.state!=="claimed"||
+       j.plan_hash!==b.plan_hash||
+       !(j.state==="claimed"||(b.stage==="ready"&&j.state==="succeeded"))||
        j.lease_owner!==b.lease_owner||j.lease_fence!==b.lease_fence||
        !a||a.attempt_id!==b.attempt_id||a.session_id!==s.id)
       deny("RENDER_AUTHORITY_CHANGED","Output, session, hold or exact lease is stale");
