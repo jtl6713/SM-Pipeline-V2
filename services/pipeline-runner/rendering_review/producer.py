@@ -268,9 +268,9 @@ def _all_night_stills_candidate(model: dict, evidence: dict, direction: str) -> 
     immutable plan adapter before a Render button becomes available.
     """
     import re
-    if not re.search(r"\\b(?:both|all)\\b.{0,80}\\bnight(?:time)?\\b", direction, re.I):
+    if not re.search(r"\b(?:both|all)\b.{0,80}\bnight(?:time)?\b", direction, re.I):
         return None
-    if not re.search(r"\\breplace\\b", direction, re.I):
+    if not re.search(r"\breplace\b", direction, re.I):
         return None
     scenes = evidence.get("original_timeline")
     assets = evidence.get("assets")
