@@ -237,25 +237,29 @@
     dialog.classList.remove("is-image");
     if (thumb) video.setAttribute("poster", thumb);
     video.onerror = () => {
-      if (thumb) {
-        dialog.classList.remove("is-video");
-        dialog.classList.add("is-image");
-        image.src = thumb;
-        image.hidden = false;
-        video.removeAttribute("src");
-        setStatus(`Video stream failed — showing cover for ${cardLabel(card)}.`, true);
-        return;
-      }
+      // A failed video is not a successful still render. Never silently
+      // replace the movie with its cover image (Output 3129).
+      video.pause();
+      video.hidden = true;
+      image.hidden = true;
       empty.hidden = false;
-      empty.textContent = "Preview stream failed. Open Pipeline review for this output.";
-      setStatus("Preview stream failed.", true);
+      empty.textContent = "Video playback failed — this cover is not the finished render. Open the output in Pipeline or its original video file to review the scenes.";
+      setStatus(`Video preview failed for ${cardLabel(card)} — not a single-image render.`, true);
     };
+    video.onplaying = () => setStatus(`Playing video · ${cardLabel(card)}`);
+    video.onloadedmetadata = () => {
+      if (video.paused) setStatus(`Video ready · tap Play to review all scenes of ${cardLabel(card)}`);
+    };
+    video.controls = true;
     video.src = previewUrl;
     video.hidden = false;
     video.load();
     backdrop.hidden = false;
-    setStatus(`Previewing · ${cardLabel(card)}`);
-    video.play?.().catch(() => {});
+    setStatus(`Video loading · tap Play if it does not start automatically · ${cardLabel(card)}`);
+    video.play?.().catch(() => {
+      // Unmuted autoplay is blocked on iOS. Explain why a poster is visible.
+      if (!video.error) setStatus(`Video ready · tap Play to watch the full render · ${cardLabel(card)}`);
+    });
   }
 
 
