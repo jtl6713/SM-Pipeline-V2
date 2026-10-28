@@ -162,7 +162,7 @@ class LaunchTests(unittest.TestCase):
     def test_receipt_write_fails_without_relaunch(self):
         args,ops,renderer=self.prep()
         ops.skip_persist=True
-        with self.assertRaisesRegex(ReviewLaunchUnverified,"receipt_persistence_unverified"):
+        with self.assertRaisesRegex(ReviewLaunchUnverified,"remotion_receipt_readback_mismatch"):
             self.launch(args,ops,renderer)
         recovered=self.launch(args,ops,renderer)
         self.assertEqual(recovered["status"],"reconciliation_required")
