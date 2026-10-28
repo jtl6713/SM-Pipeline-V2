@@ -61,19 +61,24 @@ class ReviewPublicationTests(unittest.TestCase):
             verify_before_reel_publication(Unavailable(), "outputs", self.record()["id"], self.record())
 
 class ProcessorBoundaryTests(unittest.TestCase):
-    def exercise(self, after_poll):
+    def exercise(self, after_poll, *, before_create=None, new_container=False):
         # Execute the real processor function with fixture transports. No
         # provider, Airtable, mirror, media, or scheduling service is contacted.
         source = Path(__file__).parents[1] / "ap1_ig" / "processor.py"
         tree = ast.parse(source.read_text())
         names = {"_append_notes", "_preview", "process_request", "_is_in_progress"}
         selected = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in names]
-        current = ReviewPublicationTests().record(Platform_Media_ID="container-1")
-        counters = {"publish": 0, "reads": 0}
+        current = ReviewPublicationTests().record(
+            Platform_Media_ID="" if new_container else "container-1"
+        )
+        counters = {"publish": 0, "create": 0, "reads": 0}
         class Transport:
             def get_record(self, table, output_id):
                 counters["reads"] += 1
-                if counters["reads"] > 1 and after_poll == "unavailable":
+                # First read = eligibility; second = fresh pre-Graph fence.
+                if counters["reads"] == 2 and before_create:
+                    current["fields"].update(before_create)
+                if counters["reads"] > 2 and after_poll == "unavailable":
                     raise RuntimeError("Airtable unavailable")
                 return copy.deepcopy(current)
             def update_record(self, table, output_id, fields, **kw):
@@ -82,6 +87,9 @@ class ProcessorBoundaryTests(unittest.TestCase):
         class Graph:
             def __init__(self, **kw):
                 pass
+            def create_reel(self, body):
+                counters["create"] += 1
+                return {"id": "container-new"}
             def wait_for_container(self, *args, **kw):
                 if isinstance(after_poll, dict):
                     current["fields"].update(after_poll)
@@ -131,6 +139,28 @@ class ProcessorBoundaryTests(unittest.TestCase):
         result, calls, _ = self.exercise({"Final_File_ID": "new-render"})
         self.assertEqual(result["reason"], "publication_artifact_changed")
         self.assertEqual(calls["publish"], 0)
+
+    def test_hold_claimed_after_initial_snapshot_blocks_first_graph_create(self):
+        result, calls, current = self.exercise(
+            None, before_create={"Studio_Render_Review_Hold_ID": "review-hold-new"},
+            new_container=True
+        )
+        self.assertFalse(result["processed"])
+        self.assertEqual(result["reason"], "rendering_review_requires_exact_approval")
+        self.assertEqual(calls["create"], 0)
+        self.assertEqual(calls["publish"], 0)
+        self.assertEqual(current["fields"]["Platform_Media_ID"], "")
+        self.assertEqual(current["fields"]["Studio_Render_Review_Hold_ID"], "review-hold-new")
+
+    def test_container_identity_changed_after_first_read_blocks_graph_create(self):
+        result, calls, current = self.exercise(
+            None, before_create={"Platform_Media_ID": "another-dispatch-container"},
+            new_container=True
+        )
+        self.assertEqual(result["reason"], "publication_artifact_changed")
+        self.assertEqual(calls["create"], 0)
+        self.assertEqual(calls["publish"], 0)
+        self.assertEqual(current["fields"]["Platform_Media_ID"], "another-dispatch-container")
 
     def test_unselected_matching_video_uses_existing_publish_flow(self):
         result, calls, _ = self.exercise(None)
