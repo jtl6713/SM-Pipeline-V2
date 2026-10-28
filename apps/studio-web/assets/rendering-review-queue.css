@@ -15,3 +15,5 @@
 .rr-message{padding:10px 12px;border:1px solid var(--line,#d6dce3);border-radius:10px}
 .rr-message p{white-space:pre-wrap;overflow-wrap:anywhere;margin:6px 0}
 @media(max-width:760px){.rr-layout{grid-template-columns:minmax(0,1fr)}.rr-panel{padding:12px}.rr-list{max-height:340px}.rr-preview{max-height:440px}}
+
+.rr-preview[hidden],.rr-open-file[hidden]{display:none!important}
