@@ -453,9 +453,7 @@ test('held #8447 surfaces a verified Morning alternative and saves correction on
     if(url.endsWith('/producer-conversation')){
       const body=JSON.parse(options.body);
       assert.equal(body.expected_version,3);
-      assert.match(body.direction,/replace BOTH nighttime scenes/);
-      assert.match(body.direction,/frame 1 .* and frame 5 /);
-      assert.match(body.direction,/Chicago Riverwalk 8/);
+      assert.equal(body.direction,'Yes, those look good.');
       savedRevision=true;
       return {ok:true,json:async()=>({ok:true,persisted:true,
         render_queued:false,plan_ready:true,plan_persisted:true})};
@@ -476,31 +474,38 @@ test('held #8447 surfaces a verified Morning alternative and saves correction on
   for(let i=0;i<12;i++)await tick();
   const descendants=root=>[root,...root.children.flatMap(descendants)];
   const before=descendants(nodes.rrDetail);
-  const fix=before.find(n=>n.tag==='button'&&
-    n.textContent==='Fix both nighttime stills — save Producer plan');
-  assert.ok(fix,'a prominent correction action appears for the held old proposal');
-  assert.ok(before.some(n=>n.textContent==='AVAILABLE MORNING PHOTO · NOT IN SAVED PLAN'),
-    'source owned Morning photo must be visibly distinguished from saved plan');
+  const reply=before.find(n=>n.tag==='textarea'&&
+    n.attributes?.['aria-label']==='Reply to your Producer')||
+    before.find(n=>n.tag==='textarea');
+  const send=before.find(n=>n.tag==='button'&&n.textContent==='Reply to Producer');
+  assert.ok(reply&&send,'Producer invites a natural-language reply next to verified photos');
+  assert.ok(before.some(n=>String(n.textContent).includes('Do these look right?')),
+    'Producer speaks naturally rather than showing an internal workflow warning');
+  assert.ok(before.some(n=>n.textContent==='Suggested morning photo'),
+    'the available Morning photo appears as a suggestion');
+  assert.ok(!before.some(n=>String(n.textContent).includes('Daytime correction not yet saved')),
+    'no technical system-status warning in the conversation');
   assert.equal(calls.filter(x=>x.method==='POST').length,0,'read never changes the session');
-  await fix.listeners.click();
+  reply.value='Yes, those look good.';
+  await send.listeners.click();
   for(let i=0;i<12;i++)await tick();
   assert.equal(calls.filter(x=>x.method==='POST').length,1);
   assert.equal(savedRevision,true);
   assert.ok(!calls.some(x=>/commit-attempt|publish|approve/.test(x.url)));
   const after=descendants(nodes.rrDetail);
-  assert.ok(!after.some(n=>n.textContent==='Fix both nighttime stills — save Producer plan'));
-  assert.ok(after.some(n=>n.textContent==='Saved proposed replacement · NOT RENDERED'));
+  assert.ok(!after.some(n=>n.textContent==='Reply to Producer'));
+  assert.ok(after.some(n=>n.textContent==='Suggested replacement'));
 });
 
 test('Rendering Review does not portray V1 playback as a completed Producer render',()=>{
   assert.match(script,/ORIGINAL V1 — unchanged/);
   assert.match(script,/NOT RENDERED/);
-  assert.match(script,/Latest Producer proposal — not yet rendered/);
-  assert.match(script,/Fix both nighttime stills — save Producer plan/);
-  assert.match(script,/const direction='Please replace BOTH nighttime scenes/);
-  assert.match(script,/AVAILABLE MORNING PHOTO · NOT IN SAVED PLAN/);
+  assert.match(script,/Proposed edits/);
+  assert.match(script,/Do these look right/);
+  assert.match(script,/Reply to Producer/);
+  assert.match(script,/Suggested morning photo/);
   assert.match(script,/created\.persisted!==true\|\|created\.render_queued!==false/);
-  assert.match(script,/The original V1 video remains unchanged/);
+  assert.match(script,/I haven\\'t changed the video yet/);
   assert.match(css,/rr-storyboard-pair/);
   assert.doesNotMatch(script,/showMedia\(.*candidate\.candidate\.timeline/);
 });
