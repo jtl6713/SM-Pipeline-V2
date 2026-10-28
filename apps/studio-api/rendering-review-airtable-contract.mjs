@@ -131,10 +131,20 @@ export function checkRenderingReviewBeforeDispatch({
   // No live sessions yet. The separate enforcement flag cannot be disabled
   // after pilot activation while any session survives.
   if (!enforcement_enabled) return {allowed:true,reason:"LEGACY_UNENROLLED"};
-  const scoped=text(f.Content_Profile_Record_ID)===CHICAGO_PROFILE_ID &&
-      text(f.Platform).toLowerCase()==="instagram" &&
-      text(f.Platform_Output_Type)==="Instagram Reel";
-  if (!scoped) return {allowed:true,reason:"OUTSIDE_PILOT_SCOPE"};
+  const platform=text(f.Platform).toLowerCase();
+  const outputType=text(f.Platform_Output_Type);
+  if (platform!=="instagram" || outputType!=="Instagram Reel")
+    return {allowed:true,reason:"OUTSIDE_PILOT_SCOPE"};
+  // Airtable provides a linked Content_Profile field. Projections are allowed
+  // but must be verified; an absent/ambiguous profile may never bypass gate.
+  const rawProfile=f.Content_Profile_Record_ID || f.Content_Profile;
+  const ids=Array.isArray(rawProfile)
+    ? rawProfile.map(x=>text(typeof x==="string" ? x : x?.id)).filter(Boolean)
+    : [text(rawProfile)].filter(Boolean);
+  if (ids.length!==1 || !/^rec[A-Za-z0-9]{14}$/.test(ids[0]))
+    return {allowed:false,reason:"PROFILE_UNRESOLVED"};
+  if (ids[0]!==CHICAGO_PROFILE_ID)
+    return {allowed:true,reason:"OUTSIDE_PILOT_SCOPE"};
   if (!hold_field_fetched) return {allowed:false,reason:"HOLD_FIELD_NOT_FETCHED"};
   if (sessionResolution?.kind==="not_found")
     return {allowed:true,reason:"UNENROLLED"};
