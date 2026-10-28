@@ -151,7 +151,13 @@ export async function inspectReviewPlan({
       need("asset","Selected media must be independently verified in Drive", "rrasset_"+(await digest([p.hash,assetId])).slice(0,48));
     }else resolved.push({asset_id:a.id,drive_file_id:a.drive_file_id,
       profile_id:a.profile_id,media_type:str(a.media_type),
-      rights_receipt_id:str(a.rights_receipt_id)});
+      rights_receipt_id:str(a.rights_receipt_id),
+      // The checked, source-specific crop is frozen separately from the
+      // master Drive file. The isolated Runner must verify both identities.
+      ...(a.render_variant_drive_file_id&&a.render_url?{
+        render_variant_drive_file_id:str(a.render_variant_drive_file_id),
+        render_url:str(a.render_url),
+      }:{})});
   }
   for(const [i,r] of c.requirements.entries()){
     if(!r||!["asset","research","clarification"].includes(r.kind)||
