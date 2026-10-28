@@ -120,6 +120,63 @@ class ProducerTests(unittest.TestCase):
         self.assertFalse(result["visual_inspection_performed"])
         self.assertTrue(result["requires_fact_validation"])
 
+    def test_exact_8447_reviewer_action_bypasses_slow_model_without_rendering(self):
+        # Ten original, independently described stills with the two recorded
+        # Night scenes in positions 1 and 5. The actual Studio action requests
+        # an executable candidate only; the endpoint still re-reads authority
+        # and the Worker must independently validate crops/rights/hold.
+        day = {"id": "day", "name": "Chicago Riverwalk 8", "time_of_day": "Morning",
+               "metadata_verified": True, "frames_inspected": False}
+        night1 = {"id": "night1", "name": "Gibsons Italia 5", "time_of_day": "Night",
+                  "metadata_verified": True, "frames_inspected": False}
+        night5 = {"id": "night5", "name": "Chicago Riverwalk 10", "time_of_day": "Night",
+                  "metadata_verified": True, "frames_inspected": False}
+        bounds = [0, 3.567, 6.767, 10.3, 13.9, 17.133, 20.7,
+                  24.233, 27.433, 30.967, 34.467]
+        orig = []
+        for i in range(10):
+            asset = night1 if i == 0 else night5 if i == 4 else day
+            orig.append({"start_seconds": bounds[i], "end_seconds": bounds[i + 1],
+                         "asset_id": asset["id"], "time_of_day": asset["time_of_day"]})
+        evidence = {**EVIDENCE, "output_id": "rec0uVrVeiUM6shp9",
+                    "assets": [night1, day, night5],
+                    "narration": "Preserve original soundtrack narration.",
+                    "original_timeline": orig}
+        direction = ("Please replace BOTH nighttime scenes, including frame 1 "
+                     "(0.000–3.567s) and frame 5 (13.900–17.133s), using already "
+                     "owned, approved 9:16 Morning/Daytime Chicago River stills "
+                     "such as Chicago Riverwalk 8. Keep every other scene, "
+                     "narration, music, watermark and exact scene timing unchanged. "
+                     "Do not request an upload when a verified existing still is "
+                     "available. Do not claim the video was modified; first produce "
+                     "a complete render-ready plan with zero unresolved requirements "
+                     "and no invented factual claims. I will separately authorize "
+                     "V2 rendering after reviewing the plan.")
+        def forbidden_model(*args, **kwargs):
+            raise AssertionError("Exact source-owned edit should not call model")
+        result = propose_revision(evidence, direction, {}, transport=forbidden_model)
+        candidate = result["candidate"]
+        self.assertEqual(len(candidate["timeline"]), 10)
+        self.assertEqual([x["asset_ids"][0] for x in candidate["timeline"]],
+                         ["day"] * 10)
+        self.assertEqual([x["start_seconds"] for x in candidate["timeline"]], bounds[:-1])
+        self.assertEqual([x["end_seconds"] for x in candidate["timeline"]], bounds[1:])
+        self.assertEqual(candidate["narration"], evidence["narration"])
+        self.assertEqual(candidate["requirements"], [])
+        self.assertEqual(candidate["claims"], [])
+        self.assertEqual(len(candidate["changes"]), 2)
+        self.assertTrue(result["candidate_only"])
+        self.assertTrue(result["requires_fact_validation"])
+        self.assertFalse(result["visual_inspection_performed"])
+        self.assertIsNone(result["model_response_id"])
+        self.assertEqual(result["model"], "bounded-source-evidence-only")
+
+    def test_8447_other_creative_requests_keep_model_conversation(self):
+        evidence = {**EVIDENCE, "output_id": "rec0uVrVeiUM6shp9"}
+        result, calls = self.invoke(evidence=evidence)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(result["model_response_id"], "model-fixture")
+
     def test_two_night_stills_never_invents_a_source_if_daypart_not_verified(self):
         evidence={**EVIDENCE,"narration":"Morning river",
             "assets":[{"id":"night-one","time_of_day":"Night","metadata_verified":True},
