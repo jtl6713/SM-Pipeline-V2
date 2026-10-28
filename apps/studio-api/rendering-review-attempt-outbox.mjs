@@ -34,7 +34,17 @@ function requireOutput(o,session,manifest,outputId){
      /^(published|publishing|dispatched)$/i.test(str(o.publish_status)))
     deny("OUTPUT_NOT_HELD","Exact Chicago Reel must remain held and undispatched");
   const source=(session.attempts||[]).find(a=>a.id===manifest.source_attempt_id);
-  if(!source||manifest.source_attempt_id!==session.current_attempt_id||
+  const active=(session.attempts||[]).find(a=>a.id===session.current_attempt_id);
+  // An exact idempotent retry sees the NEW queued attempt as current, so its
+  // previous verified source is necessarily the queued attempt's parent.
+  // Allow only that same queued job/plan to repair missing outbox projections.
+  const replaySource=session.state==="queued"&&
+    session.active_job?.attempt_id===session.current_attempt_id&&
+    session.active_job?.plan_hash===session.plan?.hash&&
+    active?.parent_id===manifest.source_attempt_id&&
+    active?.status==="queued"&&!active?.artifact_id;
+  if(!source||
+     (manifest.source_attempt_id!==session.current_attempt_id&&!replaySource)||
      (source.number>1&&source.status!=="ready_for_review")||
      source.artifact_id!==manifest.source_artifact_id)
     deny("SOURCE_CHANGED","The current validated review attempt changed since plan freeze");
