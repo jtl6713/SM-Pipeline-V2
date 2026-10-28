@@ -1514,7 +1514,7 @@ export default {
 
       if (url.pathname.startsWith("/api/rendering-review/")) {
         requirePermission(authorization, "outputs_review");
-        const feedbackMatch = /^\\/api\\/rendering-review\\/outputs\\/(rec[A-Za-z0-9]{14})\\/messages$/.exec(url.pathname);
+        const feedbackMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/messages$/.exec(url.pathname);
         if (feedbackMatch && request.method === "POST") {
           // Three protected release gates are OFF until the complete manual
           // Chicago pilot is verified. Never accept HTTP body flags.
