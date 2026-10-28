@@ -77,12 +77,16 @@ def download_mp4_bytes(client, record: dict[str, Any]) -> bytes:
     return content
 
 
-def ensure_public_mp4_url(client, record: dict[str, Any], plan: dict[str, str]) -> str:
+def ensure_public_mp4_url(
+    client, record: dict[str, Any], plan: dict[str, str], *, force_final_master: bool = False,
+) -> str:
     from integrations.r2_upload import R2UploadClient
 
     existing = field_str(record, "Publish_Asset_URL")
-    if is_public_publish_url(existing):
+    if is_public_publish_url(existing) and not force_final_master:
         return existing
+    if force_final_master and not field_str(record, "Final_File_ID"):
+        raise RuntimeError("TikTok immutable publish staging requires an authoritative Drive Final_File_ID")
     handle = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
     handle.close()
     try:
