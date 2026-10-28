@@ -111,7 +111,7 @@ class RemoteLaunchLedger:
         }
         try:
             response = self.transport(
-                self.worker_base + "/internal/rendering-review/launch-ledger",
+                self.worker_base + "/api/internal/rendering-review/launch-ledger",
                 body, {
                     "Content-Type": "application/json",
                     "X-Rendering-Review-Job-Secret": self.shared_secret,
