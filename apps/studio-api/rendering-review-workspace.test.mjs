@@ -124,10 +124,12 @@ test('queue excludes Reels with already-created Instagram containers or post URL
     if(table==='outputs'){
       assert.ok(opts.fields.includes('Platform_Media_ID'));
       assert.ok(opts.fields.includes('Platform_Post_URL'));
+      assert.ok(opts.fields.includes('Publish_Locked_By'));
       return {valid:true,records:[
         {id:outputId,fields:{...base,Platform_Media_ID:'ig-existing-container'}},
         {id:'recH1B2C3D4E5F6G7',fields:{...base,Platform_Post_URL:'https://instagram.com/reel/existing'}},
         {id:'recI1B2C3D4E5F6G7',fields:base},
+        {id:'recK1B2C3D4E5F6G7',fields:{...base,Publish_Locked_By:'active-owner'}},
       ]};
     }
     return {valid:true,records:[f.content]};

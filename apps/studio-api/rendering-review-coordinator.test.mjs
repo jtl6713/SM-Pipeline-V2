@@ -173,6 +173,18 @@ test("dispatch begins while claiming the hold: refuse and preserve hold",async()
   assert.equal(f.session,null);
 });
 
+test("publisher owner claimed after hold blocks enrollment before session is recorded",async()=>{
+  const f=fixture();
+  const claim=f.ops.claimHold;
+  f.ops.claimHold=async(...values)=>{
+    await claim(...values);
+    f.output.publish_locked_by="AP1-IG-inflight-owner";
+  };
+  await check(()=>enrollManualReviewCommand({...args,operations:f.ops}),"DISPATCH_RACE");
+  assert.equal(f.hold.active,true);
+  assert.equal(f.session,null);
+});
+
 test("server-only events cannot be spoofed as producer/validated renderer events",async()=>{
   const f=fixture();
   await enrollManualReviewCommand({...args,operations:f.ops});
