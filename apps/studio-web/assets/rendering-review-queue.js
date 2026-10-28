@@ -9,7 +9,7 @@
   const nav = $('navRenderingReview');
   if (!root || !nav) return;
   const chicago = 'recT2rbKX3MF7cVFU';
-  const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0};
+  const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map()};
   const list = $('rrQueueList'), detail = $('rrDetail'), status = $('rrStatus');
   const refresh = $('rrRefresh'), more = $('rrMore');
   const elem = (tag,text,cls) => {
@@ -72,9 +72,49 @@
   };
   function clearMedia(){
     const video = $('rrVideo');
-    if(video){video.pause();video.removeAttribute('src');video.load();}
+    if(video){video.pause();video.removeAttribute('src');video.load();video.hidden=true;}
+    const frame=$('rrDrivePreview');
+    if(frame)frame.remove();
     const a = $('rrOpenFile');
     if(a){a.hidden=true;a.removeAttribute('href');}
+  }
+  // A Google Drive /view URL is an HTML page, not an MP4 source for <video>.
+  // Use Drive's authenticated embedded viewer; never create arbitrary iframe URLs.
+  function drivePreview(value){
+    try{
+      const u=new URL(value);
+      if(u.protocol!=='https:'||u.hostname!=='drive.google.com')return '';
+      const match=/^\\/file\\/d\\/([A-Za-z0-9_-]{16,})\\/(?:view|preview)\\/?$/.exec(u.pathname);
+      return match?'https://drive.google.com/file/d/'+match[1]+'/preview':'';
+    }catch{return '';}
+  }
+  function showMedia(mediaValue,label){
+    clearMedia();
+    const value=safeUrl(mediaValue);
+    if(!value)return false;
+    const preview=drivePreview(value);
+    if(preview){
+      const frame=elem('iframe',null,'rr-preview');
+      frame.id='rrDrivePreview';frame.title=label||'Chicago Reel playback';
+      frame.src=preview;frame.loading='lazy';frame.allowFullscreen=true;
+      frame.referrerPolicy='strict-origin-when-cross-origin';
+      frame.style.cssText='display:block;width:100%;max-width:380px;height:min(74vh,670px);border:0;border-radius:12px;';
+      $('rrVideo').insertAdjacentElement('afterend',frame);
+    }else{
+      const video=$('rrVideo');
+      video.src=value;video.hidden=false;
+    }
+    const link=$('rrOpenFile');
+    link.href=value;link.hidden=false;
+    link.textContent=label?'Open '+label+' file':'Open Reel file';
+    return true;
+  }
+  function attemptMedia(attempt,entry){
+    if(attempt?.number===1)return entry.final_file_url;
+    const artifact=String(attempt?.artifact_id||'');
+    if(/^[A-Za-z0-9_-]{20,}$/.test(artifact))
+      return 'https://drive.google.com/file/d/'+artifact+'/view';
+    return safeUrl(artifact);
   }
   function renderList(){
     list.replaceChildren();
@@ -107,14 +147,8 @@
     detail.replaceChildren();
     detail.append(elem('h2',entry.title||'Instagram Reel'),
       elem('p','Chicago · Instagram Reel'+(entry.output_number?' · #'+entry.output_number:''),'rr-entry-meta'));
-    const media=safeUrl(entry.final_file_url);
-    const video=$('rrVideo');
-    if(media && video){
-      video.src=media; video.hidden=false;
-      const link=$('rrOpenFile');link.href=media;link.hidden=false;
-    } else {
-      if(video)video.hidden=true;
-      detail.append(elem('p','The original render has no playable HTTPS preview URL. Open it through Pipeline or the linked source library.','rr-muted'));
+    if(!showMedia(entry.final_file_url,'original Reel')){
+      detail.append(elem('p','The original render has no verified HTTPS preview URL. Open it through Pipeline or the linked source library.','rr-muted'));
     }
     appendLine(detail,'Render:',entry.render_status||'Completed file recorded');
     appendLine(detail,'Review:',entry.review_held?'Existing hold detected — do not clear automatically':
@@ -152,6 +186,70 @@
         return;
       }
       const session=saved.session;
+      const attempts=Array.isArray(session?.attempts)?session.attempts:[];
+      if(attempts.length){
+        const heading=elem('h3','Rendering attempts');detail.append(heading);
+        const picker=elem('div',null,'rr-attempts');
+        for(const attempt of attempts){
+          const statusText='Attempt '+attempt.number+' · '+String(attempt.status||'unknown').replace(/_/g,' ');
+          const media=attemptMedia(attempt,entry);
+          const playable=attempt.status==='ready_for_review'&&!!media;
+          const button=actionButton(statusText,async()=>{
+            if(!playable)throw new Error('This attempt is not yet a verified, playable render');
+            if(!showMedia(media,'Attempt '+attempt.number))
+              throw new Error('This attempt has no supported HTTPS media URL');
+            say('Showing Attempt '+attempt.number+' · original and revised files are retained separately');
+          });
+          button.disabled=!playable;
+          picker.append(button);
+        }
+        detail.append(picker);
+        const newest=attempts.filter(a=>a.status==='ready_for_review'&&a.artifact_id).at(-1);
+        if(newest?.number>1)showMedia(attemptMedia(newest,entry),'Attempt '+newest.number);
+      }
+      if(['queued','rendering','validating'].includes(session?.state)){
+        detail.append(elem('p','Attempt '+session.latest_attempt_number+' · '+
+          ({queued:'Queued for isolated renderer',rendering:'Rendering',validating:'Validating media'}[session.state])+
+          '. No Instagram publication has been authorized.','rr-notice'));
+      }
+      const plan=session?.plan;
+      if(plan){
+        detail.append(elem('h3','Current revision plan'));
+        const ready=plan.frozen===true&&Array.isArray(plan.missing_assets)&&
+          plan.missing_assets.length===0&&!!plan.immutable_manifest&&
+          session.state==='plan_ready'&&session.review_hold?.active===true&&
+          saved.publication_hold_verified===true&&
+          saved.flags?.attempt_commit_enabled===true&&
+          session.producer_candidate?.stale!==true;
+        appendLine(detail,'Plan:',ready?'Ready for render-only authorization':
+          plan.frozen&&plan.missing_assets?.length===0?
+          'Frozen plan exists; rendering is not enabled':'Requirements remain unresolved');
+        appendLine(detail,'Version:',plan.version);
+        if(Array.isArray(plan.acceptance_checks)&&plan.acceptance_checks.length){
+          for(const check of plan.acceptance_checks.slice(0,10))
+            detail.append(elem('p','Acceptance check: '+String(check),'rr-muted'));
+        }
+        if(Array.isArray(plan.missing_assets)&&plan.missing_assets.length)
+          detail.append(elem('p',plan.missing_assets.length+' requirements must be resolved before rendering.','rr-notice'));
+        if(ready){
+          detail.append(actionButton('Create next attempt — render only',async()=>{
+            if(!window.confirm('Render one replacement Reel from the frozen plan? This will NOT upload or publish to Instagram.'))return;
+            const identity=entry.output_id+':'+plan.hash+':'+plan.version;
+            if(!state.commitKeys.has(identity))state.commitKeys.set(identity,safeRequestId());
+            const receipt=await post('/api/rendering-review/outputs/'+
+              encodeURIComponent(entry.output_id)+'/commit-attempt',{
+              intent:'render_this_plan',expected_version:session.version,
+              plan_version:plan.version,plan_hash:plan.hash,
+              client_request_id:state.commitKeys.get(identity),
+            });
+            if(receipt.ok!==true||receipt.hold_active!==true||
+               receipt.public_post_created!==false||!receipt.attempt_id||!receipt.job_id)
+              throw new Error('A held, unique render-only job was not verified');
+            say('Attempt '+receipt.attempt_number+' queued under the publication hold. No Instagram post created.');
+            await open(entry);
+          }));
+        }
+      }
       const candidate=session?.producer_candidate;
       if(candidate?.candidate){
         const heading=elem('h3','Latest Producer proposal');detail.append(heading);
@@ -202,7 +300,7 @@
           say('Producer response saved. No replacement render has been started.');
           await open(entry);
         }));
-        form.append(elem('p','Producer discussion only. Create next attempt and Approve & schedule remain disabled until the replacement renderer and exact-attempt approval pass verification.','rr-muted'));
+        form.append(elem('p','Producer discussion does not launch a render. A separate render-only button appears only for an independently verified frozen plan; Instagram approval and publishing remain disabled.','rr-muted'));
         detail.append(form);
       }
     }catch(err){
