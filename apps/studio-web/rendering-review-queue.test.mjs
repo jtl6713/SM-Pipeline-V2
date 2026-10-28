@@ -428,3 +428,81 @@ test('Rendering Review does not portray V1 playback as a completed Producer rend
   assert.match(css,/rr-storyboard-pair/);
   assert.doesNotMatch(script,/showMedia\(.*candidate\.candidate\.timeline/);
 });
+
+
+test('one click sends BOTH original Night frames even if saved scene 5 is already Morning',async()=>{
+  const ids=['page-rendering-review','navRenderingReview','rrQueueList','rrDetail',
+    'rrStatus','rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile'];
+  const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
+  const output='rec0uVrVeiUM6shp9';
+  const posts=[];
+  let observerCallback;
+  let updated=false;
+  const night=(scene,start,end,changed)=>({
+    scene,start_seconds:start,end_seconds:end,changed,
+    proposed_ready:true,suggestion_saved:false,
+    original:{name:'Night source',time_of_day:'Night',
+      preview_url:'https://media.chicagoshining.com/studio/previews/item4/night.jpg'},
+    proposed:{name:changed?'Chicago Riverwalk 8':'Night source',
+      time_of_day:changed?'Morning':'Night',
+      preview_url:'https://media.chicagoshining.com/studio/previews/item4/saved.jpg'},
+    suggested:{name:'Chicago Riverwalk 8',time_of_day:'Morning',
+      preview_url:'https://media.chicagoshining.com/studio/previews/item4/morning.jpg'},
+  });
+  const fetchStub=async(url,options)=>{
+    if(url==='/api/session')return {ok:true,json:async()=>({
+      ok:true,authenticated:true,authorized:true,permissions:{outputs_review:true}})};
+    if(url.startsWith('/api/rendering-review/queue?'))return {ok:true,json:async()=>({
+      ok:true,flags:{admission_enabled:false,producer_conversation_enabled:true,
+        automatic_sampling_percent:0},
+      queue:[{output_id:output,profile_id:'recT2rbKX3MF7cVFU',
+        output_type:'Instagram Reel',review_held:true,title:'Riverwalk Morning Reflections',
+        output_number:8447,render_status:'Rendered'}],next_cursor:null})};
+    if(url==='/api/rendering-review/outputs/'+output)return {ok:true,json:async()=>({
+      ok:true,publication_hold_verified:true,flags:{producer_conversation_enabled:true},
+      session:{version:updated?4:3,state:'discussing',review_hold:{active:true},
+        messages:[],attempts:[]},
+      storyboard:[night(1,0,3.567,updated),night(5,13.9,17.133,true)],
+    })};
+    if(url.endsWith('/producer-conversation')){
+      assert.equal(options.method,'POST');
+      const body=JSON.parse(options.body);
+      posts.push(body);
+      updated=true;
+      return {ok:true,json:async()=>({
+        ok:true,persisted:true,render_queued:false,
+        plan_ready:true,plan_persisted:true,session_version:4,
+      })};
+    }
+    throw new Error('Unexpected endpoint '+url);
+  };
+  const sandbox={
+    document:{getElementById:id=>nodes[id],createElement:tag=>new Node(tag)},
+    window:{location:{href:'https://studio.test/'},
+      CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''}},
+    MutationObserver:class {constructor(cb){observerCallback=cb;}observe(){}},
+    fetch:fetchStub,URL,URLSearchParams,
+    crypto:{randomUUID:()=> '12345678-1234-1234-1234-123456789012'},
+  };
+  vm.runInNewContext(script,sandbox,{filename:'rendering-review-queue.js'});
+  await tick();await tick();
+  nodes['page-rendering-review'].classList.add('active');
+  observerCallback();
+  for(let i=0;i<10;i++)await tick();
+  const descendants=root=>[root,...root.children.flatMap(descendants)];
+  assert.equal(posts.length,0,'read-only preview must not auto-submit feedback');
+  const before=descendants(nodes.rrDetail);
+  assert.ok(before.some(n=>n.textContent==='Verified Morning source · NOT SAVED'));
+  const actions=before.filter(n=>n.tag==='button'&&
+    n.textContent==='Correct frames 1 and 5 in Producer plan — no render');
+  assert.equal(actions.length,2,'visible above storyboard and beside composer');
+  await actions[0].listeners.click();
+  for(let i=0;i<10;i++)await tick();
+  assert.equal(posts.length,1);
+  assert.equal(posts[0].expected_version,3);
+  assert.match(posts[0].direction,/frame 1 \\(0\\.000/);
+  assert.match(posts[0].direction,/frame 5 \\(13\\.900/);
+  assert.match(posts[0].direction,/Preserve|Keep every other scene, narration, music, watermark/);
+  assert.ok(!posts[0].direction.includes('publish'));
+  assert.equal(updated,true);
+});
