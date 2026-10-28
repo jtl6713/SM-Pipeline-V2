@@ -34,11 +34,11 @@ function fixture({body=input,env=flags,secret=SECRET}={}){
   const readContentItem=async()=>({id:ITEM,fields:{Content_Profile:[profile]}});
   const patchOutput=async(_id,fields)=>{patches++;Object.assign(current,fields)};
   const withOutputLock=async(_id,fn)=>{locks++;return fn()};
-  const request=new Request("https://studio.test/internal/rendering-review/ig-dispatch-claim",{
+  const makeRequest=()=>new Request("https://studio.test/internal/rendering-review/ig-dispatch-claim",{
     method:"POST",headers:{"Content-Type":"application/json",
       "X-Review-Dispatch-Token":secret},body:JSON.stringify(body),
   });
-  const send=()=>claim({request,env,readOutput,readContentItem,patchOutput,withOutputLock,
+  const send=()=>claim({request:makeRequest(),env,readOutput,readContentItem,patchOutput,withOutputLock,
     now:()=>new Date("2026-10-28T15:00:00Z")});
   return {send,env,output,readOutput,readContentItem,patchOutput,
     withOutputLock,get patches(){return patches},get locks(){return locks},
