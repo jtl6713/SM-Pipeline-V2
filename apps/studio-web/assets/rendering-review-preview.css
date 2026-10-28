@@ -1,0 +1,50 @@
+/* Rendering Review preview; responsive and independent of Factory approvals. */
+#page-rendering-review .rr-header {
+  display:flex; align-items:flex-start; justify-content:space-between;
+  flex-wrap:wrap; gap:14px; margin-bottom:16px;
+}
+#page-rendering-review .rr-guard-note {
+  border-inline-start:3px solid currentColor;
+  padding:12px; margin-top:14px; opacity:.86;
+}
+#page-rendering-review .rr-layout {
+  display:grid; grid-template-columns:minmax(260px,1fr) minmax(300px,1.3fr);
+  gap:16px; align-items:start;
+}
+#page-rendering-review .rr-queue,
+#page-rendering-review .rr-detail {
+  min-width:0; padding:16px;
+}
+#page-rendering-review .rr-grid {
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(185px,1fr)); gap:10px;
+}
+#page-rendering-review .rr-output-card {
+  min-width:0; width:100%; border:1px solid currentColor;
+  border-radius:12px; padding:14px; text-align:left;
+  background:transparent; color:inherit; cursor:pointer;
+  display:flex; flex-direction:column; gap:9px;
+}
+#page-rendering-review .rr-output-card:hover,
+#page-rendering-review .rr-output-card:focus-visible { outline:2px solid currentColor; outline-offset:2px; }
+#page-rendering-review .rr-output-card strong,
+#page-rendering-review .rr-output-card span {overflow-wrap:anywhere}
+#page-rendering-review .rr-player {
+  width:100%; max-height:65vh; aspect-ratio:9/16;
+  object-fit:contain; background:#111; border-radius:12px;
+  margin:12px auto; display:block;
+}
+#page-rendering-review .rr-detail a {display:inline-block; margin-block:8px}
+#page-rendering-review .rr-message {
+  padding:10px 12px; margin-bottom:8px; border-radius:9px;
+  border:1px solid currentColor; overflow-wrap:anywhere;
+}
+#page-rendering-review .rr-message[data-actor=producer] {margin-inline-start:10%}
+#page-rendering-review #rrStatus[data-error=true] {font-weight:700}
+#page-rendering-review .rr-pager {
+  display:flex; align-items:center; gap:12px; margin-top:14px;
+}
+@media(max-width:850px) {
+  #page-rendering-review .rr-layout {grid-template-columns:minmax(0,1fr)}
+  #page-rendering-review .rr-grid {grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+  #page-rendering-review .rr-player {max-height:55vh}
+}
