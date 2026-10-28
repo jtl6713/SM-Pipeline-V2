@@ -1231,3 +1231,16 @@ def test_distinct_scene_captions_are_preserved():
     fixed = collapse_repeated_scene_caption_overlays(clips)
     assert fixed[0]["overlay"]["text"] == "DuSable Bridge"
     assert fixed[1]["overlay"]["text"] == "Bridge Raised"
+
+
+def test_expected_photo_count_never_collapses_partial_studio_asset_plan():
+    from studio_produce.context import expected_photo_count
+    one = [{"id": "master-1"}]
+    manual = {"fields": {"Production_Notes": "origin=ez-wizard; ez-manual=6; ez-ai=0"}}
+    assert expected_photo_count(manual, one) == 6
+    plan = {"fields": {"Studio_Output_Plan_JSON": '{"source_asset_count":5}', "Carousel_Image_Mode": "Use Photos"}}
+    assert expected_photo_count(plan, one) == 5
+    ai = {"fields": {"Carousel_Image_Mode": "Make AI Generated", "Carousel_Slide_Count_Exact": 7}}
+    assert expected_photo_count(ai, one) == 7
+    assert expected_photo_count(plan, [{"id": f"asset-{i}"} for i in range(8)]) == 8
+    assert expected_photo_count({"fields": {}}, one) == 1
