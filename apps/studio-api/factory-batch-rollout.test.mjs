@@ -195,7 +195,8 @@ test("production rollout manifest enables only the guarded five-Reel Chicago pil
   // an LA-disabled/Chicago-enabled production smoke look misleading.
   assert.match(workflow, /\\?profile=recT2rbKX3MF7cVFU/);
   assert.match(workflow, /\\?profile=recF7UAn0LkMZZrWZ/);
-  assert.doesNotMatch(workflow, /\\?profile_id=rec(?:T2rbKX3MF7cVFU|F7UAn0LkMZZrWZ)/);
+  // Scope this contract to Factory; Rendering Review uses profile_id.
+  assert.doesNotMatch(workflow, /\/api\/factory\/approval-batches\?profile_id=rec(?:T2rbKX3MF7cVFU|F7UAn0LkMZZrWZ)/);
 
   assert.match(workflow,/Factory Chicago canary verification failed/);
   assert.match(workflow,/Roll back to captured production version on any failure/);
