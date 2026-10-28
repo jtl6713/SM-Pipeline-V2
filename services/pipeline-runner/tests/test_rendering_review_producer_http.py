@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from flask import Flask
 from rendering_review.http import create_rendering_review_producer_blueprint
+from rendering_review.producer import ProducerModelHTTPError
 
 OUTPUT = "recA1B2C3D4E5F6G7"
 SESSION = "rrsession_0123456789abcdef"
@@ -140,6 +141,15 @@ class ProposalRouteTests(unittest.TestCase):
                 "visual_inspection_performed": False})
             self.assertEqual(self.send(client).status_code, 502)
 
+
+
+    def test_safe_provider_http_code_does_not_expose_provider_response_body(self):
+        client, _ = self.fixture(fail_model=ProducerModelHTTPError(400))
+        with patch.dict("os.environ", {"RENDERING_REVIEW_PRODUCER_PROPOSALS_ENABLED": "true"}):
+            result = self.send(client)
+        self.assertEqual(result.status_code, 502)
+        self.assertEqual(result.json["error"], "producer_model_http_400")
+        self.assertFalse(result.json["ok"])
 
 if __name__ == "__main__":
     unittest.main()
