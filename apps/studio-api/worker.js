@@ -2,6 +2,8 @@ import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
 import { makeRenderingReviewAirtableOperations } from "./rendering-review-airtable.mjs";
 import { CHICAGO_PROFILE_ID } from "./rendering-review-policy.mjs";
 import { handleRenderingReviewFeedbackRequest, reviewFeedbackWriteEnabled } from "./rendering-review-feedback-http.mjs";
+import { handleRenderingReviewEnrollRequest, reviewEnrollmentWriteEnabled } from "./rendering-review-enrollment-http.mjs";
+import { composeRenderingReviewEnrollmentOperations } from "./rendering-review-enrollment-wiring.mjs";
 import { listRecords as reviewListRecords, listRecordsPage as reviewListRecordsPage, resolveAuthorizedContentProfiles as reviewAuthorizedProfiles } from "./worker-functions-01.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { readProducerThread, appendProducerThreadMessage, producerConversationHistory } from "./producer-conversation.mjs";
@@ -1514,6 +1516,67 @@ export default {
 
       if (url.pathname.startsWith("/api/rendering-review/")) {
         requirePermission(authorization, "outputs_review");
+        const enrollmentMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/enroll$/.exec(url.pathname);
+        if (enrollmentMatch && request.method === "POST") {
+          // Protected, default-OFF path. Neither the Worker nor a client may
+          // enable manual admission merely because this source is deployed.
+          if (!reviewEnrollmentWriteEnabled(env))
+            throw new HttpError(405, "Rendering Review enrollment is not enabled");
+          const chicagoMembership = (await reviewAuthorizedProfiles(env, authorization))
+            .some(profile => profile.id === CHICAGO_PROFILE_ID);
+          if (!chicagoMembership) throw new HttpError(403, "Chicago Rendering Review membership required");
+          let adapter;
+          const authorizeOutput = async outputId => {
+            const view = await adapter.readOutput(outputId);
+            return view.profile_id === CHICAGO_PROFILE_ID &&
+              view.platform === "Instagram" && view.output_type === "Instagram Reel";
+          };
+          adapter = composeRenderingReviewEnrollmentOperations({
+            env, airtableFetch, listRecords: reviewListRecords, readField: f,
+            withOutputApprovalLock,
+            authorizeReview: authorizeOutput,
+            authorizeEvent: async () => false, // Enrollment does not mutate conversations.
+            writeVacateUnderLane: async ({ output_id, fields, signal, review_hold_id, review_owner }) => {
+              if (signal?.aborted) throw new HttpError(409, "Review scheduling lease was interrupted");
+              // This callback is invoked ONLY by the canonical MAE transaction
+              // while the same output approval lock and review hold are owned.
+              const latest = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, output_id);
+              if (latest?.id !== output_id || !latest.fields ||
+                  f(latest, "Studio_Render_Review_Hold_Active") !== true ||
+                  String(f(latest, "Studio_Render_Review_Hold_ID") || "") !== review_hold_id ||
+                  String(f(latest, "Studio_Render_Review_Hold_Owner") || "") !== review_owner ||
+                  String(f(latest, "Studio_Render_Review_Session_ID") || "") !== review_owner ||
+                  f(latest, "Do_Not_Publish") !== true ||
+                  f(latest, "Publish_Started_At") || f(latest, "Publish_Locked_At") ||
+                  f(latest, "Publish_Locked_By") || f(latest, "Platform_Media_ID") ||
+                  f(latest, "Platform_Post_ID") || f(latest, "Platform_Post_URL") ||
+                  f(latest, "Published_At"))
+                throw new HttpError(409, "Review hold or dispatch authority changed before atomic schedule vacate");
+              if (signal?.aborted) throw new HttpError(409, "Review scheduling lease was interrupted");
+              return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, output_id, {
+                method: "PATCH", body: JSON.stringify({ fields, typecast: false }),
+              });
+            },
+            postCommit: async ({ output }) => {
+              // Mirror is never the approval/schedule authority. Its failure
+              // must not rewrite or revert an Airtable-verified vacate.
+              try {
+                const synced = await syncAirtableOutputRowToSupabase(env, output);
+                if (synced?.ok === false)
+                  console.warn("Rendering Review atomic vacate mirror deferred", output.id);
+              } catch (error) {
+                console.warn("Rendering Review atomic vacate mirror deferred", output.id, error);
+              }
+            },
+          });
+          const result = await handleRenderingReviewEnrollRequest({
+            request, env, authorization, output_id: enrollmentMatch[1],
+            assertWriteRequest,
+            authorizeChicagoMembership: async () => chicagoMembership,
+            operations: adapter,
+          });
+          return respond(request, env, result);
+        }
         const feedbackMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/messages$/.exec(url.pathname);
         if (feedbackMatch && request.method === "POST") {
           // Three protected release gates are OFF until the complete manual
