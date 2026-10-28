@@ -26,6 +26,7 @@ from studio_produce.ops_alert import send_produce_escalation
 from studio_produce.processor import resume_job, start_job
 from studio_compress.processor import start_job as start_studio_compress
 from ttd.client import TikTokDraftClient, load_tiktok_settings
+from rendering_review.http import create_rendering_review_producer_blueprint
 
 logger = logging.getLogger("pipeline-runner")
 settings = load_settings()
@@ -61,6 +62,9 @@ logger = logging.getLogger("pipeline-runner")
 settings = load_settings()
 
 app = Flask(__name__)
+# Model-backed proposals are explicitly disabled until Worker conversation
+# persistence and phase-1 ownership safeguards have been verified.
+app.register_blueprint(create_rendering_review_producer_blueprint(settings))
 
 
 def _verify_secret() -> tuple[dict | None, int | None]:
