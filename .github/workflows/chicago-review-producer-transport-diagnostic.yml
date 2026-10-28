@@ -1,0 +1,68 @@
+name: Diagnose Chicago Producer transport (GET and rejected POST only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/chicago-review-producer-transport-diagnostic.yml
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - name: Probe Runner route without authorization (cannot create proposals)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in health jobs/rendering-review/propose; do
+            safe=${path//\//-}
+            if [[ "$path" == "health" ]]; then
+              status=$(curl -sS --max-time 18 --max-redirs 0 -D "/tmp/${safe}.headers" -o "/tmp/${safe}.body" -w '%{http_code}' "https://pipeline.chicagoshining.com/$path" || true)
+            else
+              status=$(curl -sS --max-time 18 --max-redirs 0 -D "/tmp/${safe}.headers" -o "/tmp/${safe}.body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "https://pipeline.chicagoshining.com/$path" || true)
+            fi
+            echo "runner_path=$safe status=$status mime=$(awk 'BEGIN{IGNORECASE=1} /^content-type:/ {print $2}' "/tmp/${safe}.headers" | tr -d '\r' | tail -1)"
+            if jq -e 'type=="object"' "/tmp/${safe}.body" >/dev/null 2>&1; then
+              jq -cr '{ok,error,service,version}' "/tmp/${safe}.body" | head -c 400
+              echo
+            else
+              echo "runner_response_non_json=true"
+            fi
+          done
+      - name: Inspect active Worker Runner binding shape without secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api"
+          curl -fsS --max-time 15 "$API/deployments" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/deploy.json
+          VERSION=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deploy.json)
+          curl -fsS --max-time 15 "$API/versions/$VERSION" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/bindings.json
+          jq -cr '
+            [.result.resources.bindings[] | select(.name=="PIPELINE_RUNNER_URL" or .name=="PIPELINE_RUNNER_SHARED_SECRET" or .name=="CF_ACCESS_CLIENT_ID" or .name=="CF_ACCESS_CLIENT_SECRET") |
+              {name,type,host:(if .name=="PIPELINE_RUNNER_URL" and .type=="plain_text" then (.text|tostring|sub("^https?://";"")|split("/")[0]) else null end)}]
+          ' /tmp/bindings.json
+          test "$(jq '[.result.resources.bindings[]|select(.name=="PIPELINE_RUNNER_SHARED_SECRET")]|length' /tmp/bindings.json)" = "1"
+      - name: Probe Runner with Cloudflare Access service token only (no Runner secret)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$CF_ACCESS_CLIENT_ID" || -z "$CF_ACCESS_CLIENT_SECRET" ]]; then
+            echo "access_probe_credentials_not_configured=true"
+            exit 0
+          fi
+          status=$(curl -sS --max-time 18 --max-redirs 0 -o /tmp/access-probe.json -w '%{http_code}' \
+            -X POST -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            -H 'Content-Type: application/json' -d '{}' \
+            https://pipeline.chicagoshining.com/jobs/rendering-review/propose || true)
+          echo "runner_with_access_probe_http=$status"
+          if jq -e 'type=="object"' /tmp/access-probe.json >/dev/null 2>&1; then
+            jq -cr '{ok,error}' /tmp/access-probe.json
+          else
+            echo "runner_with_access_response_non_json=true"
+          fi
