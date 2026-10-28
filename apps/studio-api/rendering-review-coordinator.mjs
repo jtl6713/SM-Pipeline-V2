@@ -127,7 +127,7 @@ export async function mutateReviewSessionCommand({
   output_id, event, operations,
 }) {
   requireOperations(operations, [
-    "authorizeReview", "withOutputLock", "loadSession", "saveSessionIfVersion",
+    "authorizeReview", "authorizeEvent", "withOutputLock", "loadSession", "saveSessionIfVersion",
     "readSession", "readHold",
   ]);
   const outputId=id(output_id);
@@ -135,6 +135,14 @@ export async function mutateReviewSessionCommand({
     err("INVALID_OUTPUT_ID", "Exact Platform Output record ID required", 400);
   if (await operations.authorizeReview(outputId) !== true)
     err("NOT_AUTHORIZED", "Not authorized to change this review", 403);
+  // The generic state-event path must not bypass the real scheduler or its
+  // independent hold-release readback. Those need separate orchestrated paths.
+  if (["APPROVE_ATTEMPT", "RELEASE_REVIEW_HOLD"].includes(event?.type))
+    err("ORCHESTRATION_REQUIRED", "Approval and hold release require verified scheduling integration", 409);
+  // Server adapter validates actual identity, action permission, event
+  // provenance and hashes; producer/callback roles cannot be client-asserted.
+  if (await operations.authorizeEvent(outputId,event) !== true)
+    err("UNTRUSTED_EVENT", "This event lacks authenticated provenance", 403);
   return operations.withOutputLock(outputId, async () => {
     const s=await operations.loadSession(outputId);
     if (!s) err("REVIEW_NOT_FOUND", "No Rendering Review session exists",404);
