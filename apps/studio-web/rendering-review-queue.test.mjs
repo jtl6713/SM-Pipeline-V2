@@ -7,7 +7,7 @@ const html=fs.readFileSync(new URL('./index.html',import.meta.url),'utf8');
 const script=fs.readFileSync(new URL('./assets/rendering-review-queue.js',import.meta.url),'utf8');
 const css=fs.readFileSync(new URL('./assets/rendering-review-queue.css',import.meta.url),'utf8');
 
-test('dedicated Chicago review page and nav are opt-in read-only surfaces',()=>{
+test('dedicated Chicago review page and nav are opt-in protected surfaces',()=>{
   assert.match(html,/<button[^>]*id="navRenderingReview"[^>]*hidden/);
   assert.match(html,/<section id="page-rendering-review" class="page"/);
   assert.match(html,/id="rrVideo"[^>]*controls playsinline/);
@@ -15,10 +15,11 @@ test('dedicated Chicago review page and nav are opt-in read-only surfaces',()=>{
   assert.match(html,/id="rrMore"/);
   assert.match(html,/rendering-review-queue\.js/);
   assert.match(html,/rendering-review-queue\.css/);
-  assert.match(html,/No changes or review holds are created from this page/);
+  assert.match(html,/Previewing never enrolls an output or publishes it/);
   assert.match(css,/@media\(max-width:760px\)/);
   assert.doesNotMatch(html,/id="rr(?:Submit|Approve|Publish|Commit|Release)"/);
-  assert.doesNotMatch(script,/method:\s*['"](?:POST|PATCH|PUT|DELETE)['"]/);
+  assert.match(script,/method:'POST'/);
+  assert.doesNotMatch(script,/method:\s*['"](?:PATCH|PUT|DELETE)['"]/);
 });
 class Node {
   constructor(tag='div'){
@@ -53,7 +54,7 @@ test('queue UI does not write, respects Chicago scope, and renders a safe origin
     if(url==='/api/session')return {ok:true,json:async()=>({
       ok:true,authenticated:true,authorized:true,permissions:{outputs_review:true}})};
     if(url.startsWith('/api/rendering-review/queue?'))return {ok:true,json:async()=>({
-      ok:true,flags:{admission_enabled:false,automatic_sampling_percent:0},
+      ok:true,flags:{admission_enabled:false,producer_conversation_enabled:false,automatic_sampling_percent:0},
       queue:[{output_id:'recA1B2C3D4E5F6G7',profile_id:'recT2rbKX3MF7cVFU',
         output_type:'Instagram Reel',manual_admission_enabled:false,output_number:54,
         title:'Chicago test reel',render_status:'Rendered',review_held:false,
