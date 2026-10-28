@@ -161,6 +161,7 @@ test("an existing Instagram media container blocks enrollment before a hold or s
  for(const [field,value] of [
   ["Platform_Media_ID","existing-container-123"],
   ["Platform_Post_URL","https://instagram.com/reel/existing"],
+  ["Publish_Locked_By","active-remote-publisher"],
  ]){
   const f=fake({mutationGate:true});
   f.output.fields[field]=value;
