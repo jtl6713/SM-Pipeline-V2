@@ -64,7 +64,7 @@ test('queue UI does not write, respects Chicago scope, and renders a safe origin
     document:{getElementById:id=>nodes[id],createElement:tag=>new Node(tag)},
     window:{location:{href:'https://studio.test/'},CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''}},
     MutationObserver:class {constructor(cb){notify=cb;}observe(){}},
-    fetch:fetchStub,URL,
+    fetch:fetchStub,URL,URLSearchParams,
   };
   vm.runInNewContext(script,sandbox,{filename:'rendering-review-queue.js'});
   await tick();await tick();
