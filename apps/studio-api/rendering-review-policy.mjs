@@ -1,0 +1,284 @@
+/**
+ * Rendering Review Phase 0: pure, deny-by-default lifecycle and dispatch policy.
+ *
+ * This module DOES NOT establish a provider/Studio hold, modify Airtable,
+ * enqueue a render, or approve a post. The caller must first acquire and
+ * verify an authoritative hold, then persist the returned session using a
+ * serialized, version-checked coordinator. Do not activate the UI or enroll
+ * live outputs until every publishing path consults a durable session gate.
+ */
+export const CHICAGO_PROFILE_ID = "recT2rbKX3MF7cVFU";
+export const REVIEW_SCHEMA = "studio.render-review.1";
+export const REVIEW_PILOT = Object.freeze({
+  enabled: false,
+  profile_ids: Object.freeze([CHICAGO_PROFILE_ID]),
+  output_types: Object.freeze(["Instagram Reel"]),
+  manual_admission: true,
+  sample_percent: 0,
+  quality_auto_admission: false,
+  scheduled_auto_admission: false,
+  max_sampled_open: 5,
+});
+export const REVIEW_STATES = Object.freeze([
+  "ready_for_review", "discussing", "awaiting_assets", "plan_ready",
+  "queued", "rendering", "validating", "revision_failed",
+  "approved", "cancelled",
+]);
+const ACTIVE_REVIEW = new Set(REVIEW_STATES.filter(s => s !== "approved" && s !== "cancelled"));
+const inProgress = new Set(["queued", "rendering", "validating"]);
+const text = value => String(value ?? "").trim();
+const lower = value => text(value).toLowerCase();
+const fail = (code, message, status = 409) => {
+  const error = new Error(message);
+  error.code = code;
+  error.status = status;
+  throw error;
+};
+const validId = v => /^[A-Za-z0-9_-]{8,120}$/.test(text(v));
+const copy = x => JSON.parse(JSON.stringify(x));
+const hasReceipt = v => Boolean(v?.post_id || v?.published_at || v?.platform_post_url);
+const isPublished = o => hasReceipt(o) || /^(published|publishing|dispatched)$/i.test(text(o?.output_status)) ||
+  /^(published|publishing|dispatched)$/i.test(text(o?.publish_status));
+const isDispatching = o => Boolean(o?.publish_started_at || o?.publish_locked_at ||
+  o?.dispatch_lease_active || o?.irreversible_dispatch_started);
+const humanIntent = v => v === "explicit_button" || v === "explicit_go_ahead";
+const current = s => s.attempts.find(a => a.id === s.current_attempt_id);
+const eligible = (o, p) =>
+  p.profile_ids.includes(text(o?.profile_id)) &&
+  p.output_types.includes(text(o?.output_type)) &&
+  lower(o?.platform) === "instagram";
+
+export function reviewEligibility(output, policy = REVIEW_PILOT, admission = "manual") {
+  if (!policy?.enabled) return { allowed: false, reason: "FEATURE_DISABLED" };
+  if (!eligible(output, policy)) return { allowed: false, reason: "OUTSIDE_PILOT_SCOPE" };
+  if (admission !== "manual" || !policy.manual_admission)
+    return { allowed: false, reason: "AUTOMATIC_ENROLLMENT_DISABLED" };
+  if (isPublished(output) || isDispatching(output))
+    return { allowed: false, reason: "DISPATCH_ALREADY_STARTED" };
+  if (lower(output?.render_status) !== "rendered" || !text(output?.final_file_id || output?.final_file_url))
+    return { allowed: false, reason: "NO_COMPLETED_RENDER" };
+  if (output?.review_session_exists) return { allowed: false, reason: "ALREADY_ENROLLED" };
+  return { allowed: true, reason: null };
+}
+
+/** Requires caller-verified hold receipt, not a requested/pending hold. */
+export function enrollReview(output, hold, policy, { session_id, original_attempt_id } = {}) {
+  const check = reviewEligibility(output, policy);
+  if (!check.allowed) fail(check.reason, "Output is not eligible for manual Rendering Review");
+  if (!validId(session_id) || !validId(original_attempt_id))
+    fail("INVALID_IDENTITY", "Session and original attempt IDs are required", 400);
+  if (hold?.verified !== true || !validId(hold?.id) ||
+      text(hold.output_id) !== text(output.id) ||
+      text(hold.owner) !== text(session_id))
+    fail("HOLD_NOT_VERIFIED", "Authoritative review hold must be verified before enrollment");
+  const artifact = text(output.final_file_id || output.final_file_url);
+  return {
+    schema: REVIEW_SCHEMA, id: session_id, output_id: text(output.id),
+    profile_id: text(output.profile_id), output_type: text(output.output_type),
+    state: "ready_for_review", version: 1,
+    review_hold: { id: hold.id, owner: session_id, active: true },
+    original_approval: output.approved_attempt_id || null,
+    current_attempt_id: original_attempt_id, latest_attempt_number: 1,
+    approved_attempt_id: null, plan: null, pending_authorization: null,
+    active_job: null, messages: [], processed: {}, history: [],
+    attempts: [{ id: original_attempt_id, number: 1, parent_id: null,
+      status: "ready_for_review", artifact_id: artifact, plan_version: null,
+      job_id: null, cleanup_state: "not_applicable" }],
+  };
+}
+
+function checkSession(session) {
+  if (!session || session.schema !== REVIEW_SCHEMA ||
+      !REVIEW_STATES.includes(session.state) || !session.review_hold)
+    fail("INVALID_SESSION", "Review session is missing or malformed", 400);
+}
+function requirePlanReady(s, planVersion, planHash) {
+  const p = s.plan;
+  if (!p || p.version !== planVersion || p.hash !== planHash)
+    fail("STALE_PLAN", "The revision plan changed; inspect the latest plan");
+  if (!p.frozen || p.missing_assets?.length)
+    fail("DEPENDENCIES_UNRESOLVED", "Validate the frozen plan and its required assets");
+}
+function markHistory(s, e) {
+  s.history.push({ type: e.type, key: e.idempotency_key, at: text(e.at), version: s.version });
+}
+
+/**
+ * All events require expected_version + idempotency_key + canonical fingerprint.
+ * Caller performs authentication and serializes read/modify/persist. The event
+ * result is an intended state change, NEVER a permission to run side effects.
+ */
+export function applyReviewEvent(session, event) {
+  checkSession(session);
+  const key = text(event?.idempotency_key);
+  const fingerprint = text(event?.fingerprint);
+  if (!validId(key) || !validId(fingerprint))
+    fail("INVALID_REQUEST_ID", "Idempotency key and request fingerprint required", 400);
+  const prior = session.processed[key];
+  if (prior) {
+    if (prior !== fingerprint) fail("IDEMPOTENCY_CONFLICT", "Request ID used for different content");
+    return { session: copy(session), replay: true, ignored: false };
+  }
+  if (!Number.isSafeInteger(event.expected_version) || event.expected_version !== session.version)
+    fail("STALE_SESSION", "Session changed; reload the latest state before retrying");
+  const s = copy(session);
+  const kind = text(event.type);
+  let ignored = false;
+
+  if (kind === "MESSAGE") {
+    if (s.state === "cancelled" || s.state === "approved")
+      fail("SESSION_CLOSED", "This review is no longer open");
+    if (!["user", "producer"].includes(event.role) ||
+        !text(event.content) || text(event.content).length > 3000 ||
+        !validId(event.message_id))
+      fail("INVALID_MESSAGE", "Valid actor, message ID and content required", 400);
+    s.messages.push({ id: event.message_id, role: event.role,
+      content: text(event.content), at: text(event.at), attempt_id: s.current_attempt_id,
+      timestamp_seconds: Number.isFinite(event.timestamp_seconds) &&
+        event.timestamp_seconds >= 0 ? event.timestamp_seconds : null });
+    if (s.state === "ready_for_review") s.state = "discussing";
+    // Messages during rendering are feedback for the NEXT attempt, never job mutation.
+  } else if (kind === "PROPOSE_PLAN") {
+    if (!["ready_for_review", "discussing", "awaiting_assets", "plan_ready", "revision_failed"].includes(s.state))
+      fail("PLAN_NOT_EDITABLE", "Cannot replace a plan while rendering");
+    if (!validId(event.plan_hash) || !Number.isSafeInteger(event.plan_version) ||
+        event.plan_version !== (s.plan?.version || 0) + 1 ||
+        !Array.isArray(event.missing_assets) ||
+        event.missing_assets.some(id => !validId(id)))
+      fail("INVALID_PLAN", "A newer validated plan version and dependency list are required", 400);
+    s.plan = { version: event.plan_version, hash: event.plan_hash, frozen: event.frozen === true,
+      missing_assets: [...new Set(event.missing_assets)], source_attempt_id: s.current_attempt_id,
+      acceptance_checks: Array.isArray(event.acceptance_checks) ? event.acceptance_checks : [] };
+    s.pending_authorization = null; // materially changed plan revokes conditional intent
+    s.state = s.plan.missing_assets.length ? "awaiting_assets" : s.plan.frozen ? "plan_ready" : "discussing";
+  } else if (kind === "ASSET_VALIDATED") {
+    if (s.state !== "awaiting_assets" || !s.plan || !s.plan.frozen)
+      fail("NO_MISSING_ASSET_PLAN", "There is no frozen plan awaiting assets");
+    if (s.plan.hash !== event.plan_hash || s.plan.version !== event.plan_version)
+      fail("STALE_PLAN", "Assets belong to a superseded plan");
+    const id = text(event.requirement_id);
+    if (!s.plan.missing_assets.includes(id) || event.validation_passed !== true)
+      fail("ASSET_NOT_VALIDATED", "Required asset was not validated");
+    s.plan.missing_assets = s.plan.missing_assets.filter(x => x !== id);
+    s.state = s.plan.missing_assets.length ? "awaiting_assets" : "plan_ready";
+    // Conditional authorization is a separate durable decision. Caller may
+    // commit it exactly once only after this state is persisted.
+  } else if (kind === "AUTHORIZE_AFTER_ASSETS") {
+    if (s.state !== "awaiting_assets" || !humanIntent(event.intent))
+      fail("NO_CONDITIONAL_AUTH", "Explicit intent is needed for an awaiting-assets plan");
+    if (s.plan?.hash !== event.plan_hash || s.plan?.version !== event.plan_version || !s.plan.frozen)
+      fail("STALE_PLAN", "Conditional authorization must bind the frozen plan");
+    s.pending_authorization = { plan_hash: s.plan.hash, plan_version: s.plan.version,
+      source_attempt_id: s.current_attempt_id };
+  } else if (kind === "COMMIT_PLAN") {
+    if (s.state !== "plan_ready" || !s.review_hold.active)
+      fail("REVIEW_NOT_READY", "Review hold and a ready plan are required");
+    requirePlanReady(s, event.plan_version, event.plan_hash);
+    const conditional = s.pending_authorization?.plan_hash === s.plan.hash &&
+      s.pending_authorization?.plan_version === s.plan.version &&
+      s.pending_authorization?.source_attempt_id === s.current_attempt_id;
+    if (!humanIntent(event.intent) && !(event.intent === "authorized_after_assets" && conditional))
+      fail("COMMIT_NOT_AUTHORIZED", "Explicit authorization is required for this plan");
+    if (!validId(event.attempt_id) || !validId(event.job_id))
+      fail("INVALID_JOB_ID", "Attempt and job identities are required", 400);
+    const parent_id = s.current_attempt_id;
+    const number = s.latest_attempt_number + 1;
+    s.attempts.push({ id: event.attempt_id, number, parent_id, status: "queued",
+      artifact_id: null, plan_version: s.plan.version, job_id: event.job_id,
+      cleanup_state: "pending" });
+    s.current_attempt_id = event.attempt_id;
+    s.latest_attempt_number = number;
+    s.approved_attempt_id = null;
+    s.active_job = { id: event.job_id, attempt_id: event.attempt_id, plan_hash: s.plan.hash };
+    s.pending_authorization = null;
+    s.state = "queued";
+  } else if (["RENDER_STARTED", "RENDER_VALIDATING", "RENDER_READY", "RENDER_FAILED"].includes(kind)) {
+    if (!s.active_job || s.active_job.id !== event.job_id ||
+        s.active_job.attempt_id !== event.attempt_id || !inProgress.has(s.state)) {
+      // Stale authenticated callbacks must be acknowledged without promotion.
+      ignored = true;
+    } else {
+      const attempt = current(s);
+      if (!attempt || attempt.id !== event.attempt_id)
+        fail("ATTEMPT_MISMATCH", "Active attempt is inconsistent");
+      if (kind === "RENDER_STARTED") {
+        if (s.state !== "queued") ignored = true;
+        else s.state = attempt.status = "rendering";
+      } else if (kind === "RENDER_VALIDATING") {
+        if (s.state !== "rendering") ignored = true;
+        else s.state = attempt.status = "validating";
+      } else if (kind === "RENDER_READY") {
+        if (s.state !== "validating" || event.validation_passed !== true || !validId(event.artifact_id))
+          fail("RENDER_NOT_VALIDATED", "A validated immutable artifact is required");
+        attempt.artifact_id = event.artifact_id;
+        attempt.status = "ready_for_review";
+        s.state = "ready_for_review";
+        s.active_job = null;
+        s.plan = null;
+      } else {
+        attempt.status = "revision_failed";
+        s.state = "revision_failed";
+        s.active_job = null;
+      }
+    }
+  } else if (kind === "APPROVE_ATTEMPT") {
+    if (s.state !== "ready_for_review" || !s.review_hold.active ||
+        event.attempt_id !== s.current_attempt_id ||
+        event.artifact_id !== current(s)?.artifact_id ||
+        event.unrelated_hold_active === true)
+      fail("STALE_OR_HELD_APPROVAL", "Only the current validated attempt may be approved");
+    // This is a request to apply the existing authoritative scheduler. The
+    // orchestrator must actually write and verify approval before releasing hold.
+    s.approved_attempt_id = s.current_attempt_id;
+    s.state = "approved";
+  } else if (kind === "RELEASE_REVIEW_HOLD") {
+    if (s.state !== "approved" || event.scheduler_receipt_verified !== true ||
+        event.hold_id !== s.review_hold.id || event.hold_owner !== s.id)
+      fail("HOLD_RELEASE_DENIED", "Verified scheduled approval and exact hold ownership required");
+    s.review_hold.active = false;
+  } else if (kind === "CANCEL") {
+    if (s.state === "approved") fail("ALREADY_APPROVED", "An approved review cannot be cancelled");
+    if (s.state === "cancelled") ignored = true;
+    else {
+      if (s.active_job) {
+        if (event.job_fenced !== true) fail("ACTIVE_JOB_NOT_FENCED", "Cancel/fence the active job first");
+        s.active_job = null;
+      }
+      s.state = "cancelled";
+      // Releasing the hold / restoring a prior attempt is a separate
+      // audited operation, never an automatic side effect of cancellation.
+    }
+  } else {
+    fail("UNKNOWN_EVENT", "Unsupported review event", 400);
+  }
+  s.version += 1;
+  s.processed[key] = fingerprint;
+  markHistory(s, event);
+  return { session: s, replay: false, ignored };
+}
+
+/**
+ * Additional gate; never substitutes for the legacy publishing checks.
+ * Disabling feature admissions MUST NOT allow an existing session to dispatch.
+ */
+export function reviewDispatchGate(session, output, candidate) {
+  if (!session) return { allowed: true, reason: "UNENROLLED_LEGACY_PATH" };
+  checkSession(session);
+  if (isPublished(output) || isDispatching(output)) return { allowed: false, reason: "OUTPUT_ALREADY_DISPATCHING" };
+  if (session.review_hold.active) return { allowed: false, reason: "REVIEW_HOLD_ACTIVE" };
+  const attempt = current(session);
+  if (session.state !== "approved" || !attempt ||
+      session.approved_attempt_id !== session.current_attempt_id ||
+      candidate?.attempt_id !== attempt.id || candidate?.artifact_id !== attempt.artifact_id)
+    return { allowed: false, reason: "STALE_OR_UNAPPROVED_ATTEMPT" };
+  if (output?.unrelated_hold_active) return { allowed: false, reason: "OTHER_HOLD_ACTIVE" };
+  return { allowed: true, reason: null };
+}
+
+export function cleanupCandidates(files, referenceCounts) {
+  if (!Array.isArray(files)) fail("INVALID_FILES", "Expected generated media inventory", 400);
+  return files.filter(f => f?.generated === true && validId(f?.owner_attempt_id) &&
+    f.canonical_source !== true && f.published_evidence !== true &&
+    f.shared !== true && f.owned_by_attempt === true &&
+    Number(referenceCounts?.[f.id]) === 0).map(f => f.id);
+}
