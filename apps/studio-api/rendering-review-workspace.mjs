@@ -46,7 +46,10 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
     });
     if(!page.valid||!Array.isArray(page.records)||page.records.length>40)
       fail(503,'Authoritative rendered queue unavailable');
-    const queue=[];
+    // Select eligible Platform Output rows without trusting the display-only
+    // Content_Profile lookup. Resolve their linked Content Items in ONE exact-ID
+    // Airtable query instead of 40 serial subrequests per source page.
+    const candidates=[];
     for(const row of page.records){
       const f=row?.fields||{};
       const links=f.Content_Item;
@@ -56,10 +59,34 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
       if(/^(published|publishing|dispatched)$/i.test(text(f.Publish_Status))||
          /^(published|publishing|dispatched)$/i.test(text(f.Output_Status))||
          f.Published_At||f.Platform_Post_ID)continue;
-      const content=await operations.airtableFetch(env,'tblwzN9AXWvmKVKPs',links[0]);
-      if(content?.id!==links[0]||!Array.isArray(content.fields?.Content_Profile)||
+      candidates.push({row,contentId:links[0]});
+    }
+    const uniqueContentIds=[...new Set(candidates.map(item=>item.contentId))];
+    let contentById=new Map();
+    if(uniqueContentIds.length){
+      const formula='OR('+uniqueContentIds.map(id=>'RECORD_ID()="'+id+'"').join(',')+')';
+      const contentPage=await operations.listRecordsPage(env,'tblwzN9AXWvmKVKPs',{
+        limit:uniqueContentIds.length,filterFormula:formula,fields:['Content_Profile'],
+      });
+      // An incomplete source read must not become an apparently verified
+      // authorization decision. Missing/deleted links are individually skipped.
+      if(!contentPage.valid||!Array.isArray(contentPage.records)||
+         contentPage.records.length>uniqueContentIds.length||contentPage.offset)
+        fail(503,'Authoritative Content Item batch read unavailable');
+      const wanted=new Set(uniqueContentIds);
+      for(const content of contentPage.records){
+        if(!rec(content?.id)||!wanted.has(content.id)||contentById.has(content.id))
+          fail(503,'Authoritative Content Item batch identity mismatch');
+        contentById.set(content.id,content);
+      }
+    }
+    const queue=[];
+    for(const {row,contentId} of candidates){
+      const content=contentById.get(contentId);
+      if(!Array.isArray(content?.fields?.Content_Profile)||
          content.fields.Content_Profile.length!==1||
          content.fields.Content_Profile[0]!==chicago)continue;
+      const f=row.fields;
       const held=f[RENDER_REVIEW_OUTPUT_FIELDS.hold_active]===true||
         [RENDER_REVIEW_OUTPUT_FIELDS.hold_id,RENDER_REVIEW_OUTPUT_FIELDS.hold_owner,
           RENDER_REVIEW_OUTPUT_FIELDS.session_id].some(key=>Boolean(text(f[key])));
