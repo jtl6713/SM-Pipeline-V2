@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {serveReviewAttemptVideo} from "./rendering-review-attempt-video.mjs";
+import {serveReviewAttemptVideo,fetchTrustedRunnerReviewMedia} from "./rendering-review-attempt-video.mjs";
 const output="rec0uVrVeiUM6shp9", id="rrattempt_1234567890abcdef";
 const file="1XZ-_ARlXoP5mwILho13f81vmWQlpgTs4";
 const session={id:"rrsession_test12345678",output_id:output,
@@ -56,4 +56,33 @@ test("rejects mismatched persistent attempt, missing artifact and unready status
   f.args.loadWorkspace=async()=>({ok:true,publication_hold_verified:true,session:wrong});
   await assert.rejects(()=>serveReviewAttemptVideo(f.args),e=>e.status===409);
   assert.equal(f.calls(),0);
+});
+
+test("exact Runner Google relay preserves Range and credentials never appear in media URL",async()=>{
+  let seen;
+  const reply=await fetchTrustedRunnerReviewMedia({
+    env:{PIPELINE_RUNNER_URL:"https://pipeline.chicagoshining.com",
+      PIPELINE_RUNNER_SHARED_SECRET:"x".repeat(32)},
+    outputId:output,attemptId:id,
+    request:new Request("https://studio.example/media",{headers:{Range:"bytes=50-99"}}),
+    transport:async(url,options)=>{seen={url,options};return new Response("video",{
+      status:206,headers:{"Content-Type":"video/mp4","Content-Range":"bytes 50-99/700"}})},
+  });
+  assert.equal(reply.status,206);
+  assert.equal(seen.url,"https://pipeline.chicagoshining.com/jobs/rendering-review/attempt-media/"+output+"/"+id);
+  assert.equal(seen.options.headers.get("Range"),"bytes=50-99");
+  assert.equal(seen.options.headers.get("X-Pipeline-Secret"),"x".repeat(32));
+  assert.equal(seen.url.includes("x".repeat(32)),false);
+});
+test("Runner relay fails closed for untrusted origin and malformed range",async()=>{
+  const base={PIPELINE_RUNNER_URL:"https://untrusted.example",
+    PIPELINE_RUNNER_SHARED_SECRET:"x".repeat(32)};
+  const request=new Request("https://studio.example/media",{headers:{Range:"bytes=0-99"}});
+  await assert.rejects(()=>fetchTrustedRunnerReviewMedia({
+    env:base,outputId:output,attemptId:id,request}),e=>e.status===503);
+  await assert.rejects(()=>fetchTrustedRunnerReviewMedia({
+    env:{...base,PIPELINE_RUNNER_URL:"https://pipeline.chicagoshining.com"},
+    outputId:output,attemptId:id,
+    request:new Request("https://studio.example/media",{headers:{Range:"nonsense"}}),
+  }),e=>e.status===416);
 });

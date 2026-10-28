@@ -743,3 +743,4 @@ Rendering Review V3 source validation + Producer executable timeline canary code
 
 2026-10-28: Deploy Studio Rendering Review #8447 authenticated V1/V2 MP4 playback (UI 0.6.769); no render or publish action.
 2026-10-28: Redeploy Chicago #8447 authenticated V1/V2 video streaming, preserving the already active Chicago Instagram scheduling lane in postdeploy verification.
+# 2026-10-28: Deliver protected Chicago #8447 V2 Google Drive streaming through Runner credentials, no public share or Instagram publication.

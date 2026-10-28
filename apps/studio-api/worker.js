@@ -1,5 +1,5 @@
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
-import { serveReviewAttemptVideo } from "./rendering-review-attempt-video.mjs";
+import { serveReviewAttemptVideo, fetchTrustedRunnerReviewMedia } from "./rendering-review-attempt-video.mjs";
 import { completeReviewAttempt } from "./rendering-review-completion-http.mjs";
 import {applyReviewEvent} from "./rendering-review-policy.mjs";
 import { makeRenderingReviewAirtableOperations } from "./rendering-review-airtable.mjs";
@@ -1766,7 +1766,9 @@ export default {
               fields:["Attempt_ID","Session_ID","Output_Record_ID",
                 "Attempt_Number","Attempt_Status","Artifact_File_ID"],
             }),
-            readVideo:fetchGoogleDriveVideo,
+            readVideo:(_file,_source,probe,config,identity)=>fetchTrustedRunnerReviewMedia({
+              env:config,outputId:identity.outputId,attemptId:identity.attemptId,request:probe,
+            }),
             copyHeaders:copyDriveVideoHeaders,
           });
         }
