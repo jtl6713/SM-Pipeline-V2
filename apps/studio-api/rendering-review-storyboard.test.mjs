@@ -61,3 +61,61 @@ test("tampered preview, bad crop, unowned media, wrong profile and unknown sourc
  v.output.fields.Remotion_Props_JSON=v.output.fields.Remotion_Props_JSON.replace("media.chicagoshining.com","evil.example");
  assert.equal(reviewStillStoryboard(v).length,0);
 });
+
+
+test("held #8447 reveals verified Morning source for BOTH Night frames without silently saving a plan",()=>{
+ const assets=Array.from({length:10},(_,i)=>({
+   id:i===6?"e7eafa73de3e460782":"photo-source-"+i,
+   media:"rec"+String(i+1).padStart(14,"0"),
+   name:i===6?"Chicago Riverwalk 8":i===0?"Gibsons Italia 5":
+     i===4?"Chicago Riverwalk 10":"Chicago Day "+i,
+   day:i===0||i===4?"Night":"Morning",
+   drive:"1OriginalAssetFileABCDEFGHI"+i,
+   crop:"1ApprovedCropABCDEFGHIJKL"+i,
+   url:img("ten-"+i),
+ }));
+ const output={id:"rec0uVrVeiUM6shp9",fields:{
+   Remotion_Props_JSON:JSON.stringify({
+     compositionId:"ChicagoShiningPhotoSequence",fps:30,
+     clips:assets.map((a,i)=>({mediaAssetRecordId:a.media,
+       startFrame:i*90,durationFrames:90,googleDriveFileId:a.crop,
+       url:a.url,src:a.url})),
+   }),
+ }};
+ const request={id:"rec00000000000099",fields:{
+   Studio_Master_Assets_JSON:JSON.stringify(assets.map(a=>({
+     id:a.id,name:a.name,media_asset_record_id:a.media,google_drive_file_id:a.drive
+   }))),
+   Studio_Variant_Manifest_JSON:JSON.stringify({
+     production_request_record_id:"rec00000000000099",complete:true,
+     assets:assets.map(a=>({id:a.id,media_asset_record_id:a.media,
+       google_drive_file_id:a.drive,variants:{"9:16":{
+         google_drive_file_id:a.crop,preview_status:"Ready",preview_url:a.url
+       }}})),
+   }),
+ }};
+ const media=assets.map(a=>({id:a.media,fields:{
+   "Asset Name":a.name,"Media_Class":"Image","Asset_Status":"Available",
+   "Rights_Status":"Owned","Active":true,"Do_Not_Use":false,
+   "Content_Profile":[chicago],"Google Drive File ID":a.drive,"Time_Of_Day":a.day
+ }}));
+ const session={producer_candidate:{stale:false,candidate:{timeline:assets.map((a,i)=>({
+   start_seconds:i*3,end_seconds:(i+1)*3,asset_ids:[
+     i===4?"e7eafa73de3e460782":a.id
+   ]
+ }))}}};
+ const r=reviewStillStoryboard({output,request,media,session});
+ assert.equal(r.length,10);
+ assert.equal(r[0].original.time_of_day,"Night");
+ assert.equal(r[0].proposed.time_of_day,"Night","saved proposal MUST remain truthful");
+ assert.equal(r[0].changed,false);
+ assert.equal(r[0].suggested.time_of_day,"Morning");
+ assert.equal(r[0].suggested.name,"Chicago Riverwalk 8");
+ assert.equal(r[4].proposed.time_of_day,"Morning");
+ assert.equal(r[4].suggested.name,"Chicago Riverwalk 8");
+ assert.ok(r.every(row=>row.suggestion_saved===false&&row.video_rendered===false));
+ const other={...output,id:"rec00000000000098"};
+ assert.equal(reviewStillStoryboard({output:other,request,media,session})[0].suggested,null);
+ media[6].fields.Rights_Status="Unverified";
+ assert.equal(reviewStillStoryboard({output,request,media,session}).length,0);
+});
