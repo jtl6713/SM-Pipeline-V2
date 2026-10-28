@@ -18,7 +18,7 @@ PROPOSAL = {"candidate_only": True, "requires_fact_validation": True,
 
 class ProposalRouteTests(unittest.TestCase):
     def fixture(self, *, secret="test-runner-secret-123", fail_evidence=None,
-                fail_model=None, result=PROPOSAL):
+                fail_model=None, result=PROPOSAL, drift_after_model=False, lost_hold_after_model=False):
         calls = {"evidence": 0, "model": 0, "client": 0}
         def factory():
             calls["client"] += 1
@@ -28,8 +28,11 @@ class ProposalRouteTests(unittest.TestCase):
             self.assertEqual((output, session, version), (OUTPUT, SESSION, 2))
             if fail_evidence:
                 raise fail_evidence
+            if calls["model"] and lost_hold_after_model:
+                raise ValueError("session hold lost")
             return {"profile_id": "recT2rbKX3MF7cVFU",
-                    "output_type": "Instagram Reel", "version": 2}
+                    "output_type": "Instagram Reel", "version": 2,
+                    "content_revision": "changed" if calls["model"] and drift_after_model else "original"}
         def producer(content, direction, settings):
             calls["model"] += 1
             self.assertEqual(content["version"], 2)
@@ -76,7 +79,23 @@ class ProposalRouteTests(unittest.TestCase):
         self.assertFalse(result.json["render_queued"])
         self.assertFalse(result.json["publication_changed"])
         self.assertEqual(result.headers["Cache-Control"], "no-store")
-        self.assertEqual(calls, {"evidence": 1, "model": 1, "client": 1})
+        self.assertEqual(calls, {"evidence": 2, "model": 1, "client": 2})
+
+    def test_stale_model_candidate_discarded_if_evidence_changed_during_reasoning(self):
+        client, calls = self.fixture(drift_after_model=True)
+        with patch.dict("os.environ", {"RENDERING_REVIEW_PRODUCER_PROPOSALS_ENABLED": "true"}):
+            result = self.send(client)
+        self.assertEqual(result.status_code, 409)
+        self.assertEqual(result.json["error"], "review_changed_during_proposal")
+        self.assertEqual(calls, {"evidence": 2, "model": 1, "client": 2})
+
+    def test_model_candidate_discarded_if_review_hold_lost_during_reasoning(self):
+        client, calls = self.fixture(lost_hold_after_model=True)
+        with patch.dict("os.environ", {"RENDERING_REVIEW_PRODUCER_PROPOSALS_ENABLED": "true"}):
+            result = self.send(client)
+        self.assertEqual(result.status_code, 409)
+        self.assertEqual(result.json["error"], "review_changed_during_proposal")
+        self.assertEqual(calls, {"evidence": 2, "model": 1, "client": 2})
 
     def test_input_allowlist_prevents_caller_supplied_approval_context_or_evidence(self):
         client, calls = self.fixture()
