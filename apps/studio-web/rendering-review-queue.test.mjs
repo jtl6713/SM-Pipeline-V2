@@ -15,7 +15,7 @@ test('dedicated Chicago review page and nav are opt-in read-only surfaces',()=>{
   assert.match(html,/id="rrMore"/);
   assert.match(html,/rendering-review-queue\.js/);
   assert.match(html,/rendering-review-queue\.css/);
-  assert.match(html,/Review enrollment and new changes are not yet enabled/);
+  assert.match(html,/No changes or review holds are created from this page/);
   assert.match(css,/@media\(max-width:760px\)/);
   assert.doesNotMatch(html,/id="rr(?:Submit|Approve|Publish|Commit|Release)"/);
   assert.doesNotMatch(script,/method:\s*['"](?:POST|PATCH|PUT|DELETE)['"]/);
