@@ -672,14 +672,17 @@ jobs:
           TOKEN=$(cat /tmp/verify-token.txt)
           URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/rendering-review-sessions"
           curl -fsS --retry 3 --max-time 60 "$URL" -o /tmp/rendering-review-sessions.json
-          jq -e '.ok==true and (.sessions|type)=="array" and .flags.admission_enabled==false and .flags.automatic_sampling_percent==0 and .flags.integration_verified==false' /tmp/rendering-review-sessions.json >/dev/null
+          REVIEW_ADMISSION_EXPECTED=$(jq -r '(.RENDERING_REVIEW_ENROLL_WRITES_ENABLED=="true" and .RENDERING_REVIEW_MANUAL_ADMISSION_ENABLED=="true" and .RENDERING_REVIEW_INTEGRATION_VERIFIED=="true" and .RENDERING_REVIEW_DISPATCH_FENCE_VERIFIED=="true" and .RENDERING_REVIEW_SCHEDULER_VACATE_VERIFIED=="true")' /tmp/active-plain-vars.json)
+          REVIEW_INTEGRATION_EXPECTED=$(jq -r '.RENDERING_REVIEW_INTEGRATION_VERIFIED=="true"' /tmp/active-plain-vars.json)
+          REVIEW_EXACT_OUTPUT=$(jq -r '.RENDERING_REVIEW_EXACT_OUTPUT_ID // ""' /tmp/active-plain-vars.json)
+          jq -e --argjson admission "$REVIEW_ADMISSION_EXPECTED" --argjson integration "$REVIEW_INTEGRATION_EXPECTED" '.ok==true and (.sessions|type)=="array" and .flags.admission_enabled==$admission and .flags.automatic_sampling_percent==0 and .flags.integration_verified==$integration' /tmp/rendering-review-sessions.json >/dev/null
           echo "rendering_review_authenticated_read=PASS"
           QUEUE_URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/rendering-review-queue"
           QUEUE_SECONDS=$(curl -fsS --retry 3 --max-time 60 -w '%{time_total}' "$QUEUE_URL" -o /tmp/rendering-review-queue.json)
           echo "rendering_review_chicago_queue_read_seconds=$QUEUE_SECONDS"
-          jq -e '.ok==true and (.queue|type)=="array" and (.next_cursor==null or (.next_cursor|type)=="string") and .flags.admission_enabled==false and .flags.automatic_sampling_percent==0 and .flags.integration_verified==false and ([.queue[] | select(.profile_id!="recT2rbKX3MF7cVFU" or .output_type!="Instagram Reel" or .manual_admission_enabled!=false)]|length)==0' /tmp/rendering-review-queue.json >/dev/null
+          jq -e --argjson admission "$REVIEW_ADMISSION_EXPECTED" --argjson integration "$REVIEW_INTEGRATION_EXPECTED" --arg pilot "$REVIEW_EXACT_OUTPUT" '.ok==true and (.queue|type)=="array" and (.next_cursor==null or (.next_cursor|type)=="string") and .flags.admission_enabled==$admission and .flags.automatic_sampling_percent==0 and .flags.integration_verified==$integration and ([.queue[] | select(.profile_id!="recT2rbKX3MF7cVFU" or .output_type!="Instagram Reel" or (.manual_admission_enabled==true and (.output_id!=$pilot or $admission!=true)))]|length)==0' /tmp/rendering-review-queue.json >/dev/null
           echo "rendering_review_chicago_queue_read=PASS count=$(jq '.queue|length' /tmp/rendering-review-queue.json)"
-          echo "rendering_review_admission_enabled=false sampling_percent=0 integration_verified=false"
+          echo "rendering_review_admission_enabled=$REVIEW_ADMISSION_EXPECTED sampling_percent=0 integration_verified=$REVIEW_INTEGRATION_EXPECTED exact_output_allowlisted=$([[ "$REVIEW_EXACT_OUTPUT" =~ ^rec[A-Za-z0-9]{14}$ ]] && echo true || echo false)"
           # Do not emit private conversation/session records into deployment logs.
 
       - name: Verify authoritative All Profiles force refresh through service binding
