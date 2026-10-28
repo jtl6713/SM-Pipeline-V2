@@ -417,10 +417,10 @@ test('Rendering Review does not portray V1 playback as a completed Producer rend
   assert.match(script,/ORIGINAL V1 — unchanged/);
   assert.match(script,/NOT RENDERED/);
   assert.match(script,/Latest Producer proposal — not yet rendered/);
-  assert.match(script,/Prepare corrections for ALL nighttime frames/);
+  assert.match(script,/Request verified replacements for BOTH nighttime frames/);
   assert.match(script,/composer\.value='Please replace BOTH nighttime scenes/);
-  assert.match(script,/Review this instruction, then tap Send to Producer/);
-  assert.match(script,/No render will start/);
+  assert.match(script,/await sendDirection\(composer\.value\)/);
+  assert.match(script,/not render, approve or publish/);
   assert.match(css,/rr-storyboard-pair/);
   assert.doesNotMatch(script,/showMedia\(.*candidate\.candidate\.timeline/);
 });

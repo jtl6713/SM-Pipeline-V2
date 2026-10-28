@@ -264,12 +264,15 @@
               return block;
             };
             pair.append(imageCard('Original V1',frame.original),
-              imageCard(frame.changed?'Proposed replacement · NOT RENDERED':
-                'Proposed · still unchanged',frame.proposed||frame.original));
+              imageCard(!frame.proposed_ready?'No verified replacement proposed yet':
+                frame.changed?'Proposed replacement · NOT RENDERED':
+                'Proposed · still unchanged',frame.proposed));
             item.append(pair);
             if(frame.original.time_of_day==='Night'&&
                (!frame.changed||frame.proposed?.time_of_day==='Night')){
-              item.append(elem('p','Nighttime frame still present in the proposed plan.','rr-v1-warning'));
+              item.append(elem('p',frame.proposed_ready?
+                'Nighttime frame still present in the proposed plan.':
+                'No verified daytime replacement has been proposed for this frame.','rr-v1-warning'));
             }
             section.append(item);
           }
@@ -405,8 +408,8 @@
         feedbackStatus.setAttribute('role','status');
         feedbackStatus.setAttribute('aria-live','polite');
         let pendingKey='',pendingDirection='';
-        form.append(actionButton('Send to Producer',async()=>{
-          const content=String(composer.value||'').trim();
+        const sendDirection=async content=>{
+          content=String(content||'').trim();
           if(!content)throw new Error('Enter creative direction before sending');
           // Keep an idempotency key for a retry of the same direction. A lost
           // response must never create duplicate producer messages.
@@ -434,13 +437,14 @@
           say('Producer response saved. No replacement render has been started.');
           pendingDirection='';pendingKey='';
           await open(entry);
-        },feedbackStatus));
+        };
+        form.append(actionButton('Send to Producer',async()=>sendDirection(composer.value),feedbackStatus));
         form.append(feedbackStatus);
         const unresolvedNight=storyboard.filter(frame=>
           frame?.original?.time_of_day==='Night'&&
           (!frame.changed||frame.proposed?.time_of_day==='Night'));
         if(unresolvedNight.length){
-          form.append(actionButton('Prepare corrections for ALL nighttime frames',async()=>{
+          form.append(actionButton('Request verified replacements for BOTH nighttime frames',async()=>{
             const listed=unresolvedNight.map(f=>'frame '+f.scene+' ('+
               Number(f.start_seconds).toFixed(3)+'–'+Number(f.end_seconds).toFixed(3)+'s)').join(' and ');
             composer.value='Please replace BOTH nighttime scenes, including '+listed+
@@ -450,9 +454,9 @@
               'Do not claim the video was modified; first produce a complete render-ready plan '+
               'with zero unresolved requirements and no invented factual claims. '+
               'I will separately authorize V2 rendering after reviewing the plan.';
-            feedbackStatus.textContent='Both nighttime frames included. Review this instruction, then tap Send to Producer. No render will start.';
-            feedbackStatus.classList.toggle('error-text',false);
-            if(typeof composer.focus==='function')composer.focus();
+            // This explicit reviewer click sends one revision request; it does
+            // not render, approve or publish. Never silently re-run on page GET.
+            await sendDirection(composer.value);
           }));
         }
         form.append(elem('p','Producer discussion does not launch a render. A separate render-only button appears only for an independently verified frozen plan; Instagram approval and publishing remain disabled.','rr-muted'));

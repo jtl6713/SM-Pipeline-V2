@@ -49,7 +49,7 @@ test("display only actual source and proposed variants, never V2 or a rendered M
 test("unfinished model timeline is never described as applied",()=>{
  const v=fixture();v.session.producer_candidate.candidate.timeline.pop();
  const rows=reviewStillStoryboard(v);
- assert.ok(rows.every(r=>r.changed===false&&r.proposed_ready===false));
+ assert.ok(rows.every(r=>r.changed===false&&r.proposed_ready===false&&r.proposed===null));
 });
 test("tampered preview, bad crop, unowned media, wrong profile and unknown source are all denied",()=>{
  const v=fixture();v.media[0].fields.Rights_Status="Unverified";
