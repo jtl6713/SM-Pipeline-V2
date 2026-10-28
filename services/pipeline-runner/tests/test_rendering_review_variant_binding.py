@@ -69,7 +69,7 @@ def renderer_base():
             and n.name=="_review_renderer_base")
     ns={"os":os}
     exec(compile(ast.Module(body=[fn],type_ignores=[]),str(path),"exec"),ns)
-    return ns["_review_renderer_base"]
+    return ns["_review_renderer_base"]()
 
 
 class VariantContract(unittest.TestCase):
