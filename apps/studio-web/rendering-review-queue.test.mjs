@@ -77,8 +77,8 @@ test('queue UI does not write, respects Chicago scope, and renders a safe origin
   for(let i=0;i<10;i++)await tick();
   assert.match(nodes.rrStatus.textContent,/Read-only · Chicago Instagram Reels/);
   assert.equal(nodes.rrQueueList.children.length,1);
-  assert.equal(nodes.rrOpenFile.href,'/api/outputs/recA1B2C3D4E5F6G7/preview');
-  assert.equal(nodes.rrVideo.src,'/api/outputs/recA1B2C3D4E5F6G7/preview');
+  assert.equal(nodes.rrOpenFile.href,'https://studio.test/api/outputs/recA1B2C3D4E5F6G7/preview');
+  assert.equal(nodes.rrVideo.src,'https://studio.test/api/outputs/recA1B2C3D4E5F6G7/preview');
   assert.equal(nodes.rrMore.hidden,true);
   assert.equal(nodes.rrCount.textContent,'1 results loaded');
   assert.equal(requests.length,2);
@@ -213,7 +213,7 @@ test('real Drive /view source uses the authenticated Studio MP4 stream, not a Go
   for(let i=0;i<10;i++)await tick();
   assert.equal(nodes.rrVideo.hidden,false,'Native Studio video is visible');
   assert.equal(nodes.rrVideo.inserted,undefined,'No Google Drive iframe inserted');
-  assert.equal(nodes.rrVideo.src,'/api/outputs/recA1B2C3D4E5F6G7/preview');
+  assert.equal(nodes.rrVideo.src,'https://studio.test/api/outputs/recA1B2C3D4E5F6G7/preview');
   assert.equal(nodes.rrOpenFile.href,nodes.rrVideo.src);
 });
 
@@ -338,14 +338,14 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
   for(let i=0;i<10;i++)await tick();
   assert.equal(reads,1);
   assert.equal(timers.length,1,'One polling callback for exact held session');
-  assert.equal(nodes.rrOpenFile.href,'/api/outputs/'+output+'/preview');
+  assert.equal(nodes.rrOpenFile.href,'https://studio.test/api/outputs/'+output+'/preview');
   await timers[0]();for(let i=0;i<4;i++)await tick();
   assert.equal(reads,2,'Poll reads authoritative session once');
   assert.equal(timers.length,2,'Still queued: do not reset the player');
-  assert.equal(nodes.rrOpenFile.href,'/api/outputs/'+output+'/preview');
+  assert.equal(nodes.rrOpenFile.href,'https://studio.test/api/outputs/'+output+'/preview');
   ready=true;
   await timers[1]();for(let i=0;i<5;i++)await tick();
-  const revisedStream='/api/rendering-review/outputs/'+output+'/attempts/'+attemptId+'/preview';
+  const revisedStream='https://studio.test/api/rendering-review/outputs/'+output+'/attempts/'+attemptId+'/preview';
   assert.equal(nodes.rrOpenFile.href,revisedStream);
   assert.equal(nodes.rrVideo.src,revisedStream);
   assert.equal(nodes.rrVideo.inserted,undefined);
