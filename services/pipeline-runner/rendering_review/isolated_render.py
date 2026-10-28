@@ -86,7 +86,7 @@ def compile_isolated_render_payload(
         not SHA.fullmatch(plan_hash) or
         job.get("state") != "claimed" or
         job.get("lease_verified") is not True or
-        job.get("lease_fence", 0) < 1 or
+        type(job.get("lease_fence")) is not int or job["lease_fence"] < 1 or
         job.get("output_id") != output_id or
         job.get("session_id") != plan.get("session_id") or
         plan.get("plan_hash") != plan_hash or
@@ -105,7 +105,8 @@ def compile_isolated_render_payload(
         source.get("attempt_id") != plan.get("source_attempt_id") or
         source.get("artifact_id") != plan.get("source_artifact_id") or
         source.get("drive_file_id") != plan.get("source_drive_file_id") or
-        source.get("canonical_media_authority") != "google_drive"):
+        source.get("canonical_media_authority") != "google_drive" or
+        source.get("composition_id") != "ChicagoShiningPhotoSequence"):
         _deny("original_artifact_changed")
     creative = plan.get("creative")
     if not isinstance(creative, dict):
@@ -201,7 +202,7 @@ def compile_isolated_render_payload(
     filename = f"review-{output_id}-{attempt_id}-{plan_hash[:12]}.mp4"
     return {
         "filename": filename,
-        "compositionId": "P020",
+        "compositionId": "ChicagoShiningPhotoSequence",
         "fps": FPS,
         "width": 1080,
         "height": 1920,
