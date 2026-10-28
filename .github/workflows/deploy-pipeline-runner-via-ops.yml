@@ -345,3 +345,4 @@ jobs:
 # 2026-10-28: redeploy Runner with compatible review publication regression mock.
 # 2026-10-28: Deliver protected Chicago #8447 V2 Google Drive streaming through Runner credentials, no public share or Instagram publication.
 # 2026-10-28: Deploy protected Chicago Producer Azure-compatible JSON proposal repair, exact Runner version bumped; no output/render/publish canary.
+# 2026-10-28: Producer JSON mode requires explicit JSON wording inside Responses input (not only instructions), version v2; protected runner only, no render or publication.
