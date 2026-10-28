@@ -96,3 +96,4 @@ jobs:
             https://studio.chicagoshining.com/api/health -o /tmp/rr-live-health.json
           jq -e '.ok==true and .rendering_review.admission_enabled==true and .rendering_review.integration_verified==true' /tmp/rr-live-health.json >/dev/null
           echo "chicago_8447_atomic_schedule_vacate_ready=true no_render_or_publish_performed=true"
+# Retry existing guarded Chicago review lane activation after strict binding contract update.
