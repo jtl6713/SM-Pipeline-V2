@@ -29,3 +29,11 @@ test("preview only calls authenticated GETs, never initiates a review or public 
   assert.match(ui,/url\.protocol === "https:"/);
   assert.match(ui,/textContent = String\(value\)/);
 });
+
+test("review navigation preserves Studio's unsaved-work and page lifecycle handling",()=>{
+  assert.doesNotMatch(ui,/stopImmediatePropagation|preventDefault\(\)/);
+  assert.doesNotMatch(ui,/querySelectorAll\("main \.page"\)/);
+  assert.match(ui,/new MutationObserver/);
+  assert.match(ui,/pageObserver\.observe\(root/);
+  assert.match(ui,/details\.querySelector\("video"\)\?\.pause\(\)/);
+});
