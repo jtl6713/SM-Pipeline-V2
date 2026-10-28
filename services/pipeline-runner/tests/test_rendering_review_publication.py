@@ -216,7 +216,7 @@ class ProcessorBoundaryTests(unittest.TestCase):
             None, before_create={"Platform_Media_ID": "another-dispatch-container"},
             new_container=True
         )
-        self.assertEqual(result["reason"], "publication_artifact_changed")
+        self.assertEqual(result["reason"], "remote_publication_already_started")
         self.assertEqual(calls["create"], 0)
         self.assertEqual(calls["publish"], 0)
         self.assertEqual(current["fields"]["Platform_Media_ID"], "another-dispatch-container")
