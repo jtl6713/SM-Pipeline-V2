@@ -86,7 +86,7 @@ jobs:
             output_id='rec0uVrVeiUM6shp9'
             session_id='rrsession_5db47c3f652bf0f80162c4e933cb8b7a913c92c888fec796'
             expected_version=1
-            direction='Create a proposed revision that uses existing Riverwalk stills and preserves the sunrise opening. This is a non-persistent Producer connection canary.'
+            direction='There is a still embedded of nighttime view of the river. Please replace that with a daytime view or even better a sunrise view if we have one.'
           } | ConvertTo-Json -Compress
           $sw=[System.Diagnostics.Stopwatch]::StartNew()
           Add-Type -AssemblyName System.Net.Http
@@ -111,10 +111,12 @@ jobs:
             Write-Output ("producer_probe_http="+$status+" elapsed_sec="+[int]$sw.Elapsed.TotalSeconds+" mime="+$mime+" code="+$code+" ok="+$ok+" render_queued="+$renderQueued)
             if($status -eq 200 -and $ok -and $data.render_queued -eq $false -and $data.publication_changed -eq $false){
               Write-Output 'producer_probe_safe_candidate=true no_persistence=true'
+              Write-Output ("producer_probe_timeline_scenes="+[int]@($data.proposal.candidate.timeline).Count+" requirements="+[int]@($data.proposal.candidate.requirements).Count)
             }
           }catch{
             Write-Output ("producer_probe_transport_failure_elapsed="+[int]$sw.Elapsed.TotalSeconds+" class="+$_.Exception.GetType().Name)
           }finally{
+            if($status -ne 200){
             $localSw=[System.Diagnostics.Stopwatch]::StartNew()
             try{
               $localReq=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post,'http://127.0.0.1:3350/jobs/rendering-review/propose')
@@ -131,6 +133,7 @@ jobs:
             }catch{
               Write-Output ("producer_loopback_transport_failure="+$_.Exception.GetType().Name+" elapsed_sec="+[int]$localSw.Elapsed.TotalSeconds)
             }
+            }else{ Write-Output "producer_loopback_skipped_after_public_success=true" }
             $http.Dispose()
           }
           PS1
