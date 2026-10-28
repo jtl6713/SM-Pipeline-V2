@@ -33,13 +33,44 @@ async function exact(readRecord,table,id){
     fail("REVIEW_SOURCE_UNAVAILABLE","Authoritative source record not readable",503);
   return row;
 }
-function sourceReceipt({output,session,readField,output_id}){
+async function sourceReceipt({output,session,readField,output_id,loadCompletedAttempt}){
   const f=(row,key)=>readField(row,key);
   const attempt=(session.attempts||[]).find(x=>x.id===session.current_attempt_id);
-  const fileId=str(f(output,"Final_File_ID"));
-  if(!drive(fileId)||!attempt||attempt.artifact_id!==fileId||
-     !driveUrlMatches(str(f(output,"Final_File_URL")||f(output,"Output_URL")),fileId))
-    fail("REVIEW_SOURCE_NOT_VERIFIED","Original Drive render and attempt do not match");
+  const originalFileId=str(f(output,"Final_File_ID"));
+  if(!drive(originalFileId)||!attempt||attempt.status!=="ready_for_review")
+    fail("REVIEW_SOURCE_NOT_VERIFIED","Completed source attempt and original Drive render required");
+  let fileId=originalFileId;
+  if(attempt.number===1){
+    if(attempt.artifact_id!==originalFileId||
+       !driveUrlMatches(str(f(output,"Final_File_URL")||f(output,"Output_URL")),originalFileId))
+      fail("REVIEW_SOURCE_NOT_VERIFIED","Original Drive render and attempt do not match");
+  }else{
+    if(!Number.isSafeInteger(attempt.number)||attempt.number<2||
+       !drive(str(attempt.artifact_id))||
+       typeof loadCompletedAttempt!=="function")
+      fail("REVIEW_SOURCE_NOT_VERIFIED","Completed revision needs its own durable artifact receipt");
+    const row=await loadCompletedAttempt(attempt.id);
+    const rf=row?.fields||{};
+    let proof;
+    try{proof=JSON.parse(str(rf.Validation_Evidence_JSON));}catch{
+      fail("REVIEW_SOURCE_NOT_VERIFIED","Revision MP4 validation receipt is unreadable");
+    }
+    if(!row||str(rf.Attempt_ID)!==attempt.id||
+       str(rf.Session_ID)!==session.id||
+       str(rf.Output_Record_ID)!==output_id||
+       Number(rf.Attempt_Number)!==attempt.number||
+       str(rf.Attempt_Status)!=="ready_for_review"||
+       str(rf.Artifact_File_ID)!==attempt.artifact_id||
+       !driveUrlMatches(str(rf.Artifact_URL),attempt.artifact_id)||
+       !/^[a-f0-9]{64}$/.test(str(proof?.sha256))||
+       !Number.isSafeInteger(proof?.byte_count)||proof.byte_count<100000||
+       proof.mime_type!=="video/mp4"||
+       proof.width!==1080||proof.height!==1920||
+       proof.audio_verified!==true||proof.watermark_verified!==true||
+       proof.google_drive_verified!==true)
+      fail("REVIEW_SOURCE_NOT_VERIFIED","Source revision differs from the validated Drive attempt");
+    fileId=attempt.artifact_id;
+  }
   return {verified:true,authority:"server",output_id,
     profile_id:CHICAGO_PROFILE_ID,artifact_id:fileId,
     attempt_id:attempt.id,drive_file_id:fileId,
@@ -77,7 +108,8 @@ function rightsReceipt(row,entry,readField){
  * version-fenced Airtable session adapter with canonical output lock.
  */
 export async function persistReadyReviewPlan({
-  env,output_id,operations,readRecord,readField,now=()=>new Date(),
+  env,output_id,operations,readRecord,readField,
+  loadCompletedAttempt=null,now=()=>new Date(),
 }={}){
   if(!rec(output_id)||!env?.AIRTABLE_OUTPUT_TABLE_ID||
      !env?.AIRTABLE_MEDIA_TABLE_ID||
@@ -137,7 +169,8 @@ export async function persistReadyReviewPlan({
     if(receipt)assets.push(receipt);
   }
   const result=await inspectReviewPlan({
-    session,source:sourceReceipt({output,session,readField,output_id}),
+    session,source:await sourceReceipt({output,session,readField,output_id,
+      loadCompletedAttempt}),
     assets,visualReceipt:null,factReceipts:[],requirementReceipts:[],
   });
   if(!result.ready_to_commit){
