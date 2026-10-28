@@ -126,7 +126,11 @@ export function checkRenderingReviewBeforeDispatch({
 }) {
   const f=output?.fields;
   if (!f || !output?.id) return {allowed:false,reason:"OUTPUT_NOT_AUTHORITATIVE"};
-  if (text(f.Studio_Review_Hold_ID))
+  // Do not allow either staging or production review holds to bypass the
+  // dispatcher while admissions are disabled. Both schemas are additive.
+  if (text(f.Studio_Review_Hold_ID) ||
+      text(f.Studio_Render_Review_Hold_ID) ||
+      f.Studio_Render_Review_Hold_Active === true)
     return {allowed:false,reason:"REVIEW_HOLD_ACTIVE"};
   // No live sessions yet. The separate enforcement flag cannot be disabled
   // after pilot activation while any session survives.

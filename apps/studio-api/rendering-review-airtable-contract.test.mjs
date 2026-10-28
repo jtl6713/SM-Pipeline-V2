@@ -162,3 +162,12 @@ test("approved session can dispatch only the latest artifact and no unrelated ho
     session:{...s,output_id:"recABCDEFGHIJKLMN"},
   }}).reason,"SESSION_IDENTITY_MISMATCH");
 });
+
+test("production authoritative hold cannot bypass staging dispatch gate even when admission off",()=>{
+  const row=store();
+  row.fields.Studio_Render_Review_Hold_Active=true;
+  row.fields.Studio_Render_Review_Hold_ID="rrhold-00000001";
+  assert.equal(checkRenderingReviewBeforeDispatch({output:row}).reason,"REVIEW_HOLD_ACTIVE");
+  row.fields.Studio_Render_Review_Hold_ID="";
+  assert.equal(checkRenderingReviewBeforeDispatch({output:row}).allowed,false);
+});

@@ -98,7 +98,7 @@ export async function enrollManualReviewCommand({
     const liveOutput=await operations.readOutput(outputId);
     if (!liveOutput || liveOutput.id !== outputId ||
         liveOutput.publish_started_at || liveOutput.publish_locked_at ||
-        liveOutput.post_id || liveOutput.published_at ||
+        liveOutput.post_id || liveOutput.platform_post_id || liveOutput.published_at ||
         liveOutput.platform_post_url ||
         /^(published|publishing|dispatched)$/i.test(String(liveOutput.output_status||"")) ||
         /^(published|publishing|dispatched)$/i.test(String(liveOutput.publish_status||"")))
