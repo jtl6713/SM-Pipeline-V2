@@ -7,6 +7,7 @@ on:
       - 'apps/studio-api/rendering-review-coordinator.*'
       - 'apps/studio-api/rendering-review-airtable.*'
       - 'apps/studio-api/rendering-review-output-view.*'
+      - 'apps/studio-api/rendering-review-workspace.*'
       - '.github/workflows/rendering-review-phase0-ci.yml'
   workflow_dispatch:
 
@@ -31,7 +32,9 @@ jobs:
           node --check apps/studio-api/rendering-review-airtable.mjs
           node --check apps/studio-api/rendering-review-output-view.mjs
           node --check apps/studio-api/rendering-review-airtable.test.mjs
+          node --check apps/studio-api/rendering-review-workspace.mjs
+          node --check apps/studio-api/rendering-review-workspace.test.mjs
       - name: Chicago pilot lifecycle and safety contracts
-        run: node --test apps/studio-api/rendering-review-policy.test.mjs apps/studio-api/rendering-review-coordinator.test.mjs apps/studio-api/rendering-review-airtable.test.mjs
+        run: node --test apps/studio-api/rendering-review-policy.test.mjs apps/studio-api/rendering-review-coordinator.test.mjs apps/studio-api/rendering-review-airtable.test.mjs apps/studio-api/rendering-review-workspace.test.mjs
       - name: Existing producer selective rework regression
         run: node --test apps/studio-api/conversational-producer-plan.test.mjs apps/studio-api/producer-conversation.test.mjs apps/studio-api/output-approval-lease.test.mjs

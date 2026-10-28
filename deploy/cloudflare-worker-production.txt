@@ -725,3 +725,5 @@ Deploy Worker 0.10.682-idea-lifecycle-live: authoritative fresh Ideas classifica
 2026-10-28: Deploy independent Rendering Review ownership guards in approval, dispatch and recovery. Admission remains disabled, sampling 0%; integration_verified=false. No review enrollment or public posting canary; preserve all existing holds and normal unselected flows.
 
 2026-10-28: Deploy authenticated Rendering Review queue/workspace reads and admission identity hardening. Validate live Chicago queue via existing temporary verification bridge; admission remains false, sampling 0, integration unverified. No rendering, scheduling or publication canary.
+
+2026-10-28: Deploy authenticated read-only Chicago Rendering Review completed-Reel queue with authoritative linked Content Item profile check, bounded paging, hidden outside pilot scope, and no admission/mutation. Require authenticated deployment-bridge queue canary plus session check, protected source/binding parity and rollback. Keep sampling 0, integration false; no Pages release, producer event, rendering, scheduling or publication canary.

@@ -569,6 +569,7 @@ jobs:
             async fetch(request, env) {
               const url = new URL(request.url);
               const reviewSessions = url.pathname === "/$TOKEN/rendering-review-sessions";
+              const reviewQueue = url.pathname === "/$TOKEN/rendering-review-queue";
               const factoryStatus = url.pathname === "/$TOKEN/factory-status";
               const factoryDesk = url.pathname === "/$TOKEN/factory-desk";
               const chicagoCanary = url.pathname === "/$TOKEN/factory-status-chicago";
@@ -583,9 +584,10 @@ jobs:
               const readyProductionDiagnostic = url.pathname === "/$TOKEN/ready-production-diagnostic";
               const summary = url.pathname === "/$TOKEN/summary";
               const summaryReconcile = url.pathname === "/$TOKEN/summary-reconcile";
-              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !failedOutputCensus && !qualityFacebookPreview && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic && !summary && !summaryReconcile && !reviewSessions) return new Response("Not found", {status:404});
+              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !failedOutputCensus && !qualityFacebookPreview && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic && !summary && !summaryReconcile && !reviewSessions && !reviewQueue) return new Response("Not found", {status:404});
               const generation = String(url.searchParams.get("generation") || "");
               const path = reviewSessions ? "/api/rendering-review/sessions?profile_id=recT2rbKX3MF7cVFU"
+                : reviewQueue ? "/api/rendering-review/queue?profile_id=recT2rbKX3MF7cVFU"
                 : qualityFacebookPreview ? "/api/operations/outputs/" + previewOutputId + "/schedule"
                 : readyProductionDiagnostic ? "/api/admin/ready-production-diagnostic" + (url.searchParams.get("ideas") ? "?ideas=" + encodeURIComponent(url.searchParams.get("ideas")) : "")
                 : overviewRefresh ? "/api/profiles/overview/refresh"
@@ -670,6 +672,10 @@ jobs:
           curl -fsS --retry 3 --max-time 60 "$URL" -o /tmp/rendering-review-sessions.json
           jq -e '.ok==true and (.sessions|type)=="array" and .flags.admission_enabled==false and .flags.automatic_sampling_percent==0 and .flags.integration_verified==false' /tmp/rendering-review-sessions.json >/dev/null
           echo "rendering_review_authenticated_read=PASS"
+          QUEUE_URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/rendering-review-queue"
+          curl -fsS --retry 3 --max-time 60 "$QUEUE_URL" -o /tmp/rendering-review-queue.json
+          jq -e '.ok==true and (.queue|type)=="array" and (.next_cursor==null or (.next_cursor|type)=="string") and .flags.admission_enabled==false and .flags.automatic_sampling_percent==0 and .flags.integration_verified==false and ([.queue[] | select(.profile_id!="recT2rbKX3MF7cVFU" or .output_type!="Instagram Reel" or .manual_admission_enabled!=false)]|length)==0' /tmp/rendering-review-queue.json >/dev/null
+          echo "rendering_review_chicago_queue_read=PASS count=$(jq '.queue|length' /tmp/rendering-review-queue.json)"
           echo "rendering_review_admission_enabled=false sampling_percent=0 integration_verified=false"
           # Do not emit private conversation/session records into deployment logs.
 

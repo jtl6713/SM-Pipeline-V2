@@ -61,3 +61,70 @@ test('workspace cannot expose another profile after authoritative content drift'
   f.output.fields.Content_Item.push('recD1B2C3D4E5F6G7');
   await assert.rejects(()=>read(f.args),e=>e.status===409);
 });
+
+
+test('Chicago completed render queue is bounded, paginated, authenticated and read-only',async()=>{
+  const f=fixture(),calls=[];
+  f.args.url=new URL('https://studio.test/api/rendering-review/queue?profile_id='+CHICAGO_PROFILE_ID);
+  f.args.operations.listRecordsPage=async(env,table,options)=>{
+    calls.push({type:'page',table,options});
+    return {valid:true,offset:'itrNextPage',records:[{
+      id:outputId,fields:{
+        Content_Item:[f.content.id],Platform:'Instagram',Platform_Output_Type:'Instagram Reel',
+        Final_File_ID:'drive-file',Final_File_URL:'https://example.test/video',
+        Output_Title:'Chicago skyline',Output_ID:2507,Render_Status:'Rendered',
+        Publish_Status:'Not Published',
+      },
+    }]};
+  };
+  f.args.operations.airtableFetch=async(env,table,id,options)=>{
+    assert.equal(table,'tblwzN9AXWvmKVKPs');
+    assert.equal(id,f.content.id);
+    assert.equal(options,undefined);
+    calls.push({type:'content'});
+    return f.content;
+  };
+  const result=await read(f.args);
+  assert.equal(result.queue.length,1);
+  assert.equal(result.queue[0].title,'Chicago skyline');
+  assert.equal(result.queue[0].profile_id,CHICAGO_PROFILE_ID);
+  assert.equal(result.queue[0].manual_admission_enabled,false);
+  assert.equal(result.next_cursor,'itrNextPage');
+  assert.equal(result.flags.admission_enabled,false);
+  assert.equal(calls[0].options.limit,40);
+  assert.match(calls[0].options.filterFormula,/Final_File_ID/);
+  assert.equal(calls.filter(x=>x.type==='content').length,1);
+});
+
+test('queue omits other profiles, published, unrelated platforms and malformed links',async()=>{
+  const f=fixture();
+  f.args.url=new URL('https://studio.test/api/rendering-review/queue');
+  const valid={Content_Item:[f.content.id],Platform:'Instagram',
+    Platform_Output_Type:'Instagram Reel',Final_File_ID:'file',Publish_Status:'Ready'};
+  f.args.operations.listRecordsPage=async()=>({valid:true,records:[
+    {id:outputId,fields:{...valid,Platform:'Facebook'}},
+    {id:'recH1B2C3D4E5F6G7',fields:{...valid,Publish_Status:'Published'}},
+    {id:'recI1B2C3D4E5F6G7',fields:{...valid,Content_Item:[f.content.id,f.content.id]}},
+    {id:'recJ1B2C3D4E5F6G7',fields:valid},
+  ]});
+  f.content.fields.Content_Profile=['recZ1B2C3D4E5F6G7'];
+  const result=await read(f.args);
+  assert.deepEqual(result.queue,[]);
+  f.content.fields.Content_Profile=[CHICAGO_PROFILE_ID];
+  const included=await read(f.args);
+  assert.equal(included.queue.length,1);
+  assert.equal(included.queue[0].output_id,'recJ1B2C3D4E5F6G7');
+});
+test('queue denies wrong profile, invalid cursor and missing permissions',async()=>{
+  const f=fixture();f.args.url=new URL('https://studio.test/api/rendering-review/queue?profile_id=recZ1B2C3D4E5F6G7');
+  await assert.rejects(()=>read(f.args),e=>e.status===403);
+  f.args.url=new URL('https://studio.test/api/rendering-review/queue?cursor=bad%24cursor');
+  await assert.rejects(()=>read(f.args),e=>e.status===400);
+  f.args.authorization.permissions.outputs_review=false;
+  await assert.rejects(()=>read(f.args),e=>e.status===403);
+});
+test('queue fails closed when authoritative Airtable scan is not complete',async()=>{
+  const f=fixture();f.args.url=new URL('https://studio.test/api/rendering-review/queue');
+  f.args.operations.listRecordsPage=async()=>({valid:false,records:[]});
+  await assert.rejects(()=>read(f.args),e=>e.status===503);
+});

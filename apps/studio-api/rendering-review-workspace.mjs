@@ -24,6 +24,56 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
   if(requested&&!allowed.has(requested))fail(403,'Content Profile is not available for this membership');
   const scope=requested?[requested]:[...allowed];
   const flags={admission_enabled:false,automatic_sampling_percent:0,integration_verified:false};
+  // Bounded read-only discovery of completed Chicago Instagram Reels. This is
+  // NOT an admission or approval endpoint. Validate the linked Content Item
+  // before returning even a title or asset URL to prevent cross-profile leaks.
+  if(url.pathname==='/api/rendering-review/queue'){
+    const chicago='recT2rbKX3MF7cVFU';
+    if(requested&&requested!==chicago)fail(403,'Chicago-only Rendering Review pilot');
+    if(!allowed.has(chicago))return {ok:true,queue:[],next_cursor:null,as_of:new Date().toISOString(),flags};
+    const cursor=text(url.searchParams.get('cursor'));
+    if(cursor&&(cursor.length>512||!/^[A-Za-z0-9._-]+$/.test(cursor)))
+      fail(400,'Invalid Rendering Review cursor');
+    const page=await operations.listRecordsPage(env,env.AIRTABLE_OUTPUT_TABLE_ID,{
+      limit:40,offset:cursor||null,
+      filterFormula:'AND({Platform_Output_Type}="Instagram Reel",OR({Final_File_ID}!="",{Final_File_URL}!=""))',
+      fields:['Content_Item','Platform','Platform_Output_Type','Render_Status',
+        'Final_File_ID','Final_File_URL','Output_Title','Output_ID','Output_Status',
+        'Publish_Status','Published_At','Platform_Post_ID','Publish_Started_At',
+        'Publish_Locked_At','Do_Not_Publish',
+        RENDER_REVIEW_OUTPUT_FIELDS.hold_active,RENDER_REVIEW_OUTPUT_FIELDS.hold_id,
+        RENDER_REVIEW_OUTPUT_FIELDS.hold_owner,RENDER_REVIEW_OUTPUT_FIELDS.session_id],
+    });
+    if(!page.valid||!Array.isArray(page.records)||page.records.length>40)
+      fail(503,'Authoritative rendered queue unavailable');
+    const queue=[];
+    for(const row of page.records){
+      const f=row?.fields||{};
+      const links=f.Content_Item;
+      if(!rec(row?.id)||!Array.isArray(links)||links.length!==1||!rec(links[0]))continue;
+      if(text(f.Platform)!=='Instagram'||text(f.Platform_Output_Type)!=='Instagram Reel')continue;
+      if(!text(f.Final_File_ID)&&!text(f.Final_File_URL))continue;
+      if(/^(published|publishing|dispatched)$/i.test(text(f.Publish_Status))||
+         /^(published|publishing|dispatched)$/i.test(text(f.Output_Status))||
+         f.Published_At||f.Platform_Post_ID)continue;
+      const content=await operations.airtableFetch(env,'tblwzN9AXWvmKVKPs',links[0]);
+      if(content?.id!==links[0]||!Array.isArray(content.fields?.Content_Profile)||
+         content.fields.Content_Profile.length!==1||
+         content.fields.Content_Profile[0]!==chicago)continue;
+      const held=f[RENDER_REVIEW_OUTPUT_FIELDS.hold_active]===true||
+        [RENDER_REVIEW_OUTPUT_FIELDS.hold_id,RENDER_REVIEW_OUTPUT_FIELDS.hold_owner,
+          RENDER_REVIEW_OUTPUT_FIELDS.session_id].some(key=>Boolean(text(f[key])));
+      queue.push({
+        output_id:row.id,profile_id:chicago,output_type:'Instagram Reel',
+        output_number:f.Output_ID||null,title:text(f.Output_Title)||('Output '+(f.Output_ID||row.id)),
+        render_status:text(f.Render_Status),final_file_id:text(f.Final_File_ID)||null,
+        final_file_url:text(f.Final_File_URL)||null,
+        review_held:held,dispatch_started:Boolean(f.Publish_Started_At||f.Publish_Locked_At),
+        manual_admission_enabled:false,
+      });
+    }
+    return {ok:true,queue,next_cursor:page.offset||null,as_of:new Date().toISOString(),flags};
+  }
   if(url.pathname==='/api/rendering-review/sessions'){
     if(!scope.length)return {ok:true,sessions:[],next_cursor:null,as_of:new Date().toISOString(),flags};
     const filter='OR('+scope.map(id=>'{Profile_Record_ID}="'+id+'"').join(',')+')';
