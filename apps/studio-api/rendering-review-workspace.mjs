@@ -58,6 +58,14 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
   const output=await operations.airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,outputId);
   if(output?.id!==outputId||!output.fields)fail(503,'Authoritative output unavailable');
   const f=output.fields;
+  const links=f.Content_Item;
+  if(!Array.isArray(links)||links.length!==1||!rec(links[0]))
+    fail(409,'Review output has ambiguous content identity');
+  const content=await operations.airtableFetch(env,'tblwzN9AXWvmKVKPs',links[0]);
+  const linkedProfiles=content?.fields?.Content_Profile;
+  if(content?.id!==links[0]||!Array.isArray(linkedProfiles)||linkedProfiles.length!==1||
+    linkedProfiles[0]!==session.profile_id||!scope.includes(linkedProfiles[0]))
+    fail(403,'Authoritative output profile does not match this review workspace');
   const held=f[RENDER_REVIEW_OUTPUT_FIELDS.hold_active]===true&&
     f[RENDER_REVIEW_OUTPUT_FIELDS.hold_id]===session.review_hold.id&&
     f[RENDER_REVIEW_OUTPUT_FIELDS.hold_owner]===session.id&&
