@@ -1,4 +1,7 @@
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
+import { makeRenderingReviewAirtableOperations } from "./rendering-review-airtable.mjs";
+import { CHICAGO_PROFILE_ID } from "./rendering-review-policy.mjs";
+import { handleRenderingReviewFeedbackRequest, reviewFeedbackWriteEnabled } from "./rendering-review-feedback-http.mjs";
 import { listRecords as reviewListRecords, listRecordsPage as reviewListRecordsPage, resolveAuthorizedContentProfiles as reviewAuthorizedProfiles } from "./worker-functions-01.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { readProducerThread, appendProducerThreadMessage, producerConversationHistory } from "./producer-conversation.mjs";
@@ -1511,6 +1514,54 @@ export default {
 
       if (url.pathname.startsWith("/api/rendering-review/")) {
         requirePermission(authorization, "outputs_review");
+        const feedbackMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/messages$/.exec(url.pathname);
+        if (feedbackMatch && request.method === "POST") {
+          // Three protected release gates are OFF until the complete manual
+          // Chicago pilot is verified. Never accept HTTP body flags.
+          if (!reviewFeedbackWriteEnabled(env))
+            throw new HttpError(405, "Rendering Review mutations are not enabled");
+          const permitted = (await reviewAuthorizedProfiles(env, authorization))
+            .some(profile => profile.id === CHICAGO_PROFILE_ID);
+          if (!permitted) throw new HttpError(403, "Chicago Rendering Review membership required");
+          let adapter;
+          const authorizeOutput = async outputId => {
+            const view = await adapter.readOutput(outputId);
+            return view.profile_id === CHICAGO_PROFILE_ID &&
+              view.output_type === "Instagram Reel" && view.platform === "Instagram";
+          };
+          adapter = makeRenderingReviewAirtableOperations({
+            env, airtableFetch, listRecords:reviewListRecords, readField:f,
+            withOutputApprovalLock,
+            authorizeReview:authorizeOutput,
+            authorizeEvent:async (_outputId,event) =>
+              event?.type === "MESSAGE" && event?.role === "user",
+            revokeScheduleUnderHold:async () => {
+              throw new HttpError(503, "Rendering Review enrollment is not enabled by feedback submission");
+            },
+            mutationGate:true,
+          });
+          const operations = {
+            ...adapter,
+            getAuthenticatedActor:async () => ({
+              id:authorization.user?.record_id,
+              authenticated:authorization.authenticated,
+              authorized:authorization.authorized,
+              permissions:authorization.permissions,
+            }),
+            // Recheck authoritative Chicago identity under the same output
+            // approval mutex used for the persisted session mutation.
+            readHold:async outputId => {
+              if (!await authorizeOutput(outputId))
+                throw new HttpError(403, "Output is outside Chicago Reel scope");
+              return adapter.readHold(outputId);
+            },
+          };
+          const result = await handleRenderingReviewFeedbackRequest({
+            request,env,authorization,output_id:feedbackMatch[1],
+            assertWriteRequest,operations,
+          });
+          return respond(request,env,result);
+        }
         if (request.method !== "GET") throw new HttpError(405, "Rendering Review mutations are not enabled");
         const result = await readRenderingReviewWorkspace({
           env, url, authorization,
