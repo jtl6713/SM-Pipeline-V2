@@ -385,3 +385,39 @@ def test_r4_post_write_compensation_clears_only_its_own_job():
         launched_job_id="job-old",
         error="stale render snapshot",
     ) == {}
+
+
+def test_studio_render_guard_rejects_long_one_image_movie():
+    from r4.render_request import studio_visual_integrity_error
+    output = {"fields": {"Output_Filename": "studio-100-instagram-reel.mp4", "Studio_Output_Type": "Reel", "Selected_Clip_Count": 1}}
+    one = {"durationInFrames": 900, "fps": 30, "clips": [{"src": "https://media.example/one.jpg", "mediaKind": "photo"}]}
+    assert "one distinct still" in studio_visual_integrity_error(output, one)
+    repeated = {**one, "clips": [one["clips"][0], {**one["clips"][0], "id": "second"}]}
+    assert "one distinct still" in studio_visual_integrity_error(output, repeated)
+
+
+def test_studio_render_guard_allows_diverse_stills_and_single_footage():
+    from r4.render_request import studio_visual_integrity_error
+    output = {"fields": {"Output_Filename": "studio-100-instagram-reel.mp4", "Studio_Output_Type": "Reel", "Selected_Clip_Count": 2}}
+    two = {"durationInFrames": 900, "fps": 30, "clips": [
+        {"src": "https://media.example/one.jpg", "mediaKind": "photo"},
+        {"src": "https://media.example/two.jpg", "mediaKind": "photo"},
+    ]}
+    assert studio_visual_integrity_error(output, two) is None
+    assert "incomplete" in studio_visual_integrity_error(output, {**two, "clips": two["clips"][:1]})
+    one_video = {**two, "clips": [{"src": "https://media.example/clip.mp4", "mediaKind": "video"}]}
+    output["fields"]["Selected_Clip_Count"] = 1
+    assert studio_visual_integrity_error(output, one_video) is None
+    assert studio_visual_integrity_error(
+        {**output, "fields": {**output["fields"], "Studio_Output_Type": "Story"}}, {**two, "clips": two["clips"][:1]}
+    ) is None
+
+
+def test_studio_render_guard_rejects_missing_sources_but_allows_legacy_render():
+    from r4.render_request import studio_visual_integrity_error
+    output = {"fields": {"Output_Filename": "studio-100-instagram-reel.mp4", "Studio_Output_Type": "Reel"}}
+    payload = {"durationInFrames": 900, "fps": 30, "clips": [{"src": ""}, {"src": "https://cdn/two.jpg"}]}
+    assert "missing its source" in studio_visual_integrity_error(output, payload)
+    assert studio_visual_integrity_error(
+        {"fields": {"Output_Filename": "legacy-reel.mp4"}}, payload
+    ) is None

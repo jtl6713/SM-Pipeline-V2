@@ -19,7 +19,7 @@ from audio.voiceover_duration import (
     validate_voiceover_for_render,
     voiceover_is_disabled,
 )
-from r4.render_request import choose_render_request, timing_blocks_render, voiceover_is_required, voiceover_url
+from r4.render_request import choose_render_request, studio_visual_integrity_error, timing_blocks_render, voiceover_is_required, voiceover_url
 from render.fields import field, field_str, first_linked_id
 from render.remotion_client import RemotionClient
 from render.settings import get_render_server_url, get_render_volumes
@@ -358,6 +358,30 @@ def process_one(
         default_music=music_default,
         default_voice=voice_default,
     )
+    integrity_error = studio_visual_integrity_error(output, payload)
+    if integrity_error:
+        # This must run before clearing artifacts or calling Remotion. Preserve
+        # the original output and block further automatic retries of bad inputs.
+        if not dry_run:
+            client.update_record(
+                PLATFORM_OUTPUTS_TABLE,
+                output["id"],
+                {
+                    "Render_Status": "Blocked",
+                    "Remotion_Error_Message": integrity_error[:10000],
+                },
+                typecast=True,
+            )
+        return {
+            "processed": False,
+            "reason": "studio_visual_integrity_blocked",
+            "error": integrity_error,
+            "output_record_id": output["id"],
+            "output_id": field_str(output, "Output_ID"),
+            "make_scenario_id": MAKE_SCENARIO_ID,
+            "make_scenario_name": MAKE_SCENARIO_NAME,
+        }
+
     expected_revision = manifest_studio_revision(output)
     expected_snapshot = render_snapshot_identity(output)
     watermark_url = render_watermark_url(client, output, content_item)

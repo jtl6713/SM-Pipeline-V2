@@ -91,19 +91,18 @@ def expected_photo_count(request: dict[str, Any], assets: list[dict[str, Any]] |
     notes = str(field(request, "Production_Notes") or "")
     manual = _note_count(notes, r"ez-manual=(\d+)")
     ai = _note_count(notes, r"ez-ai=(\d+)")
-    if manual and ai:
-        return manual + ai
     mode = field_str(request, "Carousel_Image_Mode")
     exact = int(field(request, "Carousel_Slide_Count_Exact") or 0)
     plan = parse_json(field(request, "Studio_Output_Plan_JSON"), {}) or {}
     plan_count = int(plan.get("source_asset_count") or 0)
-    if mode == "Make AI Generated" and exact > count:
-        return exact
-    if mode == "Make AI Generated" and plan_count > count:
-        return plan_count
-    if not count and mode == "Make AI Generated" and exact >= 1:
-        return exact
-    return count or exact or plan_count or 0
+    # Never use the number of assets that happened to arrive as proof that a
+    # larger, explicit Studio request is complete. A partially populated master
+    # list must not stamp a one-image movie (Output 3129 defect class).
+    # Notes may contain only ez-manual or only ez-ai, not necessarily both.
+    requested = manual + ai
+    if mode == "Make AI Generated" or count == 0:
+        requested = max(requested, exact)
+    return max(count, requested, plan_count)
 
 
 def _note_count(notes: str, pattern: str) -> int:
