@@ -138,8 +138,46 @@ export function applyReviewEvent(session, event) {
       content: text(event.content), at: text(event.at), attempt_id: s.current_attempt_id,
       timestamp_seconds: Number.isFinite(event.timestamp_seconds) &&
         event.timestamp_seconds >= 0 ? event.timestamp_seconds : null });
+    if(event.role==="user"&&s.producer_candidate)s.producer_candidate.stale=true;
     if (s.state === "ready_for_review") s.state = "discussing";
     // Messages during rendering are feedback for the NEXT attempt, never job mutation.
+  } else if (kind === "PRODUCER_CANDIDATE") {
+    // This event is authorized ONLY by the trusted Worker after its model
+    // service response was checked. It persists user direction + genuine
+    // model reasoning in ONE version-fenced event, not a render authorization.
+    if (!["ready_for_review","discussing","awaiting_assets","plan_ready","revision_failed"].includes(s.state)
+        || s.review_hold.active !== true)
+      fail("PRODUCER_NOT_EDITABLE", "A live held review is required for Producer discussion");
+    const candidate=event.candidate;
+    const candidateText=JSON.stringify(candidate);
+    if (!candidate || Array.isArray(candidate) || typeof candidate!=="object" ||
+        !candidateText || candidateText.length>40000 ||
+        !/^[a-f0-9]{64}$/.test(text(event.candidate_hash)) ||
+        !/^[a-f0-9]{64}$/.test(text(event.evidence_hash)) ||
+        !validId(event.user_message_id) || !validId(event.producer_message_id) ||
+        !text(event.direction) || text(event.direction).length>3000 ||
+        !text(event.summary) || text(event.summary).length>3000 ||
+        !text(candidate.explanation) || !text(candidate.narration) ||
+        !Array.isArray(candidate.changes) || !Array.isArray(candidate.timeline) ||
+        !Array.isArray(candidate.requirements) || !Array.isArray(candidate.acceptance_checks))
+      fail("INVALID_PRODUCER_CANDIDATE", "A bounded, validated candidate and two messages are required",400);
+    if (s.messages.some(m=>m.id===event.user_message_id||m.id===event.producer_message_id))
+      fail("DUPLICATE_PRODUCER_MESSAGE", "Review message identity must not be reused");
+    s.messages.push({id:event.user_message_id,role:"user",content:text(event.direction),
+      at:text(event.at),attempt_id:s.current_attempt_id,timestamp_seconds:null});
+    s.messages.push({id:event.producer_message_id,role:"producer",content:text(event.summary),
+      at:text(event.at),attempt_id:s.current_attempt_id,timestamp_seconds:null});
+    s.producer_candidate={
+      hash:event.candidate_hash,evidence_hash:event.evidence_hash,
+      source_attempt_id:s.current_attempt_id,request_key:key,
+      candidate:copy(candidate),created_at:text(event.at),
+      requires_fact_validation:true,ready_to_commit:false,stale:false,
+    };
+    // A new model candidate cannot inherit any previous frozen plan or
+    // conditional 'render when uploaded' authorization.
+    s.plan=null;
+    s.pending_authorization=null;
+    s.state="discussing";
   } else if (kind === "PROPOSE_PLAN") {
     if (!["ready_for_review", "discussing", "awaiting_assets", "plan_ready", "revision_failed"].includes(s.state))
       fail("PLAN_NOT_EDITABLE", "Cannot replace a plan while rendering");

@@ -5,6 +5,7 @@ import { handleRenderingReviewFeedbackRequest, reviewFeedbackWriteEnabled } from
 import { handleRenderingReviewEnrollRequest, reviewEnrollmentWriteEnabled } from "./rendering-review-enrollment-http.mjs";
 import { composeRenderingReviewEnrollmentOperations } from "./rendering-review-enrollment-wiring.mjs";
 import { handleReviewProducerProposal, reviewProducerBridgeEnabled } from "./rendering-review-producer-bridge.mjs";
+import { persistReviewProducerCandidate, producerConversationWritesEnabled } from "./rendering-review-producer-persist.mjs";
 import { listRecords as reviewListRecords, listRecordsPage as reviewListRecordsPage, resolveAuthorizedContentProfiles as reviewAuthorizedProfiles } from "./worker-functions-01.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { readProducerThread, appendProducerThreadMessage, producerConversationHistory } from "./producer-conversation.mjs";
@@ -1519,6 +1520,51 @@ export default {
         requirePermission(authorization, "outputs_review");
         // Read-only authenticated model proposal handoff. Keep this separate
         // from user-message writes and every render/approval/publish action.
+        // Protected Chicago Producer conversation. Only this route may persist
+        // genuine model replies, through the existing versioned session owner.
+        const conversationMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/producer-conversation$/.exec(url.pathname);
+        if (conversationMatch && request.method === "POST") {
+          if (!producerConversationWritesEnabled(env))
+            throw new HttpError(405, "Rendering Review Producer conversations are not enabled");
+          const chicagoMembership = (await reviewAuthorizedProfiles(env, authorization))
+            .some(profile => profile.id === CHICAGO_PROFILE_ID);
+          if (!chicagoMembership) throw new HttpError(403, "Chicago Rendering Review membership required");
+          let adapter;
+          const authorizeOutput = async outputId => {
+            const view = await adapter.readOutput(outputId);
+            return view.profile_id === CHICAGO_PROFILE_ID &&
+              view.output_type === "Instagram Reel" && view.platform === "Instagram";
+          };
+          adapter = makeRenderingReviewAirtableOperations({
+            env, airtableFetch, listRecords: reviewListRecords, readField: f,
+            withOutputApprovalLock, authorizeReview: authorizeOutput,
+            authorizeEvent: async (_id, event) =>
+              event?.type === "PRODUCER_CANDIDATE",
+            revokeScheduleUnderHold: async () => {
+              throw new HttpError(405, "Producer conversations cannot change schedules");
+            },
+            // Only the six-gated conversation route can persist candidates.
+            // No enrollment, schedule, render, approval or hold-release action.
+            mutationGate: true,
+          });
+          // The bridge validates its own strict body allowlist and CSRF gate.
+          // Clone only so the same accepted literal direction may be persisted.
+          const literal = request.clone();
+          const proposed = await handleReviewProducerProposal({
+            request, env, authorization, output_id: conversationMatch[1],
+            assertWriteRequest, operations: adapter,
+          });
+          let input;
+          try { input = JSON.parse(await literal.text()); }
+          catch { throw new HttpError(400, "Invalid Producer conversation input"); }
+          const result = await persistReviewProducerCandidate({
+            env, output_id: conversationMatch[1], authorization, operations: adapter,
+            expected_version: proposed.expected_version,
+            client_request_id: proposed.client_request_id,
+            direction: input.direction, proposal: proposed.proposal,
+          });
+          return respond(request, env, result);
+        }
         const proposalMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/producer-proposal$/.exec(url.pathname);
         if (proposalMatch && request.method === "POST") {
           if (!reviewProducerBridgeEnabled(env))
