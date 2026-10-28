@@ -281,7 +281,7 @@ test("approval bound to exact latest attempt and artifact, not stale file", () =
   throws(()=>transition(s,"APPROVE_ATTEMPT",{attempt_id:"attempt-00000001",artifact_id:base.final_file_id}),"STALE_OR_HELD_APPROVAL");
   throws(()=>transition(s,"APPROVE_ATTEMPT",{attempt_id:attempt,artifact_id:"wrongart-0000001"}),"STALE_OR_HELD_APPROVAL");
   throws(()=>transition(s,"APPROVE_ATTEMPT",{attempt_id:attempt,artifact_id:artifact,unrelated_hold_active:true}),"STALE_OR_HELD_APPROVAL");
-  s=transition(s,"APPROVE_ATTEMPT",{attempt_id:attempt,artifact_id:artifact});
+  s=transition(s,"APPROVE_ATTEMPT",{attempt_id:attempt,artifact_id:artifact,pilot_creative_only:true});
   assert.equal(s.state,"approved");
   assert.equal(s.review_hold.active,true);
   assert.equal(reviewDispatchGate(s,base,{attempt_id:attempt,artifact_id:artifact}).allowed,false);
