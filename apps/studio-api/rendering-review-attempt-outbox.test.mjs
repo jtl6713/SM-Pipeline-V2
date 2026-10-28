@@ -101,6 +101,21 @@ function fixture({failJobOnce=false}={}){
     setHold(x){holds={...holds,...x}},
     replaceSession(x){saved=x}};
 }
+test("original attempt source metadata remains valid under model plan",()=>{
+  const x=session().s;
+  const src=x.attempts.find(a=>a.id===x.plan.immutable_manifest.source_attempt_id);
+  assert.deepEqual({
+    current:x.current_attempt_id,
+    source:x.plan.immutable_manifest.source_attempt_id,
+    artifact:src?.artifact_id,
+    planned:x.plan.immutable_manifest.source_artifact_id,
+    status:src?.status,
+    number:src?.number,
+  },{
+    current:"original_12345678",source:"original_12345678",
+    artifact:SOURCE,planned:SOURCE,status:"ready_for_review",number:1,
+  });
+});
 test("every protected flag is required; no source or record mutation when disabled",async()=>{
   assert.equal(enabled({}),false);
   for(const key of Object.keys(flags)){
@@ -174,4 +189,36 @@ test("model messages cannot masquerade as explicit commit identity",async()=>{
   await assert.rejects(()=>f.send({client_request_id:""}),e=>e.status===400);
   await assert.rejects(()=>f.send({plan_hash:"notsha"}),e=>e.status===400);
   assert.equal(f.jobs.size,0);
+});
+
+test("V3 render intent uses verified V2 source without overwriting original V1",async()=>{
+  const f=fixture(),s=clone(f.saved);
+  const v1=s.current_attempt_id, v2="rrattempt_completed_12345678",artifact="drive-revision-v2-123";
+  s.attempts.push({id:v2,number:2,parent_id:v1,artifact_id:artifact,
+    status:"ready_for_review"});
+  s.current_attempt_id=v2;
+  s.latest_attempt_number=2;
+  s.plan.source_attempt_id=v2;
+  s.plan.immutable_manifest.source_attempt_id=v2;
+  s.plan.immutable_manifest.source_artifact_id=artifact;
+  s.plan.immutable_manifest.source_drive_file_id=artifact;
+  f.replaceSession(s);
+  const result=await f.send();
+  assert.equal(result.attempt_number,3);
+  assert.equal(f.saved.attempts.at(-1).parent_id,v2);
+  assert.equal(result.public_post_created,false);
+});
+test("V3 source cannot be substituted with an unrelated artifact",async()=>{
+  const f=fixture(),s=clone(f.saved);
+  const v2="rrattempt_completed_12345678";
+  s.attempts.push({id:v2,number:2,parent_id:s.current_attempt_id,
+    artifact_id:"drive-revision-v2-123",status:"ready_for_review"});
+  s.current_attempt_id=v2;s.latest_attempt_number=2;
+  s.plan.source_attempt_id=v2;
+  s.plan.immutable_manifest.source_attempt_id=v2;
+  s.plan.immutable_manifest.source_artifact_id="wrong-attempt-artifact";
+  s.plan.immutable_manifest.source_drive_file_id="wrong-attempt-artifact";
+  f.replaceSession(s);
+  await assert.rejects(()=>f.send(),e=>e.code==="SOURCE_CHANGED");
+  assert.equal(f.writes,0);
 });

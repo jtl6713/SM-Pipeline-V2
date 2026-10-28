@@ -21,6 +21,17 @@ instructional request, include the actual steps and worked example in the draft.
 Preserve explicitly protected material. Reuse only asset IDs in the inventory.
 Describe missing visuals precisely and offer existing uploads, generated illustrations
 or deterministic diagrams where appropriate; never claim an unavailable asset exists.
+For an immediately executable first revision, favor already owned assets when they
+satisfy the request. If an owned image or scene should remain, reference its
+inventory asset ID in reuse_asset_ids and timeline; do not use preserve for
+ordinary asset reuse. The preserve array is only for exact source-video
+segments that require separately verified timestamps, so leave it empty when
+recomposing owned still photographs. Do not invent factual claims just to
+make a simple visual or pacing change.
+The Remotion compiler requires a contiguous timeline: first scene starts at
+0, every next start_seconds equals the prior end_seconds, and each scene has
+exactly one existing inventory asset ID. Match narration length to the proposed
+total duration so the spoken audio is within 2.5 seconds of the timeline.
 You have text evidence only: do not claim to have watched the video or inspected frames.
 List every new factual instructional claim with source IDs from the supplied evidence.
 If sources are missing or do not establish a detail, identify research as a missing
@@ -68,10 +79,12 @@ def validate_candidate(candidate: dict, evidence: dict) -> dict:
         if not isinstance(scene, dict) or set(scene) != {"start_seconds", "end_seconds", "direction", "asset_ids"}:
             raise ValueError("Invalid proposed timeline scene")
         start, end = scene["start_seconds"], scene["end_seconds"]
-        if type(start) not in (float, int) or type(end) not in (float, int) or not (0 <= previous_end <= start < end <= 180):
+        if (type(start) not in (float, int) or type(end) not in (float, int)
+                or not (abs(start - previous_end) < 1e-6 and start < end <= 180)):
             raise ValueError("Proposed Reel timeline is unordered or exceeds pilot duration")
-        if not isinstance(scene["direction"], str) or not scene["direction"].strip() or not isinstance(scene["asset_ids"], list):
-            raise ValueError("Timeline direction and assets required")
+        if (not isinstance(scene["direction"], str) or not scene["direction"].strip()
+                or not isinstance(scene["asset_ids"], list) or len(scene["asset_ids"]) != 1):
+            raise ValueError("Executable timeline requires exactly one owned asset per scene")
         previous_end = end
         references.extend(scene["asset_ids"])
     if any(not isinstance(value, str) or value not in inventory for value in references):

@@ -33,8 +33,28 @@ function requireOutput(o,session,manifest,outputId){
      o.platform_media_id||o.platform_post_id||o.published_at||
      /^(published|publishing|dispatched)$/i.test(str(o.publish_status)))
     deny("OUTPUT_NOT_HELD","Exact Chicago Reel must remain held and undispatched");
-  if(str(o.final_file_id||o.final_file_url)!==manifest.source_artifact_id)
-    deny("SOURCE_CHANGED","The source media changed since plan freeze");
+  const source=(session.attempts||[]).find(a=>a.id===manifest.source_attempt_id);
+  const active=(session.attempts||[]).find(a=>a.id===session.current_attempt_id);
+  // An exact idempotent retry sees the NEW queued attempt as current, so its
+  // previous verified source is necessarily the queued attempt's parent.
+  // Allow only that same queued job/plan to repair missing outbox projections.
+  const replaySource=session.state==="queued"&&
+    session.active_job?.attempt_id===session.current_attempt_id&&
+    session.active_job?.plan_hash===session.plan?.hash&&
+    active?.parent_id===manifest.source_attempt_id&&
+    active?.status==="queued"&&!active?.artifact_id;
+  if(!source||
+     (manifest.source_attempt_id!==session.current_attempt_id&&!replaySource)||
+     (source.number>1&&source.status!=="ready_for_review")||
+     source.artifact_id!==manifest.source_artifact_id)
+    deny("SOURCE_CHANGED","The current validated review attempt changed since plan freeze");
+  // The original Platform Output remains permanently V1 during Rendering
+  // Review. Later iterations read the independently validated Attempt MP4;
+  // they must not overwrite V1 or assume the latest source is the V1 file.
+  if(!str(o.final_file_id)||!str(manifest.source_drive_file_id)||
+     (source.number===1&&str(o.final_file_id)!==manifest.source_artifact_id)||
+     (source.number>1&&str(o.final_file_id)===manifest.source_artifact_id))
+    deny("SOURCE_CHANGED","Original or revised Drive artifact identity changed");
 }
 export function renderAttemptCommitEnabled(env){
   return env?.RENDERING_REVIEW_ATTEMPT_COMMIT_ENABLED==="true"&&

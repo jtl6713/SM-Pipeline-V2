@@ -59,6 +59,31 @@ class ProducerTests(unittest.TestCase):
         p["timeline"][0]["end_seconds"] = -1
         with self.assertRaises(ValueError): self.invoke(p)
 
+    def test_timeline_gap_is_rejected_before_unrenderable_plan_reaches_studio(self):
+        p = copy.deepcopy(PROPOSAL)
+        p["timeline"].append({
+            "start_seconds": 16, "end_seconds": 20,
+            "direction": "Second owned image", "asset_ids": ["asset-1"],
+        })
+        with self.assertRaisesRegex(ValueError, "timeline"):
+            self.invoke(p)
+
+    def test_multiple_assets_in_one_scene_are_rejected_before_render(self):
+        p = copy.deepcopy(PROPOSAL)
+        p["timeline"][0]["asset_ids"] = ["asset-1", "asset-1"]
+        with self.assertRaisesRegex(ValueError, "exactly one owned asset"):
+            self.invoke(p)
+
+    def test_contiguous_owned_image_scenes_stay_executable(self):
+        p = copy.deepcopy(PROPOSAL)
+        p["preserve"] = []
+        p["timeline"].append({
+            "start_seconds": 15, "end_seconds": 20,
+            "direction": "Finish with the same owned image", "asset_ids": ["asset-1"],
+        })
+        result, _ = self.invoke(p)
+        self.assertEqual(len(result["candidate"]["timeline"]), 2)
+
     def test_existing_source_associations_retained_without_claiming_verified(self):
         p = copy.deepcopy(PROPOSAL)
         p["claims"][0]["source_ids"] = ["source-1"]

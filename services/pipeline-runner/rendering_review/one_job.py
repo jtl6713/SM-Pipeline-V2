@@ -35,6 +35,7 @@ CHICAGO="recT2rbKX3MF7cVFU"
 OUTPUTS="tblrlPeboBthkplH0"
 SESSIONS="tblHX3UdoNszkoquG"
 JOBS="tblUkZB6SMtf9Ib6I"
+ATTEMPTS="tbl7wPOAE26o2coMU"
 PLANS="tblalFXUJyYg5PBrz"
 ITEMS="tblwzN9AXWvmKVKPs"
 REQUESTS="tbl75nxNi6PMUjBQE"
@@ -124,18 +125,63 @@ def _evidence(client,drive,output_id,job_id):
     if plan_row["fields"].get("Session_ID")!=session["id"]:
         fail("review_plan_durable_row_mismatch")
     original_file=str(of.get("Final_File_ID") or "")
-    meta=drive.get_file(original_file)
-    if (not original_file or meta.get("id")!=original_file or
-        meta.get("mimeType")!="video/mp4" or
-        plan.get("source_drive_file_id")!=original_file):
+    if (not original_file or
+        not IDENTITY.fullmatch(str(plan.get("source_attempt_id") or ""))):
         fail("original_drive_media_not_verified")
+    source_file=str(plan.get("source_drive_file_id") or "")
+    source_attempt=next((a for a in session.get("attempts",[])
+        if a.get("id")==plan.get("source_attempt_id")),None)
+    if (not source_attempt or source_attempt.get("id")!=
+        session.get("current_attempt_id") and
+        # Once a job is queued, current_attempt_id is the NEW attempt; the
+        # immutable plan source is its verified parent.
+        source_attempt.get("id")!=next((a.get("parent_id")
+          for a in session.get("attempts",[])
+          if a.get("id")==session.get("current_attempt_id")),"")):
+        fail("review_source_attempt_not_current_parent")
+    if (source_attempt.get("artifact_id")!=source_file or
+        not isinstance(source_attempt.get("number"),int)):
+        fail("review_source_artifact_changed")
+    if source_attempt["number"]==1:
+        if source_file!=original_file:
+            fail("original_drive_media_not_verified")
+    else:
+        if source_file==original_file:
+            fail("review_revised_source_must_be_separate")
+        source_row=select_one(client,ATTEMPTS,"Attempt_ID",
+                              source_attempt["id"])
+        sf=source_row["fields"]
+        try:
+            validated=json.loads(sf.get("Validation_Evidence_JSON") or "null")
+        except (TypeError,ValueError):
+            fail("review_source_validation_missing")
+        if (sf.get("Session_ID")!=session["id"] or
+            sf.get("Output_Record_ID")!=output_id or
+            sf.get("Attempt_Number")!=source_attempt["number"] or
+            sf.get("Artifact_File_ID")!=source_file or
+            sf.get("Attempt_Status")!="ready_for_review" or
+            not isinstance(validated,dict) or
+            not SHA.fullmatch(str(validated.get("sha256") or "")) or
+            validated.get("byte_count",0)<100000 or
+            validated.get("mime_type")!="video/mp4" or
+            validated.get("width")!=1080 or validated.get("height")!=1920 or
+            validated.get("audio_verified") is not True or
+            validated.get("watermark_verified") is not True or
+            validated.get("google_drive_verified") is not True):
+            fail("review_source_attempt_validation_unverified")
+    meta=drive.get_file(source_file)
+    if (meta.get("id")!=source_file or
+        meta.get("mimeType")!="video/mp4" or
+        (source_attempt["number"]>1 and
+         int(meta.get("size") or 0)!=validated["byte_count"])):
+        fail("source_drive_media_not_verified")
     props=json.loads(of.get("Remotion_Props_JSON") or "{}")
     if props.get("compositionId")!="ChicagoShiningPhotoSequence":
         fail("source_composition_mismatch")
     source={"verified":True,"authority":"server","output_id":output_id,
        "attempt_id":plan["source_attempt_id"],
        "artifact_id":plan["source_artifact_id"],
-       "drive_file_id":original_file,
+       "drive_file_id":source_file,
        "canonical_media_authority":"google_drive",
        "composition_id":"ChicagoShiningPhotoSequence"}
     original_by_id={x.get("id"):x for x in originals}
