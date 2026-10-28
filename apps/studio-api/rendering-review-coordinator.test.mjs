@@ -14,6 +14,8 @@ const args={
   policy,
 };
 const clone=x=>JSON.parse(JSON.stringify(x));
+const messageEvent=()=>({type:"MESSAGE",expected_version:1,idempotency_key:"request-00000099",
+  fingerprint:"digest-00000099",message_id:"message-00000001",role:"user",content:"change it"});
 const check=(fn,code)=>assert.rejects(fn,error=>error.code===code);
 function fixture() {
   let output={
@@ -260,3 +262,37 @@ test("profile or output type drift during admission also fails closed",async()=>
     assert.equal(f.session,null);
   }
 });
+
+test("same owner cannot substitute a different hold on replay or mutation",async()=>{
+  const f=fixture();
+  await enrollManualReviewCommand({...args,operations:f.ops});
+  f.hold={...f.hold,id:"hold-replacement"};
+  await check(()=>enrollManualReviewCommand({...args,operations:f.ops}),"HOLD_LOST");
+  await check(()=>mutateReviewSessionCommand({output_id:outputId,event:messageEvent(),operations:f.ops}),"HOLD_NOT_VERIFIED");
+  assert.equal(f.session.version,1);
+});
+
+test("hold substitution during session creation cannot return enrollment success",async()=>{
+  const f=fixture(), create=f.ops.createSessionIfAbsent;
+  f.ops.createSessionIfAbsent=async s=>{await create(s);f.hold={...f.hold,id:"hold-replacement"}};
+  await check(()=>enrollManualReviewCommand({...args,operations:f.ops}),"HOLD_LOST");
+  assert.equal(f.hold.active,true);
+});
+
+test("event readback must verify message contents, not only version and attempt",async()=>{
+  const f=fixture();
+  await enrollManualReviewCommand({...args,operations:f.ops});
+  const read=f.ops.readSession;
+  f.ops.readSession=async()=>{const s=await read();s.messages=[];return s};
+  await check(()=>mutateReviewSessionCommand({output_id:outputId,event:messageEvent(),operations:f.ops}),"SESSION_SAVE_UNVERIFIED");
+  assert.equal(f.hold.active,true);
+});
+
+test("hold loss during event persistence cannot return mutation success",async()=>{
+  const f=fixture();
+  await enrollManualReviewCommand({...args,operations:f.ops});
+  const save=f.ops.saveSessionIfVersion;
+  f.ops.saveSessionIfVersion=async arg=>{const saved=await save(arg);f.hold={...f.hold,active:false};return saved};
+  await check(()=>mutateReviewSessionCommand({output_id:outputId,event:messageEvent(),operations:f.ops}),"HOLD_LOST");
+});
+

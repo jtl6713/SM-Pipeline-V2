@@ -19,9 +19,10 @@ function requireOperations(operations, names) {
   for (const key of names) if (typeof operations?.[key] !== "function")
     err("INTEGRATION_MISSING", "Rendering Review requires " + key, 503);
 }
-function authoritativeHoldMatches(hold, outputId, sessionId) {
+function authoritativeHoldMatches(hold, outputId, sessionId, expectedHoldId = null) {
   return hold?.verified === true && id(hold.output_id) === outputId &&
-    id(hold.owner) === sessionId && Boolean(id(hold.id)) && hold.active === true;
+    id(hold.owner) === sessionId && Boolean(id(hold.id)) && hold.active === true &&
+    (expectedHoldId === null || id(hold.id) === id(expectedHoldId));
 }
 function sessionMatches(s, sessionId, requestId) {
   return s?.id === sessionId && s.enrollment_request_id === requestId;
@@ -70,7 +71,7 @@ export async function enrollManualReviewCommand({
         // An idempotent success may only be replayed when the durable hold
         // is still present. A missing hold is not a valid existing enrollment.
         const held=await operations.readHold(outputId);
-        if (prior.review_hold?.active && !authoritativeHoldMatches(held,outputId,sessionId))
+        if (prior.review_hold?.active && !authoritativeHoldMatches(held,outputId,sessionId,prior.review_hold.id))
           err("HOLD_LOST", "Previous enrollment's publication hold is no longer authoritative");
         return {session:prior,replay:true};
       }
@@ -130,7 +131,7 @@ export async function enrollManualReviewCommand({
       err("SESSION_SAVE_UNVERIFIED", "Review session did not pass authoritative readback");
 
     const stillHeld=await operations.readHold(outputId);
-    if (!authoritativeHoldMatches(stillHeld,outputId,sessionId))
+    if (!authoritativeHoldMatches(stillHeld,outputId,sessionId,hold.id))
       err("HOLD_LOST", "Publication hold was lost during enrollment");
     return {session:saved,replay:false};
   });
@@ -166,7 +167,7 @@ export async function mutateReviewSessionCommand({
     if (!s) err("REVIEW_NOT_FOUND", "No Rendering Review session exists",404);
     // Exact owner and hold readback on every mutation, not merely at enroll.
     const hold=await operations.readHold(outputId);
-    if (s.review_hold.active && !authoritativeHoldMatches(hold,outputId,s.id))
+    if (s.review_hold.active && !authoritativeHoldMatches(hold,outputId,s.id,s.review_hold.id))
       err("HOLD_NOT_VERIFIED", "Cannot change a session without its authoritative hold");
     const result=applyReviewEvent(s,event);
     if (result.replay) return result;
@@ -178,8 +179,12 @@ export async function mutateReviewSessionCommand({
     if (saved !== true) err("STALE_SESSION","Atomic session version check failed");
     const verified=await operations.readSession(outputId);
     if (!verified || verified.version!==result.session.version ||
-        verified.current_attempt_id!==result.session.current_attempt_id)
+        verified.current_attempt_id!==result.session.current_attempt_id ||
+        JSON.stringify(verified)!==JSON.stringify(result.session))
       err("SESSION_SAVE_UNVERIFIED","Persisted event could not be verified");
+    const stillHeld=await operations.readHold(outputId);
+    if (s.review_hold.active && !authoritativeHoldMatches(stillHeld,outputId,s.id,s.review_hold.id))
+      err("HOLD_LOST","Publication hold changed during event persistence");
     return {...result,session:verified};
   });
 }
