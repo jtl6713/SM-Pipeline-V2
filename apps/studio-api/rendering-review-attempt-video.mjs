@@ -98,7 +98,7 @@ export async function fetchTrustedRunnerReviewMedia({
   const headers=new Headers({"X-Pipeline-Secret":secret,"Accept":"video/mp4"});
   const range=request.headers.get("Range");
   if(range){
-    if(!/^bytes=\\d+-\\d*$/.test(range))fail(416,"Unsupported video seek range");
+    if(!/^bytes=\d+-\d*$/.test(range))fail(416,"Unsupported video seek range");
     headers.set("Range",range);
   }
   const target=origin+"/jobs/rendering-review/attempt-media/"+
