@@ -751,3 +751,4 @@ Rendering Review V3 source validation + Producer executable timeline canary code
 2026-10-28: Deploy Worker 0.10.686 to retain protected Chicago Producer bridge compatibility with Runner v4 existing photo discovery. No posts or render automation.
 2026-10-28: Worker 0.10.687 authenticated read-only proposal storyboard. No render, schedule, or publish side effects.
 2026-10-28: Redeploy Worker 0.10.688 with validated all-production-ESM bundle source equivalence. Storyboard is read-only, source-linked, and publication fenced; no automatic V2.
+2026-10-28: Deploy Worker 0.10.689 original night scene source preview for exact held Chicago #8447. Read-only owned/available Chicago Morning variant suggestion in review storyboard, no candidate mutation, render, approval, schedule or posting. Requires production source equivalence and protected workspace readback.
