@@ -12,6 +12,8 @@ import { readProducerThread, appendProducerThreadMessage, producerConversationHi
 import { scriptedShortProducerPlanFromNotes } from "./scripted-short-producer-plan.mjs";
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 import { claimChicagoInstagramDispatch, igDispatchClaimEnabled } from "./rendering-review-ig-dispatch-claim.mjs";
+import { commitReviewAttempt, renderAttemptCommitEnabled } from "./rendering-review-attempt-outbox.mjs";
+import { makeRenderingReviewOutboxAirtableOperations } from "./rendering-review-outbox-airtable.mjs";
 import {
   readStudioProfileSummary,
   notifyStudioProfileSummary,
@@ -1542,6 +1544,45 @@ export default {
         // from user-message writes and every render/approval/publish action.
         // Protected Chicago Producer conversation. Only this route may persist
         // genuine model replies, through the existing versioned session owner.
+        // Explicit human commit of a verified frozen creative plan.
+        // Completely OFF until the isolated renderer/outbox consumer exists.
+        const commitAttemptMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/commit-attempt$/.exec(url.pathname);
+        if (commitAttemptMatch && request.method === "POST") {
+          if (!renderAttemptCommitEnabled(env))
+            throw new HttpError(405, "Rendering Review render commits are disabled");
+          assertWriteRequest(request,env);
+          const chicagoMembership = (await reviewAuthorizedProfiles(env,authorization))
+            .some(profile => profile.id === CHICAGO_PROFILE_ID);
+          if (!chicagoMembership) throw new HttpError(403,"Chicago review membership required");
+          if (!/^application\/json(?:\s*;|$)/i.test(String(request.headers.get("Content-Type")||"")))
+            throw new HttpError(415,"JSON required");
+          const raw=await request.text();
+          if(raw.length>900)throw new HttpError(413,"Commit request too large");
+          let body;
+          try{body=JSON.parse(raw)}catch{throw new HttpError(400,"Invalid commit request")}
+          if(!body||Array.isArray(body)||typeof body!=="object"||
+             Object.keys(body).length!==5||
+             Object.keys(body).some(k=>!["intent","expected_version","plan_version",
+               "plan_hash","client_request_id"].includes(k))||
+             body.intent!=="render_this_plan")
+            throw new HttpError(400,"Explicit render intent and exact frozen-plan identity required");
+          let adapter;
+          const authorizeOutput = async outputId => {
+            const view=await adapter.readOutput(outputId);
+            return view.profile_id===CHICAGO_PROFILE_ID&&
+              view.output_type==="Instagram Reel"&&view.platform==="Instagram";
+          };
+          adapter=makeRenderingReviewOutboxAirtableOperations({
+            env,airtableFetch,listRecords:reviewListRecords,readField:f,
+            withOutputApprovalLock,authorizeReview:authorizeOutput,
+          });
+          const receipt=await commitReviewAttempt({
+            env,output_id:commitAttemptMatch[1],authorization,operations:adapter,
+            expected_version:body.expected_version,plan_version:body.plan_version,
+            plan_hash:body.plan_hash,client_request_id:body.client_request_id,
+          });
+          return respond(request,env,receipt);
+        }
         const conversationMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/producer-conversation$/.exec(url.pathname);
         if (conversationMatch && request.method === "POST") {
           if (!producerConversationWritesEnabled(env))
