@@ -9,8 +9,11 @@ on:
       - 'apps/studio-api/rendering-review-attempt-outbox.*'
       - 'apps/studio-api/rendering-review-job-claim.*'
       - 'apps/studio-api/rendering-review-launch-ledger.*'
+      - 'apps/studio-api/rendering-review-completion-http.*'
       - 'services/pipeline-runner/rendering_review/remote_ledger.py'
       - 'services/pipeline-runner/rendering_review/outbox_claim.py'
+      - 'services/pipeline-runner/rendering_review/one_job.py'
+      - 'services/pipeline-runner/rendering_review/one_job_http.py'
       - 'services/pipeline-runner/tests/test_rendering_review_outbox_claim.py'
       - 'services/pipeline-runner/tests/test_rendering_review_remote_ledger.py'
       - 'apps/studio-api/rendering-review-outbox-airtable.*'
@@ -64,6 +67,8 @@ jobs:
           node --check apps/studio-api/rendering-review-job-claim.test.mjs
           node --check apps/studio-api/rendering-review-launch-ledger.mjs
           node --check apps/studio-api/rendering-review-launch-ledger.test.mjs
+          node --check apps/studio-api/rendering-review-completion-http.mjs
+          node --check apps/studio-api/rendering-review-completion-http.test.mjs
           node --check apps/studio-api/rendering-review-outbox-airtable.mjs
           node --check apps/studio-api/rendering-review-outbox-airtable.test.mjs
           node --check apps/studio-api/rendering-review-coordinator.mjs
@@ -91,13 +96,18 @@ jobs:
           node --check apps/studio-api/rendering-review-ig-dispatch-claim.mjs
           node --check apps/studio-api/rendering-review-ig-dispatch-claim.test.mjs
       - name: Chicago pilot lifecycle and safety contracts
-        run: node --test apps/studio-api/rendering-review-launch-ledger.test.mjs apps/studio-api/rendering-review-job-claim.test.mjs apps/studio-api/rendering-review-outbox-airtable.test.mjs apps/studio-api/rendering-review-attempt-outbox.test.mjs apps/studio-api/rendering-review-plan-preflight.test.mjs apps/studio-api/rendering-review-plan-persist.test.mjs apps/studio-api/rendering-review-policy.test.mjs apps/studio-api/rendering-review-coordinator.test.mjs apps/studio-api/rendering-review-airtable.test.mjs apps/studio-api/rendering-review-workspace.test.mjs apps/studio-api/rendering-review-feedback.test.mjs apps/studio-api/rendering-review-feedback-http.test.mjs apps/studio-api/rendering-review-schedule-owner.test.mjs apps/studio-api/rendering-review-enrollment-http.test.mjs apps/studio-api/rendering-review-enrollment-wiring.test.mjs apps/studio-api/rendering-review-enrollment-route.test.mjs apps/studio-api/rendering-review-producer-bridge.test.mjs apps/studio-api/rendering-review-producer-persist.test.mjs apps/studio-api/rendering-review-ig-dispatch-claim.test.mjs
+        run: node --test apps/studio-api/rendering-review-completion-http.test.mjs apps/studio-api/rendering-review-launch-ledger.test.mjs apps/studio-api/rendering-review-job-claim.test.mjs apps/studio-api/rendering-review-outbox-airtable.test.mjs apps/studio-api/rendering-review-attempt-outbox.test.mjs apps/studio-api/rendering-review-plan-preflight.test.mjs apps/studio-api/rendering-review-plan-persist.test.mjs apps/studio-api/rendering-review-policy.test.mjs apps/studio-api/rendering-review-coordinator.test.mjs apps/studio-api/rendering-review-airtable.test.mjs apps/studio-api/rendering-review-workspace.test.mjs apps/studio-api/rendering-review-feedback.test.mjs apps/studio-api/rendering-review-feedback-http.test.mjs apps/studio-api/rendering-review-schedule-owner.test.mjs apps/studio-api/rendering-review-enrollment-http.test.mjs apps/studio-api/rendering-review-enrollment-wiring.test.mjs apps/studio-api/rendering-review-enrollment-route.test.mjs apps/studio-api/rendering-review-producer-bridge.test.mjs apps/studio-api/rendering-review-producer-persist.test.mjs apps/studio-api/rendering-review-ig-dispatch-claim.test.mjs
       - name: Python AP1-IG common owner fail-closed contracts
         run: PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_review_dispatch_claim.py' -v
       - name: Protected render ledger HTTP bridge tests
         run: PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_remote_ledger.py' -v
       - name: Bounded Runner outbox claim stage (OFF by default)
         run: PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_outbox_claim.py' -v
+      - name: Exact one-Reel Runner and Flask route syntax
+        run: |
+          python -m py_compile services/pipeline-runner/rendering_review/one_job.py
+          python -m py_compile services/pipeline-runner/rendering_review/one_job_http.py
+          python -m py_compile services/pipeline-runner/app.py
       - name: Rendering Review read-only Studio interface contracts
         run: |
           node --check apps/studio-web/assets/rendering-review-queue.js

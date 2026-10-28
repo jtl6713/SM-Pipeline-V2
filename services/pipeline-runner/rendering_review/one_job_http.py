@@ -1,0 +1,82 @@
+"""Protected exact one-Reel Runner entrypoint. No generalized poller."""
+from __future__ import annotations
+import hmac
+import os
+import re
+import threading
+from flask import Blueprint, jsonify, request
+from rendering_review.one_job import render_exact_attempt
+
+RECORD=re.compile(r"rec[A-Za-z0-9]{14}\Z")
+TOKEN=re.compile(r"[A-Za-z0-9_-]{8,120}\Z")
+_ACTIVE:set[str]=set()
+_RESULTS:dict[str,dict]={}
+_LOCK=threading.RLock()
+
+def create_exact_review_render_blueprint(settings,runner=render_exact_attempt):
+    blueprint=Blueprint("review_one_reel",__name__)
+    def authorized():
+        configured=str(settings.get("pipeline_runner_shared_secret") or "").strip()
+        supplied=request.headers.get("X-Pipeline-Secret","")
+        return bool(configured) and hmac.compare_digest(configured,supplied)
+
+    def worker(job_id,output_id):
+        try:
+            response=runner(output_id,job_id)
+            result={"state":"ready_for_review" if response.get("ok") else "needs_reconciliation",
+                    "attempt_id":response.get("attempt_id"),
+                    "drive_file_id":response.get("drive_file_id")}
+        except Exception as exc:
+            # Deliberately do not auto-retry. A Remotion POST may have succeeded
+            # even if the Runner lost the acknowledgement.
+            result={"state":"needs_reconciliation",
+                    "reason":type(exc).__name__}
+        with _LOCK:
+            _RESULTS[job_id]=result
+            _ACTIVE.discard(job_id)
+
+    @blueprint.post("/jobs/rendering-review/run-exact")
+    def start_exact():
+        if os.environ.get("RENDERING_REVIEW_EXACT_RENDER_ENABLED")!="true":
+            return jsonify(ok=False,error="exact_render_disabled"),405
+        if not authorized():
+            return jsonify(ok=False,error="runner_auth_required"),401
+        if not request.is_json or (request.content_length or 0)>900:
+            return jsonify(ok=False,error="invalid_request"),400
+        body=request.get_json(silent=True)
+        if not isinstance(body,dict) or set(body)!={"output_id","job_id"}:
+            return jsonify(ok=False,error="invalid_request"),400
+        output_id=body.get("output_id")
+        job_id=body.get("job_id")
+        if not isinstance(output_id,str) or not RECORD.fullmatch(output_id) or (
+            output_id!=os.environ.get("RENDERING_REVIEW_EXACT_OUTPUT_ID")) or (
+            not isinstance(job_id,str) or not TOKEN.fullmatch(job_id)):
+            return jsonify(ok=False,error="exact_output_not_allowlisted"),403
+        with _LOCK:
+            if job_id in _ACTIVE:
+                return jsonify(ok=True,accepted=True,already_running=True,
+                               output_id=output_id,job_id=job_id),202
+            if job_id in _RESULTS:
+                return jsonify(ok=True,accepted=False,already_finished=True,
+                               state=_RESULTS[job_id]["state"],
+                               output_id=output_id,job_id=job_id),200
+            _ACTIVE.add(job_id)
+            _RESULTS[job_id]={"state":"accepted"}
+        thread=threading.Thread(target=worker,args=(job_id,output_id),
+                                name="render-review-"+job_id[:24],daemon=True)
+        thread.start()
+        return jsonify(ok=True,accepted=True,output_id=output_id,job_id=job_id,
+                       public_post_created=False),202
+
+    @blueprint.get("/jobs/rendering-review/run-exact/<job_id>")
+    def exact_status(job_id):
+        if not authorized():
+            return jsonify(ok=False,error="runner_auth_required"),401
+        if not TOKEN.fullmatch(job_id):
+            return jsonify(ok=False,error="invalid_job"),400
+        with _LOCK:
+            status={"state":"running" if job_id in _ACTIVE else "unknown"}
+            status.update(_RESULTS.get(job_id,{}))
+        return jsonify(ok=True,job_id=job_id,**status),200
+
+    return blueprint

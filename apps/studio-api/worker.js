@@ -1,4 +1,6 @@
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
+import { completeReviewAttempt } from "./rendering-review-completion-http.mjs";
+import {applyReviewEvent} from "./rendering-review-policy.mjs";
 import { makeRenderingReviewAirtableOperations } from "./rendering-review-airtable.mjs";
 import { CHICAGO_PROFILE_ID } from "./rendering-review-policy.mjs";
 import { handleRenderingReviewFeedbackRequest, reviewFeedbackWriteEnabled } from "./rendering-review-feedback-http.mjs";
@@ -1620,6 +1622,83 @@ export default {
         return respond(request,env,receipt);
       }
 
+      // A protected, exact, already-claimed review job may report render
+      // progress and a validated Drive Attempt 2 without writing the original
+      // Platform Output, releasing its hold, scheduling or posting.
+      if (url.pathname === "/internal/rendering-review/complete-attempt") {
+        requireConfig(env);
+        let adapter;
+        const authorizeOutput=async outputId=>{
+          const output=await adapter.readOutput(outputId);
+          return output.profile_id===CHICAGO_PROFILE_ID&&
+            output.platform==="Instagram"&&output.output_type==="Instagram Reel";
+        };
+        adapter=makeRenderingReviewAirtableOperations({
+          env,airtableFetch,listRecords:reviewListRecords,readField:f,
+          withOutputApprovalLock,authorizeReview:authorizeOutput,
+          authorizeEvent:async(_id,event)=>["RENDER_STARTED","RENDER_VALIDATING","RENDER_READY"].includes(event?.type),
+          mutationGate:true,
+          revokeScheduleUnderHold:async()=>{throw new HttpError(405,"Render completion cannot change schedules")},
+        });
+        const getExact=async(table,key,value,fields)=>{
+          if(!/^[A-Za-z0-9_-]{8,120}$/.test(String(value||"")))return null;
+          const rows=await reviewListRecords(env,table,{
+            limit:2,filterFormula:"{"+key+"}=\""+value+"\"",fields,
+          });
+          if(!Array.isArray(rows)||rows.length!==1)return null;
+          return rows[0];
+        };
+        const readJob=async id=>{
+          const row=await getExact(RENDER_REVIEW_TABLES.jobs,"Job_ID",id,[
+            "Job_ID","Output_Record_ID","Session_ID","Attempt_ID","Plan_Hash",
+            "Job_State","Lease_Owner","Lease_Fence","Event_History_JSON",
+          ]);
+          if(!row)return null;
+          const j=row.fields;
+          return {record_id:row.id,job_id:String(j.Job_ID||""),
+            output_id:String(j.Output_Record_ID||""),session_id:String(j.Session_ID||""),
+            attempt_id:String(j.Attempt_ID||""),plan_hash:String(j.Plan_Hash||""),
+            state:String(j.Job_State||""),lease_owner:String(j.Lease_Owner||""),
+            lease_fence:Number(j.Lease_Fence||0),event_history_json:j.Event_History_JSON};
+        };
+        const readAttempt=async id=>{
+          const row=await getExact(RENDER_REVIEW_TABLES.attempts,"Attempt_ID",id,[
+            "Attempt_ID","Session_ID","Output_Record_ID","Attempt_Status","Artifact_File_ID",
+          ]);
+          if(!row)return null;
+          const a=row.fields;
+          return {record_id:row.id,attempt_id:String(a.Attempt_ID||""),
+            session_id:String(a.Session_ID||""),output_id:String(a.Output_Record_ID||""),
+            status:String(a.Attempt_Status||""),artifact_file_id:String(a.Artifact_File_ID||"")};
+        };
+        const patch=(table,id,fields)=>airtableFetch(env,table,id,{
+          method:"PATCH",body:JSON.stringify({fields,typecast:false}),
+        });
+        const receipt=await completeReviewAttempt({request,env,operations:{
+          withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+          readSession:id=>adapter.readSession(id),readHold:id=>adapter.readHold(id),
+          readOutput:id=>adapter.readOutput(id),readJob,readAttempt,
+          patchJob:(id,fields)=>patch(RENDER_REVIEW_TABLES.jobs,id,fields),
+          patchAttempt:(id,fields)=>patch(RENDER_REVIEW_TABLES.attempts,id,fields),
+          applyEvent:async(outputId,event)=>{
+            const before=await adapter.loadSession(outputId);
+            const transitioned=applyReviewEvent(before,{...event,expected_version:before.version});
+            if(transitioned.ignored)
+              throw new HttpError(409,"Render callback no longer owns active attempt");
+            const saved=await adapter.saveSessionIfVersion({
+              output_id:outputId,expected_version:before.version,next:transitioned.session,
+            });
+            if(saved!==true)throw new HttpError(409,"Render callback session changed");
+            const after=await adapter.readSession(outputId);
+            if(after?.version!==transitioned.session.version||
+               after?.state!==transitioned.session.state)
+              throw new HttpError(503,"Render callback state readback failed");
+            return {...transitioned,session:after};
+          },
+        }});
+        return respond(request,env,receipt);
+      }
+
       // Internal AP1-IG dispatch claim: never accepts browser authorization.
       // It uses a separate protected server secret and the SAME R2 output
       // lease as manual review enrollment and Factory/approval. Feature OFF.
@@ -1695,7 +1774,40 @@ export default {
             expected_version:body.expected_version,plan_version:body.plan_version,
             plan_hash:body.plan_hash,client_request_id:body.client_request_id,
           });
-          return respond(request,env,receipt);
+          // Only the exact, already held and committed Chicago pilot may
+          // ask the authenticated Runner to begin one render. The Runner
+          // independently claims the Job and enforces its own allowlist.
+          // Failure leaves a durable queued Job for reconciliation, never a
+          // public publish or an automatic second Remotion request.
+          let renderTrigger={render_triggered:false};
+          if(receipt.ok===true&&receipt.hold_active===true&&
+             receipt.public_post_created===false&&
+             env.RENDERING_REVIEW_EXACT_RENDER_TRIGGER_ENABLED==="true"&&
+             commitAttemptMatch[1]===env.RENDERING_REVIEW_EXACT_OUTPUT_ID){
+            const base=String(env.PIPELINE_RUNNER_URL||"").trim().replace(/\/+$/,"");
+            const secret=String(env.PIPELINE_RUNNER_SHARED_SECRET||"").trim();
+            if(/^https:\/\//.test(base)&&secret.length>=24){
+              try{
+                const fired=await fetch(base+"/jobs/rendering-review/run-exact",{
+                  method:"POST",redirect:"error",
+                  headers:{"Content-Type":"application/json","X-Pipeline-Secret":secret},
+                  body:JSON.stringify({output_id:commitAttemptMatch[1],
+                    job_id:receipt.job_id}),
+                  signal:AbortSignal.timeout(12000),
+                });
+                const status=await fired.json();
+                renderTrigger={
+                  render_triggered:fired.status===202&&status?.accepted===true&&
+                    status.job_id===receipt.job_id&&
+                    status.output_id===commitAttemptMatch[1],
+                };
+              }catch{
+                renderTrigger={render_triggered:false,
+                  render_trigger_status:"RUNNER_ACK_UNVERIFIED"};
+              }
+            }
+          }
+          return respond(request,env,{...receipt,...renderTrigger});
         }
         const conversationMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/producer-conversation$/.exec(url.pathname);
         if (conversationMatch && request.method === "POST") {
