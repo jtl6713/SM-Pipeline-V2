@@ -219,6 +219,33 @@ def _ordered_asset_urls(record: dict[str, Any]) -> list[str]:
     return []
 
 
+
+def verified_full_video_backup_url(record: dict[str, Any]) -> str:
+    """Only expose a verified, immutable, output-owned TikTok video backup.
+
+    Provider SEND_TO_USER_INBOX only confirms an inbox handoff, not that the
+    playable video reached TikTok intact. Do not label a mutable current.mp4 or
+    a legacy range-probed video as full-file verified.
+    """
+    if field_str(record, "TikTok_Draft_Type").casefold() != DRAFT_TYPE_VIDEO.casefold():
+        return ""
+    output_id = str(field(record, "Output_ID") or "").strip()
+    drive_id = field_str(record, "Final_File_ID")
+    if not output_id.isdecimal() or not drive_id:
+        return ""
+    expected = (
+        f"https://media.chicagoshining.com/publish/platform-output-{output_id}/{drive_id}.mp4"
+    )
+    if field_str(record, "Publish_Asset_URL") != expected:
+        return ""
+    manifest = _ordered_asset_urls(record)
+    if manifest != [expected]:
+        return ""
+    if "TTD0 verified full public MP4 equals Drive master (" not in field_str(record, "Output_Notes"):
+        return ""
+    return expected
+
+
 def _slide_label(slide: dict[str, Any], index: int) -> str:
     name = field_str(slide, "Slide Name")
     if name:
@@ -429,10 +456,24 @@ def handoff_email_text(
     if tiktok_handle:
         lines.append(f"TikTok: {tiktok_handle}")
 
+    backup_url = verified_full_video_backup_url(record)
+    if backup_url:
+        lines.extend([
+            "",
+            "COMPLETE VIDEO BACKUP — USE IF TIKTOK INBOX SHOWS ONLY THE FIRST PART",
+            "The source MP4 was checked byte-for-byte against its Drive final BEFORE handoff.",
+            "TikTok inbox delivery does not prove the playable draft is complete.",
+            "If the inbox video stalls or stops early, DO NOT POST THAT DRAFT.",
+            "Download this complete output-specific MP4 and upload it manually in TikTok:",
+            backup_url,
+            "Then add the caption, music, and cover below, and record the public post URL.",
+            "Do not use 'retry draft' to create a second inbox copy of the same output.",
+        ])
+
     lines.extend(
         [
             "",
-            f"TikTok accepted the asset package and delivered it to the TikTok inbox for {destination}.",
+            f"TikTok reported SEND_TO_USER_INBOX for {destination}; this does not verify the playable clip duration.",
             "It has not been marked Published in Airtable." if not az else (
                 "TikTok cannot tell us when the inbox draft goes public. "
                 "Use Mark as Published after you post."
