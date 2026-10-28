@@ -35,7 +35,7 @@ const fail = (code, message, status = 409) => {
 };
 const validId = v => /^[A-Za-z0-9_-]{8,120}$/.test(text(v));
 const copy = x => JSON.parse(JSON.stringify(x));
-const hasReceipt = v => Boolean(v?.post_id || v?.published_at || v?.platform_post_url);
+const hasReceipt = v => Boolean(v?.post_id || v?.platform_post_id || v?.published_at || v?.platform_post_url);
 const isPublished = o => hasReceipt(o) || /^(published|publishing|dispatched)$/i.test(text(o?.output_status)) ||
   /^(published|publishing|dispatched)$/i.test(text(o?.publish_status));
 const isDispatching = o => Boolean(o?.publish_started_at || o?.publish_locked_at ||
@@ -77,6 +77,7 @@ export function enrollReview(output, hold, policy, { session_id, original_attemp
     state: "ready_for_review", version: 1,
     review_hold: { id: hold.id, owner: session_id, active: true },
     original_approval: output.approved_attempt_id || null,
+    original_do_not_publish: output.do_not_publish === true,
     current_attempt_id: original_attempt_id, latest_attempt_number: 1,
     latest_plan_version: 0,
     approved_attempt_id: null, plan: null, pending_authorization: null,
