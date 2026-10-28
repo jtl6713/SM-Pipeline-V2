@@ -46,6 +46,7 @@ jobs:
             services/pipeline-runner/tests/test_apc_cover_selection_qa1050.py \
             services/pipeline-runner/tests/test_ap1_igs_eligibility.py \
             services/pipeline-runner/tests/test_tiktok_photo_cover.py \
+            services/pipeline-runner/tests/test_ttd_email_text.py \
             services/pipeline-runner/tests/test_tiktok_photo_sound_guard.py \
             services/pipeline-runner/tests/test_ttd4_manual_hold_completion.py \
             services/pipeline-runner/tests/test_public_cover.py \
@@ -350,3 +351,5 @@ jobs:
 # 2026-10-28: Deploy exact Reel scene/daypart metadata and bounded owned Chicago River library discovery for Producer, no V2 and no publishing.
 # 2026-10-28: Deploy Runner v5 source-metadata scoped BOTH-night-stills candidate. Only user-authorized plan creation; no automatic render or post.
 # 2026-10-28: Deploy Runner v6 exact #8447 frame-1 and frame-5 source-only Producer correction; read-only proposals, no render or publication.
+
+# 2026-10-28: verified output-owned MP4 TikTok inbox fallback + TTD3 email regression; no draft re-init.
