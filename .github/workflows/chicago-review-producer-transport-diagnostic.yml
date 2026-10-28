@@ -115,6 +115,22 @@ jobs:
           }catch{
             Write-Output ("producer_probe_transport_failure_elapsed="+[int]$sw.Elapsed.TotalSeconds+" class="+$_.Exception.GetType().Name)
           }finally{
+            $localSw=[System.Diagnostics.Stopwatch]::StartNew()
+            try{
+              $localReq=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post,'http://127.0.0.1:3350/jobs/rendering-review/propose')
+              $localReq.Content=[System.Net.Http.StringContent]::new($body,[System.Text.Encoding]::UTF8,'application/json')
+              [void]$localReq.Headers.TryAddWithoutValidation('X-Pipeline-Secret',$secret)
+              $localResp=$http.SendAsync($localReq).GetAwaiter().GetResult()
+              $localRaw=$localResp.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+              $localCode='unknown';$localOk=$false
+              try{$localJson=$localRaw|ConvertFrom-Json
+                $localCode=[string]$localJson.error
+                $localOk=($localJson.ok -eq $true)
+              }catch{}
+              Write-Output ("producer_loopback_http="+[int]$localResp.StatusCode+" mime="+[string]$localResp.Content.Headers.ContentType.MediaType+" error="+$localCode+" ok="+$localOk+" elapsed_sec="+[int]$localSw.Elapsed.TotalSeconds)
+            }catch{
+              Write-Output ("producer_loopback_transport_failure="+$_.Exception.GetType().Name+" elapsed_sec="+[int]$localSw.Elapsed.TotalSeconds)
+            }
             $http.Dispose()
           }
           PS1
@@ -138,7 +154,7 @@ jobs:
             state=$(jq -r '.job.status // empty' /tmp/rr-probe-result.json)
             if [[ "$state" == "ok" || "$state" == "failed" ]]; then
               echo "producer_ops_probe_job=$state"
-              jq -r '.job.log // ""' /tmp/rr-probe-result.json | grep -E 'producer_probe_|producer_ops_probe_' | tail -10 || true
+              jq -r '.job.log // ""' /tmp/rr-probe-result.json | grep -E '^producer_probe_http=|^producer_probe_transport_failure|^producer_loopback_|^producer_ops_probe_' | tail -10 || true
               test "$state" = "ok"
               exit 0
             fi
