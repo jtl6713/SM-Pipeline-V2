@@ -52,3 +52,5 @@ jobs:
             sleep 3
           done
           echo "ops_runner_audit_incomplete"; exit 1
+
+# 2026-10-28 Chicago V1→V2 MVP: recheck protected production key presence and rollout flags (read only).

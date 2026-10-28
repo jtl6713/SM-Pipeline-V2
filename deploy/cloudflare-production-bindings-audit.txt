@@ -7,3 +7,5 @@ Triggered: 2026-08-16 rerun
 2026-10-19 read-only post-PR925 shadow deployment audit: identify active version and verify dormant STUDIO_PROFILE_SUMMARIES namespace after force-refresh canary failed on Airtable cooldown; do not mutate Cloudflare Worker.
 
 2026-10-19: Re-audit after rollback-lifecycle repair. Emit sanitized Home/refill/shadow feature-flag values plus Durable Object namespace names; no secrets.
+
+# 2026-10-28 Chicago V1→V2 MVP: recheck protected production key presence and rollout flags (read only).
