@@ -424,7 +424,7 @@ test('Rendering Review does not portray V1 playback as a completed Producer rend
   assert.doesNotMatch(script,/const listed=unresolvedNight\.map/);
   assert.match(script,/Verified Morning source · NOT SAVED/);
   assert.match(script,/suggestion_saved===false/);
-  assert.match(script,/not render, approve or publish/);
+  assert.match(script,/never renders, approves, publishes or alters V1/);
   assert.match(css,/rr-storyboard-pair/);
   assert.doesNotMatch(script,/showMedia\(.*candidate\.candidate\.timeline/);
 });
