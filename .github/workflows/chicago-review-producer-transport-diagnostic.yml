@@ -125,9 +125,11 @@ jobs:
               $localCode='unknown';$localOk=$false
               try{$localJson=$localRaw|ConvertFrom-Json
                 $localCode=[string]$localJson.error
+                $providerCode=[string]$localJson.provider_error_code
+                $providerParam=[string]$localJson.provider_error_param
                 $localOk=($localJson.ok -eq $true)
               }catch{}
-              Write-Output ("producer_loopback_http="+[int]$localResp.StatusCode+" mime="+[string]$localResp.Content.Headers.ContentType.MediaType+" error="+$localCode+" ok="+$localOk+" elapsed_sec="+[int]$localSw.Elapsed.TotalSeconds)
+              Write-Output ("producer_loopback_http="+[int]$localResp.StatusCode+" mime="+[string]$localResp.Content.Headers.ContentType.MediaType+" error="+$localCode+" provider_code="+$providerCode+" provider_param="+$providerParam+" ok="+$localOk+" elapsed_sec="+[int]$localSw.Elapsed.TotalSeconds)
             }catch{
               Write-Output ("producer_loopback_transport_failure="+$_.Exception.GetType().Name+" elapsed_sec="+[int]$localSw.Elapsed.TotalSeconds)
             }
