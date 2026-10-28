@@ -13,6 +13,7 @@ from ap1_ig.constants import (
 )
 from asset.helpers import as_bool
 from render.fields import field, field_str
+from publish.rendering_review import rendering_review_reason
 
 
 def _ci(value: Any) -> str:
@@ -28,6 +29,9 @@ def eligibility_reason(
     """Return a skip reason, or None when Make AP1-IG would pass the eligibility filter."""
     if not str(record.get("id") or "").strip():
         return "missing_record_id"
+    review_reason = rendering_review_reason(record)
+    if review_reason:
+        return review_reason
     if _ci(field_str(record, "Platform")) != _ci(PLATFORM):
         return "not_instagram"
     if _ci(field_str(record, "Platform_Output_Type")) != _ci(PLATFORM_OUTPUT_TYPE):
@@ -78,3 +82,4 @@ def is_eligible(
         replace_transaction_id=replace_transaction_id,
         replace_fingerprint=replace_fingerprint,
     ) is None
+

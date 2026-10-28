@@ -2899,6 +2899,14 @@ export async function approveOutputRecordForPublishing(env, existing, note, stam
   // Approve, and Factory batch cannot concurrently commit two approvals for
   // the same record. Never trust a caller's earlier Ready for Review snapshot.
   const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+  // Review ownership survives Factory clearing Do_Not_Publish. Until exact
+  // attempt approval is orchestrated, legacy approval must not bypass it.
+  if (["Studio_Render_Review_Hold_Active", "Studio_Render_Review_Hold_ID",
+       "Studio_Render_Review_Hold_Owner", "Studio_Render_Review_Session_ID",
+       "Studio_Review_Hold_ID", "Studio_Review_Hold_Owner"]
+      .some(key => Boolean(f(current, key)))) {
+    throw new HttpError(409, "Rendering Review requires exact-attempt approval");
+  }
   const currentOutput = String(f(current, "Output_Status") || "").trim();
   const currentPublish = String(f(current, "Publish_Status") || "").trim();
   const currentReview = String(f(current, "Review_Status") || "").trim();

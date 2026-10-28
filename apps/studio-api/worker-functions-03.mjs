@@ -10913,6 +10913,12 @@ export async function studioPulseFacebookPublicMake(env, record) {
 /*__STUDIO_WORKER_END:studioPulseFacebookPublicMake__*/
 
 export function studioPublishDispatchTarget(record) {
+  // A partial or unexpectedly cleared review hold must not become a legacy
+  // dispatch. Retained session ownership requires review-aware authorization.
+  if (["Studio_Render_Review_Hold_Active", "Studio_Render_Review_Hold_ID",
+       "Studio_Render_Review_Hold_Owner", "Studio_Render_Review_Session_ID",
+       "Studio_Review_Hold_ID", "Studio_Review_Hold_Owner"]
+      .some(key => Boolean(f(record, key)))) return null;
   const platform = String(f(record, "Platform") || "").trim();
   const outputType = String(f(record, "Studio_Output_Type") || "").trim();
   const mapping = String(f(record, "Platform_Output_Type") || "").trim();
