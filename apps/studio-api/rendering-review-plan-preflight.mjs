@@ -178,6 +178,7 @@ export async function inspectReviewPlan({
   const unresolvedResearch=blockers.some(x=>x.kind!=="asset");
   const frozen=!unresolvedResearch;
   const plan={
+    session_id:session.id,
     plan_version:Number(session.latest_plan_version||0)+1,
     source_attempt_id:attempt.id,source_artifact_id:attempt.artifact_id,
     source_drive_file_id:source.drive_file_id,
