@@ -1,0 +1,170 @@
+/**
+ * Chicago Instagram Reel: promote a real Producer suggestion into a revision
+ * plan only when the current authoritative source and each proposed asset pass
+ * independent server-side checks. No renderer, scheduler or provider writes.
+ *
+ * A model suggestion can NEVER certify its own assets or its factual claims.
+ * Unresolved requirements remain visible as blockers, not a pretend "ready".
+ */
+import {inspectReviewPlan} from "./rendering-review-plan-preflight.mjs";
+import {mutateReviewSessionCommand} from "./rendering-review-coordinator.mjs";
+import {CHICAGO_PROFILE_ID} from "./rendering-review-policy.mjs";
+
+const rec = v => /^rec[A-Za-z0-9]{14}$/.test(String(v||""));
+const drive = v => /^[A-Za-z0-9_-]{16,}$/.test(String(v||""));
+const str = v => String(v??"").trim();
+const one = v => Array.isArray(v)&&v.length===1&&rec(v[0])?v[0]:null;
+const label = v => typeof v==="string"?v:str(v?.name);
+const fail=(code,message,status=409)=>{
+  const e=new Error(message);e.code=code;e.status=status;throw e;
+};
+const driveUrlMatches=(url,fileId)=>{
+  try {
+    const u=new URL(url);
+    return u.protocol==="https:"&&u.hostname==="drive.google.com" &&
+      (u.pathname==="/file/d/"+fileId+"/view"||
+       u.pathname==="/file/d/"+fileId+"/preview");
+  } catch{return false;}
+};
+async function exact(readRecord,table,id){
+  if(!rec(id))fail("REVIEW_SOURCE_ID_INVALID","Exact source record ID required");
+  const row=await readRecord(table,id);
+  if(row?.id!==id||!row.fields)
+    fail("REVIEW_SOURCE_UNAVAILABLE","Authoritative source record not readable",503);
+  return row;
+}
+function sourceReceipt({output,session,readField,output_id}){
+  const f=(row,key)=>readField(row,key);
+  const attempt=(session.attempts||[]).find(x=>x.id===session.current_attempt_id);
+  const fileId=str(f(output,"Final_File_ID"));
+  if(!drive(fileId)||!attempt||attempt.artifact_id!==fileId||
+     !driveUrlMatches(str(f(output,"Final_File_URL")||f(output,"Output_URL")),fileId))
+    fail("REVIEW_SOURCE_NOT_VERIFIED","Original Drive render and attempt do not match");
+  return {verified:true,authority:"server",output_id,
+    profile_id:CHICAGO_PROFILE_ID,artifact_id:fileId,
+    attempt_id:attempt.id,drive_file_id:fileId,
+    canonical_media_authority:"google_drive"};
+}
+function requestedIds(candidate){
+  const ids=[...(candidate.reuse_asset_ids||[])];
+  for(const scene of candidate.timeline||[])ids.push(...(scene.asset_ids||[]));
+  return [...new Set(ids)];
+}
+function rightsReceipt(row,entry,readField){
+  const f=name=>readField(row,name);
+  const id=str(entry.id);
+  const mediaRecordId=str(entry.media_asset_record_id);
+  const fileId=str(entry.google_drive_file_id);
+  const status=label(f("Asset_Status"));
+  const rights=label(f("Rights_Status"));
+  const kind=label(f("Media_Class"));
+  const profiles=f("Content_Profile");
+  if(!/^[A-Za-z0-9_-]{8,120}$/.test(id)||!rec(mediaRecordId)||!drive(fileId)||
+    row?.id!==mediaRecordId||str(f("Google Drive File ID"))!==fileId||
+    rights!=="Owned"||status!=="Available"||f("Active")!==true||
+    f("Do_Not_Use")===true||!Array.isArray(profiles)||
+    profiles.length!==1||profiles[0]!==CHICAGO_PROFILE_ID||
+    !["Image","Video"].includes(kind))
+    return null;
+  return {id,verified:true,rights_clear:true,authority:"server",
+    rights_receipt_id:"rrrights_"+mediaRecordId,
+    drive_file_id:fileId,profile_id:CHICAGO_PROFILE_ID,
+    canonical_media_authority:"google_drive",
+    media_type:kind==="Image"?"image":"video"};
+}
+/**
+ * Only a trusted Worker handler can call this. Caller supplies an authenticated
+ * version-fenced Airtable session adapter with canonical output lock.
+ */
+export async function persistReadyReviewPlan({
+  env,output_id,operations,readRecord,readField,now=()=>new Date(),
+}={}){
+  if(!rec(output_id)||!env?.AIRTABLE_OUTPUT_TABLE_ID||
+     !env?.AIRTABLE_MEDIA_TABLE_ID||
+     typeof readRecord!=="function"||typeof readField!=="function"||
+     typeof operations?.loadSession!=="function"||
+     typeof operations?.readHold!=="function")
+    fail("REVIEW_PLAN_ADAPTER_MISSING","Trusted plan evidence adapters required",503);
+  const session=await operations.loadSession(output_id);
+  if(!session||session.output_id!==output_id||session.profile_id!==CHICAGO_PROFILE_ID||
+     !session.producer_candidate||session.producer_candidate.stale)
+    fail("REVIEW_CANDIDATE_UNAVAILABLE","Current held Producer candidate required");
+  const hold=await operations.readHold(output_id);
+  if(!hold?.verified||!hold.active||hold.owner!==session.id||
+     hold.id!==session.review_hold?.id||!session.review_hold?.active)
+    fail("REVIEW_HOLD_UNVERIFIED","Producer plan requires an exact active review hold");
+  const output=await exact(readRecord,env.AIRTABLE_OUTPUT_TABLE_ID,output_id);
+  const f=(r,k)=>readField(r,k);
+  if(one(f(output,"Content_Item"))===null ||
+     label(f(output,"Platform"))!=="Instagram"||
+     label(f(output,"Platform_Output_Type"))!=="Instagram Reel"||
+     f(output,"Do_Not_Publish")!==true||
+     f(output,"Studio_Render_Review_Hold_Active")!==true||
+     str(f(output,"Studio_Render_Review_Hold_ID"))!==hold.id||
+     str(f(output,"Studio_Render_Review_Hold_Owner"))!==session.id||
+     str(f(output,"Studio_Render_Review_Session_ID"))!==session.id||
+     f(output,"Publish_Started_At")||f(output,"Publish_Locked_By")||
+     f(output,"Publish_Locked_At")||f(output,"Platform_Media_ID")||
+     f(output,"Platform_Post_ID")||f(output,"Published_At"))
+    fail("REVIEW_OUTPUT_INELIGIBLE","Held, unpublished Chicago Instagram Reel required");
+  const content=await exact(readRecord,"tblwzN9AXWvmKVKPs",one(f(output,"Content_Item")));
+  if(one(f(content,"Content_Profile"))!==CHICAGO_PROFILE_ID)
+    fail("REVIEW_PROFILE_MISMATCH","Original Content Item is outside Chicago");
+  const reqId=one(f(content,"Production_Request"));
+  if(!reqId)fail("REVIEW_REQUEST_UNAVAILABLE","Source Production Request not uniquely linked");
+  const request=await exact(readRecord,"tbl75nxNi6PMUjBQE",reqId);
+  let master;
+  try{master=JSON.parse(str(f(request,"Studio_Master_Assets_JSON")));}catch{
+    fail("REVIEW_ASSET_MANIFEST_INVALID","Production Request asset inventory cannot be verified");
+  }
+  if(!Array.isArray(master)||master.length>80)
+    fail("REVIEW_ASSET_MANIFEST_INVALID","Production Request asset inventory is invalid");
+  const byId=new Map();
+  for(const item of master){
+    if(!item||typeof item!=="object"||typeof item.id!=="string"||
+       byId.has(item.id))fail("REVIEW_ASSET_MANIFEST_INVALID","Duplicate or invalid source asset identity");
+    byId.set(item.id,item);
+  }
+  const candidate=session.producer_candidate.candidate;
+  const ids=requestedIds(candidate);
+  if(ids.length>80)fail("REVIEW_ASSET_LIMIT","Too many revision assets");
+  const assets=[];
+  for(const assetId of ids){
+    const entry=byId.get(assetId);
+    if(!entry||!rec(entry.media_asset_record_id))continue;
+    const row=await exact(readRecord,env.AIRTABLE_MEDIA_TABLE_ID,entry.media_asset_record_id);
+    const receipt=rightsReceipt(row,entry,readField);
+    if(receipt)assets.push(receipt);
+  }
+  const result=await inspectReviewPlan({
+    session,source:sourceReceipt({output,session,readField,output_id}),
+    assets,visualReceipt:null,factReceipts:[],requirementReceipts:[],
+  });
+  if(!result.ready_to_commit){
+    return {ok:true,ready:false,persisted:false,
+      blockers:result.blockers.map(b=>({kind:b.kind,description:b.description})),
+      public_post_created:false};
+  }
+  const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(
+    JSON.stringify([output_id,session.id,session.version,result.plan_hash])));
+  const hex=Array.from(new Uint8Array(digest),v=>v.toString(16).padStart(2,"0")).join("");
+  const event={
+    type:"PROPOSE_PLAN",expected_version:session.version,
+    idempotency_key:"rrplan_"+hex.slice(0,48),
+    fingerprint:"rrfp_"+hex,
+    plan_version:result.plan.plan_version,plan_hash:result.plan_hash,
+    missing_assets:[],frozen:true,
+    immutable_manifest:{...result.plan,session_id:session.id,
+      plan_hash:result.plan_hash},
+    acceptance_checks:result.plan.creative.acceptance_checks,
+    at:now().toISOString(),
+  };
+  const updated=await mutateReviewSessionCommand({output_id,event,operations});
+  if(updated.session?.plan?.hash!==result.plan_hash||
+     updated.session.state!=="plan_ready")
+    fail("REVIEW_PLAN_READBACK_FAILED","Immutable plan was not confirmed",503);
+  return {ok:true,ready:true,persisted:true,
+    plan_version:result.plan.plan_version,plan_hash:result.plan_hash,
+    session_version:updated.session.version,blockers:[],
+    public_post_created:false};
+}
