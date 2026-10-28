@@ -28,6 +28,7 @@ from studio_compress.processor import start_job as start_studio_compress
 from ttd.client import TikTokDraftClient, load_tiktok_settings
 from rendering_review.http import create_rendering_review_producer_blueprint
 from rendering_review.one_job_http import create_exact_review_render_blueprint
+from rendering_review.media_http import create_review_media_blueprint
 
 logger = logging.getLogger("pipeline-runner")
 settings = load_settings()
@@ -67,6 +68,7 @@ app = Flask(__name__)
 # persistence and phase-1 ownership safeguards have been verified.
 app.register_blueprint(create_rendering_review_producer_blueprint(settings))
 app.register_blueprint(create_exact_review_render_blueprint(settings))
+app.register_blueprint(create_review_media_blueprint(settings))
 
 
 def _verify_secret() -> tuple[dict | None, int | None]:
