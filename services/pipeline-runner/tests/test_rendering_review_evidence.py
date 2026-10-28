@@ -61,12 +61,20 @@ class EvidenceTests(unittest.TestCase):
         client, rows = self.fixture()
         rows[CONTENT]["fields"]["Content_Profile"] = ["another-city"]
         with self.assertRaisesRegex(ValueError, "profile"): load_evidence(client, OUTPUT, SESSION, 3)
-        for field in ("Publish_Started_At", "Platform_Media_ID",
-                      "Platform_Post_ID", "Platform_Post_URL", "Published_At"):
+        for field in ("Publish_Started_At", "Publish_Locked_At", "Publish_Locked_By",
+                      "Platform_Media_ID", "Platform_Post_ID", "Platform_Post_URL",
+                      "Published_At"):
             with self.subTest(field=field):
                 client, rows = self.fixture()
                 rows[OUTPUTS]["fields"][field] = "saved-provider-identity"
                 with self.assertRaisesRegex(ValueError, "publication"):
                     load_evidence(client, OUTPUT, SESSION, 3)
+
+
+    def test_published_status_without_receipt_denies_model_planning(self):
+        client, rows = self.fixture()
+        rows[OUTPUTS]["fields"]["Publish_Status"] = "Published"
+        with self.assertRaisesRegex(ValueError, "publication"):
+            load_evidence(client, OUTPUT, SESSION, 3)
 
 if __name__ == '__main__': unittest.main()
