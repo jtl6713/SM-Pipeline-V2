@@ -13,7 +13,7 @@ JOB = "rrjob_12345678"
 ATTEMPT = "rrattempt_12345678"
 SESSION = "rrsession_12345678"
 SECRET = "rendering-review-internal-secret-example"
-ROW = {"id": "recH1J2K3L4M5N6P7Q", "fields": {
+ROW = {"id": "recH1J2K3L4M5N6P7", "fields": {
     "Job_ID": JOB, "Session_ID": SESSION,
     "Output_Record_ID": OUTPUT, "Attempt_ID": ATTEMPT,
     "Plan_Hash": "a" * 64, "Job_State": "queued", "Lease_Fence": 0,
@@ -41,11 +41,13 @@ class OutboxClaimTests(unittest.TestCase):
                     "render_started": False, "public_post_created": False}
         with patch.dict(os.environ,
                         {"RENDERING_REVIEW_OUTBOX_CLAIM_ENABLED": "true"}):
-            return claim_one_review_job(
-                client=client or Airtable(), worker_base="https://studio.example",
-                shared_secret=SECRET, consumer_identity="runner_host_12345",
-                transport=transport or send, **kwargs,
-            )
+            options = {"client": client or Airtable(),
+                       "worker_base": "https://studio.example",
+                       "shared_secret": SECRET,
+                       "consumer_identity": "runner_host_12345",
+                       "transport": transport or send}
+            options.update(kwargs)
+            return claim_one_review_job(**options)
 
     def test_bounded_read_only_selection(self):
         db = Airtable()
