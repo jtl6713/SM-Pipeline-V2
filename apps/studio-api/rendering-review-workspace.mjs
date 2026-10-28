@@ -41,7 +41,7 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
         'Final_File_ID','Final_File_URL','Output_Title','Output_ID','Output_Status',
         'Publish_Status','Published_At','Platform_Post_ID','Platform_Post_URL',
         'Platform_Media_ID','Publish_Started_At',
-        'Publish_Locked_At','Do_Not_Publish',
+        'Publish_Locked_At','Publish_Locked_By','Do_Not_Publish',
         RENDER_REVIEW_OUTPUT_FIELDS.hold_active,RENDER_REVIEW_OUTPUT_FIELDS.hold_id,
         RENDER_REVIEW_OUTPUT_FIELDS.hold_owner,RENDER_REVIEW_OUTPUT_FIELDS.session_id],
     });
@@ -60,7 +60,7 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
       if(/^(published|publishing|dispatched)$/i.test(text(f.Publish_Status))||
          /^(published|publishing|dispatched)$/i.test(text(f.Output_Status))||
          f.Published_At||f.Platform_Post_ID||f.Platform_Post_URL||
-         f.Platform_Media_ID)continue;
+         f.Platform_Media_ID||f.Publish_Locked_By)continue;
       candidates.push({row,contentId:links[0]});
     }
     const uniqueContentIds=[...new Set(candidates.map(item=>item.contentId))];
@@ -97,7 +97,7 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
         output_number:f.Output_ID||null,title:text(f.Output_Title)||('Output '+(f.Output_ID||row.id)),
         render_status:text(f.Render_Status),final_file_id:text(f.Final_File_ID)||null,
         final_file_url:text(f.Final_File_URL)||null,
-        review_held:held,dispatch_started:Boolean(f.Publish_Started_At||f.Publish_Locked_At),
+        review_held:held,dispatch_started:Boolean(f.Publish_Started_At||f.Publish_Locked_At||f.Publish_Locked_By),
         manual_admission_enabled:false,
       });
     }
