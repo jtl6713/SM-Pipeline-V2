@@ -462,6 +462,16 @@ jobs:
               expected.setdefault('STUDIO_PROFILE_SUMMARY_RECONCILE_ENABLED',prior_plain.get('STUDIO_PROFILE_SUMMARY_RECONCILE_ENABLED','false'))
           from studio_api_rollback_lifecycle import sanitize_runtime_flags
           print('postdeploy_profile_summary_flags=' + json.dumps(sanitize_runtime_flags(after_plain)))
+          # Diagnose the precise key without ever printing plaintext values or
+          # secrets. Preserve all existing fail-closed production contracts.
+          passthrough_exceptions={'STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED','STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST'}
+          changed_passthrough=sorted(name for name,value in prior_plain.items()
+              if name not in expected and name not in passthrough_exceptions
+              and after_plain.get(name)!=value)
+          mismatched_manifest=sorted(name for name,value in expected.items()
+              if after_plain.get(name)!=value)
+          print('postdeploy_preserved_plaintext_mismatch_keys='+json.dumps(changed_passthrough))
+          print('postdeploy_manifest_mismatch_keys='+json.dumps(mismatched_manifest))
           for name,value in prior_plain.items():
               if name not in expected and name not in ('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED','STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST') and after_plain.get(name)!=value:
                   raise SystemExit('Worker plaintext setting changed or disappeared: '+name)
