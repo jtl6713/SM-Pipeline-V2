@@ -30,7 +30,8 @@ test("Worker refuses enrollment with any missing protected deployment gate",()=>
 });
 test("authenticated Chicago membership and original Studio write gate are passed to handler",()=>{
   assert.match(route,/reviewAuthorizedProfiles\(env, authorization\)/);
-  assert.match(route,/requirePermission\(authorization, "outputs_review"\)/);
+  assert.match(worker.slice(worker.indexOf('if (url.pathname.startsWith("/api/rendering-review/"))'),begin),
+    /requirePermission\(authorization, "outputs_review"\)/);
   assert.match(route,/handleRenderingReviewEnrollRequest\(/);
   assert.match(route,/assertWriteRequest,/);
   assert.match(route,/authorizeChicagoMembership: async \(\) => chicagoMembership/);
