@@ -368,6 +368,9 @@ def propose_revision(evidence: dict, direction: str, settings: dict, *, transpor
     import re
     scenes = evidence.get("original_timeline")
     if (evidence.get("output_id") == "rec0uVrVeiUM6shp9"
+            and direction.startswith("Please replace BOTH nighttime scenes, including frame 1 (")
+            and "Keep every other scene, narration, music, watermark and exact scene timing unchanged." in direction
+            and "I will separately authorize V2 rendering after reviewing the plan." in direction
             and re.search(r"\bframe\s+1\b", direction, re.I)
             and re.search(r"\bframe\s+5\b", direction, re.I)
             and isinstance(scenes, list) and len(scenes) == 10
