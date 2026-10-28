@@ -61,6 +61,7 @@ export async function acceptReviewCreativeOnly({
     output_id,operations,
     event:{
       type:"APPROVE_ATTEMPT",pilot_creative_only:true,
+      expected_version:body.expected_version,
       attempt_id:body.attempt_id,artifact_id:attempt.artifact_id,
       unrelated_hold_active:false,
       idempotency_key:"rraccept_"+key.slice(0,64),
