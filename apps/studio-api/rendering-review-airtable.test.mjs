@@ -157,6 +157,21 @@ test("provider post receipt blocks admission even if status remains Ready for Re
  assert.equal(f.writes,0);
 });
 
+test("an existing Instagram media container blocks enrollment before a hold or schedule write",async()=>{
+ for(const [field,value] of [
+  ["Platform_Media_ID","existing-container-123"],
+  ["Platform_Post_URL","https://instagram.com/reel/existing"],
+ ]){
+  const f=fake({mutationGate:true});
+  f.output.fields[field]=value;
+  const projected=await f.ops.readOutput(outputId);
+  if(field==="Platform_Media_ID")assert.equal(projected.platform_media_id,value);
+  await reject(()=>enrollManualReviewCommand({...args,operations:f.ops}),"DISPATCH_ALREADY_STARTED");
+  assert.equal(f.writes,0);
+  assert.equal(f.session,null);
+ }
+});
+
 test("malformed session and duplicate Airtable sessions fail closed",async()=>{
  const f=fake({mutationGate:true});
  await enrollManualReviewCommand({...args,operations:f.ops});
