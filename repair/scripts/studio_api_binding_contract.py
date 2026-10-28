@@ -68,6 +68,28 @@ OPTIONAL_BINDINGS = {
     # Scoped atomic scheduling allowlist; deployment verifies the exact value
     # against the explicitly confirmed single-lane activation input.
     "STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST": "plain_text",
+    # Exact, disabled-by-default Chicago review pilot bindings deployed as
+    # Cloudflare secret_text; no arbitrary new binding names or types allowed.
+    "RENDERING_REVIEW_ATTEMPT_COMMIT_ENABLED": "secret_text",
+    "RENDERING_REVIEW_COMPLETION_ENABLED": "secret_text",
+    "RENDERING_REVIEW_CREATIVE_ACCEPT_ENABLED": "secret_text",
+    "RENDERING_REVIEW_DISPATCH_FENCE_VERIFIED": "secret_text",
+    "RENDERING_REVIEW_DISPATCH_SHARED_SECRET": "secret_text",
+    "RENDERING_REVIEW_ENROLL_WRITES_ENABLED": "secret_text",
+    "RENDERING_REVIEW_EXACT_OUTPUT_ID": "secret_text",
+    "RENDERING_REVIEW_EXACT_RENDER_TRIGGER_ENABLED": "secret_text",
+    "RENDERING_REVIEW_FEEDBACK_WRITES_ENABLED": "secret_text",
+    "RENDERING_REVIEW_IG_DISPATCH_CLAIM_ENABLED": "secret_text",
+    "RENDERING_REVIEW_INTEGRATION_VERIFIED": "secret_text",
+    "RENDERING_REVIEW_JOB_CLAIM_ENABLED": "secret_text",
+    "RENDERING_REVIEW_LAUNCH_LEDGER_ENABLED": "secret_text",
+    "RENDERING_REVIEW_MANUAL_ADMISSION_ENABLED": "secret_text",
+    "RENDERING_REVIEW_PRODUCER_BRIDGE_ENABLED": "secret_text",
+    "RENDERING_REVIEW_PRODUCER_WRITES_ENABLED": "secret_text",
+    "RENDERING_REVIEW_REMOTION_BASE_URL": "secret_text",
+    "RENDERING_REVIEW_RENDER_JOB_SHARED_SECRET": "secret_text",
+    "RENDERING_REVIEW_RENDER_OUTBOX_VERIFIED": "secret_text",
+    "RENDERING_REVIEW_SCHEDULER_VACATE_VERIFIED": "secret_text",
     "ELEVENLABS_API_KEY": "secret_text",
     "PIPELINE_RUNNER_SHARED_SECRET": "secret_text",
     "PIPELINE_RUNNER_URL": "plain_text",
