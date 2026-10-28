@@ -16,6 +16,10 @@ on:
       - 'apps/studio-api/rendering-review-enrollment-route.*'
       - 'apps/studio-api/rendering-review-producer-bridge.*'
       - 'apps/studio-api/rendering-review-producer-persist.*'
+      - 'apps/studio-api/rendering-review-ig-dispatch-claim.*'
+      - 'services/pipeline-runner/publish/review_dispatch_claim.py'
+      - 'services/pipeline-runner/ap1_ig/processor.py'
+      - 'services/pipeline-runner/tests/test_review_dispatch_claim.py'
       - 'apps/studio-api/worker.js'
       - 'apps/studio-web/rendering-review-ui.test.mjs'
       - 'apps/studio-web/rendering-review-queue.test.mjs'
@@ -62,8 +66,12 @@ jobs:
           node --check apps/studio-api/rendering-review-producer-bridge.test.mjs
           node --check apps/studio-api/rendering-review-producer-persist.mjs
           node --check apps/studio-api/rendering-review-producer-persist.test.mjs
+          node --check apps/studio-api/rendering-review-ig-dispatch-claim.mjs
+          node --check apps/studio-api/rendering-review-ig-dispatch-claim.test.mjs
       - name: Chicago pilot lifecycle and safety contracts
-        run: node --test apps/studio-api/rendering-review-policy.test.mjs apps/studio-api/rendering-review-coordinator.test.mjs apps/studio-api/rendering-review-airtable.test.mjs apps/studio-api/rendering-review-workspace.test.mjs apps/studio-api/rendering-review-feedback.test.mjs apps/studio-api/rendering-review-feedback-http.test.mjs apps/studio-api/rendering-review-schedule-owner.test.mjs apps/studio-api/rendering-review-enrollment-http.test.mjs apps/studio-api/rendering-review-enrollment-wiring.test.mjs apps/studio-api/rendering-review-enrollment-route.test.mjs apps/studio-api/rendering-review-producer-bridge.test.mjs apps/studio-api/rendering-review-producer-persist.test.mjs
+        run: node --test apps/studio-api/rendering-review-policy.test.mjs apps/studio-api/rendering-review-coordinator.test.mjs apps/studio-api/rendering-review-airtable.test.mjs apps/studio-api/rendering-review-workspace.test.mjs apps/studio-api/rendering-review-feedback.test.mjs apps/studio-api/rendering-review-feedback-http.test.mjs apps/studio-api/rendering-review-schedule-owner.test.mjs apps/studio-api/rendering-review-enrollment-http.test.mjs apps/studio-api/rendering-review-enrollment-wiring.test.mjs apps/studio-api/rendering-review-enrollment-route.test.mjs apps/studio-api/rendering-review-producer-bridge.test.mjs apps/studio-api/rendering-review-producer-persist.test.mjs apps/studio-api/rendering-review-ig-dispatch-claim.test.mjs
+      - name: Python AP1-IG common owner fail-closed contracts
+        run: PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_review_dispatch_claim.py' -v
       - name: Rendering Review read-only Studio interface contracts
         run: |
           node --check apps/studio-web/assets/rendering-review-queue.js

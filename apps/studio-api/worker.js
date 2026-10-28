@@ -11,6 +11,7 @@ import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title
 import { readProducerThread, appendProducerThreadMessage, producerConversationHistory } from "./producer-conversation.mjs";
 import { scriptedShortProducerPlanFromNotes } from "./scripted-short-producer-plan.mjs";
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
+import { claimChicagoInstagramDispatch, igDispatchClaimEnabled } from "./rendering-review-ig-dispatch-claim.mjs";
 import {
   readStudioProfileSummary,
   notifyStudioProfileSummary,
@@ -1501,6 +1502,25 @@ export default {
           ok: true,
           ...authorization,
         }, authorization.authenticated ? 200 : 401);
+      }
+
+      // Internal AP1-IG dispatch claim: never accepts browser authorization.
+      // It uses a separate protected server secret and the SAME R2 output
+      // lease as manual review enrollment and Factory/approval. Feature OFF.
+      if (url.pathname === "/internal/rendering-review/ig-dispatch-claim") {
+        requireConfig(env);
+        if (!igDispatchClaimEnabled(env))
+          throw new HttpError(405, "Internal IG dispatch claim disabled");
+        const receipt = await claimChicagoInstagramDispatch({
+          request, env,
+          readOutput: id => airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+          readContentItem: id => airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+          patchOutput: (id,fields) => airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id,{
+            method:"PATCH",body:JSON.stringify({fields,typecast:false}),
+          }),
+          withOutputLock: (id,fn) => withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+        });
+        return respond(request,env,receipt);
       }
 
       requireConfig(env);
