@@ -163,7 +163,7 @@ class ProcessorBoundaryTests(unittest.TestCase):
             counters["shared_claim"] = counters.get("shared_claim", 0) + 1
             return {"ok": True}
         namespace = {
-            "shared_dispatch_claim_required": lambda: shared_claim,
+            "shared_dispatch_claim_required": lambda _output_id=None: shared_claim,
             "ReviewDispatchClaimError": ClaimError,
             "is_chicago_reel": lambda _client, _output: True,
             "claim_chicago_dispatch": fake_claim,
