@@ -39,7 +39,7 @@ test('untrusted titles and stored conversation text are not inserted as HTML',()
   assert.doesNotMatch(js,/\.innerHTML\s*=/);
   assert.match(js,/new URL\(String\(value\|\|''\), window\.location\.href\)/);
   assert.match(js,/http:','https:/);
-  assert.match(js,/rel="noopener noreferrer"/) || assert.match(html,/rel="noopener noreferrer"/);
+  assert.match(html,/rel="noopener noreferrer"/);
 });
 test('mobile video playback and read-only state are accessible',()=>{
   assert.match(html,/<video id="rrVideo"[^>]*controls playsinline preload="none" hidden/);
