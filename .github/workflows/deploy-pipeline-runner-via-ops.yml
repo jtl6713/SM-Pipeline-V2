@@ -314,3 +314,5 @@ jobs:
 
 # 2026-10-28: Deploy Rendering Review final-publication authoritative readback and retained-owner safeguards. Admissions remain disabled; no public test posts.
 # 2026-10-28: deploy merged PR #1244 exact Chicago review Runner (non-public, guarded), no automatic activation.
+
+# Deploy Rendering Review executable timeline and V3 verified-source support (PR #1245); preserve safety configuration.
