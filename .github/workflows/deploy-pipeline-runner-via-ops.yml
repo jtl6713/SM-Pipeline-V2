@@ -325,3 +325,4 @@ jobs:
 # 2026-10-28 scoped Chicago Rendering Review MVP callback routing; preserve concurrent R4 render repair.
 
 # 2026-10-28: retrigger after same-day stale SERVICE_VERSION correction for Output 3129.
+# 2026-10-28: TikTok output-owned MP4 full-byte Drive/CDN integrity guard (#1258); release=2026-10-28-tiktok-full-video-integrity-v1. No TikTok draft re-init.
