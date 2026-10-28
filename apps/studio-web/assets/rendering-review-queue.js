@@ -244,6 +244,30 @@
         const newest=attempts.filter(a=>a.status==='ready_for_review'&&a.artifact_id).at(-1);
         if(newest?.number>1)showMedia(attemptMedia(newest,entry),'Attempt '+newest.number);
       }
+      if(session?.state==='approved'){
+        detail.append(elem('p','Creative render accepted for the pilot. The publication hold remains active; no Instagram upload or publishing has been authorized.','rr-notice'));
+      }
+      if(session?.state==='ready_for_review'&&
+         saved.flags?.creative_approval_enabled===true&&
+         saved.publication_hold_verified===true){
+        const current=attempts.find(a=>a.id===session.current_attempt_id);
+        if(current?.status==='ready_for_review'&&attemptMedia(current,entry)){
+          detail.append(actionButton('Approve this version — review only',async()=>{
+            if(!window.confirm('Accept this rendered version for the pilot? This does NOT publish, upload, or release the publication hold.'))return;
+            const result=await post('/api/rendering-review/outputs/'+
+              encodeURIComponent(entry.output_id)+'/approve',{
+              expected_version:session.version,attempt_id:current.id,
+              client_request_id:safeRequestId(),
+            });
+            if(result.accepted!==true||result.review_hold_active!==true||
+               result.publication_changed!==false||
+               result.instagram_upload_created!==false)
+              throw new Error('Creative approval receipt not verified');
+            say('Version accepted. Publication remains held.');
+            await open(entry);
+          }));
+        }
+      }
       if(['queued','rendering','validating'].includes(session?.state)){
         detail.append(elem('p','Attempt '+session.latest_attempt_number+' · '+
           ({queued:'Queued for isolated renderer',rendering:'Rendering',validating:'Validating media'}[session.state])+
