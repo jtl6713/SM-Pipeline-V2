@@ -9,6 +9,7 @@ on:
       - 'apps/studio-api/rendering-review-output-view.*'
       - 'apps/studio-api/rendering-review-workspace.*'
       - 'apps/studio-web/rendering-review-ui.test.mjs'
+      - 'apps/studio-web/rendering-review-queue.test.mjs'
       - 'apps/studio-web/assets/rendering-review-queue.*'
       - 'apps/studio-web/index.html'
       - '.github/workflows/rendering-review-phase0-ci.yml'
@@ -42,6 +43,6 @@ jobs:
       - name: Rendering Review read-only Studio interface contracts
         run: |
           node --check apps/studio-web/assets/rendering-review-queue.js
-          node --test apps/studio-web/rendering-review-ui.test.mjs
+          node --test apps/studio-web/rendering-review-ui.test.mjs apps/studio-web/rendering-review-queue.test.mjs
       - name: Existing producer selective rework regression
         run: node --test apps/studio-api/conversational-producer-plan.test.mjs apps/studio-api/producer-conversation.test.mjs apps/studio-api/output-approval-lease.test.mjs
