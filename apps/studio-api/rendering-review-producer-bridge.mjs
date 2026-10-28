@@ -95,9 +95,16 @@ export async function handleReviewProducerProposal({
         expected_version:body.expected_version,direction:body.direction.trim()}),
       signal:AbortSignal.timeout(125000),
     });
+  }catch{
+    fail("PRODUCER_CONNECTION_FAILED",503,
+      "The private Producer connection failed before a response was received. Your feedback was not saved.");
+  }
+  try{
     response=await upstream.json();
   }catch{
-    fail("PRODUCER_UPSTREAM_UNAVAILABLE",503,"Model proposal could not be verified");
+    fail("PRODUCER_BAD_HTTP_RESPONSE",502,
+      "The Producer returned an unreadable response (HTTP "+(Number(upstream.status)||"unknown")+
+      "). Your feedback was not saved.");
   }
   if(!upstream.ok||response?.ok!==true){
     // Preserve safe, actionable error categories without exposing credentials,
@@ -111,6 +118,10 @@ export async function handleReviewProducerProposal({
       fail("PRODUCER_DRAFT_INVALID",502,"The Producer returned an invalid revision proposal. Your feedback was not saved; please retry.");
     if(upstream.status===502&&reason==="producer_model_unavailable")
       fail("PRODUCER_MODEL_UNAVAILABLE",502,"The Producer AI service could not generate a valid reply. Your feedback was not saved; please retry.");
+    if(upstream.status===502&&/^producer_model_http_[1-5][0-9][0-9]$/.test(reason))
+      fail("PRODUCER_MODEL_HTTP_ERROR",502,
+        "The Producer AI service rejected the revision request (provider HTTP "+reason.slice(-3)+
+        "). Your feedback was not saved.");
     if(upstream.status===503&&reason==="review_evidence_unavailable")
       fail("PRODUCER_EVIDENCE_UNAVAILABLE",503,"The Producer could not read the saved Reel context. Your feedback was not saved.");
     if(upstream.status===409&&reason==="stale_or_unavailable_review_evidence")
