@@ -223,8 +223,7 @@
       if(current!==state.request)return;
       if(data.flags?.automatic_sampling_percent!==0 ||
          typeof data.flags?.admission_enabled!=='boolean' ||
-         typeof data.flags?.producer_conversation_enabled!=='boolean' ||
-         (data.flags.producer_conversation_enabled && !data.flags.admission_enabled))
+         typeof data.flags?.producer_conversation_enabled!=='boolean')
         throw new Error('Unsafe Rendering Review feature configuration; rendering queue withheld');
       state.flags=data.flags;
       if(!next)state.records=[];
