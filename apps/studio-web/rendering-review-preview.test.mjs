@@ -37,3 +37,13 @@ test("review navigation preserves Studio's unsaved-work and page lifecycle handl
   assert.match(ui,/pageObserver\.observe\(root/);
   assert.match(ui,/details\.querySelector\("video"\)\?\.pause\(\)/);
 });
+
+
+test("pagination button does not shadow the next-page argument",()=>{
+  assert.match(ui,/async function load\(nextPage = false\)/);
+  assert.match(ui,/const cursor = nextPage \? nextCursor : null/);
+  assert.match(ui,/currentPage = nextPage \? currentPage \+ 1 : 1/);
+  assert.match(ui,/next\.hidden = !nextCursor/);
+  assert.match(ui,/next\.disabled = true/);
+  assert.doesNotMatch(ui,/async function load\(next = false\)/);
+});
