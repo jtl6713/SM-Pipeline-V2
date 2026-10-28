@@ -38,4 +38,5 @@ jobs:
           PYTHONPATH: services/pipeline-runner
         run: |
           pip install pytest
+          pip install -r services/pipeline-runner/requirements.txt
           python -m pytest -q services/pipeline-runner/tests/test_ap1_ig_eligibility.py
