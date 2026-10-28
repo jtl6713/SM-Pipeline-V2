@@ -126,6 +126,7 @@ test('existing remote media container or dispatch start prevents vacate',async()
   for(const patch of [{Platform_Post_ID:'ig-post-123'},
       {Platform_Media_ID:'ig-container-123'}, {Publish_Started_At:'2026-10-28T11:00:00Z'},
       {Publish_Locked_At:'2026-10-28T11:00:00Z'},
+      {Publish_Locked_By:'AP1-IG-owner'},
       {Publish_Status:'Publishing'}]){
     const f=fixture();Object.assign(f.output.fields,patch);
     await fail(()=>f.hooks.revokeScheduleUnderHold(owned()),'REVIEW_SCHEDULE_DISPATCH_STARTED');
