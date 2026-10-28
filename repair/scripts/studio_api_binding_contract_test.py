@@ -81,6 +81,28 @@ class StudioApiBindingContractTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             assert_live_contract(got, "unauthorized recovery binding")
 
+    def test_exact_chicago_review_secret_bindings_are_type_allowlisted_only(self):
+        got = self.legacy_core()
+        got.update(RESERVATION_BINDINGS)
+        pilot_names = (
+            "RENDERING_REVIEW_ENROLL_WRITES_ENABLED",
+            "RENDERING_REVIEW_MANUAL_ADMISSION_ENABLED",
+            "RENDERING_REVIEW_INTEGRATION_VERIFIED",
+            "RENDERING_REVIEW_SCHEDULER_VACATE_VERIFIED",
+            "RENDERING_REVIEW_EXACT_OUTPUT_ID",
+            "RENDERING_REVIEW_RENDER_JOB_SHARED_SECRET",
+            "RENDERING_REVIEW_DISPATCH_SHARED_SECRET",
+            "RENDERING_REVIEW_REMOTION_BASE_URL",
+        )
+        got.update({name: "secret_text" for name in pilot_names})
+        self.assertTrue(assert_live_contract(got, "single Reel canary")["ok"])
+        got["RENDERING_REVIEW_EXACT_OUTPUT_ID"] = "plain_text"
+        with self.assertRaises(SystemExit):
+            assert_live_contract(got, "wrong pilot binding type")
+        got["RENDERING_REVIEW_UNSAFE_BYPASS"] = "secret_text"
+        with self.assertRaises(SystemExit):
+            assert_live_contract(got, "unapproved pilot binding")
+
     def test_unknown_scheduling_binding_is_still_rejected(self):
         got = self.legacy_core()
         got.update(RESERVATION_BINDINGS)
