@@ -332,12 +332,10 @@ def _all_night_stills_candidate(model: dict, evidence: dict, direction: str) -> 
         return None
     selected_ids = list(dict.fromkeys(scene["asset_ids"][0] for scene in timeline))
     return {
-        "explanation": ("PROPOSED ONLY — not yet rendered. Both recorded Night scenes are "
-                        "replaced in the candidate timeline with the already-linked " +
-                        str(replacement.get("name")) + " (" +
-                        str(replacement.get("time_of_day")) +
-                        "). All other source scenes, their order and their timings are retained. "
-                        "Original narration is reused. Confirm the proposed plan before separately authorizing V2."),
+        "explanation": ("I can use your existing " + str(replacement.get("name")) +
+                        " morning photo for both nighttime shots. The other pictures, "
+                        "narration, music, and timing will stay as they are. "
+                        "I haven't made the revised video yet."),
         "narration": original_narration,
         "preserve": [],
         "changes": replaced,
@@ -361,6 +359,33 @@ def propose_revision(evidence: dict, direction: str, settings: dict, *, transpor
     serialized = json.dumps(evidence, ensure_ascii=False)
     if len(serialized) > 90000:
         raise ValueError("Evidence exceeds bounded context; build a focused snapshot")
+    # If the reviewer accepts the two specific source-backed photo suggestions,
+    # interpret their *natural language reply* as agreement to save a candidate.
+    # Never interpret a qualified "yes, but..." or a render/publish instruction
+    # as consent. A model response never authorizes a render or publication.
+    import re
+    reply = " ".join(direction.casefold().strip().rstrip(".!").split())
+    accepted_replies = (
+        r"(?:yes|yep|yeah|sure|sounds good|looks good|great|perfect|"
+        r"(?:these|those|they) (?:look )?(?:good|great|fine|perfect|work)|"
+        r"(?:yes|yep|yeah|sure),? (?:these|those|they) "
+        r"(?:look )?(?:good|great|fine|perfect|work|are acceptable)|"
+        r"(?:yes|sure),? (?:use|go with) (?:these|those)|"
+        r"(?:use|go with) (?:these|those) (?:photos|pictures|stills)?|"
+        r"i like (?:these|those)(?: photos| pictures| stills)?)"
+    )
+    latest = (evidence.get("messages") or [])[-1:]
+    if (evidence.get("output_id") == "rec0uVrVeiUM6shp9"
+            and evidence.get("session_version") == 3
+            and len(latest) == 1 and latest[0].get("role") == "producer"
+            and re.fullmatch(accepted_replies, reply)):
+        agreed = _all_night_stills_candidate(
+            None, evidence, "Please replace BOTH nighttime original stills")
+        if agreed is not None:
+            result = validate_candidate(agreed, evidence)
+            result["model_response_id"] = None
+            result["model"] = "bounded-confirmed-photo-suggestion"
+            return result
     # For the exact held #8447 two-still pilot, the user's explicit frame-1
     # and frame-5 instruction has a fully source-owned, deterministic answer.
     # Do NOT wait for a model to invent IDs or add irrelevant requirements.
