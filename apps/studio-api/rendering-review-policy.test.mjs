@@ -81,6 +81,7 @@ test("enrollment refuses any published, dispatching, incomplete, or existing out
     [{publish_status:"Publishing"}, "DISPATCH_ALREADY_STARTED"],
     [{publish_started_at:"2026-10-27"}, "DISPATCH_ALREADY_STARTED"],
     [{publish_locked_at:"2026-10-27"}, "DISPATCH_ALREADY_STARTED"],
+    [{platform_media_id:"existing-instagram-container"}, "DISPATCH_ALREADY_STARTED"],
     [{dispatch_lease_active:true}, "DISPATCH_ALREADY_STARTED"],
     [{render_status:"Rendering"}, "NO_COMPLETED_RENDER"],
     [{final_file_id:"",final_file_url:""}, "NO_COMPLETED_RENDER"],
