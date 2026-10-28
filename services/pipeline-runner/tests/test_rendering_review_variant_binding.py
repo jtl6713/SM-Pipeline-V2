@@ -5,7 +5,6 @@ import re
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
 
 CHICAGO = "recT2rbKX3MF7cVFU"
 MASTER = "1i6YqrXzr8a4D0DfC1QxMYdrkzUYdL976"
@@ -23,15 +22,15 @@ class Stream:
     headers={"Content-Type":"image/jpeg"}
     def __enter__(self): return self
     def __exit__(self,*args): pass
-    def iter_content(self,chunk_size): yield b"\\xff\\xd8\\xff\\xe0"
+    def iter_content(self,chunk_size): yield bytes([255,216,255,224])
 
 def tested_function():
     path=Path(__file__).resolve().parents[1]/"rendering_review"/"one_job.py"
     tree=ast.parse(path.read_text(encoding="utf-8"))
     fn=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=="_render_sources")
     namespace={
-        "json":json, "RECORD":re.compile(r"rec[A-Za-z0-9]{14}\\Z"),
-        "IDENTITY":re.compile(r"[A-Za-z0-9_-]{8,120}\\Z"),
+        "json":json, "RECORD":re.compile(r"rec[A-Za-z0-9]{14}$"),
+        "IDENTITY":re.compile(r"[A-Za-z0-9_-]{8,120}$"),
         "CHICAGO":CHICAGO,"MEDIA":"tblSITCujCsJTNcDe",
         "one_link":lambda x:x[0] if isinstance(x,list) and len(x)==1 else "",
         "fail":lambda message:(_ for _ in ()).throw(Denied(message)),
