@@ -135,7 +135,11 @@ def propose_revision(evidence: dict, direction: str, settings: dict, *, transpor
         transport = post_responses
     model = str(settings.get("openai_render_review_model") or settings.get("openai_i1_model") or "gpt-5")
     response = transport(settings, {"model": model, "store": False,
-        "instructions": INSTRUCTIONS, "input": json.dumps({"evidence": evidence, "creative_direction": direction}),
+        "instructions": INSTRUCTIONS,
+        # JSON mode requires the word JSON in the actual input/user message;
+        # top-level instructions alone are not always counted by providers.
+        "input": "Return exactly one JSON object with the requested Producer fields. Here is the evidence and creative direction as JSON data:\\n" +
+                 json.dumps({"evidence": evidence, "creative_direction": direction}),
         # Azure's deployment may not accept reasoning controls even when the
         # primary OpenAI model does. This is a cross-provider Producer request.
         # Omit optional reasoning and retain strict JSON candidate validation.
