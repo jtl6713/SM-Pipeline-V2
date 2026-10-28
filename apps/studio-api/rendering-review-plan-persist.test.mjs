@@ -8,6 +8,8 @@ const P="recEcxgIR0XFI1VVW",A="receHeCYd89YrEZrL";
 const ORIGINAL="1XZ-_ARlXoP5mwILho13f81vmWQlpgTs4";
 const SOURCE="1i6YqrXzr8a4D0DfC1QxMYdrkzUYdL976";
 const ID="fb590a7e933d4eaea4";
+const CROPPED="1DGV7Ql-1hyjrYKdhhCIPxg4JEdg8hZYn";
+const PREVIEW="https://media.chicagoshining.com/studio/previews/item4/approved-9x16.jpg";
 function fixture(){
   const attempt="rroriginal_abcdef0123456789";
   const sessionId="rrsession_abcdef0123456789";
@@ -42,6 +44,8 @@ function fixture(){
       Platform_Output_Type:"Instagram Reel",
       Final_File_ID:ORIGINAL,
       Final_File_URL:"https://drive.google.com/file/d/"+ORIGINAL+"/view",
+      Remotion_Props_JSON:JSON.stringify({compositionId:"ChicagoShiningPhotoSequence",
+        clips:[{mediaAssetRecordId:A,googleDriveFileId:CROPPED,url:PREVIEW,src:PREVIEW}]}),
       Do_Not_Publish:true,
       Studio_Render_Review_Hold_Active:true,
       Studio_Render_Review_Hold_ID:session.review_hold.id,
@@ -52,7 +56,12 @@ function fixture(){
       Production_Request:[P]}}],
     [P,{id:P,fields:{Studio_Master_Assets_JSON:JSON.stringify([
       {id:ID,media_asset_record_id:A,google_drive_file_id:SOURCE},
-    ])}}],
+    ]),Studio_Variant_Manifest_JSON:JSON.stringify({
+      complete:true,production_request_record_id:P,
+      assets:[{id:ID,media_asset_record_id:A,google_drive_file_id:SOURCE,
+        variants:{"9:16":{google_drive_file_id:CROPPED,
+          preview_status:"Ready",preview_url:PREVIEW}}}]
+    })}}],
     [A,{id:A,fields:{
       "Google Drive File ID":SOURCE,"Asset_Status":"Available",
       Rights_Status:"Owned",Active:true,Do_Not_Use:false,
@@ -95,6 +104,8 @@ test("real owned asset evidence promotes candidate to a held immutable render-on
   assert.equal(s.plan.immutable_manifest.allow_public_publish,false);
   assert.equal(s.plan.immutable_manifest.auto_approve,false);
   assert.equal(s.plan.immutable_manifest.asset_manifest[0].drive_file_id,SOURCE);
+  assert.equal(s.plan.immutable_manifest.asset_manifest[0].render_variant_drive_file_id,CROPPED);
+  assert.equal(s.plan.immutable_manifest.asset_manifest[0].render_url,PREVIEW);
   assert.equal(s.plan.immutable_manifest.session_id,s.id);
   assert.equal(s.plan.immutable_manifest.plan_hash,s.plan.hash);
 });
@@ -159,4 +170,33 @@ test("V3 plan is blocked if independent V2 validation is unavailable",async()=>{
   f.argumentsToPass.loadCompletedAttempt=async()=>null;
   await assert.rejects(()=>persistReadyReviewPlan(f.argumentsToPass),
     e=>e.code==="REVIEW_SOURCE_NOT_VERIFIED");
+});
+
+test("approved 9:16 variant mismatch blocks plan before rendering",async()=>{
+  const f=fixture();
+  const render=JSON.parse(f.rows.get(O).fields.Remotion_Props_JSON);
+  render.clips[0].googleDriveFileId="another-crop";
+  f.rows.get(O).fields.Remotion_Props_JSON=JSON.stringify(render);
+  const receipt=await persistReadyReviewPlan(f.argumentsToPass);
+  assert.equal(receipt.ready,false);
+  assert.equal(receipt.persisted,false);
+  assert.ok(receipt.blockers.some(b=>b.kind==="asset"));
+});
+
+test("variant preview swap cannot claim authority from an owned master",async()=>{
+  const f=fixture();
+  const variant=JSON.parse(f.rows.get(P).fields.Studio_Variant_Manifest_JSON);
+  variant.assets[0].variants["9:16"].preview_url="https://media.chicagoshining.com/studio/previews/item4/other.jpg";
+  f.rows.get(P).fields.Studio_Variant_Manifest_JSON=JSON.stringify(variant);
+  const receipt=await persistReadyReviewPlan(f.argumentsToPass);
+  assert.equal(receipt.ready,false);
+  assert.equal(receipt.persisted,false);
+});
+
+test("missing Request variant inventory cannot freeze a render plan",async()=>{
+  const f=fixture();
+  f.rows.get(P).fields.Studio_Variant_Manifest_JSON="{}";
+  const receipt=await persistReadyReviewPlan(f.argumentsToPass);
+  assert.equal(receipt.ready,false);
+  assert.equal(receipt.persisted,false);
 });

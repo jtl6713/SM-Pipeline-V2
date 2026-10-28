@@ -13,6 +13,7 @@ on:
       - 'services/pipeline-runner/rendering_review/remote_ledger.py'
       - 'services/pipeline-runner/rendering_review/outbox_claim.py'
       - 'services/pipeline-runner/rendering_review/one_job.py'
+      - 'services/pipeline-runner/tests/test_rendering_review_variant_binding.py'
       - 'services/pipeline-runner/rendering_review/one_job_http.py'
       - 'services/pipeline-runner/tests/test_rendering_review_outbox_claim.py'
       - 'services/pipeline-runner/tests/test_rendering_review_remote_ledger.py'
@@ -103,6 +104,8 @@ jobs:
         run: PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_remote_ledger.py' -v
       - name: Bounded Runner outbox claim stage (OFF by default)
         run: PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_outbox_claim.py' -v
+      - name: Frozen crop-to-Remotion Runner contract (no live calls)
+        run: PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_variant_binding.py' -v
       - name: Exact one-Reel Runner and Flask route syntax
         run: |
           python -m py_compile services/pipeline-runner/rendering_review/one_job.py

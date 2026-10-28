@@ -187,7 +187,23 @@ def _evidence(client,drive,output_id,job_id):
     original_by_id={x.get("id"):x for x in originals}
     return out,item,req,props,plan,source,original_by_id
 
-def _render_sources(client,original_by_id,props,plan):
+def _render_sources(client,request,original_by_id,props,plan):
+    # The original Production Request owns BOTH the master asset and the
+    # approved 9:16 crop. The original Remotion props prove which crop was
+    # actually rendered for V1. Neither may be substituted by the Producer.
+    try:
+        variants=json.loads(request["fields"].get("Studio_Variant_Manifest_JSON") or "null")
+    except (TypeError,ValueError):
+        fail("review_variant_manifest_unreadable")
+    if (not isinstance(variants,dict) or variants.get("complete") is not True or
+        variants.get("production_request_record_id")!=request.get("id") or
+        not isinstance(variants.get("assets"),list)):
+        fail("review_variant_manifest_unverified")
+    by_asset={}
+    for variant in variants["assets"]:
+        if not isinstance(variant,dict) or variant.get("id") in by_asset:
+            fail("review_variant_manifest_duplicate")
+        by_asset[variant["id"]]=variant
     all_clips=props.get("clips")
     if not isinstance(all_clips,list):fail("source_render_props_no_clips")
     clips_by_record={c.get("mediaAssetRecordId"):c for c in all_clips}
@@ -211,11 +227,26 @@ def _render_sources(client,original_by_id,props,plan):
             one_link(f.get("Content_Profile"))!=CHICAGO):
             fail("review_source_rights_or_profile_lost")
         clip=clips_by_record.get(record_id)
-        if not clip:fail("source_asset_not_in_original_render")
+        master_variant=by_asset.get(asset_id)
+        if not clip or not isinstance(master_variant,dict):
+            fail("source_asset_not_in_original_render")
+        crop=(master_variant.get("variants") or {}).get("9:16")
+        if not isinstance(crop,dict):
+            fail("review_approved_crop_missing")
         url=str(clip.get("url") or clip.get("src") or "")
-        if (not url.startswith("https://media.chicagoshining.com/studio/previews/item4/") or
+        variant_file=str(crop.get("google_drive_file_id") or "")
+        if (master_variant.get("media_asset_record_id")!=record_id or
+            master_variant.get("google_drive_file_id")!=frozen["drive_file_id"] or
+            crop.get("preview_status")!="Ready" or
+            not IDENTITY.fullmatch(variant_file) or
+            variant_file!=frozen.get("render_variant_drive_file_id") or
+            variant_file!=clip.get("googleDriveFileId") or
+            url!=crop.get("preview_url") or
+            url!=frozen.get("render_url") or
+            url!=str(clip.get("src") or clip.get("url") or "") or
+            not url.startswith("https://media.chicagoshining.com/studio/previews/item4/") or
             clip.get("mediaAssetRecordId")!=record_id):
-            fail("review_render_media_url_untrusted")
+            fail("review_render_crop_not_verified")
         # Check actual renderer-readable bytes; never pass a Google Drive HTML
         # viewer URL as an image source. Do not edit or reshare originals.
         try:
@@ -302,7 +333,7 @@ def render_exact_attempt(output_id,job_id,*,client=None,drive=None,
     client=client or AirtableClient()
     drive=drive or GoogleDriveClient()
     output,item,req,props,plan,source,originals=_evidence(client,drive,output_id,job_id)
-    assets=_render_sources(client,originals,props,plan)
+    assets=_render_sources(client,req,originals,props,plan)
     # Claim only the requested exact job. No scanning and no broad scheduler.
     request_id="rrclaim_"+hashlib.sha256(
         ("chicago-pilot-v1|"+output_id+"|"+job_id).encode()).hexdigest()[:48]
