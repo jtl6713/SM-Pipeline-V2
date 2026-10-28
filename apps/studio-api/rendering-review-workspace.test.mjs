@@ -11,13 +11,14 @@ function fixture(){
   const row={id:'recB1B2C3D4E5F6G7',fields:{Session_ID:session.id,Output_Record_ID:outputId,
     Profile_Record_ID:CHICAGO_PROFILE_ID,Row_Version:2,Current_Attempt_ID:session.current_attempt_id,
     Hold_ID:session.review_hold.id,Hold_Owner:session.id,Session_JSON:JSON.stringify(session)}};
-  const output={id:outputId,fields:{Final_File_ID:'drive-file',Final_File_URL:'https://example.test/video',
+  const content={id:'recC1B2C3D4E5F6G7',fields:{Content_Profile:[CHICAGO_PROFILE_ID]}};
+  const output={id:outputId,fields:{Content_Item:[content.id],Final_File_ID:'drive-file',Final_File_URL:'https://example.test/video',
     Studio_Render_Review_Hold_Active:true,Studio_Render_Review_Hold_ID:session.review_hold.id,
     Studio_Render_Review_Hold_Owner:session.id,Studio_Render_Review_Session_ID:session.id}};
   const operations={authorizedProfiles:async()=>[{id:CHICAGO_PROFILE_ID}],
     listRecordsPage:async()=>({valid:true,records:[row],offset:'next-page'}),
-    listRecords:async()=>[row],airtableFetch:async()=>output};
-  return {row,output,args:{env:{AIRTABLE_OUTPUT_TABLE_ID:'outputs'},
+    listRecords:async()=>[row],airtableFetch:async(env,table)=>table==='outputs'?output:content};
+  return {row,output,content,args:{env:{AIRTABLE_OUTPUT_TABLE_ID:'outputs'},
     authorization:{authenticated:true,authorized:true,permissions:{outputs_review:true}},operations,
     url:new URL('https://studio.test/api/rendering-review/outputs/'+outputId)}};
 }
@@ -51,5 +52,12 @@ test('duplicate sessions and corrupted session versions fail closed',async()=>{
   const f=fixture();f.args.operations.listRecords=async()=>[f.row,f.row];
   await assert.rejects(()=>read(f.args),e=>e.status===409);
   f.args.operations.listRecords=async()=>[f.row];f.row.fields.Row_Version=9;
+  await assert.rejects(()=>read(f.args),e=>e.status===409);
+});
+
+test('workspace cannot expose another profile after authoritative content drift',async()=>{
+  const f=fixture();f.content.fields.Content_Profile=['recZ1B2C3D4E5F6G7'];
+  await assert.rejects(()=>read(f.args),e=>e.status===403);
+  f.output.fields.Content_Item.push('recD1B2C3D4E5F6G7');
   await assert.rejects(()=>read(f.args),e=>e.status===409);
 });

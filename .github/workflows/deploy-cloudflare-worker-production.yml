@@ -568,6 +568,7 @@ jobs:
           export default {
             async fetch(request, env) {
               const url = new URL(request.url);
+              const reviewSessions = url.pathname === "/$TOKEN/rendering-review-sessions";
               const factoryStatus = url.pathname === "/$TOKEN/factory-status";
               const factoryDesk = url.pathname === "/$TOKEN/factory-desk";
               const chicagoCanary = url.pathname === "/$TOKEN/factory-status-chicago";
@@ -582,9 +583,10 @@ jobs:
               const readyProductionDiagnostic = url.pathname === "/$TOKEN/ready-production-diagnostic";
               const summary = url.pathname === "/$TOKEN/summary";
               const summaryReconcile = url.pathname === "/$TOKEN/summary-reconcile";
-              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !failedOutputCensus && !qualityFacebookPreview && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic && !summary && !summaryReconcile) return new Response("Not found", {status:404});
+              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !failedOutputCensus && !qualityFacebookPreview && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic && !summary && !summaryReconcile && !reviewSessions) return new Response("Not found", {status:404});
               const generation = String(url.searchParams.get("generation") || "");
-              const path = qualityFacebookPreview ? "/api/operations/outputs/" + previewOutputId + "/schedule"
+              const path = reviewSessions ? "/api/rendering-review/sessions?profile_id=recT2rbKX3MF7cVFU"
+                : qualityFacebookPreview ? "/api/operations/outputs/" + previewOutputId + "/schedule"
                 : readyProductionDiagnostic ? "/api/admin/ready-production-diagnostic" + (url.searchParams.get("ideas") ? "?ideas=" + encodeURIComponent(url.searchParams.get("ideas")) : "")
                 : overviewRefresh ? "/api/profiles/overview/refresh"
                 : overviewStatus ? "/api/profiles/overview/refresh-status"
@@ -657,6 +659,19 @@ jobs:
           test "$SESSION_CODE" = "200"
           jq -e '.ok==true and .authenticated==true and .authorized==true and .email=="joseph.t.logan@gmail.com"' /tmp/session.json >/dev/null
           echo "functional_session_check=PASS"
+
+      - name: Verify disabled Rendering Review workspace through service binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
+          TOKEN=$(cat /tmp/verify-token.txt)
+          URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/rendering-review-sessions"
+          curl -fsS --retry 3 --max-time 60 "$URL" -o /tmp/rendering-review-sessions.json
+          jq -e '.ok==true and (.sessions|type)=="array" and .flags.admission_enabled==false and .flags.automatic_sampling_percent==0 and .flags.integration_verified==false' /tmp/rendering-review-sessions.json >/dev/null
+          echo "rendering_review_authenticated_read=PASS"
+          echo "rendering_review_admission_enabled=false sampling_percent=0 integration_verified=false"
+          # Do not emit private conversation/session records into deployment logs.
 
       - name: Verify authoritative All Profiles force refresh through service binding
         shell: bash
