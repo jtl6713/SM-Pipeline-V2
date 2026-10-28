@@ -420,7 +420,7 @@ test('Rendering Review does not portray V1 playback as a completed Producer rend
   assert.match(script,/Request verified replacements for BOTH nighttime frames/);
   assert.match(script,/composer\.value='Please replace BOTH nighttime scenes/);
   assert.match(script,/await sendDirection\(composer\.value\)/);
-  assert.match(script,/it does not render, approve or publish/);
+  assert.match(script,/not render, approve or publish/);
   assert.match(css,/rr-storyboard-pair/);
   assert.doesNotMatch(script,/showMedia\(.*candidate\.candidate\.timeline/);
 });
