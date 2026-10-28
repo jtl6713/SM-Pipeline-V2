@@ -174,8 +174,9 @@ export async function mutateReviewSessionCommand({
     err("NOT_AUTHORIZED", "Not authorized to change this review", 403);
   // The generic state-event path must not bypass the real scheduler or its
   // independent hold-release readback. Those need separate orchestrated paths.
-  if (["APPROVE_ATTEMPT", "RELEASE_REVIEW_HOLD"].includes(event?.type))
-    err("ORCHESTRATION_REQUIRED", "Approval and hold release require verified scheduling integration", 409);
+  if (event?.type === "RELEASE_REVIEW_HOLD" ||
+      (event?.type === "APPROVE_ATTEMPT" && event?.pilot_creative_only !== true))
+    err("ORCHESTRATION_REQUIRED", "Publishing approval and hold release require scheduler integration", 409);
   // Server adapter validates actual identity, action permission, event
   // provenance and hashes; producer/callback roles cannot be client-asserted.
   if (await operations.authorizeEvent(outputId,event) !== true)
