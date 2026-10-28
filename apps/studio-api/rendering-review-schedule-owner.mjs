@@ -16,7 +16,7 @@ function fail(code,message,http=409){const e=new Error(message);e.code=code;e.st
 const scheduleOf=fields=>scheduleFields.map(key=>text(fields[key])).find(Boolean)||'';
 function dispatchPresent(f){
   return Boolean(f.Published_At||f.Platform_Post_ID||f.Platform_Post_URL||
-    f.Platform_Media_ID||f.Publish_Started_At||f.Publish_Locked_At)||
+    f.Platform_Media_ID||f.Publish_Started_At||f.Publish_Locked_At||f.Publish_Locked_By)||
     /^(published|publishing|dispatched)$/i.test(status(f.Publish_Status))||
     /^(published|publishing|dispatched)$/i.test(status(f.Output_Status));
 }
