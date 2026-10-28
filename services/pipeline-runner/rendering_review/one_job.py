@@ -29,7 +29,7 @@ from p2.normalizer_client import normalize_voiceover
 from render.remotion_client import RemotionClient
 from render.settings import get_google_drive_folder_id
 from rendering_review.isolated_launch import launch_review_render_once
-from rendering_review.remote_ledger import RemoteLaunchLedger, _NoRedirect, _validate_base
+from rendering_review.remote_ledger import RemoteLaunchLedger, _NoRedirect, _validate_base, _access_headers
 
 CHICAGO="recT2rbKX3MF7cVFU"
 OUTPUTS="tblrlPeboBthkplH0"
@@ -51,6 +51,17 @@ class ExactReviewRenderDenied(RuntimeError):
 def fail(message):
     raise ExactReviewRenderDenied(message)
 
+def _review_renderer_base():
+    """Use the already configured Pipeline Runner Remotion origin for this pilot.
+
+    An exact-review override is still supported; otherwise match the same
+    REMOTION_RENDERER_URL used by normal production renders.
+    """
+    return (os.environ.get("RENDERING_REVIEW_REMOTION_BASE_URL", "").strip()
+            or os.environ.get("REMOTION_RENDERER_URL", "").strip()
+            or "http://127.0.0.1:3333").rstrip("/")
+
+
 def one_link(value):
     return value[0] if isinstance(value,list) and len(value)==1 and RECORD.fullmatch(str(value[0])) else ""
 
@@ -68,7 +79,8 @@ def _post_once(worker,secret,route,body,timeout=20):
     url=_validate_base(worker)+route
     req=Request(url,method="POST",data=json.dumps(body,separators=(",",":")).encode(),
         headers={"Content-Type":"application/json",
-                 "X-Rendering-Review-Job-Secret":secret})
+                 "X-Rendering-Review-Job-Secret":secret,
+                 **_access_headers()})
     try:
         with build_opener(_NoRedirect).open(req,timeout=timeout) as result:
             raw=result.read(8193)
@@ -357,13 +369,13 @@ def render_exact_attempt(output_id,job_id,*,client=None,drive=None,
     watermark={"verified":True,"authority":"server",
         "profile_id":CHICAGO,"policy":"retain_current_approved",
         "url":brand_url}
-    renderer=renderer or RemotionClient(
-        os.environ.get("RENDERING_REVIEW_REMOTION_BASE_URL",""))
+    renderer_base=_review_renderer_base()
+    renderer=renderer or RemotionClient(renderer_base)
     ledger=RemoteLaunchLedger(worker_base=worker,shared_secret=secret,claim=claim)
     result=launch_review_render_once(job=job,plan=plan,source=source,
         resolved_assets=assets,voiceover=narration,watermark=watermark,
         observed_source_segments=[],operations=ledger,renderer=renderer,
-        renderer_base=os.environ.get("RENDERING_REVIEW_REMOTION_BASE_URL",""))
+        renderer_base=renderer_base)
     if result.get("ok") is not True:fail("review_launch_requires_reconciliation")
     _complete(worker,secret,claim,"started")
     status_url=result["status_url"]
