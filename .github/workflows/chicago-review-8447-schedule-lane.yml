@@ -10,7 +10,7 @@ permissions:
   actions: write
 concurrency:
   group: chicago-review-8447-atomic-lane
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   enable:
     runs-on: ubuntu-latest
