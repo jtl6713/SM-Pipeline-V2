@@ -41,6 +41,8 @@ class Node {
   addEventListener(k,fn){this.listeners[k]=fn;}
   pause(){}
   load(){}
+  insertAdjacentElement(_position,node){this.inserted=node;}
+  remove(){this.removed=true;}
 }
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 test('queue UI does not write, respects Chicago scope, and renders a safe original preview',async()=>{
@@ -176,4 +178,108 @@ test('manual Chicago enrollment and actual Producer exchange require server flag
   assert.equal(writes.length,2);
   assert.ok(writes.every(v=>v.url.endsWith('/enroll')||v.url.endsWith('/producer-conversation')));
   assert.ok(!writes.some(v=>/\/(?:publish|render|approve)(?:\/|$)/.test(v.url)));
+});
+
+
+test('real Drive /view source uses authenticated embedded playback rather than an MP4 video src',async()=>{
+  const ids=['page-rendering-review','navRenderingReview','rrQueueList','rrDetail',
+    'rrStatus','rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile'];
+  const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
+  const source='https://drive.google.com/file/d/1CAh-mGGiCiv7WKUl9jNeqm1vyQF7PTzq/view';
+  let activate;
+  const fetchStub=async url=>{
+    if(url==='/api/session')return {ok:true,json:async()=>({
+      authenticated:true,authorized:true,permissions:{outputs_review:true}})};
+    if(url.startsWith('/api/rendering-review/queue?'))return {ok:true,json:async()=>({
+      ok:true,flags:{admission_enabled:false,producer_conversation_enabled:false,
+        attempt_commit_enabled:false,automatic_sampling_percent:0},
+      queue:[{output_id:'recA1B2C3D4E5F6G7',profile_id:'recT2rbKX3MF7cVFU',
+        output_type:'Instagram Reel',output_number:9192,title:'Bridge Houses Close-Up',
+        review_held:false,dispatch_started:false,final_file_url:source}],
+      next_cursor:null})};
+    throw Error('Unexpected '+url);
+  };
+  const sandbox={
+    document:{getElementById:id=>nodes[id],createElement:tag=>{
+      const n=new Node(tag);n.style={};return n;
+    }},
+    window:{location:{href:'https://studio.test/'},CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''}},
+    MutationObserver:class{constructor(cb){activate=cb;}observe(){}},
+    fetch:fetchStub,URL,URLSearchParams,
+  };
+  vm.runInNewContext(script,sandbox,{filename:'rendering-review-queue.js'});
+  await tick();await tick();
+  nodes['page-rendering-review'].classList.add('active');activate();
+  for(let i=0;i<10;i++)await tick();
+  assert.equal(nodes.rrVideo.hidden,true,'Drive HTML viewer is not a video/mp4 resource');
+  assert.equal(nodes.rrVideo.inserted?.tag,'iframe');
+  assert.equal(nodes.rrVideo.inserted?.src,
+    'https://drive.google.com/file/d/1CAh-mGGiCiv7WKUl9jNeqm1vyQF7PTzq/preview');
+  assert.equal(nodes.rrOpenFile.href,source);
+});
+
+test('frozen render-only plan requires server availability and one explicit button, not chat text',async()=>{
+  const ids=['page-rendering-review','navRenderingReview','rrQueueList','rrDetail',
+    'rrStatus','rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile'];
+  const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
+  const output='recA1B2C3D4E5F6G7',hash='a'.repeat(64);
+  let activate,enabled=false,confirmed=0,commits=0,receiptBody=null;
+  const fetchStub=async (url,options)=>{
+    if(url==='/api/session')return {ok:true,json:async()=>({
+      authenticated:true,authorized:true,permissions:{outputs_review:true}})};
+    if(url.startsWith('/api/rendering-review/queue?'))return {ok:true,json:async()=>({
+      ok:true,flags:{admission_enabled:false,producer_conversation_enabled:false,
+        attempt_commit_enabled:enabled,automatic_sampling_percent:0},
+      queue:[{output_id:output,profile_id:'recT2rbKX3MF7cVFU',
+        output_type:'Instagram Reel',output_number:54,title:'Manual pilot',
+        review_held:true,final_file_url:'https://media.example.test/source.mp4'}],
+      next_cursor:null})};
+    if(url==='/api/rendering-review/outputs/'+output)return {ok:true,json:async()=>({
+      ok:true,publication_hold_verified:true,flags:{attempt_commit_enabled:enabled},
+      session:{
+        version:4,state:'plan_ready',review_hold:{active:true},messages:[],
+        attempts:[{number:1,status:'ready_for_review',artifact_id:'drive-source-artifact'}],
+        producer_candidate:{stale:false},
+        plan:{version:1,hash,frozen:true,missing_assets:[],immutable_manifest:{
+          allow_public_publish:false,allow_platform_upload:false},
+          acceptance_checks:['Narration clearer']},
+      }})};
+    if(url.endsWith('/commit-attempt')){
+      commits++;receiptBody=JSON.parse(options.body);
+      return {ok:true,json:async()=>({ok:true,hold_active:true,
+        attempt_id:'rrattempt-example123',job_id:'rrjob-example123',
+        attempt_number:2,public_post_created:false})};
+    }
+    throw Error('Unexpected '+url);
+  };
+  const sandbox={
+    document:{getElementById:id=>nodes[id],createElement:tag=>new Node(tag)},
+    window:{location:{href:'https://studio.test/'},confirm:()=>{confirmed++;return true;},
+      CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''}},
+    MutationObserver:class{constructor(cb){activate=cb;}observe(){}},
+    fetch:fetchStub,URL,URLSearchParams,
+    crypto:{randomUUID:()=> '12345678-1234-1234-1234-123456789012'},
+  };
+  vm.runInNewContext(script,sandbox,{filename:'rendering-review-queue.js'});
+  await tick();await tick();
+  nodes['page-rendering-review'].classList.add('active');activate();
+  for(let i=0;i<10;i++)await tick();
+  const descendants=node=>[node,...node.children.flatMap(descendants)];
+  assert.equal(descendants(nodes.rrDetail).filter(n=>
+    n.textContent==='Create next attempt — render only').length,0,
+    'No commit action when protected server gate is disabled');
+  enabled=true;await nodes.rrRefresh.listeners.click();
+  for(let i=0;i<12;i++)await tick();
+  const action=descendants(nodes.rrDetail).find(n=>
+    n.textContent==='Create next attempt — render only');
+  assert.ok(action,'Server-approved frozen plan shows the render-only button');
+  await action.listeners.click();
+  assert.equal(confirmed,1);
+  assert.equal(commits,1);
+  assert.equal(receiptBody.intent,'render_this_plan');
+  assert.equal(receiptBody.expected_version,4);
+  assert.equal(receiptBody.plan_version,1);
+  assert.equal(receiptBody.plan_hash,hash);
+  assert.match(receiptBody.client_request_id,/^review_/);
+  assert.equal(receiptBody.allow_public_publish,undefined);
 });
