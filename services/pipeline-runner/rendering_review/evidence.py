@@ -153,6 +153,30 @@ def load_evidence(client, output_id, session_id, expected_version):
                                       "frames_inspected")})
                 linked_ids.add(media_id)
         inventory.append(item)
+    # Read the original Remotion scene order and timing without disclosing R2
+    # or Drive URLs. Timecodes are frame-derived from the verified output.
+    original_timeline = []
+    props = parsed(f.get("Remotion_Props_JSON"), {})
+    owned_by_media = {a.get("media_asset_record_id"): a
+                      for a in inventory if a.get("media_asset_record_id")}
+    if isinstance(props, dict) and props.get("compositionId") == "ChicagoShiningPhotoSequence":
+        fps = props.get("fps")
+        clips = props.get("clips")
+        if type(fps) in (int, float) and 0 < fps <= 120 and isinstance(clips, list) and len(clips) <= 80:
+            for clip in clips:
+                if not isinstance(clip, dict):
+                    original_timeline = []
+                    break
+                source = owned_by_media.get(clip.get("mediaAssetRecordId"))
+                start, frames = clip.get("startFrame"), clip.get("durationFrames")
+                if not source or type(start) is not int or type(frames) is not int or frames <= 0:
+                    original_timeline = []
+                    break
+                original_timeline.append({
+                    "start_seconds": round(start / fps, 3),
+                    "end_seconds": round((start + frames) / fps, 3),
+                    "asset_id": source["id"], "name": source.get("name", ""),
+                    "time_of_day": source.get("time_of_day", "Unknown")})
     # Wider catalog suggestions remain *advisory* until the separate immutable
     # plan adapter verifies rights, a usable crop, and their exact ownership.
     # Never let a catalog photo's ID masquerade as a request-linked render asset.
@@ -167,7 +191,8 @@ def load_evidence(client, output_id, session_id, expected_version):
         "creative_settings": parsed(f.get("Studio_Creative_Settings_JSON"), {}),
         "duration_seconds": f.get("Voiceover_Duration_Seconds") or cf.get("Content_Duration"),
         "profile_requirements": {k: profile.get("fields", {}).get(k) for k in ("Brand_Voice", "Profile_Override_Guidelines", "Production_Guideline_Overrides", "Fact_Verification_Overrides")},
-        "assets": inventory, "library_candidates": library,
+        "assets": inventory, "original_timeline": original_timeline,
+        "library_candidates": library,
         "messages": session.get("messages", []),
         "prior_plan": session.get("plan"), "sources": [],
         "inspection": {"video_watched": False, "frames_inspected": False},
