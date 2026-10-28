@@ -115,10 +115,19 @@ def validate_candidate(candidate: dict, evidence: dict) -> dict:
             "candidate_only": True, "visual_inspection_performed": False}
 
 
+def _safe_provider_error_part(value: object) -> str:
+    """Only bounded provider machine codes, never provider text or user content."""
+    import re
+    part = str(value or "")
+    return part if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", part) else "unknown"
+
+
 class ProducerModelHTTPError(RuntimeError):
-    """Safe provider status only; never forward provider prompt/error body."""
-    def __init__(self, status_code: int):
+    """Safe status/code/parameter; never forward provider prompt/error message."""
+    def __init__(self, status_code: int, code: object = None, param: object = None):
         self.status_code = status_code if isinstance(status_code, int) else 0
+        self.provider_code = _safe_provider_error_part(code)
+        self.provider_param = _safe_provider_error_part(param)
         super().__init__("Producer model provider returned HTTP " + str(self.status_code))
 
 
@@ -142,7 +151,14 @@ def propose_revision(evidence: dict, direction: str, settings: dict, *, transpor
         "text": {"format": {"type": "json_object"}}},
         timeout=120, stage="rendering-review-producer")
     if not response.ok:
-        raise ProducerModelHTTPError(int(response.status_code))
+        try:
+            error = (response.json() or {}).get("error") or {}
+            error = error if isinstance(error, dict) else {}
+        except (ValueError, TypeError, AttributeError):
+            error = {}
+        raise ProducerModelHTTPError(int(response.status_code),
+                                     error.get("code") or error.get("type"),
+                                     error.get("param"))
     payload = response.json()
     raw = payload.get("output_text") or "\n".join(
         part.get("text", "") for item in payload.get("output", []) if isinstance(item, dict)
