@@ -15,10 +15,10 @@ const candidate={
   requirements:[],claims:[],acceptance_checks:["The revised Reel is 17 seconds long"],
 };
 const clone=x=>structuredClone(x);
-const source={output_id:ID,profile_id:CHICAGO_PROFILE_ID,
+const source={verified:true,authority:"server",output_id:ID,profile_id:CHICAGO_PROFILE_ID,
   attempt_id:"attempt_original_123",artifact_id:"drive-master-123",
   drive_file_id:"drive-master-123",canonical_media_authority:"google_drive"};
-const asset={id:assetId,verified:true,rights_clear:true,
+const asset={id:assetId,verified:true,authority:"server",rights_clear:true,
   drive_file_id:"drive-asset-321",profile_id:CHICAGO_PROFILE_ID,
   canonical_media_authority:"google_drive",rights_receipt_id:"rights-123",
   media_type:"video"};
@@ -79,17 +79,38 @@ test("factual instructional claims cannot be blessed by model source labels",asy
       verified_at:"2026-10-28T14:12:00Z",source_urls:["https://transit.test/rules"]}]});
   assert.equal(supported.ready_to_commit,true);
 });
-test("preserve existing footage cannot be frozen without a real visual receipt",async()=>{
+test("preserved footage needs scene-specific server evidence, not just an observation",async()=>{
   const c=clone(candidate);c.preserve=["Keep the opening clip"];
+  c.timeline[0].asset_ids=[];
   const needs=await inspectReviewPlan({...args(),session:session(c)});
   assert.equal(needs.ready_to_commit,false);
   assert.ok(needs.blockers.some(x=>x.kind==="visual_verification"));
-  const passed=await inspectReviewPlan({...args(),session:session(c),
+  const generic=await inspectReviewPlan({...args(),session:session(c),
     visualReceipt:{verified:true,authority:"server",
       source_attempt_id:source.attempt_id,
       source_drive_file_id:source.drive_file_id,
-      observed_segments:[{start_seconds:0,end_seconds:3}]}});
+      observed_segments:[{start_seconds:0,end_seconds:17}]}});
+  assert.equal(generic.ready_to_commit,false);
+  const precise={verified:true,authority:"server",
+    source_attempt_id:source.attempt_id,
+    source_drive_file_id:source.drive_file_id,
+    observed_segments:[{verified:true,authority:"server",
+      timeline_scene_index:0,preserve_instruction:c.preserve[0],
+      source_attempt_id:source.attempt_id,
+      source_drive_file_id:source.drive_file_id,
+      source_start_seconds:0,source_end_seconds:17,
+      render_url:"https://media.example/drive-clip"}]};
+  const passed=await inspectReviewPlan({...args(),session:session(c),
+    visualReceipt:precise});
   assert.equal(passed.ready_to_commit,true);
+  assert.equal(passed.plan.creative.timeline[0].preserve_source,true);
+  assert.equal(passed.plan.creative.timeline[0].preserve_instruction,c.preserve[0]);
+  assert.equal(passed.plan.preservation_manifest[0].timeline_scene_index,0);
+  const forged=clone(precise);forged.observed_segments[0].source_end_seconds=9;
+  const drifted=await inspectReviewPlan({...args(),session:session(c),
+    visualReceipt:forged});
+  assert.equal(drifted.ready_to_commit,false);
+  assert.ok(drifted.blockers.some(x=>x.kind==="visual_verification"));
 });
 test("an asset requirement remains blocked until a server-verified exact requirement receipt",async()=>{
   const c=clone(candidate);
@@ -122,4 +143,27 @@ test("ready plan hash changes when the actual creative timeline changes",async()
   c.timeline[0].end_seconds=21;
   const b=await inspectReviewPlan({...args(),session:session(c)});
   assert.notEqual(a.plan_hash,b.plan_hash);
+});
+
+test("false source verification and unverified rights never become a ready plan",async()=>{
+  const untrusted=args();untrusted.source.verified=false;
+  await assert.rejects(()=>inspectReviewPlan(untrusted),e=>e.code==="SOURCE_AUTHORITY_MISSING");
+  for(const changed of [{...asset,authority:"model"},{...asset,rights_receipt_id:""}]){
+    const result=await inspectReviewPlan({...args(),assets:[changed]});
+    assert.equal(result.ready_to_commit,false);
+    assert.ok(result.blockers.some(b=>b.kind==="asset"));
+  }
+});
+test("gapped or multi-asset timelines fail before committing immutable jobs",async()=>{
+  const gap=clone(candidate);
+  gap.timeline.push({start_seconds:18,end_seconds:20,direction:"Later scene",
+    asset_ids:[assetId]});
+  await assert.rejects(
+    ()=>inspectReviewPlan({...args(),session:session(gap)}),
+    e=>e.code==="TIMELINE_INVALID");
+  const multiple=clone(candidate);
+  multiple.timeline[0].asset_ids=[assetId,assetId];
+  await assert.rejects(
+    ()=>inspectReviewPlan({...args(),session:session(multiple)}),
+    e=>e.code==="TIMELINE_INVALID");
 });
