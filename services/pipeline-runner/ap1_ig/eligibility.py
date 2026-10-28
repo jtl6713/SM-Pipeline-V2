@@ -42,6 +42,15 @@ def eligibility_reason(
         return "auto_publish_disabled"
     if as_bool(field(record, "Do_Not_Publish"), False):
         return "do_not_publish"
+    # Review-owned hold survives unrelated Factory/QA mutation of the generic
+    # Do_Not_Publish flag. Never permit initial or saved-container publication
+    # while either the production or staging hold identity remains present.
+    if (
+        as_bool(field(record, "Studio_Render_Review_Hold_Active"), False)
+        or field_str(record, "Studio_Render_Review_Hold_ID")
+        or field_str(record, "Studio_Review_Hold_ID")
+    ):
+        return "render_review_hold"
     if field_str(record, "Published_At"):
         return "already_published"
     if field_str(record, "Platform_Post_ID"):
