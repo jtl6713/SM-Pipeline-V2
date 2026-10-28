@@ -35,7 +35,7 @@ function requireOutput(o,session,manifest,outputId){
     deny("OUTPUT_NOT_HELD","Exact Chicago Reel must remain held and undispatched");
   const source=(session.attempts||[]).find(a=>a.id===manifest.source_attempt_id);
   if(!source||manifest.source_attempt_id!==session.current_attempt_id||
-     source.status!=="ready_for_review"||
+     (source.number>1&&source.status!=="ready_for_review")||
      source.artifact_id!==manifest.source_artifact_id)
     deny("SOURCE_CHANGED","The current validated review attempt changed since plan freeze");
   // The original Platform Output remains permanently V1 during Rendering
