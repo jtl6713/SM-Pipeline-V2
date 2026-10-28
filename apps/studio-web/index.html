@@ -31,6 +31,7 @@
 <link rel="stylesheet" href="/assets/visual-script-editor.css?v=0.6.763-idea-lifecycle-live">
  <link rel="stylesheet" href="/assets/profile-admin-creative.css?v=0.6.763-idea-lifecycle-live">
  <link rel="stylesheet" href="/assets/home-city-hero-0724.css?v=0.6.763-idea-lifecycle-live">
+<link rel="stylesheet" href="/assets/rendering-review-queue.css?v=chicago-review-readonly-1">
 </head>
 <body>
  <header class="topbar">
@@ -72,6 +73,7 @@
  <button class="nav-item" data-page="profiles" id="navNewProfile">New Profile</button>
  <button class="nav-item" data-page="operations" id="navOperations">Operations <span class="ops-nav-badge" id="navOperationsBadge" hidden></span></button>
  <button class="nav-item" data-page="factory" id="navFactory">Factory</button>
+ <button class="nav-item" data-page="rendering-review" id="navRenderingReview" hidden>Rendering Review</button>
  <button class="nav-item" data-page="exception-recovery" id="navExceptionRecovery" hidden>Exception Recovery</button>
  <button class="nav-item nav-item-footer-only" data-page="support">Help</button>
  </nav>
@@ -2213,6 +2215,29 @@
     </section>
   </div>
  </section>
+ <section id="page-rendering-review" class="page" aria-label="Chicago Rendering Review">
+  <div class="page-heading rr-heading">
+    <div><span class="eyebrow">Chicago · Manual pilot</span>
+      <h1>Rendering Review</h1>
+      <p>Watch completed Instagram Reels and inspect existing feedback. Review enrollment and new changes are not yet enabled.</p>
+    </div>
+    <button type="button" class="secondary-button" id="rrRefresh">Refresh queue</button>
+  </div>
+  <p id="rrStatus" class="rr-status" role="status" aria-live="polite">Rendering Review is available to authorized reviewers.</p>
+  <div class="rr-layout">
+    <section class="rr-panel" aria-label="Completed Chicago Reel renders">
+      <h2>Completed renders</h2>
+      <p id="rrCount" class="rr-entry-meta">No renders loaded</p>
+      <div id="rrQueueList" class="rr-list" aria-live="polite"></div>
+      <button type="button" class="secondary-button" id="rrMore" hidden>Load more completed renders</button>
+    </section>
+    <section class="rr-panel" aria-label="Selected completed render">
+      <video id="rrVideo" class="rr-preview" controls playsinline preload="metadata" hidden></video>
+      <a id="rrOpenFile" class="rr-open-file" target="_blank" rel="noopener noreferrer" hidden>Open original render</a>
+      <div id="rrDetail"><p>Select a completed Chicago Reel to inspect the saved render.</p></div>
+    </section>
+  </div>
+ </section>
  <section id="page-factory" class="page">
  <div class="page-heading factory-global-heading">
  <div><span class="eyebrow">Global operations</span><h1>Factory</h1><p>Review and approve work across every city in one place.</p></div>
@@ -3043,6 +3068,7 @@
  <script defer src="/assets/global-idea-target.js?v=0.6.763-idea-lifecycle-live"></script>
  <script defer src="/assets/producer-conversation-ui.js?v=0.6.763-idea-lifecycle-live"></script>
  <script defer src="/assets/exception-recovery.js?v=0.6.763-idea-lifecycle-live&age=hm-v1"></script>
+ <script defer src="/assets/rendering-review-queue.js?v=chicago-review-readonly-1"></script>
  <script>window.StudioLazyLoad.boot();</script>
 <script>
 (function(){
