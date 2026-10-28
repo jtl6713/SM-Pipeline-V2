@@ -115,6 +115,27 @@ test('queue omits other profiles, published, unrelated platforms and malformed l
   assert.equal(included.queue[0].output_id,'recJ1B2C3D4E5F6G7');
 });
 
+test('queue excludes Reels with already-created Instagram containers or post URLs',async()=>{
+  const f=fixture();f.args.url=new URL('https://studio.test/api/rendering-review/queue');
+  const base={Content_Item:[f.content.id],Platform:'Instagram',
+    Platform_Output_Type:'Instagram Reel',Final_File_ID:'drive-file',
+    Publish_Status:'Not Published',Render_Status:'Rendered'};
+  f.args.operations.listRecordsPage=async(_env,table,opts)=>{
+    if(table==='outputs'){
+      assert.ok(opts.fields.includes('Platform_Media_ID'));
+      assert.ok(opts.fields.includes('Platform_Post_URL'));
+      return {valid:true,records:[
+        {id:outputId,fields:{...base,Platform_Media_ID:'ig-existing-container'}},
+        {id:'recH1B2C3D4E5F6G7',fields:{...base,Platform_Post_URL:'https://instagram.com/reel/existing'}},
+        {id:'recI1B2C3D4E5F6G7',fields:base},
+      ]};
+    }
+    return {valid:true,records:[f.content]};
+  };
+  const result=await read(f.args);
+  assert.deepEqual(result.queue.map(x=>x.output_id),['recI1B2C3D4E5F6G7']);
+});
+
 test('40 completed outputs with shared and distinct content IDs use one exact-match Content Item batch',async()=>{
   const f=fixture();f.args.url=new URL('https://studio.test/api/rendering-review/queue');
   const contentIds=Array.from({length:20},(_,n)=>'rec'+String(n).padStart(14,'0'));
