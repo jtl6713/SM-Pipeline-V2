@@ -47,7 +47,9 @@ def load_evidence(client, output_id, session_id, expected_version):
         raise ValueError("Exact authoritative review hold is required")
     if f.get("Platform_Output_Type") != "Instagram Reel" or f.get("Platform") != "Instagram":
         raise ValueError("Output platform changed")
-    if f.get("Published_At") or f.get("Platform_Post_ID") or f.get("Platform_Post_URL") or f.get("Publish_Started_At") or f.get("Publish_Locked_At"):
+    if (f.get("Published_At") or f.get("Platform_Post_ID") or
+            f.get("Platform_Post_URL") or f.get("Platform_Media_ID") or
+            f.get("Publish_Started_At") or f.get("Publish_Locked_At")):
         raise ValueError("Output already entered publication")
     content_id = one_link(f, "Content_Item")
     if not content_id:
