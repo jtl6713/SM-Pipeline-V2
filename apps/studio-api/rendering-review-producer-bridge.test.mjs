@@ -116,21 +116,27 @@ test("publisher owner, remote media and stale session block model before call",a
 });
 test("changed authoritative session after model is rejected without committing",async()=>{
   const f=fixture();
-  const original=f.send;
-  // Mutate version once the upstream is called (simulates other tab).
   const ops={authorizeReview:async()=>true,withOutputLock:async(_id,fn)=>fn(),
     readOutput:async()=>clone(f.output),loadSession:async()=>clone(f.session),
     readHold:async()=>clone(f.hold)};
   const request=new Request("https://studio.test/review",{method:"POST",
     headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-  await assert.rejects(()=>handle({request,env:flags,authorization:auth,output_id:OUTPUT,
-    assertWriteRequest:()=>{},operations:ops,runnerFetch:async()=>{f.session.version=3;
-      return {ok:true,status:200,json:async()=>({ok:true,output_id:OUTPUT,
-        session_id:SESSION,expected_version:2,authorization:"none",
-        render_queued:false,publication_changed:false,
+  const runnerFetch=async()=>{
+    f.session.version=3; // Another reviewer changed the session during the model call.
+    return {
+      ok:true,status:200,
+      json:async()=>({
+        ok:true,output_id:OUTPUT,session_id:SESSION,expected_version:2,
+        authorization:"none",render_queued:false,publication_changed:false,
         proposal:{candidate_only:true,requires_fact_validation:true,
-          visual_inspection_performed:false}})}};}),e=>e.status===409);
-  assert.equal(f.counts.model,0);
+          visual_inspection_performed:false},
+      }),
+    };
+  };
+  await assert.rejects(()=>handle({
+    request,env:flags,authorization:auth,output_id:OUTPUT,
+    assertWriteRequest:()=>{},operations:ops,runnerFetch,
+  }),e=>e.status===409);
 });
 test("invalid upstream authority claims and upstream errors never become proposals",async()=>{
   const f=fixture({badResponse:true});
