@@ -3,6 +3,7 @@ import { RENDER_REVIEW_TABLES, RENDER_REVIEW_OUTPUT_FIELDS } from './rendering-r
 import { REVIEW_SCHEMA } from './rendering-review-policy.mjs';
 import { reviewEnrollmentWriteEnabled } from './rendering-review-enrollment-http.mjs';
 import { producerConversationWritesEnabled } from './rendering-review-producer-persist.mjs';
+import { renderAttemptCommitEnabled } from './rendering-review-attempt-outbox.mjs';
 
 const text=x=>String(x??'').trim();
 const rec=x=>/^rec[A-Za-z0-9]{14}$/.test(text(x));
@@ -30,6 +31,7 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
   const flags={
     admission_enabled:reviewEnrollmentWriteEnabled(env),
     producer_conversation_enabled:producerConversationWritesEnabled(env),
+    attempt_commit_enabled:renderAttemptCommitEnabled(env),
     automatic_sampling_percent:0,
     integration_verified:env?.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true",
   };
