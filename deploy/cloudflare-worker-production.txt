@@ -735,3 +735,5 @@ Deploy Worker 0.10.682-idea-lifecycle-live: authoritative fresh Ideas classifica
 
 Rendering Review V3 source validation + Producer executable timeline canary code deployment 2026-10-28 PR1245; protected pilot flags remain unchanged.
 2026-10-28: Deploy Chicago Rendering Review verified 9:16 manifest freeze (PR #1246). Preserve all protected flags and publish holds.
+
+# 2026-10-28 Chicago Rendering Review MVP routed Worker, protected Runner and review-only approval rollout. No Instagram posting.

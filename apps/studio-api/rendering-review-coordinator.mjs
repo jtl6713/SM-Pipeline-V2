@@ -174,8 +174,9 @@ export async function mutateReviewSessionCommand({
     err("NOT_AUTHORIZED", "Not authorized to change this review", 403);
   // The generic state-event path must not bypass the real scheduler or its
   // independent hold-release readback. Those need separate orchestrated paths.
-  if (["APPROVE_ATTEMPT", "RELEASE_REVIEW_HOLD"].includes(event?.type))
-    err("ORCHESTRATION_REQUIRED", "Approval and hold release require verified scheduling integration", 409);
+  if (event?.type === "RELEASE_REVIEW_HOLD" ||
+      (event?.type === "APPROVE_ATTEMPT" && event?.pilot_creative_only !== true))
+    err("ORCHESTRATION_REQUIRED", "Publishing approval and hold release require scheduler integration", 409);
   // Server adapter validates actual identity, action permission, event
   // provenance and hashes; producer/callback roles cannot be client-asserted.
   if (await operations.authorizeEvent(outputId,event) !== true)
@@ -187,6 +188,21 @@ export async function mutateReviewSessionCommand({
     const hold=await operations.readHold(outputId);
     if (s.review_hold.active && !authoritativeHoldMatches(hold,outputId,s.id,s.review_hold.id))
       err("HOLD_NOT_VERIFIED", "Cannot change a session without its authoritative hold");
+    // Creative acceptance is never permission to resume publishing. Recheck
+    // the original output under the SAME approval mutex immediately before
+    // recording acceptance, and retain the durable review hold afterwards.
+    if(event?.type==="APPROVE_ATTEMPT"&&event.pilot_creative_only===true){
+      if(typeof operations.readOutput!=="function")
+        err("APPROVAL_OUTPUT_READ_REQUIRED","Authoritative output readback required",503);
+      const original=await operations.readOutput(outputId);
+      if(original?.id!==outputId||original.profile_id!==s.profile_id||
+         original.platform!=="Instagram"||original.output_type!=="Instagram Reel"||
+         original.do_not_publish!==true||original.review_hold_active!==true||
+         original.publish_started_at||original.publish_locked_at||
+         original.publish_locked_by||original.platform_post_id||
+         original.platform_media_id||original.published_at)
+        err("REVIEW_PUBLICATION_FENCE_LOST","Review approval cannot override publication hold");
+    }
     const result=applyReviewEvent(s,event);
     if (result.replay) return result;
     if (result.session.state==="queued" && !result.session.review_hold.active)

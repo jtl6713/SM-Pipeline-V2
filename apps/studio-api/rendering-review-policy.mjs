@@ -306,12 +306,13 @@ export function applyReviewEvent(session, event) {
     }
   } else if (kind === "APPROVE_ATTEMPT") {
     if (s.state !== "ready_for_review" || !s.review_hold.active ||
+        event.pilot_creative_only !== true ||
         event.attempt_id !== s.current_attempt_id ||
         event.artifact_id !== current(s)?.artifact_id ||
         event.unrelated_hold_active === true)
       fail("STALE_OR_HELD_APPROVAL", "Only the current validated attempt may be approved");
-    // This is a request to apply the existing authoritative scheduler. The
-    // orchestrator must actually write and verify approval before releasing hold.
+    // A narrow creative acceptance does not schedule or publish. The authenticated
+    // orchestrator must retain the durable hold until a separate scheduler-authorized release.
     s.approved_attempt_id = s.current_attempt_id;
     s.state = "approved";
   } else if (kind === "RELEASE_REVIEW_HOLD") {

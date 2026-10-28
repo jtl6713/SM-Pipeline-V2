@@ -32,6 +32,7 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
     admission_enabled:reviewEnrollmentWriteEnabled(env),
     producer_conversation_enabled:producerConversationWritesEnabled(env),
     attempt_commit_enabled:renderAttemptCommitEnabled(env),
+    creative_approval_enabled:env?.RENDERING_REVIEW_CREATIVE_ACCEPT_ENABLED==="true"&&reviewEnrollmentWriteEnabled(env),
     automatic_sampling_percent:0,
     integration_verified:env?.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true",
   };
@@ -109,7 +110,7 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
         render_status:text(f.Render_Status),final_file_id:text(f.Final_File_ID)||null,
         final_file_url:text(f.Final_File_URL)||null,
         review_held:held,dispatch_started:Boolean(f.Publish_Started_At||f.Publish_Locked_At||f.Publish_Locked_By),
-        manual_admission_enabled:flags.admission_enabled&&!held&&
+        manual_admission_enabled:flags.admission_enabled&&row.id===env.RENDERING_REVIEW_EXACT_OUTPUT_ID&&!held&&
           !f.Publish_Started_At&&!f.Publish_Locked_At&&
           text(f.Render_Status).toLowerCase()==="rendered",
       });

@@ -121,7 +121,7 @@ def claim_one_review_job(*, client: Any, worker_base: str,
     sender = transport or _one_shot_post
     try:
         receipt = sender(
-            origin + "/internal/rendering-review/claim-render-job",
+            origin + "/api/internal/rendering-review/claim-render-job",
             body, {"Content-Type": "application/json",
                    "X-Rendering-Review-Job-Secret": shared_secret},
             float(timeout_seconds),

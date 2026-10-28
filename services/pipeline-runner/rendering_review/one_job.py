@@ -324,7 +324,7 @@ def _complete(worker,secret,claim,stage,**extra):
     body={k:claim[k] for k in ("output_id","job_id","attempt_id",
        "plan_hash","lease_owner","lease_fence")}
     body.update(stage=stage,**extra)
-    receipt=_post_once(worker,secret,"/internal/rendering-review/complete-attempt",body)
+    receipt=_post_once(worker,secret,"/api/internal/rendering-review/complete-attempt",body)
     if receipt.get("stage")!=stage or receipt.get("attempt_id")!=claim["attempt_id"]:
         fail("render_completion_receipt_mismatch")
     return receipt
@@ -349,7 +349,7 @@ def render_exact_attempt(output_id,job_id,*,client=None,drive=None,
     # Claim only the requested exact job. No scanning and no broad scheduler.
     request_id="rrclaim_"+hashlib.sha256(
         ("chicago-pilot-v1|"+output_id+"|"+job_id).encode()).hexdigest()[:48]
-    claim=_post_once(worker,secret,"/internal/rendering-review/claim-render-job",
+    claim=_post_once(worker,secret,"/api/internal/rendering-review/claim-render-job",
         {"output_id":output_id,"job_id":job_id,
          "client_request_id":request_id})
     if (claim.get("lease_verified") is not True or
