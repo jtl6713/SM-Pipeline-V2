@@ -30,7 +30,9 @@ test("Studio can record a URL while the draft is waiting for manual posting", ()
   assert.equal(tiktokCompleteEligibility(waiting), null);
   assert.equal(tiktokNeedsUrlEntry(waiting), true);
   assert.equal(tiktokCompleteEligibility({ ...waiting, platform: "Facebook" }), "not_tiktok");
-  assert.equal(tiktokCompleteEligibility({ ...waiting, do_not_publish: true }), "do_not_publish");
+  assert.equal(tiktokCompleteEligibility({ ...waiting, do_not_publish: true }), null);
+  assert.equal(tiktokNeedsUrlEntry({ ...waiting, do_not_publish: true }), true);
+  assert.equal(tiktokCompleteEligibility({ ...waiting, do_not_publish: true, manual_completion_status: "", tiktok_draft_status: "Processing", studio_state: "Uploading" }), "do_not_publish");
   assert.equal(tiktokCompleteEligibility({ ...waiting, publish_status: "Published" }), "already_published");
   assert.equal(tiktokCompleteEligibility({
     ...waiting,
@@ -72,6 +74,7 @@ test("publish fields mark the output Published with the TikTok URL", () => {
   assert.equal(fields.Output_Status, "Published");
   assert.equal(fields.TikTok_Draft_Status, "Published");
   assert.equal(fields.Manual_Completion_Status, "Completed");
+  assert.equal(fields.Do_Not_Publish, false);
   assert.match(fields.Output_Notes, /Studio TikTok publication confirmed/);
   assert.equal(fields.Publish_Retry_Eligible, false);
 });

@@ -10,7 +10,8 @@ export function isTikTokPostUrl(url) {
 export function tiktokCompleteEligibility(record = {}) {
   const platform = String(record.platform || "").trim().toLowerCase();
   if (platform !== "tiktok") return "not_tiktok";
-  if (record.do_not_publish) return "do_not_publish";
+  // A publication hold blocks sending, not recording a user-confirmed live post.
+  // The form is available only for an output already awaiting manual completion.
   const publish = String(record.publish_status || "").trim().toLowerCase();
   const output = String(record.output_status || "").trim().toLowerCase();
   const draft = String(record.tiktok_draft_status || "").trim().toLowerCase();
@@ -24,7 +25,7 @@ export function tiktokCompleteEligibility(record = {}) {
     || draft.includes("manual action")
     || draft.includes("draft delivered")
     || draft.includes("manual completion received");
-  if (!awaiting) return "manual_completion_not_required";
+  if (!awaiting) return record.do_not_publish ? "do_not_publish" : "manual_completion_not_required";
   return null;
 }
 
@@ -54,6 +55,8 @@ export function tiktokManualPublishFields({
   const note = `Studio TikTok publication confirmed at ${stamp}. URL: ${liveUrl}`;
   const notes = String(existingNotes || "").trim() ? `${String(existingNotes).trim()}\n\n${note}` : note;
   return {
+    // Clear the old automated-send hold atomically with terminal Published state.
+    Do_Not_Publish: false,
     Publish_Locked_At: null,
     Publish_Locked_By: "",
     Publish_Started_At: null,

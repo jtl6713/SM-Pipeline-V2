@@ -185,10 +185,10 @@ def ttd4_form_eligibility_reason(record: dict[str, Any], *, token: str) -> str |
         return "missing_record_id"
     if str(token or "").strip() != field_str(record, "TikTok_Manual_Completion_Token"):
         return "token_mismatch"
-    if as_bool(record.get("fields", {}).get("Do_Not_Publish"), False):
-        return "do_not_publish"
     if _ci(field_str(record, "Publish_Status")) == "published":
         return "already_published"
+    # Do_Not_Publish prohibits initiating or re-sending platform content.
+    # It must not stop an owner from recording a post already made manually.
     if _ci(field_str(record, "Manual_Completion_Status")) != _ci(MANUAL_REQUIRED):
-        return "manual_completion_not_required"
+        return "do_not_publish" if as_bool(record.get("fields", {}).get("Do_Not_Publish"), False) else "manual_completion_not_required"
     return None
