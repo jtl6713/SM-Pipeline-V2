@@ -1682,7 +1682,7 @@ export default {
           patchAttempt:(id,fields)=>patch(RENDER_REVIEW_TABLES.attempts,id,fields),
           applyEvent:async(outputId,event)=>{
             const before=await adapter.loadSession(outputId);
-            const transitioned=applyReviewEvent(before,event);
+            const transitioned=applyReviewEvent(before,{...event,expected_version:before.version});
             if(transitioned.ignored)
               throw new HttpError(409,"Render callback no longer owns active attempt");
             const saved=await adapter.saveSessionIfVersion({
