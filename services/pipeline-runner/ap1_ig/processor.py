@@ -28,6 +28,10 @@ from carousel.timeutil import chicago_now, iso_utc, stamp_minutes, utc_now
 from item4.settings import PipelineSettings
 from publish.location import resolve_publish_location
 from publish.rendering_review import verify_before_reel_creation, verify_before_reel_publication
+from publish.review_dispatch_claim import (
+    ReviewDispatchClaimError, shared_dispatch_claim_required,
+    is_chicago_reel, claim_chicago_dispatch,
+)
 from render.fields import field, field_str
 
 RECORD_ID_PREFIX = "rec"
@@ -130,6 +134,19 @@ def process_request(
             prelock_reason = "review_authority_unavailable"
         if prelock_reason:
             return {"processed": False, "reason": prelock_reason, **preview}
+
+    # The default-off Chicago pilot requires a cross-runtime R2/Airtable
+    # dispatch ownership claim shared with manual Rendering Review enrollment.
+    # Claim BEFORE the existing Python Airtable lock PATCH or any Graph create.
+    # Existing saved-container resumes cannot enroll in Rendering Review and
+    # preserve their existing receipt-only path. Other profiles are unchanged.
+    if creating_container and shared_dispatch_claim_required():
+        try:
+            if is_chicago_reel(client, output):
+                claim_receipt = claim_chicago_dispatch(output)
+                preview["shared_dispatch_claim_verified"] = bool(claim_receipt["ok"])
+        except ReviewDispatchClaimError as exc:
+            return {"processed": False, "reason": str(exc), **preview}
 
     attempt = (parse_int(field(output, "Publish_Attempt_Count"), 0) or 0) + 1
     started_notes = _append_notes(
