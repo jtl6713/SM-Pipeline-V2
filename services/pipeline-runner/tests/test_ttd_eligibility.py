@@ -114,6 +114,17 @@ def test_ttd1_and_poll_gates():
 def test_ttd4_form_gates():
     waiting = _record(Manual_Completion_Status="Required", TikTok_Manual_Completion_Token="abc")
     assert ttd4_form_eligibility_reason(waiting, token="abc") is None
+    held = _record(
+        Platform="TikTok", Do_Not_Publish=True, Manual_Completion_Status="Required",
+        TikTok_Manual_Completion_Token="abc", TikTok_Draft_Status="Draft Delivered — Manual Action Required",
+    )
+    # An automated send hold does not prohibit recording a post already made in TikTok.
+    assert ttd4_form_eligibility_reason(held, token="abc") is None
+    assert ttd4_form_eligibility_reason(held, token="wrong") == "token_mismatch"
+    assert ttd4_form_eligibility_reason(
+        _record(Do_Not_Publish=True, Manual_Completion_Status="", TikTok_Manual_Completion_Token="abc"),
+        token="abc",
+    ) == "do_not_publish"
     assert ttd4_form_eligibility_reason(waiting, token="nope") == "token_mismatch"
     assert ttd4_form_eligibility_reason(_record(Manual_Completion_Status="Required", TikTok_Manual_Completion_Token="abc", Publish_Status="Published"), token="abc") == (
         "already_published"
