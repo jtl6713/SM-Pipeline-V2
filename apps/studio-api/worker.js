@@ -13,6 +13,7 @@ import { scriptedShortProducerPlanFromNotes } from "./scripted-short-producer-pl
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
 import { claimChicagoInstagramDispatch, igDispatchClaimEnabled } from "./rendering-review-ig-dispatch-claim.mjs";
 import { claimReviewRenderJob, reviewRendererJobClaimEnabled } from "./rendering-review-job-claim.mjs";
+import { handleReviewLaunchLedger, reviewLaunchLedgerEnabled } from "./rendering-review-launch-ledger.mjs";
 import { RENDER_REVIEW_TABLES } from "./rendering-review-airtable.mjs";
 import { commitReviewAttempt, renderAttemptCommitEnabled } from "./rendering-review-attempt-outbox.mjs";
 import { makeRenderingReviewOutboxAirtableOperations } from "./rendering-review-outbox-airtable.mjs";
@@ -1558,6 +1559,59 @@ export default {
                 lease_fence:Number(j.Lease_Fence||0)};
             },
             patchJob:async(id,fields)=>airtableFetch(env,RENDER_REVIEW_TABLES.jobs,id,{
+              method:"PATCH",body:JSON.stringify({fields,typecast:false}),
+            }),
+          },
+        });
+        return respond(request,env,receipt);
+      }
+
+      // Write-once launch intent/receipt. No Remotion request, media change,
+      // dispatch, approval or scheduler mutation in this route. OFF by default.
+      if (url.pathname === "/internal/rendering-review/launch-ledger") {
+        requireConfig(env);
+        if (!reviewLaunchLedgerEnabled(env))
+          throw new HttpError(405, "Rendering Review launch ledger disabled");
+        let adapter;
+        const authorizeOutput=async outputId=>{
+          const view=await adapter.readOutput(outputId);
+          return view.profile_id===CHICAGO_PROFILE_ID &&
+            view.platform==="Instagram" && view.output_type==="Instagram Reel";
+        };
+        adapter=makeRenderingReviewAirtableOperations({
+          env,airtableFetch,listRecords:reviewListRecords,readField:f,
+          withOutputApprovalLock,authorizeReview:authorizeOutput,
+          authorizeEvent:async()=>false,mutationGate:false,
+          revokeScheduleUnderHold:async()=>{throw new HttpError(405,"Launch ledger cannot alter schedules")},
+        });
+        const readLedgerJob=async jobId=>{
+          if(!/^[A-Za-z0-9_-]{8,120}$/.test(String(jobId||"")))return null;
+          const rows=await reviewListRecords(env,RENDER_REVIEW_TABLES.jobs,{
+            limit:2,filterFormula:'{Job_ID}="'+jobId+'"',
+            fields:["Job_ID","Output_Record_ID","Session_ID","Attempt_ID",
+              "Plan_Hash","Job_State","Lease_Owner","Lease_Fence",
+              "Event_History_JSON"],
+          });
+          if(!Array.isArray(rows)||rows.length!==1)return null;
+          const row=rows[0],j=row.fields||{};
+          return {record_id:row.id,job_id:String(j.Job_ID||""),
+            output_id:String(j.Output_Record_ID||""),
+            session_id:String(j.Session_ID||""),
+            attempt_id:String(j.Attempt_ID||""),
+            plan_hash:String(j.Plan_Hash||""),
+            state:String(j.Job_State||""),
+            lease_owner:String(j.Lease_Owner||""),
+            lease_fence:Number(j.Lease_Fence||0),
+            event_history_json:j.Event_History_JSON};
+        };
+        const receipt=await handleReviewLaunchLedger({
+          request,env,operations:{
+            withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+            readSession:id=>adapter.readSession(id),
+            readHold:id=>adapter.readHold(id),
+            readOutput:id=>adapter.readOutput(id),
+            readJob:readLedgerJob,
+            patchJob:(id,fields)=>airtableFetch(env,RENDER_REVIEW_TABLES.jobs,id,{
               method:"PATCH",body:JSON.stringify({fields,typecast:false}),
             }),
           },
