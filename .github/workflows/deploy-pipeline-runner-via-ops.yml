@@ -313,3 +313,4 @@ jobs:
 # 2026-10-27: Deploy guarded IG Story PUBLISHED-without-ID no-republish receipt verification; runner version 2026-10-27-ig-story-receipt-guard.
 
 # 2026-10-28: Deploy Rendering Review final-publication authoritative readback and retained-owner safeguards. Admissions remain disabled; no public test posts.
+# 2026-10-28: deploy merged PR #1244 exact Chicago review Runner (non-public, guarded), no automatic activation.
