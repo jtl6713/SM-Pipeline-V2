@@ -47,6 +47,7 @@ jobs:
             services/pipeline-runner/tests/test_ap1_igs_eligibility.py \
             services/pipeline-runner/tests/test_tiktok_photo_cover.py \
             services/pipeline-runner/tests/test_tiktok_photo_sound_guard.py \
+            services/pipeline-runner/tests/test_ttd4_manual_hold_completion.py \
             services/pipeline-runner/tests/test_public_cover.py \
             services/pipeline-runner/tests/test_rendering_review_publication.py
 
@@ -326,3 +327,4 @@ jobs:
 
 # 2026-10-28: retrigger after same-day stale SERVICE_VERSION correction for Output 3129.
 # 2026-10-28: TikTok output-owned MP4 full-byte Drive/CDN integrity guard (#1258); release=2026-10-28-tiktok-full-video-integrity-v1. No TikTok draft re-init.
+# 2026-10-28: Deploy held TikTok manual post URL completion self-service fix (#1261), TTD4 token guard intact, no automatic send.
