@@ -39,7 +39,8 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
       filterFormula:'AND({Platform_Output_Type}="Instagram Reel",OR({Final_File_ID}!="",{Final_File_URL}!=""))',
       fields:['Content_Item','Platform','Platform_Output_Type','Render_Status',
         'Final_File_ID','Final_File_URL','Output_Title','Output_ID','Output_Status',
-        'Publish_Status','Published_At','Platform_Post_ID','Publish_Started_At',
+        'Publish_Status','Published_At','Platform_Post_ID','Platform_Post_URL',
+        'Platform_Media_ID','Publish_Started_At',
         'Publish_Locked_At','Do_Not_Publish',
         RENDER_REVIEW_OUTPUT_FIELDS.hold_active,RENDER_REVIEW_OUTPUT_FIELDS.hold_id,
         RENDER_REVIEW_OUTPUT_FIELDS.hold_owner,RENDER_REVIEW_OUTPUT_FIELDS.session_id],
@@ -58,7 +59,8 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
       if(!text(f.Final_File_ID)&&!text(f.Final_File_URL))continue;
       if(/^(published|publishing|dispatched)$/i.test(text(f.Publish_Status))||
          /^(published|publishing|dispatched)$/i.test(text(f.Output_Status))||
-         f.Published_At||f.Platform_Post_ID)continue;
+         f.Published_At||f.Platform_Post_ID||f.Platform_Post_URL||
+         f.Platform_Media_ID)continue;
       candidates.push({row,contentId:links[0]});
     }
     const uniqueContentIds=[...new Set(candidates.map(item=>item.contentId))];

@@ -27,6 +27,7 @@ export function renderingReviewOutputView(record, readField, holdActiveField) {
     final_file_id:text(f("Final_File_ID")),
     final_file_url:text(f("Final_File_URL")),
     platform_post_id:text(f("Platform_Post_ID")),
+    platform_media_id:text(f("Platform_Media_ID")),
     platform_post_url:text(f("Platform_Post_URL")),
     published_at:text(f("Published_At")),
     publish_started_at:text(f("Publish_Started_At")),
