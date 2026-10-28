@@ -266,8 +266,8 @@ def render_exact_attempt(output_id,job_id,*,client=None,drive=None,
     if (claim.get("lease_verified") is not True or
         claim.get("output_id")!=output_id or claim.get("job_id")!=job_id or
         claim.get("plan_hash")!=plan.get("plan_hash") or
-        claim.get("attempt_id")!=plan.get("source_attempt_id") and (
-          claim.get("attempt_id")==plan.get("source_attempt_id"))):
+        not IDENTITY.fullmatch(str(claim.get("attempt_id") or "")) or
+        claim.get("attempt_id")==plan.get("source_attempt_id")):
         fail("review_claim_unverified")
     # The claimed ID is the new attempt, NOT the frozen source attempt.
     job={"state":"claimed","lease_verified":True,
