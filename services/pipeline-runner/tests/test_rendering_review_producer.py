@@ -42,6 +42,45 @@ class ProducerTests(unittest.TestCase):
         self.assertEqual(len(result["unresolved_claims"]), 1)
         self.assertEqual(len(result["candidate_hash"]), 64)
 
+    def test_producer_receives_exact_morning_scene_and_existing_sunrise_alternative(self):
+        e = {**EVIDENCE, "assets": [
+            {"id": "night-reel-asset", "name": "Chicago Riverwalk 10",
+             "time_of_day": "Night", "description": "Night view of river"},
+            {"id": "morning-reel-asset", "name": "Chicago Riverwalk 8",
+             "time_of_day": "Morning", "description": "Sunny morning Riverwalk"}],
+             "original_timeline": [
+                {"asset_id": "night-reel-asset", "start_seconds": 0,
+                 "end_seconds": 3, "time_of_day": "Night"},
+                {"asset_id": "morning-reel-asset", "start_seconds": 3,
+                 "end_seconds": 6, "time_of_day": "Morning"}],
+             "library_candidates": [
+                {"media_asset_record_id": "rec00000000000002",
+                 "name": "Chicago River Bridge 8", "time_of_day": "Sunrise"}]}
+        proposal = copy.deepcopy(PROPOSAL)
+        proposal["timeline"] = [
+            {"start_seconds": 0, "end_seconds": 3,
+             "direction": "Use the already linked morning still",
+             "asset_ids": ["morning-reel-asset"]},
+            {"start_seconds": 3, "end_seconds": 6,
+             "direction": "Keep the original morning still",
+             "asset_ids": ["morning-reel-asset"]}]
+        proposal["reuse_asset_ids"] = ["morning-reel-asset"]
+        requests = []
+        class Resp:
+            ok = True
+            def json(self):
+                return {"id": "model-fixture", "output_text": json.dumps(proposal)}
+        def transport(settings, payload, **opts):
+            requests.append(payload)
+            return Resp()
+        result = propose_revision(e, "Replace nighttime view with sunrise or daytime", {}, transport=transport)
+        self.assertEqual(result["candidate"]["timeline"][0]["asset_ids"], ["morning-reel-asset"])
+        self.assertIn("Chicago River Bridge 8", requests[0]["input"])
+        self.assertIn("Chicago Riverwalk 8", requests[0]["input"])
+        self.assertIn("Morning", requests[0]["input"])
+        self.assertTrue(result["candidate_only"])
+        self.assertFalse(result["visual_inspection_performed"])
+
     def test_missing_assets_and_fabricated_sources_rejected(self):
         for key, value in (("reuse_asset_ids", ["invented"]), ("claims", [{"claim": "Invented route", "source_ids": ["invented-source"]}])):
             p = copy.deepcopy(PROPOSAL)
