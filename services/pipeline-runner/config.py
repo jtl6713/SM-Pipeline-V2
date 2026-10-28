@@ -25,7 +25,9 @@ def _resolve_service_version() -> str:
         return code
     env_day = env[:10]
     code_day = code[:10]
-    if len(env_day) == 10 and len(code_day) == 10 and env_day < code_day:
+    # A stale SERVICE_VERSION pin from an earlier deployment on the same day
+    # must not hide newly deployed source code from /health verification.
+    if len(env_day) == 10 and len(code_day) == 10 and env_day <= code_day:
         return code
     return env
 
