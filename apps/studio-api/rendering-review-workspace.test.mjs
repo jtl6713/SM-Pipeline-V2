@@ -63,12 +63,12 @@ test('workspace cannot expose another profile after authoritative content drift'
 });
 
 
-test('Chicago completed render queue is bounded, paginated, authenticated and read-only',async()=>{
+test('Chicago completed render queue uses exactly two bounded paginated reads and no per-item fetches',async()=>{
   const f=fixture(),calls=[];
   f.args.url=new URL('https://studio.test/api/rendering-review/queue?profile_id='+CHICAGO_PROFILE_ID);
   f.args.operations.listRecordsPage=async(env,table,options)=>{
-    calls.push({type:'page',table,options});
-    return {valid:true,offset:'itrNextPage',records:[{
+    calls.push({table,options});
+    if(table==='outputs')return {valid:true,offset:'itrNextPage',records:[{
       id:outputId,fields:{
         Content_Item:[f.content.id],Platform:'Instagram',Platform_Output_Type:'Instagram Reel',
         Final_File_ID:'drive-file',Final_File_URL:'https://example.test/video',
@@ -76,14 +76,13 @@ test('Chicago completed render queue is bounded, paginated, authenticated and re
         Publish_Status:'Not Published',
       },
     }]};
-  };
-  f.args.operations.airtableFetch=async(env,table,id,options)=>{
     assert.equal(table,'tblwzN9AXWvmKVKPs');
-    assert.equal(id,f.content.id);
-    assert.equal(options,undefined);
-    calls.push({type:'content'});
-    return f.content;
+    assert.equal(options.limit,1);
+    assert.deepEqual(options.fields,['Content_Profile']);
+    assert.match(options.filterFormula,/RECORD_ID\(\)="recC1B2C3D4E5F6G7"/);
+    return {valid:true,offset:null,records:[f.content]};
   };
+  f.args.operations.airtableFetch=async()=>{throw Error('Unbounded per-row Airtable read forbidden');};
   const result=await read(f.args);
   assert.equal(result.queue.length,1);
   assert.equal(result.queue[0].title,'Chicago skyline');
@@ -91,9 +90,9 @@ test('Chicago completed render queue is bounded, paginated, authenticated and re
   assert.equal(result.queue[0].manual_admission_enabled,false);
   assert.equal(result.next_cursor,'itrNextPage');
   assert.equal(result.flags.admission_enabled,false);
+  assert.equal(calls.length,2);
   assert.equal(calls[0].options.limit,40);
   assert.match(calls[0].options.filterFormula,/Final_File_ID/);
-  assert.equal(calls.filter(x=>x.type==='content').length,1);
 });
 
 test('queue omits other profiles, published, unrelated platforms and malformed links',async()=>{
@@ -101,12 +100,12 @@ test('queue omits other profiles, published, unrelated platforms and malformed l
   f.args.url=new URL('https://studio.test/api/rendering-review/queue');
   const valid={Content_Item:[f.content.id],Platform:'Instagram',
     Platform_Output_Type:'Instagram Reel',Final_File_ID:'file',Publish_Status:'Ready'};
-  f.args.operations.listRecordsPage=async()=>({valid:true,records:[
+  f.args.operations.listRecordsPage=async(_env,table)=>table==='outputs'?({valid:true,records:[
     {id:outputId,fields:{...valid,Platform:'Facebook'}},
     {id:'recH1B2C3D4E5F6G7',fields:{...valid,Publish_Status:'Published'}},
     {id:'recI1B2C3D4E5F6G7',fields:{...valid,Content_Item:[f.content.id,f.content.id]}},
     {id:'recJ1B2C3D4E5F6G7',fields:valid},
-  ]});
+  ]}):{valid:true,records:[f.content]};
   f.content.fields.Content_Profile=['recZ1B2C3D4E5F6G7'];
   const result=await read(f.args);
   assert.deepEqual(result.queue,[]);
@@ -114,6 +113,45 @@ test('queue omits other profiles, published, unrelated platforms and malformed l
   const included=await read(f.args);
   assert.equal(included.queue.length,1);
   assert.equal(included.queue[0].output_id,'recJ1B2C3D4E5F6G7');
+});
+
+test('40 completed outputs with shared and distinct content IDs use one exact-match Content Item batch',async()=>{
+  const f=fixture();f.args.url=new URL('https://studio.test/api/rendering-review/queue');
+  const contentIds=Array.from({length:20},(_,n)=>'rec'+String(n).padStart(14,'0'));
+  const outputs=Array.from({length:40},(_,n)=>({
+    id:'rec'+String(n+100).padStart(14,'0'),
+    fields:{Platform:'Instagram',Platform_Output_Type:'Instagram Reel',
+      Final_File_ID:'drive-file',Content_Item:[contentIds[n%20]]},
+  }));
+  let reads=0;
+  f.args.operations.listRecordsPage=async(_env,table,options)=>{
+    reads++;
+    if(table==='outputs')return {valid:true,records:outputs};
+    assert.equal(table,'tblwzN9AXWvmKVKPs');
+    assert.equal(options.limit,20);
+    assert.equal((options.filterFormula.match(/RECORD_ID\(\)/g)||[]).length,20);
+    return {valid:true,offset:null,records:contentIds.map(id=>({
+      id,fields:{Content_Profile:[CHICAGO_PROFILE_ID]},
+    }))};
+  };
+  f.args.operations.airtableFetch=async()=>{throw Error('No serial per-output fetches');};
+  const result=await read(f.args);
+  assert.equal(result.queue.length,40);
+  assert.equal(reads,2);
+});
+
+test('malformed or incomplete Content Item batch results fail closed instead of exposing records',async()=>{
+  const f=fixture();f.args.url=new URL('https://studio.test/api/rendering-review/queue');
+  let contentReply={valid:true,records:[f.content],offset:'unexpectedNextPage'};
+  f.args.operations.listRecordsPage=async(_env,table)=>table==='outputs'?{
+    valid:true,records:[{id:outputId,fields:{Platform:'Instagram',
+      Platform_Output_Type:'Instagram Reel',Final_File_ID:'drive-file',Content_Item:[f.content.id]}}],
+  }:contentReply;
+  await assert.rejects(()=>read(f.args),e=>e.status===503);
+  contentReply={valid:true,offset:null,records:[{id:'recZ1B2C3D4E5F6G7',fields:{Content_Profile:[CHICAGO_PROFILE_ID]}}]};
+  await assert.rejects(()=>read(f.args),e=>e.status===503);
+  contentReply={valid:false,records:[]};
+  await assert.rejects(()=>read(f.args),e=>e.status===503);
 });
 test('queue denies wrong profile, invalid cursor and missing permissions',async()=>{
   const f=fixture();f.args.url=new URL('https://studio.test/api/rendering-review/queue?profile_id=recZ1B2C3D4E5F6G7');
