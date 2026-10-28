@@ -732,3 +732,5 @@ Deploy Worker 0.10.682-idea-lifecycle-live: authoritative fresh Ideas classifica
 2026-10-28 Rendering Review Chicago pilot: deploy merged main d777ff58 source with existing protected flags preserved. No admission, render, publish or production canary writes authorized by this marker.
 2026-10-28: Deploy source-checked Chicago Rendering Review held Producer-to-plan bridge with render/publish gates still off. New protected plan tests run before publish.
 2026-10-28 Chicago Rendering Review: deploy PR #1244 exact held Attempt 2 Worker completion and runner trigger. Keep protected rollout flags unchanged; no public publish.
+
+Rendering Review V3 source validation + Producer executable timeline canary code deployment 2026-10-28 PR1245; protected pilot flags remain unchanged.
