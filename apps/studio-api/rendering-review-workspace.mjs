@@ -59,11 +59,22 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
     });
     if(!page.valid||!Array.isArray(page.records)||page.records.length>40)
       fail(503,'Authoritative rendered queue unavailable');
+    // The manually allowlisted Reel must be discoverable on the FIRST page.
+    // Retain the ordinary bounded scan and independently verify the exact row;
+    // the existing linked-Content-Item authorization below still applies.
+    const records=[...page.records];
+    const pilotId=text(env.RENDERING_REVIEW_EXACT_OUTPUT_ID);
+    if(!cursor&&rec(pilotId)&&!records.some(row=>row?.id===pilotId)){
+      const exact=await operations.airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,pilotId);
+      if(exact?.id!==pilotId||!exact.fields)
+        fail(503,'Exact Chicago pilot output unavailable');
+      records.unshift(exact);
+    }
     // Select eligible Platform Output rows without trusting the display-only
     // Content_Profile lookup. Resolve their linked Content Items in ONE exact-ID
     // Airtable query instead of 40 serial subrequests per source page.
     const candidates=[];
-    for(const row of page.records){
+    for(const row of records){
       const f=row?.fields||{};
       const links=f.Content_Item;
       if(!rec(row?.id)||!Array.isArray(links)||links.length!==1||!rec(links[0]))continue;

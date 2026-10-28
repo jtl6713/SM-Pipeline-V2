@@ -95,6 +95,30 @@ test('Chicago completed render queue uses exactly two bounded paginated reads an
   assert.match(calls[0].options.filterFormula,/Final_File_ID/);
 });
 
+test('exact allowlisted Chicago Reel is shown first even when absent from paginated scan',async()=>{
+  const f=fixture();
+  f.args.env.RENDERING_REVIEW_EXACT_OUTPUT_ID=outputId;
+  f.args.url=new URL('https://studio.test/api/rendering-review/queue?profile_id='+CHICAGO_PROFILE_ID);
+  const otherId='recZ1B2C3D4E5F6G7';
+  const fields={Content_Item:[f.content.id],Platform:'Instagram',
+    Platform_Output_Type:'Instagram Reel',Final_File_ID:'drive-file',
+    Final_File_URL:'https://drive.google.com/file/d/12345678901234567890/view',
+    Publish_Status:'Ready to Schedule',Render_Status:'Rendered'};
+  f.args.operations.listRecordsPage=async(_env,table)=>table==='outputs'?{
+    valid:true,offset:'next-page',records:[{id:otherId,fields:{...fields,Output_Title:'Other Reel'}}],
+  }:{valid:true,records:[f.content]};
+  let exactReads=0;
+  f.args.operations.airtableFetch=async(_env,table,id)=>{
+    assert.equal(table,'outputs');assert.equal(id,outputId);exactReads++;
+    return {id:outputId,fields:{...fields,Output_ID:8447,Output_Title:'Pilot Reel'}};
+  };
+  const result=await read(f.args);
+  assert.deepEqual(result.queue.map(x=>x.output_id),[outputId,otherId]);
+  assert.equal(result.queue[0].output_number,8447);
+  assert.equal(result.next_cursor,'next-page');
+  assert.equal(exactReads,1);
+});
+
 test('queue omits other profiles, published, unrelated platforms and malformed links',async()=>{
   const f=fixture();
   f.args.url=new URL('https://studio.test/api/rendering-review/queue');
