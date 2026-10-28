@@ -8,6 +8,7 @@ are ambiguous, fail closed, and are NEVER automatically retried here.
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Callable
 from urllib.parse import urlsplit
 from urllib.request import (
@@ -34,6 +35,24 @@ def _validate_base(base: str) -> str:
         url.query or url.fragment):
         raise ReviewLedgerUnavailable("launch_ledger_origin_invalid")
     return base.rstrip("/")
+
+
+def _access_headers() -> dict[str, str]:
+    """Use a configured Cloudflare Access service token for the protected Worker.
+
+    Both parts must exist. The independent Worker job secret remains mandatory.
+    No Access credential is logged, forwarded to Remotion, or put into an MP4.
+    """
+    client_id = os.environ.get("CF_ACCESS_CLIENT_ID", "").strip()
+    client_secret = os.environ.get("CF_ACCESS_CLIENT_SECRET", "").strip()
+    if bool(client_id) != bool(client_secret):
+        raise ReviewLedgerUnavailable("review_access_credentials_incomplete")
+    if not client_id:
+        return {}
+    return {
+        "CF-Access-Client-Id": client_id,
+        "CF-Access-Client-Secret": client_secret,
+    }
 
 
 class RemoteLaunchLedger:
@@ -96,6 +115,7 @@ class RemoteLaunchLedger:
                 body, {
                     "Content-Type": "application/json",
                     "X-Rendering-Review-Job-Secret": self.shared_secret,
+                    **_access_headers(),
                 }, self.timeout_seconds,
             )
         except Exception as exc:
