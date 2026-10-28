@@ -36,7 +36,7 @@
     return body;
   }
   const safeRequestId = () => {
-    if (typeof crypto?.randomUUID !== 'function') throw new Error('Secure request IDs are unavailable on this device');
+    if (typeof crypto === 'undefined' || typeof crypto.randomUUID !== 'function') throw new Error('Secure request IDs are unavailable on this device');
     return 'review_' + crypto.randomUUID().replace(/-/g,'');
   };
   async function post(path,body) {
