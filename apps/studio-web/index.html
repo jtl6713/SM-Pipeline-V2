@@ -17,6 +17,7 @@
  <link rel="stylesheet" href="/assets/insights-0622.css?v=0.6.763-idea-lifecycle-live">
  <link rel="stylesheet" href="/assets/clean-enterprise.css?v=0.6.763-idea-lifecycle-live">
  <link rel="stylesheet" href="/assets/exception-recovery.css?v=0.6.763-idea-lifecycle-live">
+ <link rel="stylesheet" href="/assets/rendering-review-preview.css?v=0.6.764-rendering-review-preview">
  <link rel="stylesheet" href="/assets/ai-api-footer.css?v=0.6.763-idea-lifecycle-live">
  <link rel="stylesheet" href="/assets/sticky-footer-scroll.css?v=0.6.763-idea-lifecycle-live">
  <link rel="stylesheet" href="/assets/topbar-banner-0618.css?v=0.6.763-idea-lifecycle-live">
@@ -72,6 +73,7 @@
  <button class="nav-item" data-page="profiles" id="navNewProfile">New Profile</button>
  <button class="nav-item" data-page="operations" id="navOperations">Operations <span class="ops-nav-badge" id="navOperationsBadge" hidden></span></button>
  <button class="nav-item" data-page="factory" id="navFactory">Factory</button>
+ <button class="nav-item" data-page="rendering-review" id="navRenderingReview" hidden>Rendering Review</button>
  <button class="nav-item" data-page="exception-recovery" id="navExceptionRecovery" hidden>Exception Recovery</button>
  <button class="nav-item nav-item-footer-only" data-page="support">Help</button>
  </nav>
@@ -2213,6 +2215,28 @@
     </section>
   </div>
  </section>
+ <section id="page-rendering-review" class="page" aria-label="Rendering Review">
+  <div class="rr-header">
+   <div><span class="eyebrow">Chicago · Instagram Reels</span><h1>Rendering Review</h1>
+    <p>Watch completed renderings and inspect saved review history. This is a read-only preview while manual review and producer revisions remain disabled.</p>
+   </div>
+   <button class="secondary-button" type="button" id="rrRefresh">Refresh renderings</button>
+  </div>
+  <p class="rr-guard-note">Pilot preparation — no review enrollment, scheduling changes, AI producer messages, render jobs, or posting actions are available here.</p>
+  <p id="rrStatus" role="status" aria-live="polite">Open Rendering Review to load the Chicago queue.</p>
+  <div class="rr-layout">
+   <section class="panel rr-queue" aria-label="Completed Chicago Reel inventory">
+    <h2>Completed Reels</h2>
+    <div id="rrQueueList" class="rr-grid" aria-live="polite"></div>
+    <div class="rr-pager"><span id="rrPage" class="subtle"></span>
+     <button type="button" class="secondary-button" id="rrNext" hidden>Next page</button>
+    </div>
+   </section>
+   <section class="panel rr-detail" id="rrDetails" aria-label="Selected rendering preview">
+    <p class="subtle">Select a Chicago Reel to inspect its finished rendering.</p>
+   </section>
+  </div>
+ </section>
  <section id="page-factory" class="page">
  <div class="page-heading factory-global-heading">
  <div><span class="eyebrow">Global operations</span><h1>Factory</h1><p>Review and approve work across every city in one place.</p></div>
@@ -3043,6 +3067,7 @@
  <script defer src="/assets/global-idea-target.js?v=0.6.763-idea-lifecycle-live"></script>
  <script defer src="/assets/producer-conversation-ui.js?v=0.6.763-idea-lifecycle-live"></script>
  <script defer src="/assets/exception-recovery.js?v=0.6.763-idea-lifecycle-live&age=hm-v1"></script>
+ <script defer src="/assets/rendering-review-preview.js?v=0.6.764-rendering-review-preview"></script>
  <script>window.StudioLazyLoad.boot();</script>
 <script>
 (function(){
