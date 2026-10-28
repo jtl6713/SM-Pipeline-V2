@@ -371,7 +371,7 @@ def propose_revision(evidence: dict, direction: str, settings: dict, *, transpor
         r"(?:yes|yep|yeah|sure),? (?:these|those|they) "
         r"(?:look )?(?:good|great|fine|perfect|work|are acceptable)|"
         r"(?:yes|sure),? (?:use|go with) (?:these|those)|"
-        r"(?:use|go with) (?:these|those) (?:photos|pictures|stills)?|"
+        r"(?:use|go with) (?:these|those)(?: (?:photos|pictures|stills))?|"
         r"i like (?:these|those)(?: photos| pictures| stills)?)"
     )
     latest = (evidence.get("messages") or [])[-1:]
