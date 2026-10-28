@@ -36,9 +36,9 @@ jobs:
           VERSION=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/rr-deployments.json)
           curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API/versions/$VERSION" -o /tmp/rr-worker-version.json
           jq -e '
-            [.result.resources.bindings[]|select(.name=="STUDIO_SCHEDULE_RESERVATIONS" and .type=="durable_object_namespace")]|length==1
-            and [.result.resources.bindings[]|select(.name=="RENDERING_REVIEW_EXACT_OUTPUT_ID" and .type=="secret_text")]|length==1
-            and [.result.resources.bindings[]|select(.name=="RENDERING_REVIEW_ENROLL_WRITES_ENABLED")]|length==1
+            ([.result.resources.bindings[]|select(.name=="STUDIO_SCHEDULE_RESERVATIONS" and .type=="durable_object_namespace")]|length)==1 and
+            ([.result.resources.bindings[]|select(.name=="RENDERING_REVIEW_EXACT_OUTPUT_ID" and .type=="secret_text")]|length)==1 and
+            ([.result.resources.bindings[]|select(.name=="RENDERING_REVIEW_ENROLL_WRITES_ENABLED")]|length)==1
           ' /tmp/rr-worker-version.json >/dev/null
           curl -fsS --max-time 20 \
             -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
