@@ -16019,11 +16019,12 @@ export function isTikTokPostUrl(url) {
 export function tiktokCompleteEligibility(record = {}) {
   const platform = String(record.platform || "").trim().toLowerCase();
   if (platform !== "tiktok") return "not_tiktok";
-  if (record.do_not_publish) return "do_not_publish";
+  // Do_Not_Publish blocks new TikTok sends, not reporting a post already made manually.
   const publish = String(record.publish_status || "").trim().toLowerCase();
   const output = String(record.output_status || "").trim().toLowerCase();
   const draft = String(record.tiktok_draft_status || "").trim().toLowerCase();
   if (publish === "published" || output === "published" || draft === "published") return "already_published";
+  if (isTikTokPostUrl(record.platform_post_url) || isTikTokPostUrl(record.manual_published_url)) return "already_published";
   const manual = String(record.manual_completion_status || "").trim().toLowerCase();
   const studio = String(record.studio_state || "").trim().toLowerCase();
   const awaiting = manual === "required"
@@ -16032,7 +16033,7 @@ export function tiktokCompleteEligibility(record = {}) {
     || draft.includes("manual action")
     || draft.includes("draft delivered")
     || draft.includes("manual completion received");
-  if (!awaiting) return "manual_completion_not_required";
+  if (!awaiting) return record.do_not_publish ? "do_not_publish" : "manual_completion_not_required";
   return null;
 }
 /*__STUDIO_WORKER_END:tiktokCompleteEligibility__*/
@@ -16060,6 +16061,8 @@ export function tiktokManualPublishFields({
   const note = `Studio TikTok publication confirmed at ${stamp}. URL: ${liveUrl}`;
   const notes = String(existingNotes || "").trim() ? `${String(existingNotes).trim()}\n\n${note}` : note;
   return {
+    // Clear old send-only hold atomically with Published; no new upload occurs.
+    Do_Not_Publish: false,
     Publish_Locked_At: null,
     Publish_Locked_By: "",
     Publish_Started_At: null,
@@ -16093,6 +16096,8 @@ export function tiktokCompleteViewFromRecord(record) {
     output_status: f(record, "Output_Status"),
     tiktok_draft_status: f(record, "TikTok_Draft_Status"),
     manual_completion_status: f(record, "Manual_Completion_Status"),
+    platform_post_url: f(record, "Platform_Post_URL"),
+    manual_published_url: f(record, "Manual_Published_URL"),
     studio_state: normalizedOutputState(record),
     music_status: f(record, "Music_Status"),
   };
