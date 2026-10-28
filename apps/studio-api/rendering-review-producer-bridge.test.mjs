@@ -147,7 +147,7 @@ test("invalid upstream authority claims and upstream errors never become proposa
 test("Worker route has protected reviewer, Chicago scope and NO publish action",()=>{
   const worker=readFileSync(new URL("./worker.js",import.meta.url),"utf8");
   const b=worker.indexOf("const proposalMatch = ");
-  const e=worker.indexOf("const enrollmentMatch = ",b);
+  const e=worker.indexOf("const acceptMatch = ",b);
   assert.ok(b>0 && e>b,"Protected Producer proposal route not mounted");
   const route=worker.slice(b,e);
   assert.match(route,/reviewProducerBridgeEnabled\(env\)/);
