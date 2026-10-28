@@ -4,6 +4,7 @@ import { REVIEW_SCHEMA } from './rendering-review-policy.mjs';
 import { reviewEnrollmentWriteEnabled } from './rendering-review-enrollment-http.mjs';
 import { producerConversationWritesEnabled } from './rendering-review-producer-persist.mjs';
 import { renderAttemptCommitEnabled } from './rendering-review-attempt-outbox.mjs';
+import {reviewStillStoryboard} from './rendering-review-storyboard.mjs';
 
 const text=x=>String(x??'').trim();
 const rec=x=>/^rec[A-Za-z0-9]{14}$/.test(text(x));
@@ -212,7 +213,31 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
     f[RENDER_REVIEW_OUTPUT_FIELDS.hold_id]===session.review_hold.id&&
     f[RENDER_REVIEW_OUTPUT_FIELDS.hold_owner]===session.id&&
     f[RENDER_REVIEW_OUTPUT_FIELDS.session_id]===session.id;
-  return {ok:true,...summary(row),session,
+  let storyboard=[];
+  if(held&&outputId===text(env.RENDERING_REVIEW_EXACT_OUTPUT_ID)&&session.producer_candidate?.candidate){
+    const requestId=content?.fields?.Production_Request;
+    if(Array.isArray(requestId)&&requestId.length===1&&rec(requestId[0])){
+      // Read-only exact source inventory and verified original media metadata;
+      // no preview URL can originate from user or AI-supplied text.
+      const request=await operations.airtableFetch(env,'tbl75nxNi6PMUjBQE',requestId[0]);
+      let assets,props;
+      try{assets=JSON.parse(request?.fields?.Studio_Master_Assets_JSON||"null");
+        props=JSON.parse(f.Remotion_Props_JSON||"null");}catch{}
+      if(request?.id===requestId[0]&&Array.isArray(assets)&&assets.length<=80&&
+         Array.isArray(props?.clips)&&props.clips.length<=80){
+        const ids=[...new Set(assets.map(a=>a?.media_asset_record_id).filter(rec))];
+        if(ids.length&&ids.length<=80){
+          const media=await operations.listRecords(env,env.AIRTABLE_MEDIA_TABLE_ID,{
+            limit:ids.length,filterFormula:'OR('+ids.map(id=>'RECORD_ID()="'+id+'"').join(',')+')',
+            fields:['Asset Name','Media_Class','Asset_Status','Rights_Status','Active',
+              'Do_Not_Use','Content_Profile','Google Drive File ID','Time_Of_Day'],
+          });
+          storyboard=reviewStillStoryboard({output,request,media,session});
+        }
+      }
+    }
+  }
+  return {ok:true,...summary(row),session,storyboard,
     publication_hold_verified:held,
     integrity_error:session.review_hold.active&&!held?'HOLD_NOT_VERIFIED':null,
     preview:{file_id:f.Final_File_ID||null,url:f.Final_File_URL||null,
