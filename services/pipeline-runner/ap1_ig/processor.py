@@ -27,6 +27,7 @@ from asset.helpers import parse_int
 from carousel.timeutil import chicago_now, iso_utc, stamp_minutes, utc_now
 from item4.settings import PipelineSettings
 from publish.location import resolve_publish_location
+from publish.rendering_review import verify_before_reel_publication
 from render.fields import field, field_str
 
 RECORD_ID_PREFIX = "rec"
@@ -187,6 +188,17 @@ def process_request(
                     **preview,
                 }
             raise
+        # Fail closed after container polling, immediately before the public
+        # side effect. Preserve container and holds for reconciliation.
+        try:
+            review_reason = verify_before_reel_publication(
+                client, PLATFORM_OUTPUTS_TABLE, record_id, output
+            )
+        except Exception:
+            review_reason = "review_authority_unavailable"
+        if review_reason:
+            return {"processed": False, "reason": review_reason,
+                    "creation_id": creation_id, "attempt_count": attempt, **preview}
         try:
             published = graph.publish(creation_id)
         except InstagramGraphError as exc:
@@ -380,3 +392,4 @@ def _mark_failed(client: AirtableClient, output: dict[str, Any], exc: Exception)
             }
         )
     client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], fields, typecast=True)
+

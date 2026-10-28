@@ -1116,7 +1116,8 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.683-promotion-postcommit-trace" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1",
+          version: "0.10.683-promotion-postcommit-trace" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1",
+          rendering_review: { admission_enabled: false, automatic_sampling_percent: 0, integration_verified: false, publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
           quality_durable_recovery_ledger_v1: true,

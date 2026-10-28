@@ -47,7 +47,8 @@ jobs:
             services/pipeline-runner/tests/test_ap1_igs_eligibility.py \
             services/pipeline-runner/tests/test_tiktok_photo_cover.py \
             services/pipeline-runner/tests/test_tiktok_photo_sound_guard.py \
-            services/pipeline-runner/tests/test_public_cover.py
+            services/pipeline-runner/tests/test_public_cover.py \
+            services/pipeline-runner/tests/test_rendering_review_publication.py
 
       - name: Deploy Pipeline Runner through allowlisted Ops action
         shell: bash
@@ -310,3 +311,5 @@ jobs:
 # service_version=2026-10-26-tiktok-photo-grid-cover
 # 2026-10-26: Rerun gated runner release after handoff email syntax correction.
 # 2026-10-27: Deploy guarded IG Story PUBLISHED-without-ID no-republish receipt verification; runner version 2026-10-27-ig-story-receipt-guard.
+
+# 2026-10-28: Deploy Rendering Review final-publication authoritative readback and retained-owner safeguards. Admissions remain disabled; no public test posts.

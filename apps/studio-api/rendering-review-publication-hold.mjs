@@ -8,6 +8,9 @@ export const RENDER_REVIEW_HOLD_FIELDS = Object.freeze([
   "Studio_Render_Review_Hold_Active",
   "Studio_Render_Review_Hold_ID",
   "Studio_Review_Hold_ID",
+  "Studio_Render_Review_Hold_Owner",
+  "Studio_Render_Review_Session_ID",
+  "Studio_Review_Hold_Owner",
 ]);
 
 export function renderingReviewHoldPresent(readField) {
@@ -19,3 +22,4 @@ export function renderingReviewHoldPresent(readField) {
     field => String(readField(field) ?? "").trim().length > 0
   );
 }
+

@@ -49,6 +49,9 @@ def eligibility_reason(
         as_bool(field(record, "Studio_Render_Review_Hold_Active"), False)
         or field_str(record, "Studio_Render_Review_Hold_ID")
         or field_str(record, "Studio_Review_Hold_ID")
+        or field_str(record, "Studio_Render_Review_Hold_Owner")
+        or field_str(record, "Studio_Render_Review_Session_ID")
+        or field_str(record, "Studio_Review_Hold_Owner")
     ):
         return "render_review_hold"
     if field_str(record, "Published_At"):
@@ -87,3 +90,4 @@ def is_eligible(
         replace_transaction_id=replace_transaction_id,
         replace_fingerprint=replace_fingerprint,
     ) is None
+
