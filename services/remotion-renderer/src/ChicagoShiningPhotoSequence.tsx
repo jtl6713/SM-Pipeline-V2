@@ -1354,11 +1354,18 @@ React.FC<ChicagoShiningPhotoSequenceProps> = ({
   const resolvedTargetAspectRatio =
     targetAspectRatio ?? inferAspectRatioFromDimensions(width, height);
 
-  const safeClips = Array.isArray(clips)
-    ? clips.filter((clip) =>
-        Boolean(resolveClipSource(clip, resolvedTargetAspectRatio)),
-      )
-    : [];
+  // Never silently remove a missing visual and render a shorter/one-still
+  // movie. Upstream may have requested multiple scenes; invalid inputs must
+  // fail the job rather than appearing successful in Studio.
+  const safeClips = Array.isArray(clips) ? clips : [];
+  const invalidSourceIndex = safeClips.findIndex(
+    (clip) => !clip || !resolveClipSource(clip, resolvedTargetAspectRatio),
+  );
+  if (invalidSourceIndex >= 0) {
+    throw new Error(
+      `Photo sequence clip ${invalidSourceIndex + 1} is missing its visual source.`,
+    );
+  }
 
   if (safeClips.length === 0) {
     throw new Error(
