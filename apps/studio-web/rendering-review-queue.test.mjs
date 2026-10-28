@@ -77,8 +77,8 @@ test('queue UI does not write, respects Chicago scope, and renders a safe origin
   for(let i=0;i<10;i++)await tick();
   assert.match(nodes.rrStatus.textContent,/Read-only · Chicago Instagram Reels/);
   assert.equal(nodes.rrQueueList.children.length,1);
-  assert.equal(nodes.rrOpenFile.href,'https://example.org/preview.mp4');
-  assert.equal(nodes.rrVideo.src,'https://example.org/preview.mp4');
+  assert.equal(nodes.rrOpenFile.href,'/api/outputs/recA1B2C3D4E5F6G7/preview');
+  assert.equal(nodes.rrVideo.src,'/api/outputs/recA1B2C3D4E5F6G7/preview');
   assert.equal(nodes.rrMore.hidden,true);
   assert.equal(nodes.rrCount.textContent,'1 results loaded');
   assert.equal(requests.length,2);
@@ -181,7 +181,7 @@ test('manual Chicago enrollment and actual Producer exchange require server flag
 });
 
 
-test('real Drive /view source uses authenticated embedded playback rather than an MP4 video src',async()=>{
+test('real Drive /view source uses the authenticated Studio MP4 stream, not a Google iframe',async()=>{
   const ids=['page-rendering-review','navRenderingReview','rrQueueList','rrDetail',
     'rrStatus','rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile'];
   const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
@@ -211,11 +211,10 @@ test('real Drive /view source uses authenticated embedded playback rather than a
   await tick();await tick();
   nodes['page-rendering-review'].classList.add('active');activate();
   for(let i=0;i<10;i++)await tick();
-  assert.equal(nodes.rrVideo.hidden,true,'Drive HTML viewer is not a video/mp4 resource');
-  assert.equal(nodes.rrVideo.inserted?.tag,'iframe');
-  assert.equal(nodes.rrVideo.inserted?.src,
-    'https://drive.google.com/file/d/1CAh-mGGiCiv7WKUl9jNeqm1vyQF7PTzq/preview');
-  assert.equal(nodes.rrOpenFile.href,source);
+  assert.equal(nodes.rrVideo.hidden,false,'Native Studio video is visible');
+  assert.equal(nodes.rrVideo.inserted,undefined,'No Google Drive iframe inserted');
+  assert.equal(nodes.rrVideo.src,'/api/outputs/recA1B2C3D4E5F6G7/preview');
+  assert.equal(nodes.rrOpenFile.href,nodes.rrVideo.src);
 });
 
 test('frozen render-only plan requires server availability and one explicit button, not chat text',async()=>{
@@ -291,6 +290,7 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
   const output='recA1B2C3D4E5F6G7';
   const original='1CAh-mGGiCiv7WKUl9jNeqm1vyQF7PTzq';
   const revised='1XZ-_ARlXoP5mwILho13f81vmWQlpgTs4';
+  const attemptId='rrattempt_1234567890abcdef';
   let activate,ready=false,reads=0;
   const timers=[];
   const calls=[];
@@ -314,7 +314,7 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
         session:{version:ready?4:3,state:ready?'ready_for_review':'queued',
           latest_attempt_number:2,review_hold:{active:true},
           attempts:[{number:1,status:'ready_for_review',artifact_id:original},
-            {number:2,status:ready?'ready_for_review':'queued',
+            {id:attemptId,number:2,status:ready?'ready_for_review':'queued',
               artifact_id:ready?revised:null}],
           messages:[]},
       })};
@@ -338,16 +338,17 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
   for(let i=0;i<10;i++)await tick();
   assert.equal(reads,1);
   assert.equal(timers.length,1,'One polling callback for exact held session');
-  assert.equal(nodes.rrOpenFile.href,'https://drive.google.com/file/d/'+original+'/view');
+  assert.equal(nodes.rrOpenFile.href,'/api/outputs/'+output+'/preview');
   await timers[0]();for(let i=0;i<4;i++)await tick();
   assert.equal(reads,2,'Poll reads authoritative session once');
   assert.equal(timers.length,2,'Still queued: do not reset the player');
-  assert.equal(nodes.rrOpenFile.href,'https://drive.google.com/file/d/'+original+'/view');
+  assert.equal(nodes.rrOpenFile.href,'/api/outputs/'+output+'/preview');
   ready=true;
   await timers[1]();for(let i=0;i<5;i++)await tick();
-  assert.equal(nodes.rrOpenFile.href,'https://drive.google.com/file/d/'+revised+'/view');
-  assert.equal(nodes.rrVideo.inserted?.src,
-    'https://drive.google.com/file/d/'+revised+'/preview');
+  const revisedStream='/api/rendering-review/outputs/'+output+'/attempts/'+attemptId+'/preview';
+  assert.equal(nodes.rrOpenFile.href,revisedStream);
+  assert.equal(nodes.rrVideo.src,revisedStream);
+  assert.equal(nodes.rrVideo.inserted,undefined);
   const descendants=node=>[node,...node.children.flatMap(descendants)];
   const versions=descendants(nodes.rrDetail).filter(n=>n.tag==='button'&&
     /^Attempt [12] ·/.test(n.textContent));
