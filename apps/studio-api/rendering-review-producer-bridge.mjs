@@ -100,8 +100,23 @@ export async function handleReviewProducerProposal({
     fail("PRODUCER_UPSTREAM_UNAVAILABLE",503,"Model proposal could not be verified");
   }
   if(!upstream.ok||response?.ok!==true){
-    if(upstream.status===409)fail("REVIEW_SESSION_STALE",409,"Review changed during proposal");
-    fail("PRODUCER_UPSTREAM_UNAVAILABLE",502,"Model proposal was not successful");
+    // Preserve safe, actionable error categories without exposing credentials,
+    // model prompts, internal URLs or provider response bodies to the browser.
+    const reason=String(response?.error||"");
+    if(upstream.status===409)
+      fail("REVIEW_SESSION_STALE",409,"The review changed during this request. Reload the Reel and retry your feedback.");
+    if(upstream.status===405&&reason==="producer_proposal_disabled")
+      fail("PRODUCER_RUNNER_DISABLED",503,"The private Producer service is not enabled; your feedback was not saved.");
+    if(upstream.status===422&&reason==="producer_proposal_invalid")
+      fail("PRODUCER_DRAFT_INVALID",502,"The Producer returned an invalid revision proposal. Your feedback was not saved; please retry.");
+    if(upstream.status===502&&reason==="producer_model_unavailable")
+      fail("PRODUCER_MODEL_UNAVAILABLE",502,"The Producer AI service could not generate a valid reply. Your feedback was not saved; please retry.");
+    if(upstream.status===503&&reason==="review_evidence_unavailable")
+      fail("PRODUCER_EVIDENCE_UNAVAILABLE",503,"The Producer could not read the saved Reel context. Your feedback was not saved.");
+    if(upstream.status===409&&reason==="stale_or_unavailable_review_evidence")
+      fail("REVIEW_EVIDENCE_STALE",409,"Saved Reel evidence changed. Reopen the Reel and retry.");
+    fail("PRODUCER_UPSTREAM_UNAVAILABLE",502,
+      "The private Producer request failed (service status "+upstream.status+"). Your feedback was not saved.");
   }
   if(response.output_id!==output_id||response.session_id!==pre.sessionId||
      response.expected_version!==body.expected_version||
