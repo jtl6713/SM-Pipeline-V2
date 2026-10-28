@@ -1,0 +1,232 @@
+"""Isolated, attempt-specific Rendering Review Remotion payload compiler.
+
+No Airtable, Google Drive, Remotion, Instagram, scheduler or filesystem calls.
+The existing R4 processor MUST NOT be invoked: it clears fields on the
+original Platform Output and propagates shared renders to siblings.
+
+This pure boundary compiles only already validated immutable creative plans,
+server-resolved Drive media, voiceover, watermark and a separately leased job.
+The eventual outbox consumer must validate durable job ownership again both
+before and after launch and never change the original output on failure.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+import re
+from typing import Any
+
+CHICAGO_PROFILE = "recT2rbKX3MF7cVFU"
+REC = re.compile(r"rec[A-Za-z0-9]{14}\Z")
+IDENTITY = re.compile(r"[A-Za-z0-9_-]{8,120}\Z")
+SHA = re.compile(r"[0-9a-f]{64}\Z")
+FPS = 30
+MAX_FRAMES = 180 * FPS
+
+
+class IsolatedRenderDenied(ValueError):
+    pass
+
+
+def _deny(message: str):
+    raise IsolatedRenderDenied(message)
+
+
+def _str(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _sha(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _finite_seconds(value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        _deny("scene_timing_invalid")
+    value = float(value)
+    if not math.isfinite(value) or value < 0 or value > 180:
+        _deny("scene_timing_invalid")
+    return value
+
+
+def _verified_drive_asset(asset: dict, asset_id: str, profile_id: str) -> dict:
+    if not isinstance(asset, dict) or asset.get("asset_id") != asset_id:
+        _deny("asset_identity_mismatch")
+    if (asset.get("verified") is not True or
+        asset.get("authority") != "server" or
+        asset.get("canonical_media_authority") != "google_drive" or
+        not _str(asset.get("drive_file_id")) or
+        not _str(asset.get("rights_receipt_id")) or
+        not (asset.get("profile_id") == profile_id or
+             asset.get("cross_profile_authorized") is True)):
+        _deny("asset_authority_or_rights_unverified")
+    playable_url = _str(asset.get("render_url"))
+    if not playable_url.startswith("https://"):
+        _deny("asset_render_url_unverified")
+    if asset.get("media_kind") not in {"image", "video"}:
+        _deny("asset_media_kind_invalid")
+    return asset
+
+
+def compile_isolated_render_payload(
+    *, job: dict, plan: dict, source: dict, resolved_assets: list,
+    voiceover: dict, watermark: dict, observed_source_segments: list | None = None,
+) -> dict:
+    """Build a bounded, deterministic P020-compatible payload; no side effects."""
+    if not all(isinstance(obj, dict) for obj in (job, plan, source, voiceover, watermark)):
+        _deny("render_context_missing")
+    output_id = _str(plan.get("output_id"))
+    attempt_id = _str(job.get("attempt_id"))
+    job_id = _str(job.get("job_id"))
+    plan_hash = _str(job.get("plan_hash"))
+    if (not REC.fullmatch(output_id) or
+        not IDENTITY.fullmatch(attempt_id) or
+        not IDENTITY.fullmatch(job_id) or
+        not SHA.fullmatch(plan_hash) or
+        job.get("state") != "claimed" or
+        job.get("lease_verified") is not True or
+        job.get("lease_fence", 0) < 1 or
+        job.get("output_id") != output_id or
+        job.get("session_id") != plan.get("session_id") or
+        plan.get("plan_hash") != plan_hash or
+        plan.get("profile_id") != CHICAGO_PROFILE or
+        plan.get("output_type") != "Instagram Reel" or
+        plan.get("media_authority") != "google_drive" or
+        plan.get("allow_public_publish") is not False or
+        plan.get("allow_platform_upload") is not False or
+        plan.get("auto_approve") is not False or
+        plan.get("mutate_original_production_request") is not False or
+        plan.get("mutate_sibling_outputs") is not False):
+        _deny("render_job_or_plan_not_authoritative")
+    if (source.get("verified") is not True or
+        source.get("authority") != "server" or
+        source.get("output_id") != output_id or
+        source.get("attempt_id") != plan.get("source_attempt_id") or
+        source.get("artifact_id") != plan.get("source_artifact_id") or
+        source.get("drive_file_id") != plan.get("source_drive_file_id") or
+        source.get("canonical_media_authority") != "google_drive"):
+        _deny("original_artifact_changed")
+    creative = plan.get("creative")
+    if not isinstance(creative, dict):
+        _deny("creative_plan_missing")
+    narration = _str(creative.get("narration"))
+    timeline = creative.get("timeline")
+    checks = creative.get("acceptance_checks")
+    if not narration or not isinstance(timeline, list) or not (1 <= len(timeline) <= 80) or not checks:
+        _deny("creative_plan_incomplete")
+    if plan.get("blockers"):
+        _deny("unresolved_plan_dependencies")
+    if not isinstance(resolved_assets, list) or len(resolved_assets) > 80:
+        _deny("asset_manifest_invalid")
+    indexed = {}
+    for item in resolved_assets:
+        if not isinstance(item, dict) or not IDENTITY.fullmatch(_str(item.get("asset_id"))):
+            _deny("asset_manifest_invalid")
+        if item["asset_id"] in indexed:
+            _deny("duplicate_asset_identity")
+        indexed[item["asset_id"]] = item
+    manifest = plan.get("asset_manifest")
+    if not isinstance(manifest, list) or not all(isinstance(v, dict) for v in manifest):
+        _deny("frozen_asset_manifest_invalid")
+    expected = {_str(v.get("asset_id")): _str(v.get("drive_file_id")) for v in manifest}
+    if len(expected) != len(manifest) or set(expected) != set(indexed):
+        _deny("asset_manifest_changed")
+    if any(indexed[k].get("drive_file_id") != fid for k, fid in expected.items()):
+        _deny("source_drive_asset_changed")
+    if (voiceover.get("verified") is not True or
+        voiceover.get("authority") != "server" or
+        voiceover.get("output_id") != output_id or
+        voiceover.get("attempt_id") != attempt_id or
+        voiceover.get("plan_hash") != plan_hash or
+        voiceover.get("narration_sha256") != _sha(narration) or
+        voiceover.get("canonical_media_authority") != "google_drive" or
+        not _str(voiceover.get("drive_file_id")) or
+        not _str(voiceover.get("audio_url")).startswith("https://")):
+        _deny("voiceover_audio_not_verified_for_plan")
+    if (watermark.get("verified") is not True or
+        watermark.get("authority") != "server" or
+        watermark.get("policy") != "retain_current_approved" or
+        watermark.get("profile_id") != CHICAGO_PROFILE or
+        not _str(watermark.get("url")).startswith("https://")):
+        _deny("branding_policy_not_verified")
+    if plan.get("branding_policy") != "retain_current_approved":
+        _deny("branding_policy_changed")
+    clips = []
+    end_frame = 0
+    for idx, scene in enumerate(timeline):
+        if not isinstance(scene, dict):
+            _deny("scene_invalid")
+        start = _finite_seconds(scene.get("start_seconds"))
+        end = _finite_seconds(scene.get("end_seconds"))
+        start_frame, finish_frame = round(start * FPS), round(end * FPS)
+        if start_frame != end_frame or finish_frame <= start_frame:
+            _deny("scene_timing_gap_or_overlap")
+        asset_ids = scene.get("asset_ids")
+        if not isinstance(asset_ids, list) or len(asset_ids) != 1:
+            _deny("scene_requires_exactly_one_verified_asset")
+        asset_id = _str(asset_ids[0])
+        if not IDENTITY.fullmatch(asset_id) or asset_id not in indexed:
+            _deny("scene_asset_unavailable")
+        asset = _verified_drive_asset(indexed[asset_id], asset_id, CHICAGO_PROFILE)
+        clip = {
+            "id": "review-scene-%02d" % (idx + 1),
+            "src": asset["render_url"],
+            "url": asset["render_url"],
+            "startFrame": start_frame,
+            "durationFrames": finish_frame - start_frame,
+            "mediaKind": asset["media_kind"],
+            "motionStyle": "none",
+            "keepSourceAudio": False,
+            "muted": True,
+            "google_drive_file_id": asset["drive_file_id"],
+            "source_asset_id": asset_id,
+            "timingMode": "authoritative",
+            "timingSource": "timed_script",
+        }
+        clips.append(clip)
+        end_frame = finish_frame
+    if end_frame > MAX_FRAMES or end_frame < FPS:
+        _deny("pilot_duration_incompatible")
+    if abs(_finite_seconds(voiceover.get("duration_seconds")) - end_frame / FPS) > 2.5:
+        _deny("voiceover_timeline_mismatch")
+    if creative.get("preserve"):
+        receipt = observed_source_segments
+        if not isinstance(receipt, list) or not receipt or not all(
+            isinstance(v, dict) and v.get("source_drive_file_id") == source["drive_file_id"]
+            and v.get("verified") is True and v.get("authority") == "server"
+            for v in receipt
+        ):
+            _deny("preserved_clip_not_verified")
+    filename = f"review-{output_id}-{attempt_id}-{plan_hash[:12]}.mp4"
+    return {
+        "filename": filename,
+        "compositionId": "P020",
+        "fps": FPS,
+        "width": 1080,
+        "height": 1920,
+        "durationInFrames": end_frame,
+        "durationSeconds": end_frame / FPS,
+        "durationIsExplicit": True,
+        "timingMode": "authoritative",
+        "timingSource": "timed_script",
+        "voiceoverText": narration,
+        "voiceover": {"url": voiceover["audio_url"], "volume": 1},
+        "voiceoverUrl": voiceover["audio_url"],
+        "voiceoverTailSeconds": 0,
+        "spokenCaptionsEnabled": True,
+        "spokenCaptionWordsPerPage": 4,
+        "watermarkUrl": watermark["url"],
+        "watermarkRequired": True,
+        "clips": clips,
+        "expectedClipCount": len(clips),
+        "music": {"enabled": False, "url": "", "volume": 0},
+        "studioRevision": {
+            "source": "rendering_review",
+            "output_id": output_id,
+            "attempt_id": attempt_id,
+            "job_id": job_id,
+            "plan_hash": plan_hash,
+            "lease_fence": job["lease_fence"],
+        },
+    }
