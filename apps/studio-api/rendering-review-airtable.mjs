@@ -146,7 +146,8 @@ export function makeRenderingReviewAirtableOperations({
         error("ALREADY_HELD","A durable Rendering Review hold already exists");
       if(name(f(row,"Publish_Status")).toLowerCase()==="published" ||
          f(row,"Publish_Started_At") || f(row,"Publish_Locked_At") || f(row,"Published_At") ||
-         f(row,"Platform_Post_ID"))
+         f(row,"Platform_Post_ID") || f(row,"Platform_Post_URL") ||
+         f(row,"Platform_Media_ID"))
         error("DISPATCH_ALREADY_STARTED","Cannot claim hold after dispatch starts");
       const holdId=text(holdIdFactory());
       if(!/^[A-Za-z0-9_-]{8,120}$/.test(holdId))
