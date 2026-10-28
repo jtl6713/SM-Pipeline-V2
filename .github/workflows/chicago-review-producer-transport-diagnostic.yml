@@ -88,36 +88,38 @@ jobs:
             expected_version=1
             direction='Create a proposed revision that uses existing Riverwalk stills and preserves the sunrise opening. This is a non-persistent Producer connection canary.'
           } | ConvertTo-Json -Compress
+          $requestFile=Join-Path $env:TEMP 'review-producer-safe-probe-request.json'
+          $responseFile=Join-Path $env:TEMP 'review-producer-safe-probe-response.json'
+          $headersFile=Join-Path $env:TEMP 'review-producer-safe-probe-headers.txt'
+          [System.IO.File]::WriteAllText($requestFile,$body,[System.Text.UTF8Encoding]::new($false))
           $sw=[System.Diagnostics.Stopwatch]::StartNew()
+          $http=0
+          $mime='unknown'
+          $code='unknown'
+          $isJson=$false
           try{
-            $resp=Invoke-WebRequest -UseBasicParsing -Uri 'https://pipeline.chicagoshining.com/jobs/rendering-review/propose' -Method Post -ContentType 'application/json' -Headers @{'X-Pipeline-Secret'=$secret} -Body $body -TimeoutSec 145
-            $status=[int]$resp.StatusCode
-            $data=$resp.Content | ConvertFrom-Json
-            Write-Output ("producer_probe_http="+$status+" elapsed_sec="+[int]$sw.Elapsed.TotalSeconds+" ok="+[string]$data.ok+" error="+[string]$data.error)
-            if($status -eq 200 -and $data.ok -eq $true -and $data.render_queued -eq $false -and $data.publication_changed -eq $false){
-              Write-Output 'producer_probe_safe_candidate=true no_persistence=true'
+            $curlOutput=& curl.exe -sS --max-time 145 --max-redirs 0 -D $headersFile -o $responseFile -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H ('X-Pipeline-Secret: '+$secret) --data-binary ('@'+$requestFile) 'https://pipeline.chicagoshining.com/jobs/rendering-review/propose' 2>$null
+            $http=[int]([string]$curlOutput).Trim()
+            if(Test-Path -LiteralPath $headersFile){
+              $contentType=Get-Content -LiteralPath $headersFile | Where-Object {$_ -match '^content-type:'} | Select-Object -Last 1
+              if($contentType){$mime=([string]$contentType -split ':',2)[1].Trim().Trim([char]13)}
             }
-          }catch{
-            $status=0
-            try{$status=[int]$_.Exception.Response.StatusCode}catch{}
-            $kind=$_.Exception.GetType().Name
-            $code='unknown'
-            try{
-              if($_.ErrorDetails.Message){$data=$_.ErrorDetails.Message | ConvertFrom-Json; $code=[string]$data.error}
-            }catch{}
-            if($code -eq 'unknown'){
+            if(Test-Path -LiteralPath $responseFile){
               try{
-                $stream=$_.Exception.Response.GetResponseStream()
-                if($stream){
-                  $reader=New-Object System.IO.StreamReader($stream)
-                  $body=$reader.ReadToEnd()
-                  $data=$body | ConvertFrom-Json
-                  if($data.error){$code=[string]$data.error}
+                $data=(Get-Content -LiteralPath $responseFile -Raw)|ConvertFrom-Json
+                $isJson=$true
+                if($data.error -and [string]$data.error -match '^[a-z][a-z0-9_]{2,80}$'){$code=[string]$data.error}
+                if($http -eq 200 -and $data.ok -eq $true -and $data.render_queued -eq $false -and $data.publication_changed -eq $false){
+                  Write-Output 'producer_probe_safe_candidate=true no_persistence=true'
                 }
               }catch{}
             }
-            Write-Output ("producer_probe_failure_http="+$status+" elapsed_sec="+[int]$sw.Elapsed.TotalSeconds+" class="+$kind+" code="+$code)
+          }catch{
+            $code='transport_exception'
+          }finally{
+            Remove-Item -LiteralPath $requestFile,$responseFile,$headersFile -Force -ErrorAction SilentlyContinue
           }
+          Write-Output ("producer_probe_http="+$http+" elapsed_sec="+[int]$sw.Elapsed.TotalSeconds+" mime="+$mime+" json="+$isJson+" code="+$code)
           PS1
           python - <<'PY'
           import json
