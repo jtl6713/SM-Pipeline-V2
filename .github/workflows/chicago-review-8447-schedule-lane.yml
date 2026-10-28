@@ -1,0 +1,98 @@
+name: Activate Chicago #8447 atomic review schedule lane
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/chicago-review-8447-schedule-lane.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: write
+concurrency:
+  group: chicago-review-8447-atomic-lane
+  cancel-in-progress: false
+jobs:
+  enable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify exact held-review activation and durable scheduler namespace
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$CF_ACCESS_CLIENT_ID"
+          test -n "$CF_ACCESS_CLIENT_SECRET"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API/deployments" -o /tmp/rr-deployments.json
+          VERSION=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/rr-deployments.json)
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API/versions/$VERSION" -o /tmp/rr-worker-version.json
+          jq -e '
+            ([.result.resources.bindings[]|select(.name=="STUDIO_SCHEDULE_RESERVATIONS" and .type=="durable_object_namespace")]|length)==1 and
+            ([.result.resources.bindings[]|select(.name=="RENDERING_REVIEW_EXACT_OUTPUT_ID" and .type=="secret_text")]|length)==1 and
+            ([.result.resources.bindings[]|select(.name=="RENDERING_REVIEW_ENROLL_WRITES_ENABLED")]|length)==1
+          ' /tmp/rr-worker-version.json >/dev/null
+          curl -fsS --max-time 20 \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            https://studio.chicagoshining.com/api/health -o /tmp/rr-live-health.json
+          jq -e '.ok==true and .rendering_review.admission_enabled==true and .rendering_review.integration_verified==true and .rendering_review.automatic_sampling_percent==0' /tmp/rr-live-health.json >/dev/null
+          echo "chicago_exact_review_flags_active=true scheduler_namespace_present=true"
+      - name: Enable existing Chicago Instagram atomic lane through the guarded GitHub deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          now=$(date +%s)
+          echo "$now" >/tmp/rr-dispatch-epoch
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API/deployments" -o /tmp/rr-deployments.json
+          VERSION=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/rr-deployments.json)
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API/versions/$VERSION" -o /tmp/rr-worker-version.json
+          already=$(jq -r '
+            [.result.resources.bindings[]|select(.name=="STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED" and .type=="plain_text" and .text=="true")]|length==1
+            and [.result.resources.bindings[]|select(.name=="STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST" and .type=="plain_text" and (.text|split(",")|index("recT2rbKX3MF7cVFU::instagram")!=null))]|length==1
+          ' /tmp/rr-worker-version.json)
+          if [[ "$already" == "true" ]]; then echo "chicago_review_atomic_lane_already_enabled=true"; exit 0; fi
+          # The existing production deployment explicitly requires these exact
+          # operator inputs and independently checks the Durable Object binding.
+          code=$(curl -sS --max-time 20 -o /tmp/dispatch.json -w '%{http_code}' \
+            -X POST "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/deploy-cloudflare-worker-production.yml/dispatches" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'Content-Type: application/json' \
+            --data '{"ref":"main","inputs":{"activate_schedule_lane":"recT2rbKX3MF7cVFU::instagram","activate_schedule_confirmation":"ACTIVATE-SCHEDULE-LANE"}}')
+          test "$code" = "204" || { echo "github_guarded_lane_dispatch_failed=$code"; exit 1; }
+          echo "chicago_review_guarded_lane_dispatch=accepted"
+      - name: Verify authoritative lane activated without approving or publishing a Reel
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api"
+          verified=0
+          for n in $(seq 1 120); do
+            curl -fsS --max-time 15 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API/deployments" -o /tmp/rr-deployments.json
+            VERSION=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/rr-deployments.json)
+            curl -fsS --max-time 15 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API/versions/$VERSION" -o /tmp/rr-worker-version.json
+            if jq -e '
+              ([.result.resources.bindings[]|select(.name=="STUDIO_SCHEDULE_RESERVATIONS" and .type=="durable_object_namespace")]|length)==1 and
+              ([.result.resources.bindings[]|select(.name=="STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED" and .type=="plain_text" and .text=="true")]|length)==1 and
+              ([.result.resources.bindings[]|select(.name=="STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST" and .type=="plain_text" and (.text|split(",")|index("recT2rbKX3MF7cVFU::instagram")!=null))]|length)==1 and
+              ([.result.resources.bindings[]|select(.name=="RENDERING_REVIEW_EXACT_OUTPUT_ID")]|length)==1
+            ' /tmp/rr-worker-version.json >/dev/null; then verified=1; break; fi
+            sleep 6
+          done
+          test "$verified" = 1 || { echo "chicago_review_schedule_lane_not_active"; exit 1; }
+          curl -fsS --max-time 20 \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            https://studio.chicagoshining.com/api/health -o /tmp/rr-live-health.json
+          jq -e '.ok==true and .rendering_review.admission_enabled==true and .rendering_review.integration_verified==true' /tmp/rr-live-health.json >/dev/null
+          echo "chicago_8447_atomic_schedule_vacate_ready=true no_render_or_publish_performed=true"
