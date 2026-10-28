@@ -545,9 +545,13 @@ jobs:
               ]
               missing = [marker.decode() for marker in markers if marker not in live]
               bundled = live.startswith(b'var __defProp') or b'// worker.js' in live[:500]
-              # The entry file is now split into ESM function modules. Compare the
-              # bundled live size to the combined source sizes, not the entry alone.
-              source_bytes = len(repo) + sum(p.stat().st_size for p in Path('apps/studio-api').glob('worker-functions-*.mjs'))
+              # Compare the bundled Worker against ALL production ESM sources,
+              # not only worker-functions-*.mjs: the review workspace imports
+              # other real modules (including the isolated storyboard adapter).
+              # Exclude *.test.mjs so test fixtures cannot mask a mismatch.
+              sources=[p for p in Path('apps/studio-api').glob('*.mjs')
+                       if '.test.' not in p.name]
+              source_bytes = len(repo) + sum(p.stat().st_size for p in sources)
               size_ok = abs(len(live) - source_bytes) <= max(int(source_bytes * 0.30), 512000)
               print(f'repo_bytes={len(repo)} modular_source_bytes={source_bytes} live_bytes={len(live)} bundled={bundled} size_ok={size_ok} missing={missing}')
               if bundled and size_ok and not missing:
