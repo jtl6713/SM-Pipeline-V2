@@ -28,7 +28,12 @@ ordinary asset reuse. The preserve array is only for exact source-video
 segments that require separately verified timestamps, so leave it empty when
 recomposing owned still photographs. Do not invent factual claims just to
 make a simple visual or pacing change.
-The Remotion compiler requires a contiguous timeline: first scene starts at
+First respond as a conversational Producer. If an adequate replacement visual
+cannot be identified from text evidence, explain that, include a specific asset
+requirement, and return timeline: [] rather than guessing a photo or scene.
+A missing executable plan MUST NOT prevent a useful response.
+Preserve original narration when feedback changes only the still imagery.
+The Remotion compiler requires a contiguous timeline WHEN one is proposed: first scene starts at
 0, every next start_seconds equals the prior end_seconds, and each scene has
 exactly one existing inventory asset ID. Match narration length to the proposed
 total duration so the spoken audio is within 2.5 seconds of the timeline.
@@ -56,7 +61,122 @@ def canonical_hash(value: Any) -> str:
                                      ensure_ascii=False).encode()).hexdigest()
 
 
-def validate_candidate(candidate: dict, evidence: dict) -> dict:
+
+def conversational_candidate(model: dict, evidence: dict, direction: str) -> dict:
+    """Retain genuine model advice without treating an invalid model timeline
+    as executable. This only runs AFTER a schema-compliant JSON model response.
+
+    The separate immutable-plan preflight still demands owned, independently
+    verified imagery, a continuous timeline, factual proof and explicit
+    authorization. Nothing here supplies those receipts or enqueues a render.
+    """
+    required = {"explanation", "narration", "preserve", "changes", "reuse_asset_ids",
+                "timeline", "requirements", "claims", "acceptance_checks"}
+    # Do not coerce an attempted model assertion of execution authority.
+    forbidden = {"authorization", "authorized", "approve", "approved",
+                 "render", "render_queued", "publish", "published",
+                 "publication_changed", "ready_to_commit", "frozen",
+                 "verified", "fact_validation_passed", "visual_inspection_performed"}
+    if not isinstance(model, dict) or (set(model) & forbidden):
+        raise ValueError("Producer proposed privileged fields or non-object JSON")
+    explanation = model.get("explanation")
+    if not isinstance(explanation, str) or not explanation.strip() or len(explanation) > 16000:
+        raise ValueError("Producer did not provide a substantive creative reply")
+    narration = model.get("narration")
+    if not isinstance(narration, str) or not narration.strip():
+        narration = evidence.get("narration") or "Preserve the source narration pending exact verification."
+    if not isinstance(narration, str) or len(narration) > 16000:
+        raise ValueError("Producer narration is not usable")
+
+    def text_list(key):
+        value = model.get(key)
+        if not isinstance(value, list):
+            return []
+        return [x for x in value[:80] if isinstance(x, str) and x.strip() and len(x) <= 2000]
+
+    inventory = {a["id"] for a in evidence.get("assets", [])
+                 if isinstance(a, dict) and isinstance(a.get("id"), str)}
+    sources = {a["id"] for a in evidence.get("sources", [])
+               if isinstance(a, dict) and isinstance(a.get("id"), str)}
+    invalid_visual = False
+    reuse = []
+    for asset in model.get("reuse_asset_ids", []) if isinstance(model.get("reuse_asset_ids"), list) else []:
+        if isinstance(asset, str) and asset in inventory:
+            if asset not in reuse:
+                reuse.append(asset)
+        else:
+            invalid_visual = True
+
+    scenes = model.get("timeline", [])
+    timeline = []
+    previous_end = 0
+    if not isinstance(scenes, list) or not scenes:
+        invalid_visual = True
+    else:
+        for scene in scenes[:80]:
+            if not isinstance(scene, dict) or set(scene) != {
+                "start_seconds", "end_seconds", "direction", "asset_ids"}:
+                invalid_visual = True
+                break
+            start, end, assets = scene["start_seconds"], scene["end_seconds"], scene["asset_ids"]
+            if (type(start) not in (int, float) or type(end) not in (int, float)
+                    or abs(start - previous_end) > 1e-6 or start >= end
+                    or end > 180 or not isinstance(scene["direction"], str)
+                    or not scene["direction"].strip() or not isinstance(assets, list)
+                    or len(assets) != 1 or not isinstance(assets[0], str)
+                    or assets[0] not in inventory):
+                invalid_visual = True
+                break
+            timeline.append({"start_seconds": start, "end_seconds": end,
+                             "direction": scene["direction"], "asset_ids": [assets[0]]})
+            previous_end = end
+        if len(scenes) > 80:
+            invalid_visual = True
+    # Never persist a partial or invented executable plan.
+    if invalid_visual:
+        timeline = []
+
+    requirements = []
+    for item in model.get("requirements", []) if isinstance(model.get("requirements"), list) else []:
+        if (isinstance(item, dict) and item.get("kind") in
+                {"asset", "research", "clarification"} and
+                isinstance(item.get("description"), str) and
+                item["description"].strip() and
+                isinstance(item.get("alternatives"), list)):
+            requirements.append({
+                "kind": item["kind"], "description": item["description"][:2000],
+                "alternatives": [x[:2000] for x in item["alternatives"][:20]
+                                 if isinstance(x, str) and x.strip()]})
+    if invalid_visual:
+        requirements.append({
+            "kind": "asset",
+            "description": "Verify an appropriate source visual and exact scene placement "
+                           "before preparing any replacement render.",
+            "alternatives": ["Inspect the existing owned uploads",
+                             "Supply a suitable daytime or sunrise replacement if needed"]})
+
+    claims = []
+    for item in model.get("claims", []) if isinstance(model.get("claims"), list) else []:
+        if isinstance(item, dict) and isinstance(item.get("claim"), str) and item["claim"].strip():
+            selected = item.get("source_ids")
+            references = ([x for x in selected if isinstance(x, str) and x in sources]
+                          if isinstance(selected, list) else [])
+            # Unknown sources can never turn into fabricated citation receipts.
+            claims.append({"claim": item["claim"][:2000], "source_ids": references})
+
+    changes = text_list("changes") or [direction[:2000]]
+    acceptance = text_list("acceptance_checks") or [
+        "Confirm the requested edit with the reviewer before authorizing a replacement render"]
+    return {
+        "explanation": explanation, "narration": narration,
+        "preserve": text_list("preserve"),
+        "changes": changes[:80], "reuse_asset_ids": reuse[:80],
+        "timeline": timeline, "requirements": requirements[:80],
+        "claims": claims[:80], "acceptance_checks": acceptance[:80],
+    }
+
+
+def validate_candidate(candidate: dict, evidence: dict, *, allow_conversation_only: bool = False) -> dict:
     required = {"explanation", "narration", "preserve", "changes", "reuse_asset_ids",
                 "timeline", "requirements", "claims", "acceptance_checks"}
     if not isinstance(candidate, dict) or set(candidate) != required:
@@ -70,7 +190,7 @@ def validate_candidate(candidate: dict, evidence: dict) -> dict:
     for key in ("preserve", "changes", "acceptance_checks"):
         if any(not isinstance(v, str) or not v.strip() or len(v) > 2000 for v in candidate[key]):
             raise ValueError("Producer response invalid " + key)
-    if not candidate["changes"] or not candidate["acceptance_checks"] or not candidate["timeline"]:
+    if not candidate["changes"] or not candidate["acceptance_checks"] or (not candidate["timeline"] and not allow_conversation_only):
         raise ValueError("Producer must propose actionable changes and acceptance checks")
     inventory = {a["id"] for a in evidence.get("assets", []) if isinstance(a, dict) and isinstance(a.get("id"), str)}
     references = list(candidate["reuse_asset_ids"])
@@ -153,7 +273,16 @@ def propose_revision(evidence: dict, direction: str, settings: dict, *, transpor
         for part in item.get("content", []) if isinstance(part, dict) and part.get("type") == "output_text")
     if not isinstance(raw, str) or len(raw) > 50000:
         raise ValueError("Producer returned invalid or excessive content")
-    result = validate_candidate(json.loads(raw), evidence)
+    parsed = json.loads(raw)
+    try:
+        result = validate_candidate(parsed, evidence)
+    except ValueError:
+        # Conversation is not the render authorization boundary. Keep a genuine
+        # creative response even when a model cannot invent an executable asset
+        # timeline. Mark any such candidate as non-executable; the Worker still
+        # independently verifies all receipts before presenting a Render button.
+        safe = conversational_candidate(parsed, evidence, direction)
+        result = validate_candidate(safe, evidence, allow_conversation_only=True)
     result["model_response_id"] = payload.get("id")
     result["model"] = payload.get("model") or model
     return result

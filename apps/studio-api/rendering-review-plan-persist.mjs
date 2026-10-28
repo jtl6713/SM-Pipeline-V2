@@ -191,6 +191,15 @@ export async function persistReadyReviewPlan({
     originalProps=JSON.parse(str(f(output,"Remotion_Props_JSON")));
   } catch { fail("REVIEW_VARIANT_MANIFEST_INVALID","Approved Reel variant manifest and render props required"); }
   const candidate=session.producer_candidate.candidate;
+  if(!Array.isArray(candidate.timeline)||candidate.timeline.length===0){
+    // A conversational proposal is valid even when no exact renderable visual
+    // placement can yet be established. Never attempt an immutable plan or
+    // expose a render button from this model-only suggestion.
+    return {ok:true,ready:false,persisted:false,
+      blockers:[{kind:"asset",
+        description:"Producer reply saved. An owned replacement visual and complete scene timeline must be independently verified before V2."}],
+      public_post_created:false};
+  }
   const ids=requestedIds(candidate);
   if(ids.length>80)fail("REVIEW_ASSET_LIMIT","Too many revision assets");
   const assets=[];

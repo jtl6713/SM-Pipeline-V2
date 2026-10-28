@@ -1,7 +1,7 @@
 import copy
 import json
 import unittest
-from rendering_review.producer import CHICAGO_PROFILE_ID, propose_revision, ProducerModelHTTPError
+from rendering_review.producer import CHICAGO_PROFILE_ID, propose_revision, ProducerModelHTTPError, validate_candidate
 
 EVIDENCE = {"profile_id": CHICAGO_PROFILE_ID, "output_type": "Instagram Reel",
             "assets": [{"id": "asset-1", "name": "Opening station shot"}], "sources": []}
@@ -46,7 +46,12 @@ class ProducerTests(unittest.TestCase):
         for key, value in (("reuse_asset_ids", ["invented"]), ("claims", [{"claim": "Invented route", "source_ids": ["invented-source"]}])):
             p = copy.deepcopy(PROPOSAL)
             p[key] = value
-            with self.assertRaises(ValueError): self.invoke(p)
+            with self.assertRaises(ValueError):
+                validate_candidate(p, EVIDENCE)
+            result, _ = self.invoke(p)
+            self.assertTrue(result["candidate_only"])
+            self.assertEqual(result["candidate"]["timeline"], [] if value == ["invented"] else PROPOSAL["timeline"])
+            self.assertEqual(result["candidate"]["claims"][0]["source_ids"], [])
 
     def test_model_cannot_assert_commit_or_validation_authority(self):
         p = copy.deepcopy(PROPOSAL)
@@ -60,7 +65,9 @@ class ProducerTests(unittest.TestCase):
     def test_unordered_timeline_rejected(self):
         p = copy.deepcopy(PROPOSAL)
         p["timeline"][0]["end_seconds"] = -1
-        with self.assertRaises(ValueError): self.invoke(p)
+        result, _ = self.invoke(p)
+        self.assertEqual(result["candidate"]["timeline"], [])
+        self.assertTrue(result["candidate"]["requirements"])
 
     def test_timeline_gap_is_rejected_before_unrenderable_plan_reaches_studio(self):
         p = copy.deepcopy(PROPOSAL)
@@ -68,14 +75,16 @@ class ProducerTests(unittest.TestCase):
             "start_seconds": 16, "end_seconds": 20,
             "direction": "Second owned image", "asset_ids": ["asset-1"],
         })
-        with self.assertRaisesRegex(ValueError, "timeline"):
-            self.invoke(p)
+        result, _ = self.invoke(p)
+        self.assertEqual(result["candidate"]["timeline"], [])
+        self.assertTrue(result["candidate"]["requirements"])
 
     def test_multiple_assets_in_one_scene_are_rejected_before_render(self):
         p = copy.deepcopy(PROPOSAL)
         p["timeline"][0]["asset_ids"] = ["asset-1", "asset-1"]
-        with self.assertRaisesRegex(ValueError, "exactly one owned asset"):
-            self.invoke(p)
+        result, _ = self.invoke(p)
+        self.assertEqual(result["candidate"]["timeline"], [])
+        self.assertTrue(result["candidate"]["requirements"])
 
     def test_contiguous_owned_image_scenes_stay_executable(self):
         p = copy.deepcopy(PROPOSAL)
@@ -86,6 +95,43 @@ class ProducerTests(unittest.TestCase):
         })
         result, _ = self.invoke(p)
         self.assertEqual(len(result["candidate"]["timeline"]), 2)
+
+    def test_real_riverwalk_still_replacement_is_a_conversation_not_an_unauthorized_render(self):
+        user_direction = ("There is a still embedded of nighttime view of the river. "
+                          "Please replace that with a daytime view or even better "
+                          "a sunrise view if we have one.")
+        model_proposal = copy.deepcopy(PROPOSAL)
+        model_proposal["explanation"] = (
+            "I can replace the nighttime still, prioritizing sunrise if an owned image "
+            "can be verified. The source filenames do not establish lighting.")
+        model_proposal["changes"] = ["Replace the nighttime river still with a verified daytime or sunrise view"]
+        model_proposal["timeline"] = [
+            {"start_seconds": 0, "end_seconds": 8, "direction": "Existing opener",
+             "asset_ids": ["asset-1"]},
+            {"start_seconds": 8, "end_seconds": 15, "direction": "Desired sunrise still",
+             "asset_ids": ["not-owned-sunrise-photo"]},
+        ]
+        result = propose_revision(
+            {**EVIDENCE, "narration": "Preserve original spoken narration."},
+            user_direction, {}, transport=lambda *args, **kwargs:
+            type("Response", (), {"ok": True, "json": lambda _:
+            {"output_text": json.dumps(model_proposal)}})())
+        candidate = result["candidate"]
+        self.assertTrue(result["candidate_only"])
+        self.assertFalse(result["visual_inspection_performed"])
+        self.assertEqual(candidate["timeline"], [])
+        self.assertNotIn("not-owned-sunrise-photo", candidate["reuse_asset_ids"])
+        self.assertTrue(any(x["kind"] == "asset" for x in candidate["requirements"]))
+        self.assertIn("sunrise", candidate["explanation"])
+
+    def test_missing_timeline_may_be_discussed_without_inventing_asset(self):
+        candidate = copy.deepcopy(PROPOSAL)
+        candidate["timeline"] = []
+        candidate["requirements"] = [{"kind": "asset",
+            "description": "Locate a verified daytime still", "alternatives": ["Upload one"]}]
+        result, _ = self.invoke(candidate)
+        self.assertEqual(result["candidate"]["timeline"], [])
+        self.assertTrue(result["requires_fact_validation"])
 
     def test_existing_source_associations_retained_without_claiming_verified(self):
         p = copy.deepcopy(PROPOSAL)

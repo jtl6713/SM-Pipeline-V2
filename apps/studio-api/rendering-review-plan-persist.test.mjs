@@ -200,3 +200,21 @@ test("missing Request variant inventory cannot freeze a render plan",async()=>{
   assert.equal(receipt.ready,false);
   assert.equal(receipt.persisted,false);
 });
+
+test("conversation-only visual feedback is saved but cannot expose V2 render authorization",async()=>{
+  const f=fixture(),session=f.getSession();
+  session.producer_candidate.candidate.timeline=[];
+  session.producer_candidate.candidate.requirements=[{
+    kind:"asset",description:"Visually verify sunrise or daytime replacement",
+    alternatives:["Inspect existing owned photos","Upload suitable photo"]}];
+  const previousVersion=session.version;
+  const receipt=await persistReadyReviewPlan(f.argumentsToPass);
+  assert.equal(receipt.ok,true);
+  assert.equal(receipt.ready,false);
+  assert.equal(receipt.persisted,false);
+  assert.ok(receipt.blockers.some(b=>b.kind==="asset"));
+  assert.equal(session.version,previousVersion);
+  assert.equal(session.plan,null);
+  assert.equal(session.state,"discussing");
+  assert.equal(session.review_hold.active,true);
+});
