@@ -12,16 +12,17 @@ test('Rendering Review has a dedicated navigation item and responsive page',()=>
     assert.match(html,new RegExp('id="'+id+'"'));
   }
   assert.match(css,/@media\s*\(max-width:760px\)/);
-  assert.match(html,/rendering-review-queue\.js\?v=0\.6\.764/);
-  assert.match(html,/rendering-review-queue\.css\?v=0\.6\.764/);
+  assert.match(html,/rendering-review-queue\.js\?v=0\.6\.765/);
+  assert.match(html,/rendering-review-queue\.css\?v=0\.6\.765/);
 });
-test('rendering review is read-only and never displays enrollment, approval or publish actions',()=>{
-  assert.match(html,/Chicago pilot · read-only/);
-  assert.match(js,/manual_admission_enabled!==false/);
-  assert.match(js,/admission_enabled!==false/);
+test('rendering review offers gated manual discussion but never approval or publish actions',()=>{
+  assert.match(html,/Chicago pilot · protected manual review/);
+  assert.match(js,/entry.manual_admission_enabled===true/);
+  assert.match(js,/data.flags.admission_enabled!==true/);
   assert.match(js,/automatic_sampling_percent!==0/);
   assert.match(js,/method:'GET'/);
-  assert.doesNotMatch(js,/method\s*:\s*['"](?:POST|PATCH|PUT|DELETE)['"]/i);
+  assert.match(js,/method:'POST'/);
+  assert.doesNotMatch(js,/method\s*:\s*['"](?:PATCH|PUT|DELETE)['"]/i);
   assert.doesNotMatch(html,/id="rr(?:Enroll|Approve|Publish|Commit|Send|Replace)"/i);
 });
 test('authoritative Chicago profile, server permissions and session history are enforced',()=>{
