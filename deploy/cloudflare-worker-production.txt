@@ -760,3 +760,5 @@ Rendering Review V3 source validation + Producer executable timeline canary code
 2026-10-29: Deploy Worker 0.10.691-render-review-factory-drain. A previously accepted V2 must drain safely to Factory even if new creative approvals are disabled after the acceptance; preserve exact-output and publication safeguards.
 
 2026-10-29: Deploy Worker 0.10.692-render-review-factory-post-gate. Permit exact signed and reviewer Factory handoff POST routes through legacy Phase 2A global method guard, while independently enforcing authentication, accepted attempt and publication holds.
+
+2026-10-29: Deploy Worker 0.10.693-factory-v2-preview-return. Factory streams authenticated selected V2 and Request Changes reopens exact held Producer conversation without automatically scheduling or rendering.
