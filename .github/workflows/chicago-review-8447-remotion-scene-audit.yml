@@ -1,0 +1,65 @@
+name: Audit exact Chicago 8447 Remotion clip identities read-only
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/chicago-review-8447-remotion-scene-audit.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Read exact existing Remotion job clip identities without rendering
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          cat >/tmp/read-remotion-8447.ps1 <<'PS1'
+          $ErrorActionPreference='Stop'
+          $url='http://127.0.0.1:3333/status/job-20261029042719-d8b6ef01'
+          $res=Invoke-RestMethod -Uri $url -Method Get -TimeoutSec 20
+          Write-Output ('review_remotion_state='+[string]$res.status)
+          $clips=@($res.props.clips)
+          Write-Output ('review_remotion_clip_count='+$clips.Count)
+          $sources=@($clips|ForEach-Object {[string]$_.src})
+          Write-Output ('review_remotion_unique_src_count='+@($sources|Sort-Object -Unique).Count)
+          $ids=@($clips|ForEach-Object {[string]$_.google_drive_file_id})
+          Write-Output ('review_remotion_unique_drive_count='+@($ids|Sort-Object -Unique).Count)
+          for($i=0;$i -lt $clips.Count;$i++){
+            $c=$clips[$i]
+            $src=[string]$c.src
+            $tail=([uri]$src).AbsolutePath.Split('/')[-1]
+            Write-Output ('review_remotion_scene_'+($i+1)+' id='+[string]$c.id+' asset='+[string]$c.source_asset_id+' source='+$tail+' drive='+[string]$c.google_drive_file_id+' frames='+[string]$c.durationFrames)
+          }
+          $last=@($res.logs)|Select-Object -Last 4
+          foreach($line in $last) {
+            $safe=([string]$line -replace '[^\w :.,()/=-]',' ').Substring(0,[Math]::Min(220,([string]$line).Length))
+            Write-Output ('review_remotion_log='+$safe)
+          }
+          PS1
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/8447-remotion-audit.json').write_text(json.dumps({'command':Path('/tmp/read-remotion-8447.ps1').read_text(),'confirm':True}))
+          PY
+          code=$(curl -sS --max-time 20 -o /tmp/ops-audit-start.json -w '%{http_code}' \
+            -X POST https://ops.chicagoshining.com/api/shell \
+            -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/8447-remotion-audit.json)
+          [[ "$code" == "200" || "$code" == "202" ]]
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/ops-audit-start.json); test -n "$job"
+          for i in $(seq 1 60); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/ops-audit-result.json
+            status=$(jq -r '.job.status // empty' /tmp/ops-audit-result.json)
+            if [[ "$status" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/ops-audit-result.json | grep '^review_remotion_'
+              exit 0
+            fi
+            if [[ "$status" == "failed" ]]; then echo 'read_only_remotion_audit_failed=true'; exit 1; fi
+            sleep 3
+          done
+          echo 'read_only_remotion_audit_timeout=true'; exit 1
