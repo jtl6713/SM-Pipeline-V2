@@ -101,7 +101,9 @@ jobs:
           node --check apps/studio-api/engagement-service.mjs
           node --check apps/studio-api/rendering-review-plan-persist.mjs
           node --check apps/studio-api/rendering-review-factory-handoff.mjs
-          node --test apps/studio-api/rendering-review-factory-handoff.test.mjs apps/studio-api/rendering-review-factory-entry-gate.test.mjs apps/studio-api/rendering-review-approval-http.test.mjs
+          node --check apps/studio-api/rendering-review-factory-preview.mjs
+          node --check apps/studio-api/rendering-review-factory-return.mjs
+          node --test apps/studio-api/rendering-review-factory-bridge.test.mjs apps/studio-api/rendering-review-factory-handoff.test.mjs apps/studio-api/rendering-review-factory-entry-gate.test.mjs apps/studio-api/rendering-review-approval-http.test.mjs
           node --test apps/studio-api/rendering-review-plan-persist.test.mjs
           node --test apps/studio-api/engagement-auth-recovery.test.mjs
           node --test apps/studio-api/idea-list-authoritative-fresh.test.mjs
