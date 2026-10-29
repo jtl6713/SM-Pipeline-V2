@@ -315,6 +315,31 @@ export function applyReviewEvent(session, event) {
     // orchestrator must retain the durable hold until a separate scheduler-authorized release.
     s.approved_attempt_id = s.current_attempt_id;
     s.state = "approved";
+  } else if (kind === "FACTORY_HANDOFF") {
+    // Factory is a distinct human approval stage. The orchestrator must first
+    // verify the accepted V2 artifact is selected on the original output while
+    // its authoritative publication hold remains in force. This state event
+    // does not schedule, approve for publishing, or release an Airtable hold.
+    const active=current(s);
+    const original=s.attempts.find(a=>a.number===1);
+    if(s.state!=="approved" || s.review_hold.active!==true ||
+       s.original_do_not_publish!==false || !active || !original ||
+       Number(active.number)<2 ||
+       active.id!==s.approved_attempt_id ||
+       event.attempt_id!==active.id ||
+       event.artifact_id!==active.artifact_id ||
+       event.original_artifact_id!==original.artifact_id ||
+       event.hold_id!==s.review_hold.id || event.hold_owner!==s.id ||
+       event.factory_receipt_verified!==true)
+      fail("FACTORY_HANDOFF_DENIED","Only verified, creatively accepted V2 can be transferred to Factory");
+    s.factory_handoff={
+      attempt_id:active.id,artifact_id:active.artifact_id,
+      original_artifact_id:original.artifact_id,at:text(event.at),
+      status:"ready_for_factory_approval",
+    };
+    // The authoritative output hold remains active until a separate verified
+    // exact-owner Airtable release AFTER this session update is persisted.
+    s.review_hold.active=false;
   } else if (kind === "RELEASE_REVIEW_HOLD") {
     if (s.state !== "approved" || event.scheduler_receipt_verified !== true ||
         event.hold_id !== s.review_hold.id || event.hold_owner !== s.id)
