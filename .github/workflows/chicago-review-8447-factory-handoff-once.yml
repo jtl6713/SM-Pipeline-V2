@@ -31,7 +31,7 @@ jobs:
               -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
               'https://studio.chicagoshining.com/api/health' || true)
             if [[ "$status" == "200" ]] &&
-               jq -e '.ok==true and (.version|startswith("0.10.691-render-review-factory-drain"))' \
+               jq -e '.ok==true and (.version|startswith("0.10.692-render-review-factory-method-gate"))' \
                   /tmp/review-factory-live.json >/dev/null; then
               installed=true
               break
