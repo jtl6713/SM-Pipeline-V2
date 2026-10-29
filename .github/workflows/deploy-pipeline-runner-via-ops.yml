@@ -362,3 +362,5 @@ jobs:
 # 2026-10-29: Deploy general conversational Producer (no output-specific shortcuts),
 # and private exact-render reconciliation codes for existing held #8447 V2.
 # Preserve all existing approval/hold/publication fences.
+
+# 2026-10-29: guarded Runner v11, private exact-job claim denial visibility only.

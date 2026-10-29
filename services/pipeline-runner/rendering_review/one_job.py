@@ -16,6 +16,7 @@ import tempfile
 import time
 from pathlib import Path
 from urllib.request import Request, build_opener
+from urllib.error import HTTPError
 
 import requests
 
@@ -87,6 +88,12 @@ def _post_once(worker,secret,route,body,timeout=20):
             if result.status!=200 or len(raw)>8192:
                 fail("review_worker_receipt_invalid")
         reply=json.loads(raw)
+    except HTTPError as exc:
+        # A 401/403/404/405/422 is an authoritative rejection before a
+        # claim receipt, not an ambiguous successful render. Never retry here.
+        if exc.code in (401, 403, 404, 405, 422):
+            raise ExactReviewRenderDenied("review_worker_http_denied_" + str(exc.code)) from exc
+        raise ExactReviewRenderDenied("review_worker_reply_ambiguous_reconcile") from exc
     except Exception as exc:
         # The protected Worker may already have persisted this event.
         raise ExactReviewRenderDenied("review_worker_reply_ambiguous_reconcile") from exc
