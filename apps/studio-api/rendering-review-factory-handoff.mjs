@@ -67,7 +67,7 @@ function validateArtifact(record,session,attempt){
   return evidence;
 }
 function assertFactoryReady(row,f,fileId){
-  if(!row || f(row,"Do_Not_Publish")!==false ||
+  if(!row || Boolean(f(row,"Do_Not_Publish")) ||
      renderingReviewHoldPresent(key=>f(row,key)) ||
      !same(f(row,"Final_File_ID"),fileId) ||
      !same(f(row,"Final_File_URL"),"https://drive.google.com/file/d/"+fileId+"/view") ||
