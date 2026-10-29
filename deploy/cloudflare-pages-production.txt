@@ -582,3 +582,5 @@ Redeploy Studio UI 0.6.763-idea-lifecycle-live after removing stale Worker versi
 2026-10-28: Deploy Studio UI 0.6.776: Producer replies show immediate visible inline processing above the action, a busy button and honest waiting status, keyboard dismissal on iPhone, and durable saved-response acknowledgement. Session render stage appears near the top; no automatic render or publication.
 
 2026-10-28: UI 0.6.777 simple Producer review: show a plain-language V2 next step near the video, keep one guarded render button, surface natural-language Producer composer before storyboard, move conversation history and technical plan checks into optional disclosures, and avoid duplicate V1 attempt listing. No auto-render or publication.
+
+2026-10-29: Deploy Studio UI 0.6.778-factory-review-return. Factory V2 preview and Request Changes route to the existing Producer session with a visible saved-receipt confirmation.
