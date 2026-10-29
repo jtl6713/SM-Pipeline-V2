@@ -315,6 +315,31 @@ export function applyReviewEvent(session, event) {
     // orchestrator must retain the durable hold until a separate scheduler-authorized release.
     s.approved_attempt_id = s.current_attempt_id;
     s.state = "approved";
+  } else if (kind === "FACTORY_REQUEST_CHANGES") {
+    // Factory has first reacquired this exact review-owned hold in Airtable
+    // under the output lock. Resume the SAME session and selected V2,
+    // preserving V1 and every earlier message. Do not authorize a new render.
+    const selected=current(s);
+    const receipt=s.factory_handoff;
+    if(s.state!=="approved" || s.review_hold.active!==false ||
+       !receipt || receipt.status!=="ready_for_factory_approval" ||
+       receipt.attempt_id!==s.current_attempt_id ||
+       receipt.artifact_id!==selected?.artifact_id ||
+       event.hold_verified!==true ||
+       event.hold_id!==s.review_hold.id || event.hold_owner!==s.id ||
+       !validId(event.message_id) || !text(event.content) ||
+       text(event.content).length>3000 ||
+       s.messages.some(m=>m.id===event.message_id))
+      fail("FACTORY_FEEDBACK_DENIED","Only the exact held Factory revision can reopen its Producer session");
+    s.review_hold.active=true;
+    s.factory_handoff={...receipt,status:"returned_for_revision",returned_at:text(event.at)};
+    s.state="discussing";
+    s.approved_attempt_id=null;
+    s.plan=null;s.pending_authorization=null;
+    if(s.producer_candidate)s.producer_candidate.stale=true;
+    s.messages.push({id:event.message_id,role:"user",content:text(event.content),
+      at:text(event.at),attempt_id:s.current_attempt_id,timestamp_seconds:null,
+      source:"factory_request_changes"});
   } else if (kind === "FACTORY_HANDOFF") {
     // Factory is a distinct human approval stage. The orchestrator must first
     // verify the accepted V2 artifact is selected on the original output while
