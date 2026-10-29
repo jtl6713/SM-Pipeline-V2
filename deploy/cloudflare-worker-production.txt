@@ -764,3 +764,4 @@ Rendering Review V3 source validation + Producer executable timeline canary code
 2026-10-29: Deploy Worker 0.10.693-factory-v2-preview-producer-return. Factory preview streams accepted V2 through private Runner; safeguarded Request Changes restores review hold and persists notes to AI Producer. No rendering, scheduling, or publishing.
 
 2026-10-29: Deploy Worker 0.10.694-factory-review-feedback-only. Only protected Factory request-changes admits Chicago pilot to Rendering Review with initial human comments persisted under publication hold. No render or publish.
+2026-10-29: Retry Worker 0.10.694 Factory-only conversational review with corrected production read-only verifier; verify direct admission disabled and only held Factory-submitted reviews visible. Previous deploy rolled back safely.
