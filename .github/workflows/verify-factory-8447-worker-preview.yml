@@ -108,7 +108,10 @@ jobs:
             exit 1
           done
           test "$VERIFIED" = true
-          HEAD_CODE=$(curl -sS --max-time 60 -X HEAD -D /tmp/factory-head -o /dev/null -w '%{http_code}' "$URL")
+          # Use curl --head (not -X HEAD): the latter still attempts to read a
+          # response body and fails with curl 18 on a valid 200 HEAD whose
+          # Content-Length advertises the full 21.9 MB MP4 size.
+          HEAD_CODE=$(curl -sS --head --max-time 60 -D /tmp/factory-head -o /dev/null -w '%{http_code}' "$URL")
           test "$HEAD_CODE" = 200
           grep -Eiq '^content-type: video/mp4' /tmp/factory-head
           echo "factory_8447_worker_preview_range=PASS http=206 head=200 read_only=true"
