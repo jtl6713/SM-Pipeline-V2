@@ -52,7 +52,8 @@ jobs:
             services/pipeline-runner/tests/test_public_cover.py \
             services/pipeline-runner/tests/test_rendering_review_publication.py \
             services/pipeline-runner/tests/test_rendering_review_producer.py \
-            services/pipeline-runner/tests/test_rendering_review_producer_http.py
+            services/pipeline-runner/tests/test_rendering_review_producer_http.py \
+            services/pipeline-runner/tests/test_rendering_review_recovery.py
 
       - name: Deploy Pipeline Runner through allowlisted Ops action
         shell: bash
@@ -364,3 +365,5 @@ jobs:
 # Preserve all existing approval/hold/publication fences.
 
 # 2026-10-29: guarded Runner v11, private exact-job claim denial visibility only.
+
+# 2026-10-29: protected Runner v12 no-launch proof for recovering existing authorized Chicago Reel 8447 V2 job.
