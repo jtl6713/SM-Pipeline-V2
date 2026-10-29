@@ -1,0 +1,90 @@
+name: Start already-authorized Chicago Reel 8447 V2 job once
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/chicago-review-v2-8447-once.yml'
+permissions:
+  contents: read
+concurrency:
+  group: chicago-review-8447-authorized-v2-once
+  cancel-in-progress: false
+jobs:
+  start:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Start existing committed V2 job through protected Runner (no publication)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          command = r'''$ErrorActionPreference='Stop'
+          $output='rec0uVrVeiUM6shp9'
+          $job='rrjob_26054929500b8abe981e3f6131b5c668209bf9c765edb06c'
+          $envFile=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+          if(-not (Test-Path -LiteralPath $envFile)){throw 'protected_runner_env_missing'}
+          $lines=@(Get-Content -LiteralPath $envFile | Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='})
+          if($lines.Count -ne 1){throw 'runner_secret_missing_or_duplicated'}
+          $secret=([string]($lines[0] -split '=',2)[1]).Trim().Trim('"').Trim([char]39)
+          if($secret.Length -lt 24){throw 'protected_runner_secret_invalid'}
+          $body=@{output_id=$output;job_id=$job}|ConvertTo-Json -Compress
+          Add-Type -AssemblyName System.Net.Http
+          $client=[System.Net.Http.HttpClient]::new()
+          $client.Timeout=[TimeSpan]::FromSeconds(25)
+          try{
+            $req=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post,'http://127.0.0.1:3350/jobs/rendering-review/run-exact')
+            $req.Content=[System.Net.Http.StringContent]::new($body,[System.Text.Encoding]::UTF8,'application/json')
+            [void]$req.Headers.TryAddWithoutValidation('X-Pipeline-Secret',$secret)
+            $res=$client.SendAsync($req).GetAwaiter().GetResult()
+            $status=[int]$res.StatusCode
+            $raw=$res.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            try{$data=$raw|ConvertFrom-Json}catch{throw 'runner_unreadable_response'}
+            if(($status -ne 202 -and $status -ne 200) -or $data.ok -ne $true -or $data.output_id -ne $output -or $data.job_id -ne $job){
+              Write-Output ("review_launch_http="+$status+" error="+[string]$data.error)
+              throw 'exact_review_job_not_accepted'
+            }
+            if($data.accepted -ne $true -and $data.already_running -ne $true -and $data.already_finished -ne $true){
+              throw 'exact_review_job_not_recognized'
+            }
+            Write-Output ("review_job_start=PASS http="+$status+" accepted="+$data.accepted+" running="+$data.already_running+" finished="+$data.already_finished)
+            Write-Output 'scope=existing_held_chicago_8447_v2 no_new_job=true no_instagram_post=true'
+          }finally{$client.Dispose()}
+          '''
+          Path('/tmp/review-8447-exact-start.json').write_text(json.dumps({"command":command,"confirm":True}),encoding='utf-8')
+          PY
+          code=$(curl -sS --max-time 25 -o /tmp/review-8447-ops-start.json -w '%{http_code}' \
+            -X POST https://ops.chicagoshining.com/api/shell \
+            -H "Authorization: Bearer $OPS_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/review-8447-exact-start.json)
+          if [[ "$code" != "200" && "$code" != "202" ]]; then
+            echo "ops_exact_launch_unavailable_http=$code"; exit 1
+          fi
+          id=$(jq -r '.job.id // .jobId // empty' /tmp/review-8447-ops-start.json)
+          test -n "$id"
+          for i in $(seq 1 40); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$id" -o /tmp/review-8447-ops-job.json
+            state=$(jq -r '.job.status // empty' /tmp/review-8447-ops-job.json)
+            if [[ "$state" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/review-8447-ops-job.json | \
+                grep -E '^review_job_start=|^scope=' | tail -2
+              test "$(jq -r '.job.log // ""' /tmp/review-8447-ops-job.json | grep -c '^review_job_start=PASS')" -eq 1
+              exit 0
+            fi
+            if [[ "$state" == "failed" ]]; then
+              echo "ops_exact_launch_job_failed=true"
+              jq -r '.job.log // ""' /tmp/review-8447-ops-job.json | \
+                grep -E '^review_launch_http=|^review_job_start=' | tail -3 || true
+              exit 1
+            fi
+            sleep 3
+          done
+          echo 'ops_exact_launch_status_unverified=true'
+          exit 1
