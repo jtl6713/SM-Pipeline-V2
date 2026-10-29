@@ -81,167 +81,102 @@ class ProducerTests(unittest.TestCase):
         self.assertTrue(result["candidate_only"])
         self.assertFalse(result["visual_inspection_performed"])
 
-    def test_explicit_two_night_stills_creates_verified_source_only_candidate_not_v2(self):
-        owned = [
-            {"id": "night-one", "name": "Gibsons Italia 5",
-             "time_of_day": "Night", "metadata_verified": True,
-             "frames_inspected": False},
-            {"id": "day-two", "name": "Chicago Riverwalk 8",
-             "time_of_day": "Morning", "metadata_verified": True,
-             "frames_inspected": False},
-            {"id": "night-three", "name": "Chicago Riverwalk 10",
-             "time_of_day": "Night", "metadata_verified": True,
-             "frames_inspected": False}]
-        evidence = {**EVIDENCE,"assets":owned,
-            "narration":"The Chicago river at sunrise.",
-            "original_timeline":[
-                {"start_seconds":0.0,"end_seconds":3.567,"asset_id":"night-one"},
-                {"start_seconds":3.567,"end_seconds":6.767,"asset_id":"day-two"},
-                {"start_seconds":6.767,"end_seconds":10.0,"asset_id":"night-three"}]}
+    def test_all_creative_requests_use_model_even_for_existing_8447(self):
+        # The old exception used to match the output number, frames 1 and 5,
+        # and exact "both nighttime" phrases instead of consulting the model.
+        owned = [{"id": "night-1", "name": "Night opener"},
+                 {"id": "morning", "name": "Riverwalk morning"},
+                 {"id": "night-5", "name": "Night river"}]
+        original = [
+            {"asset_id": "night-1", "start_seconds": 0, "end_seconds": 4},
+            {"asset_id": "morning", "start_seconds": 4, "end_seconds": 8},
+            {"asset_id": "night-5", "start_seconds": 8, "end_seconds": 12}]
+        evidence = {**EVIDENCE, "output_id": "rec0uVrVeiUM6shp9",
+                    "session_version": 4, "assets": owned,
+                    "original_timeline": original,
+                    "narration": "Early light on the river."}
+        candidate = copy.deepcopy(PROPOSAL)
+        candidate["narration"] = evidence["narration"]
+        candidate["preserve"] = []
+        candidate["requirements"] = []
+        candidate["claims"] = []
+        candidate["reuse_asset_ids"] = ["morning"]
+        candidate["changes"] = ["Replace both night views"]
+        candidate["timeline"] = [
+            {"start_seconds": row["start_seconds"], "end_seconds": row["end_seconds"],
+             "direction": "Use a daytime image", "asset_ids": ["morning"]}
+            for row in original]
+        observed = []
         class Response:
             ok = True
             def json(self):
-                return {"id":"model-fixture","output_text":json.dumps(PROPOSAL)}
-        result=propose_revision(evidence,
-            "Please replace BOTH nighttime scenes using already owned Riverwalk images. "
-            "Preserve narration, music and scene timing. Do not render V2 yet.",
-            {},transport=lambda *args, **kwargs: Response())
-        c=result["candidate"]
-        self.assertEqual([x["asset_ids"][0] for x in c["timeline"]],
-                         ["day-two","day-two","day-two"])
-        self.assertEqual([x["end_seconds"] for x in c["timeline"]],
-                         [3.567,6.767,10.0])
-        self.assertEqual(c["narration"],evidence["narration"])
-        self.assertEqual(c["requirements"],[])
-        self.assertEqual(c["claims"],[])
-        self.assertEqual(len(c["changes"]),2)
-        self.assertIn("haven\'t made the revised video",c["explanation"])
-        self.assertTrue(result["candidate_only"])
-        self.assertFalse(result["visual_inspection_performed"])
-        self.assertTrue(result["requires_fact_validation"])
-
-    def test_exact_8447_reviewer_action_bypasses_slow_model_without_rendering(self):
-        # Ten original, independently described stills with the two recorded
-        # Night scenes in positions 1 and 5. The actual Studio action requests
-        # an executable candidate only; the endpoint still re-reads authority
-        # and the Worker must independently validate crops/rights/hold.
-        day = {"id": "day", "name": "Chicago Riverwalk 8", "time_of_day": "Morning",
-               "metadata_verified": True, "frames_inspected": False}
-        night1 = {"id": "night1", "name": "Gibsons Italia 5", "time_of_day": "Night",
-                  "metadata_verified": True, "frames_inspected": False}
-        night5 = {"id": "night5", "name": "Chicago Riverwalk 10", "time_of_day": "Night",
-                  "metadata_verified": True, "frames_inspected": False}
-        bounds = [0, 3.567, 6.767, 10.3, 13.9, 17.133, 20.7,
-                  24.233, 27.433, 30.967, 34.467]
-        orig = []
-        for i in range(10):
-            asset = night1 if i == 0 else night5 if i == 4 else day
-            orig.append({"start_seconds": bounds[i], "end_seconds": bounds[i + 1],
-                         "asset_id": asset["id"], "time_of_day": asset["time_of_day"]})
-        evidence = {**EVIDENCE, "output_id": "rec0uVrVeiUM6shp9",
-                    "assets": [night1, day, night5],
-                    "narration": "Preserve original soundtrack narration.",
-                    "original_timeline": orig}
-        direction = ("Please replace BOTH nighttime scenes, including frame 1 "
-                     "(0.000–3.567s) and frame 5 (13.900–17.133s), using already "
-                     "owned, approved 9:16 Morning/Daytime Chicago River stills "
-                     "such as Chicago Riverwalk 8. Keep every other scene, "
-                     "narration, music, watermark and exact scene timing unchanged. "
-                     "Do not request an upload when a verified existing still is "
-                     "available. Do not claim the video was modified; first produce "
-                     "a complete render-ready plan with zero unresolved requirements "
-                     "and no invented factual claims. I will separately authorize "
-                     "V2 rendering after reviewing the plan.")
-        def forbidden_model(*args, **kwargs):
-            raise AssertionError("Exact source-owned edit should not call model")
-        result = propose_revision(evidence, direction, {}, transport=forbidden_model)
-        candidate = result["candidate"]
-        self.assertEqual(len(candidate["timeline"]), 10)
-        self.assertEqual([x["asset_ids"][0] for x in candidate["timeline"]],
-                         ["day"] * 10)
-        self.assertEqual([x["start_seconds"] for x in candidate["timeline"]], bounds[:-1])
-        self.assertEqual([x["end_seconds"] for x in candidate["timeline"]], bounds[1:])
-        self.assertEqual(candidate["narration"], evidence["narration"])
-        self.assertEqual(candidate["requirements"], [])
-        self.assertEqual(candidate["claims"], [])
-        self.assertEqual(len(candidate["changes"]), 2)
-        self.assertTrue(result["candidate_only"])
-        self.assertTrue(result["requires_fact_validation"])
-        self.assertFalse(result["visual_inspection_performed"])
-        self.assertIsNone(result["model_response_id"])
-        self.assertEqual(result["model"], "bounded-source-evidence-only")
-
-    def test_8447_plain_language_photo_acceptance_preserves_actual_reply(self):
-        day = {"id": "day-morning", "name": "Chicago Riverwalk 8",
-               "time_of_day": "Morning", "metadata_verified": True,
-               "frames_inspected": False}
-        n1 = {"id": "night-one", "name": "Gibsons Italia 5",
-              "time_of_day": "Night", "metadata_verified": True,
-              "frames_inspected": False}
-        n5 = {"id": "night-five", "name": "Chicago Riverwalk 10",
-              "time_of_day": "Night", "metadata_verified": True,
-              "frames_inspected": False}
-        bounds = [0, 3.567, 6.767, 10.3, 13.9, 17.133, 20.7,
-                  24.233, 27.433, 30.967, 34.467]
-        original = [{"start_seconds": bounds[i], "end_seconds": bounds[i+1],
-                     "asset_id": (n1 if i == 0 else n5 if i == 4 else day)["id"]}
-                    for i in range(10)]
-        evidence = {**EVIDENCE, "output_id": "rec0uVrVeiUM6shp9",
-                    "session_version": 3, "assets": [n1, day, n5],
-                    "narration": "The original narration", "original_timeline": original,
-                    "messages": [{"role": "producer", "content": "I found a morning Riverwalk photo."}]}
-        def no_model(*args, **kwargs):
-            raise AssertionError("Accepting exact source-backed images must not call model")
-        for direction in ("Yes", "Yes, those look good.", "Looks good", "Use these",
-                          "Yes this is good. Rerender please."):
-            result = propose_revision(evidence, direction, {}, transport=no_model)
-            candidate = result["candidate"]
-            self.assertEqual([scene["asset_ids"][0] for scene in candidate["timeline"]],
-                             ["day-morning"] * 10)
-            self.assertEqual(len(candidate["changes"]), 2)
-            self.assertEqual(candidate["requirements"], [])
-            self.assertEqual(candidate["narration"], evidence["narration"])
-            self.assertTrue(result["candidate_only"])
-            self.assertFalse(result["visual_inspection_performed"])
-            self.assertEqual(result["model"], "bounded-confirmed-photo-suggestion")
-
-        # The original confirmation reached Airtable, but the first Producer
-        # attempt advanced the session to v4 while retaining frame 1 at Night.
-        # A safe, version-fenced retry must still offer both replacements.
-        old_reply = "Yes this is good.  Rerender please."
-        old_producer = {
-            "role": "producer",
-            "content": "The opener remains as-is; we replaced the later night scene.",
-        }
-        recovered = {
-            **evidence,
-            "session_version": 4,
-            "messages": [
-                {"role": "user", "content": old_reply},
-                old_producer,
-            ],
-        }
-        result = propose_revision(recovered, old_reply, {}, transport=no_model)
-        self.assertEqual(len(result["candidate"]["changes"]), 2)
-        self.assertEqual(result["candidate"]["timeline"][0]["asset_ids"], ["day-morning"])
-        self.assertEqual(result["candidate"]["timeline"][4]["asset_ids"], ["day-morning"])
-        self.assertEqual(result["candidate"]["requirements"], [])
-        self.assertEqual(result["candidate"]["claims"], [])
-        self.assertTrue(result["candidate_only"])
-        self.assertFalse(result["visual_inspection_performed"])
-
-        # Qualified or negative responses stay genuinely conversational.
-        class Response:
-            ok = True
-            def json(self):
-                return {"id": "normal-model", "output_text": json.dumps(PROPOSAL)}
-        seen = []
-        def model(settings, data, **options):
-            seen.append(data)
+                return {"id": "general-model", "model": "fixture",
+                        "output_text": json.dumps(candidate)}
+        def model(settings, payload, **options):
+            observed.append(payload)
             return Response()
-        propose_revision(evidence, "Yes, but use a different image for the opener",
-                         {}, transport=model)
-        self.assertEqual(len(seen), 1)
+        for direction in ("Replace both nighttime shots with daytime photos",
+                          "That first still is too dark. Fix the whole morning story.",
+                          "Yes, those replacements look good. Rerender please."):
+            result = propose_revision(evidence, direction, {}, transport=model)
+            self.assertEqual(result["model"], "fixture")
+            self.assertEqual(result["model_response_id"], "general-model")
+            self.assertEqual(len(result["candidate"]["timeline"]), 3)
+            self.assertEqual(result["candidate"]["narration"], evidence["narration"])
+            self.assertFalse(result["visual_inspection_performed"])
+            self.assertTrue(result["candidate_only"])
+        self.assertEqual(len(observed), 3)
+        self.assertIn("entire cut", observed[0]["instructions"])
+        self.assertIn("prior messages", observed[0]["instructions"])
+        for payload, direction in zip(observed, (
+                "Replace both nighttime shots with daytime photos",
+                "That first still is too dark. Fix the whole morning story.",
+                "Yes, those replacements look good. Rerender please.")):
+            self.assertIn(direction, payload["input"])
+            self.assertNotIn("authorization", payload["input"].split("creative_direction")[-1].lower())
+
+    def test_general_edit_intents_are_not_rewritten_to_photo_replacement(self):
+        intents = [
+            "Trim the introduction and increase the pace.",
+            "The narration is too formal; make it warmer and more concise.",
+            "Move the strongest visual to the opening and remove repetition.",
+            "The subtitles cover the subject; improve readability.",
+            "The story feels disconnected; improve transitions and flow.",
+        ]
+        for direction in intents:
+            sent = []
+            class Response:
+                ok = True
+                def json(self):
+                    return {"id": "general-model", "model": "fixture",
+                            "output_text": json.dumps(PROPOSAL)}
+            def model(settings, body, **opts):
+                sent.append(body["input"])
+                return Response()
+            result = propose_revision(EVIDENCE, direction, {}, transport=model)
+            self.assertEqual(len(sent), 1)
+            self.assertIn(direction, sent[0])
+            self.assertEqual(result["candidate"]["changes"], PROPOSAL["changes"])
+            self.assertEqual(result["model"], "fixture")
+            self.assertFalse(result["render_queued"] if "render_queued" in result else False)
+
+    def test_incomplete_visual_plan_still_gives_helpful_nonexecuting_reply(self):
+        draft = copy.deepcopy(PROPOSAL)
+        draft["explanation"] = "The opening needs a stronger sense of place; the owned library has no matching detail still."
+        draft["timeline"] = []
+        draft["requirements"] = [{"kind": "asset",
+            "description": "Confirm an existing compatible detail still",
+            "alternatives": ["Search owned inventory"]}]
+        class Response:
+            ok = True
+            def json(self):
+                return {"id": "fixture", "output_text": json.dumps(draft)}
+        result = propose_revision(EVIDENCE, "Make the first shot more cinematic",
+                                  {}, transport=lambda *a, **k: Response())
+        self.assertEqual(result["candidate"]["timeline"], [])
+        self.assertIn("stronger sense of place", result["candidate"]["explanation"])
+        self.assertTrue(result["candidate_only"])
+        self.assertFalse(result["visual_inspection_performed"])
 
     def test_8447_other_creative_requests_keep_model_conversation(self):
         evidence = {**EVIDENCE, "output_id": "rec0uVrVeiUM6shp9"}

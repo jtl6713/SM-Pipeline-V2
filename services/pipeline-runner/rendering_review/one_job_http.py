@@ -5,7 +5,7 @@ import os
 import re
 import threading
 from flask import Blueprint, jsonify, request
-from rendering_review.one_job import render_exact_attempt
+from rendering_review.one_job import render_exact_attempt, ExactReviewRenderDenied
 
 RECORD=re.compile(r"rec[A-Za-z0-9]{14}\Z")
 TOKEN=re.compile(r"[A-Za-z0-9_-]{8,120}\Z")
@@ -27,10 +27,17 @@ def create_exact_review_render_blueprint(settings,runner=render_exact_attempt):
                     "attempt_id":response.get("attempt_id"),
                     "drive_file_id":response.get("drive_file_id")}
         except Exception as exc:
-            # Deliberately do not auto-retry. A Remotion POST may have succeeded
-            # even if the Runner lost the acknowledgement.
+            # Do not auto-retry: a remote render may have started already.
+            # Status is private/shared-secret-gated; expose only our own
+            # bounded, allowlisted denial code, never provider bodies/URLs.
+            reason_code = ""
+            if isinstance(exc, ExactReviewRenderDenied):
+                code = str(exc).split(":", 1)[0]
+                if re.fullmatch(r"[a-z][a-z0-9_]{0,95}", code):
+                    reason_code = code
             result={"state":"needs_reconciliation",
-                    "reason":type(exc).__name__}
+                    "reason":type(exc).__name__,
+                    "reason_code":reason_code}
         with _LOCK:
             _RESULTS[job_id]=result
             _ACTIVE.discard(job_id)

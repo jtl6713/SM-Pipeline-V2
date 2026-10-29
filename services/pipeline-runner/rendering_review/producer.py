@@ -2,7 +2,8 @@
 
 The caller supplies a server-built evidence snapshot and persists the returned
 candidate under the session version fence. A model response is never an
-authorization or a validation receipt.
+authorization or a validation receipt. All creative feedback routes through
+the model; no specific output, scene index, photo name or phrase bypass exists.
 """
 from __future__ import annotations
 
@@ -26,16 +27,23 @@ original_timeline[] contains the actual source scene order and durations.
 library_candidates[] contains other existing Chicago-owned photos, but these
 are search suggestions, not verified renderer assets. Names/time-of-day are
 metadata, not evidence that frames were visually inspected.
-For a request to replace a nighttime Riverwalk still with daytime or sunrise:
-identify the actual night scene from original_timeline[] and assets[]; prefer
-a Sunrise/Morning matching photo among assets[] first. If an appropriate
-request-linked photo is available, reconstruct the other source scenes in order,
-replace only the identified night scene, keep the original narration, and
-produce a contiguous timeline using only request-linked assets[].id values.
-If a better existing photo is only in library_candidates[], recommend it by
-name and time_of_day, say it needs rights/crop verification for THIS output,
-and request library import/verification rather than asking for a new upload.
-Never use a library candidate ID as an executable timeline asset ID.
+Understand arbitrary conversational feedback: story arc, mismatched visuals,
+shot selection, sequence, rhythm, captions, narration, duration, mood, motion,
+music, accessibility and factual accuracy. Read prior messages to resolve
+references such as "those shots", "the opening", or "make it less rushed".
+For each instruction, inspect the existing scene inventory and timeline metadata,
+identify all affected scenes (not merely the first match), distinguish requested
+edits from material the reviewer explicitly wants preserved, and explain
+concretely which scenes and timings change. When visuals can be corrected using
+already linked owned images, propose a full revised timeline rather than an
+upload request. Every proposed executable timeline MUST contain the complete
+ordered video, including unchanged scenes; never return only edited fragments.
+Keep unchanged asset identities and exact scene boundaries by default, unless
+the reviewer asks for different timing or structural edits. If the reviewer asks
+to speed up, slow down, reorder, replace many images, remove repeats or alter
+the narrative, consider the entire cut, not only one matching scene.
+Acknowledge tradeoffs and ask one specific question only when truly blocked;
+otherwise propose a usable next cut, with clear acceptance criteria.
 For ambiguous source scene matches, ask for scene confirmation instead of
 inventing a visual inspection. Never claim an unavailable asset exists.
 For an immediately executable first revision, favor already owned assets when they
@@ -170,7 +178,7 @@ def conversational_candidate(model: dict, evidence: dict, direction: str) -> dic
             "description": "Verify an appropriate source visual and exact scene placement "
                            "before preparing any replacement render.",
             "alternatives": ["Inspect the existing owned uploads",
-                             "Supply a suitable daytime or sunrise replacement if needed"]})
+                             "Supply the missing suitable asset if the current inventory cannot satisfy the request"]})
 
     claims = []
     for item in model.get("claims", []) if isinstance(model.get("claims"), list) else []:
@@ -259,98 +267,6 @@ class ProducerModelHTTPError(RuntimeError):
         super().__init__("Producer model provider returned HTTP " + str(self.status_code))
 
 
-def _all_night_stills_candidate(model: dict, evidence: dict, direction: str) -> dict | None:
-    """Scope a user's explicit BOTH-night-stills instruction to linked photos.
-
-    This is only candidate construction, not visual validation or render
-    authorization. Original frame timestamps and owned image metadata are
-    recorded independently in Airtable and independently rechecked by the
-    immutable plan adapter before a Render button becomes available.
-    """
-    import re
-    required = {"explanation", "narration", "preserve", "changes", "reuse_asset_ids",
-                "timeline", "requirements", "claims", "acceptance_checks"}
-    if model is not None and (not isinstance(model, dict) or set(model) != required or
-                              not isinstance(model.get("explanation"), str) or
-                              not model["explanation"].strip()):
-        return None
-    if not re.search(r"\b(?:both|all)\b.{0,80}\bnight(?:time)?\b", direction, re.I):
-        return None
-    if not re.search(r"\breplace\b", direction, re.I):
-        return None
-    scenes = evidence.get("original_timeline")
-    assets = evidence.get("assets")
-    if not isinstance(scenes, list) or not 2 <= len(scenes) <= 80 or not isinstance(assets, list):
-        return None
-    available = {a.get("id"): a for a in assets if isinstance(a, dict) and a.get("metadata_verified") is True
-                 and a.get("frames_inspected") is False and isinstance(a.get("id"), str)}
-    if len(available) < 2:
-        return None
-    night = [x for x in scenes if isinstance(x, dict) and
-             available.get(x.get("asset_id"), {}).get("time_of_day") == "Night"]
-    if len(night) < 2:
-        return None
-    morning = [a for a in available.values() if a.get("time_of_day") in ("Sunrise", "Morning", "Midday", "Afternoon")]
-    morning.sort(key=lambda a: (
-        0 if a.get("time_of_day") == "Sunrise" and "river" in str(a.get("name", "")).lower() else
-        1 if a.get("time_of_day") == "Morning" and "riverwalk" in str(a.get("name", "")).lower() else
-        2 if a.get("time_of_day") == "Morning" else 3,
-        str(a.get("name", ""))))
-    if not morning:
-        return None
-    replacement = morning[0]
-    if "river" not in str(replacement.get("name", "")).lower():
-        return None
-    timeline = []
-    previous_end = 0.0
-    replaced = []
-    for idx, scene in enumerate(scenes):
-        if not isinstance(scene, dict):
-            return None
-        start, end = scene.get("start_seconds"), scene.get("end_seconds")
-        original = scene.get("asset_id")
-        if (type(start) not in (float, int) or type(end) not in (float, int)
-                or abs(start - previous_end) > 0.002 or start >= end
-                or original not in available):
-            return None
-        old = available[original]
-        needs_replacement = old.get("time_of_day") == "Night"
-        image = replacement if needs_replacement else old
-        timeline.append({"start_seconds": start, "end_seconds": end,
-                         "direction": "gentle-zoom-in" if needs_replacement else "hold",
-                         "asset_ids": [image["id"]]})
-        if needs_replacement:
-            replaced.append("Scene " + str(idx + 1) + " (" + str(start) + "–" +
-                            str(end) + "s): replace " + str(old.get("name")) +
-                            " (Night) with " + str(image.get("name")) + " (" +
-                            str(image.get("time_of_day")) + ")")
-        previous_end = end
-    if len(replaced) != len(night):
-        return None
-    original_narration = evidence.get("narration")
-    if not isinstance(original_narration, str) or not original_narration.strip():
-        return None
-    selected_ids = list(dict.fromkeys(scene["asset_ids"][0] for scene in timeline))
-    return {
-        "explanation": ("I can use your existing " + str(replacement.get("name")) +
-                        " morning photo for both nighttime shots. The other pictures, "
-                        "narration, music, and timing will stay as they are. "
-                        "I haven't made the revised video yet."),
-        "narration": original_narration,
-        "preserve": [],
-        "changes": replaced,
-        "reuse_asset_ids": selected_ids,
-        "timeline": timeline,
-        "requirements": [],
-        "claims": [],
-        "acceptance_checks": [
-            "Neither of the original Night scenes remains in the replacement timeline.",
-            "Both replacement sources have verified existing Chicago-owned 9:16 variants.",
-            "Preserve original scene order, durations, narration, music, and brand watermark.",
-            "Do not publish; a separate user authorization is required before V2 rendering."],
-    }
-
-
 def propose_revision(evidence: dict, direction: str, settings: dict, *, transport=None) -> dict:
     if evidence.get("profile_id") != CHICAGO_PROFILE_ID or evidence.get("output_type") != "Instagram Reel":
         raise ValueError("Producer is restricted to Chicago Instagram Reels")
@@ -359,65 +275,6 @@ def propose_revision(evidence: dict, direction: str, settings: dict, *, transpor
     serialized = json.dumps(evidence, ensure_ascii=False)
     if len(serialized) > 90000:
         raise ValueError("Evidence exceeds bounded context; build a focused snapshot")
-    # If the reviewer accepts the two specific source-backed photo suggestions,
-    # interpret their *natural language reply* as agreement to save a candidate.
-    # Never interpret a qualified "yes, but..." as acceptance. A request
-    # to rerender can confirm the proposed photos here but NEVER authorizes
-    # a render or publication; rendering requires its separate guarded action.
-    import re
-    reply = " ".join(direction.casefold().strip().rstrip(".!").split())
-    accepted_replies = (
-        r"(?:yes|yep|yeah|sure|sounds good|looks good|great|perfect|"
-        r"(?:these|those|they) (?:look )?(?:good|great|fine|perfect|work)|"
-        r"(?:yes|yep|yeah|sure),? (?:these|those|they) "
-        r"(?:look )?(?:good|great|fine|perfect|work|are acceptable)|"
-        r"(?:yes|sure),? (?:use|go with) (?:these|those)|"
-        r"(?:use|go with) (?:these|those)(?: (?:photos|pictures|stills))?|"
-        r"i like (?:these|those)(?: photos| pictures| stills)?|"
-        r"yes,? this is (?:good|great|perfect)(?:[.!]? (?:please )?re-?render(?: please)?)?)"
-    )
-    latest = (evidence.get("messages") or [])[-1:]
-    # #8447 already persisted an affirmative user answer at row version 4,
-    # but an older model changed only frame 5. The review UI had offered to
-    # replace BOTH nighttime scenes. Reprocessing that exact saved approval
-    # must yield both replacements even when the session advanced from v3 to
-    # v4. It remains candidate-only; no implicit render or publication.
-    #
-    # Limit recovery to the exact held Chicago output and the known two
-    # historically affected revisions; do not hijack later conversations.
-    if (evidence.get("output_id") == "rec0uVrVeiUM6shp9"
-            and evidence.get("session_version") in (3, 4)
-            and len(latest) == 1 and latest[0].get("role") == "producer"
-            and re.fullmatch(accepted_replies, reply)):
-        agreed = _all_night_stills_candidate(
-            None, evidence, "Please replace BOTH nighttime original stills")
-        if agreed is not None:
-            result = validate_candidate(agreed, evidence)
-            result["model_response_id"] = None
-            result["model"] = "bounded-confirmed-photo-suggestion"
-            return result
-    # For the exact held #8447 two-still pilot, the user's explicit frame-1
-    # and frame-5 instruction has a fully source-owned, deterministic answer.
-    # Do NOT wait for a model to invent IDs or add irrelevant requirements.
-    # Other natural-language edits still use the normal model-backed Producer.
-    import re
-    scenes = evidence.get("original_timeline")
-    if (evidence.get("output_id") == "rec0uVrVeiUM6shp9"
-            and direction.startswith("Please replace BOTH nighttime scenes, including frame 1 (")
-            and "Keep every other scene, narration, music, watermark and exact scene timing unchanged." in direction
-            and "I will separately authorize V2 rendering after reviewing the plan." in direction
-            and re.search(r"\bframe\s+1\b", direction, re.I)
-            and re.search(r"\bframe\s+5\b", direction, re.I)
-            and isinstance(scenes, list) and len(scenes) == 10
-            and sum(1 for x in scenes if isinstance(x, dict)
-                    and x.get("time_of_day") == "Night") == 2
-            and all(scenes[i].get("time_of_day") == "Night" for i in (0, 4))):
-        exact_stills = _all_night_stills_candidate(None, evidence, direction)
-        if exact_stills is not None:
-            result = validate_candidate(exact_stills, evidence)
-            result["model_response_id"] = None
-            result["model"] = "bounded-source-evidence-only"
-            return result
     if transport is None:
         from ai_api_router import post_responses
         transport = post_responses
@@ -442,14 +299,6 @@ def propose_revision(evidence: dict, direction: str, settings: dict, *, transpor
     if not isinstance(raw, str) or len(raw) > 50000:
         raise ValueError("Producer returned invalid or excessive content")
     parsed = json.loads(raw)
-    # A user explicitly choosing to replace ALL Night stills with already
-    # linked Morning/Daytime images need not depend on AI inventing scene IDs,
-    # or on irrelevant factual claims about server-owned source metadata.
-    # This is only a bounded candidate; independent rights/crop/hold verification
-    # and the human Render button remain mandatory.
-    exact_stills = _all_night_stills_candidate(parsed, evidence, direction)
-    if exact_stills is not None:
-        parsed = exact_stills
     try:
         result = validate_candidate(parsed, evidence)
     except ValueError:
