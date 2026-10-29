@@ -3232,9 +3232,9 @@ export default {
       }
 
       if (isFactoryOutputPreviewRoute) {
-        requirePermission(authorization,"outputs_review");
         const outputId=url.pathname.split("/")[4];
         if(outputId===env.RENDERING_REVIEW_EXACT_OUTPUT_ID){
+          requirePermission(authorization,"outputs_review");
           const o=makeReviewFactoryHandoffOperations(env);
           return serveFactorySelectedReviewVideo({
             request,env,outputId,authorization,
