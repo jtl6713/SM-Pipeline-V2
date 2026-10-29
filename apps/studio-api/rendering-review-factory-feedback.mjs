@@ -69,23 +69,30 @@ export async function requestFactoryRevisionFeedback({
        s.factory_handoff?.status!=="ready_for_factory_approval" ||
        s.factory_handoff?.attempt_id!==s.current_attempt_id ||
        s.factory_handoff?.artifact_id!==current.artifact_id ||
-       f(row,"Do_Not_Publish")===true ||
-       f(row,"Studio_Render_Review_Hold_Active")===true ||
-       str(f(row,"Studio_Render_Review_Hold_ID")) ||
-       str(f(row,"Studio_Render_Review_Hold_Owner")) ||
-       name(f(row,"Output_Status"))!=="Ready for Review" ||
-       name(f(row,"Review_Status"))!=="Review Sent")
+       !(holds(f,row,s) &&
+         name(f(row,"Output_Status"))==="In Production" &&
+         name(f(row,"Review_Status"))==="Changes Requested") &&
+       (f(row,"Do_Not_Publish")===true ||
+        f(row,"Studio_Render_Review_Hold_Active")===true ||
+        str(f(row,"Studio_Render_Review_Hold_ID")) ||
+        str(f(row,"Studio_Render_Review_Hold_Owner")) ||
+        name(f(row,"Output_Status"))!=="Ready for Review" ||
+        name(f(row,"Review_Status"))!=="Review Sent"))
       fail("FACTORY_REVISION_STATE_CHANGED","Only the exact unapproved Factory V2 can reopen its review");
     // Protect the output before saving a message or transitioning the session.
-    await operations.patchOutput(output_id,{
-      Do_Not_Publish:true,Auto_Publish_Enabled:false,
-      Studio_Render_Review_Hold_Active:true,
-      Studio_Render_Review_Hold_ID:s.review_hold.id,
-      Studio_Render_Review_Hold_Owner:s.id,
-      Studio_Render_Review_Session_ID:s.id,
-      Output_Status:"In Production",Review_Status:"Changes Requested",
-      Publish_Status:"Not Ready",
-    });
+    // If the first request lost its response after reacquiring the hold,
+    // resume under the SAME output lease without toggling the hold back off.
+    if(!holds(f,row,s)){
+      await operations.patchOutput(output_id,{
+        Do_Not_Publish:true,Auto_Publish_Enabled:false,
+        Studio_Render_Review_Hold_Active:true,
+        Studio_Render_Review_Hold_ID:s.review_hold.id,
+        Studio_Render_Review_Hold_Owner:s.id,
+        Studio_Render_Review_Session_ID:s.id,
+        Output_Status:"In Production",Review_Status:"Changes Requested",
+        Publish_Status:"Not Ready",
+      });
+    }
     const protectedRow=await operations.readRawOutput(output_id);
     if(!holds(f,protectedRow,s) || !noDispatch(f,protectedRow) ||
        str(f(protectedRow,"Final_File_ID"))!==current.artifact_id)
