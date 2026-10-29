@@ -8,17 +8,18 @@ from __future__ import annotations
 
 import json
 
-from airtable.client import AirtableClient
-from rendering_review.one_job import (
-    OUTPUTS, SESSIONS, JOBS, ATTEMPTS, select_one,
-)
-
 
 class ReviewRecoveryDenied(RuntimeError):
     pass
 
 
 def require_unlaunched_authority(output_id: str, job_id: str, *, client=None) -> bool:
+    # Keep these optional until an actual guarded recovery request; the
+    # normal service and hermetic producer tests must import without clients.
+    from airtable.client import AirtableClient
+    from rendering_review.one_job import (
+        OUTPUTS, SESSIONS, JOBS, ATTEMPTS, select_one,
+    )
     client = client if client is not None else AirtableClient()
     output = client.get_record(OUTPUTS, output_id)
     of = output.get("fields") or {}
