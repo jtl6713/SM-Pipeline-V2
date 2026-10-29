@@ -683,12 +683,12 @@ jobs:
           TOKEN=$(cat /tmp/verify-token.txt)
           URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/rendering-review-sessions"
           curl -fsS --retry 3 --max-time 60 "$URL" -o /tmp/rendering-review-sessions.json
-          jq -e '.ok==true and (.sessions|type)=="array" and .flags.automatic_sampling_percent==0 and ((.flags.admission_enabled==false and .flags.integration_verified==false) or (.flags.admission_enabled==true and .flags.integration_verified==true))' /tmp/rendering-review-sessions.json >/dev/null
+          jq -e '.ok==true and (.sessions|type)=="array" and .flags.automatic_sampling_percent==0 and .flags.admission_enabled==false' /tmp/rendering-review-sessions.json >/dev/null
           echo "rendering_review_authenticated_read=PASS"
           QUEUE_URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/rendering-review-queue"
           QUEUE_SECONDS=$(curl -fsS --retry 3 --max-time 60 -w '%{time_total}' "$QUEUE_URL" -o /tmp/rendering-review-queue.json)
           echo "rendering_review_chicago_queue_read_seconds=$QUEUE_SECONDS"
-          jq -e '.ok==true and (.queue|type)=="array" and (.next_cursor==null or (.next_cursor|type)=="string") and .flags.automatic_sampling_percent==0 and ((.flags.admission_enabled==false and .flags.integration_verified==false and ([.queue[]|select(.manual_admission_enabled!=false)]|length)==0) or (.flags.admission_enabled==true and .flags.integration_verified==true and ([.queue[]|select(.manual_admission_enabled==true and .output_id!="rec0uVrVeiUM6shp9")]|length)==0)) and ([.queue[]|select(.profile_id!="recT2rbKX3MF7cVFU" or .output_type!="Instagram Reel")]|length)==0' /tmp/rendering-review-queue.json >/dev/null
+          jq -e '.ok==true and (.queue|type)=="array" and (.next_cursor==null or (.next_cursor|type)=="string") and .flags.automatic_sampling_percent==0 and .flags.admission_enabled==false and ([.queue[]|select(.manual_admission_enabled!=false)]|length)==0) and ([.queue[]|select(.profile_id!="recT2rbKX3MF7cVFU" or .output_type!="Instagram Reel")]|length)==0' /tmp/rendering-review-queue.json >/dev/null
           echo "rendering_review_chicago_queue_read=PASS count=$(jq '.queue|length' /tmp/rendering-review-queue.json)"
           jq -c '{admission_enabled:.flags.admission_enabled,automatic_sampling_percent:.flags.automatic_sampling_percent,integration_verified:.flags.integration_verified}' /tmp/rendering-review-queue.json
           # Never print private conversation/session records or secret binding values.
