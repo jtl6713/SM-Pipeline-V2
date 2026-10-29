@@ -8,6 +8,7 @@ import { CHICAGO_PROFILE_ID } from "./rendering-review-policy.mjs";
 import { handleRenderingReviewFeedbackRequest, reviewFeedbackWriteEnabled } from "./rendering-review-feedback-http.mjs";
 import { handleRenderingReviewEnrollRequest, reviewEnrollmentWriteEnabled } from "./rendering-review-enrollment-http.mjs";
 import { acceptReviewCreativeOnly } from "./rendering-review-approval-http.mjs";
+import { promoteAcceptedReviewToFactory } from "./rendering-review-factory-handoff.mjs";
 import { composeRenderingReviewEnrollmentOperations } from "./rendering-review-enrollment-wiring.mjs";
 import { handleReviewProducerProposal, reviewProducerBridgeEnabled } from "./rendering-review-producer-bridge.mjs";
 import { persistReviewProducerCandidate, producerConversationWritesEnabled } from "./rendering-review-producer-persist.mjs";
@@ -773,6 +774,72 @@ const JSON_HEADERS = {
 const STUDIO_DEFAULT_MUSIC_VOLUME = 0.6;
 const STUDIO_DEFAULT_DUCKED_MUSIC_VOLUME = 0.0504;
 
+// Single authority for both automatic post-acceptance and protected recovery.
+// This path cannot call Factory Approve, scheduling or any publisher.
+async function studioPromoteAcceptedReviewFactory(env, outputId) {
+  if (outputId !== env.RENDERING_REVIEW_EXACT_OUTPUT_ID)
+    throw new HttpError(403, "Accepted-review Factory handoff is limited to the enrolled Chicago pilot");
+  if (env.RENDERING_REVIEW_CREATIVE_ACCEPT_ENABLED !== "true")
+    throw new HttpError(405, "Rendering Review Factory handoff disabled");
+  let adapter;
+  const authorizeOutput=async id=>{
+    if(id!==outputId)return false;
+    const view=await adapter.readOutput(id);
+    return view.id===outputId&&view.profile_id===CHICAGO_PROFILE_ID&&
+      view.platform==="Instagram"&&view.output_type==="Instagram Reel";
+  };
+  adapter=makeRenderingReviewAirtableOperations({
+    env,airtableFetch,listRecords:reviewListRecords,readField:f,
+    withOutputApprovalLock,authorizeReview:authorizeOutput,
+    authorizeEvent:async()=>false,mutationGate:true,
+    revokeScheduleUnderHold:async()=>{throw new HttpError(405,"Factory handoff never schedules")},
+  });
+  if(await authorizeOutput(outputId)!==true)
+    throw new HttpError(403,"Chicago review output identity changed");
+  const handoff=await promoteAcceptedReviewToFactory({outputId,operations:{
+    withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+    readSession:id=>adapter.readSession(id),
+    readOutputRaw:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+    readAttempt:async attemptId=>{
+      if(!/^[A-Za-z0-9_-]{8,120}$/.test(String(attemptId||"")))return null;
+      const rows=await reviewListRecords(env,RENDER_REVIEW_TABLES.attempts,{
+        limit:2,filterFormula:'{Attempt_ID}="'+attemptId+'"',
+        fields:["Attempt_ID","Session_ID","Output_Record_ID","Attempt_Status",
+                "Artifact_File_ID","Validation_Evidence_JSON"],
+      });
+      if(!Array.isArray(rows)||rows.length!==1)return null;
+      const fields=rows[0].fields||{};
+      return {
+        attempt_id:String(fields.Attempt_ID||""),
+        session_id:String(fields.Session_ID||""),
+        output_id:String(fields.Output_Record_ID||""),
+        status:String(fields.Attempt_Status||""),
+        artifact_file_id:String(fields.Artifact_File_ID||""),
+        validation_evidence_json:fields.Validation_Evidence_JSON,
+      };
+    },
+    patchOutput:(id,fields)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id,{
+      method:"PATCH",skipSupabaseWriteThrough:true,
+      body:JSON.stringify({fields,typecast:false}),
+    }),
+    saveSessionIfVersion:args=>adapter.saveSessionIfVersion(args),
+  }});
+  // Factory's Supabase read mirror must show the same new file ID as Airtable.
+  // This is never an alternate write authority for the approval or its hold.
+  let mirrored=false;
+  try {
+    const mirroredRow={...handoff.record,fields:{
+      ...handoff.record.fields,Content_Profile:[CHICAGO_PROFILE_ID]}};
+    const synced=await syncAirtableOutputRowToSupabase(env,mirroredRow);
+    mirrored=synced?.ok===true;
+    if(!mirrored)console.warn("Review Factory handoff mirror deferred",outputId);
+  } catch(error) {
+    console.warn("Review Factory handoff mirror deferred",outputId,error?.message);
+  }
+  const {record,...safe}=handoff;
+  return {...safe,factory_mirror_synced:mirrored};
+}
+
 export default {
   async fetch(request, env, ctx) {
     try {
@@ -1146,7 +1213,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.689-review-audio-qa-repair" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
+          version: "0.10.690-review-v2-factory-handoff" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
@@ -1634,6 +1701,31 @@ export default {
         return respond(request,env,receipt);
       }
 
+      // Retry an already accepted V2 into Factory, without a new acceptance,
+      // render, schedule, upload or publication. The service token is private.
+      if (url.pathname==="/api/internal/rendering-review/factory-handoff") {
+        requireConfig(env);
+        if(request.method!=="POST")throw new HttpError(405,"POST required");
+        const supplied=request.headers.get("X-Rendering-Review-Job-Secret")||"";
+        const expected=String(env.RENDERING_REVIEW_RENDER_JOB_SHARED_SECRET||"");
+        if(expected.length<24||supplied.length!==expected.length)
+          throw new HttpError(403,"Factory handoff service authorization required");
+        const hash=async t=>new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(t)));
+        const [a,b]=await Promise.all([hash(supplied),hash(expected)]);
+        let mismatch=0;for(let i=0;i<a.length;i++)mismatch|=a[i]^b[i];
+        if(mismatch)throw new HttpError(403,"Factory handoff service authorization required");
+        if(!/^application\/json(?:\s*;|$)/i.test(request.headers.get("Content-Type")||""))
+          throw new HttpError(415,"JSON required");
+        const raw=await request.text();
+        if(raw.length>200)throw new HttpError(413,"Request too large");
+        let body;try{body=JSON.parse(raw)}catch{throw new HttpError(400,"Invalid JSON")}
+        if(!body||Object.keys(body).length!==2||
+           body.output_id!=="rec0uVrVeiUM6shp9"||
+           body.confirm!=="PROMOTE-ACCEPTED-REVIEW-TO-FACTORY")
+          throw new HttpError(400,"Exact pilot output and handoff confirmation required");
+        return respond(request,env,await studioPromoteAcceptedReviewFactory(env,body.output_id));
+      }
+
       // A one-time, authenticated, exact held V2 audio QA correction.
       // Does not render, upload, publish or mutate the original V1 output.
       if (url.pathname==="/internal/rendering-review/qa-audio-rebind" ||
@@ -2058,6 +2150,7 @@ export default {
           return respond(request,env,await acceptReviewCreativeOnly({
             request,env,authorization,output_id:acceptMatch[1],
             assertWriteRequest,operations:adapter,
+            afterCreativeAcceptance:()=>studioPromoteAcceptedReviewFactory(env,acceptMatch[1]),
           }));
         }
         const enrollmentMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/enroll$/.exec(url.pathname);
