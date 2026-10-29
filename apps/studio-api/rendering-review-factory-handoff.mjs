@@ -130,7 +130,7 @@ export async function handoffApprovedReviewToFactory({output_id,env,operations,n
     if(!alreadyTransferred){
       if(!ownedHold(row,f,s,output_id))
         deny("FACTORY_HOLD_NOT_OWNED","Current session does not own the authoritative publication hold");
-      if(currentFile!==fileId || !same(f(row,"Output_URL"),"https://drive.google.com/file/d/"+fileId+"/view")){
+      if(currentFile!==fileId || !same(f(row,"Output_URL"),"https://drive.google.com/file/d/"+fileId+"/view") || f(row,"Auto_Publish_Enabled")===true || Boolean(str(f(row,"Publish_Asset_URL")))){
         // Never unhold while replacing a media reference. Clear any V1-specific
         // preview/public media cache so publishing must prepare V2 itself.
         await o.patchOutput(output_id,{
