@@ -1,0 +1,64 @@
+name: Read-only status of authorized Chicago 8447 V2
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/chicago-review-8447-v2-status-once.yml']
+permissions:
+  contents: read
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Inspect protected exact Runner result without starting a job
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          command=r'''$ErrorActionPreference='Stop'
+          $file=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+          if(-not (Test-Path -LiteralPath $file)){throw 'review_runner_env_missing'}
+          $lines=@(Get-Content -LiteralPath $file|Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='})
+          if($lines.Count -ne 1){throw 'review_runner_secret_unavailable'}
+          $secret=([string]($lines[0] -split '=',2)[1]).Trim().Trim('"').Trim([char]39)
+          if($secret.Length -lt 24){throw 'review_runner_secret_unusable'}
+          Add-Type -AssemblyName System.Net.Http
+          $client=[System.Net.Http.HttpClient]::new()
+          $client.Timeout=[TimeSpan]::FromSeconds(20)
+          try{
+            $req=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get,'http://127.0.0.1:3350/jobs/rendering-review/run-exact/rrjob_26054929500b8abe981e3f6131b5c668209bf9c765edb06c')
+            [void]$req.Headers.TryAddWithoutValidation('X-Pipeline-Secret',$secret)
+            $res=$client.SendAsync($req).GetAwaiter().GetResult()
+            $status=[int]$res.StatusCode
+            $raw=$res.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            try{$data=$raw|ConvertFrom-Json}catch{throw 'unreadable_status'}
+            Write-Output ("review_exact_status_http="+$status+" state="+$data.state+" reason="+$data.reason)
+            if($status -ne 200 -or $data.ok -ne $true){throw 'review_exact_status_unavailable'}
+          }finally{$client.Dispose()}
+          '''
+          Path('/tmp/chicago-v2-status.json').write_text(json.dumps({'command':command,'confirm':True}),encoding='utf-8')
+          PY
+          code=$(curl -sS --max-time 20 -o /tmp/ops-status.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/chicago-v2-status.json https://ops.chicagoshining.com/api/shell)
+          [[ "$code" == "200" || "$code" == "202" ]]
+          id=$(jq -r '.job.id // .jobId // empty' /tmp/ops-status.json); test -n "$id"
+          for i in $(seq 1 24); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$id" -o /tmp/ops-status-result.json
+            state=$(jq -r '.job.status // empty' /tmp/ops-status-result.json)
+            if [[ "$state" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/ops-status-result.json | grep '^review_exact_status_http=' | tail -1
+              exit 0
+            fi
+            if [[ "$state" == "failed" ]]; then
+              echo "read_only_review_status_failed=true"; exit 1
+            fi
+            sleep 3
+          done
+          echo "read_only_review_status_timeout=true"; exit 1
