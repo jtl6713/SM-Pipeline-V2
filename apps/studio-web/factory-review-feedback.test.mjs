@@ -84,3 +84,12 @@ test("Factory Producer is visible before expanding a collapsed lane", () => {
   assert.match(factory, /band\.classList\.remove\("is-collapsed"\)/);
   assert.match(factory, /Request Changes appears when a content item reaches Needs eyes/);
 });
+
+test("Factory is the only conversational-review entry and requires comments",()=>{
+  assert.match(factory,/function isConversationalReviewCandidate/);
+  assert.match(factory,/action:"start_render_review"/);
+  assert.match(factory,/if \(!notes\)/);
+  assert.match(factory,/Describe the changes needed before sending back/);
+  assert.ok(factory.includes('rendering-review/factory/outputs'));
+  assert.match(factory,/review_notes_saved!==true/);
+});

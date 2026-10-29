@@ -584,3 +584,5 @@ Redeploy Studio UI 0.6.763-idea-lifecycle-live after removing stale Worker versi
 2026-10-28: UI 0.6.777 simple Producer review: show a plain-language V2 next step near the video, keep one guarded render button, surface natural-language Producer composer before storyboard, move conversation history and technical plan checks into optional disclosures, and avoid duplicate V1 attempt listing. No auto-render or publication.
 
 2026-10-29: Deploy Studio UI 0.6.778 Factory V2 preview and Request Changes return-to-Rendering-Review conversation with confirmation. Other Factory workflows unchanged.
+
+2026-10-29: Deploy Studio UI 0.6.779 Factory-only conversational review. Written rework comments are mandatory, no review-page admission, no upstream automatic enrollment.

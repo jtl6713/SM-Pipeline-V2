@@ -1064,7 +1064,8 @@ export default {
       // Exact Chicago review writes are authorized again by their protected handlers.
       // The old global Phase-2A allowlist must not reject them before inspection.
       const isChicagoReviewPost = request.method === "POST" &&
-        (/^\/api\/rendering-review\/outputs\/rec[A-Za-z0-9]{14}\/(?:enroll|producer-conversation|producer-proposal|commit-attempt|messages|approve|factory-handoff)$/.test(url.pathname) ||
+        (/^\/api\/rendering-review\/outputs\/rec[A-Za-z0-9]{14}\/(?:producer-conversation|producer-proposal|commit-attempt|messages|approve|factory-handoff)$/.test(url.pathname) ||
+         /^\/api\/rendering-review\/factory\/outputs\/rec[A-Za-z0-9]{14}\/request-changes$/.test(url.pathname) ||
          /^\/(?:api\/)?internal\/rendering-review\/(?:claim-render-job|launch-ledger|complete-attempt|qa-audio-rebind|ig-dispatch-claim|factory-handoff)$/.test(url.pathname));
       const allowedMethod =
         isChicagoReviewPost ||
@@ -1197,7 +1198,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.693-factory-v2-preview-producer-return" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
+          version: "0.10.694-factory-review-feedback-only" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
@@ -2166,10 +2167,11 @@ export default {
             review_hold_active:false,
           });
         }
-        const enrollmentMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/enroll$/.exec(url.pathname);
+        const enrollmentMatch = /^\/api\/rendering-review\/factory\/outputs\/(rec[A-Za-z0-9]{14})\/request-changes$/.exec(url.pathname);
         if (enrollmentMatch && request.method === "POST") {
-          // Protected, default-OFF path. Neither the Worker nor a client may
-          // enable manual admission merely because this source is deployed.
+          // Factory is the only authenticated UI entry into conversational review.
+          // The old /outputs/:id/enroll route is deliberately not mounted.
+          // Mandatory comments are validated and saved with the first session.
           if (!reviewEnrollmentWriteEnabled(env))
             throw new HttpError(405, "Rendering Review enrollment is not enabled");
           const chicagoMembership = (await reviewAuthorizedProfiles(env, authorization))

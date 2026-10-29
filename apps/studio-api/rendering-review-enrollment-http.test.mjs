@@ -18,7 +18,7 @@ const keys=[
 const flags={...Object.fromEntries(keys.map(x=>[x,"true"])),RENDERING_REVIEW_EXACT_OUTPUT_ID:outputId};
 const auth={authenticated:true,authorized:true,user:{record_id:actor},
   permissions:{outputs_review:true}};
-const data={client_request_id:"chicago-review-request-0001"};
+const data={client_request_id:"chicago-review-request-0001",note:"Replace the nighttime Riverwalk images with daylight scenes."};
 const clone=x=>JSON.parse(JSON.stringify(x));
 function fixture(){
   let output={
@@ -64,7 +64,7 @@ function fixture(){
   };
   const send=async(body=data,{env=flags,authorization=auth,membershipAllowed=true,
     writeGate=true,operations=ops,method="POST",contentType="application/json"}={})=>{
-    const request=new Request("https://studio.test/api/rendering-review/outputs/"+outputId+"/enroll",{
+    const request=new Request("https://studio.test/api/rendering-review/factory/outputs/"+outputId+"/request-changes",{
       method,headers:{"Content-Type":contentType},
       body:method==="POST"?(typeof body==="string"?body:JSON.stringify(body)):undefined,
     });
@@ -97,7 +97,10 @@ test("server generates session and initial attempt; hold precedes schedule revoc
   const result=await f.send();
   assert.equal(result.ok,true);
   assert.equal(result.replay,false);
-  assert.equal(result.review_state,"ready_for_review");
+  assert.equal(result.review_state,"discussing");
+  assert.equal(result.review_notes_saved,true);
+  assert.equal(f.session.messages[0].content,data.note);
+  assert.equal(f.session.factory_entry.source,"factory");
   assert.equal(result.review_hold_active,true);
   assert.match(result.session_id,/^rrsession_[0-9a-f]{48}$/);
   assert.match(result.current_attempt_id,/^rroriginal_[0-9a-f]{40}$/);
@@ -138,7 +141,10 @@ test("invalid body, content type and request ID fail before a hold",async()=>{
     await assert.rejects(()=>f.send(body),e=>e.status===400);
   }
   await assert.rejects(()=>f.send(data,{contentType:"text/plain"}),e=>e.status===415);
-  await assert.rejects(()=>f.send("x".repeat(401)),e=>e.status===413);
+  await assert.rejects(()=>f.send("x".repeat(3601)),e=>e.status===413);
+  for(const note of ["","   ","x".repeat(3001)]){
+    await assert.rejects(()=>f.send({...data,note}),e=>e.status===400);
+  }
   assert.equal(f.writes,0);
 });
 
@@ -169,8 +175,17 @@ test("wrong authoritative profile and existing session cannot be hijacked",async
   assert.equal(f.writes,0);
   const g=fixture();
   const once=await g.send();
-  await assert.rejects(()=>g.send({client_request_id:"other-request-0000001"}),
+  await assert.rejects(()=>g.send({...data,client_request_id:"other-request-0000001"}),
     e=>e.code==="ALREADY_ENROLLED");
   assert.equal(g.session.id,once.session_id);
   assert.equal(g.writes,3);
+});
+
+test("request ID replay with different comments is refused, not silently accepted",async()=>{
+  const f=fixture();
+  await f.send();
+  await assert.rejects(()=>f.send({...data,note:"Different feedback"}),
+    e=>e.code==="FACTORY_FEEDBACK_CONFLICT");
+  assert.equal(f.session.messages.length,1);
+  assert.equal(f.writes,3);
 });

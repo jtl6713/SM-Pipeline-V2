@@ -75,7 +75,7 @@ test('queue UI does not write, respects Chicago scope, and renders a safe origin
   nodes['page-rendering-review'].classList.add('active');
   notify();
   for(let i=0;i<10;i++)await tick();
-  assert.match(nodes.rrStatus.textContent,/Read-only · Chicago Instagram Reels/);
+  assert.match(nodes.rrStatus.textContent,/Factory-submitted reviews · Chicago Instagram Reels/);
   assert.equal(nodes.rrQueueList.children.length,1);
   assert.equal(nodes.rrOpenFile.href,'https://studio.test/api/outputs/recA1B2C3D4E5F6G7/preview');
   assert.equal(nodes.rrVideo.src,'https://studio.test/api/outputs/recA1B2C3D4E5F6G7/preview');
@@ -87,15 +87,15 @@ test('queue UI does not write, respects Chicago scope, and renders a safe origin
 });
 
 
-test('manual Chicago enrollment and actual Producer exchange require server flags and hold',async()=>{
+test('Rendering Review never enrolls; Factory-submitted sessions retain Producer conversation',async()=>{
   const ids=['page-rendering-review','navRenderingReview','rrQueueList','rrDetail',
     'rrStatus','rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile'];
   const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
   const calls=[];
   let observerCallback;
-  let enrolled=false;
+  let enrolled=true; // Review was admitted by Factory with required comments.
   let conversation=false;
-  let admissionActive=true;
+  let admissionActive=false; // Direct admission is disabled.
   const output='recA1B2C3D4E5F6G7';
   const queue=()=>({ok:true,
     flags:{admission_enabled:admissionActive,producer_conversation_enabled:true,
@@ -157,11 +157,8 @@ test('manual Chicago enrollment and actual Producer exchange require server flag
   const descendants=root=>[root,...root.children.flatMap(descendants)];
   const initial=descendants(nodes.rrDetail);
   const enroll=initial.find(n=>n.tag==='button'&&n.textContent==='Review with Producer');
-  assert.ok(enroll);
-  await enroll.listeners.click();
-  for(let i=0;i<10;i++)await tick();
-  assert.equal(enrolled,true);
-  // Operators may pause fresh admissions without losing already-held chats.
+  assert.equal(enroll,undefined,'Rendering Review must not offer its own enrollment control');
+  // Changing feature flags cannot bypass Factory-origin enrollment.
   admissionActive=false;
   await nodes.rrRefresh.listeners.click();
   for(let i=0;i<10;i++)await tick();
@@ -175,8 +172,9 @@ test('manual Chicago enrollment and actual Producer exchange require server flag
   assert.equal(conversation,true);
   assert.ok(descendants(nodes.rrDetail).some(n=>n.textContent==='I propose a clearer journey example.'));
   const writes=calls.filter(v=>v.method==='POST');
-  assert.equal(writes.length,2);
-  assert.ok(writes.every(v=>v.url.endsWith('/enroll')||v.url.endsWith('/producer-conversation')));
+  assert.equal(writes.length,1);
+  assert.ok(writes.every(v=>v.url.endsWith('/producer-conversation')));
+  assert.ok(!calls.some(v=>v.url.endsWith('/enroll')));
   assert.ok(!writes.some(v=>/\/(?:publish|render|approve)(?:\/|$)/.test(v.url)));
 });
 

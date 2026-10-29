@@ -30,7 +30,7 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
   // These capabilities come ONLY from the protected deployment environment.
   // No Airtable settings, request headers or UI toggles can activate them.
   const flags={
-    admission_enabled:reviewEnrollmentWriteEnabled(env),
+    admission_enabled:false, // Direct enrollment from Rendering Review is forbidden.
     producer_conversation_enabled:producerConversationWritesEnabled(env),
     attempt_commit_enabled:renderAttemptCommitEnabled(env),
     creative_approval_enabled:env?.RENDERING_REVIEW_CREATIVE_ACCEPT_ENABLED==="true"&&reviewEnrollmentWriteEnabled(env),
@@ -75,16 +75,15 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
       const held=f[RENDER_REVIEW_OUTPUT_FIELDS.hold_active]===true||
         [RENDER_REVIEW_OUTPUT_FIELDS.hold_id,RENDER_REVIEW_OUTPUT_FIELDS.hold_owner,
           RENDER_REVIEW_OUTPUT_FIELDS.session_id].some(key=>Boolean(text(f[key])));
-      return {ok:true,queue:[{
+      return {ok:true,queue:held?[{
         output_id:pilotId,profile_id:chicago,output_type:'Instagram Reel',
         output_number:f.Output_ID||null,
         title:text(f.Output_Title)||('Output '+(f.Output_ID||pilotId)),
         render_status:text(f.Render_Status),final_file_id:text(f.Final_File_ID)||null,
         final_file_url:text(f.Final_File_URL)||null,
         review_held:held,dispatch_started:Boolean(f.Publish_Started_At||f.Publish_Locked_At||f.Publish_Locked_By),
-        manual_admission_enabled:flags.admission_enabled&&!held&&!f.Publish_Locked_At&&
-          text(f.Render_Status).toLowerCase()==='rendered',
-      }],next_cursor:null,as_of:new Date().toISOString(),flags};
+        manual_admission_enabled:false,
+      }]:[],next_cursor:null,as_of:new Date().toISOString(),flags};
     }
     const page=await operations.listRecordsPage(env,env.AIRTABLE_OUTPUT_TABLE_ID,{
       limit:40,offset:cursor||null,
@@ -154,15 +153,14 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
       const held=f[RENDER_REVIEW_OUTPUT_FIELDS.hold_active]===true||
         [RENDER_REVIEW_OUTPUT_FIELDS.hold_id,RENDER_REVIEW_OUTPUT_FIELDS.hold_owner,
           RENDER_REVIEW_OUTPUT_FIELDS.session_id].some(key=>Boolean(text(f[key])));
+      if(!held)continue; // Upstream readiness never initiates conversational review.
       queue.push({
         output_id:row.id,profile_id:chicago,output_type:'Instagram Reel',
         output_number:f.Output_ID||null,title:text(f.Output_Title)||('Output '+(f.Output_ID||row.id)),
         render_status:text(f.Render_Status),final_file_id:text(f.Final_File_ID)||null,
         final_file_url:text(f.Final_File_URL)||null,
         review_held:held,dispatch_started:Boolean(f.Publish_Started_At||f.Publish_Locked_At||f.Publish_Locked_By),
-        manual_admission_enabled:flags.admission_enabled&&row.id===env.RENDERING_REVIEW_EXACT_OUTPUT_ID&&!held&&
-          !f.Publish_Started_At&&!f.Publish_Locked_At&&
-          text(f.Render_Status).toLowerCase()==="rendered",
+        manual_admission_enabled:false,
       });
     }
     return {ok:true,queue,next_cursor:page.offset||null,as_of:new Date().toISOString(),flags};
