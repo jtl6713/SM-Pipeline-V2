@@ -1,0 +1,124 @@
+name: Verify Factory 8447 actual Worker MP4 proxy (read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-factory-8447-worker-preview.yml'
+permissions:
+  contents: read
+concurrency:
+  group: exact-8447-factory-proxy-canary
+  cancel-in-progress: false
+jobs:
+  proxy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      VERIFY_BRIDGE: chicagoshining-factory8447-readonly
+    steps:
+      - name: Create temporary internal service-binding probe (no Airtable mutations)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          python - <<'PY'
+          from pathlib import Path
+          import secrets
+          Path('/tmp/factory-token').write_text(secrets.token_urlsafe(40))
+          PY
+          TOKEN=$(cat /tmp/factory-token)
+          cat >/tmp/factory-proxy.js <<'EOF'
+          export default {
+            async fetch(request,env) {
+              const u=new URL(request.url);
+              const expected="/__TOKEN__/preview";
+              if(u.pathname!==expected || !["GET","HEAD"].includes(request.method))
+                return new Response("Not found",{status:404});
+              const method=request.method;
+              const req=new Request(
+                "https://studio.chicagoshining.com/api/factory/outputs/rec0uVrVeiUM6shp9/preview",
+                {method,headers:{
+                  "Cf-Access-Authenticated-User-Email":"__REVIEW_USER__",
+                  "Origin":"https://studio.chicagoshining.com",
+                  "Range":"bytes=0-63",
+                  "Accept":"video/mp4"
+                }});
+              const res=await env.STUDIO_API.fetch(req);
+              const hdr=new Headers();
+              for(const k of ["Content-Type","Content-Range","Content-Length","Accept-Ranges",
+                               "X-Studio-Preview-Source","Cache-Control"])
+                if(res.headers.has(k))hdr.set(k,res.headers.get(k));
+              hdr.set("Cache-Control","no-store");
+              if(method==="HEAD")return new Response(null,{status:res.status,headers:hdr});
+              return new Response(res.body,{status:res.status,headers:hdr});
+            }
+          };
+          EOF
+          sed -i "s@__TOKEN__@$TOKEN@g" /tmp/factory-proxy.js
+          sed -i 's|__REVIEW_USER__|joseph.t.logan@gmail.com|g' /tmp/factory-proxy.js
+          cat >/tmp/factory-verify-metadata.json <<'EOF'
+          {"main_module":"worker.js","compatibility_date":"2026-08-02",
+           "bindings":[{"type":"service","name":"STUDIO_API","service":"chicagoshining-studio-api"}]}
+          EOF
+          API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -X PUT "$API_ROOT/workers/scripts/$VERIFY_BRIDGE/content" -H "$AUTH" \
+            -F 'metadata=@/tmp/factory-verify-metadata.json;type=application/json' \
+            -F 'worker.js=@/tmp/factory-proxy.js;type=application/javascript+module;filename=worker.js' \
+            -o /tmp/factory-verify-upload.json
+          jq -e '.success==true' /tmp/factory-verify-upload.json >/dev/null
+          curl -fsS -X POST "$API_ROOT/workers/scripts/$VERIFY_BRIDGE/subdomain" -H "$AUTH" \
+            -H 'Content-Type: application/json' \
+            --data '{"enabled":true,"previews_enabled":false}' \
+            -o /tmp/factory-verify-subdomain.json
+          jq -e '.success==true and .result.enabled==true' /tmp/factory-verify-subdomain.json >/dev/null
+          curl -fsS -H "$AUTH" "$API_ROOT/workers/subdomain" -o /tmp/factory-account.json
+          jq -e '.result.subdomain|type=="string"' /tmp/factory-account.json >/dev/null
+      - name: Verify user-facing Factory Preview through deployed Worker and Runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/factory-account.json)
+          TOKEN=$(cat /tmp/factory-token)
+          URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/preview"
+          VERIFIED=false
+          for i in $(seq 1 22); do
+            CODE=$(curl -sS --max-time 75 -o /tmp/factory-first-64.mp4 \
+              -D /tmp/factory-proxy-headers -w '%{http_code}' "$URL" || true)
+            if [[ "$CODE" == "206" ]]; then
+              python - <<'PY'
+          from pathlib import Path
+          b=Path('/tmp/factory-first-64.mp4').read_bytes()
+          assert len(b)>=12 and b[4:8]==b'ftyp', 'Factory proxy did not stream MP4 header'
+          print("factory_proxy_mp4_header_verified=true")
+          PY
+              grep -Eiq '^content-type: video/mp4' /tmp/factory-proxy-headers
+              grep -Eiq '^x-studio-preview-source: factory-selected-review-attempt' /tmp/factory-proxy-headers
+              VERIFIED=true
+              break
+            fi
+            if [[ "$CODE" == "404" ]] && grep -Fq "error code: 1042" /tmp/factory-first-64.mp4; then
+              sleep 4
+              continue
+            fi
+            echo "factory_preview_worker_http=$CODE"
+            exit 1
+          done
+          test "$VERIFIED" = true
+          HEAD_CODE=$(curl -sS --max-time 60 -X HEAD -D /tmp/factory-head -o /dev/null -w '%{http_code}' "$URL")
+          test "$HEAD_CODE" = 200
+          grep -Eiq '^content-type: video/mp4' /tmp/factory-head
+          echo "factory_8447_worker_preview_range=PASS http=206 head=200 read_only=true"
+      - name: Delete temporary verification bridge even if preview test fails
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "$CLOUDFLARE_ACCOUNT_ID" && -n "$CLOUDFLARE_API_TOKEN" ]]; then
+            curl -sS --max-time 25 -X DELETE \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$VERIFY_BRIDGE" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" >/dev/null || true
+          fi
