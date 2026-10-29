@@ -757,3 +757,4 @@ Rendering Review V3 source validation + Producer executable timeline canary code
 2026-10-29 Studio Worker 0.10.689 exact Chicago review QA audio repair version verification, hold retained.
 
 2026-10-29: Deploy Worker 0.10.690-render-review-factory-handoff. Exact approved Chicago #8447 V2 to Factory Ready for Review, with durable two-phase handoff and no scheduling, posting or second creative acceptance.
+2026-10-29: Deploy Worker 0.10.691-render-review-factory-drain. A previously accepted V2 must drain safely to Factory even if new creative approvals are disabled after the acceptance; preserve exact-output and publication safeguards.

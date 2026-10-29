@@ -192,14 +192,16 @@ test("Airtable's omitted false checkbox remains valid after readback",async()=>{
  };
  assert.equal((await f.handoff()).factory_ready,true);
 });
-test("disabled handoff and wrong output never access live records",async()=>{
+test("wrong output denies and completed approval drains even if creative admissions are now off",async()=>{
  const f=fixture();
  await assert.rejects(()=>handoffApprovedReviewToFactory({
   output_id:"recAAAAAAAAAAAAAA",env,operations:f.ops
  }),e=>e.code==="FACTORY_PILOT_SCOPE");
- await assert.rejects(()=>handoffApprovedReviewToFactory({
+ // A previously approved session can safely drain after flags were disabled.
+ const result=await handoffApprovedReviewToFactory({
   output_id:id,env:{...env,RENDERING_REVIEW_CREATIVE_ACCEPT_ENABLED:"false"},
   operations:f.ops
- }),e=>e.code==="FACTORY_HANDOFF_DISABLED");
- assert.equal(f.writes,0);
+ });
+ assert.equal(result.factory_ready,true);
+ assert.equal(f.raw.fields.Do_Not_Publish,false);
 });
