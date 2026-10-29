@@ -67,7 +67,7 @@ function validateArtifact(record,session,attempt){
   return evidence;
 }
 function assertFactoryReady(row,f,fileId){
-  if(!row || Boolean(f(row,"Do_Not_Publish")) ||
+  if(!row || Boolean(f(row,"Do_Not_Publish")) || Boolean(f(row,"Auto_Publish_Enabled")) ||
      renderingReviewHoldPresent(key=>f(row,key)) ||
      !same(f(row,"Final_File_ID"),fileId) ||
      !same(f(row,"Final_File_URL"),"https://drive.google.com/file/d/"+fileId+"/view") ||
@@ -135,6 +135,7 @@ export async function handoffApprovedReviewToFactory({output_id,env,operations,n
         // preview/public media cache so publishing must prepare V2 itself.
         await o.patchOutput(output_id,{
           Final_File_ID:fileId,
+          Remotion_Job_ID:validateArtifact(persistedAttempt,s,attempt).render_job_id,
           Final_File_URL:"https://drive.google.com/file/d/"+fileId+"/view",
           Output_URL:"https://drive.google.com/file/d/"+fileId+"/view",
           Studio_Preview_URL:null,
@@ -147,13 +148,15 @@ export async function handoffApprovedReviewToFactory({output_id,env,operations,n
           Output_Status:"Ready for Review",
           Review_Status:"Review Sent",
           Publish_Status:"Not Ready",
+          Auto_Publish_Enabled:false,
         });
         row=await o.readRawOutput(output_id);
       }
       if(!ownedHold(row,f,s,output_id) ||
          !same(f(row,"Final_File_ID"),fileId) ||
          !same(f(row,"Final_File_URL"),"https://drive.google.com/file/d/"+fileId+"/view") ||
-         !noSchedule(row,f) || dispatchStarted(row,f))
+         !noSchedule(row,f) || dispatchStarted(row,f) ||
+         f(row,"Auto_Publish_Enabled")===true)
         deny("FACTORY_ASSET_PREP_READBACK_FAILED","V2 selection did not verify under active hold",503);
 
       const eventKey="rrfactory_"+attempt.id;
@@ -195,6 +198,7 @@ export async function handoffApprovedReviewToFactory({output_id,env,operations,n
         Studio_Render_Review_Hold_Owner:"",
         Studio_Render_Review_Session_ID:"",
         Do_Not_Publish:false,
+        Auto_Publish_Enabled:false,
       });
     }
     const ready=await o.readRawOutput(output_id);
