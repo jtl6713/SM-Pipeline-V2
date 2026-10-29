@@ -56,3 +56,16 @@
 .rr-night-fix>p{margin:4px 0;line-height:1.5}
 .rr-night-fix .rr-chat-form{margin-top:4px}
 .rr-night-fix .rr-chat-form button{min-height:44px;font-weight:600}
+
+
+/* The playing media version sits directly below the video on every screen. */
+.rr-panel[aria-label="Selected Reel preview"]{display:flex;flex-direction:column}
+.rr-panel[aria-label="Selected Reel preview"] #rrVideo{order:0}
+.rr-panel[aria-label="Selected Reel preview"] #rrVersionBar{order:1}
+.rr-panel[aria-label="Selected Reel preview"] #rrOpenFile{order:2}
+.rr-panel[aria-label="Selected Reel preview"] #rrDetail{order:3}
+.rr-version-bar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:0 0 6px}
+.rr-version-bar[hidden],.rr-original-version[hidden]{display:none!important}
+.rr-version-label{font-weight:700}
+.rr-original-version{font:inherit;color:var(--accent,#679cde);background:none;border:0;padding:0;text-decoration:underline;cursor:pointer}
+.rr-original-version:hover{text-decoration-thickness:2px}

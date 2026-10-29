@@ -576,3 +576,5 @@ Redeploy Studio UI 0.6.763-idea-lifecycle-live after removing stale Worker versi
 
 2026-10-28: Deploy Chicago #8447 Studio UI 0.6.773 correction CTA above storyboard, show owned Morning alternative explicitly as NOT in saved plan, and preserve exact authenticated Producer session/hold/version authorization. Only explicit click submits; GET is read only. No V2 render, approval or Instagram publication.
 2026-10-28: Deploy Studio UI 0.6.774 conversational Producer: invite plain-language feedback on existing Morning stills without repair jargon; no automatic plan write, V2 render or Instagram publication on GET.
+
+2026-10-28: Deploy Studio UI 0.6.775: label the actual playing Chicago Review video V1/V2/Vn directly beneath its player, show a clickable Original version link for V2+, and eliminate confusing unchanged-video commentary. Preserve explicit render and publication holds.

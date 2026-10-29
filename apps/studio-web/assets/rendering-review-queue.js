@@ -8,7 +8,7 @@
   const nav = $('navRenderingReview');
   if (!root || !nav) return;
   const chicago = 'recT2rbKX3MF7cVFU';
-  const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map(),pollTimer:null};
+  const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map(),pollTimer:null,activeEntry:null};
   const list = $('rrQueueList'), detail = $('rrDetail'), status = $('rrStatus');
   const refresh = $('rrRefresh'), more = $('rrMore');
   const elem = (tag,text,cls) => {
@@ -90,6 +90,10 @@
     if(frame)frame.remove();
     const a = $('rrOpenFile');
     if(a){a.hidden=true;a.removeAttribute('href');}
+    const version=$('rrVersionBar');
+    if(version)version.hidden=true;
+    const original=$('rrOriginalVersion');
+    if(original)original.hidden=true;
   }
   // Always use the authenticated same-origin MP4 stream. Drive's embedded
   // /preview page can return HTTP 400 in mobile browsers, despite a real MP4.
@@ -105,7 +109,7 @@
     return url('/api/rendering-review/outputs/'+encodeURIComponent(entry.output_id)+
       '/attempts/'+encodeURIComponent(attempt.id)+'/preview');
   }
-  function showMedia(mediaValue,label){
+  function showMedia(mediaValue,label,versionNumber=1){
     clearMedia();
     const value=safeUrl(mediaValue);
     if(!value)return false;
@@ -120,8 +124,20 @@
     const link=$('rrOpenFile');
     link.href=value;link.hidden=false;
     link.textContent=label?'Open '+label+' video':'Open Reel video';
+    const version=Number.isInteger(versionNumber)&&versionNumber>=1?versionNumber:1;
+    const bar=$('rrVersionBar');
+    const labelNode=$('rrVersionLabel');
+    const originalLink=$('rrOriginalVersion');
+    if(labelNode)labelNode.textContent='Version V'+version;
+    if(originalLink)originalLink.hidden=version===1;
+    if(bar)bar.hidden=false;
     return true;
   }
+  const originalVersionLink=$('rrOriginalVersion');
+  if(originalVersionLink)originalVersionLink.addEventListener('click',()=>{
+    if(state.activeEntry&&showMedia(originalMedia(state.activeEntry),'V1',1))
+      say('Viewing original version (V1).');
+  });
   function renderList(){
     list.replaceChildren();
     $('rrCount').textContent=state.records.length + ' results loaded';
@@ -186,11 +202,11 @@
   }
   async function open(entry) {
     cancelAttemptPoll();
-    state.selected=entry.output_id; renderList();clearMedia();
+    state.selected=entry.output_id;state.activeEntry=entry;renderList();clearMedia();
     detail.replaceChildren();
     detail.append(elem('h2',entry.title||'Instagram Reel'),
       elem('p','Chicago · Instagram Reel'+(entry.output_number?' · #'+entry.output_number:''),'rr-entry-meta'));
-    if(!showMedia(originalMedia(entry),'original Reel')){
+    if(!showMedia(originalMedia(entry),'V1',1)){
       detail.append(elem('p','The original render has no authenticated Studio video source.','rr-muted'));
     }
     appendLine(detail,'Render:',entry.render_status||'Completed file recorded');
@@ -231,10 +247,6 @@
       const session=saved.session;
       const attempts=Array.isArray(session?.attempts)?session.attempts:[];
       const storyboard=Array.isArray(saved.storyboard)?saved.storyboard:[];
-      const anyV2=attempts.some(a=>a?.number>1&&a?.status==='ready_for_review');
-      detail.append(elem('p',anyV2?
-        'Video preview: latest completed rendering (check the selected attempt below).':
-        'VIDEO PREVIEW: ORIGINAL V1 — unchanged. The Producer has only proposed edits. No replacement video exists until you separately authorize a render.','rr-v1-warning'));
       const nightRows=storyboard.filter(frame=>frame?.original?.time_of_day==='Night');
       const unresolvedNight=nightRows.filter(frame=>
         !frame.changed||frame.proposed?.time_of_day==='Night');
@@ -259,7 +271,6 @@
           'Tell me if you would prefer a different photo for either shot.':
           'I can see two nighttime shots. I haven\'t found a suitable verified daytime replacement yet. '+
           'Tell me which existing photo you would like me to try.'));
-        offer.append(elem('p','I haven\'t changed the video yet.','rr-muted'));
         if(reviewCanTalk){
           const conversation=elem('div',null,'rr-chat-form');
           const reply=elem('textarea');
@@ -288,7 +299,7 @@
               'I saved your choices. You can review them before making the new video.':
               'I saved your feedback. Tell me if you would like another change.';
             pendingReply='';pendingKey='';
-            say('Your Producer has your feedback. No new video has been made.');
+            say('Your Producer has your feedback.');
             await open(entry);
           },feedback));
           conversation.append(feedback);
@@ -306,7 +317,6 @@
         if(toShow.length){
           const section=elem('section',null,'rr-proposal-storyboard');
           section.append(elem('h3','Take a look at these photos'));
-          section.append(elem('p','Here are the original shots alongside the photos I suggest using. The video has not changed.','rr-muted'));
           for(const frame of toShow){
             const item=elem('div',null,'rr-storyboard-row');
             const time=Number(frame.start_seconds).toFixed(2)+'–'+Number(frame.end_seconds).toFixed(2)+'s';
@@ -351,21 +361,22 @@
         const heading=elem('h3','Rendering attempts');detail.append(heading);
         const picker=elem('div',null,'rr-attempts');
         for(const attempt of attempts){
-          const statusText='Attempt '+attempt.number+' · '+String(attempt.status||'unknown').replace(/_/g,' ');
+          const statusText='Version V'+attempt.number+' · '+String(attempt.status||'unknown').replace(/_/g,' ');
           const media=attemptMedia(attempt,entry);
           const playable=attempt.status==='ready_for_review'&&!!media;
           const button=actionButton(statusText,async()=>{
             if(!playable)throw new Error('This attempt is not yet a verified, playable render');
-            if(!showMedia(media,'Attempt '+attempt.number))
+            if(!showMedia(media,'V'+attempt.number,attempt.number))
               throw new Error('This attempt has no supported HTTPS media URL');
-            say('Showing Attempt '+attempt.number+' · original and revised files are retained separately');
+            say('Viewing version V'+attempt.number+'.');
           });
           button.disabled=!playable;
           picker.append(button);
         }
         detail.append(picker);
-        const newest=attempts.filter(a=>a.status==='ready_for_review'&&a.artifact_id).at(-1);
-        if(newest?.number>1)showMedia(attemptMedia(newest,entry),'Attempt '+newest.number);
+        const newest=attempts.filter(a=>a.status==='ready_for_review'&&a.artifact_id)
+          .sort((a,b)=>Number(b.number)-Number(a.number))[0];
+        if(newest?.number>1)showMedia(attemptMedia(newest,entry),'V'+newest.number,newest.number);
       }
       if(session?.state==='approved'){
         detail.append(elem('p','Creative render accepted for the pilot. The publication hold remains active; no Instagram upload or publishing has been authorized.','rr-notice'));
@@ -410,7 +421,7 @@
         appendLine(detail,'Plan:',ready?'Ready for render-only authorization':
           plan.frozen&&plan.missing_assets?.length===0?
           'Frozen plan exists; rendering is not enabled':'Requirements remain unresolved');
-        appendLine(detail,'Version:',plan.version);
+        appendLine(detail,'Plan revision:',plan.version);
         if(Array.isArray(plan.acceptance_checks)&&plan.acceptance_checks.length){
           for(const check of plan.acceptance_checks.slice(0,10))
             detail.append(elem('p','Acceptance check: '+String(check),'rr-muted'));
@@ -418,7 +429,8 @@
         if(Array.isArray(plan.missing_assets)&&plan.missing_assets.length)
           detail.append(elem('p',plan.missing_assets.length+' requirements must be resolved before rendering.','rr-notice'));
         if(ready){
-          detail.append(actionButton('Make the revised video (V2)',async()=>{
+          const nextVersion=Math.max(1,...attempts.map(a=>Number(a?.number)||1))+1;
+          detail.append(actionButton('Make the revised video (V'+nextVersion+')',async()=>{
             if(!window.confirm('Render one replacement Reel from the frozen plan? This will NOT upload or publish to Instagram.'))return;
             const identity=entry.output_id+':'+plan.hash+':'+plan.version;
             if(!state.commitKeys.has(identity))state.commitKeys.set(identity,safeRequestId());
@@ -439,7 +451,6 @@
       const candidate=session?.producer_candidate;
       if(candidate?.candidate){
         const heading=elem('h3','Proposed edits');detail.append(heading);
-        detail.append(elem('p','These changes are suggestions until we agree on them. No new video has been made.','rr-muted'));
         const draft=elem('details',null,'rr-candidate');
         draft.append(elem('summary','Proposed narration and changes'));
         draft.append(elem('p',candidate.candidate.narration||'', 'rr-draft'));
@@ -496,13 +507,13 @@
           if(created.plan_ready===true&&created.plan_persisted===true){
             feedbackStatus.textContent='Render-ready plan saved. You must separately authorize creating V2.';
           }else if(Array.isArray(created.plan_blockers)&&created.plan_blockers.length){
-            feedbackStatus.textContent='Producer reply saved; V2 not created. Plan requirements: '+
+            feedbackStatus.textContent='Producer reply saved. Items to resolve: '+
               created.plan_blockers.slice(0,3).map(x=>x.description).join(' / ');
           }else{
-            feedbackStatus.textContent='Producer reply saved, but no render-ready V2 plan exists.';
+            feedbackStatus.textContent='Producer reply saved. You can continue refining it.';
           }
           feedbackStatus.classList.toggle('error-text',false);
-          say('Producer response saved. No replacement render has been started.');
+          say('Producer response saved.');
           pendingDirection='';pendingKey='';
           await open(entry);
         };
