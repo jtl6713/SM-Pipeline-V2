@@ -1913,35 +1913,52 @@ export default {
         }));
       }
 
+      const reviewVideoWorkspace=outputId=>readRenderingReviewWorkspace({
+        env,url:new URL("/api/rendering-review/outputs/"+outputId,url),
+        authorization,operations:{
+          authorizedProfiles:reviewAuthorizedProfiles,
+          listRecords:reviewListRecords,listRecordsPage:reviewListRecordsPage,
+          airtableFetch,
+        },
+      });
+      const serveExactReviewVideo=targetUrl=>serveReviewAttemptVideo({
+        request,env,url:targetUrl,authorization,loadWorkspace:reviewVideoWorkspace,
+        listAttempts:attemptId=>reviewListRecords(env,RENDER_REVIEW_TABLES.attempts,{
+          limit:2,filterFormula:'{Attempt_ID}="'+attemptId+'"',
+          fields:["Attempt_ID","Session_ID","Output_Record_ID",
+            "Attempt_Number","Attempt_Status","Artifact_File_ID"],
+        }),
+        readVideo:(_file,_source,probe,config,identity)=>fetchTrustedRunnerReviewMedia({
+          env:config,outputId:identity.outputId,
+          attemptId:identity.attemptId,request:probe,
+        }),
+        copyHeaders:copyDriveVideoHeaders,
+      });
+      // A promoted Rendering Review V2 remains a private Drive artifact:
+      // the ordinary output preview cannot play it. For ONLY the exact
+      // Factory-selected revision reuse the authenticated byte-range stream.
+      if(url.pathname==="/api/outputs/"+env.RENDERING_REVIEW_EXACT_OUTPUT_ID+"/preview" &&
+         (request.method==="GET"||request.method==="HEAD")){
+        const w=await reviewVideoWorkspace(env.RENDERING_REVIEW_EXACT_OUTPUT_ID);
+        const s=w?.session,receipt=s?.factory_handoff;
+        if(receipt?.status==="ready_for_factory_approval" &&
+           receipt.attempt_id===s.current_attempt_id &&
+           receipt.artifact_id===w.preview?.file_id &&
+           s.state==="approved" && s.review_hold?.active===false){
+          const selectedUrl=new URL("/api/rendering-review/outputs/"+
+            encodeURIComponent(s.output_id)+"/attempts/"+
+            encodeURIComponent(receipt.attempt_id)+"/preview",url);
+          return serveExactReviewVideo(selectedUrl);
+        }
+      }
+
       if (url.pathname.startsWith("/api/rendering-review/")) {
         requirePermission(authorization, "outputs_review");
         // Byte-range MP4 streaming for a completed, exact, held V2+ attempt.
         // Google Drive iframes return HTTP 400 in some iOS browsers. No
         // caller-supplied Drive ID is accepted, and this cannot publish.
         if (isReviewAttemptPreviewRoute) {
-          return serveReviewAttemptVideo({
-            request,env,url,authorization,
-            loadWorkspace: outputId => readRenderingReviewWorkspace({
-              env,
-              url:new URL("/api/rendering-review/outputs/"+outputId,url),
-              authorization,
-              operations:{
-                authorizedProfiles:reviewAuthorizedProfiles,
-                listRecords:reviewListRecords,
-                listRecordsPage:reviewListRecordsPage,
-                airtableFetch,
-              },
-            }),
-            listAttempts:attemptId=>reviewListRecords(env,RENDER_REVIEW_TABLES.attempts,{
-              limit:2,filterFormula:'{Attempt_ID}="'+attemptId+'"',
-              fields:["Attempt_ID","Session_ID","Output_Record_ID",
-                "Attempt_Number","Attempt_Status","Artifact_File_ID"],
-            }),
-            readVideo:(_file,_source,probe,config,identity)=>fetchTrustedRunnerReviewMedia({
-              env:config,outputId:identity.outputId,attemptId:identity.attemptId,request:probe,
-            }),
-            copyHeaders:copyDriveVideoHeaders,
-          });
+          return serveExactReviewVideo(url);
         }
         // Read-only authenticated model proposal handoff. Keep this separate
         // from user-message writes and every render/approval/publish action.
