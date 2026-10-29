@@ -31,7 +31,7 @@ function fixture(){
  let raw={id,fields:{
   Platform:"Instagram",Platform_Output_Type:"Instagram Reel",
   Render_Status:"Rendered",Final_File_ID:v1,Final_File_URL:url(v1),
-  Output_URL:url(v1),Do_Not_Publish:true,
+  Output_URL:url(v1),Auto_Publish_Enabled:true,Do_Not_Publish:true,
   Studio_Render_Review_Hold_Active:true,
   Studio_Render_Review_Hold_ID:holdId,
   Studio_Render_Review_Hold_Owner:sessionId,
@@ -47,7 +47,7 @@ function fixture(){
    sha256:"8ee06c1f0234959c5ff4610b020d6bb72a005200ffa5d6590d920754b3c0f77e",
    byte_count:21961807,mime_type:"video/mp4",width:1080,height:1920,
    audio_verified:true,watermark_verified:true,google_drive_verified:true,
-   google_drive_mime_type:"video/mp4"
+   google_drive_mime_type:"video/mp4",render_job_id:"job-20261029042719-d8b6ef01"
   })
  }};
  let writes=0,saves=0,syncs=0,failStep="";
@@ -97,6 +97,8 @@ test("real #8447 V2 creative approval becomes Factory Needs Eyes, never schedule
  assert.equal(f.raw.fields.Final_File_URL,url(v2));
  assert.equal(f.raw.fields.Output_URL,url(v2));
  assert.equal(f.raw.fields.Do_Not_Publish,false);
+ assert.equal(f.raw.fields.Auto_Publish_Enabled,false);
+ assert.equal(f.raw.fields.Remotion_Job_ID,"job-20261029042719-d8b6ef01");
  assert.equal(f.raw.fields.Studio_Render_Review_Hold_Active,false);
  assert.equal(f.raw.fields.Studio_Render_Review_Hold_ID,"");
  assert.equal(f.raw.fields.Studio_Render_Review_Hold_Owner,"");
