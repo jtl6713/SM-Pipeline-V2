@@ -146,7 +146,8 @@ test('queue omits other profiles, published, unrelated platforms and malformed l
   const f=fixture();
   f.args.url=new URL('https://studio.test/api/rendering-review/queue');
   const valid={Content_Item:[f.content.id],Platform:'Instagram',
-    Platform_Output_Type:'Instagram Reel',Final_File_ID:'file',Publish_Status:'Ready'};
+    Platform_Output_Type:'Instagram Reel',Final_File_ID:'file',Publish_Status:'Ready',
+    Studio_Render_Review_Hold_Active:true};
   f.args.operations.listRecordsPage=async(_env,table)=>table==='outputs'?({valid:true,records:[
     {id:outputId,fields:{...valid,Platform:'Facebook'}},
     {id:'recH1B2C3D4E5F6G7',fields:{...valid,Publish_Status:'Published'}},
@@ -166,7 +167,8 @@ test('queue excludes Reels with already-created Instagram containers or post URL
   const f=fixture();f.args.url=new URL('https://studio.test/api/rendering-review/queue');
   const base={Content_Item:[f.content.id],Platform:'Instagram',
     Platform_Output_Type:'Instagram Reel',Final_File_ID:'drive-file',
-    Publish_Status:'Not Published',Render_Status:'Rendered'};
+    Publish_Status:'Not Published',Render_Status:'Rendered',
+    Studio_Render_Review_Hold_Active:true};
   f.args.operations.listRecordsPage=async(_env,table,opts)=>{
     if(table==='outputs'){
       assert.ok(opts.fields.includes('Platform_Media_ID'));
@@ -191,7 +193,8 @@ test('40 completed outputs with shared and distinct content IDs use one exact-ma
   const outputs=Array.from({length:40},(_,n)=>({
     id:'rec'+String(n+100).padStart(14,'0'),
     fields:{Platform:'Instagram',Platform_Output_Type:'Instagram Reel',
-      Final_File_ID:'drive-file',Content_Item:[contentIds[n%20]]},
+      Final_File_ID:'drive-file',Content_Item:[contentIds[n%20]],
+      Studio_Render_Review_Hold_Active:true},
   }));
   let reads=0;
   f.args.operations.listRecordsPage=async(_env,table,options)=>{
