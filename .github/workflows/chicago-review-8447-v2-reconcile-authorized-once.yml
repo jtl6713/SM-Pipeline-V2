@@ -21,6 +21,9 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$OPS_TOKEN"
+          curl -fsS --max-time 20 https://pipeline.chicagoshining.com/health -o /tmp/rr-v14-health.json
+          jq -e '.ok==true and .version=="2026-10-29-chicago-gzip-claim-receipt-v14"' /tmp/rr-v14-health.json >/dev/null
+          echo 'held_v2_runner_v14_verified=true'
           cat >/tmp/8447-reconcile.ps1 <<'PS1'
           $ErrorActionPreference='Stop'
           $envFile=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
@@ -44,7 +47,7 @@ jobs:
               throw 'prior_job_must_be_reconciled_not_launched'
             }
             # The endpoint independently checks Airtable's held V1, session,
-            # exact queued job, zero lease/events, absent attempt artifact,
+            # exact first claimed lease, no Remotion intent, absent artifact,
             # and then the Worker/Remotion single-launch ledger.
             $req=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post,'http://127.0.0.1:3350/jobs/rendering-review/reconcile-exact')
             $req.Content=[System.Net.Http.StringContent]::new($body,[System.Text.Encoding]::UTF8,'application/json')
@@ -54,7 +57,7 @@ jobs:
             Write-Output ('review_reconcile_http='+[int]$resp.StatusCode+' accepted='+[bool]$reply.accepted+' existing_job_only='+[bool]$reply.existing_job_only)
             if([int]$resp.StatusCode -ne 202 -or -not $reply.ok -or
                -not $reply.accepted -or -not $reply.existing_job_only){throw 'review_reconcile_denied_no_retry'}
-            for($i=0;$i -lt 35;$i++){
+            for($i=0;$i -lt 70;$i++){
               Start-Sleep -Seconds 3
               $poll=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get,('http://127.0.0.1:3350/jobs/rendering-review/run-exact/'+$id))
               [void]$poll.Headers.TryAddWithoutValidation('X-Pipeline-Secret',$secret)
@@ -63,13 +66,14 @@ jobs:
               $result=($check.Content.ReadAsStringAsync().GetAwaiter().GetResult())|ConvertFrom-Json
               if([string]$result.state -eq 'ready_for_review'){
                 Write-Output ('review_reconcile_outcome=ready_for_review file_present='+[bool]$result.drive_file_id)
+                if(-not $result.drive_file_id){throw 'review_artifact_missing'}
                 break
               }
               if([string]$result.state -eq 'needs_reconciliation'){
                 Write-Output ('review_reconcile_outcome=needs_reconciliation reason_code='+[string]$result.reason_code)
-                break
+                throw 'existing_claim_failed_no_retry'
               }
-              if($i -eq 34){Write-Output ('review_reconcile_outcome='+[string]$result.state)}
+              if($i -eq 69){Write-Output ('review_reconcile_outcome='+[string]$result.state)}
             }
           }finally{$http.Dispose()}
           PS1
@@ -100,3 +104,5 @@ jobs:
             sleep 3
           done
           echo 'review_reconcile_not_verified_no_retry=true'; exit 1
+
+# 2026-10-29: resume only identical claimed lease after v14 gzip receipt recovery; zero Remotion launch events and unchanged V1 required by server.
