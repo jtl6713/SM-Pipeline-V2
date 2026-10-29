@@ -28,6 +28,24 @@ jobs:
           Write-Output ('review_remotion_unique_src_count='+@($sources|Sort-Object -Unique).Count)
           $ids=@($clips|ForEach-Object {[string]$_.google_drive_file_id})
           Write-Output ('review_remotion_unique_drive_count='+@($ids|Sort-Object -Unique).Count)
+          Add-Type -AssemblyName System.Net.Http
+          $http=[System.Net.Http.HttpClient]::new()
+          $http.Timeout=[TimeSpan]::FromSeconds(25)
+          $hashes=@()
+          try {
+            foreach($src in ($sources|Sort-Object -Unique)){
+              if(-not $src.StartsWith('http://127.0.0.1:3333/job-assets/')){throw 'untrusted_localized_source'}
+              $bytes=$http.GetByteArrayAsync($src).GetAwaiter().GetResult()
+              if($bytes.Length -lt 1024){throw 'localized_source_too_small'}
+              $sha=[System.Security.Cryptography.SHA256]::Create()
+              try { $hex=[BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-','').ToLowerInvariant() }
+              finally { $sha.Dispose() }
+              $hashes+=,$hex
+            }
+          } finally { $http.Dispose() }
+          Write-Output ('review_remotion_unique_binary_hashes='+@($hashes|Sort-Object -Unique).Count)
+          Write-Output ('review_remotion_binary_count='+$hashes.Count)
+
           for($i=0;$i -lt $clips.Count;$i++){
             $c=$clips[$i]
             $src=[string]$c.src
@@ -63,3 +81,5 @@ jobs:
             sleep 3
           done
           echo 'read_only_remotion_audit_timeout=true'; exit 1
+
+# 2026-10-29: read-only compare byte hashes of all already-localized Remotion scene assets; never restart or render.
