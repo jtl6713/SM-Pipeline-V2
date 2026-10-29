@@ -62,7 +62,7 @@ export async function enrollManualReviewCommand({
       !/^[A-Za-z0-9_-]{8,120}$/.test(requestId))
     err("INVALID_REQUEST", "Server-generated session, attempt, and request identifiers required", 400);
   // A Factory-origin review cannot be established with empty or unverified feedback.
-  if(initial_note!==undefined && (!text(initial_note) || text(initial_note).length>3000 ||
+  if(initial_note!==undefined && (!id(initial_note) || id(initial_note).length>3000 ||
       !/^rec[A-Za-z0-9]{14}$/.test(id(actor_id))))
     err("FACTORY_FEEDBACK_REQUIRED", "Factory review requires comments and a verified reviewer", 400);
   if (!policy?.enabled) err("FEATURE_DISABLED", "Rendering Review admission is disabled", 403);
@@ -75,7 +75,7 @@ export async function enrollManualReviewCommand({
     if (prior) {
       if (sessionMatches(prior,sessionId,requestId)) {
         if(initial_note!==undefined && (prior.factory_entry?.source!=="factory" ||
-           prior.messages?.[0]?.content!==text(initial_note)))
+           prior.messages?.[0]?.content!==id(initial_note)))
           err("FACTORY_FEEDBACK_CONFLICT","Replayed review request does not match saved comments",409);
         // An idempotent success may only be replayed when the durable hold
         // is still present. A missing hold is not a valid existing enrollment.
@@ -155,7 +155,7 @@ export async function enrollManualReviewCommand({
       // session write: never create a conversational review with no feedback.
       const at=new Date().toISOString();
       session.messages.push({
-        id:"rrfactoryinitial_"+requestId,role:"user",content:text(initial_note),
+        id:"rrfactoryinitial_"+requestId,role:"user",content:id(initial_note),
         at,attempt_id:session.current_attempt_id,timestamp_seconds:null,
       });
       session.state="discussing";
