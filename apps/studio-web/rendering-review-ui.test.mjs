@@ -15,8 +15,11 @@ test('Rendering Review has a dedicated navigation item and responsive page',()=>
   assert.match(html,/rendering-review-queue\.js\?v=\d+\.\d+\.\d+/);
   assert.match(html,/rendering-review-queue\.css\?v=\d+\.\d+\.\d+/);
 });
-test('rendering review offers gated manual discussion but never approval or publish actions',()=>{
+test('rendering review allows conversation only after Factory submission, never direct enrollment',()=>{
   assert.match(html,/Chicago pilot · protected manual review/);
+  assert.doesNotMatch(js,/Review with Producer/);
+  assert.doesNotMatch(js,/\/enroll/);
+  assert.match(js,/Factory-submitted reviews/);
   assert.match(js,/entry.manual_admission_enabled===true/);
   assert.match(js,/data.flags.admission_enabled!==true/);
   assert.match(js,/automatic_sampling_percent!==0/);
