@@ -100,7 +100,15 @@ class RemoteLaunchLedger:
                 stream=True,
             ) as resp:
                 status=resp.status_code
-                raw=resp.raw.read(8193)
+                # Decode gzip/br transfer encoding; raw.read gives wire bytes.
+                # Preserve the one-shot POST and 8KiB response ceiling.
+                bounded=bytearray()
+                for part in resp.iter_content(chunk_size=8193):
+                    if part:
+                        bounded.extend(part)
+                        if len(bounded)>8192:
+                            break
+                raw=bytes(bounded)
         except requests.RequestException as exc:
             raise ReviewLedgerUnavailable("launch_ledger_response_ambiguous_no_retry") from exc
         if status != 200:
