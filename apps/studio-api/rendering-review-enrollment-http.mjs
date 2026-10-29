@@ -13,7 +13,7 @@ import {REVIEW_PILOT, CHICAGO_PROFILE_ID} from "./rendering-review-policy.mjs";
 
 const idPattern=/^rec[A-Za-z0-9]{14}$/;
 const requestPattern=/^[A-Za-z0-9_-]{8,120}$/;
-const keys=new Set(["client_request_id"]);
+const keys=new Set(["client_request_id","note"]);
 const hashText=bytes=>Array.from(new Uint8Array(bytes), b=>b.toString(16).padStart(2,"0")).join("");
 const fail=(status,code,message)=>{const e=new Error(message);e.status=status;e.code=code;throw e;};
 const validIdentity=v=>typeof v==="string" && idPattern.test(v);
@@ -70,13 +70,14 @@ export async function handleRenderingReviewEnrollRequest({
   if(!/^application\/json(?:\s*;|$)/.test(contentType))
     fail(415,"JSON_REQUIRED","Only JSON enrollment requests are supported");
   const raw=await request.text();
-  if(raw.length>400)
+  if(raw.length>3600)
     fail(413,"BODY_TOO_LARGE","Enrollment request is too large");
   let body;
   try{body=JSON.parse(raw);}catch{fail(400,"INVALID_JSON","Invalid JSON enrollment request");}
   if(!body||typeof body!=="object"||Array.isArray(body)||
      Object.keys(body).some(key=>!keys.has(key))||
-     !requestPattern.test(body.client_request_id||""))
+     !requestPattern.test(body.client_request_id||"")||
+     typeof body.note!=="string"||!body.note.trim()||body.note.trim().length>3000)
     fail(400,"UNTRUSTED_BODY","Only a stable client request ID is accepted");
 
   const id=await digest(["chicago-review-enrollment-v1",actor,output_id,body.client_request_id]);
@@ -88,10 +89,12 @@ export async function handleRenderingReviewEnrollRequest({
     // The source policy remains OFF; only a protected, authenticated request
     // after all five gates may temporarily allow manual coordinator admission.
     policy:{...REVIEW_PILOT,enabled:true},
+    initial_note:body.note.trim(),actor_id:actor,
     operations,
   });
   return {
-    ok:true,replay:result.replay,
+    ok:true,replay:result.replay,review_notes_saved:true,
+    message:"Request received. Continue the conversation with your Producer in Rendering Review.",
     session_id:result.session.id,
     session_version:result.session.version,
     review_state:result.session.state,
