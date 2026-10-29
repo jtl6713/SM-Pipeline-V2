@@ -12,6 +12,10 @@ import os
 from typing import Any, Callable
 from pathlib import Path
 
+def _review_env_path() -> Path:
+    return Path(__file__).resolve().parents[1] / ".env"
+
+
 def review_setting(name: str) -> str:
     """Use the exact local Ops-owned .env for this isolated pilot.
 
@@ -20,7 +24,7 @@ def review_setting(name: str) -> str:
     secret rotation wrote the matched credentials to this local .env. Never
     print, persist or export those values in an HTTP response.
     """
-    env_file = Path(__file__).resolve().parents[1] / ".env"
+    env_file = _review_env_path()
     if env_file.is_file():
         from dotenv import dotenv_values
         values = dotenv_values(env_file)
