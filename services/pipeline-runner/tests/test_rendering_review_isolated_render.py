@@ -114,6 +114,37 @@ class IsolatedRenderTests(unittest.TestCase):
         self.assertNotIn("platform_upload",result)
         self.assertNotIn("publish",result)
 
+    def test_owned_v1_music_and_spoken_caption_choice_remain_in_v2(self):
+        original_music={
+            "url":"https://drive.google.com/uc?export=download&id=1NptYQLFLWhLdzUWI8t7-SKH_SiWCJAj2",
+            "volume":0.6,"duckingEnabled":True,"duckingMultiplier":0.35,
+            "duckFadeFrames":6,"fadeInFrames":15,"fadeOutFrames":15,
+            "startFromSeconds":0,
+        }
+        source_mix={
+            "verified":True,"authority":"server","output_id":OUTPUT_ID,
+            "music":original_music,
+            "music_drive_file_id":"1NptYQLFLWhLdzUWI8t7-SKH_SiWCJAj2",
+            "spoken_captions_enabled":False,
+            "spoken_caption_words_per_page":4,
+        }
+        result=self.compile({"source_mix":source_mix})
+        self.assertEqual(result["music"],original_music)
+        self.assertFalse(result["spokenCaptionsEnabled"])
+        self.assertEqual(result["spokenCaptionWordsPerPage"],4)
+        self.assertTrue(result["watermarkRequired"])
+        self.assertFalse(result["studioRevision"].get("publish",False))
+        for change in [
+            {"verified":False},
+            {"authority":"model"},
+            {"music_drive_file_id":"wrong-file"},
+            {"spoken_captions_enabled":"false"},
+        ]:
+            bad=deepcopy(source_mix)
+            bad.update(change)
+            self.denied(lambda: self.compile({"source_mix":bad}),
+                        "original_audio_or_caption_mix_unverified|original_music_mix_untrusted")
+
     def test_unleased_job_cannot_launch(self):
         for patch in [{"state":"queued"},{"lease_verified":False},
                       {"lease_fence":0},{"lease_fence":"3"},
