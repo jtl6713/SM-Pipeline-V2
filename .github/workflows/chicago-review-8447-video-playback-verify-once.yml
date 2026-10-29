@@ -1,4 +1,4 @@
-name: Verify held Chicago 8447 corrected V2 video serving read-only
+name: Verify accepted Chicago 8447 Factory V2 video after handoff (read-only)
 on:
   push:
     branches: [main]
@@ -11,7 +11,29 @@ jobs:
     timeout-minutes: 7
     env:
       OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
     steps:
+      - name: Gate private playback verification on actual Runner v17 and Worker 693 production versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            runner=$(curl -sS --max-time 20 -o /tmp/review-v17-health.json -w '%{http_code}' 'https://pipeline.chicagoshining.com/health' || true)
+            worker=$(curl -sS --max-time 20 -o /tmp/review-693-health.json -w '%{http_code}' \
+              -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+              -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+              'https://studio.chicagoshining.com/api/health' || true)
+            if [[ "$runner" == "200" && "$worker" == "200" ]] &&
+               jq -e '.ok==true and .version=="2026-10-29-factory-v2-private-preview-v17"' /tmp/review-v17-health.json >/dev/null &&
+               jq -e '.ok==true and (.version|startswith("0.10.693-factory-v2-preview-producer-return"))' /tmp/review-693-health.json >/dev/null; then
+              echo 'factory_preview_runner_and_worker_proven_live=true'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'factory_preview_versions_not_verified=true'
+          exit 1
       - name: Verify the existing corrected V2 is byte-range playable by the private Studio Runner
         shell: bash
         run: |
@@ -45,7 +67,7 @@ jobs:
             if($read -lt 12 -or [System.Text.Encoding]::ASCII.GetString($bytes,4,4) -ne 'ftyp'){
               throw 'video_bytes_invalid'
             }
-            Write-Output 'review_playback_verified=true original_output_unchanged=true no_publish=true'
+            Write-Output 'review_playback_verified=true v2_selected=true original_v1_preserved=true no_publish=true'
           } finally { $http.Dispose() }
           PS1
           python - <<'PY'
