@@ -65,12 +65,6 @@ def create_review_media_blueprint(settings, client_factory=_client,
                 session.get("output_id")!=output_id or
                 session.get("profile_id")!=CHICAGO or
                 sf.get("Row_Version")!=session.get("version") or
-                not hold.get("active") or
-                of.get("Studio_Render_Review_Hold_Active") is not True or
-                of.get("Studio_Render_Review_Hold_ID")!=hold.get("id") or
-                of.get("Studio_Render_Review_Hold_Owner")!=session.get("id") or
-                of.get("Studio_Render_Review_Session_ID")!=session.get("id") or
-                of.get("Do_Not_Publish") is not True or
                 of.get("Platform")!="Instagram" or
                 of.get("Platform_Output_Type")!="Instagram Reel" or
                 any(of.get(k) for k in ("Published_At","Platform_Post_ID",
@@ -78,6 +72,38 @@ def create_review_media_blueprint(settings, client_factory=_client,
                     "Publish_Locked_By")) or
                 not isinstance(content_link,list) or len(content_link)!=1):
                 return denied(409,"review_media_hold_unverified")
+            held=(hold.get("active") is True and
+                  of.get("Studio_Render_Review_Hold_Active") is True and
+                  of.get("Studio_Render_Review_Hold_ID")==hold.get("id") and
+                  of.get("Studio_Render_Review_Hold_Owner")==session.get("id") and
+                  of.get("Studio_Render_Review_Session_ID")==session.get("id") and
+                  of.get("Do_Not_Publish") is True)
+            handoff=session.get("factory_handoff") or {}
+            # Factory's accepted, independently verified V2 is intentionally
+            # unheld. The same private stream is safe ONLY for the exact
+            # approved attempt chosen on the output and durable handoff receipt.
+            factory_ready=(hold.get("active") is False and
+                session.get("state")=="approved" and
+                session.get("approved_attempt_id")==attempt_id and
+                session.get("current_attempt_id")==attempt_id and
+                handoff.get("status")=="ready_for_factory_approval" and
+                handoff.get("attempt_id")==attempt_id and
+                handoff.get("artifact_id")==of.get("Final_File_ID") and
+                of.get("Do_Not_Publish") is not True and
+                of.get("Auto_Publish_Enabled") is not True and
+                of.get("Studio_Render_Review_Hold_Active") is not True and
+                all(not of.get(k) for k in (
+                    "Studio_Render_Review_Hold_ID",
+                    "Studio_Render_Review_Hold_Owner",
+                    "Studio_Render_Review_Session_ID",
+                    "Studio_Review_Hold_ID",
+                    "Studio_Review_Hold_Owner",
+                    "Scheduled_Post_Date","Studio_Scheduled_At")) and
+                of.get("Output_Status")=="Ready for Review" and
+                of.get("Review_Status")=="Review Sent" and
+                of.get("Publish_Status")=="Not Ready")
+            if not (held or factory_ready):
+                return denied(409,"review_media_hold_or_factory_receipt_unverified")
             content=(client.get_record(ITEMS,content_link[0]) or {}).get("fields",{})
             if content.get("Content_Profile")!=[CHICAGO]:
                 return denied(403,"review_media_wrong_profile")
@@ -90,6 +116,8 @@ def create_review_media_blueprint(settings, client_factory=_client,
             ar=one(client,ATTEMPTS,"Attempt_ID",attempt_id)
             af=ar.get("fields",{}) if ar else {}
             file_id=selected["artifact_id"]
+            if factory_ready and file_id!=of.get("Final_File_ID"):
+                return denied(409,"review_media_factory_asset_mismatch")
             if (af.get("Attempt_ID")!=attempt_id or
                 af.get("Output_Record_ID")!=output_id or
                 af.get("Session_ID")!=session.get("id") or
