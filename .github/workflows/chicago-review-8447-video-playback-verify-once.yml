@@ -1,0 +1,78 @@
+name: Verify held Chicago 8447 corrected V2 video serving read-only
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/chicago-review-8447-video-playback-verify-once.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Verify the existing corrected V2 is byte-range playable by the private Studio Runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          cat >/tmp/probe-8447-private-playback.ps1 <<'PS1'
+          $ErrorActionPreference='Stop'
+          $f=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+          if(-not (Test-Path -LiteralPath $f)){throw 'runner_config_missing'}
+          $lines=@(Get-Content -LiteralPath $f | Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='})
+          if($lines.Count -ne 1){throw 'runner_secret_missing'}
+          $secret=($lines[0] -split '=',2)[1].Trim().Trim('"').Trim([char]39)
+          if($secret.Length -lt 24){throw 'runner_secret_invalid'}
+          Add-Type -AssemblyName System.Net.Http
+          $http=[System.Net.Http.HttpClient]::new()
+          $http.Timeout=[TimeSpan]::FromSeconds(75)
+          try{
+            $url='http://127.0.0.1:3350/jobs/rendering-review/attempt-media/rec0uVrVeiUM6shp9/rrattempt_26054929500b8abe981e3f6131b5c668209bf9c765edb06c'
+            $req=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get,$url)
+            [void]$req.Headers.TryAddWithoutValidation('X-Pipeline-Secret',$secret)
+            [void]$req.Headers.TryAddWithoutValidation('Range','bytes=0-1023')
+            $reply=$http.SendAsync($req,[System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+            $mime=[string]$reply.Content.Headers.ContentType.MediaType
+            $code=[int]$reply.StatusCode
+            Write-Output ('review_playback_http='+$code+' mime='+$mime)
+            if($code -notin @(200,206) -or $mime -ne 'video/mp4'){throw 'private_playback_unavailable'}
+            $stream=$reply.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+            $bytes=[byte[]]::new(64)
+            $read=$stream.Read($bytes,0,64)
+            $stream.Dispose()
+            if($read -lt 12 -or [System.Text.Encoding]::ASCII.GetString($bytes,4,4) -ne 'ftyp'){
+              throw 'video_bytes_invalid'
+            }
+            Write-Output 'review_playback_verified=true original_output_unchanged=true no_publish=true'
+          } finally { $http.Dispose() }
+          PS1
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/playback-8447.json').write_text(json.dumps({
+            'command':Path('/tmp/probe-8447-private-playback.ps1').read_text(),'confirm':True
+          }))
+          PY
+          status=$(curl -sS --max-time 25 -o /tmp/playback-ops-submit.json -w '%{http_code}' \
+            -X POST https://ops.chicagoshining.com/api/shell \
+            -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/playback-8447.json)
+          [[ "$status" == "200" || "$status" == "202" ]]
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/playback-ops-submit.json)
+          test -n "$job"
+          for i in $(seq 1 48); do
+            curl -fsS --max-time 15 -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/playback-ops-result.json
+            state=$(jq -r '.job.status // empty' /tmp/playback-ops-result.json)
+            if [[ "$state" == "ok" || "$state" == "failed" ]]; then
+              jq -r '.job.log // ""' /tmp/playback-ops-result.json | grep '^review_playback_' || true
+              [[ "$state" == "ok" ]]
+              jq -e '(.job.log // "")|contains("review_playback_verified=true")' /tmp/playback-ops-result.json >/dev/null
+              exit 0
+            fi
+            sleep 3
+          done
+          echo 'review_playback_probe_timeout=true'
+          exit 1
