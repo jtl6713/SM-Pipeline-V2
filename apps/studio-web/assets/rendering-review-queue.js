@@ -652,5 +652,20 @@
   }
   reveal();
   if(root.classList.contains('active'))load(false);
-  window.StudioRenderingReview={load};
+  async function openOutput(outputId,notice){
+    if(!/^rec[A-Za-z0-9]{14}$/.test(String(outputId||"")))
+      throw new Error("Invalid Rendering Review output");
+    state.lastReplyNotice={outputId,message:String(notice||
+      "Your request has been received. Continue the conversation with the Producer here.")};
+    if(!root.classList.contains('active'))nav.click();
+    // A Factory return changes hold status, so never reuse a cached queue.
+    state.lastLoad=0;
+    for(let i=0;state.busy && i<30;i++)
+      await new Promise(resolve=>window.setTimeout(resolve,100));
+    await load(false);
+    const entry=state.records.find(x=>x.output_id===outputId);
+    if(!entry)throw new Error("Saved review was not found in the Chicago queue");
+    await open(entry);
+  }
+  window.StudioRenderingReview={load,openOutput};
 })();
