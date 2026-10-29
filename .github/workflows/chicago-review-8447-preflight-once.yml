@@ -38,22 +38,33 @@ jobs:
           from rendering_review.one_job import _evidence, _render_sources, ExactReviewRenderDenied
           output='rec0uVrVeiUM6shp9'
           job='rrjob_26054929500b8abe981e3f6131b5c668209bf9c765edb06c'
+          client=None
+          drive=None
           try:
               client=AirtableClient()
-              drive=GoogleDriveClient()
-              output_row,item,request,props,plan,source,assets=_evidence(client,drive,output,job)
-              print('review_preflight_evidence=PASS')
-              try:
-                  checked=_render_sources(client,request,assets,props,plan)
-                  print('review_preflight_media=PASS count='+str(len(checked)))
-              except ExactReviewRenderDenied as e:
-                  print('review_preflight_media=DENIED code='+str(e).split(':')[0])
-              except Exception as e:
-                  print('review_preflight_media=EXCEPTION type='+type(e).__name__)
-          except ExactReviewRenderDenied as e:
-              print('review_preflight_evidence=DENIED code='+str(e).split(':')[0])
+              print('review_preflight_client=PASS type=Airtable')
           except Exception as e:
-              print('review_preflight_evidence=EXCEPTION type='+type(e).__name__)
+              print('review_preflight_client=EXCEPTION type='+type(e).__name__)
+          try:
+              drive=GoogleDriveClient()
+              print('review_preflight_drive=PASS')
+          except Exception as e:
+              print('review_preflight_drive=EXCEPTION type='+type(e).__name__)
+          if client is not None and drive is not None:
+              try:
+                  output_row,item,request,props,plan,source,assets=_evidence(client,drive,output,job)
+                  print('review_preflight_evidence=PASS')
+                  try:
+                      checked=_render_sources(client,request,assets,props,plan)
+                      print('review_preflight_media=PASS count='+str(len(checked)))
+                  except ExactReviewRenderDenied as e:
+                      print('review_preflight_media=DENIED code='+str(e).split(':')[0])
+                  except Exception as e:
+                      print('review_preflight_media=EXCEPTION type='+type(e).__name__)
+              except ExactReviewRenderDenied as e:
+                  print('review_preflight_evidence=DENIED code='+str(e).split(':')[0])
+              except Exception as e:
+                  print('review_preflight_evidence=EXCEPTION type='+type(e).__name__)
           '@
           [System.IO.File]::WriteAllText($temp,$source,[System.Text.UTF8Encoding]::new($false))
           Push-Location $service
@@ -78,7 +89,7 @@ jobs:
               "https://ops.chicagoshining.com/api/jobs/$id" -o /tmp/preflight-result.json
             state=$(jq -r '.job.status // empty' /tmp/preflight-result.json)
             if [[ "$state" == "ok" ]]; then
-              jq -r '.job.log // ""' /tmp/preflight-result.json | grep -E '^review_preflight_(evidence|media)=' || true
+              jq -r '.job.log // ""' /tmp/preflight-result.json | grep -E '^review_preflight_(client|drive|evidence|media)=' || true
               exit 0
             fi
             if [[ "$state" == "failed" ]]; then
