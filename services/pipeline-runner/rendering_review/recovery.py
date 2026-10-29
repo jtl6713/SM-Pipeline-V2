@@ -1,12 +1,13 @@
 """Read-only authority proof for resuming a failed exact review job.
 
-Only a queued job with zero claims, no persistent launch history, no artifact,
-and the original active publication hold can be recovered. This function
+Only an exact queued job OR the same deterministically-owned claimed job with no
+persistent Remotion launch history or artifact can resume. Never mint a lease. This function
 makes no Airtable, Drive, Remotion, or publisher writes.
 """
 from __future__ import annotations
 
 import json
+import hashlib
 
 
 class ReviewRecoveryDenied(RuntimeError):
@@ -40,22 +41,42 @@ def require_unlaunched_authority(output_id: str, job_id: str, *, client=None) ->
 
     job = select_one(client, JOBS, "Job_ID", job_id)
     jf = job.get("fields") or {}
-    # A claimed job (or durable event of a Remotion launch) must NEVER be
-    # restarted. Its existing remote attempt must instead be reconciled.
+    # Replaying the SAME already-claimed lease is permitted only when no
+    # Remotion intent has EVER been reserved. The claim endpoint derives its
+    # lease owner from an immutable request fingerprint; compute that owner
+    # independently instead of trusting the stored arbitrary owner.
     try:
         history = json.loads(jf.get("Event_History_JSON") or "null")
     except (ValueError, TypeError) as exc:
         raise ReviewRecoveryDenied("launch_history_unreadable") from exc
-    if (jf.get("Job_ID") != job_id or
-        jf.get("Output_Record_ID") != output_id or
-        jf.get("Job_State") != "queued" or
-        jf.get("Progress_Stage") != "awaiting_isolated_renderer" or
-        jf.get("Progress_Percent") not in (0, 0.0, None) or
-        jf.get("Lease_Fence") not in (0, 0.0, None) or
-        jf.get("Lease_Owner") or
-        history != [] or
-        not isinstance(jf.get("Plan_Hash"), str) or
-        len(jf["Plan_Hash"]) != 64):
+    expected_req = "rrclaim_" + hashlib.sha256(
+        ("chicago-pilot-v1|" + output_id + "|" + job_id).encode()
+    ).hexdigest()[:48]
+    expected_owner = "rrrunner_" + hashlib.sha256(json.dumps(
+        ["render-job-claim-v1", output_id, job_id, expected_req],
+        separators=(",", ":")).encode()).hexdigest()[:48]
+    job_state = jf.get("Job_State")
+    common_valid = (
+        jf.get("Job_ID") == job_id and
+        jf.get("Output_Record_ID") == output_id and
+        jf.get("Progress_Percent") in (0, 0.0, None) and
+        history == [] and
+        isinstance(jf.get("Plan_Hash"), str) and
+        len(jf["Plan_Hash"]) == 64
+    )
+    queued_valid = (
+        job_state == "queued" and
+        jf.get("Progress_Stage") == "awaiting_isolated_renderer" and
+        jf.get("Lease_Fence") in (0, 0.0, None) and
+        not jf.get("Lease_Owner")
+    )
+    replay_valid = (
+        job_state == "claimed" and
+        jf.get("Progress_Stage") == "claimed" and
+        jf.get("Lease_Fence") == 1 and
+        jf.get("Lease_Owner") == expected_owner
+    )
+    if not common_valid or not (queued_valid or replay_valid):
         raise ReviewRecoveryDenied("job_might_have_launched")
 
     attempt_id = jf.get("Attempt_ID")

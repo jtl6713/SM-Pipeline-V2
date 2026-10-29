@@ -83,6 +83,27 @@ class RecoveryProof(unittest.TestCase):
         self.assertEqual(len(calls), 4)
         self.assertTrue(all(x[0] in ("select", "get") for x in calls))
 
+    def test_exact_existing_claim_can_replay_only_before_any_launch_intent(self):
+        data=snapshot()
+        job=data["job"]["fields"]
+        job["Job_State"]="claimed"
+        job["Progress_Stage"]="claimed"
+        job["Lease_Fence"]=1
+        job["Lease_Owner"]="rrrunner_588b9c34df9a2b95e9f11e15b0cbdb1776a9d1d5dbe31854"
+        self.assertTrue(verified(data)[0])
+        for changed in (
+            {"Lease_Owner":"another-runner"},
+            {"Lease_Fence":2},
+            {"Event_History_JSON":json.dumps([{"kind":"review_remotion_launch_intent"}])},
+            {"Progress_Stage":"voiceover_uploaded"},
+            {"Progress_Percent":25},
+        ):
+            with self.subTest(change=changed):
+                unsafe=copy.deepcopy(data)
+                unsafe["job"]["fields"].update(changed)
+                with self.assertRaises(ReviewRecoveryDenied):
+                    verified(unsafe)
+
     def test_all_possible_previous_launch_indicators_are_denied(self):
         mutations = [
             ("job", "Job_State", "claimed"),

@@ -1,6 +1,7 @@
 """Offline regressions for Cloudflare Worker HTTP transports; no real calls."""
 import io
 import json
+import gzip
 import unittest
 from unittest.mock import patch
 
@@ -10,9 +11,14 @@ from rendering_review.remote_ledger import RemoteLaunchLedger, ReviewLedgerUnava
 
 
 class Response:
-    def __init__(self, code, body):
+    def __init__(self, code, body, compressed=False):
         self.status_code=code
-        self.raw=io.BytesIO(body if isinstance(body,bytes) else json.dumps(body).encode())
+        self.decoded=body if isinstance(body,bytes) else json.dumps(body).encode()
+        self.raw=io.BytesIO(gzip.compress(self.decoded) if compressed else self.decoded)
+    def iter_content(self, chunk_size):
+        # The requests iterator decompresses wire bytes; raw.read() does not.
+        for i in range(0,len(self.decoded),chunk_size):
+            yield self.decoded[i:i+chunk_size]
     def __enter__(self):
         return self
     def __exit__(self,*_):
@@ -35,6 +41,38 @@ class HttpTransportTests(unittest.TestCase):
         self.assertTrue(seen[0][1]["stream"])
         self.assertEqual(seen[0][1]["headers"]["User-Agent"],"")
         self.assertIn("X-Rendering-Review-Job-Secret",seen[0][1]["headers"])
+
+    def test_worker_compressed_reply_is_decoded_before_receipt_validation(self):
+        # Production Worker may gzip even short JSON. A raw wire-byte read
+        # previously caused the job to be claimed, then lost its receipt.
+        body={"ok":True,"job_id":"rrjob_12345678",
+              "lease_verified":True,"lease_fence":1}
+        with patch("rendering_review.one_job.requests.post",
+                   return_value=Response(200,body,compressed=True)) as post:
+            with patch("rendering_review.one_job._access_headers",return_value={}):
+                reply=_post_once("https://studio.chicagoshining.com","s"*32,
+                       "/api/internal/rendering-review/claim-render-job",{})
+        self.assertEqual(reply["lease_fence"],1)
+        self.assertEqual(post.call_count,1)
+
+    def test_oversized_decoded_worker_response_is_never_accepted(self):
+        with patch("rendering_review.one_job.requests.post",
+                   return_value=Response(200,{"ok":True,"data":"x"*9000})) as post:
+            with patch("rendering_review.one_job._access_headers",return_value={}):
+                with self.assertRaisesRegex(ExactReviewRenderDenied,
+                                             "receipt_invalid"):
+                    _post_once("https://studio.chicagoshining.com","s"*32,
+                               "/api/internal/rendering-review/claim-render-job",{})
+        self.assertEqual(post.call_count,1)
+
+    def test_compressed_ledger_json_is_decoded_without_second_post(self):
+        with patch("rendering_review.remote_ledger.requests.post",
+                   return_value=Response(200,{"verified":True},compressed=True)) as post:
+            reply=RemoteLaunchLedger._one_shot_post(
+                "https://studio.chicagoshining.com/api/internal/rendering-review/launch-ledger",
+                {"action":"read_authority"},{"X-Rendering-Review-Job-Secret":"s"*32},10.0)
+        self.assertTrue(reply["verified"])
+        self.assertEqual(post.call_count,1)
 
     def test_worker_denials_never_retry_and_include_only_safe_error_code(self):
         for status,body,expected in [
