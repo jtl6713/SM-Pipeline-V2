@@ -40,7 +40,8 @@ function fixture(){
       method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
         expected_version:1,attempt_id:session.current_attempt_id,client_request_id:"pilot-accept-12345678"})});
     return acceptReviewCreativeOnly({request:req,env:opts.env||flags,
-      authorization:auth,output_id:outputId,operations:ops,assertWriteRequest:()=>{}});
+      authorization:auth,output_id:outputId,operations:ops,assertWriteRequest:()=>{},
+    afterCreativeAcceptance:opts.afterCreativeAcceptance||null});
   };
   return {send,get session(){return session},get output(){return output},
     set output(o){output=o},get writes(){return writes}};
@@ -67,4 +68,29 @@ test("creative approval rejects output without durable publication safety and ma
   const f=fixture();f.output={...f.output,do_not_publish:false};
   await assert.rejects(()=>f.send(),e=>e.code==="REVIEW_PUBLICATION_FENCE_LOST");
   assert.equal(f.writes,0);
+});
+
+test("creative acceptance also invokes guarded Factory handoff automatically",async()=>{
+  const f=fixture();
+  let calls=0;
+  const result=await f.send({afterCreativeAcceptance:async()=>{
+    calls++;return {ready_for_factory:true,session_version:2,factory_mirror_synced:true};
+  }});
+  assert.equal(calls,1);
+  assert.equal(result.accepted,true);
+  assert.equal(result.ready_for_factory,true);
+  assert.equal(result.factory_mirror_synced,true);
+  assert.equal(result.published,false);
+  assert.equal(result.scheduled,false);
+});
+test("failed Factory handoff does not misreport committed creative acceptance",async()=>{
+  const f=fixture();
+  const result=await f.send({afterCreativeAcceptance:async()=>{
+    const error=new Error("Temporary mirror failure");error.code="FACTORY_BUSY";throw error;
+  }});
+  assert.equal(f.session.state,"approved");
+  assert.equal(result.accepted,true);
+  assert.equal(result.factory_handoff_pending,true);
+  assert.equal(result.reason,"FACTORY_BUSY");
+  assert.equal(result.publication_changed,false);
 });
