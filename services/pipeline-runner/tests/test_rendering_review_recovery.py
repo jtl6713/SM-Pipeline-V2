@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from flask import Flask
 from rendering_review.recovery import (
-    require_unlaunched_authority, ReviewRecoveryDenied,
+    require_unlaunched_authority, ReviewRecoveryDenied, _expected_owner,
 )
 from rendering_review.one_job_http import (
     create_exact_review_render_blueprint, _ACTIVE, _RESULTS, _LOCK,
@@ -82,6 +82,35 @@ class RecoveryProof(unittest.TestCase):
         self.assertTrue(result)
         self.assertEqual(len(calls), 4)
         self.assertTrue(all(x[0] in ("select", "get") for x in calls))
+
+    def test_already_claimed_exact_owner_can_resume_without_second_lease(self):
+        data=snapshot()
+        data["job"]["fields"].update({
+            "Job_State":"claimed","Progress_Stage":"claimed",
+            "Lease_Fence":1,"Lease_Owner":_expected_owner(OUTPUT,JOB),
+        })
+        verified_now,reads=verified(data)
+        self.assertTrue(verified_now)
+        self.assertEqual(len(reads),4)
+
+    def test_claimed_owner_fence_launch_and_artifact_drift_are_rejected(self):
+        base=snapshot()
+        base["job"]["fields"].update({
+            "Job_State":"claimed","Progress_Stage":"claimed",
+            "Lease_Fence":1,"Lease_Owner":_expected_owner(OUTPUT,JOB),
+        })
+        for table,key,bad in [
+            ("job","Lease_Owner","another-worker"),
+            ("job","Lease_Fence",2),
+            ("job","Progress_Stage","rendering"),
+            ("job","Event_History_JSON",'[{"type":"LAUNCH_INTENT"}]'),
+            ("attempt","Artifact_File_ID","some-v2-file"),
+        ]:
+            with self.subTest(key=key):
+                modified=copy.deepcopy(base)
+                modified[table]["fields"][key]=bad
+                with self.assertRaises(ReviewRecoveryDenied):
+                    verified(modified)
 
     def test_all_possible_previous_launch_indicators_are_denied(self):
         mutations = [
