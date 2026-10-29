@@ -1,0 +1,101 @@
+name: Recover the original authorized Chicago 8447 V2 without creating a job
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/chicago-review-8447-reconcile-existing-once.yml']
+permissions:
+  contents: read
+concurrency:
+  group: chicago-8447-same-authorized-job-reconciliation
+  cancel-in-progress: false
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Require verified guarded Runner v12 before invoking the existing job
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          curl -fsS --max-time 20 https://pipeline.chicagoshining.com/health -o /tmp/recovery-health.json
+          jq -e '.ok==true and .version=="2026-10-29-chicago-exact-job-recovery-v12"' /tmp/recovery-health.json >/dev/null
+          echo "exact_recovery_runner_v12_live=true"
+      - name: Resume ONLY the same authorized job after atomic durable no-launch proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/recover-existing.ps1 <<'PS1'
+          $ErrorActionPreference='Stop'
+          $p=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+          if(-not (Test-Path -LiteralPath $p)){throw 'runner_env_missing'}
+          $matches=@(Get-Content -LiteralPath $p | Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='})
+          if($matches.Count -ne 1){throw 'runner_auth_unavailable'}
+          $secret=($matches[0] -split '=',2)[1].Trim().Trim('"').Trim([char]39)
+          if($secret.Length -lt 24){throw 'runner_auth_invalid'}
+          Add-Type -AssemblyName System.Net.Http
+          $http=[System.Net.Http.HttpClient]::new()
+          $http.Timeout=[TimeSpan]::FromSeconds(45)
+          try {
+            $body=@{output_id='rec0uVrVeiUM6shp9';job_id='rrjob_26054929500b8abe981e3f6131b5c668209bf9c765edb06c'} | ConvertTo-Json -Compress
+            $req=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post,'http://127.0.0.1:3350/jobs/rendering-review/reconcile-exact')
+            $req.Content=[System.Net.Http.StringContent]::new($body,[System.Text.Encoding]::UTF8,'application/json')
+            [void]$req.Headers.TryAddWithoutValidation('X-Pipeline-Secret',$secret)
+            $reply=$http.SendAsync($req).GetAwaiter().GetResult()
+            $data=($reply.Content.ReadAsStringAsync().GetAwaiter().GetResult()) | ConvertFrom-Json
+            Write-Output ('review_recovery_http='+[int]$reply.StatusCode+' accepted='+[bool]$data.accepted+' existing_job_only='+[bool]$data.existing_job_only+' no_public_post='+($data.public_post_created -eq $false)+' code='+[string]$data.error)
+            if([int]$reply.StatusCode -ne 202 -or $data.ok -ne $true -or
+               $data.existing_job_only -ne $true -or $data.public_post_created -ne $false){
+              throw 'exact_existing_recovery_denied'
+            }
+            for($i=0;$i -lt 25;$i++){
+              Start-Sleep -Seconds 3
+              $poll=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get,'http://127.0.0.1:3350/jobs/rendering-review/run-exact/rrjob_26054929500b8abe981e3f6131b5c668209bf9c765edb06c')
+              [void]$poll.Headers.TryAddWithoutValidation('X-Pipeline-Secret',$secret)
+              $pr=$http.SendAsync($poll).GetAwaiter().GetResult()
+              if([int]$pr.StatusCode -ne 200){throw 'review_status_unavailable'}
+              $status=($pr.Content.ReadAsStringAsync().GetAwaiter().GetResult()) | ConvertFrom-Json
+              $state=[string]$status.state
+              if($state -eq 'ready_for_review'){
+                Write-Output ('review_v2_result=ready_for_review artifact_present='+[bool]$status.drive_file_id)
+                return
+              }
+              if($state -eq 'needs_reconciliation'){
+                Write-Output ('review_v2_result=needs_reconciliation reason_code='+[string]$status.reason_code)
+                throw 'review_render_stopped_before_validation'
+              }
+            }
+            Write-Output 'review_v2_result=still_processing; exact job accepted once'
+          }finally{$http.Dispose()}
+          PS1
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/exact-recovery-command.json').write_text(json.dumps({
+            'command':Path('/tmp/recover-existing.ps1').read_text(),
+            'confirm':True
+          }))
+          PY
+          code=$(curl -sS --max-time 25 -o /tmp/ops-response.json -w '%{http_code}' \
+            -X POST https://ops.chicagoshining.com/api/shell \
+            -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/exact-recovery-command.json || true)
+          [[ "$code" == "200" || "$code" == "202" ]]
+          id=$(jq -r '.job.id // .jobId // empty' /tmp/ops-response.json)
+          test -n "$id"
+          for n in $(seq 1 65); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$id" -o /tmp/ops-result.json
+            state=$(jq -r '.job.status // empty' /tmp/ops-result.json)
+            if [[ "$state" == "ok" || "$state" == "failed" ]]; then
+              jq -r '.job.log // ""' /tmp/ops-result.json | grep -E '^review_(recovery_http|v2_result)=' || true
+              if [[ "$state" == "failed" ]]; then exit 1; fi
+              jq -e '(.job.log // "")|contains("existing_job_only=True")' /tmp/ops-result.json >/dev/null
+              exit 0
+            fi
+            sleep 4
+          done
+          echo "review_recovery_no_verified_result=true"
+          exit 1
