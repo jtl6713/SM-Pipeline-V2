@@ -10,6 +10,23 @@ from __future__ import annotations
 import json
 import os
 from typing import Any, Callable
+from pathlib import Path
+
+def review_setting(name: str) -> str:
+    """Use the exact local Ops-owned .env for this isolated pilot.
+
+    Windows service process environment can retain older values after a
+    rolling deployment, whereas the protected Ops configuration and Worker
+    secret rotation wrote the matched credentials to this local .env. Never
+    print, persist or export those values in an HTTP response.
+    """
+    env_file = Path(__file__).resolve().parents[1] / ".env"
+    if env_file.is_file():
+        from dotenv import dotenv_values
+        values = dotenv_values(env_file)
+        if name in values:
+            return str(values.get(name) or "").strip()
+    return os.environ.get(name, "").strip()
 from urllib.parse import urlsplit
 from urllib.request import (
     Request, HTTPRedirectHandler, build_opener,
@@ -43,8 +60,8 @@ def _access_headers() -> dict[str, str]:
     Both parts must exist. The independent Worker job secret remains mandatory.
     No Access credential is logged, forwarded to Remotion, or put into an MP4.
     """
-    client_id = os.environ.get("CF_ACCESS_CLIENT_ID", "").strip()
-    client_secret = os.environ.get("CF_ACCESS_CLIENT_SECRET", "").strip()
+    client_id = review_setting("CF_ACCESS_CLIENT_ID")
+    client_secret = review_setting("CF_ACCESS_CLIENT_SECRET")
     if bool(client_id) != bool(client_secret):
         raise ReviewLedgerUnavailable("review_access_credentials_incomplete")
     if not client_id:
