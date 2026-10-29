@@ -13,6 +13,8 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
     steps:
       - name: Read-only Worker route access probe with no claim body or auth
         shell: bash
@@ -25,6 +27,21 @@ jobs:
             error=$(jq -r '.error // .code // "none"' /tmp/review-route-body 2>/dev/null || echo 'not_json')
             echo "review_claim_route_probe_host=$host http=$code mime=$mime error=$error no_post=true"
           done
+      - name: Read-only service token identity probe to protected claim route
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$CF_ACCESS_CLIENT_ID" || -z "$CF_ACCESS_CLIENT_SECRET" ]]; then
+            echo 'review_claim_access_token_pair_in_actions=absent'
+          else
+            code=$(curl -sS --max-time 15 --max-redirs 0 -o /tmp/review-service-body -w '%{http_code}' \
+              -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+              -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+              'https://studio.chicagoshining.com/api/internal/rendering-review/claim-render-job' || true)
+            mime=$(file -b --mime-type /tmp/review-service-body 2>/dev/null || true)
+            error=$(jq -r '.error // .code // "none"' /tmp/review-service-body 2>/dev/null || echo 'not_json')
+            echo "review_claim_access_token_pair_in_actions=present http=$code mime=$mime error=$error no_post=true"
+          fi
       - name: Inspect only active Worker binding names and five boolean gates
         shell: bash
         run: |
