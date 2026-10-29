@@ -554,7 +554,7 @@ test('Rendering Review labels the playing video without unchanged-video explanat
   assert.match(script,/Version V/);
   assert.match(script,/rrVersionBar/);
   assert.match(html,/id="rrOriginalVersion"/);
-  assert.match(script,/Proposed edits/);
+  assert.match(script,/Suggested changes/);
   assert.match(script,/Do these look right/);
   assert.match(script,/Reply to Producer/);
   assert.match(script,/Suggested morning photo/);
