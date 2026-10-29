@@ -1061,8 +1061,8 @@ export default {
       // Exact Chicago review writes are authorized again by their protected handlers.
       // The old global Phase-2A allowlist must not reject them before inspection.
       const isChicagoReviewPost = request.method === "POST" &&
-        (/^\/api\/rendering-review\/outputs\/rec[A-Za-z0-9]{14}\/(?:enroll|producer-conversation|producer-proposal|commit-attempt|messages|approve)$/.test(url.pathname) ||
-         /^\/(?:api\/)?internal\/rendering-review\/(?:claim-render-job|launch-ledger|complete-attempt|qa-audio-rebind|ig-dispatch-claim)$/.test(url.pathname));
+        (/^\/api\/rendering-review\/outputs\/rec[A-Za-z0-9]{14}\/(?:enroll|producer-conversation|producer-proposal|commit-attempt|messages|approve|factory-handoff)$/.test(url.pathname) ||
+         /^\/(?:api\/)?internal\/rendering-review\/(?:claim-render-job|launch-ledger|complete-attempt|qa-audio-rebind|ig-dispatch-claim|factory-handoff)$/.test(url.pathname));
       const allowedMethod =
         isChicagoReviewPost ||
         request.method === "GET" ||
@@ -1194,7 +1194,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.691-render-review-factory-drain" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
+          version: "0.10.692-render-review-factory-method-gate" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
