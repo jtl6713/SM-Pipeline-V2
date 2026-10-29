@@ -192,7 +192,8 @@ class ProducerTests(unittest.TestCase):
                     "messages": [{"role": "producer", "content": "I found a morning Riverwalk photo."}]}
         def no_model(*args, **kwargs):
             raise AssertionError("Accepting exact source-backed images must not call model")
-        for direction in ("Yes", "Yes, those look good.", "Looks good", "Use these"):
+        for direction in ("Yes", "Yes, those look good.", "Looks good", "Use these",
+                          "Yes this is good. Rerender please."):
             result = propose_revision(evidence, direction, {}, transport=no_model)
             candidate = result["candidate"]
             self.assertEqual([scene["asset_ids"][0] for scene in candidate["timeline"]],
