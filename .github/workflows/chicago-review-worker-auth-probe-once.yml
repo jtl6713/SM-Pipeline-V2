@@ -51,7 +51,9 @@ jobs:
               $code='not_json'
               try{
                 $json=$body|ConvertFrom-Json -ErrorAction Stop
-                $code=[string]($json.error ?? $json.code ?? 'none')
+                $code='none'
+                if($null -ne $json.error){$code=[string]$json.error}
+                elseif($null -ne $json.code){$code=[string]$json.code}
               }catch{}
               Write-Output ('review_auth_probe='+$kind+' http='+[int]$res.StatusCode+' app_error='+$code)
             }
