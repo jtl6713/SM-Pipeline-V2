@@ -372,3 +372,5 @@ jobs:
 # 2026-10-29: guarded Worker HTTP transport used by exact held Chicago #8447 V2 (Runner v13). No claim, render or publish from deploy.
 
 # 2026-10-29: deploy Runner v14 to decode Worker compressed receipts, permitting only already-claimed exact same-job recovery with empty launch history.
+
+# 2026-10-29: Runner v15 preserve original owned V1 music ducking and captions for held Chicago 8447 V2, with no publish or new attempt.

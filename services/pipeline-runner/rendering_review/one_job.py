@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 from urllib.request import Request, build_opener
 from urllib.error import HTTPError
+from urllib.parse import urlsplit, parse_qs
 
 import requests
 
@@ -314,6 +315,44 @@ def _render_sources(client,request,original_by_id,props,plan):
           "profile_id":CHICAGO,"media_kind":"image","render_url":url})
     return assets
 
+def _source_mix(drive,props,output_id):
+    """Preserve V1's verified audio mix and caption choice, not a new AI guess.
+
+    Read the canonical, already rendered Output Remotion props. The music file
+    must still exist in Drive and must resolve to the exact URL V1 used.
+    No source, publish or production-request fields are modified.
+    """
+    if not isinstance(props,dict) or type(props.get("spokenCaptionsEnabled")) is not bool:
+        fail("original_spoken_caption_policy_missing")
+    music=props.get("music")
+    if not isinstance(music,dict) or not isinstance(music.get("url"),str):
+        fail("original_music_mix_missing")
+    url=music["url"]
+    parsed=urlsplit(url)
+    query=parse_qs(parsed.query)
+    files=query.get("id") or []
+    if (parsed.scheme!="https" or parsed.netloc!="drive.google.com" or
+        parsed.path!="/uc" or query.get("export")!=["download"] or
+        len(files)!=1 or not IDENTITY.fullmatch(files[0]) or parsed.fragment):
+        fail("original_music_source_untrusted")
+    if set(music) - {"url","volume","duckingEnabled","duckingMultiplier",
+                      "duckFadeFrames","fadeInFrames","fadeOutFrames",
+                      "startFromSeconds"}:
+        fail("original_music_mix_schema_changed")
+    if (type(music.get("volume")) not in (float,int) or
+        not 0<=music["volume"]<=1):
+        fail("original_music_volume_untrusted")
+    details=drive.get_file(files[0])
+    if (details.get("id")!=files[0] or
+        not str(details.get("mimeType") or "").startswith("audio/")):
+        fail("original_music_drive_not_verified")
+    return {"verified":True,"authority":"server",
+            "output_id":output_id,"music":dict(music),
+            "music_drive_file_id":files[0],
+            "spoken_captions_enabled":props["spokenCaptionsEnabled"],
+            "spoken_caption_words_per_page":int(props.get("spokenCaptionWordsPerPage") or 4)}
+
+
 def _voiceover(client,drive,item,plan,claim):
     spoken=plan["creative"]["narration"]
     voice_id=resolve_content_voice_id(item)
@@ -383,6 +422,7 @@ def render_exact_attempt(output_id,job_id,*,client=None,drive=None,
     drive=drive or GoogleDriveClient()
     output,item,req,props,plan,source,originals=_evidence(client,drive,output_id,job_id)
     assets=_render_sources(client,req,originals,props,plan)
+    mix=_source_mix(drive,props,output_id)
     # Claim only the requested exact job. No scanning and no broad scheduler.
     request_id="rrclaim_"+hashlib.sha256(
         ("chicago-pilot-v1|"+output_id+"|"+job_id).encode()).hexdigest()[:48]
@@ -411,6 +451,7 @@ def render_exact_attempt(output_id,job_id,*,client=None,drive=None,
     ledger=RemoteLaunchLedger(worker_base=worker,shared_secret=secret,claim=claim)
     result=launch_review_render_once(job=job,plan=plan,source=source,
         resolved_assets=assets,voiceover=narration,watermark=watermark,
+        source_mix=mix,
         observed_source_segments=[],operations=ledger,renderer=renderer,
         renderer_base=renderer_base)
     if result.get("ok") is not True:fail("review_launch_requires_reconciliation")
