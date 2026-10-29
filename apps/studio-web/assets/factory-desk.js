@@ -68,14 +68,16 @@
     try { body = await response.json(); } catch { body = null; }
     if (!response.ok) {
       const detail = body?.error || body?.message || "";
-      if (detail) throw new Error(detail);
+      if (detail) { const error = new Error(detail); error.status = response.status; throw error; }
       if (response.status === 503) {
         throw new Error("Factory desk is busy (503). Wait a moment, check Activity, then retry.");
       }
       if (response.status >= 500) {
         throw new Error(`Factory desk timed out or failed (${response.status}). Check Activity before retrying — the batch may not have been stored.`);
       }
-      throw new Error(`Factory desk failed (${response.status})`);
+      const error = new Error(`Factory desk failed (${response.status})`);
+      error.status = response.status;
+      throw error;
     }
     return body || {};
   }
@@ -1177,7 +1179,8 @@
       setStatus("Review notes window is unavailable. Refresh Studio before sending back.", true);
       return;
     }
-    state.pendingFactoryFeedback = { payload, focusedElement: document.activeElement };
+    state.pendingFactoryFeedback = { payload, focusedElement: document.activeElement,
+      requestId: (typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : "factory_"+Date.now()+"_"+Math.random().toString(36).slice(2)) };
     const heading = $("factoryFeedbackTarget");
     const detail = $("factoryFeedbackScope");
     const error = $("factoryFeedbackError");
@@ -1188,10 +1191,10 @@
     const hints = document.querySelector("#factoryFeedbackHintsText");
     if (intro) intro.textContent = auto
       ? "Tell the Producer what to change in everyday language. Precise caption, narration, duration and uniquely identified photo/clip instructions can restart production automatically. Other creative requests are saved for guided editing."
-      : "Describe exactly what needs to change. Studio saves these review notes with the linked Production Request.";
+      : "Tell the Producer what needs to change. Accepted revisions return to Rendering Review; other outputs use Production.";
     if (hints) hints.textContent = auto
       ? "Examples: Please make it 20 seconds. · Add the photo named Chicago River Night. · Replace narration with: Welcome to Chicago. Unresolved photos/clips stay on hold for selection."
-      : "This send-back opens Production for manual editing and approval.";
+      : "Reviewed revisions return to their Producer conversation. Other outputs return to Production.";
     if (error) { error.hidden = true; error.textContent = ""; }
     textarea.value = "";
     const count = $("factoryFeedbackCount");
@@ -1231,6 +1234,37 @@
     if (error) { error.hidden = true; error.textContent = ""; }
     try {
       closeFactoryPreview();
+      // An output enrolled in Rendering Review must return to that SAME
+      // conversation. Probe the authoritative session first. A missing
+      // session (404) keeps the legacy Production send-back behavior.
+      const outputId = String(pending.payload?.id || "");
+      if(pending.payload?.kind==="output" && /^rec[A-Za-z0-9]{14}$/.test(outputId)){
+        let review = null;
+        try {
+          review = await fetchJson("/api/rendering-review/outputs/"+encodeURIComponent(outputId));
+        } catch (error) {
+          if(error.status!==404)throw error;
+        }
+        if(review?.session){
+          const receipt = await fetchJson("/api/rendering-review/outputs/"+
+            encodeURIComponent(outputId)+"/factory-return",{
+            method:"POST",
+            body:JSON.stringify({note:notes,client_request_id:pending.requestId}),
+          });
+          if(receipt?.received!==true || receipt?.review_hold_active!==true)
+            throw new Error("Your review note was not verified. The output has not been sent to Production.");
+          closeFactoryFeedback();
+          const notice="Your request has been received. Continue the conversation with the Producer in Rendering Review.";
+          setStatus(notice);
+          if(typeof window.StudioRenderingReview?.openOutput==="function"){
+            try{await window.StudioRenderingReview.openOutput(outputId,notice);}
+            catch(error){setStatus(notice+" Open Rendering Review to continue.",true);}
+          }else{
+            fallbackOpenPage("rendering-review");
+          }
+          return;
+        }
+      }
       const desk = await mutateDesk({ ...pending.payload, note: notes });
       const requestId = String(desk?.result?.production_request_id || pending.payload.production_request_id || "").trim();
       closeFactoryFeedback();
