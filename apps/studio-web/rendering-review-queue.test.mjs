@@ -416,7 +416,7 @@ test('Producer failure is visible beside Send, preserves direction and reuses re
   await send.listeners.click();
   const statuses=descendants(nodes.rrDetail).filter(n=>n.className==='rr-feedback-status');
   assert.equal(statuses.length,1);
-  assert.match(statuses[0].textContent,/Not sent: The Producer returned an invalid revision proposal/);
+  assert.match(statuses[0].textContent,/Could not confirm your reply: The Producer returned an invalid revision proposal/);
   assert.equal(composer.value,'Keep the morning opening, but show three more Riverwalk photos.');
   assert.equal(send.disabled,false);
   await send.listeners.click();
