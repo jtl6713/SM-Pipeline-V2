@@ -356,3 +356,5 @@ jobs:
 # 2026-10-28: Deploy Runner v7 natural-language two-photo confirmation for held #8447; separate render authorization and publication hold remain mandatory.
 
 # 2026-10-28: Deploy Runner v8 source-backed acceptance of Chicago #8447 photo confirmation with rerender wording. Save candidate only; separate render consent remains mandatory.
+
+# 2026-10-28: Deploy Runner v9 to restore source-backed BOTH-night-still acceptance for the already-persisted Chicago #8447 V4 review; no output record or render is changed by deployment.
