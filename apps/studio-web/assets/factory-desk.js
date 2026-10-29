@@ -209,8 +209,11 @@
     video.removeAttribute("poster");
 
     const thumb = String(card.thumbnail_url || "").trim();
-    const previewUrl = String(card.preview_url || "").trim()
-      || (/^rec[A-Za-z0-9]+$/.test(String(card.id || "")) ? `/api/outputs/${card.id}/preview` : "");
+    // Always use authenticated same-origin preview for output videos. The
+    // upstream source can be an accepted, private V2 Google Drive artifact.
+    const previewUrl = /^rec[A-Za-z0-9]+$/.test(String(card.id || ""))
+      ? `/api/outputs/${card.id}/preview`
+      : String(card.preview_url || "").trim();
     const imageOnly = looksLikeImageOnly(card);
 
     if (imageOnly && thumb) {
@@ -1177,7 +1180,13 @@
       setStatus("Review notes window is unavailable. Refresh Studio before sending back.", true);
       return;
     }
-    state.pendingFactoryFeedback = { payload, focusedElement: document.activeElement };
+    const retryId = typeof crypto!=="undefined" && typeof crypto.randomUUID==="function"
+      ? "factory_review_"+crypto.randomUUID().replace(/-/g,"")
+      : "";
+    state.pendingFactoryFeedback = {
+      payload:{...payload,client_request_id:retryId},
+      focusedElement:document.activeElement,
+    };
     const heading = $("factoryFeedbackTarget");
     const detail = $("factoryFeedbackScope");
     const error = $("factoryFeedbackError");
@@ -1234,6 +1243,14 @@
       const desk = await mutateDesk({ ...pending.payload, note: notes });
       const requestId = String(desk?.result?.production_request_id || pending.payload.production_request_id || "").trim();
       closeFactoryFeedback();
+      if (desk?.result?.rendering_review_reopened===true) {
+        const message=desk.result.message||
+          "Your change request has been received and saved. Continue the conversation with your AI Producer in Rendering Review.";
+        setStatus(message);
+        await window.StudioRenderingReview?.openFromFactory?.(pending.payload.id,message);
+        loadFactoryDesk(true).catch(()=>{});
+        return;
+      }
       if (desk?.result?.producer_queued) {
         setStatus(desk.result.message || "Producer revision accepted. Production continues without this page.");
         return;
