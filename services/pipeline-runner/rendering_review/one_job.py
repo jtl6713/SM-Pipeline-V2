@@ -77,26 +77,47 @@ def select_one(client,table,key,value,fields=None):
     return rows[0]
 
 def _post_once(worker,secret,route,body,timeout=20):
+    """One protected HTTP POST. No redirects, retries or implicit replays.
+
+    The production Cloudflare route is known to authorize the service token
+    through HttpClient. Use the same direct single-request semantics rather
+    than Python-urllib's default request fingerprint/redirect stack.
+    """
     url=_validate_base(worker)+route
-    req=Request(url,method="POST",data=json.dumps(body,separators=(",",":")).encode(),
-        headers={"Content-Type":"application/json",
-                 "X-Rendering-Review-Job-Secret":secret,
-                 **_access_headers()})
+    headers={"Content-Type":"application/json",
+             "X-Rendering-Review-Job-Secret":secret,
+             "User-Agent":"",
+             **_access_headers()}
+    data=json.dumps(body,separators=(",",":")).encode("utf-8")
     try:
-        with build_opener(_NoRedirect).open(req,timeout=timeout) as result:
-            raw=result.read(8193)
-            if result.status!=200 or len(raw)>8192:
-                fail("review_worker_receipt_invalid")
-        reply=json.loads(raw)
-    except HTTPError as exc:
-        # A 401/403/404/405/422 is an authoritative rejection before a
-        # claim receipt, not an ambiguous successful render. Never retry here.
-        if exc.code in (401, 403, 404, 405, 422):
-            raise ExactReviewRenderDenied("review_worker_http_denied_" + str(exc.code)) from exc
+        with requests.post(url,headers=headers,data=data,timeout=timeout,
+                           allow_redirects=False,stream=True) as result:
+            status=result.status_code
+            raw=result.raw.read(8193)
+    except requests.RequestException as exc:
         raise ExactReviewRenderDenied("review_worker_reply_ambiguous_reconcile") from exc
     except Exception as exc:
-        # The protected Worker may already have persisted this event.
         raise ExactReviewRenderDenied("review_worker_reply_ambiguous_reconcile") from exc
+    if status!=200:
+        # A readable Worker application error is a narrow safe denial code,
+        # NOT a permit to retry a render. Never surface arbitrary body text.
+        reason=""
+        if status in (401,403,404,405,409,415,422):
+            try:
+                response=json.loads(raw)
+                code=response.get("code") if isinstance(response,dict) else None
+                if isinstance(code,str) and re.fullmatch(r"[A-Z][A-Z0-9_]{2,80}",code):
+                    reason="_"+code.lower()
+            except (ValueError,TypeError,UnicodeError):
+                pass
+            fail("review_worker_http_denied_"+str(status)+reason)
+        fail("review_worker_reply_ambiguous_reconcile")
+    if len(raw)>8192:
+        fail("review_worker_receipt_invalid")
+    try:
+        reply=json.loads(raw)
+    except (ValueError,UnicodeError):
+        fail("review_worker_receipt_invalid")
     if not isinstance(reply,dict) or reply.get("ok") is not True:
         fail("review_worker_receipt_unverified")
     return reply
