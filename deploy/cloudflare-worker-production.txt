@@ -755,3 +755,5 @@ Rendering Review V3 source validation + Producer executable timeline canary code
 2026-10-29 exact Chicago 8447 QA correction: guarded original V1 audio rebind, only after independent Runner proof; no publishing or new rendering.
 
 2026-10-29 Studio Worker 0.10.689 exact Chicago review QA audio repair version verification, hold retained.
+
+2026-10-29: Deploy Worker 0.10.690-review-v2-factory-handoff. Promote accepted, validated Chicago Rendering Review V2 into Factory Needs Eyes with no scheduling or publishing; preserve V1.
