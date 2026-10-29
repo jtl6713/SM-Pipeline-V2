@@ -60,17 +60,43 @@ def create_review_media_blueprint(settings, client_factory=_client,
             hold=session.get("review_hold") or {}
             of=(client.get_record(OUTPUTS,output_id) or {}).get("fields",{})
             content_link=of.get("Content_Item")
+            # Permit either the original active hold OR the durable selected
+            # Factory handoff; both are backed by the same review session and
+            # exact authorized output. Do not grant access to superseded V2s.
+            receipt=session.get("factory_handoff") or {}
+            selected=next((a for a in (session.get("attempts") or [])
+                           if a.get("id")==attempt_id),None)
+            held=(hold.get("active") is True and
+                  of.get("Studio_Render_Review_Hold_Active") is True and
+                  of.get("Studio_Render_Review_Hold_ID")==hold.get("id") and
+                  of.get("Studio_Render_Review_Hold_Owner")==session.get("id") and
+                  of.get("Studio_Render_Review_Session_ID")==session.get("id") and
+                  of.get("Do_Not_Publish") is True)
+            selected_for_factory=(session.get("state")=="approved" and
+                  hold.get("active") is False and
+                  receipt.get("status")=="ready_for_factory_approval" and
+                  receipt.get("attempt_id")==session.get("current_attempt_id") and
+                  receipt.get("attempt_id")==attempt_id and
+                  selected is not None and
+                  receipt.get("artifact_id")==selected.get("artifact_id") and
+                  of.get("Final_File_ID")==receipt.get("artifact_id") and
+                  of.get("Studio_Render_Review_Hold_Active") is not True and
+                  not of.get("Studio_Render_Review_Hold_ID") and
+                  not of.get("Studio_Render_Review_Hold_Owner") and
+                  not of.get("Studio_Render_Review_Session_ID") and
+                  not of.get("Do_Not_Publish") and
+                  not of.get("Auto_Publish_Enabled") and
+                  of.get("Output_Status")=="Ready for Review" and
+                  of.get("Review_Status")=="Review Sent" and
+                  of.get("Publish_Status")=="Not Ready" and
+                  not of.get("Scheduled_Post_Date") and
+                  not of.get("Studio_Scheduled_At"))
             if (session.get("schema")!="studio.render-review.1" or
                 session.get("id")!=sf.get("Session_ID") or
                 session.get("output_id")!=output_id or
                 session.get("profile_id")!=CHICAGO or
                 sf.get("Row_Version")!=session.get("version") or
-                not hold.get("active") or
-                of.get("Studio_Render_Review_Hold_Active") is not True or
-                of.get("Studio_Render_Review_Hold_ID")!=hold.get("id") or
-                of.get("Studio_Render_Review_Hold_Owner")!=session.get("id") or
-                of.get("Studio_Render_Review_Session_ID")!=session.get("id") or
-                of.get("Do_Not_Publish") is not True or
+                not (held or selected_for_factory) or
                 of.get("Platform")!="Instagram" or
                 of.get("Platform_Output_Type")!="Instagram Reel" or
                 any(of.get(k) for k in ("Published_At","Platform_Post_ID",
