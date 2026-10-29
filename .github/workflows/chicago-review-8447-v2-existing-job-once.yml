@@ -34,6 +34,17 @@ jobs:
           $http=[System.Net.Http.HttpClient]::new()
           $http.Timeout=[TimeSpan]::FromSeconds(30)
           try {
+            # Existing authorized Airtable job previously had no claim, lease,
+            # launch events, or artifact. Never post if Runner still remembers it.
+            $statusReq=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get,'http://127.0.0.1:3350/jobs/rendering-review/run-exact/rrjob_26054929500b8abe981e3f6131b5c668209bf9c765edb06c')
+            [void]$statusReq.Headers.TryAddWithoutValidation('X-Pipeline-Secret',$secret)
+            $statusReply=$http.SendAsync($statusReq).GetAwaiter().GetResult()
+            $statusData=($statusReply.Content.ReadAsStringAsync().GetAwaiter().GetResult()) | ConvertFrom-Json
+            Write-Output ('exact_v2_before_state='+[string]$statusData.state)
+            if([int]$statusReply.StatusCode -ne 200 -or -not $statusData.ok -or
+               [string]$statusData.state -ne 'unknown'){throw 'runner_job_state_not_safe_for_reconciliation'}
+            # Existing job ID only. The source and hold guards, Worker lease,
+            # and durable Remotion launch ledger still gate actual rendering.
             $req=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post,'http://127.0.0.1:3350/jobs/rendering-review/run-exact')
             $req.Content=[System.Net.Http.StringContent]::new($body,[System.Text.Encoding]::UTF8,'application/json')
             [void]$req.Headers.TryAddWithoutValidation('X-Pipeline-Secret',$secret)
@@ -45,6 +56,23 @@ jobs:
               throw 'exact_v2_trigger_not_accepted'
             }
             Write-Output 'exact_v2_render_triggered=true existing_job_only=true no_publish=true'
+            for($i=0; $i -lt 25; $i++){
+              Start-Sleep -Seconds 3
+              $poll=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get,'http://127.0.0.1:3350/jobs/rendering-review/run-exact/rrjob_26054929500b8abe981e3f6131b5c668209bf9c765edb06c')
+              [void]$poll.Headers.TryAddWithoutValidation('X-Pipeline-Secret',$secret)
+              $pollResp=$http.SendAsync($poll).GetAwaiter().GetResult()
+              if([int]$pollResp.StatusCode -ne 200){throw 'runner_status_unavailable'}
+              $state=($pollResp.Content.ReadAsStringAsync().GetAwaiter().GetResult()) | ConvertFrom-Json
+              if([string]$state.state -eq 'ready_for_review'){
+                Write-Output ('exact_v2_final_state=ready_for_review artifact_present='+[bool]$state.drive_file_id)
+                break
+              }
+              if([string]$state.state -eq 'needs_reconciliation'){
+                Write-Output ('exact_v2_final_state=needs_reconciliation reason_code='+[string]$state.reason_code)
+                break
+              }
+              if($i -eq 24){Write-Output ('exact_v2_final_state='+[string]$state.state)}
+            }
           } finally {$http.Dispose()}
           PS1
           python - <<'PY'
