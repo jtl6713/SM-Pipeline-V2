@@ -82,8 +82,10 @@ function assertFactoryReady(row,f,fileId){
 export async function handoffApprovedReviewToFactory({output_id,env,operations,now=()=>new Date().toISOString()}){
   if(!rec.test(str(output_id)) || output_id!==env?.RENDERING_REVIEW_EXACT_OUTPUT_ID)
     deny("FACTORY_PILOT_SCOPE","Exact pilot output required",403);
-  if(env?.RENDERING_REVIEW_CREATIVE_ACCEPT_ENABLED!=="true")
-    deny("FACTORY_HANDOFF_DISABLED","Rendering Review handoff disabled",405);
+  // Once a revision is durably accepted, it must remain eligible to drain
+  // into Factory even if new Creative Accept or enrollment is later disabled.
+  // The exact-output gate, current approved session, independent media proof,
+  // output lease, and protected caller remain mandatory.
   requireFunctions(operations);
   const o=operations;
   return o.withOutputLock(output_id,async()=>{
