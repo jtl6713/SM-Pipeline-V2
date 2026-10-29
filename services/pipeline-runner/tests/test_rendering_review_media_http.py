@@ -14,6 +14,7 @@ SECRET="x"*32
 
 class FakeClient:
     hold=True
+    factory_ready=False
     def __init__(self): self.seen=[]
     def list_records(self,table,**kwargs):
         self.seen.append(table)
@@ -23,6 +24,11 @@ class FakeClient:
                 "review_hold":{"active":self.hold,"id":"hold-test","owner":SESSION},
                 "attempts":[{"id":ATTEMPT,"number":2,
                     "status":"ready_for_review","artifact_id":FILE}]}
+            if self.factory_ready:
+                session.update({"state":"approved","approved_attempt_id":ATTEMPT,
+                    "current_attempt_id":ATTEMPT,"factory_handoff":{
+                        "status":"ready_for_factory_approval","attempt_id":ATTEMPT,
+                        "artifact_id":FILE}})
             return [{"fields":{"Session_ID":SESSION,"Row_Version":4,
                                 "Session_JSON":json.dumps(session)}}]
         if table==ATTEMPTS:
@@ -37,7 +43,13 @@ class FakeClient:
                 "Studio_Render_Review_Hold_ID":"hold-test",
                 "Studio_Render_Review_Hold_Owner":SESSION,
                 "Studio_Render_Review_Session_ID":SESSION,
-                "Do_Not_Publish":True,"Platform":"Instagram",
+                "Do_Not_Publish":not self.factory_ready,
+                "Final_File_ID":FILE if self.factory_ready else "",
+                "Auto_Publish_Enabled":False,
+                "Output_Status":"Ready for Review",
+                "Review_Status":"Review Sent",
+                "Publish_Status":"Not Ready",
+                "Platform":"Instagram",
                 "Platform_Output_Type":"Instagram Reel"}}
         if table==ITEMS: return {"fields":{"Content_Profile":[CHICAGO]}}
         raise ValueError(table)
@@ -55,6 +67,8 @@ class FakeResponse:
 class ProxyTests(unittest.TestCase):
     def setUp(self):
         self.client=FakeClient()
+        self.client.hold=True
+        self.client.factory_ready=False
         self.transfers=[]
         def transport(url,**kwargs):
             self.transfers.append((url,kwargs))
@@ -89,6 +103,21 @@ class ProxyTests(unittest.TestCase):
         self.client.hold=False
         self.assertEqual(self.http.get(self.url,headers={"X-Pipeline-Secret":SECRET}).status_code,409)
         self.assertEqual(self.transfers,[])
+    def test_accepted_factory_v2_streams_without_reinstating_review_hold(self):
+        self.client.hold=False
+        self.client.factory_ready=True
+        r=self.http.get(self.url,headers={"X-Pipeline-Secret":SECRET,
+                                          "Range":"bytes=0-3"})
+        self.assertEqual(r.status_code,206)
+        self.assertEqual(r.data,b"mp4!")
+        self.assertEqual(len(self.transfers),1)
+
+    def test_released_without_factory_receipt_is_denied(self):
+        self.client.hold=False
+        self.assertEqual(self.http.get(self.url,headers={
+            "X-Pipeline-Secret":SECRET}).status_code,409)
+        self.assertEqual(self.transfers,[])
+
     def test_head_probe_no_google_media_in_response(self):
         r=self.http.head(self.url,headers={"X-Pipeline-Secret":SECRET})
         self.assertEqual(r.status_code,200)
