@@ -14,12 +14,17 @@ SECRET="x"*32
 
 class FakeClient:
     hold=True
+    factory=False
     def __init__(self): self.seen=[]
     def list_records(self,table,**kwargs):
         self.seen.append(table)
         if table==SESSIONS:
             session={"schema":"studio.render-review.1","id":SESSION,
                 "output_id":OUTPUT,"profile_id":CHICAGO,"version":4,
+                "state":"approved" if self.factory else "ready_for_review",
+                "current_attempt_id":ATTEMPT,
+                "factory_handoff":{"status":"ready_for_factory_approval",
+                    "attempt_id":ATTEMPT,"artifact_id":FILE} if self.factory else None,
                 "review_hold":{"active":self.hold,"id":"hold-test","owner":SESSION},
                 "attempts":[{"id":ATTEMPT,"number":2,
                     "status":"ready_for_review","artifact_id":FILE}]}
@@ -37,7 +42,13 @@ class FakeClient:
                 "Studio_Render_Review_Hold_ID":"hold-test",
                 "Studio_Render_Review_Hold_Owner":SESSION,
                 "Studio_Render_Review_Session_ID":SESSION,
-                "Do_Not_Publish":True,"Platform":"Instagram",
+                "Do_Not_Publish":not self.factory,
+                "Final_File_ID":FILE if self.factory else None,
+                "Output_Status":"Ready for Review",
+                "Review_Status":"Review Sent",
+                "Publish_Status":"Not Ready",
+                "Auto_Publish_Enabled":False,
+                "Platform":"Instagram",
                 "Platform_Output_Type":"Instagram Reel"}}
         if table==ITEMS: return {"fields":{"Content_Profile":[CHICAGO]}}
         raise ValueError(table)
@@ -88,6 +99,35 @@ class ProxyTests(unittest.TestCase):
     def test_lost_hold_denied_before_drive(self):
         self.client.hold=False
         self.assertEqual(self.http.get(self.url,headers={"X-Pipeline-Secret":SECRET}).status_code,409)
+        self.assertEqual(self.transfers,[])
+    def test_factory_selected_accepted_v2_streams_without_temporary_hold(self):
+        self.client.hold=False
+        self.client.factory=True
+        r=self.http.get(self.url,headers={"X-Pipeline-Secret":SECRET,"Range":"bytes=0-3"})
+        self.assertEqual(r.status_code,206)
+        self.assertEqual(r.data,b"mp4!")
+        self.assertEqual(len(self.transfers),1)
+    def test_factory_preview_rejects_unselected_or_publishing_output(self):
+        self.client.hold=False
+        self.client.factory=True
+        original=self.client.get_record
+        def wrong_file(table,id):
+            item=original(table,id)
+            if table==OUTPUTS:
+                item["fields"]["Final_File_ID"]="a_different_file_not_selected"
+            return item
+        self.client.get_record=wrong_file
+        r=self.http.get(self.url,headers={"X-Pipeline-Secret":SECRET})
+        self.assertEqual(r.status_code,409)
+        self.assertEqual(self.transfers,[])
+        self.client.get_record=original
+        def publishing(table,id):
+            item=original(table,id)
+            if table==OUTPUTS:item["fields"]["Publish_Started_At"]="2026-10-29"
+            return item
+        self.client.get_record=publishing
+        r=self.http.get(self.url,headers={"X-Pipeline-Secret":SECRET})
+        self.assertEqual(r.status_code,409)
         self.assertEqual(self.transfers,[])
     def test_head_probe_no_google_media_in_response(self):
         r=self.http.head(self.url,headers={"X-Pipeline-Secret":SECRET})
