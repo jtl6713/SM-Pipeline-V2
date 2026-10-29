@@ -1215,12 +1215,16 @@
     const intro = $("factoryFeedbackIntro");
     const hints = document.querySelector("#factoryFeedbackHintsText");
     if (intro) intro.textContent = returnReview
-      ? "Tell your Producer what needs to change in everyday language. Your feedback will be saved in the existing Rendering Review conversation."
+      ? payload?.action === "start_render_review"
+        ? "Describe what you want changed. Your comments are required, and they will start a Rendering Review conversation with your Producer."
+        : "Tell your Producer what needs to change in everyday language. Your comments will be added to the existing Rendering Review conversation."
       : auto
       ? "Tell the Producer what to change in everyday language. Precise caption, narration, duration and uniquely identified photo/clip instructions can restart production automatically. Other creative requests are saved for guided editing."
       : "Describe exactly what needs to change. Studio saves these review notes with the linked Production Request.";
     if (hints) hints.textContent = returnReview
-      ? "Your selected V2 stays preserved and publishing is held while you continue with the Producer. No new render starts until you authorize it."
+      ? payload?.action === "start_render_review"
+        ? "Your current render is preserved and publishing is held. After submitting, continue with your Producer in Rendering Review. No new render starts until you authorize it."
+        : "Your selected V2 stays preserved and publishing is held while you continue with the Producer. No new render starts until you authorize it."
       : auto
       ? "Examples: Please make it 20 seconds. · Add the photo named Chicago River Night. · Replace narration with: Welcome to Chicago. Unresolved photos/clips stay on hold for selection."
       : "This send-back opens Production for manual editing and approval.";

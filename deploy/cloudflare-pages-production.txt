@@ -586,3 +586,5 @@ Redeploy Studio UI 0.6.763-idea-lifecycle-live after removing stale Worker versi
 2026-10-29: Deploy Studio UI 0.6.778 Factory V2 preview and Request Changes return-to-Rendering-Review conversation with confirmation. Other Factory workflows unchanged.
 
 2026-10-29: Deploy Studio UI 0.6.779 Factory-only conversational review. Written rework comments are mandatory, no review-page admission, no upstream automatic enrollment.
+
+2026-10-29: Deploy UI 0.6.780. First-time Factory Request Changes dialog distinguishes new Rendering Review conversation from an existing V2 return, with clear mandatory notes and preserved V1 semantics.
