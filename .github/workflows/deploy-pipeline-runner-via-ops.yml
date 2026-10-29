@@ -53,7 +53,8 @@ jobs:
             services/pipeline-runner/tests/test_rendering_review_publication.py \
             services/pipeline-runner/tests/test_rendering_review_producer.py \
             services/pipeline-runner/tests/test_rendering_review_producer_http.py \
-            services/pipeline-runner/tests/test_rendering_review_recovery.py
+            services/pipeline-runner/tests/test_rendering_review_recovery.py \
+            services/pipeline-runner/tests/test_rendering_review_http_transport.py
 
       - name: Deploy Pipeline Runner through allowlisted Ops action
         shell: bash
@@ -369,3 +370,5 @@ jobs:
 # 2026-10-29: protected Runner v12 no-launch proof for recovering existing authorized Chicago Reel 8447 V2 job.
 
 # 2026-10-29: guarded Worker HTTP transport used by exact held Chicago #8447 V2 (Runner v13). No claim, render or publish from deploy.
+
+# 2026-10-29: deploy Runner v14 to decode Worker compressed receipts, permitting only already-claimed exact same-job recovery with empty launch history.
