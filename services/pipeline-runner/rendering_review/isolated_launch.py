@@ -70,6 +70,7 @@ def launch_review_render_once(
     *, job: dict, plan: dict, source: dict, resolved_assets: list,
     voiceover: dict, watermark: dict, observed_source_segments: list | None,
     operations: Any, renderer: Any, renderer_base: str,
+    source_mix: dict | None = None,
 ) -> dict:
     """Side-effect boundary invoked only by an authenticated outbox consumer.
 
@@ -93,6 +94,7 @@ def launch_review_render_once(
             job=job, plan=plan, source=source,
             resolved_assets=resolved_assets, voiceover=voiceover,
             watermark=watermark, observed_source_segments=observed_source_segments,
+            source_mix=source_mix,
         )
     except IsolatedRenderDenied as exc:
         _fail("render_inputs_not_verified:" + str(exc))
