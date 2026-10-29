@@ -13,12 +13,18 @@ class ReviewRecoveryDenied(RuntimeError):
     pass
 
 
+def select_one(*args, **kwargs):
+    """Lazy source lookup, injectable in hermetic no-write tests."""
+    from rendering_review.one_job import select_one as lookup
+    return lookup(*args, **kwargs)
+
+
 def require_unlaunched_authority(output_id: str, job_id: str, *, client=None) -> bool:
     # Keep these optional until an actual guarded recovery request; the
     # normal service and hermetic producer tests must import without clients.
     from airtable.client import AirtableClient
     from rendering_review.one_job import (
-        OUTPUTS, SESSIONS, JOBS, ATTEMPTS, select_one,
+        OUTPUTS, SESSIONS, JOBS, ATTEMPTS,
     )
     client = client if client is not None else AirtableClient()
     output = client.get_record(OUTPUTS, output_id)
