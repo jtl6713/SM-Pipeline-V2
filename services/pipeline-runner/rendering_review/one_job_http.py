@@ -125,6 +125,22 @@ def create_exact_review_render_blueprint(settings,runner=render_exact_attempt,
                        job_id=job_id, output_id=output_id,
                        public_post_created=False), 202
 
+    @blueprint.get("/jobs/rendering-review/private-audio-qa/rec0uVrVeiUM6shp9")
+    def exact_audio_qa_proof():
+        # Read-only, exact artifact proof for the already completed V2.
+        # No image generation, Remotion calls, uploads or publication.
+        if not authorized():
+            return jsonify(ok=False,error="runner_auth_required"),401
+        if os.environ.get("RENDERING_REVIEW_EXACT_OUTPUT_ID") != "rec0uVrVeiUM6shp9":
+            return jsonify(ok=False,error="exact_output_not_allowlisted"),403
+        try:
+            from rendering_review.audio_qa_proof import verify_8447_audio_repair
+            proof=verify_8447_audio_repair()
+            return jsonify(ok=True,**proof),200
+        except Exception:
+            # Never expose file paths, provider errors or credentials.
+            return jsonify(ok=False,error="private_media_proof_unverified"),409
+
     @blueprint.get("/jobs/rendering-review/run-exact/<job_id>")
     def exact_status(job_id):
         if not authorized():

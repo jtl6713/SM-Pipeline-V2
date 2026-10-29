@@ -1,6 +1,7 @@
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
 import { serveReviewAttemptVideo, fetchTrustedRunnerReviewMedia } from "./rendering-review-attempt-video.mjs";
 import { completeReviewAttempt } from "./rendering-review-completion-http.mjs";
+import {repairExactReviewAudio} from "./rendering-review-audio-qa-repair.mjs";
 import {applyReviewEvent} from "./rendering-review-policy.mjs";
 import { makeRenderingReviewAirtableOperations } from "./rendering-review-airtable.mjs";
 import { CHICAGO_PROFILE_ID } from "./rendering-review-policy.mjs";
@@ -1013,7 +1014,7 @@ export default {
       // The old global Phase-2A allowlist must not reject them before inspection.
       const isChicagoReviewPost = request.method === "POST" &&
         (/^\/api\/rendering-review\/outputs\/rec[A-Za-z0-9]{14}\/(?:enroll|producer-conversation|producer-proposal|commit-attempt|messages|approve)$/.test(url.pathname) ||
-         /^\/(?:api\/)?internal\/rendering-review\/(?:claim-render-job|launch-ledger|complete-attempt|ig-dispatch-claim)$/.test(url.pathname));
+         /^\/(?:api\/)?internal\/rendering-review\/(?:claim-render-job|launch-ledger|complete-attempt|qa-audio-rebind|ig-dispatch-claim)$/.test(url.pathname));
       const allowedMethod =
         isChicagoReviewPost ||
         request.method === "GET" ||
@@ -1630,6 +1631,84 @@ export default {
             }),
           },
         });
+        return respond(request,env,receipt);
+      }
+
+      // A one-time, authenticated, exact held V2 audio QA correction.
+      // Does not render, upload, publish or mutate the original V1 output.
+      if (url.pathname==="/internal/rendering-review/qa-audio-rebind" ||
+          url.pathname==="/api/internal/rendering-review/qa-audio-rebind") {
+        requireConfig(env);
+        let adapter;
+        const authorizeOutput=async outputId=>{
+          const output=await adapter.readOutput(outputId);
+          return output.profile_id===CHICAGO_PROFILE_ID&&
+            output.platform==="Instagram"&&output.output_type==="Instagram Reel";
+        };
+        adapter=makeRenderingReviewAirtableOperations({
+          env,airtableFetch,listRecords:reviewListRecords,readField:f,
+          withOutputApprovalLock,authorizeReview:authorizeOutput,
+          authorizeEvent:async()=>false,mutationGate:true,
+          revokeScheduleUnderHold:async()=>{throw new HttpError(405,"QA repair cannot change schedules")},
+        });
+        const readAttempt=async attemptId=>{
+          if(!/^[A-Za-z0-9_-]{8,120}$/.test(String(attemptId||"")))return null;
+          const rows=await reviewListRecords(env,RENDER_REVIEW_TABLES.attempts,{
+            limit:2,filterFormula:'{Attempt_ID}="'+attemptId+'"',
+            fields:["Attempt_ID","Session_ID","Output_Record_ID","Attempt_Status",
+                    "Artifact_File_ID","Validation_Evidence_JSON"]
+          });
+          if(!Array.isArray(rows)||rows.length!==1)return null;
+          const a=rows[0].fields||{};
+          return {record_id:rows[0].id,attempt_id:String(a.Attempt_ID||""),
+            session_id:String(a.Session_ID||""),output_id:String(a.Output_Record_ID||""),
+            status:String(a.Attempt_Status||""),
+            artifact_file_id:String(a.Artifact_File_ID||""),
+            validation_evidence_json:a.Validation_Evidence_JSON};
+        };
+        const verifyCorrectedMedia=async({file_id,sha256,expected_bytes,
+                                         previous_file_id,original_file_id})=>{
+          if(file_id!=="1Qm8H_s1QJRQgsVFG7eexlwtE0xvDn7up"||
+             previous_file_id!=="1MgyPrgEDWUFwdX--uZamtK8_fvY7Nki3"||
+             original_file_id!=="1XZ-_ARlXoP5mwILho13f81vmWQlpgTs4"||
+             sha256!=="8ee06c1f0234959c5ff4610b020d6bb72a005200ffa5d6590d920754b3c0f77e"||
+             expected_bytes!==21961807)return false;
+          const secret=String(env.PIPELINE_RUNNER_SHARED_SECRET||"");
+          const base=String(env.PIPELINE_RUNNER_URL||"").trim();
+          const origin=base.endsWith("/")?base.slice(0,-1):base;
+          if(secret.length<24||origin!=="https://pipeline.chicagoshining.com")
+            throw new HttpError(503,"QA proof endpoint unavailable");
+          let response;
+          try {
+            response=await fetch(origin+
+              "/jobs/rendering-review/private-audio-qa/rec0uVrVeiUM6shp9",{
+                method:"GET",headers:{"X-Pipeline-Secret":secret},redirect:"manual"
+              });
+          } catch {return false}
+          if(response.status!==200)return false;
+          let proof;try{proof=await response.json()}catch{return false}
+          return proof?.ok===true&&proof.verified===true&&
+            proof.corrected_file_id===file_id&&
+            proof.corrected_sha256===sha256&&
+            proof.byte_count===expected_bytes&&
+            proof.previous_file_id===previous_file_id&&
+            proof.original_file_id===original_file_id&&
+            proof.v2_video_unchanged===true&&
+            proof.v1_audio_unchanged===true&&
+            proof.public_post_created===false;
+        };
+        const receipt=await repairExactReviewAudio({request,env,operations:{
+          withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+          readSession:id=>adapter.readSession(id),
+          readHold:id=>adapter.readHold(id),
+          readOutput:id=>adapter.readOutput(id),
+          readAttempt,
+          patchAttempt:(id,fields)=>airtableFetch(env,RENDER_REVIEW_TABLES.attempts,id,{
+            method:"PATCH",body:JSON.stringify({fields,typecast:false})
+          }),
+          saveSessionIfVersion:args=>adapter.saveSessionIfVersion(args),
+          verifyCorrectedMedia,
+        }});
         return respond(request,env,receipt);
       }
 
