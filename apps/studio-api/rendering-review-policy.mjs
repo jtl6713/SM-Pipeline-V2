@@ -315,6 +315,21 @@ export function applyReviewEvent(session, event) {
     // orchestrator must retain the durable hold until a separate scheduler-authorized release.
     s.approved_attempt_id = s.current_attempt_id;
     s.state = "approved";
+  } else if (kind === "HANDOFF_TO_FACTORY") {
+    // This event records a PREVIOUSLY VERIFIED V2 asset staged on the
+    // authoritative output under its still-active publication hold.
+    // It is NOT a publishing approval or scheduling receipt.
+    if (s.state !== "approved" || s.review_hold.active !== true ||
+        event.factory_handoff_verified !== true ||
+        event.hold_id !== s.review_hold.id ||
+        event.hold_owner !== s.id ||
+        event.attempt_id !== s.current_attempt_id ||
+        event.attempt_id !== s.approved_attempt_id ||
+        event.artifact_id !== current(s)?.artifact_id ||
+        current(s)?.number < 2 ||
+        current(s)?.status !== "ready_for_review")
+      fail("FACTORY_HANDOFF_DENIED", "Verified accepted V2 and exact owned hold required");
+    s.review_hold.active = false;
   } else if (kind === "RELEASE_REVIEW_HOLD") {
     if (s.state !== "approved" || event.scheduler_receipt_verified !== true ||
         event.hold_id !== s.review_hold.id || event.hold_owner !== s.id)
