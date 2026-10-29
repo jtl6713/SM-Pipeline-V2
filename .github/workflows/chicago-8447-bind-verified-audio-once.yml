@@ -1,0 +1,132 @@
+name: Verify and bind exact Chicago 8447 held V2 audio correction once
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/chicago-8447-bind-verified-audio-once.yml']
+permissions:
+  contents: read
+concurrency:
+  group: chicago-8447-original-v2-audio-qa-binding
+  cancel-in-progress: false
+jobs:
+  verify-and-bind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Check protected Runner v16 has shipped
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          for i in $(seq 1 36); do
+            if curl -fsS --max-time 12 https://pipeline.chicagoshining.com/health -o /tmp/qa-runner-health.json; then
+              if jq -e '.ok==true and .version=="2026-10-29-chicago-v2-audio-qa-repair-v16"' /tmp/qa-runner-health.json >/dev/null; then
+                echo 'qa_runner_v16_confirmed=true'
+                exit 0
+              fi
+            fi
+            sleep 5
+          done
+          echo 'qa_runner_v16_not_available=true'
+          exit 1
+      - name: Prove exact three Drive files and bitstream hashes before binding original V2 attempt
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/chicago-qa-bind.ps1 <<'PS1'
+          $ErrorActionPreference='Stop'
+          $path=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+          if(-not (Test-Path -LiteralPath $path)){throw 'runner_env_missing'}
+          $rows=@(Get-Content -LiteralPath $path)
+          function Required([string]$key){
+            $matches=@($rows|Where-Object {$_ -match ('^\s*'+[regex]::Escape($key)+'\s*=')})
+            if($matches.Count -ne 1){throw 'runner_required_binding_unavailable'}
+            $v=($matches[0] -split '=',2)[1].Trim().Trim('"').Trim([char]39)
+            if([string]::IsNullOrWhiteSpace($v)){throw 'runner_required_binding_empty'}
+            return $v
+          }
+          $runnerSecret=Required 'PIPELINE_RUNNER_SHARED_SECRET'
+          $jobSecret=Required 'RENDERING_REVIEW_RENDER_JOB_SHARED_SECRET'
+          $cfId=Required 'CF_ACCESS_CLIENT_ID'
+          $cfSecret=Required 'CF_ACCESS_CLIENT_SECRET'
+          if($runnerSecret.Length -lt 24 -or $jobSecret.Length -lt 24){throw 'protected_secrets_short'}
+          Add-Type -AssemblyName System.Net.Http
+          $http=[System.Net.Http.HttpClient]::new()
+          $http.Timeout=[TimeSpan]::FromMinutes(4)
+          function Json([System.Net.Http.HttpResponseMessage]$response) {
+            $raw=$response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            try{return ($raw|ConvertFrom-Json -ErrorAction Stop)}catch{throw 'private_json_unavailable'}
+          }
+          try {
+            $h=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get,'https://studio.chicagoshining.com/api/health')
+            [void]$h.Headers.TryAddWithoutValidation('CF-Access-Client-Id',$cfId)
+            [void]$h.Headers.TryAddWithoutValidation('CF-Access-Client-Secret',$cfSecret)
+            $hr=$http.SendAsync($h).GetAwaiter().GetResult()
+            if([int]$hr.StatusCode -ne 200){throw 'studio_health_unverified'}
+            $health=Json $hr
+            if(-not $health.ok -or -not ([string]$health.version).StartsWith('0.10.689-review-audio-qa-repair')){
+              throw 'studio_audio_qa_version_not_deployed'
+            }
+            Write-Output 'qa_studio_worker_689_confirmed=true'
+            $proofReq=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get,'http://127.0.0.1:3350/jobs/rendering-review/private-audio-qa/rec0uVrVeiUM6shp9')
+            [void]$proofReq.Headers.TryAddWithoutValidation('X-Pipeline-Secret',$runnerSecret)
+            $proofResp=$http.SendAsync($proofReq).GetAwaiter().GetResult()
+            $proof=Json $proofResp
+            if([int]$proofResp.StatusCode -ne 200 -or $proof.verified -ne $true -or
+               $proof.v1_audio_unchanged -ne $true -or $proof.v2_video_unchanged -ne $true -or
+               [string]$proof.corrected_file_id -ne '1Qm8H_s1QJRQgsVFG7eexlwtE0xvDn7up' -or
+               [string]$proof.corrected_sha256 -ne '8ee06c1f0234959c5ff4610b020d6bb72a005200ffa5d6590d920754b3c0f77e' -or
+               [int]$proof.byte_count -ne 21961807 -or $proof.public_post_created -ne $false){
+              Write-Output ('qa_proof_http='+[int]$proofResp.StatusCode+' verified='+[bool]$proof.verified)
+              throw 'audio_video_identity_not_verified_no_mutation'
+            }
+            Write-Output 'qa_stream_proof=verified_v2_video_and_v1_audio'
+            $payload='{"confirm":"BIND-VERIFIED-AUDIO-ONLY"}'
+            $req=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post,'https://studio.chicagoshining.com/api/internal/rendering-review/qa-audio-rebind')
+            $req.Content=[System.Net.Http.StringContent]::new($payload,[System.Text.Encoding]::UTF8,'application/json')
+            [void]$req.Headers.TryAddWithoutValidation('CF-Access-Client-Id',$cfId)
+            [void]$req.Headers.TryAddWithoutValidation('CF-Access-Client-Secret',$cfSecret)
+            [void]$req.Headers.TryAddWithoutValidation('X-Rendering-Review-Job-Secret',$jobSecret)
+            $res=$http.SendAsync($req).GetAwaiter().GetResult()
+            $result=Json $res
+            Write-Output ('qa_bind_http='+[int]$res.StatusCode+' ok='+[bool]$result.ok+' replay='+[bool]$result.replay)
+            if([int]$res.StatusCode -ne 200 -or $result.ok -ne $true -or
+               $result.original_preserved -ne $true -or
+               $result.public_post_created -ne $false -or
+               [string]$result.artifact_id -ne '1Qm8H_s1QJRQgsVFG7eexlwtE0xvDn7up'){
+              throw 'qa_bind_failed_no_render_or_publish'
+            }
+            Write-Output 'qa_final_state=corrected_v2_bound_v1_retained_no_publish'
+          }finally{$http.Dispose()}
+          PS1
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/chicago-qa-ops.json').write_text(json.dumps({
+            'command':Path('/tmp/chicago-qa-bind.ps1').read_text(),
+            'confirm':True
+          }))
+          PY
+          code=$(curl -sS --max-time 25 -o /tmp/qa-ops-submit.json -w '%{http_code}' \
+            -X POST https://ops.chicagoshining.com/api/shell \
+            -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/chicago-qa-ops.json)
+          [[ "$code" == "200" || "$code" == "202" ]]
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/qa-ops-submit.json)
+          test -n "$job"
+          for i in $(seq 1 105); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/qa-ops-result.json
+            state=$(jq -r '.job.status // empty' /tmp/qa-ops-result.json)
+            if [[ "$state" == "ok" || "$state" == "failed" ]]; then
+              jq -r '.job.log // ""' /tmp/qa-ops-result.json | grep '^qa_' || true
+              [[ "$state" == "ok" ]]
+              jq -e '(.job.log // "")|contains("qa_final_state=corrected_v2_bound_v1_retained_no_publish")' /tmp/qa-ops-result.json >/dev/null
+              exit 0
+            fi
+            sleep 4
+          done
+          echo 'qa_ops_timeout_no_duplicate_attempt=true'
+          exit 1
