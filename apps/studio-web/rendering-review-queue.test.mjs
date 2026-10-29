@@ -272,6 +272,17 @@ test('frozen render-only plan requires server availability and one explicit butt
   const action=descendants(nodes.rrDetail).find(n=>
     n.textContent==='Make the revised video (V2)');
   assert.ok(action,'Server-approved frozen plan shows the render-only button');
+  const all=descendants(nodes.rrDetail);
+  assert.equal(all.filter(n=>n.textContent==='Make the revised video (V2)').length,1,
+    'only one render button is shown');
+  const nextStep=all.find(n=>n.className==='rr-next-step');
+  const planDetails=all.find(n=>n.className==='rr-plan-details');
+  assert.ok(nextStep,'the Producer presents a clear next step');
+  assert.ok(planDetails,'technical checks remain accessible, but are collapsed');
+  assert.equal(planDetails.tag,'details');
+  assert.ok(all.indexOf(nextStep)<all.indexOf(planDetails),
+    'the action appears before plan diagnostics');
+  assert.ok(!all.some(n=>n.textContent==='Current revision plan'));
   await action.listeners.click();
   assert.equal(confirmed,1);
   assert.equal(commits,1);
@@ -543,7 +554,7 @@ test('Rendering Review labels the playing video without unchanged-video explanat
   assert.match(script,/Version V/);
   assert.match(script,/rrVersionBar/);
   assert.match(html,/id="rrOriginalVersion"/);
-  assert.match(script,/Proposed edits/);
+  assert.match(script,/Suggested changes/);
   assert.match(script,/Do these look right/);
   assert.match(script,/Reply to Producer/);
   assert.match(script,/Suggested morning photo/);

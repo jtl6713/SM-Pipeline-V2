@@ -287,6 +287,43 @@
       const nightRows=storyboard.filter(frame=>frame?.original?.time_of_day==='Night');
       const unresolvedNight=nightRows.filter(frame=>
         !frame.changed||frame.proposed?.time_of_day==='Night');
+      const plan=session?.plan;
+      const ready=plan?.frozen===true&&Array.isArray(plan.missing_assets)&&
+        plan.missing_assets.length===0&&!!plan.immutable_manifest&&
+        session.state==='plan_ready'&&session.review_hold?.active===true&&
+        saved.publication_hold_verified===true&&
+        saved.flags?.attempt_commit_enabled===true&&
+        session.producer_candidate?.stale!==true;
+      if(ready){
+        const nextVersion=Math.max(1,...attempts.map(a=>Number(a?.number)||1))+1;
+        const proposal=elem('section',null,'rr-next-step');
+        proposal.append(elem('strong','Your Producer','rr-producer-label'));
+        const bothNightReplaced=nightRows.length>=2&&unresolvedNight.length===0&&
+          nightRows.every(frame=>frame.changed&&frame.proposed?.time_of_day!=='Night');
+        proposal.append(elem('p',bothNightReplaced?
+          'I found daytime replacements for the nighttime images. I can make V'+nextVersion+
+          ' with the changes we discussed. Would you like me to create it?':
+          'I have the changes ready for V'+nextVersion+'. Would you like me to make the new video?'));
+        const make=actionButton('Make the revised video (V'+nextVersion+')',async()=>{
+          if(!window.confirm('Create V'+nextVersion+' for your review? It will not be published.'))return;
+          const identity=entry.output_id+':'+plan.hash+':'+plan.version;
+          if(!state.commitKeys.has(identity))state.commitKeys.set(identity,safeRequestId());
+          const receipt=await post('/api/rendering-review/outputs/'+
+            encodeURIComponent(entry.output_id)+'/commit-attempt',{
+            intent:'render_this_plan',expected_version:session.version,
+            plan_version:plan.version,plan_hash:plan.hash,
+            client_request_id:state.commitKeys.get(identity),
+          });
+          if(receipt.ok!==true||receipt.hold_active!==true||
+             receipt.public_post_created!==false||!receipt.attempt_id||!receipt.job_id)
+            throw new Error('A held, unique render-only job was not verified');
+          say('V'+receipt.attempt_number+' is being made. It will appear here when ready.');
+          await open(entry);
+        });
+        make.classList.add('rr-primary-render');
+        proposal.append(make);
+        detail.append(proposal);
+      }
       // Show the Producer's creative suggestion in plain language, not the
       // internal distinction between an unsaved draft and a render manifest.
       // This message is grounded in source images from the held, verified
@@ -296,6 +333,63 @@
         saved.publication_hold_verified===true;
       const reviewCanTalk=saved.flags?.producer_conversation_enabled===true&&
         ['ready_for_review','discussing','awaiting_assets','plan_ready','revision_failed'].includes(session?.state);
+      if(!reviewNightOffer&&state.flags.producer_conversation_enabled===true &&
+         ['ready_for_review','discussing','awaiting_assets','plan_ready','revision_failed'].includes(session.state)){
+        const form=elem('div',null,'rr-chat-form rr-producer-chat-primary');
+        const composer=elem('textarea');
+        composer.placeholder='Tell me what you would like changed. Use your own words.';
+        composer.rows=4;composer.maxLength=3000;
+        composer.setAttribute('aria-label','Creative direction for Producer');
+        form.append(elem('strong','Talk to your Producer','rr-producer-label'));
+        form.append(elem('p','Want a different change? Just tell me what feels wrong.','rr-muted'));
+        form.append(composer);
+        const feedbackStatus=elem('p','','rr-feedback-status');
+        feedbackStatus.hidden=true;
+        feedbackStatus.setAttribute('role','status');
+        feedbackStatus.setAttribute('aria-live','polite');
+        let pendingKey='',pendingDirection='';
+        const sendDirection=async content=>{
+          content=String(content||'').trim();
+          if(!content)throw new Error('Enter creative direction before sending');
+          // Keep an idempotency key for a retry of the same direction. A lost
+          // response must never create duplicate producer messages.
+          if(content!==pendingDirection){
+            pendingKey=safeRequestId();pendingDirection=content;
+          }
+          feedbackStatus.textContent='Checking the saved Reel and preparing a Producer response…';
+          say('Your Producer is considering your changes…');
+          const created=await post('/api/rendering-review/outputs/'+
+            encodeURIComponent(entry.output_id)+'/producer-conversation',{
+            direction:content,expected_version:session.version,
+            client_request_id:pendingKey,
+          });
+          if(created.persisted!==true||created.render_queued!==false)
+            throw new Error('Producer response was not confirmed saved. Your text is preserved for retry.');
+          if(created.plan_ready===true&&created.plan_persisted===true){
+            feedbackStatus.textContent='Your changes are ready. You can make the new video whenever you like.';
+          }else if(Array.isArray(created.plan_blockers)&&created.plan_blockers.length){
+            feedbackStatus.textContent='I need to check one more thing before making the video: '+
+              created.plan_blockers.slice(0,3).map(x=>x.description).join(' / ');
+          }else{
+            feedbackStatus.textContent='Producer reply saved. You can continue refining it.';
+          }
+          feedbackStatus.classList.toggle('error-text',false);
+          feedbackStatus.dataset.state='success';
+          state.lastReplyNotice={outputId:entry.output_id,message:
+            'Your message was saved. Review the Producer’s response and any proposed edits below.'};
+          say('Producer response saved.');
+          pendingDirection='';pendingKey='';
+          await open(entry);
+          if(typeof state.lastReplyNoticeNode?.scrollIntoView==='function')
+            state.lastReplyNoticeNode.scrollIntoView({block:'nearest'});
+        };
+        form.append(feedbackStatus);
+        form.append(actionButton('Send to Producer',async()=>{
+          if(typeof composer.blur==='function')composer.blur();
+          return sendDirection(composer.value);
+        },feedbackStatus));
+        detail.append(form);
+      }
       if(reviewNightOffer){
         const offer=elem('section',null,'rr-night-fix');
         offer.append(elem('strong','Your Producer','rr-producer-label'));
@@ -352,6 +446,21 @@
         }
         detail.append(offer);
       }
+      const messages=Array.isArray(saved.session?.messages)?saved.session.messages:[];
+      if(messages.length){
+        const history=elem('details',null,'rr-conversation-history');
+        history.append(elem('summary','Previous conversation ('+messages.length+' messages)'));
+        detail.append(history);
+        const thread=elem('div',null,'rr-thread');
+        for(const message of messages.slice(-30)){
+          const line=elem('article',null,'rr-message');
+          line.append(elem('strong',message.role==='user'?'You':'Producer'),
+            elem('p',message.content||''));
+          thread.append(line);
+        }
+        history.append(thread);
+      }
+
       if(storyboard.length){
         const changedRows=storyboard.filter(frame=>frame.changed===true);
         const availableMorning=storyboard.map(frame=>frame?.original).find(source=>
@@ -402,8 +511,8 @@
           detail.append(section);
         }
       }
-      if(attempts.length){
-        const heading=elem('h3','Rendering attempts');detail.append(heading);
+      if(attempts.length>1){
+        const heading=elem('h3','Video versions');detail.append(heading);
         const picker=elem('div',null,'rr-attempts');
         for(const attempt of attempts){
           const statusText='Version V'+attempt.number+' · '+String(attempt.status||'unknown').replace(/_/g,' ');
@@ -454,48 +563,24 @@
         detail.append(actionButton('Check render status',async()=>{await open(entry);}));
         watchAttempt(entry,session.state,seq);
       }
-      const plan=session?.plan;
       if(plan){
-        detail.append(elem('h3','Current revision plan'));
-        const ready=plan.frozen===true&&Array.isArray(plan.missing_assets)&&
-          plan.missing_assets.length===0&&!!plan.immutable_manifest&&
-          session.state==='plan_ready'&&session.review_hold?.active===true&&
-          saved.publication_hold_verified===true&&
-          saved.flags?.attempt_commit_enabled===true&&
-          session.producer_candidate?.stale!==true;
-        appendLine(detail,'Plan:',ready?'Ready for render-only authorization':
+        const technical=elem('details',null,'rr-plan-details');
+        technical.append(elem('summary','Technical details (optional)'));
+        appendLine(technical,'Plan status:',ready?'Ready':
           plan.frozen&&plan.missing_assets?.length===0?
-          'Frozen plan exists; rendering is not enabled':'Requirements remain unresolved');
-        appendLine(detail,'Plan revision:',plan.version);
-        if(Array.isArray(plan.acceptance_checks)&&plan.acceptance_checks.length){
+          'Saved; render action unavailable':'Additional details needed');
+        appendLine(technical,'Plan revision:',plan.version);
+        if(Array.isArray(plan.acceptance_checks)){
           for(const check of plan.acceptance_checks.slice(0,10))
-            detail.append(elem('p','Acceptance check: '+String(check),'rr-muted'));
+            technical.append(elem('p','Acceptance check: '+String(check),'rr-muted'));
         }
         if(Array.isArray(plan.missing_assets)&&plan.missing_assets.length)
-          detail.append(elem('p',plan.missing_assets.length+' requirements must be resolved before rendering.','rr-notice'));
-        if(ready){
-          const nextVersion=Math.max(1,...attempts.map(a=>Number(a?.number)||1))+1;
-          detail.append(actionButton('Make the revised video (V'+nextVersion+')',async()=>{
-            if(!window.confirm('Render one replacement Reel from the frozen plan? This will NOT upload or publish to Instagram.'))return;
-            const identity=entry.output_id+':'+plan.hash+':'+plan.version;
-            if(!state.commitKeys.has(identity))state.commitKeys.set(identity,safeRequestId());
-            const receipt=await post('/api/rendering-review/outputs/'+
-              encodeURIComponent(entry.output_id)+'/commit-attempt',{
-              intent:'render_this_plan',expected_version:session.version,
-              plan_version:plan.version,plan_hash:plan.hash,
-              client_request_id:state.commitKeys.get(identity),
-            });
-            if(receipt.ok!==true||receipt.hold_active!==true||
-               receipt.public_post_created!==false||!receipt.attempt_id||!receipt.job_id)
-              throw new Error('A held, unique render-only job was not verified');
-            say('Attempt '+receipt.attempt_number+' queued under the publication hold. No Instagram post created.');
-            await open(entry);
-          }));
-        }
+          technical.append(elem('p',plan.missing_assets.length+' items need attention before making V2.','rr-notice'));
+        detail.append(technical);
       }
       const candidate=session?.producer_candidate;
       if(candidate?.candidate){
-        const heading=elem('h3','Proposed edits');detail.append(heading);
+        const heading=elem('h3','Suggested changes');detail.append(heading);
         const draft=elem('details',null,'rr-candidate');
         draft.append(elem('summary','Proposed narration and changes'));
         draft.append(elem('p',candidate.candidate.narration||'', 'rr-draft'));
@@ -508,74 +593,7 @@
         if(candidate.stale)draft.append(elem('p','An additional comment was added. Ask the Producer to refresh this plan.','rr-notice'));
         detail.append(draft);
       }
-      const messages=Array.isArray(saved.session?.messages)?saved.session.messages:[];
-      if(messages.length){
-        const heading=elem('h3','Our conversation');detail.append(heading);
-        const thread=elem('div',null,'rr-thread');
-        for(const message of messages.slice(-30)){
-          const line=elem('article',null,'rr-message');
-          line.append(elem('strong',message.role==='user'?'You':'Producer'),
-            elem('p',message.content||''));
-          thread.append(line);
-        }
-        detail.append(thread);
-      }
-      if(!reviewNightOffer&&state.flags.producer_conversation_enabled===true &&
-         ['ready_for_review','discussing','awaiting_assets','plan_ready','revision_failed'].includes(session.state)){
-        const form=elem('div',null,'rr-chat-form');
-        const composer=elem('textarea');
-        composer.placeholder='Describe what to change, what to preserve, and where the video needs more detail';
-        composer.rows=4;composer.maxLength=3000;
-        composer.setAttribute('aria-label','Creative direction for Producer');
-        form.append(composer);
-        const feedbackStatus=elem('p','','rr-feedback-status');
-        feedbackStatus.hidden=true;
-        feedbackStatus.setAttribute('role','status');
-        feedbackStatus.setAttribute('aria-live','polite');
-        let pendingKey='',pendingDirection='';
-        const sendDirection=async content=>{
-          content=String(content||'').trim();
-          if(!content)throw new Error('Enter creative direction before sending');
-          // Keep an idempotency key for a retry of the same direction. A lost
-          // response must never create duplicate producer messages.
-          if(content!==pendingDirection){
-            pendingKey=safeRequestId();pendingDirection=content;
-          }
-          feedbackStatus.textContent='Checking the saved Reel and preparing a Producer response…';
-          say('Checking the saved render context and preparing a Producer response…');
-          const created=await post('/api/rendering-review/outputs/'+
-            encodeURIComponent(entry.output_id)+'/producer-conversation',{
-            direction:content,expected_version:session.version,
-            client_request_id:pendingKey,
-          });
-          if(created.persisted!==true||created.render_queued!==false)
-            throw new Error('Producer response was not confirmed saved. Your text is preserved for retry.');
-          if(created.plan_ready===true&&created.plan_persisted===true){
-            feedbackStatus.textContent='Render-ready plan saved. You must separately authorize creating V2.';
-          }else if(Array.isArray(created.plan_blockers)&&created.plan_blockers.length){
-            feedbackStatus.textContent='Producer reply saved. Items to resolve: '+
-              created.plan_blockers.slice(0,3).map(x=>x.description).join(' / ');
-          }else{
-            feedbackStatus.textContent='Producer reply saved. You can continue refining it.';
-          }
-          feedbackStatus.classList.toggle('error-text',false);
-          feedbackStatus.dataset.state='success';
-          state.lastReplyNotice={outputId:entry.output_id,message:
-            'Your message was saved. Review the Producer’s response and any proposed edits below.'};
-          say('Producer response saved.');
-          pendingDirection='';pendingKey='';
-          await open(entry);
-          if(typeof state.lastReplyNoticeNode?.scrollIntoView==='function')
-            state.lastReplyNoticeNode.scrollIntoView({block:'nearest'});
-        };
-        form.append(feedbackStatus);
-        form.append(actionButton('Send to Producer',async()=>{
-          if(typeof composer.blur==='function')composer.blur();
-          return sendDirection(composer.value);
-        },feedbackStatus));
-        form.append(elem('p','Producer discussion does not launch a render. A separate render-only button appears only for an independently verified frozen plan; Instagram approval and publishing remain disabled.','rr-muted'));
-        detail.append(form);
-      }
+
     }catch(err){
       if(seq===state.request && err.status!==404)
         detail.append(elem('p','Saved review detail could not be verified: '+err.message,'rr-notice'));
