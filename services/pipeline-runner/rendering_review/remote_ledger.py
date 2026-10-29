@@ -100,7 +100,7 @@ class RemoteLaunchLedger:
                 stream=True,
             ) as resp:
                 status=resp.status_code
-                raw=resp.raw.read(8193)
+                raw=resp.raw.read(8193, decode_content=True)
         except requests.RequestException as exc:
             raise ReviewLedgerUnavailable("launch_ledger_response_ambiguous_no_retry") from exc
         if status != 200:
