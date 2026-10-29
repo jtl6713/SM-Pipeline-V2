@@ -19,7 +19,7 @@ export function reviewCreativeApprovalEnabled(env){
     reviewEnrollmentWriteEnabled(env);
 }
 export async function acceptReviewCreativeOnly({
-  request,env,authorization,output_id,assertWriteRequest,operations
+  request,env,authorization,output_id,assertWriteRequest,operations,afterCreativeAcceptance=null
 }){
   if(!reviewCreativeApprovalEnabled(env))
     fail(405,"CREATIVE_APPROVAL_DISABLED","Chicago review creative approval is disabled");
@@ -74,7 +74,22 @@ export async function acceptReviewCreativeOnly({
      result.session?.review_hold?.active!==true||
      result.session?.approved_attempt_id!==body.attempt_id)
     fail(503,"ACCEPTANCE_UNVERIFIED","Creative approval not durably verified");
+  let handoff=null;
+  if(typeof afterCreativeAcceptance==="function"){
+    try{handoff=await afterCreativeAcceptance()}
+    catch(error){
+      console.warn("Review acceptance saved; Factory handoff pending",output_id,error?.code);
+      return {ok:true,accepted:true,attempt_id:body.attempt_id,
+        session_version:result.session.version,review_hold_active:true,
+        factory_handoff_pending:true,reason:error?.code||"HANDOFF_PENDING",
+        publication_changed:false,instagram_upload_created:false};
+    }
+  }
   return {ok:true,accepted:true,attempt_id:body.attempt_id,
-    session_version:result.session.version,review_hold_active:true,
-    publication_changed:false,instagram_upload_created:false};
+    session_version:handoff?.session_version||result.session.version,
+    review_hold_active:handoff?false:true,
+    ready_for_factory:handoff?.ready_for_factory===true,
+    factory_mirror_synced:handoff?.factory_mirror_synced===true,
+    publication_changed:handoff?.ready_for_factory===true,
+    instagram_upload_created:false,scheduled:false,published:false};
 }
