@@ -60,23 +60,46 @@ def create_review_media_blueprint(settings, client_factory=_client,
             hold=session.get("review_hold") or {}
             of=(client.get_record(OUTPUTS,output_id) or {}).get("fields",{})
             content_link=of.get("Content_Item")
-            if (session.get("schema")!="studio.render-review.1" or
-                session.get("id")!=sf.get("Session_ID") or
-                session.get("output_id")!=output_id or
-                session.get("profile_id")!=CHICAGO or
-                sf.get("Row_Version")!=session.get("version") or
-                not hold.get("active") or
-                of.get("Studio_Render_Review_Hold_Active") is not True or
-                of.get("Studio_Render_Review_Hold_ID")!=hold.get("id") or
-                of.get("Studio_Render_Review_Hold_Owner")!=session.get("id") or
-                of.get("Studio_Render_Review_Session_ID")!=session.get("id") or
-                of.get("Do_Not_Publish") is not True or
-                of.get("Platform")!="Instagram" or
-                of.get("Platform_Output_Type")!="Instagram Reel" or
-                any(of.get(k) for k in ("Published_At","Platform_Post_ID",
-                    "Platform_Media_ID","Publish_Started_At","Publish_Locked_At",
-                    "Publish_Locked_By")) or
-                not isinstance(content_link,list) or len(content_link)!=1):
+            identity_ok=(session.get("schema")=="studio.render-review.1" and
+                session.get("id")==sf.get("Session_ID") and
+                session.get("output_id")==output_id and
+                session.get("profile_id")==CHICAGO and
+                sf.get("Row_Version")==session.get("version") and
+                of.get("Platform")=="Instagram" and
+                of.get("Platform_Output_Type")=="Instagram Reel" and
+                not any(of.get(k) for k in ("Published_At","Platform_Post_ID",
+                    "Platform_Media_ID","Platform_Post_URL","Publish_Started_At",
+                    "Publish_Locked_At","Publish_Locked_By")) and
+                isinstance(content_link,list) and len(content_link)==1)
+            # The original route only streamed while the review hold existed.
+            # After the verified V2-to-Factory handoff that hold is intentionally
+            # released. Permit the *same selected artifact* for Factory review,
+            # without permitting unapproved media or arbitrary Drive IDs.
+            held=(hold.get("active") is True and
+                of.get("Studio_Render_Review_Hold_Active") is True and
+                of.get("Studio_Render_Review_Hold_ID")==hold.get("id") and
+                of.get("Studio_Render_Review_Hold_Owner")==session.get("id") and
+                of.get("Studio_Render_Review_Session_ID")==session.get("id") and
+                of.get("Do_Not_Publish") is True)
+            transfer=session.get("factory_handoff") or {}
+            factory=(session.get("state")=="approved" and
+                hold.get("active") is False and
+                transfer.get("status")=="ready_for_factory_approval" and
+                session.get("approved_attempt_id")==attempt_id and
+                session.get("current_attempt_id")==attempt_id and
+                transfer.get("attempt_id")==attempt_id and
+                not of.get("Studio_Render_Review_Hold_Active") and
+                not of.get("Studio_Render_Review_Hold_ID") and
+                not of.get("Studio_Render_Review_Hold_Owner") and
+                not of.get("Studio_Render_Review_Session_ID") and
+                not of.get("Do_Not_Publish") and
+                not of.get("Auto_Publish_Enabled") and
+                of.get("Output_Status")=="Ready for Review" and
+                of.get("Review_Status")=="Review Sent" and
+                of.get("Publish_Status")=="Not Ready" and
+                not of.get("Scheduled_Post_Date") and
+                not of.get("Studio_Scheduled_At"))
+            if not identity_ok or not (held or factory):
                 return denied(409,"review_media_hold_unverified")
             content=(client.get_record(ITEMS,content_link[0]) or {}).get("fields",{})
             if content.get("Content_Profile")!=[CHICAGO]:
@@ -90,6 +113,11 @@ def create_review_media_blueprint(settings, client_factory=_client,
             ar=one(client,ATTEMPTS,"Attempt_ID",attempt_id)
             af=ar.get("fields",{}) if ar else {}
             file_id=selected["artifact_id"]
+            if factory and (
+                transfer.get("artifact_id")!=file_id or
+                of.get("Final_File_ID")!=file_id or
+                of.get("Final_File_URL")!="https://drive.google.com/file/d/"+file_id+"/view"):
+                return denied(409,"review_media_factory_asset_mismatch")
             if (af.get("Attempt_ID")!=attempt_id or
                 af.get("Output_Record_ID")!=output_id or
                 af.get("Session_ID")!=session.get("id") or
