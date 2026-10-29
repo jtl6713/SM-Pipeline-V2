@@ -1714,7 +1714,7 @@
     const savedMessage = desk.message || ACTION_STATUS[payload.action] || "Updated.";
     if (desk.lanes) {
       renderDesk(desk);
-    } else if (desk.ok && payload.action === "request_changes_content") {
+    } else if (desk.ok && (payload.action === "request_changes_content" || payload.action === "return_to_review")) {
       // The Airtable write is already committed; do not block acceptance on
       // a slow Factory queue read or convert a successful POST into an error.
       setStatus(savedMessage);
