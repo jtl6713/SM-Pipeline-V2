@@ -86,3 +86,31 @@ test("Runner relay fails closed for untrusted origin and malformed range",async(
     request:new Request("https://studio.example/media",{headers:{Range:"nonsense"}}),
   }),e=>e.status===416);
 });
+
+test("approved Factory-selected V2 remains playable after its temporary hold is released",async()=>{
+  const f=fixture();
+  const approved={...session,state:"approved",current_attempt_id:id,
+    review_hold:{active:false},factory_handoff:{
+      status:"ready_for_factory_approval",attempt_id:id,artifact_id:file}};
+  f.args.loadWorkspace=async()=>({ok:true,publication_hold_verified:false,
+    session:approved,preview:{file_id:file}});
+  const resp=await serveReviewAttemptVideo(f.args);
+  assert.equal(resp.status,206);
+  assert.equal(f.calls(),1);
+});
+test("post-handoff preview rejects a mismatched selected file or old V2",async()=>{
+  for(const variant of [
+    {selectedFile:"another_drive_file_123456789",current:id},
+    {selectedFile:file,current:"other_attempt_1234"},
+  ]){
+    const f=fixture();
+    const approved={...session,state:"approved",current_attempt_id:variant.current,
+      review_hold:{active:false},factory_handoff:{
+        status:"ready_for_factory_approval",attempt_id:variant.current,
+        artifact_id:file}};
+    f.args.loadWorkspace=async()=>({ok:true,publication_hold_verified:false,
+      session:approved,preview:{file_id:variant.selectedFile}});
+    await assert.rejects(()=>serveReviewAttemptVideo(f.args),e=>e.status===409);
+    assert.equal(f.calls(),0);
+  }
+});
