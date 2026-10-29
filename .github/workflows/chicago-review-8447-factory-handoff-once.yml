@@ -75,6 +75,9 @@ jobs:
             $body=$resp.Content.ReadAsStringAsync().GetAwaiter().GetResult()
             $result=$null
             try {$result=$body|ConvertFrom-Json -ErrorAction Stop} catch {}
+            $reason=([string]($result.code ?? $result.error ?? $result.message)) -replace '[^a-zA-Z0-9_ -]',''
+            if($reason.Length -gt 120){$reason=$reason.Substring(0,120)}
+            Write-Output ('factory_handoff_server_reason='+$reason)
             $assetMatch=([string]$result.artifact_id -eq '1Qm8H_s1QJRQgsVFG7eexlwtE0xvDn7up')
             $originalMatch=([string]$result.original_artifact_id -eq '1XZ-_ARlXoP5mwILho13f81vmWQlpgTs4')
             $safe=($result.scheduled -eq $false -and
