@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import requests
 from typing import Any, Callable
 from urllib.parse import urlsplit
 from urllib.request import (
@@ -88,18 +89,28 @@ class RemoteLaunchLedger:
 
     @staticmethod
     def _one_shot_post(url: str, body: dict, headers: dict, timeout: float) -> dict:
-        request = Request(
-            url, method="POST", headers=headers,
-            data=json.dumps(body, separators=(",", ":")).encode("utf-8"),
-        )
-        opener = build_opener(_NoRedirect)
-        with opener.open(request, timeout=timeout) as resp:
-            if resp.status != 200:
-                raise ReviewLedgerUnavailable("launch_ledger_http_status_unverified")
-            raw = resp.read(8193)
+        """Exact one-request Worker ledger mutation; never retry or follow redirects."""
+        try:
+            with requests.post(
+                url,
+                headers={**headers, "User-Agent": ""},
+                data=json.dumps(body, separators=(",", ":")).encode("utf-8"),
+                timeout=timeout,
+                allow_redirects=False,
+                stream=True,
+            ) as resp:
+                status=resp.status_code
+                raw=resp.raw.read(8193)
+        except requests.RequestException as exc:
+            raise ReviewLedgerUnavailable("launch_ledger_response_ambiguous_no_retry") from exc
+        if status != 200:
+            raise ReviewLedgerUnavailable("launch_ledger_http_status_unverified")
         if len(raw) > 8192:
             raise ReviewLedgerUnavailable("launch_ledger_response_too_large")
-        return json.loads(raw)
+        try:
+            return json.loads(raw)
+        except (ValueError, UnicodeError) as exc:
+            raise ReviewLedgerUnavailable("launch_ledger_response_unverified") from exc
 
     def _call(self, action: str, **extra: Any) -> dict:
         body = {
