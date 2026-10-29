@@ -1918,7 +1918,7 @@ export default {
       // Return a Factory-selected revision to the SAME Rendering Review
       // conversation. Save the human notes and restore its exact output hold;
       // never send it through the legacy Production Request rerender path.
-      const factoryReturnMatch=/^\\/api\\/rendering-review\\/outputs\\/(rec[A-Za-z0-9]{14})\\/factory-return$/.exec(url.pathname);
+      const factoryReturnMatch=/^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/factory-return$/.exec(url.pathname);
       if(factoryReturnMatch && request.method==="POST") {
         requirePermission(authorization,"outputs_review");
         if(!(await reviewAuthorizedProfiles(env,authorization)).some(p=>p.id===CHICAGO_PROFILE_ID))
@@ -3249,7 +3249,7 @@ export default {
         // The normal preview is R2/render-server-first and cannot read a
         // privately held V2 Drive file after Rendering Review hands it to
         // Factory. Resolve the accepted Factory receipt before any fallback.
-        const outputId=url.pathname.match(/^\\/api\\/outputs\\/(rec[A-Za-z0-9]{14})\\/preview$/)?.[1];
+        const outputId=url.pathname.match(/^\/api\/outputs\/(rec[A-Za-z0-9]{14})\/preview$/)?.[1];
         if(outputId===env.RENDERING_REVIEW_EXACT_OUTPUT_ID) {
           const reviewVideo=await previewAcceptedFactoryRevision({
             request,env,authorization,outputId,
