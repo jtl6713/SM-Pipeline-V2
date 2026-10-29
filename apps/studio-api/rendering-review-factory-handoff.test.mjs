@@ -1,3 +1,4 @@
+import {readFileSync} from "node:fs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {handoffApprovedReviewToFactory} from "./rendering-review-factory-handoff.mjs";
@@ -204,4 +205,13 @@ test("wrong output denies and completed approval drains even if creative admissi
  });
  assert.equal(result.factory_ready,true);
  assert.equal(f.raw.fields.Do_Not_Publish,false);
+});
+
+test("approved revision and protected runner Factory handoff POSTs pass global Phase 2A gate",()=>{
+ const worker=readFileSync(new URL("./worker.js",import.meta.url),"utf8");
+ assert.ok(worker.includes("messages|approve|factory-handoff)$"),"reviewer handoff POST must enter global gate");
+ assert.ok(worker.includes("qa-audio-rebind|ig-dispatch-claim|factory-handoff)$"),"protected runner handoff POST must enter global gate");
+ assert.ok(worker.includes('const allowedMethod =\n        isChicagoReviewPost ||'),"checked POST gate remains the only admission path");
+ assert.ok(worker.includes('if (url.pathname==="/api/internal/rendering-review/factory-handoff"'),"server secret handler exists");
+ assert.ok(worker.includes('const factoryMatch=/^\\/api\\/rendering-review'),"reviewer handoff route exists");
 });
