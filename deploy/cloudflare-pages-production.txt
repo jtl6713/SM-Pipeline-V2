@@ -580,3 +580,5 @@ Redeploy Studio UI 0.6.763-idea-lifecycle-live after removing stale Worker versi
 2026-10-28: Deploy Studio UI 0.6.775: label the actual playing Chicago Review video V1/V2/Vn directly beneath its player, show a clickable Original version link for V2+, and eliminate confusing unchanged-video commentary. Preserve explicit render and publication holds.
 
 2026-10-28: Deploy Studio UI 0.6.776: Producer replies show immediate visible inline processing above the action, a busy button and honest waiting status, keyboard dismissal on iPhone, and durable saved-response acknowledgement. Session render stage appears near the top; no automatic render or publication.
+
+2026-10-28: UI 0.6.777 simple Producer review: show a plain-language V2 next step near the video, keep one guarded render button, surface natural-language Producer composer before storyboard, move conversation history and technical plan checks into optional disclosures, and avoid duplicate V1 attempt listing. No auto-render or publication.
