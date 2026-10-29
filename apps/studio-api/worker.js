@@ -9,6 +9,7 @@ import { handleRenderingReviewFeedbackRequest, reviewFeedbackWriteEnabled } from
 import { handleRenderingReviewEnrollRequest, reviewEnrollmentWriteEnabled } from "./rendering-review-enrollment-http.mjs";
 import { acceptReviewCreativeOnly } from "./rendering-review-approval-http.mjs";
 import { handoffApprovedReviewToFactory } from "./rendering-review-factory-handoff.mjs";
+import { requestFactoryRevisionFeedback } from "./rendering-review-factory-feedback.mjs";
 import { composeRenderingReviewEnrollmentOperations } from "./rendering-review-enrollment-wiring.mjs";
 import { handleReviewProducerProposal, reviewProducerBridgeEnabled } from "./rendering-review-producer-bridge.mjs";
 import { persistReviewProducerCandidate, producerConversationWritesEnabled } from "./rendering-review-producer-persist.mjs";
@@ -1194,7 +1195,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.692-render-review-factory-post-gate" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
+          version: "0.10.693-factory-review-preview-feedback" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
@@ -2481,6 +2482,25 @@ export default {
         if (request.method === "GET") return getFactoryDesk(request, env, authorization);
         if (request.method === "POST") {
           assertWriteRequest(request, env);
+          // An approved Rendering Review V2 must return to its OWN Producer
+          // conversation, never the legacy Production send-back/rerender flow.
+          // All non-pilot Factory outputs keep their existing behavior.
+          const copy=request.clone();
+          let action=null;
+          try {action=await copy.json();} catch {}
+          if(action?.id===env.RENDERING_REVIEW_EXACT_OUTPUT_ID &&
+             ["send_back","request_changes_content"].includes(action?.action)){
+            requirePermission(authorization,"outputs_review");
+            const note=String(action.note||"").trim();
+            const requestId=String(action.client_request_id||"").trim();
+            const actorId=authorization.user?.record_id;
+            const receipt=await requestFactoryRevisionFeedback({
+              output_id:action.id,note,client_request_id:requestId,
+              actor:actorId,env,operations:makeReviewFactoryHandoffOperations(env),
+            });
+            return respond(request,env,{ok:true,result:receipt,
+              message:receipt.message});
+          }
           return mutateFactoryDesk(request, env, authorization, ctx);
         }
         throw new HttpError(405, "Method not allowed");
