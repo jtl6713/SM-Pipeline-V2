@@ -205,6 +205,31 @@ class ProducerTests(unittest.TestCase):
             self.assertFalse(result["visual_inspection_performed"])
             self.assertEqual(result["model"], "bounded-confirmed-photo-suggestion")
 
+        # The original confirmation reached Airtable, but the first Producer
+        # attempt advanced the session to v4 while retaining frame 1 at Night.
+        # A safe, version-fenced retry must still offer both replacements.
+        old_reply = "Yes this is good.  Rerender please."
+        old_producer = {
+            "role": "producer",
+            "content": "The opener remains as-is; we replaced the later night scene.",
+        }
+        recovered = {
+            **evidence,
+            "session_version": 4,
+            "messages": [
+                {"role": "user", "content": old_reply},
+                old_producer,
+            ],
+        }
+        result = propose_revision(recovered, old_reply, {}, transport=no_model)
+        self.assertEqual(len(result["candidate"]["changes"]), 2)
+        self.assertEqual(result["candidate"]["timeline"][0]["asset_ids"], ["day-morning"])
+        self.assertEqual(result["candidate"]["timeline"][4]["asset_ids"], ["day-morning"])
+        self.assertEqual(result["candidate"]["requirements"], [])
+        self.assertEqual(result["candidate"]["claims"], [])
+        self.assertTrue(result["candidate_only"])
+        self.assertFalse(result["visual_inspection_performed"])
+
         # Qualified or negative responses stay genuinely conversational.
         class Response:
             ok = True

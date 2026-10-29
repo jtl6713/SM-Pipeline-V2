@@ -377,8 +377,16 @@ def propose_revision(evidence: dict, direction: str, settings: dict, *, transpor
         r"yes,? this is (?:good|great|perfect)(?:[.!]? (?:please )?re-?render(?: please)?)?)"
     )
     latest = (evidence.get("messages") or [])[-1:]
+    # #8447 already persisted an affirmative user answer at row version 4,
+    # but an older model changed only frame 5. The review UI had offered to
+    # replace BOTH nighttime scenes. Reprocessing that exact saved approval
+    # must yield both replacements even when the session advanced from v3 to
+    # v4. It remains candidate-only; no implicit render or publication.
+    #
+    # Limit recovery to the exact held Chicago output and the known two
+    # historically affected revisions; do not hijack later conversations.
     if (evidence.get("output_id") == "rec0uVrVeiUM6shp9"
-            and evidence.get("session_version") == 3
+            and evidence.get("session_version") in (3, 4)
             and len(latest) == 1 and latest[0].get("role") == "producer"
             and re.fullmatch(accepted_replies, reply)):
         agreed = _all_night_stills_candidate(
