@@ -55,3 +55,5 @@ jobs:
 
 # 2026-10-28 Chicago V1→V2 MVP: recheck protected production key presence and rollout flags (read only).
 # 2026-10-28 exact Chicago #8447 MVP: repeat production read-only inspection without changing any runtime binding.
+
+# 2026-10-29: Verify if protected Runner has CF Access token pair for held #8447 claim 403, names only.
