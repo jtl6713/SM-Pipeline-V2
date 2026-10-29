@@ -1,0 +1,102 @@
+name: Reconcile only existing authorized held Chicago 8447 V2
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/chicago-review-8447-v2-reconcile-authorized-once.yml'
+permissions:
+  contents: read
+concurrency:
+  group: chicago-8447-reconcile-original-authorized-job
+  cancel-in-progress: false
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Resume exact existing V2 only under live no-launch authority guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          cat >/tmp/8447-reconcile.ps1 <<'PS1'
+          $ErrorActionPreference='Stop'
+          $envFile=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+          if(-not (Test-Path -LiteralPath $envFile)){throw 'runner_env_missing'}
+          $match=@(Get-Content -LiteralPath $envFile | Where-Object {$_ -match '^PIPELINE_RUNNER_SHARED_SECRET\s*='})
+          if($match.Count -ne 1){throw 'runner_secret_missing'}
+          $secret=($match[0] -split '=',2)[1].Trim().Trim('"').Trim([char]39)
+          if($secret.Length -lt 24){throw 'runner_secret_invalid'}
+          $id='rrjob_26054929500b8abe981e3f6131b5c668209bf9c765edb06c'
+          $body=@{output_id='rec0uVrVeiUM6shp9';job_id=$id} | ConvertTo-Json -Compress
+          Add-Type -AssemblyName System.Net.Http
+          $http=[System.Net.Http.HttpClient]::new()
+          $http.Timeout=[TimeSpan]::FromSeconds(25)
+          try{
+            $statusReq=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get,('http://127.0.0.1:3350/jobs/rendering-review/run-exact/'+$id))
+            [void]$statusReq.Headers.TryAddWithoutValidation('X-Pipeline-Secret',$secret)
+            $prior=$http.SendAsync($statusReq).GetAwaiter().GetResult()
+            $priorJson=($prior.Content.ReadAsStringAsync().GetAwaiter().GetResult())|ConvertFrom-Json
+            Write-Output ('review_reconcile_prior_http='+[int]$prior.StatusCode+' state='+[string]$priorJson.state)
+            if([int]$prior.StatusCode -ne 200 -or -not $priorJson.ok -or ([string]$priorJson.state -notin @('unknown','needs_reconciliation'))){
+              throw 'prior_job_must_be_reconciled_not_launched'
+            }
+            # The endpoint independently checks Airtable's held V1, session,
+            # exact queued job, zero lease/events, absent attempt artifact,
+            # and then the Worker/Remotion single-launch ledger.
+            $req=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post,'http://127.0.0.1:3350/jobs/rendering-review/reconcile-exact')
+            $req.Content=[System.Net.Http.StringContent]::new($body,[System.Text.Encoding]::UTF8,'application/json')
+            [void]$req.Headers.TryAddWithoutValidation('X-Pipeline-Secret',$secret)
+            $resp=$http.SendAsync($req).GetAwaiter().GetResult()
+            $reply=($resp.Content.ReadAsStringAsync().GetAwaiter().GetResult())|ConvertFrom-Json
+            Write-Output ('review_reconcile_http='+[int]$resp.StatusCode+' accepted='+[bool]$reply.accepted+' existing_job_only='+[bool]$reply.existing_job_only)
+            if([int]$resp.StatusCode -ne 202 -or -not $reply.ok -or
+               -not $reply.accepted -or -not $reply.existing_job_only){throw 'review_reconcile_denied_no_retry'}
+            for($i=0;$i -lt 35;$i++){
+              Start-Sleep -Seconds 3
+              $poll=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get,('http://127.0.0.1:3350/jobs/rendering-review/run-exact/'+$id))
+              [void]$poll.Headers.TryAddWithoutValidation('X-Pipeline-Secret',$secret)
+              $check=$http.SendAsync($poll).GetAwaiter().GetResult()
+              if([int]$check.StatusCode -ne 200){throw 'review_status_unavailable'}
+              $result=($check.Content.ReadAsStringAsync().GetAwaiter().GetResult())|ConvertFrom-Json
+              if([string]$result.state -eq 'ready_for_review'){
+                Write-Output ('review_reconcile_outcome=ready_for_review file_present='+[bool]$result.drive_file_id)
+                break
+              }
+              if([string]$result.state -eq 'needs_reconciliation'){
+                Write-Output ('review_reconcile_outcome=needs_reconciliation reason_code='+[string]$result.reason_code)
+                break
+              }
+              if($i -eq 34){Write-Output ('review_reconcile_outcome='+[string]$result.state)}
+            }
+          }finally{$http.Dispose()}
+          PS1
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/8447-reconcile.json').write_text(json.dumps({'command':Path('/tmp/8447-reconcile.ps1').read_text(),'confirm':True}))
+          PY
+          code=$(curl -sS --max-time 25 -o /tmp/8447-ops-start.json -w '%{http_code}' \
+            -X POST https://ops.chicagoshining.com/api/shell \
+            -H "Authorization: Bearer $OPS_TOKEN" -H "Content-Type: application/json" \
+            --data-binary @/tmp/8447-reconcile.json)
+          [[ "$code" == "202" || "$code" == "200" ]]
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/8447-ops-start.json); test -n "$job"
+          for i in $(seq 1 95); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/8447-ops-status.json
+            status=$(jq -r '.job.status // empty' /tmp/8447-ops-status.json)
+            if [[ "$status" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/8447-ops-status.json | grep -E '^review_reconcile_' || true
+              exit 0
+            fi
+            if [[ "$status" == "failed" ]]; then
+              echo 'review_reconcile_guard_or_launch_failed_no_retry=true'
+              jq -r '.job.log // ""' /tmp/8447-ops-status.json | grep -E '^review_reconcile_' || true
+              exit 1
+            fi
+            sleep 3
+          done
+          echo 'review_reconcile_not_verified_no_retry=true'; exit 1
