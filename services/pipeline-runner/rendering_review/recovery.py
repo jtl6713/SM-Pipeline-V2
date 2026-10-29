@@ -7,6 +7,7 @@ makes no Airtable, Drive, Remotion, or publisher writes.
 from __future__ import annotations
 
 import json
+import hashlib
 
 
 class ReviewRecoveryDenied(RuntimeError):
@@ -17,6 +18,14 @@ def select_one(*args, **kwargs):
     """Lazy source lookup, injectable in hermetic no-write tests."""
     from rendering_review.one_job import select_one as lookup
     return lookup(*args, **kwargs)
+
+
+def _expected_owner(output_id: str, job_id: str) -> str:
+    request_id = 'rrclaim_' + hashlib.sha256(
+        ('chicago-pilot-v1|' + output_id + '|' + job_id).encode()).hexdigest()[:48]
+    identity = json.dumps(['render-job-claim-v1', output_id, job_id, request_id],
+                          separators=(',', ':'))
+    return 'rrrunner_' + hashlib.sha256(identity.encode()).hexdigest()[:48]
 
 
 def require_unlaunched_authority(output_id: str, job_id: str, *, client=None) -> bool:
@@ -46,13 +55,26 @@ def require_unlaunched_authority(output_id: str, job_id: str, *, client=None) ->
         history = json.loads(jf.get("Event_History_JSON") or "null")
     except (ValueError, TypeError) as exc:
         raise ReviewRecoveryDenied("launch_history_unreadable") from exc
+    # The Worker may have already atomically claimed this job while the
+    # Python client failed to decode its compressed success response. Resume
+    # under that EXACT immutable lease; never reserve a second owner/fence.
+    state = jf.get("Job_State")
+    if state == "claimed":
+        if (jf.get("Lease_Owner") != _expected_owner(output_id, job_id) or
+            jf.get("Lease_Fence") != 1 or
+            jf.get("Progress_Stage") != "claimed"):
+            raise ReviewRecoveryDenied("claimed_job_owner_or_fence_changed")
+    elif state == "queued":
+        if (jf.get("Lease_Owner") or
+            jf.get("Lease_Fence") not in (0, 0.0, None) or
+            jf.get("Progress_Stage") != "awaiting_isolated_renderer"):
+            raise ReviewRecoveryDenied("queued_job_might_have_lease")
+    else:
+        raise ReviewRecoveryDenied("job_not_recoverable")
+
     if (jf.get("Job_ID") != job_id or
         jf.get("Output_Record_ID") != output_id or
-        jf.get("Job_State") != "queued" or
-        jf.get("Progress_Stage") != "awaiting_isolated_renderer" or
         jf.get("Progress_Percent") not in (0, 0.0, None) or
-        jf.get("Lease_Fence") not in (0, 0.0, None) or
-        jf.get("Lease_Owner") or
         history != [] or
         not isinstance(jf.get("Plan_Hash"), str) or
         len(jf["Plan_Hash"]) != 64):
