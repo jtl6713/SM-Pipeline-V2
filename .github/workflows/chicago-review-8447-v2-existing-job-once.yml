@@ -1,0 +1,82 @@
+name: Dispatch the already-authorized Chicago #8447 V2 job exactly once
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/chicago-review-8447-v2-existing-job-once.yml'
+permissions:
+  contents: read
+concurrency:
+  group: chicago-review-8447-v2-existing-rrjob-26054929500b8abe
+  cancel-in-progress: false
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Submit only the already-committed, exact held render job
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          cat >/tmp/review-exact-existing.ps1 <<'PS1'
+          $ErrorActionPreference='Stop'
+          $envFile=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+          if(-not (Test-Path -LiteralPath $envFile)){throw 'runner_env_missing'}
+          $match=Get-Content -LiteralPath $envFile | Where-Object {$_ -match '^PIPELINE_RUNNER_SHARED_SECRET\s*='} | Select-Object -First 1
+          if(-not $match){throw 'runner_secret_missing'}
+          $secret=($match -split '=',2)[1].Trim().Trim('"').Trim([char]39)
+          if($secret.Length -lt 24){throw 'runner_secret_invalid'}
+          $body=@{output_id='rec0uVrVeiUM6shp9';job_id='rrjob_26054929500b8abe981e3f6131b5c668209bf9c765edb06c'} | ConvertTo-Json -Compress
+          Add-Type -AssemblyName System.Net.Http
+          $http=[System.Net.Http.HttpClient]::new()
+          $http.Timeout=[TimeSpan]::FromSeconds(30)
+          try {
+            $req=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post,'http://127.0.0.1:3350/jobs/rendering-review/run-exact')
+            $req.Content=[System.Net.Http.StringContent]::new($body,[System.Text.Encoding]::UTF8,'application/json')
+            [void]$req.Headers.TryAddWithoutValidation('X-Pipeline-Secret',$secret)
+            $resp=$http.SendAsync($req).GetAwaiter().GetResult()
+            $raw=$resp.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            $data=$raw | ConvertFrom-Json
+            Write-Output ('exact_v2_trigger_http='+[int]$resp.StatusCode+' ok='+[bool]$data.ok+' accepted='+[bool]$data.accepted+' running='+[bool]$data.already_running+' finished='+[bool]$data.already_finished)
+            if(-not $data.ok -or -not ($resp.StatusCode -eq 202 -or ($resp.StatusCode -eq 200 -and $data.already_finished))){
+              throw 'exact_v2_trigger_not_accepted'
+            }
+            Write-Output 'exact_v2_render_triggered=true existing_job_only=true no_publish=true'
+          } finally {$http.Dispose()}
+          PS1
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/review-exact-existing.json').write_text(json.dumps({
+            'command':Path('/tmp/review-exact-existing.ps1').read_text(),
+            'confirm':True
+          }))
+          PY
+          code=$(curl -sS --max-time 25 -o /tmp/review-start.json -w '%{http_code}' \
+            -X POST https://ops.chicagoshining.com/api/shell \
+            -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/review-exact-existing.json || true)
+          if [[ "$code" != "200" && "$code" != "202" ]]; then echo "protected_ops_start_not_accepted_http=$code"; exit 1; fi
+          JOB=$(jq -r '.job.id // .jobId // empty' /tmp/review-start.json)
+          test -n "$JOB"
+          for n in $(seq 1 60); do
+            curl -fsS --max-time 15 -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$JOB" -o /tmp/review-result.json
+            state=$(jq -r '.job.status // empty' /tmp/review-result.json)
+            if [[ "$state" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/review-result.json | grep -E '^exact_v2_' | tail -5
+              jq -e '(.job.log // "")|contains("exact_v2_render_triggered=true")' /tmp/review-result.json >/dev/null
+              exit 0
+            fi
+            if [[ "$state" == "failed" ]]; then
+              echo "protected_exact_job_trigger_failed"
+              jq -r '.job.log // ""' /tmp/review-result.json | grep -E '^exact_v2_|^exception|^ERROR' | tail -5 || true
+              exit 1
+            fi
+            sleep 4
+          done
+          echo 'exact_v2_trigger_unverified'
+          exit 1
