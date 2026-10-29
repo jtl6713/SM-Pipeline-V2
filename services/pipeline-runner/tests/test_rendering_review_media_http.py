@@ -40,9 +40,9 @@ class FakeClient:
         if table==OUTPUTS:
             return {"id":OUTPUT,"fields":{"Content_Item":["recSkCY227R8iuoaJ"],
                 "Studio_Render_Review_Hold_Active":self.hold,
-                "Studio_Render_Review_Hold_ID":"hold-test",
-                "Studio_Render_Review_Hold_Owner":SESSION,
-                "Studio_Render_Review_Session_ID":SESSION,
+                "Studio_Render_Review_Hold_ID":"hold-test" if self.hold else "",
+                "Studio_Render_Review_Hold_Owner":SESSION if self.hold else "",
+                "Studio_Render_Review_Session_ID":SESSION if self.hold else "",
                 "Do_Not_Publish":not self.factory_ready,
                 "Final_File_ID":FILE if self.factory_ready else "",
                 "Auto_Publish_Enabled":False,
