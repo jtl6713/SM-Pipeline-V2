@@ -69,3 +69,12 @@
 .rr-version-label{font-weight:700}
 .rr-original-version{font:inherit;color:var(--accent,#679cde);background:none;border:0;padding:0;text-decoration:underline;cursor:pointer}
 .rr-original-version:hover{text-decoration-thickness:2px}
+
+/* Keep feedback visible above the action, even with the iOS keyboard open. */
+.rr-feedback-status{margin:4px 0;padding:12px;border:1px solid var(--line,#d6dce3);border-radius:10px;background:var(--surface,#fff);color:inherit;line-height:1.45}
+.rr-feedback-status[hidden]{display:none!important}
+.rr-feedback-status[data-state="working"]{border-left:4px solid var(--accent,#679cde)}
+.rr-feedback-status[data-state="success"]{border-left:4px solid #3f8d60}
+.rr-feedback-status[data-state="error"]{border-left:4px solid #c65b52}
+.rr-chat-form button[aria-busy="true"]{opacity:.8;cursor:progress}
+.rr-feedback-receipt,.rr-review-progress{padding:12px;margin:8px 0;border-left:4px solid var(--accent,#679cde);border-radius:8px;background:rgba(114,139,190,.09);line-height:1.45}
