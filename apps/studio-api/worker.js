@@ -1674,7 +1674,8 @@ export default {
              sha256!=="8ee06c1f0234959c5ff4610b020d6bb72a005200ffa5d6590d920754b3c0f77e"||
              expected_bytes!==21961807)return false;
           const secret=String(env.PIPELINE_RUNNER_SHARED_SECRET||"");
-          const origin=String(env.PIPELINE_RUNNER_URL||"").replace(/\\/$/,"");
+          const base=String(env.PIPELINE_RUNNER_URL||"").trim();
+          const origin=base.endsWith("/")?base.slice(0,-1):base;
           if(secret.length<24||origin!=="https://pipeline.chicagoshining.com")
             throw new HttpError(503,"QA proof endpoint unavailable");
           let response;
