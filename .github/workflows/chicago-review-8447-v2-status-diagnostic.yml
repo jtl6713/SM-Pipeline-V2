@@ -38,6 +38,7 @@ jobs:
             Write-Output ('runner_exact_status_ok='+[bool]$data.ok)
             Write-Output ('runner_exact_status_state='+[string]$data.state)
             Write-Output ('runner_exact_status_reason='+[string]$data.reason)
+            Write-Output ('runner_exact_status_reason_code='+[string]$data.reason_code)
             Write-Output ('runner_exact_status_attempt_present='+[bool]$data.attempt_id)
             Write-Output ('runner_exact_status_drive_present='+[bool]$data.drive_file_id)
             if([int]$response.StatusCode -ne 200){throw 'runner_exact_status_unavailable'}
@@ -73,3 +74,5 @@ jobs:
           done
           echo 'read_only_status_unverified'
           exit 1
+
+# 2026-10-29: read-only check exact claimed V2 job following Runner v13 transport release. No render, retries or publication.
