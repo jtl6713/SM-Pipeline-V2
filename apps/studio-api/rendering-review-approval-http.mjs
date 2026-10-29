@@ -45,6 +45,22 @@ export async function acceptReviewCreativeOnly({
      !token.test(body.attempt_id||"")||!token.test(body.client_request_id||""))
     fail(400,"INVALID_ACCEPTANCE","Exact attempt, session version and request key required");
   const session=await operations.readSession(output_id);
+  // The creative approval may have committed before a Factory handoff
+  // timed out. A repeated approval of the SAME current accepted attempt is
+  // a read-only replay, not a second approval or another rendering request.
+  if(session?.profile_id==="recT2rbKX3MF7cVFU"&&
+     session.output_type==="Instagram Reel"&&
+     session.state==="approved"&&
+     session.current_attempt_id===body.attempt_id&&
+     session.approved_attempt_id===body.attempt_id&&
+     body.expected_version<=session.version&&
+     (session.review_hold?.active===true||
+      session.factory_handoff?.attempt_id===body.attempt_id)){
+    return {ok:true,accepted:true,replay:true,attempt_id:body.attempt_id,
+      session_version:session.version,
+      review_hold_active:session.review_hold.active,
+      publication_changed:false,instagram_upload_created:false};
+  }
   if(!session||session.profile_id!=="recT2rbKX3MF7cVFU"||
      session.output_type!=="Instagram Reel"||
      session.version!==body.expected_version||
