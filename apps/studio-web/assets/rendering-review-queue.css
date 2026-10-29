@@ -78,3 +78,12 @@
 .rr-feedback-status[data-state="error"]{border-left:4px solid #c65b52}
 .rr-chat-form button[aria-busy="true"]{opacity:.8;cursor:progress}
 .rr-feedback-receipt,.rr-review-progress{padding:12px;margin:8px 0;border-left:4px solid var(--accent,#679cde);border-radius:8px;background:rgba(114,139,190,.09);line-height:1.45}
+
+/* Conversation first, technical details only on request. */
+.rr-next-step{margin:14px 0;border:1px solid var(--line,#d6dce3);border-radius:12px;padding:16px;display:grid;gap:10px}
+.rr-next-step p{margin:0;line-height:1.5}
+.rr-next-step button{width:100%;min-height:48px;font-weight:700;white-space:normal}
+.rr-producer-chat-primary{padding:12px;border:1px solid var(--line,#d6dce3);border-radius:12px;margin:14px 0}
+.rr-producer-chat-primary>p{margin:0}
+.rr-plan-details,.rr-conversation-history{margin:12px 0;padding:12px;border:1px solid var(--line,#d6dce3);border-radius:10px}
+.rr-plan-details summary,.rr-conversation-history summary{cursor:pointer;font-weight:600}
