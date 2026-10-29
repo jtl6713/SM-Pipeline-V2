@@ -57,3 +57,10 @@ test("non-authoritative mirror issues are logged without changing verified Airta
   assert.match(route,/catch \(error\)/);
   assert.doesNotMatch(route,/clearReviewHold|releaseReviewHold|APPROVE_ATTEMPT/);
 });
+
+test("only Factory submission with comments can mount the enrollment operation",()=>{
+  assert.match(route,/rendering-review\\/factory\\/outputs/);
+  assert.doesNotMatch(route,/\\/enroll\\$/);
+  assert.doesNotMatch(worker,/const enrollmentMatch = \/\\^\\\\\\/api\\\\\\/rendering-review\\\\\\/outputs/);
+  assert.match(worker,/request-changes\\$\\/\\.test\\(url\\.pathname\\)/);
+});
