@@ -86,14 +86,14 @@ export async function returnFactoryRevisionToProducer({output_id,note,client_req
       s.current_attempt_id!==s.approved_attempt_id||
       s.factory_handoff.status!=="ready_for_factory_approval"||
       s.original_do_not_publish!==false||
-      renderingReviewHoldPresent(k=>f(row,k))||
-      f(row,"Do_Not_Publish")===true||
+      (renderingReviewHoldPresent(k=>f(row,k))&&!ownedHold(row,f,s))||
+      (f(row,"Do_Not_Publish")===true&&!ownedHold(row,f,s))||
       f(row,"Auto_Publish_Enabled")===true)
       fail(409,"FACTORY_RETURN_ALREADY_CHANGED","This revision is not in the Factory approval stage");
 
     // Reapply this session's preserved hold before making comments editable.
     // The output leaves Factory approval without deleting its accepted V2.
-    await o.patchOutput(output_id,{
+    if(!ownedHold(row,f,s))await o.patchOutput(output_id,{
       Studio_Render_Review_Hold_Active:true,
       Studio_Render_Review_Hold_ID:s.review_hold.id,
       Studio_Render_Review_Hold_Owner:s.id,
