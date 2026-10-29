@@ -12,25 +12,40 @@ jobs:
     env:
       CF_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
       CF_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
-      JOB_SECRET: ${{ secrets.RENDERING_REVIEW_RENDER_JOB_SHARED_SECRET }}
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
     steps:
       - name: Verify production Worker release
         run: |
           set -euo pipefail
-          test -n "$CF_ID"; test -n "$CF_SECRET"; test -n "$JOB_SECRET"
+          test -n "$CF_ID"; test -n "$CF_SECRET"; test -n "$OPS_TOKEN"
           for i in $(seq 1 60); do
             curl -fsS -H "CF-Access-Client-Id: $CF_ID" -H "CF-Access-Client-Secret: $CF_SECRET" https://studio.chicagoshining.com/api/health -o /tmp/health.json || true
             if jq -e '.ok==true and (.version|startswith("0.10.690-review-v2-factory-handoff"))' /tmp/health.json >/dev/null 2>&1; then break; fi
             sleep 5
           done
           jq -e '.ok==true and (.version|startswith("0.10.690-review-v2-factory-handoff"))' /tmp/health.json
-      - name: Promote only the accepted Chicago test revision
+      - uses: actions/checkout@v4
+      - name: Run protected one-time Factory handoff
+        shell: bash
         run: |
           set -euo pipefail
-          curl -fsS --max-time 160 -X POST 'https://studio.chicagoshining.com/api/internal/rendering-review/factory-handoff' \
-            -H 'Content-Type: application/json' \
-            -H "X-Rendering-Review-Job-Secret: $JOB_SECRET" \
-            -H "CF-Access-Client-Id: $CF_ID" \
-            -H "CF-Access-Client-Secret: $CF_SECRET" \
-            --data '{"output_id":"rec0uVrVeiUM6shp9","confirm":"PROMOTE-ACCEPTED-REVIEW-TO-FACTORY"}' -o /tmp/handoff.json
-          jq -e '.ok==true and .ready_for_factory==true and .artifact_id=="1Qm8H_s1QJRQgsVFG7eexlwtE0xvDn7up" and .preserved_v1_file_id=="1XZ-_ARlXoP5mwILho13f81vmWQlpgTs4" and .factory_mirror_synced==true and .publication_approved==false and .scheduled==false and .published==false' /tmp/handoff.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/request.json').write_text(json.dumps({'command':Path('scripts/review-8447-factory-handoff-once.ps1').read_text(),'confirm':True}))
+          PY
+          status=$(curl -sS --max-time 25 -o /tmp/start.json -w '%{http_code}' -X POST https://ops.chicagoshining.com/api/shell -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/request.json)
+          [[ "$status" == 200 || "$status" == 202 ]]
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/start.json); test -n "$job"
+          for i in $(seq 1 65); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/result.json
+            state=$(jq -r '.job.status // empty' /tmp/result.json)
+            if [[ "$state" == ok || "$state" == failed ]]; then
+              jq -r '.job.log // ""' /tmp/result.json | grep '^factory_handoff_verified=' || true
+              [[ "$state" == ok ]]
+              jq -e '(.job.log // "")|contains("factory_handoff_verified=True")' /tmp/result.json >/dev/null
+              exit 0
+            fi
+            sleep 3
+          done
+          echo 'factory_handoff_unverified_no_auto_retry=true'; exit 1
