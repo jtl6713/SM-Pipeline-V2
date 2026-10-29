@@ -15,6 +15,7 @@ function err(code, message, status = 409) {
   throw error;
 }
 const id = v => String(v ?? "").trim();
+const text = id;
 function requireOperations(operations, names) {
   for (const key of names) if (typeof operations?.[key] !== "function")
     err("INTEGRATION_MISSING", "Rendering Review requires " + key, 503);
