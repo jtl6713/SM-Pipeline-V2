@@ -1,0 +1,56 @@
+name: Verify Factory 8447 accepted V2 private playback
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-factory-8447-v2-preview.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    env:
+      ACCESS_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      ACCESS_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - name: Wait for exact Worker 693 and Runner 17 releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ACCESS_ID"; test -n "$ACCESS_SECRET"
+          for i in $(seq 1 70); do
+            studio=$(curl -sS -m 12 -o /tmp/factory-health.json -w '%{http_code}' \
+              -H "CF-Access-Client-Id: $ACCESS_ID" \
+              -H "CF-Access-Client-Secret: $ACCESS_SECRET" \
+              https://studio.chicagoshining.com/api/health || true)
+            runner=$(curl -sS -m 12 -o /tmp/factory-runner-health.json -w '%{http_code}' \
+              https://pipeline.chicagoshining.com/health || true)
+            if [[ "$studio" == "200" && "$runner" == "200" ]] &&
+              jq -e '.ok==true and (.version | startswith("0.10.693-factory-v2-preview-return"))' \
+                /tmp/factory-health.json >/dev/null 2>&1 &&
+              jq -e '.ok==true and .version=="2026-10-29-factory-v2-private-preview-v17"' \
+                /tmp/factory-runner-health.json >/dev/null 2>&1; then
+              echo "accepted_v2_preview_versions_live=true"
+              exit 0
+            fi
+            sleep 12
+          done
+          echo "required_worker_or_runner_not_live"
+          exit 1
+      - name: Require actual 206 video bytes of accepted V2 without publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS --max-time 90 -D /tmp/factory-preview.headers \
+            -o /tmp/factory-preview.bytes -w '%{http_code}' \
+            -H "CF-Access-Client-Id: $ACCESS_ID" \
+            -H "CF-Access-Client-Secret: $ACCESS_SECRET" \
+            -H "Range: bytes=0-4095" \
+            https://studio.chicagoshining.com/api/outputs/rec0uVrVeiUM6shp9/preview)
+          test "$code" = "206"
+          grep -iq '^content-type: video/mp4' /tmp/factory-preview.headers
+          grep -iq '^x-studio-preview-source: factory-accepted-review-v2' /tmp/factory-preview.headers
+          test "$(wc -c </tmp/factory-preview.bytes)" -ge 16
+          echo "factory_8447_selected_v2_private_mp4_range=PASS"
+          echo "no_new_render_or_publish=true"
