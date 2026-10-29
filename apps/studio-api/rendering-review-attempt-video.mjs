@@ -25,13 +25,26 @@ export async function serveReviewAttemptVideo({
      typeof readVideo!=="function"||typeof copyHeaders!=="function")
     fail(503,"Protected preview integration unavailable");
   const workspace=await loadWorkspace(outputId);
-  if(workspace?.ok!==true||workspace?.publication_hold_verified!==true||
-     workspace?.session?.review_hold?.active!==true||
-     workspace?.session?.output_id!==outputId)
-    fail(409,"Review ownership or publication hold not verified");
+  const session=workspace?.session;
+  // A verified Factory-selected revision can be read after the session's
+  // handoff released the temporary review hold. The selected file must match
+  // the durable handoff receipt and authoritative Platform Output projection.
+  const held=workspace?.publication_hold_verified===true &&
+    session?.review_hold?.active===true;
+  const transferred=workspace?.ok===true &&
+    session?.state==="approved" && session?.review_hold?.active===false &&
+    session?.factory_handoff?.status==="ready_for_factory_approval" &&
+    session?.factory_handoff?.attempt_id===session?.current_attempt_id &&
+    session?.factory_handoff?.artifact_id===workspace?.preview?.file_id &&
+    session?.factory_handoff?.artifact_id===session?.attempts?.find(
+      a=>a.id===session.current_attempt_id)?.artifact_id;
+  if(workspace?.ok!==true||session?.output_id!==outputId||(!held&&!transferred))
+    fail(409,"Review ownership, active hold or selected Factory handoff not verified");
   const attempts=workspace.session.attempts;
   if(!Array.isArray(attempts))fail(409,"Review attempts unavailable");
   const attempt=attempts.find(a=>a?.id===attemptId);
+  if(transferred && attemptId!==session.current_attempt_id)
+    fail(409,"Only the currently selected V2 can be played after Factory handoff");
   if(!attempt||Number(attempt.number)<2||
      attempt.status!=="ready_for_review"||!FILE.test(String(attempt.artifact_id||"")))
     fail(409,"Only completed replacement attempts are playable");
