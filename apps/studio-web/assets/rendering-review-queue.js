@@ -240,23 +240,7 @@
     appendLine(detail,'Review:',entry.review_held?'Existing hold detected — do not clear automatically':
       entry.dispatch_started?'Already being dispatched — not eligible to claim':'Not enrolled');
     if(!entry.review_held){
-      if(state.flags.admission_enabled===true&&entry.manual_admission_enabled===true&&
-          !entry.dispatch_started){
-        const enroll=actionButton('Review with Producer',async()=>{
-          const result=await post('/api/rendering-review/outputs/'+
-            encodeURIComponent(entry.output_id)+'/enroll',
-            {client_request_id:safeRequestId()});
-          if(!result.review_hold_active)throw new Error('Enrollment hold could not be verified');
-          entry.review_held=true;entry.manual_admission_enabled=false;
-          say('Chicago Reel enrolled · publication review hold verified');
-          renderList();
-          await open(entry);
-        });
-        detail.append(enroll);
-        detail.append(elem('p','Manual enrollment establishes a publication hold and vacates any earlier schedule before discussion. Previewing alone changes nothing.','rr-muted'));
-      }else{
-        detail.append(elem('p','Read-only preview. Manual review admission is disabled or this output is not eligible.','rr-notice'));
-      }
+      detail.append(elem('p','To request changes, open this output in Factory, select Request Changes, and enter comments before submitting.','rr-notice'));
       return;
     }
     if(state.flags.producer_conversation_enabled!==true){
@@ -604,7 +588,7 @@
     if(!next && state.lastLoad && Date.now()-state.lastLoad<30000)return;
     const current=++state.request;
     state.busy=true;refresh.disabled=true;more.disabled=true;
-    say(next?'Loading more Chicago renders…':'Loading completed Chicago Reel renders…');
+    say(next?'Loading more Factory-submitted reviews…':'Loading Factory-submitted reviews…');
     try{
       const query=new URLSearchParams({profile_id:chicago});
       if(next && state.cursor)query.set('cursor',state.cursor);
@@ -624,8 +608,7 @@
         if(!previousIds.has(entry.output_id)){state.records.push(entry);previousIds.add(entry.output_id);}
       }
       state.cursor=data.next_cursor||null;state.lastLoad=Date.now();
-      say((state.flags.admission_enabled ? 'Manual pilot available' : 'Read-only')+
-        ' · Chicago Instagram Reels · '+state.records.length+' loaded');
+      say('Factory-submitted reviews · Chicago Instagram Reels · '+state.records.length+' loaded');
       renderList();
       if(!state.selected && state.records.length)open(state.records[0]);
     }catch(error){
