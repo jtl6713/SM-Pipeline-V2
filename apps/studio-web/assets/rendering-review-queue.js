@@ -652,5 +652,18 @@
   }
   reveal();
   if(root.classList.contains('active'))load(false);
-  window.StudioRenderingReview={load};
+  async function openFromFactory(outputId,message){
+    if(!/^rec[A-Za-z0-9]{14}$/.test(String(outputId||"")))return;
+    state.lastReplyNotice={
+      outputId,message:String(message||
+        "Your change request was saved. Continue with the Producer here."),
+    };
+    state.selected='';
+    state.lastLoad=0;
+    nav.click();
+    if(root.classList.contains('active'))await load(false);
+    const entry=state.records.find(row=>row.output_id===outputId);
+    if(entry)await open(entry);
+  }
+  window.StudioRenderingReview={load,openFromFactory};
 })();
