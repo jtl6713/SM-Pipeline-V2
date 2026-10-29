@@ -753,3 +753,5 @@ Rendering Review V3 source validation + Producer executable timeline canary code
 2026-10-28: Redeploy Worker 0.10.688 with validated all-production-ESM bundle source equivalence. Storyboard is read-only, source-linked, and publication fenced; no automatic V2.
 
 2026-10-29 exact Chicago 8447 QA correction: guarded original V1 audio rebind, only after independent Runner proof; no publishing or new rendering.
+
+2026-10-29 Studio Worker 0.10.689 exact Chicago review QA audio repair version verification, hold retained.
