@@ -5,6 +5,8 @@ on:
     paths:
       - 'apps/studio-api/rendering-review-airtable-contract.*'
       - 'apps/studio-api/rendering-review-policy.*'
+      - 'apps/studio-api/rendering-review-factory-handoff.*'
+      - 'apps/studio-api/worker.js'
       - '.github/workflows/rendering-review-phase1-ci.yml'
   workflow_dispatch:
 
@@ -24,5 +26,7 @@ jobs:
         run: |
           node --check apps/studio-api/rendering-review-airtable-contract.mjs
           node --check apps/studio-api/rendering-review-airtable-contract.test.mjs
+          node --check apps/studio-api/rendering-review-factory-handoff.mjs
+          node --check apps/studio-api/worker.js
       - name: Isolated storage and dispatch guard contracts
-        run: node --test apps/studio-api/rendering-review-airtable-contract.test.mjs apps/studio-api/rendering-review-policy.test.mjs apps/studio-api/rendering-review-coordinator.test.mjs
+        run: node --test apps/studio-api/rendering-review-airtable-contract.test.mjs apps/studio-api/rendering-review-policy.test.mjs apps/studio-api/rendering-review-coordinator.test.mjs apps/studio-api/rendering-review-factory-handoff.test.mjs apps/studio-api/rendering-review-approval-http.test.mjs
