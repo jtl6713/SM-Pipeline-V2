@@ -285,7 +285,8 @@ test('frozen render-only plan requires server availability and one explicit butt
 
 test('queued Chicago render automatically delivers verified V2 without interrupting V1 during polling',async()=>{
   const ids=['page-rendering-review','navRenderingReview','rrQueueList','rrDetail',
-    'rrStatus','rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile'];
+    'rrStatus','rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile',
+    'rrVersionBar','rrVersionLabel','rrOriginalVersion'];
   const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
   const output='recA1B2C3D4E5F6G7';
   const original='1CAh-mGGiCiv7WKUl9jNeqm1vyQF7PTzq';
@@ -339,6 +340,8 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
   assert.equal(reads,1);
   assert.equal(timers.length,1,'One polling callback for exact held session');
   assert.equal(nodes.rrOpenFile.href,'https://studio.test/api/outputs/'+output+'/preview');
+  assert.equal(nodes.rrVersionLabel.textContent,'Version V1');
+  assert.equal(nodes.rrOriginalVersion.hidden,true);
   await timers[0]();for(let i=0;i<4;i++)await tick();
   assert.equal(reads,2,'Poll reads authoritative session once');
   assert.equal(timers.length,2,'Still queued: do not reset the player');
@@ -349,10 +352,20 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
   assert.equal(nodes.rrOpenFile.href,revisedStream);
   assert.equal(nodes.rrVideo.src,revisedStream);
   assert.equal(nodes.rrVideo.inserted,undefined);
+  assert.equal(nodes.rrVersionLabel.textContent,'Version V2');
+  assert.equal(nodes.rrOriginalVersion.hidden,false);
+  nodes.rrOriginalVersion.listeners.click();
+  assert.equal(nodes.rrVideo.src,'https://studio.test/api/outputs/'+output+'/preview');
+  assert.equal(nodes.rrVersionLabel.textContent,'Version V1');
+  assert.equal(nodes.rrOriginalVersion.hidden,true);
   const descendants=node=>[node,...node.children.flatMap(descendants)];
   const versions=descendants(nodes.rrDetail).filter(n=>n.tag==='button'&&
-    /^Attempt [12] ·/.test(n.textContent));
+    /^Version V[12] ·/.test(n.textContent));
   assert.equal(versions.length,2,'Both original and revised versions remain selectable');
+  await versions[1].listeners.click();
+  assert.equal(nodes.rrVideo.src,revisedStream);
+  assert.equal(nodes.rrVersionLabel.textContent,'Version V2');
+  assert.equal(nodes.rrOriginalVersion.hidden,false);
   assert.ok(calls.every(c=>c.method==='GET'),'Polling never renders or publishes');
 });
 
@@ -497,15 +510,18 @@ test('held #8447 surfaces a verified Morning alternative and saves correction on
   assert.ok(after.some(n=>n.textContent==='Suggested replacement'));
 });
 
-test('Rendering Review does not portray V1 playback as a completed Producer render',()=>{
-  assert.match(script,/ORIGINAL V1 — unchanged/);
-  assert.match(script,/I haven\\'t changed the video yet/);
+test('Rendering Review labels the playing video without unchanged-video explanations',()=>{
+  assert.match(script,/Version V/);
+  assert.match(script,/rrVersionBar/);
+  assert.match(html,/id="rrOriginalVersion"/);
   assert.match(script,/Proposed edits/);
   assert.match(script,/Do these look right/);
   assert.match(script,/Reply to Producer/);
   assert.match(script,/Suggested morning photo/);
   assert.match(script,/created\.persisted!==true\|\|created\.render_queued!==false/);
-  assert.match(script,/I haven\\'t changed the video yet/);
-  assert.match(css,/rr-storyboard-pair/);
+  assert.doesNotMatch(script,/ORIGINAL V1 — unchanged/);
+  assert.doesNotMatch(script,/The video has not changed/);
+  assert.doesNotMatch(script,/I haven\\'t changed the video yet/);
+  assert.match(css,/rr-version-bar/);
   assert.doesNotMatch(script,/showMedia\(.*candidate\.candidate\.timeline/);
 });
