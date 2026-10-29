@@ -68,7 +68,8 @@ export async function returnFactoryRevisionToProducer({output_id,note,client_req
     const f=o.readField;
     validOutput(row,f,s,a);
     const key="rrfactoryreturn_"+client_request_id;
-    const fingerprint="rrfactoryreturn_"+client_request_id+"_"+note.trim();
+    const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(note.trim()));
+    const fingerprint="rrfactoryfp_"+Array.from(new Uint8Array(digest),x=>x.toString(16).padStart(2,"0")).join("");
     // An earlier request can be replayed without adding duplicate messages.
     if(s.processed?.[key]){
       if(s.processed[key]!==fingerprint)
