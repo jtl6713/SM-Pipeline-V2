@@ -72,6 +72,7 @@ def _verified_drive_asset(asset: dict, asset_id: str, profile_id: str) -> dict:
 def compile_isolated_render_payload(
     *, job: dict, plan: dict, source: dict, resolved_assets: list,
     voiceover: dict, watermark: dict, observed_source_segments: list | None = None,
+    source_mix: dict | None = None,
 ) -> dict:
     """Build a bounded, deterministic P020-compatible payload; no side effects."""
     if not all(isinstance(obj, dict) for obj in (job, plan, source, voiceover, watermark)):
@@ -153,6 +154,37 @@ def compile_isolated_render_payload(
         _deny("branding_policy_not_verified")
     if plan.get("branding_policy") != "retain_current_approved":
         _deny("branding_policy_changed")
+    # A revision is not permission to silently drop V1's music or enable
+    # captions. Only independently verified original rendering properties
+    # may set this mix; a model cannot supply or override them.
+    mix={"enabled":False,"url":"","volume":0}
+    captions=True
+    words_per_page=4
+    if source_mix is not None:
+        if (not isinstance(source_mix,dict) or
+            source_mix.get("verified") is not True or
+            source_mix.get("authority")!="server" or
+            source_mix.get("output_id")!=output_id or
+            not IDENTITY.fullmatch(_str(source_mix.get("music_drive_file_id"))) or
+            type(source_mix.get("spoken_captions_enabled")) is not bool or
+            type(source_mix.get("spoken_caption_words_per_page")) is not int or
+            not 1<=source_mix["spoken_caption_words_per_page"]<=12):
+            _deny("original_audio_or_caption_mix_unverified")
+        original_music=source_mix.get("music")
+        if (not isinstance(original_music,dict) or
+            set(original_music)-{"url","volume","duckingEnabled",
+                "duckingMultiplier","duckFadeFrames","fadeInFrames",
+                "fadeOutFrames","startFromSeconds"} or
+            not _str(original_music.get("url")).startswith(
+                "https://drive.google.com/uc?export=download&id=") or
+            not _str(original_music.get("url")).endswith(
+                source_mix["music_drive_file_id"]) or
+            type(original_music.get("volume")) not in (int,float) or
+            not 0<=original_music["volume"]<=1):
+            _deny("original_music_mix_untrusted")
+        mix=dict(original_music)
+        captions=source_mix["spoken_captions_enabled"]
+        words_per_page=source_mix["spoken_caption_words_per_page"]
     clips = []
     end_frame = 0
     preserved_instructions = creative.get("preserve") or []
@@ -259,13 +291,13 @@ def compile_isolated_render_payload(
         "voiceover": {"url": voiceover["audio_url"], "volume": 1},
         "voiceoverUrl": voiceover["audio_url"],
         "voiceoverTailSeconds": 0,
-        "spokenCaptionsEnabled": True,
-        "spokenCaptionWordsPerPage": 4,
+        "spokenCaptionsEnabled": captions,
+        "spokenCaptionWordsPerPage": words_per_page,
         "watermarkUrl": watermark["url"],
         "watermarkRequired": True,
         "clips": clips,
         "expectedClipCount": len(clips),
-        "music": {"enabled": False, "url": "", "volume": 0},
+        "music": mix,
         "studioRevision": {
             "source": "rendering_review",
             "output_id": output_id,
