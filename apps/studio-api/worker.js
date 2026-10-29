@@ -9,6 +9,7 @@ import { handleRenderingReviewFeedbackRequest, reviewFeedbackWriteEnabled } from
 import { handleRenderingReviewEnrollRequest, reviewEnrollmentWriteEnabled } from "./rendering-review-enrollment-http.mjs";
 import { acceptReviewCreativeOnly } from "./rendering-review-approval-http.mjs";
 import { handoffApprovedReviewToFactory } from "./rendering-review-factory-handoff.mjs";
+import { previewAcceptedFactoryRevision } from "./rendering-review-factory-video.mjs";
 import { composeRenderingReviewEnrollmentOperations } from "./rendering-review-enrollment-wiring.mjs";
 import { handleReviewProducerProposal, reviewProducerBridgeEnabled } from "./rendering-review-producer-bridge.mjs";
 import { persistReviewProducerCandidate, producerConversationWritesEnabled } from "./rendering-review-producer-persist.mjs";
@@ -3218,6 +3219,19 @@ export default {
       }
 
       if (isOutputPreviewRoute) {
+        // The normal preview is R2/render-server-first and cannot read a
+        // privately held V2 Drive file after Rendering Review hands it to
+        // Factory. Resolve the accepted Factory receipt before any fallback.
+        const outputId=url.pathname.match(/^\\/api\\/outputs\\/(rec[A-Za-z0-9]{14})\\/preview$/)?.[1];
+        if(outputId===env.RENDERING_REVIEW_EXACT_OUTPUT_ID) {
+          const reviewVideo=await previewAcceptedFactoryRevision({
+            request,env,authorization,outputId,
+            operations:makeReviewFactoryHandoffOperations(env),
+            readVideo:identity=>fetchTrustedRunnerReviewMedia(identity),
+            copyHeaders:copyDriveVideoHeaders,
+          });
+          if(reviewVideo)return reviewVideo;
+        }
         return outputPreview(request, env, url, authorization);
       }
 
