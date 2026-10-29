@@ -367,3 +367,5 @@ jobs:
 # 2026-10-29: guarded Runner v11, private exact-job claim denial visibility only.
 
 # 2026-10-29: protected Runner v12 no-launch proof for recovering existing authorized Chicago Reel 8447 V2 job.
+
+# 2026-10-29: guarded Worker HTTP transport used by exact held Chicago #8447 V2 (Runner v13). No claim, render or publish from deploy.
