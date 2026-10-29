@@ -90,6 +90,6 @@ test("Factory is the only conversational-review entry and requires comments",()=
   assert.match(factory,/action:"start_render_review"/);
   assert.match(factory,/if \(!notes\)/);
   assert.match(factory,/Describe the changes needed before sending back/);
-  assert.match(factory,/rendering-review\\/factory\\/outputs/);
+  assert.ok(factory.includes('rendering-review/factory/outputs'));
   assert.match(factory,/review_notes_saved!==true/);
 });
