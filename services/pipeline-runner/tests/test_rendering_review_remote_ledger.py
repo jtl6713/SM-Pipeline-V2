@@ -103,11 +103,11 @@ class LedgerTests(unittest.TestCase):
         # override the new matched source.
         with tempfile.TemporaryDirectory() as d:
             cfg=Path(d)/".env"
-            cfg.write_text("CF_ACCESS_CLIENT_ID=fresh-client\\n"
-                           "CF_ACCESS_CLIENT_SECRET=fresh-secret\\n"
-                           "RENDERING_REVIEW_RENDER_JOB_SHARED_SECRET=fresh-review-job-secret-long\\n"
-                           "RENDERING_REVIEW_WORKER_BASE_URL=https://studio.chicagoshining.com\\n")
-            with patch("rendering_review.remote_ledger._review_env_path",return_value=cfg), \\
+            cfg.write_text("CF_ACCESS_CLIENT_ID=fresh-client\n"
+                           "CF_ACCESS_CLIENT_SECRET=fresh-secret\n"
+                           "RENDERING_REVIEW_RENDER_JOB_SHARED_SECRET=fresh-review-job-secret-long\n"
+                           "RENDERING_REVIEW_WORKER_BASE_URL=https://studio.chicagoshining.com\n")
+            with patch("rendering_review.remote_ledger._review_env_path",return_value=cfg), \
                  patch.dict(os.environ, {
                    "CF_ACCESS_CLIENT_ID":"old-client",
                    "CF_ACCESS_CLIENT_SECRET":"old-secret",
@@ -127,8 +127,8 @@ class LedgerTests(unittest.TestCase):
     def test_existing_ops_file_missing_key_fails_closed_without_stale_fallback(self):
         with tempfile.TemporaryDirectory() as d:
             cfg=Path(d)/".env"
-            cfg.write_text("CF_ACCESS_CLIENT_ID=present\\nCF_ACCESS_CLIENT_SECRET=\\n")
-            with patch("rendering_review.remote_ledger._review_env_path",return_value=cfg), \\
+            cfg.write_text("CF_ACCESS_CLIENT_ID=present\nCF_ACCESS_CLIENT_SECRET=\n")
+            with patch("rendering_review.remote_ledger._review_env_path",return_value=cfg), \
                  patch.dict(os.environ, {"CF_ACCESS_CLIENT_ID":"stale-id",
                                          "CF_ACCESS_CLIENT_SECRET":"stale-secret"}):
                 sent=[]
