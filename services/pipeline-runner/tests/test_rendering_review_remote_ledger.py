@@ -1,9 +1,11 @@
 """Hermetic protected Worker launch-ledger bridge contracts."""
 import os
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
-from rendering_review.remote_ledger import RemoteLaunchLedger, ReviewLedgerUnavailable
+from rendering_review.remote_ledger import RemoteLaunchLedger, ReviewLedgerUnavailable, review_setting
 
 CLAIM={
     "ok":True,"lease_verified":True,"output_id":"recA1B2C3D4E5F6G7",
@@ -93,6 +95,47 @@ class LedgerTests(unittest.TestCase):
             with self.assertRaisesRegex(ReviewLedgerUnavailable,"no_retry"):
                 ledger.read_authority(CLAIM["job_id"])
         self.assertEqual(sent,[])
+
+    def test_protected_ops_env_overrides_stale_process_review_credentials(self):
+        # The protected Ops activation writes a matched Cloudflare Access
+        # identity and job credential to the local Runner .env. No value is
+        # logged or returned over HTTP; a stale Windows process env must not
+        # override the new matched source.
+        with tempfile.TemporaryDirectory() as d:
+            cfg=Path(d)/".env"
+            cfg.write_text("CF_ACCESS_CLIENT_ID=fresh-client\\n"
+                           "CF_ACCESS_CLIENT_SECRET=fresh-secret\\n"
+                           "RENDERING_REVIEW_RENDER_JOB_SHARED_SECRET=fresh-review-job-secret-long\\n"
+                           "RENDERING_REVIEW_WORKER_BASE_URL=https://studio.chicagoshining.com\\n")
+            with patch("rendering_review.remote_ledger._review_env_path",return_value=cfg), \\
+                 patch.dict(os.environ, {
+                   "CF_ACCESS_CLIENT_ID":"old-client",
+                   "CF_ACCESS_CLIENT_SECRET":"old-secret",
+                   "RENDERING_REVIEW_RENDER_JOB_SHARED_SECRET":"old-job-secret",
+                   "RENDERING_REVIEW_WORKER_BASE_URL":"https://old.example",
+                 }):
+                self.assertEqual(review_setting("RENDERING_REVIEW_RENDER_JOB_SHARED_SECRET"),
+                                 "fresh-review-job-secret-long")
+                self.assertEqual(review_setting("RENDERING_REVIEW_WORKER_BASE_URL"),
+                                 "https://studio.chicagoshining.com")
+                ledger,calls=self.make()
+                ledger.read_authority(CLAIM["job_id"])
+                self.assertEqual(calls[0][2]["CF-Access-Client-Id"],"fresh-client")
+                self.assertEqual(calls[0][2]["CF-Access-Client-Secret"],"fresh-secret")
+                self.assertEqual(calls[0][2]["X-Rendering-Review-Job-Secret"],SECRET)
+
+    def test_existing_ops_file_missing_key_fails_closed_without_stale_fallback(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg=Path(d)/".env"
+            cfg.write_text("CF_ACCESS_CLIENT_ID=present\\nCF_ACCESS_CLIENT_SECRET=\\n")
+            with patch("rendering_review.remote_ledger._review_env_path",return_value=cfg), \\
+                 patch.dict(os.environ, {"CF_ACCESS_CLIENT_ID":"stale-id",
+                                         "CF_ACCESS_CLIENT_SECRET":"stale-secret"}):
+                sent=[]
+                ledger,_=self.make(transport=lambda *args:sent.append(args))
+                with self.assertRaisesRegex(ReviewLedgerUnavailable,"no_retry"):
+                    ledger.read_authority(CLAIM["job_id"])
+                self.assertEqual(sent,[])
 
     def test_invalid_server_response_denies_without_guessing(self):
         ledger,_=self.make(transport=lambda *_:None)
