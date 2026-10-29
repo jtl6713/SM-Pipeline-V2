@@ -416,7 +416,7 @@ test('Producer failure is visible beside Send, preserves direction and reuses re
   await send.listeners.click();
   const statuses=descendants(nodes.rrDetail).filter(n=>n.className==='rr-feedback-status');
   assert.equal(statuses.length,1);
-  assert.match(statuses[0].textContent,/Not sent: The Producer returned an invalid revision proposal/);
+  assert.match(statuses[0].textContent,/Could not confirm your reply: The Producer returned an invalid revision proposal/);
   assert.equal(composer.value,'Keep the morning opening, but show three more Riverwalk photos.');
   assert.equal(send.disabled,false);
   await send.listeners.click();
@@ -431,7 +431,8 @@ test('held #8447 surfaces a verified Morning alternative and saves correction on
     'rrStatus','rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile'];
   const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
   const output='rec0uVrVeiUM6shp9';
-  let notify, savedRevision=false;
+  let notify, savedRevision=false,completeReply;
+  const slowTimers=[];
   const calls=[];
   const night={name:'Gibsons Italia 5',time_of_day:'Night',
     preview_url:'https://media.chicagoshining.com/studio/previews/item4/night.jpg'};
@@ -467,15 +468,19 @@ test('held #8447 surfaces a verified Morning alternative and saves correction on
       const body=JSON.parse(options.body);
       assert.equal(body.expected_version,3);
       assert.equal(body.direction,'Yes, those look good.');
-      savedRevision=true;
-      return {ok:true,json:async()=>({ok:true,persisted:true,
-        render_queued:false,plan_ready:true,plan_persisted:true})};
+      return new Promise(resolve=>{completeReply=()=>{
+        savedRevision=true;
+        resolve({ok:true,json:async()=>({ok:true,persisted:true,
+          render_queued:false,plan_ready:true,plan_persisted:true})});
+      };});
     }
     throw new Error('Unexpected request '+url);
   };
   const sandbox={
     document:{getElementById:id=>nodes[id],createElement:tag=>new Node(tag)},
-    window:{location:{href:'https://studio.test/'},CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''}},
+    window:{location:{href:'https://studio.test/'},CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''},
+      setTimeout:fn=>{slowTimers.push(fn);return slowTimers.length;},
+      clearTimeout:()=>{}},
     MutationObserver:class {constructor(fn){notify=fn;}observe(){}},
     fetch:fetchStub,URL,URLSearchParams,
     crypto:{randomUUID:()=> 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'},
@@ -500,12 +505,36 @@ test('held #8447 surfaces a verified Morning alternative and saves correction on
     'no technical system-status warning in the conversation');
   assert.equal(calls.filter(x=>x.method==='POST').length,0,'read never changes the session');
   reply.value='Yes, those look good.';
+  const conversation=before.find(n=>n.className==='rr-chat-form');
+  const progress=before.find(n=>n.className==='rr-feedback-status');
+  assert.ok(conversation&&progress);
+  assert.ok(conversation.children.indexOf(progress)<conversation.children.indexOf(send),
+    'progress status must be above the button so iPhone keyboard cannot hide it');
+  const response=send.listeners.click();
+  assert.equal(send.disabled,true);
+  assert.equal(send.textContent,'Producer is working…');
+  assert.equal(send.attrs['aria-busy'],'true');
+  assert.equal(progress.hidden,false);
+  assert.match(progress.textContent,/Sending your feedback/);
+  assert.equal(progress.dataset.state,'working');
+  assert.equal(slowTimers.length,1);
+  slowTimers[0]();
+  assert.match(progress.textContent,/Still waiting for the Producer/);
+  assert.equal(calls.filter(x=>x.method==='POST').length,1);
   await send.listeners.click();
+  assert.equal(calls.filter(x=>x.method==='POST').length,1,'no duplicate while pending');
+  completeReply();
+  await response;
   for(let i=0;i<12;i++)await tick();
+  assert.equal(send.disabled,false);
+  assert.equal(send.textContent,'Reply to Producer');
   assert.equal(calls.filter(x=>x.method==='POST').length,1);
   assert.equal(savedRevision,true);
   assert.ok(!calls.some(x=>/commit-attempt|publish|approve/.test(x.url)));
   const after=descendants(nodes.rrDetail);
+  assert.ok(after.some(n=>n.className==='rr-feedback-receipt'&&
+    /photo choices were saved/.test(n.textContent)),
+    'the acknowledgement survives the detail rerender');
   assert.ok(!after.some(n=>n.textContent==='Reply to Producer'));
   assert.ok(after.some(n=>n.textContent==='Suggested replacement'));
 });

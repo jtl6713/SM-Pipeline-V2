@@ -361,8 +361,9 @@ def propose_revision(evidence: dict, direction: str, settings: dict, *, transpor
         raise ValueError("Evidence exceeds bounded context; build a focused snapshot")
     # If the reviewer accepts the two specific source-backed photo suggestions,
     # interpret their *natural language reply* as agreement to save a candidate.
-    # Never interpret a qualified "yes, but..." or a render/publish instruction
-    # as consent. A model response never authorizes a render or publication.
+    # Never interpret a qualified "yes, but..." as acceptance. A request
+    # to rerender can confirm the proposed photos here but NEVER authorizes
+    # a render or publication; rendering requires its separate guarded action.
     import re
     reply = " ".join(direction.casefold().strip().rstrip(".!").split())
     accepted_replies = (
@@ -372,7 +373,8 @@ def propose_revision(evidence: dict, direction: str, settings: dict, *, transpor
         r"(?:look )?(?:good|great|fine|perfect|work|are acceptable)|"
         r"(?:yes|sure),? (?:use|go with) (?:these|those)|"
         r"(?:use|go with) (?:these|those)(?: (?:photos|pictures|stills))?|"
-        r"i like (?:these|those)(?: photos| pictures| stills)?)"
+        r"i like (?:these|those)(?: photos| pictures| stills)?|"
+        r"yes,? this is (?:good|great|perfect)(?:[.!]? (?:please )?re-?render(?: please)?)?)"
     )
     latest = (evidence.get("messages") or [])[-1:]
     if (evidence.get("output_id") == "rec0uVrVeiUM6shp9"
