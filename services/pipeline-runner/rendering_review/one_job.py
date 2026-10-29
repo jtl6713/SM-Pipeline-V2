@@ -93,7 +93,7 @@ def _post_once(worker,secret,route,body,timeout=20):
         with requests.post(url,headers=headers,data=data,timeout=timeout,
                            allow_redirects=False,stream=True) as result:
             status=result.status_code
-            raw=result.raw.read(8193)
+            raw=result.raw.read(8193, decode_content=True)
     except requests.RequestException as exc:
         raise ExactReviewRenderDenied("review_worker_reply_ambiguous_reconcile") from exc
     except Exception as exc:
