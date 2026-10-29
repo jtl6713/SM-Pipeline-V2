@@ -1853,7 +1853,7 @@ export default {
         let difference=0;
         for(let i=0;i<a.length;i++)difference|=a[i]^b[i];
         if(difference)throw new HttpError(403,"Protected Runner credential required");
-        if(!/^application\\/json(?:\\s*;|$)/i.test(String(request.headers.get("Content-Type")||"")))
+        if(!/^application\/json(?:\s*;|$)/i.test(String(request.headers.get("Content-Type")||"")))
           throw new HttpError(415,"JSON required");
         const body=await request.text();
         if(body!=='{"confirm":"PROMOTE-APPROVED-V2-TO-FACTORY"}')
@@ -1901,7 +1901,7 @@ export default {
 
       // Factory promotion is a separate, authenticated retry for a review
       // that was creatively accepted before the automatic handoff existed.
-      const factoryMatch=/^\\/api\\/rendering-review\\/outputs\\/(rec[A-Za-z0-9]{14})\\/factory-handoff$/.exec(url.pathname);
+      const factoryMatch=/^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/factory-handoff$/.exec(url.pathname);
       if(factoryMatch && request.method==="POST") {
         requirePermission(authorization,"outputs_review");
         if(!(await reviewAuthorizedProfiles(env,authorization)).some(p=>p.id===CHICAGO_PROFILE_ID))
