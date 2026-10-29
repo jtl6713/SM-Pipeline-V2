@@ -1,0 +1,84 @@
+name: Safely identify Chicago V2 Worker claim authentication failure
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/chicago-review-worker-auth-probe-once.yml']
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Verify Runner-held Cloudflare Access and job secret without a valid claim
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          cat >/tmp/chicago-worker-probe.ps1 <<'PS1'
+          $ErrorActionPreference='Stop'
+          $p=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+          if(-not (Test-Path -LiteralPath $p)){throw 'runner_env_missing'}
+          $lines=@(Get-Content -LiteralPath $p)
+          function GetValue([string]$name){
+            $match=@($lines|Where-Object {$_ -match ('^\s*'+[regex]::Escape($name)+'\s*=')})
+            if($match.Count -ne 1){throw 'runner_credential_binding_unavailable'}
+            $raw=($match[0] -split '=',2)[1].Trim()
+            return $raw.Trim('"').Trim([char]39)
+          }
+          $clientId=GetValue 'CF_ACCESS_CLIENT_ID'
+          $clientSecret=GetValue 'CF_ACCESS_CLIENT_SECRET'
+          $jobSecret=GetValue 'RENDERING_REVIEW_RENDER_JOB_SHARED_SECRET'
+          if([string]::IsNullOrWhiteSpace($clientId) -or [string]::IsNullOrWhiteSpace($clientSecret) -or $jobSecret.Length -lt 24){throw 'runner_credential_missing'}
+          Add-Type -AssemblyName System.Net.Http
+          $http=[System.Net.Http.HttpClient]::new()
+          $http.Timeout=[TimeSpan]::FromSeconds(20)
+          try{
+            foreach($kind in @('health','invalid_claim')){
+              if($kind -eq 'health'){
+                $req=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get,'https://studio.chicagoshining.com/api/health')
+              }else{
+                $req=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post,'https://studio.chicagoshining.com/api/internal/rendering-review/claim-render-job')
+                $req.Content=[System.Net.Http.StringContent]::new('{}',[System.Text.Encoding]::UTF8,'application/json')
+                [void]$req.Headers.TryAddWithoutValidation('X-Rendering-Review-Job-Secret',$jobSecret)
+              }
+              [void]$req.Headers.TryAddWithoutValidation('CF-Access-Client-Id',$clientId)
+              [void]$req.Headers.TryAddWithoutValidation('CF-Access-Client-Secret',$clientSecret)
+              $res=$http.SendAsync($req).GetAwaiter().GetResult()
+              $body=$res.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+              $code='not_json'
+              try{
+                $json=$body|ConvertFrom-Json -ErrorAction Stop
+                $code='none'
+                if($null -ne $json.error){$code=[string]$json.error}
+                elseif($null -ne $json.code){$code=[string]$json.code}
+              }catch{}
+              Write-Output ('review_auth_probe='+$kind+' http='+[int]$res.StatusCode+' app_error='+$code)
+            }
+          }finally{$http.Dispose()}
+          PS1
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/review-auth-probe.json').write_text(json.dumps({'command':Path('/tmp/chicago-worker-probe.ps1').read_text(),'confirm':True}))
+          PY
+          code=$(curl -sS --max-time 20 -o /tmp/ops-auth-probe.json -w '%{http_code}' \
+            -X POST https://ops.chicagoshining.com/api/shell \
+            -H "Authorization: Bearer $OPS_TOKEN" -H "Content-Type: application/json" \
+            --data-binary @/tmp/review-auth-probe.json)
+          [[ "$code" == "200" || "$code" == "202" ]]
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/ops-auth-probe.json); test -n "$job"
+          for i in $(seq 1 40); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/ops-auth-probe-result.json
+            state=$(jq -r '.job.status // empty' /tmp/ops-auth-probe-result.json)
+            if [[ "$state" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/ops-auth-probe-result.json | grep '^review_auth_probe='
+              exit 0
+            fi
+            if [[ "$state" == "failed" ]]; then echo "review_auth_probe_failed=true"; exit 1; fi
+            sleep 3
+          done
+          echo "review_auth_probe_unverified=true"; exit 1
