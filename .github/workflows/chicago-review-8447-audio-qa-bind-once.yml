@@ -1,0 +1,113 @@
+name: Bind verified V1 soundtrack to the existing held Chicago 8447 V2
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/chicago-review-8447-audio-qa-bind-once.yml']
+permissions:
+  contents: read
+concurrency:
+  group: chicago-review-8447-existing-v2-audio-qa-bind
+  cancel-in-progress: false
+jobs:
+  verify-and-bind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - name: Verify exact Runner and live Worker QA release, never infer deployment from merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          test -n "$CF_ACCESS_CLIENT_ID"
+          test -n "$CF_ACCESS_CLIENT_SECRET"
+          curl -fsS --max-time 25 'https://pipeline.chicagoshining.com/health' -o /tmp/review-qa-runner.json
+          jq -e '.ok==true and .version=="2026-10-29-chicago-v2-audio-qa-repair-v16"' /tmp/review-qa-runner.json >/dev/null
+          curl -fsS --max-time 25 \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            'https://studio.chicagoshining.com/api/health' -o /tmp/review-qa-worker.json
+          jq -e '.ok==true and (.version|startswith("0.10.689-review-audio-qa-repair"))' /tmp/review-qa-worker.json >/dev/null
+          echo 'private_v2_qa_runner_and_worker_proven_live=true'
+      - name: Apply one-time exact-held-attempt artifact rebinding through Studio lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/8447-audio-bind.ps1 <<'PS1'
+          $ErrorActionPreference='Stop'
+          $p=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+          if(-not (Test-Path -LiteralPath $p)){throw 'runner_env_missing'}
+          $rows=@(Get-Content -LiteralPath $p)
+          $matches=@($rows|Where-Object {$_ -match '^\s*RENDERING_REVIEW_RENDER_JOB_SHARED_SECRET\s*='})
+          if($matches.Count -ne 1){throw 'review_qa_secret_unavailable'}
+          $secret=($matches[0] -split '=',2)[1].Trim().Trim('"').Trim([char]39)
+          if($secret.Length -lt 24){throw 'review_qa_secret_invalid'}
+          $accessId=($rows|Where-Object {$_ -match '^\s*CF_ACCESS_CLIENT_ID\s*='}|Select-Object -First 1)
+          $accessSecret=($rows|Where-Object {$_ -match '^\s*CF_ACCESS_CLIENT_SECRET\s*='}|Select-Object -First 1)
+          if(-not $accessId -or -not $accessSecret){throw 'review_qa_access_unavailable'}
+          $clientId=($accessId -split '=',2)[1].Trim().Trim('"').Trim([char]39)
+          $clientSecret=($accessSecret -split '=',2)[1].Trim().Trim('"').Trim([char]39)
+          Add-Type -AssemblyName System.Net.Http
+          $http=[System.Net.Http.HttpClient]::new()
+          $http.Timeout=[TimeSpan]::FromSeconds(200)
+          try{
+            $req=[System.Net.Http.HttpRequestMessage]::new(
+              [System.Net.Http.HttpMethod]::Post,
+              'https://studio.chicagoshining.com/api/internal/rendering-review/qa-audio-rebind')
+            $req.Content=[System.Net.Http.StringContent]::new(
+              '{"confirm":"BIND-VERIFIED-AUDIO-ONLY"}',
+              [System.Text.Encoding]::UTF8,'application/json')
+            [void]$req.Headers.TryAddWithoutValidation('X-Rendering-Review-Job-Secret',$secret)
+            [void]$req.Headers.TryAddWithoutValidation('CF-Access-Client-Id',$clientId)
+            [void]$req.Headers.TryAddWithoutValidation('CF-Access-Client-Secret',$clientSecret)
+            $resp=$http.SendAsync($req).GetAwaiter().GetResult()
+            $body=$resp.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            $result=$null
+            try{$result=$body|ConvertFrom-Json -ErrorAction Stop}catch{}
+            Write-Output ('review_qa_bind_http='+[int]$resp.StatusCode+
+              ' ok='+[bool]$result.ok+
+              ' original_preserved='+[bool]$result.original_preserved+
+              ' artifact_match='+([string]$result.artifact_id -eq '1Qm8H_s1QJRQgsVFG7eexlwtE0xvDn7up')+
+              ' no_public_post='+($result.public_post_created -eq $false))
+            if([int]$resp.StatusCode -ne 200 -or $result.ok -ne $true -or
+               $result.original_preserved -ne $true -or
+               [string]$result.artifact_id -ne '1Qm8H_s1QJRQgsVFG7eexlwtE0xvDn7up' -or
+               $result.public_post_created -ne $false){
+              throw 'review_qa_bind_not_verified_no_retry'
+            }
+          }finally{$http.Dispose()}
+          PS1
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/review-qa-bind.json').write_text(json.dumps({
+             'command':Path('/tmp/8447-audio-bind.ps1').read_text(),'confirm':True
+          }))
+          PY
+          code=$(curl -sS --max-time 25 -w '%{http_code}' -o /tmp/review-qa-start.json \
+            -X POST 'https://ops.chicagoshining.com/api/shell' \
+            -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/review-qa-bind.json || true)
+          [[ "$code" == "200" || "$code" == "202" ]]
+          id=$(jq -r '.job.id // .jobId // empty' /tmp/review-qa-start.json); test -n "$id"
+          for i in $(seq 1 100); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$id" -o /tmp/review-qa-job.json
+            status=$(jq -r '.job.status // empty' /tmp/review-qa-job.json)
+            if [[ "$status" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/review-qa-job.json | grep '^review_qa_bind_http='
+              jq -e '(.job.log // "")|contains("ok=True") and contains("artifact_match=True") and contains("no_public_post=True")' /tmp/review-qa-job.json >/dev/null
+              exit 0
+            fi
+            if [[ "$status" == "failed" ]]; then
+              echo 'review_qa_bind_failed_no_auto_retry=true'
+              jq -r '.job.log // ""' /tmp/review-qa-job.json | grep '^review_qa_bind_http=' || true
+              exit 1
+            fi
+            sleep 4
+          done
+          echo 'review_qa_bind_outcome_unverified_no_retry=true'
+          exit 1
