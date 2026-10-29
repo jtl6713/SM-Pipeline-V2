@@ -8,7 +8,7 @@
   const nav = $('navRenderingReview');
   if (!root || !nav) return;
   const chicago = 'recT2rbKX3MF7cVFU';
-  const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map(),pollTimer:null,activeEntry:null};
+  const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map(),pollTimer:null,activeEntry:null,lastReplyNotice:null,lastReplyNoticeNode:null};
   const list = $('rrQueueList'), detail = $('rrDetail'), status = $('rrStatus');
   const refresh = $('rrRefresh'), more = $('rrMore');
   const elem = (tag,text,cls) => {
@@ -60,20 +60,40 @@
     button.addEventListener('click',async()=>{
       if(state.actionBusy)return;
       state.actionBusy=true;button.disabled=true;
+      button.textContent=inlineStatus?'Producer is working…':'Working…';
+      button.setAttribute('aria-busy','true');
+      let slowNotice=null;
       if(inlineStatus){
-        inlineStatus.textContent='Sending your request…';
+        inlineStatus.hidden=false;
+        inlineStatus.dataset.state='working';
+        inlineStatus.textContent='Sending your feedback to the Producer…';
         inlineStatus.classList.toggle('error-text',false);
+        // The Producer request can take time, but there is no server-side
+        // stage feed. Tell the truth rather than inventing a percentage.
+        if(typeof window.setTimeout==='function'){
+          slowNotice=window.setTimeout(()=>{
+            if(inlineStatus.dataset.state==='working'){
+              inlineStatus.textContent='Still waiting for the Producer to respond. Your request is processing; please keep this page open.';
+            }
+          },8000);
+        }
       }
       try{await run();}
       catch(error){
         const message=error.message||'Review action could not be verified';
         say(message,true);
         if(inlineStatus){
-          inlineStatus.textContent='Not sent: '+message;
+          inlineStatus.hidden=false;
+          inlineStatus.dataset.state='error';
+          inlineStatus.textContent='Could not confirm your reply: '+message+' Your message is still in the box to retry.';
           inlineStatus.classList.toggle('error-text',true);
         }
       }
-      finally{state.actionBusy=false;button.disabled=false;}
+      finally{
+        if(slowNotice!==null&&typeof window.clearTimeout==='function')window.clearTimeout(slowNotice);
+        state.actionBusy=false;button.disabled=false;
+        button.textContent=textValue;button.removeAttribute('aria-busy');
+      }
     });
     return button;
   }
@@ -206,6 +226,13 @@
     detail.replaceChildren();
     detail.append(elem('h2',entry.title||'Instagram Reel'),
       elem('p','Chicago · Instagram Reel'+(entry.output_number?' · #'+entry.output_number:''),'rr-entry-meta'));
+    state.lastReplyNoticeNode=null;
+    if(state.lastReplyNotice?.outputId===entry.output_id){
+      const receipt=elem('p',state.lastReplyNotice.message,'rr-feedback-receipt');
+      receipt.setAttribute('role','status');
+      detail.append(receipt);
+      state.lastReplyNoticeNode=receipt;
+    }
     if(!showMedia(originalMedia(entry),'V1',1)){
       detail.append(elem('p','The original render has no authenticated Studio video source.','rr-muted'));
     }
@@ -247,6 +274,16 @@
       const session=saved.session;
       const attempts=Array.isArray(session?.attempts)?session.attempts:[];
       const storyboard=Array.isArray(saved.storyboard)?saved.storyboard:[];
+      if(['queued','rendering','validating','revision_failed'].includes(session?.state)){
+        const version='V'+(Number(session.latest_attempt_number)||2);
+        const phase={
+          queued:'Queued for rendering',
+          rendering:'Rendering your revised video',
+          validating:'Checking your revised video',
+          revision_failed:'The render needs attention'
+        }[session.state];
+        detail.append(elem('p',version+' · '+phase,'rr-review-progress'));
+      }
       const nightRows=storyboard.filter(frame=>frame?.original?.time_of_day==='Night');
       const unresolvedNight=nightRows.filter(frame=>
         !frame.changed||frame.proposed?.time_of_day==='Night');
@@ -279,30 +316,38 @@
           reply.setAttribute('aria-label','Reply to your Producer');
           conversation.append(reply);
           const feedback=elem('p','','rr-feedback-status');
+          feedback.hidden=true;
           feedback.setAttribute('role','status');
           feedback.setAttribute('aria-live','polite');
           let pendingKey='',pendingReply='';
+          conversation.append(feedback);
           conversation.append(actionButton('Reply to Producer',async()=>{
+            // Dismiss the iPhone keyboard so both progress and the Producer
+            // action remain visible while the request is processing.
+            if(typeof reply.blur==='function')reply.blur();
             const direction=String(reply.value||'').trim();
             if(!direction)throw new Error('Tell your Producer what you think of these photos.');
             if(direction!==pendingReply){
               pendingReply=direction;pendingKey=safeRequestId();
             }
-            feedback.textContent='Sending your feedback to the Producer…';
             const created=await post('/api/rendering-review/outputs/'+
               encodeURIComponent(entry.output_id)+'/producer-conversation',{
               direction,expected_version:session.version,client_request_id:pendingKey,
             });
             if(created.persisted!==true||created.render_queued!==false)
               throw new Error('I couldn\'t save your reply. Your words are still here so you can retry.');
-            feedback.textContent=created.plan_ready&&created.plan_persisted?
-              'I saved your choices. You can review them before making the new video.':
-              'I saved your feedback. Tell me if you would like another change.';
+            feedback.dataset.state='success';
+            feedback.textContent='Your feedback is saved.';
+            state.lastReplyNotice={outputId:entry.output_id,message:
+              created.plan_ready&&created.plan_persisted?
+                'Your photo choices were saved. Choose “Make the revised video” when the render button is available.':
+                'Your message was saved. Review the Producer’s response below.'};
             pendingReply='';pendingKey='';
             say('Your Producer has your feedback.');
             await open(entry);
+            if(typeof state.lastReplyNoticeNode?.scrollIntoView==='function')
+              state.lastReplyNoticeNode.scrollIntoView({block:'nearest'});
           },feedback));
-          conversation.append(feedback);
           offer.append(conversation);
         }
         detail.append(offer);
@@ -484,6 +529,7 @@
         composer.setAttribute('aria-label','Creative direction for Producer');
         form.append(composer);
         const feedbackStatus=elem('p','','rr-feedback-status');
+        feedbackStatus.hidden=true;
         feedbackStatus.setAttribute('role','status');
         feedbackStatus.setAttribute('aria-live','polite');
         let pendingKey='',pendingDirection='';
@@ -513,12 +559,20 @@
             feedbackStatus.textContent='Producer reply saved. You can continue refining it.';
           }
           feedbackStatus.classList.toggle('error-text',false);
+          feedbackStatus.dataset.state='success';
+          state.lastReplyNotice={outputId:entry.output_id,message:
+            'Your message was saved. Review the Producer’s response and any proposed edits below.'};
           say('Producer response saved.');
           pendingDirection='';pendingKey='';
           await open(entry);
+          if(typeof state.lastReplyNoticeNode?.scrollIntoView==='function')
+            state.lastReplyNoticeNode.scrollIntoView({block:'nearest'});
         };
-        form.append(actionButton('Send to Producer',async()=>sendDirection(composer.value),feedbackStatus));
         form.append(feedbackStatus);
+        form.append(actionButton('Send to Producer',async()=>{
+          if(typeof composer.blur==='function')composer.blur();
+          return sendDirection(composer.value);
+        },feedbackStatus));
         form.append(elem('p','Producer discussion does not launch a render. A separate render-only button appears only for an independently verified frozen plan; Instagram approval and publishing remain disabled.','rr-muted'));
         detail.append(form);
       }
