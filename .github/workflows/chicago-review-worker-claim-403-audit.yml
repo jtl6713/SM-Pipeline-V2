@@ -14,6 +14,17 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
+      - name: Read-only Worker route access probe with no claim body or auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          for route in 'https://studio.chicagoshining.com/api/internal/rendering-review/claim-render-job' 'https://api.chicagoshining.com/api/internal/rendering-review/claim-render-job'; do
+            host=${route#https://}; host=${host%%/*}
+            code=$(curl -sS --max-time 15 --max-redirs 0 -o /tmp/review-route-body -w '%{http_code}' "$route" || true)
+            mime=$(file -b --mime-type /tmp/review-route-body 2>/dev/null || true)
+            error=$(jq -r '.error // .code // "none"' /tmp/review-route-body 2>/dev/null || echo 'not_json')
+            echo "review_claim_route_probe_host=$host http=$code mime=$mime error=$error no_post=true"
+          done
       - name: Inspect only active Worker binding names and five boolean gates
         shell: bash
         run: |
