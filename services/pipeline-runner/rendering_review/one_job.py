@@ -93,7 +93,16 @@ def _post_once(worker,secret,route,body,timeout=20):
         with requests.post(url,headers=headers,data=data,timeout=timeout,
                            allow_redirects=False,stream=True) as result:
             status=result.status_code
-            raw=result.raw.read(8193)
+            # requests.Response.raw.read returns compressed wire bytes.
+            # iter_content decodes transfer/content encoding while enforcing
+            # the same strict 8KiB reply limit. Never retry the POST.
+            bounded=bytearray()
+            for part in result.iter_content(chunk_size=8193):
+                if part:
+                    bounded.extend(part)
+                    if len(bounded)>8192:
+                        break
+            raw=bytes(bounded)
     except requests.RequestException as exc:
         raise ExactReviewRenderDenied("review_worker_reply_ambiguous_reconcile") from exc
     except Exception as exc:
