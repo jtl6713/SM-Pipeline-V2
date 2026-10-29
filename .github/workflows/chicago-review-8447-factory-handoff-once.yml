@@ -17,7 +17,7 @@ jobs:
       CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
       CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
     steps:
-      - name: Gate on actual live Worker 0.10.690 after production deployment
+      - name: Gate on actual live Worker 0.10.692 after production deployment
         shell: bash
         run: |
           set -euo pipefail
@@ -31,7 +31,7 @@ jobs:
               -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
               'https://studio.chicagoshining.com/api/health' || true)
             if [[ "$status" == "200" ]] &&
-               jq -e '.ok==true and (.version|startswith("0.10.691-render-review-factory-drain"))' \
+               jq -e '.ok==true and (.version|startswith("0.10.692-render-review-factory-route"))' \
                   /tmp/review-factory-live.json >/dev/null; then
               installed=true
               break
