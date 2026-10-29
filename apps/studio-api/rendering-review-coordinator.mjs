@@ -46,6 +46,7 @@ function sessionMatches(s, sessionId, requestId) {
  */
 export async function enrollManualReviewCommand({
   output_id, session_id, original_attempt_id, idempotency_key, policy, operations,
+  initial_note, actor_id,
 }) {
   requireOperations(operations, [
     "authorizeReview", "withOutputLock", "readOutput", "loadSession",
@@ -59,6 +60,10 @@ export async function enrollManualReviewCommand({
       !/^[A-Za-z0-9_-]{8,120}$/.test(id(original_attempt_id)) ||
       !/^[A-Za-z0-9_-]{8,120}$/.test(requestId))
     err("INVALID_REQUEST", "Server-generated session, attempt, and request identifiers required", 400);
+  // A Factory-origin review cannot be established with empty or unverified feedback.
+  if(initial_note!==undefined && (!text(initial_note) || text(initial_note).length>3000 ||
+      !/^rec[A-Za-z0-9]{14}$/.test(id(actor_id))))
+    err("FACTORY_FEEDBACK_REQUIRED", "Factory review requires comments and a verified reviewer", 400);
   if (!policy?.enabled) err("FEATURE_DISABLED", "Rendering Review admission is disabled", 403);
   // Never accept a client-supplied "is_admin"/"authorized" assertion.
   if (await operations.authorizeReview(outputId) !== true)
@@ -68,6 +73,9 @@ export async function enrollManualReviewCommand({
     const prior=await operations.loadSession(outputId);
     if (prior) {
       if (sessionMatches(prior,sessionId,requestId)) {
+        if(initial_note!==undefined && (prior.factory_entry?.source!=="factory" ||
+           prior.messages?.[0]?.content!==text(initial_note)))
+          err("FACTORY_FEEDBACK_CONFLICT","Replayed review request does not match saved comments",409);
         // An idempotent success may only be replayed when the durable hold
         // is still present. A missing hold is not a valid existing enrollment.
         const held=await operations.readHold(outputId);
@@ -141,6 +149,17 @@ export async function enrollManualReviewCommand({
     const session=enrollReview(output,{...hold,verified:true},policy,{
       session_id:sessionId,original_attempt_id,
     });
+    if(initial_note!==undefined){
+      // Persist the reviewer's mandatory Factory comments in the initial
+      // session write: never create a conversational review with no feedback.
+      const at=new Date().toISOString();
+      session.messages.push({
+        id:"rrfactoryinitial_"+requestId,role:"user",content:text(initial_note),
+        at,attempt_id:session.current_attempt_id,timestamp_seconds:null,
+      });
+      session.state="discussing";
+      session.factory_entry={source:"factory",submitted_by:id(actor_id),submitted_at:at};
+    }
     session.enrollment_request_id=requestId;
     await operations.createSessionIfAbsent(session);
     const saved=await operations.readSession(outputId);
