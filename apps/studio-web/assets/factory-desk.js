@@ -1355,13 +1355,29 @@
       });
     });
     root.querySelectorAll("[data-factory-send-back-content]").forEach((button) => {
-      button.addEventListener("click", () => {
+      button.addEventListener("click", async () => {
         const key = button.getAttribute("data-factory-send-back-content");
         const cards = (state.desk?.lanes?.needs_eyes || []).filter((card) => contentGroupKey(card) === key);
         const ready = readyContentCards({ cards });
         if (!ready.length) {
           setStatus("No reviewable outputs were found for this content.", true);
           return;
+        }
+        if(ready.length===1){
+          try {
+            if(await reviewedFactoryRevision(ready[0])){
+              openFactoryFeedback({
+                title:ready[0].title||cardLabel(ready[0]),
+                scope:"Selected revised output · Continue with Producer",
+                payload:{action:"return_to_review",id:ready[0].id,kind:"output",
+                  client_request_id:"factoryreview_"+crypto.randomUUID().replace(/-/g,"")}
+              });
+              return;
+            }
+          }catch(error){
+            setStatus("Rendering Review lookup failed: "+(error.message||error),true);
+            return;
+          }
         }
         const productionRequestId = String(ready.find((card) => /^rec[A-Za-z0-9]+$/.test(String(card.production_request_id || "")))?.production_request_id || "").trim();
         if (!productionRequestId) {
