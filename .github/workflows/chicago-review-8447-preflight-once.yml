@@ -33,6 +33,12 @@ jobs:
           $source=@'
           from dotenv import load_dotenv
           load_dotenv('.env')
+          import os
+          port=os.environ.get('PORT','3350')
+          print('review_preflight_port_numeric='+str(port.isdecimal()))
+          # The Ops shell has its own PORT; it is not the service listener.
+          # Pin only this read-only subprocess to the actual runner port.
+          os.environ['PORT']='3350'
           from airtable.client import AirtableClient
           from integrations.google_drive import GoogleDriveClient
           from rendering_review.one_job import _evidence, _render_sources, ExactReviewRenderDenied
@@ -89,7 +95,7 @@ jobs:
               "https://ops.chicagoshining.com/api/jobs/$id" -o /tmp/preflight-result.json
             state=$(jq -r '.job.status // empty' /tmp/preflight-result.json)
             if [[ "$state" == "ok" ]]; then
-              jq -r '.job.log // ""' /tmp/preflight-result.json | grep -E '^review_preflight_(client|drive|evidence|media)=' || true
+              jq -r '.job.log // ""' /tmp/preflight-result.json | grep -E '^review_preflight_(port|client|drive|evidence|media)=' || true
               exit 0
             fi
             if [[ "$state" == "failed" ]]; then
