@@ -10,6 +10,7 @@ import { handleRenderingReviewEnrollRequest, reviewEnrollmentWriteEnabled } from
 import { acceptReviewCreativeOnly } from "./rendering-review-approval-http.mjs";
 import { handoffApprovedReviewToFactory } from "./rendering-review-factory-handoff.mjs";
 import { previewAcceptedFactoryRevision } from "./rendering-review-factory-video.mjs";
+import { returnFactoryRevisionToProducer } from "./rendering-review-factory-return.mjs";
 import { composeRenderingReviewEnrollmentOperations } from "./rendering-review-enrollment-wiring.mjs";
 import { handleReviewProducerProposal, reviewProducerBridgeEnabled } from "./rendering-review-producer-bridge.mjs";
 import { persistReviewProducerCandidate, producerConversationWritesEnabled } from "./rendering-review-producer-persist.mjs";
@@ -1062,7 +1063,7 @@ export default {
       // Exact Chicago review writes are authorized again by their protected handlers.
       // The old global Phase-2A allowlist must not reject them before inspection.
       const isChicagoReviewPost = request.method === "POST" &&
-        (/^\/api\/rendering-review\/outputs\/rec[A-Za-z0-9]{14}\/(?:enroll|producer-conversation|producer-proposal|commit-attempt|messages|approve|factory-handoff)$/.test(url.pathname) ||
+        (/^\/api\/rendering-review\/outputs\/rec[A-Za-z0-9]{14}\/(?:enroll|producer-conversation|producer-proposal|commit-attempt|messages|approve|factory-handoff|factory-return)$/.test(url.pathname) ||
          /^\/(?:api\/)?internal\/rendering-review\/(?:claim-render-job|launch-ledger|complete-attempt|qa-audio-rebind|ig-dispatch-claim|factory-handoff)$/.test(url.pathname));
       const allowedMethod =
         isChicagoReviewPost ||
@@ -1195,7 +1196,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.692-render-review-factory-post-gate" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
+          version: "0.10.693-factory-v2-preview-return" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
@@ -1912,6 +1913,32 @@ export default {
           output_id:factoryMatch[1],env,
           operations:makeReviewFactoryHandoffOperations(env),
         }));
+      }
+
+      // Return a Factory-selected revision to the SAME Rendering Review
+      // conversation. Save the human notes and restore its exact output hold;
+      // never send it through the legacy Production Request rerender path.
+      const factoryReturnMatch=/^\\/api\\/rendering-review\\/outputs\\/(rec[A-Za-z0-9]{14})\\/factory-return$/.exec(url.pathname);
+      if(factoryReturnMatch && request.method==="POST") {
+        requirePermission(authorization,"outputs_review");
+        if(!(await reviewAuthorizedProfiles(env,authorization)).some(p=>p.id===CHICAGO_PROFILE_ID))
+          throw new HttpError(403,"Chicago review permission required");
+        assertWriteRequest(request,env);
+        if(!/^application\\/json(?:\\s*;|$)/i.test(String(request.headers.get("Content-Type")||"")))
+          throw new HttpError(415,"JSON required");
+        const raw=await request.text();
+        if(raw.length>4200)throw new HttpError(413,"Review comment too long");
+        let body;
+        try{body=JSON.parse(raw)}catch{throw new HttpError(400,"Invalid review comment JSON")}
+        if(!body||typeof body!=="object"||Array.isArray(body)||
+           Object.keys(body).length!==2||!("note" in body)||!("client_request_id" in body))
+          throw new HttpError(400,"Exact review note and request ID required");
+        const result=await returnFactoryRevisionToProducer({
+          output_id:factoryReturnMatch[1],note:body.note,
+          client_request_id:body.client_request_id,env,
+          operations:makeReviewFactoryHandoffOperations(env),
+        });
+        return respond(request,env,result);
       }
 
       if (url.pathname.startsWith("/api/rendering-review/")) {
