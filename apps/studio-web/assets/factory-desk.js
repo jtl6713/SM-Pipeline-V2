@@ -1188,6 +1188,14 @@
       s?.review_hold?.active===false);
   }
 
+  function isConversationalReviewCandidate(card) {
+    const type=String(card?.studio_output_type||card?.output_type||"").trim().toLowerCase();
+    return card?.kind==="output" &&
+      String(card?.profile_id||"")==="recT2rbKX3MF7cVFU" &&
+      String(card?.platform||"").trim().toLowerCase()==="instagram" &&
+      (type==="instagram reel" || type==="reel");
+  }
+
   // Review feedback is entered before any state-changing request is sent.
   function openFactoryFeedback({ title, scope, payload }) {
     const backdrop = $("factoryFeedbackBackdrop");
@@ -1202,7 +1210,7 @@
     const error = $("factoryFeedbackError");
     if (heading) heading.textContent = title || "Untitled content";
     if (detail) detail.textContent = scope || "Review changes";
-    const returnReview = payload?.action === "return_to_review";
+    const returnReview = payload?.action === "return_to_review" || payload?.action === "start_render_review";
     const auto = payload?.action === "request_changes_content";
     const intro = $("factoryFeedbackIntro");
     const hints = document.querySelector("#factoryFeedbackHintsText");
@@ -1258,7 +1266,7 @@
       const desk = await mutateDesk({ ...pending.payload, note: notes });
       const requestId = String(desk?.result?.production_request_id || pending.payload.production_request_id || "").trim();
       closeFactoryFeedback();
-      if (pending.payload?.action === "return_to_review") {
+      if (pending.payload?.action === "return_to_review" || pending.payload?.action === "start_render_review") {
         if (desk?.result?.review_notes_saved!==true || desk?.result?.review_hold_active!==true)
           throw new Error("Review notes or publication hold could not be verified.");
         const notice = desk.result.message || "Request received. Continue the conversation with your Producer in Rendering Review.";
@@ -1286,7 +1294,7 @@
         setStatus("Review notes saved. Open the returned item in Production for changes.");
       }
     } catch (err) {
-      if (submit) { submit.disabled = false; submit.textContent = pending.payload?.action === "return_to_review" ? "Send to Rendering Review" : pending.payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
+      if (submit) { submit.disabled = false; submit.textContent = ["return_to_review","start_render_review"].includes(pending.payload?.action) ? "Send to Rendering Review" : pending.payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
       if (error) { error.hidden = false; error.textContent = String(err?.message || err); }
       setStatus("Could not send back: " + (err?.message || err), true);
     }
@@ -1378,6 +1386,15 @@
             setStatus("Rendering Review lookup failed: "+(error.message||error),true);
             return;
           }
+        }
+        if(ready.length===1 && isConversationalReviewCandidate(ready[0])){
+          openFactoryFeedback({
+            title:ready[0].title||cardLabel(ready[0]),
+            scope:"Selected Reel · Send to conversational Producer review",
+            payload:{action:"start_render_review",id:ready[0].id,kind:"output",
+              client_request_id:"factoryreview_"+crypto.randomUUID().replace(/-/g,"")}
+          });
+          return;
         }
         const productionRequestId = String(ready.find((card) => /^rec[A-Za-z0-9]+$/.test(String(card.production_request_id || "")))?.production_request_id || "").trim();
         if (!productionRequestId) {
@@ -1480,6 +1497,15 @@
           }
         } catch(error) {
           setStatus("Could not verify Rendering Review handoff: "+(error.message||error),true);
+          return;
+        }
+        if(isConversationalReviewCandidate(card)){
+          openFactoryFeedback({
+            title:card.title||cardLabel(card),
+            scope:[card.platform,card.studio_output_type,"Selected output only"].filter(Boolean).join(" · "),
+            payload:{action:"start_render_review",id:card.id,kind:"output",
+              client_request_id:"factoryreview_"+crypto.randomUUID().replace(/-/g,"")}
+          });
           return;
         }
         // A content revision changes the shared render; the individual-row
@@ -1705,6 +1731,16 @@
 
   async function mutateDesk(payload) {
     setStatus("Saving…");
+    if(payload?.action==="start_render_review"){
+      // The Factory dialog is the only new-session UI. Direct enrollment
+      // from Rendering Review is absent and the server requires the note.
+      const receipt=await fetchJson("/api/rendering-review/factory/outputs/"+
+        encodeURIComponent(payload.id)+"/request-changes",{
+        method:"POST",
+        body:JSON.stringify({note:payload.note,client_request_id:payload.client_request_id}),
+      });
+      return {ok:true,result:receipt,message:receipt.message};
+    }
     const desk = await fetchJson("/api/factory/desk", {
       method: "POST",
       body: JSON.stringify(payload),
