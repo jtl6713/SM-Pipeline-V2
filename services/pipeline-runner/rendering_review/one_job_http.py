@@ -6,6 +6,7 @@ import re
 import threading
 from flask import Blueprint, jsonify, request
 from rendering_review.one_job import render_exact_attempt, ExactReviewRenderDenied
+from rendering_review.recovery import require_unlaunched_authority, ReviewRecoveryDenied
 
 RECORD=re.compile(r"rec[A-Za-z0-9]{14}\Z")
 TOKEN=re.compile(r"[A-Za-z0-9_-]{8,120}\Z")
@@ -13,7 +14,8 @@ _ACTIVE:set[str]=set()
 _RESULTS:dict[str,dict]={}
 _LOCK=threading.RLock()
 
-def create_exact_review_render_blueprint(settings,runner=render_exact_attempt):
+def create_exact_review_render_blueprint(settings,runner=render_exact_attempt,
+                                         recovery_guard=require_unlaunched_authority):
     blueprint=Blueprint("review_one_reel",__name__)
     def authorized():
         configured=str(settings.get("pipeline_runner_shared_secret") or "").strip()
@@ -74,6 +76,54 @@ def create_exact_review_render_blueprint(settings,runner=render_exact_attempt):
         thread.start()
         return jsonify(ok=True,accepted=True,output_id=output_id,job_id=job_id,
                        public_post_created=False),202
+
+    @blueprint.post("/jobs/rendering-review/reconcile-exact")
+    def reconcile_exact():
+        """Resume the SAME saved job only after durable no-launch proof.
+
+        The prior process may remember an error even though the authoritative
+        Airtable job was never claimed. Never erase a launch receipt or start a
+        new attempt. The Worker independently fences claim and Remotion intent.
+        """
+        if os.environ.get("RENDERING_REVIEW_EXACT_RENDER_ENABLED") != "true":
+            return jsonify(ok=False, error="exact_render_disabled"), 405
+        if not authorized():
+            return jsonify(ok=False, error="runner_auth_required"), 401
+        if not request.is_json or (request.content_length or 0) > 900:
+            return jsonify(ok=False, error="invalid_request"), 400
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict) or set(data) != {"output_id", "job_id"}:
+            return jsonify(ok=False, error="invalid_request"), 400
+        output_id = data.get("output_id")
+        job_id = data.get("job_id")
+        if (not isinstance(output_id, str) or not RECORD.fullmatch(output_id)
+            or output_id != os.environ.get("RENDERING_REVIEW_EXACT_OUTPUT_ID")
+            or not isinstance(job_id, str) or not TOKEN.fullmatch(job_id)):
+            return jsonify(ok=False, error="exact_output_not_allowlisted"), 403
+        with _LOCK:
+            # No restart for any known live/completed job. Unknown means
+            # a process was restarted after a failed preclaim execution.
+            old = _RESULTS.get(job_id, {})
+            previous = str(old.get("state") or "unknown")
+            if job_id in _ACTIVE or previous not in ("unknown", "needs_reconciliation"):
+                return jsonify(ok=False, error="existing_job_not_recoverable",
+                               state=previous), 409
+            try:
+                if recovery_guard(output_id, job_id) is not True:
+                    raise ReviewRecoveryDenied("unlaunched_authority_not_verified")
+            except Exception:
+                # Never reveal Airtable response bodies or perform a retry
+                # when authority is missing or reads are ambiguous.
+                return jsonify(ok=False, error="unlaunched_authority_unverified"), 409
+            _ACTIVE.add(job_id)
+            _RESULTS[job_id] = {"state": "accepted", "reconciled_unlaunched": True}
+            thread = threading.Thread(
+                target=worker, args=(job_id, output_id),
+                name="review-reconcile-" + job_id[:24], daemon=True)
+            thread.start()
+        return jsonify(ok=True, accepted=True, existing_job_only=True,
+                       job_id=job_id, output_id=output_id,
+                       public_post_created=False), 202
 
     @blueprint.get("/jobs/rendering-review/run-exact/<job_id>")
     def exact_status(job_id):
