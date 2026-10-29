@@ -8,11 +8,12 @@ import { CHICAGO_PROFILE_ID } from "./rendering-review-policy.mjs";
 import { handleRenderingReviewFeedbackRequest, reviewFeedbackWriteEnabled } from "./rendering-review-feedback-http.mjs";
 import { handleRenderingReviewEnrollRequest, reviewEnrollmentWriteEnabled } from "./rendering-review-enrollment-http.mjs";
 import { acceptReviewCreativeOnly } from "./rendering-review-approval-http.mjs";
+import { handoffApprovedReviewToFactory } from "./rendering-review-factory-handoff.mjs";
 import { composeRenderingReviewEnrollmentOperations } from "./rendering-review-enrollment-wiring.mjs";
 import { handleReviewProducerProposal, reviewProducerBridgeEnabled } from "./rendering-review-producer-bridge.mjs";
 import { persistReviewProducerCandidate, producerConversationWritesEnabled } from "./rendering-review-producer-persist.mjs";
 import { persistReadyReviewPlan } from "./rendering-review-plan-persist.mjs";
-import { listRecords as reviewListRecords, listRecordsPage as reviewListRecordsPage, resolveAuthorizedContentProfiles as reviewAuthorizedProfiles } from "./worker-functions-01.mjs";
+import { listRecords as reviewListRecords, listRecordsPage as reviewListRecordsPage, resolveAuthorizedContentProfiles as reviewAuthorizedProfiles, studioSupabaseWriteThroughOutput as reviewFactorySyncOutput } from "./worker-functions-01.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { readProducerThread, appendProducerThreadMessage, producerConversationHistory } from "./producer-conversation.mjs";
 import { scriptedShortProducerPlanFromNotes } from "./scripted-short-producer-plan.mjs";
@@ -32,6 +33,53 @@ import {
   studioAirtableEgressWindow,
 } from "./profile-summary-controller.mjs";
 export { StudioProfileSummary } from "./profile-summary-do.mjs";
+/**
+ * The handoff adapter shares the same output approval lease as Factory.
+ * All row writes remain in the primary Airtable source, never Supabase-first.
+ */
+function makeReviewFactoryHandoffOperations(env) {
+  let adapter;
+  const authorizeOutput=async id=>{
+    if(id!==env.RENDERING_REVIEW_EXACT_OUTPUT_ID)return false;
+    const view=await adapter.readOutput(id);
+    return view.profile_id===CHICAGO_PROFILE_ID &&
+      view.platform==="Instagram" && view.output_type==="Instagram Reel";
+  };
+  adapter=makeRenderingReviewAirtableOperations({
+    env,airtableFetch,listRecords:reviewListRecords,readField:f,
+    withOutputApprovalLock,authorizeReview:authorizeOutput,
+    authorizeEvent:async()=>false,
+    revokeScheduleUnderHold:async()=>{throw new HttpError(405,"Factory handoff does not schedule")},
+    mutationGate:true,
+  });
+  return {
+    withOutputLock:adapter.withOutputLock,
+    readSession:adapter.readSession,
+    readNormalizedOutput:adapter.readOutput,
+    readRawOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+    readField:f,
+    saveSessionIfVersion:adapter.saveSessionIfVersion,
+    readAttempt:async attemptId=>{
+      if(!/^[A-Za-z0-9_-]{8,120}$/.test(String(attemptId||"")))
+        throw new HttpError(400,"Invalid review attempt");
+      const rows=await reviewListRecords(env,RENDER_REVIEW_TABLES.attempts,{
+        limit:2,filterFormula:'{Attempt_ID}="'+attemptId+'"',
+        fields:["Attempt_ID","Session_ID","Output_Record_ID","Attempt_Number",
+          "Attempt_Status","Artifact_File_ID","Artifact_URL","Validation_Evidence_JSON"],
+      });
+      if(!Array.isArray(rows)||rows.length!==1)
+        throw new HttpError(409,"Unique verified revision attempt unavailable");
+      return rows[0];
+    },
+    patchOutput:(id,fields)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id,{
+      method:"PATCH",skipSupabaseWriteThrough:true,
+      body:JSON.stringify({fields,typecast:false}),
+    }),
+    syncOutput:row=>reviewFactorySyncOutput(env,row,"render-review-factory-handoff"),
+  };
+}
+
+
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
   studioReadSource,
@@ -1146,7 +1194,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.689-review-audio-qa-repair" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
+          version: "0.10.690-render-review-factory-handoff" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
@@ -1789,6 +1837,36 @@ export default {
         return respond(request,env,receipt);
       }
 
+      // Exact, server-authorized recovery path for an already accepted review.
+      // It does not issue publication approval, schedule or Instagram dispatch.
+      if (url.pathname==="/api/internal/rendering-review/factory-handoff" ||
+          url.pathname==="/internal/rendering-review/factory-handoff") {
+        requireConfig(env);
+        if(request.method!=="POST")throw new HttpError(405,"POST required");
+        const expected=String(env.RENDERING_REVIEW_RENDER_JOB_SHARED_SECRET||"").trim();
+        const supplied=String(request.headers.get("X-Rendering-Review-Job-Secret")||"").trim();
+        if(expected.length<24||supplied.length!==expected.length)
+          throw new HttpError(403,"Protected Runner credential required");
+        const digest=async s=>new Uint8Array(await crypto.subtle.digest(
+          "SHA-256",new TextEncoder().encode(s)));
+        const [a,b]=await Promise.all([digest(expected),digest(supplied)]);
+        let difference=0;
+        for(let i=0;i<a.length;i++)difference|=a[i]^b[i];
+        if(difference)throw new HttpError(403,"Protected Runner credential required");
+        if(!/^application\\/json(?:\\s*;|$)/i.test(String(request.headers.get("Content-Type")||"")))
+          throw new HttpError(415,"JSON required");
+        const body=await request.text();
+        if(body!=='{"confirm":"PROMOTE-APPROVED-V2-TO-FACTORY"}')
+          throw new HttpError(400,"Exact one-time Factory handoff confirmation required");
+        const outputId=env.RENDERING_REVIEW_EXACT_OUTPUT_ID;
+        if(outputId!=="rec0uVrVeiUM6shp9")
+          throw new HttpError(403,"One-time handoff requires Chicago output 8447");
+        const result=await handoffApprovedReviewToFactory({
+          output_id:outputId,env,operations:makeReviewFactoryHandoffOperations(env),
+        });
+        return respond(request,env,result);
+      }
+
       // Internal AP1-IG dispatch claim: never accepts browser authorization.
       // It uses a separate protected server secret and the SAME R2 output
       // lease as manual review enrollment and Factory/approval. Feature OFF.
@@ -1819,6 +1897,20 @@ export default {
       }
       if (!authorization.authorized) {
         throw new HttpError(403, authorization.authorization_error || "Studio membership required");
+      }
+
+      // Factory promotion is a separate, authenticated retry for a review
+      // that was creatively accepted before the automatic handoff existed.
+      const factoryMatch=/^\\/api\\/rendering-review\\/outputs\\/(rec[A-Za-z0-9]{14})\\/factory-handoff$/.exec(url.pathname);
+      if(factoryMatch && request.method==="POST") {
+        requirePermission(authorization,"outputs_review");
+        if(!(await reviewAuthorizedProfiles(env,authorization)).some(p=>p.id===CHICAGO_PROFILE_ID))
+          throw new HttpError(403,"Chicago review membership required");
+        assertWriteRequest(request,env);
+        return respond(request,env,await handoffApprovedReviewToFactory({
+          output_id:factoryMatch[1],env,
+          operations:makeReviewFactoryHandoffOperations(env),
+        }));
       }
 
       if (url.pathname.startsWith("/api/rendering-review/")) {
@@ -2055,10 +2147,21 @@ export default {
             },
             mutationGate:true,
           });
-          return respond(request,env,await acceptReviewCreativeOnly({
+          const accepted=await acceptReviewCreativeOnly({
             request,env,authorization,output_id:acceptMatch[1],
             assertWriteRequest,operations:adapter,
-          }));
+          });
+          // Creative acceptance is already durable. Finish the Factory
+          // handoff automatically; a replay of the same accept request can
+          // resume a partial transfer without requiring another approval.
+          const transferred=await handoffApprovedReviewToFactory({
+            output_id:acceptMatch[1],env,
+            operations:makeReviewFactoryHandoffOperations(env),
+          });
+          return respond(request,env,{...accepted,
+            factory_handoff:transferred,factory_ready:transferred.factory_ready,
+            review_hold_active:false,
+          });
         }
         const enrollmentMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/enroll$/.exec(url.pathname);
         if (enrollmentMatch && request.method === "POST") {
