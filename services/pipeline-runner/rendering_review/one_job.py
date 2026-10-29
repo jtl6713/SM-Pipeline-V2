@@ -30,7 +30,7 @@ from p2.normalizer_client import normalize_voiceover
 from render.remotion_client import RemotionClient
 from render.settings import get_google_drive_folder_id
 from rendering_review.isolated_launch import launch_review_render_once
-from rendering_review.remote_ledger import RemoteLaunchLedger, _NoRedirect, _validate_base, _access_headers
+from rendering_review.remote_ledger import RemoteLaunchLedger, _NoRedirect, _validate_base, _access_headers, review_setting
 
 CHICAGO="recT2rbKX3MF7cVFU"
 OUTPUTS="tblrlPeboBthkplH0"
@@ -345,8 +345,8 @@ def render_exact_attempt(output_id,job_id,*,client=None,drive=None,
         not IDENTITY.fullmatch(str(job_id)) or
         output_id!=os.environ.get("RENDERING_REVIEW_EXACT_OUTPUT_ID")):
         fail("review_output_not_allowlisted")
-    worker=worker_base or os.environ.get("RENDERING_REVIEW_WORKER_BASE_URL","")
-    secret=shared_secret or os.environ.get("RENDERING_REVIEW_RENDER_JOB_SHARED_SECRET","")
+    worker=worker_base or review_setting("RENDERING_REVIEW_WORKER_BASE_URL")
+    secret=shared_secret or review_setting("RENDERING_REVIEW_RENDER_JOB_SHARED_SECRET")
     if len(secret)<24:fail("review_runner_secret_unconfigured")
     worker=_validate_base(worker)
     client=client or AirtableClient()
