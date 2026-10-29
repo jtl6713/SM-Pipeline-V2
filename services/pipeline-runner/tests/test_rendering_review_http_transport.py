@@ -9,10 +9,17 @@ from rendering_review.one_job import _post_once, ExactReviewRenderDenied
 from rendering_review.remote_ledger import RemoteLaunchLedger, ReviewLedgerUnavailable
 
 
+class Raw:
+    def __init__(self, data):
+        self.reader=io.BytesIO(data)
+    def read(self,size,decode_content=False):
+        return self.reader.read(size)
+
+
 class Response:
     def __init__(self, code, body):
         self.status_code=code
-        self.raw=io.BytesIO(body if isinstance(body,bytes) else json.dumps(body).encode())
+        self.raw=Raw(body if isinstance(body,bytes) else json.dumps(body).encode())
     def __enter__(self):
         return self
     def __exit__(self,*_):
