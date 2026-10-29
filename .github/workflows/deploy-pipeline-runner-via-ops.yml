@@ -358,3 +358,7 @@ jobs:
 # 2026-10-28: Deploy Runner v8 source-backed acceptance of Chicago #8447 photo confirmation with rerender wording. Save candidate only; separate render consent remains mandatory.
 
 # 2026-10-28: Deploy Runner v9 to restore source-backed BOTH-night-still acceptance for the already-persisted Chicago #8447 V4 review; no output record or render is changed by deployment.
+
+# 2026-10-29: Deploy general conversational Producer (no output-specific shortcuts),
+# and private exact-render reconciliation codes for existing held #8447 V2.
+# Preserve all existing approval/hold/publication fences.
