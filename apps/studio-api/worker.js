@@ -9,6 +9,8 @@ import { handleRenderingReviewFeedbackRequest, reviewFeedbackWriteEnabled } from
 import { handleRenderingReviewEnrollRequest, reviewEnrollmentWriteEnabled } from "./rendering-review-enrollment-http.mjs";
 import { acceptReviewCreativeOnly } from "./rendering-review-approval-http.mjs";
 import { handoffApprovedReviewToFactory } from "./rendering-review-factory-handoff.mjs";
+import { returnFactoryRevisionToProducer } from "./rendering-review-factory-return.mjs";
+import { serveFactorySelectedReviewVideo } from "./rendering-review-factory-preview.mjs";
 import { composeRenderingReviewEnrollmentOperations } from "./rendering-review-enrollment-wiring.mjs";
 import { handleReviewProducerProposal, reviewProducerBridgeEnabled } from "./rendering-review-producer-bridge.mjs";
 import { persistReviewProducerCandidate, producerConversationWritesEnabled } from "./rendering-review-producer-persist.mjs";
@@ -884,6 +886,7 @@ export default {
       const isItem4VariantsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/variants$/.test(url.pathname);
       const isProductionRequestOutputRecordRoute = /^\/api\/production-request-outputs\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isOutputPreviewRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/preview$/.test(url.pathname);
+      const isFactoryOutputPreviewRoute = /^\/api\/factory\/outputs\/rec[A-Za-z0-9]{14}\/preview$/.test(url.pathname);
       const isReviewAttemptPreviewRoute = /^\/api\/rendering-review\/outputs\/rec[A-Za-z0-9]{14}\/attempts\/[A-Za-z0-9_-]{8,120}\/preview$/.test(url.pathname);
       const isOutputScheduleGridRoute = url.pathname === "/api/outputs/schedule-grid";
       const isOutputCreativeRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative$/.test(url.pathname);
@@ -1066,7 +1069,7 @@ export default {
       const allowedMethod =
         isChicagoReviewPost ||
         request.method === "GET" ||
-        (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isMediaAssetStreamRoute || isPublicBrandWatermarkRoute || isOutputPreviewRoute || isReviewAttemptPreviewRoute || isVoicePreviewRoute)) ||
+        (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isMediaAssetStreamRoute || isPublicBrandWatermarkRoute || isOutputPreviewRoute || isFactoryOutputPreviewRoute || isReviewAttemptPreviewRoute || isVoicePreviewRoute)) ||
         isProfilesOverviewRefreshWrite ||
         isProfilesOverviewSummaryReconcileWrite ||
         isIdeaCreateRoute ||
@@ -1194,7 +1197,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.692-render-review-factory-post-gate" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
+          version: "0.10.693-factory-v2-preview-producer-return" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
@@ -2464,6 +2467,17 @@ export default {
         if (request.method === "GET") return getFactoryDesk(request, env, authorization);
         if (request.method === "POST") {
           assertWriteRequest(request, env);
+          const input = await request.clone().json().catch(() => null);
+          if (input?.action === "return_to_review") {
+            requirePermission(authorization, "outputs_review");
+            const result=await returnFactoryRevisionToProducer({
+              output_id:input.id,note:input.note,
+              client_request_id:input.client_request_id,
+              env,operations:makeReviewFactoryHandoffOperations(env),
+            });
+            return respond(request,env,{ok:true,action:"return_to_review",
+              result,refresh_required:true});
+          }
           return mutateFactoryDesk(request, env, authorization, ctx);
         }
         throw new HttpError(405, "Method not allowed");
@@ -3215,6 +3229,26 @@ export default {
 
       if (isOutputScheduleGridRoute) {
         return listOutputScheduleGrid(request, env, url, authorization);
+      }
+
+      if (isFactoryOutputPreviewRoute) {
+        const outputId=url.pathname.split("/")[4];
+        if(outputId===env.RENDERING_REVIEW_EXACT_OUTPUT_ID){
+          requirePermission(authorization,"outputs_review");
+          const o=makeReviewFactoryHandoffOperations(env);
+          return serveFactorySelectedReviewVideo({
+            request,env,outputId,authorization,
+            readSession:o.readSession,
+            readRow:o.readRawOutput,
+            readProfile:async id=>(await o.readNormalizedOutput(id)).profile_id,
+            readVideo:(id,attemptId,probe)=>fetchTrustedRunnerReviewMedia({
+              env,outputId:id,attemptId,request:probe,
+            }),
+            copyHeaders:copyDriveVideoHeaders,
+          });
+        }
+        const original=new URL("/api/outputs/"+outputId+"/preview",url);
+        return outputPreview(request,env,original,authorization);
       }
 
       if (isOutputPreviewRoute) {

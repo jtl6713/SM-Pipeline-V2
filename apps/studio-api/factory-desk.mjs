@@ -284,7 +284,7 @@ export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
   const finalFileUrl = String(row.final_file_url || "").trim() || null;
   const thumbnailUrl = String(row.thumbnail_url || "").trim() || null;
   const previewPath = kind === "output" && /^rec[A-Za-z0-9]+$/.test(String(row.id || ""))
-    ? `/api/outputs/${row.id}/preview`
+    ? `/api/factory/outputs/${row.id}/preview`
     : null;
   return {
     id: row.id,

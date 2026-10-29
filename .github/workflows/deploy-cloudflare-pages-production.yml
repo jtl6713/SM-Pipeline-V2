@@ -42,6 +42,7 @@ jobs:
           set -euo pipefail
           node --check apps/studio-web/assets/app-item4-1008.js
           node --check apps/studio-web/assets/rendering-review-queue.js
+          node --check apps/studio-web/assets/factory-desk.js
           node --test --test-reporter=./apps/studio-web/compact-ci-test-reporter.mjs \
             apps/studio-web/compact-ci-test-reporter.test.mjs \
             apps/studio-web/rendering-review-ui.test.mjs \

@@ -1169,6 +1169,25 @@
     setCount("factoryCountManual", String(Number(summary.manual) || 0));
   }
 
+  async function reviewedFactoryRevision(card) {
+    if(card?.kind!=="output" || !/^rec[A-Za-z0-9]{14}$/.test(String(card.id||"")))return false;
+    let response;
+    try {
+      response=await fetch("/api/rendering-review/outputs/"+encodeURIComponent(card.id),{
+        credentials:"same-origin",cache:"no-store",headers:{Accept:"application/json"}
+      });
+    } catch(error) { throw new Error("Cannot verify Rendering Review handoff: "+error.message); }
+    if(response.status===404)return false;
+    if(!response.ok)throw new Error("Could not verify this revision's review session ("+response.status+")");
+    const data=await response.json().catch(()=>null);
+    const s=data?.session;
+    return Boolean(data?.ok===true && s?.state==="approved" &&
+      s?.factory_handoff?.status==="ready_for_factory_approval" &&
+      s?.factory_handoff?.attempt_id===s?.approved_attempt_id &&
+      s?.current_attempt_id===s?.approved_attempt_id &&
+      s?.review_hold?.active===false);
+  }
+
   // Review feedback is entered before any state-changing request is sent.
   function openFactoryFeedback({ title, scope, payload }) {
     const backdrop = $("factoryFeedbackBackdrop");
@@ -1183,13 +1202,18 @@
     const error = $("factoryFeedbackError");
     if (heading) heading.textContent = title || "Untitled content";
     if (detail) detail.textContent = scope || "Review changes";
+    const returnReview = payload?.action === "return_to_review";
     const auto = payload?.action === "request_changes_content";
     const intro = $("factoryFeedbackIntro");
     const hints = document.querySelector("#factoryFeedbackHintsText");
-    if (intro) intro.textContent = auto
+    if (intro) intro.textContent = returnReview
+      ? "Tell your Producer what needs to change in everyday language. Your feedback will be saved in the existing Rendering Review conversation."
+      : auto
       ? "Tell the Producer what to change in everyday language. Precise caption, narration, duration and uniquely identified photo/clip instructions can restart production automatically. Other creative requests are saved for guided editing."
       : "Describe exactly what needs to change. Studio saves these review notes with the linked Production Request.";
-    if (hints) hints.textContent = auto
+    if (hints) hints.textContent = returnReview
+      ? "Your selected V2 stays preserved and publishing is held while you continue with the Producer. No new render starts until you authorize it."
+      : auto
       ? "Examples: Please make it 20 seconds. · Add the photo named Chicago River Night. · Replace narration with: Welcome to Chicago. Unresolved photos/clips stay on hold for selection."
       : "This send-back opens Production for manual editing and approval.";
     if (error) { error.hidden = true; error.textContent = ""; }
@@ -1197,7 +1221,7 @@
     const count = $("factoryFeedbackCount");
     if (count) count.textContent = "0 / 3000";
     const submit = $("factoryFeedbackSubmit");
-    if (submit) { submit.disabled = false; submit.textContent = payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
+    if (submit) { submit.disabled = false; submit.textContent = returnReview ? "Send to Rendering Review" : payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
     backdrop.hidden = false;
     const transcript = $("factoryProducerTranscript");
     if (transcript) transcript.hidden = !auto;
@@ -1234,6 +1258,19 @@
       const desk = await mutateDesk({ ...pending.payload, note: notes });
       const requestId = String(desk?.result?.production_request_id || pending.payload.production_request_id || "").trim();
       closeFactoryFeedback();
+      if (pending.payload?.action === "return_to_review") {
+        if (desk?.result?.review_notes_saved!==true || desk?.result?.review_hold_active!==true)
+          throw new Error("Review notes or publication hold could not be verified.");
+        const notice = desk.result.message || "Request received. Continue the conversation with your Producer in Rendering Review.";
+        setStatus(notice);
+        window.alert(notice);
+        if (typeof window.StudioRenderingReview?.openOutputById === "function") {
+          await window.StudioRenderingReview.openOutputById(pending.payload.id);
+        } else {
+          document.getElementById("navRenderingReview")?.click();
+        }
+        return;
+      }
       if (desk?.result?.producer_queued) {
         setStatus(desk.result.message || "Producer revision accepted. Production continues without this page.");
         return;
@@ -1249,7 +1286,7 @@
         setStatus("Review notes saved. Open the returned item in Production for changes.");
       }
     } catch (err) {
-      if (submit) { submit.disabled = false; submit.textContent = pending.payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
+      if (submit) { submit.disabled = false; submit.textContent = pending.payload?.action === "return_to_review" ? "Send to Rendering Review" : pending.payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
       if (error) { error.hidden = false; error.textContent = String(err?.message || err); }
       setStatus("Could not send back: " + (err?.message || err), true);
     }
@@ -1318,13 +1355,29 @@
       });
     });
     root.querySelectorAll("[data-factory-send-back-content]").forEach((button) => {
-      button.addEventListener("click", () => {
+      button.addEventListener("click", async () => {
         const key = button.getAttribute("data-factory-send-back-content");
         const cards = (state.desk?.lanes?.needs_eyes || []).filter((card) => contentGroupKey(card) === key);
         const ready = readyContentCards({ cards });
         if (!ready.length) {
           setStatus("No reviewable outputs were found for this content.", true);
           return;
+        }
+        if(ready.length===1){
+          try {
+            if(await reviewedFactoryRevision(ready[0])){
+              openFactoryFeedback({
+                title:ready[0].title||cardLabel(ready[0]),
+                scope:"Selected revised output · Continue with Producer",
+                payload:{action:"return_to_review",id:ready[0].id,kind:"output",
+                  client_request_id:"factoryreview_"+crypto.randomUUID().replace(/-/g,"")}
+              });
+              return;
+            }
+          }catch(error){
+            setStatus("Rendering Review lookup failed: "+(error.message||error),true);
+            return;
+          }
         }
         const productionRequestId = String(ready.find((card) => /^rec[A-Za-z0-9]+$/.test(String(card.production_request_id || "")))?.production_request_id || "").trim();
         if (!productionRequestId) {
@@ -1409,10 +1462,24 @@
       });
     });
     root.querySelectorAll("[data-factory-send-back]").forEach((button) => {
-      button.addEventListener("click", () => {
+      button.addEventListener("click", async () => {
         const card = byId.get(button.getAttribute("data-factory-send-back"));
         if (!card) {
           setStatus("Send back failed: card not found in desk payload.", true);
+          return;
+        }
+        try {
+          if(await reviewedFactoryRevision(card)) {
+            const clientKey = "factoryreview_" + crypto.randomUUID().replace(/-/g,"");
+            openFactoryFeedback({
+              title:card.title||cardLabel(card),
+              scope:[card.platform,card.studio_output_type,"Selected revision only"].filter(Boolean).join(" · "),
+              payload:{action:"return_to_review",id:card.id,kind:"output",client_request_id:clientKey}
+            });
+            return;
+          }
+        } catch(error) {
+          setStatus("Could not verify Rendering Review handoff: "+(error.message||error),true);
           return;
         }
         // A content revision changes the shared render; the individual-row
@@ -1647,7 +1714,7 @@
     const savedMessage = desk.message || ACTION_STATUS[payload.action] || "Updated.";
     if (desk.lanes) {
       renderDesk(desk);
-    } else if (desk.ok && payload.action === "request_changes_content") {
+    } else if (desk.ok && (payload.action === "request_changes_content" || payload.action === "return_to_review")) {
       // The Airtable write is already committed; do not block acceptance on
       // a slow Factory queue read or convert a successful POST into an error.
       setStatus(savedMessage);

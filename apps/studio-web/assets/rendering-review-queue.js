@@ -652,5 +652,18 @@
   }
   reveal();
   if(root.classList.contains('active'))load(false);
-  window.StudioRenderingReview={load};
+  async function openOutputById(outputId) {
+    if(!/^rec[A-Za-z0-9]{14}$/.test(String(outputId||"")))
+      throw new Error("A valid output is required");
+    state.lastReplyNotice={outputId,message:
+      "Your change request was received in Factory. Continue the conversation with your Producer here; no new render has been started."};
+    state.lastLoad=0;
+    state.selected='';
+    nav.click();
+    if(root.classList.contains('active'))await load(false);
+    const entry=state.records.find(v=>v.output_id===outputId);
+    if(entry)await open(entry);
+    else say("Rendering Review opened. Refresh to find the saved revision.",true);
+  }
+  window.StudioRenderingReview={load,openOutputById};
 })();

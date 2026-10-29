@@ -315,6 +315,32 @@ export function applyReviewEvent(session, event) {
     // orchestrator must retain the durable hold until a separate scheduler-authorized release.
     s.approved_attempt_id = s.current_attempt_id;
     s.state = "approved";
+  } else if (kind === "FACTORY_REQUEST_CHANGES") {
+    // The Factory writer has already re-established and read back the exact
+    // output hold while holding the shared per-output approval lease.
+    const attempt=current(s);
+    if(s.state!=="approved"||s.review_hold.active!==false||
+       s.current_attempt_id!==s.approved_attempt_id ||
+       s.factory_handoff?.status!=="ready_for_factory_approval"||
+       s.factory_handoff?.attempt_id!==attempt?.id||
+       s.factory_handoff?.artifact_id!==attempt?.artifact_id||
+       event.attempt_id!==attempt?.id||event.artifact_id!==attempt?.artifact_id||
+       event.hold_id!==s.review_hold.id||event.hold_owner!==s.id||
+       !validId(event.message_id)||!text(event.note)||
+       text(event.note).length>3000||
+       s.messages.some(m=>m.id===event.message_id))
+      fail("FACTORY_RETURN_NOT_ALLOWED","Factory request cannot bypass an approved revision or active render hold");
+    s.messages.push({id:event.message_id,role:"user",content:text(event.note),
+      at:text(event.at),attempt_id:attempt.id,timestamp_seconds:null});
+    s.review_hold.active=true;
+    s.approved_attempt_id=null;
+    s.factory_handoff.status="returned_for_changes";
+    s.factory_handoff.returned_at=text(event.at);
+    s.producer_candidate=null;
+    s.plan=null;
+    s.pending_authorization=null;
+    s.active_job=null;
+    s.state="discussing";
   } else if (kind === "FACTORY_HANDOFF") {
     // Factory is a distinct human approval stage. The orchestrator must first
     // verify the accepted V2 artifact is selected on the original output while

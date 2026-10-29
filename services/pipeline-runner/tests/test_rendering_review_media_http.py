@@ -14,12 +14,20 @@ SECRET="x"*32
 
 class FakeClient:
     hold=True
+    factory=False
+    mismatch=False
     def __init__(self): self.seen=[]
     def list_records(self,table,**kwargs):
         self.seen.append(table)
         if table==SESSIONS:
             session={"schema":"studio.render-review.1","id":SESSION,
                 "output_id":OUTPUT,"profile_id":CHICAGO,"version":4,
+                "state":"approved" if self.factory else "discussing",
+                "approved_attempt_id":ATTEMPT if self.factory else None,
+                "current_attempt_id":ATTEMPT,
+                "factory_handoff":{"status":"ready_for_factory_approval",
+                    "attempt_id":ATTEMPT,
+                    "artifact_id":("different-asset" if self.mismatch else FILE)},
                 "review_hold":{"active":self.hold,"id":"hold-test","owner":SESSION},
                 "attempts":[{"id":ATTEMPT,"number":2,
                     "status":"ready_for_review","artifact_id":FILE}]}
@@ -32,13 +40,19 @@ class FakeClient:
         return []
     def get_record(self,table,rid):
         if table==OUTPUTS:
-            return {"id":OUTPUT,"fields":{"Content_Item":["recSkCY227R8iuoaJ"],
+            f={"Content_Item":["recSkCY227R8iuoaJ"],
                 "Studio_Render_Review_Hold_Active":self.hold,
-                "Studio_Render_Review_Hold_ID":"hold-test",
-                "Studio_Render_Review_Hold_Owner":SESSION,
-                "Studio_Render_Review_Session_ID":SESSION,
-                "Do_Not_Publish":True,"Platform":"Instagram",
-                "Platform_Output_Type":"Instagram Reel"}}
+                "Studio_Render_Review_Hold_ID":"hold-test" if self.hold else "",
+                "Studio_Render_Review_Hold_Owner":SESSION if self.hold else "",
+                "Studio_Render_Review_Session_ID":SESSION if self.hold else "",
+                "Do_Not_Publish":self.hold,"Auto_Publish_Enabled":False,
+                "Platform":"Instagram","Platform_Output_Type":"Instagram Reel"}
+            if self.factory:
+                f.update({"Final_File_ID":FILE,
+                    "Final_File_URL":"https://drive.google.com/file/d/"+FILE+"/view",
+                    "Output_Status":"Ready for Review","Review_Status":"Review Sent",
+                    "Publish_Status":"Not Ready"})
+            return {"id":OUTPUT,"fields":f}
         if table==ITEMS: return {"fields":{"Content_Profile":[CHICAGO]}}
         raise ValueError(table)
 
@@ -88,6 +102,21 @@ class ProxyTests(unittest.TestCase):
     def test_lost_hold_denied_before_drive(self):
         self.client.hold=False
         self.assertEqual(self.http.get(self.url,headers={"X-Pipeline-Secret":SECRET}).status_code,409)
+        self.assertEqual(self.transfers,[])
+    def test_factory_handoff_unheld_accepted_v2_is_still_streamable(self):
+        self.client.factory=True
+        self.client.hold=False
+        resp=self.http.get(self.url,headers={"X-Pipeline-Secret":SECRET,
+                                             "Range":"bytes=0-3"})
+        self.assertEqual(resp.status_code,206)
+        self.assertEqual(resp.data,b"mp4!")
+        self.assertEqual(len(self.transfers),1)
+    def test_factory_handoff_wrong_asset_is_denied_without_google(self):
+        self.client.factory=True
+        self.client.hold=False
+        self.client.mismatch=True
+        resp=self.http.get(self.url,headers={"X-Pipeline-Secret":SECRET})
+        self.assertEqual(resp.status_code,409)
         self.assertEqual(self.transfers,[])
     def test_head_probe_no_google_media_in_response(self):
         r=self.http.head(self.url,headers={"X-Pipeline-Secret":SECRET})
