@@ -74,6 +74,8 @@ test('Chicago completed render queue uses exactly two bounded paginated reads an
         Final_File_ID:'drive-file',Final_File_URL:'https://example.test/video',
         Output_Title:'Chicago skyline',Output_ID:2507,Render_Status:'Rendered',
         Publish_Status:'Not Published',
+        Studio_Render_Review_Hold_Active:true,
+        Studio_Render_Review_Hold_ID:session.review_hold.id,
       },
     }]};
     assert.equal(table,'tblwzN9AXWvmKVKPs');
@@ -103,7 +105,8 @@ test('exact Chicago pilot bypasses the broad queue scan and validates both autho
   const exact={id:outputId,fields:{Content_Item:[f.content.id],
     Platform:'Instagram',Platform_Output_Type:'Instagram Reel',Final_File_ID:'drive-file',
     Output_ID:8447,Output_Title:'Riverwalk Morning Reflections',Render_Status:'Rendered',
-    Publish_Status:'Ready to Schedule',Output_Status:'Approved for Publishing'}};
+    Publish_Status:'Ready to Schedule',Output_Status:'Approved for Publishing',
+    Studio_Render_Review_Hold_Active:true,Studio_Render_Review_Hold_ID:session.review_hold.id}};
   f.args.operations.airtableFetch=async(_env,table,id)=>{
     reads.push({table,id});
     if(table==='outputs'&&id===outputId)return exact;
@@ -232,4 +235,21 @@ test('queue fails closed when authoritative Airtable scan is not complete',async
   const f=fixture();f.args.url=new URL('https://studio.test/api/rendering-review/queue');
   f.args.operations.listRecordsPage=async()=>({valid:false,records:[]});
   await assert.rejects(()=>read(f.args),e=>e.status===503);
+});
+
+test('unflagged completed outputs never appear in conversational review queue',async()=>{
+  const f=fixture();
+  f.args.env.RENDERING_REVIEW_EXACT_OUTPUT_ID=outputId;
+  f.args.url=new URL('https://studio.test/api/rendering-review/queue');
+  f.output.fields.Platform='Instagram';
+  f.output.fields.Platform_Output_Type='Instagram Reel';
+  f.output.fields.Render_Status='Rendered';
+  f.output.fields.Studio_Render_Review_Hold_Active=false;
+  f.output.fields.Studio_Render_Review_Hold_ID='';
+  f.output.fields.Studio_Render_Review_Hold_Owner='';
+  f.output.fields.Studio_Render_Review_Session_ID='';
+  f.args.operations.airtableFetch=async(_env,table)=>table==='outputs'?f.output:f.content;
+  const result=await read(f.args);
+  assert.deepEqual(result.queue,[]);
+  assert.equal(result.flags.admission_enabled,false);
 });
