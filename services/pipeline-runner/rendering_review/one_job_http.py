@@ -36,7 +36,7 @@ def create_exact_review_render_blueprint(settings,runner=render_exact_attempt):
                 if re.fullmatch(r"[a-z][a-z0-9_]{0,95}", code):
                     reason_code = code
             result={"state":"needs_reconciliation",
-                    "reason":type(exc).__name__,
+                    "reason":reason_code or type(exc).__name__,
                     "reason_code":reason_code}
         with _LOCK:
             _RESULTS[job_id]=result
