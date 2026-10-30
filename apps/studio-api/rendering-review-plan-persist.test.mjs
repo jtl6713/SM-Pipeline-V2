@@ -218,3 +218,55 @@ test("conversation-only visual feedback is saved but cannot expose V2 render aut
   assert.equal(session.state,"discussing");
   assert.equal(session.review_hold.active,true);
 });
+
+
+test("owned V1 MP4 passthrough is eligible without pretending it is an image crop",async()=>{
+  const f=fixture(),VIDEO="recByWv7yDeVi2NPE";
+  const VIDEO_ID="59a9b4d684904e5382";
+  const FILE="1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr";
+  const URL="https://drive.google.com/uc?export=download&id="+FILE;
+  const original=f.rows.get(O),req=f.rows.get(P),candidate=f.getSession().producer_candidate.candidate;
+  const props=JSON.parse(original.fields.Remotion_Props_JSON);
+  props.clips.push({mediaAssetRecordId:VIDEO,googleDriveFileId:FILE,url:URL,src:URL});
+  original.fields.Remotion_Props_JSON=JSON.stringify(props);
+  const masters=JSON.parse(req.fields.Studio_Master_Assets_JSON);
+  masters.push({id:VIDEO_ID,media_asset_record_id:VIDEO,google_drive_file_id:FILE,
+    media_kind:"video",mime_type:"video/mp4"});
+  req.fields.Studio_Master_Assets_JSON=JSON.stringify(masters);
+  const variants=JSON.parse(req.fields.Studio_Variant_Manifest_JSON);
+  variants.assets.push({id:VIDEO_ID,media_asset_record_id:VIDEO,
+    google_drive_file_id:FILE,media_kind:"video",
+    variants:{"9:16":{media_kind:"video",recipe_version:"video-passthrough",
+      width:1080,height:1920,google_drive_file_id:FILE,
+      preview_url:"/api/media-assets/"+VIDEO+"/stream",preview_status:"Ready"}}});
+  req.fields.Studio_Variant_Manifest_JSON=JSON.stringify(variants);
+  f.rows.set(VIDEO,{id:VIDEO,fields:{"Google Drive File ID":FILE,
+    "Asset_Status":"Available","Rights_Status":"Owned",Active:true,
+    "Content_Profile":[CHICAGO_PROFILE_ID],"Media_Class":"Video"}});
+  candidate.reuse_asset_ids=[ID,VIDEO_ID];
+  candidate.timeline=[{start_seconds:0,end_seconds:10,
+    direction:"Original photo",asset_ids:[ID]},
+    {start_seconds:10,end_seconds:12.5,
+    direction:"Original fireworks footage, no replacement",asset_ids:[VIDEO_ID]}];
+  const result=await persistReadyReviewPlan(f.argumentsToPass);
+  assert.equal(result.ready,true);
+  const manifest=f.getSession().plan.immutable_manifest.asset_manifest;
+  const source=manifest.find(x=>x.asset_id===VIDEO_ID);
+  assert.equal(source?.media_type,"video");
+  assert.equal(source?.render_url,URL);
+  assert.equal(source?.render_variant_drive_file_id,FILE);
+  assert.equal(f.getSession().plan.immutable_manifest.allow_public_publish,false);
+});
+test("an MP4 variant cannot substitute another Drive file or HTML view URL",async()=>{
+  const f=fixture(),file="1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr";
+  // Malicious substitution must not be accepted as a verified photo variant.
+  const v=JSON.parse(f.rows.get(P).fields.Studio_Variant_Manifest_JSON);
+  const current=v.assets[0].variants["9:16"];
+  current.media_kind="video";current.recipe_version="video-passthrough";
+  current.width=1080;current.height=1920;current.google_drive_file_id=file;
+  current.preview_url="/api/media-assets/"+A+"/stream";
+  f.rows.get(P).fields.Studio_Variant_Manifest_JSON=JSON.stringify(v);
+  const result=await persistReadyReviewPlan(f.argumentsToPass);
+  assert.equal(result.ready,false);
+  assert.ok(result.blockers.some(x=>x.kind==="asset"));
+});
