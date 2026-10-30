@@ -454,3 +454,5 @@ jobs:
 # 2026-10-30 v3: release metadata-only original-size persistence (no canary rerun).
 
 # 2026-10-30 Deploy protected Chicago Rendering Review dynamic exact-output runner for Factory #9389 pilot.
+
+# 2026-10-30: Deploy Producer source-only tail normalization for Chicago review feedback; no render or publish on deploy.
