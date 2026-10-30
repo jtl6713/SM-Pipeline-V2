@@ -1,0 +1,52 @@
+name: One-time guarded MAE scheduling for two corrected Wynwood outputs
+on:
+  pull_request:
+    paths:
+      - 'repair/scripts/wynwood-pair-future-mae-20261029.mjs'
+      - '.github/workflows/wynwood-pair-future-mae-20261029.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/wynwood-pair-future-mae-20261029.yml'
+permissions:
+  contents: read
+concurrency:
+  group: two-verified-wynwood-mae-20261029
+  cancel-in-progress: false
+jobs:
+  safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: No publishing or unsafe manual scheduling
+        run: |
+          node --check repair/scripts/wynwood-pair-future-mae-20261029.mjs
+          node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          const s=fs.readFileSync('repair/scripts/wynwood-pair-future-mae-20261029.mjs','utf8');
+          for(const id of ['rec2vayWtSoOmPps3','rec6YjfEDasEvnfF4'])
+            if(!s.includes(id))throw Error('Unscoped recovery '+id);
+          for(const forbid of ['publish_now','/publish','graph.facebook.com','method:"PATCH"'])
+            if(s.includes(forbid))throw Error('Unsafe operation '+forbid);
+          NODE
+  live:
+    needs: safety
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: node repair/scripts/wynwood-pair-future-mae-20261029.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wynwood-pair-mae-readback
+          path: /tmp/wynwood-schedule-audit.json
+          retention-days: 21
