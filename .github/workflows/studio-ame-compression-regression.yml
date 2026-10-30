@@ -6,6 +6,8 @@ on:
       - 'services/pipeline-runner/studio_compress/**'
       - 'services/pipeline-runner/tests/test_ame_encoder.py'
       - 'services/pipeline-runner/tests/test_studio_compress.py'
+      - 'apps/studio-api/worker-functions-01.mjs'
+      - 'apps/studio-api/compression-stale-heal.test.mjs'
       - '.github/workflows/studio-ame-compression-regression.yml'
 
 permissions:
@@ -24,6 +26,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Test Worker compression-false-ready guards
+        run: node --test apps/studio-api/compression-stale-heal.test.mjs
       - name: Test private source selection, AME handoff and fallback
         run: |
           python -m pip install --quiet -r services/pipeline-runner/requirements.txt pytest

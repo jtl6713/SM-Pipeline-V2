@@ -132,7 +132,7 @@ jobs:
 
 
       - name: One-time exact Chicago Waterfront compression recovery (no publish)
-        if: ${{ success() && github.event_name == 'push' && startsWith(github.event.head_commit.message, 'studio-ame-waterfront-canary-20261030:') }}
+        if: ${{ success() && github.event_name == 'push' && startsWith(github.event.head_commit.message, 'studio-ame-size-canary-20261030:') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -151,7 +151,7 @@ jobs:
           $record = "recZKifUsQgTQBwbR"
           $asset = "59a9b4d684904e5382"
           $health = Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 15
-          if ($health.ok -ne $true -or $health.version -ne "2026-10-30-studio-ame-private-drive-v1") { throw "runner_version_mismatch" }
+          if ($health.ok -ne $true -or $health.version -ne "2026-10-30-studio-ame-size-guard-v2") { throw "runner_version_mismatch" }
           $ame = $false
           try {
             $bridge = Invoke-RestMethod -Uri "http://127.0.0.1:3344/health" -TimeoutSec 4
@@ -448,3 +448,5 @@ jobs:
 # 2026-10-29: Runner v17 allow exact accepted V2 to remain byte-range playable after the guarded Factory handoff; no public Drive sharing, render or publish.
 
 # Trigger once on merge to deploy Chicago Waterfront private-Drive AME recovery.
+
+# One-time exact Chicago oversized AME preview rescue, no publication.
