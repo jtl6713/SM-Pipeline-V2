@@ -414,3 +414,10 @@ test("held Meta 368 Reels with reserved slots remain blocked but show verificati
    assert.notEqual(altered.signature,"QA-FB-368-RESCHEDULED-HELD");
  }
 });
+
+// Cancelled + Skipped + held Facebook Stories are historical incidents, not active failed work.
+test("failed census excludes terminal retired held Stories without erasing historical errors",()=>{
+  assert.match(FAILED_OUTPUT_FORMULA,/NOT\(AND\(\{Output_Status\}="Cancelled",\{Review_Status\}="Skipped",\{Do_Not_Publish\}=1\)\)/);
+  assert.match(FAILED_OUTPUT_FORMULA,/\{Publish_Status\}="Failed"/);
+  assert.match(FAILED_OUTPUT_FORMULA,/\{IG_Carousel_Error_Message\}/);
+});
