@@ -5,6 +5,7 @@ from typing import Any
 from studio_compress.ame_encoder import AmeNotReady
 from studio_compress.processor import (
     compress_pending_assets,
+    MAX_COMPRESSED_BYTES,
     needs_compress,
     studio_master_download_url,
     studio_drive_download_url,
@@ -422,3 +423,102 @@ def test_drive_fallback_url_rejects_arbitrary_urls_and_path_traversal():
         studio_drive_download_url("../../etc/passwd")
     with pytest.raises(RuntimeError, match="Invalid authoritative"):
         studio_drive_download_url("https://drive.google.com/file/d/public/view")
+
+
+class _OversizeBytes(bytes):
+    def __len__(self):
+        return MAX_COMPRESSED_BYTES + 1
+
+
+def test_ame_output_larger_than_target_is_rejected_and_ffmpeg_finishes():
+    import json
+    client = _drive_only_client()
+    attempts = []
+    stages = []
+
+    def ame_encode(asset, on_progress):
+        on_progress(100)
+        attempts.append("ame")
+        return _OversizeBytes(b"oversized-AME")
+
+    def submit(url, name, record_id):
+        attempts.append("ffmpeg")
+        assert "/internal/drive-media/" in url
+        return {"job_id": "rescue", "status": "complete", "ok": True, "output_size_bytes": 25}
+
+    result = compress_pending_assets(
+        client, "recPRCompress", ame_encode=ame_encode,
+        submit_job=submit, poll_job=lambda *_a: {},
+        download_output=lambda *_a: (b"safe-small-preview", "video/mp4"),
+        stage_preview=lambda _request, _asset, content: (
+            stages.append(content) or "https://media.chicagoshining.com/studio/previews/finished-video/r/a.mp4"
+        ),
+        sleep=lambda _: None,
+    )
+    saved = json.loads(client.record["fields"]["Studio_Master_Assets_JSON"])[0]
+    assert result["ok"]
+    assert attempts == ["ame", "ffmpeg"]
+    assert stages == [b"safe-small-preview"]
+    assert saved["compression_status"] == "ready"
+    assert saved["compression_provider"] == "ffmpeg"
+    assert saved["original_size_bytes"] == 118105125
+
+
+def test_legacy_ready_147mb_ame_clip_skips_reencoding_and_recovers_with_ffmpeg():
+    import json
+
+    client = _drive_only_client()
+    assets = json.loads(client.record["fields"]["Studio_Master_Assets_JSON"])
+    assets[0].update({
+        "compression_status": "ready",
+        "compression_needed": False,
+        "compression_provider": "adobe-media-encoder",
+        "compression_job_id": "ame-59a9b4d684904e5382",
+        "size_bytes": 147069566,
+        "original_size_bytes": 118105125,
+        "preview_public_url": "https://media.chicagoshining.com/studio/previews/finished-video/recZKifUsQgTQBwbR/59a9b4d684904e5382.mp4",
+    })
+    client.record["fields"]["Studio_Master_Assets_JSON"] = json.dumps(assets)
+    assert needs_compress(assets[0])
+    stages = []
+    result = compress_pending_assets(
+        client, "recPRCompress",
+        ame_encode=lambda *_args: (_ for _ in ()).throw(AssertionError("AME should not re-encode the oversized result")),
+        submit_job=lambda url, *_args: (
+            {"job_id": "ffmpeg-rescue", "status": "complete", "ok": True, "output_size_bytes": 20}
+            if "/internal/drive-media/" in url else (_ for _ in ()).throw(AssertionError("public URL"))
+        ),
+        poll_job=lambda *_args: {},
+        download_output=lambda *_args: (b"smaller-preview", "video/mp4"),
+        stage_preview=lambda _request, _asset, content: (
+            stages.append(content) or "https://media.chicagoshining.com/studio/previews/finished-video/r/a.mp4"
+        ),
+        sleep=lambda _: None,
+    )
+    asset = json.loads(client.record["fields"]["Studio_Master_Assets_JSON"])[0]
+    assert result["compressed"] == 1
+    assert result["ok"]
+    assert stages == [b"smaller-preview"]
+    assert asset["compression_provider"] == "ffmpeg"
+    assert asset["size_bytes"] == 20
+    assert asset["google_drive_file_id"] == "1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr"
+
+
+def test_ffmpeg_cannot_mark_oversized_result_ready():
+    import json
+
+    client = _drive_only_client()
+    result = compress_pending_assets(
+        client, "recPRCompress",
+        ame_encode=lambda *_args: (_ for _ in ()).throw(AmeNotReady("not watching")),
+        submit_job=lambda *_args: {"job_id": "ffmpeg-large", "status": "complete", "ok": True},
+        poll_job=lambda *_args: {},
+        download_output=lambda *_args: (_OversizeBytes(b"oversized-ffmpeg"), "video/mp4"),
+        stage_preview=lambda *_args: (_ for _ in ()).throw(AssertionError("must not stage oversized output")),
+        sleep=lambda _: None,
+    )
+    asset = json.loads(client.record["fields"]["Studio_Master_Assets_JSON"])[0]
+    assert not result["ok"]
+    assert asset["compression_status"] == "failed"
+    assert "95 MiB" in asset["compression_error"]
+    assert asset["google_drive_file_id"] == "1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr"
