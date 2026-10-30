@@ -28,10 +28,11 @@ export function verifySubmittedPromotionOwnership({
   if (linkedIdeas.length !== 1 || linkedIdeas[0] !== ideaId) return fail("ambiguous_request_idea");
   const candidateParents = ids(ideaContentIds);
   const promoted = String(ideaPromotedContentId || "").trim();
-  if (candidateParents.length !== 1 || !validId(candidateParents[0]))
+  if (candidateParents.length > 1 || (candidateParents.length === 0 && !validId(promoted)))
     return fail("unconfirmed_or_ambiguous_i4_parent");
-  if (promoted && promoted !== candidateParents[0]) return fail("conflicting_i4_parent");
-  if (candidateParents[0] !== parentId) return fail("unexpected_content_record");
+  if (candidateParents.length === 1 && promoted && promoted !== candidateParents[0])
+    return fail("conflicting_i4_parent");
+  if ((candidateParents[0] || promoted) !== parentId) return fail("unexpected_content_record");
   const owners = ids(parentRequestIds);
   if (owners.length !== 1 || owners[0] !== requestId) return fail("ambiguous_parent_owner");
   const inverseRequests = ids(ideaRequestIds);
