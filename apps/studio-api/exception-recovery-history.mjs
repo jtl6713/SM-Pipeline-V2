@@ -20,6 +20,11 @@ export function normalizeRecoveryHistory(rows, filters={}) {
     if(f.Exception_Signature===RECOVERY_SIGNATURE)
       return {...evidence,audit_record_id:row.id,event_key:f.Event_Key,
         timestamp:f.Created_At,automatic:true};
+    if(f.Exception_Signature==="FACTORY_BATCH_APPROVAL_FAILURE")
+      return {...evidence,audit_record_id:row.id,event_key:f.Event_Key,
+        timestamp:f.Created_At,actor:f.Actor||"quality_agent",
+        reason:evidence.original_error || f.Message_Text, outcome:"Escalated",
+        phase:"outcome",automatic:true};
     if(!["ADMIN_APPROVED_ACTION","ADMIN_ACTION_OUTCOME"].includes(f.Exception_Signature)) return null;
     return {...evidence,audit_record_id:row.id,event_key:f.Event_Key,
       timestamp:f.Created_At,record_id:f.Output_Record_ID,actor:f.Actor,automatic:false,
