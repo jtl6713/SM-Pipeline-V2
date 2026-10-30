@@ -44,8 +44,8 @@ function assertAdapter(o){
  * per-output approval lock. Request IDs are stable across retry.
  */
 export async function returnFactoryRevisionToProducer({output_id,note,client_request_id,env,operations,now=()=>new Date().toISOString()}){
-  if(!record.test(value(output_id))||output_id!==env?.RENDERING_REVIEW_EXACT_OUTPUT_ID)
-    fail(403,"FACTORY_RETURN_SCOPE","Only the enrolled Chicago pilot may use this bridge");
+  if(!record.test(value(output_id)))
+    fail(403,"FACTORY_RETURN_SCOPE","Exact output record required");
   if(typeof note!=="string"||!note.trim()||note.trim().length>3000||
     !token.test(value(client_request_id)))
     fail(400,"FACTORY_RETURN_INPUT","Enter review notes and a valid request identifier");
