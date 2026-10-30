@@ -135,6 +135,45 @@ class ProducerTests(unittest.TestCase):
             self.assertIn(direction, payload["input"])
             self.assertNotIn("authorization", payload["input"].split("creative_direction")[-1].lower())
 
+    def test_timing_only_direction_preserves_source_and_does_not_create_new_research(self):
+        evidence = {**EVIDENCE, "output_id": "recVFaT3VnhCD3dcb",
+                    "narration": "The river multiplies the glow.",
+                    "original_timeline": [
+                        {"start_seconds": 0, "end_seconds": 8, "asset_id": "asset-1"}
+                    ],
+                    "messages": [
+                        {"role": "user", "content": "Leave more video after the voiceover ends."},
+                        {"role": "user", "content": "Please proceed with the revised render."}
+                    ]}
+        requested = []
+        class Response:
+            ok = True
+            def json(self):
+                model = copy.deepcopy(PROPOSAL)
+                model.update(narration=evidence["narration"], preserve=[],
+                             requirements=[], claims=[],
+                             changes=["Extend the final existing shot after the voiceover"],
+                             timeline=[{"start_seconds": 0, "end_seconds": 10.5,
+                                        "direction": "Hold the same owned asset",
+                                        "asset_ids": ["asset-1"]}])
+                return {"id": "min-edit", "model": "fixture",
+                        "output_text": json.dumps(model)}
+        def model(settings, body, **opts):
+            requested.append(body)
+            return Response()
+        result = propose_revision(evidence, "Please proceed with the revised render",
+                                  {}, transport=model)
+        self.assertEqual(len(requested), 1)
+        instructions = requested[0]["instructions"]
+        self.assertIn("timing-only request", instructions)
+        self.assertIn("original_timeline", instructions)
+        self.assertIn("claims=[]", instructions)
+        self.assertIn("previous user direction", instructions)
+        self.assertEqual(result["candidate"]["narration"], evidence["narration"])
+        self.assertEqual(result["candidate"]["requirements"], [])
+        self.assertEqual(result["candidate"]["claims"], [])
+        self.assertEqual(result["candidate"]["timeline"][-1]["end_seconds"], 10.5)
+
     def test_general_edit_intents_are_not_rewritten_to_photo_replacement(self):
         intents = [
             "Trim the introduction and increase the pace.",
