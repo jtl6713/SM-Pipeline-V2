@@ -7,6 +7,7 @@ import {
   factoryBatchCronSelectJobs, factoryBatchListGlobal, factoryBatchNeedsAttention,
   factoryBatchBuild, factoryBatchQualitySignals, factoryBatchMarkRemoved,
   factoryBatchMarkExceptionRouted, factoryBatchFailureRouted, factoryBatchRetryEligible,
+  factoryBatchRetryTransientOnce,
 } from "./factory-approval-queue.mjs";
 
 class FakeR2 {
@@ -577,4 +578,31 @@ test("manual Retry Failed is a single bounded attempt with original error histor
   const noRetry=await factoryBatchRetry(bucket,profileId,rid);
   assert.deepEqual(noRetry,secondFailure.job);
   assert.equal(noRetry.items[0].failure_history[0].error,"original-failure");
+});
+
+
+test("automatic transient failure recovery permits one bounded retry, then escalates",async()=>{
+  const bucket=new FakeR2(),rid="factory_auto_retry_once_1";
+  await factoryBatchEnqueue(bucket,{profileId,requestId:rid,records:[records[0]]});
+  const key="studio/state/factory-approvals/v2/jobs/"+profileId+"/"+rid+".json";
+  const stored=bucket.objects.get(key).value;
+  stored.status="failed";stored.items[0].status="failed";
+  stored.items[0].error="503 temporarily unavailable";
+  stored.items[0].total_attempts=5;
+  const first=await factoryBatchRetryTransientOnce(bucket,{profileId,requestId:rid,
+    recordId:records[0].id,outputId:records[0].output_id});
+  assert.equal(first.status,"queued");
+  assert.equal(first.items[0].auto_retry_count,1);
+  assert.equal(first.items[0].failure_history[0].error,"503 temporarily unavailable");
+  let attempted=0;
+  const failedAgain=await factoryBatchDrain(bucket,{profileId,requestId:rid,
+    approve:async()=>{attempted++;throw Error("503 still unavailable");},maxItems:1});
+  assert.equal(attempted,1);
+  assert.equal(failedAgain.job.items[0].status,"failed",
+    "second transient error must not launch five additional retries");
+  const reread=await factoryBatchRetryTransientOnce(bucket,{profileId,requestId:rid,
+    recordId:records[0].id,outputId:records[0].output_id});
+  assert.deepEqual(reread,failedAgain.job);
+  assert.equal(factoryBatchNeedsAttention(reread),true,
+    "not yet routed to recovery history, so error remains actionable");
 });
