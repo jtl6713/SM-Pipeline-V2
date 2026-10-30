@@ -56,7 +56,9 @@ jobs:
             services/pipeline-runner/tests/test_rendering_review_recovery.py \
             services/pipeline-runner/tests/test_rendering_review_http_transport.py \
             services/pipeline-runner/tests/test_rendering_review_audio_qa.py \
-            services/pipeline-runner/tests/test_rendering_review_media_http.py
+            services/pipeline-runner/tests/test_rendering_review_media_http.py \
+            services/pipeline-runner/tests/test_ame_encoder.py \
+            services/pipeline-runner/tests/test_studio_compress.py
 
       - name: Deploy Pipeline Runner through allowlisted Ops action
         shell: bash
@@ -380,3 +382,5 @@ jobs:
 # 2026-10-29: Runner v16 exact read-only proof of corrected V2 video plus original V1 audio; no render/publish.
 
 # 2026-10-29: Runner v17 allow exact accepted V2 to remain byte-range playable after the guarded Factory handoff; no public Drive sharing, render or publish.
+
+# Trigger once on merge to deploy Chicago Waterfront private-Drive AME recovery.
