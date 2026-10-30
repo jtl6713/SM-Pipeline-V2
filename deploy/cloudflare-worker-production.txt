@@ -765,3 +765,5 @@ Rendering Review V3 source validation + Producer executable timeline canary code
 
 2026-10-29: Deploy Worker 0.10.694-factory-review-feedback-only. Only protected Factory request-changes admits Chicago pilot to Rendering Review with initial human comments persisted under publication hold. No render or publish.
 2026-10-29: Retry Worker 0.10.694 Factory-only conversational review with corrected production read-only verifier; verify direct admission disabled and only held Factory-submitted reviews visible. Previous deploy rolled back safely.
+
+2026-10-29 Worker 0.10.695: exclude deliberately cancelled Facebook Stories from active Failed Quality Agent census; preserve their holds and historical errors. No posting, retry or rescheduling.
