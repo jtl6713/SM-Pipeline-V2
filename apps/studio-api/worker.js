@@ -42,7 +42,6 @@ export { StudioProfileSummary } from "./profile-summary-do.mjs";
 function makeReviewFactoryHandoffOperations(env) {
   let adapter;
   const authorizeOutput=async id=>{
-    if(id!==env.RENDERING_REVIEW_EXACT_OUTPUT_ID)return false;
     const view=await adapter.readOutput(id);
     return view.profile_id===CHICAGO_PROFILE_ID &&
       view.platform==="Instagram" && view.output_type==="Instagram Reel";
@@ -1996,8 +1995,7 @@ export default {
           let renderTrigger={render_triggered:false};
           if(receipt.ok===true&&receipt.hold_active===true&&
              receipt.public_post_created===false&&
-             env.RENDERING_REVIEW_EXACT_RENDER_TRIGGER_ENABLED==="true"&&
-             commitAttemptMatch[1]===env.RENDERING_REVIEW_EXACT_OUTPUT_ID){
+             env.RENDERING_REVIEW_EXACT_RENDER_TRIGGER_ENABLED==="true"){
             const base=String(env.PIPELINE_RUNNER_URL||"").trim().replace(/\/+$/,"");
             const secret=String(env.PIPELINE_RUNNER_SHARED_SECRET||"").trim();
             if(/^https:\/\//.test(base)&&secret.length>=24){
@@ -2137,8 +2135,7 @@ export default {
           let adapter;
           const authorizeOutput=async id=>{
             const view=await adapter.readOutput(id);
-            return view.id===env.RENDERING_REVIEW_EXACT_OUTPUT_ID&&
-              view.profile_id===CHICAGO_PROFILE_ID&&
+            return view.id===id&&view.profile_id===CHICAGO_PROFILE_ID&&
               view.platform==="Instagram"&&view.output_type==="Instagram Reel";
           };
           adapter=makeRenderingReviewAirtableOperations({
@@ -3235,9 +3232,10 @@ export default {
 
       if (isFactoryOutputPreviewRoute) {
         const outputId=url.pathname.split("/")[4];
-        if(outputId===env.RENDERING_REVIEW_EXACT_OUTPUT_ID){
+        // Only saved exact-output sessions activate protected revision preview.
+        const o=makeReviewFactoryHandoffOperations(env);
+        if(await o.readSession(outputId)){
           requirePermission(authorization,"outputs_review");
-          const o=makeReviewFactoryHandoffOperations(env);
           return serveFactorySelectedReviewVideo({
             request,env,outputId,authorization,
             readSession:o.readSession,
