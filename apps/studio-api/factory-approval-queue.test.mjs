@@ -596,7 +596,7 @@ test("automatic transient failure recovery permits one bounded retry, then escal
   assert.equal(first.items[0].failure_history[0].error,"503 temporarily unavailable");
   let attempted=0;
   const failedAgain=await factoryBatchDrain(bucket,{profileId,requestId:rid,
-    approve:async()=>{attempted++;throw Error("503 still unavailable");},maxItems:1});
+    approve:async()=>{attempted++;throw Error("503 temporarily unavailable");},maxItems:1});
   assert.equal(attempted,1);
   assert.equal(failedAgain.job.items[0].status,"failed",
     "second transient error must not launch five additional retries");
