@@ -58,6 +58,40 @@ async function seedLegacy(bucket, profileId) {
   if (objects.length > MAX_LEGACY_JOBS) {
     throw Error("Factory legacy job history exceeds safe migration budget");
   }
+  // Parent ledgers can persist even if the Worker dies before child enqueue.
+  // They must be included in first-use migration, not inferred from jobs alone.
+  const groupObjects = [];
+  let groupCursor;
+  do {
+    const remaining = MAX_LEGACY_JOBS + 1 - groupObjects.length;
+    if (remaining < 1) throw Error("Factory parent migration exceeds safe budget");
+    const page = await bucket.list({
+      prefix: FACTORY_BATCH_PREFIX + "/groups/", limit: Math.min(1000, remaining),
+      ...(groupCursor ? { cursor: groupCursor } : {}),
+    });
+    groupObjects.push(...(page.objects || []));
+    if (!page.truncated) break;
+    if (!page.cursor || page.cursor === groupCursor) throw Error("Factory parent migration cursor stalled");
+    groupCursor = page.cursor;
+  } while (true);
+  if (groupObjects.length > MAX_LEGACY_JOBS) throw Error("Factory parent migration exceeds safe budget");
+  const parentClaims = [];
+  for (let i = 0; i < groupObjects.length; i += 30) {
+    const reads = await Promise.all(groupObjects.slice(i, i + 30).map(row => read(bucket, row.key)));
+    for (const item of reads) {
+      const parent = item?.value;
+      if (!parent) continue;
+      if (parent.schema !== "studio.factory-approval-group.1" ||
+          !RID.test(String(parent.request_id || "")) || !Array.isArray(parent.records)) {
+        throw Error("Unrecognized Factory parent ledger; refusing incomplete migration");
+      }
+      for (const row of parent.records) {
+        if (row.profile_id === profileId && ID.test(String(row.id || ""))) {
+          parentClaims.push({ id: row.id, owner: parent.request_id, at: parent.created_at || null });
+        }
+      }
+    }
+  }
   const jobs = [];
   for (let i = 0; i < objects.length; i += 30) {
     const reads = await Promise.all(objects.slice(i, i + 30).map(row => read(bucket, row.key)));
@@ -76,16 +110,19 @@ async function seedLegacy(bucket, profileId) {
   jobs.sort((a, b) => (Date.parse(a.created_at || 0) || 0) -
     (Date.parse(b.created_at || 0) || 0) || a.request_id.localeCompare(b.request_id));
   const outputs = {};
-  for (const job of jobs) {
-    const owner = String(job.group_request_id || job.request_id || "");
-    if (!RID.test(owner)) continue;
-    for (const item of job.items || []) {
-      if (!ID.test(String(item.id || "")) ||
-          ["superseded_duplicate", "skipped_removed"].includes(item.status)) continue;
-      if (!outputs[item.id]) {
-        outputs[item.id] = { request_id: owner, source: "legacy", at: job.created_at || null };
-      }
-    }
+  const candidates = [
+    ...parentClaims.map(row => ({ id: row.id, owner: row.owner, at: row.at })),
+    ...jobs.flatMap(job => (job.items || [])
+      .filter(item => ID.test(String(item.id || "")) &&
+        !["superseded_duplicate", "skipped_removed"].includes(item.status))
+      .map(item => ({ id: item.id,
+        owner: String(job.group_request_id || job.request_id || ""),
+        at: job.created_at || null }))),
+  ].sort((a, b) => (Date.parse(a.at || 0) || 0) -
+    (Date.parse(b.at || 0) || 0) || a.owner.localeCompare(b.owner));
+  for (const row of candidates) {
+    if (!RID.test(row.owner) || outputs[row.id]) continue;
+    outputs[row.id] = { request_id: row.owner, source: "legacy", at: row.at };
   }
   const now = new Date().toISOString();
   return { schema: SCHEMA, profile_id: profileId, outputs,
