@@ -10,6 +10,16 @@
   const chicago = 'recT2rbKX3MF7cVFU';
   const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map(),pollTimer:null,activeEntry:null,lastReplyNotice:null,lastReplyNoticeNode:null};
   const list = $('rrQueueList'), detail = $('rrDetail'), status = $('rrStatus');
+
+  const chicagoTime = value => {
+    if(typeof value!=='string'||!value.trim())return 'Timestamp unavailable';
+    const date=new Date(value);
+    if(!Number.isFinite(date.getTime()))return 'Timestamp unavailable';
+    return new Intl.DateTimeFormat('en-US',{
+      timeZone:'America/Chicago',month:'short',day:'numeric',year:'numeric',
+      hour:'numeric',minute:'2-digit',timeZoneName:'short',
+    }).format(date);
+  };
   const refresh = $('rrRefresh'), more = $('rrMore');
   const elem = (tag,text,cls) => {
     const node = document.createElement(tag);
