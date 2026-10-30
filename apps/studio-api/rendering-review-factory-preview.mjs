@@ -46,9 +46,9 @@ export async function serveFactorySelectedReviewVideo({request,env,outputId,auth
   if(!authorization?.authenticated||!authorization?.authorized||
      authorization?.permissions?.outputs_review!==true)
     fail(403,"FACTORY_VIDEO_REVIEW_PERMISSION");
-  if(!/^rec[A-Za-z0-9]{14}$/.test(outputId)||
-     outputId!==env?.RENDERING_REVIEW_EXACT_OUTPUT_ID)
+  if(!/^rec[A-Za-z0-9]{14}$/.test(outputId))
     fail(403,"FACTORY_VIDEO_SCOPE");
+  // Saved session + authoritative Chicago output/attempt control playback.
   const session=await readSession(outputId);
   const row=await readRow(outputId);
   const profile=await readProfile(outputId);
