@@ -450,3 +450,5 @@ jobs:
 # Trigger once on merge to deploy Chicago Waterfront private-Drive AME recovery.
 
 # One-time exact Chicago oversized AME preview rescue, no publication.
+
+# 2026-10-30 v3: release metadata-only original-size persistence (no canary rerun).
