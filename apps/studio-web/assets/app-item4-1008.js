@@ -13668,6 +13668,14 @@ function timedScriptAssetLabel(asset, index) {
         ? "Promoted"
         : String(record?.status || "Draft"));
     const cancelled = status === "Cancelled";
+    if (status === "Submitted") {
+      const approvalState = productionApprovalReadbackState(record, recordId);
+      if (approvalState === "stalled") {
+        setRequestMessage("Approval is stalled beyond the normal processing window. Automatic recovery will reconcile the original request. Do not resubmit approval.", "error-text");
+      } else if (approvalState === "recovery-required") {
+        setRequestMessage("Production recovery required: " + String(record?.studio_production_job?.error || "an existing job is blocked") + ". Do not approve again.", "error-text");
+      }
+    }
     const editable = !cancelled && (revisionOpen || status === "Draft" || status === "Ready");
     const form = $("productionRequestForm");
 
@@ -13730,7 +13738,10 @@ function timedScriptAssetLabel(asset, index) {
         }
       } else if (status === "Submitted") {
         promote.disabled = false;
-        promote.textContent = "Check promotion status";
+        const state = productionApprovalReadbackState(record, recordId);
+        promote.textContent = state === "stalled" || state === "recovery-required"
+          ? "Check recovery status" : "Check promotion status";
+        promote.title = "Read-only status check; does not submit approval or start another render.";
       } else if (item4Workspace?.assets?.length) {
         const planReady = item4Workspace?.plan_status === "Ready";
         const finished = item4IsFinishedRequest(record);
@@ -15574,7 +15585,14 @@ function timedScriptAssetLabel(asset, index) {
       return Array.isArray(links) && links.some(id => /^rec[A-Za-z0-9]{14}$/.test(String(id || "")))
         ? "promoted" : "incomplete";
     }
-    if (status === "Submitted") return "processing";
+    if (status === "Submitted") {
+      const jobStep = String(record.studio_production_job?.step || "").trim();
+      if (jobStep === "escalated" || jobStep === "blocked") return "recovery-required";
+      const submittedAtMs = Date.parse(String(record.submitted_at || ""));
+      if (Number.isFinite(submittedAtMs) && Date.now() - submittedAtMs >= 10 * 60 * 1000)
+        return "stalled";
+      return "processing";
+    }
     if (status === "Cancelled") return "cancelled";
     if (status === "Draft" || status === "Ready") return "not-confirmed";
     return "unverified";
@@ -15606,7 +15624,12 @@ function timedScriptAssetLabel(asset, index) {
       setRequestMessage("Approved. The saved Production Request is promoted and linked to its Content Item. Open Pipeline for the outputs.", "success");
       openPipelineAfterPromote();
     } else if (outcome === "processing") {
-      setRequestMessage("Approval was submitted and is still processing. Check approval status to refresh without submitting it again.", "success");
+      setRequestMessage("Approval is submitted. Studio will reconcile it automatically; use Check approval status for a read-only refresh. Do not approve again.", "success");
+    } else if (outcome === "stalled") {
+      setRequestMessage("Approval has exceeded the normal processing window. Automatic recovery is checking the existing request. This is NOT a successful approval yet. Check recovery status; do not resubmit.", "error-text");
+    } else if (outcome === "recovery-required") {
+      const errorDetail = String(result?.record?.studio_production_job?.error || "").trim();
+      setRequestMessage("Production recovery required: the existing job is blocked or escalated." + (errorDetail ? " " + errorDetail : "") + " Do not approve again.", "error-text");
     } else if (outcome === "cancelled") {
       item4PromotionReadbackRequired.delete(requestId);
       setRequestMessage("This Production Request was cancelled. Open Pipeline / Open Review for the active item; do not approve a duplicate.", "error-text");
