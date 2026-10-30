@@ -323,3 +323,90 @@ def test_ame_not_ready_falls_back_to_ffmpeg():
     assert submitted == ["ffmpeg"]
     assert asset["compression_provider"] == "ffmpeg"
     assert asset["compression_job_id"] == "job-fallback"
+
+
+def _drive_only_client() -> FakeAirtable:
+    """Exact failure shape: Chicago: Life Along the Waterfront, clip #8."""
+    return FakeAirtable(_request([{
+        "id": "59a9b4d684904e5382",
+        "name": "Navy Pier Fireworks 12.mp4",
+        "media_kind": "video",
+        "mime_type": "video/mp4",
+        "size_bytes": 118105125,
+        "r2_key": None,
+        "authoritative_storage": "google_drive",
+        "staging_deleted": True,
+        "google_drive_file_id": "1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr",
+        "media_asset_record_id": "recSITCujCsJTNcDe",
+        "compression_status": "failed",
+        "compression_needed": True,
+        "compression_error": "Studio compression needs a private studio/master-assets key",
+    }], finished=False))
+
+
+def test_chicago_waterfront_drive_original_uses_ame_first_without_ffmpeg():
+    import json
+
+    client = _drive_only_client()
+    submitted = []
+    def ame_encode(asset, on_progress):
+        assert asset["r2_key"] is None
+        assert asset["google_drive_file_id"] == "1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr"
+        on_progress(35)
+        return b"AME-encoded-private-original"
+
+    outcome = compress_pending_assets(
+        client, "recPRCompress",
+        ame_encode=ame_encode,
+        submit_job=lambda *_a: submitted.append("ffmpeg-public"),
+        submit_drive_job=lambda *_a: submitted.append("ffmpeg-private"),
+        poll_job=lambda *_a: {},
+        download_output=lambda *_a: (b"ffmpeg", "video/mp4"),
+        stage_preview=lambda request_id, asset_id, content: (
+            f"https://media.chicagoshining.com/studio/previews/finished-video/{request_id}/{asset_id}.mp4"
+        ),
+        sleep=lambda _s: None,
+    )
+    asset = json.loads(client.record["fields"]["Studio_Master_Assets_JSON"])[0]
+    assert outcome["ok"] is True
+    assert outcome["compressed"] == 1
+    assert submitted == []
+    assert asset["compression_provider"] == "adobe-media-encoder"
+    assert asset["compression_status"] == "ready"
+    assert asset["original_r2_key"] == ""
+    assert asset["google_drive_file_id"] == "1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr"
+
+
+def test_chicago_waterfront_ame_unavailable_falls_back_to_private_drive_not_public_url():
+    import json
+
+    client = _drive_only_client()
+    private_submissions = []
+    public_submissions = []
+
+    def ame_encode(_asset, _on_progress):
+        raise AmeNotReady("Media Encoder did not pick up the inbox file")
+
+    def submit_drive_job(file_id, name):
+        private_submissions.append((file_id, name))
+        return {"job_id": "ffmpeg-private-job", "status": "complete", "ok": True, "output_size_bytes": 34}
+
+    result = compress_pending_assets(
+        client, "recPRCompress",
+        ame_encode=ame_encode,
+        submit_job=lambda *_args: public_submissions.append(True),
+        submit_drive_job=submit_drive_job,
+        poll_job=lambda *_args: {"status": "complete", "ok": True},
+        download_output=lambda *_args: (b"ffmpeg-private-output", "video/mp4"),
+        stage_preview=lambda request_id, asset_id, _content: (
+            f"https://media.chicagoshining.com/studio/previews/finished-video/{request_id}/{asset_id}.mp4"
+        ),
+        sleep=lambda _s: None,
+    )
+    asset = json.loads(client.record["fields"]["Studio_Master_Assets_JSON"])[0]
+    assert result["ok"] is True
+    assert private_submissions == [("1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr", "Navy Pier Fireworks 12.mp4")]
+    assert public_submissions == []
+    assert asset["compression_provider"] == "ffmpeg"
+    assert asset["compression_status"] == "ready"
+    assert asset["google_drive_file_id"] == "1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr"
