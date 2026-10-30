@@ -113,12 +113,21 @@ jobs:
             -o /tmp/studio-cover-repair/subdomain.json
           jq -e '.success==true and .result.enabled==true' /tmp/studio-cover-repair/subdomain.json >/dev/null
           for cid in 1857 1858; do
-            code="$(curl -sS --retry 3 --retry-delay 2 -o "/tmp/studio-cover-repair/upload-$cid.json" -w '%{http_code}' \
-              -X PUT "https://$WORKER.joseph-t-logan.workers.dev/$cid" \
-              -H "X-One-Shot-Token: $(cat /tmp/studio-cover-repair/one-time-token)" \
-              -H 'Content-Type: image/jpeg' \
-              --data-binary "@/tmp/studio-cover-repair/$cid.jpg")"
-            if [[ "$code" -lt 200 || "$code" -ge 300 ]]; then
+            code="000"
+            for attempt in $(seq 1 15); do
+              code="$(curl -sS -o "/tmp/studio-cover-repair/upload-$cid.json" -w '%{http_code}' \
+                -X PUT "https://$WORKER.joseph-t-logan.workers.dev/$cid" \
+                -H "X-One-Shot-Token: $(cat /tmp/studio-cover-repair/one-time-token)" \
+                -H 'Content-Type: image/jpeg' \
+                --data-binary "@/tmp/studio-cover-repair/$cid.jpg" || true)"
+              if [[ "$code" == "200" ]]; then break; fi
+              # Brand-new Workers.dev routes may initially return 404/1042
+              # while the route propagates; never retry unauthorized requests.
+              if [[ "$code" != "404" && "$code" != "503" && "$code" != "000" ]]; then break; fi
+              echo "temporary_worker_route_propagating=$cid attempt=$attempt status=$code"
+              sleep 5
+            done
+            if [[ "$code" != "200" ]]; then
               echo "Temporary Worker cover upload failed for $cid with HTTP $code" >&2
               head -c 400 "/tmp/studio-cover-repair/upload-$cid.json" >&2 || true
               exit 1
