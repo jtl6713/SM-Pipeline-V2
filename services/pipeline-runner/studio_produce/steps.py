@@ -1046,6 +1046,15 @@ def _requeue_failed_render(client: AirtableClient, output_id: str) -> None:
     )
 
 
+def waiting_on_existing_render_job(output: dict[str, Any]) -> bool:
+    """A queued label must not cause a second R4 launch for a known Remotion job."""
+    return (
+        field_str(output, "Render_Status") == "Waiting in Render Queue"
+        and bool(field_str(output, "Remotion_Job_ID"))
+        and bool(field_str(output, "Remotion_Status_URL"))
+    )
+
+
 def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
     if is_finished(ctx):
         return "done"
@@ -1101,6 +1110,26 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
             field_str(fresh, "Platform_Output_Type"),
         )
         try:
+            # A pre-existing Remotion job wins over a stale queue label.
+            # Reconcile/harvest by exact job before any new render is allowed.
+            if waiting_on_existing_render_job(fresh):
+                process_r5(output_record_id=fresh["id"], test_run_id=test_run_id)
+                harvested = client.get_record(PLATFORM_OUTPUTS_TABLE, fresh["id"])
+                if _output_ready(harvested):
+                    if meta.get("role") == "canonical" and meta.get("sibling_ids"):
+                        propagate_render_result(client, harvested, meta["sibling_ids"])
+                    continue
+                if field_str(harvested, "Render_Status").lower() == "failed":
+                    if _is_delay_render_failure(harvested):
+                        _requeue_failed_render(client, harvested["id"])
+                        remaining.append(harvested["id"])
+                        continue
+                    raise StepBlocked(
+                        "Existing Remotion job failed; investigate before retrying "
+                        + field_str(harvested, "Remotion_Job_ID")
+                    )
+                remaining.append(fresh["id"])
+                continue
             if native or render_status == "Native Photo Route":
                 if render_status != "Native Photo Route":
                     remaining.append(fresh["id"])
