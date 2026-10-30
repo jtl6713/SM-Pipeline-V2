@@ -88,14 +88,22 @@ jobs:
           token=Path('/tmp/studio-cover-repair/one-time-token').read_text().strip()
           js="""const secret = "__SECRET__";
           const items = {
-            "1857": {key:"studio/previews/thumbnails/recPFH9PAvFcFmk6k/cover-20261030-revised-9x16.jpg", sha:"113a568e7e360d5c90e6541a01d5091c79476ca940db0358ddabaf83b068472b"},
-            "1858": {key:"studio/previews/thumbnails/recaqlkDfkQRQAlxw/cover-20261030-revised-9x16.jpg", sha:"57d1b6fb6f36df30dcae2e0e8cc94f4054cddaeea50acb148287d10607afb974"}
+            "1857": {key:"studio/previews/thumbnails/recPFH9PAvFcFmk6k/cover-20261030-revised-9x16.jpg", oldKey:"studio/previews/thumbnails/recPFH9PAvFcFmk6k/cover-9x16.png", sha:"113a568e7e360d5c90e6541a01d5091c79476ca940db0358ddabaf83b068472b"},
+            "1858": {key:"studio/previews/thumbnails/recaqlkDfkQRQAlxw/cover-20261030-revised-9x16.jpg", oldKey:"studio/previews/thumbnails/recaqlkDfkQRQAlxw/cover-9x16.png", sha:"57d1b6fb6f36df30dcae2e0e8cc94f4054cddaeea50acb148287d10607afb974"}
           };
           export default {async fetch(request,env) {
             const id = new URL(request.url).pathname.replace(/^\\//,"");
             const item=items[id];
-            if (request.method !== "PUT" || !item) return new Response("Not found",{status:404});
+            if (!item || !["PUT","DELETE"].includes(request.method)) return new Response("Not found",{status:404});
             if (request.headers.get("X-One-Shot-Token") !== secret) return new Response("Forbidden",{status:403});
+            if (request.method === "DELETE") {
+              const newFile = await env.STUDIO_MEDIA.head(item.key);
+              if (!newFile || newFile.size < 100000) return new Response("New cover missing; refused delete",{status:409});
+              await env.STUDIO_MEDIA.delete(item.oldKey);
+              const stillThere = await env.STUDIO_MEDIA.head(item.oldKey);
+              if (stillThere) return new Response("Old cover still present",{status:500});
+              return Response.json({ok:true,id,oldKey:item.oldKey,deleted:true});
+            }
             if (request.headers.get("Content-Type") !== "image/jpeg") return new Response("Bad type",{status:415});
             const bytes=await request.arrayBuffer();
             if (bytes.byteLength < 100000 || bytes.byteLength > 3000000) return new Response("Bad size",{status:400});
@@ -196,6 +204,25 @@ jobs:
           1858 recaqlkDfkQRQAlxw 57d1b6fb6f36df30dcae2e0e8cc94f4054cddaeea50acb148287d10607afb974
           RECORDS
           echo "Public cover delivery PASS. Airtable updates are a separate, manually verified step." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Delete ONLY the two superseded R2 covers after both new CDN checksums passed
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKER="$(cat /tmp/studio-cover-repair/worker-name)"
+          for cid in 1857 1858; do
+            code="$(curl -sS -o "/tmp/studio-cover-repair/delete-$cid.json" -w '%{http_code}' \
+              -X DELETE "https://$WORKER.joseph-t-logan.workers.dev/$cid" \
+              -H "X-One-Shot-Token: $(cat /tmp/studio-cover-repair/one-time-token)")"
+            if [[ "$code" != "200" ]]; then
+              echo "Refused or failed exact old cover removal for $cid: HTTP $code" >&2
+              head -c 450 "/tmp/studio-cover-repair/delete-$cid.json" >&2 || true
+              exit 1
+            fi
+            jq -e --arg id "$cid" '.ok==true and .id==$id and .deleted==true' "/tmp/studio-cover-repair/delete-$cid.json" >/dev/null
+            echo "superseded_r2_cover_deleted=$cid"
+            echo "- $cid: superseded original cover-9x16.png removed from R2" >> "$GITHUB_STEP_SUMMARY"
+          done
 
       - name: Remove temporary upload Worker regardless of outcome
         if: always()
