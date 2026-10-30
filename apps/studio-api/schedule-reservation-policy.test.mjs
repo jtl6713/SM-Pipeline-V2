@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const worker02 = fs.readFileSync(path.join(here, "worker-functions-02.mjs"), "utf8");
 const worker04 = fs.readFileSync(path.join(here, "worker-functions-04.mjs"), "utf8");
+const worker03 = fs.readFileSync(path.join(here, "worker-functions-03.mjs"), "utf8");
+const worker = fs.readFileSync(path.join(here, "worker.js"), "utf8");
 
 function sliceBetween(source, startNeedle, endNeedle) {
   const start = source.indexOf(startNeedle);
@@ -50,4 +52,38 @@ test("atomic seed schedule mutation is abortable and authoritatively verified", 
   assert.match(seed, /method: "PATCH",[\s\S]{0,100}signal,/);
   assert.match(seed, /const authoritative = await airtableFetch/);
   assert.match(seed, /Platform Output seed schedule could not be verified/);
+});
+
+test("production fanout gates atomic seed writes by exact profile/platform lane", () => {
+  const fanout = sliceBetween(
+    worker02,
+    "export async function fanoutProductionRequestOutputsToContentItems",
+    "/*__STUDIO_WORKER_END:fanoutProductionRequestOutputsToContentItems__*/",
+  );
+  assert.match(worker02, /import \{ scheduleReservationAuthorityEnabled, scheduleReservationLaneEnabled \} from/);
+  assert.match(fanout, /const seedProfileId = studioFirstLinkedId\(f\(parent, "Content_Profile"\)\)/);
+  assert.match(fanout, /if \(scheduleReservationLaneEnabled\(env, seedProfileId, effective\.platform\)/);
+  assert.doesNotMatch(fanout, /if \(scheduleReservationAuthorityEnabled\(env\)/);
+});
+
+test("Submitted replay fans out only missing rows and preserves existing Remotion evidence", () => {
+  const finalizer = sliceBetween(
+    worker02,
+    "export async function completeProductionRequestPromotionSideEffects",
+    "/*__STUDIO_WORKER_END:completeProductionRequestPromotionSideEffects__*/",
+  );
+  assert.match(finalizer, /onlyMissing: !productionRequestRevisionOpen\(current\)/);
+  assert.match(finalizer, /String\(existingJob\?\.step \|\| ""\) === "escalated"/);
+  assert.match(finalizer, /Studio produce remains escalated pending guarded resume/);
+});
+
+test("cron reconciles stale Submitted approvals from confirmed I4 parent without I3 replay", () => {
+  const healer = sliceBetween(worker03, "export async function studioHealPromotedMissingFanout", "/*__STUDIO_WORKER_END:studioHealPromotedMissingFanout__*/");
+  assert.match(healer, /\{Request_Status\}="Submitted"/);
+  assert.match(healer, /Date\.now\(\) - submittedMs < 10 \* 60 \* 1000/);
+  assert.match(healer, /ideaParent !== parentId \|\| owners\.length !== 1 \|\| owners\[0\] !== pendingRequest\.id/);
+  assert.match(healer, /finalizeProductionRequestPromotion\(env, pendingRequest\.id, idea, ctx\)/);
+  assert.match(healer, /recoveredSubmitted >= 1/);
+  assert.doesNotMatch(healer, /fetchPromotionHandoff/);
+  assert.match(worker, /studioHealPromotedMissingFanout\(env, \{ limit: 4, ctx \}\)/);
 });
