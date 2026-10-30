@@ -7,7 +7,7 @@ import {
   factoryBatchCronSelectJobs, factoryBatchListGlobal, factoryBatchNeedsAttention,
   factoryBatchBuild, factoryBatchQualitySignals, factoryBatchMarkRemoved,
   factoryBatchMarkExceptionRouted, factoryBatchFailureRouted, factoryBatchRetryEligible,
-  factoryBatchRetryTransientOnce,
+  factoryBatchRetryTransientOnce, factoryBatchMarkAlreadySatisfied,
 } from "./factory-approval-queue.mjs";
 
 class FakeR2 {
@@ -605,4 +605,39 @@ test("automatic transient failure recovery permits one bounded retry, then escal
   assert.deepEqual(reread,failedAgain.job);
   assert.equal(factoryBatchNeedsAttention(reread),true,
     "not yet routed to recovery history, so error remains actionable");
+});
+
+
+test("independently confirmed Airtable approval corrects failed bookkeeping without re-approving",async()=>{
+  const bucket = new FakeR2();
+  const rid="factory_approved_readback_1";
+  await factoryBatchEnqueue(bucket,{profileId,requestId:rid,records:[records[0]]});
+  const key="studio/state/factory-approvals/v2/jobs/"+profileId+"/"+rid+".json";
+  const stored=bucket.objects.get(key).value;
+  stored.status="failed";stored.items[0].status="failed";
+  stored.items[0].error="Airtable write confirmed, postflight timed out";
+  let checks=0;
+  const opts={profileId,requestId:rid,recordId:records[0].id,
+    outputId:records[0].output_id,verifySatisfied:async()=>{checks++;return true;}};
+  const repaired=await factoryBatchMarkAlreadySatisfied(bucket,opts);
+  assert.equal(repaired.items[0].status,"already_satisfied");
+  assert.equal(repaired.items[0].previous_failure_error,"Airtable write confirmed, postflight timed out");
+  assert.equal(repaired.status,"completed");
+  assert.equal(factoryBatchNeedsAttention(repaired),false);
+  const repeated=await factoryBatchMarkAlreadySatisfied(bucket,opts);
+  assert.equal(checks,1,"replay must not call Airtable or approval again");
+  assert.deepEqual(repeated,repaired);
+  assert.equal((await factoryBatchListGlobal(bucket,{mode:"completed"})).jobs.length,1);
+});
+test("failed bookkeeping stays active when authoritative approval cannot be confirmed",async()=>{
+  const bucket=new FakeR2(),rid="factory_approved_unverified_1";
+  await factoryBatchEnqueue(bucket,{profileId,requestId:rid,records:[records[0]]});
+  const key="studio/state/factory-approvals/v2/jobs/"+profileId+"/"+rid+".json";
+  const item=bucket.objects.get(key).value;
+  item.status="failed";item.items[0].status="failed";
+  await assert.rejects(()=>factoryBatchMarkAlreadySatisfied(bucket,{
+    profileId,requestId:rid,recordId:records[0].id,outputId:records[0].output_id,
+    verifySatisfied:async()=>false,
+  }),/not verified/);
+  assert.equal(factoryBatchNeedsAttention(item),true);
 });
