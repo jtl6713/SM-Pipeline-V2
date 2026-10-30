@@ -44,7 +44,7 @@ export function factoryBatchFailureRouted(item) {
 /** One explicitly requested retry of a terminal failed row; no broad replay. */
 export function factoryBatchRetryEligible(item) {
   return item?.status === "failed" && !factoryBatchFailureRouted(item) &&
-    Number(item.manual_retry_count || 0) < 1;
+    Number(item.manual_retry_count || 0) + Number(item.auto_retry_count || 0) < 1;
 }
 /** Only unresolved failures and live work belong on the active Factory desk. */
 export function factoryBatchNeedsAttention(job) {
@@ -588,6 +588,7 @@ export async function factoryBatchMarkRemoved(
     const items = job.items.map(row => row.id === recordId ? {
       ...row,
       status: "skipped_removed",
+      removed_original_error: row.error || null,
       error: null,
       next_attempt_ms: 0,
       removed_reason: String(reason).slice(0, 500),
