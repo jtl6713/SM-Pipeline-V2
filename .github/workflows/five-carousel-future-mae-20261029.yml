@@ -1,0 +1,52 @@
+name: One-time MAE scheduling for five corrected Instagram carousels
+on:
+  pull_request:
+    paths:
+      - 'repair/scripts/five-carousel-future-mae-20261029.mjs'
+      - '.github/workflows/five-carousel-future-mae-20261029.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/five-carousel-future-mae-20261029.yml'
+permissions:
+  contents: read
+concurrency:
+  group: five-verified-carousel-mae-20261029
+  cancel-in-progress: false
+jobs:
+  safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: No publishing or unsafe manual scheduling
+        run: |
+          node --check repair/scripts/five-carousel-future-mae-20261029.mjs
+          node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          const s=fs.readFileSync('repair/scripts/five-carousel-future-mae-20261029.mjs','utf8');
+          for(const id of ['recIsQOyT3b139ySl','rechudovE5tJr3ZHn','rec8XZJI1VtdrbDYa','rec77l9OCSZvtEM0P','recBf2tlvin7GV6n3'])
+            if(!s.includes(id))throw Error('Unscoped recovery '+id);
+          for(const forbid of ['publish_now','/publish','graph.facebook.com','method:"PATCH"'])
+            if(s.includes(forbid))throw Error('Unsafe operation '+forbid);
+          NODE
+  live:
+    needs: safety
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: node repair/scripts/five-carousel-future-mae-20261029.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: five-carousel-future-mae-readback
+          path: /tmp/corrected-carousel-schedule.json
+          retention-days: 21
