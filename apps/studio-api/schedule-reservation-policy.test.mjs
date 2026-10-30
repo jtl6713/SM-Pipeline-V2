@@ -77,13 +77,16 @@ test("Submitted replay fans out only missing rows and preserves existing Remotio
   assert.match(finalizer, /Studio produce remains escalated pending guarded resume/);
 });
 
-test("cron reconciles stale Submitted approvals from confirmed I4 parent without I3 replay", () => {
+test("cron independently recovers stale Submitted approvals even when request parent backlink is missing", () => {
   const healer = sliceBetween(worker03, "export async function studioHealPromotedMissingFanout", "/*__STUDIO_WORKER_END:studioHealPromotedMissingFanout__*/");
   assert.match(healer, /\{Request_Status\}="Submitted"/);
-  assert.match(healer, /Date\.now\(\) - submittedMs < 10 \* 60 \* 1000/);
-  assert.match(healer, /ideaParent !== parentId \|\| owners\.length !== 1 \|\| owners\[0\] !== pendingRequest\.id/);
-  assert.match(healer, /finalizeProductionRequestPromotion\(env, pendingRequest\.id, idea, ctx\)/);
-  assert.match(healer, /recoveredSubmitted >= 1/);
+  assert.doesNotMatch(healer, /\{Request_Status\}="Submitted",\{Promoted_Content_Item\}!=BLANK\(\)/);
+  assert.match(healer, /submittedApprovalAge\(/);
+  assert.match(healer, /verifySubmittedPromotionOwnership\(/);
+  assert.match(healer, /Promoted_Content_Item: \[latestProof\.parentId\]/);
+  assert.match(healer, /Promoted_Content_Item repair failed readback/);
+  assert.match(healer, /finalizeProductionRequestPromotion\(env, latest\.id, idea, ctx\)/);
+  assert.match(healer, /attemptedSubmitted = true/);
   assert.doesNotMatch(healer, /fetchPromotionHandoff/);
   assert.match(worker, /studioHealPromotedMissingFanout\(env, \{ limit: 4, ctx \}\)/);
 });

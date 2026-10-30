@@ -31,9 +31,9 @@ test("Save draft busy label is manual-only and survives control-state redraws", 
   assert.match(save, /if \(!quiet && button\) \{\s*delete button\.dataset\.busy/s);
 
   const controlStart = app.indexOf("function setProductionRequestControlState");
-  // Factory feedback block lengthened this function; keep enough of the body
-  // that the busy-label guard is inside the hermetic window.
-  const control = app.slice(controlStart, controlStart + 3600);
+  // Read through the complete button-state branch; future recovery notices
+  // should not make this regression fail due to an arbitrary character window.
+  const control = app.slice(controlStart, controlStart + 6500);
   assert.match(control, /save\.dataset\.busy === "true"/);
   assert.match(control, /Saving draft…/);
 });
