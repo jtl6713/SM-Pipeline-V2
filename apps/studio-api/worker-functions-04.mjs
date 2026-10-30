@@ -64,7 +64,9 @@ import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchList, factoryBatchListGlobal,
   factoryBatchDrain, factoryBatchRetry, factoryBatchSummary, factoryBatchCounts,
   factoryBatchQualitySignals, factoryBatchNeedsAttention, factoryBatchReconcile, factoryBatchCronScan,
-  factoryBatchCronSelectJobs,
+  factoryBatchCronSelectJobs, factoryBatchFailureRouted, factoryBatchFailure,
+  factoryBatchMarkRemoved, factoryBatchMarkExceptionRouted, factoryBatchRetryTransientOnce,
+  factoryBatchLock, factoryBatchUnlock,
 } from "./factory-approval-queue.mjs";
 import {
   READY_PRODUCTION_MAX_CONCURRENCY,
@@ -17440,6 +17442,138 @@ async function factoryGroupRecordsFromAirtablePreflight(env, authorization, ids,
 
 
 /**
+ * Bounded Factory failure disposition. Only exact failed R2 entries are read.
+ * Airtable Platform Outputs remains the authority; missing rows require two
+ * independent successful exact-ID queries before a skipped_removed write.
+ * Existing rows are routed to persisted Exception Recovery history only after
+ * an independently verified event readback. Neither branch publishes.
+ */
+async function factoryBatchRecoverTerminalFailure(env, profileId, requestId, snapshot) {
+  if (!["completed", "failed"].includes(snapshot?.status)) return "not_terminal";
+  if (factoryBatchCounts(snapshot).pending_count) return "still_pending";
+  const failed = (snapshot.items || []).filter(item =>
+    item.status === "failed" && !factoryBatchFailureRouted(item));
+  if (!failed.length) return "already_handled";
+  const item = failed[0]; // one exact row per invocation
+  if (!/^rec[A-Za-z0-9]{14}$/.test(String(item.id || "")) ||
+      !Number.isSafeInteger(Number(item.output_id)) || Number(item.output_id) <= 0) {
+    return "invalid_identity";
+  }
+  const owner = "factory-failure-" + crypto.randomUUID();
+  if (!await factoryBatchLock(env.STUDIO_MEDIA, profileId, owner, Date.now())) return "profile_busy";
+  try {
+    const fresh = await factoryBatchRead(env.STUDIO_MEDIA, profileId, requestId);
+    const exact = (fresh?.items || []).filter(row =>
+      row.id === item.id && Number(row.output_id) === Number(item.output_id));
+    if (exact.length !== 1 || exact[0].status !== "failed" ||
+        factoryBatchFailureRouted(exact[0]) ||
+        factoryBatchCounts(fresh).pending_count) return "state_changed";
+
+    const findExact = async () => {
+      const page = await listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+        filterFormula: 'RECORD_ID()="' + item.id + '"', limit: 2,
+      });
+      if (!page?.valid || !Array.isArray(page.records) || page.records.length > 1) {
+        throw Error("Authoritative Airtable read incomplete or ambiguous");
+      }
+      return page.records;
+    };
+    const rows = await findExact();
+    if (!rows.length) {
+      await factoryBatchMarkRemoved(env.STUDIO_MEDIA, {
+        profileId, requestId, recordId: item.id, outputId: item.output_id,
+        reason: "Exact output absent in two authoritative Airtable reads; approval not retried",
+        verifiedBy: "factory-failure-recovery",
+        verifyAbsent: async (id, outputId) =>
+          id === item.id && Number(outputId) === Number(item.output_id) &&
+          (await findExact()).length === 0,
+      });
+      return "authoritative_output_removed";
+    }
+
+    const source = rows[0];
+    if (source.id !== item.id || Number(f(source,"Output_ID")) !== Number(item.output_id)) {
+      return "identity_mismatch";
+    }
+    if (await studioContentProfileRecordIdForOutput(env, source) !== profileId) {
+      return "profile_ownership_unverified";
+    }
+    // If an earlier partial approval succeeded, preserve it for canonical
+    // reconciliation rather than treating it as a new exception or retry.
+    const authorityStatus = String(f(source, "Status") || "");
+    if (/approved|published/i.test(authorityStatus)) return "already_authoritative_success";
+
+    const problem = factoryBatchFailure(new Error(String(exact[0].error || "")));
+    if (problem.transient && Number(exact[0].auto_retry_count || 0) < 1 &&
+        Number(exact[0].manual_retry_count || 0) < 1) {
+      const retried = await factoryBatchRetryTransientOnce(env.STUDIO_MEDIA, {
+        profileId, requestId, recordId: item.id, outputId: item.output_id,
+      });
+      return retried?.items?.find(row => row.id === item.id)?.status === "pending"
+        ? "one_bounded_retry_queued" : "retry_not_eligible";
+    }
+
+    const eventKey = "factory-approval-failed:" + requestId + ":" + item.id;
+    const reason = String(exact[0].error || "Factory approval failed").slice(0, 450);
+    const event = {
+      kind: "factory_batch_approval_failure", request_id: requestId,
+      profile_id: profileId, record_id: item.id, output_id: Number(item.output_id),
+      platform: item.platform || null, format: item.format || null,
+      original_error: reason, failure_attempts: Number(exact[0].total_attempts || 0),
+      recovery: "escalated_to_exception_history", public_publish: false,
+    };
+    const fields = {
+      Event_Key: eventKey, Output_Record_ID: item.id,
+      Exception_Signature: "FACTORY_BATCH_APPROVAL_FAILURE",
+      Role: "quality_agent", Actor: "quality_agent",
+      Message_Text: "Factory approval failed; needs exception recovery: " + reason,
+      Created_At: new Date().toISOString(),
+      Intent_JSON: JSON.stringify(event),
+    };
+    const readAudit = async () => {
+      const page = await listRecordsPage(env, EXCEPTION_MESSAGES_TABLE, {
+        filterFormula: '{Event_Key}="' + eventKey + '"', limit: 2,
+      });
+      if (!page?.valid || !Array.isArray(page.records) || page.records.length > 1) {
+        throw Error("Factory exception audit unavailable or ambiguous");
+      }
+      return page.records;
+    };
+    const prior = await readAudit();
+    if (!prior.length) {
+      await airtableFetch(env, EXCEPTION_MESSAGES_TABLE, "", {
+        method: "POST",
+        body: JSON.stringify({records:[{fields}],typecast:true}),
+      });
+    }
+    const verified = await readAudit();
+    if (verified.length !== 1 || verified[0]?.fields?.Event_Key !== eventKey ||
+        verified[0]?.fields?.Output_Record_ID !== item.id ||
+        verified[0]?.fields?.Exception_Signature !== fields.Exception_Signature) {
+      throw Error("Factory exception audit readback unverified");
+    }
+    let auditEvent;
+    try { auditEvent = JSON.parse(verified[0].fields.Intent_JSON || "{}"); }
+    catch { throw Error("Factory exception audit corrupt"); }
+    if (auditEvent.kind !== event.kind || auditEvent.request_id !== requestId ||
+        auditEvent.record_id !== item.id || auditEvent.output_id !== Number(item.output_id) ||
+        auditEvent.profile_id !== profileId || auditEvent.original_error !== reason) {
+      throw Error("Factory exception audit identity or error conflict");
+    }
+    await factoryBatchMarkExceptionRouted(env.STUDIO_MEDIA, {
+      profileId, requestId, recordId: item.id, outputId: item.output_id,
+      eventKey, reason, verifiedBy: "airtable_exception_history_readback",
+      verifyRouted: async proof =>
+        proof.recordId === item.id && proof.outputId === Number(item.output_id) &&
+        (await readAudit()).length === 1,
+    });
+    return "exception_routed";
+  } finally {
+    await factoryBatchUnlock(env.STUDIO_MEDIA, profileId, owner);
+  }
+}
+
+/**
  * Cron recovery: enumerate bounded recent jobs for each profile in the R2 jobs
  * hierarchy. No client poll is necessary. An expired R2 lease can be reclaimed.
  */
@@ -17518,6 +17652,27 @@ export async function factoryBatchCronResume(env, ctx = null) {
   const selected = factoryBatchCronSelectJobs(distinct, { maxProfiles: 5 });
   for (const candidate of selected) {
     await factoryBatchProcess(env, candidate.profileId, candidate.requestId, ctx);
+  }
+  // Do not let completed-with-failures accumulate forever on the active desk.
+  // Bounded at four exact failed rows per minute; each decision requires fresh
+  // Airtable identity and either independent absence or persisted audit proof.
+  let recoveredFailures = 0;
+  for (const candidate of distinct) {
+    if (recoveredFailures >= 4) break;
+    const job = candidate.job;
+    if (!["completed","failed"].includes(job?.status) ||
+        !(job.items || []).some(item => item.status === "failed" && !factoryBatchFailureRouted(item))) continue;
+    try {
+      const result = await factoryBatchRecoverTerminalFailure(
+        env,candidate.profileId,candidate.requestId,job);
+      if (["exception_routed","authoritative_output_removed","one_bounded_retry_queued"].includes(result)) {
+        recoveredFailures++;
+        console.log("Factory failed approval recovery", candidate.requestId, result);
+      }
+    } catch(error) {
+      console.warn("Factory failed approval recovery safely deferred",
+        candidate.requestId,String(error?.message || error).slice(0,160));
+    }
   }
   if (selected.length) {
     console.log("Factory cron fair recovery", {
