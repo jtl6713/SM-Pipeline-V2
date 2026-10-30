@@ -23,6 +23,13 @@ def load_request(client: AirtableClient, record_id: str) -> dict[str, Any]:
 def load_parent(client: AirtableClient, request: dict[str, Any]) -> dict[str, Any] | None:
     parent_id = first_linked_id(field(request, "Promoted_Content_Item"))
     if not parent_id:
+        # Some Studio submissions populate the inverse Content Items link
+        # before the canonical Promoted_Content_Item link. Only accept an
+        # unambiguous parent; never guess among multiple linked contents.
+        candidates = linked_ids(field(request, "Content Items"))
+        if len(candidates) == 1:
+            parent_id = candidates[0]
+    if not parent_id:
         return None
     return client.get_record(CONTENT_ITEMS_TABLE, parent_id)
 
