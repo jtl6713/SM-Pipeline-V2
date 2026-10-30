@@ -877,8 +877,8 @@
 
   async function submitFactoryBatchApprovals() {
     if (state.submittingBatch) return;
-    const pending = pendingFactoryApproval();
-    if (pending?.profile_id === "global") {
+    const unresolved = pendingFactoryApproval();
+    if (unresolved?.profile_id === "global") {
       setStatus("Resuming the saved Factory submission using its original request ID; no new request will be created.");
     }
     if (state.batchApprovalsEnabled === false) { setStatus("Batch approvals are not enabled yet; individual approvals still work.", true); return; }
