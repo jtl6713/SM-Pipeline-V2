@@ -32,12 +32,27 @@ export function factoryBatchCounts(job) {
   }
   return { ...result, done_count: result.approved_count + result.skipped_count + result.failed_count };
 }
-/** Pending or failed work stays on the operator's active desk until resolved. */
+/** A failed row leaves the active desk only AFTER an external exception audit is
+ * durably saved and independently verified. Failed status/error are retained. */
+export function factoryBatchFailureRouted(item) {
+  const audit = item?.exception_recovery;
+  return item?.status === "failed" && audit?.state === "routed" &&
+    typeof audit.event_key === "string" && audit.event_key.length > 0 &&
+    typeof audit.reason === "string" && audit.reason.length > 0 &&
+    Number.isFinite(Date.parse(audit.at));
+}
+/** One explicitly requested retry of a terminal failed row; no broad replay. */
+export function factoryBatchRetryEligible(item) {
+  return item?.status === "failed" && !factoryBatchFailureRouted(item) &&
+    Number(item.manual_retry_count || 0) + Number(item.auto_retry_count || 0) < 1;
+}
+/** Only unresolved failures and live work belong on the active Factory desk. */
 export function factoryBatchNeedsAttention(job) {
   if (!job) return false;
   const counts = factoryBatchCounts(job);
-  return counts.pending_count > 0 || counts.failed_count > 0 ||
-    !["completed"].includes(job.status);
+  return counts.pending_count > 0 ||
+    (job.items || []).some(item => item.status === "failed" && !factoryBatchFailureRouted(item)) ||
+    !["completed", "failed"].includes(job.status);
 }
 export function factoryBatchSummary(job) {
   if (!job) return { ok: true, batch: true, status: "idle", job_id: null, items: [] };
@@ -47,11 +62,17 @@ export function factoryBatchSummary(job) {
     ok: true, batch: true, job_id: job.id, profile_id: job.profile_id,
     request_id: job.request_id, created_at: job.created_at, updated_at: job.updated_at,
     status: job.status, ...counts, timing_report,
-    can_retry: counts.failed_count > 0 && ["completed", "failed"].includes(job.status),
+    can_retry: ["completed", "failed"].includes(job.status) && job.items.some(factoryBatchRetryEligible),
     items: job.items.map(item => ({
       id: item.id, output_id: item.output_id, platform: item.platform,
       format: item.format, title: item.title || null, content_id: item.content_id || null,
       status: item.status, error: item.error || null,
+      exception_recovery: item.exception_recovery || null,
+      manual_retry_count: Number(item.manual_retry_count || 0),
+      auto_retry_count: Number(item.auto_retry_count || 0),
+      failure_history: item.failure_history || [],
+      removed_original_error: item.removed_original_error || null,
+      previous_failure_error: item.previous_failure_error || null,
       timing: factoryApprovalItemTiming(item),
     })),
   };
@@ -90,14 +111,14 @@ async function putAbsent(bucket, key, value) {
   return bucket.put(key, JSON.stringify(value), {
     onlyIf: new Headers({ "If-None-Match": "*" }),
     httpMetadata: { contentType: "application/json" },
-    customMetadata: { factory_status: String(value.status || ""), factory_failed: String(factoryBatchCounts(value).failed_count), factory_group: String(value.group_request_id || "") },
+    customMetadata: { factory_status: String(value.status || ""), factory_failed: String(factoryBatchCounts(value).failed_count), factory_active: String(factoryBatchNeedsAttention(value)), factory_group: String(value.group_request_id || "") },
   });
 }
 async function putMatch(bucket, key, value, etag) {
   return bucket.put(key, JSON.stringify(value), {
     onlyIf: { etagMatches: etag },
     httpMetadata: { contentType: "application/json" },
-    customMetadata: { factory_status: String(value.status || ""), factory_failed: String(factoryBatchCounts(value).failed_count), factory_group: String(value.group_request_id || "") },
+    customMetadata: { factory_status: String(value.status || ""), factory_failed: String(factoryBatchCounts(value).failed_count), factory_active: String(factoryBatchNeedsAttention(value)), factory_group: String(value.group_request_id || "") },
   });
 }
 async function cas(bucket, key, fn, max = 8) {
@@ -191,7 +212,8 @@ export async function factoryBatchListGlobal(bucket, {
     const meta = row.customMetadata || {};
     if (mode !== "all" && meta.factory_group) return false;
     if (!meta.factory_status || mode === "all") return true; // legacy jobs require a read
-    const attention = meta.factory_status !== "completed" || Number(meta.factory_failed || 0) > 0;
+    const attention = meta.factory_active === "true" ? true : meta.factory_active === "false" ? false
+      : meta.factory_status !== "completed" || Number(meta.factory_failed || 0) > 0;
     return mode === "active" ? attention : !attention;
   });
   const qualified = [];
@@ -372,7 +394,8 @@ export async function factoryBatchDrain(bucket, options) {
         const failure = factoryBatchFailure(error);
         const attempts = job.items.find(x => x.id === item.id)?.attempts || 1;
         outcome = {
-          status: failure.transient && (failure.waitRender || attempts < 5) ? "pending" : "failed",
+          status: failure.transient && !job.items.find(x => x.id === item.id)?.auto_retry_count
+             && (failure.waitRender || attempts < 5) ? "pending" : "failed",
           error: failure.message,
           next_attempt_ms: failure.transient
             ? now() + (failure.waitRender ? 300000 : Math.min(600000, 30000 * Math.pow(2, attempts)))
@@ -411,17 +434,62 @@ export async function factoryBatchRetry(bucket, profileId, requestId) {
   const key = factoryBatchKey(profileId, requestId);
   return cas(bucket, key, job => {
     if (["queued", "running"].includes(job.status)) return null;
-    if (!job.items.some(item => item.status === "failed")) return null;
+    if (!job.items.some(factoryBatchRetryEligible)) return null;
     return {
       ...job, status: "queued", updated_at: new Date().toISOString(),
-      items: job.items.map(item => item.status === "failed"
-        ? { ...item, status: "pending", error: null, attempts: 0, next_attempt_ms: 0,
+      items: job.items.map(item => factoryBatchRetryEligible(item)
+        ? { ...item, status: "pending", error: null, attempts: 0,
+          manual_retry_count: Number(item.manual_retry_count || 0) + 1,
+          failure_history: [...(item.failure_history || []), {
+            at: new Date().toISOString(), error: item.error || null,
+          }].slice(-10),
+          next_attempt_ms: 0,
           timeline: [...(item.timeline || []), {
             state: "pending", at: new Date().toISOString(),
-            attempt: item.total_attempts || 0,
+            attempt: item.total_attempts || 0, reason: "bounded_manual_retry",
           }].slice(-180),
         }
         : item),
+    };
+  });
+}
+
+/**
+ * Recover one verified transient terminal failure with exactly ONE additional
+ * approval attempt. No group-wide retry, no successful-item mutation, and the
+ * original error remains in failure_history. Canonical approval still rereads
+ * the Airtable record under the output lock; this does not publish.
+ */
+export async function factoryBatchRetryTransientOnce(bucket, {
+  profileId, requestId, recordId, outputId,
+} = {}) {
+  assertBucket(bucket);
+  if (!ID.test(String(recordId || "")) || !Number.isSafeInteger(Number(outputId)) ||
+      Number(outputId) <= 0) throw Error("Exact retry identity required");
+  return cas(bucket, factoryBatchKey(profileId, requestId), job => {
+    if (!["completed", "failed"].includes(job.status) ||
+        factoryBatchCounts(job).pending_count) return null;
+    const found = job.items.filter(item =>
+      item.id === recordId && Number(item.output_id) === Number(outputId));
+    if (found.length !== 1) throw Error("Retry identity missing or ambiguous");
+    const item = found[0];
+    if (item.status !== "failed" || factoryBatchFailureRouted(item) ||
+        Number(item.auto_retry_count || 0) >= 1 ||
+        Number(item.manual_retry_count || 0) >= 1 ||
+        !factoryBatchFailure(new Error(item.error || "")).transient) return null;
+    const at = new Date().toISOString();
+    return {...job, status: "queued", updated_at: at,
+      items: job.items.map(row => row.id === recordId ? {
+        ...row, status: "pending", error: null, attempts: 0,
+        auto_retry_count: 1, next_attempt_ms: 0,
+        failure_history: [...(row.failure_history || []), {
+          at, error: row.error || null,
+        }].slice(-10),
+        timeline: [...(row.timeline || []), {
+          state: "pending", at, attempt: row.total_attempts || 0,
+          reason: "one_verified_transient_retry",
+        }].slice(-180),
+      } : row),
     };
   });
 }
@@ -471,13 +539,13 @@ export function factoryBatchQualitySignals(job, nowMs = Date.now()) {
     signals.push({ code: "QA-FACTORY-BATCH-TRANSIENT-WAIT", safe_auto_recover: true,
       detail: "Transient item(s) are scheduled for bounded retry; do not dispatch before backoff expires" });
   }
-  if (counts.failed_count) {
+  if ((job.items || []).some(item => item.status === "failed" && !factoryBatchFailureRouted(item))) {
     signals.push({ code: "QA-FACTORY-BATCH-FAILED-ITEM", safe_auto_recover: false,
       detail: "Failed outputs require inspection or Retry Failed; never retry successful rows" });
     // A Factory item may fail before Airtable has any Platform Output row.
     // The exact R2 job ledger is authoritative for the approval error; do not
     // classify a missing record from a UI display number alone.
-    const sourceMissing = (job.items || []).filter(item => item.status === "failed" &&
+    const sourceMissing = (job.items || []).filter(item => item.status === "failed" && !factoryBatchFailureRouted(item) &&
       /(?:404|422|not found|missing output|unknown record|record does not exist|invalid record)/i.test(String(item.error || "")));
     if (sourceMissing.length) {
       signals.push({
@@ -524,6 +592,7 @@ export async function factoryBatchMarkRemoved(
     const items = job.items.map(row => row.id === recordId ? {
       ...row,
       status: "skipped_removed",
+      removed_original_error: row.error || null,
       error: null,
       next_attempt_ms: 0,
       removed_reason: String(reason).slice(0, 500),
@@ -538,6 +607,103 @@ export async function factoryBatchMarkRemoved(
     return {...job, items, updated_at: at,
       status: counts.pending_count ? "running" :
         counts.failed_count && !counts.approved_count && !counts.skipped_count ? "failed" : "completed"};
+  });
+}
+
+/**
+ * Close one terminal FAILED row on the active Factory desk only when a matching
+ * exception-recovery event has already been persisted and independently read
+ * back from Airtable. This does not change status, clear error, or approve.
+ * verifyRouted must fail closed on missing, ambiguous or unavailable history.
+ */
+/** Verify an already-committed Airtable approval and repair only its failed
+ * local R2 bookkeeping. No scheduling, publishing, or approval call is made. */
+export async function factoryBatchMarkAlreadySatisfied(bucket, {
+  profileId, requestId, recordId, outputId, verifySatisfied,
+} = {}) {
+  assertBucket(bucket);
+  if (!ID.test(String(recordId || "")) || !Number.isSafeInteger(Number(outputId)) ||
+      Number(outputId) <= 0 || typeof verifySatisfied !== "function") {
+    throw Error("Exact approved output identity and verifier required");
+  }
+  const snapshot = await factoryBatchRead(bucket, profileId, requestId);
+  const matches = (snapshot?.items || []).filter(item =>
+    item.id === recordId && Number(item.output_id) === Number(outputId));
+  if (matches.length !== 1) throw Error("Already-approved Factory row not found or ambiguous");
+  if (matches[0].status === "already_satisfied") return snapshot;
+  if (matches[0].status !== "failed") throw Error("Only failed bookkeeping can be reconciled");
+  if (await verifySatisfied(recordId, Number(outputId)) !== true) {
+    throw Error("Authoritative approval not verified");
+  }
+  return cas(bucket, factoryBatchKey(profileId, requestId), job => {
+    const current = (job.items || []).filter(item =>
+      item.id === recordId && Number(item.output_id) === Number(outputId));
+    if (current.length !== 1) throw Error("Approved bookkeeping identity changed");
+    if (current[0].status === "already_satisfied") return null;
+    if (current[0].status !== "failed") throw Error("Failed bookkeeping changed after verification");
+    const at = new Date().toISOString();
+    const items = job.items.map(item => item.id === recordId ? {
+      ...item, status: "already_satisfied", error: null, next_attempt_ms: 0,
+      previous_failure_error: item.error || null,
+      approval_verified_at: at,
+      timeline: [...(item.timeline || []), {
+        state: "already_satisfied", at, attempt: item.total_attempts || 0,
+        reason: "confirmed_authoritative_approval",
+      }].slice(-180),
+    } : item);
+    const counts = factoryBatchCounts({...job,items});
+    return {...job, items, updated_at: at,
+      status: counts.pending_count ? "running" :
+        counts.failed_count && !counts.approved_count && !counts.skipped_count ? "failed" : "completed"};
+  });
+}
+
+export async function factoryBatchMarkExceptionRouted(bucket, {
+  profileId, requestId, recordId, outputId, eventKey, reason,
+  verifyRouted, verifiedBy = "quality-agent",
+} = {}) {
+  assertBucket(bucket);
+  if (!ID.test(String(recordId || "")) || !Number.isSafeInteger(Number(outputId)) ||
+      Number(outputId) <= 0 || typeof verifyRouted !== "function" ||
+      !/^[a-zA-Z0-9:_-]{12,180}$/.test(String(eventKey || "")) ||
+      !String(reason || "").trim()) {
+    throw Error("Exact failed row, verified exception audit and reason required");
+  }
+  const snapshot = await factoryBatchRead(bucket, profileId, requestId);
+  const rows = (snapshot?.items || []).filter(item =>
+    item.id === recordId && Number(item.output_id) === Number(outputId));
+  if (rows.length !== 1) throw Error("Exact Factory failed row not found or ambiguous");
+  if (factoryBatchFailureRouted(rows[0])) {
+    if (rows[0].exception_recovery.event_key !== eventKey) throw Error("Exception audit identity conflict");
+    return snapshot;
+  }
+  if (rows[0].status !== "failed") throw Error("Only terminal failed rows may be routed");
+  const verified = await verifyRouted({
+    profileId, requestId, recordId, outputId: Number(outputId), eventKey,
+    error: rows[0].error || null,
+  });
+  if (verified !== true) throw Error("Matching persisted Airtable exception audit not verified");
+  return cas(bucket, factoryBatchKey(profileId, requestId), job => {
+    const current = (job.items || []).filter(item =>
+      item.id === recordId && Number(item.output_id) === Number(outputId));
+    if (current.length !== 1) throw Error("Factory failed row changed or ambiguous");
+    if (factoryBatchFailureRouted(current[0])) {
+      if (current[0].exception_recovery.event_key !== eventKey) throw Error("Exception audit identity conflict");
+      return null;
+    }
+    if (current[0].status !== "failed") throw Error("Factory failed row changed after verification");
+    const at = new Date().toISOString();
+    const items = job.items.map(item => item.id === recordId ? {
+      ...item, exception_recovery: {
+        state: "routed", event_key: eventKey, reason: String(reason).slice(0, 500),
+        at, verified_by: String(verifiedBy).slice(0, 120),
+      },
+      timeline: [...(item.timeline || []), {
+        state: "exception_routed", at, attempt: item.total_attempts || 0,
+        event_key: eventKey,
+      }].slice(-180),
+    } : item);
+    return {...job, items, updated_at: at};
   });
 }
 

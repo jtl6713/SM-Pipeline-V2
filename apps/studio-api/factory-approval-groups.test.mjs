@@ -6,7 +6,7 @@ import {
   factoryApprovalGroupStatus, factoryApprovalGroupRetryFailures,
   factoryApprovalGroupList, factoryApprovalGroupCronScan,
 } from "./factory-approval-groups.mjs";
-import {factoryBatchRead, factoryBatchDrain, factoryBatchCounts} from "./factory-approval-queue.mjs";
+import {factoryBatchRead, factoryBatchDrain, factoryBatchCounts, factoryBatchMarkExceptionRouted} from "./factory-approval-queue.mjs";
 
 class FakeR2 {
   constructor() {this.objects=new Map();this.version=0;this.rejectOnce=false;}
@@ -223,4 +223,41 @@ test("global Factory group history separates active work from fully completed pa
   const history = await factoryApprovalGroupList(bucket,{mode:"completed"});
   assert.deepEqual(live.groups.map(x=>x.request_id),[activeId]);
   assert.deepEqual(history.groups.map(x=>x.request_id),[completedId]);
+});
+
+
+test("global Factory group closes only after its failed child is verified in exception history",async()=>{
+  const bucket=new FakeR2();
+  const req="global_exception_disposition_test_01";
+  await factoryApprovalGroupEnqueue(bucket,{...opts,requestId:req});
+  const group=await factoryApprovalGroupRead(bucket,req);
+  let failed=null;
+  for(const child of group.children){
+    const key="studio/state/factory-approvals/v2/jobs/"+child.profile_id+"/"+child.request_id+".json";
+    const stored=bucket.objects.get(key).data;
+    stored.items.forEach(item=>{
+      if(item.id===outputs[1].id){item.status="failed";item.error="permanent-approval-error";
+        failed={...child,item};}
+      else item.status="approved";
+    });
+    stored.status="completed";
+    await bucket.put(key,JSON.stringify(stored));
+  }
+  const active=await factoryApprovalGroupStatus(bucket,req);
+  assert.equal(active.approved_count,3);
+  assert.equal(active.failed_count,1);
+  assert.equal(active.can_retry,true);
+  assert.equal((await factoryApprovalGroupList(bucket,{mode:"active"})).groups.length,1);
+  await factoryBatchMarkExceptionRouted(bucket,{
+    profileId:failed.profile_id,requestId:failed.request_id,
+    recordId:failed.item.id,outputId:7002,eventKey:"factory-failed:global-7002",
+    reason:"Persisted Recovery Center entry",verifyRouted:async()=>true,
+  });
+  const archived=await factoryApprovalGroupStatus(bucket,req);
+  assert.equal(archived.approved_count,3);
+  assert.equal(archived.failed_count,1);
+  assert.equal(archived.items.find(item=>item.id===outputs[1].id).error,"permanent-approval-error");
+  assert.equal(archived.can_retry,false);
+  assert.equal((await factoryApprovalGroupList(bucket,{mode:"active"})).groups.length,0);
+  assert.equal((await factoryApprovalGroupList(bucket,{mode:"completed"})).groups.length,1);
 });

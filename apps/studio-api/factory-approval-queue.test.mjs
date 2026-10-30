@@ -6,6 +6,8 @@ import {
   factoryBatchRetry, factoryBatchLockKey, factoryBatchCronScan,
   factoryBatchCronSelectJobs, factoryBatchListGlobal, factoryBatchNeedsAttention,
   factoryBatchBuild, factoryBatchQualitySignals, factoryBatchMarkRemoved,
+  factoryBatchMarkExceptionRouted, factoryBatchFailureRouted, factoryBatchRetryEligible,
+  factoryBatchRetryTransientOnce, factoryBatchMarkAlreadySatisfied,
 } from "./factory-approval-queue.mjs";
 
 class FakeR2 {
@@ -483,4 +485,159 @@ test("Deleted Factory reconciliation refuses ambiguous or unverified records", a
   state.items[0].status="approved";
   await assert.rejects(() => factoryBatchMarkRemoved(bucket,{...base,verifyAbsent:async()=>true}),/Only failed/);
   assert.equal(factoryBatchCounts(state).approved_count,1);
+});
+
+
+test("verified exception routing clears a mixed 42-success Factory batch without changing errors", async () => {
+  const bucket = new FakeR2();
+  const rid = "factory_verified_exception_42";
+  const selected = Array.from({length:44},(_,i)=>({
+    id: "recMix" + String(i).padStart(12,"0"), output_id:9000+i,
+    platform:"Instagram",format:"Reel",
+  }));
+  await factoryBatchEnqueue(bucket,{profileId,requestId:rid,records:selected});
+  const key = "studio/state/factory-approvals/v2/jobs/"+profileId+"/"+rid+".json";
+  const stored = bucket.objects.get(key).value;
+  stored.status = "completed";
+  stored.items.forEach((item,i)=>{
+    item.status = i < 42 ? "approved" : "failed";
+    item.error = i < 42 ? null : "Nontransient scheduling conflict";
+  });
+  assert.equal(factoryBatchNeedsAttention(stored),true);
+  let calls=0;
+  const verifyRouted=async proof=>{
+    calls++;
+    assert.ok([9042,9043].includes(proof.outputId));
+    assert.match(proof.error,/Nontransient/);
+    return true;
+  };
+  const values={profileId,requestId:rid,reason:"Confirmed persisted Quality Agent exception",verifyRouted};
+  const first=await factoryBatchMarkExceptionRouted(bucket,{
+    ...values,recordId:selected[42].id,outputId:9042,eventKey:"factory-failed:event-9042",
+  });
+  assert.equal(factoryBatchNeedsAttention(first),true);
+  const final=await factoryBatchMarkExceptionRouted(bucket,{
+    ...values,recordId:selected[43].id,outputId:9043,eventKey:"factory-failed:event-9043",
+  });
+  assert.equal(factoryBatchNeedsAttention(final),false);
+  assert.equal(factoryBatchCounts(final).approved_count,42);
+  assert.equal(factoryBatchCounts(final).failed_count,2);
+  assert.equal(final.items[42].status,"failed");
+  assert.equal(final.items[42].error,"Nontransient scheduling conflict");
+  assert.equal(factoryBatchSummary(final).can_retry,false);
+  assert.equal(factoryBatchFailureRouted(final.items[42]),true);
+  assert.equal((await factoryBatchListGlobal(bucket,{mode:"active"})).jobs.length,0);
+  assert.equal((await factoryBatchListGlobal(bucket,{mode:"completed"})).jobs.length,1);
+  const again=await factoryBatchMarkExceptionRouted(bucket,{
+    ...values,recordId:selected[42].id,outputId:9042,eventKey:"factory-failed:event-9042",
+  });
+  assert.equal(calls,2,"idempotent replay must not issue another external audit check");
+  assert.equal(again.items[42].timeline.length,first.items[42].timeline.length);
+  assert.deepEqual(await factoryBatchRetry(bucket,profileId,rid),again,
+    "resolved exceptions cannot be accidentally re-approved");
+});
+
+test("exception routing rejects absent, ambiguous, mismatched and unverified audit evidence", async()=>{
+  const bucket=new FakeR2();
+  const rid="factory_exception_failclosed_1";
+  await factoryBatchEnqueue(bucket,{profileId,requestId:rid,records:[records[0]]});
+  const key="studio/state/factory-approvals/v2/jobs/"+profileId+"/"+rid+".json";
+  const stored=bucket.objects.get(key).value;
+  stored.status="failed";
+  stored.items[0].status="failed";
+  stored.items[0].error="persistent error";
+  const args={profileId,requestId:rid,recordId:records[0].id,
+    outputId:records[0].output_id,eventKey:"factory-failed:case-1",reason:"Escalated"};
+  await assert.rejects(()=>factoryBatchMarkExceptionRouted(bucket,{
+    ...args,verifyRouted:async()=>false,
+  }),/not verified/);
+  await assert.rejects(()=>factoryBatchMarkExceptionRouted(bucket,{
+    ...args,outputId:999999,verifyRouted:async()=>true,
+  }),/not found/);
+  await assert.rejects(()=>factoryBatchMarkExceptionRouted(bucket,{
+    ...args,verifyRouted:async()=>{throw Error("Airtable unavailable");},
+  }),/Airtable unavailable/);
+  assert.equal(factoryBatchNeedsAttention(stored),true);
+  assert.equal(factoryBatchFailureRouted(stored.items[0]),false);
+  assert.equal(factoryBatchRetryEligible(stored.items[0]),true);
+});
+
+test("manual Retry Failed is a single bounded attempt with original error history",async()=>{
+  const bucket=new FakeR2(),rid="factory_single_recovery_once";
+  await factoryBatchEnqueue(bucket,{profileId,requestId:rid,records:[records[0]]});
+  const key="studio/state/factory-approvals/v2/jobs/"+profileId+"/"+rid+".json";
+  const stored=bucket.objects.get(key).value;
+  stored.status="failed";stored.items[0].status="failed";stored.items[0].error="original-failure";
+  const retry=await factoryBatchRetry(bucket,profileId,rid);
+  assert.equal(retry.items[0].manual_retry_count,1);
+  assert.equal(retry.items[0].failure_history[0].error,"original-failure");
+  const secondFailure=await factoryBatchDrain(bucket,{profileId,requestId:rid,
+    approve:async()=>{throw Error("unfixed failure")},maxItems:1});
+  assert.equal(secondFailure.job.status,"failed");
+  assert.equal(factoryBatchRetryEligible(secondFailure.job.items[0]),false);
+  const noRetry=await factoryBatchRetry(bucket,profileId,rid);
+  assert.deepEqual(noRetry,secondFailure.job);
+  assert.equal(noRetry.items[0].failure_history[0].error,"original-failure");
+});
+
+
+test("automatic transient failure recovery permits one bounded retry, then escalates",async()=>{
+  const bucket=new FakeR2(),rid="factory_auto_retry_once_1";
+  await factoryBatchEnqueue(bucket,{profileId,requestId:rid,records:[records[0]]});
+  const key="studio/state/factory-approvals/v2/jobs/"+profileId+"/"+rid+".json";
+  const stored=bucket.objects.get(key).value;
+  stored.status="failed";stored.items[0].status="failed";
+  stored.items[0].error="503 temporarily unavailable";
+  stored.items[0].total_attempts=5;
+  const first=await factoryBatchRetryTransientOnce(bucket,{profileId,requestId:rid,
+    recordId:records[0].id,outputId:records[0].output_id});
+  assert.equal(first.status,"queued");
+  assert.equal(first.items[0].auto_retry_count,1);
+  assert.equal(first.items[0].failure_history[0].error,"503 temporarily unavailable");
+  let attempted=0;
+  const failedAgain=await factoryBatchDrain(bucket,{profileId,requestId:rid,
+    approve:async()=>{attempted++;throw Error("503 temporarily unavailable");},maxItems:1});
+  assert.equal(attempted,1);
+  assert.equal(failedAgain.job.items[0].status,"failed",
+    "second transient error must not launch five additional retries");
+  const reread=await factoryBatchRetryTransientOnce(bucket,{profileId,requestId:rid,
+    recordId:records[0].id,outputId:records[0].output_id});
+  assert.deepEqual(reread,failedAgain.job);
+  assert.equal(factoryBatchNeedsAttention(reread),true,
+    "not yet routed to recovery history, so error remains actionable");
+});
+
+
+test("independently confirmed Airtable approval corrects failed bookkeeping without re-approving",async()=>{
+  const bucket = new FakeR2();
+  const rid="factory_approved_readback_1";
+  await factoryBatchEnqueue(bucket,{profileId,requestId:rid,records:[records[0]]});
+  const key="studio/state/factory-approvals/v2/jobs/"+profileId+"/"+rid+".json";
+  const stored=bucket.objects.get(key).value;
+  stored.status="failed";stored.items[0].status="failed";
+  stored.items[0].error="Airtable write confirmed, postflight timed out";
+  let checks=0;
+  const opts={profileId,requestId:rid,recordId:records[0].id,
+    outputId:records[0].output_id,verifySatisfied:async()=>{checks++;return true;}};
+  const repaired=await factoryBatchMarkAlreadySatisfied(bucket,opts);
+  assert.equal(repaired.items[0].status,"already_satisfied");
+  assert.equal(repaired.items[0].previous_failure_error,"Airtable write confirmed, postflight timed out");
+  assert.equal(repaired.status,"completed");
+  assert.equal(factoryBatchNeedsAttention(repaired),false);
+  const repeated=await factoryBatchMarkAlreadySatisfied(bucket,opts);
+  assert.equal(checks,1,"replay must not call Airtable or approval again");
+  assert.deepEqual(repeated,repaired);
+  assert.equal((await factoryBatchListGlobal(bucket,{mode:"completed"})).jobs.length,1);
+});
+test("failed bookkeeping stays active when authoritative approval cannot be confirmed",async()=>{
+  const bucket=new FakeR2(),rid="factory_approved_unverified_1";
+  await factoryBatchEnqueue(bucket,{profileId,requestId:rid,records:[records[0]]});
+  const key="studio/state/factory-approvals/v2/jobs/"+profileId+"/"+rid+".json";
+  const item=bucket.objects.get(key).value;
+  item.status="failed";item.items[0].status="failed";
+  await assert.rejects(()=>factoryBatchMarkAlreadySatisfied(bucket,{
+    profileId,requestId:rid,recordId:records[0].id,outputId:records[0].output_id,
+    verifySatisfied:async()=>false,
+  }),/not verified/);
+  assert.equal(factoryBatchNeedsAttention(item),true);
 });

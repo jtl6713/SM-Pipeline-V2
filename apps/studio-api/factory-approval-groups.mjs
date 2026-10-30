@@ -9,7 +9,7 @@
  */
 import {
   factoryBatchEnqueue, factoryBatchRead, factoryBatchCounts, factoryBatchRetry,
-  factoryBatchQualitySignals, factoryBatchNeedsAttention,
+  factoryBatchQualitySignals, factoryBatchNeedsAttention, factoryBatchRetryEligible,
 } from "./factory-approval-queue.mjs";
 import { factoryApprovalItemTiming, factoryApprovalTimingReport } from "./factory-approval-timings.mjs";
 
@@ -191,6 +191,12 @@ export async function factoryApprovalGroupStatus(bucket,requestId) {
         profile_id:child.profile_id, platform:entry.platform, format:entry.format,
         title:entry.title, content_id:entry.content_id,
         status:item?.status||"pending", error:item?.error||null,
+        exception_recovery: item?.exception_recovery || null,
+        manual_retry_count: Number(item?.manual_retry_count || 0),
+        auto_retry_count: Number(item?.auto_retry_count || 0),
+        failure_history: item?.failure_history || [],
+        removed_original_error: item?.removed_original_error || null,
+        previous_failure_error: item?.previous_failure_error || null,
         timing: item ? factoryApprovalItemTiming(item) : null });
     }
   }
@@ -206,7 +212,7 @@ export async function factoryApprovalGroupStatus(bucket,requestId) {
     created_at:parent.created_at,updated_at:parent.updated_at,
     status,...totals,done_count:totals.total-totals.pending_count,
     timing_report:factoryApprovalTimingReport(observedTimings),
-    can_retry:!totals.pending_count && totals.failed_count>0,
+    can_retry:!totals.pending_count && items.some(factoryBatchRetryEligible),
     children,
   };
 }
