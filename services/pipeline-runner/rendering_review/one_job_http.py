@@ -57,8 +57,7 @@ def create_exact_review_render_blueprint(settings,runner=render_exact_attempt,
             return jsonify(ok=False,error="invalid_request"),400
         output_id=body.get("output_id")
         job_id=body.get("job_id")
-        if not isinstance(output_id,str) or not RECORD.fullmatch(output_id) or (
-            output_id!=os.environ.get("RENDERING_REVIEW_EXACT_OUTPUT_ID")) or (
+        if (not isinstance(output_id,str) or not RECORD.fullmatch(output_id) or
             not isinstance(job_id,str) or not TOKEN.fullmatch(job_id)):
             return jsonify(ok=False,error="exact_output_not_allowlisted"),403
         with _LOCK:
@@ -97,7 +96,6 @@ def create_exact_review_render_blueprint(settings,runner=render_exact_attempt,
         output_id = data.get("output_id")
         job_id = data.get("job_id")
         if (not isinstance(output_id, str) or not RECORD.fullmatch(output_id)
-            or output_id != os.environ.get("RENDERING_REVIEW_EXACT_OUTPUT_ID")
             or not isinstance(job_id, str) or not TOKEN.fullmatch(job_id)):
             return jsonify(ok=False, error="exact_output_not_allowlisted"), 403
         with _LOCK:
