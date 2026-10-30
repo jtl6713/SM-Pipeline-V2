@@ -113,5 +113,65 @@ class VariantContract(unittest.TestCase):
         with self.assertRaisesRegex(Denied,"variant_manifest_unverified"):
             tested_function()(*args)
 
+
+    def test_original_owned_video_passes_through_without_image_fetch(self):
+        video_id="59a9b4d684904e5382"
+        file_id="1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr"
+        url="https://drive.google.com/uc?export=download&id="+file_id
+        video_record="recByWv7yDeVi2NPE"
+        master={video_id:{"id":video_id,"media_asset_record_id":video_record,
+            "google_drive_file_id":file_id}}
+        plan={"asset_manifest":[{"asset_id":video_id,"drive_file_id":file_id,
+            "render_variant_drive_file_id":file_id,"render_url":url,
+            "rights_receipt_id":"rrrights_"+video_record}]}
+        props={"clips":[{"mediaAssetRecordId":video_record,
+            "googleDriveFileId":file_id,"url":url,"src":url}]}
+        request={"id":REQUEST,"fields":{"Studio_Variant_Manifest_JSON":json.dumps({
+            "complete":True,"production_request_record_id":REQUEST,
+            "assets":[{"id":video_id,"media_asset_record_id":video_record,
+              "google_drive_file_id":file_id,"media_kind":"video",
+              "variants":{"9:16":{"google_drive_file_id":file_id,
+                "preview_status":"Ready","recipe_version":"video-passthrough",
+                "media_kind":"video","width":1080,"height":1920,
+                "preview_url":"/api/media-assets/"+video_record+"/stream"}}}]})}}
+        client=SimpleNamespace(get_record=lambda *_:{"id":video_record,"fields":{
+            "Google Drive File ID":file_id,"Rights_Status":"Owned",
+            "Asset_Status":"Available","Active":True,"Do_Not_Use":False,
+            "Content_Profile":[CHICAGO],"Media_Class":"Video","MIME_Type":"video/mp4"}})
+        drive=SimpleNamespace(get_file=lambda key:{"id":key,
+            "mimeType":"video/mp4","size":"78925885"})
+        result=tested_function()(client,request,master,props,plan,drive=drive)
+        self.assertEqual(len(result),1)
+        self.assertEqual(result[0]["media_kind"],"video")
+        self.assertEqual(result[0]["render_url"],url)
+
+    def test_video_substitution_denied_even_if_approved_variant_exists(self):
+        video_id="59a9b4d684904e5382"
+        file_id="1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr"
+        url="https://drive.google.com/uc?export=download&id="+file_id
+        video_record="recByWv7yDeVi2NPE"
+        master={video_id:{"id":video_id,"media_asset_record_id":video_record,
+            "google_drive_file_id":file_id}}
+        plan={"asset_manifest":[{"asset_id":video_id,"drive_file_id":file_id,
+            "render_variant_drive_file_id":file_id,"render_url":url,
+            "rights_receipt_id":"rrrights_"+video_record}]}
+        props={"clips":[{"mediaAssetRecordId":video_record,
+            "googleDriveFileId":file_id,"url":url+"-swapped","src":url+"-swapped"}]}
+        request={"id":REQUEST,"fields":{"Studio_Variant_Manifest_JSON":json.dumps({
+            "complete":True,"production_request_record_id":REQUEST,
+            "assets":[{"id":video_id,"media_asset_record_id":video_record,
+              "google_drive_file_id":file_id,"media_kind":"video",
+              "variants":{"9:16":{"google_drive_file_id":file_id,
+                "preview_status":"Ready","recipe_version":"video-passthrough",
+                "media_kind":"video","width":1080,"height":1920}}}]})}}
+        client=SimpleNamespace(get_record=lambda *_:{"id":video_record,"fields":{
+            "Google Drive File ID":file_id,"Rights_Status":"Owned",
+            "Asset_Status":"Available","Active":True,"Do_Not_Use":False,
+            "Content_Profile":[CHICAGO],"Media_Class":"Video","MIME_Type":"video/mp4"}})
+        drive=SimpleNamespace(get_file=lambda key:{"id":key,
+            "mimeType":"video/mp4","size":"78925885"})
+        with self.assertRaisesRegex(Denied,"crop_not_verified"):
+            tested_function()(client,request,master,props,plan,drive=drive)
+
 if __name__=="__main__":
     unittest.main()
