@@ -105,13 +105,14 @@ test("unavailable readback remains fenced and is never interpreted as success", 
 test("the real click path checks uncertain 5xx/timeouts, uses read-only check button, and disables POST retries", () => {
   const click = app.slice(app.indexOf('  $("promoteProductionRequest")?.addEventListener'), app.indexOf('  async function loadProductionRequests(', app.indexOf('  $("promoteProductionRequest")?.addEventListener')));
   assert.match(click, /item4PromotionReadbackRequired\.has\(approvalRequestId\)/);
+  assert.match(click, /\|\| String\(activeProductionRequest\.status \|\| ""\) === "Submitted"/);
   assert.match(click, /readProductionApprovalAfterError\(approvalRequestId\)/);
   assert.match(click, /Number\(e\?\.status\) >= 500/);
   assert.match(click, /item4PromotionReadbackRequired\.add\(requestId\)/);
   assert.match(click, /retries: 0, \/\/ Never repeat an ambiguous mutation/);
   assert.match(click, /body: JSON\.stringify\(\{ revision_approve: true \}\)/);
   assert.match(app, /promote\.textContent = "Check approval status"/);
-  const checkGate = click.indexOf("if (item4PromotionReadbackRequired.has(approvalRequestId))");
+  const checkGate = click.indexOf("if (item4PromotionReadbackRequired.has(approvalRequestId)");
   const post = click.indexOf('const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/promote`');
   assert.ok(checkGate >= 0 && post > checkGate, "readback gate must precede promote POST");
 });
