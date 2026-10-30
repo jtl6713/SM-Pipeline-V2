@@ -1,0 +1,165 @@
+name: One-shot LA Factory approval duplicate audit
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/one-shot-audit-la-factory-20261030.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: one-shot-la-factory-ledger-audit-20261030
+  cancel-in-progress: false
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Find active Studio R2 binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/la-factory-audit
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api"
+          curl -fsS "$API/deployments" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/la-factory-audit/deployments.json
+          VERSION="$(jq -er '.result.deployments[0].versions | max_by(.percentage) | .version_id' /tmp/la-factory-audit/deployments.json)"
+          curl -fsS "$API/versions/$VERSION" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/la-factory-audit/version.json
+          BUCKET="$(jq -er '.result.resources.bindings[] | select(.name=="STUDIO_MEDIA" and .type=="r2_bucket") | (.bucket_name // .bucket)' /tmp/la-factory-audit/version.json)"
+          echo "FACTORY_LEDGER_BUCKET=$BUCKET" >> "$GITHUB_ENV"
+      - name: Deploy temporary read-only ledger diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKER="chicagoshining-la-factory-audit-once"
+          echo "$WORKER" > /tmp/la-factory-audit/worker-name
+          openssl rand -hex 32 > /tmp/la-factory-audit/token
+          python3 - <<'PY'
+          from pathlib import Path
+          token=Path('/tmp/la-factory-audit/token').read_text().strip()
+          js=r"""
+          const SECRET="__TOKEN__";
+          const TARGET="recF7UAn0LkMZZrWZ";
+          const PREFIX="studio/state/factory-approvals/v2/";
+          async function readJson(bucket,key) {
+            const obj=await bucket.get(key);
+            return obj ? JSON.parse(await obj.text()) : null;
+          }
+          export default {
+            async fetch(request,env) {
+              if (request.method!=="GET" || new URL(request.url).pathname!=="/audit") return new Response("Not found",{status:404});
+              if (request.headers.get("x-audit-secret")!==SECRET) return new Response("Forbidden",{status:403});
+              const bucket=env.STUDIO_MEDIA;
+              const groups=[];
+              let cursor, scanned=0, pages=0, truncated=false;
+              do {
+                const page=await bucket.list({prefix:PREFIX+"groups/",limit:Math.min(1000,3000-scanned)});
+                // Cursor applied in alternate call below, if needed.
+                groups.push(...(page.objects||[])); scanned+=page.objects?.length||0; pages++;
+                cursor=page.truncated?page.cursor:null;
+                if (!cursor || scanned>=3000) {truncated=!!cursor;break;}
+                break;
+              } while(false);
+              // Continue pagination for the full bounded scan.
+              while(cursor && scanned<3000) {
+                const page=await bucket.list({prefix:PREFIX+"groups/",limit:Math.min(1000,3000-scanned),cursor});
+                groups.push(...(page.objects||[]));scanned+=page.objects?.length||0; pages++;
+                if (!page.truncated) {cursor=null;break;}
+                if (!page.cursor||page.cursor===cursor)break;
+                cursor=page.cursor;
+              }
+              truncated=!!cursor;
+              groups.sort((a,b)=>new Date(b.uploaded||0)-new Date(a.uploaded||0));
+              const recent=groups.slice(0,Math.min(100,groups.length));
+              const matching=[];
+              for(const obj of recent) {
+                const group=await readJson(bucket,obj.key);
+                if (!group || group.schema!=="studio.factory-approval-group.1")continue;
+                if (!(group.children||[]).some(c=>c.profile_id===TARGET))continue;
+                const children=[];
+                for(const child of group.children||[]) {
+                  const key=PREFIX+"jobs/"+child.profile_id+"/"+child.request_id+".json";
+                  const job=await readJson(bucket,key);
+                  children.push({
+                    profile_id:child.profile_id,request_id:child.request_id,status:job?.status||"missing",
+                    items:(job?.items||child.records||[]).map(it=>({
+                      id:it.id,output_id:it.output_id,status:it.status||"pending",error:it.error||null,
+                      next_attempt_ms:it.next_attempt_ms||0,
+                      attempts:it.attempts||0
+                    }))
+                  });
+                }
+                matching.push({id:group.id,request_id:group.request_id,status:group.status,
+                  created_at:group.created_at,updated_at:group.updated_at,uploaded:obj.uploaded,
+                  children,record_ids:(group.records||[]).map(x=>x.id)});
+              }
+              return Response.json({ok:true,read_only:true,scanned,groups_total:groups.length,more_group_keys:truncated,
+                recent_inspected:recent.length,LA_groups:matching});
+            }
+          };
+          """
+          Path('/tmp/la-factory-audit/worker.js').write_text(js.replace('__TOKEN__',token))
+          PY
+          node --check /tmp/la-factory-audit/worker.js
+          META="$(jq -cn --arg bucket "$FACTORY_LEDGER_BUCKET" '{main_module:"worker.js",bindings:[{name:"STUDIO_MEDIA",type:"r2_bucket",bucket_name:$bucket}]}')"
+          code="$(curl -sS -o /tmp/la-factory-audit/create.json -w '%{http_code}' -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -F "metadata=$META;type=application/json" \
+            -F 'worker.js=@/tmp/la-factory-audit/worker.js;type=application/javascript+module')"
+          if [[ "$code" -lt 200 || "$code" -ge 300 ]]; then
+            echo "Temporary audit Worker create HTTP $code" >&2
+            jq '{success,errors}' /tmp/la-factory-audit/create.json >&2
+            exit 1
+          fi
+          jq -e '.success==true' /tmp/la-factory-audit/create.json >/dev/null
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER"
+          curl -fsS "$API/versions" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/la-factory-audit/versions.json
+          VERSION="$(jq -er '(.result.items // .result.versions // .result | if type=="array" then . else [] end)|sort_by(.number//0)|last|.id' /tmp/la-factory-audit/versions.json)"
+          jq -cn --arg v "$VERSION" '{strategy:"percentage",versions:[{version_id:$v,percentage:100}]}' > /tmp/la-factory-audit/deploy-request.json
+          curl -fsS -X POST "$API/deployments" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H 'Content-Type: application/json' --data-binary @/tmp/la-factory-audit/deploy-request.json \
+            -o /tmp/la-factory-audit/deployed.json
+          jq -e '.success==true' /tmp/la-factory-audit/deployed.json >/dev/null
+          curl -fsS -X POST "$API/subdomain" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' \
+            -o /tmp/la-factory-audit/subdomain.json
+          jq -e '.success==true and .result.enabled==true' /tmp/la-factory-audit/subdomain.json >/dev/null
+      - name: Inspect LA group identities and member outputs only
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKER="$(cat /tmp/la-factory-audit/worker-name)"
+          status=000
+          for attempt in $(seq 1 6); do
+            status="$(curl -sS -o /tmp/la-factory-audit/report.json -w '%{http_code}' \
+              "https://$WORKER.joseph-t-logan.workers.dev/audit" \
+              -H "x-audit-secret: $(cat /tmp/la-factory-audit/token)" || true)"
+            if [[ "$status" == 200 ]]; then break; fi
+            if [[ "$status" != 404 && "$status" != 503 && "$status" != 000 ]]; then break; fi
+            sleep 4
+          done
+          if [[ "$status" != 200 ]]; then
+            echo "Audit endpoint HTTP $status" >&2
+            head -c 500 /tmp/la-factory-audit/report.json >&2
+            exit 1
+          fi
+          jq -e '.ok==true and .read_only==true' /tmp/la-factory-audit/report.json >/dev/null
+          echo 'LA_FACTORY_AUDIT_BEGIN'
+          jq -c '{scanned,groups_total,more_group_keys,recent_inspected,LA_groups}' /tmp/la-factory-audit/report.json
+          echo 'LA_FACTORY_AUDIT_END'
+          echo "Read-only LA Factory audit executed without changes to batch ledgers or Airtable." >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove temporary Worker
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f /tmp/la-factory-audit/worker-name ]]; then exit 0; fi
+          WORKER="$(cat /tmp/la-factory-audit/worker-name)"
+          curl -fsS -X DELETE \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/la-factory-audit/delete.json
+          jq -e '.success==true' /tmp/la-factory-audit/delete.json >/dev/null
+          echo "Temporary LA Factory audit Worker removed."
