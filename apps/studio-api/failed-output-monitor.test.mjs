@@ -34,6 +34,13 @@ test("paginated failed-output scan returns every outstanding record, without the
   assert.equal(found[234].id, "rec234");
 });
 
+test("retired cancelled Stories never enter the active Failed census", () => {
+  assert.match(FAILED_OUTPUT_FORMULA, /\\{Output_Status\\}!="Cancelled"/);
+  assert.match(FAILED_OUTPUT_FORMULA, /\\{Test_Run_ID\\}=BLANK\\(\\)/);
+  // Keep their original error and hold fields intact for the audit trail;
+  // classification, not state rewriting, excludes terminally retired rows.
+});
+
 test("failed-output scan never transforms a partial/error response into a false zero", async () => {
   await assert.rejects(scanOutstandingFailedOutputs(async () => {
     throw new Error("Airtable unavailable");
