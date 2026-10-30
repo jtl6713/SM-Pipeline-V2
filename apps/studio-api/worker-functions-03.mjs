@@ -6,6 +6,7 @@ import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { withPhase5SyncLease } from "./supabase-sync-lease.mjs";
 import { homeApprovedExceptionKind, homeIsUnpublishedFailure } from "./profile-summary-classification.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
+import { submittedApprovalAge, verifySubmittedPromotionOwnership, SUBMITTED_RECOVERY_GRACE_MS } from "./submitted-approval-recovery.mjs";
 import {
   studioReadSource,
   studioSupabaseConfigured,
@@ -8851,42 +8852,99 @@ export function cadenceScheduleSync(ctx, env, options = {}) {
 /*__STUDIO_WORKER_END:cadenceScheduleSync__*/
 
 export async function studioHealPromotedMissingFanout(env, { limit = 8, ctx = null } = {}) {
-  // Repair old, Submitted approvals only after I4 has definitively promoted
-  // their Idea and the sole authoritative Content Item owns this request.
-  // This performs a *missing-only* fanout via the canonical finalizer: it
-  // never sends a second I3 approval or restamps an existing render.
+  // Detect ALL stale Submitted approvals, including those whose
+  // Promoted_Content_Item backlink was never written. An I4 Idea/Content
+  // relationship, not that fallible request backlink, supplies the proof.
   const pending = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
-    limit: Math.min(8, Math.max(1, limit)),
-    sortField: "Updated_At",
-    sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Active}=1,{Request_Status}="Submitted",{Promoted_Content_Item}!=BLANK())',
-  }).catch(() => []);
-  let recoveredSubmitted = 0;
+    limit: Math.min(16, Math.max(4, limit * 2)),
+    sortField: "Submitted_At",
+    sortDirection: "asc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Active}=1,{Request_Status}="Submitted")',
+  }).catch((error) => {
+    console.warn("Studio submitted approval recovery scan unavailable", error);
+    return [];
+  });
+  let attemptedSubmitted = false;
   for (const pendingRequest of pending || []) {
-    if (recoveredSubmitted >= 1) break; // bounded per cron tick
+    if (attemptedSubmitted) break; // no fanout overlap from this cron tick
+    const age = submittedApprovalAge(f(pendingRequest, "Submitted_At"));
+    if (age === null) {
+      console.warn("Studio submitted approval missing timestamp; administrator investigation required", pendingRequest.id);
+      continue;
+    }
+    if (age < SUBMITTED_RECOVERY_GRACE_MS) continue;
     try {
-      const submittedMs = Date.parse(String(f(pendingRequest, "Submitted_At") || ""));
-      if (!Number.isFinite(submittedMs) || Date.now() - submittedMs < 10 * 60 * 1000) continue;
-      const parentId = studioFirstLinkedId(f(pendingRequest, "Promoted_Content_Item"));
-      const ideaId = studioFirstLinkedId(f(pendingRequest, "Idea_Candidate"));
-      if (!parentId || !ideaId) continue;
-      const [idea, parent] = await Promise.all([
-        airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId),
-        airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId),
-      ]);
-      const ideaParent = studioFirstLinkedId(f(idea, "Content Items"))
-        || String(f(idea, "Promoted_Content_Record_ID") || "").trim();
-      const owners = arrayOrEmpty(f(parent, "Production_Request"));
-      if (ideaParent !== parentId || owners.length !== 1 || owners[0] !== pendingRequest.id) continue;
+      const ideaIds = arrayOrEmpty(f(pendingRequest, "Idea_Candidate"));
+      if (ideaIds.length !== 1) {
+        console.warn("Studio submitted approval ambiguous Idea; recovery withheld", pendingRequest.id);
+        continue;
+      }
+      const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaIds[0]);
+      const ideaParents = arrayOrEmpty(f(idea, "Content Items"));
+      const fromI4 = String(f(idea, "Promoted_Content_Record_ID") || "").trim();
+      const candidateParentId = ideaParents.length === 1 ? ideaParents[0] : fromI4;
+      if (!/^rec[A-Za-z0-9]{14}$/.test(String(candidateParentId || ""))) {
+        console.warn("Studio submitted approval awaiting authoritative I4 Content Item", pendingRequest.id);
+        continue;
+      }
+      const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, candidateParentId);
+      const proof = verifySubmittedPromotionOwnership({
+        requestId: pendingRequest.id,
+        requestStatus: String(f(pendingRequest, "Request_Status") || ""),
+        requestIdeaIds: ideaIds,
+        requestParentIds: f(pendingRequest, "Promoted_Content_Item"),
+        submittedAt: f(pendingRequest, "Submitted_At"),
+        ideaId: idea.id,
+        ideaContentIds: f(idea, "Content Items"),
+        ideaPromotedContentId: fromI4,
+        ideaRequestIds: f(idea, "Production Requests"),
+        parentId: parent.id,
+        parentRequestIds: f(parent, "Production_Request"),
+      });
+      if (!proof.safe) {
+        console.warn("Studio submitted approval ownership recovery withheld", pendingRequest.id, proof.reason);
+        continue;
+      }
+      // Re-read immediately before any mutation to ensure a concurrent
+      // finalizer did not complete or change the parent in the meantime.
       const latest = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, pendingRequest.id);
       if (String(f(latest, "Request_Status") || "") !== "Submitted") continue;
-      const finalized = await finalizeProductionRequestPromotion(env, pendingRequest.id, idea, ctx);
+      const latestProof = verifySubmittedPromotionOwnership({
+        requestId: latest.id,
+        requestStatus: String(f(latest, "Request_Status") || ""),
+        requestIdeaIds: f(latest, "Idea_Candidate"),
+        requestParentIds: f(latest, "Promoted_Content_Item"),
+        submittedAt: f(latest, "Submitted_At"),
+        ideaId: idea.id,
+        ideaContentIds: f(idea, "Content Items"),
+        ideaPromotedContentId: fromI4,
+        ideaRequestIds: f(idea, "Production Requests"),
+        parentId: parent.id,
+        parentRequestIds: f(parent, "Production_Request"),
+      });
+      if (!latestProof.safe) continue;
+      attemptedSubmitted = true;
+      if (latestProof.repairLink) {
+        await airtableFetch(env, PRODUCTION_REQUEST_TABLE, latest.id, {
+          method: "PATCH",
+          body: JSON.stringify({
+            fields: { Promoted_Content_Item: [latestProof.parentId], Updated_At: new Date().toISOString() },
+            typecast: false,
+          }),
+        });
+        const repaired = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, latest.id);
+        const linked = arrayOrEmpty(f(repaired, "Promoted_Content_Item"));
+        if (linked.length !== 1 || linked[0] !== latestProof.parentId)
+          throw new Error("Promoted_Content_Item repair failed readback; no fanout performed");
+      }
+      const finalized = await finalizeProductionRequestPromotion(env, latest.id, idea, ctx);
       if (String(f(finalized?.requestRecord, "Request_Status") || "") === "Promoted") {
-        recoveredSubmitted++;
-        console.info("Studio submitted promotion fanout reconciled", pendingRequest.id, parentId);
+        console.info("Studio Submitted approval independently recovered", latest.id, parent.id, {
+          missing_parent_link_repaired: latestProof.repairLink,
+        });
       }
     } catch (error) {
-      console.warn("Studio submitted promotion heal deferred", pendingRequest.id, error);
+      console.warn("Studio submitted approval recovery deferred", pendingRequest.id, error);
     }
   }
 
