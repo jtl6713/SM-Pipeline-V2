@@ -117,6 +117,21 @@ test("legacy ledgers migrate oldest valid owner; superseded duplicates do not ow
   assert.equal(result.conflicts.length, 7);
 });
 
+test("orphan global parent is indexed when a crash prevented child enqueue", async () => {
+  const bucket = new R2();
+  await bucket.put("studio/state/factory-approvals/v2/groups/" + groupA + ".json",
+    JSON.stringify({
+      schema: "studio.factory-approval-group.1", request_id: groupA,
+      created_at: "2026-10-30T14:01:00Z", status: "enqueuing",
+      records: ids.map(id => ({ id, profile_id: profile })),
+    }));
+  const newAttempt = await factoryOutputClaimReserve(bucket, {
+    profileId: profile, requestId: groupB, ids,
+  });
+  assert.equal(newAttempt.ok, false);
+  assert.deepEqual(newAttempt.owners, [groupA]);
+});
+
 test("global and profile-local routes share the same canonical output-ID fence", () => {
   const worker = readFileSync(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(worker, /factoryOutputClaimReserve/);
