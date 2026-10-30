@@ -4579,7 +4579,13 @@ export function item4LooksLikeVideoAsset(asset) {
 
 export function item4AssetCompressionPending(asset) {
   const status = String(asset?.compression_status || "").trim().toLowerCase();
-  if (status === "ready" || status === "skipped") return false;
+  if (status === "ready") {
+    // Old AME presets could produce files larger than the original and still
+    // set ready. Keep only those precise oversized AME assets eligible for repair.
+    return String(asset?.compression_provider || "") === "adobe-media-encoder"
+      && Number(asset?.size_bytes || 0) > 95 * 1024 * 1024;
+  }
+  if (status === "skipped") return false;
   if (["pending", "queued", "compressing", "downloading", "failed"].includes(status)) return true;
   if (asset?.compression_needed === true) return true;
   return item4LooksLikeVideoAsset(asset)
@@ -4602,10 +4608,12 @@ export function item4HealStaleCompressionAssets(assets) {
     const driveId = String(asset?.google_drive_file_id || "").trim();
     const mediaId = String(asset?.media_asset_record_id || "").trim();
     const progress = Number(asset?.compression_progress || 0);
-    const preview = String(asset?.preview_public_url || asset?.url || "").trim();
+    const preview = String(asset?.preview_public_url || "").trim();
     const previewReady = preview && item4UrlIsPublicPublishCdn(preview);
-    if (!driveId || !mediaId) return asset;
-    if (!(progress >= 95 || previewReady)) return asset;
+    const previewSize = Number(asset?.size_bytes || 0);
+    // Neither Drive authority nor 100% AME progress demonstrates a smaller
+    // completed preview. Do not auto-heal an oversized AME output to Ready.
+    if (!driveId || !mediaId || !previewReady || !(previewSize > 0 && previewSize <= 95 * 1024 * 1024)) return asset;
     changed = true;
     return {
       ...asset,
