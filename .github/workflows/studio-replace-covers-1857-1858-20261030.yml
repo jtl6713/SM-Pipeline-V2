@@ -63,29 +63,69 @@ jobs:
           echo "STUDIO_MEDIA_BUCKET=$BUCKET" >> "$GITHUB_ENV"
           echo "live_r2_bucket_discovered=PASS"
 
-      - name: Upload versioned covers without touching old objects
+      - name: Create temporary least-privilege R2-bound Worker and send only two verified covers
         shell: bash
         run: |
           set -euo pipefail
-          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/$STUDIO_MEDIA_BUCKET/objects"
-          while IFS=' ' read -r cid rec; do
-            test -n "$cid" || continue
-            key="studio/previews/thumbnails/$rec/cover-20261030-revised-9x16.jpg"
-            code="$(curl -sS -o "/tmp/studio-cover-repair/upload-$cid.json" -w '%{http_code}' \
-              -X PUT "$API/$key" \
-              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-              -F "body=@/tmp/studio-cover-repair/$cid.jpg;type=image/jpeg")"
+          WORKER="chicagoshining-studio-cover-1857-1858-once"
+          printf '%s' "$WORKER" > /tmp/studio-cover-repair/worker-name
+          openssl rand -hex 32 > /tmp/studio-cover-repair/one-time-token
+          python3 - <<'PY'
+          from pathlib import Path
+          token=Path('/tmp/studio-cover-repair/one-time-token').read_text().strip()
+          js="""const secret = "__SECRET__";
+          const items = {
+            "1857": {key:"studio/previews/thumbnails/recPFH9PAvFcFmk6k/cover-20261030-revised-9x16.jpg", sha:"113a568e7e360d5c90e6541a01d5091c79476ca940db0358ddabaf83b068472b"},
+            "1858": {key:"studio/previews/thumbnails/recaqlkDfkQRQAlxw/cover-20261030-revised-9x16.jpg", sha:"57d1b6fb6f36df30dcae2e0e8cc94f4054cddaeea50acb148287d10607afb974"}
+          };
+          export default {async fetch(request,env) {
+            const id = new URL(request.url).pathname.replace(/^\\//,"");
+            const item=items[id];
+            if (request.method !== "PUT" || !item) return new Response("Not found",{status:404});
+            if (request.headers.get("X-One-Shot-Token") !== secret) return new Response("Forbidden",{status:403});
+            if (request.headers.get("Content-Type") !== "image/jpeg") return new Response("Bad type",{status:415});
+            const bytes=await request.arrayBuffer();
+            if (bytes.byteLength < 100000 || bytes.byteLength > 3000000) return new Response("Bad size",{status:400});
+            const hash=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",bytes)),x=>x.toString(16).padStart(2,"0")).join("");
+            if (hash !== item.sha) return new Response("SHA256 mismatch",{status:409});
+            await env.STUDIO_MEDIA.put(item.key,bytes,{httpMetadata:{contentType:"image/jpeg",cacheControl:"public, max-age=300"},customMetadata:{purpose:"one-shot-authorized-studio-thumbnail-replacement", contentId:id}});
+            return Response.json({ok:true,id,key:item.key,sha:hash});
+          }};
+          """
+          Path('/tmp/studio-cover-repair/worker.js').write_text(js.replace('__SECRET__',token))
+          PY
+          metadata="$(jq -cn --arg bucket "$STUDIO_MEDIA_BUCKET" '{main_module:"worker.js",bindings:[{name:"STUDIO_MEDIA",type:"r2_bucket",bucket_name:$bucket}]}')"
+          code="$(curl -sS -o /tmp/studio-cover-repair/worker-create.json -w '%{http_code}' -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -F "metadata=$metadata;type=application/json" \
+            -F "worker.js=@/tmp/studio-cover-repair/worker.js;type=application/javascript+module")"
+          if [[ "$code" -lt 200 || "$code" -ge 300 ]]; then
+            echo "Temporary Worker creation failed with HTTP $code" >&2
+            jq '{success,errors,messages}' /tmp/studio-cover-repair/worker-create.json >&2 || true
+            exit 1
+          fi
+          jq -e '.success==true' /tmp/studio-cover-repair/worker-create.json >/dev/null
+          curl -fsS -X POST \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER/subdomain" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' \
+            --data '{"enabled":true,"previews_enabled":false}' \
+            -o /tmp/studio-cover-repair/subdomain.json
+          jq -e '.success==true and .result.enabled==true' /tmp/studio-cover-repair/subdomain.json >/dev/null
+          for cid in 1857 1858; do
+            code="$(curl -sS --retry 3 --retry-delay 2 -o "/tmp/studio-cover-repair/upload-$cid.json" -w '%{http_code}' \
+              -X PUT "https://$WORKER.joseph-t-logan.workers.dev/$cid" \
+              -H "X-One-Shot-Token: $(cat /tmp/studio-cover-repair/one-time-token)" \
+              -H 'Content-Type: image/jpeg' \
+              --data-binary "@/tmp/studio-cover-repair/$cid.jpg")"
             if [[ "$code" -lt 200 || "$code" -ge 300 ]]; then
-              echo "R2 cover upload failed for $cid with HTTP $code" >&2
-              jq '{success,errors,messages}' "/tmp/studio-cover-repair/upload-$cid.json" >&2 || true
+              echo "Temporary Worker cover upload failed for $cid with HTTP $code" >&2
+              head -c 400 "/tmp/studio-cover-repair/upload-$cid.json" >&2 || true
               exit 1
             fi
-            jq -e --arg key "$key" '.success == true and .result.key == $key' "/tmp/studio-cover-repair/upload-$cid.json" >/dev/null
-            echo "r2_cover_uploaded=$cid key=$key"
-          done <<'RECORDS'
-          1857 recPFH9PAvFcFmk6k
-          1858 recaqlkDfkQRQAlxw
-          RECORDS
+            jq -e --arg id "$cid" '.ok == true and .id == $id' "/tmp/studio-cover-repair/upload-$cid.json" >/dev/null
+            echo "r2_cover_uploaded=$cid"
+          done
 
       - name: Verify exactly matching public CDN bytes before Airtable can reference covers
         shell: bash
@@ -104,3 +144,21 @@ jobs:
           1858 recaqlkDfkQRQAlxw 57d1b6fb6f36df30dcae2e0e8cc94f4054cddaeea50acb148287d10607afb974
           RECORDS
           echo "Public cover delivery PASS. Airtable updates are a separate, manually verified step." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove temporary upload Worker regardless of outcome
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f /tmp/studio-cover-repair/worker-name ]]; then exit 0; fi
+          WORKER="$(cat /tmp/studio-cover-repair/worker-name)"
+          code="$(curl -sS -o /tmp/studio-cover-repair/worker-delete.json -w '%{http_code}' -X DELETE \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")"
+          if [[ "$code" -lt 200 || "$code" -ge 300 ]]; then
+            echo "SECURITY: Temporary Worker cleanup failed HTTP $code" >&2
+            jq '{success,errors,messages}' /tmp/studio-cover-repair/worker-delete.json >&2 || true
+            exit 1
+          fi
+          jq -e '.success==true' /tmp/studio-cover-repair/worker-delete.json >/dev/null
+          echo "temporary_cover_worker_removed=PASS"
