@@ -8,7 +8,7 @@ export const FACTORY_BATCH_PREFIX = "studio/state/factory-approvals/v2";
 export const FACTORY_BATCH_LEASE_MS = 12 * 60 * 1000;
 const ID = /^rec[A-Za-z0-9]+$/;
 const RID = /^[A-Za-z0-9_-]{12,128}$/;
-const done = new Set(["approved", "already_satisfied", "skipped_removed", "failed"]);
+const done = new Set(["approved", "already_satisfied", "skipped_removed", "superseded_duplicate", "failed"]);
 
 function assertBucket(bucket) {
   if (!bucket?.put || !bucket?.get || !bucket?.list) throw Error("STUDIO_MEDIA R2 storage required");
@@ -26,7 +26,7 @@ export function factoryBatchCounts(job) {
   const result = { total: items.length, approved_count: 0, skipped_count: 0, failed_count: 0, pending_count: 0 };
   for (const item of items) {
     if (item.status === "approved") result.approved_count++;
-    else if (item.status === "already_satisfied" || item.status === "skipped_removed") result.skipped_count++;
+    else if (item.status === "already_satisfied" || item.status === "skipped_removed" || item.status === "superseded_duplicate") result.skipped_count++;
     else if (item.status === "failed") result.failed_count++;
     else result.pending_count++;
   }
@@ -46,6 +46,10 @@ export function factoryBatchRetryEligible(item) {
   return item?.status === "failed" && !factoryBatchFailureRouted(item) &&
     Number(item.manual_retry_count || 0) + Number(item.auto_retry_count || 0) < 1;
 }
+/** A superseded_duplicate item is a terminal batch-ledger bookkeeping state.
+ * It never changes or removes the authoritative Platform Output; the older
+ * matching approval batch retains full responsibility for remaining work.
+ * Only write it through exact-set verified, profile-lock-protected recovery. */
 /** Only unresolved failures and live work belong on the active Factory desk. */
 export function factoryBatchNeedsAttention(job) {
   if (!job) return false;
