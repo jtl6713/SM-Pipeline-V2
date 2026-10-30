@@ -78,7 +78,7 @@ test("Submitted readback keeps verification fence and never promotes again", asy
   assert.equal(h.api.show(outcome, requestId), "processing");
   assert.equal(h.context.item4PromotionReadbackRequired.has(requestId), true);
   assert.deepEqual(h.opened, []);
-  assert.match(h.messages.at(-1).message, /still processing/);
+  assert.match(h.messages.at(-1).message, /submitted/);
   assert.ok(h.calls.every(c => c.options.method === "GET"));
 });
 
@@ -114,4 +114,32 @@ test("the real click path checks uncertain 5xx/timeouts, uses read-only check bu
   const checkGate = click.indexOf("if (item4PromotionReadbackRequired.has(approvalRequestId))");
   const post = click.indexOf('const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/promote`');
   assert.ok(checkGate >= 0 && post > checkGate, "readback gate must precede promote POST");
+});
+
+test("stale Submitted approval is explicitly identified as stalled rather than successful", async () => {
+  const submitted_at = "2025-01-01T00:00:00.000Z";
+  const record = {id:requestId,status:"Submitted",submitted_at};
+  const h = harness(async () => ({record}));
+  assert.equal(h.api.classify(record,requestId),"stalled");
+  const outcome=await h.api.read(requestId);
+  assert.equal(h.api.show(outcome,requestId),"stalled");
+  assert.equal(h.messages.at(-1).tone,"error-text");
+  assert.match(h.messages.at(-1).message,/stalled|exceeded/i);
+  assert.equal(h.context.item4PromotionReadbackRequired.has(requestId),true);
+  assert.ok(h.calls.every(c=>c.options.method==="GET"));
+});
+
+test("escalated or blocked job surfaces recovery-required, not still processing", async () => {
+  for(const step of ["escalated","blocked"]) {
+    const record={id:requestId,status:"Submitted",submitted_at:"2025-01-01T00:00:00.000Z",
+      studio_production_job:{step,error:"No Platform Outputs found"}};
+    const h=harness(async()=>({record}));
+    assert.equal(h.api.classify(record,requestId),"recovery-required");
+    const outcome=await h.api.read(requestId);
+    assert.equal(h.api.show(outcome,requestId),"recovery-required");
+    assert.match(h.messages.at(-1).message,/No Platform Outputs found/);
+    assert.equal(h.messages.at(-1).tone,"error-text");
+    assert.deepEqual(h.opened,[]);
+    assert.ok(h.calls.every(c=>c.options.method==="GET"));
+  }
 });
