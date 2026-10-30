@@ -767,3 +767,4 @@ Rendering Review V3 source validation + Producer executable timeline canary code
 2026-10-29: Retry Worker 0.10.694 Factory-only conversational review with corrected production read-only verifier; verify direct admission disabled and only held Factory-submitted reviews visible. Previous deploy rolled back safely.
 
 2026-10-29: Worker 0.10.695, exclude only explicitly Cancelled + Skipped + Do_Not_Publish historical Facebook Stories from active Quality Agent Failed count. Preserve all errors, audit fields, holds and published guards; no publication or scheduling.
+2026-10-30: Deploy Worker 0.10.696-la-submitted-fanout-recovery. Fix LA promotion HTTP 503 for non-allowlisted atomic schedule lanes; safely reconcile missing destinations from confirmed Submitted approval; preserve existing Output #9370 Remotion evidence and escalated job until guarded runner resume. No public publishing.
