@@ -7,6 +7,7 @@ from studio_compress.processor import (
     compress_pending_assets,
     needs_compress,
     studio_master_download_url,
+    studio_drive_download_url,
 )
 
 
@@ -359,7 +360,6 @@ def test_chicago_waterfront_drive_original_uses_ame_first_without_ffmpeg():
         client, "recPRCompress",
         ame_encode=ame_encode,
         submit_job=lambda *_a: submitted.append("ffmpeg-public"),
-        submit_drive_job=lambda *_a: submitted.append("ffmpeg-private"),
         poll_job=lambda *_a: {},
         download_output=lambda *_a: (b"ffmpeg", "video/mp4"),
         stage_preview=lambda request_id, asset_id, content: (
@@ -381,21 +381,19 @@ def test_chicago_waterfront_ame_unavailable_falls_back_to_private_drive_not_publ
     import json
 
     client = _drive_only_client()
-    private_submissions = []
-    public_submissions = []
+    submissions = []
 
     def ame_encode(_asset, _on_progress):
         raise AmeNotReady("Media Encoder did not pick up the inbox file")
 
-    def submit_drive_job(file_id, name):
-        private_submissions.append((file_id, name))
+    def submit_job(url, name, record_id):
+        submissions.append((url, name, record_id))
         return {"job_id": "ffmpeg-private-job", "status": "complete", "ok": True, "output_size_bytes": 34}
 
     result = compress_pending_assets(
         client, "recPRCompress",
         ame_encode=ame_encode,
-        submit_job=lambda *_args: public_submissions.append(True),
-        submit_drive_job=submit_drive_job,
+        submit_job=submit_job,
         poll_job=lambda *_args: {"status": "complete", "ok": True},
         download_output=lambda *_args: (b"ffmpeg-private-output", "video/mp4"),
         stage_preview=lambda request_id, asset_id, _content: (
@@ -405,8 +403,22 @@ def test_chicago_waterfront_ame_unavailable_falls_back_to_private_drive_not_publ
     )
     asset = json.loads(client.record["fields"]["Studio_Master_Assets_JSON"])[0]
     assert result["ok"] is True
-    assert private_submissions == [("1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr", "Navy Pier Fireworks 12.mp4")]
-    assert public_submissions == []
+    assert submissions == [(
+        "http://127.0.0.1:3350/internal/drive-media/1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr",
+        "Navy Pier Fireworks 12.mp4",
+        "studio-recPRCompress-59a9b4d684904e5382",
+    )]
     assert asset["compression_provider"] == "ffmpeg"
     assert asset["compression_status"] == "ready"
     assert asset["google_drive_file_id"] == "1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr"
+
+
+def test_drive_fallback_url_rejects_arbitrary_urls_and_path_traversal():
+    assert studio_drive_download_url("1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr") == (
+        "http://127.0.0.1:3350/internal/drive-media/1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr"
+    )
+    import pytest
+    with pytest.raises(RuntimeError, match="Invalid authoritative"):
+        studio_drive_download_url("../../etc/passwd")
+    with pytest.raises(RuntimeError, match="Invalid authoritative"):
+        studio_drive_download_url("https://drive.google.com/file/d/public/view")
