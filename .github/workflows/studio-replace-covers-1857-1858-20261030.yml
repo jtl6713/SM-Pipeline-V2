@@ -1,0 +1,106 @@
+name: One-shot Studio covers 1857 1858 publish to R2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/studio-replace-covers-1857-1858-20261030.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: one-shot-cover-1857-1858
+  cancel-in-progress: false
+
+jobs:
+  replace-covers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Download and validate EXACT approved 9x16 covers from existing public Drive file IDs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/studio-cover-repair
+          while IFS=' ' read -r cid drive_id expected_hash; do
+            test -n "$cid" || continue
+            curl -fsSL --retry 3 --max-time 50 \
+              "https://drive.google.com/uc?export=download&id=${drive_id}&confirm=t" \
+              -o "/tmp/studio-cover-repair/${cid}.jpg"
+            printf '%s  %s\n' "$expected_hash" "/tmp/studio-cover-repair/${cid}.jpg" | sha256sum -c -
+            MIME="$(file -b --mime-type "/tmp/studio-cover-repair/${cid}.jpg")"
+            test "$MIME" = image/jpeg
+            python3 - "$cid" <<'PY'
+          import sys
+          from pathlib import Path
+          b=Path('/tmp/studio-cover-repair/'+sys.argv[1]+'.jpg').read_bytes()
+          assert b[:2]==bytes.fromhex('ffd8') and b[-2:]==bytes.fromhex('ffd9')
+          assert 100_000 < len(b) < 3_000_000
+          print(f'cover_validated={sys.argv[1]} size={len(b)}')
+          PY
+          done <<'COVERS'
+          1857 1ip_rWjQbBKAolgORjfEks_jBgDhB8n96 113a568e7e360d5c90e6541a01d5091c79476ca940db0358ddabaf83b068472b
+          1858 17XOAQ_SRQfosgGyRaofaA3KFDwpDy7WV 57d1b6fb6f36df30dcae2e0e8cc94f4054cddaeea50acb148287d10607afb974
+          COVERS
+
+      - name: Discover authoritative live R2 bucket without changing Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api"
+          curl -fsS "$API/deployments" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/studio-cover-repair/deployments.json
+          VERSION="$(jq -er '.result.deployments[0].versions | max_by(.percentage) | .version_id' /tmp/studio-cover-repair/deployments.json)"
+          curl -fsS "$API/versions/$VERSION" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/studio-cover-repair/version.json
+          BUCKET="$(jq -er '.result.resources.bindings[] | select(.name=="STUDIO_MEDIA" and .type=="r2_bucket") | (.bucket_name // .bucket)' /tmp/studio-cover-repair/version.json)"
+          test -n "$BUCKET"
+          echo "STUDIO_MEDIA_BUCKET=$BUCKET" >> "$GITHUB_ENV"
+          echo "live_r2_bucket_discovered=PASS"
+
+      - name: Upload versioned covers without touching old objects
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/$STUDIO_MEDIA_BUCKET/objects"
+          while IFS=' ' read -r cid rec; do
+            test -n "$cid" || continue
+            key="studio/previews/thumbnails/$rec/cover-20261030-revised-9x16.jpg"
+            code="$(curl -sS -o "/tmp/studio-cover-repair/upload-$cid.json" -w '%{http_code}' \
+              -X PUT "$API/$key" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -F "body=@/tmp/studio-cover-repair/$cid.jpg;type=image/jpeg")"
+            if [[ "$code" -lt 200 || "$code" -ge 300 ]]; then
+              echo "R2 cover upload failed for $cid with HTTP $code" >&2
+              jq '{success,errors,messages}' "/tmp/studio-cover-repair/upload-$cid.json" >&2 || true
+              exit 1
+            fi
+            jq -e --arg key "$key" '.success == true and .result.key == $key' "/tmp/studio-cover-repair/upload-$cid.json" >/dev/null
+            echo "r2_cover_uploaded=$cid key=$key"
+          done <<'RECORDS'
+          1857 recPFH9PAvFcFmk6k
+          1858 recaqlkDfkQRQAlxw
+          RECORDS
+
+      - name: Verify exactly matching public CDN bytes before Airtable can reference covers
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS=' ' read -r cid rec expected_hash; do
+            test -n "$cid" || continue
+            key="studio/previews/thumbnails/$rec/cover-20261030-revised-9x16.jpg"
+            url="https://media.chicagoshining.com/$key"
+            curl -fsSL --retry 5 --retry-delay 2 "$url" -o "/tmp/studio-cover-repair/public-$cid.jpg"
+            printf '%s  %s\n' "$expected_hash" "/tmp/studio-cover-repair/public-$cid.jpg" | sha256sum -c -
+            echo "public_cover_verified=$cid url=$url"
+            echo "- $cid: $url (SHA-256 verified)" >> "$GITHUB_STEP_SUMMARY"
+          done <<'RECORDS'
+          1857 recPFH9PAvFcFmk6k 113a568e7e360d5c90e6541a01d5091c79476ca940db0358ddabaf83b068472b
+          1858 recaqlkDfkQRQAlxw 57d1b6fb6f36df30dcae2e0e8cc94f4054cddaeea50acb148287d10607afb974
+          RECORDS
+          echo "Public cover delivery PASS. Airtable updates are a separate, manually verified step." >> "$GITHUB_STEP_SUMMARY"
