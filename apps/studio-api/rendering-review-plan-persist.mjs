@@ -90,15 +90,30 @@ function verifiedReelVariant(entry,variantManifest,originalProps,requestId){
   const clips=originalProps.clips.filter(c=>c?.mediaAssetRecordId===entry?.media_asset_record_id);
   if(linked.length!==1||clips.length!==1)return null;
   const master=linked[0],clip=clips[0],v=master.variants?.["9:16"];
-  const url=str(v?.preview_url),variantFile=str(v?.google_drive_file_id);
+  const variantFile=str(v?.google_drive_file_id);
+  // V1 contains mixed images and an owned, already rendered video clip.
+  // Video passthrough variants have an internal preview route, not a
+  // /studio/previews/item4/ image crop. Only the exact original Google Drive
+  // source is executable; never turn the preview route into a render URL.
+  const isVideo=v?.media_kind==="video";
+  const url=isVideo?str(clip.url||clip.src):str(v?.preview_url);
   if(master.media_asset_record_id!==entry.media_asset_record_id||
      master.google_drive_file_id!==entry.google_drive_file_id||
      v?.preview_status!=="Ready"||!drive(variantFile)||
-     !/^https:\/\/media\.chicagoshining\.com\/studio\/previews\/item4\//.test(url)||
      str(clip.url||clip.src)!==url||
      str(clip.googleDriveFileId)!==variantFile||
      str(clip.src||clip.url)!==url)return null;
-  return {render_variant_drive_file_id:variantFile,render_url:url};
+  if(isVideo){
+    if(entry.media_kind!=="video"||v.recipe_version!=="video-passthrough"||
+       variantFile!==entry.google_drive_file_id||
+       v.width!==1080||v.height!==1920||
+       url!=="https://drive.google.com/uc?export=download&id="+variantFile)
+      return null;
+  }else if(!/^https:\/\/media\.chicagoshining\.com\/studio\/previews\/item4\//.test(url)){
+    return null;
+  }
+  return {render_variant_drive_file_id:variantFile,render_url:url,
+    media_kind:isVideo?"video":"image"};
 }
 
 function requestedIds(candidate){
