@@ -50,8 +50,8 @@ export async function handleRenderingReviewEnrollRequest({
     fail(405,"METHOD_NOT_ALLOWED","POST required");
   if(!validIdentity(output_id))
     fail(400,"INVALID_OUTPUT_ID","Exact Platform Output ID required");
-  if(output_id!==env?.RENDERING_REVIEW_EXACT_OUTPUT_ID)
-    fail(403,"PILOT_OUTPUT_NOT_ALLOWED","Chicago review pilot is limited to one exact output");
+  // Exact target comes from Factory; membership, output identity, schedule
+  // ownership and hold authority are checked by trusted adapters below.
   const actor=authorization?.user?.record_id;
   if(!authorization?.authenticated||!authorization?.authorized||
      authorization?.permissions?.outputs_review!==true||!validIdentity(actor))
