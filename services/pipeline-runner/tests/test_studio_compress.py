@@ -337,7 +337,7 @@ def _drive_only_client() -> FakeAirtable:
         "authoritative_storage": "google_drive",
         "staging_deleted": True,
         "google_drive_file_id": "1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr",
-        "media_asset_record_id": "recSITCujCsJTNcDe",
+        "media_asset_record_id": "recByWv7yDeVi2NPE",
         "compression_status": "failed",
         "compression_needed": True,
         "compression_error": "Studio compression needs a private studio/master-assets key",
