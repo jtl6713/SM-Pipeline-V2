@@ -177,7 +177,17 @@ jobs:
             test -n "$cid" || continue
             key="studio/previews/thumbnails/$rec/cover-20261030-revised-9x16.jpg"
             url="https://media.chicagoshining.com/$key"
-            curl -fsSL --retry 5 --retry-delay 2 "$url" -o "/tmp/studio-cover-repair/public-$cid.jpg"
+            old_url="https://media.chicagoshining.com/studio/previews/thumbnails/$rec/cover-9x16.png"
+            old_status="$(curl -sSL -o /tmp/studio-cover-repair/old-$cid.png -w '%{http_code}' "$old_url" || true)"
+            echo "old_public_cover_http=$cid:$old_status"
+            status="000"
+            for attempt in $(seq 1 8); do
+              status="$(curl -sSL -o "/tmp/studio-cover-repair/public-$cid.jpg" -w '%{http_code}' "$url" || true)"
+              if [[ "$status" == "200" ]]; then break; fi
+              echo "new_public_cover_http=$cid:$status attempt=$attempt"
+              sleep 4
+            done
+            test "$status" = "200"
             printf '%s  %s\n' "$expected_hash" "/tmp/studio-cover-repair/public-$cid.jpg" | sha256sum -c -
             echo "public_cover_verified=$cid url=$url"
             echo "- $cid: $url (SHA-256 verified)" >> "$GITHUB_STEP_SUMMARY"
