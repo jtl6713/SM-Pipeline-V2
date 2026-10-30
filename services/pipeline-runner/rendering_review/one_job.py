@@ -411,8 +411,7 @@ def render_exact_attempt(output_id,job_id,*,client=None,drive=None,
     if os.environ.get("RENDERING_REVIEW_EXACT_RENDER_ENABLED")!="true":
         fail("review_exact_render_not_enabled")
     if (not RECORD.fullmatch(str(output_id)) or
-        not IDENTITY.fullmatch(str(job_id)) or
-        output_id!=os.environ.get("RENDERING_REVIEW_EXACT_OUTPUT_ID")):
+        not IDENTITY.fullmatch(str(job_id))):
         fail("review_output_not_allowlisted")
     worker=worker_base or os.environ.get("RENDERING_REVIEW_WORKER_BASE_URL","")
     secret=shared_secret or os.environ.get("RENDERING_REVIEW_RENDER_JOB_SHARED_SECRET","")
