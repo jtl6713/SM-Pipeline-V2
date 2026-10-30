@@ -731,9 +731,9 @@
       }
       renderFactoryBatchActivity(batch);
       reconcilePendingGlobalSelection(batch);
-      reconcilePersistedFactoryPending().catch(() => {});
       document.dispatchEvent(new CustomEvent("factory:batch-status", { detail: batch }));
       reconcileFinishedBatchDesk(batch?.batches?.[0] || batch).catch(() => {});
+      reconcilePersistedFactoryPending().catch(() => {});
       // The API intentionally omits completed jobs from the active feed.
       // When a running batch disappears, refresh the authoritative Desk once,
       // without fetching terminal batch history or leaving stale Needs Eyes rows.
