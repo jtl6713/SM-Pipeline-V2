@@ -768,3 +768,4 @@ Rendering Review V3 source validation + Producer executable timeline canary code
 
 2026-10-29: Worker 0.10.695, exclude only explicitly Cancelled + Skipped + Do_Not_Publish historical Facebook Stories from active Quality Agent Failed count. Preserve all errors, audit fields, holds and published guards; no publication or scheduling.
 2026-10-30: Deploy Worker 0.10.696-la-submitted-fanout-recovery. Fix LA promotion HTTP 503 for non-allowlisted atomic schedule lanes; safely reconcile missing destinations from confirmed Submitted approval; preserve existing Output #9370 Remotion evidence and escalated job until guarded runner resume. No public publishing.
+2026-10-30: Deploy Worker 0.10.697-submitted-recovery-hardening. Automatically reconcile confirmed I4 promotions even when request parent link is absent; bounded proof-checked recovery, exact readbacks and missing-only output fanout. Chicago-only Rendering Review isolation retained; no publish or duplicate approval.

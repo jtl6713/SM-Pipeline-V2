@@ -588,3 +588,4 @@ Redeploy Studio UI 0.6.763-idea-lifecycle-live after removing stale Worker versi
 2026-10-29: Deploy Studio UI 0.6.779 Factory-only conversational review. Written rework comments are mandatory, no review-page admission, no upstream automatic enrollment.
 
 2026-10-29: Deploy UI 0.6.780. First-time Factory Request Changes dialog distinguishes new Rendering Review conversation from an existing V2 return, with clear mandatory notes and preserved V1 semantics.
+2026-10-30: Deploy Studio UI 0.6.781-approval-recovery. Stalled/escalated approval notices and always read-only Submitted status checks, including after reload. No reapproval, render, or public publishing.
