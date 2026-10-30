@@ -10132,8 +10132,16 @@ export async function completeProductionRequestPromotionSideEffects(env, request
     console.warn("Studio promote media pulse failed", error);
   }
   if (Number(outputFanout?.routed_count || 0) > 0) {
-    try { await enqueueStudioProductionJob(env, requestRecordId); } catch (error) {
-      console.warn("Studio produce enqueue after output fanout failed", requestRecordId, error);
+    const existingJob = parseStudioProductionJob(current);
+    // An escalated job can own an in-flight or completed Remotion render.
+    // Finish the approval/fanout, but never automatically replay that job:
+    // an operator must first verify the existing render and local runner code.
+    if (String(existingJob?.step || "") === "escalated") {
+      console.warn("Studio produce remains escalated pending guarded resume", requestRecordId);
+    } else {
+      try { await enqueueStudioProductionJob(env, requestRecordId); } catch (error) {
+        console.warn("Studio produce enqueue after output fanout failed", requestRecordId, error);
+      }
     }
   }
   return { requestRecord: current, directiveBridge, outputFanout };
