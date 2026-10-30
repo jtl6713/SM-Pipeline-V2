@@ -589,3 +589,5 @@ Redeploy Studio UI 0.6.763-idea-lifecycle-live after removing stale Worker versi
 
 2026-10-29: Deploy UI 0.6.780. First-time Factory Request Changes dialog distinguishes new Rendering Review conversation from an existing V2 return, with clear mandatory notes and preserved V1 semantics.
 2026-10-30: Deploy Studio UI 0.6.781-approval-recovery. Stalled/escalated approval notices and always read-only Submitted status checks, including after reload. No reapproval, render, or public publishing.
+2026-10-30: Deploy Studio UI 0.6.782-mobile-overview-scroll. Preserve All Profiles horizontal scroll and actionable count taps across read-only polls and refresh status updates. No publishing changes.
+Deploy Studio UI 0.6.782-mobile-overview-scroll. Preserve All Profiles horizontal scroll and action tap targets while 12-second Home snapshots and manual refresh statuses update. Narrow UI-only fix. Trigger protected Cloudflare Pages production deployment through GitHub.

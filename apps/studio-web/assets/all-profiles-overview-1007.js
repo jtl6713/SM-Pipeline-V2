@@ -333,15 +333,71 @@
     const refreshText = state.manualRefreshing ? "Refreshing…" : "Refresh";
     const disabled = state.manualRefreshing ? " disabled aria-disabled=\"true\"" : "";
 
+
+    // Preserve the existing mobile horizontal scrollport through automatic snapshot
+    // polls and force-refresh status changes. Rebuilding host.innerHTML here used
+    // to reset scrollLeft to zero and cancel taps on right-hand action counts.
+    const visibleBody = host.querySelector(".all-profiles-table-wrap tbody");
+    const visibleHeading = host.querySelector(".all-profiles-heading");
+    const bodyHtml = state.rows.map((r) => rowHtml(r)).join("") + rowHtml({ name: "Total", ...total }, true);
+    if (visibleBody && visibleHeading && visibleBody.rows.length === state.rows.length + 1) {
+      const updatedBody = document.createElement("tbody");
+      updatedBody.innerHTML = bodyHtml;
+      const oldRows = Array.from(visibleBody.rows);
+      const newRows = Array.from(updatedBody.rows);
+      for (let rowIndex = 0; rowIndex < oldRows.length; rowIndex += 1) {
+        const oldCells = Array.from(oldRows[rowIndex].cells);
+        const newCells = Array.from(newRows[rowIndex].cells);
+        if (oldCells.length !== newCells.length) {
+          visibleBody.replaceWith(updatedBody);
+          break;
+        }
+        for (let cellIndex = 0; cellIndex < oldCells.length; cellIndex += 1) {
+          if (oldCells[cellIndex].innerHTML !== newCells[cellIndex].innerHTML) {
+            oldCells[cellIndex].innerHTML = newCells[cellIndex].innerHTML;
+          }
+          if (oldCells[cellIndex].className !== newCells[cellIndex].className) {
+            oldCells[cellIndex].className = newCells[cellIndex].className;
+          }
+        }
+      }
+      const currentStatus = visibleHeading.querySelector(".all-profiles-stale");
+      if (!statusText) currentStatus?.remove();
+      else if (currentStatus) {
+        if (currentStatus.textContent !== statusText) currentStatus.textContent = statusText;
+      } else {
+        const status = document.createElement("p");
+        status.className = "subtle all-profiles-stale";
+        status.setAttribute("aria-live", "polite");
+        status.textContent = statusText;
+        visibleHeading.firstElementChild?.appendChild(status);
+      }
+      const refreshButton = visibleHeading.querySelector("#allProfilesRefresh");
+      if (refreshButton) {
+        if (refreshButton.textContent !== refreshText) refreshButton.textContent = refreshText;
+        refreshButton.disabled = state.manualRefreshing;
+        if (state.manualRefreshing) refreshButton.setAttribute("aria-disabled", "true");
+        else refreshButton.removeAttribute("aria-disabled");
+      }
+      return;
+    }
+
     host.innerHTML = `<div class="all-profiles-heading"><div><p class="studio-hub-kicker">ALL PROFILES</p><h1>Studio overview</h1>${statusNote}</div><button type="button" class="secondary-button" id="allProfilesRefresh"${disabled}>${refreshText}</button></div>
       <div class="all-profiles-table-wrap"><table class="all-profiles-table"><thead><tr class="all-profiles-group-row"><th rowspan="2" title="City profile. Counts represent individual platform outputs associated with this city.">Profile</th><th colspan="4" class="all-profiles-scheduled-group" title="Each platform counts individual unpublished outputs that are approved and scheduled after now, plus fully rendered outputs awaiting final human approval. An output is counted only once.">Future + Review platform outputs</th><th rowspan="2" title="Total of Facebook, Instagram, TikTok and YouTube: approved unpublished outputs scheduled in the future, plus rendered outputs awaiting final human approval.">Pipeline · Total</th><th rowspan="2" title="Fully approved, not yet published platform outputs with a scheduled date and time later than now. Excludes outputs still awaiting approval.">Approved · Future</th><th rowspan="2" title="Estimated additional ideas: round up (500 minus Pipeline Total) divided by 5, with a minimum of 0. Assumes 5 platform outputs per idea; creation remains subject to hourly limits.">Ideas Needed</th><th rowspan="2" title="Fully approved outputs that are still unpublished after their scheduled date and time. Publishing exceptions; not part of the future Pipeline Total.">Approved · Past Due</th><th rowspan="2" title="Fully approved, unpublished outputs without a valid Scheduled Post Date. Scheduling exceptions; not part of the future Pipeline Total.">Approved · No Date</th><th rowspan="2" title="Platform outputs in Manual Action Required status. These need a person to complete a workflow or publishing action.">Manual action</th><th rowspan="2" title="Platform outputs in Failed status that require investigation or retry.">Failed</th><th rowspan="2" title="Fully rendered platform outputs awaiting final human approval. Already included in Pipeline Total, not counted again.">Awaiting approval</th><th rowspan="2" title="Existing idea candidates that have not been promoted into production. Different from the Ideas Needed estimate.">Ideas</th></tr><tr class="all-profiles-platform-row">${platformOrder.map((p)=>`<th class="all-profiles-scheduled-col" title="${p}: individual approved, unpublished outputs scheduled after now, plus fully rendered outputs awaiting final human approval. Counts every output format once.">${p}</th>`).join("")}</tr></thead>
       <tbody>${state.rows.map((r)=>rowHtml(r)).join("")}${rowHtml({name:"Total",...total},true)}</tbody></table></div>`;
 
-    document.getElementById("allProfilesRefresh")?.addEventListener("click", forceRefresh);
-    host.querySelectorAll(".overview-action-count").forEach((button) => button.addEventListener("click", () => {
-      openOverviewAction(button.dataset.overviewProfile || "", button.dataset.overviewAction || "");
-    }));
   }
+
+  // Delegate once: unchanged action buttons survive the periodic in-place updates.
+  host.addEventListener("click", (event) => {
+    const button = event.target?.closest?.("button");
+    if (!button || !host.contains(button)) return;
+    if (button.id === "allProfilesRefresh") {
+      forceRefresh();
+    } else if (button.classList.contains("overview-action-count")) {
+      openOverviewAction(button.dataset.overviewProfile || "", button.dataset.overviewAction || "");
+    }
+  });
 
   function mapRows(rows) {
     return (rows || []).map((row) => ({

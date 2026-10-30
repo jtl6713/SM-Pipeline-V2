@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./all-profiles-mobile-scroll.test.mjs";
 import fs from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
