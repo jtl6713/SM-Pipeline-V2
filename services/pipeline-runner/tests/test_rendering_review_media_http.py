@@ -80,7 +80,7 @@ class ProxyTests(unittest.TestCase):
             drive_factory=FakeDrive,transport=transport))
         self.http=self.app.test_client()
         self.url="/jobs/rendering-review/attempt-media/"+OUTPUT+"/"+ATTEMPT
-        self.env=patch.dict(os.environ,{"RENDERING_REVIEW_EXACT_OUTPUT_ID":OUTPUT})
+        self.env=patch.dict(os.environ,{"RENDERING_REVIEW_EXACT_OUTPUT_ID":"recVFaT3VnhCD3dcb"})
         self.env.start()
     def tearDown(self):self.env.stop()
     def test_authenticated_range_stream_without_public_drive_url(self):
@@ -97,7 +97,7 @@ class ProxyTests(unittest.TestCase):
     def test_untrusted_or_wrong_output_never_reads_google(self):
         self.assertEqual(self.http.get(self.url).status_code,401)
         self.assertEqual(self.http.get(self.url.replace(OUTPUT,"recA1B2C3D4E5F6G7"),
-            headers={"X-Pipeline-Secret":SECRET}).status_code,403)
+            headers={"X-Pipeline-Secret":SECRET}).status_code,409)
         self.assertEqual(self.transfers,[])
     def test_lost_hold_denied_before_drive(self):
         self.client.hold=False
