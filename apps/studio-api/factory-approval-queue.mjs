@@ -612,6 +612,48 @@ export async function factoryBatchMarkRemoved(
  * back from Airtable. This does not change status, clear error, or approve.
  * verifyRouted must fail closed on missing, ambiguous or unavailable history.
  */
+/** Verify an already-committed Airtable approval and repair only its failed
+ * local R2 bookkeeping. No scheduling, publishing, or approval call is made. */
+export async function factoryBatchMarkAlreadySatisfied(bucket, {
+  profileId, requestId, recordId, outputId, verifySatisfied,
+} = {}) {
+  assertBucket(bucket);
+  if (!ID.test(String(recordId || "")) || !Number.isSafeInteger(Number(outputId)) ||
+      Number(outputId) <= 0 || typeof verifySatisfied !== "function") {
+    throw Error("Exact approved output identity and verifier required");
+  }
+  const snapshot = await factoryBatchRead(bucket, profileId, requestId);
+  const matches = (snapshot?.items || []).filter(item =>
+    item.id === recordId && Number(item.output_id) === Number(outputId));
+  if (matches.length !== 1) throw Error("Already-approved Factory row not found or ambiguous");
+  if (matches[0].status === "already_satisfied") return snapshot;
+  if (matches[0].status !== "failed") throw Error("Only failed bookkeeping can be reconciled");
+  if (await verifySatisfied(recordId, Number(outputId)) !== true) {
+    throw Error("Authoritative approval not verified");
+  }
+  return cas(bucket, factoryBatchKey(profileId, requestId), job => {
+    const current = (job.items || []).filter(item =>
+      item.id === recordId && Number(item.output_id) === Number(outputId));
+    if (current.length !== 1) throw Error("Approved bookkeeping identity changed");
+    if (current[0].status === "already_satisfied") return null;
+    if (current[0].status !== "failed") throw Error("Failed bookkeeping changed after verification");
+    const at = new Date().toISOString();
+    const items = job.items.map(item => item.id === recordId ? {
+      ...item, status: "already_satisfied", error: null, next_attempt_ms: 0,
+      previous_failure_error: item.error || null,
+      approval_verified_at: at,
+      timeline: [...(item.timeline || []), {
+        state: "already_satisfied", at, attempt: item.total_attempts || 0,
+        reason: "confirmed_authoritative_approval",
+      }].slice(-180),
+    } : item);
+    const counts = factoryBatchCounts({...job,items});
+    return {...job, items, updated_at: at,
+      status: counts.pending_count ? "running" :
+        counts.failed_count && !counts.approved_count && !counts.skipped_count ? "failed" : "completed"};
+  });
+}
+
 export async function factoryBatchMarkExceptionRouted(bucket, {
   profileId, requestId, recordId, outputId, eventKey, reason,
   verifyRouted, verifiedBy = "quality-agent",
