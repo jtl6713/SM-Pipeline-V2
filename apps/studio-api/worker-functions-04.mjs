@@ -17437,7 +17437,7 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
   } catch (error) {
     console.warn("Factory group process schedule failed after durable accept", requestId, error);
   }
-  return respond(request, env, { ...submitted, accepted: true, accept_mode: "client_hints" });
+  return respond(request, env, { ...submitted, accepted: true, accept_mode: "authoritative_preflight" });
 }
 
 /**
