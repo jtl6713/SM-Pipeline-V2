@@ -109,8 +109,8 @@ test('Rendering Review never enrolls; Factory-submitted sessions retain Producer
     id:'rrsession-12345678',version:conversation?2:1,
     state:conversation?'discussing':'ready_for_review',
     messages:conversation?[
-      {role:'user',content:'Explain step by step'},
-      {role:'producer',content:'I propose a clearer journey example.'}]:[],
+      {role:'user',content:'Explain step by step',at:'2026-10-30T20:39:18.045Z'},
+      {role:'producer',content:'I propose a clearer journey example.',at:'2026-10-30T20:42:39.164Z'}]:[],
     producer_candidate:conversation?{candidate:{narration:'Revised script',
       changes:['Add a worked example'],requirements:[]}}:null,
   }});
@@ -170,7 +170,14 @@ test('Rendering Review never enrolls; Factory-submitted sessions retain Producer
   await send.listeners.click();
   for(let i=0;i<10;i++)await tick();
   assert.equal(conversation,true);
-  assert.ok(descendants(nodes.rrDetail).some(n=>n.textContent==='I propose a clearer journey example.'));
+  const activity=descendants(nodes.rrDetail);
+  assert.ok(activity.some(n=>n.textContent==='I propose a clearer journey example.'));
+  assert.ok(activity.some(n=>n.className==='rr-activity-heading'&&/V2 NOT STARTED/.test(n.textContent)));
+  const times=activity.filter(n=>n.className==='rr-message-time');
+  assert.equal(times.length,2);
+  assert.ok(times.some(n=>/3:39/.test(n.textContent)&&/CDT/.test(n.textContent)));
+  assert.ok(times.some(n=>/3:42/.test(n.textContent)&&/CDT/.test(n.textContent)));
+  assert.ok(activity.some(n=>n.className==='rr-conversation-live'),'Conversation must not be hidden');
   const writes=calls.filter(v=>v.method==='POST');
   assert.equal(writes.length,1);
   assert.ok(writes.every(v=>v.url.endsWith('/producer-conversation')));
