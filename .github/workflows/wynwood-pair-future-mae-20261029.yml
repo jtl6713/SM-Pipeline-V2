@@ -50,3 +50,5 @@ jobs:
           name: wynwood-pair-mae-readback
           path: /tmp/wynwood-schedule-audit.json
           retention-days: 21
+
+# 2026-10-29: rerun exact #8059 after verifying its Retry Pending stage independently in Airtable; GET response omits optional ig_carousel_status. #8060 is already scheduled and is skipped.
