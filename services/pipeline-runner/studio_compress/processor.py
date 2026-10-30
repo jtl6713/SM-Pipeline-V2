@@ -19,7 +19,7 @@ from urllib.parse import quote
 
 from a1s import compressor as compressor_api
 from airtable.constants import PRODUCTION_REQUESTS_TABLE
-from studio_compress.ame_encoder import AmeNotReady, live_encoder
+from studio_compress.ame_encoder import AmeNotReady, live_encoder, source_for_asset
 from ap0.public_mp4 import (
     existing_finished_preview_url,
     finished_video_preview_key,
@@ -27,7 +27,6 @@ from ap0.public_mp4 import (
     stage_finished_video_preview,
 )
 from item4.clip_poster import is_video_master_asset
-from item4.sources import is_studio_master_key
 
 logger = logging.getLogger("pipeline-runner.studio-compress")
 
@@ -191,6 +190,7 @@ def compress_pending_assets(
     stage_preview: Callable[[str, str, bytes], str] | None = None,
     sleep: SleepFn = time.sleep,
     ame_encode: Callable[..., bytes] | None = None,
+    submit_drive_job: Callable[[str, str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     record, assets = load_assets(client, record_id)
     targets = [asset for asset in assets if needs_compress(asset)]
@@ -222,6 +222,7 @@ def compress_pending_assets(
                 stage_preview=stage,
                 sleep=sleep,
                 ame_encode=encoder,
+                submit_drive_job=submit_drive_job,
             )
             compressed += 1
         except Exception as exc:
@@ -275,13 +276,12 @@ def compress_one(
     stage_preview: Callable[[str, str, bytes], str],
     sleep: SleepFn = time.sleep,
     ame_encode: Callable[..., bytes] | None = None,
+    submit_drive_job: Callable[[str, str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     asset_id = str(asset.get("id") or "").strip()
-    r2_key = str(asset.get("r2_key") or "").strip()
     if not asset_id:
         raise RuntimeError("Master asset is missing an id")
-    if not is_studio_master_key(r2_key):
-        raise RuntimeError("Studio compression needs a private studio/master-assets key")
+    source_kind, source_value = source_for_asset(asset)
 
     existing_job = str(asset.get("compression_job_id") or "").strip()
     ffmpeg_job = "" if existing_job.startswith("ame-") else existing_job
@@ -310,11 +310,17 @@ def compress_one(
             job = None
 
     if not job_id:
-        payload = submit_job(
-            studio_master_download_url(r2_key),
-            str(asset.get("name") or "video.mp4"),
-            f"studio-{record_id}-{asset_id}",
-        )
+        source_name = str(asset.get("name") or "video.mp4")
+        if source_kind == "drive":
+            # The local FFmpeg fallback already supports authenticated Drive
+            # downloads, with no public sharing and no temporary R2 re-upload.
+            payload = (submit_drive_job or compressor_api.submit_job)(source_value, source_name)
+        else:
+            payload = submit_job(
+                studio_master_download_url(source_value),
+                source_name,
+                f"studio-{record_id}-{asset_id}",
+            )
         job_id = str(payload.get("job_id") or "").strip()
         if not job_id:
             raise RuntimeError("Video Compressor submit did not return a job_id")
