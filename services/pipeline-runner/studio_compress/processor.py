@@ -485,7 +485,12 @@ def _store_compressed(
         raise RuntimeError("Compressed preview exceeds the 95 MiB safety target")
     preview_url = stage_preview(record_id, asset_id, content)
     preview_key = finished_video_preview_key(record_id, asset_id)
-    original_size = asset_size_bytes(asset) or int(asset.get("original_size_bytes") or 0)
+    try:
+        original_size = int(asset.get("original_size_bytes") or 0)
+    except (TypeError, ValueError):
+        original_size = 0
+    if original_size <= 0:
+        original_size = asset_size_bytes(asset)
     _record, assets = load_assets(client, record_id)
     save_assets(
         client,
