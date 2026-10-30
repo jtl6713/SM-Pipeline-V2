@@ -111,7 +111,7 @@ test("only exact enabled scheduling lanes use atomic writers; others retain lega
     const body = topLevelFunctionBodies(sources[file]).get(name);
     assert.ok(body, `missing ${file}:${name}`);
     const guard = name === "fanoutProductionRequestOutputsToContentItems"
-      ? /scheduleReservationAuthorityEnabled\(env\)/
+      ? /scheduleReservationLaneEnabled\(env,/
       : /scheduleReservationLaneEnabled\(env,/;
     assert.match(
       body,
@@ -362,10 +362,10 @@ test("flag-on protective seed stripping and Factory vacate remain before legacy 
   const fanout = topLevelFunctionBodies(sources["worker-functions-02.mjs"])
     .get("fanoutProductionRequestOutputsToContentItems");
   assert.ok(fanout);
-  const flagAt = fanout.indexOf("scheduleReservationAuthorityEnabled(env)");
+  const flagAt = fanout.indexOf("scheduleReservationLaneEnabled(env,");
   const stripAt = fanout.indexOf("delete seed.Scheduled_Post_Date");
   const patchAt = fanout.indexOf("airtableFetch(env,STUDIO_PLATFORM_OUTPUT_TABLE");
-  assert.ok(flagAt >= 0 && stripAt > flagAt, "flag-on fanout must strip seed schedule fields");
+  assert.ok(flagAt >= 0 && stripAt > flagAt, "allowlisted-lane fanout must strip seed schedule fields");
   assert.ok(
     patchAt < 0 || stripAt < patchAt,
     "seed schedule stripping must happen before Platform Output POST/PATCH",
