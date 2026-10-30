@@ -211,9 +211,18 @@ jobs:
           set -euo pipefail
           WORKER="$(cat /tmp/studio-cover-repair/worker-name)"
           for cid in 1857 1858; do
-            code="$(curl -sS -o "/tmp/studio-cover-repair/delete-$cid.json" -w '%{http_code}' \
-              -X DELETE "https://$WORKER.joseph-t-logan.workers.dev/$cid" \
-              -H "X-One-Shot-Token: $(cat /tmp/studio-cover-repair/one-time-token)")"
+            code="000"
+            for attempt in $(seq 1 5); do
+              code="$(curl -sS -o "/tmp/studio-cover-repair/delete-$cid.json" -w '%{http_code}' \
+                -X DELETE "https://$WORKER.joseph-t-logan.workers.dev/$cid" \
+                -H "X-One-Shot-Token: $(cat /tmp/studio-cover-repair/one-time-token)" || true)"
+              if [[ "$code" == "200" ]]; then break; fi
+              # Idempotent exact-key R2 delete; transient Worker 500/1104
+              # can be safely retried, but never retry auth/scope errors.
+              if [[ "$code" != "500" && "$code" != "503" && "$code" != "404" && "$code" != "000" ]]; then break; fi
+              echo "old_cover_delete_transient=$cid HTTP=$code attempt=$attempt"
+              sleep 4
+            done
             if [[ "$code" != "200" ]]; then
               echo "Refused or failed exact old cover removal for $cid: HTTP $code" >&2
               head -c 450 "/tmp/studio-cover-repair/delete-$cid.json" >&2 || true
