@@ -59,6 +59,26 @@ validation is one exact source with an output/probe/readback, then the Studio
 manifest status and URL. Do not release or publish any content during a
 compression canary.
 
+### Compression result contract
+
+A source must become **smaller than 95 MiB** before Studio declares its
+compressed preview Ready. A completed AME encode is not sufficient. The live
+Chicago validation showed why: the first AME pass used the displayed
+`Drone Portrait 1080p` preset and produced **147,069,566 bytes** from an
+original **118,105,125-byte** clip. Runner v2 rejects an AME output larger
+than the 95 MiB cap, uses the private local FFmpeg fallback, and refuses to
+mark an oversized fallback Ready. Previously-Ready oversized AME outputs are
+eligible for exactly-scoped private reprocessing without re-encoding through
+the bad AME preset again.
+
+To keep Adobe Media Encoder the successful primary encoder, adjust the
+`social-standard-9x16` watch folder to a **real H.264 1080×1920 social preset
+with VBR target 8 Mbps / max 12 Mbps** (AAC stereo at 48 kHz). The displayed
+`Drone Portrait 1080p` name alone does not guarantee those bitrate values.
+For videos longer than approximately 95 seconds, even 8 Mbps can exceed the
+95 MiB size budget; the runner therefore still needs the output-size gate
+and automatic fallback. The original Drive master is never replaced.
+
 ## One-time Media Encoder setup
 
 Installed editor: Adobe Media Encoder 2026 (26.5). It has to be open in a logged-on Windows session. Watch Folders do not run after sign-out.
