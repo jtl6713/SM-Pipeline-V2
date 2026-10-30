@@ -43,7 +43,7 @@ function guard(x,number){
     r.review_status!=='Approved'||!statusAllowed.includes(r.publish_status)||
     r.do_not_publish===true||r.published_at||r.platform_post_id||
     r.platform_post_url||r.platform_media_id||r.publish_locked_by||
-    (number===8059&&r.ig_carousel_status!=='Retry Pending'))
+    (number===8059&&r.ig_carousel_status&&r.ig_carousel_status!=='Retry Pending'))
   throw Error('authoritative_guard_denied_'+number);
  return r;
 }
