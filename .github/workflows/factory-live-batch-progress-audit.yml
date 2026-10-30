@@ -90,7 +90,7 @@ jobs:
               exit 1
             fi
             echo "FACTORY_LIVE_SAMPLE=$ROUND"
-            jq -c '{at:(now|todateiso8601),totals,quality_signals,history_complete,history_scanned, batches:[.batches[] | {status,created_at,updated_at,total,approved_count,pending_count,failed_count,quality_signals,items:(.items // [] | map({status,error,next_attempt_ms,attempts})),children:(.children // [] | map({status,total,approved_count,pending_count,failed_count,profile_id,request_id,updated_at,quality_signals,items:(.items // [] | map({status,error,next_attempt_ms,attempts}))}))}]}' /tmp/factory-live.json
+            jq -c '{at:(now|todateiso8601),totals,quality_signals,history_complete,history_scanned, batches:[.batches[] | {job_id,request_id,group,profile_id,status,created_at,updated_at,total,approved_count,pending_count,failed_count,quality_signals,items:(.items // [] | map({id,output_id,platform,format,status,error,next_attempt_ms,attempts,total_attempts})),children:(.children // [] | map({job_id,profile_id,request_id,status,total,approved_count,pending_count,failed_count,updated_at,quality_signals,items:(.items // [] | map({id,output_id,platform,format,status,error,next_attempt_ms,attempts,total_attempts}))}))}]}' /tmp/factory-live.json
             cp /tmp/factory-live.json "/tmp/factory-live-$ROUND.json"
             if [[ "$ROUND" == "1" ]]; then sleep 75; fi
           done
