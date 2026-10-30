@@ -17542,6 +17542,7 @@ async function factoryBatchRecoverTerminalFailure(env, profileId, requestId, sna
       profile_id: profileId, record_id: item.id, output_id: Number(item.output_id),
       platform: item.platform || null, format: item.format || null,
       original_error: reason, failure_attempts: Number(exact[0].total_attempts || 0),
+      prior_failures: (exact[0].failure_history || []).slice(-10),
       recovery: "escalated_to_exception_history", public_publish: false,
     };
     const fields = {

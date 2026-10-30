@@ -69,6 +69,10 @@ export function factoryBatchSummary(job) {
       status: item.status, error: item.error || null,
       exception_recovery: item.exception_recovery || null,
       manual_retry_count: Number(item.manual_retry_count || 0),
+      auto_retry_count: Number(item.auto_retry_count || 0),
+      failure_history: item.failure_history || [],
+      removed_original_error: item.removed_original_error || null,
+      previous_failure_error: item.previous_failure_error || null,
       timing: factoryApprovalItemTiming(item),
     })),
   };
