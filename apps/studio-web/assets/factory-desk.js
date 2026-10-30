@@ -29,6 +29,26 @@
   const FACTORY_SELECTION_KEY = "studio.factory.batch-selection.v1";
   const FACTORY_LAST_BATCH_KEY = "studio.factory.last-batch.v1";
   const FACTORY_PENDING_REQUEST_KEY = "studio.factory.pending-approval-request.v1";
+  const FACTORY_ACCEPTED_OUTPUTS_KEY = "studio.factory.accepted-output-ids.v1";
+  // A successful accept must remain visible even if the Desk still has an old
+  // Ready-for-Review snapshot. This is a UX fence; R2 claims are authoritative.
+  function recentFactoryAccepted() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(FACTORY_ACCEPTED_OUTPUTS_KEY) || "{}");
+      const now = Date.now();
+      return Object.fromEntries(Object.entries(raw || {}).filter(([id, at]) =>
+        /^rec[A-Za-z0-9]+$/.test(id) && now - Number(at) < 48 * 60 * 60 * 1000));
+    } catch { return {}; }
+  }
+  function rememberFactoryAccepted(ids) {
+    const entries = recentFactoryAccepted();
+    for (const id of ids || []) if (/^rec[A-Za-z0-9]+$/.test(String(id))) entries[id] = Date.now();
+    try { localStorage.setItem(FACTORY_ACCEPTED_OUTPUTS_KEY, JSON.stringify(entries)); } catch {}
+  }
+  function pendingFactoryApproval() {
+    try { return JSON.parse(localStorage.getItem(FACTORY_PENDING_REQUEST_KEY) || "null"); }
+    catch { return null; }
+  }
   try {
     const saved = JSON.parse(localStorage.getItem(FACTORY_SELECTION_KEY) || "[]");
     state.selectedOutputs = new Set(Array.isArray(saved)
@@ -269,6 +289,7 @@
   }
 
   function canSelectBatchOutput(card) {
+    if (recentFactoryAccepted()[String(card?.id || "")]) return false;
     if (state.batchApprovalsEnabled === false) return false;
     if (state.batchGlobal?.enabled) {
       const platform = String(card?.platform || "");
@@ -377,13 +398,22 @@
     if (count) count.textContent = `${selectable} output${selectable === 1 ? "" : "s"} selected${planned > 1 ? ` · will submit as ${planned} batches` : ""}`;
     const submit = $("factoryBatchSubmit");
     if (submit) {
-      submit.disabled = !selectable || (!global && selectable > limit) || state.submittingBatch || state.batchApprovalsEnabled !== true;
+      const pending = pendingFactoryApproval();
+      const pendingIds = pending?.profile_id === "global" && Array.isArray(pending.ids)
+        ? pending.ids : null;
+      const pendingMismatch = pendingIds && (pendingIds.length !== selectable ||
+        pendingIds.some(id => !selectedCards.some(card => card.id === id)));
+      submit.disabled = !selectable || (!global && selectable > limit) ||
+        state.submittingBatch || state.batchApprovalsEnabled !== true || Boolean(pendingMismatch);
       submit.title = state.batchApprovalsEnabled === false
         ? "Batch approval rollout is disabled for this profile; individual approvals remain available."
         : global && planned > 1
           ? `This selection will be submitted as ${planned} durable batches, each within the ${limit}-total / ${perProfile}-per-profile safety limits.`
           : selectable > limit ? `Select at most ${limit} output${limit === 1 ? "" : "s"} for this rollout.` : "";
-      submit.textContent = state.submittingBatch ? "Submitting…" : `Submit Approvals${selectable ? ` (${selectable})` : ""}`;
+      submit.textContent = state.submittingBatch ? "Submitting…"
+        : pendingIds ? "Resume previous submission (same request)"
+        : `Submit Approvals${selectable ? ` (${selectable})` : ""}`;
+      if (pendingMismatch) submit.title = "An earlier submission is still unresolved. Refresh Activity; a different request is blocked until reconciliation.";
     }
     const clear = $("factoryBatchClear");
     if (clear) clear.disabled = !state.selectedOutputs.size || state.submittingBatch;
@@ -609,8 +639,10 @@
     let recovered = 0;
     for (const plan of pending.batches) {
       if (factoryActivityMatchesPlan(activity, plan)) {
+        rememberFactoryAccepted(plan.ids || []);
+        recovered += (plan.ids || []).length;
         for (const id of plan.ids || []) {
-          if (state.selectedOutputs.delete(id)) recovered++;
+          state.selectedOutputs.delete(id);
         }
       } else {
         remaining.push(plan);
@@ -633,6 +665,33 @@
     if (state.desk) renderDesk(state.desk);
     updateFactoryBatchToolbar();
     return recovered;
+  }
+
+  let factoryPendingReconcileAt = 0;
+  let factoryPendingReconcileRunning = false;
+  async function reconcilePersistedFactoryPending(force = false) {
+    const pending = pendingFactoryApproval();
+    if (state.submittingBatch || factoryPendingReconcileRunning ||
+        pending?.profile_id !== "global" || !Array.isArray(pending.batches) ||
+        !pending.batches.length) return;
+    if (!force && Date.now() - factoryPendingReconcileAt < 15000) return;
+    factoryPendingReconcileAt = Date.now();
+    factoryPendingReconcileRunning = true;
+    try {
+      // Active Activity intentionally excludes completed batches. Read each
+      // pending request by exact ID, including after reload or mobile timeout.
+      for (const plan of pending.batches) {
+        try {
+          const activity = await fetchJson("/api/factory/approval-batches?scope=all&request_id=" +
+            encodeURIComponent(plan.request_id), { cache: "no-store" });
+          const confirmed = factoryActivityMatchesPlan(activity, plan);
+          if (confirmed) reconcilePendingGlobalSelection({ batches: [confirmed] });
+        } catch { /* Preserve unresolved request identity; never create a new one. */ }
+      }
+    } finally {
+      factoryPendingReconcileRunning = false;
+      updateFactoryBatchToolbar();
+    }
   }
 
   async function recoverSubmittedFactoryPlan(plan, originalError) {
@@ -674,6 +733,7 @@
       reconcilePendingGlobalSelection(batch);
       document.dispatchEvent(new CustomEvent("factory:batch-status", { detail: batch }));
       reconcileFinishedBatchDesk(batch?.batches?.[0] || batch).catch(() => {});
+      reconcilePersistedFactoryPending().catch(() => {});
       // The API intentionally omits completed jobs from the active feed.
       // When a running batch disappears, refresh the authoritative Desk once,
       // without fetching terminal batch history or leaving stale Needs Eyes rows.
@@ -727,8 +787,10 @@
       && Array.isArray(pending?.ids)
       && JSON.stringify(pending.ids) === JSON.stringify(selectionIds)
       && Array.isArray(pending?.batches)
-      && pending.batches.every((row) => Array.isArray(row?.ids) && row?.request_id)
-      && Date.now() - Number(pending.saved_ms || 0) < 24 * 60 * 60 * 1000;
+      && pending.batches.every((row) => Array.isArray(row?.ids) && row?.request_id);
+    if (pending && !reusable) {
+      throw new Error("A previous approval remains unresolved. Refresh Activity before starting any different submission.");
+    }
     const planned = reusable
       ? pending.batches
       : planFactoryApprovalBatches(ready, maxTotal, maxPerProfile).map((batch) => ({
@@ -782,6 +844,7 @@
         if (!batch.accepted) throw new Error("Approval queue did not acknowledge the batch.");
         acceptedOutputs += chunk.length;
         acceptedBatches++;
+        rememberFactoryAccepted(plan.ids);
         chunk.forEach((card) => state.selectedOutputs.delete(card.id));
         saveFactorySelection();
         const remaining = planned.slice(index + 1);
@@ -791,9 +854,11 @@
           job_id: batch.job_id, profile_id: "global",
         })); } catch {}
         renderFactoryBatchActivity(batch);
-        setStatus(batch.recovered_after_error
-          ? `Recovered a confirmed server submission after a connection error. Accepted ${acceptedOutputs} of ${ready.length} outputs; continuing automatically.`
-          : `Accepted ${acceptedOutputs} of ${ready.length} outputs in ${acceptedBatches} batch${acceptedBatches === 1 ? "" : "es"}. Server processing continues in the background.`);
+        setStatus(batch.duplicate_prevented
+          ? `These outputs were already submitted. Original batch restored; no duplicate created. ${acceptedOutputs} of ${ready.length} reconciled.`
+          : batch.recovered_after_error
+            ? `Recovered a confirmed server submission after a connection error. Accepted ${acceptedOutputs} of ${ready.length} outputs; continuing automatically.`
+            : `Accepted ${acceptedOutputs} of ${ready.length} outputs in ${acceptedBatches} batch${acceptedBatches === 1 ? "" : "es"}. Server processing continues in the background.`);
       }
       if (state.desk) renderDesk(state.desk);
       closeFactoryPreview();
@@ -812,6 +877,10 @@
 
   async function submitFactoryBatchApprovals() {
     if (state.submittingBatch) return;
+    const unresolved = pendingFactoryApproval();
+    if (unresolved?.profile_id === "global") {
+      setStatus("Resuming the saved Factory submission using its original request ID; no new request will be created.");
+    }
     if (state.batchApprovalsEnabled === false) { setStatus("Batch approvals are not enabled yet; individual approvals still work.", true); return; }
     const ready = readyFactoryOutputs(true).filter((card) => state.selectedOutputs.has(card.id));
     if (!ready.length) { updateFactoryBatchToolbar(); setStatus("Select one or more review-ready outputs.", true); return; }
@@ -838,7 +907,7 @@
     try { pending = JSON.parse(localStorage.getItem(FACTORY_PENDING_REQUEST_KEY) || "null"); } catch {}
     const reuseRequest = pending && pending.profile_id === profiles[0]
       && JSON.stringify(pending.ids) === JSON.stringify(selectionIds)
-      && Date.now() - Number(pending.saved_ms || 0) < 24 * 60 * 60 * 1000;
+;
     const requestId = reuseRequest ? pending.request_id : newFactoryRequestId();
     try { localStorage.setItem(FACTORY_PENDING_REQUEST_KEY, JSON.stringify({
       request_id: requestId, profile_id: profiles[0], ids: selectionIds, saved_ms: Date.now(),
@@ -865,6 +934,7 @@
         setStatus("A previous batch for this profile is still running. Selection is preserved; submit again after it completes.", true);
         return;
       }
+      rememberFactoryAccepted(selectionIds);
       state.lastBatchProfile = profiles[0];
       try { localStorage.setItem(FACTORY_LAST_BATCH_KEY, JSON.stringify({ job_id: batch.job_id, profile_id: profiles[0] })); } catch {}
       try { localStorage.removeItem(FACTORY_PENDING_REQUEST_KEY); } catch {}
@@ -1785,6 +1855,7 @@
       const desk = await fetchJson("/api/factory/desk", { cache: "no-store" });
       renderDesk(desk);
       setStatus(desk.warning || "Factory Desk ready.");
+      reconcilePersistedFactoryPending(true).catch(() => {});
       return desk;
     } catch (error) {
       setStatus(error.message || String(error), true);

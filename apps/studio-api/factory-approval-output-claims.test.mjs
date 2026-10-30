@@ -1,0 +1,145 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import {
+  factoryOutputClaimReserve, factoryOutputClaimInspect,
+  FACTORY_OUTPUT_CLAIMS_PREFIX,
+} from "./factory-approval-output-claims.mjs";
+
+const profile = "recLosAngelesProfile";
+const groupA = "request_la_original_20261030";
+const groupB = "request_la_seconddevice_20261030";
+const ids = Array.from({ length: 7 }, (_, i) => "recLosAngelesOutput" + (i + 1));
+
+class R2 {
+  constructor() { this.items = new Map(); this.revision = 0; }
+  async get(key) {
+    const o = this.items.get(key);
+    return o ? { etag: o.etag, text: async () => JSON.stringify(o.value) } : null;
+  }
+  async put(key, content, options = {}) {
+    const old = this.items.get(key);
+    const rule = options.onlyIf;
+    if (rule instanceof Headers && rule.get("If-None-Match") === "*" && old) return null;
+    if (rule?.etagMatches && rule.etagMatches !== old?.etag) return null;
+    const etag = String(++this.revision);
+    const value = JSON.parse(content);
+    this.items.set(key, { value, etag });
+    return { etag };
+  }
+  async list({ prefix, limit = 1000, cursor } = {}) {
+    const keys = [...this.items.keys()].filter(x => x.startsWith(prefix)).sort();
+    const start = cursor ? keys.findIndex(x => x === cursor) + 1 : 0;
+    const slice = keys.slice(start, start + limit);
+    return {
+      objects: slice.map(key => ({ key, uploaded: new Date().toISOString() })),
+      truncated: start + slice.length < keys.length,
+      cursor: slice.length && start + slice.length < keys.length ? slice.at(-1) : undefined,
+    };
+  }
+}
+
+function legacyJob(id, requestId, entries, timestamp, groupRequestId = null) {
+  return {
+    schema: "studio.factory-batch.2", id: "fb_" + requestId,
+    request_id: requestId, group_request_id: groupRequestId,
+    profile_id: profile, created_at: timestamp, status: "completed", items: entries,
+  };
+}
+
+test("LA seven-output incident: a new request ID cannot create a second batch", async () => {
+  const bucket = new R2();
+  assert.equal((await factoryOutputClaimReserve(bucket, {
+    profileId: profile, requestId: groupA, ids,
+  })).ok, true);
+  const duplicate = await factoryOutputClaimReserve(bucket, {
+    profileId: profile, requestId: groupB, ids,
+  });
+  assert.equal(duplicate.ok, false);
+  assert.deepEqual(duplicate.conflicts.map(row => row.id), ids);
+  assert.deepEqual(duplicate.owners, [groupA]);
+  const original = await factoryOutputClaimReserve(bucket, {
+    profileId: profile, requestId: groupA, ids,
+  });
+  assert.equal(original.ok, true);
+  assert.equal(original.already_reserved, true);
+  assert.ok(bucket.items.has(FACTORY_OUTPUT_CLAIMS_PREFIX + "/" + profile + ".json"));
+});
+
+test("partial overlap is rejected without claiming the non-overlapping IDs", async () => {
+  const bucket = new R2();
+  await factoryOutputClaimReserve(bucket, { profileId: profile, requestId: groupA, ids: ids.slice(0, 3) });
+  const mixed = await factoryOutputClaimReserve(bucket, {
+    profileId: profile, requestId: groupB, ids: [ids[1], ids[3]],
+  });
+  assert.equal(mixed.ok, false);
+  const newOnly = await factoryOutputClaimInspect(bucket, {
+    profileId: profile, requestId: groupB, ids: [ids[3]],
+  });
+  assert.equal(newOnly.ok, true);
+});
+
+test("simultaneous devices serialize through the R2 profile CAS", async () => {
+  const bucket = new R2();
+  const [a, b] = await Promise.all([
+    factoryOutputClaimReserve(bucket, { profileId: profile, requestId: groupA, ids }),
+    factoryOutputClaimReserve(bucket, { profileId: profile, requestId: groupB, ids }),
+  ]);
+  assert.equal(Number(a.ok) + Number(b.ok), 1);
+  const loser = a.ok ? b : a;
+  assert.equal(loser.conflicts.length, 7);
+});
+
+test("interrupted enrollment remains claimed for its original request ID", async () => {
+  const bucket = new R2();
+  await factoryOutputClaimReserve(bucket, { profileId: profile, requestId: groupA, ids });
+  // Deliberately omit the group ledger, modelling a crash before the group PUT.
+  const second = await factoryOutputClaimReserve(bucket, { profileId: profile, requestId: groupB, ids });
+  assert.equal(second.ok, false);
+  const recovery = await factoryOutputClaimReserve(bucket, { profileId: profile, requestId: groupA, ids });
+  assert.equal(recovery.ok, true);
+});
+
+test("legacy ledgers migrate oldest valid owner; superseded duplicates do not own claims", async () => {
+  const bucket = new R2();
+  const prefix = "studio/state/factory-approvals/v2/jobs/" + profile + "/";
+  const original = legacyJob("original", "legacyChildOriginal_20261030",
+    ids.map(id => ({ id, status: "approved" })), "2026-10-30T14:00:00Z", groupA);
+  const duplicate = legacyJob("duplicate", "legacyChildDuplicate_20261030",
+    ids.map(id => ({ id, status: "superseded_duplicate" })),
+    "2026-10-30T14:05:00Z", groupB);
+  await bucket.put(prefix + original.request_id + ".json", JSON.stringify(original));
+  await bucket.put(prefix + duplicate.request_id + ".json", JSON.stringify(duplicate));
+  const result = await factoryOutputClaimInspect(bucket, {
+    profileId: profile, requestId: groupB, ids,
+  });
+  assert.deepEqual(result.owners, [groupA]);
+  assert.equal(result.conflicts.length, 7);
+});
+
+test("orphan global parent is indexed when a crash prevented child enqueue", async () => {
+  const bucket = new R2();
+  await bucket.put("studio/state/factory-approvals/v2/groups/" + groupA + ".json",
+    JSON.stringify({
+      schema: "studio.factory-approval-group.1", request_id: groupA,
+      created_at: "2026-10-30T14:01:00Z", status: "enqueuing",
+      records: ids.map(id => ({ id, profile_id: profile })),
+    }));
+  const newAttempt = await factoryOutputClaimReserve(bucket, {
+    profileId: profile, requestId: groupB, ids,
+  });
+  assert.equal(newAttempt.ok, false);
+  assert.deepEqual(newAttempt.owners, [groupA]);
+});
+
+test("global and profile-local routes share the same canonical output-ID fence", () => {
+  const worker = readFileSync(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+  assert.match(worker, /factoryOutputClaimReserve/);
+  assert.match(worker, /factoryOutputClaimInspect/);
+  assert.match(worker, /factoryGroupRecordsFromAirtablePreflight\(\s*env, authorization, ids, payload, policy/);
+  assert.match(worker, /duplicate_prevented: true/);
+  const ui = readFileSync(new URL("../studio-web/assets/factory-desk.js", import.meta.url), "utf8");
+  assert.match(ui, /rememberFactoryAccepted\(plan\.ids\)/);
+  assert.match(ui, /reconcilePersistedFactoryPending/);
+  assert.match(ui, /Resume previous submission \(same request\)/);
+});

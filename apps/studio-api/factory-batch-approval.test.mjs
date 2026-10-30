@@ -181,28 +181,20 @@ test("Factory strict occupancy is per profile and platform, once per platform in
   assert.match(source, /filter\(\(item\) => !\["approved", "already_satisfied", "failed"\]/);
 });
 
-test("Global Factory group submit accepts from desk hints before Airtable", () => {
-  // Group submit lives as a module sibling after the submit-route extract marker,
-  // so assert against the live ESM source rather than the reconstructed Worker.
+test("Global Factory group submit authorizes Airtable before claiming output IDs", () => {
   const start = functions04.indexOf("async function factoryBatchGroupSubmitRoute(");
-  assert.ok(start >= 0, "factoryBatchGroupSubmitRoute present");
+  assert.ok(start >= 0);
   const end = functions04.indexOf("export async function factoryBatchCronResume(", start);
-  const group = functions04.slice(start, end > start ? end : start + 8000);
-  assert.match(functions04, /function factoryGroupRecordsFromClientHints/);
-  assert.match(group, /factoryGroupRecordsFromClientHints\(ids, payload, policy\)/);
-  assert.match(group, /accept_mode: "client_hints"/);
-  assert.match(group, /durable accept/);
-  assert.match(group, /factoryMapSubmitAirtableError/);
-  assert.match(group, /Airtable is busy/);
-  // Happy path must not wait on N output GETs before enqueue.
-  const hintsIdx = group.indexOf("factoryGroupRecordsFromClientHints");
-  const enqueueIdx = group.indexOf("factoryApprovalGroupEnqueue");
-  assert.ok(hintsIdx >= 0 && enqueueIdx > hintsIdx, "client hints before enqueue");
-  assert.doesNotMatch(
-    group.slice(hintsIdx, enqueueIdx),
-    /studioFetchApproveAllRecordsByIds/,
-  );
-  // Legacy clients without profile_id still get a bounded Airtable fallback.
+  const group = functions04.slice(start, end > start ? end : start + 12000);
+  const preflightIdx = group.indexOf("factoryGroupRecordsFromAirtablePreflight(");
+  const claimsIdx = group.indexOf("factoryOutputClaimReserve(");
+  const enqueueIdx = group.indexOf("factoryApprovalGroupEnqueue(");
+  assert.ok(preflightIdx >= 0 && claimsIdx > preflightIdx && enqueueIdx > claimsIdx,
+    "authoritative preflight then CAS output claims then durable enqueue");
+  assert.doesNotMatch(group.slice(0, claimsIdx), /factoryGroupRecordsFromClientHints\(ids, payload, policy\)/);
+  assert.match(group, /factoryOutputClaimInspect/);
+  assert.match(group, /duplicate_prevented: true/);
+  assert.match(group, /accept_mode: "authoritative_preflight"/);
   assert.match(functions04, /async function factoryGroupRecordsFromAirtablePreflight/);
   assert.match(functions04, /SUBMIT_BUDGET_MS/);
   assert.match(functions04, /Factory submit timed out verifying outputs before accept/);

@@ -82,6 +82,7 @@ import {
 } from "./ready-production-queue.mjs";
 import { factoryGlobalPolicy, factoryGlobalAcceptsOutput } from "./factory-batch-global-policy.mjs";
 import { readFactoryGlobalRolloutHealth } from "./factory-global-rollout-health.mjs";
+import { factoryOutputClaimInspect, factoryOutputClaimReserve } from "./factory-approval-output-claims.mjs";
 import {
   factoryApprovalGroupPlan, factoryApprovalGroupEnqueue, factoryApprovalGroupRead,
   factoryApprovalGroupResume, factoryApprovalGroupStatus, factoryApprovalGroupRetryFailures,
@@ -17140,6 +17141,18 @@ export async function factoryBatchSubmitRoute(request, env, authorization, ctx =
       }
     }
   }
+  // The legacy single-profile route must participate in the same CAS registry
+  // as global groups; otherwise a second device could bypass the global fence.
+  try {
+    const claim = await factoryOutputClaimReserve(env.STUDIO_MEDIA, {
+      profileId: profile.id, requestId, ids: records.map(row => row.id),
+    });
+    if (!claim.ok) throw new HttpError(409,
+      "One or more outputs already belong to a Factory approval. Check Activity; no duplicate was created.");
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(503, error?.message || "Factory claim check unavailable; nothing was submitted");
+  }
   let enqueued;
   try {
     enqueued = await factoryBatchEnqueue(env.STUDIO_MEDIA, {
@@ -17321,14 +17334,11 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
       `Airtable is busy (${Math.ceil(coolMs / 1000)}s); Factory cannot accept a new batch yet. Retry shortly.`);
   }
 
-  let records;
-  try {
-    records = factoryGroupRecordsFromClientHints(ids, payload, policy);
-  } catch (error) {
-    // Legacy clients without profile_id hints: one bounded Airtable preflight.
-    if (!(error instanceof HttpError) || error.status !== 400) throw error;
-    records = await factoryGroupRecordsFromAirtablePreflight(env, authorization, ids, payload, policy);
-  }
+  // Client hints are display metadata, never proof of eligibility or profile
+  // ownership. Validate Airtable's canonical records before reserving IDs.
+  const records = await factoryGroupRecordsFromAirtablePreflight(
+    env, authorization, ids, payload, policy,
+  );
 
   const verifiedProfiles = new Set();
   for (const row of records) {
@@ -17353,6 +17363,61 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
     throw new HttpError(400, error.message || "Invalid global Factory group");
   }
 
+  // First inspect *every* profile before mutating any claim registry. This
+  // avoids reservations for ordinary partial-overlap errors. The subsequent
+  // per-profile CAS reserves still close concurrent multi-device races.
+  const byProfile = new Map();
+  for (const record of records) {
+    const list = byProfile.get(record.profile_id) || [];
+    list.push(record.id);
+    byProfile.set(record.profile_id, list);
+  }
+  const inspections = [];
+  try {
+    for (const [profileId, outputIds] of [...byProfile].sort(([a], [b]) => a.localeCompare(b))) {
+      const check = await factoryOutputClaimInspect(env.STUDIO_MEDIA, {
+        profileId, requestId, ids: outputIds,
+      });
+      inspections.push(check);
+    }
+  } catch (error) {
+    throw new HttpError(503, error?.message || "Factory claim history unavailable; no batch created");
+  }
+  const conflicting = inspections.flatMap(row => row.conflicts);
+  if (conflicting.length) {
+    // Exact duplicate selection on another device: return the original
+    // receipt. Partial overlap is a true 409, never silently resubmitted.
+    const owners = [...new Set(conflicting.map(row => row.request_id))];
+    if (conflicting.length === records.length && owners.length === 1) {
+      const existingGroup = await factoryApprovalGroupRead(env.STUDIO_MEDIA, owners[0]);
+      const expected = new Set(ids);
+      if (existingGroup?.records?.length === expected.size &&
+          existingGroup.records.every(row => expected.has(row.id))) {
+        const canonical = await factoryApprovalGroupStatus(env.STUDIO_MEDIA, owners[0]);
+        if (canonical) return respond(request, env, {
+          ...canonical, accepted: true, already_submitted: true,
+          duplicate_prevented: true, original_request_id: owners[0],
+        });
+      }
+    }
+    throw new HttpError(409,
+      "Selected outputs overlap another Factory approval. No new batch was created; check Activity.");
+  }
+  try {
+    for (const [profileId, outputIds] of [...byProfile].sort(([a], [b]) => a.localeCompare(b))) {
+      const claim = await factoryOutputClaimReserve(env.STUDIO_MEDIA, {
+        profileId, requestId, ids: outputIds,
+      });
+      if (!claim.ok) throw new HttpError(409,
+        "Another submission claimed one or more outputs. No new batch was created; check Activity.");
+    }
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    // A partially reserved request is intentionally left fail-closed and can
+    // only be resumed by the SAME request ID; do not silently create a new ID.
+    throw new HttpError(503, error?.message || "Factory claim pending; retry with the same request ID");
+  }
+
   let submitted;
   try {
     submitted = await factoryApprovalGroupEnqueue(env.STUDIO_MEDIA, {
@@ -17372,7 +17437,7 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
   } catch (error) {
     console.warn("Factory group process schedule failed after durable accept", requestId, error);
   }
-  return respond(request, env, { ...submitted, accepted: true, accept_mode: "client_hints" });
+  return respond(request, env, { ...submitted, accepted: true, accept_mode: "authoritative_preflight" });
 }
 
 /**
@@ -17418,11 +17483,9 @@ async function factoryGroupRecordsFromAirtablePreflight(env, authorization, ids,
   const records = [];
   for (const id of ids) {
     const record = byId.get(id);
-    let profileId = ownershipCache.get(id) || null;
-    if (!profileId) {
-      const hinted = String(clientInfo.get(id)?.profile_id || "").trim();
-      if (/^rec[A-Za-z0-9]+$/.test(hinted)) profileId = hinted;
-    }
+    // Do not trust client-supplied profile hints if the canonical ownership
+    // chain is missing or ambiguous.
+    const profileId = ownershipCache.get(id) || null;
     if (!profileId || !factoryGlobalAcceptsOutput(policy, record) ||
         Boolean(f(record, "Do_Not_Publish")) || !studioOutputReadyForPublishApproval(record)) {
       throw new HttpError(409, "At least one selected output is not ready or eligible for global batch approval");
