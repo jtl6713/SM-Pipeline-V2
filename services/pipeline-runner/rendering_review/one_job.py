@@ -324,7 +324,7 @@ def _render_sources(client,request,original_by_id,props,plan,*,drive=None):
                     if r.status_code!=200 or not r.headers.get("Content-Type","").startswith("image/"):
                         fail("review_image_cache_unavailable")
                     chunk=next(r.iter_content(chunk_size=1024),b"")
-                    if not (chunk.startswith(b"\\xff\\xd8") or chunk.startswith(b"\\x89PNG")):
+                    if not (chunk.startswith(b"\xff\xd8") or chunk.startswith(b"\x89PNG")):
                         fail("review_image_not_binary")
             except requests.RequestException as exc:
                 raise ExactReviewRenderDenied("review_image_cache_unavailable") from exc
