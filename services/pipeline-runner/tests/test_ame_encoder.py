@@ -10,6 +10,8 @@ from studio_compress.ame_encoder import (
     encode_downloaded_master,
     live_encoder,
     preset_for_asset,
+    source_for_asset,
+    fetch_master,
 )
 
 
@@ -326,3 +328,75 @@ def test_reuses_an_encode_media_encoder_already_finished(tmp_path: Path):
     assert content == b"x" * 40000
     assert not (out / "vid1-55.mp4").exists()
     assert not parked.exists()
+
+
+def test_authoritative_drive_original_is_a_valid_private_compression_source():
+    asset = _asset(
+        r2_key=None,
+        authoritative_storage="google_drive",
+        google_drive_file_id="1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr",
+        media_asset_record_id="recSITCujCsJTNcDe",
+    )
+    assert source_for_asset(asset) == ("drive", "1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr")
+    assert source_for_asset(_asset())[0] == "studio"
+
+
+def test_missing_unverified_or_public_source_is_not_compressed():
+    asset = _asset(r2_key=None, google_drive_file_id="1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr")
+    with pytest.raises(RuntimeError, match="no private master"):
+        source_for_asset(asset)
+    with pytest.raises(RuntimeError, match="no private master"):
+        source_for_asset(_asset(r2_key="https://example.com/master.mp4"))
+    with pytest.raises(RuntimeError, match="no private master"):
+        source_for_asset(_asset(
+            r2_key=None, authoritative_storage="google_drive",
+            media_asset_record_id="recSITCujCsJTNcDe", google_drive_file_id="../secrets",
+        ))
+
+
+def test_ame_uses_private_drive_source_for_library_asset(tmp_path: Path):
+    root = _root(tmp_path)
+    inbox = root / "inbox" / "social-standard-9x16"
+    out = root / "out" / "social-standard-9x16"
+    fetched = []
+
+    def fetch(source, dest):
+        fetched.append(source)
+        dest.write_bytes(b"original-in-drive")
+
+    def sleep(_seconds):
+        source = next(inbox.glob("*.mov"))
+        (out / f"{source.stem}.mp4").write_bytes(b"e" * 40000)
+        source.unlink()
+
+    asset = _asset(
+        r2_key=None,
+        authoritative_storage="google_drive",
+        google_drive_file_id="1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr",
+        media_asset_record_id="recSITCujCsJTNcDe",
+    )
+    content = encode_downloaded_master(
+        root=root, asset=asset, fetch=fetch,
+        sleep=sleep, monotonic=lambda: 0, now=lambda: 100,
+    )
+    assert fetched == ["drive:1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr"]
+    assert content == b"e" * 40000
+    assert list(inbox.iterdir()) == []
+    assert list(out.iterdir()) == []
+
+
+def test_drive_fetch_streams_original_without_public_sharing(tmp_path: Path, monkeypatch):
+    from integrations import google_drive
+
+    calls = []
+
+    class FakeDrive:
+        def download_file_to_path(self, file_id, path):
+            calls.append(file_id)
+            Path(path).write_bytes(b"private-drive-file")
+
+    monkeypatch.setattr(google_drive, "GoogleDriveClient", lambda: FakeDrive())
+    dest = tmp_path / "master.mp4"
+    fetch_master("drive:1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr", dest)
+    assert calls == ["1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr"]
+    assert dest.read_bytes() == b"private-drive-file"
