@@ -774,3 +774,5 @@ Rendering Review V3 source validation + Producer executable timeline canary code
 2026-10-30: Deploy Factory duplicate-ledger terminal recognition after verified seven-output LA overlap. New `superseded_duplicate` bookkeeping status counts as terminal skipped, with original batch retaining all pending approvals. No Platform Output, schedule, publish, or user-content mutation by deployment.
 
 2026-10-30: Deploy Worker 0.10.699-factory-idempotency-claims from PR #1373. Durable per-profile R2 output-ID claim registry, legacy parent/child migration, authoritative Airtable preflight, exact duplicate original receipt and partial-overlap rejection across devices. No automated public publishing or scheduling-rule changes; fail-closed on ambiguous submissions.
+
+2026-10-30: Deploy Worker 0.10.700-ame-output-size-guard. Repair previously marked Ready AME outputs larger than 95 MiB, prevent Drive-backed progress-only false Ready; preserve source video, schedule and publishing. Exact Chicago Waterfront video regression.
