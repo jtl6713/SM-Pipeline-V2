@@ -15651,7 +15651,10 @@ function timedScriptAssetLabel(asset, index) {
     const promoteButton = $("promoteProductionRequest");
     if (item4PromoteInFlight || promoteButton?.dataset.busy === "true" || promoteButton?.disabled) return;
     const approvalRequestId = String(activeProductionRequest.id);
-    if (item4PromotionReadbackRequired.has(approvalRequestId)) {
+    if (item4PromotionReadbackRequired.has(approvalRequestId)
+        || String(activeProductionRequest.status || "") === "Submitted") {
+      // All Submitted buttons are read-only, including after page reload.
+      // Never POST /promote a second time merely to check completion.
       item4PromoteInFlight = true;
       if (promoteButton) { promoteButton.disabled = true; promoteButton.dataset.busy = "true"; promoteButton.textContent = "Checking…"; }
       const readback = await readProductionApprovalAfterError(approvalRequestId);
