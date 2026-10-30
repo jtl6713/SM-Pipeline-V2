@@ -640,8 +640,9 @@
     for (const plan of pending.batches) {
       if (factoryActivityMatchesPlan(activity, plan)) {
         rememberFactoryAccepted(plan.ids || []);
+        recovered += (plan.ids || []).length;
         for (const id of plan.ids || []) {
-          if (state.selectedOutputs.delete(id)) recovered++;
+          state.selectedOutputs.delete(id);
         }
       } else {
         remaining.push(plan);
@@ -664,6 +665,33 @@
     if (state.desk) renderDesk(state.desk);
     updateFactoryBatchToolbar();
     return recovered;
+  }
+
+  let factoryPendingReconcileAt = 0;
+  let factoryPendingReconcileRunning = false;
+  async function reconcilePersistedFactoryPending(force = false) {
+    const pending = pendingFactoryApproval();
+    if (state.submittingBatch || factoryPendingReconcileRunning ||
+        pending?.profile_id !== "global" || !Array.isArray(pending.batches) ||
+        !pending.batches.length) return;
+    if (!force && Date.now() - factoryPendingReconcileAt < 15000) return;
+    factoryPendingReconcileAt = Date.now();
+    factoryPendingReconcileRunning = true;
+    try {
+      // Active Activity intentionally excludes completed batches. Read each
+      // pending request by exact ID, including after reload or mobile timeout.
+      for (const plan of pending.batches) {
+        try {
+          const activity = await fetchJson("/api/factory/approval-batches?scope=all&request_id=" +
+            encodeURIComponent(plan.request_id), { cache: "no-store" });
+          const confirmed = factoryActivityMatchesPlan(activity, plan);
+          if (confirmed) reconcilePendingGlobalSelection({ batches: [confirmed] });
+        } catch { /* Preserve unresolved request identity; never create a new one. */ }
+      }
+    } finally {
+      factoryPendingReconcileRunning = false;
+      updateFactoryBatchToolbar();
+    }
   }
 
   async function recoverSubmittedFactoryPlan(plan, originalError) {
@@ -703,6 +731,7 @@
       }
       renderFactoryBatchActivity(batch);
       reconcilePendingGlobalSelection(batch);
+      reconcilePersistedFactoryPending().catch(() => {});
       document.dispatchEvent(new CustomEvent("factory:batch-status", { detail: batch }));
       reconcileFinishedBatchDesk(batch?.batches?.[0] || batch).catch(() => {});
       // The API intentionally omits completed jobs from the active feed.
@@ -905,6 +934,7 @@
         setStatus("A previous batch for this profile is still running. Selection is preserved; submit again after it completes.", true);
         return;
       }
+      rememberFactoryAccepted(selectionIds);
       state.lastBatchProfile = profiles[0];
       try { localStorage.setItem(FACTORY_LAST_BATCH_KEY, JSON.stringify({ job_id: batch.job_id, profile_id: profiles[0] })); } catch {}
       try { localStorage.removeItem(FACTORY_PENDING_REQUEST_KEY); } catch {}
@@ -1825,6 +1855,7 @@
       const desk = await fetchJson("/api/factory/desk", { cache: "no-store" });
       renderDesk(desk);
       setStatus(desk.warning || "Factory Desk ready.");
+      reconcilePersistedFactoryPending(true).catch(() => {});
       return desk;
     } catch (error) {
       setStatus(error.message || String(error), true);
