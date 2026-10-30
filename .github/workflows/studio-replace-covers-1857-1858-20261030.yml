@@ -114,7 +114,7 @@ jobs:
             -o /tmp/studio-cover-repair/versions.json
           VERSION_ID="$(jq -er '(.result.items // .result.versions // .result | if type == "array" then . else [] end) | sort_by(.number // 0) | last | .id' /tmp/studio-cover-repair/versions.json)"
           jq -cn --arg v "$VERSION_ID" '{strategy:"percentage",versions:[{version_id:$v,percentage:100}]}' \
-            -o /tmp/studio-cover-repair/deploy-payload.json
+            > /tmp/studio-cover-repair/deploy-payload.json
           deploy_code="$(curl -sS -o /tmp/studio-cover-repair/deploy-result.json -w '%{http_code}' -X POST \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER/deployments" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' \
