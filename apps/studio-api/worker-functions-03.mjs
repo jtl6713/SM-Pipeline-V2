@@ -695,6 +695,7 @@ import {
   platformOutputSeedFields,
   studioFinishedSeedOverlay,
   fanoutProductionRequestOutputsToContentItems,
+  finalizeProductionRequestPromotion,
   armStudioParentForP3Handoff,
   pulseStudioP2Handoff,
   pulseStudioC2Handoff,
@@ -8849,7 +8850,46 @@ export function cadenceScheduleSync(ctx, env, options = {}) {
 }
 /*__STUDIO_WORKER_END:cadenceScheduleSync__*/
 
-export async function studioHealPromotedMissingFanout(env, { limit = 8 } = {}) {
+export async function studioHealPromotedMissingFanout(env, { limit = 8, ctx = null } = {}) {
+  // Repair old, Submitted approvals only after I4 has definitively promoted
+  // their Idea and the sole authoritative Content Item owns this request.
+  // This performs a *missing-only* fanout via the canonical finalizer: it
+  // never sends a second I3 approval or restamps an existing render.
+  const pending = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    limit: Math.min(8, Math.max(1, limit)),
+    sortField: "Updated_At",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Active}=1,{Request_Status}="Submitted",{Promoted_Content_Item}!=BLANK())',
+  }).catch(() => []);
+  let recoveredSubmitted = 0;
+  for (const pendingRequest of pending || []) {
+    if (recoveredSubmitted >= 1) break; // bounded per cron tick
+    try {
+      const submittedMs = Date.parse(String(f(pendingRequest, "Submitted_At") || ""));
+      if (!Number.isFinite(submittedMs) || Date.now() - submittedMs < 10 * 60 * 1000) continue;
+      const parentId = studioFirstLinkedId(f(pendingRequest, "Promoted_Content_Item"));
+      const ideaId = studioFirstLinkedId(f(pendingRequest, "Idea_Candidate"));
+      if (!parentId || !ideaId) continue;
+      const [idea, parent] = await Promise.all([
+        airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId),
+        airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId),
+      ]);
+      const ideaParent = studioFirstLinkedId(f(idea, "Content Items"))
+        || String(f(idea, "Promoted_Content_Record_ID") || "").trim();
+      const owners = arrayOrEmpty(f(parent, "Production_Request"));
+      if (ideaParent !== parentId || owners.length !== 1 || owners[0] !== pendingRequest.id) continue;
+      const latest = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, pendingRequest.id);
+      if (String(f(latest, "Request_Status") || "") !== "Submitted") continue;
+      const finalized = await finalizeProductionRequestPromotion(env, pendingRequest.id, idea, ctx);
+      if (String(f(finalized?.requestRecord, "Request_Status") || "") === "Promoted") {
+        recoveredSubmitted++;
+        console.info("Studio submitted promotion fanout reconciled", pendingRequest.id, parentId);
+      }
+    } catch (error) {
+      console.warn("Studio submitted promotion heal deferred", pendingRequest.id, error);
+    }
+  }
+
   const requests = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
     limit,
     sortField: "Updated_At",

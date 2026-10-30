@@ -11,7 +11,7 @@ import {
   validateScriptedShortProductionConstraints,
 } from "./scripted-short-producer-plan.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
-import { scheduleReservationAuthorityEnabled } from "./schedule-reservation-authority.mjs";
+import { scheduleReservationAuthorityEnabled, scheduleReservationLaneEnabled } from "./schedule-reservation-authority.mjs";
 import { creativeSettingName, parseCreativeGuidance } from "./profile-creative-guidance.mjs";
 import { runAtomicScheduleTransaction } from "./schedule-reservation-transaction.mjs";
 import {
@@ -9978,7 +9978,11 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
     let atomicSeedSchedule = null;
     let atomicSeedVacate = false;
     let atomicSeedHasScheduleMutation = false;
-    if (scheduleReservationAuthorityEnabled(env)
+    // Only allowlisted profile/platform lanes use the atomic seed transaction.
+    // The global flag by itself is insufficient: other lanes must keep the
+    // existing seed write, otherwise the atomic adapter calls its 503 guard.
+    const seedProfileId = studioFirstLinkedId(f(parent, "Content_Profile"));
+    if (scheduleReservationLaneEnabled(env, seedProfileId, effective.platform)
         && Object.prototype.hasOwnProperty.call(seed, "Scheduled_Post_Date")) {
       atomicSeedHasScheduleMutation = true;
       atomicSeedVacate = seed.Scheduled_Post_Date == null || String(seed.Scheduled_Post_Date || "").trim() === "";
@@ -10071,13 +10075,17 @@ export async function completeProductionRequestPromotionSideEffects(env, request
       contentItemId
     );
 
+    // A Submitted approval may have already created some destinations before
+    // a timeout. Do not restamp those existing outputs (or their Remotion jobs)
+    // while completing the missing fanout. Explicit Factory revisions still
+    // update their existing destinations through the normal full route.
     outputFanout = await fanoutProductionRequestOutputsToContentItems(
       env,
       current,
       contentItemId,
       studioFinishedOriginKind(current) === "finished-video"
         ? { onlyMissing: true, limit: azExpectedOutputCount(studioRequestNotesText(current)) }
-        : {}
+        : { onlyMissing: !productionRequestRevisionOpen(current) }
     );
   }
 
@@ -10124,8 +10132,16 @@ export async function completeProductionRequestPromotionSideEffects(env, request
     console.warn("Studio promote media pulse failed", error);
   }
   if (Number(outputFanout?.routed_count || 0) > 0) {
-    try { await enqueueStudioProductionJob(env, requestRecordId); } catch (error) {
-      console.warn("Studio produce enqueue after output fanout failed", requestRecordId, error);
+    const existingJob = parseStudioProductionJob(current);
+    // An escalated job can own an in-flight or completed Remotion render.
+    // Finish the approval/fanout, but never automatically replay that job:
+    // an operator must first verify the existing render and local runner code.
+    if (String(existingJob?.step || "") === "escalated") {
+      console.warn("Studio produce remains escalated pending guarded resume", requestRecordId);
+    } else {
+      try { await enqueueStudioProductionJob(env, requestRecordId); } catch (error) {
+        console.warn("Studio produce enqueue after output fanout failed", requestRecordId, error);
+      }
     }
   }
   return { requestRecord: current, directiveBridge, outputFanout };

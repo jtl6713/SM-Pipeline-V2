@@ -3728,7 +3728,7 @@ export default {
       // Light tick: missing Platform Output fanout for Promoted Vibe Cuts (Adler Short).
       // Heavy cron still runs the full heal; this unblocks Short gaps between :00/:30.
       try {
-        await studioHealPromotedMissingFanout(env, { limit: 4 });
+        await studioHealPromotedMissingFanout(env, { limit: 4, ctx });
       } catch (error) {
         console.warn("studio promoted fanout heal (light) failed", error);
       }
@@ -3855,7 +3855,7 @@ export default {
         console.warn("studio awaiting-approval stale RFR heal failed", error);
       }
       try {
-        await studioHealPromotedMissingFanout(env, { limit: 8 });
+        await studioHealPromotedMissingFanout(env, { limit: 8, ctx });
       } catch (error) {
         console.warn("studio promoted fanout heal failed", error);
       }
