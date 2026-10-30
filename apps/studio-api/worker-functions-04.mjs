@@ -17455,7 +17455,9 @@ async function factoryBatchRecoverTerminalFailure(env, profileId, requestId, sna
   const failed = (snapshot.items || []).filter(item =>
     item.status === "failed" && !factoryBatchFailureRouted(item));
   if (!failed.length) return "already_handled";
-  const item = failed[0]; // one exact row per invocation
+  // A persistently unresolvable first row must not starve subsequent rows.
+  // Rotate deterministically by minute; still touch only one exact row per call.
+  const item = failed[Math.floor(Date.now() / 60000) % failed.length];
   if (!/^rec[A-Za-z0-9]{14}$/.test(String(item.id || "")) ||
       !Number.isSafeInteger(Number(item.output_id)) || Number(item.output_id) <= 0) {
     return "invalid_identity";
@@ -17677,11 +17679,13 @@ export async function factoryBatchCronResume(env, ctx = null) {
   // Bounded at four exact failed rows per minute; each decision requires fresh
   // Airtable identity and either independent absence or persisted audit proof.
   let recoveredFailures = 0;
+  let attemptedFailures = 0;
   for (const candidate of distinct) {
-    if (recoveredFailures >= 4) break;
+    if (attemptedFailures >= 4) break;
     const job = candidate.job;
     if (!["completed","failed"].includes(job?.status) ||
         !(job.items || []).some(item => item.status === "failed" && !factoryBatchFailureRouted(item))) continue;
+    attemptedFailures++;
     try {
       const result = await factoryBatchRecoverTerminalFailure(
         env,candidate.profileId,candidate.requestId,job);
