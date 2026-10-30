@@ -46,6 +46,16 @@ def studio_master_download_url(r2_key: str) -> str:
     return f"{LOOPBACK_BASE}/internal/studio-master?key={quote(key, safe='')}"
 
 
+def studio_drive_download_url(file_id: str) -> str:
+    """Private runner-local Drive proxy; no separate compressor SA sharing."""
+    import re
+
+    file_id = str(file_id or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{10,128}", file_id):
+        raise RuntimeError("Invalid authoritative Google Drive original")
+    return f"{LOOPBACK_BASE}/internal/drive-media/{quote(file_id, safe='')}"
+
+
 def asset_size_bytes(asset: dict[str, Any] | None) -> int:
     try:
         return int((asset or {}).get("size_bytes") or 0)
@@ -190,7 +200,6 @@ def compress_pending_assets(
     stage_preview: Callable[[str, str, bytes], str] | None = None,
     sleep: SleepFn = time.sleep,
     ame_encode: Callable[..., bytes] | None = None,
-    submit_drive_job: Callable[[str, str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     record, assets = load_assets(client, record_id)
     targets = [asset for asset in assets if needs_compress(asset)]
@@ -222,7 +231,6 @@ def compress_pending_assets(
                 stage_preview=stage,
                 sleep=sleep,
                 ame_encode=encoder,
-                submit_drive_job=submit_drive_job,
             )
             compressed += 1
         except Exception as exc:
@@ -276,7 +284,6 @@ def compress_one(
     stage_preview: Callable[[str, str, bytes], str],
     sleep: SleepFn = time.sleep,
     ame_encode: Callable[..., bytes] | None = None,
-    submit_drive_job: Callable[[str, str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     asset_id = str(asset.get("id") or "").strip()
     if not asset_id:
@@ -311,16 +318,15 @@ def compress_one(
 
     if not job_id:
         source_name = str(asset.get("name") or "video.mp4")
-        if source_kind == "drive":
-            # The local FFmpeg fallback already supports authenticated Drive
-            # downloads, with no public sharing and no temporary R2 re-upload.
-            payload = (submit_drive_job or compressor_api.submit_job)(source_value, source_name)
-        else:
-            payload = submit_job(
-                studio_master_download_url(source_value),
-                source_name,
-                f"studio-{record_id}-{asset_id}",
-            )
+        # FFmpeg is local on the same Windows host and can fetch the runner's
+        # loopback-only, authenticated media route. Do not rely on the separate
+        # Video Compressor service account having library-folder permissions.
+        source_url = (
+            studio_drive_download_url(source_value)
+            if source_kind == "drive"
+            else studio_master_download_url(source_value)
+        )
+        payload = submit_job(source_url, source_name, f"studio-{record_id}-{asset_id}")
         job_id = str(payload.get("job_id") or "").strip()
         if not job_id:
             raise RuntimeError("Video Compressor submit did not return a job_id")
