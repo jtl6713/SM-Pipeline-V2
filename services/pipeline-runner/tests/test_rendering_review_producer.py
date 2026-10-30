@@ -135,6 +135,30 @@ class ProducerTests(unittest.TestCase):
             self.assertIn(direction, payload["input"])
             self.assertNotIn("authorization", payload["input"].split("creative_direction")[-1].lower())
 
+    def test_approved_end_tail_preserves_original_scenes(self):
+        evidence={**EVIDENCE, "narration":"Approved narration",
+                  "assets":[{"id":"a"},{"id":"b"}],
+                  "original_timeline":[
+                      {"start_seconds":0,"end_seconds":6,"asset_id":"a"},
+                      {"start_seconds":6,"end_seconds":12,"asset_id":"b"}],
+                  "messages":[{"role":"user","content":"More space after the voiceover at the end"},
+                              {"role":"user","content":"Please proceed with the new render"}]}
+        candidate=copy.deepcopy(PROPOSAL)
+        candidate["explanation"]="Hold the final clip about 2.5 seconds after narration; also change imagery"
+        candidate["changes"]=["2.5 seconds of silent tail", "Unrequested image crop"]
+        candidate["requirements"]=[{"kind":"clarification","description":"Crop an image","alternatives":[]}]
+        class Response:
+            ok=True
+            def json(self):
+                return {"output_text":json.dumps(candidate)}
+        result=propose_revision(evidence,"Please proceed with the new render",{},
+            transport=lambda *a,**k:Response())["candidate"]
+        self.assertEqual(result["narration"],evidence["narration"])
+        self.assertEqual([x["asset_ids"] for x in result["timeline"]],[["a"],["b"]])
+        self.assertEqual(result["timeline"][-1]["end_seconds"],14.5)
+        self.assertEqual(result["requirements"],[])
+        self.assertEqual(result["claims"],[])
+
     def test_timing_only_direction_preserves_source_and_does_not_create_new_research(self):
         evidence = {**EVIDENCE, "output_id": "recVFaT3VnhCD3dcb",
                     "narration": "The river multiplies the glow.",
