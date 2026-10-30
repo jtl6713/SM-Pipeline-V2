@@ -35,8 +35,8 @@ test("paginated failed-output scan returns every outstanding record, without the
 });
 
 test("retired cancelled Stories never enter the active Failed census", () => {
-  assert.match(FAILED_OUTPUT_FORMULA, /\\{Output_Status\\}!="Cancelled"/);
-  assert.match(FAILED_OUTPUT_FORMULA, /\\{Test_Run_ID\\}=BLANK\\(\\)/);
+  assert.ok(FAILED_OUTPUT_FORMULA.includes('{Output_Status}!="Cancelled"'));
+  assert.ok(FAILED_OUTPUT_FORMULA.includes("{Test_Run_ID}=BLANK()"));
   // Keep their original error and hold fields intact for the audit trail;
   // classification, not state rewriting, excludes terminally retired rows.
 });
