@@ -4,3 +4,5 @@
 2026-10-20 recovery continuation: confirm autonomous progress beyond 55 pending and zero new failures, without retriggering approvals.
 
 2026-10-20 post-PR987 sustained progress verification: re-sample live Factory global batch counts twice; baseline at 13:13:15 UTC 7 active / 55 pending / 0 failed. Read-only; no approval, schedule or publication mutations.
+
+2026-10-30 post-Worker-0.10.698 verified read-only audit: collect exact Factory global active group/child IDs and terminal failed item state, 75-second progress delta, no approvals, output mutations, public publishing or scheduling.
