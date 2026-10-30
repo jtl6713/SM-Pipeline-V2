@@ -10288,7 +10288,7 @@ export async function studioPublicationRecoveryCron(env) {
 export async function getStudioPublicationRecoveryHistory(request,env) {
   const query=new URL(request.url).searchParams;
   const page=await listRecordsPage(env,EXCEPTION_MESSAGES_TABLE,{
-    filterFormula:'OR({Exception_Signature}="'+RECOVERY_SIGNATURE+'",{Exception_Signature}="ADMIN_APPROVED_ACTION",{Exception_Signature}="ADMIN_ACTION_OUTCOME")',
+    filterFormula:'OR({Exception_Signature}="'+RECOVERY_SIGNATURE+'",{Exception_Signature}="ADMIN_APPROVED_ACTION",{Exception_Signature}="ADMIN_ACTION_OUTCOME",{Exception_Signature}="FACTORY_BATCH_APPROVAL_FAILURE")',
     sortField:"Created_At",sortDirection:"desc",limit:100,
     offset:query.get("cursor")||undefined,
   });
