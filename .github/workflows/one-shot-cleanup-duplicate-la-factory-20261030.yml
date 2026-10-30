@@ -1,0 +1,231 @@
+name: One-shot guarded cleanup of exact duplicate LA Factory batch
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/one-shot-cleanup-duplicate-la-factory-20261030.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: one-shot-la-factory-duplicate-cleanup-20261030
+  cancel-in-progress: false
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Identify live production Factory R2 storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/la-factory-clean
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api"
+          curl -fsS "$API/deployments" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/la-factory-clean/deployments.json
+          VERSION="$(jq -er '.result.deployments[0].versions | max_by(.percentage) | .version_id' /tmp/la-factory-clean/deployments.json)"
+          curl -fsS "$API/versions/$VERSION" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/la-factory-clean/version.json
+          BUCKET="$(jq -er '.result.resources.bindings[] | select(.name=="STUDIO_MEDIA" and .type=="r2_bucket") | (.bucket_name // .bucket)' /tmp/la-factory-clean/version.json)"
+          echo "LA_FACTORY_BUCKET=$BUCKET" >> "$GITHUB_ENV"
+      - name: Deploy guarded temporary duplicate reconciliation Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKER="chicagoshining-la-factory-clean-once"
+          echo "$WORKER" > /tmp/la-factory-clean/worker-name
+          openssl rand -hex 32 > /tmp/la-factory-clean/token
+          python3 - <<'PY'
+          from pathlib import Path
+          token=Path('/tmp/la-factory-clean/token').read_text().strip()
+          js=r"""
+          const SECRET="__TOKEN__";
+          const PROFILE="recF7UAn0LkMZZrWZ";
+          const OLD="1f109f06-3d1c-4036-9b51-c24367b8c7e8";
+          const NEW="e0ba6b13-ef7f-44cc-950d-2e0596e4f00f";
+          const OLD_CHILD="fgc_053a154b8a5900ae77f3781b7143e22b4e4ff6bfe132f07fc678d124c560f375";
+          const NEW_CHILD="fgc_9ad2b0137492baffe5ec434577fc2e22d0fd6d4ab4f9c1cd3171a8e8dea1b5c2";
+          const IDS=["rec1iMqQsYRbkypOg","rec4D0lWietBvtbEh","receAZwh95RkEshIm","recJiWbghQ0dfkr4u","reckeobFFFjmKftsk","recLfZrkY6ROB0MzV","recM1A1BRoxjjq06q"].sort();
+          const P="studio/state/factory-approvals/v2";
+          const oldGroup=P+"/groups/"+OLD+".json";
+          const newGroup=P+"/groups/"+NEW+".json";
+          const oldChild=P+"/jobs/"+PROFILE+"/"+OLD_CHILD+".json";
+          const newChild=P+"/jobs/"+PROFILE+"/"+NEW_CHILD+".json";
+          const lockKey=P+"/locks/"+PROFILE+".json";
+          const archiveKey=P+"/duplicate-archive/2026-10-30/"+NEW+".json";
+          async function read(b,key) {
+            const obj=await b.get(key);
+            return obj?{v:JSON.parse(await obj.text()),etag:obj.etag}:null;
+          }
+          const ids = values => (values||[]).map(x=>x.id).sort();
+          const equal = (x,y) => JSON.stringify(x)===JSON.stringify(y);
+          function verify(group,job,requestId,childId) {
+            if (!group||!job) throw Error("Missing required group or child");
+            if (group.v.schema!=="studio.factory-approval-group.1" ||
+                group.v.request_id!==requestId ||
+                group.v.id!=="fg_"+requestId ||
+                group.v.children?.length!==1 ||
+                group.v.children[0]?.profile_id!==PROFILE ||
+                group.v.children[0]?.request_id!==childId ||
+                !equal(ids(group.v.records),IDS)) throw Error("Group identity or membership mismatch");
+            if (job.v.schema!=="studio.factory-batch.2" ||
+                job.v.profile_id!==PROFILE || job.v.request_id!==childId ||
+                job.v.group_request_id!==requestId ||
+                !equal(ids(job.v.items),IDS)) throw Error("Child identity or membership mismatch");
+          }
+          async function reconcile(b) {
+            const owner="dedupe:"+crypto.randomUUID();
+            const now=Date.now();
+            let held=false;
+            try {
+              const oldLock=await read(b,lockKey);
+              if (oldLock?.v?.owner && Number(oldLock.v.expires_ms)>now) {
+                return {ok:false,reason:"profile_lock_active",retry:true,expires_ms:oldLock.v.expires_ms};
+              }
+              const value={owner,expires_ms:now+180000};
+              const acquired=await b.put(lockKey,JSON.stringify(value),{
+                onlyIf:oldLock?{etagMatches:oldLock.etag}:new Headers({"If-None-Match":"*"}),
+                httpMetadata:{contentType:"application/json"}
+              });
+              if (!acquired) return {ok:false,reason:"profile_lock_race",retry:true};
+              held=true;
+              const [older,olderChild,newer,newerChild,archive]=await Promise.all([
+                read(b,oldGroup),read(b,oldChild),read(b,newGroup),read(b,newChild),read(b,archiveKey)
+              ]);
+              verify(older,olderChild,OLD,OLD_CHILD);
+              if (newer && newerChild) {
+                verify(newer,newerChild,NEW,NEW_CHILD);
+                if (!(Date.parse(newer.v.created_at)>Date.parse(older.v.created_at))) {
+                  throw Error("Chronology mismatch: refused");
+                }
+              } else if (!archive) {
+                throw Error("Incomplete source without archive: refused");
+              }
+              let saved=archive;
+              if (!saved) {
+                const snapshot={
+                  schema:"studio.factory-approval-duplicate-archive.1",
+                  source:"LA user duplicate-submit reconciliation 2026-10-30",
+                  archived_at:new Date().toISOString(), canonical_group_id:OLD,
+                  duplicate_group_id:NEW,profile_id:PROFILE,
+                  canonical_item_ids:IDS,
+                  duplicate_parent:newer.v,duplicate_child:newerChild.v
+                };
+                const inserted=await b.put(archiveKey,JSON.stringify(snapshot),{
+                  onlyIf:new Headers({"If-None-Match":"*"}),
+                  httpMetadata:{contentType:"application/json"}
+                });
+                saved=await read(b,archiveKey);
+                if (!saved || saved.v.duplicate_group_id!==NEW ||
+                    !equal(saved.v.canonical_item_ids,IDS)) throw Error("Archive verification failed");
+              } else if(saved.v.duplicate_group_id!==NEW || !equal(saved.v.canonical_item_ids,IDS)) {
+                throw Error("Existing archive mismatch: refused");
+              }
+              // Remove parent first. Cron won't process an orphaned duplicate
+              // child: factoryBatchProcess requires its parent to exist.
+              if(newer) await b.delete(newGroup);
+              if(newerChild) await b.delete(newChild);
+              const [remainingParent,remainingChild,keptParent,keptChild,archiveCheck]=await Promise.all([
+                read(b,newGroup),read(b,newChild),read(b,oldGroup),read(b,oldChild),read(b,archiveKey)
+              ]);
+              if(remainingParent||remainingChild||!keptParent||!keptChild||!archiveCheck) {
+                throw Error("Post-cleanup state not verified");
+              }
+              return {ok:true,archive_key:archiveKey,
+                canonical_group_id:OLD,duplicate_group_id:NEW,
+                removed_parent:true,removed_child:true,
+                original_outputs:IDS.length,
+                preserved_approvals:(saved.v.duplicate_child.items||[]).filter(x=>x.status==="approved"||x.status==="already_satisfied").map(x=>x.output_id),
+                canonical_status:keptChild.v.status,
+                canonical_item_states:keptChild.v.items.map(x=>({output_id:x.output_id,status:x.status}))
+              };
+            } finally {
+              if (held) {
+                try {
+                  const cur=await read(b,lockKey);
+                  if (cur?.v?.owner===owner) {
+                    await b.put(lockKey,JSON.stringify({owner:null,expires_ms:0}),{
+                      onlyIf:{etagMatches:cur.etag},httpMetadata:{contentType:"application/json"}
+                    });
+                  }
+                } catch(err) {
+                  console.log("Profile lock cleanup could not confirm release",String(err).slice(0,120));
+                }
+              }
+            }
+          }
+          export default {async fetch(req,env) {
+            if(req.method!=="POST"||new URL(req.url).pathname!=="/reconcile")return new Response("Not found",{status:404});
+            if(req.headers.get("x-reconcile-secret")!==SECRET)return new Response("Forbidden",{status:403});
+            try {
+              const r=await reconcile(env.STUDIO_MEDIA);
+              return Response.json(r,{status:r.ok?200:r.retry?409:500});
+            } catch(err) {
+              return Response.json({ok:false,error:String(err?.message||err).slice(0,300)},{status:422});
+            }
+          }};
+          """
+          Path('/tmp/la-factory-clean/worker.js').write_text(js.replace('__TOKEN__',token))
+          PY
+          node --check /tmp/la-factory-clean/worker.js
+          META="$(jq -cn --arg b "$LA_FACTORY_BUCKET" '{main_module:"worker.js",bindings:[{name:"STUDIO_MEDIA",type:"r2_bucket",bucket_name:$b}]}')"
+          code="$(curl -sS -o /tmp/la-factory-clean/create.json -w '%{http_code}' -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -F "metadata=$META;type=application/json" \
+            -F 'worker.js=@/tmp/la-factory-clean/worker.js;type=application/javascript+module')"
+          if [[ "$code" -lt 200 || "$code" -ge 300 ]]; then
+            echo "Worker creation HTTP $code" >&2
+            jq '{success,errors}' /tmp/la-factory-clean/create.json >&2
+            exit 1
+          fi
+          jq -e '.success==true' /tmp/la-factory-clean/create.json >/dev/null
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER"
+          curl -fsS "$API/versions" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/la-factory-clean/versions.json
+          VERSION="$(jq -er '(.result.items // .result.versions // .result | if type=="array" then . else [] end)|sort_by(.number//0)|last|.id' /tmp/la-factory-clean/versions.json)"
+          jq -cn --arg v "$VERSION" '{strategy:"percentage",versions:[{version_id:$v,percentage:100}]}' > /tmp/la-factory-clean/deploy-payload.json
+          curl -fsS -X POST "$API/deployments" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H 'Content-Type: application/json' --data-binary @/tmp/la-factory-clean/deploy-payload.json \
+            -o /tmp/la-factory-clean/deploy-result.json
+          jq -e '.success==true' /tmp/la-factory-clean/deploy-result.json >/dev/null
+          curl -fsS -X POST "$API/subdomain" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' \
+            -o /tmp/la-factory-clean/subdomain.json
+          jq -e '.success==true and .result.enabled==true' /tmp/la-factory-clean/subdomain.json >/dev/null
+      - name: Archive and remove redundant LA parent and child with profile lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKER="$(cat /tmp/la-factory-clean/worker-name)"
+          status=000
+          for attempt in $(seq 1 9); do
+            status="$(curl -sS -o /tmp/la-factory-clean/result.json -w '%{http_code}' \
+              -X POST "https://$WORKER.joseph-t-logan.workers.dev/reconcile" \
+              -H "x-reconcile-secret: $(cat /tmp/la-factory-clean/token)" || true)"
+            if [[ "$status" == 200 ]]; then break; fi
+            if [[ "$status" != 404 && "$status" != 503 && "$status" != 409 && "$status" != 000 ]]; then break; fi
+            echo "la_duplicate_cleanup_retry attempt=$attempt http=$status"
+            sleep 10
+          done
+          echo "LA_DUPLICATE_RECONCILIATION_RESULT_BEGIN"
+          jq -c . /tmp/la-factory-clean/result.json
+          echo "LA_DUPLICATE_RECONCILIATION_RESULT_END"
+          if [[ "$status" != 200 ]]; then
+            echo "Refused unsafe or locked LA duplicate cleanup: HTTP $status" >&2
+            exit 1
+          fi
+          jq -e '.ok==true and .removed_parent==true and .removed_child==true and .original_outputs==7' /tmp/la-factory-clean/result.json >/dev/null
+          echo "Exact duplicate removed. Canonical LA batch, Airtable approval records and scheduled work unchanged." >> "$GITHUB_STEP_SUMMARY"
+      - name: Destroy temporary Worker even on failure
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f /tmp/la-factory-clean/worker-name ]]; then exit 0; fi
+          WORKER="$(cat /tmp/la-factory-clean/worker-name)"
+          curl -fsS -X DELETE \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/la-factory-clean/deleted.json
+          jq -e '.success==true' /tmp/la-factory-clean/deleted.json >/dev/null
+          echo "Temporary LA cleanup Worker removed."
