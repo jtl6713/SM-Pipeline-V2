@@ -19,7 +19,7 @@ from urllib.parse import quote
 
 from a1s import compressor as compressor_api
 from airtable.constants import PRODUCTION_REQUESTS_TABLE
-from studio_compress.ame_encoder import AmeNotReady, live_encoder
+from studio_compress.ame_encoder import AmeNotReady, live_encoder, source_for_asset
 from ap0.public_mp4 import (
     existing_finished_preview_url,
     finished_video_preview_key,
@@ -27,7 +27,6 @@ from ap0.public_mp4 import (
     stage_finished_video_preview,
 )
 from item4.clip_poster import is_video_master_asset
-from item4.sources import is_studio_master_key
 
 logger = logging.getLogger("pipeline-runner.studio-compress")
 
@@ -45,6 +44,16 @@ SleepFn = Callable[[float], None]
 def studio_master_download_url(r2_key: str) -> str:
     key = str(r2_key or "").strip()
     return f"{LOOPBACK_BASE}/internal/studio-master?key={quote(key, safe='')}"
+
+
+def studio_drive_download_url(file_id: str) -> str:
+    """Private runner-local Drive proxy; no separate compressor SA sharing."""
+    import re
+
+    file_id = str(file_id or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{10,128}", file_id):
+        raise RuntimeError("Invalid authoritative Google Drive original")
+    return f"{LOOPBACK_BASE}/internal/drive-media/{quote(file_id, safe='')}"
 
 
 def asset_size_bytes(asset: dict[str, Any] | None) -> int:
@@ -277,11 +286,9 @@ def compress_one(
     ame_encode: Callable[..., bytes] | None = None,
 ) -> dict[str, Any]:
     asset_id = str(asset.get("id") or "").strip()
-    r2_key = str(asset.get("r2_key") or "").strip()
     if not asset_id:
         raise RuntimeError("Master asset is missing an id")
-    if not is_studio_master_key(r2_key):
-        raise RuntimeError("Studio compression needs a private studio/master-assets key")
+    source_kind, source_value = source_for_asset(asset)
 
     existing_job = str(asset.get("compression_job_id") or "").strip()
     ffmpeg_job = "" if existing_job.startswith("ame-") else existing_job
@@ -310,11 +317,16 @@ def compress_one(
             job = None
 
     if not job_id:
-        payload = submit_job(
-            studio_master_download_url(r2_key),
-            str(asset.get("name") or "video.mp4"),
-            f"studio-{record_id}-{asset_id}",
+        source_name = str(asset.get("name") or "video.mp4")
+        # FFmpeg is local on the same Windows host and can fetch the runner's
+        # loopback-only, authenticated media route. Do not rely on the separate
+        # Video Compressor service account having library-folder permissions.
+        source_url = (
+            studio_drive_download_url(source_value)
+            if source_kind == "drive"
+            else studio_master_download_url(source_value)
         )
+        payload = submit_job(source_url, source_name, f"studio-{record_id}-{asset_id}")
         job_id = str(payload.get("job_id") or "").strip()
         if not job_id:
             raise RuntimeError("Video Compressor submit did not return a job_id")

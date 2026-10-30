@@ -21,6 +21,44 @@ The same pair exists for `social-high-9x16`, `small-file-9x16`, `landscape-stand
 
 If a watch folder is left on Media Encoder's default, the bridge also accepts `inbox/<preset>/Output/`.
 
+## Studio source recovery
+
+Studio compression prefers Adobe Media Encoder whenever the local listener on
+`127.0.0.1:3344` is healthy. For a fresh uploaded video, the bridge reads a
+private `studio/master-assets/` staging key. For a library-sourced video whose
+temporary Studio staging key has already been removed, the runner instead reads
+the existing authoritative **private Google Drive original** using its
+authenticated Google Drive client. Neither path changes or trashes the Drive
+original. If Media Encoder does not pick up the inbox copy, the existing local
+FFmpeg compressor can use the same authenticated Drive file ID as fallback.
+
+To verify the Chicago recovery example, inspect Production Request
+`recZKifUsQgTQBwbR` (Chicago: Life Along the Waterfront) and the video
+`Navy Pier Fireworks 12.mp4` (`59a9b4d684904e5382`). Its original is
+118,105,125 bytes, stored in Drive, and there is **no** valid
+`studio/master-assets/` staging key. A successful retry must show
+`compression_status=ready`, a public `studio/previews/` URL,
+`compression_provider=adobe-media-encoder` (or `ffmpeg` with an explicit
+fallback reason), while preserving `google_drive_file_id` and the original
+Drive file untouched. Do not manually fabricate a staging key or make the Drive
+original public.
+
+**Watch-folder warning:** Only folders under `AME_Bridge/inbox/` belong in
+Media Encoder's Watch Folders list. The separate
+`AME_Bridge/out/small-file-9x16` directory must **not** itself be a watch
+folder: that can re-encode completed output. Every inbox should write to its
+matching `AME_Bridge/out/<preset>` directory. The screenshot's
+`archive-master` watch folder is assigned the portrait preset; change it to
+a source-matching archive preset if archives are needed. Also confirm that the
+standard, high, and small-file portrait presets have their own intended bitrate
+targets, not merely the same displayed preset name.
+
+`/health` confirms the Python bridge listener, **not** that the Adobe Media
+Encoder GUI process is open, logged in, and actively watching. The safest live
+validation is one exact source with an output/probe/readback, then the Studio
+manifest status and URL. Do not release or publish any content during a
+compression canary.
+
 ## One-time Media Encoder setup
 
 Installed editor: Adobe Media Encoder 2026 (26.5). It has to be open in a logged-on Windows session. Watch Folders do not run after sign-out.
