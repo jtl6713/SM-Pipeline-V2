@@ -31,6 +31,7 @@ from item4.clip_poster import is_video_master_asset
 logger = logging.getLogger("pipeline-runner.studio-compress")
 
 THRESHOLD_BYTES = 100 * 1024 * 1024
+MAX_COMPRESSED_BYTES = 95 * 1024 * 1024  # below 100 MB with headroom
 MAX_WALL_SECONDS = 20 * 60
 POLL_SLEEP_SECONDS = 4
 LOOPBACK_BASE = os.environ.get("PIPELINE_RUNNER_LOOPBACK_URL", "http://127.0.0.1:3350").rstrip("/")
@@ -98,7 +99,15 @@ def needs_compress(asset: dict[str, Any] | None) -> bool:
     if not is_video_master_asset(asset):
         return False
     status = compression_status(asset)
-    if status in {"ready", "skipped"}:
+    if status == "ready":
+        # A previously shipped AME preset can encode a larger file and still
+        # mark it ready. Permit a one-time private FFmpeg rescue of that output.
+        return (
+            str(asset.get("compression_provider") or "") == "adobe-media-encoder"
+            and asset_size_bytes(asset) > MAX_COMPRESSED_BYTES
+            and asset_size_bytes(asset) > 0
+        )
+    if status == "skipped":
         return False
     if status in {"pending", "queued", "compressing", "downloading", "failed"}:
         return True
@@ -292,19 +301,33 @@ def compress_one(
 
     existing_job = str(asset.get("compression_job_id") or "").strip()
     ffmpeg_job = "" if existing_job.startswith("ame-") else existing_job
-    if ame_encode is not None and not ffmpeg_job:
+    ame_already_oversized = (
+        compression_status(asset) == "ready"
+        and str(asset.get("compression_provider") or "") == "adobe-media-encoder"
+        and asset_size_bytes(asset) > MAX_COMPRESSED_BYTES
+    )
+    if ame_encode is not None and not ffmpeg_job and not ame_already_oversized:
         encoded = _encode_with_ame(client, record_id, asset, ame_encode)
         if encoded is not None:
-            return _store_compressed(
-                client,
+            if len(encoded) <= MAX_COMPRESSED_BYTES:
+                return _store_compressed(
+                    client,
+                    record_id,
+                    asset,
+                    content=encoded,
+                    output_size=len(encoded),
+                    job_id=f"ame-{asset_id}",
+                    provider="adobe-media-encoder",
+                    stage_preview=stage_preview,
+                )
+            logger.warning(
+                "studio-compress AME output missed 95 MiB cap request=%s asset=%s bytes=%s; using FFmpeg",
                 record_id,
-                asset,
-                content=encoded,
-                output_size=len(encoded),
-                job_id=f"ame-{asset_id}",
-                provider="adobe-media-encoder",
-                stage_preview=stage_preview,
+                asset_id,
+                len(encoded),
             )
+            # The AME attempt is not a completed compression. Continue to the
+            # existing FFmpeg path using the same original source.
 
     record, assets = load_assets(client, record_id)
     job_id = ffmpeg_job
@@ -337,6 +360,7 @@ def compress_one(
                 "compression_status": "compressing",
                 "compression_needed": True,
                 "compression_job_id": job_id,
+                "compression_provider": "ffmpeg",
                 "compression_error": None,
                 "compression_progress": 0,
             },
@@ -457,6 +481,8 @@ def _store_compressed(
 ) -> dict[str, Any]:
     asset_id = str(asset.get("id") or "").strip()
     r2_key = str(asset.get("r2_key") or "").strip()
+    if not content or len(content) > MAX_COMPRESSED_BYTES:
+        raise RuntimeError("Compressed preview exceeds the 95 MiB safety target")
     preview_url = stage_preview(record_id, asset_id, content)
     preview_key = finished_video_preview_key(record_id, asset_id)
     original_size = asset_size_bytes(asset) or int(asset.get("original_size_bytes") or 0)
