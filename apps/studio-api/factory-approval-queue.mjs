@@ -390,7 +390,8 @@ export async function factoryBatchDrain(bucket, options) {
         const failure = factoryBatchFailure(error);
         const attempts = job.items.find(x => x.id === item.id)?.attempts || 1;
         outcome = {
-          status: failure.transient && (failure.waitRender || attempts < 5) ? "pending" : "failed",
+          status: failure.transient && !job.items.find(x => x.id === item.id)?.auto_retry_count
+             && (failure.waitRender || attempts < 5) ? "pending" : "failed",
           error: failure.message,
           next_attempt_ms: failure.transient
             ? now() + (failure.waitRender ? 300000 : Math.min(600000, 30000 * Math.pow(2, attempts)))
@@ -445,6 +446,46 @@ export async function factoryBatchRetry(bucket, profileId, requestId) {
           }].slice(-180),
         }
         : item),
+    };
+  });
+}
+
+/**
+ * Recover one verified transient terminal failure with exactly ONE additional
+ * approval attempt. No group-wide retry, no successful-item mutation, and the
+ * original error remains in failure_history. Canonical approval still rereads
+ * the Airtable record under the output lock; this does not publish.
+ */
+export async function factoryBatchRetryTransientOnce(bucket, {
+  profileId, requestId, recordId, outputId,
+} = {}) {
+  assertBucket(bucket);
+  if (!ID.test(String(recordId || "")) || !Number.isSafeInteger(Number(outputId)) ||
+      Number(outputId) <= 0) throw Error("Exact retry identity required");
+  return cas(bucket, factoryBatchKey(profileId, requestId), job => {
+    if (!["completed", "failed"].includes(job.status) ||
+        factoryBatchCounts(job).pending_count) return null;
+    const found = job.items.filter(item =>
+      item.id === recordId && Number(item.output_id) === Number(outputId));
+    if (found.length !== 1) throw Error("Retry identity missing or ambiguous");
+    const item = found[0];
+    if (item.status !== "failed" || factoryBatchFailureRouted(item) ||
+        Number(item.auto_retry_count || 0) >= 1 ||
+        Number(item.manual_retry_count || 0) >= 1 ||
+        !factoryBatchFailure(new Error(item.error || "")).transient) return null;
+    const at = new Date().toISOString();
+    return {...job, status: "queued", updated_at: at,
+      items: job.items.map(row => row.id === recordId ? {
+        ...row, status: "pending", error: null, attempts: 0,
+        auto_retry_count: 1, next_attempt_ms: 0,
+        failure_history: [...(row.failure_history || []), {
+          at, error: row.error || null,
+        }].slice(-10),
+        timeline: [...(row.timeline || []), {
+          state: "pending", at, attempt: row.total_attempts || 0,
+          reason: "one_verified_transient_retry",
+        }].slice(-180),
+      } : row),
     };
   });
 }
