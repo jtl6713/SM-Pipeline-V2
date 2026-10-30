@@ -130,6 +130,70 @@ jobs:
           jq -e '.ok==false and .error=="review_media_auth_required"' /tmp/review-media-denied.json >/dev/null
           echo "chicago_review_private_google_media_route=PASS auth_required=true no_render=true"
 
+
+      - name: One-time exact Chicago Waterfront compression recovery (no publish)
+        if: ${{ success() && github.event_name == 'push' && startsWith(github.event.head_commit.message, 'studio-ame-waterfront-canary-20261030:') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://ops.chicagoshining.com'
+          selected=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            if [[ -z "$candidate" ]]; then continue; fi
+            code=$(curl -sS --max-time 20 -o /tmp/ame-catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok==true' /tmp/ame-catalog.json >/dev/null 2>&1; then
+              selected="$candidate"; break
+            fi
+          done
+          test -n "$selected"
+          cat > /tmp/chicago-ame-recover.ps1 <<'PS'
+          $ErrorActionPreference = "Stop"
+          $record = "recZKifUsQgTQBwbR"
+          $asset = "59a9b4d684904e5382"
+          $health = Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 15
+          if ($health.ok -ne $true -or $health.version -ne "2026-10-30-studio-ame-private-drive-v1") { throw "runner_version_mismatch" }
+          $ame = $false
+          try {
+            $bridge = Invoke-RestMethod -Uri "http://127.0.0.1:3344/health" -TimeoutSec 4
+            $ame = ($bridge.ok -eq $true -and $bridge.service -eq "chicagoshining-ame-bridge" -and $bridge.delete_watch_source -eq $true)
+          } catch {}
+          $gui = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {$_.ProcessName -like "Adobe Media Encoder*"}).Count -gt 0
+          Write-Output ("ame_bridge_ready=" + $ame)
+          Write-Output ("ame_gui_process_present=" + $gui)
+          $envfile = Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
+          if (-not (Test-Path $envfile)) { throw "runner_env_missing" }
+          $line = @(Get-Content $envfile | Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='}) | Select-Object -Last 1
+          if (-not $line) { throw "runner_auth_missing" }
+          $secret = ([string]$line -split '=', 2)[1].Trim().Trim('"', "'")
+          if (-not $secret) { throw "runner_auth_empty" }
+          $payload = @{production_request_record_id=$record; source_asset_id=$asset} | ConvertTo-Json -Compress
+          $resp = Invoke-RestMethod -Uri "http://127.0.0.1:3350/jobs/studio-compress" -Method POST -Headers @{"X-Pipeline-Secret"=$secret} -Body $payload -ContentType "application/json" -TimeoutSec 15
+          if ($resp.accepted -ne $true -or $resp.production_request_record_id -ne $record -or $resp.source_asset_id -ne $asset) { throw "exact_studio_compress_not_accepted" }
+          Write-Output ("chicago_exact_compress_accepted=true")
+          Write-Output ("chicago_already_running=" + $resp.already_running)
+          PS
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/chicago-ame-recover.json').write_text(json.dumps({"command":Path('/tmp/chicago-ame-recover.ps1').read_text(),"confirm":True}))
+          PY
+          code=$(curl -sS --max-time 20 -o /tmp/chicago-ame-job.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $selected" -H 'Content-Type: application/json' --data-binary @/tmp/chicago-ame-recover.json || true)
+          if [[ "$code" != "202" && "$code" != "200" ]]; then echo "exact_chicago_ame_shell_start_failed=$code"; exit 1; fi
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/chicago-ame-job.json)
+          test -n "$job"
+          for n in $(seq 1 30); do
+            curl -sS --max-time 20 -H "Authorization: Bearer $selected" "$BASE/api/jobs/$job" -o /tmp/chicago-ame-job-status.json
+            state=$(jq -r '.job.status // empty' /tmp/chicago-ame-job-status.json)
+            if [[ "$state" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/chicago-ame-job-status.json | grep -E '^(ame_bridge_ready|ame_gui_process_present|chicago_exact_compress_accepted|chicago_already_running)='
+              jq -e '.job.log|contains("chicago_exact_compress_accepted=true")' /tmp/chicago-ame-job-status.json >/dev/null
+              exit 0
+            fi
+            if [[ "$state" == "failed" ]]; then echo "exact_chicago_ame_shell_failed"; exit 2; fi
+            sleep 3
+          done
+          echo "exact_chicago_ame_shell_timeout"; exit 3
+
 # Trigger: deploy TikTok handoff MIME fix f9d3326
 
 # Trigger pipeline-runner deploy for AP3C/AP0C/AP1C IG Graph max-10 child clamp (Output 1235)
