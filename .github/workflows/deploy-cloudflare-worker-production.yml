@@ -133,6 +133,12 @@ jobs:
             apps/studio-api/schedule-reservation-writer-audit.test.mjs \
             apps/studio-api/schedule-reservation-runtime.test.mjs
 
+      - name: Verify exact duplicate Factory batch reconciliation semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test apps/studio-api/factory-approval-duplicate-supersede.test.mjs
+
       - name: Validate source and install pinned Wrangler
         shell: bash
         run: |
