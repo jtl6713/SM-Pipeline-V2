@@ -39,7 +39,26 @@ already linked owned images, propose a full revised timeline rather than an
 upload request. Every proposed executable timeline MUST contain the complete
 ordered video, including unchanged scenes; never return only edited fragments.
 Keep unchanged asset identities and exact scene boundaries by default, unless
-the reviewer asks for different timing or structural edits. If the reviewer asks
+the reviewer asks for different timing or structural edits.
+A timing-only request (for example, room after the voiceover, a slower ending,
+or shortening a pause) is NOT permission to reselect photos, crop a watermark,
+reword approved narration, add visual shots, or research existing location lines.
+For timing-only changes preserve the complete original_timeline scene order and
+every original asset_id; adjust only the exact requested time spans. If a longer
+visual tail is requested, extend the final existing scene instead of replacing
+it with a different shot. Preserve the original narration verbatim and avoid
+re-synthesizing it conceptually. Do not create claims about facts already in
+unchanged narration: claims=[] unless your requested edit asserts a NEW fact.
+Do not manufacture optional clarification, watermark, or research requirements
+for untouched content; requirements=[] when the requested edit can be carried
+out from verified existing sources. Clearly distinguish legitimate blockers
+from unrelated improvements that can wait until a later revision.
+When the latest message says to proceed with a previously discussed edit,
+resolve it against the previous user direction and Producer reply. Do not
+invent a new creative scope or restart the discussion.
+The server independently validates all assets and final media; a model cannot
+grant authorization or claim verification.
+If the reviewer asks
 to speed up, slow down, reorder, replace many images, remove repeats or alter
 the narrative, consider the entire cut, not only one matching scene.
 Acknowledge tradeoffs and ask one specific question only when truly blocked;
@@ -201,6 +220,94 @@ def conversational_candidate(model: dict, evidence: dict, direction: str) -> dic
     }
 
 
+
+def _source_only_timing_candidate(model: dict, evidence: dict, direction: str) -> dict:
+    """Constrain a model's proposed *timing-only* edit to original owned media.
+
+    A chat model may propose unrelated photo replacements, crops or factual
+    claims for a voiceover-tail request. That turns a straightforward approved
+    pacing edit into unsatisfiable research/asset gates. We only normalize when
+    the authenticated saved original direction is unambiguous, the model itself
+    proposed a bounded tail, and original scene IDs are complete. This DOES NOT
+    certify Drive access or grant render authority; the Worker and Runner remain
+    independent gates.
+    """
+    import re
+    if not isinstance(model, dict):
+        return model
+    messages = evidence.get("messages") or []
+    original = next((m.get("content") for m in messages
+                     if isinstance(m, dict) and m.get("role") == "user"
+                     and isinstance(m.get("content"), str)), "")
+    if not original:
+        original = direction
+    first = original.lower()
+    # A conservative *class* of edits, never an output number, title, or photo.
+    wants_tail = (re.search(r"voice[ -]?over|narration|spoken audio", first) and
+                  re.search(r"end|ending|finish|last|tail", first) and
+                  re.search(r"space|pause|breath|room|hold|silence|after", first))
+    wants_other_edits = re.search(
+        r"replace|change.*photo|different.*image|crop|mask|remove.*shot|new.*scene|rewrite|revoice", first)
+    if not wants_tail or wants_other_edits:
+        return model
+    if len(messages) > 1:
+        current = direction.lower()
+        if not re.search(r"proceed|go ahead|make|render|yes|approved?|confirm", current):
+            return model
+    scenes = evidence.get("original_timeline")
+    narration = evidence.get("narration")
+    inventory = {a.get("id") for a in evidence.get("assets", [])
+                 if isinstance(a, dict) and isinstance(a.get("id"), str)}
+    if (not isinstance(scenes, list) or not scenes or len(scenes) > 80 or
+        not isinstance(narration, str) or not narration.strip()):
+        return model
+    previous_end = 0.0
+    safe = []
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            return model
+        start, end, asset = scene.get("start_seconds"), scene.get("end_seconds"), scene.get("asset_id")
+        if (type(start) not in (int, float) or type(end) not in (int, float) or
+            abs(float(start) - previous_end) > 0.002 or
+            float(end) <= float(start) or asset not in inventory):
+            return model
+        safe.append({"start_seconds": previous_end, "end_seconds": float(end),
+                     "direction": "Retain this exact original source shot and its order.",
+                     "asset_ids": [asset]})
+        previous_end = float(end)
+    text = " ".join(str(x) for x in model.get("changes", []) if isinstance(x, str))
+    text += " " + str(model.get("explanation") or "")
+    # The reviewed Producer proposal must actually specify a bounded tail.
+    tail = re.search(r"(?:~|about|approximately)?\s*(\d+(?:\.\d+)?)\s*(?:-| )?seconds?\s*(?:of\s*)?(?:silent|silence|tail|hold|after)", text, re.I)
+    if not tail:
+        tail = re.search(r"(?:tail|hold|after\s+the\s+voiceover).{0,50}?(\d+(?:\.\d+)?)\s*(?:-| )?seconds?", text, re.I)
+    if not tail:
+        return model
+    seconds = float(tail.group(1))
+    if not 0.5 <= seconds <= 5.0 or previous_end + seconds > 180:
+        return model
+    safe[-1]["end_seconds"] = round(previous_end + seconds, 3)
+    result = dict(model)
+    result["narration"] = narration
+    result["timeline"] = safe
+    result["reuse_asset_ids"] = list(dict.fromkeys(scene["asset_ids"][0] for scene in safe))
+    result["preserve"] = []
+    result["claims"] = []  # No new fact: identical source narration and media.
+    result["requirements"] = []  # Unrequested crop/location checks are not edits.
+    result["changes"] = ["Preserve the entire original Reel and narration.",
+                          "Hold the last original visual " + str(seconds) +
+                          " seconds longer after the voiceover for breathing room."]
+    result["explanation"] = ("I will keep every original shot and the existing " +
+                              "narration unchanged, extending only the final shot by " +
+                              str(seconds) + " seconds. The prior proposal's unrelated " +
+                              "photo, watermark and research changes are excluded.")
+    result["acceptance_checks"] = [
+        "Original shot count, order and asset identities remain unchanged.",
+        "Original narration text is unchanged.",
+        "Duration is extended by exactly " + str(seconds) + " seconds.",
+        "No shared output, original render, schedule or publication is changed."]
+    return result
+
 def validate_candidate(candidate: dict, evidence: dict, *, allow_conversation_only: bool = False) -> dict:
     required = {"explanation", "narration", "preserve", "changes", "reuse_asset_ids",
                 "timeline", "requirements", "claims", "acceptance_checks"}
@@ -299,6 +406,7 @@ def propose_revision(evidence: dict, direction: str, settings: dict, *, transpor
     if not isinstance(raw, str) or len(raw) > 50000:
         raise ValueError("Producer returned invalid or excessive content")
     parsed = json.loads(raw)
+    parsed = _source_only_timing_candidate(parsed, evidence, direction)
     try:
         result = validate_candidate(parsed, evidence)
     except ValueError:
