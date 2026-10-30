@@ -468,7 +468,7 @@ def test_legacy_ready_147mb_ame_clip_skips_reencoding_and_recovers_with_ffmpeg()
     import json
 
     client = _drive_only_client()
-    assets = json.loads(client.record["fields"]["Studio_Master_Assets_JSON"])
+    assets = list(client.record["fields"]["Studio_Master_Assets_JSON"])
     assets[0].update({
         "compression_status": "ready",
         "compression_needed": False,
