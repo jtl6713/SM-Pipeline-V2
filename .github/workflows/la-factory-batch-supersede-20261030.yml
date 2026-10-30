@@ -1,0 +1,165 @@
+name: LA Factory exact duplicate batch supersede
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/la-factory-batch-supersede-20261030.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: la-factory-exact-supersede-once
+  cancel-in-progress: false
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Create guarded one-shot Worker with current Studio R2 binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/la-reconcile
+          WORKER=chicagoshining-la-duplicate-reconcile-once
+          echo "$WORKER" >/tmp/la-reconcile/worker
+          openssl rand -hex 32 >/tmp/la-reconcile/token
+          python3 - <<'PY'
+          from pathlib import Path
+          token=Path('/tmp/la-reconcile/token').read_text().strip()
+          script=r"""const secret="__SECRET__";
+          const profile="recF7UAn0LkMZZrWZ";
+          const oldId="fgc_053a154b8a5900ae77f3781b7143e22b4e4ff6bfe132f07fc678d124c560f375";
+          const newId="fgc_9ad2b0137492baffe5ec434577fc2e22d0fd6d4ab4f9c1cd3171a8e8dea1b5c2";
+          const groupOld="1f109f06-3d1c-4036-9b51-c24367b8c7e8";
+          const groupNew="e0ba6b13-ef7f-44cc-950d-2e0596e4f00f";
+          const expected=["rec1iMqQsYRbkypOg","rec4D0lWietBvtbEh","receAZwh95RkEshIm","recJiWbghQ0dfkr4u","reckeobFFFjmKftsk","recLfZrkY6ROB0MzV","recM1A1BRoxjjq06q"].sort();
+          const prefix="studio/state/factory-approvals/v2/";
+          const key=id=>prefix+"jobs/"+profile+"/"+id+".json";
+          const lockKey=prefix+"locks/"+profile+".json";
+          const read=async (r2,k)=>{const o=await r2.get(k);return o?{value:JSON.parse(await o.text()),etag:o.etag}:null;};
+          const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+          const guard=(a,b)=>{
+            if(!a||!b)throw Error("Both exact canonical and redundant ledgers required");
+            if(a.value.schema!=="studio.factory-batch.2"||b.value.schema!=="studio.factory-batch.2"||
+               a.value.request_id!==oldId||b.value.request_id!==newId||
+               a.value.group_request_id!==groupOld||b.value.group_request_id!==groupNew||
+               a.value.profile_id!==profile||b.value.profile_id!==profile)throw Error("Ledger identity mismatch");
+            const aa=(a.value.items||[]).map(i=>i.id).sort(),bb=(b.value.items||[]).map(i=>i.id).sort();
+            if(!equal(aa,expected)||!equal(bb,expected))throw Error("Duplicate set drift; no write");
+            if(!(Date.parse(a.value.created_at)<Date.parse(b.value.created_at)))throw Error("Canonical chronology mismatch");
+          };
+          const stats=j=>({request_id:j.request_id,group_request_id:j.group_request_id,status:j.status,
+            pending:(j.items||[]).filter(i=>["pending","processing"].includes(i.status)).length,
+            approved:(j.items||[]).filter(i=>i.status==="approved").length,
+            already_satisfied:(j.items||[]).filter(i=>i.status==="already_satisfied").length,
+            superseded:(j.items||[]).filter(i=>i.status==="superseded_duplicate").length,
+            failed:(j.items||[]).filter(i=>i.status==="failed").length,
+            outputs:(j.items||[]).map(i=>({output_id:i.output_id,status:i.status}))});
+          export default {async fetch(req,env){
+            if(req.method!=="POST"||new URL(req.url).pathname!=="/supersede")return new Response("Not found",{status:404});
+            if(req.headers.get("X-Reconcile-Token")!==secret)return new Response("Forbidden",{status:403});
+            const r2=env.STUDIO_MEDIA;let locked=false,owner="la-duplicate-once-"+crypto.randomUUID();
+            try{
+              const first=await read(r2,key(oldId)),second=await read(r2,key(newId));
+              guard(first,second);
+              if(second.value.items.some(i=>i.status==="failed"))throw Error("Duplicate has failures; operator audit required");
+              const before=stats(second.value);
+              if(second.value.items.every(i=>["approved","already_satisfied","superseded_duplicate","skipped_removed"].includes(i.status))
+                 && second.value.status==="completed")return Response.json({ok:true,noop:true,primary:stats(first.value),duplicate:before});
+              const lease=await read(r2,lockKey);
+              if(lease?.value?.owner && Number(lease.value.expires_ms)>Date.now())
+                return Response.json({ok:false,retryable:true,reason:"profile_approval_lock_busy"},{status:423});
+              const held={owner,expires_ms:Date.now()+60000};
+              const acquired=await r2.put(lockKey,JSON.stringify(held),{onlyIf:lease?{etagMatches:lease.etag}:new Headers({"If-None-Match":"*"}),httpMetadata:{contentType:"application/json"}});
+              if(!acquired)return Response.json({ok:false,retryable:true,reason:"profile_lock_raced"},{status:423});
+              locked=true;
+              const a=await read(r2,key(oldId)),b=await read(r2,key(newId));
+              guard(a,b);
+              if(b.value.items.some(i=>i.status==="failed"))throw Error("Duplicate failure present; refused cleanup");
+              const now=new Date().toISOString();
+              const items=b.value.items.map(i=>(i.status==="pending"||i.status==="processing")?
+                {...i,status:"superseded_duplicate",error:null,next_attempt_ms:0,
+                  superseded_by_request_id:oldId,superseded_at:now,
+                  timeline:[...(i.timeline||[]),{state:"superseded_duplicate",at:now,reason:"exact_same_seven_output_ids_in_older_active_batch"}].slice(-180)}:i);
+              if(items.some(i=>!["approved","already_satisfied","skipped_removed","superseded_duplicate"].includes(i.status)))
+                throw Error("Unexpected item state; refused cleanup");
+              const next={...b.value,items,status:"completed",updated_at:now,
+                superseded_by_request_id:oldId,superseded_at:now,duplicate_cleanup_reason:"exact_same_7_outputs_as_older_factory_submission"};
+              const match=await r2.put(key(newId),JSON.stringify(next),{
+                onlyIf:{etagMatches:b.etag},httpMetadata:{contentType:"application/json"},
+                customMetadata:{factory_status:"completed",factory_failed:"0",factory_active:"false",factory_group:groupNew}});
+              if(!match)throw Error("Ledger CAS conflict; retry after fresh inspection");
+              const verify=await read(r2,key(newId));
+              if(!verify||verify.value.status!=="completed"||!equal(verify.value.items.map(i=>i.id).sort(),expected)||
+                 verify.value.items.some(i=>["pending","processing"].includes(i.status)))throw Error("Ledger readback failed");
+              return Response.json({ok:true,primary:stats(a.value),before,after:stats(verify.value),
+                original_preserved:true,only_duplicate_batch_mutated:true});
+            }catch(e){return Response.json({ok:false,retryable:false,error:String(e).slice(0,240)},{status:409});}
+            finally{
+              if(locked){try{
+                const l=await read(r2,lockKey);
+                if(l?.value?.owner===owner)await r2.put(lockKey,JSON.stringify({owner:null,expires_ms:0}),
+                  {onlyIf:{etagMatches:l.etag},httpMetadata:{contentType:"application/json"}});
+              }catch(e){}}
+            }
+          }};
+          """
+          Path('/tmp/la-reconcile/worker.js').write_text(script.replace('__SECRET__',token))
+          PY
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API/chicagoshining-studio-api/deployments" -H "$AUTH" -o /tmp/la-reconcile/current.json
+          VERSION="$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/la-reconcile/current.json)"
+          curl -fsS "$API/chicagoshining-studio-api/versions/$VERSION" -H "$AUTH" -o /tmp/la-reconcile/version.json
+          BUCKET="$(jq -er '.result.resources.bindings[]|select(.name=="STUDIO_MEDIA" and .type=="r2_bucket")|(.bucket_name//.bucket)' /tmp/la-reconcile/version.json)"
+          META="$(jq -cn --arg b "$BUCKET" '{main_module:"worker.js",bindings:[{name:"STUDIO_MEDIA",type:"r2_bucket",bucket_name:$b}]}')"
+          curl -fsS -X PUT "$API/$WORKER" -H "$AUTH" -F "metadata=$META;type=application/json" \
+            -F 'worker.js=@/tmp/la-reconcile/worker.js;type=application/javascript+module' -o /tmp/la-reconcile/create.json
+          jq -e '.success==true' /tmp/la-reconcile/create.json >/dev/null
+          curl -fsS "$API/$WORKER/versions" -H "$AUTH" -o /tmp/la-reconcile/versions.json
+          V="$(jq -er '(.result.items//.result.versions//.result|if type=="array" then . else [] end)|sort_by(.number//0)|last|.id' /tmp/la-reconcile/versions.json)"
+          jq -cn --arg v "$V" '{strategy:"percentage",versions:[{version_id:$v,percentage:100}]}' > /tmp/la-reconcile/deploy.json
+          curl -fsS -X POST "$API/$WORKER/deployments" -H "$AUTH" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/la-reconcile/deploy.json -o /tmp/la-reconcile/deploy-result.json
+          jq -e '.success==true' /tmp/la-reconcile/deploy-result.json >/dev/null
+          curl -fsS -X POST "$API/$WORKER/subdomain" -H "$AUTH" -H 'Content-Type: application/json' \
+            --data '{"enabled":true,"previews_enabled":false}' -o /tmp/la-reconcile/route.json
+          jq -e '.success==true' /tmp/la-reconcile/route.json >/dev/null
+      - name: Supersede only exact newer duplicate with profile lock and CAS
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKER="$(cat /tmp/la-reconcile/worker)"
+          CODE=000
+          for attempt in $(seq 1 20); do
+            CODE="$(curl -sS -o /tmp/la-reconcile/result.json -w '%{http_code}' -X POST \
+              "https://$WORKER.joseph-t-logan.workers.dev/supersede" \
+              -H "X-Reconcile-Token: $(cat /tmp/la-reconcile/token)" || true)"
+            if [[ "$CODE" == 200 ]]; then break; fi
+            if [[ "$CODE" == 409 ]]; then break; fi
+            if [[ "$CODE" != 404 && "$CODE" != 503 && "$CODE" != 423 && "$CODE" != 000 ]]; then break; fi
+            sleep 4
+          done
+          if [[ "$CODE" != 200 ]]; then
+            echo "Failed closed: R2 exact duplicate correction HTTP $CODE" >&2
+            head -c 600 /tmp/la-reconcile/result.json || true
+            exit 1
+          fi
+          jq -e '.ok==true and ((.noop==true) or (.only_duplicate_batch_mutated==true and .original_preserved==true))' /tmp/la-reconcile/result.json >/dev/null
+          echo LA_DUPLICATE_RECONCILIATION_BEGIN
+          jq -c '{ok,noop,primary,before,after,original_preserved,only_duplicate_batch_mutated}' /tmp/la-reconcile/result.json
+          echo LA_DUPLICATE_RECONCILIATION_END
+      - name: Remove temporary mutation Worker
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f /tmp/la-reconcile/worker || exit 0
+          WORKER="$(cat /tmp/la-reconcile/worker)"
+          curl -fsS -X DELETE \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/la-reconcile/delete.json
+          jq -e '.success==true' /tmp/la-reconcile/delete.json >/dev/null
+          echo temporary_la_reconciliation_worker_removed=PASS
