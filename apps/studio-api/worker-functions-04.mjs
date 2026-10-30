@@ -65,7 +65,8 @@ import {
   factoryBatchDrain, factoryBatchRetry, factoryBatchSummary, factoryBatchCounts,
   factoryBatchQualitySignals, factoryBatchNeedsAttention, factoryBatchReconcile, factoryBatchCronScan,
   factoryBatchCronSelectJobs, factoryBatchFailureRouted, factoryBatchFailure,
-  factoryBatchMarkRemoved, factoryBatchMarkExceptionRouted, factoryBatchRetryTransientOnce,
+  factoryBatchMarkRemoved, factoryBatchMarkAlreadySatisfied,
+  factoryBatchMarkExceptionRouted, factoryBatchRetryTransientOnce,
   factoryBatchLock, factoryBatchUnlock,
 } from "./factory-approval-queue.mjs";
 import {
@@ -17500,8 +17501,27 @@ async function factoryBatchRecoverTerminalFailure(env, profileId, requestId, sna
     }
     // If an earlier partial approval succeeded, preserve it for canonical
     // reconciliation rather than treating it as a new exception or retry.
-    const authorityStatus = String(f(source, "Status") || "");
-    if (/approved|published/i.test(authorityStatus)) return "already_authoritative_success";
+    const outputStatus = String(f(source, "Output_Status") || "").trim();
+    const reviewStatus = String(f(source, "Review_Status") || "").trim();
+    const publishStatus = String(f(source, "Publish_Status") || "").trim();
+    if (publishStatus === "Published" || outputStatus === "Published" ||
+        reviewStatus === "Approved" || outputStatus === "Approved for Publishing") {
+      await factoryBatchMarkAlreadySatisfied(env.STUDIO_MEDIA, {
+        profileId, requestId, recordId: item.id, outputId: item.output_id,
+        verifySatisfied: async () => {
+          const check = await findExact();
+          if (check.length !== 1 || check[0].id !== item.id ||
+              Number(f(check[0], "Output_ID")) !== Number(item.output_id) ||
+              await studioContentProfileRecordIdForOutput(env, check[0]) !== profileId) return false;
+          const verifiedOutput = String(f(check[0],"Output_Status") || "").trim();
+          const verifiedReview = String(f(check[0],"Review_Status") || "").trim();
+          const verifiedPublish = String(f(check[0],"Publish_Status") || "").trim();
+          return verifiedPublish === "Published" || verifiedOutput === "Published" ||
+            verifiedReview === "Approved" || verifiedOutput === "Approved for Publishing";
+        },
+      });
+      return "already_authoritative_success";
+    }
 
     const problem = factoryBatchFailure(new Error(String(exact[0].error || "")));
     if (problem.transient && Number(exact[0].auto_retry_count || 0) < 1 &&
@@ -17665,7 +17685,7 @@ export async function factoryBatchCronResume(env, ctx = null) {
     try {
       const result = await factoryBatchRecoverTerminalFailure(
         env,candidate.profileId,candidate.requestId,job);
-      if (["exception_routed","authoritative_output_removed","one_bounded_retry_queued"].includes(result)) {
+      if (["exception_routed","authoritative_output_removed","one_bounded_retry_queued","already_authoritative_success"].includes(result)) {
         recoveredFailures++;
         console.log("Factory failed approval recovery", candidate.requestId, result);
       }
