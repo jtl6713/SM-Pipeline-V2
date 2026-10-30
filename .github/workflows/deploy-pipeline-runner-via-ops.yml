@@ -452,3 +452,5 @@ jobs:
 # One-time exact Chicago oversized AME preview rescue, no publication.
 
 # 2026-10-30 v3: release metadata-only original-size persistence (no canary rerun).
+
+# 2026-10-30 Deploy protected Chicago Rendering Review dynamic exact-output runner for Factory #9389 pilot.
