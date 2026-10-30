@@ -10,6 +10,16 @@
   const chicago = 'recT2rbKX3MF7cVFU';
   const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map(),pollTimer:null,activeEntry:null,lastReplyNotice:null,lastReplyNoticeNode:null};
   const list = $('rrQueueList'), detail = $('rrDetail'), status = $('rrStatus');
+
+  const chicagoTime = value => {
+    if(typeof value!=='string'||!value.trim())return 'Timestamp unavailable';
+    const date=new Date(value);
+    if(!Number.isFinite(date.getTime()))return 'Timestamp unavailable';
+    return new Intl.DateTimeFormat('en-US',{
+      timeZone:'America/Chicago',month:'short',day:'numeric',year:'numeric',
+      hour:'numeric',minute:'2-digit',timeZoneName:'short',
+    }).format(date);
+  };
   const refresh = $('rrRefresh'), more = $('rrMore');
   const elem = (tag,text,cls) => {
     const node = document.createElement(tag);
@@ -256,6 +266,49 @@
         return;
       }
       const session=saved.session;
+      const messages=Array.isArray(session?.messages)?session.messages:[];
+      const last=messages.length?messages[messages.length-1]:null;
+      const producer=[...messages].reverse().find(m=>m.role==='producer');
+      const rendering=['queued','rendering','validating'].includes(session?.state);
+      const planReady=session?.state==='plan_ready'&&session?.plan?.frozen===true&&
+        Array.isArray(session.plan?.missing_assets)&&session.plan.missing_assets.length===0;
+      const activity=elem('section',null,'rr-activity');
+      activity.setAttribute('aria-label','Producer and render status');
+      const title=rendering?'V'+(Number(session.latest_attempt_number)||2)+' · '+
+        ({queued:'Queued for rendering',rendering:'Rendering',validating:'Validating'}[session.state]):
+        planReady?'Revision plan ready · Make revised video to begin render':
+        producer?'Producer replied · V2 NOT STARTED':
+        messages.length?'Factory comments saved · Producer has not replied':'No saved messages';
+      activity.append(elem('strong',title,'rr-activity-heading'));
+      if(last?.at)activity.append(elem('p','Last saved: '+chicagoTime(last.at),'rr-activity-time'));
+      if(!rendering&&!planReady&&producer){
+        activity.append(elem('p','The Producer responded, but no render-ready plan or V2 job exists. Chat messages do not queue a render.','rr-activity-detail'));
+        const needs=session?.producer_candidate?.candidate?.requirements;
+        if(Array.isArray(needs)&&needs.some(x=>x?.description)){
+          const prompt=elem('div',null,'rr-activity-needs');
+          prompt.append(elem('strong','Plan still needs these checks or answers:'));
+          const list=elem('ul');
+          for(const item of needs.filter(x=>x?.description).slice(0,3))list.append(elem('li',item.description));
+          prompt.append(list);activity.append(prompt);
+        }
+      }
+      detail.append(activity);
+      if(messages.length){
+        const history=elem('section',null,'rr-conversation-live');
+        history.setAttribute('aria-label','Saved Producer messages with timestamps');
+        history.append(elem('h3','Conversation · newest first'));
+        const thread=elem('div',null,'rr-thread');
+        for(const message of messages.slice(-30).reverse()){
+          const row=elem('article',null,'rr-message');
+          const head=elem('div',null,'rr-message-head');
+          head.append(elem('strong',message.role==='producer'?'Producer':'You'));
+          const time=elem('time',chicagoTime(message.at),'rr-message-time');
+          if(typeof message.at==='string')time.dateTime=message.at;
+          head.append(time);
+          row.append(head,elem('p',message.content||''));thread.append(row);
+        }
+        history.append(thread);detail.append(history);
+      }
       const attempts=Array.isArray(session?.attempts)?session.attempts:[];
       const storyboard=Array.isArray(saved.storyboard)?saved.storyboard:[];
       if(['queued','rendering','validating','revision_failed'].includes(session?.state)){
@@ -430,21 +483,6 @@
         }
         detail.append(offer);
       }
-      const messages=Array.isArray(saved.session?.messages)?saved.session.messages:[];
-      if(messages.length){
-        const history=elem('details',null,'rr-conversation-history');
-        history.append(elem('summary','Previous conversation ('+messages.length+' messages)'));
-        detail.append(history);
-        const thread=elem('div',null,'rr-thread');
-        for(const message of messages.slice(-30)){
-          const line=elem('article',null,'rr-message');
-          line.append(elem('strong',message.role==='user'?'You':'Producer'),
-            elem('p',message.content||''));
-          thread.append(line);
-        }
-        history.append(thread);
-      }
-
       if(storyboard.length){
         const changedRows=storyboard.filter(frame=>frame.changed===true);
         const availableMorning=storyboard.map(frame=>frame?.original).find(source=>

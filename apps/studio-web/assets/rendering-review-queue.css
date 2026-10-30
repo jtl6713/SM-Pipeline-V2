@@ -87,3 +87,16 @@
 .rr-producer-chat-primary>p{margin:0}
 .rr-plan-details,.rr-conversation-history{margin:12px 0;padding:12px;border:1px solid var(--line,#d6dce3);border-radius:10px}
 .rr-plan-details summary,.rr-conversation-history summary{cursor:pointer;font-weight:600}
+
+/* Status and saved messages are visible before Producer input (not collapsed). */
+.rr-activity{display:grid;gap:6px;margin:12px 0;padding:12px 14px;border:1px solid var(--line,#d6dce3);border-left:4px solid var(--accent,#679cde);border-radius:10px;overflow-wrap:anywhere}
+.rr-activity-heading{font-size:1rem}
+.rr-activity-time{font-size:.82rem;margin:0;color:var(--muted,#768392)}
+.rr-activity-detail{margin:3px 0;line-height:1.5}
+.rr-activity-needs{font-size:.89rem}
+.rr-activity-needs ul{margin:6px 0;padding-left:22px}
+.rr-conversation-live{margin:12px 0;min-width:0}
+.rr-conversation-live h3{font-size:1rem;margin:0 0 10px}
+.rr-message-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.rr-message-time{font-size:.78rem;color:var(--muted,#768392);font-variant-numeric:tabular-nums}
+.rr-conversation-live .rr-thread{max-height:440px}
