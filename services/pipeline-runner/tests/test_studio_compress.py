@@ -501,6 +501,7 @@ def test_legacy_ready_147mb_ame_clip_skips_reencoding_and_recovers_with_ffmpeg()
     assert stages == [b"smaller-preview"]
     assert asset["compression_provider"] == "ffmpeg"
     assert asset["size_bytes"] == 20
+    assert asset["original_size_bytes"] == 118105125
     assert asset["google_drive_file_id"] == "1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr"
 
 
