@@ -335,7 +335,7 @@ def test_authoritative_drive_original_is_a_valid_private_compression_source():
         r2_key=None,
         authoritative_storage="google_drive",
         google_drive_file_id="1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr",
-        media_asset_record_id="recSITCujCsJTNcDe",
+        media_asset_record_id="recByWv7yDeVi2NPE",
     )
     assert source_for_asset(asset) == ("drive", "1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr")
     assert source_for_asset(_asset())[0] == "studio"
@@ -350,7 +350,7 @@ def test_missing_unverified_or_public_source_is_not_compressed():
     with pytest.raises(RuntimeError, match="no private master"):
         source_for_asset(_asset(
             r2_key=None, authoritative_storage="google_drive",
-            media_asset_record_id="recSITCujCsJTNcDe", google_drive_file_id="../secrets",
+            media_asset_record_id="recByWv7yDeVi2NPE", google_drive_file_id="../secrets",
         ))
 
 
@@ -373,7 +373,7 @@ def test_ame_uses_private_drive_source_for_library_asset(tmp_path: Path):
         r2_key=None,
         authoritative_storage="google_drive",
         google_drive_file_id="1fFQhSOPlVy8PqnB7QTxNhXZueMCTI_zr",
-        media_asset_record_id="recSITCujCsJTNcDe",
+        media_asset_record_id="recByWv7yDeVi2NPE",
     )
     content = encode_downloaded_master(
         root=root, asset=asset, fetch=fetch,
