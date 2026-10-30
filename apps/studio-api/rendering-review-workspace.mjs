@@ -47,47 +47,10 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
     const cursor=text(url.searchParams.get('cursor'));
     if(cursor&&(cursor.length>512||!/^[A-Za-z0-9._-]+$/.test(cursor)))
       fail(400,'Invalid Rendering Review cursor');
-    // The protected one-Reel Chicago pilot must not wait for a broad scan of
-    // thousands of unrelated outputs. Airtable stays authoritative: fetch the
-    // exact server-allowlisted output and its linked Content Item by record ID.
-    // Invalid identity/dispatch state is surfaced as an error, never as an
-    // apparently empty authorized queue. Other profiles are never projected.
-    const pilotId=text(env.RENDERING_REVIEW_EXACT_OUTPUT_ID);
-    if(!cursor&&rec(pilotId)){
-      const row=await operations.airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,pilotId);
-      if(row?.id!==pilotId||!row.fields)fail(503,'Exact Chicago pilot output unavailable');
-      const f=row.fields,links=f.Content_Item;
-      if(!Array.isArray(links)||links.length!==1||!rec(links[0]))
-        fail(409,'Pilot Reel must have one authoritative Content Item');
-      if(text(f.Platform)!=='Instagram'||text(f.Platform_Output_Type)!=='Instagram Reel'||
-         (!text(f.Final_File_ID)&&!text(f.Final_File_URL)))
-        fail(409,'Pilot Reel is not a completed Instagram Reel with a saved video');
-      if(/^(published|publishing|dispatched)$/i.test(text(f.Publish_Status))||
-         /^(published|publishing|dispatched)$/i.test(text(f.Output_Status))||
-         f.Published_At||f.Platform_Post_ID||f.Platform_Post_URL||
-         f.Platform_Media_ID||f.Publish_Locked_By||f.Publish_Started_At)
-        fail(409,'Pilot Reel has already entered Instagram dispatch');
-      const content=await operations.airtableFetch(env,'tblwzN9AXWvmKVKPs',links[0]);
-      const profiles=content?.fields?.Content_Profile;
-      if(content?.id!==links[0]||!Array.isArray(profiles)||profiles.length!==1||
-         profiles[0]!==chicago)
-        fail(403,'Pilot Reel linked Content Profile could not be verified');
-      const held=f[RENDER_REVIEW_OUTPUT_FIELDS.hold_active]===true||
-        [RENDER_REVIEW_OUTPUT_FIELDS.hold_id,RENDER_REVIEW_OUTPUT_FIELDS.hold_owner,
-          RENDER_REVIEW_OUTPUT_FIELDS.session_id].some(key=>Boolean(text(f[key])));
-      return {ok:true,queue:held?[{
-        output_id:pilotId,profile_id:chicago,output_type:'Instagram Reel',
-        output_number:f.Output_ID||null,
-        title:text(f.Output_Title)||('Output '+(f.Output_ID||pilotId)),
-        render_status:text(f.Render_Status),final_file_id:text(f.Final_File_ID)||null,
-        final_file_url:text(f.Final_File_URL)||null,
-        review_held:held,dispatch_started:Boolean(f.Publish_Started_At||f.Publish_Locked_At||f.Publish_Locked_By),
-        manual_admission_enabled:false,
-      }]:[],next_cursor:null,as_of:new Date().toISOString(),flags};
-    }
+    // Only already-held Factory submissions are discoverable. No auto-admission.
     const page=await operations.listRecordsPage(env,env.AIRTABLE_OUTPUT_TABLE_ID,{
       limit:40,offset:cursor||null,
-      filterFormula:'AND({Platform_Output_Type}="Instagram Reel",OR({Final_File_ID}!="",{Final_File_URL}!=""))',
+      filterFormula:'AND({Platform_Output_Type}="Instagram Reel",OR({Final_File_ID}!="",{Final_File_URL}!=""),OR({Studio_Render_Review_Hold_Active}=TRUE(),{Studio_Render_Review_Hold_ID}!="",{Studio_Render_Review_Session_ID}!=""))',
       fields:['Content_Item','Platform','Platform_Output_Type','Render_Status',
         'Final_File_ID','Final_File_URL','Output_Title','Output_ID','Output_Status',
         'Publish_Status','Published_At','Platform_Post_ID','Platform_Post_URL',
@@ -98,16 +61,7 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
     });
     if(!page.valid||!Array.isArray(page.records)||page.records.length>40)
       fail(503,'Authoritative rendered queue unavailable');
-    // The manually allowlisted Reel must be discoverable on the FIRST page.
-    // Retain the ordinary bounded scan and independently verify the exact row;
-    // the existing linked-Content-Item authorization below still applies.
     const records=[...page.records];
-    if(!cursor&&rec(pilotId)&&!records.some(row=>row?.id===pilotId)){
-      const exact=await operations.airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,pilotId);
-      if(exact?.id!==pilotId||!exact.fields)
-        fail(503,'Exact Chicago pilot output unavailable');
-      records.unshift(exact);
-    }
     // Select eligible Platform Output rows without trusting the display-only
     // Content_Profile lookup. Resolve their linked Content Items in ONE exact-ID
     // Airtable query instead of 40 serial subrequests per source page.
@@ -212,7 +166,7 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
     f[RENDER_REVIEW_OUTPUT_FIELDS.hold_owner]===session.id&&
     f[RENDER_REVIEW_OUTPUT_FIELDS.session_id]===session.id;
   let storyboard=[];
-  if(held&&outputId===text(env.RENDERING_REVIEW_EXACT_OUTPUT_ID)&&session.producer_candidate?.candidate){
+  if(held&&session.producer_candidate?.candidate){
     const requestId=content?.fields?.Production_Request;
     if(Array.isArray(requestId)&&requestId.length===1&&rec(requestId[0])){
       // Read-only exact source inventory and verified original media metadata;
