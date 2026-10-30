@@ -80,11 +80,11 @@ function assertFactoryReady(row,f,fileId){
 }
 /** Can be safely called again after a network error or partial Airtable write. */
 export async function handoffApprovedReviewToFactory({output_id,env,operations,now=()=>new Date().toISOString()}){
-  if(!rec.test(str(output_id)) || output_id!==env?.RENDERING_REVIEW_EXACT_OUTPUT_ID)
-    deny("FACTORY_PILOT_SCOPE","Exact pilot output required",403);
+  if(!rec.test(str(output_id)))
+    deny("FACTORY_PILOT_SCOPE","Valid exact output required",403);
   // Once a revision is durably accepted, it must remain eligible to drain
   // into Factory even if new Creative Accept or enrollment is later disabled.
-  // The exact-output gate, current approved session, independent media proof,
+  // The current exact-output session, independent media proof,
   // output lease, and protected caller remain mandatory.
   requireFunctions(operations);
   const o=operations;

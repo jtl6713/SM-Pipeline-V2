@@ -49,8 +49,9 @@ def create_review_media_blueprint(settings, client_factory=_client,
         if not secret or not incoming or not hmac.compare_digest(secret,incoming):
             return denied(401,"review_media_auth_required")
         if (not _RECORD.fullmatch(output_id) or
-            output_id!=os.environ.get("RENDERING_REVIEW_EXACT_OUTPUT_ID") or
             not _ID.fullmatch(attempt_id)):
+            # Exact output, Chicago profile and attempt are verified from the
+            # authenticated durable review session below.
             return denied(403,"review_media_exact_output_required")
         try:
             client=client_factory()

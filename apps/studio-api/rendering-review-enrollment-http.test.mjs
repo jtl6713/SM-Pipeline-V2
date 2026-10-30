@@ -189,3 +189,12 @@ test("request ID replay with different comments is refused, not silently accepte
   assert.equal(f.session.messages.length,1);
   assert.equal(f.writes,3);
 });
+
+test("Factory-selected Chicago Reel does not require the historical 8447 global sample",async()=>{
+  const f=fixture();
+  const receipt=await f.send(data,{env:{...flags,RENDERING_REVIEW_EXACT_OUTPUT_ID:"rec0uVrVeiUM6shp9"}});
+  assert.equal(receipt.ok,true);
+  assert.equal(f.session.output_id,outputId);
+  assert.equal(f.hold.output_id,outputId);
+  assert.equal(f.writes,3);
+});

@@ -11,7 +11,7 @@ const attemptId="rrattempt_26054929500b8abe981e3f6131b5c668209bf9c765edb06c";
 const sessionId="rrsession_5db47c3f652bf0f80162c4e933cb8b7a913c92c888fec796";
 const holdId="rrhold-64201956-6207-464a-8e9c-616974479c1c";
 const url=f=>"https://drive.google.com/file/d/"+f+"/view";
-const env={RENDERING_REVIEW_EXACT_OUTPUT_ID:id,
+const env={RENDERING_REVIEW_EXACT_OUTPUT_ID:"recVFaT3VnhCD3dcb",
  RENDERING_REVIEW_CREATIVE_ACCEPT_ENABLED:"true"};
 const c=x=>structuredClone(x);
 function fixture(){
@@ -195,8 +195,13 @@ test("Airtable's omitted false checkbox remains valid after readback",async()=>{
 test("wrong output denies and completed approval drains even if creative admissions are now off",async()=>{
  const f=fixture();
  await assert.rejects(()=>handoffApprovedReviewToFactory({
-  output_id:"recAAAAAAAAAAAAAA",env,operations:f.ops
+  output_id:"bad-id",env,operations:f.ops
  }),e=>e.code==="FACTORY_PILOT_SCOPE");
+ // A different valid output ID must never inherit this record\'s approval.
+ f.ops.withOutputLock=async (_output,callback)=>callback();
+ await assert.rejects(()=>handoffApprovedReviewToFactory({
+  output_id:"recAAAAAAAAAAAAAA",env,operations:f.ops
+ }),e=>e.code==="FACTORY_SESSION_NOT_ELIGIBLE");
  // A previously approved session can safely drain after flags were disabled.
  const result=await handoffApprovedReviewToFactory({
   output_id:id,env:{...env,RENDERING_REVIEW_CREATIVE_ACCEPT_ENABLED:"false"},

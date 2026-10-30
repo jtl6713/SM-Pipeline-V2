@@ -28,8 +28,9 @@ export async function acceptReviewCreativeOnly({
   if(!id.test(str(actor))||!authorization.authenticated||
      !authorization.authorized||authorization.permissions?.outputs_review!==true)
     fail(403,"REVIEW_PERMISSION_REQUIRED","Authenticated reviewer required");
-  if(output_id!==env.RENDERING_REVIEW_EXACT_OUTPUT_ID||!id.test(str(output_id)))
-    fail(403,"PILOT_SCOPE","Review pilot is restricted to its selected Chicago Reel");
+  if(!id.test(str(output_id)))
+    fail(403,"PILOT_SCOPE","Exact Chicago Reel ID required");
+  // Only the exact held session and authorized Chicago output may be accepted.
   if(typeof assertWriteRequest!=="function")fail(503,"WRITE_GUARD_MISSING","Studio write guard required");
   assertWriteRequest(request,env);
   if(!/^application\/json(?:\s*;|$)/i.test(str(request.headers.get("Content-Type"))))
