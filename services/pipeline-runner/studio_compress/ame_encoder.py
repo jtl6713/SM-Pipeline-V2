@@ -56,6 +56,31 @@ class AmeNotReady(RuntimeError):
     """The bridge is down, or Media Encoder did not take the inbox copy."""
 
 
+def source_for_asset(asset: dict[str, Any]) -> tuple[str, str]:
+    """Choose the private original, never a public preview or an arbitrary URL.
+
+    Library/Idea assets may already be authoritative on Drive by the time
+    Studio notices that their video exceeds the compression threshold. Their
+    temporary studio/master-assets key is then intentionally absent.
+    """
+    from item4.sources import is_studio_master_key
+
+    r2_key = str(asset.get("r2_key") or "").strip()
+    if is_studio_master_key(r2_key):
+        return "studio", r2_key
+
+    drive_id = str(asset.get("google_drive_file_id") or "").strip()
+    media_asset_id = str(asset.get("media_asset_record_id") or "").strip()
+    authoritative = str(asset.get("authoritative_storage") or "").strip().lower()
+    if (
+        authoritative == "google_drive"
+        and re.fullmatch(r"[A-Za-z0-9_-]{10,128}", drive_id)
+        and re.fullmatch(r"rec[A-Za-z0-9]{14}", media_asset_id)
+    ):
+        return "drive", drive_id
+    raise RuntimeError("Studio compression has no private master or authoritative Google Drive original")
+
+
 def bridge_is_ready(url: str | None = None, get: Callable[..., Any] | None = None) -> bool:
     import requests
 
@@ -112,11 +137,21 @@ def live_encoder() -> Callable[[dict[str, Any], ProgressFn | None], bytes] | Non
     return encode
 
 
-def fetch_master(r2_key: str, dest: Path) -> None:
+def fetch_master(source: str, dest: Path) -> None:
+    if source.startswith("drive:"):
+        from integrations.google_drive import GoogleDriveClient
+
+        # Stream the already-authoritative private original directly to local
+        # staging. Do not make the Google Drive asset public or duplicate it.
+        GoogleDriveClient().download_file_to_path(source[6:], str(dest))
+        if dest.stat().st_size <= 0:
+            raise RuntimeError("Google Drive master download was empty")
+        return
+
     from item4.settings import pipeline_settings
     from item4.sources import download_via_media_bridge
 
-    content, _mime = download_via_media_bridge(r2_key, pipeline_settings())
+    content, _mime = download_via_media_bridge(source, pipeline_settings())
     if not content:
         raise RuntimeError("Studio master download was empty")
     dest.write_bytes(content)
@@ -138,9 +173,8 @@ def encode_downloaded_master(
 ) -> bytes:
     if not _marker_ok(root):
         raise AmeNotReady(f"AME bridge root is not marked at {root}")
-    r2_key = str(asset.get("r2_key") or "").strip()
-    if not r2_key:
-        raise RuntimeError("Studio compression needs a private studio/master-assets key")
+    source_kind, source_value = source_for_asset(asset)
+    source_ref = f"drive:{source_value}" if source_kind == "drive" else source_value
     preset = preset_for_asset(asset)
     inbox = root / "inbox" / preset
     inbox.mkdir(parents=True, exist_ok=True)
@@ -152,7 +186,7 @@ def encode_downloaded_master(
         return ready
     source = inbox / _source_filename(asset, now())
     _progress(on_progress, 8)
-    _stage_outside_watch_folder(root, source, fetch, r2_key)
+    _stage_outside_watch_folder(root, source, fetch, source_ref)
     if not source.is_file() or source.stat().st_size <= 0:
         raise RuntimeError("Studio master was not written to the Media Encoder inbox")
     logger.info(
