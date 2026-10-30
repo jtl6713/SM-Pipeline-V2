@@ -60,8 +60,21 @@ jobs:
           curl -fsS "$API/versions/$VERSION" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/studio-cover-repair/version.json
           BUCKET="$(jq -er '.result.resources.bindings[] | select(.name=="STUDIO_MEDIA" and .type=="r2_bucket") | (.bucket_name // .bucket)' /tmp/studio-cover-repair/version.json)"
           test -n "$BUCKET"
-          echo "STUDIO_MEDIA_BUCKET=$BUCKET" >> "$GITHUB_ENV"
-          echo "live_r2_bucket_discovered=PASS"
+          # The public media hostname uses the upload Worker bucket, which may
+          # differ from the Studio API worker's private STUDIO_MEDIA binding.
+          UPLOAD_API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-r2-upload"
+          curl -fsS "$UPLOAD_API/deployments" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/studio-cover-repair/upload-deployments.json
+          UPLOAD_VERSION="$(jq -er '.result.deployments[0].versions | max_by(.percentage) | .version_id' /tmp/studio-cover-repair/upload-deployments.json)"
+          curl -fsS "$UPLOAD_API/versions/$UPLOAD_VERSION" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/studio-cover-repair/upload-version.json
+          PUBLIC_BUCKET="$(jq -er '[.result.resources.bindings[] | select(.type=="r2_bucket") | select(.name=="PUBLISH_BUCKET" or .name=="STUDIO_MEDIA" or .name=="MEDIA_BUCKET" or .name=="BUCKET")] | sort_by(if .name=="PUBLISH_BUCKET" then 0 elif .name=="STUDIO_MEDIA" then 1 elif .name=="MEDIA_BUCKET" then 2 else 3 end) | first | (.bucket_name // .bucket)' /tmp/studio-cover-repair/upload-version.json)"
+          test -n "$PUBLIC_BUCKET"
+          echo "STUDIO_MEDIA_BUCKET=$PUBLIC_BUCKET" >> "$GITHUB_ENV"
+          echo "public_r2_bucket_discovered=PASS"
+          if [[ "$BUCKET" == "$PUBLIC_BUCKET" ]]; then
+            echo "Production Studio and public upload buckets match."
+          else
+            echo "Production Studio and public upload use distinct R2 buckets."
+          fi
 
       - name: Create temporary least-privilege R2-bound Worker and send only two verified covers
         shell: bash
