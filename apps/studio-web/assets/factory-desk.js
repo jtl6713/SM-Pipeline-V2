@@ -152,7 +152,7 @@
   }
 
   function canReviewActions(card, { pile = false, candidate = false } = {}) {
-    if (pile || candidate) return false;
+    if (pile || candidate || state.submittingOutputIds?.has(card?.id) || recentFactoryAccepted()[String(card?.id || "")]) return false;
     if (card?.kind !== "output") return false;
     // studio_state can paint Ready for Review while Output_Status is still
     // In Production. Approve all must only claim Airtable-ready rows.
@@ -346,8 +346,9 @@
     return !factoryProfileId() || String(card?.profile_id || "") === factoryProfileId();
   }
   function readyFactoryOutputs(includeOtherProfiles=false) {
+    const hidden = new Set([...Object.keys(recentFactoryAccepted()), ...(state.submittingOutputIds || [])]);
     return (state.desk?.lanes?.needs_eyes || [])
-      .filter((card) => (includeOtherProfiles || factoryMatchesProfile(card)) && card?.kind === "output"
+      .filter((card) => !hidden.has(card.id) && (includeOtherProfiles || factoryMatchesProfile(card)) && card?.kind === "output"
         && canReviewActions(card) && canSelectBatchOutput(card));
   }
 
@@ -809,6 +810,8 @@
     };
     persistRemaining(planned);
     state.submittingBatch = true;
+    state.submittingOutputIds = new Set(selectionIds);
+    if (state.desk) renderDesk(state.desk);
     updateFactoryBatchToolbar();
     let acceptedOutputs = 0;
     let acceptedBatches = 0;
@@ -847,6 +850,7 @@
         rememberFactoryAccepted(plan.ids);
         chunk.forEach((card) => state.selectedOutputs.delete(card.id));
         saveFactorySelection();
+        if (state.desk) renderDesk(state.desk);
         const remaining = planned.slice(index + 1);
         persistRemaining(remaining);
         state.lastBatchProfile = "global";
@@ -870,7 +874,9 @@
       setStatus(`Submitted ${acceptedOutputs} of ${ready.length} outputs. ${remaining} remain selected. ${error.message || error} Check Activity before retrying.`, true);
       await refreshFactoryBatchActivity();
     } finally {
+      state.submittingOutputIds = null;
       state.submittingBatch = false;
+      if (state.desk) renderDesk(state.desk);
       updateFactoryBatchToolbar();
     }
   }
@@ -901,6 +907,8 @@
     // Each child owns profile-local scheduling.
     // Refuse to mix profiles rather than stamp an output in the wrong timezone.
     state.submittingBatch = true;
+    state.submittingOutputIds = new Set(ready.map(card => card.id));
+    if (state.desk) renderDesk(state.desk);
     updateFactoryBatchToolbar();
     const selectionIds = ready.map((card) => card.id);
     let pending = null;
@@ -949,7 +957,9 @@
       setStatus(`Batch submission not confirmed: ${error.message || error}. Check Activity before retrying.`, true);
       await refreshFactoryBatchActivity();
     } finally {
+      state.submittingOutputIds = null;
       state.submittingBatch = false;
+      if (state.desk) renderDesk(state.desk);
       updateFactoryBatchToolbar();
     }
   }
@@ -1639,7 +1649,10 @@
   function renderDesk(desk) {
     state.desk = desk;
     syncFactoryFilterOptions();
-    const filtered = (cards) => (cards || []).filter(factoryMatchesProfile);
+    const hiddenApprovals = new Set([...Object.keys(recentFactoryAccepted()), ...(state.submittingOutputIds || [])]);
+    const filtered = (cards) => (cards || []).filter(card => factoryMatchesProfile(card) && !(card?.kind === "output" && hiddenApprovals.has(card.id)));
+    const visibleDesk = { ...desk, lanes: { ...desk.lanes,
+      needs_eyes: (desk.lanes?.needs_eyes || []).filter(card => !hiddenApprovals.has(card.id)) } };
     // Global counts come from the authoritative Desk summary. With a Factory
     // filter, only rows in the returned snapshot are counted and labelled.
     const summary = factoryProfileId() ? {
@@ -1669,7 +1682,7 @@
       const max = desk.summary?.needs_assets_max || 3;
       pileMeta.textContent = `Working pile ${used}/${max}. Pin candidates below.`;
     }
-    bindCardActions(desk);
+    bindCardActions(visibleDesk);
     updateFactoryBatchToolbar();
   }
 

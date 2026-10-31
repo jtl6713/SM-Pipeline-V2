@@ -144,3 +144,12 @@ test("Ambiguous global POST responses reconcile only an exact durable Activity m
   assert.match(js,/reconcilePendingGlobalSelection\(batch\)/);
   assert.match(js,/Recovered a confirmed server submission after a connection error/);
 });
+
+test("Submit Approvals hides queued and accepted outputs even with a stale Desk snapshot", () => {
+  assert.match(js, /state\.submittingOutputIds = new Set\(selectionIds\)/);
+  assert.match(js, /state\.submittingOutputIds = new Set\(ready\.map\(card => card\.id\)\)/);
+  assert.match(js, /hiddenApprovals\.has\(card\.id\)/);
+  assert.match(js, /bindCardActions\(visibleDesk\)/);
+  assert.match(js, /recentFactoryAccepted\(\)\[String\(card\?\.id \|\| ""\)\]/);
+  assert.match(js, /if \(state\.desk\) renderDesk\(state\.desk\)/);
+});
