@@ -308,7 +308,7 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
   const original='1CAh-mGGiCiv7WKUl9jNeqm1vyQF7PTzq';
   const revised='1XZ-_ARlXoP5mwILho13f81vmWQlpgTs4';
   const attemptId='rrattempt_1234567890abcdef';
-  let activate,ready=false,reads=0,permitApproval=false;
+  let activate,ready=false,reads=0,permitApproval=false,releaseApproval;
   const timers=[];
   const calls=[],confirmations=[],approvalPosts=[];
   const fetchStub=async(url,options)=>{
@@ -326,8 +326,11 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
         next_cursor:null})};
     if(url==='/api/rendering-review/outputs/'+output+'/approve'){
       approvalPosts.push(JSON.parse(options.body));
-      return {ok:true,json:async()=>({ok:true,accepted:true,
-        review_hold_active:true,publication_changed:false,instagram_upload_created:false})};
+      return new Promise(resolve=>{
+        releaseApproval=()=>resolve({ok:true,json:async()=>({ok:true,accepted:true,
+          factory_ready:true,factory_handoff:{factory_ready:true,attempt_id:attemptId},
+          review_hold_active:false,publication_changed:false,instagram_upload_created:false})});
+      });
     }
     if(url==='/api/rendering-review/outputs/'+output){
       reads++;
