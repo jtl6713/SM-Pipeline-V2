@@ -1119,25 +1119,57 @@ export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { autho
       });
       return { ...decision, action: "wait", idea: ideaOnly, production_request: null };
     }
-    const attachIds = decision.selected.map((row) => row.id).filter((id) => !rejectedIds.has(id));
-    if (shouldAttachPhotoWaitAssets({ action: decision.action, autoOff }) && attachIds.length) {
+    // Rank an extra bounded reserve so a provenance-held asset cannot block
+    // otherwise safe Chicago winter images. The attachment loop stops at max.
+    const usableMatches = sortHighConfidenceMatches(matches).filter((row) =>
+      !rejectedIds.has(row.id) && (force || !row.intake_batch_id || !pendingBatchIds.includes(row.intake_batch_id))
+    );
+    const attachCandidates = usableMatches.slice(0, Math.min(20, Math.max(1, max) + 8));
+    let acceptedRows = decision.selected.filter((row) => !rejectedIds.has(row.id));
+    if (shouldAttachPhotoWaitAssets({ action: decision.action, autoOff }) && attachCandidates.length) {
       const attached = await ideaPhotoWaitStage("attach_assets", () => applyLibraryAssetsToProductionRequest(
         env,
         requestRecord,
-        attachIds,
-        { replaceWaitAssets: !autoOff, allowManagePaused: force }
+        attachCandidates.map((row) => row.id),
+        { replaceWaitAssets: !autoOff, allowManagePaused: force,
+          maxWaitAssets: max, minWaitAssets: min }
       ));
-      if (attached.skipped) return { action: "manual", idea, production_request: attached.record, skipped: true };
+      if (attached.skipped) {
+        if (attached.reason !== "insufficient_safe_assets" && attached.reason !== "asset_provenance_review") {
+          return { action: "manual", idea, production_request: attached.record, skipped: true };
+        }
+        matchJson.action = "wait";
+        matchJson.reason = "not_enough_safe_photos";
+        matchJson.selected = [];
+        matchJson.provenance_blocked_count = attached.blockedAssetIds?.length || 0;
+        const waiting = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+          method: "PATCH",
+          body: JSON.stringify({ fields: {
+            Studio_Photo_Wait_Status: "Waiting",
+            Studio_Photo_Match_JSON: JSON.stringify(matchJson),
+          }, typecast: true }),
+        });
+        return { ...decision, action: "wait", reason: matchJson.reason,
+          idea: waiting, production_request: attached.record };
+      }
       requestRecord = attached.record;
+      const accepted = new Set(attached.acceptedIds || []);
+      acceptedRows = usableMatches.filter((row) => accepted.has(row.id));
+      matchJson.provenance_blocked_count = attached.blockedAssetIds?.length || 0;
     }
+    matchJson.selected = acceptedRows.map((row) => ({
+      id: row.id, score: row.score, confidence: row.confidence,
+      match_reasons: row.match_reasons, intake_date: row.intake_date,
+      intake_batch_id: row.intake_batch_id || null,
+    }));
     const ideaReady = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
       method: "PATCH",
       body: JSON.stringify({
         fields: {
           Studio_Photo_Wait_Status: "Ready",
           Studio_Photo_Match_JSON: JSON.stringify(matchJson),
-          Studio_Matched_Media_Assets: decision.selected.map((row) => row.id),
-          Production_Carousel_Slide_Count: decision.selected.length,
+          Studio_Matched_Media_Assets: acceptedRows.map((row) => row.id),
+          Production_Carousel_Slide_Count: acceptedRows.length,
         },
         typecast: true,
       }),
