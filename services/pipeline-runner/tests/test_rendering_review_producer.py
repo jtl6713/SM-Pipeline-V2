@@ -369,4 +369,18 @@ class ProducerTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 400)
         self.assertNotIn("provider_internal_secret", str(raised.exception))
 
+
+    def test_global_verified_profile_can_receive_candidate_without_render_authority(self):
+        profile = "recNYC12345678901"
+        evidence = {**EVIDENCE, "profile_id": profile, "platform": "TikTok",
+                    "output_type": "TikTok Video", "output_id": "recA1B2C3D4E5F6G7",
+                    "scope_verified": True}
+        result, calls = self.invoke(evidence=evidence)
+        self.assertTrue(result["candidate_only"])
+        self.assertFalse(result["visual_inspection_performed"])
+        self.assertEqual(len(calls), 1)
+        evidence["scope_verified"] = False
+        with self.assertRaisesRegex(ValueError, "authoritative"):
+            self.invoke(evidence=evidence)
+
 if __name__ == '__main__': unittest.main()
