@@ -328,7 +328,9 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
       reads++;
       return {ok:true,json:async()=>({
         ok:true,publication_hold_verified:true,
+        flags:{creative_approval_enabled:true},
         session:{version:ready?4:3,state:ready?'ready_for_review':'queued',
+          current_attempt_id:attemptId,
           latest_attempt_number:2,review_hold:{active:true},
           attempts:[{number:1,status:'ready_for_review',artifact_id:original},
             {id:attemptId,number:2,status:ready?'ready_for_review':'queued',
@@ -370,11 +372,16 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
   assert.equal(nodes.rrVideo.inserted,undefined);
   assert.equal(nodes.rrVersionLabel.textContent,'Version V2');
   assert.equal(nodes.rrOriginalVersion.hidden,false);
+  const descendants=node=>[node,...node.children.flatMap(descendants)];
+  const approval=descendants(nodes.rrDetail).find(n=>n.tag==='button'&&
+    n.textContent==='Approve selected version');
+  assert.ok(approval,'Current V2 offers the requested exact approval label');
+  assert.equal(approval.disabled,false,'The displayed V2 is approvable');
   nodes.rrOriginalVersion.listeners.click();
+  assert.equal(approval.disabled,true,'Previewing V1 must not accidentally approve V2');
   assert.equal(nodes.rrVideo.src,'https://studio.test/api/outputs/'+output+'/preview');
   assert.equal(nodes.rrVersionLabel.textContent,'Version V1');
   assert.equal(nodes.rrOriginalVersion.hidden,true);
-  const descendants=node=>[node,...node.children.flatMap(descendants)];
   const versions=descendants(nodes.rrDetail).filter(n=>n.tag==='button'&&
     /^Version V[12] ·/.test(n.textContent));
   assert.equal(versions.length,2,'Both original and revised versions remain selectable');
@@ -382,6 +389,7 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
   assert.equal(nodes.rrVideo.src,revisedStream);
   assert.equal(nodes.rrVersionLabel.textContent,'Version V2');
   assert.equal(nodes.rrOriginalVersion.hidden,false);
+  assert.equal(approval.disabled,false,'Re-selecting V2 enables its approval');
   assert.ok(calls.every(c=>c.method==='GET'),'Polling never renders or publishes');
 });
 
