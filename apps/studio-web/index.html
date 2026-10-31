@@ -2088,7 +2088,7 @@
  <div id="operationsPublishList" class="table-wrap"></div>
  </div>
  <div class="ops-tab-panel" id="operationsOversizedPanel" data-ops-tab-panel="oversized" role="tabpanel" aria-labelledby="operationsTabOversized" hidden>
- <div class="panel-heading"><div><h2>Oversized library videos</h2><p>Files over 100 MB in the ingestion folder or Asset Manager. Compress runs A1S one file at a time. When a clip finishes, the next oversized file starts immediately, then intake records and moves the compressed file without waiting for the next 10-minute scan. Compress all starts the queue now.</p></div>
+ <div class="panel-heading"><div><h2>Oversized library videos</h2><p>Files over 100 MB in Drive ingestion or Asset Manager. Compress all queues eligible videos one at a time, prioritizing new intake. Originals are preserved; verified library derivatives update the existing Media Asset record without creating duplicates. Ingestion copies enter the regular intake flow. Progress appears below.</p></div>
  <button type="button" class="secondary-button" id="operationsCompressAllOversized" hidden>Compress all in intake folder</button>
  </div>
  <div id="operationsCompressionStatus" class="ops-compression-status" hidden></div>
