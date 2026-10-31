@@ -342,8 +342,11 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
           latest_attempt_number:2,review_hold:{active:true},
           attempts:[{number:1,status:'ready_for_review',artifact_id:original},
             {id:attemptId,number:2,status:ready?'ready_for_review':'queued',
-              artifact_id:ready?revised:null}],
-          messages:[]},
+              artifact_id:ready?revised:null,
+              ...(ready?{provenance:{kind:'manual_verified_review_import'}}:{})}],
+          history:ready?[{at:'2026-10-31T21:50:00.000Z'}]:[],
+          messages:ready?[{role:'producer',content:'Old message: waiting for V2',
+            at:'2026-10-31T21:00:00.000Z'}]:[]},
       })};
     }
     throw Error('Unexpected '+url);
@@ -384,6 +387,11 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
   assert.equal(nodes.rrVersionLabel.textContent,'Version V2');
   assert.equal(nodes.rrOriginalVersion.hidden,false);
   const descendants=node=>[node,...node.children.flatMap(descendants)];
+  const activityTitles=descendants(nodes.rrDetail).filter(n=>
+    n.className==='rr-activity-heading').map(n=>n.textContent);
+  assert.ok(activityTitles.some(t=>t.includes('V2 · Ready for review (verified imported edit)')));
+  assert.ok(!activityTitles.some(t=>t.includes('V2 NOT STARTED')),
+    'A verified imported V2 must supersede obsolete Producer conversation');
   const approval=descendants(nodes.rrDetail).find(n=>n.tag==='button'&&
     n.textContent==='Approve selected version');
   assert.ok(approval,'Current V2 offers the requested exact approval label');

@@ -285,16 +285,27 @@
       const rendering=['queued','rendering','validating'].includes(session?.state);
       const planReady=session?.state==='plan_ready'&&session?.plan?.frozen===true&&
         Array.isArray(session.plan?.missing_assets)&&session.plan.missing_assets.length===0;
+      // A separately validated, registered V2 must override stale Producer chatter.
+      const completedAttempt=Array.isArray(session?.attempts)?
+        session.attempts.find(a=>a?.id===session?.current_attempt_id&&
+          Number(a?.number)>1&&a?.status==='ready_for_review'&&
+          typeof a?.artifact_id==='string'&&a.artifact_id.length>0):null;
       const activity=elem('section',null,'rr-activity');
       activity.setAttribute('aria-label','Producer and render status');
-      const title=rendering?'V'+(Number(session.latest_attempt_number)||2)+' · '+
+      const title=completedAttempt&&session.state==='ready_for_review'?
+        'V'+completedAttempt.number+' · Ready for review'+
+        (completedAttempt.provenance?.kind==='manual_verified_review_import'?
+          ' (verified imported edit)':''):
+        rendering?'V'+(Number(session.latest_attempt_number)||2)+' · '+
         ({queued:'Queued for rendering',rendering:'Rendering',validating:'Validating'}[session.state]):
         planReady?'Revision plan ready · Make revised video to begin render':
         producer?'Producer replied · V2 NOT STARTED':
         messages.length?'Factory comments saved · Producer has not replied':'No saved messages';
       activity.append(elem('strong',title,'rr-activity-heading'));
-      if(last?.at)activity.append(elem('p','Last saved: '+chicagoTime(last.at),'rr-activity-time'));
-      if(!rendering&&!planReady&&producer){
+      const lastActivityAt=completedAttempt?
+        session.history?.[session.history.length-1]?.at:last?.at;
+      if(lastActivityAt)activity.append(elem('p','Last saved: '+chicagoTime(lastActivityAt),'rr-activity-time'));
+      if(!completedAttempt&&!rendering&&!planReady&&producer){
         activity.append(elem('p','The Producer responded, but no render-ready plan or V2 job exists. Chat messages do not queue a render.','rr-activity-detail'));
         const needs=session?.producer_candidate?.candidate?.requirements;
         if(Array.isArray(needs)&&needs.some(x=>x?.description)){
