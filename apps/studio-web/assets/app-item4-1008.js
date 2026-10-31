@@ -289,7 +289,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.793-factory-mixed-select-refresh";
+  const BUILD_ID = "item4-0.6.794-factory-mixed-select-refresh";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -13245,6 +13245,29 @@ function timedScriptAssetLabel(asset, index) {
       .sort((a, b) => Number(a.output_order || 0) - Number(b.output_order || 0));
   }
 
+  // One shared full-length render is delivered to four platforms; one Story
+  // companion is delivered to Instagram and Facebook. These are the only
+  // supported cross-platform edit families. Never sweep in extra output types.
+  const PR_MAIN_RENDER_FAMILY = new Set([
+    "Instagram::Reel", "Facebook::Reel", "TikTok::Video Draft", "YouTube::Short",
+  ]);
+  const PR_STORY_RENDER_FAMILY = new Set(["Instagram::Story", "Facebook::Story"]);
+
+  function productionOutputRenderFamily(row) {
+    const key = outputRecordKey(row);
+    if (PR_MAIN_RENDER_FAMILY.has(key)) return "main";
+    if (PR_STORY_RENDER_FAMILY.has(key)) return "story";
+    return "";
+  }
+
+  function productionOutputFamilyMembers(row) {
+    const kind = productionOutputRenderFamily(row);
+    if (!kind) return [];
+    return enabledProductionRequestOutputs().filter(candidate =>
+      productionOutputRenderFamily(candidate) === kind
+    );
+  }
+
   function overrideCount(row) {
     const keys = [
       "voiceover_mode_override","background_music_mode_override","thumbnail_mode_override",
@@ -13366,6 +13389,23 @@ function timedScriptAssetLabel(asset, index) {
     $("prOverrideHeading").textContent = `${row.platform} · ${row.output_type}`;
     $("prOverrideInheritedNote").textContent = "Use Inherit or leave numeric/text fields blank to use the master Production Request.";
 
+    const familyMembers = productionOutputFamilyMembers(row);
+    const scope = $("prOverrideApplyScope");
+    const familyOption = scope?.querySelector('option[value="family"]');
+    const kind = productionOutputRenderFamily(row);
+    if (scope) scope.value = "single";
+    if (familyOption) {
+      familyOption.hidden = familyMembers.length < 2;
+      familyOption.disabled = familyMembers.length < 2;
+      familyOption.textContent = kind === "main"
+        ? `All ${familyMembers.length} full renderings`
+        : `Both Stories (${familyMembers.length})`;
+    }
+    const scopeHint = $("prOverrideApplyHint");
+    if (scopeHint) scopeHint.textContent = familyMembers.length >= 2
+      ? `Optional: apply these same creative/render overrides to ${familyMembers.length} ${kind === "main" ? "full renderings" : "Stories"}. Individual publish modes and scheduled times are preserved.`
+      : "Changes apply to this output only.";
+
     setOverrideSelect("prOverrideVoiceover", row.voiceover_mode_override);
     setOverrideSelect("prOverrideMusicMode", row.background_music_mode_override);
     setOverrideSelect("prOverrideThumbnail", row.thumbnail_mode_override);
@@ -13462,17 +13502,47 @@ function timedScriptAssetLabel(asset, index) {
         scheduled_at: scheduledRaw ? studioDateTimeLocalToIso(scheduledRaw) : "",
       };
 
-      const result = await api(`/api/production-request-outputs/${encodeURIComponent(recordId)}`, {
-        method: "PATCH",
-        body: JSON.stringify(payload),
-      });
+      const selectedScope = $("prOverrideApplyScope")?.value || "single";
+      const targets = selectedScope === "family"
+        ? productionOutputFamilyMembers(overrideRow)
+        : [overrideRow];
+      if (!targets.length || !targets.some(row => row.id === recordId)) {
+        throw new Error("The selected output group has changed. Reload Production before applying changes.");
+      }
+      const family = productionOutputRenderFamily(overrideRow);
+      if (selectedScope === "family" && (!family || targets.length < 2)) {
+        throw new Error("No compatible sister outputs are available for this Production Request.");
+      }
 
-      const idx = productionRequestOutputs.findIndex(r => r.id === recordId);
-      if (idx >= 0) productionRequestOutputs[idx] = result.record;
+      // Family edits share the render/creative recipe, not the destination's
+      // publishing controls. Preserve each sibling's scheduled time and mode.
+      const { publish_mode: _publishMode, scheduled_at: _scheduledAt, ...sharedPayload } = payload;
+      const requestIdAtStart = activeProductionRequest?.id;
+      const applied = [];
+      for (const target of targets) {
+        if (activeProductionRequest?.id !== requestIdAtStart) {
+          throw new Error(`Production Request changed. Updated ${applied.length} of ${targets.length} outputs; reopen to finish.`);
+        }
+        try {
+          const result = await api(`/api/production-request-outputs/${encodeURIComponent(target.id)}`, {
+            method: "PATCH",
+            body: JSON.stringify(target.id === recordId ? payload : sharedPayload),
+          });
+          const idx = productionRequestOutputs.findIndex(row => row.id === target.id);
+          if (idx >= 0) productionRequestOutputs[idx] = result.record;
+          applied.push(target.id);
+        } catch (error) {
+          renderProductionRequestOutputCards();
+          throw new Error(`Saved ${applied.length} of ${targets.length} output overrides. ${target.platform} ${target.output_type} failed: ${error.message || error}. Retry to finish; no publishing settings were changed on sibling outputs.`);
+        }
+      }
       renderProductionRequestOutputCards();
       openProductionRequestOutputOverride(recordId);
+      if (selectedScope === "family") $("prOverrideApplyScope").value = "family";
 
-      message.textContent = "Output override saved.";
+      message.textContent = selectedScope === "family"
+        ? `Creative/render changes saved to all ${applied.length} ${family === "main" ? "full renderings" : "Stories"}. Sibling schedules and publishing modes were preserved.`
+        : "Output override saved.";
       message.className = "form-message success";
     } catch (e) {
       message.textContent = e.message;
