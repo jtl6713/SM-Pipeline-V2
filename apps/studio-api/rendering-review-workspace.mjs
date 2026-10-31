@@ -37,20 +37,18 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
     automatic_sampling_percent:0,
     integration_verified:env?.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true",
   };
-  // Bounded read-only discovery of completed Chicago Instagram Reels. This is
-  // NOT an admission or approval endpoint. Validate the linked Content Item
-  // before returning even a title or asset URL to prevent cross-profile leaks.
+  // Read-only discovery of any held, completed output for authenticated
+  // profiles. The Content Item link, not any output lookup field, owns scope.
+  // No automatic admission, render authorization or scheduling side effects.
   if(url.pathname==='/api/rendering-review/queue'){
-    const chicago='recT2rbKX3MF7cVFU';
-    if(requested&&requested!==chicago)fail(403,'Chicago-only Rendering Review pilot');
-    if(!allowed.has(chicago))return {ok:true,queue:[],next_cursor:null,as_of:new Date().toISOString(),flags};
+    if(!scope.length)return {ok:true,queue:[],next_cursor:null,as_of:new Date().toISOString(),flags};
     const cursor=text(url.searchParams.get('cursor'));
     if(cursor&&(cursor.length>512||!/^[A-Za-z0-9._-]+$/.test(cursor)))
       fail(400,'Invalid Rendering Review cursor');
     // Only already-held Factory submissions are discoverable. No auto-admission.
     const page=await operations.listRecordsPage(env,env.AIRTABLE_OUTPUT_TABLE_ID,{
       limit:40,offset:cursor||null,
-      filterFormula:'AND({Platform_Output_Type}="Instagram Reel",OR({Final_File_ID}!="",{Final_File_URL}!=""),OR({Studio_Render_Review_Hold_Active}=TRUE(),{Studio_Render_Review_Hold_ID}!="",{Studio_Render_Review_Session_ID}!=""))',
+      filterFormula:'AND(OR({Final_File_ID}!="",{Final_File_URL}!=""),OR({Studio_Render_Review_Hold_Active}=TRUE(),{Studio_Render_Review_Hold_ID}!="",{Studio_Render_Review_Session_ID}!=""))',
       fields:['Content_Item','Platform','Platform_Output_Type','Render_Status',
         'Final_File_ID','Final_File_URL','Output_Title','Output_ID','Output_Status',
         'Publish_Status','Published_At','Platform_Post_ID','Platform_Post_URL',
@@ -70,7 +68,7 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
       const f=row?.fields||{};
       const links=f.Content_Item;
       if(!rec(row?.id)||!Array.isArray(links)||links.length!==1||!rec(links[0]))continue;
-      if(text(f.Platform)!=='Instagram'||text(f.Platform_Output_Type)!=='Instagram Reel')continue;
+      if(!text(f.Platform)||!text(f.Platform_Output_Type))continue;
       if(!text(f.Final_File_ID)&&!text(f.Final_File_URL))continue;
       if(/^(published|publishing|dispatched)$/i.test(text(f.Publish_Status))||
          /^(published|publishing|dispatched)$/i.test(text(f.Output_Status))||
@@ -102,14 +100,16 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
       const content=contentById.get(contentId);
       if(!Array.isArray(content?.fields?.Content_Profile)||
          content.fields.Content_Profile.length!==1||
-         content.fields.Content_Profile[0]!==chicago)continue;
+         !allowed.has(content.fields.Content_Profile[0])||
+         (requested&&content.fields.Content_Profile[0]!==requested))continue;
       const f=row.fields;
       const held=f[RENDER_REVIEW_OUTPUT_FIELDS.hold_active]===true||
         [RENDER_REVIEW_OUTPUT_FIELDS.hold_id,RENDER_REVIEW_OUTPUT_FIELDS.hold_owner,
           RENDER_REVIEW_OUTPUT_FIELDS.session_id].some(key=>Boolean(text(f[key])));
       if(!held)continue; // Upstream readiness never initiates conversational review.
       queue.push({
-        output_id:row.id,profile_id:chicago,output_type:'Instagram Reel',
+        output_id:row.id,profile_id:content.fields.Content_Profile[0],
+        platform:text(f.Platform),output_type:text(f.Platform_Output_Type),
         output_number:f.Output_ID||null,title:text(f.Output_Title)||('Output '+(f.Output_ID||row.id)),
         render_status:text(f.Render_Status),final_file_id:text(f.Final_File_ID)||null,
         final_file_url:text(f.Final_File_URL)||null,
