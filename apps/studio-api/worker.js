@@ -1,3 +1,4 @@
+import { factoryCorrectionMatches } from "./factory-correction-selection.mjs";
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
 import { serveReviewAttemptVideo, fetchTrustedRunnerReviewMedia } from "./rendering-review-attempt-video.mjs";
 import { completeReviewAttempt } from "./rendering-review-completion-http.mjs";
@@ -2460,6 +2461,91 @@ export default {
           return factoryBatchSubmitRoute(request, env, authorization, ctx);
         }
         throw new HttpError(405, "Method not allowed");
+      }
+
+      const correctionMatches = /^\\/api\\/factory\\/outputs\\/(rec[A-Za-z0-9]{14})\\/correction-matches$/.exec(url.pathname);
+      if (correctionMatches && request.method === "GET") {
+        requirePermission(authorization, "outputs_review");
+        const outputId = correctionMatches[1];
+        const requestId = String(url.searchParams.get("production_request_id") || "");
+        if (!/^rec[A-Za-z0-9]{14}$/.test(requestId))
+          throw new HttpError(400, "Exact linked Production Request required");
+        const output = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId);
+        const linked = (field, record = output) => {
+          const v = f(record, field);
+          return Array.isArray(v) && v.length === 1 && /^rec[A-Za-z0-9]{14}$/.test(v[0]) ? v[0] : null;
+        };
+        const contentId = linked("Content_Item");
+        if (!contentId || (linked("Production_Request") &&
+            linked("Production_Request") !== requestId))
+          throw new HttpError(409, "Output and Production Request identity do not match");
+        const content = await airtableFetch(env, "tblwzN9AXWvmKVKPs", contentId);
+        const profileId = linked("Content_Profile", content);
+        const memberships = await reviewAuthorizedProfiles(env, authorization);
+        if (!profileId || !memberships.some(profile => profile.id === profileId))
+          throw new HttpError(403, "Content profile is not authorized");
+        const productionUrl = new URL("/api/production-requests/" + requestId + "/outputs", url);
+        const response = await listProductionRequestOutputs(request, env, productionUrl, authorization, ctx);
+        if (!response.ok) throw new HttpError(response.status, "Production mappings unavailable");
+        const mapped = await response.json();
+        const rows = Array.isArray(mapped.records) ? mapped.records : [];
+        const mappedSource = rows.filter(row => row?.enabled === true &&
+          Array.isArray(row.platform_output_links) &&
+          row.platform_output_links.includes(outputId));
+        if (mappedSource.length !== 1 || !mappedSource[0]?.render_format?.key)
+          throw new HttpError(409, "Source output format mapping is unavailable");
+        const signature = mappedSource[0].render_format.key;
+        const matchedRows = rows.filter(row => row?.enabled === true &&
+          row?.render_format?.key === signature);
+        const targetRows = matchedRows.flatMap(row =>
+          (Array.isArray(row.platform_output_links) ? row.platform_output_links : [])
+            .map(id => ({id,row})));
+        if (targetRows.length > 40 || targetRows.some(x => !/^rec[A-Za-z0-9]{14}$/.test(x.id)))
+          throw new HttpError(409, "Production output mapping is malformed or excessive");
+        const unique = new Set();
+        const authoritative = [];
+        for (const {id,row} of targetRows) {
+          if (unique.has(id)) continue;
+          unique.add(id);
+          const candidate = id === outputId ? output :
+            await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+          const candidateContent = linked("Content_Item", candidate);
+          const direct = linked("Production_Request", candidate);
+          if (candidateContent !== contentId || (direct && direct !== requestId))
+            throw new HttpError(409, "Cross-content or cross-request output mapping detected");
+          authoritative.push({
+            id,production_request_id:requestId,content_item_id:contentId,
+            profile_id:profileId,platform:row.platform,output_type:row.output_type,
+            enabled:row.enabled,render_format:row.render_format,
+            render_status:f(candidate,"Render_Status"),
+            output_status:f(candidate,"Output_Status"),
+            publish_status:f(candidate,"Publish_Status"),
+            final_file_id:f(candidate,"Final_File_ID"),
+            final_file_url:f(candidate,"Final_File_URL"),
+            published_at:f(candidate,"Published_At"),
+            platform_post_url:f(candidate,"Platform_Post_URL"),
+            platform_post_id:f(candidate,"Platform_Post_ID"),
+            platform_media_id:f(candidate,"Platform_Media_ID"),
+            publish_started_at:f(candidate,"Publish_Started_At"),
+            publish_locked_at:f(candidate,"Publish_Locked_At"),
+            publish_locked_by:f(candidate,"Publish_Locked_By"),
+            review_hold_active:f(candidate,"Studio_Render_Review_Hold_Active"),
+            do_not_publish:f(candidate,"Do_Not_Publish"),
+            review_session_id:f(candidate,"Studio_Render_Review_Session_ID"),
+          });
+        }
+        const source = authoritative.find(row => row.id === outputId);
+        const eligible = factoryCorrectionMatches(source,authoritative,{
+          authorized_profile_ids:memberships.map(p => p.id),
+        });
+        return respond(request,env,{
+          ok:true, source_output_id:outputId,
+          production_request_id:requestId,
+          render_format:source?.render_format || null,
+          matching_outputs:eligible.map(({id,platform,output_type}) => ({
+            id,platform,output_type,
+          })),
+        });
       }
 
       if (isFactoryDeskRoute) {
