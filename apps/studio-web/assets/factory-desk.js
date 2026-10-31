@@ -293,7 +293,11 @@
     if (state.batchApprovalsEnabled === false) return false;
     if (state.batchGlobal?.enabled) {
       const platform = String(card?.platform || "").trim();
-      const type = String(card?.studio_output_type || card?.format || "").trim();
+      // A lean Desk card may carry the output type in format while its
+      // studio_output_type is a stale display alias. Accept either only when
+      // the server-signed platform matrix explicitly permits it.
+      const typesOnCard = [...new Set([card?.studio_output_type, card?.format]
+        .map((value) => String(value || "").trim()).filter(Boolean))];
       const platforms = Array.isArray(state.batchGlobal.allowed_platforms)
         ? state.batchGlobal.allowed_platforms : ["Instagram"];
       if (!platforms.includes(platform)) return false;
@@ -301,7 +305,7 @@
       const types = Array.isArray(byPlatform[platform]) ? byPlatform[platform]
         : (Array.isArray(state.batchGlobal.allowed_formats)
           ? state.batchGlobal.allowed_formats : ["Reel","Story"]);
-      return types.includes(type);
+      return typesOnCard.some((type) => types.includes(type));
     }
     const rollout = state.batchRollout;
     if (!rollout) return state.batchApprovalsEnabled !== false;
