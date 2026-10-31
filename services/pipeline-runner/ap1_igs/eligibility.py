@@ -14,6 +14,7 @@ from ap1_igs.constants import (
     STORY_STATUS_PUBLISHING,
     STORY_STATUS_READY,
 )
+from publish.rendering_review import rendering_review_reason
 from asset.helpers import as_bool
 from render.fields import field, field_str
 
@@ -45,6 +46,7 @@ def _first_class_story_ready(record: dict[str, Any]) -> bool:
         and _ci(field_str(record, "Output_Status")) == _ci(OUTPUT_STATUS)
         and _ci(field_str(record, "Publish_Method")) == _ci(PUBLISH_METHOD)
         and as_bool(field(record, "Auto_Publish_Enabled"), False)
+        and not rendering_review_reason(record)
         and not as_bool(field(record, "Do_Not_Publish"), False)
         and not field_str(record, "Published_At")
         and bool(story_asset_url(record))
@@ -66,6 +68,7 @@ def _legacy_reel_story_ready(record: dict[str, Any]) -> bool:
         and not field_str(record, "IG_Story_Post_ID")
         and not field_str(record, "IG_Story_Container_ID")
         and bool(story_asset_url(record))
+        and not rendering_review_reason(record)
         and not as_bool(field(record, "Do_Not_Publish"), False)
         and _ci(field_str(record, "Review_Status")) == _ci(REVIEW_STATUS)
     )
@@ -107,6 +110,9 @@ def create_eligibility_reason(
         return "publish_method_not_automated"
     if not as_bool(field(record, "Auto_Publish_Enabled"), False):
         return "auto_publish_disabled"
+    held = rendering_review_reason(record)
+    if held:
+        return held
     if as_bool(field(record, "Do_Not_Publish"), False):
         return "do_not_publish"
     if field_str(record, "Published_At"):
@@ -136,6 +142,9 @@ def poll_eligibility_reason(
         return "not_instagram"
     if _ci(field_str(record, "Review_Status")) != _ci(REVIEW_STATUS):
         return "review_not_approved"
+    held = rendering_review_reason(record)
+    if held:
+        return held
     if as_bool(field(record, "Do_Not_Publish"), False):
         return "do_not_publish"
     if _ci(field_str(record, "Publish_Error_Stage")) == "ap1_igs_published_unverified":
