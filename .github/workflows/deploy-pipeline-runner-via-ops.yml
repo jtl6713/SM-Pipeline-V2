@@ -133,6 +133,68 @@ jobs:
           echo "chicago_review_private_google_media_route=PASS auth_required=true no_render=true"
 
 
+      - name: One-time exact oversized ingestion A1S canary (no publish)
+        if: ${{ success() && github.event_name == 'push' && startsWith(github.event.head_commit.message, 'oversized-a1s-canary-20261030:') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://ops.chicagoshining.com'
+          selected=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            if [[ -z "$candidate" ]]; then continue; fi
+            code=$(curl -sS --max-time 20 -o /tmp/oversize-ops-catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok==true' /tmp/oversize-ops-catalog.json >/dev/null 2>&1; then selected="$candidate"; break; fi
+          done
+          test -n "$selected"
+          cat > /tmp/oversize-ingestion-canary.ps1 <<'PS'
+          $ErrorActionPreference = "Stop"
+          $fileId = "1OeCHnytBPep_IRhvDX4wsM2xuemPmPVt"
+          $health = Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 15
+          if ($health.ok -ne $true) { throw "runner_not_healthy" }
+          $envfile = Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
+          if (-not (Test-Path $envfile)) { throw "runner_env_missing" }
+          $line = @(Get-Content $envfile | Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='}) | Select-Object -Last 1
+          if (-not $line) { throw "runner_auth_missing" }
+          $secret = ([string]$line -split '=', 2)[1].Trim().Trim('"', "'")
+          if (-not $secret) { throw "runner_auth_empty" }
+          $payload = @{extra=@{drive_file_id=$fileId;inline=$true}} | ConvertTo-Json -Depth 6 -Compress
+          $reply = Invoke-RestMethod -Uri "http://127.0.0.1:3350/stages/a1s" -Method POST -Headers @{"X-Pipeline-Secret"=$secret} -Body $payload -ContentType "application/json" -TimeoutSec 90
+          $run = $reply.details.run
+          $started = [int]$run.started_count
+          if ($started -ne 1) {
+            Write-Output ("a1s_reason=" + [string]$run.reason)
+            throw "a1s_canary_not_started"
+          }
+          $matched = @($run.started | Where-Object {$_.file_id -eq $fileId})
+          if ($matched.Count -ne 1) { throw "a1s_wrong_source" }
+          Write-Output "oversized_canary_accepted=true"
+          Write-Output ("job_id=" + $matched[0].job_id)
+          PS
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/oversize-ingestion-canary.json').write_text(json.dumps({"command":Path('/tmp/oversize-ingestion-canary.ps1').read_text(),"confirm":True}))
+          PY
+          code=$(curl -sS --max-time 20 -o /tmp/oversize-canary-job.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $selected" -H 'Content-Type: application/json' --data-binary @/tmp/oversize-ingestion-canary.json || true)
+          if [[ "$code" != "202" && "$code" != "200" ]]; then echo "oversized_canary_shell_submit_failed=$code"; exit 1; fi
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/oversize-canary-job.json)
+          test -n "$job"
+          for n in $(seq 1 25); do
+            curl -sS --max-time 20 -H "Authorization: Bearer $selected" "$BASE/api/jobs/$job" -o /tmp/oversize-canary-status.json
+            state=$(jq -r '.job.status // empty' /tmp/oversize-canary-status.json)
+            if [[ "$state" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/oversize-canary-status.json | grep -E '^(oversized_canary_accepted|job_id)='
+              exit 0
+            fi
+            if [[ "$state" == "failed" ]]; then
+              echo "oversized_canary_failed"
+              jq -r '.job.log // ""' /tmp/oversize-canary-status.json | tail -12 | sed -E 's/(PIPELINE_RUNNER_SHARED_SECRET|X-Pipeline-Secret).*/[redacted]/'
+              exit 2
+            fi
+            sleep 3
+          done
+          echo "oversized_canary_status_timeout"; exit 3
+
       - name: One-time exact Chicago Waterfront compression recovery (no publish)
         if: ${{ success() && github.event_name == 'push' && startsWith(github.event.head_commit.message, 'studio-ame-size-canary-20261030:') }}
         shell: bash
