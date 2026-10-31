@@ -13,3 +13,21 @@ test("a prompt without naming instructions keeps automatic title behavior", () =
   assert.equal(scriptedShortExplicitTitle("Create a short about Miami waterfront."), "");
   assert.match(scriptedShortPublishableTitle("Create a short about Miami waterfront.", timeline, "Miami"), /Miami|Waterfront/i);
 });
+
+test("preserves exact user-authored LA Sixth Street Viaduct title from multiline brief", () => {
+  const exact = "Sixth Street Viaduct — “Architecture in the Light”";
+  const brief = [
+    "Please use this exact title: " + exact,
+    "Location: Sixth Street Viaduct (mid-span or east side looking toward the downtown towers)",
+    "Shot list:",
+    "Still: Strong architectural lines of the viaduct catching hard golden light",
+    "Clip: Slow tracking shot along the curves of the bridge",
+  ].join("\n");
+  assert.equal(scriptedShortExplicitTitle(brief), exact);
+  assert.equal(scriptedShortPublishableTitle(brief.replace(/\n/g, " "), timeline, "Los Angeles"), exact);
+  assert.equal(scriptedShortPublishableTitle(brief, timeline, "Los Angeles"), exact);
+});
+test("other exact-title instructions preserve surrounding typography", () => {
+  assert.equal(scriptedShortExplicitTitle('Please use the exact title: "LA Bridge After Dark"'), "LA Bridge After Dark");
+  assert.equal(scriptedShortExplicitTitle("Set this exact title to: Sixth Street Viaduct — “Blue Hour”"), "Sixth Street Viaduct — “Blue Hour”");
+});
