@@ -84,3 +84,27 @@ def resolve_profile_watermark(*,client:Any,drive:Any,profile_id:str)->dict:
         "profile_id":profile_id,"media_authority":"google_drive",
         "media_asset_record_id":target["id"],"drive_file_id":fid,
         "sha256":hashlib.sha256(content).hexdigest()}}
+
+
+def require_owned_profile_watermark_url(*,client:Any,drive:Any,
+                                        profile_id:str,url:str)->dict:
+    """Bind a Remotion source watermark to THIS profile's owned catalog asset.
+
+    A Drive file merely being accessible is not ownership evidence. Source
+    props may refer to a different Shining city or a stale, untracked image.
+    Do not use them to bypass the authoritative Airtable/Drive receipt.
+    """
+    from urllib.parse import urlsplit,parse_qs
+    owned=resolve_profile_watermark(client=client,drive=drive,profile_id=profile_id)
+    receipt=owned["receipt"]
+    if not isinstance(url,str):
+        denied("profile_source_watermark_identity_mismatch")
+    parsed=urlsplit(url)
+    query=parse_qs(parsed.query,keep_blank_values=True)
+    if (parsed.scheme!="https" or parsed.netloc!="drive.google.com" or
+        parsed.path!="/uc" or parsed.fragment or parsed.username or
+        parsed.password or set(query)!={"id","export"} or
+        query.get("export")!=["download"] or
+        query.get("id")!=[receipt["drive_file_id"]]):
+        denied("profile_source_watermark_identity_mismatch")
+    return {"url":url,"receipt":receipt}
