@@ -1,4 +1,7 @@
 import { loadAuthoritativeFactoryCorrection } from "./factory-correction-authority.mjs";
+import { factoryCorrectionEligible } from "./factory-correction-selection.mjs";
+import { submitFactoryCorrectionBatch } from "./factory-correction-batch.mjs";
+import { factoryCorrectionReceiptStore } from "./factory-correction-receipts.mjs";
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
 import { serveReviewAttemptVideo, fetchTrustedRunnerReviewMedia } from "./rendering-review-attempt-video.mjs";
 import { completeReviewAttempt } from "./rendering-review-completion-http.mjs";
@@ -7,7 +10,7 @@ import {applyReviewEvent} from "./rendering-review-policy.mjs";
 import { makeRenderingReviewAirtableOperations } from "./rendering-review-airtable.mjs";
 import { CHICAGO_PROFILE_ID } from "./rendering-review-policy.mjs";
 import { handleRenderingReviewFeedbackRequest, reviewFeedbackWriteEnabled } from "./rendering-review-feedback-http.mjs";
-import { handleRenderingReviewEnrollRequest, reviewEnrollmentWriteEnabled } from "./rendering-review-enrollment-http.mjs";
+import { handleRenderingReviewEnrollRequest, reviewEnrollmentWriteEnabled, globalReviewEnrollmentEnabled } from "./rendering-review-enrollment-http.mjs";
 import { acceptReviewCreativeOnly } from "./rendering-review-approval-http.mjs";
 import { handoffApprovedReviewToFactory } from "./rendering-review-factory-handoff.mjs";
 import { returnFactoryRevisionToProducer } from "./rendering-review-factory-return.mjs";
@@ -2493,6 +2496,133 @@ export default {
             id,platform,output_type,
           })),
         });
+      }
+
+      // Batch review requires a separate, newly verified global Runner rollout.
+      // It is deliberately not routed through request_changes_content, whose
+      // original semantics change every output in a Content Item.
+      const correctionBatch = /^\/api\/factory\/outputs\/(rec[A-Za-z0-9]{14})\/correction-batch$/.exec(url.pathname);
+      if(correctionBatch && request.method==="POST"){
+        requirePermission(authorization,"outputs_review");
+        assertWriteRequest(request,env);
+        if(!globalReviewEnrollmentEnabled(env))
+          throw new HttpError(405,"Multi-profile Rendering Review requires verified runner integration");
+        if(!/^application\\/json(?:\\s*;|$)/i.test(String(request.headers.get("Content-Type")||"")))
+          throw new HttpError(415,"JSON required for Factory correction");
+        const raw=await request.text();
+        if(raw.length>7500)throw new HttpError(413,"Factory correction exceeds size limit");
+        let input;try{input=JSON.parse(raw)}catch{throw new HttpError(400,"Invalid Factory correction JSON")}
+        if(!input||typeof input!=="object"||Array.isArray(input)||
+           Object.keys(input).some(k=>!["production_request_id","selected_output_ids","client_request_id","note"].includes(k))||
+           !/^rec[A-Za-z0-9]{14}$/.test(String(input.production_request_id||""))||
+           !Array.isArray(input.selected_output_ids)||
+           input.selected_output_ids.length>40||
+           input.selected_output_ids.some(id=>!/^rec[A-Za-z0-9]{14}$/.test(id))||
+           !/^[A-Za-z0-9_-]{8,120}$/.test(String(input.client_request_id||""))||
+           typeof input.note!=="string"||!input.note.trim()||input.note.length>3000)
+          throw new HttpError(400,"Exact output selection and review note required");
+
+        const authorized=await reviewAuthorizedProfiles(env,authorization);
+        const profileIds=authorized.map(x=>x.id);
+        if(!profileIds.length||!authorization.user?.record_id)
+          throw new HttpError(403,"Authorized Factory reviewer and profile required");
+        const actor=authorization.user.record_id;
+        const receiptStore=factoryCorrectionReceiptStore(env.STUDIO_MEDIA,actor);
+        let adapter;
+        const authorizeOutput=async id=>{
+          const view=await adapter.readOutput(id);
+          return view?.id===id&&profileIds.includes(view.profile_id)&&
+            Boolean(view.platform)&&Boolean(view.output_type);
+        };
+        adapter=composeRenderingReviewEnrollmentOperations({
+          env,airtableFetch,listRecords:reviewListRecords,readField:f,
+          withOutputApprovalLock,authorizeReview:authorizeOutput,
+          authorizeEvent:async()=>false,
+          writeVacateUnderLane:async({output_id,fields,signal,review_hold_id,review_owner})=>{
+            if(signal?.aborted)throw new HttpError(409,"Scheduling lease interrupted");
+            const latest=await airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,output_id);
+            if(latest?.id!==output_id||!latest.fields||
+               f(latest,"Studio_Render_Review_Hold_Active")!==true||
+               String(f(latest,"Studio_Render_Review_Hold_ID")||"")!==review_hold_id||
+               String(f(latest,"Studio_Render_Review_Hold_Owner")||"")!==review_owner||
+               String(f(latest,"Studio_Render_Review_Session_ID")||"")!==review_owner||
+               f(latest,"Do_Not_Publish")!==true||
+               ["Published_At","Publish_Started_At","Publish_Locked_At",
+                "Publish_Locked_By","Platform_Media_ID","Platform_Post_ID",
+                "Platform_Post_URL"].some(key=>Boolean(f(latest,key))))
+              throw new HttpError(409,"Authoritative review hold or publication state changed");
+            if(signal?.aborted)throw new HttpError(409,"Scheduling lease interrupted");
+            return airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,output_id,{
+              method:"PATCH",body:JSON.stringify({fields,typecast:false}),
+            });
+          },
+          postCommit:async({output})=>{
+            try{await syncAirtableOutputRowToSupabase(env,output)}
+            catch(err){console.warn("Factory correction vacate mirror deferred",err?.message||"");}
+          },
+        });
+        const sourceId=correctionBatch[1],requestId=input.production_request_id;
+        const receipt=await submitFactoryCorrectionBatch({
+          source_output_id:sourceId,selected_output_ids:input.selected_output_ids,
+          note:input.note,client_request_id:input.client_request_id,
+          operations:{
+            withRequestLock:(id,execute)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,execute),
+            readAuthoritativeSnapshot:async id=>{
+              const view=await readFactoryCorrectionSnapshot(id,requestId);
+              return {
+                source:view.source,outputs:view.outputs,
+                authorized_profile_ids:profileIds,
+              };
+            },
+            ...receiptStore,
+            enrollHeldOutput:async({output_id,note,client_request_id,profile_id,render_format_key})=>{
+              const latest=await readFactoryCorrectionSnapshot(sourceId,requestId);
+              const target=latest.outputs.find(row=>row.id===output_id);
+              if(!target||target.profile_id!==profile_id||
+                 target.render_format?.key!==render_format_key||
+                 !factoryCorrectionEligible(target))
+                throw new HttpError(409,"Selected output is no longer eligible for correction");
+              const internal=new Request(url.toString(),{
+                method:"POST",headers:{"Content-Type":"application/json"},
+                body:JSON.stringify({client_request_id,note}),
+              });
+              const result=await handleRenderingReviewEnrollRequest({
+                request:internal,env,authorization,output_id,operations:adapter,
+                assertWriteRequest:()=>{},
+                trustedAuthorizedProfileIds:profileIds,
+              });
+              if(result.review_notes_saved!==true||result.review_hold_active!==true)
+                throw new HttpError(503,"Output review hold was not verified");
+              return result;
+            },
+            verifyHeldSession:async(id,key)=>{
+              const [session,hold,rawOutput]=await Promise.all([
+                adapter.readSession(id),adapter.readHold(id),
+                airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+              ]);
+              const first=session?.attempts?.find(a=>a.number===1);
+              const original=String(f(rawOutput,"Final_File_ID")||f(rawOutput,"Final_File_URL")||"");
+              const valid=session?.enrollment_request_id&&
+                session.factory_entry?.source==="factory"&&
+                session.profile_id&&profileIds.includes(session.profile_id)&&
+                session.review_hold?.active===true&&
+                hold?.active===true&&hold.id===session.review_hold.id&&
+                hold.owner===session.id&&
+                first?.artifact_id===original&&
+                f(rawOutput,"Do_Not_Publish")===true;
+              return {
+                hold_active:valid===true,original_preserved:valid===true,
+                published_or_dispatching:Boolean(
+                  ["Published_At","Publish_Started_At","Publish_Locked_At",
+                   "Publish_Locked_By","Platform_Post_ID","Platform_Post_URL",
+                   "Platform_Media_ID"].some(field=>f(rawOutput,field))
+                ),
+                session_id:valid?session.id:null,
+              };
+            },
+          },
+        });
+        return respond(request,env,receipt);
       }
 
       if (isFactoryDeskRoute) {
