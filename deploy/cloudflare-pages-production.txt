@@ -610,3 +610,5 @@ Deploy Studio UI 0.6.789-factory-story-selection after correcting mandatory rele
 2026-10-31: Deploy Studio UI 0.6.794. Optional per-output override fanout to four identical full renderings (IG Reel, FB Reel, TikTok Video Draft, YouTube Short) or two Story companions (Instagram, Facebook). Default remains single output. Family copies creative/render overrides only, preserving each destination's publish mode and schedule. Verify live Cloudflare Pages custom domain and cache keys.
 
 2026-10-31: Deploy Studio UI 0.6.795-factory-submit-immediate. Factory Submit Approvals enables immediately when eligible outputs are selected instead of waiting for the background rollout refresh.
+
+2026-10-31: Deploy Studio UI 0.6.796 dynamic matching-format override scopes. Uses Pipeline_Family and active DB mapping Format/Aspect_Ratio instead of fixed platform lists; single-output is default, sibling schedule/publish fields untouched. Verify protected Pages custom domain and BUILD_ID.

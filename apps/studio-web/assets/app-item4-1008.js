@@ -289,7 +289,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.795-factory-submit-immediate";
+  const BUILD_ID = "item4-0.6.796-factory-submit-immediate";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -13245,26 +13245,19 @@ function timedScriptAssetLabel(asset, index) {
       .sort((a, b) => Number(a.output_order || 0) - Number(b.output_order || 0));
   }
 
-  // One shared full-length render is delivered to four platforms; one Story
-  // companion is delivered to Instagram and Facebook. These are the only
-  // supported cross-platform edit families. Never sweep in extra output types.
-  const PR_MAIN_RENDER_FAMILY = new Set([
-    "Instagram::Reel", "Facebook::Reel", "TikTok::Video Draft", "YouTube::Short",
-  ]);
-  const PR_STORY_RENDER_FAMILY = new Set(["Instagram::Story", "Facebook::Story"]);
-
+  // Format authority comes from Airtable's Production Request Outputs
+  // Pipeline_Family and active Platform Output Mappings Format / Aspect_Ratio.
+  // The server emits a complete signature or null (fail closed). A new output
+  // type/platform joins the matching group without a client-side whitelist.
   function productionOutputRenderFamily(row) {
-    const key = outputRecordKey(row);
-    if (PR_MAIN_RENDER_FAMILY.has(key)) return "main";
-    if (PR_STORY_RENDER_FAMILY.has(key)) return "story";
-    return "";
+    return String(row?.render_format?.key || "").trim();
   }
 
   function productionOutputFamilyMembers(row) {
-    const kind = productionOutputRenderFamily(row);
-    if (!kind) return [];
+    const signature = productionOutputRenderFamily(row);
+    if (!signature) return [];
     return enabledProductionRequestOutputs().filter(candidate =>
-      productionOutputRenderFamily(candidate) === kind
+      productionOutputRenderFamily(candidate) === signature
     );
   }
 
@@ -13392,19 +13385,19 @@ function timedScriptAssetLabel(asset, index) {
     const familyMembers = productionOutputFamilyMembers(row);
     const scope = $("prOverrideApplyScope");
     const familyOption = scope?.querySelector('option[value="family"]');
-    const kind = productionOutputRenderFamily(row);
+    const format = row.render_format;
     if (scope) scope.value = "single";
     if (familyOption) {
       familyOption.hidden = familyMembers.length < 2;
       familyOption.disabled = familyMembers.length < 2;
-      familyOption.textContent = kind === "main"
-        ? `All ${familyMembers.length} full renderings`
-        : `Both Stories (${familyMembers.length})`;
+      familyOption.textContent = `Apply to all matching formats (${familyMembers.length})`;
     }
     const scopeHint = $("prOverrideApplyHint");
     if (scopeHint) scopeHint.textContent = familyMembers.length >= 2
-      ? `Optional: apply these same creative/render overrides to ${familyMembers.length} ${kind === "main" ? "full renderings" : "Stories"}. Individual publish modes and scheduled times are preserved.`
-      : "Changes apply to this output only.";
+      ? `Matches ${format.pipeline_family} · ${format.format} · ${format.aspect_ratio}: ${familyMembers.map(member => `${member.platform} ${member.output_type}`).join(", ")}. Destination-specific publishing and schedules are preserved.`
+      : format?.key
+        ? "No other enabled output has the same Pipeline Family, Format and Aspect Ratio. Only this output can be edited."
+        : "Format mapping is not ready or incomplete. Cross-platform editing is unavailable until Studio resolves the output mapping.";
 
     setOverrideSelect("prOverrideVoiceover", row.voiceover_mode_override);
     setOverrideSelect("prOverrideMusicMode", row.background_music_mode_override);
@@ -13529,7 +13522,7 @@ function timedScriptAssetLabel(asset, index) {
             body: JSON.stringify(target.id === recordId ? payload : sharedPayload),
           });
           const idx = productionRequestOutputs.findIndex(row => row.id === target.id);
-          if (idx >= 0) productionRequestOutputs[idx] = result.record;
+          if (idx >= 0) productionRequestOutputs[idx] = { ...productionRequestOutputs[idx], ...result.record };
           applied.push(target.id);
         } catch (error) {
           renderProductionRequestOutputCards();
@@ -13541,7 +13534,7 @@ function timedScriptAssetLabel(asset, index) {
       if (selectedScope === "family") $("prOverrideApplyScope").value = "family";
 
       message.textContent = selectedScope === "family"
-        ? `Creative/render changes saved to all ${applied.length} ${family === "main" ? "full renderings" : "Stories"}. Sibling schedules and publishing modes were preserved.`
+        ? `Creative/render changes saved to all ${applied.length} matching-format outputs. Sibling schedules and publishing modes were preserved.`
         : "Output override saved.";
       message.className = "form-message success";
     } catch (e) {
