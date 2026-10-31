@@ -105,6 +105,25 @@ class CrossProfileSourceTests(unittest.TestCase):
             select(FakeClient(CHICAGO), request, originals, props, plan,
                    drive=FakeDrive(), profile_id=LA)
 
+    def test_branding_preflight_must_precede_irreversible_job_claim(self):
+        module = Path(__file__).resolve().parents[1] / "rendering_review" / "one_job.py"
+        parsed = ast.parse(module.read_text(encoding="utf-8"))
+        fn = next(node for node in parsed.body
+                  if isinstance(node, ast.FunctionDef)
+                  and node.name == "render_exact_attempt")
+        checks = [node.lineno for node in ast.walk(fn)
+                  if isinstance(node, ast.Call)
+                  and isinstance(node.func, ast.Name)
+                  and node.func.id == "require_owned_profile_watermark_url"]
+        claims = [node.lineno for node in ast.walk(fn)
+                  if isinstance(node, ast.Call)
+                  and isinstance(node.func, ast.Name)
+                  and node.func.id == "_post_once"]
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(len(claims), 1)
+        self.assertLess(checks[0], claims[0],
+                        "Never claim a one-shot render job before verifying city watermark")
+
     def test_missing_profile_must_fail_closed(self):
         select = extract_renderer()
         request, originals, props, plan = source_fixture()
