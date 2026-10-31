@@ -2791,6 +2791,9 @@
         timeoutMs: 150000,
       });
       clearScriptedShortProposal();
+      // Acceptance is persisted. Return the entry form to a clean state for the next short.
+      if ($("scriptedShortPrompt")) $("scriptedShortPrompt").value = "";
+      updateScriptedShortCharacterCount();
       setScriptedShortMessage(result.message || "Draft saved.", "success");
       await Promise.all([loadIdeas(), loadDashboard(), loadProductionRequests()]).catch(() => {});
       if (result.record?.id && result.production_request?.id) {
