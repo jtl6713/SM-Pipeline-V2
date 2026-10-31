@@ -42,3 +42,24 @@ export function verifySubmittedPromotionOwnership({
     return fail("conflicting_request_parent");
   return { safe: true, reason: "confirmed", parentId, repairLink: requestParents.length === 0 };
 }
+
+/**
+ * Keep a repeatedly failing older Submitted request from monopolizing cron.
+ * Try never-attempted requests first (newest first), then least recently
+ * attempted. This changes only which *existing* request can be recovered;
+ * ownership proof, one-attempt-per-tick, and no-I3-replay still apply.
+ */
+export function orderSubmittedRecoveryRequests(records, field) {
+  const timestamp = (row, name) => {
+    const parsed = Date.parse(String(field(row, name) || ""));
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  return [...(Array.isArray(records) ? records : [])].sort((a, b) => {
+    const aAttempt = timestamp(a, "Studio_Approval_Recovery_Last_Attempt_At");
+    const bAttempt = timestamp(b, "Studio_Approval_Recovery_Last_Attempt_At");
+    if (aAttempt === null && bAttempt !== null) return -1;
+    if (bAttempt === null && aAttempt !== null) return 1;
+    if (aAttempt !== null && bAttempt !== null && aAttempt !== bAttempt) return aAttempt - bAttempt;
+    return (timestamp(b, "Submitted_At") || 0) - (timestamp(a, "Submitted_At") || 0);
+  });
+}
