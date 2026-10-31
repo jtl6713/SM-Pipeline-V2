@@ -3013,7 +3013,8 @@ export async function cleanProductionRequestPayload(payload, env) {
 
   let requestedTitle = String(payload?.requested_title || "").trim();
   let requestedCaption = String(payload?.requested_caption || "").trim();
-  let requestedScript = String(payload?.requested_script || "").trim();
+  let requestedScript = vibeCut ? "" : String(payload?.requested_script || "").trim();
+  if (vibeCut) scriptMode = "Leave blank";
   const productionNotes = String(payload?.production_notes || "").trim();
   const primaryLocation = String(payload?.primary_location || "").trim();
 
