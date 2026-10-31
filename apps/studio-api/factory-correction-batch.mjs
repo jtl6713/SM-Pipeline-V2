@@ -66,20 +66,38 @@ export async function submitFactoryCorrectionBatch({
   if (!/^rec[A-Za-z0-9]{14}$/.test(stable(source_output_id)))
     throw fail("Exact Factory source output required", "INVALID_SOURCE");
 
-  return operations.withRequestLock(key, async () => {
+  const first = await operations.readAuthoritativeSnapshot(source_output_id);
+  const requestId = stable(first?.source?.production_request_id);
+  if (!/^rec[A-Za-z0-9]{14}$/.test(requestId)) throw fail('Missing Production Request', 'PREFLIGHT_UNAVAILABLE');
+  return operations.withRequestLock(requestId, async () => {
     // Re-read live records under the batch lease. Never trust a stale
     // browser preview, the Supabase mirror or selected format strings.
     const snapshot = await operations.readAuthoritativeSnapshot(source_output_id);
     if (!snapshot?.source || !Array.isArray(snapshot?.outputs) ||
         !Array.isArray(snapshot?.authorized_profile_ids))
       throw fail("Authoritative correction snapshot unavailable", "PREFLIGHT_UNAVAILABLE");
-    const plan = validateFactoryCorrectionSelection({
+    const existingReceipt = await operations.readBatchReceipt(key);
+    if (!snapshot.authorized_profile_ids.includes(snapshot.source?.profile_id))
+      throw fail('Profile membership revoked', 'NOT_AUTHORIZED');
+    const plan = existingReceipt ? {
+      production_request_id: snapshot.source.production_request_id,
+      content_item_id: snapshot.source.content_item_id,
+      profile_id: snapshot.source.profile_id,
+      source_output_id: source_output_id,
+      render_format_key: existingReceipt.render_format_key,
+      client_request_id: key, note: stable(note), output_ids: selected_output_ids,
+    } : validateFactoryCorrectionSelection({
       source: snapshot.source, outputs: snapshot.outputs,
       authorized_profile_ids: snapshot.authorized_profile_ids,
       selected_output_ids, note, client_request_id: key,
     });
     const hash = await fingerprint(plan);
-    let receipt = await operations.readBatchReceipt(key);
+    let receipt = existingReceipt;
+    if (receipt && (receipt.source_output_id !== source_output_id ||
+        receipt.profile_id !== snapshot.source.profile_id ||
+        receipt.production_request_id !== requestId ||
+        receipt.content_item_id !== snapshot.source.content_item_id))
+      throw fail('Correction identity mismatch', 'IDENTITY_CONFLICT');
     if (receipt && (receipt.fingerprint !== hash ||
         receipt.production_request_id !== plan.production_request_id))
       throw fail("Correction ID reused with different selection or feedback", "IDEMPOTENCY_CONFLICT");
@@ -88,6 +106,7 @@ export async function submitFactoryCorrectionBatch({
         version: 1, schema: "studio.factory-correction-batch.1",
         client_request_id: key, fingerprint: hash,
         production_request_id: plan.production_request_id,
+        content_item_id: plan.content_item_id, source_output_id: plan.source_output_id,
         profile_id: plan.profile_id, render_format_key: plan.render_format_key,
         selected_output_ids: plan.output_ids,
         status: "holding", outputs: Object.fromEntries(
