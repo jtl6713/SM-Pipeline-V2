@@ -167,7 +167,6 @@ def internal_drive_media(file_id: str):
     # Stream private Google Drive originals through localhost only. Avoid
     # buffering 180–450 MB footage in the Runner process when A1S hands it to
     # the local Video Compressor. No public URL or OAuth token is exposed.
-    from integrations.google_drive import GoogleDriveClient
     import requests
 
     drive = GoogleDriveClient()
