@@ -90,8 +90,8 @@ export async function handoffApprovedReviewToFactory({output_id,env,operations,n
   const o=operations;
   return o.withOutputLock(output_id,async()=>{
     const s=await o.readSession(output_id);
-    if(!s || s.output_id!==output_id || s.profile_id!==CHICAGO_PROFILE_ID ||
-       s.output_type!=="Instagram Reel" || s.state!=="approved" ||
+    if(!s || s.output_id!==output_id || !rec.test(str(s.profile_id)) ||
+       !str(s.output_type) || s.state!=="approved" ||
        s.current_attempt_id!==s.approved_attempt_id ||
        s.original_do_not_publish!==false)
       deny("FACTORY_SESSION_NOT_ELIGIBLE","Only accepted V2 without an unrelated original hold can enter Factory");
@@ -106,12 +106,13 @@ export async function handoffApprovedReviewToFactory({output_id,env,operations,n
     const output=await o.readRawOutput(output_id),f=o.readField;
     const normalized=await o.readNormalizedOutput(output_id);
     if(output?.id!==output_id || normalized?.id!==output_id ||
-       normalized.profile_id!==CHICAGO_PROFILE_ID ||
-       normalized.platform!=="Instagram" ||
-       normalized.output_type!=="Instagram Reel" ||
+       normalized.profile_id!==s.profile_id ||
+       normalized.platform!==(s.platform||(s.profile_id===CHICAGO_PROFILE_ID&&
+         s.output_type==="Instagram Reel"?"Instagram":null)) ||
+       normalized.output_type!==s.output_type ||
        value(f(output,"Render_Status"))!=="Rendered" ||
        dispatchStarted(output,f) || !noSchedule(output,f))
-      deny("FACTORY_OUTPUT_NOT_ELIGIBLE","Live output is not a held, unscheduled Chicago Reel");
+      deny("FACTORY_OUTPUT_NOT_ELIGIBLE","Live output is not the exact held, unscheduled approved revision");
     if(str(f(output,"Studio_Review_Hold_ID")) || str(f(output,"Studio_Review_Hold_Owner")))
       deny("FACTORY_UNRELATED_HOLD","Cannot release a different review hold");
 
