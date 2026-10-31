@@ -2507,7 +2507,7 @@ export default {
         assertWriteRequest(request,env);
         if(!globalReviewEnrollmentEnabled(env))
           throw new HttpError(405,"Multi-profile Rendering Review requires verified runner integration");
-        if(!/^application\\/json(?:\\s*;|$)/i.test(String(request.headers.get("Content-Type")||"")))
+        if(!/^application\/json(?:\s*;|$)/i.test(String(request.headers.get("Content-Type")||"")))
           throw new HttpError(415,"JSON required for Factory correction");
         const raw=await request.text();
         if(raw.length>7500)throw new HttpError(413,"Factory correction exceeds size limit");
