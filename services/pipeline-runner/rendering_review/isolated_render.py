@@ -91,8 +91,11 @@ def compile_isolated_render_payload(
         job.get("output_id") != output_id or
         job.get("session_id") != plan.get("session_id") or
         plan.get("plan_hash") != plan_hash or
-        plan.get("profile_id") != CHICAGO_PROFILE or
-        plan.get("output_type") != "Instagram Reel" or
+        not REC.fullmatch(_str(plan.get("profile_id"))) or
+        not _str(plan.get("output_type")) or
+        not (plan.get("platform") or
+             (plan.get("profile_id")==CHICAGO_PROFILE and
+              plan.get("output_type")=="Instagram Reel")) or
         plan.get("media_authority") != "google_drive" or
         plan.get("allow_public_publish") is not False or
         plan.get("allow_platform_upload") is not False or
@@ -149,7 +152,7 @@ def compile_isolated_render_payload(
     if (watermark.get("verified") is not True or
         watermark.get("authority") != "server" or
         watermark.get("policy") != "retain_current_approved" or
-        watermark.get("profile_id") != CHICAGO_PROFILE or
+        watermark.get("profile_id") != plan.get("profile_id") or
         not _str(watermark.get("url")).startswith("https://")):
         _deny("branding_policy_not_verified")
     if plan.get("branding_policy") != "retain_current_approved":
@@ -240,7 +243,7 @@ def compile_isolated_render_payload(
             asset_id = _str(asset_ids[0])
             if not IDENTITY.fullmatch(asset_id) or asset_id not in indexed:
                 _deny("scene_asset_unavailable")
-            asset = _verified_drive_asset(indexed[asset_id], asset_id, CHICAGO_PROFILE)
+            asset = _verified_drive_asset(indexed[asset_id], asset_id, plan["profile_id"])
             asset_url = asset["render_url"]
             asset_file = asset["drive_file_id"]
             asset_kind = asset["media_kind"]
