@@ -578,7 +578,12 @@
           const approval=actionButton('Approve selected version',async()=>{
             if(state.viewingVersion!==Number(current.number))
               throw new Error('Select V'+current.number+' before approving this version.');
-            if(!window.confirm('Accept this rendered version for the pilot? This does NOT publish, upload, or release the publication hold.'))return;
+            const versionNumber=Number(current.number);
+            if(!window.confirm('Approve selected version V'+versionNumber+'?\n\n'+
+              'Select OK to approve V'+versionNumber+', or Cancel to choose a different version.\n\n'+
+              'This does not publish, upload, or release the publication hold.'))return;
+            if(state.viewingVersion!==versionNumber)
+              throw new Error('Version selection changed; select V'+versionNumber+' again before approving.');
             const result=await post('/api/rendering-review/outputs/'+
               encodeURIComponent(entry.output_id)+'/approve',{
               expected_version:session.version,attempt_id:current.id,
