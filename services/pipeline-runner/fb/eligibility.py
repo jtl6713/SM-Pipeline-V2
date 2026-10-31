@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from publish.rendering_review import rendering_review_reason
 from asset.helpers import as_bool, parse_int
 from fb.constants import (
     STATUS_PENDING_FINALIZE,
@@ -55,6 +56,9 @@ def fb0_eligibility_reason(record: dict[str, Any]) -> str | None:
         return held
     if not as_bool(field(record, "Auto_Publish_Enabled"), False):
         return "auto_publish_disabled"
+    held = rendering_review_reason(record)
+    if held:
+        return held
     if as_bool(field(record, "Do_Not_Publish"), False):
         return "do_not_publish"
     if field_str(record, "Platform_Post_ID"):
@@ -84,6 +88,9 @@ def fb1_eligibility_reason(
         return held
     if field_str(record, "Platform_Post_ID"):
         return "already_has_platform_post"
+    held = rendering_review_reason(record)
+    if held:
+        return held
     if as_bool(field(record, "Do_Not_Publish"), False):
         return "do_not_publish"
     if replace_mismatch(
@@ -107,6 +114,9 @@ def fb2_eligibility_reason(
     if not str(record.get("id") or "").strip():
         return "missing_record_id"
     held = facebook_graph_publish_held_reason()
+    if held:
+        return held
+    held = rendering_review_reason(record)
     if held:
         return held
     if as_bool(field(record, "Do_Not_Publish"), False):
@@ -140,6 +150,9 @@ def fb2r_eligibility_reason(
     held = facebook_graph_publish_held_reason()
     if held:
         return held
+    held = rendering_review_reason(record)
+    if held:
+        return held
     if as_bool(field(record, "Do_Not_Publish"), False):
         return "do_not_publish"
     if field_str(record, "Platform_Post_ID"):
@@ -170,6 +183,9 @@ def fb3_eligibility_reason(
         return "missing_platform_post_id"
     if _ci(field_str(record, "Publish_Status")) == "published":
         return "already_published"
+    held = rendering_review_reason(record)
+    if held:
+        return held
     if as_bool(field(record, "Do_Not_Publish"), False):
         return "do_not_publish"
     if replace_mismatch(
