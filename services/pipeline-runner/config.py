@@ -15,7 +15,7 @@ StageStatus = Literal["ok", "skipped", "deferred", "not_implemented", "error"]
 
 # Bump on every ship that must show through public /health. Deploy also syncs
 # this into runtime .env, but a stale pin must never win.
-PIPELINE_RUNNER_CODE_VERSION = "2026-10-30-review-original-scenes-tail-v5"
+PIPELINE_RUNNER_CODE_VERSION = "2026-10-30-review-mixed-media-passthrough-v6"
 
 
 def _resolve_service_version() -> str:
