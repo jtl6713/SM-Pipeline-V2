@@ -1922,6 +1922,13 @@ export default {
 
       if (url.pathname.startsWith("/api/rendering-review/")) {
         requirePermission(authorization, "outputs_review");
+        const reviewAuthorized=await reviewAuthorizedProfiles(env,authorization);
+        const reviewGlobal=globalReviewEnrollmentEnabled(env);
+        const reviewAllowed=(view,id)=>Boolean(view?.id===id&&
+          reviewAuthorized.some(profile=>profile.id===view.profile_id)&&
+          String(view.platform||"").trim()&&String(view.output_type||"").trim()&&
+          (reviewGlobal||(view.profile_id===CHICAGO_PROFILE_ID&&
+            view.platform==="Instagram"&&view.output_type==="Instagram Reel")));
         // Byte-range MP4 streaming for a completed, exact, held V2+ attempt.
         // Google Drive iframes return HTTP 400 in some iOS browsers. No
         // caller-supplied Drive ID is accepted, and this cannot publish.
@@ -1964,7 +1971,7 @@ export default {
           assertWriteRequest(request,env);
           const chicagoMembership = (await reviewAuthorizedProfiles(env,authorization))
             .some(profile => profile.id === CHICAGO_PROFILE_ID);
-          if (!chicagoMembership) throw new HttpError(403,"Chicago review membership required");
+          if (!chicagoMembership && !reviewGlobal) throw new HttpError(403,"Rendering Review membership required");
           if (!/^application\/json(?:\s*;|$)/i.test(String(request.headers.get("Content-Type")||"")))
             throw new HttpError(415,"JSON required");
           const raw=await request.text();
@@ -1980,8 +1987,7 @@ export default {
           let adapter;
           const authorizeOutput = async outputId => {
             const view=await adapter.readOutput(outputId);
-            return view.profile_id===CHICAGO_PROFILE_ID&&
-              view.output_type==="Instagram Reel"&&view.platform==="Instagram";
+            return reviewAllowed(view,outputId);
           };
           adapter=makeRenderingReviewOutboxAirtableOperations({
             env,airtableFetch,listRecords:reviewListRecords,readField:f,
@@ -2032,12 +2038,11 @@ export default {
             throw new HttpError(405, "Rendering Review Producer conversations are not enabled");
           const chicagoMembership = (await reviewAuthorizedProfiles(env, authorization))
             .some(profile => profile.id === CHICAGO_PROFILE_ID);
-          if (!chicagoMembership) throw new HttpError(403, "Chicago Rendering Review membership required");
+          if (!chicagoMembership && !reviewGlobal) throw new HttpError(403, "Rendering Review membership required");
           let adapter;
           const authorizeOutput = async outputId => {
             const view = await adapter.readOutput(outputId);
-            return view.profile_id === CHICAGO_PROFILE_ID &&
-              view.output_type === "Instagram Reel" && view.platform === "Instagram";
+            return reviewAllowed(view,outputId);
           };
           adapter = makeRenderingReviewAirtableOperations({
             env, airtableFetch, listRecords: reviewListRecords, readField: f,
@@ -2110,12 +2115,11 @@ export default {
             throw new HttpError(405, "Rendering Review Producer is not enabled");
           const chicagoMembership = (await reviewAuthorizedProfiles(env, authorization))
             .some(profile => profile.id === CHICAGO_PROFILE_ID);
-          if (!chicagoMembership) throw new HttpError(403, "Chicago Rendering Review membership required");
+          if (!chicagoMembership && !reviewGlobal) throw new HttpError(403, "Rendering Review membership required");
           let adapter;
           const authorizeOutput = async outputId => {
             const view = await adapter.readOutput(outputId);
-            return view.profile_id === CHICAGO_PROFILE_ID &&
-              view.output_type === "Instagram Reel" && view.platform === "Instagram";
+            return reviewAllowed(view,outputId);
           };
           adapter = makeRenderingReviewAirtableOperations({
             env, airtableFetch, listRecords: reviewListRecords, readField: f,
@@ -2136,12 +2140,11 @@ export default {
         if (acceptMatch && request.method === "POST") {
           const permitted = (await reviewAuthorizedProfiles(env,authorization))
             .some(p=>p.id===CHICAGO_PROFILE_ID);
-          if(!permitted) throw new HttpError(403,"Chicago review membership required");
+          if(!permitted && !reviewGlobal) throw new HttpError(403,"Rendering Review membership required");
           let adapter;
           const authorizeOutput=async id=>{
             const view=await adapter.readOutput(id);
-            return view.id===id&&view.profile_id===CHICAGO_PROFILE_ID&&
-              view.platform==="Instagram"&&view.output_type==="Instagram Reel";
+            return reviewAllowed(view,id);
           };
           adapter=makeRenderingReviewAirtableOperations({
             env,airtableFetch,listRecords:reviewListRecords,readField:f,
@@ -2178,12 +2181,11 @@ export default {
             throw new HttpError(405, "Rendering Review enrollment is not enabled");
           const chicagoMembership = (await reviewAuthorizedProfiles(env, authorization))
             .some(profile => profile.id === CHICAGO_PROFILE_ID);
-          if (!chicagoMembership) throw new HttpError(403, "Chicago Rendering Review membership required");
+          if (!chicagoMembership && !reviewGlobal) throw new HttpError(403, "Rendering Review membership required");
           let adapter;
           const authorizeOutput = async outputId => {
             const view = await adapter.readOutput(outputId);
-            return view.profile_id === CHICAGO_PROFILE_ID &&
-              view.platform === "Instagram" && view.output_type === "Instagram Reel";
+            return reviewAllowed(view,outputId);
           };
           adapter = composeRenderingReviewEnrollmentOperations({
             env, airtableFetch, listRecords: reviewListRecords, readField: f,
@@ -2239,12 +2241,11 @@ export default {
             throw new HttpError(405, "Rendering Review mutations are not enabled");
           const permitted = (await reviewAuthorizedProfiles(env, authorization))
             .some(profile => profile.id === CHICAGO_PROFILE_ID);
-          if (!permitted) throw new HttpError(403, "Chicago Rendering Review membership required");
+          if (!permitted && !reviewGlobal) throw new HttpError(403, "Rendering Review membership required");
           let adapter;
           const authorizeOutput = async outputId => {
             const view = await adapter.readOutput(outputId);
-            return view.profile_id === CHICAGO_PROFILE_ID &&
-              view.output_type === "Instagram Reel" && view.platform === "Instagram";
+            return reviewAllowed(view,outputId);
           };
           adapter = makeRenderingReviewAirtableOperations({
             env, airtableFetch, listRecords:reviewListRecords, readField:f,
