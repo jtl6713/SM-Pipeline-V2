@@ -409,11 +409,27 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
   assert.match(confirmations[0],/does not publish, upload, or release the publication hold/);
   assert.equal(approvalPosts.length,0,'Cancel must not submit an approval');
   permitApproval=true;
-  await approval.listeners.click();
+  const pending=approval.listeners.click();
+  await tick();
   assert.equal(approvalPosts.length,1,'OK sends one approval');
+  assert.equal(approval.disabled,true,'The approval action locks immediately');
+  assert.equal(approval.textContent,'Approving V2…');
+  const receipt=descendants(nodes.rrDetail).find(n=>n.className==='rr-feedback-status');
+  assert.equal(receipt?.hidden,false,'Feedback is visible next to the approval action');
+  assert.match(receipt.textContent,/Approving V2 and moving it to Factory/);
+  await approval.listeners.click();
+  assert.equal(approvalPosts.length,1,'Repeated click cannot send another approval');
   assert.equal(approvalPosts[0].attempt_id,attemptId,'Approval references displayed V2 attempt');
   assert.equal(approvalPosts[0].expected_version,4);
   assert.equal(approvalPosts[0].public_post_created,undefined,'No publishing intent is submitted');
+  releaseApproval();
+  await pending;
+  assert.equal(approval.disabled,true,'A completed approval cannot be submitted again');
+  assert.equal(approval.textContent,'V2 approved — in Factory');
+  assert.equal(receipt.dataset.state,'success');
+  assert.match(receipt.textContent,/V2 approved and transferred to Factory/);
+  await approval.listeners.click();
+  assert.equal(approvalPosts.length,1,'Approval remains once-only after successful handoff');
 });
 
 
