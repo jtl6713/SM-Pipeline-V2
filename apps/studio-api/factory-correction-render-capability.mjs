@@ -10,6 +10,14 @@
  */
 const value = x => String(x ?? "").trim();
 export function correctionRenderCapability(format, originalPropsJson) {
+  const declaredFormat=value(format?.format).toLowerCase();
+  // A native image package is not a video with a missing Remotion file.
+  // The separate immutable gallery-artifact contract exists, but its
+  // rendering/publish handoff adapter is not yet certified for live writes.
+  if(/(?:carousel|photo set|single (?:photo|image)|image set|static image)/.test(declaredFormat))
+    return {supported:false,media_kind:"image-set",
+      reason:"IMAGE_GALLERY_RENDERER_NOT_VERIFIED",
+      required_contract:"studio.render-review.gallery.1"};
   if (value(format?.aspect_ratio).replace(/\s/g,"") !== "9:16")
     return {supported:false,reason:"OUTPUT_ASPECT_NOT_CERTIFIED"};
   if (value(format?.key) === "")
@@ -22,7 +30,9 @@ export function correctionRenderCapability(format, originalPropsJson) {
   catch { return {supported:false,reason:"ORIGINAL_RENDER_PROPS_INVALID"}; }
   if (!props || Array.isArray(props) ||
       props.compositionId !== "ChicagoShiningPhotoSequence")
-    return {supported:false,reason:"COMPOSITION_NOT_CERTIFIED"};
+    return {supported:false,media_kind:"video",
+      reason:/vibe.?cut/i.test(value(props?.compositionId))?
+        "VIBE_CUT_RENDERER_NOT_VERIFIED":"COMPOSITION_NOT_CERTIFIED"};
   if (!Array.isArray(props.clips) || props.clips.length<1 ||
       props.clips.length>80 || props.clips.some(clip=>
         !clip || typeof clip !== "object" || Array.isArray(clip)))
@@ -31,5 +41,5 @@ export function correctionRenderCapability(format, originalPropsJson) {
       (props.height != null && Number(props.height)!==1920) ||
       (props.fps != null && Number(props.fps)!==30))
     return {supported:false,reason:"COMPOSITION_DIMENSIONS_NOT_CERTIFIED"};
-  return {supported:true,reason:null,contract:"photo-sequence-9x16-mp4-v1"};
+  return {supported:true,media_kind:"video",reason:null,contract:"photo-sequence-9x16-mp4-v1"};
 }
