@@ -138,7 +138,7 @@ test('held queue excludes dispatch-started and foreign-profile rows',async()=>{
   const result=await read(f.args);
   assert.deepEqual(result.queue,[]);
 });
-test('queue omits other profiles, published, unrelated platforms and malformed links',async()=>{
+test('queue accepts all held platforms in the authorized profile and excludes published or malformed links',async()=>{
   const f=fixture();
   f.args.url=new URL('https://studio.test/api/rendering-review/queue');
   const valid={Content_Item:[f.content.id],Platform:'Instagram',
@@ -155,8 +155,8 @@ test('queue omits other profiles, published, unrelated platforms and malformed l
   assert.deepEqual(result.queue,[]);
   f.content.fields.Content_Profile=[CHICAGO_PROFILE_ID];
   const included=await read(f.args);
-  assert.equal(included.queue.length,1);
-  assert.equal(included.queue[0].output_id,'recJ1B2C3D4E5F6G7');
+  assert.equal(included.queue.length,2);
+  assert.deepEqual(included.queue.map(x=>x.output_id),[outputId,'recJ1B2C3D4E5F6G7']);
 });
 
 test('queue excludes Reels with already-created Instagram containers or post URLs',async()=>{
@@ -251,4 +251,32 @@ test('unflagged completed outputs never appear in conversational review queue',a
   const result=await read(f.args);
   assert.deepEqual(result.queue,[]);
   assert.equal(result.flags.admission_enabled,false);
+});
+
+test('held Facebook, TikTok, YouTube and photo output discovery respects profile membership',async()=>{
+  const f=fixture();
+  const nyc='recNYC12345678901', chicago=CHICAGO_PROFILE_ID;
+  const secondId='recXYZ12345678901';
+  const content2={id:'recNYCONT12345678',fields:{Content_Profile:[nyc]}};
+  const types=[['Facebook','Facebook Reel'],['TikTok','TikTok Video'],['YouTube','YouTube Short'],
+    ['Instagram','Instagram Carousel'],['Facebook','Facebook Story']];
+  const outputs=types.map(([platform,kind],i)=>({
+    id:'rec'+String(i+100).padStart(14,'0'),
+    fields:{Content_Item:[i===4?content2.id:f.content.id],
+      Platform:platform,Platform_Output_Type:kind,Final_File_ID:'drive-asset',
+      Studio_Render_Review_Hold_Active:true},
+  }));
+  f.args.url=new URL('https://studio.test/api/rendering-review/queue');
+  f.args.operations.listRecordsPage=async(_env,table)=>table==='outputs'
+    ? {valid:true,records:outputs}
+    : {valid:true,records:[f.content,content2]};
+  const onlyChicago=await read(f.args);
+  assert.equal(onlyChicago.queue.length,4);
+  assert.deepEqual(onlyChicago.queue.map(x=>x.output_type),types.slice(0,4).map(x=>x[1]));
+  f.args.operations.authorizedProfiles=async()=>[{id:chicago},{id:nyc}];
+  const both=await read(f.args);
+  assert.equal(both.queue.length,5);
+  f.args.url=new URL('https://studio.test/api/rendering-review/queue?profile_id='+nyc);
+  const onlyNY=await read(f.args);
+  assert.deepEqual(onlyNY.queue.map(x=>x.output_type),['Facebook Story']);
 });
