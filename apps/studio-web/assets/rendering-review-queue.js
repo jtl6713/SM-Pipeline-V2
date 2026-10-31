@@ -8,7 +8,7 @@
   const nav = $('navRenderingReview');
   if (!root || !nav) return;
   const chicago = 'recT2rbKX3MF7cVFU';
-  const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map(),pollTimer:null,activeEntry:null,lastReplyNotice:null,lastReplyNoticeNode:null};
+  const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map(),pollTimer:null,activeEntry:null,lastReplyNotice:null,lastReplyNoticeNode:null,viewingVersion:null,approvalButton:null,approvalVersion:null};
   const list = $('rrQueueList'), detail = $('rrDetail'), status = $('rrStatus');
 
   const chicagoTime = value => {
@@ -113,7 +113,16 @@
       return ['http:','https:'].includes(u.protocol) ? u.href : '';
     } catch { return ''; }
   };
+  function syncSelectedApproval(){
+    const button=state.approvalButton;
+    if(!button)return;
+    const selected=state.viewingVersion===state.approvalVersion;
+    button.disabled=!selected;
+    button.title=selected?'':'Select V'+state.approvalVersion+' to approve it.';
+  }
   function clearMedia(){
+    state.viewingVersion=null;
+    syncSelectedApproval();
     const video = $('rrVideo');
     if(video){video.pause();video.removeAttribute('src');video.load();video.hidden=true;}
     const frame=$('rrDrivePreview');
@@ -155,6 +164,8 @@
     link.href=value;link.hidden=false;
     link.textContent=label?'Open '+label+' video':'Open Reel video';
     const version=Number.isInteger(versionNumber)&&versionNumber>=1?versionNumber:1;
+    state.viewingVersion=version;
+    syncSelectedApproval();
     const bar=$('rrVersionBar');
     const labelNode=$('rrVersionLabel');
     const originalLink=$('rrOriginalVersion');
@@ -232,7 +243,9 @@
   }
   async function open(entry) {
     cancelAttemptPoll();
-    state.selected=entry.output_id;state.activeEntry=entry;renderList();clearMedia();
+    state.selected=entry.output_id;state.activeEntry=entry;
+    state.approvalButton=null;state.approvalVersion=null;
+    renderList();clearMedia();
     detail.replaceChildren();
     detail.append(elem('h2',entry.title||'Instagram Reel'),
       elem('p','Chicago · Instagram Reel'+(entry.output_number?' · #'+entry.output_number:''),'rr-entry-meta'));
@@ -562,7 +575,9 @@
          saved.publication_hold_verified===true){
         const current=attempts.find(a=>a.id===session.current_attempt_id);
         if(current?.status==='ready_for_review'&&attemptMedia(current,entry)){
-          detail.append(actionButton('Approve this version — review only',async()=>{
+          const approval=actionButton('Approve selected version',async()=>{
+            if(state.viewingVersion!==Number(current.number))
+              throw new Error('Select V'+current.number+' before approving this version.');
             if(!window.confirm('Accept this rendered version for the pilot? This does NOT publish, upload, or release the publication hold.'))return;
             const result=await post('/api/rendering-review/outputs/'+
               encodeURIComponent(entry.output_id)+'/approve',{
@@ -575,7 +590,11 @@
               throw new Error('Creative approval receipt not verified');
             say('Version accepted. Publication remains held.');
             await open(entry);
-          }));
+          });
+          state.approvalButton=approval;
+          state.approvalVersion=Number(current.number);
+          syncSelectedApproval();
+          detail.append(approval);
         }
       }
       if(['queued','rendering','validating'].includes(session?.state)){
