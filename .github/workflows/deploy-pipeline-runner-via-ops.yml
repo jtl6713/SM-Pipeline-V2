@@ -456,3 +456,6 @@ jobs:
 # 2026-10-30 Deploy protected Chicago Rendering Review dynamic exact-output runner for Factory #9389 pilot.
 
 # 2026-10-30: Deploy Producer source-only tail normalization for Chicago review feedback; no render or publish on deploy.
+
+# 2026-10-30: guarded deploy of merged PR #1380 mixed image/video original-passthrough validation.
+# Source preservation only. Do not render, enqueue, approve, upload to Meta or publish #9389.
