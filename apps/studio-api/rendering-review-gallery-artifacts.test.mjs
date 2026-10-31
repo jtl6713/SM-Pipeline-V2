@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import {createHash} from "node:crypto";
 import {REVIEW_GALLERY_SCHEMA,validateReviewGalleryAttempt as verify}
  from "./rendering-review-gallery-artifacts.mjs";
 const rec=n=>"rec"+String(n).padStart(14,"0");
@@ -8,7 +9,7 @@ const asset=(n,drive,ratio="4:5")=>({
   slot_id:"slide_"+n+"_12345",order:n,
   drive_file_id:drive,mime_type:"image/jpeg",byte_count:21001,
   width:1080,height:ratio==="1:1"?1080:ratio==="16:9"?608:ratio==="9:16"?1920:1350,
-  sha256:hash(String(n)),canonical_media_authority:"google_drive",
+  sha256:createHash("sha256").update(String(n)).digest("hex"),canonical_media_authority:"google_drive",
   authority:"server",verified:true,google_drive_verified:true,
   rights_verified:true,watermark_verified:true,profile_id:profile,output_id:output,
 });
