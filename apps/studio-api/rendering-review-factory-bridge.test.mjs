@@ -108,6 +108,7 @@ test("private Factory V2 stream supports range and never leaks Drive links",asyn
  let observed=null;
  const response=await serveFactorySelectedReviewVideo({request,env,outputId:id,
   authorization:{authenticated:true,authorized:true,permissions:{outputs_review:true}},
+  authorizedProfileIds:[profile],
   readSession:f.ops.readSession,readRow:f.ops.readRawOutput,readProfile:async()=>profile,
   readVideo:async(outputId,attemptId,proxy)=>{
     observed={outputId,attemptId,range:proxy.headers.get("Range")};
@@ -119,4 +120,57 @@ test("private Factory V2 stream supports range and never leaks Drive links",asyn
  assert.deepEqual(observed,{outputId:id,attemptId,range:"bytes=0-99"});
  assert.equal(response.headers.get("X-Studio-Preview-Source"),"factory-selected-review-attempt");
  assert.equal(response.headers.get("Cache-Control"),"private, no-store");
+});
+
+test("cross-profile and platform Factory V2 preview requires exact owned content and output",async()=>{
+ const original=fixture();
+ for(const platform of [
+  {profile:"recNYC12345678901",name:"TikTok",type:"TikTok Video"},
+  {profile:"recLA123456789012",name:"YouTube",type:"YouTube Short"},
+  {profile:"recMIA12345678901",name:"Facebook",type:"Facebook Reel"},
+ ]) {
+  const session={...structuredClone(original.session),
+    profile_id:platform.profile,platform:platform.name,output_type:platform.type};
+  const row=structuredClone(original.row);
+  row.fields.Platform=platform.name;
+  row.fields.Platform_Output_Type=platform.type;
+  assert.equal(factorySelectedReviewAttempt({
+    session,row,profile:platform.profile,outputId:id})?.id,attemptId);
+  assert.equal(factorySelectedReviewAttempt({
+    session,row,profile,outputId:id}),null);
+  row.fields.Platform="Instagram";
+  assert.equal(factorySelectedReviewAttempt({
+    session,row,profile:platform.profile,outputId:id}),null);
+ }
+});
+test("unauthorized profile is rejected BEFORE retrieving selected session or private media",async()=>{
+ const request=new Request("https://studio.chicagoshining.com/api/factory/outputs/"+id+"/preview");
+ let accessed=false;
+ await assert.rejects(serveFactorySelectedReviewVideo({
+  request,env,outputId:id,
+  authorization:{authenticated:true,authorized:true,permissions:{outputs_review:true}},
+  authorizedProfileIds:[profile],
+  readProfile:async()=>"recNYC12345678901",
+  readSession:async()=>{accessed=true;return null},
+  readRow:async()=>{accessed=true;return null},
+  readVideo:async()=>{accessed=true;return null},
+  copyHeaders:x=>x.headers,
+ }),e=>e.status===403&&e.message==="FACTORY_PREVIEW_PROFILE_DENIED");
+ assert.equal(accessed,false);
+});
+test("missing and malformed authorized profile set never grant Factory preview",async()=>{
+ const request=new Request("https://studio.chicagoshining.com/api/factory/outputs/"+id+"/preview");
+ for(const authorizedProfileIds of [[],null,["recNO"]]){
+  let reads=0;
+  await assert.rejects(serveFactorySelectedReviewVideo({
+   request,env,outputId:id,authorizedProfileIds,
+   authorization:{authenticated:true,authorized:true,permissions:{outputs_review:true}},
+   readProfile:async()=>{reads++;return profile},
+   readSession:async()=>{reads++;return null},
+   readRow:async()=>{reads++;return null},
+   readVideo:async()=>{reads++;return null},
+   copyHeaders:x=>x.headers,
+  }),e=>e.status===403);
+  assert.equal(reads,0);
+ }
 });
