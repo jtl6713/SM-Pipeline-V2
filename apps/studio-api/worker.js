@@ -5221,6 +5221,7 @@ const FACTORY_REVISION_NOTE_PREFIX = "[factory-revision-open]";
 /*__STUDIO_WORKER_EXTRACT:applyPromotedTimedScriptRoute__*/
 /*__STUDIO_WORKER_EXTRACT:productionRequestPreferredMusic__*/
 /*__STUDIO_WORKER_EXTRACT:productionRequestDirectiveSnapshot__*/
+/*__STUDIO_WORKER_EXTRACT:studioWritableTextMode__*/
 /*__STUDIO_WORKER_EXTRACT:syncProductionRequestDirectivesToContentItem__*/
 /*__STUDIO_WORKER_EXTRACT:syncProductionRequestDirectivesRoute__*/
 const STUDIO_OUTPUT_ROUTE_SPECS = Object.freeze({

@@ -3124,7 +3124,7 @@ export function productionRequestFields(input, nowIso, { status = "Draft" } = {}
     Voice_Name: vibeCut ? null : (input.voice_name || null),
     Title_Mode: input.title_mode,
     Requested_Title: input.requested_title || null,
-    Caption_Mode: input.caption_mode,
+    Caption_Mode: studioWritableTextMode(input.caption_mode),
     Requested_Caption: input.requested_caption || null,
     Script_Mode: vibeCut ? "Leave blank" : input.script_mode,
     Requested_Script: vibeCut ? null : (input.requested_script || null),
@@ -4525,6 +4525,15 @@ export function productionRequestDirectiveSnapshot(requestRecord, music) {
 }
 /*__STUDIO_WORKER_END:productionRequestDirectiveSnapshot__*/
 
+// Production Requests support "Leave blank", but Content Items and Platform Outputs
+// only define three text-mode select options. Keep the original intent in the
+// directive JSON/notes; never write an unsupported select choice downstream.
+export function studioWritableTextMode(mode) {
+  const value = String(mode || "AI decides").trim();
+  return value === "Force exact" || value === "AI improve" ? value : "AI decides";
+}
+/*__STUDIO_WORKER_END:studioWritableTextMode__*/
+
 export async function syncProductionRequestDirectivesToContentItem(env, requestRecord, contentItemId, options = {}) {
   if (!/^rec[A-Za-z0-9]+$/.test(String(contentItemId || ""))) {
     throw new HttpError(409, "A promoted Content Item is required before advanced directives can be applied");
@@ -4560,9 +4569,9 @@ export async function syncProductionRequestDirectivesToContentItem(env, requestR
   const fields = {
     Production_Request: [requestRecord.id],
     Test_Run_ID: String(f(requestRecord, "Test_Run_ID") || "").trim() || null,
-    Requested_Title_Mode: String(f(requestRecord, "Title_Mode") || "AI decides"),
+    Requested_Title_Mode: studioWritableTextMode(f(requestRecord, "Title_Mode")),
     Requested_Title: String(f(requestRecord, "Requested_Title") || "").trim() || null,
-    Requested_Caption_Mode: String(f(requestRecord, "Caption_Mode") || "AI decides"),
+    Requested_Caption_Mode: studioWritableTextMode(f(requestRecord, "Caption_Mode")),
     Requested_Caption: String(f(requestRecord, "Requested_Caption") || "").trim() || null,
     Include_Voiceover: item4StudioDirectiveYes(f(requestRecord, "Voiceover_Mode")) ? "Yes" : "No",
     Include_Background_Music: item4StudioDirectiveYes(f(requestRecord, "Background_Music_Mode")) ? "Yes" : "No",
@@ -4572,7 +4581,7 @@ export async function syncProductionRequestDirectivesToContentItem(env, requestR
     Music_Start_Seconds: f(requestRecord, "Music_Start_Seconds") ?? 0,
     Voiceover_Tail_Seconds: f(requestRecord, "Voiceover_Tail_Seconds") ?? null,
     Carousel_Slide_Count: f(requestRecord, "Carousel_Slide_Count_Exact") ?? null,
-    Requested_Script_Mode: String(f(requestRecord, "Script_Mode") || "AI decides"),
+    Requested_Script_Mode: studioWritableTextMode(f(requestRecord, "Script_Mode")),
     Requested_Script: String(f(requestRecord, "Requested_Script") || "").trim() || null,
     Production_Request_Notes: String(f(requestRecord, "Production_Notes") || "").trim() || null,
     Primary_Location: String(f(requestRecord, "Primary_Location") || "").trim() || null,
@@ -6539,11 +6548,11 @@ export function outputWorkItemFields(parentContentItem, requestRecord, outputRow
     Studio_Source_Render_Total_Frames: sourcePackage?.total_frames || null,
     Studio_Source_Composition_ID: sourcePackage?.composition_id || null,
 
-    Requested_Title_Mode: effective.title_mode,
+    Requested_Title_Mode: studioWritableTextMode(effective.title_mode),
     Requested_Title: effective.requested_title || null,
-    Requested_Caption_Mode: effective.caption_mode,
+    Requested_Caption_Mode: studioWritableTextMode(effective.caption_mode),
     Requested_Caption: effective.requested_caption || null,
-    Requested_Script_Mode: effective.script_mode,
+    Requested_Script_Mode: studioWritableTextMode(effective.script_mode),
     Requested_Script: effective.requested_script || null,
     Production_Request_Notes: productionNotes || null,
 
@@ -6700,11 +6709,11 @@ export function platformOutputSeedFields(parentContentItem, requestRecord, outpu
         ? `Missing ${String(planItem.aspect_ratio || sourcePackage?.ratio || "").trim() || "plan"} crop for this output.`
         : null),
     Studio_Output_Override_Applied: true,
-    Studio_Effective_Title_Mode: effective.title_mode,
+    Studio_Effective_Title_Mode: studioWritableTextMode(effective.title_mode),
     Studio_Effective_Requested_Title: effective.requested_title || null,
-    Studio_Effective_Caption_Mode: effective.caption_mode,
+    Studio_Effective_Caption_Mode: studioWritableTextMode(effective.caption_mode),
     Studio_Effective_Requested_Caption: effective.requested_caption || null,
-    Studio_Effective_Script_Mode: effective.script_mode,
+    Studio_Effective_Script_Mode: studioWritableTextMode(effective.script_mode),
     Studio_Effective_Requested_Script: effective.requested_script || null,
     Studio_Effective_Thumbnail_Mode: effective.thumbnail_mode,
     Studio_Effective_Voiceover_Mode: effective.voiceover_mode,
