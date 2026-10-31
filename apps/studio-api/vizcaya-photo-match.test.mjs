@@ -110,3 +110,26 @@ test("production photo ranker strips Citywide without bypassing profile scope", 
   assert.match(ranker, /mediaAssetProfileScopeForId/);
   assert.match(ranker, /combineAirtableFormulas\(ideaLibraryFilterFormula\(filterKeys\), scopeFormula\)/);
 });
+
+test("Chicago Winters assets with exclusions are screened before watermark, then provenance-held candidates are skipped", () => {
+  const worker = readStudioWorkerSource();
+  const image = worker.slice(worker.indexOf("function ideaLibraryIsEligibleImage("),
+    worker.indexOf("/*__STUDIO_WORKER_END:ideaLibraryIsEligibleImage__*/"));
+  assert.match(image, /Exclusion_Reasons/);
+  assert.match(image, /Potential_Match_Notes/);
+  assert.match(image, /exclusions\.length > 0/);
+  const matching = worker.slice(worker.indexOf("async function evaluateAndMaybeAttachWaitingIdeaPhotos("),
+    worker.indexOf("/*__STUDIO_WORKER_END:evaluateAndMaybeAttachWaitingIdeaPhotos__*/"));
+  assert.match(matching, /const attachCandidates = usableMatches\.slice/);
+  assert.match(matching, /maxWaitAssets: max, minWaitAssets: min/);
+  assert.match(matching, /acceptedRows = usableMatches\.filter/);
+  assert.match(matching, /Studio_Matched_Media_Assets: acceptedRows\.map/);
+  assert.match(matching, /reason = "not_enough_safe_photos"/);
+  const attach = worker.slice(worker.indexOf("async function applyLibraryAssetsToProductionRequest("),
+    worker.indexOf("/*__STUDIO_WORKER_END:applyLibraryAssetsToProductionRequest__*/"));
+  assert.match(attach, /ideaLibraryRejectReason\(media, \{ allowVideo \}\)/);
+  assert.match(attach, /photoMatchSkippableOverlayReview\(error\)/);
+  assert.match(attach, /if \(appended\.length >= cap\) break/);
+  assert.match(attach, /reason: "insufficient_safe_assets"/);
+  assert.ok(attach.indexOf("if (ideaLibraryRejectReason") < attach.indexOf("await ensureChicagoWatermarkedLibraryAsset"));
+});
