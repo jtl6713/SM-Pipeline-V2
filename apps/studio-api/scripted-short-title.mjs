@@ -18,7 +18,7 @@ export function scriptedShortExplicitTitle(prompt) {
     // Accept "this" and "please" rather than silently falling back to AI.
     /(?:^|[\n.!?;]\s*)\s*(?:please\s+)?(?:use|set|keep)\s+(?:(?:this|the|my)\s+)?(?:exact\s+)?(?:video\s+|post\s+|short\s+|content\s+)?(?:title|headline)\s*(?:(?:exactly\s+)?(?:as|to|:|=))?\s*([^\n]+)/im,
     /(?:^|[\n.!?;]\s*)\s*(?:please\s+)?(?:the\s+)?(?:exact\s+)?(?:video\s+|post\s+|short\s+|content\s+)?title\s*(?:should\s+be|must\s+be|is|:|=)\s*([^\n]+)/im,
-    /\b(?:call|name|title)\s+(?:the\s+)?(?:video|short|reel|post|piece|it|this)\s+(?:exactly\s+)?(?:as\s+)?[:"'“”]?\s*([^\n]+)/i,
+    /\b(?:call|name|title)\s+(?:the\s+)?(?:video|short|reel|post|piece|it|this)\s+(?:exactly\s+)?(?:as\s+)?[:=]?\s*([^\n]+)/i,
   ];
   for (const pattern of patterns) {
     const match = pattern.exec(source);
