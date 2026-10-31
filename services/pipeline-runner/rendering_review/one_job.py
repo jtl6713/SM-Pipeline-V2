@@ -172,13 +172,12 @@ def _evidence(client,drive,output_id,job_id):
         fail("review_job_session_not_authoritative")
     plan_state=session.get("plan") or {}
     plan=plan_state.get("immutable_manifest")
-    if not isinstance(plan,dict) or plan_state.get("hash")!=jf.get("Plan_Hash") or (
+    if (not isinstance(plan,dict) or plan_state.get("hash")!=jf.get("Plan_Hash") or (
         plan_state.get("version") != plan.get("plan_version")) or
         plan.get("profile_id")!=profile_id or
         plan.get("output_type")!=of.get("Platform_Output_Type") or
         (plan.get("platform") or
-         ("Instagram" if profile_id==CHICAGO and plan.get("output_type")=="Instagram Reel" else None))!=of.get("Platform"):
-
+         ("Instagram" if profile_id==CHICAGO and plan.get("output_type")=="Instagram Reel" else None))!=of.get("Platform")):
         fail("frozen_review_plan_unavailable")
     plan_row=select_one(client,PLANS,"Plan_Hash",jf["Plan_Hash"])
     if plan_row["fields"].get("Session_ID")!=session["id"]:
