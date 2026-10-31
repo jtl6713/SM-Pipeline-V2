@@ -44,6 +44,10 @@ async function inspectCurrent(ops,id,version){
      /^(published|publishing|dispatched)$/i.test(String(output.publish_status||"")))
     fail("REVIEW_DISPATCH_STARTED",409,"Publishing ownership or remote provider identity exists");
   const s=await ops.loadSession(id);
+  if(s&&(s.profile_id!==output.profile_id||s.output_type!==output.output_type||
+    (s.platform||((s.profile_id==="recT2rbKX3MF7cVFU"&&
+      s.output_type==="Instagram Reel")?"Instagram":null))!==output.platform))
+    fail("REVIEW_SCOPE_DENIED",403,"Authoritative review output identity changed");
   const hold=await ops.readHold(id);
   requireSession(s,hold,output,version);
   return {sessionId:s.id,attemptId:s.current_attempt_id,holdId:hold.id};
