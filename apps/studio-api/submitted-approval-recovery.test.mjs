@@ -115,3 +115,18 @@ test("Submitted approval recovery owns an independent cron task, never two overl
   assert.ok(independent >= 0 && independent < publish, "recovery begins before lengthy publish maintenance");
   assert.match(entry, /airtableCooldownWaitMs\(\) <= AIRTABLE_SLOT_FAIL_FAST_MS\) \{\s*ctx.waitUntil\(studioHealPromotedMissingFanout/);
 });
+
+test("atomic Production Output seed uses independent Story lane occupancy and preserves non-Story platform collisions", () => {
+  const src = readFileSync(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
+  const start = src.indexOf("export async function studioAtomicApplyPlatformOutputSeedSchedule(");
+  const end = src.indexOf("/*__STUDIO_WORKER_END:studioAtomicApplyPlatformOutputSeedSchedule__*/", start);
+  assert.ok(start >= 0 && end > start);
+  const scheduler = src.slice(start,end);
+  assert.match(scheduler, /const seedOccupiedMs = \/story\/i\.test\(outputType\) \? laneMs : platformMs;/);
+  assert.match(scheduler, /maeScheduleConflicts\(candidateMs, seedOccupiedMs\)/);
+  assert.match(scheduler, /platformOccupiedMs: seedOccupiedMs,/);
+  assert.match(scheduler, /const laneOccupied = studioOccupiedForLane\(occupied, platform, outputType\)/);
+  assert.match(scheduler, /const platformOccupied = studioOccupiedForPlatform\(occupied, platform\)/);
+  // Preserve fail-closed behavior for genuine same-type conflicts.
+  assert.match(scheduler, /Requested Platform Output seed schedule conflicts with another output/);
+});
