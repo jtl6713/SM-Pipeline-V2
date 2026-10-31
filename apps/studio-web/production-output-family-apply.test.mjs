@@ -14,13 +14,14 @@ test("Output override defaults to one output and offers a compatible family", ()
   assert.match(ui, /<option value="single">Only this output<\/option>/);
   assert.match(ui, /<option value="family" hidden>All matching outputs<\/option>/);
   assert.match(js, /function productionOutputRenderFamily\(row\)/);
-  for (const type of [
-    "Instagram::Reel", "Facebook::Reel", "TikTok::Video Draft",
-    "YouTube::Short", "Instagram::Story", "Facebook::Story",
-  ]) assert.ok(js.includes(type), type);
+  assert.doesNotMatch(js, /PR_MAIN_RENDER_FAMILY|PR_STORY_RENDER_FAMILY/);
+  assert.match(js, /row\?\.render_format\?\.key/);
+  assert.match(js, /Apply to all matching formats/);
+  assert.match(js, /format\.pipeline_family/);
+  assert.match(js, /format\.aspect_ratio/);
   assert.match(js, /if \(scope\) scope\.value = "single"/);
   assert.match(js, /familyOption\.disabled = familyMembers\.length < 2/);
-  assert.match(js, /productionOutputRenderFamily\(candidate\) === kind/);
+  assert.match(js, /productionOutputRenderFamily\(candidate\) === signature/);
 });
 
 test("Fanout excludes publishing and scheduling changes on siblings", () => {
@@ -34,4 +35,5 @@ test("Fanout excludes publishing and scheduling changes on siblings", () => {
   assert.match(save, /Saved \$\{applied\.length\} of \$\{targets\.length\}/);
   assert.doesNotMatch(save, /Promise\.all\(/);
   assert.match(save, /renderProductionRequestOutputCards\(\)/);
+  assert.match(save, /\.\.\.productionRequestOutputs\[idx\], \.\.\.result\.record/);
 });
