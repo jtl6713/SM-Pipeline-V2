@@ -2693,10 +2693,22 @@ export default {
           const input = await request.clone().json().catch(() => null);
           if (input?.action === "return_to_review") {
             requirePermission(authorization, "outputs_review");
+            const profiles=await reviewAuthorizedProfiles(env,authorization);
+            const globalReview=globalReviewEnrollmentEnabled(env);
+            const ops=makeReviewFactoryHandoffOperations(env,{
+              authorizedProfileIds:profiles.map(p=>p.id),globalReview,
+            });
+            if(!/^rec[A-Za-z0-9]{14}$/.test(String(input.id||"")))
+              throw new HttpError(400,"Exact review output required");
+            const live=await ops.readNormalizedOutput(input.id);
+            if(live?.id!==input.id||!profiles.some(p=>p.id===live.profile_id)||
+               (!globalReview&&!(live.profile_id===CHICAGO_PROFILE_ID&&
+                 live.platform==="Instagram"&&live.output_type==="Instagram Reel")))
+              throw new HttpError(403,"Producer return outside authorized profile");
             const result=await returnFactoryRevisionToProducer({
               output_id:input.id,note:input.note,
               client_request_id:input.client_request_id,
-              env,operations:makeReviewFactoryHandoffOperations(env),
+              env,operations:ops,
             });
             return respond(request,env,{ok:true,action:"return_to_review",
               result,refresh_required:true});
