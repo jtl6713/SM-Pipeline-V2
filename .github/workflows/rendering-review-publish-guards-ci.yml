@@ -8,6 +8,11 @@ on:
       - 'apps/studio-api/rendering-review-entry-guards.test.mjs'
       - 'apps/studio-api/worker-functions-03.mjs'
       - 'apps/studio-api/worker-functions-04.mjs'
+      - 'services/pipeline-runner/fb/eligibility.py'
+      - 'services/pipeline-runner/yt/eligibility.py'
+      - 'services/pipeline-runner/ttd/eligibility.py'
+      - 'services/pipeline-runner/ap1_igs/eligibility.py'
+      - 'services/pipeline-runner/tests/test_rendering_review_cross_platform_holds.py'
       - 'services/pipeline-runner/ap1_ig/eligibility.py'
       - 'services/pipeline-runner/ap1_ig/processor.py'
       - 'services/pipeline-runner/publish/rendering_review.py'
@@ -46,4 +51,6 @@ jobs:
           pip install -r services/pipeline-runner/requirements.txt
           python -m pytest -q services/pipeline-runner/tests/test_ap1_ig_eligibility.py
           python -m unittest discover -s services/pipeline-runner/tests -p test_rendering_review_publication.py -v
+          python -m unittest discover -s services/pipeline-runner/tests -p test_rendering_review_cross_platform_holds.py -v
+          python -m pytest -q services/pipeline-runner/tests/test_fb_eligibility.py services/pipeline-runner/tests/test_yt_eligibility.py services/pipeline-runner/tests/test_ttd_eligibility.py services/pipeline-runner/tests/test_ap1_igs_eligibility.py
 
