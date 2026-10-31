@@ -568,7 +568,13 @@
         if(newest?.number>1)showMedia(attemptMedia(newest,entry),'V'+newest.number,newest.number);
       }
       if(session?.state==='approved'){
-        detail.append(elem('p','Creative render accepted for the pilot. The publication hold remains active; no Instagram upload or publishing has been authorized.','rr-notice'));
+        const approved=attempts.find(a=>a.id===session.approved_attempt_id);
+        const transferred=session.factory_handoff?.attempt_id===session.approved_attempt_id &&
+          session.review_hold?.active===false;
+        detail.append(elem('p','V'+(approved?.number||session.latest_attempt_number||2)+
+          (transferred?' approved and moved to Factory. Continue with normal Factory approval or scheduling.':
+            ' creatively approved; Factory handoff is being verified.')+
+          ' No Instagram publication has been authorized.','rr-notice'));
       }
       if(session?.state==='ready_for_review'&&
          saved.flags?.creative_approval_enabled===true&&
