@@ -594,3 +594,4 @@ Deploy Studio UI 0.6.782-mobile-overview-scroll. Preserve All Profiles horizonta
 
 2026-10-30: Deploy Studio UI 0.6.783-factory-idempotency-v1 from PR #1373. Persist same request after ambiguous mobile response and reload, exact-ID reconciliation, accepted-output UX fence and durable acknowledgement. No automatic approval or publication; guarded GitHub Cloudflare Pages production verification required.
 2026-10-30: UI 0.6.784 Rendering Review live timestamps and explicit Producer response/no V2 job status for output 9389. No publish changes.
+2026-10-30: Deploy UI 0.6.785 oversized library repair and correct Owner admin compression controls (PR #1381). No automatic publishing or media deletion.
