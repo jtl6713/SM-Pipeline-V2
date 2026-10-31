@@ -11,6 +11,15 @@
 const value = x => String(x ?? "").trim();
 export function correctionRenderCapability(format, originalPropsJson) {
   const declaredFormat=value(format?.format).toLowerCase();
+  // Vibe Cut may reuse the PhotoSequence compositor for a music-only video.
+  // Composition ID alone therefore cannot certify the narrated review path.
+  // The dedicated music-only Vibe adapter needs its own post-render ledger,
+  // preview, and approval contract before any publication hold is created.
+  if(/\b(?:vibe[\s_-]*cut|music[\s_-]*cut)\b/i.test(
+      [format?.format,format?.key,format?.output_type].map(value).join(" ")))
+    return {supported:false,media_kind:"video",
+      reason:"VIBE_CUT_RENDERER_NOT_VERIFIED",
+      required_contract:"studio.render-review.vibe.1"};
   // A native image package is not a video with a missing Remotion file.
   // The separate immutable gallery-artifact contract exists, but its
   // rendering/publish handoff adapter is not yet certified for live writes.
