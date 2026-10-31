@@ -18,9 +18,11 @@ export async function serveReviewAttemptVideo({
   const match=/^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/attempts\/([A-Za-z0-9_-]{8,120})\/preview$/.exec(url.pathname);
   if(!match)fail(404,"Rendering Review preview not found");
   const [,outputId,attemptId]=match;
-  if(!RECORD.test(outputId)||!TOKEN.test(attemptId)||
-     outputId!==env?.RENDERING_REVIEW_EXACT_OUTPUT_ID)
-    fail(403,"Not the selected Chicago pilot Reel");
+  if(!RECORD.test(outputId)||!TOKEN.test(attemptId))
+    fail(403,"Invalid review media identity");
+  // Scope is verified by the authenticated workspace, held Output and
+  // exact durable Attempt. The legacy single-output binding is not the
+  // authority for a second manually admitted Chicago Reel.
   if(typeof loadWorkspace!=="function"||typeof listAttempts!=="function"||
      typeof readVideo!=="function"||typeof copyHeaders!=="function")
     fail(503,"Protected preview integration unavailable");

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
 import {serveReviewAttemptVideo,fetchTrustedRunnerReviewMedia} from "./rendering-review-attempt-video.mjs";
 const output="rec0uVrVeiUM6shp9", id="rrattempt_1234567890abcdef";
 const file="1XZ-_ARlXoP5mwILho13f81vmWQlpgTs4";
@@ -35,17 +36,20 @@ test("streams verified V2 with byte ranges, never embedding Drive",async()=>{
   assert.equal(r.headers.get("Cache-Control"),"private, no-store");
   assert.equal(f.calls(),1);
 });
-test("rejects a different output, lost hold or missing reviewer permission before reading media",async()=>{
+test("a stale exact-output binding cannot block a held V2, but permissions and hold still gate media",async()=>{
   const f=fixture();
+  // A prior exact-output binding cannot shadow a separately enrolled,
+  // authenticated held Review output. Studio and Runner both re-read scope.
   f.args.env.RENDERING_REVIEW_EXACT_OUTPUT_ID="recA1B2C3D4E5F6G7";
-  await assert.rejects(()=>serveReviewAttemptVideo(f.args),e=>e.status===403);
+  assert.equal((await serveReviewAttemptVideo(f.args)).status,206);
   f.args.env.RENDERING_REVIEW_EXACT_OUTPUT_ID=output;
   f.args.authorization.permissions.outputs_review=false;
   await assert.rejects(()=>serveReviewAttemptVideo(f.args),e=>e.status===403);
   f.args.authorization.permissions.outputs_review=true;
   f.args.loadWorkspace=async()=>({ok:true,publication_hold_verified:false,session});
   await assert.rejects(()=>serveReviewAttemptVideo(f.args),e=>e.status===409);
-  assert.equal(f.calls(),0);
+  // The initial valid preview streams once; denied requests add no reads.
+  assert.equal(f.calls(),1);
 });
 test("rejects mismatched persistent attempt, missing artifact and unready status",async()=>{
   const f=fixture();
@@ -56,6 +60,37 @@ test("rejects mismatched persistent attempt, missing artifact and unready status
   f.args.loadWorkspace=async()=>({ok:true,publication_hold_verified:true,session:wrong});
   await assert.rejects(()=>serveReviewAttemptVideo(f.args),e=>e.status===409);
   assert.equal(f.calls(),0);
+});
+
+test("separately admitted #9389 V2 has a playable authorized preview route",async()=>{
+  const f=fixture();
+  const nextOutput="recVFaT3VnhCD3dcb";
+  const nextAttempt="rrattempt_2fd0ffb68ead349090898bc8cf69bac093a08f1706ff230a";
+  const nextFile="1aS0OwooNJY5cmoCK-z6T8gpxzRcD-fux";
+  const nextSession={...session,output_id:nextOutput,
+    attempts:[{id:nextAttempt,number:2,status:"ready_for_review",artifact_id:nextFile}]};
+  f.args.request=new Request("https://studio.example/api/rendering-review/outputs/"+nextOutput+
+    "/attempts/"+nextAttempt+"/preview",{headers:{Range:"bytes=0-100"}});
+  f.args.url=new URL(f.args.request.url);
+  f.args.env.RENDERING_REVIEW_EXACT_OUTPUT_ID=output;
+  f.args.loadWorkspace=async()=>({ok:true,publication_hold_verified:true,session:nextSession});
+  f.args.listAttempts=async()=>[{fields:{Attempt_ID:nextAttempt,Session_ID:nextSession.id,
+    Output_Record_ID:nextOutput,Attempt_Number:2,Attempt_Status:"ready_for_review",
+    Artifact_File_ID:nextFile}}];
+  f.args.readVideo=async(file,source,probe,config,identity)=>{
+    assert.equal(file,nextFile);
+    assert.equal(identity.outputId,nextOutput);
+    assert.equal(identity.attemptId,nextAttempt);
+    assert.equal(probe.headers.get("Range"),"bytes=0-100");
+    return new Response("mp4",{status:206,headers:{"Content-Type":"video/mp4"}});
+  };
+  const response=await serveReviewAttemptVideo(f.args);
+  assert.equal(response.status,206);
+  assert.equal(response.headers.get("X-Studio-Preview-Source"),"rendering-review-owned-drive-attempt");
+  f.args.listAttempts=async()=>[{fields:{Attempt_ID:nextAttempt,Session_ID:nextSession.id,
+    Output_Record_ID:nextOutput,Attempt_Number:2,Attempt_Status:"ready_for_review",
+    Artifact_File_ID:"some-other-drive-file-identity"}}];
+  await assert.rejects(()=>serveReviewAttemptVideo(f.args),e=>e.status===409);
 });
 
 test("exact Runner Google relay preserves Range and credentials never appear in media URL",async()=>{
@@ -85,4 +120,9 @@ test("Runner relay fails closed for untrusted origin and malformed range",async(
     outputId:output,attemptId:id,
     request:new Request("https://studio.example/media",{headers:{Range:"nonsense"}}),
   }),e=>e.status===416);
+});
+
+test("Worker awaits preview promise so a rejected V2 stream becomes JSON rather than Error 1101",()=>{
+  const source=readFileSync(new URL("./worker.js",import.meta.url),"utf8");
+  assert.match(source,/if \(isReviewAttemptPreviewRoute\) \{\s*\/\/[^\n]*\n\s*return await serveReviewAttemptVideo\(/);
 });
