@@ -60,7 +60,8 @@ jobs:
             services/pipeline-runner/tests/test_ame_encoder.py \
             services/pipeline-runner/tests/test_studio_compress.py \
             services/pipeline-runner/tests/test_a1s_eligibility.py \
-            services/pipeline-runner/tests/test_a1_local_compressor.py
+            services/pipeline-runner/tests/test_a1_local_compressor.py \
+            services/pipeline-runner/tests/test_internal_media_guard.py
 
       - name: Deploy Pipeline Runner through allowlisted Ops action
         shell: bash
@@ -527,3 +528,6 @@ jobs:
 # 2026-10-30: Deploy source-preserving oversized video recovery PR #1381. Gated A1S/A1P tests.
 # Prioritize verified Compression Test.MOV ingestion; preserve all ten originals,
 # deduplicate solely by immutable Drive IDs, and never auto-publish anything.
+
+# 2026-10-30: Deploy private loopback Drive source fix #1387 with full A1S/A1P and media-stream tests.
+# Re-run exact ingestion-only A1S canary once; keep all originals and every publish hold.
