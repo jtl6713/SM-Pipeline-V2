@@ -25,7 +25,7 @@ def _daypart(fields):
     return value if isinstance(value, str) else ""
 
 
-def _owned_chicago_image(record, *, expected_file=None):
+def _owned_profile_image(record, profile_id, *, expected_file=None):
     if not isinstance(record, dict) or not re.fullmatch(r"rec[A-Za-z0-9]{14}", str(record.get("id") or "")):
         return False
     f = record.get("fields") or {}
@@ -33,10 +33,14 @@ def _owned_chicago_image(record, *, expected_file=None):
     if (f.get("Media_Class") != "Image" or f.get("Asset_Status") != "Available"
             or f.get("Rights_Status") != "Owned" or f.get("Active") is not True
             or f.get("Do_Not_Use") is True or
-            f.get("Content_Profile") != [CHICAGO_PROFILE_ID] or
+            f.get("Content_Profile") != [profile_id] or
             not isinstance(file_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{16,}", file_id)):
         return False
     return expected_file is None or expected_file == file_id
+
+# Backward-compatible Chicago evidence helper for the pilot tests.
+def _owned_chicago_image(record, *, expected_file=None):
+    return _owned_profile_image(record, CHICAGO_PROFILE_ID, expected_file=expected_file)
 
 
 def _summary(record):
@@ -101,8 +105,14 @@ def load_evidence(client, output_id, session_id, expected_version):
         raise ValueError("Session identity mismatch")
     if type(expected_version) is not int or session.get("version") != expected_version or fields.get("Row_Version") != expected_version:
         raise ValueError("Stale session version")
-    if session.get("profile_id") != CHICAGO_PROFILE_ID or session.get("output_type") != "Instagram Reel":
-        raise ValueError("Outside Chicago Reel pilot")
+    profile_id = session.get("profile_id")
+    output_type = session.get("output_type")
+    if not isinstance(profile_id, str) or not re.fullmatch(r"rec[A-Za-z0-9]{14}", profile_id) or not isinstance(output_type, str) or not output_type.strip():
+        raise ValueError("Invalid authoritative review profile or output type")
+    platform = session.get("platform") or (
+        "Instagram" if profile_id == CHICAGO_PROFILE_ID and output_type == "Instagram Reel" else None)
+    if not isinstance(platform, str) or not platform.strip():
+        raise ValueError("Review session platform identity missing")
     if session.get("state") not in {"ready_for_review", "discussing", "awaiting_assets", "plan_ready", "revision_failed"}:
         raise ValueError("Revision plan cannot change in current state")
     output = client.get_record(OUTPUTS, output_id)
@@ -110,8 +120,8 @@ def load_evidence(client, output_id, session_id, expected_version):
     hold = session.get("review_hold", {})
     if output.get("id") != output_id or not hold.get("active") or f.get("Studio_Render_Review_Hold_Active") is not True or f.get("Studio_Render_Review_Hold_ID") != hold.get("id") or f.get("Studio_Render_Review_Hold_Owner") != session_id or f.get("Studio_Render_Review_Session_ID") != session_id:
         raise ValueError("Exact authoritative review hold is required")
-    if f.get("Platform_Output_Type") != "Instagram Reel" or f.get("Platform") != "Instagram":
-        raise ValueError("Output platform changed")
+    if f.get("Platform_Output_Type") != output_type or f.get("Platform") != platform:
+        raise ValueError("Output platform or output type changed")
     if (f.get("Published_At") or f.get("Platform_Post_ID") or
             f.get("Platform_Post_URL") or f.get("Platform_Media_ID") or
             f.get("Publish_Started_At") or f.get("Publish_Locked_At") or
@@ -123,9 +133,11 @@ def load_evidence(client, output_id, session_id, expected_version):
         raise ValueError("Authoritative content item is ambiguous")
     content = client.get_record(CONTENT, content_id)
     cf = content.get("fields", {})
-    if one_link(cf, "Content_Profile") != CHICAGO_PROFILE_ID:
+    if one_link(cf, "Content_Profile") != profile_id:
         raise ValueError("Content profile does not match review session")
-    profile = client.get_record(PROFILES, CHICAGO_PROFILE_ID)
+    profile = client.get_record(PROFILES, profile_id)
+    if profile.get("id") != profile_id and profile.get("id") is not None:
+        raise ValueError("Profile evidence record identity changed")
     request_id = one_link(cf, "Production_Request")
     request = client.get_record(REQUESTS, request_id) if request_id else {"fields": {}}
     rf = request.get("fields", {})
@@ -161,7 +173,7 @@ def load_evidence(client, output_id, session_id, expected_version):
         if (isinstance(media_id, str) and re.fullmatch(r"rec[A-Za-z0-9]{14}", media_id)
                 and isinstance(file_id, str)):
             row = source_rows.get(media_id)
-            if row and _owned_chicago_image(row, expected_file=file_id):
+            if row and _owned_profile_image(row, profile_id, expected_file=file_id):
                 item.update({k: v for k, v in _summary(row).items()
                              if k in ("time_of_day", "description", "location", "metadata_verified",
                                       "frames_inspected")})
@@ -194,10 +206,11 @@ def load_evidence(client, output_id, session_id, expected_version):
     # Wider catalog suggestions remain *advisory* until the separate immutable
     # plan adapter verifies rights, a usable crop, and their exact ownership.
     # Never let a catalog photo's ID masquerade as a request-linked render asset.
-    library = _library_candidates(client, linked_ids)
+    library = _library_candidates(client, linked_ids) if profile_id == CHICAGO_PROFILE_ID else []
     evidence = {
         "output_id": output_id, "session_id": session_id, "session_version": expected_version,
-        "profile_id": CHICAGO_PROFILE_ID, "output_type": "Instagram Reel",
+        "profile_id": profile_id, "platform": platform, "output_type": output_type,
+        "scope_verified": True,
         "current_attempt_id": session.get("current_attempt_id"),
         "title": cf.get("Content_Title"),
         "original_brief": {k: cf.get(k) for k in ("Idea_Summary", "Hook", "Required_Assets", "Suggested_Visuals")},
