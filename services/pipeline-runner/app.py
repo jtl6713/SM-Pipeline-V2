@@ -164,12 +164,40 @@ def internal_drive_media(file_id: str):
         return denied, status
     if not file_id or len(file_id) > 256 or not all(char.isalnum() or char in "_-" for char in file_id):
         return jsonify({"error": "Invalid Drive file ID"}), 400
-    content, mime_type = GoogleDriveClient().download_file(file_id)
-    return Response(
-        content,
-        mimetype=mime_type or "application/octet-stream",
-        headers={"Cache-Control": "no-store"},
+    # Stream private Google Drive originals through localhost only. Avoid
+    # buffering 180–450 MB footage in the Runner process when A1S hands it to
+    # the local Video Compressor. No public URL or OAuth token is exposed.
+    from integrations.google_drive import GoogleDriveClient
+    import requests
+
+    drive = GoogleDriveClient()
+    upstream = requests.get(
+        f"https://www.googleapis.com/drive/v3/files/{file_id}",
+        params={"alt": "media", "supportsAllDrives": "true"},
+        headers={"Authorization": f"Bearer {drive.access_token()}"},
+        stream=True,
+        timeout=(30, 600),
     )
+    try:
+        upstream.raise_for_status()
+    except Exception:
+        upstream.close()
+        raise
+    mime = (upstream.headers.get("Content-Type") or "application/octet-stream").split(";")[0].strip()
+    length = str(upstream.headers.get("Content-Length") or "").strip()
+
+    def chunks():
+        try:
+            for chunk in upstream.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    yield chunk
+        finally:
+            upstream.close()
+
+    headers = {"Cache-Control": "no-store"}
+    if length.isdigit():
+        headers["Content-Length"] = length
+    return Response(chunks(), mimetype=mime, headers=headers)
 
 
 @app.get("/internal/studio-master")
