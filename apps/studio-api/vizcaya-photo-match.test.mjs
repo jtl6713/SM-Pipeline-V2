@@ -60,3 +60,52 @@ test("manual matching skips unnecessary unfinished-intake scans and errors leave
   assert.match(worker, /reason: "matcher_error"/);
   assert.match(worker, /idea photo-wait error diagnostic write failed/);
 });
+
+// Regression from Idea Candidate #1811 ("Best Winter View?") and the
+// newly classified "Chicago Winters 1..14" batch. Citywide is scope, not
+// a photographic subject; profile isolation remains a separate hard guard.
+test("Idea #1811 Citywide winter view discovers high-confidence Chicago Winters photos", () => {
+  const keys = buildIdeaLibraryKeys({
+    primaryLocation: "Citywide",
+    title: "Best Winter View?",
+    summary: "Ask followers for their favorite winter skyline viewpoints in Chicago.",
+  });
+  assert.deepEqual(keys.placeKeys, [], "Citywide must never become a required location anchor");
+  assert.ok(keys.subjectKeys.includes("winter"));
+  const classified = ["Chicago Winters 1", "Chicago Winters 2", "Chicago Winters 10", "Chicago Winters 14"];
+  const ranked = classified.map((name, i) => {
+    const row = rankIdeaLibraryFields({
+      name: name.toLowerCase(),
+      location: "chicago, lake michigan shoreline",
+      haystack: [name, "winter skyline, lake michigan, snow, frozen lakefront"].join(" ").toLowerCase(),
+      placeKeys: keys.placeKeys,
+      subjectKeys: keys.subjectKeys,
+      strongIdeaTokens: ["winter", "skyline"],
+      ideaTokens: ["best", "winter", "view", "skyline"],
+      queryTokens: [],
+      today: "2026-10-31",
+      intakeDate: "2026-10-31",
+    });
+    assert.equal(row?.confidence, "high", name + " should be a high-confidence match");
+    return { ...row, id: "recChicagoWintersTest" + i, intake_date: "2026-10-31" };
+  });
+  const result = selectMatchedPhotos({matches: ranked, min: 1, max: 4, force: true});
+  assert.equal(result.action, "ready");
+  assert.equal(result.selected.length, 4);
+  const cityWideNamedPlace = buildIdeaLibraryKeys({
+    primaryLocation: "Citywide — Navy Pier",
+    title: "Navy Pier Winter Views",
+    summary: "Snow and lakefront",
+  });
+  assert.equal(cityWideNamedPlace.placeKeys.includes("citywide"), false);
+  assert.ok(cityWideNamedPlace.placeKeys.includes("navy"));
+});
+
+test("production photo ranker strips Citywide without bypassing profile scope", () => {
+  const source = readStudioWorkerSource();
+  assert.match(source, /const locationForMatching = String\(primaryLocation \|\| ""\)\.replace/);
+  const ranker = source.slice(source.indexOf("export async function rankStillsForIdeaPhotoWait("),
+    source.indexOf("/*__STUDIO_WORKER_END:rankStillsForIdeaPhotoWait__*/"));
+  assert.match(ranker, /mediaAssetProfileScopeForId/);
+  assert.match(ranker, /combineAirtableFormulas\(ideaLibraryFilterFormula\(filterKeys\), scopeFormula\)/);
+});
