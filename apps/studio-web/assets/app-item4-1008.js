@@ -8755,8 +8755,14 @@ function timedScriptAssetLabel(asset, index) {
             method: "POST",
             body: JSON.stringify({
               title: answers.ideaTitle,
-              summary: answers.ideaSummary || answers.ideaTitle,
+              summary: answers.inputKind === "vibe-cut"
+                ? `${answers.ideaSummary || answers.ideaTitle}\nCreated from New content (origin=ez-wizard; ez-input=vibe-cut).`
+                : (answers.ideaSummary || answers.ideaTitle),
               primary_location: answers.ideaLocation || "",
+              content_profile_id: selectedProfileId,
+              input_kind: answers.inputKind,
+              source_aspect: answers.sourceAspect || "",
+              vibe_target_seconds: answers.vibeTargetSeconds || 15,
             }),
             timeoutMs: 30000,
             retries: 1,
@@ -8984,6 +8990,10 @@ function timedScriptAssetLabel(asset, index) {
     let nextFiles = ezIntakeKind === "single-photo" ? supported.slice(0, 1) : supported;
     if (ezIntakeKind === "finished-video" || ezIntakeKind === "vibe-cut") {
       nextFiles = supported.filter(item4FileLooksLikeVideo).slice(0, 1);
+      if (!nextFiles.length && ezIntakeKind === "vibe-cut") {
+        setEzMessage("Vibe Cut requires one source video (MP4 or MOV), not photos.", "error-text");
+        return false;
+      }
       if (!nextFiles.length) nextFiles = supported.slice(0, 1);
     }
     if (pending?.inputKind === "mixed") {
@@ -9040,7 +9050,7 @@ function timedScriptAssetLabel(asset, index) {
       }
       const wizardPlanned = pending?.planned;
       const totalAfter = existingCount + nextFiles.length;
-      const photoCount = allowEmpty
+      const photoCount = (ezIntakeKind === "vibe-cut" || pending?.inputKind === "vibe-cut") ? 0 : allowEmpty
         ? (apiHelpers.ezWizardPhotoCount(pending) || 1)
         : (Number(pending?.photoCount) || (pending?.inputKind === "mixed" ? apiHelpers.ezWizardPhotoCount(pending) : 0) || Math.max(totalAfter, ezIntakeKind === "multiple-photos" ? 2 : 1));
       let planned;
@@ -9092,6 +9102,13 @@ function timedScriptAssetLabel(asset, index) {
         body: JSON.stringify({
           title: defaultTitle,
           summary: ezIdeaSummaryValue(pending?.inputKind || ezIntakeKind),
+          primary_location: currentPrimaryLocationValue(),
+          content_profile_id: selectedProfileId,
+          input_kind: pending?.inputKind || ezIntakeKind,
+          source_aspect: aspectBundle?.plan?.source_aspect || planned?.source_aspect || pending?.sourceAspect || "",
+          source_video_width: aspectBundle?.width || 0,
+          source_video_height: aspectBundle?.height || 0,
+          vibe_target_seconds: pending?.vibeTargetSeconds || 15,
         }),
       });
       activeIdea = idea.record;
@@ -9113,7 +9130,7 @@ function timedScriptAssetLabel(asset, index) {
         requestPayload.carousel_image_mode = "Make AI Generated";
         requestPayload.carousel_slide_count_mode = "Exact";
         requestPayload.carousel_slide_count_exact = apiHelpers.ezWizardPhotoCount(pending);
-      } else if (pending?.inputKind === "single-photo" || pending?.inputKind === "multiple-photos" || nextFiles.length) {
+      } else if (!ezIsVibeCut() && (pending?.inputKind === "single-photo" || pending?.inputKind === "multiple-photos" || nextFiles.length)) {
         requestPayload.carousel_image_mode = "Manual Upload";
         requestPayload.carousel_slide_count_mode = "Exact";
         requestPayload.carousel_slide_count_exact = photoCount;
@@ -15368,6 +15385,7 @@ function timedScriptAssetLabel(asset, index) {
         ? (window.StudioTimedScript?.exactVoiceoverText?.(productionTimedScript) || "")
         : $("prRequestedScript").value.trim(),
       primary_location: currentPrimaryLocationValue(),
+      location_change_confirmed: Boolean(primaryLocationUserEdited),
       production_notes: mergeProductionRenderSettings($("prProductionNotes").value.trim()),
       slide_captions: collectEzSlideCaptionRecords(),
     };
