@@ -1,3 +1,4 @@
+import {CHICAGO_PROFILE_ID} from "./rendering-review-policy.mjs";
 /**
  * Authenticated Factory preview of the selected, already accepted V2+.
  * Never trust a Factory card URL or expose private Google Drive credentials.
@@ -13,8 +14,10 @@ export function factorySelectedReviewAttempt({session,row,profile,outputId}){
      session.output_id!==outputId||
      !/^rec[A-Za-z0-9]{14}$/.test(str(profile))||
      session.profile_id!==profile||
-     !str(session.platform)||!str(session.output_type)||
-     str(field(row,"Platform"))!==str(session.platform)||
+     !str(session.output_type)||
+     str(field(row,"Platform"))!==
+       str(session.platform||(profile===CHICAGO_PROFILE_ID&&
+         session.output_type==="Instagram Reel"?"Instagram":""))||
      str(field(row,"Platform_Output_Type"))!==str(session.output_type)||
      dispatched(row))return null;
   const attempt=session.attempts?.find(a=>a.id===session.current_attempt_id);
