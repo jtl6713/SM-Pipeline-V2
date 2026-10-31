@@ -593,6 +593,18 @@
               'This does not publish, upload, or release the publication hold.'))return;
             if(state.viewingVersion!==versionNumber)
               throw new Error('Version selection changed; select V'+versionNumber+' again before approving.');
+            if(state.actionBusy||state.approvalLocks.has(approvalKey))return;
+            state.actionBusy=true;
+            state.approvalLocks.add(approvalKey);
+            approval.textContent='Approving V'+versionNumber+'…';
+            approval.setAttribute('aria-busy','true');
+            approvalStatus.hidden=false;
+            approvalStatus.dataset.state='working';
+            approvalStatus.textContent='Approving V'+versionNumber+' and moving it to Factory…';
+            syncSelectedApproval();
+            try{
+              if(!state.approvalKeys.has(approvalKey))
+                state.approvalKeys.set(approvalKey,safeRequestId());
             const result=await post('/api/rendering-review/outputs/'+
               encodeURIComponent(entry.output_id)+'/approve',{
               expected_version:session.version,attempt_id:current.id,
