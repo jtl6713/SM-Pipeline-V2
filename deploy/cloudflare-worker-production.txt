@@ -789,3 +789,5 @@ Deploy Worker 0.10.708-vibe-cut-video-ideas. P1 Vibe Cut video-only Idea create/
 Retry Worker 0.10.708-vibe-cut-video-ideas after preserving canonicalProductionPlatforms(platformsRaw) for legacy request-validation contract. P1 Vibe video-only normalization is unchanged; fail-closed previous deploy did not ship.
 
 2026-10-31: Deploy Airtable text-select compatibility hotfix (PR #1411). Normalize downstream Content Item/Platform Output Title/Caption/Script mode select writes when the Production Request intentionally stores Leave blank, while retaining Vibe Cut no-voiceover, original Drive source, Airtable authority and existing I3/I4 idempotency. No new uploads, posts, scheduling, or content requests.
+
+2026-10-31: Guarded Submitted approval recovery fairness and diagnostic fix (PR #1412). Existing old Submitted requests no longer starve later approved I4 content. Record last recovery failure in two existing Airtable fields. No I3 replay, no media reupload, no direct publishing, Airtable remains write SoR. Recover Michigan Avenue Stroll Idea 2050 existing PR and Content 1869 only.
