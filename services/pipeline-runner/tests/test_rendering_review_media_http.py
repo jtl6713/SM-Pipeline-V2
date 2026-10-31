@@ -16,12 +16,17 @@ class FakeClient:
     hold=True
     factory=False
     mismatch=False
+    profile_id=CHICAGO
+    item_profile_id=None
+    platform="Instagram"
+    output_type="Instagram Reel"
     def __init__(self): self.seen=[]
     def list_records(self,table,**kwargs):
         self.seen.append(table)
         if table==SESSIONS:
             session={"schema":"studio.render-review.1","id":SESSION,
-                "output_id":OUTPUT,"profile_id":CHICAGO,"version":4,
+                "output_id":OUTPUT,"profile_id":self.profile_id,"version":4,
+                "platform":self.platform,"output_type":self.output_type,
                 "state":"approved" if self.factory else "discussing",
                 "approved_attempt_id":ATTEMPT if self.factory else None,
                 "current_attempt_id":ATTEMPT,
@@ -46,14 +51,14 @@ class FakeClient:
                 "Studio_Render_Review_Hold_Owner":SESSION if self.hold else "",
                 "Studio_Render_Review_Session_ID":SESSION if self.hold else "",
                 "Do_Not_Publish":self.hold,"Auto_Publish_Enabled":False,
-                "Platform":"Instagram","Platform_Output_Type":"Instagram Reel"}
+                "Platform":self.platform,"Platform_Output_Type":self.output_type}
             if self.factory:
                 f.update({"Final_File_ID":FILE,
                     "Final_File_URL":"https://drive.google.com/file/d/"+FILE+"/view",
                     "Output_Status":"Ready for Review","Review_Status":"Review Sent",
                     "Publish_Status":"Not Ready"})
             return {"id":OUTPUT,"fields":f}
-        if table==ITEMS: return {"fields":{"Content_Profile":[CHICAGO]}}
+        if table==ITEMS: return {"fields":{"Content_Profile":[self.item_profile_id or self.profile_id]}}
         raise ValueError(table)
 
 class FakeDrive:
@@ -118,6 +123,51 @@ class ProxyTests(unittest.TestCase):
         resp=self.http.get(self.url,headers={"X-Pipeline-Secret":SECRET})
         self.assertEqual(resp.status_code,409)
         self.assertEqual(self.transfers,[])
+    def test_other_city_private_attempt_requires_runner_global_scope(self):
+        self.client.profile_id="recF7UAn0LkMZZrWZ"
+        self.client.platform="TikTok"
+        self.client.output_type="TikTok Video"
+        headers={"X-Pipeline-Secret":SECRET,"Range":"bytes=0-3"}
+        self.assertEqual(self.http.get(self.url,headers=headers).status_code,409)
+        self.assertEqual(self.transfers,[])
+        flags={
+            "RENDERING_REVIEW_ENROLL_WRITES_ENABLED":"true",
+            "RENDERING_REVIEW_MANUAL_ADMISSION_ENABLED":"true",
+            "RENDERING_REVIEW_INTEGRATION_VERIFIED":"true",
+            "RENDERING_REVIEW_DISPATCH_FENCE_VERIFIED":"true",
+            "RENDERING_REVIEW_SCHEDULER_VACATE_VERIFIED":"true",
+            "RENDERING_REVIEW_GLOBAL_MANUAL_ENABLED":"true",
+            "RENDERING_REVIEW_GLOBAL_RUNNER_VERIFIED":"true",
+        }
+        with patch.dict(os.environ,flags):
+            ok=self.http.get(self.url,headers=headers)
+            self.assertEqual(ok.status_code,206)
+            self.assertEqual(ok.data,b"mp4!")
+            self.assertEqual(len(self.transfers),1)
+            self.client.item_profile_id=CHICAGO
+            cross=self.http.get(self.url,headers=headers)
+            self.assertEqual(cross.status_code,403)
+            self.assertEqual(len(self.transfers),1)
+
+    def test_other_city_fails_closed_when_one_runner_flag_is_off(self):
+        self.client.profile_id="recF7UAn0LkMZZrWZ"
+        self.client.platform="Facebook"
+        self.client.output_type="Facebook Reel"
+        flags={key:"true" for key in (
+            "RENDERING_REVIEW_ENROLL_WRITES_ENABLED",
+            "RENDERING_REVIEW_MANUAL_ADMISSION_ENABLED",
+            "RENDERING_REVIEW_INTEGRATION_VERIFIED",
+            "RENDERING_REVIEW_DISPATCH_FENCE_VERIFIED",
+            "RENDERING_REVIEW_SCHEDULER_VACATE_VERIFIED",
+            "RENDERING_REVIEW_GLOBAL_MANUAL_ENABLED",
+            "RENDERING_REVIEW_GLOBAL_RUNNER_VERIFIED")}
+        with patch.dict(os.environ,flags):
+            for key in flags:
+                with patch.dict(os.environ,{key:"false"}):
+                    self.assertEqual(self.http.get(self.url,
+                        headers={"X-Pipeline-Secret":SECRET}).status_code,409,key)
+        self.assertEqual(self.transfers,[])
+
     def test_head_probe_no_google_media_in_response(self):
         r=self.http.head(self.url,headers={"X-Pipeline-Secret":SECRET})
         self.assertEqual(r.status_code,200)
