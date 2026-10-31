@@ -407,7 +407,7 @@ def _process_scan(*, drive_file_id: str | None, dry_run: bool, inline: bool,
     preview["skipped_count"] = len(skipped)
     if dry_run:
         preview["eligible"] = [
-            {"id": item.get("id"), "name": item.get("name"), "size": parse_bytes(item.get("size"))}
+            {"id": item.get("id"), "name": item.get("name"), "size": parse_bytes(item.get("size")), "source_kind": item.get("source_kind")}
             for item in candidates
         ]
         return {"processed": False, "dry_run": True, **preview}
