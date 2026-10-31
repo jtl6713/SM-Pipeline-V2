@@ -10920,7 +10920,7 @@ export async function listOversizedIntakeVideos(env) {
     if (!response.ok) return [];
     const run = payload?.details?.run || {};
     const eligible = Array.isArray(run.eligible) ? run.eligible : [];
-    return eligible.map(mapOversizedIntakeDriveFile).filter(Boolean);
+    return eligible.filter((row) => row.source_kind === "ingestion").map(mapOversizedIntakeDriveFile).filter(Boolean);
   } catch (error) {
     console.error("listOversizedIntakeVideos failed", error);
     return [];
