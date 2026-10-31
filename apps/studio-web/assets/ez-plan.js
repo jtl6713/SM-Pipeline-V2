@@ -364,8 +364,8 @@
 
   function ezWizardPhotoCount(answers = {}) {
     const kind = String(answers.inputKind || "").trim();
-    if (kind === EZ_INPUTS.SINGLE_PHOTO || kind === EZ_INPUTS.SINGLE_AI || kind === EZ_INPUTS.VIBE_CUT) return 1;
-    if (kind === EZ_INPUTS.VIDEO_CLIPS) return 0;
+    if (kind === EZ_INPUTS.SINGLE_PHOTO || kind === EZ_INPUTS.SINGLE_AI) return 1;
+    if (kind === EZ_INPUTS.VIBE_CUT || kind === EZ_INPUTS.VIDEO_CLIPS) return 0;
     if (kind === EZ_INPUTS.MIXED) {
       return Math.max(0, Number(answers.manualCount) || 0) + Math.max(0, Number(answers.aiCount) || 0);
     }
@@ -388,6 +388,8 @@
 
   function ezWizardExpectedUploads(answers = {}) {
     const kind = String(answers.inputKind || "").trim();
+    // Vibe Cut requires one *video*, not one photo; photo-wait cannot bypass it.
+    if (kind === EZ_INPUTS.VIBE_CUT) return 1;
     if (answers.photoWait) return 0;
     if (kind === EZ_INPUTS.SINGLE_AI || kind === EZ_INPUTS.MULTIPLE_AI) return 0;
     if (kind === EZ_INPUTS.SINGLE_PHOTO || kind === EZ_INPUTS.FINISHED_VIDEO || kind === EZ_INPUTS.VIBE_CUT) return 1;
@@ -891,6 +893,17 @@
   }
 
   function ezWizardResolvePackage(answers = {}) {
+    // Single canonical orientation plan for both EZ launch paths. Neither
+    // custom formats nor a photo count may turn a Vibe Cut into stills.
+    if (ezIsVibeCutInput(answers.inputKind)) {
+      const horizontal = String(answers.sourceAspect || "").toLowerCase() === "horizontal"
+        || ezIsHorizontalSource(answers.sourceVideoWidth, answers.sourceVideoHeight);
+      return ezPlanFromSourceAspect({
+        width: horizontal ? 1920 : 1080,
+        height: horizontal ? 1080 : 1920,
+        inputKind: EZ_INPUTS.VIBE_CUT,
+      });
+    }
     const count = ezWizardPhotoCount(answers);
     const packageId = String(answers.packageId || EZ_PACKAGES.VIDEO).trim() || EZ_PACKAGES.VIDEO;
     if (packageId === "custom" && Array.isArray(answers.customItems) && answers.customItems.length) {
