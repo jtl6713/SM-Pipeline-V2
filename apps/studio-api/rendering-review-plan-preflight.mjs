@@ -7,6 +7,8 @@
  * This module is NOT an enrollment, job dispatch, or publish API.
  */
 import {CHICAGO_PROFILE_ID, REVIEW_SCHEMA} from "./rendering-review-policy.mjs";
+const sessionPlatform=s=>str(s?.platform)||
+  (s?.profile_id===CHICAGO_PROFILE_ID&&s?.output_type==="Instagram Reel"?"Instagram":"");
 
 const str=x=>String(x??"").trim();
 const validId=x=>/^[A-Za-z0-9_-]{8,120}$/.test(str(x));
@@ -25,11 +27,11 @@ async function digest(x){
 }
 function validSession(s){
   if(s?.schema!==REVIEW_SCHEMA||!rec(s.output_id)||
-     s.profile_id!==CHICAGO_PROFILE_ID||s.output_type!=="Instagram Reel"||
+     !rec(s.profile_id)||!str(s.output_type)||!sessionPlatform(s)||
      !["ready_for_review","discussing","awaiting_assets","plan_ready","revision_failed"].includes(s.state)||
      !s.review_hold?.active||!validId(s.review_hold.id)||
      s.active_job||!validId(s.current_attempt_id))
-    err("REVIEW_NOT_EDITABLE","A held Chicago Reel without an active job is required");
+    err("REVIEW_NOT_EDITABLE","An authorized, held output without an active job is required");
   const attempt=(s.attempts||[]).find(a=>a.id===s.current_attempt_id);
   if(!attempt || attempt.status!=="ready_for_review"&&!["discussing","revision_failed"].includes(s.state)||
      !str(attempt.artifact_id))
@@ -53,7 +55,7 @@ export async function inspectReviewPlan({
   const c=p.candidate;
   if(!source||source.verified!==true||source.authority!=="server"||
      source.output_id!==session.output_id||
-     source.profile_id!==CHICAGO_PROFILE_ID||
+     source.profile_id!==session.profile_id||
      source.artifact_id!==attempt.artifact_id||
      source.attempt_id!==attempt.id||
      !str(source.drive_file_id)||source.canonical_media_authority!=="google_drive")
@@ -147,7 +149,7 @@ export async function inspectReviewPlan({
     if(!a||a.verified!==true||a.rights_clear!==true||
        a.authority!=="server"||!str(a.rights_receipt_id)||
        !str(a.drive_file_id)||a.canonical_media_authority!=="google_drive"||
-       !(a.profile_id===CHICAGO_PROFILE_ID||a.cross_profile_authorized===true)){
+       !(a.profile_id===session.profile_id||a.cross_profile_authorized===true)){
       need("asset","Selected media must be independently verified in Drive", "rrasset_"+(await digest([p.hash,assetId])).slice(0,48));
     }else resolved.push({asset_id:a.id,drive_file_id:a.drive_file_id,
       profile_id:a.profile_id,media_type:str(a.media_type),
@@ -180,7 +182,7 @@ export async function inspectReviewPlan({
   }
   const duration=Number(c.timeline.at(-1)?.end_seconds);
   if(!Number.isFinite(duration)||duration<=0||duration>180)
-    err("DURATION_INCOMPATIBLE","The Instagram Reel plan must end within 180 seconds");
+    err("DURATION_INCOMPATIBLE","The approved video composition must end within 180 seconds");
   const unresolvedResearch=blockers.some(x=>x.kind!=="asset");
   const frozen=!unresolvedResearch;
   const plan={
@@ -188,8 +190,8 @@ export async function inspectReviewPlan({
     source_attempt_id:attempt.id,source_artifact_id:attempt.artifact_id,
     source_drive_file_id:source.drive_file_id,
     candidate_hash:p.hash,evidence_hash:p.evidence_hash,
-    profile_id:CHICAGO_PROFILE_ID,output_id:session.output_id,
-    output_type:"Instagram Reel",creative:{
+    profile_id:session.profile_id,output_id:session.output_id,
+    platform:sessionPlatform(session),output_type:session.output_type,creative:{
       narration:c.narration,changes:c.changes,preserve:c.preserve,
       timeline,acceptance_checks:c.acceptance_checks,
       target_duration_seconds:duration,
