@@ -124,7 +124,7 @@ export async function commitReviewAttempt({
          previous.output_type==="Instagram Reel"?"Instagram Reel":null))!==
          previous.output_type||
        (manifest.platform||(manifest.profile_id===CHICAGO_PROFILE_ID&&
-         manifest.output_type==="Instagram Reel"?"Instagram":null))!==
+         (manifest.output_type||"Instagram Reel")==="Instagram Reel"?"Instagram":null))!==
          (previous.platform||(previous.profile_id===CHICAGO_PROFILE_ID&&
            previous.output_type==="Instagram Reel"?"Instagram":null))||
        manifest.source_attempt_id!==plan.source_attempt_id||
