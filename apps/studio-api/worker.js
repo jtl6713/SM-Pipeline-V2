@@ -2492,6 +2492,14 @@ export default {
           authorizedProfileIds:profiles.map(profile=>profile.id),
           readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
           readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+          // Live Airtable catalog, deliberately not the Supabase mirror. If
+          // missing/partial the authority layer disables cross-city revisions.
+          readWatermarkCatalog:()=>reviewListRecords(env,"tblSITCujCsJTNcDe",{
+            limit:200,
+            filterFormula:'AND({Asset_Role}="Watermark",{Asset_Status}="Available")',
+            fields:["Asset Name","Asset_Role","Asset_Status","Rights_Status",
+              "Active","Do_Not_Use","MIME_Type","Google Drive File ID","Content_Profile"],
+          }),
           readMappings:async id=>{
             const location=new URL("/api/production-requests/"+id+"/outputs",url);
             const reply=await listProductionRequestOutputs(request,env,location,authorization,ctx);
