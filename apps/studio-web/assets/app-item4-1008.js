@@ -16083,7 +16083,9 @@ function timedScriptAssetLabel(asset, index) {
     const promote = ideaShowPromoteAction(r)
       ? `<button type="button" class="manage-button promote-row-button" data-idea-id="${escapeHtml(r.id)}" data-idea-action="promote">Promote</button>`
       : "";
-    const listeningForPhotos = !ideaIsVideoWorkflow(r) && String(r?.photo_wait_status || "").trim() === "Waiting";
+    const videoRow = ["Vertical Short Video", "Longform Video"].includes(String(r?.content_type || "").trim())
+      || /ez-input=vibe-cut/i.test(String(r?.summary || "") + "\n" + String(r?.production_notes_user || ""));
+    const listeningForPhotos = !videoRow && String(r?.photo_wait_status || "").trim() === "Waiting";
     const findImages = listeningForPhotos
       ? `<button type="button" class="manage-button find-images-row-button" data-idea-find-images="${escapeHtml(r.id)}">Find images now</button>`
       : "";
