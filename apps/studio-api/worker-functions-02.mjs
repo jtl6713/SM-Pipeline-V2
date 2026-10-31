@@ -3086,9 +3086,7 @@ export function productionRequestFields(input, nowIso, { status = "Draft" } = {}
   return {
     Request_Status: status,
     Master_Content_Type: vibeCut
-      ? (vibeHorizontal
-        ? (input.content_type || "Longform Video")
-        : "Vertical Short Video")
+      ? (vibeHorizontal ? "Longform Video" : "Vertical Short Video")
       : (input.content_type || null),
     Target_Platforms: vibeHorizontal
       ? ["YouTube"]
@@ -3107,23 +3105,23 @@ export function productionRequestFields(input, nowIso, { status = "Draft" } = {}
     Video_Duration_Seconds: (vibeCut && vibeTargetSeconds > 0)
       ? vibeTargetSeconds
       : input.video_duration_seconds,
-    Voiceover_Duration_Seconds: input.voiceover_duration_seconds,
+    Voiceover_Duration_Seconds: vibeCut ? null : input.voiceover_duration_seconds,
     Music_Start_Seconds: input.music_start_seconds,
-    Carousel_Slide_Count_Mode: input.carousel_slide_count_mode,
-    Carousel_Slide_Count_Exact: input.carousel_slide_count_exact,
-    Carousel_Slide_Count_Min: input.carousel_slide_count_min,
-    Carousel_Slide_Count_Max: input.carousel_slide_count_max,
-    Carousel_Image_Mode: input.carousel_image_mode,
+    Carousel_Slide_Count_Mode: vibeCut ? null : input.carousel_slide_count_mode,
+    Carousel_Slide_Count_Exact: vibeCut ? null : input.carousel_slide_count_exact,
+    Carousel_Slide_Count_Min: vibeCut ? null : input.carousel_slide_count_min,
+    Carousel_Slide_Count_Max: vibeCut ? null : input.carousel_slide_count_max,
+    Carousel_Image_Mode: vibeCut ? null : input.carousel_image_mode,
     Voiceover_Tail_Seconds: input.voiceover_tail_seconds,
     Selected_Music_Asset: input.selected_music_asset_id ? [input.selected_music_asset_id] : [],
-    Voice_ID: input.voice_id || null,
-    Voice_Name: input.voice_name || null,
+    Voice_ID: vibeCut ? null : (input.voice_id || null),
+    Voice_Name: vibeCut ? null : (input.voice_name || null),
     Title_Mode: input.title_mode,
     Requested_Title: input.requested_title || null,
     Caption_Mode: input.caption_mode,
     Requested_Caption: input.requested_caption || null,
-    Script_Mode: input.script_mode,
-    Requested_Script: input.requested_script || null,
+    Script_Mode: vibeCut ? "Leave blank" : input.script_mode,
+    Requested_Script: vibeCut ? null : (input.requested_script || null),
     Primary_Location: input.primary_location || null,
     Production_Notes: input.production_notes || null,
     Updated_At: nowIso,
