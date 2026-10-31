@@ -4201,7 +4201,9 @@ function productionRequestOutputRenderFormat(row, parent, mappingIndex, planItem
   const family = String(f(row, "Pipeline_Family") || "").trim();
   const planned = (Array.isArray(planItems) ? planItems : []).find(item =>
     String(item?.platform || "").trim() === platform &&
-    item4CanonicalOutputType(platform, item?.output_type) === item4CanonicalOutputType(platform, outputType)
+    (String(item?.output_type || "").trim() === outputType ||
+      (item4CanonicalOutputType(platform, item?.output_type) &&
+       item4CanonicalOutputType(platform, item?.output_type) === item4CanonicalOutputType(platform, outputType)))
   );
   const supported = ITEM4_PLAN_SPECS[platform]?.options?.[outputType];
   const mappingType = String(planned?.mapping_type || supported?.mapping_type || "").trim();
