@@ -2966,8 +2966,8 @@
   function ideaStatusLabel(idea) {
     if (idea?.is_on_hold) return "On Hold";
     if (ideaIsPromoted(idea)) return "In production";
-    if (String(idea?.photo_wait_status || "") === "Waiting") return "Listening for photos";
-    if (String(idea?.photo_wait_status || "") === "Ready") return "Photos ready";
+    if (!ideaIsVideoContent(idea) && String(idea?.photo_wait_status || "") === "Waiting") return "Listening for photos";
+    if (!ideaIsVideoContent(idea) && String(idea?.photo_wait_status || "") === "Ready") return "Photos ready";
     const status = String(idea?.status || "").trim();
     if (status === "Sent for Review" || status === "Generated") return "Ready to produce";
     return status || "Unknown";
@@ -15969,7 +15969,25 @@ function timedScriptAssetLabel(asset, index) {
   }
 
 
+  function ideaIsVibeCut(record) {
+    return Boolean(record?.is_vibe_cut) || /ez-input=vibe-cut/i.test(
+      [record?.summary, record?.production_notes_user].map((value) => String(value || "")).join("\n")
+    );
+  }
+
+  function ideaIsVideoContent(record) {
+    return ideaIsVibeCut(record) || ["Vertical Short Video", "Longform Video"].includes(String(record?.content_type || ""));
+  }
+
   function ideaStructureLabel(record) {
+    if (ideaIsVibeCut(record)) {
+      const seconds = Number(record?.video_duration);
+      return `Source: 1 video · ${seconds > 0 ? `${seconds}-second ` : ""}Vibe Cut`;
+    }
+    if (ideaIsVideoContent(record)) {
+      const clips = Number(record?.video_clip_count);
+      return clips > 0 ? `${clips} clips` : "Video";
+    }
     const wait = String(record?.photo_wait_status || "").trim();
     if (wait === "Waiting") {
       const high = Number(record?.photo_match?.high_count || 0);
@@ -15982,7 +16000,9 @@ function timedScriptAssetLabel(asset, index) {
       return `${count || record.carousel_slide_count || 0} photos ready`;
     }
     if (record?.carousel_slide_count_mode === "Target range") {
-      return `${record.carousel_slide_count_min || "?"}–${record.carousel_slide_count_max || "?"} photos`;
+      const min = Number(record?.carousel_slide_count_min);
+      const max = Number(record?.carousel_slide_count_max);
+      return min > 0 && max >= min ? `${min}–${max} photos` : "Photos not set";
     }
     if (record?.carousel_slide_count) return `${record.carousel_slide_count} slides`;
     if (record?.video_clip_count) return `${record.video_clip_count} clips`;
@@ -16041,7 +16061,7 @@ function timedScriptAssetLabel(asset, index) {
     const promote = ideaShowPromoteAction(r)
       ? `<button type="button" class="manage-button promote-row-button" data-idea-id="${escapeHtml(r.id)}" data-idea-action="promote">Promote</button>`
       : "";
-    const listeningForPhotos = String(r?.photo_wait_status || "").trim() === "Waiting";
+    const listeningForPhotos = !ideaIsVideoContent(r) && String(r?.photo_wait_status || "").trim() === "Waiting";
     const findImages = listeningForPhotos
       ? `<button type="button" class="manage-button find-images-row-button" data-idea-find-images="${escapeHtml(r.id)}">Find images now</button>`
       : "";
