@@ -308,7 +308,7 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
   const original='1CAh-mGGiCiv7WKUl9jNeqm1vyQF7PTzq';
   const revised='1XZ-_ARlXoP5mwILho13f81vmWQlpgTs4';
   const attemptId='rrattempt_1234567890abcdef';
-  let activate,ready=false,reads=0,permitApproval=false;
+  let activate,ready=false,reads=0,permitApproval=false,releaseApproval;
   const timers=[];
   const calls=[],confirmations=[],approvalPosts=[];
   const fetchStub=async(url,options)=>{
@@ -326,8 +326,11 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
         next_cursor:null})};
     if(url==='/api/rendering-review/outputs/'+output+'/approve'){
       approvalPosts.push(JSON.parse(options.body));
-      return {ok:true,json:async()=>({ok:true,accepted:true,
-        review_hold_active:true,publication_changed:false,instagram_upload_created:false})};
+      return new Promise(resolve=>{
+        releaseApproval=()=>resolve({ok:true,json:async()=>({ok:true,accepted:true,
+          factory_ready:true,factory_handoff:{factory_ready:true,attempt_id:attemptId},
+          review_hold_active:false,publication_changed:false,instagram_upload_created:false})});
+      });
     }
     if(url==='/api/rendering-review/outputs/'+output){
       reads++;
@@ -406,11 +409,27 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
   assert.match(confirmations[0],/does not publish, upload, or release the publication hold/);
   assert.equal(approvalPosts.length,0,'Cancel must not submit an approval');
   permitApproval=true;
-  await approval.listeners.click();
+  const pending=approval.listeners.click();
+  await tick();
   assert.equal(approvalPosts.length,1,'OK sends one approval');
+  assert.equal(approval.disabled,true,'The approval action locks immediately');
+  assert.equal(approval.textContent,'Approving V2…');
+  const receipt=descendants(nodes.rrDetail).find(n=>n.className==='rr-feedback-status');
+  assert.equal(receipt?.hidden,false,'Feedback is visible next to the approval action');
+  assert.match(receipt.textContent,/Approving V2 and moving it to Factory/);
+  await approval.listeners.click();
+  assert.equal(approvalPosts.length,1,'Repeated click cannot send another approval');
   assert.equal(approvalPosts[0].attempt_id,attemptId,'Approval references displayed V2 attempt');
   assert.equal(approvalPosts[0].expected_version,4);
   assert.equal(approvalPosts[0].public_post_created,undefined,'No publishing intent is submitted');
+  releaseApproval();
+  await pending;
+  assert.equal(approval.disabled,true,'A completed approval cannot be submitted again');
+  assert.equal(approval.textContent,'V2 approved — in Factory');
+  assert.equal(receipt.dataset.state,'success');
+  assert.match(receipt.textContent,/V2 approved and transferred to Factory/);
+  await approval.listeners.click();
+  assert.equal(approvalPosts.length,1,'Approval remains once-only after successful handoff');
 });
 
 

@@ -8,7 +8,7 @@
   const nav = $('navRenderingReview');
   if (!root || !nav) return;
   const chicago = 'recT2rbKX3MF7cVFU';
-  const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map(),pollTimer:null,activeEntry:null,lastReplyNotice:null,lastReplyNoticeNode:null,viewingVersion:null,approvalButton:null,approvalVersion:null};
+  const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map(),pollTimer:null,activeEntry:null,lastReplyNotice:null,lastReplyNoticeNode:null,viewingVersion:null,approvalButton:null,approvalVersion:null,approvalLocks:new Set(),approvalKeys:new Map()};
   const list = $('rrQueueList'), detail = $('rrDetail'), status = $('rrStatus');
 
   const chicagoTime = value => {
@@ -117,7 +117,7 @@
     const button=state.approvalButton;
     if(!button)return;
     const selected=state.viewingVersion===state.approvalVersion;
-    button.disabled=!selected;
+    button.disabled=!selected||state.approvalLocks.has(button.dataset.approvalKey);
     button.title=selected?'':'Select V'+state.approvalVersion+' to approve it.';
   }
   function clearMedia(){
@@ -568,38 +568,84 @@
         if(newest?.number>1)showMedia(attemptMedia(newest,entry),'V'+newest.number,newest.number);
       }
       if(session?.state==='approved'){
-        detail.append(elem('p','Creative render accepted for the pilot. The publication hold remains active; no Instagram upload or publishing has been authorized.','rr-notice'));
+        const approved=attempts.find(a=>a.id===session.approved_attempt_id);
+        const transferred=session.factory_handoff?.attempt_id===session.approved_attempt_id &&
+          session.review_hold?.active===false;
+        detail.append(elem('p','V'+(approved?.number||session.latest_attempt_number||2)+
+          (transferred?' approved and moved to Factory. Continue with normal Factory approval or scheduling.':
+            ' creatively approved; Factory handoff is being verified.')+
+          ' No Instagram publication has been authorized.','rr-notice'));
       }
       if(session?.state==='ready_for_review'&&
          saved.flags?.creative_approval_enabled===true&&
          saved.publication_hold_verified===true){
         const current=attempts.find(a=>a.id===session.current_attempt_id);
         if(current?.status==='ready_for_review'&&attemptMedia(current,entry)){
-          const approval=actionButton('Approve selected version',async()=>{
-            if(state.viewingVersion!==Number(current.number))
-              throw new Error('Select V'+current.number+' before approving this version.');
+          const approvalKey=entry.output_id+':'+current.id;
+          const approval=elem('button','Approve selected version','secondary-button');
+          approval.type='button';
+          approval.dataset.approvalKey=approvalKey;
+          const approvalStatus=elem('p','','rr-feedback-status');
+          approvalStatus.hidden=true;
+          approvalStatus.setAttribute('role','status');
+          approvalStatus.setAttribute('aria-live','polite');
+          approval.addEventListener('click',async()=>{
+            if(state.actionBusy||state.approvalLocks.has(approvalKey))return;
+            if(state.viewingVersion!==Number(current.number)){
+              say('Select V'+current.number+' before approving this version.',true);
+              return;
+            }
             const versionNumber=Number(current.number);
             if(!window.confirm('Approve selected version V'+versionNumber+'?\n\n'+
               'Select OK to approve V'+versionNumber+', or Cancel to choose a different version.\n\n'+
               'This does not publish, upload, or release the publication hold.'))return;
             if(state.viewingVersion!==versionNumber)
               throw new Error('Version selection changed; select V'+versionNumber+' again before approving.');
+            if(state.actionBusy||state.approvalLocks.has(approvalKey))return;
+            state.actionBusy=true;
+            state.approvalLocks.add(approvalKey);
+            approval.textContent='Approving V'+versionNumber+'…';
+            approval.setAttribute('aria-busy','true');
+            approvalStatus.hidden=false;
+            approvalStatus.dataset.state='working';
+            approvalStatus.textContent='Approving V'+versionNumber+' and moving it to Factory…';
+            syncSelectedApproval();
+            try{
+              if(!state.approvalKeys.has(approvalKey))
+                state.approvalKeys.set(approvalKey,safeRequestId());
             const result=await post('/api/rendering-review/outputs/'+
               encodeURIComponent(entry.output_id)+'/approve',{
               expected_version:session.version,attempt_id:current.id,
-              client_request_id:safeRequestId(),
+              client_request_id:state.approvalKeys.get(approvalKey),
             });
-            if(result.accepted!==true||result.review_hold_active!==true||
+            if(result.accepted!==true||result.factory_ready!==true||
+               result.factory_handoff?.factory_ready!==true||
+               result.review_hold_active!==false||
                result.publication_changed!==false||
                result.instagram_upload_created!==false)
               throw new Error('Creative approval receipt not verified');
-            say('Version accepted. Publication remains held.');
-            await open(entry);
+            approval.textContent='V'+versionNumber+' approved — in Factory';
+            approvalStatus.dataset.state='success';
+            approvalStatus.textContent='V'+versionNumber+
+              ' approved and transferred to Factory. Continue there for normal approval and scheduling. Nothing was published.';
+            say('V'+versionNumber+' approved and ready in Factory.');
+            }catch(error){
+              approval.textContent='V'+versionNumber+' approval status needs checking';
+              approvalStatus.dataset.state='error';
+              approvalStatus.textContent='Could not confirm the final response: '+
+                (error?.message||'Status unavailable')+
+                '. Approval may have completed. Check Factory or refresh this review; do not approve again.';
+              say('Approval status requires verification. Do not approve again.',true);
+            }finally{
+              state.actionBusy=false;
+              approval.removeAttribute('aria-busy');
+              syncSelectedApproval();
+            }
           });
           state.approvalButton=approval;
           state.approvalVersion=Number(current.number);
           syncSelectedApproval();
-          detail.append(approval);
+          detail.append(approval,approvalStatus);
         }
       }
       if(['queued','rendering','validating'].includes(session?.state)){
