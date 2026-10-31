@@ -724,7 +724,13 @@
     if (factoryProfileId()) params.set("factory_profile", factoryProfileId());
     try {
       const previousActive = (state.batch?.batches || []).filter(row => row?.job_id);
-      const batch = await fetchJson(`/api/factory/approval-batches?${params.toString()}`, { cache: "no-store" });
+      const fetched = await fetchJson(`/api/factory/approval-batches?${params.toString()}`, { cache: "no-store" });
+      // An empty polling response is not proof that a running batch vanished.
+      // Hold the last nonempty activity snapshot until two consecutive empty polls;
+      // the authoritative Desk will still be reconciled on the confirmed transition.
+      const emptyActive = previousActive.length > 0 && !(fetched.batches || []).length;
+      state.emptyActivityPolls = emptyActive ? (state.emptyActivityPolls || 0) + 1 : 0;
+      const batch = emptyActive && state.emptyActivityPolls < 2 ? state.batch : fetched;
       state.lastBatchFetchMs = Date.now();
       if (typeof batch.approvals_enabled === "boolean") {
         const before = JSON.stringify([state.batchRollout,state.batchGlobal]);
@@ -742,8 +748,8 @@
       // The API intentionally omits completed jobs from the active feed.
       // When a running batch disappears, refresh the authoritative Desk once,
       // without fetching terminal batch history or leaving stale Needs Eyes rows.
-      const liveIds = new Set((batch.batches || []).map(row => row.job_id));
-      if (previousActive.some(row => !liveIds.has(row.job_id)) &&
+      const liveIds = new Set((fetched.batches || []).map(row => row.job_id));
+      if (batch === fetched && previousActive.some(row => !liveIds.has(row.job_id)) &&
           !state.loading && !state.reconcilingBatchDesk) {
         state.reconcilingBatchDesk = true;
         fetchJson("/api/factory/desk", { cache: "no-store" })
@@ -1665,7 +1671,9 @@
       needs_assets_pile: filtered(desk.lanes?.needs_assets).length,
       needs_assets_max: desk.summary?.needs_assets_max || 3,
       manual: filtered(desk.lanes?.manual).length,
-    } : desk.summary;
+    } : { ...desk.summary,
+      needs_eyes: filtered(desk.lanes?.needs_eyes).length,
+    };
     renderSummary(summary);
     const visibleNote = $("factoryProfileScopeNote");
     if (visibleNote) visibleNote.textContent = factoryProfileId()
