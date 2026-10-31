@@ -14,7 +14,7 @@ from a1s.compressor import delete_job, list_health_jobs, poll_job, submit_job
 from a1s.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from a1s.eligibility import eligibility_reason
 from airtable.client import AirtableClient
-from airtable.constants import PIPELINE_SETTINGS_TABLE
+from airtable.constants import MEDIA_ASSETS_TABLE, PIPELINE_SETTINGS_TABLE
 from asset.constants import (
     A1S_DRIVE_PAGE_SIZE,
     A1S_JOB_NOTES,
@@ -56,7 +56,12 @@ def _any_active_a1_job(client: AirtableClient) -> bool:
 
 
 def _smallest_candidate(files: list[dict[str, Any]]) -> dict[str, Any]:
-    return min(files, key=lambda item: (parse_bytes(item.get("size")), str(item.get("name") or "")))
+    # A new ingestion-folder upload should not starve behind historic library cleanup.
+    return min(files, key=lambda item: (
+        item.get("source_kind") != "ingestion",
+        parse_bytes(item.get("size")),
+        str(item.get("id") or ""),
+    ))
 
 
 def _parse_state_value(value: str) -> dict[str, str]:
@@ -134,15 +139,79 @@ def list_live_jobs(client: AirtableClient | None = None, *, resume: bool = True)
     return live
 
 
-def _resolve_files(drive: GoogleDriveClient, drive_file_id: str | None) -> list[dict[str, Any]]:
-    if drive_file_id:
-        return [drive.get_file(drive_file_id, fields=FILE_FIELDS)]
-    return drive.list_files(
-        query=SCAN_QUERY,
-        page_size=A1S_DRIVE_PAGE_SIZE,
-        order_by="createdTime desc",
-        fields=SCAN_FIELDS,
+def _catalog_records(client: AirtableClient, threshold: int) -> list[dict[str, Any]]:
+    """Read only currently oversized catalog videos; never infer identity by name."""
+    formula = (
+        f'AND({{File_Size_Bytes}}>{threshold},{{Active}}=1,'
+        'OR({Media_Class}="Video",LEFT({MIME_Type}&"",6)="video/"),'
+        '{Google Drive File ID}!="")'
     )
+    return client.list_records(
+        MEDIA_ASSETS_TABLE, formula=formula, max_records=200,
+        fields=["Asset Name", "Google Drive File ID", "File_Size_Bytes", "MIME_Type"],
+    )
+
+
+def _catalog_source_ids(client: AirtableClient, threshold: int) -> dict[str, str]:
+    """Ambiguous Drive IDs are never eligible for destructive or catalog updates."""
+    found: dict[str, str] = {}
+    ambiguous: set[str] = set()
+    for row in _catalog_records(client, threshold):
+        file_id = str((row.get("fields") or {}).get("Google Drive File ID") or "").strip()
+        if not file_id:
+            continue
+        if file_id in found:
+            ambiguous.add(file_id)
+        else:
+            found[file_id] = str(row.get("id") or "")
+    return {key: value for key, value in found.items() if key not in ambiguous and value}
+
+
+def _resolve_files(
+    drive: GoogleDriveClient, drive_file_id: str | None, client: AirtableClient, threshold: int,
+) -> list[dict[str, Any]]:
+    # A targeted request must name either an ingestion-folder file or an actual
+    # oversized catalog record. Reject arbitrary accessible Drive file IDs.
+    catalog = _catalog_source_ids(client, threshold)
+    if drive_file_id:
+        item = drive.get_file(drive_file_id, fields=FILE_FIELDS)
+        if GDRIVE_INGESTION_FOLDER in (item.get("parents") or []):
+            return [{**item, "source_kind": "ingestion"}]
+        if drive_file_id not in catalog:
+            raise ValueError("Drive file is neither in ingestion nor an eligible oversized Media Asset")
+        return [{**item, "source_kind": "asset_manager", "media_asset_record_id": catalog[drive_file_id]}]
+
+    intake = drive.list_files(
+        query=SCAN_QUERY, page_size=A1S_DRIVE_PAGE_SIZE,
+        order_by="createdTime desc", fields=SCAN_FIELDS,
+    )
+    files_by_id = {str(row.get("id")): {**row, "source_kind": "ingestion"} for row in intake if row.get("id")}
+    for file_id, record_id in catalog.items():
+        if file_id in files_by_id:
+            continue
+        try:
+            item = drive.get_file(file_id, fields=FILE_FIELDS)
+        except Exception:
+            logger.exception("A1S catalog Drive asset missing or inaccessible: %s", file_id)
+            continue
+        if item.get("trashed"):
+            logger.warning("A1S skipped trashed catalog source %s", file_id)
+            continue
+        files_by_id[file_id] = {**item, "source_kind": "asset_manager", "media_asset_record_id": record_id}
+    return list(files_by_id.values())
+
+
+def _active_job_ids(client: AirtableClient) -> set[str]:
+    rows = client.list_records(
+        PIPELINE_SETTINGS_TABLE,
+        formula="AND({Active}=1,FIND('A1_JOB_',{Setting_Name})=1)",
+        max_records=100, fields=["Setting_Name"],
+    )
+    return {
+        str((row.get("fields") or {}).get("Setting_Name") or "")[len("A1_JOB_"):]
+        for row in rows
+        if str((row.get("fields") or {}).get("Setting_Name") or "").startswith("A1_JOB_")
+    }
 
 
 def _write_state(client: AirtableClient, record_id: str, *, active: bool, value: str, notes: str) -> None:
@@ -269,19 +338,20 @@ def process_request(
         "make_scenario_name": MAKE_SCENARIO_NAME,
         "drive_file_id": drive_file_id,
     }
-    drive = GoogleDriveClient()
-    files = _resolve_files(drive, (drive_file_id or "").strip() or None)
-    preview["file_ids"] = [str(item.get("id") or "") for item in files]
-    preview["files_found"] = bool(files)
     client = AirtableClient()
     threshold = _threshold(client)
+    drive = GoogleDriveClient()
+    files = _resolve_files(drive, (drive_file_id or "").strip() or None, client, threshold)
+    preview["file_ids"] = [str(item.get("id") or "") for item in files]
+    preview["files_found"] = bool(files)
     preview["threshold_bytes"] = threshold
     poller_url = _poller_url(client)
+    active_ids = _active_job_ids(client) if not dry_run else set()
     skipped: list[dict[str, Any]] = []
     candidates: list[dict[str, Any]] = []
     for item in files:
         file_id = str(item.get("id") or "")
-        has_job = bool(_active_job(client, file_id)) if file_id else False
+        has_job = file_id in active_ids
         reason = eligibility_reason(
             item,
             threshold_bytes=threshold,
@@ -303,7 +373,7 @@ def process_request(
         return {"processed": False, "dry_run": True, **preview}
     if not candidates:
         return {"processed": False, "reason": "no_eligible_files", "started_count": 0, **preview}
-    if _any_active_a1_job(client):
+    if active_ids:
         resumed = resume_active_jobs(client)
         return {
             "processed": False,
