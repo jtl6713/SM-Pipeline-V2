@@ -4532,6 +4532,7 @@ export function studioWritableTextMode(mode) {
   const value = String(mode || "AI decides").trim();
   return value === "Force exact" || value === "AI improve" ? value : "AI decides";
 }
+/*__STUDIO_WORKER_END:studioWritableTextMode__*/
 
 export async function syncProductionRequestDirectivesToContentItem(env, requestRecord, contentItemId, options = {}) {
   if (!/^rec[A-Za-z0-9]+$/.test(String(contentItemId || ""))) {
