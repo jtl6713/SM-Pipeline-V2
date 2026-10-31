@@ -7,6 +7,30 @@ const MAX_TITLE_LENGTH = 90;
 const instructionWords = /\b(?:utilize|uploaded|you don't|please|don't have to|system|write|generate|create\s+(?:a|an)|make\s+(?:a|an)|caption|hashtags|voiceover|script|use\s+(?:the|my|our))\b/i;
 const readable = (value) => String(value || "").replace(/\s+/g, " ").replace(/[“”]/g, '"').replace(/[‘’]/g, "'").trim();
 
+/**
+ * Explicit naming instructions are user-authored output data, not creative
+ * direction to be overwritten by the automatic headline generator.
+ */
+export function scriptedShortExplicitTitle(prompt) {
+  const source = String(prompt || "").replace(/\r/g, "");
+  const patterns = [
+    /(?:^|[\n.!?;]\s*)\s*(?:use\s+)?(?:the\s+)?(?:exact\s+)?(?:video\s+|post\s+|short\s+|content\s+)?title\s*(?:should\s+be|must\s+be|is|:|=)\s*([^\n]+)/im,
+    /\b(?:call|name|title)\s+(?:the\s+)?(?:video|short|reel|post|piece|it|this)\s+(?:exactly\s+)?(?:as\s+)?[:"'“”]?\s*([^\n]+)/i,
+    /\b(?:use|set)\s+(?:the\s+)?(?:exact\s+)?title\s+(?:as|to)\s+([^\n]+)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(source);
+    if (!match) continue;
+    let title = String(match[1]).trim();
+    const quoted = /^(["'“‘])(.+?)["'”’](?:\s*[.!?])?$/.exec(title);
+    if (quoted) title = quoted[2];
+    else title = title.split(/\s*[.;]\s+(?=(?:use|include|make|do not|don't|avoid|with|for)\b)/i)[0];
+    title = readable(title).replace(/^["'“‘]+|["'”’]+$/g, "").replace(/[.!?]$/g, "").trim();
+    if (title && title.length <= MAX_TITLE_LENGTH) return title;
+  }
+  return "";
+}
+
 function subjectFromNarration(timeline) {
   const scenes = Array.isArray(timeline?.segments) ? timeline.segments : [];
   const opening = readable(scenes[0]?.voiceover_text);
@@ -40,6 +64,8 @@ function validSubject(value) {
  * Reject copy-pasted instructions and never use an arbitrary truncated prompt.
  */
 export function scriptedShortPublishableTitle(prompt, timeline, market = "") {
+  const explicit = scriptedShortExplicitTitle(prompt);
+  if (explicit) return explicit;
   const source = readable(prompt);
   const narrated = validSubject(subjectFromNarration(timeline));
   const topic = narrated || validSubject(subjectFromPrompt(source));
