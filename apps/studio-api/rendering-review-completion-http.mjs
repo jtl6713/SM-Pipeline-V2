@@ -89,7 +89,7 @@ export async function completeReviewAttempt({request,env,operations,now=()=>new 
       operations.readOutput(b.output_id),operations.readJob(b.job_id),
       operations.readAttempt(b.attempt_id),
     ]);
-    if(!s||s.output_id!==b.output_id||!rec.test(str(s.profile_id))||
+    if(!s||s.output_id!==b.output_id||!exact.test(str(s.profile_id))||
        !str(s.output_type)||s.review_hold?.active!==true||
        h?.verified!==true||h.active!==true||h.owner!==s.id||
        h.id!==s.review_hold.id||h.output_id!==b.output_id||
