@@ -4,6 +4,7 @@
  * No publication, schedule or original-output mutation is permitted.
  */
 import {mutateReviewSessionCommand} from "./rendering-review-coordinator.mjs";
+import {validateReviewVideoEvidence} from "./rendering-review-video-evidence.mjs";
 import {reviewLaunchLedgerEnabled} from "./rendering-review-launch-ledger.mjs";
 const exact=/^rec[A-Za-z0-9]{14}$/;
 const token=/^[A-Za-z0-9_-]{8,120}$/;
@@ -43,18 +44,21 @@ function events(job){
      launch[0].lease_fence!==reserved[0].lease_fence)return null;
   return launch[0];
 }
-function validateReadyEvidence(b,receipt){
+function validateReadyEvidence(b,receipt,session){
   if(b.stage!=="ready")return;
   const v=b.validation;
   if(!v||typeof v!=="object"||
      !token.test(str(b.artifact_id))||!hex.test(str(v.sha256))||
      !Number.isSafeInteger(v.byte_count)||v.byte_count<100000||
-     v.mime_type!=="video/mp4"||v.width!==1080||v.height!==1920||
+     v.mime_type!=="video/mp4"||
      typeof v.duration_seconds!=="number"||v.duration_seconds<1||v.duration_seconds>180||
      v.audio_verified!==true||v.watermark_verified!==true||
      v.google_drive_verified!==true||v.render_job_id!==receipt.remotion_job_id||
      !v.google_drive_mime_type||v.google_drive_mime_type!=="video/mp4")
     deny("RENDER_NOT_VALIDATED","A real MP4, audio, watermark, dimensions and Drive readback are required");
+  try{validateReviewVideoEvidence({validation:v,session,
+    expectedRenderJobId:receipt.remotion_job_id});}
+  catch{deny("RENDER_NOT_VALIDATED","Completed media does not match frozen review plan");}
 }
 export async function completeReviewAttempt({request,env,operations,now=()=>new Date()}){
   if(!reviewCompletionEnabled(env))
@@ -115,7 +119,7 @@ export async function completeReviewAttempt({request,env,operations,now=()=>new 
        receipt.lease_fence!==b.lease_fence||
        !token.test(str(receipt.remotion_job_id)))
       deny("RENDER_LAUNCH_UNVERIFIED","Exact reserved one-shot Remotion receipt required");
-    validateReadyEvidence(b,receipt);
+    validateReadyEvidence(b,receipt,s);
     const attempt=(s.attempts||[]).find(x=>x.id===b.attempt_id);
     if(!attempt)deny("RENDER_ATTEMPT_MISSING","Active Attempt 2 record is missing");
     // On ambiguous network acknowledgement, never launch or promote a new

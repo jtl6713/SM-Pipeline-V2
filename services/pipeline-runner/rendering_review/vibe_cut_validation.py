@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -19,8 +20,11 @@ class VibeMediaDenied(ValueError):
 def deny(msg): raise VibeMediaDenied(msg)
 
 def validate_vibe_mp4(data:bytes, *, aspect_ratio:str, expected_duration:float,
-                      probe=None, watermark_qa=None)->dict:
+                      expected_profile_id:str=None, probe=None, watermark_qa=None)->dict:
     dimensions={"9:16":(1080,1920),"16:9":(1920,1080)}
+    if (not isinstance(expected_profile_id,str) or
+        re.fullmatch(r"rec[A-Za-z0-9]{14}",expected_profile_id) is None):
+        deny("vibe_expected_profile_identity_missing")
     if (aspect_ratio not in dimensions or
         type(expected_duration) not in (float,int) or
         not math.isfinite(expected_duration) or
@@ -74,8 +78,7 @@ def validate_vibe_mp4(data:bytes, *, aspect_ratio:str, expected_duration:float,
         branding.get("authority")!="server" or
         branding.get("profile_watermark_matched") is not True or
         branding.get("frame_sample_count",0)<3 or
-        not isinstance(branding.get("profile_id"),str) or
-        not branding["profile_id"].startswith("rec")
+        branding.get("profile_id")!=expected_profile_id
     ):
         deny("vibe_media_branding_not_verified")
     return {

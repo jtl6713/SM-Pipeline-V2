@@ -9,6 +9,7 @@ on:
       - 'apps/studio-api/rendering-review-gallery-source.*'
       - 'apps/studio-api/rendering-review-approval-http.*'
       - 'apps/studio-api/rendering-review-policy.*'
+      - 'apps/studio-api/rendering-review-video-evidence.*'
       - 'apps/studio-api/rendering-review-internal-scope.*'
       - 'apps/studio-api/rendering-review-factory-entry-gate.test.mjs'
       - 'apps/studio-api/rendering-review-factory-handoff.*'
@@ -131,6 +132,8 @@ jobs:
         run: |
           node --check apps/studio-api/rendering-review-internal-scope.mjs
           node --test apps/studio-api/rendering-review-internal-scope.test.mjs
+      - name: Media-type-scoped V2 MP4 evidence validation
+        run: node --test apps/studio-api/rendering-review-video-evidence.test.mjs
       - name: Chicago pilot lifecycle and safety contracts
         run: node --test apps/studio-api/rendering-review-audio-qa-repair.test.mjs apps/studio-api/rendering-review-approval-http.test.mjs apps/studio-api/rendering-review-completion-http.test.mjs apps/studio-api/rendering-review-launch-ledger.test.mjs apps/studio-api/rendering-review-job-claim.test.mjs apps/studio-api/rendering-review-outbox-airtable.test.mjs apps/studio-api/rendering-review-attempt-outbox.test.mjs apps/studio-api/rendering-review-plan-preflight.test.mjs apps/studio-api/rendering-review-plan-persist.test.mjs apps/studio-api/rendering-review-policy.test.mjs apps/studio-api/rendering-review-coordinator.test.mjs apps/studio-api/rendering-review-airtable.test.mjs apps/studio-api/rendering-review-workspace.test.mjs apps/studio-api/rendering-review-attempt-video.test.mjs apps/studio-api/rendering-review-feedback.test.mjs apps/studio-api/rendering-review-feedback-http.test.mjs apps/studio-api/rendering-review-schedule-owner.test.mjs apps/studio-api/rendering-review-enrollment-http.test.mjs apps/studio-api/rendering-review-enrollment-wiring.test.mjs apps/studio-api/rendering-review-enrollment-route.test.mjs apps/studio-api/rendering-review-producer-bridge.test.mjs apps/studio-api/rendering-review-producer-persist.test.mjs apps/studio-api/rendering-review-ig-dispatch-claim.test.mjs
       - name: Factory post-render multi-profile matching and certified renderer preflight

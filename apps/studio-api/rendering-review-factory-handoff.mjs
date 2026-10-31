@@ -11,6 +11,7 @@
  * approval lease used by Factory and the protected scheduler.
  */
 import {CHICAGO_PROFILE_ID,applyReviewEvent} from "./rendering-review-policy.mjs";
+import {validateReviewVideoEvidence} from "./rendering-review-video-evidence.mjs";
 import {renderingReviewHoldPresent} from "./rendering-review-publication-hold.mjs";
 
 const rec=/^rec[A-Za-z0-9]{14}$/;
@@ -60,10 +61,11 @@ function validateArtifact(record,session,attempt){
   }
   if(!sha.test(str(evidence.sha256)) || !Number.isSafeInteger(evidence.byte_count) ||
      evidence.byte_count<100000 || evidence.mime_type!=="video/mp4" ||
-     evidence.width!==1080 || evidence.height!==1920 ||
      evidence.audio_verified!==true || evidence.watermark_verified!==true ||
      evidence.google_drive_verified!==true || evidence.google_drive_mime_type!=="video/mp4")
     deny("FACTORY_VALIDATION_FAILED","Only independently verified playable V2 is eligible");
+  try{validateReviewVideoEvidence({validation:evidence,session});}
+  catch{deny("FACTORY_VALIDATION_FAILED","V2 media does not match the frozen output format");}
   return evidence;
 }
 function assertFactoryReady(row,f,fileId){

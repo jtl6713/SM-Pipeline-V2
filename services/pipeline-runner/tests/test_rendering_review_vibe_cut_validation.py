@@ -15,6 +15,7 @@ def brand(data,ratio):
             "profile_id":PROFILE,"frame_sample_count":5}
 def run(**overrides):
     args={"aspect_ratio":"9:16","expected_duration":15.0,
+          "expected_profile_id":PROFILE,
           "probe":probe,"watermark_qa":brand}
     args.update(overrides)
     return validate_vibe_mp4(MP4,**args)
@@ -62,10 +63,17 @@ class TestVibeMedia(unittest.TestCase):
                 r=brand(data,ratio);alter(r);return r
             with self.assertRaises(VibeMediaDenied):
                 run(watermark_qa=bad)
+    def test_actual_watermark_must_match_exact_held_content_profile(self):
+        with self.assertRaisesRegex(VibeMediaDenied,"expected_profile_identity"):
+            run(expected_profile_id=None)
+        with self.assertRaisesRegex(VibeMediaDenied,"branding_not_verified"):
+            run(expected_profile_id="rec00000000000003")
+
     def test_invalid_original_bytes_are_rejected_before_probe(self):
         for payload in [b"",b"\x00"*100003,b"\x00\x00\x00\x20HTML"+b"0"*100000]:
             with self.assertRaises(VibeMediaDenied):
                 validate_vibe_mp4(payload,aspect_ratio="9:16",
-                  expected_duration=15.0,probe=probe,watermark_qa=brand)
+                  expected_duration=15.0,expected_profile_id=PROFILE,
+                  probe=probe,watermark_qa=brand)
 if __name__=="__main__":
     unittest.main()
