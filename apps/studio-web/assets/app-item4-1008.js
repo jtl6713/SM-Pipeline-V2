@@ -3021,6 +3021,7 @@
   }
 
   function ideaPhotoWaitActive(idea) {
+    if (ideaIsVideoContent(idea)) return false;
     const wait = String(idea?.photo_wait_status || "").trim();
     return wait === "Waiting" || wait === "Ready";
   }
@@ -3177,19 +3178,25 @@
   }
 
   function fillIdeaProductionSnapshot(idea) {
+    const video = ideaIsVideoContent(idea);
+    const vibe = ideaIsVibeCut(idea);
+    const validMin = Number(idea?.carousel_slide_count_min);
+    const validMax = Number(idea?.carousel_slide_count_max);
+    const validPhotoRange = validMin > 0 && validMax >= validMin;
     const snapshot = [
       ["Type", idea?.content_type],
       ["Platforms", Array.isArray(idea?.platforms) && idea.platforms.length ? idea.platforms.join(", ") : null],
-      ["Slides", ideaPhotoWaitActive(idea) || idea?.carousel_slide_count_mode === "Target range"
-        ? `${idea?.carousel_slide_count_min || "?"}–${idea?.carousel_slide_count_max || "?"} photos`
+      ["Slides", video ? null : (ideaPhotoWaitActive(idea) || idea?.carousel_slide_count_mode === "Target range")
+        ? (validPhotoRange ? `${validMin}–${validMax} photos` : null)
         : idea?.carousel_slide_count],
-      ["Photo wait", idea?.photo_wait_status],
-      ["Matched", idea?.photo_match?.high_count != null ? `${idea.photo_match.high_count} high-confidence` : null],
-      ["Clips", idea?.video_clip_count],
+      ["Photo wait", video ? null : idea?.photo_wait_status],
+      ["Matched", !video && idea?.photo_match?.high_count != null ? `${idea.photo_match.high_count} high-confidence` : null],
+      ["Source", vibe ? "1 video" : null],
+      ["Clips", vibe ? null : idea?.video_clip_count],
       ["Voiceover", idea?.include_voiceover],
       ["Music", idea?.include_background_music],
       ["Thumbnail", idea?.include_thumbnail],
-      ["Duration", idea?.video_duration ? `${idea.video_duration}s` : null],
+      ["Duration", idea?.video_duration ? (vibe ? `${idea.video_duration}-second Vibe Cut` : `${idea.video_duration}s`) : null],
     ];
     const target = $("ideaProductionSnapshot");
     if (target) {
@@ -8743,6 +8750,9 @@ function timedScriptAssetLabel(asset, index) {
               title: answers.ideaTitle,
               summary: answers.ideaSummary || answers.ideaTitle,
               primary_location: answers.ideaLocation || "",
+              input_kind: answers.inputKind || "",
+              source_aspect: planned?.source_aspect || "vertical",
+              target_seconds: answers.inputKind === "vibe-cut" ? vibeCutConfigFromWizard(answers).target_seconds : null,
             }),
             timeoutMs: 30000,
             retries: 1,
@@ -8970,6 +8980,10 @@ function timedScriptAssetLabel(asset, index) {
     let nextFiles = ezIntakeKind === "single-photo" ? supported.slice(0, 1) : supported;
     if (ezIntakeKind === "finished-video" || ezIntakeKind === "vibe-cut") {
       nextFiles = supported.filter(item4FileLooksLikeVideo).slice(0, 1);
+      if (!nextFiles.length && ezIntakeKind === "vibe-cut") {
+        setEzMessage("Vibe Cut requires one MP4/MOV source video, not photos.", "error-text");
+        return false;
+      }
       if (!nextFiles.length) nextFiles = supported.slice(0, 1);
     }
     if (pending?.inputKind === "mixed") {
@@ -9078,6 +9092,11 @@ function timedScriptAssetLabel(asset, index) {
         body: JSON.stringify({
           title: defaultTitle,
           summary: ezIdeaSummaryValue(pending?.inputKind || ezIntakeKind),
+          primary_location: currentPrimaryLocationValue(),
+          input_kind: pending?.inputKind || ezIntakeKind,
+          source_aspect: aspectBundle?.plan?.source_aspect || planned?.source_aspect || "vertical",
+          target_seconds: pending?.inputKind === "vibe-cut" || ezIsVibeCut()
+            ? vibeCutConfigFromWizard(pending || {}).target_seconds : null,
         }),
       });
       activeIdea = idea.record;
@@ -9087,7 +9106,12 @@ function timedScriptAssetLabel(asset, index) {
       if ($("ezIdeaSummary") && !String($("ezIdeaSummary").value || "").trim()) {
         $("ezIdeaSummary").value = userIdeaSummaryFromStored(activeIdea.summary);
       }
-      hydratePrimaryLocationFromSources({ record: activeProductionRequest, idea: activeIdea, force: true });
+      // A previous city/request must not overwrite the new video's selected location.
+      hydratePrimaryLocationFromSources({
+        record: ezIsVibeCut() ? null : activeProductionRequest,
+        idea: activeIdea,
+        force: !ezIsVibeCut(),
+      });
       syncEzIdeaIdentityFields();
       setEzIdeaIdentityHint("Saved. You can keep editing.");
       const requestPayload = ezWizardRequestPayload(planned, { fileCount: photoCount });
@@ -9099,7 +9123,8 @@ function timedScriptAssetLabel(asset, index) {
         requestPayload.carousel_image_mode = "Make AI Generated";
         requestPayload.carousel_slide_count_mode = "Exact";
         requestPayload.carousel_slide_count_exact = apiHelpers.ezWizardPhotoCount(pending);
-      } else if (pending?.inputKind === "single-photo" || pending?.inputKind === "multiple-photos" || nextFiles.length) {
+      } else if (pending?.inputKind === "single-photo" || pending?.inputKind === "multiple-photos"
+        || (nextFiles.length && !["vibe-cut", "finished-video"].includes(pending?.inputKind || ezIntakeKind))) {
         requestPayload.carousel_image_mode = "Manual Upload";
         requestPayload.carousel_slide_count_mode = "Exact";
         requestPayload.carousel_slide_count_exact = photoCount;
