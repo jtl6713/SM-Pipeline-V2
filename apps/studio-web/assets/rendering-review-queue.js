@@ -589,7 +589,9 @@
               expected_version:session.version,attempt_id:current.id,
               client_request_id:safeRequestId(),
             });
-            if(result.accepted!==true||result.review_hold_active!==true||
+            if(result.accepted!==true||result.factory_ready!==true||
+               result.factory_handoff?.factory_ready!==true||
+               result.review_hold_active!==false||
                result.publication_changed!==false||
                result.instagram_upload_created!==false)
               throw new Error('Creative approval receipt not verified');
