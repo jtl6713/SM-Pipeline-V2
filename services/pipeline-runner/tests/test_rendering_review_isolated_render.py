@@ -254,3 +254,21 @@ class IsolatedRenderTests(unittest.TestCase):
 
 if __name__=="__main__":
     unittest.main()
+
+
+    def test_verified_other_profile_platform_compiles_same_proven_9x16_composition(self):
+        parts=fixture()
+        profile="recNYC12345678901"
+        parts["plan"].update(profile_id=profile, platform="TikTok",output_type="TikTok Video")
+        parts["watermark"]["profile_id"]=profile
+        for asset in parts["resolved_assets"]:
+            asset["profile_id"]=profile
+        rendered=compile_isolated_render_payload(**parts)
+        self.assertEqual(rendered["width"],1080)
+        self.assertEqual(rendered["height"],1920)
+        self.assertEqual(rendered["expectedClipCount"],2)
+        parts["watermark"]["profile_id"]=CHICAGO
+        self.denied(lambda:compile_isolated_render_payload(**parts),"branding")
+        parts["watermark"]["profile_id"]=profile
+        parts["resolved_assets"][0]["profile_id"]=CHICAGO
+        self.denied(lambda:compile_isolated_render_payload(**parts),"asset_authority")
