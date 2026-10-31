@@ -23,7 +23,7 @@ export function scriptedShortExplicitTitle(prompt) {
   for (const pattern of patterns) {
     const match = pattern.exec(source);
     if (!match) continue;
-    let title = String(match[1]).trim();
+    let title = String(match[1]).trim().replace(/^[:=]\s*/, "");
     // Propose/Accept flatten line breaks in creative briefs. Stop at the
     // next named section so Location/Shot list never become part of a title.
     title = title.split(/\s+(?=(?:location|shot\s*list|sample\s*caption|hashtags?|voiceover|visuals?|asset\s*list|scene\s*\d+)\s*:)/i)[0];
