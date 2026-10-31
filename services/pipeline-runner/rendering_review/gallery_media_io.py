@@ -33,7 +33,7 @@ def deny(message: str):
     raise GalleryMediaDenied(message)
 
 
-def _png(value: bytes) -> Image.Image:
+def _png(value: bytes, *, min_edge: int = 128) -> Image.Image:
     if not isinstance(value, bytes) or len(value) < 128 or not value.startswith(b"\x89PNG\r\n\x1a\n"):
         deny("gallery_png_required")
     try:
@@ -41,7 +41,7 @@ def _png(value: bytes) -> Image.Image:
             if image.format != "PNG":
                 deny("gallery_png_required")
             image.load()
-            if not (128 <= image.width <= 12000 and 128 <= image.height <= 12000):
+            if not (min_edge <= image.width <= 12000 and min_edge <= image.height <= 12000):
                 deny("gallery_image_dimensions_invalid")
             return image.copy()
     except (OSError, ValueError) as exc:
@@ -65,7 +65,7 @@ class GalleryMediaIO:
             not isinstance(profile_watermark, bytes) or
             hashlib.sha256(profile_watermark).hexdigest() != receipt.get("sha256")):
             deny("gallery_profile_branding_not_authoritative")
-        _png(profile_watermark)
+        _png(profile_watermark,min_edge=1)
         if not all(callable(getattr(drive, n, None))
                    for n in ("upload_file", "get_file", "download_file")):
             deny("gallery_google_drive_unavailable")
