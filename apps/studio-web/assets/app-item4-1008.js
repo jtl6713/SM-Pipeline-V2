@@ -16086,7 +16086,11 @@ function timedScriptAssetLabel(asset, index) {
     const promote = ideaShowPromoteAction(r)
       ? `<button type="button" class="manage-button promote-row-button" data-idea-id="${escapeHtml(r.id)}" data-idea-action="promote">Promote</button>`
       : "";
-    const listeningForPhotos = !ideaIsVideoContent(r) && String(r?.photo_wait_status || "").trim() === "Waiting";
+    // Keep this renderer self-contained for extracted row harnesses as well as Studio.
+    const listeningForPhotos = !Boolean(r?.is_vibe_cut)
+      && !["Vertical Short Video", "Longform Video"].includes(String(r?.content_type || ""))
+      && !/ez-input=vibe-cut/i.test(String(r?.summary || ""))
+      && String(r?.photo_wait_status || "").trim() === "Waiting";
     const findImages = listeningForPhotos
       ? `<button type="button" class="manage-button find-images-row-button" data-idea-find-images="${escapeHtml(r.id)}">Find images now</button>`
       : "";

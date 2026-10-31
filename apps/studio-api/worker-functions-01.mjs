@@ -3881,6 +3881,9 @@ export async function updateIdea(request, env, url, authorization) {
       targetSeconds: payload?.video_duration ?? f(record, "Production_Video_Duration"),
     }) : {}),
   };
+  if (vibeCut && !isVibeCutNotes(fields.Idea_Summary)) {
+    fields.Idea_Summary = `${String(fields.Idea_Summary || "").slice(0, 4900)}\nCreated from New content (origin=ez-wizard; ez-input=vibe-cut).`.trim();
+  }
   if (Object.prototype.hasOwnProperty.call(payload || {}, "primary_location")) {
     fields.Primary_Location = input.primary_location || null;
   } else if (!String(f(record, "Primary_Location") || "").trim()) {
