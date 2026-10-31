@@ -210,3 +210,29 @@ test("wrong output denies and completed approval drains even if creative admissi
  assert.equal(result.factory_ready,true);
  assert.equal(f.raw.fields.Do_Not_Publish,false);
 });
+
+test("independently validated 16:9 Vibe Cut returns to Factory without enabling publication",async()=>{
+ const f=fixture(),p=f.session.profile_id;
+ f.session.platform="YouTube";
+ f.session.output_type="YouTube Video";
+ f.raw.fields.Platform="YouTube";
+ f.raw.fields.Platform_Output_Type="YouTube Video";
+ f.session.plan={immutable_manifest:{
+   schema:"studio.render-review.vibe.1",mode:"vibe_cut",
+   source_kind:"video",output_id:id,profile_id:p,session_id:sessionId,
+   human_intent:"explicit_button",voiceover:"off",narration:"",
+   allow_public_publish:false,allow_platform_upload:false,auto_approve:false,
+   aspect_ratio:"16:9"
+ }};
+ const proof=JSON.parse(f.independent.fields.Validation_Evidence_JSON);
+ Object.assign(proof,{width:1920,height:1080,duration_seconds:20,
+   music_only:true,voiceover_expected:false,
+   watermark_profile_id:p,ready_for_publication:false});
+ f.independent.fields.Validation_Evidence_JSON=JSON.stringify(proof);
+ const receipt=await f.handoff();
+ assert.equal(receipt.factory_ready,true);
+ assert.equal(receipt.public_post_created,false);
+ assert.equal(receipt.approved_for_publishing,false);
+ assert.equal(f.raw.fields.Do_Not_Publish,false);
+ assert.equal(f.raw.fields.Auto_Publish_Enabled,false);
+});

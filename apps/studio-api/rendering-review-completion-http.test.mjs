@@ -109,3 +109,30 @@ test("no acceptance without real vertical MP4 audio, watermark and Drive checks"
   }),{code:"RENDER_NOT_VALIDATED"});
   assert.equal(s.state().session.state,"validating");
 });
+
+test("music-only 16:9 Vibe Cut completion requires verified profile logo and frozen plan",async()=>{
+  const s=scenario(),state=s.state(),profile=state.session.profile_id;
+  state.session.platform="YouTube";
+  state.session.output_type="YouTube Video";
+  state.original.platform="YouTube";
+  state.original.output_type="YouTube Video";
+  state.session.plan={immutable_manifest:{
+    schema:"studio.render-review.vibe.1",mode:"vibe_cut",source_kind:"video",
+    output_id:output,profile_id:profile,session_id:sessionId,
+    human_intent:"explicit_button",voiceover:"off",narration:"",
+    allow_platform_upload:false,allow_public_publish:false,auto_approve:false,
+    aspect_ratio:"16:9",
+  }};
+  await s.call("started");await s.call("validating");
+  const approved={...proof,width:1920,height:1080,duration_seconds:16,
+    music_only:true,voiceover_expected:false,
+    watermark_profile_id:profile,ready_for_publication:false};
+  await assert.rejects(s.call("ready",secret,{
+    validation:{...approved,watermark_profile_id:"recF7UAn0LkMZZrWZ"}
+  }),{code:"RENDER_NOT_VALIDATED"});
+  assert.equal(state.session.state,"validating");
+  const ready=await s.call("ready",secret,{validation:approved});
+  assert.equal(ready.stage,"ready");
+  assert.equal(state.session.state,"ready_for_review");
+  assert.equal(state.original.platform_post_id,undefined);
+});
