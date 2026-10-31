@@ -1309,6 +1309,7 @@
         !/^rec[A-Za-z0-9]{14}$/.test(requestId)) return;
     section.hidden = false;
     apply.disabled = true;
+    pending.matchLookupPending = true;
     status.textContent = "Checking rendered output formats…";
     try {
       // Matching is authoritative on the Worker; the Factory queue may be
@@ -1328,13 +1329,26 @@
       status.textContent = matches.length > 1
         ? matches.length + " compatible, review-ready outputs found."
         : "No additional review-ready outputs share this format.";
-      if (matches.length < 2) return;
       if(response.batch_enabled!==true){
-        status.textContent += " Multi-output correction submission is not enabled on this release.";
+        status.textContent += " Protected corrections are not enabled on this release.";
         apply.disabled = true;
         return;
       }
       apply.disabled = false;
+      const one = matches.length === 1;
+      const label = apply.closest("label")?.querySelector("span");
+      if (label) label.textContent = one
+        ? "Use Rendering Review for this output"
+        : "Apply to all matching outputs";
+      // A lone matching output must not be silently sent back to Production
+      // when the server supports the protected per-output review workflow.
+      apply.checked = one;
+      picker.hidden = !one;
+      picker.disabled = !one;
+      if (one) {
+        const submit = $("factoryFeedbackSubmit");
+        if (submit) submit.textContent = "Submit selected correction";
+      }
       rows.innerHTML = matches.map(row =>
         '<label class="factory-correction-match-row"><input type="checkbox" data-factory-correction-output="' +
         esc(row.id) + '" checked><span>' + esc([row.platform, row.output_type].filter(Boolean).join(" · ")) +
@@ -1344,6 +1358,8 @@
       status.textContent = "Apply to all unavailable: " + String(error.message || error) +
         " Single-output review remains available.";
       apply.disabled = true;
+    } finally {
+      pending.matchLookupPending = false;
     }
   }
 
@@ -1419,6 +1435,10 @@
     if (!notes) {
       if (error) { error.hidden = false; error.textContent = "Describe the changes needed before sending back."; }
       $("factoryFeedbackNotes")?.focus();
+      return;
+    }
+    if (pending.matchLookupPending === true) {
+      if (error) { error.hidden = false; error.textContent = "Matching outputs are still being verified. Try submitting again."; }
       return;
     }
     const submit = $("factoryFeedbackSubmit");
