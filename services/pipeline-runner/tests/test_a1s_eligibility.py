@@ -227,3 +227,44 @@ def test_inactive_failed_job_blocks_auto_retry_but_not_targeted_retry(monkeypatc
     active, failed = a1s_processor._job_state_ids(FailedState())
     assert not active
     assert failed == {"drive-file"}
+
+def test_a1s_handoff_uses_private_runner_loopback_without_service_account(monkeypatch):
+    import a1s.processor as a1s
+    captured = {}
+    monkeypatch.setattr(a1s, "AirtableClient", lambda: object())
+    monkeypatch.setattr(a1s, "submit_download_job", lambda url, name, record_id: (
+        captured.update(url=url, name=name, record_id=record_id) or
+        {"job_id": "a1s-private-123", "status_url": "https://compress.chicagoshining.com/jobs/a1s-private-123"}
+    ))
+    monkeypatch.setattr(a1s, "_write_state", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(a1s, "schedule_next", lambda payload: captured.update(poller=payload))
+    monkeypatch.setattr(a1s, "delete_job", lambda *_args: None)
+    result = a1s._compress_one(
+        _file(id="1OeCHnytBPep_IRhvDX4wsM2xuemPmPVt", name="Compression Test.MOV",
+              size="188518755"),
+        state_record_id="recSTATE", poller_url="https://example.org/poller",
+        sleep=lambda _: None,
+    )
+    assert result["status"] == "started"
+    assert captured["url"] == (
+        "http://127.0.0.1:3350/internal/drive-media/1OeCHnytBPep_IRhvDX4wsM2xuemPmPVt"
+    )
+    assert captured["record_id"] == "a1s-1OeCHnytBPep_IRhvDX4wsM2xuemPmPVt"
+    assert captured["poller"]["source_file_id"] == "1OeCHnytBPep_IRhvDX4wsM2xuemPmPVt"
+    assert "access_token" not in captured["url"]
+    assert "drive.google.com" not in captured["url"]
+
+
+def test_a1s_handoff_rejects_bad_drive_id_before_submit(monkeypatch):
+    import a1s.processor as a1s
+    monkeypatch.setattr(a1s, "AirtableClient", lambda: object())
+    monkeypatch.setattr(a1s, "_clear_state", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(a1s, "submit_download_job", lambda *_args: (
+        (_ for _ in ()).throw(AssertionError("Unexpected public submission"))
+    ))
+    import pytest
+    with pytest.raises(ValueError, match="Unsafe source Drive ID"):
+        a1s._compress_one(
+            _file(id="../../etc/passwd"), state_record_id="recSTATE",
+            poller_url="https://example.org/poller", sleep=lambda _: None,
+        )
