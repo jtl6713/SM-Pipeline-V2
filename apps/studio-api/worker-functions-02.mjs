@@ -402,6 +402,7 @@ import {
   selectsFromSceneTimestamps,
   vibeCutProductionDefaults,
   vibeCutRenderSettings,
+  vibeCutIdeaFields,
 } from "./vibe-cut.mjs";
 import {
   capabilityMatrixResponse,
@@ -3421,7 +3422,7 @@ export async function createProductionRequestFromBody(request, env, authorizatio
   const ideaRecordId = String(payload?.idea_record_id || "").trim();
   if (!/^rec[A-Za-z0-9]+$/.test(ideaRecordId)) throw new HttpError(400, "idea_record_id is required");
 
-  const idea = await loadAuthorizedIdea(env, ideaRecordId, authorization);
+  let idea = await loadAuthorizedIdea(env, ideaRecordId, authorization);
   if (promotionCompleted(idea)) throw new HttpError(409, "This idea has already been promoted");
   const preferredProfileId = requestedProfileId(url, payload);
   const existing = await existingDraftForIdea(env, ideaRecordId, authorization, idea);
@@ -3441,6 +3442,19 @@ export async function createProductionRequestFromBody(request, env, authorizatio
     input.voice_name = "";
   }
   input.voice_explicit = explicitVoice;
+  // A Vibe Cut wizard may create the Idea before it can inspect the video.
+  // Correct that same Idea once upload orientation is available; never create a
+  // second Idea or Photo Set as a side effect of the first video upload.
+  if (studioIsVibeCut(input.production_notes) && isVibeCutNotes(f(idea, "Idea_Summary"))) {
+    const target = vibeCutIdeaFields({
+      sourceAspect: isHorizontalVibeCutAspect(input.production_notes) ? "horizontal" : "vertical",
+      targetSeconds: parseVibeCutDirective(input.production_notes)?.target_seconds || input.video_duration_seconds || 15,
+    });
+    idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: target, typecast: true }),
+    });
+  }
   const created = await createDraftForIdea(env, idea, authorization, input, { preferredProfileId });
   return respond(request, env, {
     ok: true,
