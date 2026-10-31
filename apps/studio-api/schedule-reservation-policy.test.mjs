@@ -90,3 +90,13 @@ test("cron independently recovers stale Submitted approvals even when request pa
   assert.doesNotMatch(healer, /fetchPromotionHandoff/);
   assert.match(worker, /ctx\.waitUntil\(studioHealPromotedMissingFanout\(env, \{ limit: cadence\.heavy \? 8 : 4, ctx \}\)/);
 });
+
+test("Atomic seed respects a separate Story lane for companion scheduling", () => {
+  const seed = sliceBetween(worker02, "export async function studioAtomicApplyPlatformOutputSeedSchedule", "/*__STUDIO_WORKER_END:studioAtomicApplyPlatformOutputSeedSchedule__*/");
+  assert.match(seed, /const seedOccupiedMs = outputType === "Story" \? laneMs : platformMs/);
+  assert.match(seed, /maeScheduleConflicts\(candidateMs, seedOccupiedMs\)/);
+  assert.match(seed, /platformOccupiedMs: seedOccupiedMs/);
+  assert.match(seed, /if \(maeIsBlackoutLocalTime\(candidateMs, timeZone\)\)/);
+  assert.match(seed, /Requested Platform Output seed schedule conflicts with another output on this profile\/platform/);
+  assert.match(seed, /if \(vacate\)/);
+});

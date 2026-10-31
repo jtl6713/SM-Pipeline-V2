@@ -6829,6 +6829,11 @@ export async function studioAtomicApplyPlatformOutputSeedSchedule(env, {
       }
       const laneMs = [...new Set(laneOccupied.filter(Number.isFinite))];
       const platformMs = [...new Set(platformOccupied.filter(Number.isFinite))];
+      // A companion Story deliberately follows its parent Reel by ~10 minutes.
+      // Story occupancy is per profile/platform/output-type lane; the main
+      // Reel and other post types may retain their cross-type platform policy.
+      // Never vacate or shift an operator's explicitly requested Story time.
+      const seedOccupiedMs = outputType === "Story" ? laneMs : platformMs;
       const requestedSchedule = String(desiredSchedule || "").trim();
       let candidate = requestedSchedule;
       let candidateMs = Date.parse(candidate);
@@ -6841,7 +6846,7 @@ export async function studioAtomicApplyPlatformOutputSeedSchedule(env, {
         if (maeIsBlackoutLocalTime(candidateMs, timeZone)) {
           throw new HttpError(409, "Requested Platform Output seed schedule is inside the profile-local blackout");
         }
-        if (maeScheduleConflicts(candidateMs, platformMs)) {
+        if (maeScheduleConflicts(candidateMs, seedOccupiedMs)) {
           throw new HttpError(
             409,
             "Requested Platform Output seed schedule conflicts with another output on this profile/platform",
@@ -6851,7 +6856,7 @@ export async function studioAtomicApplyPlatformOutputSeedSchedule(env, {
         const picked = maeScheduleNextSlot({
           timeZone,
           laneOccupiedMs: laneMs,
-          platformOccupiedMs: platformMs,
+          platformOccupiedMs: seedOccupiedMs,
           horizonDays,
         });
         if (!picked.ok) throw new HttpError(409, picked.error || "No safe MAE slot is available for Platform Output seed");
