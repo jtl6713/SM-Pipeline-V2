@@ -15,25 +15,29 @@ export function reviewProducerBridgeEnabled(env){
     env?.RENDERING_REVIEW_SCHEDULER_VACATE_VERIFIED==="true";
 }
 
-function requireSession(s,hold,outputId,version){
-  if(!s||s.output_id!==outputId||s.profile_id!=="recT2rbKX3MF7cVFU"||
-     s.output_type!=="Instagram Reel"||s.version!==version||
+function requireSession(s,hold,output,version){
+  const outputId=output.id;
+  if(!s||s.output_id!==outputId||s.profile_id!==output.profile_id||
+     s.output_type!==output.output_type||
+     (s.platform||((s.profile_id==="recT2rbKX3MF7cVFU"&&
+       s.output_type==="Instagram Reel")?"Instagram":null))!==output.platform||
+     s.version!==version||
      !requestRe.test(String(s.id||""))||
      !["ready_for_review","discussing","awaiting_assets","plan_ready","revision_failed"].includes(s.state)||
      s.review_hold?.active!==true||!s.review_hold.id||
      hold?.verified!==true||hold?.active!==true||
      hold.output_id!==outputId||hold.owner!==s.id||
      hold.id!==s.review_hold.id)
-    fail("REVIEW_SESSION_STALE",409,"An exact active Chicago review hold and current session are required");
+    fail("REVIEW_SESSION_STALE",409,"An exact active authorized review hold and current session are required");
 }
 
 async function inspectCurrent(ops,id,version){
   const allowed=await ops.authorizeReview(id);
-  if(allowed!==true)fail("REVIEW_SCOPE_DENIED",403,"Output is outside authorized Chicago Reel scope");
+  if(allowed!==true)fail("REVIEW_SCOPE_DENIED",403,"Output is outside authorized review scope");
   const output=await ops.readOutput(id);
-  if(output?.id!==id||output.profile_id!=="recT2rbKX3MF7cVFU"||
-     output.platform!=="Instagram"||output.output_type!=="Instagram Reel")
-    fail("REVIEW_SCOPE_DENIED",403,"Authoritative output is outside the Chicago Reel pilot");
+  if(output?.id!==id||!recordRe.test(String(output.profile_id||""))||
+     !String(output.platform||"").trim()||!String(output.output_type||"").trim())
+    fail("REVIEW_SCOPE_DENIED",403,"Authoritative output identity is incomplete");
   if(output.publish_locked_by||output.publish_started_at||output.publish_locked_at||
      output.platform_media_id||output.platform_post_id||output.post_id||
      output.published_at||output.platform_post_url||
@@ -41,7 +45,7 @@ async function inspectCurrent(ops,id,version){
     fail("REVIEW_DISPATCH_STARTED",409,"Publishing ownership or remote provider identity exists");
   const s=await ops.loadSession(id);
   const hold=await ops.readHold(id);
-  requireSession(s,hold,id,version);
+  requireSession(s,hold,output,version);
   return {sessionId:s.id,attemptId:s.current_attempt_id,holdId:hold.id};
 }
 
