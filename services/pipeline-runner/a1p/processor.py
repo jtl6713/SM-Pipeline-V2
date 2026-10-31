@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 def _compressed_names(source_name: str, source_id: str = "") -> tuple[str, str]:
-    stem = re.sub(r"\\.[^.]+$", "", source_name or "video")
+    stem = re.sub(r"\.[^.]+$", "", source_name or "video")
     # Catalog videos with identical names/sizes still have distinct immutable IDs.
     suffix = f"__{source_id}" if source_id else ""
     return f"{stem}_compressed", f"{stem}{suffix}_compressed.mp4"
@@ -86,7 +86,7 @@ def _register_catalog_derivative(
         raise RuntimeError("Source Media Asset changed during compression; refusing stale update")
     existing_notes = str(fields.get("Asset_Description") or "").strip()
     marker = f"Compression source master Drive ID: {source_id}"
-    note = existing_notes if marker in existing_notes else "\\n".join(filter(None, [existing_notes, marker]))
+    note = existing_notes if marker in existing_notes else "\n".join(filter(None, [existing_notes, marker]))
     client.update_record(MEDIA_ASSETS_TABLE, record["id"], {
         "Google Drive File ID": derivative_id,
         "Google Drive URL": f"https://drive.google.com/uc?export=download&id={derivative_id}",
