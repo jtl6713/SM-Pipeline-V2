@@ -1329,6 +1329,11 @@
         ? matches.length + " compatible, review-ready outputs found."
         : "No additional review-ready outputs share this format.";
       if (matches.length < 2) return;
+      if(response.batch_enabled!==true){
+        status.textContent += " Multi-output correction submission is not enabled on this release.";
+        apply.disabled = true;
+        return;
+      }
       apply.disabled = false;
       rows.innerHTML = matches.map(row =>
         '<label class="factory-correction-match-row"><input type="checkbox" data-factory-correction-output="' +
@@ -1436,12 +1441,21 @@
         : pending.payload;
       // Preserve the same request ID after an ambiguous HTTP failure.
       if (matching) pending.payload.client_request_id = requestPayload.client_request_id;
-      const desk = matching
-        ? await mutateDesk({ ...requestPayload, note: notes })
-        : await mutateDesk({ ...pending.payload, note: notes });
+      const desk = matching ? {
+        result: await fetchJson("/api/factory/outputs/" +
+          encodeURIComponent(pending.payload.id) + "/correction-batch",{
+          method:"POST",
+          body:JSON.stringify({
+            production_request_id:pending.payload.production_request_id,
+            selected_output_ids:selectedIds,
+            client_request_id:requestPayload.client_request_id,
+            note:notes,
+          }),
+        }),
+      } : await mutateDesk({ ...pending.payload, note: notes });
       const requestId = String(desk?.result?.production_request_id || pending.payload.production_request_id || "").trim();
       if (matching && (desk?.result?.status !== "accepted" ||
-          !Array.isArray(desk?.result?.outputs) && !desk?.result?.outputs)) {
+          !desk?.result?.outputs || typeof desk.result.outputs !== "object")) {
         throw new Error("Selected outputs were not all placed on verified review holds. Check correction status before retrying.");
       }
       closeFactoryFeedback();
