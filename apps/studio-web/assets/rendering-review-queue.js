@@ -575,7 +575,16 @@
          saved.publication_hold_verified===true){
         const current=attempts.find(a=>a.id===session.current_attempt_id);
         if(current?.status==='ready_for_review'&&attemptMedia(current,entry)){
-          const approval=actionButton('Approve selected version',async()=>{
+          const approvalKey=entry.output_id+':'+current.id;
+          const approval=elem('button','Approve selected version','secondary-button');
+          approval.type='button';
+          approval.dataset.approvalKey=approvalKey;
+          const approvalStatus=elem('p','','rr-feedback-status');
+          approvalStatus.hidden=true;
+          approvalStatus.setAttribute('role','status');
+          approvalStatus.setAttribute('aria-live','polite');
+          approval.addEventListener('click',async()=>{
+            if(state.actionBusy||state.approvalLocks.has(approvalKey))return;
             if(state.viewingVersion!==Number(current.number))
               throw new Error('Select V'+current.number+' before approving this version.');
             const versionNumber=Number(current.number);
