@@ -89,12 +89,14 @@ export async function completeReviewAttempt({request,env,operations,now=()=>new 
       operations.readOutput(b.output_id),operations.readJob(b.job_id),
       operations.readAttempt(b.attempt_id),
     ]);
-    if(!s||s.output_id!==b.output_id||s.profile_id!=="recT2rbKX3MF7cVFU"||
-       s.output_type!=="Instagram Reel"||s.review_hold?.active!==true||
+    if(!s||s.output_id!==b.output_id||!rec.test(str(s.profile_id))||
+       !str(s.output_type)||s.review_hold?.active!==true||
        h?.verified!==true||h.active!==true||h.owner!==s.id||
        h.id!==s.review_hold.id||h.output_id!==b.output_id||
        o?.id!==b.output_id||o.profile_id!==s.profile_id||
-       o.platform!=="Instagram"||o.output_type!=="Instagram Reel"||
+       o.platform!==(s.platform||(s.profile_id==="recT2rbKX3MF7cVFU"&&
+         s.output_type==="Instagram Reel"?"Instagram":null))||
+       o.output_type!==s.output_type||
        o.do_not_publish!==true||o.review_hold_active!==true||
        o.publish_started_at||o.publish_locked_at||o.publish_locked_by||
        o.platform_post_id||o.platform_media_id||o.published_at||
