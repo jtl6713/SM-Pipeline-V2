@@ -2930,7 +2930,11 @@ export function requestedVoiceFromProductionRequest(record) {
 /*__STUDIO_WORKER_END:requestedVoiceFromProductionRequest__*/
 
 export async function cleanProductionRequestPayload(payload, env) {
-  const contentTypeRaw = String(payload?.content_type || "").trim();
+  // Validate the true video format before evaluating any photo-only fields.
+  const vibeCut = isVibeCutNotes(payload?.production_notes);
+  const contentTypeRaw = vibeCut
+    ? (isHorizontalVibeCutAspect(payload?.production_notes) ? "Longform Video" : "Vertical Short Video")
+    : String(payload?.content_type || "").trim();
   const contentType = contentTypeRaw
     ? normalizeChoice(contentTypeRaw, PR_CONTENT_TYPES, "", "Master content type")
     : null;
