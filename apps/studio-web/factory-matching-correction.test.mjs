@@ -30,3 +30,13 @@ test("Production override and single-output Factory behavior are not removed",()
   assert.match(html,/id="factoryFeedbackNotes"/);
   assert.match(html,/id="prOverrideApplyScope"/);
 });
+
+test("one eligible output still uses isolated Rendering Review when global gate is enabled",()=>{
+  assert.match(js,/const one = matches\.length === 1;/);
+  assert.match(js,/apply\.checked = one;/);
+  assert.match(js,/Use Rendering Review for this output/);
+  assert.match(js,/Submit selected correction/);
+  assert.match(js,/pending\.matchLookupPending = true;/);
+  assert.match(js,/pending\.matchLookupPending = false;/);
+  assert.match(js,/if \(pending\.matchLookupPending === true\)/);
+});
