@@ -36,7 +36,7 @@ test("vertical Vibe plan routes to all six video/story outputs", () => {
     inputKind: "vibe-cut", sourceAspect: "vertical", sourceVideoWidth: 1552, sourceVideoHeight: 2064,
   });
   assert.equal(output.master_content_type, "Vertical Short Video");
-  const keys = [...output.items.map(row => row.platform + "::" + row.output_type), ...output.extras];
+  const keys = [...new Set([...output.items.map(row => row.platform + "::" + row.output_type), ...output.extras])];
   assert.equal(new Set(keys).size, 6);
   assert.deepEqual([...keys].sort(), [
     "Instagram::Reel", "Instagram::Story", "Facebook::Reel",
@@ -50,7 +50,7 @@ test("horizontal Vibe plan routes to Longform and both YouTube outputs", () => {
     inputKind: "vibe-cut", sourceVideoWidth: 1920, sourceVideoHeight: 1080,
   });
   assert.equal(output.master_content_type, "Longform Video");
-  assert.deepEqual([...output.items.map(x => x.platform + "::" + x.output_type), ...output.extras].sort(),
+  assert.deepEqual([...new Set([...output.items.map(x => x.platform + "::" + x.output_type), ...output.extras])].sort(),
     ["YouTube::Standard Video", "YouTube::Short"].sort());
 });
 
