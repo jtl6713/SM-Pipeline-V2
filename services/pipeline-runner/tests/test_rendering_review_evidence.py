@@ -135,4 +135,24 @@ class EvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "publication"):
             load_evidence(client, OUTPUT, SESSION, 3)
 
+
+    def test_authorized_nyc_tiktok_output_uses_own_content_and_skips_chicago_library(self):
+        client, rows = self.fixture()
+        nyc = "recNYC12345678901"
+        session = json.loads(rows[SESSIONS][0]["fields"]["Session_JSON"])
+        session.update(profile_id=nyc, platform="TikTok", output_type="TikTok Video")
+        rows[SESSIONS][0]["fields"]["Session_JSON"] = json.dumps(session)
+        rows[OUTPUTS]["fields"].update(Platform="TikTok", Platform_Output_Type="TikTok Video")
+        rows[CONTENT]["fields"]["Content_Profile"] = [nyc]
+        rows[PROFILES]["id"] = nyc
+        snapshot = load_evidence(client, OUTPUT, SESSION, 3)
+        self.assertTrue(snapshot["scope_verified"])
+        self.assertEqual(snapshot["profile_id"], nyc)
+        self.assertEqual(snapshot["platform"], "TikTok")
+        self.assertEqual(snapshot["output_type"], "TikTok Video")
+        self.assertEqual(snapshot["library_candidates"], [])
+        rows[OUTPUTS]["fields"]["Platform_Output_Type"] = "Instagram Reel"
+        with self.assertRaisesRegex(ValueError, "platform"):
+            load_evidence(client, OUTPUT, SESSION, 3)
+
 if __name__ == '__main__': unittest.main()
