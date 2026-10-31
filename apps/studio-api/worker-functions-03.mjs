@@ -1124,6 +1124,19 @@ export async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { autho
       !rejectedIds.has(row.id) && (force || !row.intake_batch_id || !pendingBatchIds.includes(row.intake_batch_id))
     );
     const attachCandidates = usableMatches.slice(0, Math.min(20, Math.max(1, max) + 8));
+    if (!attachCandidates.length) {
+      matchJson.action = "wait";
+      matchJson.reason = "all_matches_rejected";
+      matchJson.selected = [];
+      const waiting = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+        method: "PATCH", body: JSON.stringify({ fields: {
+          Studio_Photo_Wait_Status: "Waiting",
+          Studio_Photo_Match_JSON: JSON.stringify(matchJson),
+        }, typecast: true }),
+      });
+      return { ...decision, action: "wait", reason: matchJson.reason,
+        idea: waiting, production_request: requestRecord };
+    }
     let acceptedRows = decision.selected.filter((row) => !rejectedIds.has(row.id));
     if (shouldAttachPhotoWaitAssets({ action: decision.action, autoOff }) && attachCandidates.length) {
       const attached = await ideaPhotoWaitStage("attach_assets", () => applyLibraryAssetsToProductionRequest(
