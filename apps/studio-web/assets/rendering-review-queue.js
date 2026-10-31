@@ -637,7 +637,7 @@
           state.approvalButton=approval;
           state.approvalVersion=Number(current.number);
           syncSelectedApproval();
-          detail.append(approval);
+          detail.append(approval,approvalStatus);
         }
       }
       if(['queued','rendering','validating'].includes(session?.state)){
