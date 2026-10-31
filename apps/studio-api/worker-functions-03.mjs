@@ -1,7 +1,7 @@
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
 import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 import { readyProductionEnqueue } from "./ready-production-queue.mjs";
-import { ideaPhotoMatchingSlaFinding, selectProfileFairIdeaPhotoCandidates } from "./idea-photo-wait.mjs";
+import { ideaPhotoMatchingSlaFinding, selectProfileFairIdeaPhotoCandidates, photoMatchSkippableOverlayReview } from "./idea-photo-wait.mjs";
 import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { withPhase5SyncLease } from "./supabase-sync-lease.mjs";
 import { homeApprovedExceptionKind, homeIsUnpublishedFailure } from "./profile-summary-classification.mjs";
@@ -910,8 +910,7 @@ export async function applyLibraryAssetsToProductionRequest(env, requestRecord, 
       // An asset held for third-party overlay review is not an operational
       // error; skip it and consider the next ranked photo. Fail closed on
       // every other watermark, Drive, or transport error.
-      if (Number(error?.status) !== 422 ||
-          !/Asset held for third-party overlay review/i.test(String(error?.message || ""))) throw error;
+      if (!photoMatchSkippableOverlayReview(error)) throw error;
       blockedAssetIds.push(mediaId);
       continue;
     }
