@@ -46,7 +46,8 @@ def test_local_target_and_drive_duration_metadata():
 
 class _FakeDrive:
     def get_file(self, file_id, *, fields=""):
-        return _file(id=file_id)
+        from asset.constants import GDRIVE_INGESTION_FOLDER
+        return _file(id=file_id, parents=[GDRIVE_INGESTION_FOLDER])
 
     def list_files(self, **_kwargs):
         return [_file()]
@@ -79,7 +80,12 @@ def test_a1s_dry_run_lists_active_jobs_and_live_skips_them(monkeypatch):
     assert preview["dry_run"] is True
     assert preview["eligible"][0]["id"] == "drive-file"
 
-    monkeypatch.setattr(a1s_processor, "AirtableClient", lambda: _FakeAirtable(jobs=[{"id": "recJOB"}]))
+    monkeypatch.setattr(a1s_processor, "AirtableClient", lambda: _FakeAirtable(jobs=[{
+        "id": "recJOB", "fields": {
+            "Setting_Name": "A1_JOB_drive-file", "Setting_Value": "processing_local|job|0|drive-file",
+            "Active": True,
+        },
+    }]))
     listed = process_request(drive_file_id="drive-file", dry_run=True)
     assert listed["eligible"][0]["id"] == "drive-file"
     assert listed["skipped"] == []
@@ -154,7 +160,7 @@ def test_folder_scan_waits_when_another_job_is_active(monkeypatch):
     monkeypatch.setattr(a1s_processor, "GoogleDriveClient", _TwoFileDrive)
     monkeypatch.setattr(a1s_processor, "AirtableClient", lambda: _FakeAirtable())
     monkeypatch.setattr(a1s_processor, "pipeline_settings", lambda _client=None: _FakeSettings())
-    monkeypatch.setattr(a1s_processor, "_any_active_a1_job", lambda _client: True)
+    monkeypatch.setattr(a1s_processor, "_job_state_ids", lambda _client: ({"other-drive-file"}, set()))
     monkeypatch.setattr(a1s_processor, "resume_active_jobs", lambda _client=None: [{"id": "recJOB"}])
     result = process_request(inline=True)
     assert result["processed"] is False
@@ -162,3 +168,62 @@ def test_folder_scan_waits_when_another_job_is_active(monkeypatch):
     assert result["started_count"] == 0
     assert result["queued_count"] == 2
     assert result["resumed_count"] == 1
+
+def test_catalog_candidates_use_distinct_drive_ids_and_ingestion_first(monkeypatch):
+    import a1s.processor as a1s_processor
+    from asset.constants import GDRIVE_INGESTION_FOLDER
+
+    class CatalogDrive:
+        def get_file(self, file_id, *, fields=""):
+            return _file(id=file_id, name="DJI_duplicate.mp4", size="195000000", parents=["video-folder"])
+
+        def list_files(self, **_kwargs):
+            return [_file(id="new-ingestion", name="Compression Test.MOV",
+                          mimeType="video/quicktime", size="188000000")]
+
+    class CatalogAirtable:
+        def list_records(self, _table, **_kwargs):
+            return [{
+                "id": "recABC00000000001",
+                "fields": {
+                    "Google Drive File ID": "catalog-drive-id-1",
+                    "Asset Name": "DJI_duplicate.mp4",
+                    "File_Size_Bytes": 195000000,
+                    "MIME_Type": "video/mp4",
+                },
+            }, {
+                "id": "recABC00000000002",
+                "fields": {
+                    "Google Drive File ID": "catalog-drive-id-2",
+                    "Asset Name": "DJI_duplicate.mp4",
+                    "File_Size_Bytes": 195000000,
+                    "MIME_Type": "video/mp4",
+                },
+            }]
+
+    files = a1s_processor._resolve_files(CatalogDrive(), None, CatalogAirtable(), 100000000)
+    assert len(files) == 3
+    assert a1s_processor._smallest_candidate(files)["id"] == "new-ingestion"
+    assert len({row["id"] for row in files}) == 3
+    assert [x["media_asset_record_id"] for x in files if x.get("source_kind") == "asset_manager"] == [
+        "recABC00000000001", "recABC00000000002",
+    ]
+    try:
+        a1s_processor._resolve_files(CatalogDrive(), "unknown-id", CatalogAirtable(), 100000000)
+    except ValueError:
+        pass
+    else:
+        assert False, "Unknown Drive IDs must be rejected"
+
+
+def test_inactive_failed_job_blocks_auto_retry_but_not_targeted_retry(monkeypatch):
+    import a1s.processor as a1s_processor
+    class FailedState:
+        def list_records(self, _table, **_kwargs):
+            return [{"fields": {
+                "Setting_Name": "A1_JOB_drive-file", "Active": False,
+                "Setting_Value": "failed_local_compressor|job|1|drive-file",
+            }}]
+    active, failed = a1s_processor._job_state_ids(FailedState())
+    assert not active
+    assert failed == {"drive-file"}
