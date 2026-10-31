@@ -11,7 +11,7 @@ test("Factory Request Changes offers a default-selected multi-output picker",()=
     assert.match(html,new RegExp('id="'+id+'"'));
   assert.match(html,/Apply to all matching outputs/);
   assert.match(js,/function loadFactoryCorrectionMatches/);
-  assert.match(js,/row\?\.render_format\?\.key !== signature/);
+  assert.match(js,/correction-matches\?production_request_id/);
   assert.match(js,/data-factory-correction-output/);
   assert.match(js,/checked><span>/);
   assert.match(css,/\.factory-correction-matches/);
