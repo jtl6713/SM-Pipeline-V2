@@ -179,3 +179,11 @@ test("Global Factory selects Instagram Stories with backend-normalized metadata"
   assert.equal(eligible({...story, profile_id: "recChicago"}), false,
     "Legacy Reel-only policy must remain fail-closed for Stories");
 });
+
+
+test("Factory counts only visible review rows and tolerates one empty active poll", () => {
+  assert.match(js, /needs_eyes: filtered\(desk\.lanes\?\.needs_eyes\)\.length/);
+  assert.match(js, /state\.emptyActivityPolls = emptyActive/);
+  assert.match(js, /emptyActive && state\.emptyActivityPolls < 2 \? state\.batch : fetched/);
+  assert.match(js, /batch === fetched && previousActive\.some/);
+});
