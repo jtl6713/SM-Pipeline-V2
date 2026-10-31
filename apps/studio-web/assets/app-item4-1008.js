@@ -1359,12 +1359,14 @@
         timeoutMs: 180000,
       });
       setOperationsMessage(result.message || "Compression request submitted.");
-      renderCompressionStatus([{
-        headline: "Starting the next oversized video",
-        tone: "waiting",
-        notes: "Checking the intake folder…",
-      }], operationsOversizedCache.length);
-      startCompressionPoll();
+      if (Number(result.started_count || 0) > 0) {
+        renderCompressionStatus([{
+          headline: "Starting the next oversized video",
+          tone: "waiting",
+          notes: "Local compressor accepted the first job.",
+        }], operationsOversizedCache.length);
+        startCompressionPoll();
+      }
       loadOperations();
     } catch (error) {
       setOperationsMessage(error.message || "Could not start intake-folder compression.", "error-text");
@@ -26268,10 +26270,11 @@ function timedScriptAssetLabel(asset, index) {
     syncCompressionPoll(activeJobs.length > 0 || operationsOversizedCache.length > 0);
     const totalCount = operationsOversizedCache.length;
     if (compressAll) {
-      compressAll.hidden = !(canCompress && totalCount > 0);
-      compressAll.textContent = totalCount === 1
+      compressAll.hidden = totalCount < 1;
+      compressAll.disabled = !canCompress;
+      compressAll.textContent = !canCompress ? "Admin permission required" : (totalCount === 1
         ? "Compress oversized video"
-        : `Compress all oversized videos (${totalCount})`;
+        : `Compress all oversized videos (${totalCount})`);
     }
     if (!target) return;
     if (!operationsOversizedCache.length) {
@@ -26510,6 +26513,10 @@ function timedScriptAssetLabel(asset, index) {
       operationsVoiceOptions = phase6NormalizeVoices(voicesResult?.voices || voicesResult?.records || voicesResult?.items || []);
       operationsTimezone = data.timezone || null;
       operationsCanEditProfiles = Boolean(data.can_edit_profiles);
+      // Paint the true Owner/Admin capability as soon as Operations responds;
+      // waiting for optional music/desk fetches left the compression poll using
+      // the initial false permission and rendering every action "Admin only".
+      renderOperationsOversized(data.oversized_media || [], operationsCanEditProfiles, data.compression_jobs || []);
       mergeOperationsProfilesIntoStudio(data.profiles || []);
       profileVoicesLoaded = true;
       if (!$("productionRequestWorkspace")?.hidden) applyResolvedDefaultVoice();
