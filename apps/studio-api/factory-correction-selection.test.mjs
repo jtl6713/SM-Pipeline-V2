@@ -81,6 +81,30 @@ test("selection includes only explicitly checked, compatible output IDs", () => 
   assert.equal(result.render_format_key, vertical.key);
   assert.equal(result.profile_id, profile);
 });
+test("Chicago, LA, New York and Miami each match only their own outputs", () => {
+  const cities = [id(900), id(910), id(920), id(930)];
+  const all = cities.flatMap((city, index) =>
+    rows.slice(0, 4).map((row, offset) => ({
+      ...row,
+      id: id(100 + index * 10 + offset),
+      profile_id: city,
+      production_request_id: id(1000 + index),
+      content_item_id: id(2000 + index),
+    }))
+  );
+  for (const [index, city] of cities.entries()) {
+    const source = all[index * 4];
+    const matched = factoryCorrectionMatches(source, all, {
+      authorized_profile_ids: cities,
+    });
+    assert.equal(matched.length, 4);
+    assert.ok(matched.every(row => row.profile_id === city));
+    assert.deepEqual(factoryCorrectionMatches(source, all, {
+      authorized_profile_ids: cities.filter(other => other !== city),
+    }), []);
+  }
+});
+
 test("malformed, stale, mismatched and duplicate selection fails closed", () => {
   const base = {
     source: rows[0], outputs: rows, authorized_profile_ids: [profile],
