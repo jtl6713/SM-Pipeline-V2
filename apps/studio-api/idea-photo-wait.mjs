@@ -127,7 +127,11 @@ export function ideaLibraryNamedPlaceKeys(text) {
 }
 
 export function buildIdeaLibraryKeys({ primaryLocation = "", title = "", summary = "", query = "" } = {}) {
-  const fromLocation = ideaLibraryStrongTokens(ideaLibraryTokens(primaryLocation));
+  // A generic city-wide brief is not a named place: do not search for the
+  // literal word "citywide" and discard the actual seasonal/topic photos.
+  // Preserve any real city or neighborhood tokens in the same location field.
+  const locationForMatching = String(primaryLocation || "").replace(/\\bcity[\\s-]?wide\\b/gi, " ");
+  const fromLocation = ideaLibraryStrongTokens(ideaLibraryTokens(locationForMatching));
   const fromNamed = ideaLibraryNamedPlaceKeys(`${primaryLocation} ${title} ${summary}`);
   const fromQuery = ideaLibraryStrongTokens(ideaLibraryTokens(query));
   const placeKeys = [...new Set([...fromLocation, ...fromNamed, ...fromQuery])];
