@@ -104,8 +104,9 @@ test("Idea #1811 Citywide winter view discovers high-confidence Chicago Winters 
 test("production photo ranker strips Citywide without bypassing profile scope", () => {
   const source = readStudioWorkerSource();
   assert.match(source, /const locationForMatching = String\(primaryLocation \|\| ""\)\.replace/);
-  const ranker = source.slice(source.indexOf("export async function rankStillsForIdeaPhotoWait("),
-    source.indexOf("/*__STUDIO_WORKER_END:rankStillsForIdeaPhotoWait__*/"));
+  const start = source.indexOf("async function rankStillsForIdeaPhotoWait(");
+  assert.ok(start > 0, "compiled matcher remains in the deployed Worker");
+  const ranker = source.slice(start, start + 2200);
   assert.match(ranker, /mediaAssetProfileScopeForId/);
   assert.match(ranker, /combineAirtableFormulas\(ideaLibraryFilterFormula\(filterKeys\), scopeFormula\)/);
 });
