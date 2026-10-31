@@ -65,8 +65,12 @@ export function authorizedManualReviewPolicy(authorizedProfileIds = [], {
 const eligible = (o, p) =>
   Array.isArray(p?.profile_ids) && p.profile_ids.includes(text(o?.profile_id)) &&
   Array.isArray(p?.output_types) &&
-  (p.output_types.includes("*") || p.output_types.includes(text(o?.output_type))) &&
-  Boolean(text(o?.platform)) && Boolean(text(o?.output_type));
+  Boolean(text(o?.platform)) && Boolean(text(o?.output_type)) &&
+  // Preserve the original Chicago Instagram contract for pilot policies.
+  // Only a newly server-constructed wildcard policy can widen platform scope.
+  (p.output_types.includes("*") ||
+    (lower(o?.platform) === "instagram" &&
+     p.output_types.includes(text(o?.output_type))));
 
 export function reviewEligibility(output, policy = REVIEW_PILOT, admission = "manual") {
   if (!policy?.enabled) return { allowed: false, reason: "FEATURE_DISABLED" };
