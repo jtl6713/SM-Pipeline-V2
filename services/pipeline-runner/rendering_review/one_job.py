@@ -145,8 +145,9 @@ def _evidence(client,drive,output_id,job_id):
     item_id=one_link(of.get("Content_Item"))
     if not item_id: fail("review_content_item_missing")
     item=client.get_record(ITEMS,item_id)
-    if one_link(item["fields"].get("Content_Profile"))!=CHICAGO:
-        fail("review_not_chicago")
+    profile_id=one_link(item["fields"].get("Content_Profile"))
+    if not profile_id:
+        fail("review_profile_not_authoritative")
     req_id=one_link(item["fields"].get("Production_Request"))
     if not req_id: fail("review_original_request_missing")
     req=client.get_record(REQUESTS,req_id)
@@ -158,7 +159,10 @@ def _evidence(client,drive,output_id,job_id):
     job_row=select_one(client,JOBS,"Job_ID",job_id)
     jf=job_row["fields"]
     if (session.get("output_id")!=output_id or
-        session.get("profile_id")!=CHICAGO or
+        session.get("profile_id")!=profile_id or
+        (session.get("platform") or
+            ("Instagram" if profile_id==CHICAGO and session.get("output_type")=="Instagram Reel" else None))!=of.get("Platform") or
+        session.get("output_type")!=of.get("Platform_Output_Type") or
         session.get("review_hold",{}).get("active") is not True or
         jf.get("Output_Record_ID")!=output_id or
         jf.get("Session_ID")!=session.get("id") or
@@ -169,7 +173,12 @@ def _evidence(client,drive,output_id,job_id):
     plan_state=session.get("plan") or {}
     plan=plan_state.get("immutable_manifest")
     if not isinstance(plan,dict) or plan_state.get("hash")!=jf.get("Plan_Hash") or (
-        plan_state.get("version") != plan.get("plan_version")):
+        plan_state.get("version") != plan.get("plan_version")) or
+        plan.get("profile_id")!=profile_id or
+        plan.get("output_type")!=of.get("Platform_Output_Type") or
+        (plan.get("platform") or
+         ("Instagram" if profile_id==CHICAGO and plan.get("output_type")=="Instagram Reel" else None))!=of.get("Platform"):
+
         fail("frozen_review_plan_unavailable")
     plan_row=select_one(client,PLANS,"Plan_Hash",jf["Plan_Hash"])
     if plan_row["fields"].get("Session_ID")!=session["id"]:
@@ -235,9 +244,9 @@ def _evidence(client,drive,output_id,job_id):
        "canonical_media_authority":"google_drive",
        "composition_id":"ChicagoShiningPhotoSequence"}
     original_by_id={x.get("id"):x for x in originals}
-    return out,item,req,props,plan,source,original_by_id
+    return out,item,req,props,plan,source,original_by_id,profile_id
 
-def _render_sources(client,request,original_by_id,props,plan,*,drive=None):
+def _render_sources(client,request,original_by_id,props,plan,*,drive=None,profile_id=None):
     # The original Production Request owns BOTH the master asset and the
     # approved 9:16 crop. The original Remotion props prove which crop was
     # actually rendered for V1. Neither may be substituted by the Producer.
@@ -332,7 +341,7 @@ def _render_sources(client,request,original_by_id,props,plan,*,drive=None):
           "canonical_media_authority":"google_drive",
           "drive_file_id":frozen["drive_file_id"],
           "rights_receipt_id":frozen["rights_receipt_id"],
-          "profile_id":CHICAGO,"media_kind":"video" if is_video else "image",
+          "profile_id":profile_id,"media_kind":"video" if is_video else "image",
           "render_url":url})
     return assets
 
@@ -440,12 +449,12 @@ def render_exact_attempt(output_id,job_id,*,client=None,drive=None,
     worker=_validate_base(worker)
     client=client or AirtableClient()
     drive=drive or GoogleDriveClient()
-    output,item,req,props,plan,source,originals=_evidence(client,drive,output_id,job_id)
-    assets=_render_sources(client,req,originals,props,plan,drive=drive)
+    output,item,req,props,plan,source,originals,profile_id=_evidence(client,drive,output_id,job_id)
+    assets=_render_sources(client,req,originals,props,plan,drive=drive,profile_id=profile_id)
     mix=_source_mix(drive,props,output_id)
     # Claim only the requested exact job. No scanning and no broad scheduler.
     request_id="rrclaim_"+hashlib.sha256(
-        ("chicago-pilot-v1|"+output_id+"|"+job_id).encode()).hexdigest()[:48]
+        ("profile-render-v1|"+profile_id+"|"+output_id+"|"+job_id).encode()).hexdigest()[:48]
     claim=_post_once(worker,secret,"/api/internal/rendering-review/claim-render-job",
         {"output_id":output_id,"job_id":job_id,
          "client_request_id":request_id})
@@ -460,11 +469,26 @@ def render_exact_attempt(output_id,job_id,*,client=None,drive=None,
          **{k:claim[k] for k in ("output_id","job_id","attempt_id",
          "plan_hash","session_id","lease_owner","lease_fence")}}
     narration=_voiceover(client,drive,item,plan,claim)
-    brand_url=brand_watermark_url(client)
+    if profile_id==CHICAGO:
+        brand_url=brand_watermark_url(client)
+    else:
+        # Never replace another city’s original brand with Chicago branding.
+        # The V1 Remotion artifact is authoritative for that city's mark.
+        brand_url=str(props.get("watermarkUrl") or "")
+        parsed=urlsplit(brand_url)
+        query=parse_qs(parsed.query)
+        file_ids=query.get("id") or []
+        if (parsed.scheme!="https" or parsed.netloc!="drive.google.com" or
+            parsed.path!="/uc" or query.get("export")!=["download"] or
+            len(file_ids)!=1 or not IDENTITY.fullmatch(file_ids[0]) or parsed.fragment):
+            fail("review_profile_watermark_unverified")
+        wm=drive.get_file(file_ids[0])
+        if wm.get("id")!=file_ids[0] or not str(wm.get("mimeType") or "").startswith("image/"):
+            fail("review_profile_watermark_unverified")
     if not brand_url.startswith("https://"):
         fail("review_watermark_url_unavailable")
     watermark={"verified":True,"authority":"server",
-        "profile_id":CHICAGO,"policy":"retain_current_approved",
+        "profile_id":profile_id,"policy":"retain_current_approved",
         "url":brand_url}
     renderer_base=_review_renderer_base()
     renderer=renderer or RemotionClient(renderer_base)
