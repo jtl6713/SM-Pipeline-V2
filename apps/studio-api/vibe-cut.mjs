@@ -824,6 +824,30 @@ export function capVibeCutPlanItems(items, { notes = "", sourceAspect = "" } = {
   return out;
 }
 
+/** Vibe Cut is video intake, never a photo queue or slide-based Idea. */
+export function vibeCutIdeaFields({ sourceAspect = "", notes = "", targetSeconds = null } = {}) {
+  const horizontal = isHorizontalVibeCutAspect(sourceAspect || notes);
+  const seconds = Number(targetSeconds);
+  return {
+    Production_Content_Type: horizontal ? "Longform Video" : "Vertical Short Video",
+    Production_Target_Platforms: horizontal ? ["YouTube"] : ["Instagram", "Facebook", "TikTok", "YouTube"],
+    Production_Include_Voiceover: "No",
+    Production_Include_Background_Music: "Yes",
+    Production_Include_Thumbnail: "Yes",
+    Production_Carousel_Slide_Count: null,
+    Production_Carousel_Slide_Count_Mode: null,
+    Production_Carousel_Slide_Count_Min: null,
+    Production_Carousel_Slide_Count_Max: null,
+    Production_Carousel_Image_Mode: null,
+    Studio_Photo_Wait_Status: "Not Needed",
+    Studio_Photo_Match_JSON: null,
+    Studio_Matched_Media_Assets: [],
+    Production_Video_Clip_Count: null,
+    ...(Number.isFinite(seconds) && seconds >= 5 && seconds <= 600
+      ? { Production_Video_Duration: Math.round(seconds) } : {}),
+  };
+}
+
 export function vibeCutProductionDefaults(config, { sourceAspect = "", notes = "" } = {}) {
   const normalized = defaultVibeCutConfig(config || {});
   const horizontal = isHorizontalVibeCutAspect(sourceAspect || notes);
