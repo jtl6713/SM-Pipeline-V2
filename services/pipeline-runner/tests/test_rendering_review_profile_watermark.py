@@ -76,6 +76,22 @@ class ProfileWatermarkTests(unittest.TestCase):
         entries=[media("rec"+str(i).zfill(14),FILE,"Watermark.png") for i in range(200)]
         with self.assertRaisesRegex(ProfileWatermarkUnavailable,"unbounded"):
             resolve_profile_watermark(client=FakeAirtable(entries),drive=FakeDrive(),profile_id=CHICAGO)
+    def test_vibe_watermark_compiler_input_is_bound_to_actual_profile_owned_png(self):
+        from rendering_review.profile_watermark import resolve_vibe_review_watermark
+        row=media("rec00000000000003",FILE,"LA_Shining_Watermark_Small.png",LA)
+        result=resolve_vibe_review_watermark(
+            client=FakeAirtable([row]),drive=FakeDrive(),profile_id=LA)
+        self.assertEqual(result["profile_id"],LA)
+        self.assertEqual(result["catalog_receipt"]["media_asset_record_id"],row["id"])
+        self.assertEqual(result["catalog_receipt"]["drive_file_id"],FILE)
+        self.assertEqual(result["render_url"],
+            "https://drive.google.com/uc?export=download&id="+FILE)
+        self.assertEqual(result["catalog_receipt"]["sha256"],
+            __import__("hashlib").sha256(DATA).hexdigest())
+        with self.assertRaises(ProfileWatermarkUnavailable):
+            resolve_vibe_review_watermark(
+                client=FakeAirtable(),drive=FakeDrive(),profile_id=LA)
+
     def test_source_watermark_url_must_match_owning_profile_catalog_receipt(self):
         catalog=FakeAirtable([media(
             "rec00000000000003",FILE,"LA_Shining_Watermark_Small.png",LA)])

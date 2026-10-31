@@ -108,3 +108,23 @@ def require_owned_profile_watermark_url(*,client:Any,drive:Any,
         query.get("id")!=[receipt["drive_file_id"]]):
         denied("profile_source_watermark_identity_mismatch")
     return {"url":url,"receipt":receipt}
+
+
+
+def resolve_vibe_review_watermark(*,client:Any,drive:Any,profile_id:str)->dict:
+    """Produce a Vibe Cut compiler input bound to Airtable and actual Drive PNG.
+
+    The compiler deliberately requires this exact catalog receipt, not an
+    unverified source-props watermarkUrl or another city's branding.
+    This read-only adapter never uploads or changes any source media.
+    """
+    owned=resolve_profile_watermark(client=client,drive=drive,profile_id=profile_id)
+    receipt=owned["receipt"]
+    file_id=receipt["drive_file_id"]
+    return {
+        "verified":True,"authority":"server",
+        "profile_id":profile_id,"policy":"retain_current_approved",
+        "drive_file_id":file_id,
+        "render_url":"https://drive.google.com/uc?export=download&id="+file_id,
+        "catalog_receipt":receipt,
+    }
