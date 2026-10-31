@@ -153,3 +153,29 @@ test("Submit Approvals hides queued and accepted outputs even with a stale Desk 
   assert.match(js, /recentFactoryAccepted\(\)\[String\(card\?\.id \|\| ""\)\]/);
   assert.match(js, /if \(state\.desk\) renderDesk\(state\.desk\)/);
 });
+
+test("Global Factory selects Instagram Stories with backend-normalized metadata", () => {
+  const fn = extractNamedFunction(js, "canSelectBatchOutput");
+  const state = {
+    batchApprovalsEnabled: true,
+    batchGlobal: {
+      enabled: true,
+      allowed_platforms: ["Instagram", "Facebook"],
+      allowed_output_types_by_platform: {
+        Instagram: ["Reel", "Story", "Single Image", "Carousel"],
+        Facebook: ["Reel", "Story"],
+      },
+    },
+  };
+  const eligible = new Function("state", "recentFactoryAccepted",
+    `${fn}; return canSelectBatchOutput;`)(state, () => ({}));
+  const story = {id: "recStory9393", platform: "Instagram ", studio_output_type: "Story "};
+  assert.equal(eligible(story), true, "Story #9393 must be selectable like the backend's trimmed fields");
+  assert.equal(eligible({...story, studio_output_type: "Reel"}), true);
+  assert.equal(eligible({...story, studio_output_type: "Unsupported"}), false);
+  assert.equal(eligible({...story, platform: "TikTok"}), false);
+  state.batchGlobal.enabled = false;
+  state.batchRollout = {mode: "chicago_ig_reels_v2", profile_id: "recChicago"};
+  assert.equal(eligible({...story, profile_id: "recChicago"}), false,
+    "Legacy Reel-only policy must remain fail-closed for Stories");
+});
