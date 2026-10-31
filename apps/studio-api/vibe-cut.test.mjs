@@ -238,7 +238,7 @@ test("Worker never treats Vibe Cut as finished-video passthrough", () => {
   assert.match(worker, /Re-enable horizontal Vibe Cut destinations/);
   assert.match(worker, /vibe-cut missing Short fanout failed/);
   assert.match(worker, /onlyMissing: true/);
-  assert.match(worker, /studioHealPromotedMissingFanout\(env, \{ limit: 4 \}\)/);
+  assert.match(worker, /studioHealPromotedMissingFanout\(env, \{ limit: [48], ctx \}\)/);
 });
 
 test("Smooth Vibes energy 1 at 45s builds multi-clip montage (not one trim)", () => {
