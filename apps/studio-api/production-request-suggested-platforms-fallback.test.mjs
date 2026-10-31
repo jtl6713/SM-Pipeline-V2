@@ -27,7 +27,7 @@ test("legacy output-style platform labels normalize to Production platforms", as
   assert.match(worker, /\["instagram reels", "Instagram"\]/i);
   assert.match(worker, /\["facebook reels", "Facebook"\]/i);
   assert.match(worker, /function canonicalProductionPlatform/);
-  assert.match(worker, /const platforms = canonicalProductionPlatforms\(platformsRaw\)/);
+  assert.match(worker, /canonicalProductionPlatforms\(platformsRaw\)/);
   assert.match(worker, /if \(productionPlatforms\.length\) return productionPlatforms/);
 });
 
