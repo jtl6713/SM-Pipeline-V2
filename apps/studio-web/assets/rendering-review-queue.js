@@ -8,7 +8,7 @@
   const nav = $('navRenderingReview');
   if (!root || !nav) return;
   const chicago = 'recT2rbKX3MF7cVFU';
-  const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map(),pollTimer:null,activeEntry:null,lastReplyNotice:null,lastReplyNoticeNode:null,viewingVersion:null,approvalButton:null,approvalVersion:null};
+  const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map(),pollTimer:null,activeEntry:null,lastReplyNotice:null,lastReplyNoticeNode:null,viewingVersion:null,approvalButton:null,approvalVersion:null,approvalLocks:new Set(),approvalKeys:new Map()};
   const list = $('rrQueueList'), detail = $('rrDetail'), status = $('rrStatus');
 
   const chicagoTime = value => {
@@ -117,7 +117,7 @@
     const button=state.approvalButton;
     if(!button)return;
     const selected=state.viewingVersion===state.approvalVersion;
-    button.disabled=!selected;
+    button.disabled=!selected||state.approvalLocks.has(button.dataset.approvalKey);
     button.title=selected?'':'Select V'+state.approvalVersion+' to approve it.';
   }
   function clearMedia(){
