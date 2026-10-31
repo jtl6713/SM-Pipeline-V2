@@ -878,7 +878,7 @@ export async function unfinishedIntakeBatchIds(env, batchIds) {
 }
 /*__STUDIO_WORKER_END:unfinishedIntakeBatchIds__*/
 
-export async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaIds, { replaceWaitAssets = false, allowManagePaused = false, replaceAll = false, allowVideo = false, maxWaitAssets = null } = {}) {
+export async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaIds, { replaceWaitAssets = false, allowManagePaused = false, replaceAll = false, allowVideo = false, maxWaitAssets = null, minWaitAssets = 1 } = {}) {
   // Vibe Cut masters must come from the user's uploaded footage. Never
   // substitute photo-wait/library imagery (including replaceAll recovery).
   if (studioIsVibeCut(requestRecord)) {
@@ -956,6 +956,12 @@ export async function applyLibraryAssetsToProductionRequest(env, requestRecord, 
       source: "idea_photo_wait",
     });
     already.add(media.id);
+  }
+  // Never mark a partial (below-minimum) selection Ready or replace the
+  // existing Production masters with an invalid set.
+  if (maxWaitAssets != null && appended.length < Math.max(1, Number(minWaitAssets) || 1)) {
+    return { record: requestRecord, assets: existingAll, appended: 0,
+      acceptedIds: [], blockedAssetIds, skipped: true, reason: "insufficient_safe_assets" };
   }
   // If every candidate is unsafe, leave the existing master/selection
   // untouched rather than declaring Ready with an empty asset manifest.
