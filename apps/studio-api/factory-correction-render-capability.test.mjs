@@ -33,3 +33,17 @@ test("alternate Vibe Cut compositions report missing music-only renderer instead
  assert.equal(result.supported,false);
  assert.equal(result.reason,"VIBE_CUT_RENDERER_NOT_VERIFIED");
 });
+
+test("explicit Vibe Cut formats cannot enter narrated PhotoSequence revision even if the compositor matches",()=>{
+  for(const tagged of [
+    {...fmt,format:"Vibe Cut"},
+    {...fmt,key:"video|Vibe Cut|9:16"},
+    {...fmt,output_type:"Music Cut"},
+  ]){
+    const result=check(tagged,valid());
+    assert.equal(result.supported,false);
+    assert.equal(result.media_kind,"video");
+    assert.equal(result.reason,"VIBE_CUT_RENDERER_NOT_VERIFIED");
+    assert.equal(result.required_contract,"studio.render-review.vibe.1");
+  }
+});
