@@ -1286,6 +1286,84 @@
       (type==="instagram reel" || type==="reel");
   }
 
+  // Factory reuses the PR #1406 render format supplied by the authenticated
+  // Production Requests API. This is a display preflight, NOT hold authority.
+  // The server must independently re-resolve every selected output on submit.
+  async function loadFactoryCorrectionMatches(pending) {
+    const section = $("factoryFeedbackApplySection");
+    const apply = $("factoryFeedbackApplyAll");
+    const picker = $("factoryFeedbackMatchPicker");
+    const rows = $("factoryFeedbackMatchRows");
+    const status = $("factoryFeedbackMatchStatus");
+    if (!section || !apply || !picker || !rows || !status) return;
+    section.hidden = true;
+    apply.checked = false;
+    picker.hidden = true;
+    picker.disabled = true;
+    rows.replaceChildren();
+    pending.matches = [];
+    const payload = pending.payload || {};
+    const sourceId = String(payload.id || "");
+    const requestId = String(payload.production_request_id || "");
+    if (payload.kind !== "output" || !/^rec[A-Za-z0-9]{14}$/.test(sourceId) ||
+        !/^rec[A-Za-z0-9]{14}$/.test(requestId)) return;
+    section.hidden = false;
+    apply.disabled = true;
+    status.textContent = "Checking rendered output formats…";
+    try {
+      const response = await fetchJson("/api/production-requests/" +
+        encodeURIComponent(requestId) + "/outputs");
+      if (state.pendingFactoryFeedback !== pending) return;
+      const sourceRows = (Array.isArray(response.records) ? response.records : [])
+        .filter(row => row?.enabled === true &&
+          Array.isArray(row.platform_output_links) &&
+          row.platform_output_links.includes(sourceId));
+      if (sourceRows.length !== 1) throw new Error("Source output mapping is not uniquely resolved.");
+      const signature = String(sourceRows[0]?.render_format?.key || "");
+      if (!signature) throw new Error("The source format mapping is incomplete.");
+      const eligible = (state.desk?.lanes?.needs_eyes || [])
+        .filter(card => card.kind === "output" && canReviewActions(card) &&
+          String(card.production_request_id || "") === requestId);
+      const eligibleById = new Map(eligible.map(card => [card.id, card]));
+      const found = new Set();
+      const matches = [];
+      for (const row of response.records || []) {
+        if (row?.enabled !== true || row?.render_format?.key !== signature) continue;
+        for (const id of row.platform_output_links || []) {
+          const card = eligibleById.get(id);
+          if (!card || found.has(id)) continue;
+          if (String(card.profile_id || "") !==
+              String(eligibleById.get(sourceId)?.profile_id || "")) continue;
+          if (String(card.content_item_id || "") !==
+              String(eligibleById.get(sourceId)?.content_item_id || "")) continue;
+          found.add(id);
+          matches.push({ id, platform: row.platform, output_type: row.output_type });
+        }
+      }
+      if (!found.has(sourceId)) throw new Error("Source output is no longer review-ready.");
+      pending.matches = matches;
+      status.textContent = matches.length > 1
+        ? matches.length + " compatible, review-ready outputs found."
+        : "No additional review-ready outputs share this format.";
+      if (matches.length < 2) return;
+      apply.disabled = false;
+      rows.innerHTML = matches.map(row =>
+        '<label class="factory-correction-match-row"><input type="checkbox" data-factory-correction-output="' +
+        esc(row.id) + '" checked><span>' + esc([row.platform, row.output_type].filter(Boolean).join(" · ")) +
+        '</span></label>').join("");
+    } catch (error) {
+      if (state.pendingFactoryFeedback !== pending) return;
+      status.textContent = "Apply to all unavailable: " + String(error.message || error) +
+        " Single-output review remains available.";
+      apply.disabled = true;
+    }
+  }
+
+  function factoryCorrectionSelectedOutputs() {
+    return [...document.querySelectorAll("#factoryFeedbackMatchRows [data-factory-correction-output]:checked")]
+      .map(input => String(input.getAttribute("data-factory-correction-output") || ""));
+  }
+
   // Review feedback is entered before any state-changing request is sent.
   function openFactoryFeedback({ title, scope, payload }) {
     const backdrop = $("factoryFeedbackBackdrop");
@@ -1294,7 +1372,8 @@
       setStatus("Review notes window is unavailable. Refresh Studio before sending back.", true);
       return;
     }
-    state.pendingFactoryFeedback = { payload, focusedElement: document.activeElement };
+    state.pendingFactoryFeedback = { payload, focusedElement: document.activeElement, matches: [] };
+    void loadFactoryCorrectionMatches(state.pendingFactoryFeedback);
     const heading = $("factoryFeedbackTarget");
     const detail = $("factoryFeedbackScope");
     const error = $("factoryFeedbackError");
@@ -1338,6 +1417,8 @@
     if (backdrop) backdrop.hidden = true;
     const origin = state.pendingFactoryFeedback?.focusedElement;
     state.pendingFactoryFeedback = null;
+    const apply = $("factoryFeedbackApplyAll");
+    if (apply) apply.checked = false;
     if (origin?.isConnected) origin.focus?.();
   }
 
@@ -1357,7 +1438,22 @@
     if (error) { error.hidden = true; error.textContent = ""; }
     try {
       closeFactoryPreview();
-      const desk = await mutateDesk({ ...pending.payload, note: notes });
+      const applyAll = $("factoryFeedbackApplyAll");
+      const matching = applyAll?.checked === true;
+      const selectedIds = matching ? factoryCorrectionSelectedOutputs() : [];
+      if (matching && (!selectedIds.length || !pending.matches.some(row => row.id === pending.payload.id) ||
+          selectedIds.some(id => !pending.matches.some(row => row.id === id)))) {
+        throw new Error("Choose at least one confirmed matching output.");
+      }
+      const requestPayload = matching
+        ? { ...pending.payload, action: "request_changes_matching",
+            selected_output_ids: selectedIds,
+            client_request_id: pending.payload.client_request_id ||
+              ("factoryreview_" + crypto.randomUUID().replace(/-/g, "")) }
+        : pending.payload;
+      // Preserve the same request ID after an ambiguous HTTP failure.
+      if (matching) pending.payload.client_request_id = requestPayload.client_request_id;
+      const desk = await mutateDesk({ ...requestPayload, note: notes });
       const requestId = String(desk?.result?.production_request_id || pending.payload.production_request_id || "").trim();
       closeFactoryFeedback();
       if (pending.payload?.action === "return_to_review" || pending.payload?.action === "start_render_review") {
@@ -1471,7 +1567,7 @@
               openFactoryFeedback({
                 title:ready[0].title||cardLabel(ready[0]),
                 scope:"Selected revised output · Continue with Producer",
-                payload:{action:"return_to_review",id:ready[0].id,kind:"output",
+                payload:{action:"return_to_review",id:ready[0].id,kind:"output",production_request_id:ready[0].production_request_id,
                   client_request_id:"factoryreview_"+crypto.randomUUID().replace(/-/g,"")}
               });
               return;
@@ -1485,7 +1581,7 @@
           openFactoryFeedback({
             title:ready[0].title||cardLabel(ready[0]),
             scope:"Selected Reel · Send to conversational Producer review",
-            payload:{action:"start_render_review",id:ready[0].id,kind:"output",
+            payload:{action:"start_render_review",id:ready[0].id,kind:"output",production_request_id:ready[0].production_request_id,
               client_request_id:"factoryreview_"+crypto.randomUUID().replace(/-/g,"")}
           });
           return;
@@ -1585,7 +1681,7 @@
             openFactoryFeedback({
               title:card.title||cardLabel(card),
               scope:[card.platform,card.studio_output_type,"Selected revision only"].filter(Boolean).join(" · "),
-              payload:{action:"return_to_review",id:card.id,kind:"output",client_request_id:clientKey}
+              payload:{action:"return_to_review",id:card.id,kind:"output",production_request_id:card.production_request_id,client_request_id:clientKey}
             });
             return;
           }
@@ -1597,7 +1693,7 @@
           openFactoryFeedback({
             title:card.title||cardLabel(card),
             scope:[card.platform,card.studio_output_type,"Selected output only"].filter(Boolean).join(" · "),
-            payload:{action:"start_render_review",id:card.id,kind:"output",
+            payload:{action:"start_render_review",id:card.id,kind:"output",production_request_id:card.production_request_id,
               client_request_id:"factoryreview_"+crypto.randomUUID().replace(/-/g,"")}
           });
           return;
@@ -1890,6 +1986,16 @@
     }
   }
 
+  $("factoryFeedbackApplyAll")?.addEventListener("change", event => {
+    const picker = $("factoryFeedbackMatchPicker");
+    if (picker) {
+      picker.hidden = !event.target.checked;
+      picker.disabled = !event.target.checked;
+    }
+    const submit = $("factoryFeedbackSubmit");
+    if (submit) submit.textContent = event.target.checked
+      ? "Submit selected corrections" : "Submit Changes";
+  });
   $("factoryFeedbackForm")?.addEventListener("submit", submitFactoryFeedback);
   $("factoryFeedbackCancel")?.addEventListener("click", closeFactoryFeedback);
   $("factoryFeedbackClose")?.addEventListener("click", closeFactoryFeedback);
