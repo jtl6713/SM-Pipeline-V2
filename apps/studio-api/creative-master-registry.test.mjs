@@ -65,7 +65,7 @@ test('scheduled or published sibling remains linked but untouched',()=>{
 });
 test('approved creative master registry version is content-owned, with QA evidence',()=>{
   const f=fixture();
-  const r=nextApprovedCreativeMaster({...f,source:f.outputs[0],
+  const r=nextApprovedCreativeMaster({...f,evidence:f.proof,source:f.outputs[0],
     at:'2026-10-31T21:55:00Z'});
   assert.equal(r.changed,true);assert.equal(r.master.version,1);
   assert.equal(r.master.publishing_authorized,false);
@@ -75,16 +75,16 @@ test('approved creative master registry version is content-owned, with QA eviden
   const shown=projectCreativeMasterGroup({source:f.outputs[0],content:f.content,
     outputs:f.outputs});
   assert.equal(shown.master.approved_attempt_id,a);assert.equal(shown.linked_count,4);
-  assert.equal(nextApprovedCreativeMaster({...f,source:f.outputs[0],
+  assert.equal(nextApprovedCreativeMaster({...f,evidence:f.proof,source:f.outputs[0],
     at:'2026-10-31T21:56:00Z'}).changed,false);
 });
 test('a newer approved attempt from same source advances only its format key',()=>{
   const f=fixture();
-  const first=nextApprovedCreativeMaster({...f,source:f.outputs[0],at:'2026-10-31'});
+  const first=nextApprovedCreativeMaster({...f,evidence:f.proof,source:f.outputs[0],at:'2026-10-31'});
   f.content.fields[MASTER_FIELD]=JSON.stringify(first.registry);
   f.session.current_attempt_id=f.session.approved_attempt_id='rrattempt_next_12345678';
   f.attempt.id='rrattempt_next_12345678';f.attempt.artifact_id=original;
-  const next=nextApprovedCreativeMaster({...f,source:f.outputs[0],at:'2026-11-01'});
+  const next=nextApprovedCreativeMaster({...f,evidence:f.proof,source:f.outputs[0],at:'2026-11-01'});
   assert.equal(next.master.version,2);
   assert.equal(next.master.file_id,original);
 });
@@ -100,7 +100,7 @@ test('independent media proof and current creative approval required',()=>{
     v=>v.proof.sha256='invalid',
   ]){
     const candidate=c(f);bad(candidate);
-    assert.throws(()=>nextApprovedCreativeMaster({...candidate,source:candidate.outputs[0],
+    assert.throws(()=>nextApprovedCreativeMaster({...candidate,evidence:candidate.proof,source:candidate.outputs[0],
       at:'2026-10-31'}));
   }
 });
@@ -117,10 +117,10 @@ test('refuse cross-content, missing format and incomplete membership',()=>{
 });
 test('different source output cannot silently overwrite existing approved master',()=>{
   const f=fixture();
-  const first=nextApprovedCreativeMaster({...f,source:f.outputs[0],at:'2026-10-31'});
+  const first=nextApprovedCreativeMaster({...f,evidence:f.proof,source:f.outputs[0],at:'2026-10-31'});
   f.content.fields[MASTER_FIELD]=JSON.stringify(first.registry);
   f.session.output_id=f.outputs[1].id;
-  assert.throws(()=>nextApprovedCreativeMaster({...f,source:f.outputs[1],at:'2026-11-01'}),
+  assert.throws(()=>nextApprovedCreativeMaster({...f,evidence:f.proof,source:f.outputs[1],at:'2026-11-01'}),
     e=>e.code==='CREATIVE_MASTER_COMPETING_SOURCE');
 });
 test('unknown/mismatched registry cannot be treated as approved',()=>{
@@ -135,14 +135,14 @@ test('unknown/mismatched registry cannot be treated as approved',()=>{
 
 test('completed Factory transfer replays only the exact preexisting approved master',()=>{
   const f=fixture();
-  const first=nextApprovedCreativeMaster({...f,source:f.outputs[0],at:'2026-10-31'});
+  const first=nextApprovedCreativeMaster({...f,evidence:f.proof,source:f.outputs[0],at:'2026-10-31'});
   f.content.fields[MASTER_FIELD]=JSON.stringify(first.registry);
   f.session.review_hold.active=false;
   f.session.factory_handoff={status:'ready_for_factory_approval',
     attempt_id:a,artifact_id:revised};
-  assert.equal(nextApprovedCreativeMaster({...f,source:f.outputs[0],
+  assert.equal(nextApprovedCreativeMaster({...f,evidence:f.proof,source:f.outputs[0],
     at:'2026-11-01'}).changed,false);
   delete f.content.fields[MASTER_FIELD];
-  assert.throws(()=>nextApprovedCreativeMaster({...f,source:f.outputs[0],
+  assert.throws(()=>nextApprovedCreativeMaster({...f,evidence:f.proof,source:f.outputs[0],
     at:'2026-11-01'}),e=>e.code==='CREATIVE_MASTER_REPLAY_MISSING');
 });
