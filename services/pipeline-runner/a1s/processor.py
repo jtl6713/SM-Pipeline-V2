@@ -27,6 +27,7 @@ from integrations.google_drive import GoogleDriveClient
 from item4.settings import pipeline_settings
 
 logger = logging.getLogger(__name__)
+_START_LOCK = threading.Lock()
 
 SCAN_QUERY = f"'{GDRIVE_INGESTION_FOLDER}' in parents and trashed = false and mimeType contains 'video/'"
 SCAN_FIELDS = "files(id,name,mimeType,size,fileExtension,createdTime,videoMediaMetadata)"
@@ -201,17 +202,26 @@ def _resolve_files(
     return list(files_by_id.values())
 
 
-def _active_job_ids(client: AirtableClient) -> set[str]:
+def _job_state_ids(client: AirtableClient) -> tuple[set[str], set[str]]:
+    """One read for active locks and prior failures, to avoid Airtable cooldown."""
     rows = client.list_records(
         PIPELINE_SETTINGS_TABLE,
-        formula="AND({Active}=1,FIND('A1_JOB_',{Setting_Name})=1)",
-        max_records=100, fields=["Setting_Name"],
+        formula="FIND('A1_JOB_',{Setting_Name})=1",
+        max_records=150, fields=["Setting_Name", "Setting_Value", "Active"],
     )
-    return {
-        str((row.get("fields") or {}).get("Setting_Name") or "")[len("A1_JOB_"):]
-        for row in rows
-        if str((row.get("fields") or {}).get("Setting_Name") or "").startswith("A1_JOB_")
-    }
+    active: set[str] = set()
+    failed: set[str] = set()
+    for row in rows:
+        fields = row.get("fields") or {}
+        name = str(fields.get("Setting_Name") or "")
+        if not name.startswith("A1_JOB_"):
+            continue
+        file_id = name[len("A1_JOB_"):]
+        if fields.get("Active"):
+            active.add(file_id)
+        elif str(fields.get("Setting_Value") or "").startswith("failed_"):
+            failed.add(file_id)
+    return active, failed
 
 
 def _write_state(client: AirtableClient, record_id: str, *, active: bool, value: str, notes: str) -> None:
@@ -223,6 +233,17 @@ def _write_state(client: AirtableClient, record_id: str, *, active: bool, value:
 
 
 def _create_state(client: AirtableClient, *, file_id: str, name: str, size: int, value: str) -> str:
+    # A manual retry reuses its prior inactive failed state instead of creating
+    # a second Setting_Name row. Active records are never overwritten.
+    old = client.list_records(PIPELINE_SETTINGS_TABLE,
+        formula=f'{{Setting_Name}}="A1_JOB_{file_id}"', max_records=2)
+    if len(old) > 1 or (old and (old[0].get("fields") or {}).get("Active")):
+        return ""
+    if old:
+        client.update_record(PIPELINE_SETTINGS_TABLE, old[0]["id"], {
+            "Active": True, "Setting_Value": value, "Notes": A1S_JOB_NOTES,
+        })
+        return str(old[0]["id"])
     created = client.create_records(
         PIPELINE_SETTINGS_TABLE,
         [
@@ -242,8 +263,9 @@ def _clear_state(client: AirtableClient, record_id: str, *, value: str, notes: s
     if not record_id:
         return
     try:
+        # Retain an inactive failure record so automatic queue drains cannot
+        # endlessly re-submit the same broken file.
         _write_state(client, record_id, active=False, value=value, notes=notes)
-        client.delete_record(PIPELINE_SETTINGS_TABLE, record_id)
     except Exception:
         logger.exception("A1S failed to clear job state %s", record_id)
 
@@ -332,6 +354,22 @@ def process_request(
             "jobs": jobs,
             "started_count": 0,
         }
+    # Serialize the preflight, Airtable lease creation, and job submission.
+    # This protects against simultaneous Operations clicks and A2 cron pulses.
+    if not dry_run and not _START_LOCK.acquire(blocking=False):
+        return {"processed": False, "reason": "active_compression_in_progress",
+                "started_count": 0, "queued_count": 0}
+    try:
+        return _process_scan(
+            drive_file_id=drive_file_id, dry_run=dry_run, inline=inline, sleep=sleep,
+        )
+    finally:
+        if not dry_run:
+            _START_LOCK.release()
+
+
+def _process_scan(*, drive_file_id: str | None, dry_run: bool, inline: bool,
+                  sleep: Callable[[float], None] | None) -> dict[str, Any]:
     sleeper = sleep or ((lambda _seconds: None) if inline else time.sleep)
     preview: dict[str, Any] = {
         "make_scenario_id": MAKE_SCENARIO_ID,
@@ -346,13 +384,15 @@ def process_request(
     preview["files_found"] = bool(files)
     preview["threshold_bytes"] = threshold
     poller_url = _poller_url(client)
-    active_ids = _active_job_ids(client) if not dry_run else set()
+    active_ids, failed_ids = _job_state_ids(client) if not dry_run else (set(), set())
     skipped: list[dict[str, Any]] = []
     candidates: list[dict[str, Any]] = []
     for item in files:
         file_id = str(item.get("id") or "")
         has_job = file_id in active_ids
-        reason = eligibility_reason(
+        reason = ("previous_failure_requires_review"
+                  if file_id in failed_ids and not drive_file_id and not dry_run else None)
+        reason = reason or eligibility_reason(
             item,
             threshold_bytes=threshold,
             has_active_job=has_job,
