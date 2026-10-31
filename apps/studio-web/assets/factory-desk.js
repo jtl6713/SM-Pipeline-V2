@@ -1311,36 +1311,19 @@
     apply.disabled = true;
     status.textContent = "Checking rendered output formats…";
     try {
-      const response = await fetchJson("/api/production-requests/" +
-        encodeURIComponent(requestId) + "/outputs");
+      // Matching is authoritative on the Worker; the Factory queue may be
+      // paginated and must never determine which sibling receives a hold.
+      const response = await fetchJson("/api/factory/outputs/" +
+        encodeURIComponent(sourceId) + "/correction-matches?production_request_id=" +
+        encodeURIComponent(requestId));
       if (state.pendingFactoryFeedback !== pending) return;
-      const sourceRows = (Array.isArray(response.records) ? response.records : [])
-        .filter(row => row?.enabled === true &&
-          Array.isArray(row.platform_output_links) &&
-          row.platform_output_links.includes(sourceId));
-      if (sourceRows.length !== 1) throw new Error("Source output mapping is not uniquely resolved.");
-      const signature = String(sourceRows[0]?.render_format?.key || "");
-      if (!signature) throw new Error("The source format mapping is incomplete.");
-      const eligible = (state.desk?.lanes?.needs_eyes || [])
-        .filter(card => card.kind === "output" && canReviewActions(card) &&
-          String(card.production_request_id || "") === requestId);
-      const eligibleById = new Map(eligible.map(card => [card.id, card]));
-      const found = new Set();
-      const matches = [];
-      for (const row of response.records || []) {
-        if (row?.enabled !== true || row?.render_format?.key !== signature) continue;
-        for (const id of row.platform_output_links || []) {
-          const card = eligibleById.get(id);
-          if (!card || found.has(id)) continue;
-          if (String(card.profile_id || "") !==
-              String(eligibleById.get(sourceId)?.profile_id || "")) continue;
-          if (String(card.content_item_id || "") !==
-              String(eligibleById.get(sourceId)?.content_item_id || "")) continue;
-          found.add(id);
-          matches.push({ id, platform: row.platform, output_type: row.output_type });
-        }
-      }
-      if (!found.has(sourceId)) throw new Error("Source output is no longer review-ready.");
+      if (response?.source_output_id !== sourceId ||
+          response?.production_request_id !== requestId)
+        throw new Error("Correction preview identity changed.");
+      const matches = Array.isArray(response.matching_outputs)
+        ? response.matching_outputs : [];
+      if (!matches.some(row => row.id === sourceId))
+        throw new Error("Source output is no longer review-ready.");
       pending.matches = matches;
       status.textContent = matches.length > 1
         ? matches.length + " compatible, review-ready outputs found."
