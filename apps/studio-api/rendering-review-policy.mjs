@@ -43,10 +43,30 @@ const isDispatching = o => Boolean(o?.publish_started_at || o?.publish_locked_at
   o?.irreversible_dispatch_started);
 const humanIntent = v => v === "explicit_button" || v === "explicit_go_ahead";
 const current = s => s.attempts.find(a => a.id === s.current_attempt_id);
+// A review scope is always constructed server-side from authenticated profile
+// membership and persisted output mappings. '*' removes a format allowlist,
+// NOT the profile check or the existing publication/render safety checks.
+export function authorizedManualReviewPolicy(authorizedProfileIds = [], {
+  output_types = ["*"], enabled = false,
+} = {}) {
+  const ids = [...new Set((Array.isArray(authorizedProfileIds) ? authorizedProfileIds : [])
+    .filter(id => /^rec[A-Za-z0-9]{14}$/.test(text(id))))];
+  return Object.freeze({
+    ...REVIEW_PILOT,
+    enabled: enabled === true && ids.length > 0,
+    profile_ids: Object.freeze(ids),
+    output_types: Object.freeze(Array.isArray(output_types) &&
+      output_types.length ? [...new Set(output_types.map(text).filter(Boolean))] : []),
+    // Never enable automatic enrollment from a global profile policy.
+    manual_admission: true, sample_percent: 0, quality_auto_admission: false,
+    scheduled_auto_admission: false,
+  });
+}
 const eligible = (o, p) =>
-  p.profile_ids.includes(text(o?.profile_id)) &&
-  p.output_types.includes(text(o?.output_type)) &&
-  lower(o?.platform) === "instagram";
+  Array.isArray(p?.profile_ids) && p.profile_ids.includes(text(o?.profile_id)) &&
+  Array.isArray(p?.output_types) &&
+  (p.output_types.includes("*") || p.output_types.includes(text(o?.output_type))) &&
+  Boolean(text(o?.platform)) && Boolean(text(o?.output_type));
 
 export function reviewEligibility(output, policy = REVIEW_PILOT, admission = "manual") {
   if (!policy?.enabled) return { allowed: false, reason: "FEATURE_DISABLED" };
