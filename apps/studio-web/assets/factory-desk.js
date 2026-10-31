@@ -1440,7 +1440,20 @@
         ? await mutateDesk({ ...requestPayload, note: notes })
         : await mutateDesk({ ...pending.payload, note: notes });
       const requestId = String(desk?.result?.production_request_id || pending.payload.production_request_id || "").trim();
+      if (matching && (desk?.result?.status !== "accepted" ||
+          !Array.isArray(desk?.result?.outputs) && !desk?.result?.outputs)) {
+        throw new Error("Selected outputs were not all placed on verified review holds. Check correction status before retrying.");
+      }
       closeFactoryFeedback();
+      if (matching) {
+        setStatus(desk?.result?.message || "Selected corrections accepted; each output is held for Rendering Review.");
+        if (typeof window.StudioRenderingReview?.openOutputById === "function") {
+          await window.StudioRenderingReview.openOutputById(pending.payload.id);
+        } else {
+          document.getElementById("navRenderingReview")?.click();
+        }
+        return;
+      }
       if (pending.payload?.action === "return_to_review" || pending.payload?.action === "start_render_review") {
         if (desk?.result?.review_notes_saved!==true || desk?.result?.review_hold_active!==true)
           throw new Error("Review notes or publication hold could not be verified.");
