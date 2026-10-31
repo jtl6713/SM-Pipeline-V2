@@ -31,8 +31,8 @@ async function authenticate(request,env){
   if(mismatch!==0)deny("RENDER_AUTH_DENIED","Internal render consumer token required",403);
 }
 function assertHeld(session,hold,output,job,outputId,jobId){
-  if(session?.output_id!==outputId||session.profile_id!=="recT2rbKX3MF7cVFU"||
-     session.output_type!=="Instagram Reel"||
+  if(session?.output_id!==outputId||!rec.test(txt(session.profile_id))||
+     !txt(session.output_type)||
      session.state!=="queued"||session.review_hold?.active!==true||
      session.current_attempt_id!==job?.attempt_id||
      session.active_job?.id!==jobId||
@@ -40,13 +40,16 @@ function assertHeld(session,hold,output,job,outputId,jobId){
      hold?.verified!==true||hold?.active!==true||
      hold.owner!==session.id||hold.id!==session.review_hold.id||
      hold.output_id!==outputId||
-     output?.id!==outputId||output.profile_id!=="recT2rbKX3MF7cVFU"||
-     output.platform!=="Instagram"||output.output_type!=="Instagram Reel"||
+     output?.id!==outputId||output.profile_id!==session.profile_id||
+     output.platform!==(session.platform||
+       (session.profile_id==="recT2rbKX3MF7cVFU"&&
+        session.output_type==="Instagram Reel"?"Instagram":null))||
+     output.output_type!==session.output_type||
      output.review_hold_active!==true||output.publish_locked_by||
      output.publish_started_at||output.publish_locked_at||output.platform_media_id||
      output.platform_post_id||output.published_at||
      /^(published|publishing|dispatched)$/i.test(txt(output.publish_status)))
-    deny("RENDER_JOB_AUTHORITY_STALE","Render job no longer owns a held Chicago attempt");
+    deny("RENDER_JOB_AUTHORITY_STALE","Render job no longer owns the exact held profile/output attempt");
 }
 export async function claimReviewRenderJob({
   request,env,operations,
