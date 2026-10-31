@@ -14,11 +14,12 @@ from a1p.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from a1p.state import parse_job_value, payload_from_row, should_resume_job
 from a1s.compressor import delete_job, download_output, poll_job
 from airtable.client import AirtableClient
-from airtable.constants import PIPELINE_SETTINGS_TABLE
+from airtable.constants import MEDIA_ASSETS_TABLE, PIPELINE_SETTINGS_TABLE
 from asset.constants import (
     A1P_MAX_RESULT_BYTES,
     A1P_POLL_SLEEP_SECONDS,
     GDRIVE_INGESTION_FOLDER,
+    GDRIVE_VIDEO_FOLDER,
 )
 from asset.helpers import parse_int
 from carousel.timeutil import iso_ms
@@ -28,20 +29,24 @@ from item4.settings import pipeline_settings
 logger = logging.getLogger(__name__)
 
 
-def _compressed_names(source_name: str) -> tuple[str, str]:
-    stem = re.sub(r"\.[^.]+$", "", source_name or "video")
-    return f"{stem}_compressed", f"{stem}_compressed.mp4"
+def _compressed_names(source_name: str, source_id: str = "") -> tuple[str, str]:
+    stem = re.sub(r"\\.[^.]+$", "", source_name or "video")
+    # Catalog videos with identical names/sizes still have distinct immutable IDs.
+    suffix = f"__{source_id}" if source_id else ""
+    return f"{stem}_compressed", f"{stem}{suffix}_compressed.mp4"
 
 
 def _escape_drive_query(value: str) -> str:
     return (value or "").replace("\\", "\\\\").replace("'", "\\'")
 
 
-def _existing_output(drive: GoogleDriveClient, filename: str, expected_size: int) -> dict[str, Any]:
+def _existing_output(
+    drive: GoogleDriveClient, filename: str, expected_size: int, folder_id: str = GDRIVE_INGESTION_FOLDER,
+) -> dict[str, Any]:
     escaped = _escape_drive_query(filename)
     rows = drive.list_files(
         query=(
-            f"'{GDRIVE_INGESTION_FOLDER}' in parents and name = '{escaped}' "
+            f"'{folder_id}' in parents and name = '{escaped}' "
             "and trashed = false"
         ),
         page_size=20,
@@ -52,6 +57,44 @@ def _existing_output(drive: GoogleDriveClient, filename: str, expected_size: int
         if parse_int(row.get("size"), 0) == expected_size and str(row.get("mimeType") or "").startswith("video/"):
             return row
     return {}
+
+
+def _catalog_source(client: AirtableClient, file_id: str) -> dict[str, Any] | None:
+    """Resolve one exact catalog record. Never match by a duplicated filename."""
+    escaped = _escape_drive_query(file_id)
+    rows = client.list_records(
+        MEDIA_ASSETS_TABLE,
+        formula=f'{{Google Drive File ID}}="{escaped}"',
+        max_records=2,
+        fields=[
+            "Asset Name", "Google Drive File ID", "Google Drive URL",
+            "Drive_Access_Status", "Asset_Description", "File_Size_Bytes",
+        ],
+    )
+    if len(rows) > 1:
+        raise RuntimeError("Multiple Media Assets reference the source Drive ID; manual review required")
+    return rows[0] if rows else None
+
+
+def _register_catalog_derivative(
+    client: AirtableClient, record: dict[str, Any], *,
+    source_id: str, derivative_id: str, filename: str, result_size: int,
+) -> None:
+    """Atomic Airtable record patch after validating the Drive derivative."""
+    fields = record.get("fields") or {}
+    if str(fields.get("Google Drive File ID") or "") != source_id:
+        raise RuntimeError("Source Media Asset changed during compression; refusing stale update")
+    existing_notes = str(fields.get("Asset_Description") or "").strip()
+    marker = f"Compression source master Drive ID: {source_id}"
+    note = existing_notes if marker in existing_notes else "\\n".join(filter(None, [existing_notes, marker]))
+    client.update_record(MEDIA_ASSETS_TABLE, record["id"], {
+        "Google Drive File ID": derivative_id,
+        "Google Drive URL": f"https://drive.google.com/uc?export=download&id={derivative_id}",
+        "MIME_Type": "video/mp4",
+        "File_Extension": "mp4",
+        "File_Size_Bytes": result_size,
+        "Asset_Description": note[:95000],
+    }, typecast=True)
 
 
 def _cleanup_job(job_id: str) -> None:
@@ -270,30 +313,49 @@ def process_request(
     binary, output_mime = download_output(job)
     if len(binary) != result_size:
         raise RuntimeError("Downloaded compressor output size did not match the completed job")
-    title, filename = _compressed_names(str(source_name or "video.mp4"))
     drive = GoogleDriveClient()
-    existing = _existing_output(drive, filename, result_size)
-    uploaded = existing or drive.upload_file(GDRIVE_INGESTION_FOLDER, filename, binary, output_mime or "video/mp4")
+    catalog = _catalog_source(client, str(source_file_id or "")) if source_file_id else None
+    original = drive.get_file(source_file_id, fields="id,parents,trashed") if source_file_id else {}
+    if not original or original.get("trashed"):
+        raise RuntimeError("Source master missing or trashed; original must be preserved")
+    source_parents = [str(v) for v in (original.get("parents") or [])]
+    # Catalog assets use a separate derivative, never a recycled input Drive ID.
+    # Ingestion masters are archived as originals when their replacement is ready.
+    is_catalog = bool(catalog)
+    if not is_catalog and GDRIVE_INGESTION_FOLDER not in source_parents:
+        raise RuntimeError("Source is no longer in ingestion and has no catalog record; refusing unsafe replacement")
+    folder = GDRIVE_VIDEO_FOLDER if is_catalog else GDRIVE_INGESTION_FOLDER
+    title, filename = _compressed_names(
+        str(source_name or "video.mp4"), str(source_file_id or "") if is_catalog else "",
+    )
+    existing = _existing_output(drive, filename, result_size, folder)
+    uploaded = existing or drive.upload_file(folder, filename, binary, output_mime or "video/mp4")
     new_id = str(uploaded.get("id") or "")
     verified = drive.get_file(new_id, fields="id,name,mimeType,size,parents,trashed") if new_id else {}
     new_size = parse_int(verified.get("size"), 0) or 0
     verified_parents = [str(value) for value in (verified.get("parents") or [])]
     if (
-        not new_id
-        or new_id == source_file_id
-        or new_size != result_size
+        not new_id or new_id == source_file_id or new_size != result_size
         or str(verified.get("mimeType") or "") != "video/mp4"
-        or GDRIVE_INGESTION_FOLDER not in verified_parents
-        or bool(verified.get("trashed"))
+        or folder not in verified_parents or bool(verified.get("trashed"))
     ):
-        raise RuntimeError("Compressed Drive replacement did not pass verification; original preserved")
-    if source_file_id:
-        source = drive.get_file(source_file_id, fields="id,parents,trashed")
-        if not bool(source.get("trashed")):
-            drive.trash_file(source_file_id)
+        raise RuntimeError("Compressed Drive derivative did not pass verification; original preserved")
+
+    if is_catalog:
+        # Retain the source master and all linked Airtable records/associations.
+        if str((catalog.get("fields") or {}).get("Drive_Access_Status") or "").lower() == "public":
+            drive.share_anyone_reader(new_id)
+        _register_catalog_derivative(
+            client, catalog, source_id=str(source_file_id),
+            derivative_id=new_id, filename=filename, result_size=new_size,
+        )
+    else:
+        # Move the original OUT of the watched ingestion folder but do not trash it.
+        drive.move_file(source_file_id, GDRIVE_VIDEO_FOLDER, remove_parent_id=GDRIVE_INGESTION_FOLDER)
         source_after = drive.get_file(source_file_id, fields="id,parents,trashed")
-        if not bool(source_after.get("trashed")):
-            raise RuntimeError("Compressed replacement verified but original could not be moved to trash")
+        if source_after.get("trashed") or GDRIVE_VIDEO_FOLDER not in (source_after.get("parents") or []):
+            raise RuntimeError("Original could not be safely archived; compressed copy retained")
+
     _cleanup_job(job_id)
     value = f"finished|{job_id}|{attempt_n}|{source_file_id}|{new_id}|{verified.get('name') or filename}|{new_size}|{now}"
     _write_state(
@@ -301,13 +363,16 @@ def process_request(
         state_record_id,
         active=False,
         value=value,
-        notes="Replacement verified and original moved to Drive trash. No public Drive permission was used.",
+        notes=("Catalog derivative validated; source preserved." if is_catalog
+               else "Compressed replacement verified; original moved to Drive video archive."),
     )
     _delete_state(client, state_record_id)
     preview["new_file_id"] = new_id
     preview["new_name"] = title
     preview["new_size"] = new_size
-    preview["source_trashed"] = bool(source_file_id)
+    preview["source_trashed"] = False
+    preview["source_preserved"] = True
+    preview["catalog_updated"] = is_catalog
     preview["reused_existing_output"] = bool(existing)
     _continue_after_finish()
     return {"processed": True, "status": "finished", **preview}
