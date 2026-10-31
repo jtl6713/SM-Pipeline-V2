@@ -48,7 +48,8 @@ test("a stale exact-output binding cannot block a held V2, but permissions and h
   f.args.authorization.permissions.outputs_review=true;
   f.args.loadWorkspace=async()=>({ok:true,publication_hold_verified:false,session});
   await assert.rejects(()=>serveReviewAttemptVideo(f.args),e=>e.status===409);
-  assert.equal(f.calls(),0);
+  // The initial valid preview streams once; denied requests add no reads.
+  assert.equal(f.calls(),1);
 });
 test("rejects mismatched persistent attempt, missing artifact and unready status",async()=>{
   const f=fixture();
