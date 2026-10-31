@@ -26,7 +26,7 @@ test("accept exact owned active and rights-cleared city watermark catalog source
 });
 test("never accept missing, foreign, inactive, ambiguous or rights-unverified city branding",()=>{
   for(const value of [null,[],[asset(driveId,other)], [asset(foreign,profile)],
-    [asset(),asset(foreign,profile,"City_other.png")],
+    [asset(),{...asset(foreign,profile),id:id(11)}],
     [{...asset(),fields:{...asset().fields,Active:false}}],
     [{...asset(),fields:{...asset().fields,Rights_Status:"Unknown"}}],
     [{...asset(),fields:{...asset().fields,MIME_Type:"image/jpeg"}}],
