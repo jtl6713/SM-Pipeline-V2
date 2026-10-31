@@ -107,6 +107,12 @@ class Operations:
             "width": 1080, "height": 1350,
         }
 
+    def verify_generated_rights(self, output_id, slot_id, file_id, prompt, sha256):
+        assert output_id == OID and slot_id == "rec00000000000002"
+        assert file_id.startswith("file-new-owned")
+        assert "daytime" in prompt and len(sha256) == 64
+        return True
+
     def commit_manifest(self, job, manifest):
         assert job["attempt_id"] == manifest["attempt_id"]
         self.committed = deepcopy(manifest)
@@ -210,6 +216,15 @@ class TestIsolatedGallery(unittest.TestCase):
             run(ops=ops)
         self.assertIsNone(ops.committed)
         self.assertEqual(ops.uploaded, 1)
+
+    def test_generated_image_without_independent_rights_receipt_is_denied(self):
+        ops=Operations()
+        ops.verify_generated_rights=lambda *args: False
+        with self.assertRaisesRegex(GalleryRevisionDenied,"rights_unverified"):
+            run(ops=ops)
+        self.assertIsNone(ops.committed)
+        self.assertTrue(ops.reserved)
+        self.assertEqual(ops.generated,1)
 
 
 if __name__ == "__main__":
