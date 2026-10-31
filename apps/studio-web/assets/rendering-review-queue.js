@@ -608,7 +608,7 @@
             const result=await post('/api/rendering-review/outputs/'+
               encodeURIComponent(entry.output_id)+'/approve',{
               expected_version:session.version,attempt_id:current.id,
-              client_request_id:safeRequestId(),
+              client_request_id:state.approvalKeys.get(approvalKey),
             });
             if(result.accepted!==true||result.factory_ready!==true||
                result.factory_handoff?.factory_ready!==true||
