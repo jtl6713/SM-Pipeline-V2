@@ -1,4 +1,5 @@
 import { loadAuthoritativeFactoryCorrection } from "./factory-correction-authority.mjs";
+import { protectedReviewRunnerScope } from "./rendering-review-internal-scope.mjs";
 import { factoryCorrectionEligible } from "./factory-correction-selection.mjs";
 import { submitFactoryCorrectionBatch } from "./factory-correction-batch.mjs";
 import { factoryCorrectionReceiptStore } from "./factory-correction-receipts.mjs";
@@ -1593,8 +1594,7 @@ export default {
         let adapter;
         const authorizeOutput=async outputId=>{
           const view=await adapter.readOutput(outputId);
-          return view.profile_id===CHICAGO_PROFILE_ID &&
-            view.platform==="Instagram" && view.output_type==="Instagram Reel";
+          return protectedReviewRunnerScope(view,outputId,env);
         };
         adapter=makeRenderingReviewAirtableOperations({
           env,airtableFetch,listRecords:reviewListRecords,readField:f,
@@ -1650,8 +1650,7 @@ export default {
         let adapter;
         const authorizeOutput=async outputId=>{
           const view=await adapter.readOutput(outputId);
-          return view.profile_id===CHICAGO_PROFILE_ID &&
-            view.platform==="Instagram" && view.output_type==="Instagram Reel";
+          return protectedReviewRunnerScope(view,outputId,env);
         };
         adapter=makeRenderingReviewAirtableOperations({
           env,airtableFetch,listRecords:reviewListRecords,readField:f,
@@ -1780,8 +1779,7 @@ export default {
         let adapter;
         const authorizeOutput=async outputId=>{
           const output=await adapter.readOutput(outputId);
-          return output.profile_id===CHICAGO_PROFILE_ID&&
-            output.platform==="Instagram"&&output.output_type==="Instagram Reel";
+          return protectedReviewRunnerScope(output,outputId,env);
         };
         adapter=makeRenderingReviewAirtableOperations({
           env,airtableFetch,listRecords:reviewListRecords,readField:f,
