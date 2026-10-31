@@ -2491,6 +2491,7 @@ export default {
         const snapshot=await readFactoryCorrectionSnapshot(id,requestId);
         return respond(request,env,{
           ok:true,source_output_id:id,production_request_id:requestId,
+          batch_enabled:globalReviewEnrollmentEnabled(env),
           render_format:snapshot.source?.render_format||null,
           matching_outputs:snapshot.matches.map(({id,platform,output_type})=>({
             id,platform,output_type,
