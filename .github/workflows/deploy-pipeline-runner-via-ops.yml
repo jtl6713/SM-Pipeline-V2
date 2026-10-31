@@ -58,7 +58,9 @@ jobs:
             services/pipeline-runner/tests/test_rendering_review_audio_qa.py \
             services/pipeline-runner/tests/test_rendering_review_media_http.py \
             services/pipeline-runner/tests/test_ame_encoder.py \
-            services/pipeline-runner/tests/test_studio_compress.py
+            services/pipeline-runner/tests/test_studio_compress.py \
+            services/pipeline-runner/tests/test_a1s_eligibility.py \
+            services/pipeline-runner/tests/test_a1_local_compressor.py
 
       - name: Deploy Pipeline Runner through allowlisted Ops action
         shell: bash
@@ -459,3 +461,7 @@ jobs:
 
 # 2026-10-30: guarded deploy of merged PR #1380 mixed image/video original-passthrough validation.
 # Source preservation only. Do not render, enqueue, approve, upload to Meta or publish #9389.
+
+# 2026-10-30: Deploy source-preserving oversized video recovery PR #1381. Gated A1S/A1P tests.
+# Prioritize verified Compression Test.MOV ingestion; preserve all ten originals,
+# deduplicate solely by immutable Drive IDs, and never auto-publish anything.
