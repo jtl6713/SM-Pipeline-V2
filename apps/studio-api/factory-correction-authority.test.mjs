@@ -57,3 +57,16 @@ test("cross-content mapping and a missing source are rejected",async()=>{
   f.mappings[0].enabled=false;
   await assert.rejects(loadAuthoritativeFactoryCorrection(f.ops),e=>e.status===409);
 });
+
+test("render support is derived from exact persisted Remotion composition and mapping",async()=>{
+  const f=fixture();
+  // Absence of saved original props never authorizes a new revision job.
+  assert.equal((await loadAuthoritativeFactoryCorrection(f.ops)).outputs[0].review_render_supported,false);
+  f.outputs[0].fields.Remotion_Props_JSON=JSON.stringify({
+    compositionId:"ChicagoShiningPhotoSequence",width:1080,height:1920,fps:30,
+    clips:[{src:"https://source.test/asset.jpg"}]
+  });
+  const live=await loadAuthoritativeFactoryCorrection(f.ops);
+  assert.equal(live.outputs[0].review_render_supported,true);
+  assert.equal(live.outputs[1].review_render_supported,false);
+});

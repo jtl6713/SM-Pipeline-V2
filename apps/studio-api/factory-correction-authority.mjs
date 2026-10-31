@@ -4,6 +4,7 @@
  * builder. No mirror/cache/desk-row can authorize an output mutation.
  */
 import { factoryCorrectionMatches } from "./factory-correction-selection.mjs";
+import {correctionRenderCapability} from "./factory-correction-render-capability.mjs";
 
 const text=v=>String(v??"").trim();
 const rec=v=>/^rec[A-Za-z0-9]{14}$/.test(text(v));
@@ -14,11 +15,15 @@ function fail(message,status=409) {
 }
 function normalize(row,{requestId,contentId,profileId,mapping,field}) {
   const get=name=>field(row,name);
+  const capability=correctionRenderCapability(mapping.render_format,get("Remotion_Props_JSON"));
   return {
     id:row.id,production_request_id:requestId,
     content_item_id:contentId,profile_id:profileId,
     enabled:mapping.enabled===true,
     render_format:mapping.render_format,
+    review_render_supported:capability.supported,
+    review_render_reason:capability.reason,
+    review_render_contract:capability.contract||null,
     platform:text(mapping.platform),output_type:text(mapping.output_type),
     render_status:select(get("Render_Status")),
     output_status:select(get("Output_Status")),

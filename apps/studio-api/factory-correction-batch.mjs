@@ -91,6 +91,15 @@ export async function submitFactoryCorrectionBatch({
       authorized_profile_ids: snapshot.authorized_profile_ids,
       selected_output_ids, note, client_request_id: key,
     });
+    // Reject an unsupported render contract BEFORE any hold, schedule
+    // revocation, receipt creation, or Producer job can be attempted.
+    const unsupported=plan.output_ids.filter(id=>{
+      const row=snapshot.outputs.find(item=>item.id===id);
+      return !row || row.review_render_supported===false;
+    });
+    if(unsupported.length)throw fail(
+      "No certified post-render revision renderer for selected output(s): "+
+      unsupported.join(", "),"UNSUPPORTED_RENDER_CONTRACT");
     const hash = await fingerprint(plan);
     let receipt = existingReceipt;
     if (receipt && (receipt.source_output_id !== source_output_id ||

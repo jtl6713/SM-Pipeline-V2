@@ -85,3 +85,16 @@ test("writes are never attempted without a complete trusted adapter",async()=>{
   const f=fixture();
   await assert.rejects(submitFactoryCorrectionBatch({...f.args,operations:{}}),/missing/);
 });
+
+test("unsupported original media format is rejected before any hold or receipt",async()=>{
+  const f=fixture();
+  const original=f.ops.readAuthoritativeSnapshot;
+  f.ops.readAuthoritativeSnapshot=async id=>{
+    const snapshot=await original(id);
+    return {...snapshot,outputs:snapshot.outputs.map(row=>
+      row.id===f.outputs[2].id?{...row,review_render_supported:false}:row)};
+  };
+  await assert.rejects(()=>submitFactoryCorrectionBatch(f.args),/No certified post-render/);
+  assert.equal(f.calls.length,0);
+  assert.equal(f.receipts.size,0);
+});

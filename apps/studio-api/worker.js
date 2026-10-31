@@ -2494,8 +2494,11 @@ export default {
           ok:true,source_output_id:id,production_request_id:requestId,
           batch_enabled:globalReviewEnrollmentEnabled(env),
           render_format:snapshot.source?.render_format||null,
-          matching_outputs:snapshot.matches.map(({id,platform,output_type})=>({
+          matching_outputs:snapshot.matches.map(({id,platform,output_type,
+            review_render_supported,review_render_reason})=>({
             id,platform,output_type,
+            review_render_supported:review_render_supported===true,
+            review_render_reason:review_render_reason||null,
           })),
         });
       }

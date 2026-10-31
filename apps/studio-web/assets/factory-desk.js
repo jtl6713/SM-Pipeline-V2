@@ -1326,9 +1326,15 @@
       if (!matches.some(row => row.id === sourceId))
         throw new Error("Source output is no longer review-ready.");
       pending.matches = matches;
-      status.textContent = matches.length > 1
-        ? matches.length + " compatible, review-ready outputs found."
-        : "No additional review-ready outputs share this format.";
+      const certified=matches.filter(row=>row.review_render_supported===true);
+      const uncertified=matches.length-certified.length;
+      status.textContent = certified.length + " compatible, certified output(s) available for correction." +
+        (uncertified ? " " + uncertified + " output(s) require a different revision renderer." : "");
+      if (!certified.some(row=>row.id===sourceId)) {
+        status.textContent += " The selected source requires another revision renderer; use the existing content workflow.";
+        apply.disabled=true;
+        return;
+      }
       if(response.batch_enabled!==true){
         status.textContent += " Protected corrections are not enabled on this release.";
         apply.disabled = true;
@@ -1349,10 +1355,14 @@
         const submit = $("factoryFeedbackSubmit");
         if (submit) submit.textContent = "Submit selected correction";
       }
-      rows.innerHTML = matches.map(row =>
-        '<label class="factory-correction-match-row"><input type="checkbox" data-factory-correction-output="' +
-        esc(row.id) + '" checked><span>' + esc([row.platform, row.output_type].filter(Boolean).join(" · ")) +
-        '</span></label>').join("");
+      rows.innerHTML = matches.map(row => {
+        const canRender = row.review_render_supported===true;
+        const caption = [row.platform,row.output_type].filter(Boolean).join(" · ") +
+          (canRender ? "" : " · Not yet supported for revision");
+        return '<label class="factory-correction-match-row"><input type="checkbox" data-factory-correction-output="' +
+          esc(row.id) + '"' + (canRender ? " checked" : " disabled") +
+          '><span>' + esc(caption) + '</span></label>';
+      }).join("");
     } catch (error) {
       if (state.pendingFactoryFeedback !== pending) return;
       status.textContent = "Apply to all unavailable: " + String(error.message || error) +
