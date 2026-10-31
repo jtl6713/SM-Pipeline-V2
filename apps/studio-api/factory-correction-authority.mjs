@@ -5,6 +5,7 @@
  */
 import { factoryCorrectionMatches } from "./factory-correction-selection.mjs";
 import {correctionRenderCapability} from "./factory-correction-render-capability.mjs";
+import {profileWatermarkPreflight} from "./factory-correction-branding-preflight.mjs";
 
 const text=v=>String(v??"").trim();
 const rec=v=>/^rec[A-Za-z0-9]{14}$/.test(text(v));
@@ -13,16 +14,26 @@ const select=v=>typeof v==="string"?v:text(v?.name);
 function fail(message,status=409) {
   const err=new Error(message);err.status=status;err.code="CORRECTION_AUTHORITY_INVALID";throw err;
 }
-function normalize(row,{requestId,contentId,profileId,mapping,field}) {
+function normalize(row,{requestId,contentId,profileId,mapping,field,watermarkAssets}) {
   const get=name=>field(row,name);
   const capability=correctionRenderCapability(mapping.render_format,get("Remotion_Props_JSON"));
+  // A remotely accessible V1 watermark URL alone does not prove ownership.
+  // Reject unsupported non-Chicago outputs BEFORE any review hold/vacate.
+  // The Runner independently repeats ownership and Drive-byte validation.
+  const branding=capability.supported&&profileId!=="recT2rbKX3MF7cVFU"
+    ?profileWatermarkPreflight({
+      profileId,originalPropsJson:get("Remotion_Props_JSON"),
+      assets:watermarkAssets,field,
+    })
+    :{supported:true,reason:null};
+
   return {
     id:row.id,production_request_id:requestId,
     content_item_id:contentId,profile_id:profileId,
     enabled:mapping.enabled===true,
     render_format:mapping.render_format,
-    review_render_supported:capability.supported,
-    review_render_reason:capability.reason,
+    review_render_supported:capability.supported&&branding.supported,
+    review_render_reason:capability.reason||branding.reason,
     review_render_contract:capability.contract||null,
     platform:text(mapping.platform),output_type:text(mapping.output_type),
     render_status:select(get("Render_Status")),
@@ -47,6 +58,7 @@ function normalize(row,{requestId,contentId,profileId,mapping,field}) {
 
 export async function loadAuthoritativeFactoryCorrection({
   outputId,productionRequestId,authorizedProfileIds,readOutput,readContent,readMappings,
+  readWatermarkCatalog,
   field=(record,key)=>record?.fields?.[key],
 }) {
   if(!rec(outputId)||!rec(productionRequestId)||typeof readOutput!=="function"||
@@ -81,6 +93,12 @@ export async function loadAuthoritativeFactoryCorrection({
     mapping.platform_output_links?.map(id=>({id,mapping}))||[]);
   if(candidates.length>40||candidates.some(({id})=>!rec(id)))
     fail("Compatible output mapping exceeds the verified bound");
+  // Missing/unreadable city-owned catalog is an explicit unsupported result;
+  // never create batch receipts or holds that cannot produce a branded V2.
+  const watermarkAssets=profileId==="recT2rbKX3MF7cVFU"
+    ?[]
+    :typeof readWatermarkCatalog==="function"
+      ?await readWatermarkCatalog().catch(()=>null):null;
   const seen=new Set(),authoritative=[];
   for(const {id,mapping} of candidates){
     if(seen.has(id))continue;
@@ -92,7 +110,7 @@ export async function loadAuthoritativeFactoryCorrection({
     if(ownContent!==contentId||(ownRequest&&ownRequest!==productionRequestId))
       fail("A mapped sibling belongs to another content/request");
     authoritative.push(normalize(row,{
-      requestId:productionRequestId,contentId,profileId,mapping,field,
+      requestId:productionRequestId,contentId,profileId,mapping,field,watermarkAssets,
     }));
   }
   const authoritativeSource=authoritative.find(row=>row.id===outputId);
