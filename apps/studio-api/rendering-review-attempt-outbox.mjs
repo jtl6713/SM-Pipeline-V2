@@ -26,13 +26,15 @@ function holdMatches(s,hold,outputId){
     hold.output_id===outputId;
 }
 function requireOutput(o,session,manifest,outputId){
-  if(o?.id!==outputId||o.profile_id!==CHICAGO_PROFILE_ID||
-     o.output_type!=="Instagram Reel"||o.platform!=="Instagram"||
+  if(o?.id!==outputId||o.profile_id!==session.profile_id||
+     o.output_type!==session.output_type||
+     o.platform!==(session.platform||(session.profile_id===CHICAGO_PROFILE_ID&&
+       session.output_type==="Instagram Reel"?"Instagram":null))||
      o.do_not_publish!==true||o.review_hold_active!==true||
      o.publish_started_at||o.publish_locked_at||o.publish_locked_by||
      o.platform_media_id||o.platform_post_id||o.published_at||
      /^(published|publishing|dispatched)$/i.test(str(o.publish_status)))
-    deny("OUTPUT_NOT_HELD","Exact Chicago Reel must remain held and undispatched");
+    deny("OUTPUT_NOT_HELD","Exact review output must remain held and undispatched");
   const source=(session.attempts||[]).find(a=>a.id===manifest.source_attempt_id);
   const active=(session.attempts||[]).find(a=>a.id===session.current_attempt_id);
   // An exact idempotent retry sees the NEW queued attempt as current, so its
@@ -87,7 +89,7 @@ export async function commitReviewAttempt({
       deny("INTEGRATION_MISSING","Trusted operation "+name+" unavailable",503);
   }
   if(await operations.authorizeReview(output_id)!==true)
-    deny("REVIEW_SCOPE_DENIED","Not authorized for this Chicago Reel",403);
+    deny("REVIEW_SCOPE_DENIED","Not authorized for this output",403);
   const fingerprint=await digest(["review-commit-v1",actor,output_id,
     expected_version,plan_version,plan_hash,client_request_id]);
   const keyDigest=await digest(["review-commit-id-v1",actor,output_id,client_request_id]);
@@ -114,7 +116,12 @@ export async function commitReviewAttempt({
     if(!plan||!manifest||plan.hash!==plan_hash||
        plan.version!==plan_version||plan.frozen!==true||
        plan.missing_assets?.length!==0||manifest.output_id!==output_id||
-       manifest.profile_id!==CHICAGO_PROFILE_ID||
+       manifest.profile_id!==previous.profile_id||
+       manifest.output_type!==previous.output_type||
+       (manifest.platform||(manifest.profile_id===CHICAGO_PROFILE_ID&&
+         manifest.output_type==="Instagram Reel"?"Instagram":null))!==
+         (previous.platform||(previous.profile_id===CHICAGO_PROFILE_ID&&
+           previous.output_type==="Instagram Reel"?"Instagram":null))||
        manifest.source_attempt_id!==plan.source_attempt_id||
        manifest.candidate_hash!==previous.producer_candidate?.hash||
        previous.producer_candidate?.stale===true||
