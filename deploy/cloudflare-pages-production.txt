@@ -600,3 +600,5 @@ Deploy Studio UI 0.6.782-mobile-overview-scroll. Preserve All Profiles horizonta
 2026-10-30: Studio 0.6.788-approval-feedback fixes review approval completion UX. Match the verified Factory handoff receipt, show immediate V-number approval progress and confirmed Factory status alongside the action, and prevent duplicate submission after success or uncertain response. No new review acceptance or publish activity.
 
 Deploy Factory Story output #9393 selection normalization and browser cache refresh; include global mixed-type selection regression. 2026-10-30.
+
+Deploy Studio UI 0.6.789-factory-story-selection after correcting mandatory release version increment; resolve output #9393 selection and verify production checks. 2026-10-30.
