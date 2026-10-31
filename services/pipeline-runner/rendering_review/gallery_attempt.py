@@ -123,12 +123,13 @@ def build_isolated_gallery_attempt(
       upload_image(name, bytes) -> {id} (Drive staging folder, never original)
       verify_drive_image(file_id, sha256, byte_count) -> {
         mime_type, width, height, sha256, byte_count, google_drive_verified }
+      verify_generated_rights(output_id, slot_id, file_id, prompt, sha256) -> bool
       commit_manifest(job, manifest) -> bool (durable CAS)
       read_manifest(job) -> manifest (readback)
     """
     needed = ("verify_hold", "reserve_attempt", "generate_image",
               "watermark_image", "upload_image", "verify_drive_image",
-              "commit_manifest", "read_manifest")
+              "verify_generated_rights", "commit_manifest", "read_manifest")
     if not all(callable(getattr(operations, n, None)) for n in needed):
         deny("gallery_trusted_operations_missing")
     originals = _source(job, original, plan, authorized_profiles)
@@ -176,6 +177,12 @@ def build_isolated_gallery_attempt(
             not 128 <= verified["height"] <= 12000 or
             not check_ratio(verified["width"], verified["height"], plan["aspect_ratio"])):
             deny("gallery_revision_drive_readback_unverified")
+        # An image-generation response alone is not a rights receipt.
+        # Promotion requires an independent trusted clearance decision.
+        if operations.verify_generated_rights(
+            output, old["slot_id"], drive_id, change["prompt"], sha(branded)
+        ) is not True:
+            deny("gallery_generated_image_rights_unverified")
         results.append({**old, "drive_file_id": drive_id, "mime_type": "image/png",
           "width": verified["width"], "height": verified["height"],
           "byte_count": len(branded), "sha256": sha(branded),
