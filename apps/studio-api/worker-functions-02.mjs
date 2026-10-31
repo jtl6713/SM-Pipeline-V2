@@ -2934,7 +2934,7 @@ export async function cleanProductionRequestPayload(payload, env) {
   const vibeCut = studioIsVibeCut(payload?.production_notes);
   const vibeHorizontal = vibeCut && isHorizontalVibeCutAspect(payload?.production_notes);
   const contentTypeRaw = vibeCut ? (vibeHorizontal ? "Longform Video" : "Vertical Short Video") : String(payload?.content_type || "").trim();
-  const contentType
+  const contentType = contentTypeRaw
     ? normalizeChoice(contentTypeRaw, PR_CONTENT_TYPES, "", "Master content type")
     : null;
 
