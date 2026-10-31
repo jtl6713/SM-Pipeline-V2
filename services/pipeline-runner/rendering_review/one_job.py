@@ -471,18 +471,18 @@ def render_exact_attempt(output_id,job_id,*,client=None,drive=None,
     if profile_id==CHICAGO:
         brand_url=brand_watermark_url(client)
     else:
-        # Never replace another city’s original brand with Chicago branding.
-        # The V1 Remotion artifact is authoritative for that city's mark.
+        # A previously rendered URL is not a rights/tenant receipt. Before
+        # touching a non-Chicago review job, verify its exact profile-owned
+        # Watermark Media Asset in authoritative Airtable and Google Drive.
+        from rendering_review.profile_watermark import (
+            require_owned_profile_watermark_url, ProfileWatermarkUnavailable,
+        )
         brand_url=str(props.get("watermarkUrl") or "")
-        parsed=urlsplit(brand_url)
-        query=parse_qs(parsed.query)
-        file_ids=query.get("id") or []
-        if (parsed.scheme!="https" or parsed.netloc!="drive.google.com" or
-            parsed.path!="/uc" or query.get("export")!=["download"] or
-            len(file_ids)!=1 or not IDENTITY.fullmatch(file_ids[0]) or parsed.fragment):
-            fail("review_profile_watermark_unverified")
-        wm=drive.get_file(file_ids[0])
-        if wm.get("id")!=file_ids[0] or not str(wm.get("mimeType") or "").startswith("image/"):
+        try:
+            require_owned_profile_watermark_url(
+                client=client,drive=drive,profile_id=profile_id,url=brand_url,
+            )
+        except ProfileWatermarkUnavailable:
             fail("review_profile_watermark_unverified")
     if not brand_url.startswith("https://"):
         fail("review_watermark_url_unavailable")
