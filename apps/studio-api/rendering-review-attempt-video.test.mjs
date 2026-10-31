@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
 import {serveReviewAttemptVideo,fetchTrustedRunnerReviewMedia} from "./rendering-review-attempt-video.mjs";
 const output="rec0uVrVeiUM6shp9", id="rrattempt_1234567890abcdef";
 const file="1XZ-_ARlXoP5mwILho13f81vmWQlpgTs4";
@@ -118,4 +119,9 @@ test("Runner relay fails closed for untrusted origin and malformed range",async(
     outputId:output,attemptId:id,
     request:new Request("https://studio.example/media",{headers:{Range:"nonsense"}}),
   }),e=>e.status===416);
+});
+
+test("Worker awaits preview promise so a rejected V2 stream becomes JSON rather than Error 1101",()=>{
+  const source=readFileSync(new URL("./worker.js",import.meta.url),"utf8");
+  assert.match(source,/if \(isReviewAttemptPreviewRoute\) \{\s*\/\/[^\n]*\n\s*return await serveReviewAttemptVideo\(/);
 });
