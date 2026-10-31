@@ -401,6 +401,7 @@ import {
   validateVibeCutSourceAssets,
   vibeCutProductionDefaults,
   vibeCutRenderSettings,
+  vibeCutIdeaFields,
 } from "./vibe-cut.mjs";
 import {
   capabilityMatrixResponse,
@@ -3686,6 +3687,11 @@ export async function createIdea(request, env, authorization, ctx = null) {
   }
 
   const input = cleanIdeaCreatePayload(payload);
+  const vibeCut = String(payload?.input_kind || "").trim() === "vibe-cut" || isVibeCutNotes(input.summary);
+  const sourceAspect = String(payload?.source_aspect || "").trim().toLowerCase();
+  if (vibeCut && sourceAspect && !["vertical", "horizontal"].includes(sourceAspect)) {
+    throw new HttpError(400, "Vibe Cut source aspect must be vertical or horizontal");
+  }
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
   const duplicateTitle = await studioFindRecentDuplicateTitle(input.title, (kind, formula, field) => {
     const table = kind === "idea" ? env.AIRTABLE_IDEA_TABLE_ID : env.AIRTABLE_CONTENT_TABLE_ID;
@@ -3712,6 +3718,10 @@ export async function createIdea(request, env, authorization, ctx = null) {
     Production_Carousel_Slide_Count: 8,
     Studio_Photo_Wait_Status: "Waiting",
   };
+  if (vibeCut) Object.assign(fields, vibeCutIdeaFields({
+    sourceAspect, width: payload?.source_video_width, height: payload?.source_video_height,
+    targetSeconds: payload?.vibe_target_seconds ?? payload?.video_duration ?? 15,
+  }));
   if (input.summary) fields.Idea_Summary = input.summary;
   const inferredLocation = suggestPrimaryLocationFromIdea({
     fields: {
@@ -3729,7 +3739,7 @@ export async function createIdea(request, env, authorization, ctx = null) {
   });
   // Never convert a successful Idea create into a 500 merely because image
   // matching fails. Cron's Waiting scan owns bounded retries.
-  if (ctx?.waitUntil) {
+  if (!vibeCut && ctx?.waitUntil) {
     ctx.waitUntil(matchNewlyCreatedIdeaPhotos(env, created, authorization).catch((error) => {
       console.warn("New Idea immediate photo match failed", created.id, String(error?.message || error).slice(0, 180));
     }));
@@ -3849,10 +3859,23 @@ export async function updateIdea(request, env, url, authorization) {
   } catch (error) {
     throw new HttpError(400, error instanceof Error ? error.message : "Invalid production options");
   }
+  const vibeCut = isVibeCutNotes(f(record, "Idea_Summary"))
+    || String(payload?.input_kind || "").trim() === "vibe-cut";
+  const sourceAspect = String(payload?.source_aspect || "").trim().toLowerCase()
+    || (String(f(record, "Production_Content_Type") || "").trim() === "Longform Video" ? "horizontal" : "vertical");
+  if (vibeCut && !["vertical", "horizontal"].includes(sourceAspect)) {
+    throw new HttpError(400, "Vibe Cut source aspect must be vertical or horizontal");
+  }
   const fields = {
     Candidate_Title: input.title,
     Idea_Summary: input.summary || null,
     ...productionFields,
+    ...(vibeCut ? vibeCutIdeaFields({
+      sourceAspect,
+      width: payload?.source_video_width,
+      height: payload?.source_video_height,
+      targetSeconds: payload?.video_duration ?? f(record, "Production_Video_Duration") ?? 15,
+    }) : {}),
   };
   if (Object.prototype.hasOwnProperty.call(payload || {}, "primary_location")) {
     fields.Primary_Location = input.primary_location || null;
