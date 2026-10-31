@@ -2939,9 +2939,14 @@ export async function cleanProductionRequestPayload(payload, env) {
     : null;
 
   const platformsRaw = Array.isArray(payload?.platforms) ? payload.platforms : [];
-  const platforms = vibeCut
-    ? (vibeHorizontal ? ["YouTube"] : ["Instagram", "Facebook", "TikTok", "YouTube"])
-    : canonicalProductionPlatforms(platformsRaw);
+  const platforms = canonicalProductionPlatforms(platformsRaw);
+  if (vibeCut) {
+    // Preserve the generic platform canonicalization contract for non-video
+    // workflows; Vibe Cut then enforces its orientation-based destinations.
+    const expectedPlatforms = vibeHorizontal
+      ? ["YouTube"] : ["Instagram", "Facebook", "TikTok", "YouTube"];
+    platforms.splice(0, platforms.length, ...expectedPlatforms);
+  }
   const invalidPlatforms = platforms.filter(v => !PR_PLATFORMS.has(v));
   if (invalidPlatforms.length) throw new HttpError(400, `Unsupported platform(s): ${invalidPlatforms.join(", ")}`);
 
