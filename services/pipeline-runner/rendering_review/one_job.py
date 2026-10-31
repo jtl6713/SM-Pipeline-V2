@@ -282,7 +282,7 @@ def _render_sources(client,request,original_by_id,props,plan,*,drive=None,profil
             f.get("Rights_Status")!="Owned" or
             f.get("Asset_Status")!="Available" or
             f.get("Active") is not True or f.get("Do_Not_Use") is True or
-            one_link(f.get("Content_Profile"))!=CHICAGO):
+            one_link(f.get("Content_Profile"))!=profile_id):
             fail("review_source_rights_or_profile_lost")
         clip=clips_by_record.get(record_id)
         master_variant=by_asset.get(asset_id)
