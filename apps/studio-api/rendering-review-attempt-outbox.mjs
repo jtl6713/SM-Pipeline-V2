@@ -117,7 +117,12 @@ export async function commitReviewAttempt({
        plan.version!==plan_version||plan.frozen!==true||
        plan.missing_assets?.length!==0||manifest.output_id!==output_id||
        manifest.profile_id!==previous.profile_id||
-       manifest.output_type!==previous.output_type||
+       // Historical Chicago V1 plans predate the explicit platform/type
+       // bindings. Only that original pilot may use the audited legacy type;
+       // all new profile/format plans must carry the exact immutable type.
+       (manifest.output_type||(manifest.profile_id===CHICAGO_PROFILE_ID&&
+         previous.output_type==="Instagram Reel"?"Instagram Reel":null))!==
+         previous.output_type||
        (manifest.platform||(manifest.profile_id===CHICAGO_PROFILE_ID&&
          manifest.output_type==="Instagram Reel"?"Instagram":null))!==
          (previous.platform||(previous.profile_id===CHICAGO_PROFILE_ID&&
