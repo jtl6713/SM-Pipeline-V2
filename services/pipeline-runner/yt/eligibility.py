@@ -5,6 +5,7 @@ from typing import Any
 
 from ap0.public_cover import native_grid_cover_required
 from ap0.public_mp4 import is_public_publish_url
+from publish.rendering_review import rendering_review_reason
 from asset.helpers import as_bool
 from render.fields import field_str
 from yt.constants import STAGE_YT1, STAGE_YT2, STAGE_YT4
@@ -53,6 +54,9 @@ def yt0_eligibility_reason(
         return "not_youtube"
     if not as_bool(record.get("fields", {}).get("Auto_Publish_Enabled"), False):
         return "auto_publish_disabled"
+    held = rendering_review_reason(record)
+    if held:
+        return held
     if as_bool(record.get("fields", {}).get("Do_Not_Publish"), False):
         return "do_not_publish"
     if field_str(record, "Platform_Post_ID"):
@@ -94,6 +98,9 @@ def ytp1_eligibility_reason(
 ) -> str | None:
     if not str(record.get("id") or "").strip():
         return "missing_record_id"
+    held = rendering_review_reason(record)
+    if held:
+        return held
     if _ci(field_str(record, "Platform")) != "youtube":
         return "not_youtube"
     if _ci(field_str(record, "YouTube_Stage")) != _ci(STAGE_YT1):
@@ -123,6 +130,9 @@ def yts1_eligibility_reason(
 ) -> str | None:
     if not str(record.get("id") or "").strip():
         return "missing_record_id"
+    held = rendering_review_reason(record)
+    if held:
+        return held
     if _ci(field_str(record, "YouTube_Stage")) != _ci(STAGE_YT2):
         return "youtube_stage_not_yt2"
     if not field_str(record, "YouTube_Upload_Job_ID"):
@@ -146,6 +156,9 @@ def yts2_eligibility_reason(
 ) -> str | None:
     if not str(record.get("id") or "").strip():
         return "missing_record_id"
+    held = rendering_review_reason(record)
+    if held:
+        return held
     if _ci(field_str(record, "YouTube_Stage")) != _ci(STAGE_YT2):
         return "youtube_stage_not_yt2"
     if not field_str(record, "YouTube_Video_ID"):
@@ -168,6 +181,9 @@ def yts3_eligibility_reason(
 ) -> str | None:
     if not str(record.get("id") or "").strip():
         return "missing_record_id"
+    held = rendering_review_reason(record)
+    if held:
+        return held
     if _ci(field_str(record, "YouTube_Stage")) != _ci(STAGE_YT4):
         return "youtube_stage_not_yt4"
     if not field_str(record, "YouTube_Video_ID"):
