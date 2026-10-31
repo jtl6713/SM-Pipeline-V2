@@ -389,6 +389,9 @@
 
   function ezWizardExpectedUploads(answers = {}) {
     const kind = String(answers.inputKind || "").trim();
+    // A Vibe Cut's one required upload is video even if stale photo-wait
+    // wizard state is present. Never interpret this as a photo quota.
+    if (kind === EZ_INPUTS.VIBE_CUT) return 1;
     if (answers.photoWait) return 0;
     if (kind === EZ_INPUTS.SINGLE_AI || kind === EZ_INPUTS.MULTIPLE_AI) return 0;
     if (kind === EZ_INPUTS.SINGLE_PHOTO || kind === EZ_INPUTS.FINISHED_VIDEO || kind === EZ_INPUTS.VIBE_CUT) return 1;
