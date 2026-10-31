@@ -785,3 +785,5 @@ Rendering Review V3 source validation + Producer executable timeline canary code
 2026-10-31: Deploy Worker 0.10.706-scripted-short-exact-title. Script a Short honors 'Please use this exact title:' even when the creative brief is flattened, and preserves user-authored curly quotes/em dashes. Production Airtable Content #1868 was corrected in place (Idea/PR/Content/6 outputs) with Force exact. Run protected deployment and verify live /health version; no publish, schedule or approval mutations.
 
 2026-10-31: Deploy Worker 0.10.707-dynamic-format-groups. /api/production-requests/:id/outputs provides fail-closed render_format metadata from Airtable Production Request Outputs Pipeline_Family and active Platform Output Mappings Format/Aspect_Ratio. Existing authority and scheduling unchanged.
+
+2026-10-31: Deploy Worker 0.10.708 Vibe Cut intake P1. Normalize Idea and Production Request to source-video workflow; clear stale photo fields; guard city identity during media callbacks. Verify Idea 2050 and six existing outputs. No publishing or reupload.

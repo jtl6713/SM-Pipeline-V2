@@ -612,3 +612,5 @@ Deploy Studio UI 0.6.789-factory-story-selection after correcting mandatory rele
 2026-10-31: Deploy Studio UI 0.6.795-factory-submit-immediate. Factory Submit Approvals enables immediately when eligible outputs are selected instead of waiting for the background rollout refresh.
 
 2026-10-31: Deploy Studio UI 0.6.796 dynamic matching-format override scopes. Uses Pipeline_Family and active DB mapping Format/Aspect_Ratio instead of fixed platform lists; single-output is default, sibling schedule/publish fields untouched. Verify protected Pages custom domain and BUILD_ID.
+
+2026-10-31: Deploy Studio UI 0.6.797 Vibe Cut intake P1. Source-video upload validation independent of photos; Ideas video cards never show question-mark photo ranges/listeners. Verify UI build/cache contract and Idea 2050. No publishing.
