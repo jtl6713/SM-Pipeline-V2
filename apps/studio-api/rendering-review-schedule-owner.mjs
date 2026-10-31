@@ -79,8 +79,12 @@ export function makeRenderingReviewAtomicScheduleHooks({
       // Readiness runs BEFORE the review hold is written. The mandatory
       // live hold/owner readback happens separately inside readOwned/vacate.
       !dispatchPresent(fields)&&
-      fields[H.hold_active]!==true &&
-      !text(fields[H.hold_owner])&&!text(fields[H.hold_id]);
+      ((fields[H.hold_active]!==true&&!text(fields[H.hold_owner])&&
+        !text(fields[H.hold_id])&&!text(fields[H.session_id]))||
+       (fields[H.hold_active]===true&&fields.Do_Not_Publish===true&&
+        text(fields[H.hold_owner])===descriptor.review_owner&&
+        text(fields[H.session_id])===descriptor.review_owner&&
+        Boolean(text(fields[H.hold_id]))));
   }
 
   async function revokeScheduleUnderHold({output_id,review_hold_id,review_owner}={}){
