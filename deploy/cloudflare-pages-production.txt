@@ -602,3 +602,5 @@ Deploy Studio UI 0.6.782-mobile-overview-scroll. Preserve All Profiles horizonta
 Deploy Factory Story output #9393 selection normalization and browser cache refresh; include global mixed-type selection regression. 2026-10-30.
 
 Deploy Studio UI 0.6.789-factory-story-selection after correcting mandatory release version increment; resolve output #9393 selection and verify production checks. 2026-10-30.
+
+2026-10-31: Deploy Studio UI 0.6.790-factory-mixed-select-refresh from merged PR #1397. Force new Factory selection runtime for mixed Instagram/YouTube/TikTok/Facebook outputs; retain server-signed approval matrix and all publish guards. Verify new custom-domain build and cache keys.
