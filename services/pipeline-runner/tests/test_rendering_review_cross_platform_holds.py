@@ -63,6 +63,7 @@ class ReviewCrossPlatformHoldTests(unittest.TestCase):
         for marker in MARKERS:
             with self.subTest(marker=marker):
                 r=record("Instagram",marker)
+                r["fields"]["Platform_Output_Type"]="Instagram Story"
                 self.assertEqual(create_eligibility_reason(r), BLOCK)
                 self.assertEqual(poll_eligibility_reason(r), BLOCK)
 
