@@ -6,7 +6,7 @@ import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
 import { withPhase5SyncLease } from "./supabase-sync-lease.mjs";
 import { homeApprovedExceptionKind, homeIsUnpublishedFailure } from "./profile-summary-classification.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
-import { submittedApprovalAge, verifySubmittedPromotionOwnership, SUBMITTED_RECOVERY_GRACE_MS } from "./submitted-approval-recovery.mjs";
+import { submittedApprovalAge, verifySubmittedPromotionOwnership, orderSubmittedRecoveryRequests, SUBMITTED_RECOVERY_GRACE_MS } from "./submitted-approval-recovery.mjs";
 import {
   studioReadSource,
   studioSupabaseConfigured,
@@ -8945,8 +8945,8 @@ export async function studioHealPromotedMissingFanout(env, { limit = 8, ctx = nu
     return [];
   });
   let attemptedSubmitted = false;
-  for (const pendingRequest of pending || []) {
-    if (attemptedSubmitted) break; // no fanout overlap from this cron tick
+  for (const pendingRequest of orderSubmittedRecoveryRequests(pending, f)) {
+    if (attemptedSubmitted) break; // one verified fanout attempt per cron tick
     const age = submittedApprovalAge(f(pendingRequest, "Submitted_At"));
     if (age === null) {
       console.warn("Studio submitted approval missing timestamp; administrator investigation required", pendingRequest.id);
@@ -9019,12 +9019,35 @@ export async function studioHealPromotedMissingFanout(env, { limit = 8, ctx = nu
       }
       const finalized = await finalizeProductionRequestPromotion(env, latest.id, idea, ctx);
       if (String(f(finalized?.requestRecord, "Request_Status") || "") === "Promoted") {
+        // Only a confirmed Promoted readback clears the recovery error.
+        await airtableFetch(env, PRODUCTION_REQUEST_TABLE, latest.id, {
+          method: "PATCH",
+          body: JSON.stringify({
+            fields: {
+              Studio_Approval_Recovery_Error: null,
+              Studio_Approval_Recovery_Last_Attempt_At: new Date().toISOString(),
+            },
+            typecast: false,
+          }),
+        }).catch((diagnosticError) => console.warn("Studio approval recovery success diagnostic failed", latest.id, diagnosticError));
         console.info("Studio Submitted approval independently recovered", latest.id, parent.id, {
           missing_parent_link_repaired: latestProof.repairLink,
         });
       }
     } catch (error) {
       console.warn("Studio submitted approval recovery deferred", pendingRequest.id, error);
+      // Persist why automatic recovery failed. Never alter status/owner
+      // and never rerun I3; the next tick can fairly try another request.
+      await airtableFetch(env, PRODUCTION_REQUEST_TABLE, pendingRequest.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            Studio_Approval_Recovery_Error: String(error?.message || error).slice(0, 1400),
+            Studio_Approval_Recovery_Last_Attempt_At: new Date().toISOString(),
+          },
+          typecast: false,
+        }),
+      }).catch((diagnosticError) => console.warn("Studio approval recovery diagnostic write failed", pendingRequest.id, diagnosticError));
     }
   }
 
