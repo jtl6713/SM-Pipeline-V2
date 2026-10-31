@@ -131,7 +131,7 @@ jobs:
           node --check apps/studio-api/factory-correction-authority.mjs
           node --check apps/studio-api/factory-correction-batch.mjs
           node --check apps/studio-api/factory-correction-render-capability.mjs
-          node --test apps/studio-api/factory-correction-render-capability.test.mjs apps/studio-api/factory-correction-selection.test.mjs apps/studio-api/factory-correction-authority.test.mjs apps/studio-api/factory-correction-batch.test.mjs apps/studio-web/factory-matching-correction.test.mjs
+          node --test apps/studio-api/factory-correction-branding-preflight.test.mjs apps/studio-api/factory-correction-render-capability.test.mjs apps/studio-api/factory-correction-selection.test.mjs apps/studio-api/factory-correction-authority.test.mjs apps/studio-api/factory-correction-batch.test.mjs apps/studio-web/factory-matching-correction.test.mjs
       - name: Python AP1-IG common owner fail-closed contracts
         run: PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_review_dispatch_claim.py' -v
       - name: Protected render ledger HTTP bridge tests
