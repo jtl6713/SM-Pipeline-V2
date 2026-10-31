@@ -52,8 +52,8 @@ def extract_renderer():
 
     names = {
         "json": json, "MEDIA": "Media Assets",
-        "IDENTITY": re.compile(r"[A-Za-z0-9_-]{8,120}\\Z"),
-        "RECORD": re.compile(r"rec[A-Za-z0-9]{14}\\Z"),
+        "IDENTITY": re.compile(r"[A-Za-z0-9_-]{8,120}\Z"),
+        "RECORD": re.compile(r"rec[A-Za-z0-9]{14}\Z"),
         "one_link": lambda value: value[0] if isinstance(value, list)
                     and len(value) == 1 else "",
         "fail": deny,
