@@ -8,7 +8,7 @@ const signature=(family,format,aspect)=>({
   key:productionFormatSignature({pipeline_family:family,format,aspect_ratio:aspect}),
 });
 function fixture(){
-  const profile=id(90),content=id(91),request=id(92);
+  const profile="recT2rbKX3MF7cVFU",content=id(91),request=id(92);
   const video=signature("Video","Vertical Short Video","9:16");
   const story=signature("Story","Vertical Story","9:16");
   const outputs=Array.from({length:5},(_,i)=>({
@@ -69,4 +69,29 @@ test("render support is derived from exact persisted Remotion composition and ma
   const live=await loadAuthoritativeFactoryCorrection(f.ops);
   assert.equal(live.outputs[0].review_render_supported,true);
   assert.equal(live.outputs[1].review_render_supported,false);
+});
+
+test("non-Chicago Factory outputs must pass city-owned watermark preflight before hold",async()=>{
+  const f=fixture(),la="recF7UAn0LkMZZrWZ";
+  f.requestContent.fields.Content_Profile=[la];
+  f.ops.authorizedProfileIds=[la];
+  const file="1WQyd5W1__HkaEkWyC38IMErW8702Rd4u";
+  f.outputs[0].fields.Remotion_Props_JSON=JSON.stringify({
+    compositionId:"ChicagoShiningPhotoSequence",width:1080,height:1920,fps:30,
+    clips:[{src:"https://source.test/asset.jpg"}],
+    watermarkUrl:"https://drive.google.com/uc?export=download&id="+file,
+  });
+  const withoutCatalog=await loadAuthoritativeFactoryCorrection(f.ops);
+  assert.equal(withoutCatalog.outputs[0].review_render_supported,false);
+  assert.equal(withoutCatalog.outputs[0].review_render_reason,"PROFILE_WATERMARK_CATALOG_UNAVAILABLE");
+  f.ops.readWatermarkCatalog=async()=>[{
+    id:id(301),fields:{
+      Content_Profile:[la],Asset_Role:"Watermark",Asset_Status:"Available",
+      Rights_Status:"Owned",Active:true,MIME_Type:"image/png",
+      "Google Drive File ID":file,"Asset Name":"LA_watermark_small.png",
+    },
+  }];
+  assert.equal((await loadAuthoritativeFactoryCorrection(f.ops)).outputs[0].review_render_supported,true);
+  f.ops.readWatermarkCatalog=async()=>[];
+  assert.equal((await loadAuthoritativeFactoryCorrection(f.ops)).outputs[0].review_render_supported,false);
 });
