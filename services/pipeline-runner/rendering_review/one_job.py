@@ -451,23 +451,7 @@ def render_exact_attempt(output_id,job_id,*,client=None,drive=None,
     output,item,req,props,plan,source,originals,profile_id=_evidence(client,drive,output_id,job_id)
     assets=_render_sources(client,req,originals,props,plan,drive=drive,profile_id=profile_id)
     mix=_source_mix(drive,props,output_id)
-    # Claim only the requested exact job. No scanning and no broad scheduler.
-    request_id="rrclaim_"+hashlib.sha256(
-        ("profile-render-v1|"+profile_id+"|"+output_id+"|"+job_id).encode()).hexdigest()[:48]
-    claim=_post_once(worker,secret,"/api/internal/rendering-review/claim-render-job",
-        {"output_id":output_id,"job_id":job_id,
-         "client_request_id":request_id})
-    if (claim.get("lease_verified") is not True or
-        claim.get("output_id")!=output_id or claim.get("job_id")!=job_id or
-        claim.get("plan_hash")!=plan.get("plan_hash") or
-        not IDENTITY.fullmatch(str(claim.get("attempt_id") or "")) or
-        claim.get("attempt_id")==plan.get("source_attempt_id")):
-        fail("review_claim_unverified")
-    # The claimed ID is the new attempt, NOT the frozen source attempt.
-    job={"state":"claimed","lease_verified":True,
-         **{k:claim[k] for k in ("output_id","job_id","attempt_id",
-         "plan_hash","session_id","lease_owner","lease_fence")}}
-    narration=_voiceover(client,drive,item,plan,claim)
+    # Reject missing or cross-city watermark branding BEFORE claiming a job.
     if profile_id==CHICAGO:
         brand_url=brand_watermark_url(client)
     else:
@@ -486,6 +470,23 @@ def render_exact_attempt(output_id,job_id,*,client=None,drive=None,
             fail("review_profile_watermark_unverified")
     if not brand_url.startswith("https://"):
         fail("review_watermark_url_unavailable")
+    # Claim only the requested exact job. No scanning and no broad scheduler.
+    request_id="rrclaim_"+hashlib.sha256(
+        ("profile-render-v1|"+profile_id+"|"+output_id+"|"+job_id).encode()).hexdigest()[:48]
+    claim=_post_once(worker,secret,"/api/internal/rendering-review/claim-render-job",
+        {"output_id":output_id,"job_id":job_id,
+         "client_request_id":request_id})
+    if (claim.get("lease_verified") is not True or
+        claim.get("output_id")!=output_id or claim.get("job_id")!=job_id or
+        claim.get("plan_hash")!=plan.get("plan_hash") or
+        not IDENTITY.fullmatch(str(claim.get("attempt_id") or "")) or
+        claim.get("attempt_id")==plan.get("source_attempt_id")):
+        fail("review_claim_unverified")
+    # The claimed ID is the new attempt, NOT the frozen source attempt.
+    job={"state":"claimed","lease_verified":True,
+         **{k:claim[k] for k in ("output_id","job_id","attempt_id",
+         "plan_hash","session_id","lease_owner","lease_fence")}}
+    narration=_voiceover(client,drive,item,plan,claim)
     watermark={"verified":True,"authority":"server",
         "profile_id":profile_id,"policy":"retain_current_approved",
         "url":brand_url}
