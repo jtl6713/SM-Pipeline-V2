@@ -10035,6 +10035,24 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
     }
     const existingLinks=arrayOrEmpty(f(outputRow,"Platform_Output"));
     let poId=existingLinks.find(id=>/^rec[A-Za-z0-9]+$/.test(String(id||"")))||null;
+    // When an atomic seed reservation rejects an explicit time, the Platform
+    // Output has already been created and its reverse Airtable link exists.
+    // Reuse that verified record on retry: do NOT create another Story.
+    if(!poId){
+      const inverseIds=[...new Set(arrayOrEmpty(f(outputRow,"Platform Outputs"))
+        .map(id=>String(id||"").trim())
+        .filter(id=>/^rec[A-Za-z0-9]{14}$/.test(id)))];
+      if(inverseIds.length>1) throw new HttpError(409,"Multiple Platform Outputs linked to a single Production Request Output; manual deduplication required");
+      if(inverseIds.length===1){
+        const inverse=await airtableFetch(env,STUDIO_PLATFORM_OUTPUT_TABLE,inverseIds[0]);
+        const ownerOk=arrayOrEmpty(f(inverse,"Production_Request_Output")).includes(outputRow.id)
+          && arrayOrEmpty(f(inverse,"Content_Item")).includes(parent.id)
+          && String(f(inverse,"Platform")||"").trim()===effective.platform
+          && String(f(inverse,"Studio_Output_Type")||"").trim()===effective.output_type;
+        if(!ownerOk) throw new HttpError(409,"Platform Output reverse link owner mismatch; refusing duplicate fanout");
+        poId=inverse.id;
+      }
+    }
     if(!poId && !onlyMissing){
       const proId=String(f(outputRow,"Production_Request_Output_ID")||"").replace(/'/g,"\\'");
       if(proId){
@@ -10072,16 +10090,35 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
         console.warn("Platform Output fanout post-create reconciliation failed", outputRow.id, error);
       }
     }
+    let deferredScheduleMessage="";
     if (atomicSeedHasScheduleMutation && po?.id) {
-      po = await studioAtomicApplyPlatformOutputSeedSchedule(env, {
-        platformOutput: po,
-        desiredSchedule: atomicSeedSchedule,
-        vacate: atomicSeedVacate,
-        operationId: `production-seed:${requestRecord.id}:${outputRow.id}:${po.id}`,
-      });
+      try {
+        po = await studioAtomicApplyPlatformOutputSeedSchedule(env, {
+          platformOutput: po,
+          desiredSchedule: atomicSeedSchedule,
+          vacate: atomicSeedVacate,
+          operationId: `production-seed:${requestRecord.id}:${outputRow.id}:${po.id}`,
+        });
+      } catch(error) {
+        // Production routing is not a publishing approval. If another output
+        // owns the requested time, keep the source+Platform Output but withhold
+        // scheduling until Factory review rather than continually retrying I3.
+        const isConflict=Number(error?.status)===409
+          && String(error?.message||"").includes("Requested Platform Output seed schedule conflicts with another output");
+        if (!isConflict || atomicSeedVacate) throw error;
+        const readback=await airtableFetch(env,STUDIO_PLATFORM_OUTPUT_TABLE,po.id);
+        const hasReservation=Boolean(
+          f(readback,"Scheduled_Post_Date") || f(readback,"Studio_Scheduled_At")
+          || f(readback,"YouTube_Scheduled_Publish_At")
+        );
+        if(hasReservation) throw error;
+        po=readback;
+        deferredScheduleMessage=` Requested time ${atomicSeedSchedule} was NOT reserved (profile/platform conflict). Leave this output unscheduled until the normal approval-stage scheduler allocates an allowed MAE slot.`;
+        console.warn("Studio output routed with unreserved conflicting time",requestRecord.id,outputRow.id);
+      }
     }
     const now=new Date().toISOString();
-    await airtableFetch(env,PRODUCTION_REQUEST_OUTPUT_TABLE,outputRow.id,{method:"PATCH",body:JSON.stringify({fields:{Content_Item:[parent.id],Platform_Output:[po.id],Pipeline_Family:route.pipeline_family,Pipeline_Route_Status:"Routed",Pipeline_Route_Notes:`Single-parent route: ${route.pipeline_family}; Platform Output ${po.id}; Content Item ${parent.id}.`,Routed_At:now,Updated_At:now},typecast:false})});
+    await airtableFetch(env,PRODUCTION_REQUEST_OUTPUT_TABLE,outputRow.id,{method:"PATCH",body:JSON.stringify({fields:{Content_Item:[parent.id],Platform_Output:[po.id],Pipeline_Family:route.pipeline_family,Pipeline_Route_Status:"Routed",Pipeline_Route_Notes:`Single-parent route: ${route.pipeline_family}; Platform Output ${po.id}; Content Item ${parent.id}.${deferredScheduleMessage}`,Routed_At:now,Updated_At:now},typecast:false})});
     routed++;
     workItems.push({production_request_output_record_id:outputRow.id,platform:effective.platform,output_type:effective.output_type,content_item_record_id:parent.id,platform_output_record_id:po.id,routed:true});
   }
