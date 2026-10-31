@@ -218,6 +218,12 @@ export function rankIdeaLibraryFields({
   };
 }
 
+/** A provenance rejection is per-file, not permission to bypass the safety gate. */
+export function photoMatchSkippableOverlayReview(error) {
+  return Number(error?.status) === 422
+    && /Asset held for third-party overlay review/i.test(String(error?.message || ""));
+}
+
 export const IDEA_PHOTO_WAIT_TYPES = new Set(["Carousel", "Photo Set", "Feed Post"]);
 
 export const IDEA_AUTO_LISTEN_TYPES = ["Carousel", "Photo Set", "Feed Post", "Vertical Short Video"];
