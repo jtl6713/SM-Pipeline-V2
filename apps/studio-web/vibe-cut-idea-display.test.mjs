@@ -81,7 +81,7 @@ test("creation sends exact source aspect, profile, and video configuration", () 
   assert.match(app, /content_profile_id: selectedProfileId/);
   assert.match(app, /Vibe Cut requires one source video/);
   assert.match(app, /function ideaIsVideoWorkflow/);
-  assert.match(app, /!ideaIsVideoWorkflow\(r\) &&/);
+  assert.match(app, /const listeningForPhotos = !videoRow &&/);
   assert.match(app, /ideaIsVideoWorkflow\(idea\) \?/);
   assert.match(app, /location_change_confirmed: Boolean\(primaryLocationUserEdited\)/);
 });
