@@ -401,6 +401,7 @@ import {
   validateVibeCutSourceAssets,
   vibeCutProductionDefaults,
   vibeCutRenderSettings,
+  vibeCutIdeaFields,
 } from "./vibe-cut.mjs";
 import {
   capabilityMatrixResponse,
@@ -2128,6 +2129,7 @@ export function mapIdea(record) {
     status: f(record, "Candidate_Status"),
     priority_score: f(record, "Priority_Score"),
     content_type: f(record, "Production_Content_Type"),
+    is_vibe_cut: isVibeCutNotes(f(record, "Idea_Summary")) || isVibeCutNotes(f(record, "Production_Config_Notes")),
     platforms: f(record, "Production_Target_Platforms") || [],
     carousel_slide_count: f(record, "Production_Carousel_Slide_Count"),
     carousel_slide_count_mode: f(record, "Production_Carousel_Slide_Count_Mode") || null,
@@ -3686,6 +3688,15 @@ export async function createIdea(request, env, authorization, ctx = null) {
   }
 
   const input = cleanIdeaCreatePayload(payload);
+  // Creation is the authority: do not create a Carousel first and repair it
+  // after the asynchronous source-video upload has already started.
+  const vibeCut = String(payload?.input_kind || payload?.inputKind || "").trim() === "vibe-cut"
+    || isVibeCutNotes(input.summary) || isVibeCutNotes(payload?.production_notes);
+  const sourceAspect = String(payload?.source_aspect || payload?.sourceAspect || "").trim().toLowerCase()
+    || ((Number(payload?.source_video_width) > Number(payload?.source_video_height)) ? "horizontal" : "vertical");
+  if (vibeCut && !["horizontal", "vertical"].includes(sourceAspect)) {
+    throw new HttpError(400, "Vibe Cut source aspect must be horizontal or vertical");
+  }
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
   const duplicateTitle = await studioFindRecentDuplicateTitle(input.title, (kind, formula, field) => {
     const table = kind === "idea" ? env.AIRTABLE_IDEA_TABLE_ID : env.AIRTABLE_CONTENT_TABLE_ID;
@@ -3711,8 +3722,17 @@ export async function createIdea(request, env, authorization, ctx = null) {
     Production_Carousel_Slide_Count_Max: 8,
     Production_Carousel_Slide_Count: 8,
     Studio_Photo_Wait_Status: "Waiting",
+    // Non-photo video intake overrides the generic stills defaults in this
+    // same Airtable POST. This also prevents the photo-matcher race.
+    ...(vibeCut ? vibeCutIdeaFields({
+      sourceAspect,
+      targetSeconds: payload?.target_seconds ?? payload?.vibe_target_seconds,
+    }) : {}),
   };
   if (input.summary) fields.Idea_Summary = input.summary;
+  if (vibeCut && !isVibeCutNotes(fields.Idea_Summary)) {
+    fields.Idea_Summary = `${String(fields.Idea_Summary || "").slice(0, 4900)}\nCreated from New content (origin=ez-wizard; ez-input=vibe-cut; source-aspect=${sourceAspect}).`.trim();
+  }
   const inferredLocation = suggestPrimaryLocationFromIdea({
     fields: {
       Candidate_Title: input.title,
@@ -3729,7 +3749,7 @@ export async function createIdea(request, env, authorization, ctx = null) {
   });
   // Never convert a successful Idea create into a 500 merely because image
   // matching fails. Cron's Waiting scan owns bounded retries.
-  if (ctx?.waitUntil) {
+  if (ctx?.waitUntil && !vibeCut) {
     ctx.waitUntil(matchNewlyCreatedIdeaPhotos(env, created, authorization).catch((error) => {
       console.warn("New Idea immediate photo match failed", created.id, String(error?.message || error).slice(0, 180));
     }));
@@ -3849,10 +3869,17 @@ export async function updateIdea(request, env, url, authorization) {
   } catch (error) {
     throw new HttpError(400, error instanceof Error ? error.message : "Invalid production options");
   }
+  const vibeCut = isVibeCutNotes(f(record, "Idea_Summary"))
+    || isVibeCutNotes(f(record, "Production_Config_Notes"))
+    || String(payload?.input_kind || "").trim() === "vibe-cut";
   const fields = {
     Candidate_Title: input.title,
     Idea_Summary: input.summary || null,
     ...productionFields,
+    ...(vibeCut ? vibeCutIdeaFields({
+      sourceAspect: payload?.source_aspect || f(record, "Production_Content_Type") === "Longform Video" && "horizontal" || "vertical",
+      targetSeconds: payload?.video_duration ?? f(record, "Production_Video_Duration"),
+    }) : {}),
   };
   if (Object.prototype.hasOwnProperty.call(payload || {}, "primary_location")) {
     fields.Primary_Location = input.primary_location || null;
@@ -5646,9 +5673,16 @@ export async function item4ReconcileMasterAuthority(env, recordId, record = null
 /*__STUDIO_WORKER_END:item4ReconcileMasterAuthority__*/
 
 export async function item4UpdateRequestState(env, recordId, fields) {
+  const patch = { ...fields };
+  // Asset/compression callbacks own only media state. A delayed response must
+  // never reset operator-selected city or source-video classification.
+  if ("Studio_Master_Assets_JSON" in patch || "Studio_Master_Asset_Status" in patch) {
+    delete patch.Primary_Location;
+    delete patch.Master_Content_Type;
+  }
   return airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId, {
     method: "PATCH",
-    body: JSON.stringify({ fields: { ...fields, Updated_At: new Date().toISOString() }, typecast: false }),
+    body: JSON.stringify({ fields: { ...patch, Updated_At: new Date().toISOString() }, typecast: false }),
   });
 }
 /*__STUDIO_WORKER_END:item4UpdateRequestState__*/
