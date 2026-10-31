@@ -3471,6 +3471,17 @@ export default {
     const cronInstant = Number(event?.scheduledTime);
     const cadenceNow = Number.isFinite(cronInstant) && cronInstant > 1e12 ? new Date(cronInstant) : new Date();
     const cadence = studioCronAirtableCadence(cadenceNow, event?.cron || "");
+    // Production approval recovery must not sit behind dozens of unrelated
+    // awaited publish/Factory jobs. Schedule one independent bounded sweep,
+    // before the main cron workload, or stalled Submitted requests never move.
+    // The two older inline heal calls below were removed: only one owner per
+    // five-minute tick may create missing Platform Outputs.
+    if (airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioHealPromotedMissingFanout(env, { limit: cadence.heavy ? 8 : 4, ctx })
+        .catch(error => console.warn("Independent Submitted approval/fanout recovery failed", error)));
+    } else {
+      console.warn("Independent Submitted approval/fanout recovery skipped: Airtable cooldown");
+    }
     // Run the FB3 existing-post verifier independently from Factory's R2 batch
     // recovery. Factory can scan/process hundreds of objects and previously
     // blocked this later task for whole light cron ticks. This separate
@@ -3727,13 +3738,6 @@ export default {
       } catch (error) {
         console.warn("studio produce watchdog failed", error);
       }
-      // Light tick: missing Platform Output fanout for Promoted Vibe Cuts (Adler Short).
-      // Heavy cron still runs the full heal; this unblocks Short gaps between :00/:30.
-      try {
-        await studioHealPromotedMissingFanout(env, { limit: 4, ctx });
-      } catch (error) {
-        console.warn("studio promoted fanout heal (light) failed", error);
-      }
       try {
         await startOrphanedStudioProductionJobs(env);
       } catch (error) {
@@ -3855,11 +3859,6 @@ export default {
         await studioHealAwaitingApprovalStaleRfr(env, { limit: 12 });
       } catch (error) {
         console.warn("studio awaiting-approval stale RFR heal failed", error);
-      }
-      try {
-        await studioHealPromotedMissingFanout(env, { limit: 8, ctx });
-      } catch (error) {
-        console.warn("studio promoted fanout heal failed", error);
       }
       try {
         await advanceStudioProductionOutputs(env, { waitMs: 0 });

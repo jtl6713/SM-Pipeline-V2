@@ -105,3 +105,13 @@ test("Submitted recovery persists failure diagnostics but never fabricates appro
   assert.match(body, /if \(attemptedSubmitted\) break/);
   assert.doesNotMatch(body, /promoteProductionRequestViaI3I4\(/);
 });
+
+test("Submitted approval recovery owns an independent cron task, never two overlapping inline heal calls", () => {
+  const entry = readFileSync(new URL("./worker.js", import.meta.url), "utf8");
+  const calls = [...entry.matchAll(/studioHealPromotedMissingFanout\(env,/g)];
+  assert.equal(calls.length, 1, "exactly one scheduled recovery invocation");
+  const independent = entry.indexOf("ctx.waitUntil(studioHealPromotedMissingFanout(env,");
+  const publish = entry.indexOf("await studioReconcileOverdueScheduledPublishes(env");
+  assert.ok(independent >= 0 && independent < publish, "recovery begins before lengthy publish maintenance");
+  assert.match(entry, /airtableCooldownWaitMs\(\) <= AIRTABLE_SLOT_FAIL_FAST_MS\) \{\s*ctx.waitUntil\(studioHealPromotedMissingFanout/);
+});
