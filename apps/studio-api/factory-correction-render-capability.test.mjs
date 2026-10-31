@@ -17,3 +17,19 @@ test("image, carousel, alternate Vibe Cut and nonvertical renders must not be he
   assert.equal(check(fmt,"").supported,false);
   assert.equal(check(fmt,JSON.stringify({compositionId:"ChicagoShiningPhotoSequence",clips:[]})).supported,false);
 });
+
+test("native image and carousel formats use a separate gallery contract, never MP4",()=>{
+ for(const format of ["Carousel","Photo Set","Single Image","Static Image"]){
+  const result=check({...fmt,format},"");
+  assert.equal(result.supported,false);
+  assert.equal(result.media_kind,"image-set");
+  assert.equal(result.reason,"IMAGE_GALLERY_RENDERER_NOT_VERIFIED");
+  assert.equal(result.required_contract,"studio.render-review.gallery.1");
+ }
+});
+test("alternate Vibe Cut compositions report missing music-only renderer instead of accepting MP4 sequence",()=>{
+ const result=check(fmt,JSON.stringify({
+  compositionId:"VibeCutTimeline",width:1080,height:1920,clips:[{}]}));
+ assert.equal(result.supported,false);
+ assert.equal(result.reason,"VIBE_CUT_RENDERER_NOT_VERIFIED");
+});
