@@ -132,3 +132,17 @@ test('unknown/mismatched registry cannot be treated as approved',()=>{
   assert.throws(()=>projectCreativeMasterGroup({source:f.outputs[0],content:f.content,
     outputs:f.outputs}),e=>e.code==='CREATIVE_MASTER_BINDING_UNVERIFIED');
 });
+
+test('completed Factory transfer replays only the exact preexisting approved master',()=>{
+  const f=fixture();
+  const first=nextApprovedCreativeMaster({...f,source:f.outputs[0],at:'2026-10-31'});
+  f.content.fields[MASTER_FIELD]=JSON.stringify(first.registry);
+  f.session.review_hold.active=false;
+  f.session.factory_handoff={status:'ready_for_factory_approval',
+    attempt_id:a,artifact_id:revised};
+  assert.equal(nextApprovedCreativeMaster({...f,source:f.outputs[0],
+    at:'2026-11-01'}).changed,false);
+  delete f.content.fields[MASTER_FIELD];
+  assert.throws(()=>nextApprovedCreativeMaster({...f,source:f.outputs[0],
+    at:'2026-11-01'}),e=>e.code==='CREATIVE_MASTER_REPLAY_MISSING');
+});

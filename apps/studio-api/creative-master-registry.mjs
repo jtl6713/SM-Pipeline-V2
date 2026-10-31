@@ -82,8 +82,14 @@ export function nextApprovedCreativeMaster({source,content,attempt,session,evide
   const key=group.key;
   if(session?.state!=="approved"||session.output_id!==source.id||
     session.current_attempt_id!==session.approved_attempt_id||
-    session.current_attempt_id!==attempt?.id||session.review_hold?.active!==true)
+    session.current_attempt_id!==attempt?.id)
     fail("CREATIVE_MASTER_SOURCE_NOT_APPROVED");
+  const held=session.review_hold?.active===true;
+  const transferred=session.review_hold?.active===false&&
+    session.factory_handoff?.status==="ready_for_factory_approval"&&
+    session.factory_handoff.attempt_id===attempt?.id&&
+    session.factory_handoff.artifact_id===attempt?.artifact_id;
+  if(!held&&!transferred)fail("CREATIVE_MASTER_HOLD_OR_HANDOFF_UNVERIFIED");
   if(attempt.status!=="ready_for_review"||!file.test(attempt.artifact_id||"")||
     !sha.test(evidence?.sha256||"")||evidence?.audio_verified!==true||
     evidence?.watermark_verified!==true||evidence?.google_drive_verified!==true||
@@ -93,6 +99,9 @@ export function nextApprovedCreativeMaster({source,content,attempt,session,evide
     fail("CREATIVE_MASTER_ARTIFACT_NOT_INDEPENDENTLY_VALIDATED");
   const registry=readCreativeMasterRegistry(content.fields[MASTER_FIELD]);
   const old=registry.masters[key];
+  // A completed handoff can replay only its already-persisted master.
+  // Never create/supersede a master after the output hold was released.
+  if(!held&&!old)fail("CREATIVE_MASTER_REPLAY_MISSING");
   if(old&&(old.source_output_id!==source.id||
     old.content_item_id!==content.id))fail("CREATIVE_MASTER_COMPETING_SOURCE");
   if(old?.approved_attempt_id===attempt.id){
