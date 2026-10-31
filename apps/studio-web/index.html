@@ -2366,6 +2366,17 @@
  <p id="factoryFeedbackScope" class="factory-feedback-scope"></p>
  <p id="factoryFeedbackIntro">Describe exactly what needs to change. Your notes will be saved with the Production Request and the returned outputs for the production manager to review.</p>
  <div id="factoryProducerTranscript" aria-label="Previous Producer conversation" hidden></div>
+ <section id="factoryFeedbackApplySection" class="factory-correction-matches" hidden aria-label="Matching output corrections">
+  <label class="factory-correction-apply-label">
+   <input type="checkbox" id="factoryFeedbackApplyAll">
+   <span>Apply to all matching outputs</span>
+  </label>
+  <p id="factoryFeedbackMatchStatus" class="factory-feedback-scope" role="status">Checking compatible outputs…</p>
+  <fieldset id="factoryFeedbackMatchPicker" hidden disabled>
+   <legend>Matching outputs — uncheck any you do not want to correct</legend>
+   <div id="factoryFeedbackMatchRows"></div>
+  </fieldset>
+ </section>
  <label for="factoryFeedbackNotes" class="factory-feedback-label">Requested changes <span aria-hidden="true">*</span></label>
  <textarea id="factoryFeedbackNotes" rows="7" maxlength="3000" required placeholder="Tell the Producer what to revise. Examples: Please make it 20 seconds. / Please include the photo named Chicago River Night. / Replace narration with: Here is the Chicago River at sunset."></textarea>
  <div class="factory-feedback-hints"><span id="factoryFeedbackHintsText">Producer support for verified exact-text revisions.</span><span id="factoryFeedbackCount">0 / 3000</span></div>
