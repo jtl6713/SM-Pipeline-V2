@@ -15,8 +15,10 @@ const dispatchFields=["Publish_Started_At","Publish_Locked_At","Publish_Locked_B
   "Published_At","Platform_Post_ID","Platform_Post_URL","Platform_Media_ID"];
 function validOutput(row,read,session,attempt){
   if(!row||!session||!attempt||row.id!==session.output_id ||
-    selected(read(row,"Platform"))!=="Instagram" ||
-    selected(read(row,"Platform_Output_Type"))!=="Instagram Reel" ||
+    selected(read(row,"Platform"))!==(session.platform||
+       (session.profile_id===CHICAGO_PROFILE_ID&&
+        session.output_type==="Instagram Reel"?"Instagram":null)) ||
+    selected(read(row,"Platform_Output_Type"))!==session.output_type ||
     value(read(row,"Final_File_ID"))!==attempt.artifact_id ||
     value(read(row,"Final_File_URL"))!==drive(attempt.artifact_id) ||
     selected(read(row,"Render_Status"))!=="Rendered" ||
@@ -56,10 +58,12 @@ export async function returnFactoryRevisionToProducer({output_id,note,client_req
     const row=await o.readRawOutput(output_id);
     const output=await o.readNormalizedOutput(output_id);
     const a=s?.attempts?.find(v=>v.id===s.current_attempt_id);
-    if(!s||s.output_id!==output_id||s.profile_id!==CHICAGO_PROFILE_ID||
-      s.output_type!=="Instagram Reel"||
-      output?.profile_id!==CHICAGO_PROFILE_ID||output?.platform!=="Instagram"||
-      output?.output_type!=="Instagram Reel"||a?.number<2||
+    if(!s||s.output_id!==output_id||
+      !record.test(value(s.profile_id))||!value(s.output_type)||
+      output?.profile_id!==s.profile_id||
+      output?.platform!==(s.platform||(s.profile_id===CHICAGO_PROFILE_ID&&
+        s.output_type==="Instagram Reel"?"Instagram":null))||
+      output?.output_type!==s.output_type||a?.number<2||
       a?.status!=="ready_for_review"||
       !s.factory_handoff||s.factory_handoff.attempt_id!==a?.id||
       s.factory_handoff.artifact_id!==a?.artifact_id||
