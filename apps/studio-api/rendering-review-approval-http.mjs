@@ -22,15 +22,15 @@ export async function acceptReviewCreativeOnly({
   request,env,authorization,output_id,assertWriteRequest,operations
 }){
   if(!reviewCreativeApprovalEnabled(env))
-    fail(405,"CREATIVE_APPROVAL_DISABLED","Chicago review creative approval is disabled");
+    fail(405,"CREATIVE_APPROVAL_DISABLED","Rendering Review creative approval is disabled");
   if(request?.method!=="POST")fail(405,"METHOD_NOT_ALLOWED","POST required");
   const actor=authorization?.user?.record_id;
   if(!id.test(str(actor))||!authorization.authenticated||
      !authorization.authorized||authorization.permissions?.outputs_review!==true)
     fail(403,"REVIEW_PERMISSION_REQUIRED","Authenticated reviewer required");
   if(!id.test(str(output_id)))
-    fail(403,"PILOT_SCOPE","Exact Chicago Reel ID required");
-  // Only the exact held session and authorized Chicago output may be accepted.
+    fail(403,"PILOT_SCOPE","Exact Platform Output ID required");
+  // Only an authorized, exactly held output and current verified artifact may be accepted.
   if(typeof assertWriteRequest!=="function")fail(503,"WRITE_GUARD_MISSING","Studio write guard required");
   assertWriteRequest(request,env);
   if(!/^application\/json(?:\s*;|$)/i.test(str(request.headers.get("Content-Type"))))
@@ -45,12 +45,18 @@ export async function acceptReviewCreativeOnly({
      !Number.isSafeInteger(body.expected_version)||body.expected_version<1||
      !token.test(body.attempt_id||"")||!token.test(body.client_request_id||""))
     fail(400,"INVALID_ACCEPTANCE","Exact attempt, session version and request key required");
+  if(typeof operations?.authorizeReview!=="function" ||
+     await operations.authorizeReview(output_id)!==true)
+    fail(403,"REVIEW_SCOPE_DENIED","Output is not in this reviewer’s authorized profile");
   const session=await operations.readSession(output_id);
+  const validSession=Boolean(session&&id.test(str(session.profile_id))&&
+    str(session.output_type)&&
+    (str(session.platform)||
+      (session.profile_id==="recT2rbKX3MF7cVFU"&&session.output_type==="Instagram Reel")));
   // The creative approval may have committed before a Factory handoff
   // timed out. A repeated approval of the SAME current accepted attempt is
   // a read-only replay, not a second approval or another rendering request.
-  if(session?.profile_id==="recT2rbKX3MF7cVFU"&&
-     session.output_type==="Instagram Reel"&&
+  if(validSession&&
      session.state==="approved"&&
      session.current_attempt_id===body.attempt_id&&
      session.approved_attempt_id===body.attempt_id&&
@@ -62,9 +68,7 @@ export async function acceptReviewCreativeOnly({
       review_hold_active:session.review_hold.active,
       publication_changed:false,instagram_upload_created:false};
   }
-  if(!session||session.profile_id!=="recT2rbKX3MF7cVFU"||
-     session.output_type!=="Instagram Reel"||
-     session.version!==body.expected_version||
+  if(!validSession||session.version!==body.expected_version||
      session.state!=="ready_for_review"||
      session.current_attempt_id!==body.attempt_id||
      session.review_hold?.active!==true)
