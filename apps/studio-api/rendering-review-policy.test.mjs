@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   CHICAGO_PROFILE_ID, REVIEW_PILOT, REVIEW_SCHEMA,
-  reviewEligibility, enrollReview, applyReviewEvent,
+  reviewEligibility, authorizedManualReviewPolicy, enrollReview, applyReviewEvent,
   reviewDispatchGate, cleanupCandidates,
 } from "./rendering-review-policy.mjs";
 
@@ -353,4 +353,22 @@ test("frozen manifest must match trusted model candidate and deny publishing",()
   throws(()=>plan(s,{immutable_manifest:{...manifest,allow_public_publish:true}}),"PLAN_SOURCE_UNVERIFIED");
   throws(()=>plan(s,{immutable_manifest:{...manifest,source_attempt_id:"attempt-invalid123"}}),"PLAN_SOURCE_UNVERIFIED");
   throws(()=>plan(s,{immutable_manifest:{...manifest,candidate_hash:"b".repeat(64)}}),"PLAN_SOURCE_UNVERIFIED");
+});
+
+test("server-scoped manual review can accept arbitrary video and photo output types across profiles",()=>{
+  const nyc="recNYC12345678901", miami="recMIA12345678901";
+  const scope=authorizedManualReviewPolicy([nyc,miami],{enabled:true});
+  assert.equal(scope.enabled,true);
+  assert.deepEqual(scope.profile_ids,[nyc,miami]);
+  for(const [profile_id,platform,output_type] of [
+    [nyc,"TikTok","TikTok Video"],[nyc,"YouTube","YouTube Short"],
+    [miami,"Facebook","Facebook Reel"],[miami,"Instagram","Instagram Carousel"],
+    [miami,"Facebook","Facebook Story"],
+  ])assert.equal(reviewEligibility({...base,profile_id,platform,output_type},scope).allowed,true);
+  assert.equal(reviewEligibility(base,scope).reason,"OUTSIDE_PILOT_SCOPE");
+  assert.equal(reviewEligibility({...base,profile_id:nyc,published_at:"2026-10-31T21:00Z"},scope).reason,"DISPATCH_ALREADY_STARTED");
+  assert.equal(reviewEligibility({...base,profile_id:nyc,render_status:"Rendering"},scope).reason,"NO_COMPLETED_RENDER");
+  assert.equal(reviewEligibility({...base,profile_id:nyc},scope,"quality").reason,"AUTOMATIC_ENROLLMENT_DISABLED");
+  assert.equal(authorizedManualReviewPolicy([nyc]).enabled,false);
+  assert.equal(authorizedManualReviewPolicy([],{enabled:true}).enabled,false);
 });
