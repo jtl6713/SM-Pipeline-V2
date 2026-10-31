@@ -43,12 +43,17 @@ export { StudioProfileSummary } from "./profile-summary-do.mjs";
  * The handoff adapter shares the same output approval lease as Factory.
  * All row writes remain in the primary Airtable source, never Supabase-first.
  */
-function makeReviewFactoryHandoffOperations(env) {
+function makeReviewFactoryHandoffOperations(env,{
+  authorizedProfileIds=[CHICAGO_PROFILE_ID],globalReview=false,
+}={}) {
+  const permitted=new Set(authorizedProfileIds);
   let adapter;
   const authorizeOutput=async id=>{
     const view=await adapter.readOutput(id);
-    return view.profile_id===CHICAGO_PROFILE_ID &&
-      view.platform==="Instagram" && view.output_type==="Instagram Reel";
+    return Boolean(view?.id===id&&permitted.has(view.profile_id)&&
+      String(view.platform||"").trim()&&String(view.output_type||"").trim()&&
+      (globalReview||(view.profile_id===CHICAGO_PROFILE_ID&&
+        view.platform==="Instagram"&&view.output_type==="Instagram Reel")));
   };
   adapter=makeRenderingReviewAirtableOperations({
     env,airtableFetch,listRecords:reviewListRecords,readField:f,
@@ -1911,12 +1916,20 @@ export default {
       const factoryMatch=/^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/factory-handoff$/.exec(url.pathname);
       if(factoryMatch && request.method==="POST") {
         requirePermission(authorization,"outputs_review");
-        if(!(await reviewAuthorizedProfiles(env,authorization)).some(p=>p.id===CHICAGO_PROFILE_ID))
-          throw new HttpError(403,"Chicago review membership required");
+        const profiles=await reviewAuthorizedProfiles(env,authorization);
+        const globalReview=globalReviewEnrollmentEnabled(env);
+        const ops=makeReviewFactoryHandoffOperations(env,{
+          authorizedProfileIds:profiles.map(p=>p.id),globalReview,
+        });
+        const live=await ops.readNormalizedOutput(factoryMatch[1]);
+        if(live?.id!==factoryMatch[1]||
+           !profiles.some(p=>p.id===live.profile_id)||
+           (!globalReview&&!(live.profile_id===CHICAGO_PROFILE_ID&&
+             live.platform==="Instagram"&&live.output_type==="Instagram Reel")))
+          throw new HttpError(403,"Factory handoff outside authorized review scope");
         assertWriteRequest(request,env);
         return respond(request,env,await handoffApprovedReviewToFactory({
-          output_id:factoryMatch[1],env,
-          operations:makeReviewFactoryHandoffOperations(env),
+          output_id:factoryMatch[1],env,operations:ops,
         }));
       }
 
@@ -2165,7 +2178,10 @@ export default {
           // resume a partial transfer without requiring another approval.
           const transferred=await handoffApprovedReviewToFactory({
             output_id:acceptMatch[1],env,
-            operations:makeReviewFactoryHandoffOperations(env),
+            operations:makeReviewFactoryHandoffOperations(env,{
+              authorizedProfileIds:reviewAuthorized.map(p=>p.id),
+              globalReview:reviewGlobal,
+            }),
           });
           return respond(request,env,{...accepted,
             factory_handoff:transferred,factory_ready:transferred.factory_ready,
@@ -3443,12 +3459,24 @@ export default {
 
       if (isFactoryOutputPreviewRoute) {
         const outputId=url.pathname.split("/")[4];
-        // Only saved exact-output sessions activate protected revision preview.
-        const o=makeReviewFactoryHandoffOperations(env);
+        // Only a saved exact-output session with authorized Content Item
+        // membership can activate protected revision preview.
+        const profiles=await reviewAuthorizedProfiles(env,authorization);
+        const globalReview=globalReviewEnrollmentEnabled(env);
+        const o=makeReviewFactoryHandoffOperations(env,{
+          authorizedProfileIds:profiles.map(p=>p.id),globalReview,
+        });
         if(await o.readSession(outputId)){
           requirePermission(authorization,"outputs_review");
+          const live=await o.readNormalizedOutput(outputId);
+          if(live?.id!==outputId||
+             !profiles.some(p=>p.id===live.profile_id)||
+             (!globalReview&&!(live.profile_id===CHICAGO_PROFILE_ID&&
+               live.platform==="Instagram"&&live.output_type==="Instagram Reel")))
+            throw new HttpError(403,"Factory preview outside authorized review scope");
           return serveFactorySelectedReviewVideo({
             request,env,outputId,authorization,
+            authorizedProfileIds:profiles.map(p=>p.id),
             readSession:o.readSession,
             readRow:o.readRawOutput,
             readProfile:async id=>(await o.readNormalizedOutput(id)).profile_id,

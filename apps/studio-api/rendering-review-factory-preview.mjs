@@ -2,7 +2,6 @@
  * Authenticated Factory preview of the selected, already accepted V2+.
  * Never trust a Factory card URL or expose private Google Drive credentials.
  */
-import {CHICAGO_PROFILE_ID} from "./rendering-review-policy.mjs";
 const str=x=>String(x??"").trim();
 const field=(row,name)=>row?.fields?.[name];
 const fail=(status,code)=>{const e=new Error(code);e.status=status;e.code=code;throw e;};
@@ -12,10 +11,11 @@ const dispatched=r=>["Published_At","Platform_Post_ID","Platform_Media_ID",
 export function factorySelectedReviewAttempt({session,row,profile,outputId}){
   if(!session||!row||row.id!==outputId||
      session.output_id!==outputId||
-     session.profile_id!==CHICAGO_PROFILE_ID||profile!==CHICAGO_PROFILE_ID||
-     session.output_type!=="Instagram Reel"||
-     str(field(row,"Platform"))!=="Instagram"||
-     str(field(row,"Platform_Output_Type"))!=="Instagram Reel"||
+     !/^rec[A-Za-z0-9]{14}$/.test(str(profile))||
+     session.profile_id!==profile||
+     !str(session.platform)||!str(session.output_type)||
+     str(field(row,"Platform"))!==str(session.platform)||
+     str(field(row,"Platform_Output_Type"))!==str(session.output_type)||
      dispatched(row))return null;
   const attempt=session.attempts?.find(a=>a.id===session.current_attempt_id);
   if(!attempt||Number(attempt.number)<2||attempt.status!=="ready_for_review"||
@@ -41,17 +41,24 @@ export function factorySelectedReviewAttempt({session,row,profile,outputId}){
   return (factoryReady||backWithProducer)?attempt:null;
 }
 export async function serveFactorySelectedReviewVideo({request,env,outputId,authorization,
-  readSession,readRow,readProfile,readVideo,copyHeaders}){
+  readSession,readRow,readProfile,readVideo,copyHeaders,authorizedProfileIds}){
   if(!["GET","HEAD"].includes(request.method))fail(405,"FACTORY_VIDEO_READ_ONLY");
   if(!authorization?.authenticated||!authorization?.authorized||
      authorization?.permissions?.outputs_review!==true)
     fail(403,"FACTORY_VIDEO_REVIEW_PERMISSION");
   if(!/^rec[A-Za-z0-9]{14}$/.test(outputId))
     fail(403,"FACTORY_VIDEO_SCOPE");
-  // Saved session + authoritative Chicago output/attempt control playback.
+  // Authenticate tenant scope against authoritative Output -> Content Item
+  // BEFORE loading or returning the selected Drive asset.
+  if(!Array.isArray(authorizedProfileIds)||
+     !authorizedProfileIds.length||
+     authorizedProfileIds.some(id=>!/^rec[A-Za-z0-9]{14}$/.test(str(id))))
+    fail(403,"FACTORY_PREVIEW_PROFILE_SCOPE");
+  const profile=await readProfile(outputId);
+  if(!authorizedProfileIds.includes(profile))
+    fail(403,"FACTORY_PREVIEW_PROFILE_DENIED");
   const session=await readSession(outputId);
   const row=await readRow(outputId);
-  const profile=await readProfile(outputId);
   const attempt=factorySelectedReviewAttempt({session,row,profile,outputId});
   if(!attempt)fail(409,"FACTORY_SELECTED_REVIEW_ASSET_UNVERIFIED");
   const source=new Request(request.url,{method:"GET",headers:request.method==="HEAD"
