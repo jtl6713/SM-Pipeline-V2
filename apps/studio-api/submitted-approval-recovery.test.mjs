@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { submittedApprovalAge, verifySubmittedPromotionOwnership, SUBMITTED_RECOVERY_GRACE_MS } from "./submitted-approval-recovery.mjs";
+import { submittedApprovalAge, verifySubmittedPromotionOwnership, orderSubmittedRecoveryRequests, SUBMITTED_RECOVERY_GRACE_MS } from "./submitted-approval-recovery.mjs";
 import { CHICAGO_PROFILE_ID, REVIEW_PILOT, reviewEligibility } from "./rendering-review-policy.mjs";
 
 const requestId = "rec9xNB230bZy3I6K";
@@ -80,4 +80,28 @@ test("Rendering Review remains Chicago Instagram Reel only, never LA or auto-adm
   assert.equal(reviewEligibility({...o,profile_id:"recF7UAn0LkMZZrWZ"},policy,"manual").reason,"OUTSIDE_PILOT_SCOPE");
   assert.equal(reviewEligibility({...o,output_type:"Facebook Reel"},policy,"manual").reason,"OUTSIDE_PILOT_SCOPE");
   assert.equal(reviewEligibility(o,policy,"automatic").reason,"AUTOMATIC_ENROLLMENT_DISABLED");
+});
+
+test("Submitted approval recovery is fair; Michigan Avenue never starves behind repeatedly failed older requests", () => {
+  const mk = (id, submitted, tried = null) => ({ id, fields: { Submitted_At: submitted, Studio_Approval_Recovery_Last_Attempt_At: tried } });
+  const older = mk("older", "2026-10-31T04:34:56.293Z");
+  const middle = mk("middle", "2026-10-31T06:11:33.411Z");
+  const michigan = mk("michigan", "2026-10-31T15:59:36.831Z");
+  const field = (r, key) => r.fields[key];
+  assert.deepEqual(orderSubmittedRecoveryRequests([older, middle, michigan], field).map(r => r.id), ["michigan", "middle", "older"]);
+  michigan.fields.Studio_Approval_Recovery_Last_Attempt_At = "2026-10-31T17:10:00.000Z";
+  assert.deepEqual(orderSubmittedRecoveryRequests([older, middle, michigan], field).map(r => r.id), ["middle", "older", "michigan"]);
+  middle.fields.Studio_Approval_Recovery_Last_Attempt_At = "2026-10-31T17:11:00.000Z";
+  older.fields.Studio_Approval_Recovery_Last_Attempt_At = "2026-10-31T17:12:00.000Z";
+  assert.deepEqual(orderSubmittedRecoveryRequests([older, middle, michigan], field).map(r => r.id), ["michigan", "middle", "older"]);
+});
+
+test("Submitted recovery persists failure diagnostics but never fabricates approved status", () => {
+  const source = readFileSync(new URL("./worker-functions-03.mjs",import.meta.url), "utf8");
+  const body = source.split("export async function studioHealPromotedMissingFanout(")[1].split("/*__STUDIO_WORKER_END:studioHealPromotedMissingFanout__*/")[0];
+  assert.match(body, /for \(const pendingRequest of orderSubmittedRecoveryRequests\(pending, f\)\)/);
+  assert.match(body, /Studio_Approval_Recovery_Error: String\(error\?\.message \|\| error\)/);
+  assert.match(body, /Studio_Approval_Recovery_Last_Attempt_At: new Date\(\)\.toISOString\(\)/);
+  assert.match(body, /if \(attemptedSubmitted\) break/);
+  assert.doesNotMatch(body, /promoteProductionRequestViaI3I4\(/);
 });
