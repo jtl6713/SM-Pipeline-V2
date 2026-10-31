@@ -1357,8 +1357,13 @@
       }
       rows.innerHTML = matches.map(row => {
         const canRender = row.review_render_supported===true;
+        const reason = row.review_render_reason === "IMAGE_GALLERY_RENDERER_NOT_VERIFIED"
+          ? "Photo/gallery correction renderer pending"
+          : row.review_render_reason === "VIBE_CUT_RENDERER_NOT_VERIFIED"
+            ? "Vibe Cut correction renderer pending"
+            : "Not yet supported for revision";
         const caption = [row.platform,row.output_type].filter(Boolean).join(" · ") +
-          (canRender ? "" : " · Not yet supported for revision");
+          (canRender ? "" : " · " + reason);
         return '<label class="factory-correction-match-row"><input type="checkbox" data-factory-correction-output="' +
           esc(row.id) + '"' + (canRender ? " checked" : " disabled") +
           '><span>' + esc(caption) + '</span></label>';
