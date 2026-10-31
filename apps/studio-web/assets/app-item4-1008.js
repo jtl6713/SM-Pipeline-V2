@@ -289,7 +289,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.796-factory-submit-immediate";
+  const BUILD_ID = "item4-0.6.797-vibe-cut-video-ideas";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -3020,7 +3020,16 @@
     return ideaCanPromote(idea) && !ideaHasProductionRequest(idea);
   }
 
+  function ideaIsVibeVideo(idea) {
+    return /ez-input=vibe-cut/i.test(String(idea?.summary || "") + "\n" + String(idea?.production_notes_user || ""));
+  }
+
+  function ideaIsVideoWorkflow(idea) {
+    return ideaIsVibeVideo(idea) || ["Vertical Short Video", "Longform Video"].includes(String(idea?.content_type || "").trim());
+  }
+
   function ideaPhotoWaitActive(idea) {
+    if (ideaIsVideoWorkflow(idea)) return false;
     const wait = String(idea?.photo_wait_status || "").trim();
     return wait === "Waiting" || wait === "Ready";
   }
@@ -3180,16 +3189,21 @@
     const snapshot = [
       ["Type", idea?.content_type],
       ["Platforms", Array.isArray(idea?.platforms) && idea.platforms.length ? idea.platforms.join(", ") : null],
-      ["Slides", ideaPhotoWaitActive(idea) || idea?.carousel_slide_count_mode === "Target range"
-        ? `${idea?.carousel_slide_count_min || "?"}–${idea?.carousel_slide_count_max || "?"} photos`
-        : idea?.carousel_slide_count],
-      ["Photo wait", idea?.photo_wait_status],
-      ["Matched", idea?.photo_match?.high_count != null ? `${idea.photo_match.high_count} high-confidence` : null],
-      ["Clips", idea?.video_clip_count],
+      ...(ideaIsVideoWorkflow(idea) ? [
+        ["Source", ideaIsVibeVideo(idea) ? "1 video" : null],
+        ["Clips", ideaIsVibeVideo(idea) ? null : idea?.video_clip_count],
+      ] : [
+        ["Slides", idea?.carousel_slide_count_mode === "Target range"
+          ? (Number(idea?.carousel_slide_count_min) > 0 && Number(idea?.carousel_slide_count_max) >= Number(idea?.carousel_slide_count_min)
+            ? `${idea.carousel_slide_count_min}–${idea.carousel_slide_count_max} photos` : null)
+          : idea?.carousel_slide_count],
+        ["Photo wait", idea?.photo_wait_status],
+        ["Matched", idea?.photo_match?.high_count != null ? `${idea.photo_match.high_count} high-confidence` : null],
+      ]),
       ["Voiceover", idea?.include_voiceover],
       ["Music", idea?.include_background_music],
       ["Thumbnail", idea?.include_thumbnail],
-      ["Duration", idea?.video_duration ? `${idea.video_duration}s` : null],
+      ["Duration", idea?.video_duration ? (ideaIsVibeVideo(idea) ? `${idea.video_duration}-second Vibe Cut` : `${idea.video_duration}s`) : null],
     ];
     const target = $("ideaProductionSnapshot");
     if (target) {
@@ -8741,8 +8755,14 @@ function timedScriptAssetLabel(asset, index) {
             method: "POST",
             body: JSON.stringify({
               title: answers.ideaTitle,
-              summary: answers.ideaSummary || answers.ideaTitle,
+              summary: answers.inputKind === "vibe-cut"
+                ? `${answers.ideaSummary || answers.ideaTitle}\nCreated from New content (origin=ez-wizard; ez-input=vibe-cut).`
+                : (answers.ideaSummary || answers.ideaTitle),
               primary_location: answers.ideaLocation || "",
+              content_profile_id: selectedProfileId,
+              input_kind: answers.inputKind,
+              source_aspect: answers.sourceAspect || "",
+              vibe_target_seconds: answers.vibeTargetSeconds || 15,
             }),
             timeoutMs: 30000,
             retries: 1,
@@ -8970,6 +8990,10 @@ function timedScriptAssetLabel(asset, index) {
     let nextFiles = ezIntakeKind === "single-photo" ? supported.slice(0, 1) : supported;
     if (ezIntakeKind === "finished-video" || ezIntakeKind === "vibe-cut") {
       nextFiles = supported.filter(item4FileLooksLikeVideo).slice(0, 1);
+      if (!nextFiles.length && ezIntakeKind === "vibe-cut") {
+        setEzMessage("Vibe Cut requires one source video (MP4 or MOV), not photos.", "error-text");
+        return false;
+      }
       if (!nextFiles.length) nextFiles = supported.slice(0, 1);
     }
     if (pending?.inputKind === "mixed") {
@@ -9026,7 +9050,7 @@ function timedScriptAssetLabel(asset, index) {
       }
       const wizardPlanned = pending?.planned;
       const totalAfter = existingCount + nextFiles.length;
-      const photoCount = allowEmpty
+      const photoCount = (ezIntakeKind === "vibe-cut" || pending?.inputKind === "vibe-cut") ? 0 : allowEmpty
         ? (apiHelpers.ezWizardPhotoCount(pending) || 1)
         : (Number(pending?.photoCount) || (pending?.inputKind === "mixed" ? apiHelpers.ezWizardPhotoCount(pending) : 0) || Math.max(totalAfter, ezIntakeKind === "multiple-photos" ? 2 : 1));
       let planned;
@@ -9078,6 +9102,13 @@ function timedScriptAssetLabel(asset, index) {
         body: JSON.stringify({
           title: defaultTitle,
           summary: ezIdeaSummaryValue(pending?.inputKind || ezIntakeKind),
+          primary_location: currentPrimaryLocationValue(),
+          content_profile_id: selectedProfileId,
+          input_kind: pending?.inputKind || ezIntakeKind,
+          source_aspect: aspectBundle?.plan?.source_aspect || planned?.source_aspect || pending?.sourceAspect || "",
+          source_video_width: aspectBundle?.width || 0,
+          source_video_height: aspectBundle?.height || 0,
+          vibe_target_seconds: pending?.vibeTargetSeconds || 15,
         }),
       });
       activeIdea = idea.record;
@@ -9099,7 +9130,7 @@ function timedScriptAssetLabel(asset, index) {
         requestPayload.carousel_image_mode = "Make AI Generated";
         requestPayload.carousel_slide_count_mode = "Exact";
         requestPayload.carousel_slide_count_exact = apiHelpers.ezWizardPhotoCount(pending);
-      } else if (pending?.inputKind === "single-photo" || pending?.inputKind === "multiple-photos" || nextFiles.length) {
+      } else if (!ezIsVibeCut() && (pending?.inputKind === "single-photo" || pending?.inputKind === "multiple-photos" || nextFiles.length)) {
         requestPayload.carousel_image_mode = "Manual Upload";
         requestPayload.carousel_slide_count_mode = "Exact";
         requestPayload.carousel_slide_count_exact = photoCount;
@@ -15354,6 +15385,7 @@ function timedScriptAssetLabel(asset, index) {
         ? (window.StudioTimedScript?.exactVoiceoverText?.(productionTimedScript) || "")
         : $("prRequestedScript").value.trim(),
       primary_location: currentPrimaryLocationValue(),
+      location_change_confirmed: Boolean(primaryLocationUserEdited),
       production_notes: mergeProductionRenderSettings($("prProductionNotes").value.trim()),
       slide_captions: collectEzSlideCaptionRecords(),
     };
@@ -15970,6 +16002,14 @@ function timedScriptAssetLabel(asset, index) {
 
 
   function ideaStructureLabel(record) {
+    if (ideaIsVibeVideo(record)) {
+      const seconds = Number(record?.video_duration);
+      return `1 source video${Number.isFinite(seconds) && seconds > 0 ? ` · ${seconds}-second Vibe Cut` : " · Vibe Cut"}`;
+    }
+    if (ideaIsVideoWorkflow(record)) {
+      const clips = Number(record?.video_clip_count);
+      return Number.isFinite(clips) && clips > 0 ? `${clips} clips` : "Video";
+    }
     const wait = String(record?.photo_wait_status || "").trim();
     if (wait === "Waiting") {
       const high = Number(record?.photo_match?.high_count || 0);
@@ -15982,7 +16022,9 @@ function timedScriptAssetLabel(asset, index) {
       return `${count || record.carousel_slide_count || 0} photos ready`;
     }
     if (record?.carousel_slide_count_mode === "Target range") {
-      return `${record.carousel_slide_count_min || "?"}–${record.carousel_slide_count_max || "?"} photos`;
+      const min = Number(record?.carousel_slide_count_min), max = Number(record?.carousel_slide_count_max);
+      return Number.isFinite(min) && min > 0 && Number.isFinite(max) && max >= min
+        ? `${min}–${max} photos` : "Photo count not set";
     }
     if (record?.carousel_slide_count) return `${record.carousel_slide_count} slides`;
     if (record?.video_clip_count) return `${record.video_clip_count} clips`;
@@ -16041,7 +16083,9 @@ function timedScriptAssetLabel(asset, index) {
     const promote = ideaShowPromoteAction(r)
       ? `<button type="button" class="manage-button promote-row-button" data-idea-id="${escapeHtml(r.id)}" data-idea-action="promote">Promote</button>`
       : "";
-    const listeningForPhotos = String(r?.photo_wait_status || "").trim() === "Waiting";
+    const videoRow = ["Vertical Short Video", "Longform Video"].includes(String(r?.content_type || "").trim())
+      || /ez-input=vibe-cut/i.test(String(r?.summary || "") + "\n" + String(r?.production_notes_user || ""));
+    const listeningForPhotos = !videoRow && String(r?.photo_wait_status || "").trim() === "Waiting";
     const findImages = listeningForPhotos
       ? `<button type="button" class="manage-button find-images-row-button" data-idea-find-images="${escapeHtml(r.id)}">Find images now</button>`
       : "";

@@ -364,7 +364,8 @@
 
   function ezWizardPhotoCount(answers = {}) {
     const kind = String(answers.inputKind || "").trim();
-    if (kind === EZ_INPUTS.SINGLE_PHOTO || kind === EZ_INPUTS.SINGLE_AI || kind === EZ_INPUTS.VIBE_CUT) return 1;
+    if (kind === EZ_INPUTS.VIBE_CUT) return 0; // One source VIDEO, zero photos. Upload validation is separate.
+    if (kind === EZ_INPUTS.SINGLE_PHOTO || kind === EZ_INPUTS.SINGLE_AI) return 1;
     if (kind === EZ_INPUTS.VIDEO_CLIPS) return 0;
     if (kind === EZ_INPUTS.MIXED) {
       return Math.max(0, Number(answers.manualCount) || 0) + Math.max(0, Number(answers.aiCount) || 0);
@@ -388,6 +389,9 @@
 
   function ezWizardExpectedUploads(answers = {}) {
     const kind = String(answers.inputKind || "").trim();
+    // A Vibe Cut's one required upload is video even if stale photo-wait
+    // wizard state is present. Never interpret this as a photo quota.
+    if (kind === EZ_INPUTS.VIBE_CUT) return 1;
     if (answers.photoWait) return 0;
     if (kind === EZ_INPUTS.SINGLE_AI || kind === EZ_INPUTS.MULTIPLE_AI) return 0;
     if (kind === EZ_INPUTS.SINGLE_PHOTO || kind === EZ_INPUTS.FINISHED_VIDEO || kind === EZ_INPUTS.VIBE_CUT) return 1;

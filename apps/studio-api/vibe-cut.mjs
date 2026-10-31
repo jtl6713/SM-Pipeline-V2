@@ -28,6 +28,38 @@ export const VIBE_CUT_HORIZONTAL_KEYS = Object.freeze([
   "YouTube::Short",
 ]);
 
+/**
+ * Canonical Idea Candidate defaults for both EZ entrypoints.
+ * Photo match/link fields are deliberately cleared; the uploaded source video
+ * is stored on the Production Request, not in these Idea photo-only links.
+ */
+export function vibeCutIdeaFields({ sourceAspect = "", width = 0, height = 0, targetSeconds = null } = {}) {
+  const aspect = String(sourceAspect || "").trim().toLowerCase();
+  const w = Number(width) || 0;
+  const h = Number(height) || 0;
+  const horizontal = w > 0 && h > 0 ? w > h : aspect === "horizontal";
+  const fields = {
+    Production_Content_Type: horizontal ? "Longform Video" : "Vertical Short Video",
+    Production_Target_Platforms: horizontal ? ["YouTube"] : ["Instagram", "Facebook", "TikTok", "YouTube"],
+    Production_Carousel_Slide_Count: null,
+    Production_Carousel_Slide_Count_Mode: null,
+    Production_Carousel_Slide_Count_Min: null,
+    Production_Carousel_Slide_Count_Max: null,
+    Production_Carousel_Image_Mode: null,
+    Studio_Photo_Wait_Status: "Not Needed",
+    Studio_Photo_Match_JSON: null,
+    Studio_Matched_Media_Assets: [],
+    Production_Video_Clip_Count: null,
+    Production_Include_Voiceover: "No",
+    Production_Include_Background_Music: "Yes",
+    Production_Include_Thumbnail: "Yes",
+  };
+  if (targetSeconds !== null && targetSeconds !== undefined && String(targetSeconds).trim()) {
+    fields.Production_Video_Duration = normalizeVibeCutTargetSeconds(targetSeconds);
+  }
+  return fields;
+}
+
 export const VIBE_CUT_STYLES = Object.freeze({
   SMOOTH_VIBES: "smooth-vibes",
   BEAT_CUT: "beat-cut",

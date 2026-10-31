@@ -402,6 +402,7 @@ import {
   selectsFromSceneTimestamps,
   vibeCutProductionDefaults,
   vibeCutRenderSettings,
+  vibeCutIdeaFields,
 } from "./vibe-cut.mjs";
 import {
   capabilityMatrixResponse,
@@ -2930,37 +2931,42 @@ export function requestedVoiceFromProductionRequest(record) {
 /*__STUDIO_WORKER_END:requestedVoiceFromProductionRequest__*/
 
 export async function cleanProductionRequestPayload(payload, env) {
-  const contentTypeRaw = String(payload?.content_type || "").trim();
+  const vibeCut = studioIsVibeCut(payload?.production_notes);
+  const vibeHorizontal = vibeCut && isHorizontalVibeCutAspect(payload?.production_notes);
+  const contentTypeRaw = vibeCut ? (vibeHorizontal ? "Longform Video" : "Vertical Short Video") : String(payload?.content_type || "").trim();
   const contentType = contentTypeRaw
     ? normalizeChoice(contentTypeRaw, PR_CONTENT_TYPES, "", "Master content type")
     : null;
 
   const platformsRaw = Array.isArray(payload?.platforms) ? payload.platforms : [];
-  const platforms = canonicalProductionPlatforms(platformsRaw);
+  const platforms = vibeCut
+    ? (vibeHorizontal ? ["YouTube"] : ["Instagram", "Facebook", "TikTok", "YouTube"])
+    : canonicalProductionPlatforms(platformsRaw);
   const invalidPlatforms = platforms.filter(v => !PR_PLATFORMS.has(v));
   if (invalidPlatforms.length) throw new HttpError(400, `Unsupported platform(s): ${invalidPlatforms.join(", ")}`);
 
-  const voiceoverMode = normalizeChoice(payload?.voiceover_mode, PR_TRISTATE, "Yes", "Voiceover mode");
-  const backgroundMusicMode = normalizeChoice(payload?.background_music_mode, PR_TRISTATE, "Yes", "Background music mode");
-  const thumbnailMode = normalizeChoice(payload?.thumbnail_mode, PR_THUMBNAIL_MODES, "Yes", "Thumbnail mode");
+  const voiceoverMode = vibeCut ? "No" : normalizeChoice(payload?.voiceover_mode, PR_TRISTATE, "Yes", "Voiceover mode");
+  const backgroundMusicMode = vibeCut ? "Yes" : normalizeChoice(payload?.background_music_mode, PR_TRISTATE, "Yes", "Background music mode");
+  const thumbnailMode = vibeCut ? "Yes" : normalizeChoice(payload?.thumbnail_mode, PR_THUMBNAIL_MODES, "Yes", "Thumbnail mode");
 
-  const videoClipCountMode = normalizeChoice(payload?.video_clip_count_mode, PR_COUNT_MODES, "AI decides", "Video clip count mode");
+  const videoClipCountMode = vibeCut ? "AI decides" : normalizeChoice(payload?.video_clip_count_mode, PR_COUNT_MODES, "AI decides", "Video clip count mode");
   const slideCountApplies = ["Carousel", "Photo Set", "Feed Post"].includes(contentType);
   const carouselSlideCountMode = slideCountApplies
     ? normalizeChoice(payload?.carousel_slide_count_mode, PR_COUNT_MODES, "AI decides", "Carousel slide count mode")
-    : "AI decides";
+    : (vibeCut ? null : "AI decides");
 
-  const videoDurationSeconds = nullableWholeSeconds(payload?.video_duration_seconds, 5, 600, "Video duration");
-  let voiceoverDurationSeconds = nullableNumber(payload?.voiceover_duration_seconds, 1, 600, "Voiceover duration");
+  const vibeTarget = vibeCut ? parseVibeCutDirective(payload?.production_notes)?.target_seconds : null;
+  const videoDurationSeconds = nullableWholeSeconds(vibeTarget || payload?.video_duration_seconds, 5, 600, "Video duration");
+  let voiceoverDurationSeconds = vibeCut ? null : nullableNumber(payload?.voiceover_duration_seconds, 1, 600, "Voiceover duration");
   if (voiceoverMode === "Yes" && voiceoverDurationSeconds != null && voiceoverDurationSeconds < 4) {
     voiceoverDurationSeconds = 4;
   }
   const musicStartSeconds = nullableNumber(payload?.music_start_seconds, 0, 3600, "Music start");
   const voiceoverTailSeconds = 0;
 
-  let videoClipCountExact = nullableInt(payload?.video_clip_count_exact, 1, 60, "Exact video clip count");
-  let videoClipCountMin = nullableInt(payload?.video_clip_count_min, 1, 60, "Minimum video clip count");
-  let videoClipCountMax = nullableInt(payload?.video_clip_count_max, 1, 60, "Maximum video clip count");
+  let videoClipCountExact = vibeCut ? null : nullableInt(payload?.video_clip_count_exact, 1, 60, "Exact video clip count");
+  let videoClipCountMin = vibeCut ? null : nullableInt(payload?.video_clip_count_min, 1, 60, "Minimum video clip count");
+  let videoClipCountMax = vibeCut ? null : nullableInt(payload?.video_clip_count_max, 1, 60, "Maximum video clip count");
 
   if (videoClipCountMode === "AI decides") {
     videoClipCountExact = videoClipCountMin = videoClipCountMax = null;
@@ -2996,7 +3002,7 @@ export async function cleanProductionRequestPayload(payload, env) {
     }
   }
 
-  const carouselImageMode = normalizeChoice(
+  const carouselImageMode = vibeCut ? null : normalizeChoice(
     payload?.carousel_image_mode,
     PR_CAROUSEL_IMAGE_MODES,
     "Make AI Generated",
@@ -3005,11 +3011,11 @@ export async function cleanProductionRequestPayload(payload, env) {
 
   let titleMode = normalizeChoice(payload?.title_mode, PR_TEXT_MODES, "AI decides", "Title mode");
   let captionMode = normalizeChoice(payload?.caption_mode, PR_TEXT_MODES, "AI decides", "Caption mode");
-  let scriptMode = normalizeChoice(payload?.script_mode, PR_TEXT_MODES, "AI decides", "Script mode");
+  let scriptMode = vibeCut ? "Leave blank" : normalizeChoice(payload?.script_mode, PR_TEXT_MODES, "AI decides", "Script mode");
 
   let requestedTitle = String(payload?.requested_title || "").trim();
   let requestedCaption = String(payload?.requested_caption || "").trim();
-  let requestedScript = String(payload?.requested_script || "").trim();
+  let requestedScript = vibeCut ? "" : String(payload?.requested_script || "").trim();
   const productionNotes = String(payload?.production_notes || "").trim();
   const primaryLocation = String(payload?.primary_location || "").trim();
 
@@ -3035,7 +3041,7 @@ export async function cleanProductionRequestPayload(payload, env) {
   const selectedMusicAssetId = String(payload?.selected_music_asset_id || "").trim() || null;
   if (selectedMusicAssetId) await validateMusicAsset(env, selectedMusicAssetId);
 
-  const requestedVoice = normalizeRequestedVoice(payload, voiceoverMode);
+  const requestedVoice = vibeCut ? { voice_id: null, voice_name: null } : normalizeRequestedVoice(payload, voiceoverMode);
 
   return {
     content_type: contentType,
@@ -3081,9 +3087,7 @@ export function productionRequestFields(input, nowIso, { status = "Draft" } = {}
   return {
     Request_Status: status,
     Master_Content_Type: vibeCut
-      ? (vibeHorizontal
-        ? (input.content_type || "Longform Video")
-        : "Vertical Short Video")
+      ? (vibeHorizontal ? "Longform Video" : "Vertical Short Video")
       : (input.content_type || null),
     Target_Platforms: vibeHorizontal
       ? ["YouTube"]
@@ -3102,23 +3106,23 @@ export function productionRequestFields(input, nowIso, { status = "Draft" } = {}
     Video_Duration_Seconds: (vibeCut && vibeTargetSeconds > 0)
       ? vibeTargetSeconds
       : input.video_duration_seconds,
-    Voiceover_Duration_Seconds: input.voiceover_duration_seconds,
+    Voiceover_Duration_Seconds: vibeCut ? null : input.voiceover_duration_seconds,
     Music_Start_Seconds: input.music_start_seconds,
-    Carousel_Slide_Count_Mode: input.carousel_slide_count_mode,
-    Carousel_Slide_Count_Exact: input.carousel_slide_count_exact,
-    Carousel_Slide_Count_Min: input.carousel_slide_count_min,
-    Carousel_Slide_Count_Max: input.carousel_slide_count_max,
-    Carousel_Image_Mode: input.carousel_image_mode,
+    Carousel_Slide_Count_Mode: vibeCut ? null : input.carousel_slide_count_mode,
+    Carousel_Slide_Count_Exact: vibeCut ? null : input.carousel_slide_count_exact,
+    Carousel_Slide_Count_Min: vibeCut ? null : input.carousel_slide_count_min,
+    Carousel_Slide_Count_Max: vibeCut ? null : input.carousel_slide_count_max,
+    Carousel_Image_Mode: vibeCut ? null : input.carousel_image_mode,
     Voiceover_Tail_Seconds: input.voiceover_tail_seconds,
     Selected_Music_Asset: input.selected_music_asset_id ? [input.selected_music_asset_id] : [],
-    Voice_ID: input.voice_id || null,
-    Voice_Name: input.voice_name || null,
+    Voice_ID: vibeCut ? null : (input.voice_id || null),
+    Voice_Name: vibeCut ? null : (input.voice_name || null),
     Title_Mode: input.title_mode,
     Requested_Title: input.requested_title || null,
     Caption_Mode: input.caption_mode,
     Requested_Caption: input.requested_caption || null,
-    Script_Mode: input.script_mode,
-    Requested_Script: input.requested_script || null,
+    Script_Mode: vibeCut ? "Leave blank" : input.script_mode,
+    Requested_Script: vibeCut ? null : (input.requested_script || null),
     Primary_Location: input.primary_location || null,
     Production_Notes: input.production_notes || null,
     Updated_At: nowIso,
@@ -3418,7 +3422,7 @@ export async function createProductionRequestFromBody(request, env, authorizatio
   const ideaRecordId = String(payload?.idea_record_id || "").trim();
   if (!/^rec[A-Za-z0-9]+$/.test(ideaRecordId)) throw new HttpError(400, "idea_record_id is required");
 
-  const idea = await loadAuthorizedIdea(env, ideaRecordId, authorization);
+  let idea = await loadAuthorizedIdea(env, ideaRecordId, authorization);
   if (promotionCompleted(idea)) throw new HttpError(409, "This idea has already been promoted");
   const preferredProfileId = requestedProfileId(url, payload);
   const existing = await existingDraftForIdea(env, ideaRecordId, authorization, idea);
@@ -3438,6 +3442,19 @@ export async function createProductionRequestFromBody(request, env, authorizatio
     input.voice_name = "";
   }
   input.voice_explicit = explicitVoice;
+  // A Vibe Cut wizard may create the Idea before it can inspect the video.
+  // Correct that same Idea once upload orientation is available; never create a
+  // second Idea or Photo Set as a side effect of the first video upload.
+  if (studioIsVibeCut(input.production_notes) && isVibeCutNotes(f(idea, "Idea_Summary"))) {
+    const target = vibeCutIdeaFields({
+      sourceAspect: isHorizontalVibeCutAspect(input.production_notes) ? "horizontal" : "vertical",
+      targetSeconds: parseVibeCutDirective(input.production_notes)?.target_seconds || input.video_duration_seconds || 15,
+    });
+    idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: target, typecast: true }),
+    });
+  }
   const created = await createDraftForIdea(env, idea, authorization, input, { preferredProfileId });
   return respond(request, env, {
     ok: true,
@@ -3664,6 +3681,11 @@ export async function updateProductionRequest(request, env, url, authorization) 
   );
   if (studioIsVibeCut(input.production_notes)) {
     input.production_notes = sanitizeVibeCutSourceNotes(input.production_notes);
+    // Asynchronous upload/compression and stale open tabs cannot reclassify a
+    // hand-corrected city. An intentional location edit has an explicit flag.
+    if (String(f(existing, "Primary_Location") || "").trim() && payload?.location_change_confirmed !== true) {
+      input.primary_location = String(f(existing, "Primary_Location")).trim();
+    }
   }
   if (revisionOpen) input.production_notes = withFactoryRevisionOpen(input.production_notes);
   const now = new Date().toISOString();
