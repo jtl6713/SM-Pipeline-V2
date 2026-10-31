@@ -88,5 +88,5 @@ test("cron independently recovers stale Submitted approvals even when request pa
   assert.match(healer, /finalizeProductionRequestPromotion\(env, latest\.id, idea, ctx\)/);
   assert.match(healer, /attemptedSubmitted = true/);
   assert.doesNotMatch(healer, /fetchPromotionHandoff/);
-  assert.match(worker, /studioHealPromotedMissingFanout\(env, \{ limit: 4, ctx \}\)/);
+  assert.match(worker, /ctx\.waitUntil\(studioHealPromotedMissingFanout\(env, \{ limit: cadence\.heavy \? 8 : 4, ctx \}\)/);
 });
