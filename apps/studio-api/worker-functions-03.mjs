@@ -878,7 +878,7 @@ export async function unfinishedIntakeBatchIds(env, batchIds) {
 }
 /*__STUDIO_WORKER_END:unfinishedIntakeBatchIds__*/
 
-export async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaIds, { replaceWaitAssets = false, allowManagePaused = false, replaceAll = false, allowVideo = false } = {}) {
+export async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaIds, { replaceWaitAssets = false, allowManagePaused = false, replaceAll = false, allowVideo = false, maxWaitAssets = null } = {}) {
   // Vibe Cut masters must come from the user's uploaded footage. Never
   // substitute photo-wait/library imagery (including replaceAll recovery).
   if (studioIsVibeCut(requestRecord)) {
@@ -892,12 +892,34 @@ export async function applyLibraryAssetsToProductionRequest(env, requestRecord, 
     : existingAll;
   const already = new Set(existing.map((asset) => String(asset?.media_asset_record_id || "").trim()).filter(Boolean));
   const appended = [];
+  const blockedAssetIds = [];
+  const cap = maxWaitAssets == null ? Number.POSITIVE_INFINITY : Math.max(1, Math.min(20, Number(maxWaitAssets) || 1));
   for (const mediaId of mediaIds) {
+    if (appended.length >= cap) break;
     if (already.has(mediaId)) continue;
     let media = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, mediaId);
-    media = await ensureChicagoWatermarkedLibraryAsset(env, media, requestRecord);
+    // Check the library policy BEFORE calling the provenance-aware watermark
+    // runner. A disqualified image must never be fed to that service.
+    if (ideaLibraryRejectReason(media, { allowVideo })) {
+      blockedAssetIds.push(mediaId);
+      continue;
+    }
+    try {
+      media = await ensureChicagoWatermarkedLibraryAsset(env, media, requestRecord);
+    } catch (error) {
+      // An asset held for third-party overlay review is not an operational
+      // error; skip it and consider the next ranked photo. Fail closed on
+      // every other watermark, Drive, or transport error.
+      if (Number(error?.status) !== 422 ||
+          !/Asset held for third-party overlay review/i.test(String(error?.message || ""))) throw error;
+      blockedAssetIds.push(mediaId);
+      continue;
+    }
     const reject = ideaLibraryRejectReason(media, { allowVideo });
-    if (reject) continue;
+    if (reject) {
+      blockedAssetIds.push(mediaId);
+      continue;
+    }
     const driveId = googleDriveFileId(media);
     const driveUrl = String(f(media, "Google Drive URL") || "").trim()
       || (driveId ? `https://drive.google.com/file/d/${driveId}/view` : "");
@@ -934,6 +956,12 @@ export async function applyLibraryAssetsToProductionRequest(env, requestRecord, 
       source: "idea_photo_wait",
     });
     already.add(media.id);
+  }
+  // If every candidate is unsafe, leave the existing master/selection
+  // untouched rather than declaring Ready with an empty asset manifest.
+  if (!appended.length && blockedAssetIds.length) {
+    return { record: requestRecord, assets: existingAll, appended: 0,
+      acceptedIds: [], blockedAssetIds, skipped: true, reason: "asset_provenance_review" };
   }
   // Slow matching/watermark work must not commit over an operator edit.
   const latest = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
@@ -973,7 +1001,9 @@ export async function applyLibraryAssetsToProductionRequest(env, requestRecord, 
     Carousel_Slide_Count_Max: f(requestRecord, "Carousel_Slide_Count_Max"),
     Carousel_Slide_Count_Exact: assets.length || f(requestRecord, "Carousel_Slide_Count_Exact") || null,
   });
-  return { record: updated, assets, appended: appended.length };
+  return { record: updated, assets, appended: appended.length,
+    acceptedIds: appended.map((asset) => asset.media_asset_record_id),
+    blockedAssetIds };
 }
 /*__STUDIO_WORKER_END:applyLibraryAssetsToProductionRequest__*/
 
