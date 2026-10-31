@@ -26,7 +26,8 @@ export function makeRenderingReviewAtomicScheduleHooks({
   const supported=()=>mutationGate===true&&Boolean(text(env?.AIRTABLE_OUTPUT_TABLE_ID))&&
     typeof readOutput==='function'&&typeof readContentItem==='function'&&
     typeof writeVacateUnderLane==='function'&&typeof postCommit==='function'&&
-    typeof scheduleTransaction==='function'&&Boolean(env?.STUDIO_SCHEDULE_RESERVATIONS);
+    typeof scheduleTransaction==='function'&&Boolean(env?.STUDIO_SCHEDULE_RESERVATIONS)&&
+    env?.STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED==='true';
 
   async function readOwned(output_id,review_hold_id,review_owner){
     if(!outputIdPattern.test(text(output_id))||
@@ -75,9 +76,11 @@ export function makeRenderingReviewAtomicScheduleHooks({
       outputIdPattern.test(text(profile[0]))&&
       descriptor.profile_id===profile[0]&&
       scheduleReservationLaneEnabled(env,profile[0],descriptor.platform)&&
-      fields[H.hold_active]===true&&fields.Do_Not_Publish===true&&
-      text(fields[H.hold_owner])===descriptor.review_owner&&
-      !dispatchPresent(fields);
+      // Readiness runs BEFORE the review hold is written. The mandatory
+      // live hold/owner readback happens separately inside readOwned/vacate.
+      !dispatchPresent(fields)&&
+      fields[H.hold_active]!==true &&
+      !text(fields[H.hold_owner])&&!text(fields[H.hold_id]);
   }
 
   async function revokeScheduleUnderHold({output_id,review_hold_id,review_owner}={}){
