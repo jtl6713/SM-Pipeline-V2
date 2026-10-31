@@ -1453,7 +1453,9 @@
         : pending.payload;
       // Preserve the same request ID after an ambiguous HTTP failure.
       if (matching) pending.payload.client_request_id = requestPayload.client_request_id;
-      const desk = await mutateDesk({ ...requestPayload, note: notes });
+      const desk = matching
+        ? await mutateDesk({ ...requestPayload, note: notes })
+        : await mutateDesk({ ...pending.payload, note: notes });
       const requestId = String(desk?.result?.production_request_id || pending.payload.production_request_id || "").trim();
       closeFactoryFeedback();
       if (pending.payload?.action === "return_to_review" || pending.payload?.action === "start_render_review") {
