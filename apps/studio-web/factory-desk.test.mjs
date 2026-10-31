@@ -12,7 +12,7 @@ test("Factory Desk is a separate page beside Operations", async () => {
   const factory = await readFile(path.join(here, "assets/factory-desk.js"), "utf8");
   const css = await readFile(path.join(here, "assets/styles-phase7-0621.css"), "utf8");
 
-  assert.match(html, /id="navFactory"[^>]*>Factory</);
+  assert.match(html, /id="navFactory"[^>]*>Approval Factory</);
   assert.match(html, /id="page-factory"/);
   assert.match(html, /factory-open-target\.js\?v=0\.6\.\d+(?:-[a-z0-9-]+)?/);
   assert.match(html, /factory-desk\.js\?v=0\.6\.\d+(?:-[a-z0-9-]+)?/);
