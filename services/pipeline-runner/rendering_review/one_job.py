@@ -237,7 +237,7 @@ def _evidence(client,drive,output_id,job_id):
     original_by_id={x.get("id"):x for x in originals}
     return out,item,req,props,plan,source,original_by_id
 
-def _render_sources(client,request,original_by_id,props,plan):
+def _render_sources(client,request,original_by_id,props,plan,*,drive=None):
     # The original Production Request owns BOTH the master asset and the
     # approved 9:16 crop. The original Remotion props prove which crop was
     # actually rendered for V1. Neither may be substituted by the Producer.
@@ -291,28 +291,49 @@ def _render_sources(client,request,original_by_id,props,plan):
             not IDENTITY.fullmatch(variant_file) or
             variant_file!=frozen.get("render_variant_drive_file_id") or
             variant_file!=clip.get("googleDriveFileId") or
-            url!=crop.get("preview_url") or
             url!=frozen.get("render_url") or
             url!=str(clip.get("src") or clip.get("url") or "") or
-            not url.startswith("https://media.chicagoshining.com/studio/previews/item4/") or
             clip.get("mediaAssetRecordId")!=record_id):
             fail("review_render_crop_not_verified")
-        # Check actual renderer-readable bytes; never pass a Google Drive HTML
-        # viewer URL as an image source. Do not edit or reshare originals.
-        try:
-            with requests.get(url,timeout=20,stream=True,allow_redirects=False) as r:
-                if r.status_code!=200 or not r.headers.get("Content-Type","").startswith("image/"):
-                    fail("review_image_cache_unavailable")
-                chunk=next(r.iter_content(chunk_size=1024),b"")
-                if not (chunk.startswith(b"\xff\xd8") or chunk.startswith(b"\x89PNG")):
-                    fail("review_image_not_binary")
-        except requests.RequestException as exc:
-            raise ExactReviewRenderDenied("review_image_cache_unavailable") from exc
+        is_video=f.get("Media_Class")=="Video"
+        if is_video:
+            # Video-passthrough variants are not image crops. The original
+            # approved Remotion clip and independently re-read Drive MP4 must
+            # match; never fetch an HTML viewer or the internal preview path.
+            if (f.get("MIME_Type")!="video/mp4" or
+                master_variant.get("media_kind")!="video" or
+                crop.get("media_kind")!="video" or
+                crop.get("recipe_version")!="video-passthrough" or
+                crop.get("width")!=1080 or crop.get("height")!=1920 or
+                variant_file!=frozen["drive_file_id"] or
+                url!="https://drive.google.com/uc?export=download&id="+variant_file or
+                drive is None):
+                fail("review_video_passthrough_not_verified")
+            media=drive.get_file(variant_file)
+            if (media.get("id")!=variant_file or
+                media.get("mimeType")!="video/mp4" or
+                int(media.get("size") or 0)<100000):
+                fail("review_video_drive_file_not_verified")
+        else:
+            if (url!=crop.get("preview_url") or
+                not url.startswith("https://media.chicagoshining.com/studio/previews/item4/")):
+                fail("review_render_crop_not_verified")
+            # Images must be renderer-readable binary, not Drive HTML.
+            try:
+                with requests.get(url,timeout=20,stream=True,allow_redirects=False) as r:
+                    if r.status_code!=200 or not r.headers.get("Content-Type","").startswith("image/"):
+                        fail("review_image_cache_unavailable")
+                    chunk=next(r.iter_content(chunk_size=1024),b"")
+                    if not (chunk.startswith(b"\xff\xd8") or chunk.startswith(b"\x89PNG")):
+                        fail("review_image_not_binary")
+            except requests.RequestException as exc:
+                raise ExactReviewRenderDenied("review_image_cache_unavailable") from exc
         assets.append({"asset_id":asset_id,"verified":True,"authority":"server",
           "canonical_media_authority":"google_drive",
           "drive_file_id":frozen["drive_file_id"],
           "rights_receipt_id":frozen["rights_receipt_id"],
-          "profile_id":CHICAGO,"media_kind":"image","render_url":url})
+          "profile_id":CHICAGO,"media_kind":"video" if is_video else "image",
+          "render_url":url})
     return assets
 
 def _source_mix(drive,props,output_id):
@@ -420,7 +441,7 @@ def render_exact_attempt(output_id,job_id,*,client=None,drive=None,
     client=client or AirtableClient()
     drive=drive or GoogleDriveClient()
     output,item,req,props,plan,source,originals=_evidence(client,drive,output_id,job_id)
-    assets=_render_sources(client,req,originals,props,plan)
+    assets=_render_sources(client,req,originals,props,plan,drive=drive)
     mix=_source_mix(drive,props,output_id)
     # Claim only the requested exact job. No scanning and no broad scheduler.
     request_id="rrclaim_"+hashlib.sha256(
