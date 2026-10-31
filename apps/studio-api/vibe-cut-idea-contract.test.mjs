@@ -12,7 +12,8 @@ import {
 } from "./vibe-cut.mjs";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
-const worker = readStudioWorkerSource();
+const worker = readFileSync(path.join(dir, "worker-functions-01.mjs"), "utf8")
+  + "\n" + readFileSync(path.join(dir, "worker-functions-02.mjs"), "utf8");
 
 test("vertical Vibe Cut idea has no Photo Set, Carousel or photo listener", () => {
   const fields = vibeCutIdeaFields({ sourceAspect: "vertical", width: 1552, height: 2064, targetSeconds: 15 });
