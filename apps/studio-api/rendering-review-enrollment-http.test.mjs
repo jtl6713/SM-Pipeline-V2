@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   handleRenderingReviewEnrollRequest as enroll,
   reviewEnrollmentWriteEnabled as enabled,
+  globalReviewEnrollmentEnabled,
 } from "./rendering-review-enrollment-http.mjs";
 import {CHICAGO_PROFILE_ID,REVIEW_PILOT} from "./rendering-review-policy.mjs";
 
@@ -196,5 +197,33 @@ test("Factory-selected Chicago Reel does not require the historical 8447 global 
   assert.equal(receipt.ok,true);
   assert.equal(f.session.output_id,outputId);
   assert.equal(f.hold.output_id,outputId);
+  assert.equal(f.writes,3);
+});
+
+test('global Factory enrollment needs separate runner verification and exact profile membership',async()=>{
+  const f=fixture(),nyc='recNYC12345678901';
+  f.output={...f.output,profile_id:nyc,platform:'TikTok',output_type:'TikTok Video'};
+  const globalEnv={...flags,RENDERING_REVIEW_GLOBAL_MANUAL_ENABLED:'true',
+    RENDERING_REVIEW_GLOBAL_RUNNER_VERIFIED:'true'};
+  const args=(ids,env=globalEnv)=>({
+    request:new Request('https://studio.test/api/rendering-review/factory/outputs/'+outputId+'/request-changes',{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),
+    }),env,authorization:auth,output_id:outputId,assertWriteRequest:()=>{},
+    trustedAuthorizedProfileIds:ids,
+    operations:{...f.ops,authorizeReview:async()=>true},
+  });
+  assert.equal(globalReviewEnrollmentEnabled({}),false);
+  assert.equal(globalReviewEnrollmentEnabled(globalEnv),true);
+  await assert.rejects(()=>enroll(args([nyc],{...globalEnv,RENDERING_REVIEW_GLOBAL_RUNNER_VERIFIED:'false'})),
+    e=>e.status===405);
+  await assert.rejects(()=>enroll(args([CHICAGO_PROFILE_ID])),e=>e.status===403);
+  assert.equal(f.writes,0);
+  const result=await enroll(args([nyc]));
+  assert.equal(result.ok,true);assert.equal(result.review_hold_active,true);
+  assert.equal(f.session.profile_id,nyc);
+  assert.equal(f.session.platform,'TikTok');
+  assert.equal(f.session.output_type,'TikTok Video');
+  assert.equal(f.session.factory_entry.source,'factory');
+  assert.equal((await enroll(args([nyc]))).replay,true);
   assert.equal(f.writes,3);
 });
