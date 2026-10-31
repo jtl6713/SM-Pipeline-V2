@@ -616,8 +616,23 @@
                result.publication_changed!==false||
                result.instagram_upload_created!==false)
               throw new Error('Creative approval receipt not verified');
-            say('Version accepted. Publication remains held.');
-            await open(entry);
+            approval.textContent='V'+versionNumber+' approved — in Factory';
+            approvalStatus.dataset.state='success';
+            approvalStatus.textContent='V'+versionNumber+
+              ' approved and transferred to Factory. Continue there for normal approval and scheduling. Nothing was published.';
+            say('V'+versionNumber+' approved and ready in Factory.');
+            }catch(error){
+              approval.textContent='V'+versionNumber+' approval status needs checking';
+              approvalStatus.dataset.state='error';
+              approvalStatus.textContent='Could not confirm the final response: '+
+                (error?.message||'Status unavailable')+
+                '. Approval may have completed. Check Factory or refresh this review; do not approve again.';
+              say('Approval status requires verification. Do not approve again.',true);
+            }finally{
+              state.actionBusy=false;
+              approval.removeAttribute('aria-busy');
+              syncSelectedApproval();
+            }
           });
           state.approvalButton=approval;
           state.approvalVersion=Number(current.number);
