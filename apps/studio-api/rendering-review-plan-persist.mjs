@@ -72,7 +72,7 @@ async function sourceReceipt({output,session,readField,output_id,loadCompletedAt
     fileId=attempt.artifact_id;
   }
   return {verified:true,authority:"server",output_id,
-    profile_id:CHICAGO_PROFILE_ID,artifact_id:fileId,
+    profile_id:session.profile_id,artifact_id:fileId,
     attempt_id:attempt.id,drive_file_id:fileId,
     canonical_media_authority:"google_drive"};
 }
@@ -121,7 +121,7 @@ function requestedIds(candidate){
   for(const scene of candidate.timeline||[])ids.push(...(scene.asset_ids||[]));
   return [...new Set(ids)];
 }
-function rightsReceipt(row,entry,readField,variant){
+function rightsReceipt(row,entry,readField,variant,profileId){
   const f=name=>readField(row,name);
   const id=str(entry.id);
   const mediaRecordId=str(entry.media_asset_record_id);
@@ -135,12 +135,12 @@ function rightsReceipt(row,entry,readField,variant){
     row?.id!==mediaRecordId||str(f("Google Drive File ID"))!==fileId||
     rights!=="Owned"||status!=="Available"||f("Active")!==true||
     f("Do_Not_Use")===true||!Array.isArray(profiles)||
-    profiles.length!==1||profiles[0]!==CHICAGO_PROFILE_ID||
+    profiles.length!==1||profiles[0]!==profileId||
     !["Image","Video"].includes(kind))
     return null;
   return {id,verified:true,rights_clear:true,authority:"server",
     rights_receipt_id:"rrrights_"+mediaRecordId,
-    drive_file_id:fileId,profile_id:CHICAGO_PROFILE_ID,
+    drive_file_id:fileId,profile_id:profileId,
     canonical_media_authority:"google_drive",
     media_type:kind==="Image"?"image":"video",
     render_variant_drive_file_id:variant.render_variant_drive_file_id,
@@ -161,8 +161,9 @@ export async function persistReadyReviewPlan({
      typeof operations?.readHold!=="function")
     fail("REVIEW_PLAN_ADAPTER_MISSING","Trusted plan evidence adapters required",503);
   const session=await operations.loadSession(output_id);
-  if(!session||session.output_id!==output_id||session.profile_id!==CHICAGO_PROFILE_ID||
-     !session.producer_candidate||session.producer_candidate.stale)
+  if(!session||session.output_id!==output_id||!rec(session.profile_id)||
+     !str(session.output_type)||!session.producer_candidate||
+     session.producer_candidate.stale)
     fail("REVIEW_CANDIDATE_UNAVAILABLE","Current held Producer candidate required");
   const hold=await operations.readHold(output_id);
   if(!hold?.verified||!hold.active||hold.owner!==session.id||
@@ -170,9 +171,12 @@ export async function persistReadyReviewPlan({
     fail("REVIEW_HOLD_UNVERIFIED","Producer plan requires an exact active review hold");
   const output=await exact(readRecord,env.AIRTABLE_OUTPUT_TABLE_ID,output_id);
   const f=(r,k)=>readField(r,k);
-  if(one(f(output,"Content_Item"))===null ||
-     label(f(output,"Platform"))!=="Instagram"||
-     label(f(output,"Platform_Output_Type"))!=="Instagram Reel"||
+  const sessionPlatform=str(session.platform)||
+    (session.profile_id===CHICAGO_PROFILE_ID&&
+     session.output_type==="Instagram Reel"?"Instagram":"");
+  if(one(f(output,"Content_Item"))===null ||!sessionPlatform||
+     label(f(output,"Platform"))!==sessionPlatform||
+     label(f(output,"Platform_Output_Type"))!==session.output_type||
      f(output,"Do_Not_Publish")!==true||
      f(output,"Studio_Render_Review_Hold_Active")!==true||
      str(f(output,"Studio_Render_Review_Hold_ID"))!==hold.id||
@@ -181,10 +185,10 @@ export async function persistReadyReviewPlan({
      f(output,"Publish_Started_At")||f(output,"Publish_Locked_By")||
      f(output,"Publish_Locked_At")||f(output,"Platform_Media_ID")||
      f(output,"Platform_Post_ID")||f(output,"Published_At"))
-    fail("REVIEW_OUTPUT_INELIGIBLE","Held, unpublished Chicago Instagram Reel required");
+    fail("REVIEW_OUTPUT_INELIGIBLE","Held, unpublished output with exact review identity required");
   const content=await exact(readRecord,"tblwzN9AXWvmKVKPs",one(f(output,"Content_Item")));
-  if(one(f(content,"Content_Profile"))!==CHICAGO_PROFILE_ID)
-    fail("REVIEW_PROFILE_MISMATCH","Original Content Item is outside Chicago");
+  if(one(f(content,"Content_Profile"))!==session.profile_id)
+    fail("REVIEW_PROFILE_MISMATCH","Original Content Item belongs to another profile");
   const reqId=one(f(content,"Production_Request"));
   if(!reqId)fail("REVIEW_REQUEST_UNAVAILABLE","Source Production Request not uniquely linked");
   const request=await exact(readRecord,"tbl75nxNi6PMUjBQE",reqId);
@@ -223,7 +227,7 @@ export async function persistReadyReviewPlan({
     if(!entry||!rec(entry.media_asset_record_id))continue;
     const row=await exact(readRecord,env.AIRTABLE_MEDIA_TABLE_ID,entry.media_asset_record_id);
     const variant=verifiedReelVariant(entry,variantManifest,originalProps,reqId);
-    const receipt=rightsReceipt(row,entry,readField,variant);
+    const receipt=rightsReceipt(row,entry,readField,variant,session.profile_id);
     if(receipt)assets.push(receipt);
   }
   const result=await inspectReviewPlan({
