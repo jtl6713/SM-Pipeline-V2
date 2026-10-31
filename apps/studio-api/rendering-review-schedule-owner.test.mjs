@@ -164,3 +164,45 @@ test('legacy fallback cannot vacate a review schedule',async()=>{
   await fail(()=>hooks.revokeScheduleUnderHold(owned()),'REVIEW_SCHEDULE_LEGACY_DENIED');
   assert.equal(f.patches,0);
 });
+
+test('authoritative NYC Facebook lane vacates without touching the Chicago reservation lane',async()=>{
+  const f=fixture();
+  const nyc='recNYC12345678901';
+  f.content.fields.Content_Profile=[nyc];
+  f.output.fields.Platform='Facebook';
+  f.output.fields.Platform_Output_Type='Facebook Reel';
+  f.env.STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST=nyc+'::facebook';
+  const argsSeen=[];
+  const hooks=makeRenderingReviewAtomicScheduleHooks({
+    env:f.env,mutationGate:true,
+    readOutput:async()=>clone(f.output),readContentItem:async()=>clone(f.content),
+    writeVacateUnderLane:async({fields})=>{Object.assign(f.output.fields,fields);},
+    postCommit:async()=>{},
+    scheduleTransaction:async(_env,args,ops)=>{
+      argsSeen.push(args);
+      const p=await ops.plan();
+      await ops.write(p,{signal:new AbortController().signal});
+      await ops.verify();
+      await ops.afterCommit();
+      return {atomic_schedule:true};
+    },
+  });
+  const requested={...scope(),profile_id:nyc,platform:'Facebook',output_type:'Facebook Reel'};
+  assert.equal(await hooks.scheduleRevocationReady(requested),true);
+  assert.equal(await hooks.scheduleRevocationReady({...requested,profile_id:CHICAGO_PROFILE_ID}),false);
+  assert.equal(await hooks.scheduleRevocationReady({...requested,output_type:'Facebook Story'}),false);
+  const result=await hooks.revokeScheduleUnderHold(owned());
+  assert.equal(result.atomic_schedule,true);
+  assert.deepEqual(argsSeen.map(x=>[x.content_profile_id,x.platform,x.output_type]),
+    [[nyc,'Facebook','Facebook Reel']]);
+  assert.equal(f.output.fields.Scheduled_Post_Date,null);
+  assert.equal(f.output.fields.Studio_Render_Review_Hold_Active,true);
+});
+test('unconfigured profile-platform lane never vacates a selected output',async()=>{
+  const f=fixture();
+  f.output.fields.Platform='TikTok';
+  f.output.fields.Platform_Output_Type='TikTok Video';
+  assert.equal(await f.hooks.scheduleRevocationReady({...scope(),platform:'TikTok',output_type:'TikTok Video'}),false);
+  await fail(()=>f.hooks.revokeScheduleUnderHold(owned()),'REVIEW_SCHEDULE_PROFILE_MISMATCH');
+  assert.equal(f.patches,0);
+});
