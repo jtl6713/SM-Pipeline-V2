@@ -2944,15 +2944,15 @@ export async function cleanProductionRequestPayload(payload, env) {
   const invalidPlatforms = platforms.filter(v => !PR_PLATFORMS.has(v));
   if (invalidPlatforms.length) throw new HttpError(400, `Unsupported platform(s): ${invalidPlatforms.join(", ")}`);
 
-  const voiceoverMode = normalizeChoice(payload?.voiceover_mode, PR_TRISTATE, "Yes", "Voiceover mode");
-  const backgroundMusicMode = normalizeChoice(payload?.background_music_mode, PR_TRISTATE, "Yes", "Background music mode");
-  const thumbnailMode = normalizeChoice(payload?.thumbnail_mode, PR_THUMBNAIL_MODES, "Yes", "Thumbnail mode");
+  const voiceoverMode = vibeCut ? "No" : normalizeChoice(payload?.voiceover_mode, PR_TRISTATE, "Yes", "Voiceover mode");
+  const backgroundMusicMode = vibeCut ? "Yes" : normalizeChoice(payload?.background_music_mode, PR_TRISTATE, "Yes", "Background music mode");
+  const thumbnailMode = vibeCut ? "Yes" : normalizeChoice(payload?.thumbnail_mode, PR_THUMBNAIL_MODES, "Yes", "Thumbnail mode");
 
-  const videoClipCountMode = normalizeChoice(payload?.video_clip_count_mode, PR_COUNT_MODES, "AI decides", "Video clip count mode");
+  const videoClipCountMode = vibeCut ? "AI decides" : normalizeChoice(payload?.video_clip_count_mode, PR_COUNT_MODES, "AI decides", "Video clip count mode");
   const slideCountApplies = ["Carousel", "Photo Set", "Feed Post"].includes(contentType);
   const carouselSlideCountMode = slideCountApplies
     ? normalizeChoice(payload?.carousel_slide_count_mode, PR_COUNT_MODES, "AI decides", "Carousel slide count mode")
-    : "AI decides";
+    : null;
 
   const videoDurationSeconds = nullableWholeSeconds(payload?.video_duration_seconds, 5, 600, "Video duration");
   let voiceoverDurationSeconds = nullableNumber(payload?.voiceover_duration_seconds, 1, 600, "Voiceover duration");
@@ -3000,12 +3000,12 @@ export async function cleanProductionRequestPayload(payload, env) {
     }
   }
 
-  const carouselImageMode = normalizeChoice(
+  const carouselImageMode = slideCountApplies ? normalizeChoice(
     payload?.carousel_image_mode,
     PR_CAROUSEL_IMAGE_MODES,
     "Make AI Generated",
     "Carousel image mode"
-  );
+  ) : null;
 
   let titleMode = normalizeChoice(payload?.title_mode, PR_TEXT_MODES, "AI decides", "Title mode");
   let captionMode = normalizeChoice(payload?.caption_mode, PR_TEXT_MODES, "AI decides", "Caption mode");
