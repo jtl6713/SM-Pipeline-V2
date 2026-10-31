@@ -10931,7 +10931,7 @@ export async function listOversizedIntakeVideos(env) {
 export async function listOversizedMediaFromAirtable(env) {
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
     limit: 50,
-    filterFormula: `AND({File_Size_MB}>95.36,FIND("_compressed",{Asset Name}&"")=0)`,
+    filterFormula: `AND({File_Size_MB}>95.36,{Active}=1,OR({Media_Class}="Video",LEFT({MIME_Type}&"",6)="video/"),{Google Drive File ID}!="")`,
   });
   return records.map((record) => ({
     id: record.id,
