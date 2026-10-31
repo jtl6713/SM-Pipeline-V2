@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildIdeaLibraryKeys,
+  photoMatchSkippableOverlayReview,
   ideaAutoListenContentType,
   ideaLibraryFilterKeys,
   ideaLibrarySearchFilterKeys,
@@ -611,4 +612,16 @@ test("legacy listener ignores unresolved profile assignment and live operator pa
     }).map((row) => row.id),
     ["recEligible"],
   );
+});
+
+
+test("photo matcher skips only explicit per-asset third-party overlay holds", () => {
+  assert.equal(photoMatchSkippableOverlayReview({
+    status: 422,
+    message: "Asset held for third-party overlay review (review): QA-ASSET-THIRD-PARTY-OVERLAY: REVIEW [watermark, logo]",
+  }), true);
+  assert.equal(photoMatchSkippableOverlayReview({ status: 422, message: "Invalid image" }), false);
+  assert.equal(photoMatchSkippableOverlayReview({ status: 503, message: "Asset held for third-party overlay review" }), false);
+  assert.equal(photoMatchSkippableOverlayReview({ status: 422, message: "Watermark runner unreachable" }), false);
+  assert.equal(photoMatchSkippableOverlayReview(null), false);
 });
