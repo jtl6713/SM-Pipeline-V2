@@ -591,8 +591,10 @@
           approvalStatus.setAttribute('aria-live','polite');
           approval.addEventListener('click',async()=>{
             if(state.actionBusy||state.approvalLocks.has(approvalKey))return;
-            if(state.viewingVersion!==Number(current.number))
-              throw new Error('Select V'+current.number+' before approving this version.');
+            if(state.viewingVersion!==Number(current.number)){
+              say('Select V'+current.number+' before approving this version.',true);
+              return;
+            }
             const versionNumber=Number(current.number);
             if(!window.confirm('Approve selected version V'+versionNumber+'?\n\n'+
               'Select OK to approve V'+versionNumber+', or Cancel to choose a different version.\n\n'+
