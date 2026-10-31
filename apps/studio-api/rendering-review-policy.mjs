@@ -98,7 +98,8 @@ export function enrollReview(output, hold, policy, { session_id, original_attemp
   const artifact = text(output.final_file_id || output.final_file_url);
   return {
     schema: REVIEW_SCHEMA, id: session_id, output_id: text(output.id),
-    profile_id: text(output.profile_id), output_type: text(output.output_type),
+    profile_id: text(output.profile_id), platform: text(output.platform),
+    output_type: text(output.output_type),
     state: "ready_for_review", version: 1,
     review_hold: { id: hold.id, owner: session_id, active: true },
     original_approval: output.approved_attempt_id || null,
