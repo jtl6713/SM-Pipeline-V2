@@ -1352,13 +1352,13 @@
     const button = $("operationsCompressAllOversized");
     try {
       if (button) button.disabled = true;
-      setOperationsMessage("Starting compression for oversized intake folder videos…");
+      setOperationsMessage("Starting safe compression for oversized ingestion and Asset Manager videos…");
       const result = await api("/api/operations/compress", {
         method: "POST",
         body: JSON.stringify({ compress_all: true }),
         timeoutMs: 180000,
       });
-      setOperationsMessage(result.message || "Compression started for the intake folder.");
+      setOperationsMessage(result.message || "Compression request submitted.");
       renderCompressionStatus([{
         headline: "Starting the next oversized video",
         tone: "waiting",
@@ -26266,12 +26266,12 @@ function timedScriptAssetLabel(asset, index) {
     const activeJobs = [...jobsById.values()];
     renderCompressionStatus(activeJobs, operationsOversizedCache.length);
     syncCompressionPoll(activeJobs.length > 0 || operationsOversizedCache.length > 0);
-    const intakeCount = operationsOversizedCache.filter((record) => record.source === "intake_folder").length;
+    const totalCount = operationsOversizedCache.length;
     if (compressAll) {
-      compressAll.hidden = !(canCompress && intakeCount > 0);
-      compressAll.textContent = intakeCount === 1
-        ? "Compress intake folder video"
-        : `Compress all in intake folder (${intakeCount})`;
+      compressAll.hidden = !(canCompress && totalCount > 0);
+      compressAll.textContent = totalCount === 1
+        ? "Compress oversized video"
+        : `Compress all oversized videos (${totalCount})`;
     }
     if (!target) return;
     if (!operationsOversizedCache.length) {
@@ -26310,11 +26310,11 @@ function timedScriptAssetLabel(asset, index) {
         }], operationsOversizedCache.length);
         startCompressionPoll();
         try {
-          await api("/api/operations/compress", {
+          const result = await api("/api/operations/compress", {
             method: "POST",
             body: JSON.stringify({ drive_file_id: button.dataset.opsCompress }),
           });
-          setOperationsMessage(`Started compression for ${fileName}.`);
+          setOperationsMessage(result.message || `Compression request processed for ${fileName}.`);
           pollCompressionStatus();
         } catch (error) {
           setOperationsMessage(error.message || "Could not start compression.", "error-text");
