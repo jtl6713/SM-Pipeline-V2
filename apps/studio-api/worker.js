@@ -2481,7 +2481,7 @@ export default {
           field:f,
         });
       };
-      const correctionMatches = /^\\/api\\/factory\\/outputs\\/(rec[A-Za-z0-9]{14})\\/correction-matches$/.exec(url.pathname);
+      const correctionMatches = /^\/api\/factory\/outputs\/(rec[A-Za-z0-9]{14})\/correction-matches$/.exec(url.pathname);
       if(correctionMatches&&request.method==="GET"){
         requirePermission(authorization,"outputs_review");
         const id=correctionMatches[1],requestId=String(url.searchParams.get("production_request_id")||"");
