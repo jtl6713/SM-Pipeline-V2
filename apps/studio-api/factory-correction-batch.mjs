@@ -120,9 +120,28 @@ export async function submitFactoryCorrectionBatch({
         throw fail("Batch receipt was not verified", "RECEIPT_UNVERIFIED");
     }
     if (receipt.status === "accepted" &&
-        completed(receipt.outputs, plan.output_ids))
-      return { ok: true, replay: true, status: "accepted",
+        completed(receipt.outputs, plan.output_ids)) {
+      // An old receipt is not proof that publishing is *still* blocked.
+      // Every replay re-reads the live held session before acknowledging.
+      const changed = { ...receipt.outputs };
+      let lost = false;
+      for (const id of plan.output_ids) {
+        const live = await operations.verifyHeldSession(id, key + "_" + id);
+        if (live?.hold_active !== true || live?.original_preserved !== true ||
+            live?.published_or_dispatching === true) {
+          changed[id] = { status: "failed", verified: false, reason: "HOLD_LOST" };
+          lost = true;
+        }
+      }
+      if (!lost) return { ok: true, replay: true, status: "accepted",
         client_request_id: key, outputs: receipt.outputs };
+      const unsafe = { ...receipt, version: receipt.version + 1,
+        status: "holding", outputs: changed };
+      await operations.updateBatchReceiptIfVersion(key, receipt.version, unsafe);
+      return { ok: false, replay: false, status: "partial_hold",
+        client_request_id: key, outputs: unsafe.outputs,
+        message: "A prior hold is no longer authoritative. No correction is accepted." };
+    }
     if (!receipt.outputs || !plan.output_ids.every(id => receipt.outputs[id]))
       throw fail("Stored correction selection does not match the request", "RECEIPT_CONFLICT");
 
