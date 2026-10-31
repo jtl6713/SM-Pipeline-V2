@@ -14,18 +14,26 @@ const readable = (value) => String(value || "").replace(/\s+/g, " ").replace(/[�
 export function scriptedShortExplicitTitle(prompt) {
   const source = String(prompt || "").replace(/\r/g, "");
   const patterns = [
-    /(?:^|[\n.!?;]\s*)\s*(?:use\s+)?(?:the\s+)?(?:exact\s+)?(?:video\s+|post\s+|short\s+|content\s+)?title\s*(?:should\s+be|must\s+be|is|:|=)\s*([^\n]+)/im,
+    // "Please use this exact title:" is the normal creative-brief syntax.
+    // Accept "this" and "please" rather than silently falling back to AI.
+    /(?:^|[\n.!?;]\s*)\s*(?:please\s+)?(?:use|set|keep)\s+(?:(?:this|the|my)\s+)?(?:exact\s+)?(?:video\s+|post\s+|short\s+|content\s+)?(?:title|headline)\s*(?:(?:exactly\s+)?(?:as|to|:|=))?\s*([^\n]+)/im,
+    /(?:^|[\n.!?;]\s*)\s*(?:please\s+)?(?:the\s+)?(?:exact\s+)?(?:video\s+|post\s+|short\s+|content\s+)?title\s*(?:should\s+be|must\s+be|is|:|=)\s*([^\n]+)/im,
     /\b(?:call|name|title)\s+(?:the\s+)?(?:video|short|reel|post|piece|it|this)\s+(?:exactly\s+)?(?:as\s+)?[:"'“”]?\s*([^\n]+)/i,
-    /\b(?:use|set)\s+(?:the\s+)?(?:exact\s+)?title\s+(?:as|to)\s+([^\n]+)/i,
   ];
   for (const pattern of patterns) {
     const match = pattern.exec(source);
     if (!match) continue;
     let title = String(match[1]).trim();
-    const quoted = /^(["'“‘])(.+?)["'”’](?:\s*[.!?])?$/.exec(title);
-    if (quoted) title = quoted[2];
-    else title = title.split(/\s*[.;]\s+(?=(?:use|include|make|do not|don't|avoid|with|for)\b)/i)[0];
-    title = readable(title).replace(/^["'“‘]+|["'”’]+$/g, "").replace(/[.!?]$/g, "").trim();
+    const quoted = /^(["'“‘])(.+)(["'”’])$/.exec(title);
+    if (quoted && ({ '"': '"', "'": "'", '“': '”', '‘': '’' })[quoted[1]] === quoted[3]) {
+      title = quoted[2];
+    } else {
+      title = title.split(/\s*[.;]\s+(?=(?:use|include|make|do not|don't|avoid|with|for)\b)/i)[0];
+    }
+    // Preserve the user's exact typographic quotation marks and em dash.
+    // In "Viaduct — “Architecture in the Light”" the closing quote is not
+    // an outer wrapper and must never be stripped.
+    title = title.replace(/\s+/g, " ").trim();
     if (title && title.length <= MAX_TITLE_LENGTH) return title;
   }
   return "";
