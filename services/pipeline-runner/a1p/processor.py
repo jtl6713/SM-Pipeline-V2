@@ -279,8 +279,10 @@ def process_request(
     if status == "failed":
         value = f"failed_local_compressor|{job_id}|{attempt_n}|{source_file_id}|{source_name}|{status}|{now}"
         _write_state(client, state_record_id, active=False, value=value, notes="Local compressor returned an error. Original preserved.")
-        _delete_state(client, state_record_id)
+        # Keep an inactive failure marker. Automatic drains skip this original;
+        # an administrator can explicitly retry the exact Drive ID.
         _cleanup_job(job_id)
+        _continue_after_finish()
         return {"processed": True, "status": "failed_local_compressor", **preview}
 
     if status != "complete":
@@ -306,8 +308,8 @@ def process_request(
             value=value,
             notes="Compressed output exceeded 90 MB or did not expose a valid size. Original preserved.",
         )
-        _delete_state(client, state_record_id)
         _cleanup_job(job_id)
+        _continue_after_finish()
         return {"processed": True, "status": "failed_result_too_large", **preview}
 
     binary, output_mime = download_output(job)
