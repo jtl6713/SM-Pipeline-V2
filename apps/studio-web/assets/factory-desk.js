@@ -1162,7 +1162,7 @@
       <input type="checkbox" data-factory-select-content="${esc(group.key)}"
         aria-label="Select all review-ready outputs for ${esc(title)}"
         ${contentSelected ? "checked" : ""} ${(!batchReady.length || pending.length) ? "disabled" : ""}>
-      ${["chicago_ig_reel_v1", "chicago_ig_reels_v2"].includes(state.batchRollout?.mode) ? "Select eligible outputs" : "Select eligible outputs"}</label>`;
+      Select eligible outputs</label>`;
     return `<div class="factory-content-bar" data-factory-content="${esc(group.key)}">
       ${selectContent}
       <button type="button" class="factory-content-toggle" data-factory-toggle-content="${esc(group.key)}" aria-expanded="${expanded}" aria-controls="factory-review-${esc(group.key.replace(/[^a-zA-Z0-9_-]/g, "-"))}">
