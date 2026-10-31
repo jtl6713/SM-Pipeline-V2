@@ -3,6 +3,8 @@ name: Rendering Review Phase 0 CI
 on:
   pull_request:
     paths:
+      - 'apps/studio-api/factory-correction-*.*'
+      - 'apps/studio-web/factory-matching-correction.test.mjs'
       - 'apps/studio-api/rendering-review-approval-http.*'
       - 'apps/studio-api/rendering-review-policy.*'
       - 'apps/studio-api/rendering-review-factory-entry-gate.test.mjs'
@@ -116,6 +118,12 @@ jobs:
           node --test apps/studio-api/rendering-review-factory-handoff.test.mjs apps/studio-api/rendering-review-factory-entry-gate.test.mjs
       - name: Chicago pilot lifecycle and safety contracts
         run: node --test apps/studio-api/rendering-review-audio-qa-repair.test.mjs apps/studio-api/rendering-review-approval-http.test.mjs apps/studio-api/rendering-review-completion-http.test.mjs apps/studio-api/rendering-review-launch-ledger.test.mjs apps/studio-api/rendering-review-job-claim.test.mjs apps/studio-api/rendering-review-outbox-airtable.test.mjs apps/studio-api/rendering-review-attempt-outbox.test.mjs apps/studio-api/rendering-review-plan-preflight.test.mjs apps/studio-api/rendering-review-plan-persist.test.mjs apps/studio-api/rendering-review-policy.test.mjs apps/studio-api/rendering-review-coordinator.test.mjs apps/studio-api/rendering-review-airtable.test.mjs apps/studio-api/rendering-review-workspace.test.mjs apps/studio-api/rendering-review-attempt-video.test.mjs apps/studio-api/rendering-review-feedback.test.mjs apps/studio-api/rendering-review-feedback-http.test.mjs apps/studio-api/rendering-review-schedule-owner.test.mjs apps/studio-api/rendering-review-enrollment-http.test.mjs apps/studio-api/rendering-review-enrollment-wiring.test.mjs apps/studio-api/rendering-review-enrollment-route.test.mjs apps/studio-api/rendering-review-producer-bridge.test.mjs apps/studio-api/rendering-review-producer-persist.test.mjs apps/studio-api/rendering-review-ig-dispatch-claim.test.mjs
+      - name: Factory post-render multi-profile matching and certified renderer preflight
+        run: |
+          node --check apps/studio-api/factory-correction-authority.mjs
+          node --check apps/studio-api/factory-correction-batch.mjs
+          node --check apps/studio-api/factory-correction-render-capability.mjs
+          node --test apps/studio-api/factory-correction-render-capability.test.mjs apps/studio-api/factory-correction-selection.test.mjs apps/studio-api/factory-correction-authority.test.mjs apps/studio-api/factory-correction-batch.test.mjs apps/studio-web/factory-matching-correction.test.mjs
       - name: Python AP1-IG common owner fail-closed contracts
         run: PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_review_dispatch_claim.py' -v
       - name: Protected render ledger HTTP bridge tests

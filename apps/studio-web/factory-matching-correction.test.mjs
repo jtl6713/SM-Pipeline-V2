@@ -13,7 +13,8 @@ test("Factory Request Changes offers a default-selected multi-output picker",()=
   assert.match(js,/function loadFactoryCorrectionMatches/);
   assert.match(js,/correction-matches\?production_request_id/);
   assert.match(js,/data-factory-correction-output/);
-  assert.match(js,/checked><span>/);
+  assert.match(js,/canRender \? " checked" : " disabled"/);
+  assert.match(js,/Not yet supported for revision/);
   assert.match(css,/\.factory-correction-matches/);
 });
 test("grouped feedback is explicit and uses an isolated server action",()=>{
