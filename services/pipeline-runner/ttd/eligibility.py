@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from publish.rendering_review import rendering_review_reason
 from asset.helpers import as_bool
 from render.fields import field_str
 from ttd.constants import (
@@ -87,6 +88,9 @@ def ttd0_eligibility_reason(record: dict[str, Any]) -> str | None:
         return "not_tiktok"
     if not as_bool(record.get("fields", {}).get("Auto_Publish_Enabled"), False):
         return "auto_publish_disabled"
+    held = rendering_review_reason(record)
+    if held:
+        return held
     if as_bool(record.get("fields", {}).get("Do_Not_Publish"), False):
         return "do_not_publish"
     if field_str(record, "TikTok_Draft_Publish_ID"):
@@ -117,6 +121,9 @@ def ttd1_eligibility_reason(
         return "already_has_draft_publish_id"
     if not as_bool(record.get("fields", {}).get("Auto_Publish_Enabled"), False):
         return "auto_publish_disabled"
+    held = rendering_review_reason(record)
+    if held:
+        return held
     if as_bool(record.get("fields", {}).get("Do_Not_Publish"), False):
         return "do_not_publish"
     if replace_mismatch(
@@ -145,6 +152,9 @@ def ttd2_eligibility_reason(
         return "not_tiktok"
     if not field_str(record, "TikTok_Draft_Publish_ID"):
         return "missing_draft_publish_id"
+    held = rendering_review_reason(record)
+    if held:
+        return held
     if as_bool(record.get("fields", {}).get("Do_Not_Publish"), False):
         return "do_not_publish"
     if replace_mismatch(
@@ -164,6 +174,9 @@ def ttd3_eligibility_reason(record: dict[str, Any]) -> str | None:
         return "missing_record_id"
     if _ci(field_str(record, "Platform")) != "tiktok":
         return "not_tiktok"
+    held = rendering_review_reason(record)
+    if held:
+        return held
     if as_bool(record.get("fields", {}).get("Do_Not_Publish"), False):
         return "do_not_publish"
     if not field_str(record, "TikTok_Draft_Delivered_At"):
