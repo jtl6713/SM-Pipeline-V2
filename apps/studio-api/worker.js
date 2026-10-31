@@ -2463,7 +2463,7 @@ export default {
         throw new HttpError(405, "Method not allowed");
       }
 
-      const correctionMatches = /^\\/api\\/factory\\/outputs\\/(rec[A-Za-z0-9]{14})\\/correction-matches$/.exec(url.pathname);
+      const correctionMatches = /^\/api\/factory\/outputs\/(rec[A-Za-z0-9]{14})\/correction-matches$/.exec(url.pathname);
       if (correctionMatches && request.method === "GET") {
         requirePermission(authorization, "outputs_review");
         const outputId = correctionMatches[1];
