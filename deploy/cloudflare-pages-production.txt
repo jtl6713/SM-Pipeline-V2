@@ -596,3 +596,4 @@ Deploy Studio UI 0.6.782-mobile-overview-scroll. Preserve All Profiles horizonta
 2026-10-30: UI 0.6.784 Rendering Review live timestamps and explicit Producer response/no V2 job status for output 9389. No publish changes.
 2026-10-30: Deploy UI 0.6.785 oversized library repair and correct Owner admin compression controls (PR #1381). No automatic publishing or media deletion.
 2026-10-30: Studio UI 0.6.786 approve-selected-v2. Render Review action reads 'Approve selected version', allows approval only while the current V2 is displayed; preserves separate Factory scheduling and the publication hold. Deploy through guarded GitHub Pages workflow.
+2026-10-30: Deploy Studio UI 0.6.787-confirm-selected-version. The 'Approve selected version' confirmation names the exact V-number (e.g. V2), allows Cancel without mutation, and reiterates that review approval does not publish, upload, or release the hold. Release version and cache key bumped together.

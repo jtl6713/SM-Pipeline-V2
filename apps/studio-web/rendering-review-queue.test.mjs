@@ -308,9 +308,9 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
   const original='1CAh-mGGiCiv7WKUl9jNeqm1vyQF7PTzq';
   const revised='1XZ-_ARlXoP5mwILho13f81vmWQlpgTs4';
   const attemptId='rrattempt_1234567890abcdef';
-  let activate,ready=false,reads=0;
+  let activate,ready=false,reads=0,permitApproval=false;
   const timers=[];
-  const calls=[];
+  const calls=[],confirmations=[],approvalPosts=[];
   const fetchStub=async(url,options)=>{
     calls.push({url,method:options.method});
     if(url==='/api/session')return {ok:true,json:async()=>({
@@ -324,6 +324,11 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
           title:'Chicago test render',review_held:true,render_status:'Rendered',
           final_file_url:'https://drive.google.com/file/d/'+original+'/view'}],
         next_cursor:null})};
+    if(url==='/api/rendering-review/outputs/'+output+'/approve'){
+      approvalPosts.push(JSON.parse(options.body));
+      return {ok:true,json:async()=>({ok:true,accepted:true,
+        review_hold_active:true,publication_changed:false,instagram_upload_created:false})};
+    }
     if(url==='/api/rendering-review/outputs/'+output){
       reads++;
       return {ok:true,json:async()=>({
@@ -347,9 +352,12 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
     window:{location:{href:'https://studio.test/'},
       CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''},
       setTimeout:fn=>{timers.push(fn);return timers.length;},
-      clearTimeout:()=>{}},
+      clearTimeout:()=>{},confirm:message=>{
+        confirmations.push(message);return permitApproval;
+      }},
     MutationObserver:class{constructor(cb){activate=cb;}observe(){}},
     fetch:fetchStub,URL,URLSearchParams,
+    crypto:{randomUUID:()=> '12345678-1234-1234-1234-123456789012'},
   };
   vm.runInNewContext(script,sandbox,{filename:'rendering-review-queue.js'});
   await tick();await tick();
@@ -391,6 +399,18 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
   assert.equal(nodes.rrOriginalVersion.hidden,false);
   assert.equal(approval.disabled,false,'Re-selecting V2 enables its approval');
   assert.ok(calls.every(c=>c.method==='GET'),'Polling never renders or publishes');
+  await approval.listeners.click();
+  assert.equal(confirmations.length,1,'One approval confirmation appears');
+  assert.match(confirmations[0],/Approve selected version V2\?/);
+  assert.match(confirmations[0],/Cancel to choose a different version/);
+  assert.match(confirmations[0],/does not publish, upload, or release the publication hold/);
+  assert.equal(approvalPosts.length,0,'Cancel must not submit an approval');
+  permitApproval=true;
+  await approval.listeners.click();
+  assert.equal(approvalPosts.length,1,'OK sends one approval');
+  assert.equal(approvalPosts[0].attempt_id,attemptId,'Approval references displayed V2 attempt');
+  assert.equal(approvalPosts[0].expected_version,4);
+  assert.equal(approvalPosts[0].public_post_created,undefined,'No publishing intent is submitted');
 });
 
 
