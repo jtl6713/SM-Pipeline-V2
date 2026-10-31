@@ -1,0 +1,47 @@
+name: P1 Vibe Cut Video Intake CI
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-api/**'
+      - 'apps/studio-web/**'
+      - '.github/workflows/vibe-cut-intake-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/studio-api/**'
+      - 'apps/studio-web/**'
+      - '.github/workflows/vibe-cut-intake-ci.yml'
+permissions:
+  contents: read
+jobs:
+  vibe-cut-intake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax and video-only intake regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check apps/studio-api/worker.js
+          node --check apps/studio-api/worker-functions-01.mjs
+          node --check apps/studio-api/worker-functions-02.mjs
+          node --check apps/studio-api/vibe-cut.mjs
+          node --check apps/studio-web/assets/app-item4-1008.js
+          node --check apps/studio-web/assets/ez-plan.js
+          node --test \
+            apps/studio-api/vibe-cut-video-intake.test.mjs \
+            apps/studio-api/vibe-cut.test.mjs \
+            apps/studio-api/vibe-cut-source-regression.test.mjs \
+            apps/studio-api/idea-photo-wait.test.mjs \
+            apps/studio-api/video-carousel-count-guard.test.mjs \
+            apps/studio-web/ez-aspect-plan.test.mjs \
+            apps/studio-web/vibe-cut-mode.test.mjs \
+            apps/studio-web/vibe-cut-passthrough-guard.test.mjs \
+            apps/studio-web/vibe-upload-confirm.test.mjs \
+            apps/studio-web/idea-photo-wait-title.test.mjs \
+            apps/studio-web/idea-numeric-id-display.test.mjs \
+            apps/studio-web/ui-release-contract.test.mjs
