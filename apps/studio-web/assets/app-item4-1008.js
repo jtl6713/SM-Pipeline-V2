@@ -11744,7 +11744,10 @@ function timedScriptAssetLabel(asset, index) {
       if (/missing .+ authoritative variant/i.test(issue)) {
         return item4VariantNotReadyCopy(item4Workspace?.variant_status);
       }
-      return "Something still needs a moment before approve. Try again shortly.";
+      // Unknown preflight failures are not necessarily transient. Expose the
+      // authoritative validation issue so the operator and Quality Agent can
+      // identify the exact missing invariant instead of suggesting blind retries.
+      return `Approval blocked: ${issue}`;
     }).filter((line, index, all) => all.indexOf(line) === index);
   }
 
