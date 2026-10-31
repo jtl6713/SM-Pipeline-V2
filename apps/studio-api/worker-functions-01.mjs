@@ -426,6 +426,8 @@ import {
   profileSetupSlug,
 } from "./profile-setup.mjs";
 
+import { productionFormatSignature } from "./production-format-groups.mjs";
+
 // Functions extracted verbatim from worker.js. No route, response, or state changes.
 import {
   airtableFetch,
@@ -4011,7 +4013,7 @@ export function normalizeOutputType(platform, outputType) {
 }
 /*__STUDIO_WORKER_END:normalizeOutputType__*/
 
-export function mapProductionRequestOutput(record, master = null) {
+export function mapProductionRequestOutput(record, master = null, renderFormat = null) {
   const links = (name) => Array.isArray(f(record, name)) ? f(record, name) : [];
   const choice = (field, masterValue) => {
     const value = String(f(record, field) || "Inherit").trim() || "Inherit";
@@ -4040,6 +4042,8 @@ export function mapProductionRequestOutput(record, master = null) {
     created_by_links: links("Created_By"),
     platform: f(record, "Platform"),
     output_type: f(record, "Output_Type"),
+    pipeline_family: f(record, "Pipeline_Family"),
+    render_format: renderFormat,
     status: f(record, "Output_Status"),
     output_order: f(record, "Output_Order"),
     enabled: Boolean(f(record, "Enabled")),
@@ -4185,6 +4189,30 @@ export function assertEditableProductionRequest(parent) {
 }
 /*__STUDIO_WORKER_END:assertEditableProductionRequest__*/
 
+/**
+ * Match a child output to the authoritative Platform Output Mappings entry
+ * selected by the persisted studio output plan. If a new supported platform
+ * supplies its own mapping in the plan it participates without a UI release.
+ * Do not infer compatibility from the platform name, ratio alone or media type.
+ */
+function productionRequestOutputRenderFormat(row, parent, mappingIndex, planItems) {
+  const platform = String(f(row, "Platform") || "").trim();
+  const outputType = String(f(row, "Output_Type") || "").trim();
+  const family = String(f(row, "Pipeline_Family") || "").trim();
+  const planned = (Array.isArray(planItems) ? planItems : []).find(item =>
+    String(item?.platform || "").trim() === platform &&
+    item4CanonicalOutputType(platform, item?.output_type) === item4CanonicalOutputType(platform, outputType)
+  );
+  const supported = ITEM4_PLAN_SPECS[platform]?.options?.[outputType];
+  const mappingType = String(planned?.mapping_type || supported?.mapping_type || "").trim();
+  const mapping = mappingType ? mappingIndex.get(`${platform}::${mappingType}`) : null;
+  if (!mapping) return null;
+  const format = String(f(mapping, "Format") || "").trim();
+  const aspect_ratio = String(f(mapping, "Aspect_Ratio") || "").trim();
+  const key = productionFormatSignature({ pipeline_family: family, format, aspect_ratio });
+  return key ? { key, pipeline_family: family, format, aspect_ratio } : null;
+}
+
 export async function listProductionRequestOutputs(request, env, url, authorization, ctx) {
   // v0.10.6: this endpoint is part of every Production workspace data refresh.
   // Run the P3 hardener after the response so the outputs list is not waiting on Make.
@@ -4192,10 +4220,16 @@ export async function listProductionRequestOutputs(request, env, url, authorizat
   const productionRequestId = productionRequestIdFromOutputsPath(url);
   const parent = await loadAuthorizedProductionRequest(env, productionRequestId, authorization);
   const rows = await outputRowsForProductionRequest(env, productionRequestId);
+  // Fail closed if mapping data is unavailable: no speculative group edits.
+  const mappings = await item4MappingIndex(env).catch(() => new Map());
+  const plan = item4ParseJson(f(parent, "Studio_Output_Plan_JSON"), null);
+  const planItems = Array.isArray(plan?.items) ? plan.items : [];
   return respond(request, env, {
     ok: true,
     production_request: mapProductionRequest(parent),
-    records: rows.map(row => mapProductionRequestOutput(row, parent)),
+    records: rows.map(row => mapProductionRequestOutput(
+      row, parent, productionRequestOutputRenderFormat(row, parent, mappings, planItems)
+    )),
     supported_outputs: Object.fromEntries(
       Object.entries(PRO_OUTPUT_TYPES_BY_PLATFORM).map(([platform, values]) => [platform, [...values]])
     ),
