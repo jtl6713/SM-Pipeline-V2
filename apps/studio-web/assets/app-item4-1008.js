@@ -289,7 +289,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.791-factory-mixed-select-refresh";
+  const BUILD_ID = "item4-0.6.792-factory-mixed-select-refresh";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -2791,6 +2791,9 @@
         timeoutMs: 150000,
       });
       clearScriptedShortProposal();
+      // Acceptance is persisted. Return the entry form to a clean state for the next short.
+      if ($("scriptedShortPrompt")) $("scriptedShortPrompt").value = "";
+      updateScriptedShortCharacterCount();
       setScriptedShortMessage(result.message || "Draft saved.", "success");
       await Promise.all([loadIdeas(), loadDashboard(), loadProductionRequests()]).catch(() => {});
       if (result.record?.id && result.production_request?.id) {
