@@ -2577,6 +2577,31 @@ export default {
             },
             ...receiptStore,
             enrollHeldOutput:async({output_id,note,client_request_id,profile_id,render_format_key})=>{
+              // A crash may happen AFTER the authoritative hold and session
+              // persisted but BEFORE the per-output R2 batch receipt update.
+              // Verify the exact deterministic session before retrying admission.
+              const existing=await adapter.readSession(output_id);
+              if(existing){
+                const hash=await crypto.subtle.digest("SHA-256",
+                  new TextEncoder().encode(JSON.stringify([
+                    "profile-review-enrollment-v1",actor,profile_id,output_id,client_request_id,
+                  ])));
+                const token=[...new Uint8Array(hash)]
+                  .map(n=>n.toString(16).padStart(2,"0")).join("");
+                const storedFirst=existing.messages?.[0];
+                if(existing.id!=="rrsession_"+token.slice(0,48)||
+                   existing.enrollment_request_id!=="rrenroll_"+token.slice(0,64)||
+                   existing.profile_id!==profile_id||
+                   existing.factory_entry?.source!=="factory"||
+                   storedFirst?.content!==note||
+                   existing.review_hold?.active!==true)
+                  throw new HttpError(409,"Selected output belongs to another review session");
+                const storedHold=await adapter.readHold(output_id);
+                if(storedHold?.active!==true||storedHold.owner!==existing.id||
+                   storedHold.id!==existing.review_hold.id)
+                  throw new HttpError(409,"Previously enrolled review hold was lost");
+                return {ok:true,replay:true,session_id:existing.id};
+              }
               const latest=await readFactoryCorrectionSnapshot(sourceId,requestId);
               const target=latest.outputs.find(row=>row.id===output_id);
               if(!target||target.profile_id!==profile_id||
