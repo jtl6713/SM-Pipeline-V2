@@ -49,6 +49,19 @@ def _png(value: bytes, *, min_edge: int = 128) -> Image.Image:
 
 
 class GalleryMediaIO:
+    @classmethod
+    def from_profile_catalog(cls, *, client, drive, profile_id,
+                             staging_folder_id, generator=generate_carousel_png,
+                             watermarker=watermark_photo_bytes):
+        # Verify the linked catalog Media Asset and Google Drive bytes for
+        # this profile. Do not use the global Chicago watermark catalog view.
+        from rendering_review.profile_watermark import resolve_profile_watermark
+        owned=resolve_profile_watermark(client=client,drive=drive,profile_id=profile_id)
+        return cls(profile_id=profile_id,profile_watermark=owned["bytes"],
+                   profile_watermark_receipt=owned["receipt"],
+                   drive=drive,staging_folder_id=staging_folder_id,
+                   generator=generator,watermarker=watermarker)
+
     def __init__(self, *, profile_id: str, profile_watermark: bytes,
                  profile_watermark_receipt: dict[str, Any],
                  drive: Any, staging_folder_id: str,
