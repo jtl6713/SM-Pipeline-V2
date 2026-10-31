@@ -1,0 +1,97 @@
+name: Recover oversized A1S compressor once (exact source)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/recover-video-compressor-once-20261030.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - name: Verify compressor; start only if down; launch exact A1S job
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://ops.chicagoshining.com'
+          selected=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            if [[ -z "$candidate" ]]; then continue; fi
+            code=$(curl -sS --max-time 20 -o /tmp/ops-catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok==true' /tmp/ops-catalog.json >/dev/null; then selected="$candidate"; break; fi
+          done
+          test -n "$selected"
+          curl -fsS --max-time 25 -H "Authorization: Bearer $selected" "$BASE/api/status" > /tmp/ops-status-before.json
+          up=$(jq -r '.rows[]|select(.id=="video-compressor")|.localUp' /tmp/ops-status-before.json)
+          healthy=$(jq -r '.rows[]|select(.id=="video-compressor")|.localHealthOk' /tmp/ops-status-before.json)
+          echo "compressor_port_up=$up compressor_http_healthy=$healthy"
+          if [[ "$up" != "true" ]]; then
+            code=$(curl -sS --max-time 30 -o /tmp/ops-start.json -w '%{http_code}' -X POST "$BASE/api/run" -H "Authorization: Bearer $selected" -H 'Content-Type: application/json' --data '{"action":"start-one","service":"video-compressor"}' || true)
+            test "$code" = "202"
+            job=$(jq -r '.job.id // empty' /tmp/ops-start.json)
+            test -n "$job"
+            for n in $(seq 1 30); do
+              curl -fsS --max-time 20 -H "Authorization: Bearer $selected" "$BASE/api/jobs/$job" -o /tmp/ops-start-status.json
+              state=$(jq -r '.job.status // empty' /tmp/ops-start-status.json)
+              if [[ "$state" == "ok" ]]; then break; fi
+              if [[ "$state" == "failed" ]]; then echo "compressor_start_one_failed"; exit 2; fi
+              sleep 3
+            done
+          fi
+          curl -fsS --max-time 25 -H "Authorization: Bearer $selected" "$BASE/api/status" > /tmp/ops-status-after.json
+          jq -e '.rows[]|select(.id=="video-compressor")|.localUp==true and .localHealthOk==true' /tmp/ops-status-after.json >/dev/null || { echo "compressor_not_healthy_after_start"; exit 3; }
+          cat > /tmp/a1s-exact-diagnose.ps1 <<'PS'
+          $ErrorActionPreference = "Stop"
+          $health = Invoke-RestMethod "http://127.0.0.1:3335/health" -TimeoutSec 10
+          Write-Output ("compressor_ready=" + [bool]($health.ok -and $health.ffmpeg -and $health.ffprobe))
+          Write-Output ("private_drive_ready=" + [bool]$health.google_drive_private_downloads)
+          $envfile = Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
+          $line = @(Get-Content $envfile | Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='}) | Select-Object -Last 1
+          if (-not $line) { throw "runner_auth_missing" }
+          $secret = ([string]$line -split '=', 2)[1].Trim().Trim('"', "'")
+          $body = @{extra=@{drive_file_id="1OeCHnytBPep_IRhvDX4wsM2xuemPmPVt";inline=$true}} | ConvertTo-Json -Depth 5 -Compress
+          $response = Invoke-RestMethod "http://127.0.0.1:3350/stages/a1s" -Method POST -Headers @{"X-Pipeline-Secret"=$secret} -ContentType "application/json" -Body $body -TimeoutSec 90
+          $run = $response.details.run
+          $summary = @{
+            status = [string]$response.status
+            started = [int]$run.started_count
+            reason = [string]$run.reason
+            errors = @($run.errors)
+            started_jobs = @($run.started | ForEach-Object {@{file_id=$_.file_id; job_id=$_.job_id}})
+          }
+          Write-Output ("a1s_result=" + ($summary | ConvertTo-Json -Depth 6 -Compress))
+          if ([int]$run.started_count -ne 1) { throw "a1s_job_not_accepted" }
+          PS
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/a1s-exact-diagnose.json').write_text(json.dumps({"command":Path('/tmp/a1s-exact-diagnose.ps1').read_text(),"confirm":True}))
+          PY
+          code=$(curl -sS --max-time 20 -o /tmp/ops-shell-start.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $selected" -H 'Content-Type: application/json' --data-binary @/tmp/a1s-exact-diagnose.json || true)
+          if [[ "$code" != "202" && "$code" != "200" ]]; then echo "shell_launch_failed=$code"; exit 4; fi
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/ops-shell-start.json)
+          test -n "$job"
+          for n in $(seq 1 35); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $selected" "$BASE/api/jobs/$job" -o /tmp/ops-shell-result.json
+            state=$(jq -r '.job.status // empty' /tmp/ops-shell-result.json)
+            if [[ "$state" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/ops-shell-result.json | grep -E '^(compressor_ready|private_drive_ready|a1s_result)=' || true
+              exit 0
+            fi
+            if [[ "$state" == "failed" ]]; then
+              echo "a1s_exact_job_failed"
+              jq -r '.job.log // ""' /tmp/ops-shell-result.json | grep -E '^(compressor_ready|private_drive_ready|a1s_result)=' || true
+              exit 5
+            fi
+            sleep 3
+          done
+          echo "a1s_exact_status_timeout"; exit 6
