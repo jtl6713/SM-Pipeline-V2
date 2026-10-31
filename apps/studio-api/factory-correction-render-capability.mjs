@@ -10,7 +10,8 @@
  */
 const value = x => String(x ?? "").trim();
 export function correctionRenderCapability(format, originalPropsJson) {
-  const declaredFormat=value(format?.format).toLowerCase();
+  const declaredFormat=[format?.pipeline_family,format?.format,
+    format?.output_type,format?.key].map(value).join(" ").toLowerCase();
   // Vibe Cut may reuse the PhotoSequence compositor for a music-only video.
   // Composition ID alone therefore cannot certify the narrated review path.
   // The dedicated music-only Vibe adapter needs its own post-render ledger,
@@ -23,7 +24,7 @@ export function correctionRenderCapability(format, originalPropsJson) {
   // A native image package is not a video with a missing Remotion file.
   // The separate immutable gallery-artifact contract exists, but its
   // rendering/publish handoff adapter is not yet certified for live writes.
-  if(/(?:carousel|photo set|single (?:photo|image)|image set|static image)/.test(declaredFormat))
+  if(/(?:carousel|photo[ _-]*set|multi[ _-]*photo|single (?:photo|image)|image[ _-]*set|static image|native photo)/.test(declaredFormat))
     return {supported:false,media_kind:"image-set",
       reason:"IMAGE_GALLERY_RENDERER_NOT_VERIFIED",
       required_contract:"studio.render-review.gallery.1"};
@@ -42,6 +43,14 @@ export function correctionRenderCapability(format, originalPropsJson) {
     return {supported:false,media_kind:"video",
       reason:/vibe.?cut/i.test(value(props?.compositionId))?
         "VIBE_CUT_RENDERER_NOT_VERIFIED":"COMPOSITION_NOT_CERTIFIED"};
+  // A music-only production may use PhotoSequence without narration; it
+  // must never be routed through the narrator-based revision worker.
+  if(props.voiceover?.enabled===false &&
+     props.music?.enabled===true &&
+     !value(props.voiceoverText))
+    return {supported:false,media_kind:"video",
+      reason:"VIBE_CUT_RENDERER_NOT_VERIFIED",
+      required_contract:"studio.render-review.vibe.1"};
   if (!Array.isArray(props.clips) || props.clips.length<1 ||
       props.clips.length>80 || props.clips.some(clip=>
         !clip || typeof clip !== "object" || Array.isArray(clip)))

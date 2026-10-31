@@ -14,7 +14,7 @@ from io import BytesIO
 import re
 from typing import Callable, Any
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageChops
 from branding.watermark import watermark_photo_bytes
 from carousel.image_gen import generate_carousel_png
 
@@ -118,6 +118,12 @@ class GalleryMediaIO:
         result = _png(watermarked)
         if result.size != self.requested_size:
             deny("gallery_watermarked_dimensions_changed")
+        # A successful C6 invocation does not prove the logo is visible.
+        # For the existing deterministic compositor the actual decoded
+        # pixels must change; a no-op or metadata-only rewrite is not branding.
+        if ImageChops.difference(original.convert("RGB"),
+                                 result.convert("RGB")).getbbox() is None:
+            deny("gallery_watermark_pixels_unchanged")
         return watermarked
 
     def upload_image(self, filename: str, content: bytes) -> dict:

@@ -47,3 +47,23 @@ test("explicit Vibe Cut formats cannot enter narrated PhotoSequence revision eve
     assert.equal(result.required_contract,"studio.render-review.vibe.1");
   }
 });
+
+test("photo mappings and music-only source cannot impersonate a narrated video",()=>{
+  for(const mapping of [
+    {...fmt,output_type:"TikTok Photo Carousel"},
+    {...fmt,pipeline_family:"Carousel"},
+    {...fmt,key:"image-set|multi photo|9:16"},
+  ]){
+    const result=check(mapping,valid());
+    assert.equal(result.supported,false);
+    assert.equal(result.media_kind,"image-set");
+    assert.equal(result.required_contract,"studio.render-review.gallery.1");
+  }
+  const original=JSON.parse(valid());
+  original.voiceover={enabled:false};
+  original.voiceoverText="";
+  original.music={enabled:true,url:"https://example.test/music.mp3"};
+  const result=check(fmt,JSON.stringify(original));
+  assert.equal(result.supported,false);
+  assert.equal(result.required_contract,"studio.render-review.vibe.1");
+});

@@ -113,6 +113,13 @@ class GalleryMediaIOTests(unittest.TestCase):
                 io.upload_image(bad,branded)
         self.assertEqual(drive.count,0)
 
+    def test_noop_watermark_is_not_accepted_as_a_branded_gallery_artifact(self):
+        io=fixture()
+        io.watermarker=lambda media,logo,output_format:media
+        raw=io.generate_image("Replace the original dusk image with daylight.", "4:5")
+        with self.assertRaisesRegex(GalleryMediaDenied,"watermark_pixels_unchanged"):
+            io.watermark_image(raw,PROFILE)
+
     def test_non_png_and_malformed_source_images_are_denied(self):
         io=fixture()
         with self.assertRaises(GalleryMediaDenied):

@@ -82,6 +82,20 @@ def compile_vibe_review_payload(*,job,plan,source,music,watermark,authorized_pro
         music["render_url"]!="https://drive.google.com/uc?export=download&id="+music["drive_file_id"] or
         not finite(music.get("volume")) or not 0<=music["volume"]<=1):
         deny("vibe_music_license_or_identity_invalid")
+    catalog=watermark.get("catalog_receipt")
+    # This proof must come from the exact profile-owned Airtable Media Asset
+    # plus Google Drive byte verification, not arbitrary existing render props.
+    if (not isinstance(catalog,dict) or
+        catalog.get("verified") is not True or
+        catalog.get("authority")!="server" or
+        catalog.get("media_authority")!="google_drive" or
+        catalog.get("profile_id")!=profile or
+        not REC.fullmatch(str(catalog.get("media_asset_record_id") or "")) or
+        not TOKEN.fullmatch(str(catalog.get("drive_file_id") or "")) or
+        not DIGEST.fullmatch(str(catalog.get("sha256") or "")) or
+        watermark.get("drive_file_id")!=catalog["drive_file_id"] or
+        watermark.get("render_url")!="https://drive.google.com/uc?export=download&id="+catalog["drive_file_id"]):
+        deny("vibe_profile_catalog_watermark_mismatch")
     if (watermark.get("verified") is not True or
         watermark.get("authority")!="server" or
         watermark.get("profile_id")!=profile or

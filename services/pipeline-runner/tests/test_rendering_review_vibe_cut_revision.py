@@ -36,7 +36,12 @@ def fixture(ratio="9:16"):
          "volume":0.24}
   watermark={"verified":True,"authority":"server","profile_id":PROFILE,
              "policy":"retain_current_approved","drive_file_id":"drive_logo_abcdefghijklmnopqrstuvwxyz",
-             "render_url":"https://drive.google.com/uc?export=download&id=drive_logo_abcdefghijklmnopqrstuvwxyz"}
+             "render_url":"https://drive.google.com/uc?export=download&id=drive_logo_abcdefghijklmnopqrstuvwxyz",
+             "catalog_receipt":{"verified":True,"authority":"server",
+               "media_authority":"google_drive","profile_id":PROFILE,
+               "media_asset_record_id":"rec00000000000011",
+               "drive_file_id":"drive_logo_abcdefghijklmnopqrstuvwxyz",
+               "sha256":"c"*64}}
   return {"job":job,"source":source,"plan":plan,"music":music,
           "watermark":watermark,"authorized_profiles":[PROFILE]}
 def run(data):
@@ -48,6 +53,7 @@ class TestVibeCutRevision(unittest.TestCase):
         data=fixture(ratio)
         for item in (data["job"],data["plan"],data["source"],data["music"],data["watermark"]):
           item["profile_id"]=profile
+        data["watermark"]["catalog_receipt"]["profile_id"]=profile
         data["authorized_profiles"]=[profile]
         source_copy=deepcopy(data["source"])
         payload=run(data)
@@ -118,3 +124,19 @@ class TestVibeCutRevision(unittest.TestCase):
     self.assertEqual(payload["studioRevision"]["source"],"rendering_review_vibe_cut")
 if __name__=="__main__":
   unittest.main()
+
+  def test_logo_must_match_verified_owned_profile_receipt_and_exact_url(self):
+    for mutation in (
+      lambda w:w.update(render_url="https://example.test/watermark.png"),
+      lambda w:w.update(drive_file_id="some_other_file_abcdefghijklmnopqrst"),
+      lambda w:w["catalog_receipt"].update(profile_id="rec00000000000004"),
+      lambda w:w["catalog_receipt"].update(media_asset_record_id="not-valid"),
+      lambda w:w["catalog_receipt"].update(sha256="x"*64),
+      lambda w:w["catalog_receipt"].update(verified=False),
+      lambda w:w.pop("catalog_receipt"),
+    ):
+      data=fixture()
+      mutation(data["watermark"])
+      with self.subTest(mutation=str(mutation)):
+        with self.assertRaisesRegex(VibeRevisionDenied,"catalog_watermark"):
+          run(data)
