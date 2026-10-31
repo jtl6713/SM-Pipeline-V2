@@ -604,3 +604,5 @@ Deploy Factory Story output #9393 selection normalization and browser cache refr
 Deploy Studio UI 0.6.789-factory-story-selection after correcting mandatory release version increment; resolve output #9393 selection and verify production checks. 2026-10-30.
 
 2026-10-31: Deploy Studio UI 0.6.790-factory-mixed-select-refresh from merged PR #1397. Force new Factory selection runtime for mixed Instagram/YouTube/TikTok/Facebook outputs; retain server-signed approval matrix and all publish guards. Verify new custom-domain build and cache keys.
+
+2026-10-31: Deploy Studio UI 0.6.793 from merged PR #1402 (main b2753b621bea922585cf836095e5b03f9ac1f6e9) using protected Cloudflare Pages production release; verify custom domain UI label, BUILD_ID and cache keys. No publishing mutation.
