@@ -52,3 +52,10 @@ test("New Profile and Operations paint with the drawer before session/profiles r
   assert.match(newProfile, /function applyNewProfileNavFailOpen\(/);
   assert.match(newProfile, /applyNewProfileNavFailOpen\(\);\s*\n\s*bind\(\);/);
 });
+
+
+test("Factory navigation displays Approval Factory without changing the page route", () => {
+  assert.match(html, /data-page="factory" id="navFactory">Approval Factory<\/button>/);
+  assert.doesNotMatch(html, /id="navFactory">Factory<\/button>/);
+  assert.match(html, /id="page-factory"/);
+});

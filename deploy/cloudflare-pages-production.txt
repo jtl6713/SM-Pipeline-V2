@@ -613,3 +613,5 @@ Deploy Studio UI 0.6.789-factory-story-selection after correcting mandatory rele
 
 2026-10-31: Deploy Studio UI 0.6.796 dynamic matching-format override scopes. Uses Pipeline_Family and active DB mapping Format/Aspect_Ratio instead of fixed platform lists; single-output is default, sibling schedule/publish fields untouched. Verify protected Pages custom domain and BUILD_ID.
 Deploy UI 0.6.797-vibe-cut-video-ideas. P1 Vibe Cut video-first creation and Ideas photo metadata suppression; retain required source video and established 6/2 output routes.
+
+2026-10-31: Deploy Studio UI 0.6.799-approval-factory-nav. Rename only the left navigation Factory label to Approval Factory; preserve page route, Factory workflow and all publishing/authorization gates. Verify protected Pages custom domain build and cache keys.
