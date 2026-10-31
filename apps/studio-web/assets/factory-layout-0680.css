@@ -595,3 +595,14 @@
   #page-factory .factory-review-page-actions{width:100%;justify-content:space-between}
   #page-factory .factory-review-page-actions button{min-height:42px}
 }
+
+/* Factory post-render matching correction picker. Independent of Production override. */
+.factory-correction-matches { border: 1px solid var(--studio-border, #8b929c); border-radius: 10px; padding: 12px; margin: 12px 0; }
+.factory-correction-matches[hidden], .factory-correction-matches fieldset[hidden] { display: none !important; }
+.factory-correction-apply-label, .factory-correction-match-row { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 8px 0; }
+.factory-correction-apply-label { font-weight: 650; }
+.factory-correction-match-row { border-top: 1px solid rgba(130,140,150,.22); }
+.factory-correction-matches input[type="checkbox"] { flex: none; width: 18px; height: 18px; margin: 2px 0 0; }
+.factory-correction-matches fieldset { margin: 10px 0 0; padding: 8px 12px; border: 1px solid var(--studio-border, #8b929c); border-radius: 8px; min-width: 0; }
+.factory-correction-matches legend { font-size: .9rem; padding: 0 5px; }
+@media(max-width:520px) { .factory-correction-matches { padding: 10px; } .factory-correction-match-row { min-height: 40px; } }
