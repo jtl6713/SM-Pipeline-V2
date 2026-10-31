@@ -16306,7 +16306,7 @@ export async function pulseA1SCompression(env, { driveFileId = null, ctx } = {})
   const python = pipelineStageBackend(env, "A1S");
   if (python.mode === "python") {
     // Await the runner acknowledgement: background requests previously hid failures.
-    const { response, payload } = await item4PulsePipelineStage(env, "a1s", { extra: data }, "A1S");
+    const { response, payload } = await item4PulsePipelineStage(env, "a1s", { extra: { ...data, inline: true } }, "A1S");
     if (!response.ok || payload?.status === "error") {
       throw new HttpError(response.ok ? 502 : response.status,
         payload?.message || payload?.error || "A1S compression runner rejected the request");
