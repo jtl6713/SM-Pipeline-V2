@@ -88,7 +88,7 @@ class VariantContract(unittest.TestCase):
             self.assertEqual(renderer_base(),"https://pilot-render.chicagoshining.com")
 
     def test_real_original_crop_binding_is_accepted(self):
-        bound=tested_function()(*fixture())
+        bound=tested_function()(*fixture(), profile_id=CHICAGO)
         self.assertEqual(len(bound),1)
         self.assertEqual(bound[0]["drive_file_id"],MASTER)
         self.assertEqual(bound[0]["render_url"],URL)
@@ -97,13 +97,13 @@ class VariantContract(unittest.TestCase):
         args=list(fixture())
         args[4]["asset_manifest"][0]["render_variant_drive_file_id"]="wrong-crop"
         with self.assertRaisesRegex(Denied,"crop_not_verified"):
-            tested_function()(*args)
+            tested_function()(*args, profile_id=CHICAGO)
 
     def test_swapped_renderer_url_is_rejected(self):
         args=list(fixture())
         args[3]["clips"][0]["url"]="https://media.chicagoshining.com/studio/previews/item4/other.jpg"
         with self.assertRaisesRegex(Denied,"crop_not_verified"):
-            tested_function()(*args)
+            tested_function()(*args, profile_id=CHICAGO)
 
     def test_variant_request_not_complete_is_rejected(self):
         args=list(fixture())
@@ -111,7 +111,7 @@ class VariantContract(unittest.TestCase):
         data["complete"]=False
         args[1]["fields"]["Studio_Variant_Manifest_JSON"]=json.dumps(data)
         with self.assertRaisesRegex(Denied,"variant_manifest_unverified"):
-            tested_function()(*args)
+            tested_function()(*args, profile_id=CHICAGO)
 
 
     def test_original_owned_video_passes_through_without_image_fetch(self):
@@ -140,7 +140,7 @@ class VariantContract(unittest.TestCase):
             "Content_Profile":[CHICAGO],"Media_Class":"Video","MIME_Type":"video/mp4"}})
         drive=SimpleNamespace(get_file=lambda key:{"id":key,
             "mimeType":"video/mp4","size":"78925885"})
-        result=tested_function()(client,request,master,props,plan,drive=drive)
+        result=tested_function()(client,request,master,props,plan,drive=drive,profile_id=CHICAGO)
         self.assertEqual(len(result),1)
         self.assertEqual(result[0]["media_kind"],"video")
         self.assertEqual(result[0]["render_url"],url)
@@ -171,7 +171,7 @@ class VariantContract(unittest.TestCase):
         drive=SimpleNamespace(get_file=lambda key:{"id":key,
             "mimeType":"video/mp4","size":"78925885"})
         with self.assertRaisesRegex(Denied,"crop_not_verified"):
-            tested_function()(client,request,master,props,plan,drive=drive)
+            tested_function()(client,request,master,props,plan,drive=drive,profile_id=CHICAGO)
 
 if __name__=="__main__":
     unittest.main()
