@@ -3,7 +3,6 @@
  * by Studio. It cannot independently approve, publish, enroll, or release holds.
  * Caller must hold the shared per-output approval lease before invoking this.
  */
-import {CHICAGO_PROFILE_ID} from './rendering-review-policy.mjs';
 import {RENDER_REVIEW_OUTPUT_FIELDS as H} from './rendering-review-airtable.mjs';
 import {scheduleReservationLaneEnabled} from './schedule-reservation-authority.mjs';
 import {runAtomicScheduleTransaction} from './schedule-reservation-transaction.mjs';
@@ -27,8 +26,7 @@ export function makeRenderingReviewAtomicScheduleHooks({
   const supported=()=>mutationGate===true&&Boolean(text(env?.AIRTABLE_OUTPUT_TABLE_ID))&&
     typeof readOutput==='function'&&typeof readContentItem==='function'&&
     typeof writeVacateUnderLane==='function'&&typeof postCommit==='function'&&
-    typeof scheduleTransaction==='function'&&Boolean(env?.STUDIO_SCHEDULE_RESERVATIONS)&&
-    scheduleReservationLaneEnabled(env,CHICAGO_PROFILE_ID,'Instagram');
+    typeof scheduleTransaction==='function'&&Boolean(env?.STUDIO_SCHEDULE_RESERVATIONS);
 
   async function readOwned(output_id,review_hold_id,review_owner){
     if(!outputIdPattern.test(text(output_id))||
@@ -38,40 +36,57 @@ export function makeRenderingReviewAtomicScheduleHooks({
     const row=await readOutput(output_id);
     const f=row?.fields;
     if(row?.id!==output_id||!f)fail('REVIEW_SCHEDULE_SOURCE_UNAVAILABLE','Authoritative output unreadable',503);
-    if(status(f.Platform)!=='Instagram'||status(f.Platform_Output_Type)!=='Instagram Reel')
-      fail('REVIEW_SCHEDULE_SCOPE_MISMATCH','This adapter is Chicago Instagram Reels only',403);
+    const platform=status(f.Platform),outputType=status(f.Platform_Output_Type);
+    if(!platform||!outputType)
+      fail('REVIEW_SCHEDULE_SCOPE_MISMATCH','Authoritative platform and output type required',403);
     const items=f.Content_Item;
     if(!Array.isArray(items)||items.length!==1||!outputIdPattern.test(items[0]))
       fail('REVIEW_SCHEDULE_CONTENT_AMBIGUOUS','Output must link to one Content Item');
     const content=await readContentItem(items[0]);
     const profiles=content?.fields?.Content_Profile;
     if(content?.id!==items[0]||!Array.isArray(profiles)||profiles.length!==1||
-       profiles[0]!==CHICAGO_PROFILE_ID)
-      fail('REVIEW_SCHEDULE_PROFILE_MISMATCH','Authoritative Content Item is not Chicago');
+       !outputIdPattern.test(text(profiles[0]))||
+       !scheduleReservationLaneEnabled(env,profiles[0],platform))
+      fail('REVIEW_SCHEDULE_PROFILE_MISMATCH','Authoritative Content Profile lacks an atomic scheduling lane');
     if(f[H.hold_active]!==true||text(f[H.hold_id])!==review_hold_id||
        text(f[H.hold_owner])!==review_owner||
        text(f[H.session_id])!==review_owner||f.Do_Not_Publish!==true)
       fail('REVIEW_SCHEDULE_HOLD_LOST','Exact persistent review hold no longer matches');
     if(dispatchPresent(f))fail('REVIEW_SCHEDULE_DISPATCH_STARTED','Publication already owns this output');
-    return {row,f,contentId:items[0],previousIso:scheduleOf(f),
+    return {row,f,contentId:items[0],profileId:profiles[0],
+      platform,outputType,previousIso:scheduleOf(f),
       finalFile:text(f.Final_File_ID||f.Final_File_URL)};
   }
 
   async function scheduleRevocationReady(descriptor={}){
-    if(!supported())return false;
-    return descriptor.profile_id===CHICAGO_PROFILE_ID&&
-      descriptor.platform==='Instagram'&&descriptor.output_type==='Instagram Reel'&&
-      outputIdPattern.test(text(descriptor.output_id))&&
-      /^[A-Za-z0-9_-]{8,120}$/.test(text(descriptor.review_owner));
+    if(!supported()||!outputIdPattern.test(text(descriptor.output_id))||
+      !/^[A-Za-z0-9_-]{8,120}$/.test(text(descriptor.review_owner)))return false;
+    // An untrusted descriptor may not grant a new city/platform lane.
+    // Read exact authoritative Output -> Content Item before readiness.
+    const row=await readOutput(descriptor.output_id);
+    const fields=row?.fields;
+    const contentId=fields?.Content_Item?.length===1?fields.Content_Item[0]:'';
+    if(row?.id!==descriptor.output_id||!outputIdPattern.test(contentId)||
+       status(fields.Platform)!==descriptor.platform||
+       status(fields.Platform_Output_Type)!==descriptor.output_type)return false;
+    const content=await readContentItem(contentId);
+    const profile=content?.fields?.Content_Profile;
+    return content?.id===contentId&&Array.isArray(profile)&&profile.length===1&&
+      outputIdPattern.test(text(profile[0]))&&
+      descriptor.profile_id===profile[0]&&
+      scheduleReservationLaneEnabled(env,profile[0],descriptor.platform)&&
+      fields[H.hold_active]===true&&fields.Do_Not_Publish===true&&
+      text(fields[H.hold_owner])===descriptor.review_owner&&
+      !dispatchPresent(fields);
   }
 
   async function revokeScheduleUnderHold({output_id,review_hold_id,review_owner}={}){
     if(!supported())
-      fail('REVIEW_SCHEDULE_DISABLED','Atomic Chicago schedule vacate is not enabled',503);
+      fail('REVIEW_SCHEDULE_DISABLED','Atomic profile/platform schedule vacate is not enabled',503);
     const original=await readOwned(output_id,review_hold_id,review_owner);
     const args={
-      content_profile_id:CHICAGO_PROFILE_ID,platform:'Instagram',
-      output_type:'Instagram Reel',platform_output_record_id:output_id,
+      content_profile_id:original.profileId,platform:original.platform,
+      output_type:original.outputType,platform_output_record_id:output_id,
       content_item_id:original.contentId,
       owner_operation_id:'render-review-vacate:'+review_hold_id,
     };
@@ -92,7 +107,8 @@ export function makeRenderingReviewAtomicScheduleHooks({
         // Any changed date, owner, media, profile or dispatch state is denied.
         const latest=await readOwned(output_id,review_hold_id,review_owner);
         if(latest.previousIso!==original.previousIso||latest.contentId!==original.contentId||
-           latest.finalFile!==original.finalFile)
+           latest.profileId!==original.profileId||latest.platform!==original.platform||
+           latest.outputType!==original.outputType||latest.finalFile!==original.finalFile)
           fail('REVIEW_SCHEDULE_CHANGED','Output changed while acquiring scheduling lane');
         // Canonical Worker scheduler owns the only Airtable schedule writer.
         // This standalone module may neither issue direct PATCH nor bypass
