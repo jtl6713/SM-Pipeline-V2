@@ -24,6 +24,9 @@ export function scriptedShortExplicitTitle(prompt) {
     const match = pattern.exec(source);
     if (!match) continue;
     let title = String(match[1]).trim();
+    // Propose/Accept flatten line breaks in creative briefs. Stop at the
+    // next named section so Location/Shot list never become part of a title.
+    title = title.split(/\s+(?=(?:location|shot\s*list|sample\s*caption|hashtags?|voiceover|visuals?|asset\s*list|scene\s*\d+)\s*:)/i)[0];
     const quoted = /^(["'“‘])(.+)(["'”’])$/.exec(title);
     if (quoted && ({ '"': '"', "'": "'", '“': '”', '‘': '’' })[quoted[1]] === quoted[3]) {
       title = quoted[2];
