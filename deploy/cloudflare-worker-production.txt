@@ -795,3 +795,5 @@ Retry Worker 0.10.708-vibe-cut-video-ideas after preserving canonicalProductionP
 2026-10-31: Deploy isolated one-owner Submitted approval recovery (PR #1413), outside the congested five-minute maintenance chain. Exactly one guarded recovery owner per cadence; no concurrent fanout, no I3 resubmission, no publish. Restores recovery opportunity for Michigan Avenue Stroll original PR/Content Item.
 
 2026-10-31: Retry guarded Submitted approval independent-cron Worker deployment after updating strict existing schedule-reservation-policy test to validate the new single-independent-owner invocation. Previous deploy failed preflight, did not ship. No behavior change since PR #1413.
+
+2026-10-31: Deploy PR #1414 independent Story atomic schedule lanes to finish Michigan Avenue Stroll PR-20261031141558-HTEGHT six-output fanout. Existing IG Reel + Instagram companion Story +10 min no longer collide; Story-Story lanes, blackout, explicit schedule, atomic verification preserved. No public publish and no duplicate uploads.
