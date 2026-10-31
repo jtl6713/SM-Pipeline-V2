@@ -531,3 +531,6 @@ jobs:
 
 # 2026-10-30: Deploy private loopback Drive source fix #1387 with full A1S/A1P and media-stream tests.
 # Re-run exact ingestion-only A1S canary once; keep all originals and every publish hold.
+
+# 2026-10-30: Correct global Drive client injection for private streaming unit test.
+# Exact A1S canary retries only verified ingestion MOV and never uploads or publishes.
