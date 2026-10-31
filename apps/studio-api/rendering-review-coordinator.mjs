@@ -91,7 +91,7 @@ export async function enrollManualReviewCommand({
       err("OUTPUT_NOT_FOUND", "Authoritative Platform Output not found", 404);
     const eligibility=reviewEligibility(output,policy);
     if (!eligibility.allowed)
-      err(eligibility.reason, "Current output cannot enter the Chicago manual pilot");
+      err(eligibility.reason, "Current output cannot enter authorized manual Rendering Review");
 
     // A selected Reel may already occupy an MAE slot. Before creating ANY
     // potentially orphaned publication hold, verify that the protected
@@ -216,7 +216,11 @@ export async function mutateReviewSessionCommand({
         err("APPROVAL_OUTPUT_READ_REQUIRED","Authoritative output readback required",503);
       const original=await operations.readOutput(outputId);
       if(original?.id!==outputId||original.profile_id!==s.profile_id||
-         original.platform!=="Instagram"||original.output_type!=="Instagram Reel"||
+         // Legacy Chicago sessions predate the stored platform field.
+         // New sessions must match exact authenticated platform and type.
+         original.platform!==(s.platform||
+           (s.output_type==="Instagram Reel"?"Instagram":null))||
+         original.output_type!==s.output_type||
          original.do_not_publish!==true||original.review_hold_active!==true||
          original.publish_started_at||original.publish_locked_at||
          original.publish_locked_by||original.platform_post_id||
