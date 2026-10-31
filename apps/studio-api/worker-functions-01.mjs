@@ -6623,6 +6623,12 @@ export function ideaLibraryIsEligibleImage(record) {
   if (f(record, "Active") === false) return false;
   if (eligibility === "ineligible") return false;
   if (status && status !== "available") return false;
+  // Asset Manager exclusions are authoritative, including Wrong Subject and
+  // Watermarked/Branded. Never rank a flagged still then attempt watermarking it.
+  const exclusions = f(record, "Exclusion_Reasons");
+  if (Array.isArray(exclusions) ? exclusions.length > 0 : Boolean(String(exclusions || "").trim())) return false;
+  const reviewNote = String(f(record, "Potential_Match_Notes") || "");
+  if (/QA-ASSET-THIRD-PARTY-OVERLAY:\s*(?:REVIEW|Review required)/i.test(reviewNote)) return false;
   return Boolean(googleDriveFileId(record));
 }
 /*__STUDIO_WORKER_END:ideaLibraryIsEligibleImage__*/
