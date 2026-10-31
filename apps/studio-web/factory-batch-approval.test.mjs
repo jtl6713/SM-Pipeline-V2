@@ -30,6 +30,11 @@ test("Factory batch UI has selection, activity, refresh, inspect and failed-only
   assert.match(css, /@media\(max-width:560px\)/);
 });
 
+test("Submit Approvals enables immediately while rollout configuration is loading", () => {
+  assert.match(js, /state\.batchApprovalsEnabled === false/);
+  assert.doesNotMatch(js, /state\.batchApprovalsEnabled !== true/);
+});
+
 test("Factory submit returns after durable enqueue rather than awaiting 20 approvals", () => {
   const start = js.indexOf("async function submitFactoryBatchApprovals");
   const end = js.indexOf("async function retryFactoryBatchFailures", start);

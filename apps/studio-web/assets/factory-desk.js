@@ -409,7 +409,7 @@
       const pendingMismatch = pendingIds && (pendingIds.length !== selectable ||
         pendingIds.some(id => !selectedCards.some(card => card.id === id)));
       submit.disabled = !selectable || (!global && selectable > limit) ||
-        state.submittingBatch || state.batchApprovalsEnabled !== true || Boolean(pendingMismatch);
+        state.submittingBatch || state.batchApprovalsEnabled === false || Boolean(pendingMismatch);
       submit.title = state.batchApprovalsEnabled === false
         ? "Batch approval rollout is disabled for this profile; individual approvals remain available."
         : global && planned > 1
