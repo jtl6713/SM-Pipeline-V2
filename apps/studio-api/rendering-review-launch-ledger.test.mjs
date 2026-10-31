@@ -154,3 +154,31 @@ test("Worker mounting uses same lock and separate authenticated route",()=>{
   assert.match(route,/withOutputApprovalLock\(env.STUDIO_MEDIA,id,fn\)/);
   assert.doesNotMatch(route,/post_render|graph.publish|APPROVE_ATTEMPT|RELEASE_REVIEW_HOLD/);
 });
+
+test("protected ledger supports any verified held profile, never a foreign city",async()=>{
+  const a=setup();
+  const la="recF7UAn0LkMZZrWZ";
+  Object.assign(a.s,{profile_id:la,platform:"TikTok",output_type:"TikTok Video"});
+  Object.assign(a.o,{profile_id:la,platform:"TikTok",output_type:"TikTok Video"});
+  const global={...flags,
+    RENDERING_REVIEW_ENROLL_WRITES_ENABLED:"true",
+    RENDERING_REVIEW_SCHEDULER_VACATE_VERIFIED:"true",
+    RENDERING_REVIEW_GLOBAL_MANUAL_ENABLED:"true",
+    RENDERING_REVIEW_GLOBAL_RUNNER_VERIFIED:"true",
+  };
+  for(const flag of ["RENDERING_REVIEW_GLOBAL_MANUAL_ENABLED",
+                     "RENDERING_REVIEW_GLOBAL_RUNNER_VERIFIED"]){
+    await assert.rejects(()=>a.send("read_authority",{},{
+      env:{...global,[flag]:"false"}
+    }),e=>e.code==="LAUNCH_AUTHORITY_STALE");
+    assert.equal(a.patches,0);
+  }
+  const accepted=await a.send("reserve_intent",{payload_hash:HASH},{env:global});
+  assert.equal(accepted.verified,true);
+  assert.equal(a.patches,1);
+  a.o.profile_id="recT2rbKX3MF7cVFU";
+  await assert.rejects(()=>a.send("read_authority",{},{
+    env:global
+  }),e=>e.code==="LAUNCH_AUTHORITY_STALE");
+  assert.equal(a.patches,1);
+});

@@ -1,5 +1,5 @@
 /**
- * Protected Remotion launch ledger for one claimed Chicago Rendering Review Job.
+ * Protected Remotion launch ledger for one claimed profile-scoped Rendering Review Job.
  *
  * OFF by default. Airtable Job Event_History_JSON is a durable write-once ledger:
  * the launch intent is persisted and read back BEFORE an irreversible POST, and
@@ -11,6 +11,7 @@
  * publisher, scheduler, Drive deletion or original-output mutation authority.
  */
 import {reviewRendererJobClaimEnabled} from "./rendering-review-job-claim.mjs";
+import {protectedReviewRunnerScope} from "./rendering-review-internal-scope.mjs";
 
 const rec=/^rec[A-Za-z0-9]{14}$/;
 const token=/^[A-Za-z0-9_-]{8,120}$/;
@@ -55,7 +56,7 @@ function getEvents(job){
     deny("LEDGER_ORPHAN_RECEIPT","Remote receipt without reserved intent",503);
   return {history,intent:intent[0]||null,receipt:receipt[0]||null};
 }
-function validateAuthority(s,h,o,j,b){
+function validateAuthority(s,h,o,j,b,env){
   if(!j||j.job_id!==b.job_id||j.output_id!==b.output_id||
      j.session_id!==s?.id||j.attempt_id!==s?.current_attempt_id||
      j.plan_hash!==s?.active_job?.plan_hash||
@@ -63,20 +64,25 @@ function validateAuthority(s,h,o,j,b){
      j.state!=="claimed"||j.lease_owner!==b.lease_owner||
      j.lease_fence!==b.lease_fence||
      !rec.test(txt(j.record_id))||
-     s?.profile_id!=="recT2rbKX3MF7cVFU"||
-     s?.output_type!=="Instagram Reel"||
+     !rec.test(txt(s?.profile_id))||
+     !txt(s?.platform||(s?.profile_id==="recT2rbKX3MF7cVFU"&&
+       s?.output_type==="Instagram Reel"?"Instagram":null))||
+     !txt(s?.output_type)||
      s?.state!=="queued"||s?.output_id!==b.output_id||
      s?.review_hold?.active!==true||
      h?.verified!==true||h.active!==true||
      h.output_id!==b.output_id||h.owner!==s.id||
      h.id!==s.review_hold.id||
-     o?.id!==b.output_id||o.profile_id!=="recT2rbKX3MF7cVFU"||
-     o.platform!=="Instagram"||o.output_type!=="Instagram Reel"||
+     o?.id!==b.output_id||o.profile_id!==s.profile_id||
+     o.platform!==(s.platform||(s.profile_id==="recT2rbKX3MF7cVFU"&&
+       s.output_type==="Instagram Reel"?"Instagram":null))||
+     o.output_type!==s.output_type||
+     !protectedReviewRunnerScope(o,b.output_id,env)||
      o.do_not_publish!==true||o.review_hold_active!==true||
      o.publish_started_at||o.publish_locked_at||o.publish_locked_by||
      o.platform_media_id||o.platform_post_id||o.published_at||
      /^(publishing|published|dispatched)$/i.test(txt(o.publish_status)))
-    deny("LAUNCH_AUTHORITY_STALE","Exact held Chicago job lease no longer valid");
+    deny("LAUNCH_AUTHORITY_STALE","Exact held profile-scoped job lease no longer valid");
 }
 function ensureMatching(event,job,b){
   if(!event||event.job_id!==job.job_id||
@@ -98,12 +104,12 @@ function trustedStatusUrl(env,remotionId,url){
       a.pathname==="/status/"+remotionId;
   }catch{return false;}
 }
-async function readVerified(ops,b){
+async function readVerified(ops,b,env){
   const [s,h,o,j]=await Promise.all([
     ops.readSession(b.output_id),ops.readHold(b.output_id),
     ops.readOutput(b.output_id),ops.readJob(b.job_id),
   ]);
-  validateAuthority(s,h,o,j,b);
+  validateAuthority(s,h,o,j,b,env);
   return {s,h,o,j,...getEvents(j)};
 }
 function eventReceipt(ev){
@@ -154,7 +160,7 @@ export async function handleReviewLaunchLedger({request,env,operations}){
       deny("LEDGER_ADAPTER_MISSING","Trusted "+name+" unavailable",503);
   }
   return operations.withOutputLock(b.output_id,async()=>{
-    const a=await readVerified(operations,b);
+    const a=await readVerified(operations,b,env);
     if(b.action==="read_authority"){
       return {verified:true,hold_active:true,hold_owner_verified:true,
         output_id:b.output_id,session_id:a.s.id,
@@ -180,7 +186,7 @@ export async function handleReviewLaunchLedger({request,env,operations}){
         Event_History_JSON:JSON.stringify([...a.history,event]),
         Progress_Stage:"launch_intent_reserved",
       });
-      const after=await readVerified(operations,b);
+      const after=await readVerified(operations,b,env);
       ensureMatching(after.intent,after.j,b);
       if(after.receipt)
         deny("LAUNCH_INTENT_READBACK_FAILED","Unexpected remote receipt",503);
@@ -206,7 +212,7 @@ export async function handleReviewLaunchLedger({request,env,operations}){
       Event_History_JSON:JSON.stringify([...a.history,event]),
       Progress_Stage:"remotion_receipt_persisted",
     });
-    const after=await readVerified(operations,b);
+    const after=await readVerified(operations,b,env);
     if(!after.receipt||after.receipt.remotion_job_id!==b.remotion_job_id||
        after.receipt.status_url!==b.status_url)
       deny("REMOTION_RECEIPT_READBACK_FAILED","Remote receipt not durable",503);
