@@ -9,6 +9,7 @@ import { handleRenderingReviewFeedbackRequest, reviewFeedbackWriteEnabled } from
 import { handleRenderingReviewEnrollRequest, reviewEnrollmentWriteEnabled } from "./rendering-review-enrollment-http.mjs";
 import { acceptReviewCreativeOnly } from "./rendering-review-approval-http.mjs";
 import { handoffApprovedReviewToFactory } from "./rendering-review-factory-handoff.mjs";
+import { nextApprovedCreativeMaster, projectCreativeMasterGroup, MASTER_FIELD } from "./creative-master-registry.mjs";
 import { returnFactoryRevisionToProducer } from "./rendering-review-factory-return.mjs";
 import { serveFactorySelectedReviewVideo } from "./rendering-review-factory-preview.mjs";
 import { composeRenderingReviewEnrollmentOperations } from "./rendering-review-enrollment-wiring.mjs";
@@ -76,6 +77,41 @@ function makeReviewFactoryHandoffOperations(env) {
       method:"PATCH",skipSupabaseWriteThrough:true,
       body:JSON.stringify({fields,typecast:false}),
     }),
+    // Content-owned creative authority is separate from platform publishing.
+    // A second, content-level lease serializes concurrent source approvals.
+    recordApprovedCreativeMaster:async ({source,session,attempt,evidence,at})=>{
+      const links=source?.fields?.Content_Item;
+      if(!Array.isArray(links)||links.length!==1||
+         !/^rec[A-Za-z0-9]{14}$/.test(String(links[0]||"")))
+        throw new HttpError(409,"Creative master content identity unavailable");
+      const contentId=links[0],table="tblwzN9AXWvmKVKPs";
+      return withOutputApprovalLock(env.STUDIO_MEDIA,contentId,async()=>{
+        const content=await airtableFetch(env,table,contentId);
+        if(content?.id!==contentId)
+          throw new HttpError(503,"Authoritative content record unavailable");
+        const proposal=nextApprovedCreativeMaster({
+          source,content,attempt,session,evidence,at,
+        });
+        if(proposal.changed){
+          await airtableFetch(env,table,contentId,{
+            method:"PATCH",body:JSON.stringify({
+              fields:{[MASTER_FIELD]:JSON.stringify(proposal.registry)},typecast:false,
+            }),
+          });
+        }
+        const saved=await airtableFetch(env,table,contentId);
+        const selected=projectCreativeMasterGroup({
+          source,content:saved,outputs:[source],requireComplete:false,
+        }).master;
+        if(selected?.approved_attempt_id!==attempt.id||
+           selected?.file_id!==attempt.artifact_id||
+           selected?.version!==proposal.master.version)
+          throw new HttpError(503,"Creative master Airtable readback mismatch");
+        return {content_item_id:contentId,key:proposal.master.key,
+          version:proposal.master.version,file_id:proposal.master.file_id,
+          already_registered:!proposal.changed};
+      });
+    },
     syncOutput:row=>reviewFactorySyncOutput(env,row,"render-review-factory-handoff"),
   };
 }

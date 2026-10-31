@@ -12,6 +12,7 @@
  */
 import {CHICAGO_PROFILE_ID,applyReviewEvent} from "./rendering-review-policy.mjs";
 import {renderingReviewHoldPresent} from "./rendering-review-publication-hold.mjs";
+import {nextApprovedCreativeMaster} from "./creative-master-registry.mjs";
 
 const rec=/^rec[A-Za-z0-9]{14}$/;
 const file=/^[A-Za-z0-9_-]{20,}$/;
@@ -22,7 +23,8 @@ const deny=(code,message,status=409)=>{const e=new Error(message);e.code=code;e.
 const same=(a,b)=>str(a)===str(b);
 function requireFunctions(ops){
   for(const name of ["withOutputLock","readRawOutput","readNormalizedOutput","readSession",
-    "readAttempt","readField","saveSessionIfVersion","patchOutput","syncOutput"]){
+    "readAttempt","readField","saveSessionIfVersion","patchOutput","syncOutput",
+    "recordApprovedCreativeMaster"]){
     if(typeof ops?.[name]!=="function")
       deny("FACTORY_HANDOFF_ADAPTER_MISSING","Factory handoff requires "+name,503);
   }
@@ -120,7 +122,17 @@ export async function handoffApprovedReviewToFactory({output_id,env,operations,n
       deny("FACTORY_OUTPUT_MEDIA_CHANGED","Output no longer selects the preserved V1 or this approved V2");
 
     const persistedAttempt=await o.readAttempt(attempt.id);
-    validateArtifact(persistedAttempt,s,attempt);
+    const proof=validateArtifact(persistedAttempt,s,attempt);
+    // Commit the creative master under a content-item lease. This associates
+    // all present/future matching outputs without changing their own media,
+    // captions, publish mode, schedule, or authorization.
+    const creativeMaster=await o.recordApprovedCreativeMaster({
+      source:output,session:s,attempt,evidence:proof,at:now(),
+    });
+    if(creativeMaster?.content_item_id==null||creativeMaster?.key==null||
+       creativeMaster?.file_id!==fileId)
+      deny("FACTORY_CREATIVE_MASTER_UNVERIFIED",
+        "Approved master must be durably recorded before Factory hold release",503);
     const alreadyTransferred=s.review_hold?.active===false;
     const receipt=s.factory_handoff;
     if(alreadyTransferred &&
@@ -211,6 +223,9 @@ export async function handoffApprovedReviewToFactory({output_id,env,operations,n
       original_artifact_id:original.artifact_id,session_version:alreadyTransferred?s.version:s.version+1,
       review_hold_active:false,approved_for_publishing:false,
       scheduled:false,public_post_created:false,
-      mirror_synced:mirror?.ok===true||mirror?.skipped===true};
+      mirror_synced:mirror?.ok===true||mirror?.skipped===true,
+      creative_master:{key:creativeMaster.key,content_item_id:creativeMaster.content_item_id,
+        version:creativeMaster.version,linked_by_compatibility:true,
+        sibling_publish_changes:0}};
   });
 }

@@ -279,6 +279,34 @@
         return;
       }
       const session=saved.session;
+      const creativeGroup=saved.creative_group;
+      if(creativeGroup?.key&&Array.isArray(creativeGroup.outputs)){
+        const section=elem('section',null,'rr-activity');
+        section.setAttribute('aria-label','Creative master and matching outputs');
+        section.append(elem('strong','One creative master · '+creativeGroup.linked_count+
+          ' matching output'+(creativeGroup.linked_count===1?'':'s'),'rr-activity-heading'));
+        section.append(elem('p','Content '+creativeGroup.content_item_id+
+          ' · '+creativeGroup.format+' · '+creativeGroup.aspect_ratio,'rr-activity-detail'));
+        section.append(elem('p',creativeGroup.master?
+          'Creative master V'+creativeGroup.master.version+
+          ' recorded. Matching outputs share its reference, but retain independent videos, captions, schedules, and publishing approvals.':
+          'These outputs match the source creative. A shared approved master will be registered only after independently verified creative acceptance and Factory handoff.','rr-activity-detail'));
+        const linked=elem('ul',null,'rr-creative-master-members');
+        for(const sibling of creativeGroup.outputs.slice().sort((a,b)=>
+          Number(a.output_number||0)-Number(b.output_number||0))){
+          linked.append(elem('li',(sibling.output_number?'#'+sibling.output_number+' · ':'')+
+            sibling.platform+' · '+sibling.output_type+
+            (sibling.dispatched?' · already dispatched':
+              sibling.scheduled?' · scheduled':
+              sibling.held?' · held':' · not scheduled')+
+            ' · publishing unchanged'));
+        }
+        section.append(linked);
+        detail.append(section);
+      }else if(saved.creative_group_error){
+        detail.append(elem('p',saved.creative_group_error+
+          '. No automatic sibling changes were made.','rr-notice'));
+      }
       const messages=Array.isArray(session?.messages)?session.messages:[];
       const last=messages.length?messages[messages.length-1]:null;
       const producer=[...messages].reverse().find(m=>m.role==='producer');
