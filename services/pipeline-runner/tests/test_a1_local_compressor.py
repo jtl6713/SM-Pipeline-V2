@@ -50,8 +50,12 @@ class _FakeAirtable:
     def __init__(self) -> None:
         self.updates: list[dict[str, Any]] = []
         self.deleted: list[str] = []
+        self.catalog: dict | None = None
 
-    def update_record(self, _table, record_id, fields):
+    def list_records(self, _table, **_kwargs):
+        return [self.catalog] if self.catalog else []
+
+    def update_record(self, _table, record_id, fields, **_kwargs):
         self.updates.append({"record_id": record_id, "fields": fields})
         return {"id": record_id}
 
@@ -64,6 +68,8 @@ class _FakeDrive:
     def __init__(self) -> None:
         self.uploads: list[dict[str, Any]] = []
         self.trashed: set[str] = set()
+        self.moved: set[str] = set()
+        self.catalog_source = False
 
     def list_files(self, **_kwargs):
         return []
@@ -86,14 +92,23 @@ class _FakeDrive:
                 "name": "Streeterville 1_compressed.mp4",
                 "mimeType": "video/mp4",
                 "size": "4",
-                "parents": ["1VpjoRDHbwUlQrrEjfEpkGrIz1HFFtNNX"],
+                "parents": [self.uploads[-1]["folder_id"]],
                 "trashed": False,
             }
         return {
             "id": file_id,
-            "parents": ["1VpjoRDHbwUlQrrEjfEpkGrIz1HFFtNNX"],
+            "parents": ["1U5BbeeTBEBrMuYKpA5FoQoKY6qbTEwMi"]
+                if self.catalog_source or file_id in self.moved
+                else ["1VpjoRDHbwUlQrrEjfEpkGrIz1HFFtNNX"],
             "trashed": file_id in self.trashed,
         }
+
+    def move_file(self, file_id, _folder_id, **_kwargs):
+        self.moved.add(file_id)
+        return {"id": file_id}
+
+    def share_anyone_reader(self, file_id):
+        return {"id": file_id}
 
     def trash_file(self, file_id):
         self.trashed.add(file_id)
@@ -130,7 +145,7 @@ def test_poller_defers_active_job(monkeypatch):
     assert airtable.deleted == []
 
 
-def test_completed_job_is_verified_before_source_is_trashed(monkeypatch):
+def test_ingestion_source_is_archived_not_trashed_after_verified_output(monkeypatch):
     airtable = _FakeAirtable()
     drive = _FakeDrive()
     cleaned: list[str] = []
@@ -162,8 +177,10 @@ def test_completed_job_is_verified_before_source_is_trashed(monkeypatch):
     assert result["status"] == "finished"
     assert result["new_file_id"] == "replacement-file"
     assert result["new_size"] == 4
-    assert result["source_trashed"] is True
-    assert "source-file" in drive.trashed
+    assert result["source_trashed"] is False
+    assert result["source_preserved"] is True
+    assert "source-file" not in drive.trashed
+    assert "source-file" in drive.moved
     assert drive.uploads[0]["filename"] == "Streeterville 1_compressed.mp4"
     assert cleaned == ["job-1"]
     assert airtable.deleted == ["rec-state"]
@@ -179,6 +196,7 @@ def test_failed_job_preserves_source_and_clears_state(monkeypatch):
         lambda _job_id: {"job_id": "job-1", "status": "failed", "error": "download_failed"},
     )
     monkeypatch.setattr(a1p_processor, "delete_job", cleaned.append)
+    monkeypatch.setattr(a1p_processor, "_continue_after_finish", lambda: None)
 
     result = a1p_processor.process_request(
         job_id="job-1",
@@ -189,7 +207,7 @@ def test_failed_job_preserves_source_and_clears_state(monkeypatch):
     )
 
     assert result["status"] == "failed_local_compressor"
-    assert airtable.deleted == ["rec-state"]
+    assert airtable.deleted == []
     assert cleaned == ["job-1"]
 
 
@@ -258,3 +276,41 @@ def test_resume_active_jobs_schedules_complete_row(monkeypatch):
     assert len(kicked) == 1
     assert scheduled[0][1] == 0
     assert scheduled[0][0]["job_id"] == "job-1"
+
+def test_catalog_derivative_keeps_source_and_updates_exact_record(monkeypatch):
+    airtable = _FakeAirtable()
+    airtable.catalog = {
+        "id": "recCATALOG0000001",
+        "fields": {
+            "Google Drive File ID": "source-file",
+            "Asset Name": "DJI_20260508.mp4",
+            "Drive_Access_Status": "Public",
+            "Asset_Description": "Existing tags must remain intact",
+        },
+    }
+    drive = _FakeDrive()
+    drive.catalog_source = True
+    monkeypatch.setattr(a1p_processor, "AirtableClient", lambda: airtable)
+    monkeypatch.setattr(a1p_processor, "GoogleDriveClient", lambda: drive)
+    monkeypatch.setattr(a1p_processor, "poll_job", lambda _id: {
+        "status": "complete", "output_size_bytes": 4,
+    })
+    monkeypatch.setattr(a1p_processor, "download_output", lambda _job: (b"mp4!", "video/mp4"))
+    monkeypatch.setattr(a1p_processor, "delete_job", lambda _id: None)
+    monkeypatch.setattr(a1p_processor, "_continue_after_finish", lambda: None)
+    result = a1p_processor.process_request(
+        job_id="job-1", state_record_id="rec-state",
+        source_file_id="source-file", source_name="DJI_20260508.mp4", attempt="2",
+    )
+    assert result["status"] == "finished"
+    assert result["catalog_updated"] is True
+    assert result["source_preserved"] is True
+    assert not drive.trashed and not drive.moved
+    assert drive.uploads[0]["folder_id"] == "1U5BbeeTBEBrMuYKpA5FoQoKY6qbTEwMi"
+    assert drive.uploads[0]["filename"] == "DJI_20260508__source-file_compressed.mp4"
+    writes = [x for x in airtable.updates if x["record_id"] == "recCATALOG0000001"]
+    assert len(writes) == 1
+    assert writes[0]["fields"]["Google Drive File ID"] == "replacement-file"
+    assert writes[0]["fields"]["File_Size_Bytes"] == 4
+    assert "Compression source master Drive ID: source-file" in writes[0]["fields"]["Asset_Description"]
+    assert "Existing tags" in writes[0]["fields"]["Asset_Description"]

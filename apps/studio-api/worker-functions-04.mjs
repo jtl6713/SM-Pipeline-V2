@@ -10920,7 +10920,7 @@ export async function listOversizedIntakeVideos(env) {
     if (!response.ok) return [];
     const run = payload?.details?.run || {};
     const eligible = Array.isArray(run.eligible) ? run.eligible : [];
-    return eligible.map(mapOversizedIntakeDriveFile).filter(Boolean);
+    return eligible.filter((row) => row.source_kind === "ingestion").map(mapOversizedIntakeDriveFile).filter(Boolean);
   } catch (error) {
     console.error("listOversizedIntakeVideos failed", error);
     return [];
@@ -10931,7 +10931,7 @@ export async function listOversizedIntakeVideos(env) {
 export async function listOversizedMediaFromAirtable(env) {
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
     limit: 50,
-    filterFormula: `AND({File_Size_MB}>95.36,FIND("_compressed",{Asset Name}&"")=0)`,
+    filterFormula: `AND({File_Size_MB}>95.36,{Active}=1,OR({Media_Class}="Video",LEFT({MIME_Type}&"",6)="video/"),{Google Drive File ID}!="")`,
   });
   return records.map((record) => ({
     id: record.id,
@@ -16304,38 +16304,32 @@ export async function pulseA1SCompression(env, { driveFileId = null, ctx } = {})
   const normalizedId = String(driveFileId || "").trim();
   const data = normalizedId ? { drive_file_id: normalizedId } : {};
   const python = pipelineStageBackend(env, "A1S");
-  const task = (async () => {
-    if (python.mode === "python") {
-      try {
-        await item4PulsePipelineStage(env, "a1s", { extra: data }, "A1S");
-      } catch (error) {
-        console.error("A1S python pulse failed", error);
-      }
-      if (normalizedId) {
-        try {
-          await item4PulsePipelineStage(env, "a1m", { extra: data }, "A1S");
-        } catch (error) {
-          console.error("A1M python pulse failed", error);
-        }
-      }
-      return;
+  if (python.mode === "python") {
+    // Await the runner acknowledgement: background requests previously hid failures.
+    const { response, payload } = await item4PulsePipelineStage(env, "a1s", { extra: { ...data, inline: true } }, "A1S");
+    if (!response.ok || payload?.status === "error") {
+      throw new HttpError(response.ok ? 502 : response.status,
+        payload?.message || payload?.error || "A1S compression runner rejected the request");
     }
-    try {
-      await phase6PulseOnDemandScenario(env, STUDIO_A1S_SCENARIO_ID, { waitMs: 20000, data });
-    } catch (error) {
-      console.error("A1S on-demand pulse failed", error);
+    const run = payload?.details?.run || {};
+    const started = Number(run.started_count || 0);
+    const reason = String(run.reason || "");
+    if (!started && !["active_compression_in_progress", "no_eligible_files"].includes(reason)) {
+      throw new HttpError(502, payload?.message || "A1S did not confirm a compression job");
     }
-    if (normalizedId) {
-      try {
-        await phase6PulseOnDemandScenario(env, STUDIO_A1M_SCENARIO_ID, { waitMs: 20000, data });
-      } catch (error) {
-        console.error("A1M on-demand pulse failed", error);
-      }
+    if (normalizedId && started > 0 && ctx?.waitUntil) {
+      ctx.waitUntil(item4PulsePipelineStage(env, "a1m", { extra: data }, "A1M"));
     }
-  })();
-  if (ctx?.waitUntil) ctx.waitUntil(task);
-  else await task;
-  return { driveFileId: normalizedId || null, backend: python.mode };
+    return { driveFileId: normalizedId || null, backend: "python", started_count: started,
+      reason, queued_count: Number(run.queued_count || 0), started: run.started || [] };
+  }
+  // Legacy scenario acknowledgement is not a confirmed compressor start.
+  await phase6PulseOnDemandScenario(env, STUDIO_A1S_SCENARIO_ID, { waitMs: 20000, data });
+  if (normalizedId && ctx?.waitUntil) {
+    ctx.waitUntil(phase6PulseOnDemandScenario(env, STUDIO_A1M_SCENARIO_ID, { waitMs: 20000, data }));
+  }
+  return { driveFileId: normalizedId || null, backend: python.mode, started_count: null,
+    reason: "legacy_scenario_submitted" };
 }
 /*__STUDIO_WORKER_END:pulseA1SCompression__*/
 
@@ -16349,7 +16343,7 @@ export async function pulseA1SForDriveFile(request, env, authorization, ctx) {
     throw new HttpError(400, "drive_file_id is required unless compress_all is true");
   }
   const pulse = await pulseA1SCompression(env, { driveFileId: driveFileId || null, ctx });
-  if (compressAll && !pulse.driveFileId) {
+  if (compressAll && !pulse.driveFileId && pulse.started_count > 0) {
     const intakeSmallFiles = (async () => {
       try {
         await item4PulsePipelineStage(env, "a2", {
@@ -16362,17 +16356,20 @@ export async function pulseA1SForDriveFile(request, env, authorization, ctx) {
     if (ctx?.waitUntil) ctx.waitUntil(intakeSmallFiles);
     else await intakeSmallFiles;
   }
+  const message = pulse.started_count > 0
+    ? "Started " + pulse.started_count + " verified A1S job. Remaining eligible ingestion and library videos will run sequentially."
+    : pulse.reason === "active_compression_in_progress"
+      ? "Another A1S compression is already active; no duplicate job was submitted."
+      : pulse.reason === "no_eligible_files"
+        ? "No eligible oversized video was found; no job was submitted."
+        : "Legacy compression scenario submitted; confirm its status before retrying.";
   return respond(request, env, {
-    ok: true,
-    triggered: pulse.backend === "python" ? "a1s-python" : "on-demand-run",
-    backend: pulse.backend,
-    drive_file_id: pulse.driveFileId,
+    ok: true, backend: pulse.backend,
+    started_count: pulse.started_count, reason: pulse.reason,
+    queued_count: pulse.queued_count || 0, drive_file_id: pulse.driveFileId,
     compress_all: compressAll && !pulse.driveFileId,
-    scenarios: pulse.driveFileId ? ["A1S", "A1M"] : ["A1S"],
-    message: pulse.driveFileId
-      ? "A1S compress and A1M duration probe were pulsed because this file is over 100 MB."
-      : "A1S scanned the ingestion folder and started compression for eligible oversized videos.",
-  }, 202);
+    message,
+  }, pulse.started_count > 0 ? 202 : 200);
 }
 /*__STUDIO_WORKER_END:pulseA1SForDriveFile__*/
 

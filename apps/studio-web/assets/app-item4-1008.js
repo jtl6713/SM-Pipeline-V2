@@ -289,7 +289,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.784-review-message-times";
+  const BUILD_ID = "item4-0.6.785-oversized-library-safe";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -1352,19 +1352,21 @@
     const button = $("operationsCompressAllOversized");
     try {
       if (button) button.disabled = true;
-      setOperationsMessage("Starting compression for oversized intake folder videos…");
+      setOperationsMessage("Starting safe compression for oversized ingestion and Asset Manager videos…");
       const result = await api("/api/operations/compress", {
         method: "POST",
         body: JSON.stringify({ compress_all: true }),
         timeoutMs: 180000,
       });
-      setOperationsMessage(result.message || "Compression started for the intake folder.");
-      renderCompressionStatus([{
-        headline: "Starting the next oversized video",
-        tone: "waiting",
-        notes: "Checking the intake folder…",
-      }], operationsOversizedCache.length);
-      startCompressionPoll();
+      setOperationsMessage(result.message || "Compression request submitted.");
+      if (Number(result.started_count || 0) > 0) {
+        renderCompressionStatus([{
+          headline: "Starting the next oversized video",
+          tone: "waiting",
+          notes: "Local compressor accepted the first job.",
+        }], operationsOversizedCache.length);
+        startCompressionPoll();
+      }
       loadOperations();
     } catch (error) {
       setOperationsMessage(error.message || "Could not start intake-folder compression.", "error-text");
@@ -26266,12 +26268,13 @@ function timedScriptAssetLabel(asset, index) {
     const activeJobs = [...jobsById.values()];
     renderCompressionStatus(activeJobs, operationsOversizedCache.length);
     syncCompressionPoll(activeJobs.length > 0 || operationsOversizedCache.length > 0);
-    const intakeCount = operationsOversizedCache.filter((record) => record.source === "intake_folder").length;
+    const totalCount = operationsOversizedCache.length;
     if (compressAll) {
-      compressAll.hidden = !(canCompress && intakeCount > 0);
-      compressAll.textContent = intakeCount === 1
-        ? "Compress intake folder video"
-        : `Compress all in intake folder (${intakeCount})`;
+      compressAll.hidden = totalCount < 1;
+      compressAll.disabled = !canCompress;
+      compressAll.textContent = !canCompress ? "Admin permission required" : (totalCount === 1
+        ? "Compress oversized video"
+        : `Compress all oversized videos (${totalCount})`);
     }
     if (!target) return;
     if (!operationsOversizedCache.length) {
@@ -26310,11 +26313,11 @@ function timedScriptAssetLabel(asset, index) {
         }], operationsOversizedCache.length);
         startCompressionPoll();
         try {
-          await api("/api/operations/compress", {
+          const result = await api("/api/operations/compress", {
             method: "POST",
             body: JSON.stringify({ drive_file_id: button.dataset.opsCompress }),
           });
-          setOperationsMessage(`Started compression for ${fileName}.`);
+          setOperationsMessage(result.message || `Compression request processed for ${fileName}.`);
           pollCompressionStatus();
         } catch (error) {
           setOperationsMessage(error.message || "Could not start compression.", "error-text");
@@ -26510,6 +26513,10 @@ function timedScriptAssetLabel(asset, index) {
       operationsVoiceOptions = phase6NormalizeVoices(voicesResult?.voices || voicesResult?.records || voicesResult?.items || []);
       operationsTimezone = data.timezone || null;
       operationsCanEditProfiles = Boolean(data.can_edit_profiles);
+      // Paint the true Owner/Admin capability as soon as Operations responds;
+      // waiting for optional music/desk fetches left the compression poll using
+      // the initial false permission and rendering every action "Admin only".
+      renderOperationsOversized(data.oversized_media || [], operationsCanEditProfiles, data.compression_jobs || []);
       mergeOperationsProfilesIntoStudio(data.profiles || []);
       profileVoicesLoaded = true;
       if (!$("productionRequestWorkspace")?.hidden) applyResolvedDefaultVoice();
