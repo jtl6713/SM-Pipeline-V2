@@ -20,7 +20,7 @@ function fixture(){
        variants:{"9:16":{preview_url:img(i),preview_status:"Ready",
          google_drive_file_id:"1VariantApprovedABCDEFGHI"+i}}}))}),
  }};
- const output={fields:{Remotion_Props_JSON:JSON.stringify({compositionId:"ChicagoShiningPhotoSequence",fps:30,
+ const output={id:"rec00000000000010",fields:{Platform:"Instagram",Platform_Output_Type:"Instagram Reel",Remotion_Props_JSON:JSON.stringify({compositionId:"ChicagoShiningPhotoSequence",fps:30,
    clips:originals.map(([media],i)=>({mediaAssetRecordId:media,
      startFrame:i*90,durationFrames:90,googleDriveFileId:"1VariantApprovedABCDEFGHI"+i,
      url:img(i),src:img(i)}))})}};
@@ -28,7 +28,7 @@ function fixture(){
     "Media_Class":"Image","Asset_Status":"Available","Rights_Status":"Owned",
     "Google Drive File ID":"1ABCDEFGHIJKLMNOPQRSTUV"+internal,
     "Content_Profile":[chicago],"Active":true,"Time_Of_Day":day}}));
- const session={producer_candidate:{stale:false,candidate:{timeline:[
+ const session={output_id:output.id,profile_id:chicago,platform:"Instagram",output_type:"Instagram Reel",producer_candidate:{stale:false,candidate:{timeline:[
    {start_seconds:0,end_seconds:3,asset_ids:["day-two"]},
    {start_seconds:3,end_seconds:6,asset_ids:["day-two"]},
    {start_seconds:6,end_seconds:9,asset_ids:["day-two"]},
@@ -60,4 +60,29 @@ test("tampered preview, bad crop, unowned media, wrong profile and unknown sourc
  v.media[0].fields.Content_Profile=[chicago];
  v.output.fields.Remotion_Props_JSON=v.output.fields.Remotion_Props_JSON.replace("media.chicagoshining.com","evil.example");
  assert.equal(reviewStillStoryboard(v).length,0);
+});
+
+test("authorized LA, New York and Miami source stills display without Chicago-only filtering",()=>{
+ const profiles=["rec00000000000011","rec00000000000012","rec00000000000013"];
+ for(const owner of profiles){
+  const v=fixture();
+  v.session.profile_id=owner;
+  for(const media of v.media)media.fields.Content_Profile=[owner];
+  assert.equal(reviewStillStoryboard(v).length,3);
+  v.media[1].fields.Content_Profile=[chicago];
+  assert.equal(reviewStillStoryboard(v).length,0);
+ }
+});
+test("foreign sessions or cross-platform storyboards never show original private frames",()=>{
+ const v=fixture();
+ for(const mutate of [
+  x=>x.session.profile_id="rec00000000000014",
+  x=>x.session.output_id="rec00000000000015",
+  x=>x.session.platform="TikTok",
+  x=>x.session.output_type="Instagram Story",
+  x=>{x.session.profile_id="";},
+ ]) {
+  const changed=fixture();mutate(changed);
+  assert.deepEqual(reviewStillStoryboard(changed),[]);
+ }
 });

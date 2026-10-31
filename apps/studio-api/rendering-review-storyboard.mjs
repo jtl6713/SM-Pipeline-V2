@@ -1,4 +1,4 @@
-/** Read-only visual storyboard for the exact held Chicago Reel.
+/** Read-only visual storyboard for the exact held per-profile output.
  * Original frames and preview URLs must match the approved 9:16 production
  * manifest. An AI suggestion never becomes a video or a render receipt.
  */
@@ -11,6 +11,15 @@ export function reviewStillStoryboard({output,request,media=[],session}={}){
   const f=output?.fields||{},q=request?.fields||{};
   const props=parse(f.Remotion_Props_JSON),master=parse(q.Studio_Master_Assets_JSON),
     variants=parse(q.Studio_Variant_Manifest_JSON);
+  // This storyboard is informational, but must not leak another profile's
+  // source images. Trust the authoritative stored session and output identity,
+  // not a creative candidate's requested media ID.
+  const owner=String(session?.profile_id||"");
+  if(!rec(owner)||!rec(output?.id)||session?.output_id!==output.id||
+     !String(session?.platform||"").trim()||
+     !String(session?.output_type||"").trim()||
+     String(f.Platform||"")!==session.platform||
+     String(f.Platform_Output_Type||"")!==session.output_type)return [];
   if(!props||props.compositionId!=="ChicagoShiningPhotoSequence"||
      !Number.isFinite(props.fps)||props.fps<=0||props.fps>120||
      !Array.isArray(props.clips)||props.clips.length<1||props.clips.length>80||
@@ -39,7 +48,7 @@ export function reviewStillStoryboard({output,request,media=[],session}={}){
     if(!m||m.Media_Class!=="Image"||m.Asset_Status!=="Available"||
        m.Rights_Status!=="Owned"||m.Active!==true||m.Do_Not_Use===true||
        !Array.isArray(m.Content_Profile)||m.Content_Profile.length!==1||
-       m.Content_Profile[0]!=="recT2rbKX3MF7cVFU"||
+       m.Content_Profile[0]!==owner||
        m["Google Drive File ID"]!==entry.google_drive_file_id||
        approved.preview_status!=="Ready"||
        approved.google_drive_file_id!==clip.googleDriveFileId||
