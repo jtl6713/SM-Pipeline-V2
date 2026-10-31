@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from collections.abc import Callable
@@ -10,7 +11,7 @@ from typing import Any
 
 from a1p.processor import resume_active_jobs, schedule_next
 from a1p.state import parse_job_value
-from a1s.compressor import delete_job, list_health_jobs, poll_job, submit_job
+from a1s.compressor import delete_job, list_health_jobs, poll_job, submit_download_job
 from a1s.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from a1s.eligibility import eligibility_reason
 from airtable.client import AirtableClient
@@ -283,7 +284,13 @@ def _compress_one(
     client = AirtableClient()
     job_id = ""
     try:
-        job = submit_job(file_id, name)
+        # The local Video Compressor may have no separate Drive service account.
+        # Use Runner's existing OAuth-authorized PRIVATE loopback-only Drive media
+        # endpoint. Never make the original public or put tokens in a URL.
+        if not re.fullmatch(r"[A-Za-z0-9_-]{10,128}", file_id):
+            raise ValueError("Unsafe source Drive ID for local compressor")
+        internal_url = f"http://127.0.0.1:3350/internal/drive-media/{file_id}"
+        job = submit_download_job(internal_url, name, f"a1s-{file_id}")
         job_id = str(job.get("id") or "")
         if not job_id:
             job_id = str(job.get("job_id") or "")
@@ -319,7 +326,7 @@ def _compress_one(
             "state_record_id": state_record_id,
             "status_url": status_url,
             "status": "started",
-            "backend": "local_video_compressor",
+            "backend": "local_video_compressor_private_runner_drive",
         }
     except Exception:
         if job_id:
