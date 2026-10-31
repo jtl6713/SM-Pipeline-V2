@@ -1,4 +1,4 @@
-"""Read-only, server-authenticated streaming of one Chicago review attempt.
+"""Read-only, server-authenticated streaming of exact profile-owned review media.
 
 Google OAuth remains on the existing Pipeline Runner. No public Drive sharing,
 new credentials or original-asset writes are required. Worker independently
@@ -50,7 +50,7 @@ def create_review_media_blueprint(settings, client_factory=_client,
             return denied(401,"review_media_auth_required")
         if (not _RECORD.fullmatch(output_id) or
             not _ID.fullmatch(attempt_id)):
-            # Exact output, Chicago profile and attempt are verified from the
+            # Exact output, owning profile and attempt are verified from the
             # authenticated durable review session below.
             return denied(403,"review_media_exact_output_required")
         try:
@@ -61,13 +61,34 @@ def create_review_media_blueprint(settings, client_factory=_client,
             hold=session.get("review_hold") or {}
             of=(client.get_record(OUTPUTS,output_id) or {}).get("fields",{})
             content_link=of.get("Content_Item")
+            profile=session.get("profile_id")
+            chicago_legacy=(profile==CHICAGO and
+                of.get("Platform")=="Instagram" and
+                of.get("Platform_Output_Type")=="Instagram Reel")
+            # Read-only preview is independently fenced on Runner, not merely
+            # exposed by the Studio Worker. No foreign city can piggyback
+            # on Chicago's original pilot entitlement.
+            global_flags=(
+                "RENDERING_REVIEW_ENROLL_WRITES_ENABLED",
+                "RENDERING_REVIEW_MANUAL_ADMISSION_ENABLED",
+                "RENDERING_REVIEW_INTEGRATION_VERIFIED",
+                "RENDERING_REVIEW_DISPATCH_FENCE_VERIFIED",
+                "RENDERING_REVIEW_SCHEDULER_VACATE_VERIFIED",
+                "RENDERING_REVIEW_GLOBAL_MANUAL_ENABLED",
+                "RENDERING_REVIEW_GLOBAL_RUNNER_VERIFIED",
+            )
+            global_enabled=all(os.environ.get(name)=="true" for name in global_flags)
+            platform=session.get("platform") or ("Instagram" if chicago_legacy else None)
+            output_type=session.get("output_type") or (
+                "Instagram Reel" if chicago_legacy else None)
             identity_ok=(session.get("schema")=="studio.render-review.1" and
                 session.get("id")==sf.get("Session_ID") and
                 session.get("output_id")==output_id and
-                session.get("profile_id")==CHICAGO and
+                _RECORD.fullmatch(str(profile or "")) is not None and
+                (chicago_legacy or global_enabled) and
                 sf.get("Row_Version")==session.get("version") and
-                of.get("Platform")=="Instagram" and
-                of.get("Platform_Output_Type")=="Instagram Reel" and
+                platform==of.get("Platform") and
+                output_type==of.get("Platform_Output_Type") and
                 not any(of.get(k) for k in ("Published_At","Platform_Post_ID",
                     "Platform_Media_ID","Platform_Post_URL","Publish_Started_At",
                     "Publish_Locked_At","Publish_Locked_By")) and
@@ -103,7 +124,7 @@ def create_review_media_blueprint(settings, client_factory=_client,
             if not identity_ok or not (held or factory):
                 return denied(409,"review_media_hold_unverified")
             content=(client.get_record(ITEMS,content_link[0]) or {}).get("fields",{})
-            if content.get("Content_Profile")!=[CHICAGO]:
+            if content.get("Content_Profile")!=[profile]:
                 return denied(403,"review_media_wrong_profile")
             attempts=session.get("attempts") or []
             selected=next((a for a in attempts if a.get("id")==attempt_id),None)
