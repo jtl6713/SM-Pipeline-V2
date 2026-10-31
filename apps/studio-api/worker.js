@@ -2602,14 +2602,28 @@ export default {
               ]);
               const first=session?.attempts?.find(a=>a.number===1);
               const original=String(f(rawOutput,"Final_File_ID")||f(rawOutput,"Final_File_URL")||"");
-              const valid=session?.enrollment_request_id&&
+              // Bind an already-stored review to this exact batch/output,
+              // never count a preexisting foreign session as our success.
+              const bytes=await crypto.subtle.digest("SHA-256",
+                new TextEncoder().encode(JSON.stringify([
+                  "profile-review-enrollment-v1",actor,session?.profile_id,id,key,
+                ])));
+              const token=[...new Uint8Array(bytes)]
+                .map(n=>n.toString(16).padStart(2,"0")).join("");
+              const valid=rawOutput?.id===id&&
+                session?.enrollment_request_id==="rrenroll_"+token.slice(0,64)&&
+                session.id==="rrsession_"+token.slice(0,48)&&
                 session.factory_entry?.source==="factory"&&
-                session.profile_id&&profileIds.includes(session.profile_id)&&
+                profileIds.includes(session.profile_id)&&
+                session.platform===String(f(rawOutput,"Platform")||"")&&
+                session.output_type===String(f(rawOutput,"Platform_Output_Type")||"")&&
                 session.review_hold?.active===true&&
                 hold?.active===true&&hold.id===session.review_hold.id&&
                 hold.owner===session.id&&
                 first?.artifact_id===original&&
-                f(rawOutput,"Do_Not_Publish")===true;
+                f(rawOutput,"Do_Not_Publish")===true&&
+                !["Scheduled_Post_Date","Studio_Scheduled_At",
+                   "YouTube_Scheduled_Publish_At"].some(field=>Boolean(f(rawOutput,field)));
               return {
                 hold_active:valid===true,original_preserved:valid===true,
                 published_or_dispatching:Boolean(
