@@ -122,9 +122,6 @@ class TestVibeCutRevision(unittest.TestCase):
     self.assertFalse(payload["spokenCaptionsEnabled"])
     self.assertFalse(payload["music"]["duckingEnabled"])
     self.assertEqual(payload["studioRevision"]["source"],"rendering_review_vibe_cut")
-if __name__=="__main__":
-  unittest.main()
-
   def test_logo_must_match_verified_owned_profile_receipt_and_exact_url(self):
     for mutation in (
       lambda w:w.update(render_url="https://example.test/watermark.png"),
@@ -140,3 +137,6 @@ if __name__=="__main__":
       with self.subTest(mutation=str(mutation)):
         with self.assertRaisesRegex(VibeRevisionDenied,"catalog_watermark"):
           run(data)
+
+if __name__=="__main__":
+  unittest.main()
