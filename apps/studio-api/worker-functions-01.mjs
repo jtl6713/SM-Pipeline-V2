@@ -5669,9 +5669,15 @@ export async function item4ReconcileMasterAuthority(env, recordId, record = null
 /*__STUDIO_WORKER_END:item4ReconcileMasterAuthority__*/
 
 export async function item4UpdateRequestState(env, recordId, fields) {
+  // State-only asset callbacks must never replay an old location, content type
+  // or brand from a stale upload/compression snapshot over operator corrections.
+  const safeFields = { ...(fields || {}) };
+  for (const protectedField of ["Primary_Location", "Master_Content_Type", "Idea_Candidate", "Brand", "Organization"]) {
+    delete safeFields[protectedField];
+  }
   return airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId, {
     method: "PATCH",
-    body: JSON.stringify({ fields: { ...fields, Updated_At: new Date().toISOString() }, typecast: false }),
+    body: JSON.stringify({ fields: { ...safeFields, Updated_At: new Date().toISOString() }, typecast: false }),
   });
 }
 /*__STUDIO_WORKER_END:item4UpdateRequestState__*/
