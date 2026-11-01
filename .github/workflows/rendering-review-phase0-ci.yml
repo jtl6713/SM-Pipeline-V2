@@ -133,6 +133,10 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check 'Flask>=3,<4' 'requests>=2,<3'
           PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_media_http.py' -v
+      - name: V2+ isolated Remotion payload without watermark verification
+        run: |
+          PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_isolated_render.py' -v
+          PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_isolated_launch.py' -v
       - name: Exact one-Reel Runner and Flask route syntax
         run: |
           python -m py_compile services/pipeline-runner/rendering_review/one_job.py
