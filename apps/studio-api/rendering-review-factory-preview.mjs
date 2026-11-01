@@ -43,6 +43,18 @@ export function factorySelectedReviewAttempt({session,row,profile,outputId}){
     str(field(row,"Review_Status"))==="Review Sent"&&
     str(field(row,"Render_Status"))==="Rendered"&&
     str(field(row,"Publish_Status"))==="Not Ready";
+  // Creative approval can precede the separate Factory handoff. During this
+  // exact owned-hold interval the approved V2 remains preview-only: no new
+  // approval, hold-release, dispatch or schedule authority is granted.
+  const approvedButStillHeld=session.state==="approved"&&
+    session.current_attempt_id===session.approved_attempt_id&&
+    !session.factory_handoff&&!session.active_job&&
+    session.review_hold?.active===true&&owned&&
+    str(field(row,"Output_Status"))==="Ready for Review"&&
+    str(field(row,"Review_Status"))==="Review Sent"&&
+    str(field(row,"Render_Status"))==="Rendered"&&
+    str(field(row,"Publish_Status"))==="Not Ready"&&
+    field(row,"Auto_Publish_Enabled")!==true;
   const factoryReady=session.state==="approved"&&
     session.current_attempt_id===session.approved_attempt_id&&
     session.factory_handoff?.status==="ready_for_factory_approval"&&
@@ -52,7 +64,7 @@ export function factorySelectedReviewAttempt({session,row,profile,outputId}){
   const backWithProducer=session.state==="discussing"&&
     session.factory_handoff?.status==="returned_for_changes"&&
     session.review_hold.active===true&&owned;
-  return (waitingForReview||factoryReady||backWithProducer)?attempt:null;
+  return (waitingForReview||approvedButStillHeld||factoryReady||backWithProducer)?attempt:null;
 }
 export async function serveFactorySelectedReviewVideo({request,env,outputId,authorization,
   readSession,readRow,readProfile,readVideo,copyHeaders}){
