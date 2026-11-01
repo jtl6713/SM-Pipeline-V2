@@ -449,3 +449,31 @@ test("Worker allows schedule regeneration POST through Phase 2A gate", async () 
   assert.match(worker, /isScheduleSettingsWrite \|/);
   assert.match(worker, /version: "0\.10\.\d+(?:-[\w.-]+)?"/);
 });
+
+test("Michigan V2 held review is visible in Needs Eyes but cannot be Factory-approved", async () => {
+  const held={id:"recPnNYghmcJYivOA",kind:"output",output_id:9593,
+    content_item_id:"recYhIjy4BW0U3WaW",content_id:1869,
+    title:"Michigan Avenue Stroll - Part 1",
+    output_status:"Ready for Review",review_status:"Review Sent",
+    render_status:"Rendered",publish_status:"Not Ready",
+    studio_state:"Ready for Review",review_hold_active:true,do_not_publish:true,
+    final_file_url:"https://drive.google.com/file/d/16osgGbNcyet_4WwDLiarSurkF3yXFOcq/view",
+  };
+  const sibling={...held,id:"recyYKgkfRksIZPun",output_id:9594,
+    review_hold_active:false,do_not_publish:false};
+  const desk=partitionFactoryLanes([held,sibling]);
+  assert.equal(desk.lanes.needs_eyes.length,2);
+  assert.equal(desk.lanes.needs_eyes[0].review_hold_active,true);
+  assert.equal(desk.lanes.needs_eyes[0].do_not_publish,true);
+  assert.equal(desk.lanes.needs_eyes[0].can_preview,true);
+  assert.equal(desk.lanes.needs_eyes[1].review_hold_active,false);
+  const queue=await readFile(path.join(here,"ops-queue.mjs"),"utf8");
+  assert.match(queue,/OPS_QUEUE_REVIEW_FORMULA[\\s\\S]*?Studio_Render_Review_Hold_Active/);
+  const js=await readFile(path.join(here,"../studio-web/assets/factory-desk.js"),"utf8");
+  const html=await readFile(path.join(here,"../studio-web/index.html"),"utf8");
+  assert.match(js,/card\\.review_hold_active === true \\|\\| card\\.do_not_publish === true/);
+  assert.match(js,/function reviewGroupMatchesSearch/);
+  assert.match(js,/state\\.needsEyesSearch/);
+  assert.match(js,/cards\\.some\\(card => card\\.review_hold_active === true\\)/);
+  assert.match(html,/id="factoryNeedsEyesSearch"/);
+});
