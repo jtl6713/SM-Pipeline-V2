@@ -13,6 +13,7 @@ from stages import a1p, c3b, i3, r2, rr2, smv1, ttd4
 from stages.registry import STAGE_NAMES, get_handler, is_implemented
 from audio.backfill import process_request as backfill_audio_leading_silence
 from i1.openai_ideas import generate_ideas
+from i1.durable_jobs import enqueue as enqueue_i1_durable, enabled as i1_durable_enabled, start_consumer as start_i1_consumer, status as i1_job_status
 from carousel.image_gen import build_c2_prompt, generate_carousel_png
 from studio_music.processor import ingest_studio_music, trash_studio_music
 from airtable.egress_monitor import install_airtable_egress_monitor, read_airtable_egress
@@ -110,6 +111,7 @@ def health():
             "t1_shorten_to_footage": True,
             "stages_registered": len(STAGE_NAMES),
             "stages_implemented": sum(1 for name in STAGE_NAMES if is_implemented(name)),
+            "i1_durable_jobs": i1_durable_enabled(),
             "public_base_url": settings.get("public_base_url") or None,
             "jobs": [
                 {"name": "studio-clip-poster", "path": "/jobs/studio-clip-poster"},
@@ -229,6 +231,48 @@ def list_stages():
             ]
         }
     )
+
+
+@app.post("/jobs/i1-durable")
+def submit_durable_i1():
+    """Accept after a durable disk commit; never run model work in the HTTP turn."""
+    if not settings.get("pipeline_runner_shared_secret", "").strip():
+        return jsonify({"error": "runner authentication not configured"}), 503
+    denied, code = _verify_secret()
+    if denied is not None:
+        return denied, code
+    if not i1_durable_enabled():
+        return jsonify({"error": "I1 durable jobs not enabled on runner"}), 503
+    body = request.get_json(silent=True) or {}
+    try:
+        result = enqueue_i1_durable(
+            str(body.get("batch_record_id") or "").strip(),
+            str(body.get("profile_record_id") or "").strip(),
+            body.get("requested_count"),
+            str(body.get("quality") or "").strip(),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 422
+    except (OSError, RuntimeError) as exc:
+        logger.exception("I1 queue admission failed")
+        return jsonify({"error": str(exc)}), 503
+    return jsonify({"ok": True, **result}), 202
+
+
+@app.get("/jobs/i1-durable/<batch_id>")
+def read_durable_i1(batch_id: str):
+    if not settings.get("pipeline_runner_shared_secret", "").strip():
+        return jsonify({"error": "runner authentication not configured"}), 503
+    denied, code = _verify_secret()
+    if denied is not None:
+        return denied, code
+    if not i1_durable_enabled():
+        return jsonify({"error": "I1 durable jobs not enabled on runner"}), 503
+    try:
+        job = i1_job_status(batch_id)
+    except (OSError, RuntimeError) as exc:
+        return jsonify({"error": str(exc)}), 503
+    return (jsonify({"ok": True, "job": job}), 200) if job else (jsonify({"error": "job not found"}), 404)
 
 
 @app.post("/stages/<stage_name>")
@@ -842,6 +886,7 @@ def run_studio_produce_ops_alert():
 
 def main() -> None:
     logging.basicConfig(level=settings.get("log_level", "info").upper())
+    start_i1_consumer()  # disabled by default; startup fails if the configured spool is not durable
     app.run(host=settings["host"], port=settings["port"], debug=False)
 
 
