@@ -1784,6 +1784,9 @@
         const card=byId.get(id);
         if(!card){setStatus("Held review output not found; refresh Factory.",true);return;}
         button.disabled=true;
+        const originalLabel=button.textContent;
+        button.textContent="Verifying saved V2…";
+        button.setAttribute("aria-busy","true");
         try{
           const reviewed=await readHeldFactoryReview(card);
           if(reviewed.alreadyAccepted){
@@ -1793,6 +1796,7 @@
             return;
           }
           if(!window.confirm("Accept the selected V2 creatively in Factory?\\n\\nThis does NOT authorize publishing, release the watermark QA hold, schedule or upload anything."))return;
+          button.textContent="Saving creative acceptance…";
           const receipt=await mutateDesk({
             action:"accept_held_creative",kind:"output",id:card.id,
             expected_version:reviewed.session.version,
@@ -1810,7 +1814,11 @@
           const message=error?.message||String(error);
           setStatus("Factory creative acceptance needs attention: "+message,true);
           window.alert("Factory creative acceptance not confirmed:\\n"+message);
-        }finally{button.disabled=false;}
+        }finally{
+          button.removeAttribute("aria-busy");
+          button.textContent=originalLabel;
+          button.disabled=false;
+        }
       });
     });
     root.querySelectorAll("[data-factory-approve]").forEach((button) => {
@@ -2147,7 +2155,7 @@
     const savedMessage = desk.message || ACTION_STATUS[payload.action] || "Updated.";
     if (desk.lanes) {
       renderDesk(desk);
-    } else if (desk.ok && (payload.action === "request_changes_content" || payload.action === "return_to_review")) {
+    } else if (desk.ok && (payload.action === "request_changes_content" || payload.action === "return_to_review" || payload.action === "accept_held_creative")) {
       // The Airtable write is already committed; do not block acceptance on
       // a slow Factory queue read or convert a successful POST into an error.
       setStatus(savedMessage);
