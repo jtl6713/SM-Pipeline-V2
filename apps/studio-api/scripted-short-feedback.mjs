@@ -8,35 +8,96 @@ export const normalizedClipName = value => clean(value).toLowerCase()
   .replace(/[^a-z0-9 ]/g, "")
   .replace(/\s+/g, " ").trim();
 
+const feedbackScene = /\b(?:slide|scene)s?\s*#?\s*(\d{1,2})\b/i;
+const feedbackCommand = /\b(remove|delete|drop|replace|swap|substitute|move|reorder|change|edit|set|update)\s+(?:the\s+)?(?:slide|scene)s?\s*#?\s*(\d{1,2})\b/gi;
+const cleanClipTitle = value => clean(value)
+  .replace(/^(?:the\s+)?(?:following\s+)?(?:clip|video|asset|footage|photo|image)\s*/i, "")
+  .replace(/^(?:which\s+)?(?:i\s+)?(?:just\s+)?uploaded\b\s*[.:,-]*/i, "")
+  .replace(/^(?:named|called|titled)\s+/i, "")
+  .replace(/^[-–—:"'“”]+|[-–—:;,"'“”.]+$/g, "").trim();
+
 export function parseScriptedShortFeedback(value) {
   const source = String(value ?? "").trim();
   if (!source || source.length > SCRIPTED_SHORT_FEEDBACK_LIMIT) {
     throw new Error("Enter feedback of 1 to 3,000 characters.");
   }
-  const references = [...source.matchAll(/\b(?:slide|scene)\s*#?\s*(\d{1,2})\b/gi)];
-  if (references.length !== 1) {
-    throw new Error("For a precise revision, identify one slide number, such as 'replace slide 4 with Central Park At Night 1'.");
+  // A following scene with its own 'with' inherits the preceding replace verb.
+  // Never infer missing clip names, scene numbers or creative instructions.
+  const normalized = source.replace(/\band\s+((?:slide|scene)\s*#?\s*\d{1,2}\s+with\b)/gi, "and replace $1");
+  const matches = [...normalized.matchAll(feedbackCommand)];
+  if (!matches.length) {
+    throw new Error("Name a specific slide and an action: remove, replace, move, or change narration.");
   }
-  const scene = Number(references[0][1]);
-  const replacement = /\b(?:replace|swap|substitute)\b/i.test(source);
-  const removal = /\b(?:remove|delete|drop)\b/i.test(source);
-  if (!replacement && !removal) {
-    throw new Error("Describe a change to the slide: remove it, or replace it with an uploaded clip.");
+  const actions = [];
+  for (let index = 0; index < matches.length; index++) {
+    const match = matches[index];
+    const verb = match[1].toLowerCase();
+    const scene = Number(match[2]);
+    const suffix = normalized.slice(match.index + match[0].length,
+      index + 1 < matches.length ? matches[index + 1].index : normalized.length)
+      .replace(/\s*(?:,?\s*(?:and|then)\s*)$/i, "").trim();
+    if (["remove","delete","drop"].includes(verb)) {
+      const replaceInstead = /\band\s+replace\s+(?:it\s+)?with\b/i.test(suffix);
+      if (replaceInstead) {
+        const tail = suffix.split(/\band\s+replace\s+(?:it\s+)?with\b/i).pop();
+        const bullet = source.match(/(?:^|\n)\s*[-•]\s*([^\r\n]{3,150})\s*$/m);
+        const asset_name = cleanClipTitle(bullet?.[1] || tail || "");
+        if (!asset_name || asset_name.length > 150 || /\b(?:which|i just uploaded)\b/i.test(asset_name)) {
+          throw new Error("Specify the exact uploaded clip name for slide " + scene + ".");
+        }
+        actions.push({action:"replace",scene,asset_name});
+        continue;
+      }
+      actions.push({action:"remove",scene});
+      const extra = suffix.match(/^\s*(?:(?:,|and)\s*(?:(?:slide|scene)\s*#?\s*)?\d{1,2}\s*)+/i);
+      if (extra) {
+        for (const ref of extra[0].matchAll(/(?:slide|scene)\s*#?\s*(\d{1,2})|\b(\d{1,2})\b/gi)) {
+          actions.push({action:"remove",scene:Number(ref[1]||ref[2])});
+        }
+      } else if (/\b(?:slide|scene)\s*#?\s*\d+\b/i.test(suffix)) {
+        throw new Error("Use 'remove slides 2 and 4' or separate remove commands.");
+      }
+    } else if (["replace","swap","substitute"].includes(verb)) {
+      const bullet = source.match(/(?:^|\n)\s*[-•]\s*([^\r\n]{3,150})\s*$/m);
+      const afterWith = suffix.match(/^\s*(?:with|using)\s+([\s\S]*)$/i);
+      const asset_name = cleanClipTitle(bullet && matches.length===1 ? bullet[1] : afterWith?.[1] || "");
+      if (!asset_name || asset_name.length > 150 || /\b(?:which|i just uploaded)\b/i.test(asset_name)) {
+        throw new Error("Use 'replace slide " + scene + " with Exact Library Clip Name'.");
+      }
+      actions.push({action:"replace",scene,asset_name});
+    } else if (["move","reorder"].includes(verb)) {
+      const target = suffix.match(/^\s*(before|after)\s+(?:the\s+)?(?:slide|scene)\s*#?\s*(\d{1,2})\b/i);
+      if (!target) throw new Error("Use 'move slide " + scene + " before slide 2' (or after).");
+      actions.push({action:"move",scene,position:target[1].toLowerCase(),target_scene:Number(target[2])});
+    } else {
+      const timing = suffix.match(/^\s*(?:'s?\s*)?(?:duration|length|timing)\s+(?:to|at|as)\s+(\d{1,2}(?:\.\d)?)\s*(?:seconds?|secs?)\b/i);
+      const voice = suffix.match(/^\s*(?:'s?\s*)?(?:voice[\s-]?over|narration|script|spoken\s+line)\s+(?:to|as|:)\s*([\s\S]+)$/i);
+      if (timing) {
+        throw new Error("Scene timing is determined by recorded narration. Revise the narration text instead of setting seconds.");
+      } else if (voice) {
+        const text = clean(voice[1]).replace(/^["'“”]+|[;"'“”]+$/g, "").trim();
+        if (!text || text.length > 500) throw new Error("Narration must contain 1 to 500 characters.");
+        actions.push({action:"narration",scene,text});
+      } else {
+        throw new Error("For slide " + scene + ", specify 'narration to ...'. Timing follows the recorded voiceover.");
+      }
+    }
   }
-  if (!replacement) return { action: "remove", scene };
-  // Respect a distinct asset title after a bullet or the upload description.
-  const bullet = source.match(/(?:^|\n)\s*[-•]\s*([^\r\n]{3,150})\s*$/m)
-    || source.match(/\b(?:uploaded|named|called|titled)\s*[.:]\s*[-–—]\s*([^\r\n]{3,150})\s*$/i);
-  const afterWith = source.match(/\b(?:replace|swap|substitute)\b[\s\S]*?\bwith\s+([\s\S]+)$/i);
-  let name = bullet?.[1] || afterWith?.[1] || "";
-  name = clean(name).replace(/^(?:the\s+)?(?:following\s+)?(?:clip|video|asset|footage|photo|image)\b\s*/i, "")
-    .replace(/^(?:which\s+)?(?:i\s+)?(?:just\s+)?uploaded\b\s*[.:,-]*\s*/i, "")
-    .replace(/^(?:named|called|titled)\s+/i, "")
-    .replace(/^[-–—:"'“”]+|[-–—:"'“”.]+$/g, "").trim();
-  if (!name || name.length > 150 || /\b(?:which|i just uploaded)\b/i.test(name)) {
-    throw new Error("Specify the uploaded clip's exact library name after 'with', or on a separate '- Clip Name' line.");
+  if (actions.length > 12) throw new Error("Please revise at most 12 scenes at a time.");
+  const altered = new Set();
+  for (const item of actions) {
+    if (!Number.isInteger(item.scene) || item.scene < 1) throw new Error("Slide numbers must be positive.");
+    if (altered.has(item.scene)) throw new Error("Slide " + item.scene + " has conflicting edits. Send one change per slide.");
+    altered.add(item.scene);
+    if (item.action==="move" && item.target_scene===item.scene) {
+      throw new Error("A scene cannot be moved relative to itself.");
+    }
   }
-  return { action: "replace", scene, asset_name: name };
+  // Do not silently ignore another intent which this deterministic parser cannot execute.
+  if (/\b(?:and|then)\s+(?:make|adjust|improve|add|include|show|shorten|lengthen)\b/i.test(source)) {
+    throw new Error("Separate unsupported creative directions from precise scene changes. Nothing was revised.");
+  }
+  return actions.length === 1 ? actions[0] : {actions};
 }
 
 export function chooseScriptedShortLibraryClip(rows, assetName, profileId = "") {
@@ -79,29 +140,51 @@ export function applyScriptedShortFeedback(timeline, directive, clip = null) {
   if (!Array.isArray(timeline?.segments) || !timeline.segments.length) {
     throw new Error("An existing proposal is required before giving feedback.");
   }
-  const scene = Number(directive?.scene);
-  if (!Number.isInteger(scene) || scene < 1 || scene > timeline.segments.length) {
-    throw new Error("Slide " + String(directive?.scene) + " is not present in this proposal.");
+  const actions = Array.isArray(directive?.actions) ? directive.actions : [directive];
+  if (!actions.length || actions.length > 12) throw new Error("Invalid scene revision batch.");
+  const initial = timeline.segments.map((item,index) => ({ ...item, _feedback_original: index + 1 }));
+  const length = initial.length;
+  const removed = new Set(actions.filter(x=>x?.action==="remove").map(x=>x.scene));
+  if (length - removed.size < 5) {
+    throw new Error("Removing these scenes would leave fewer than five scenes. Replace scenes instead.");
   }
-  const segments = timeline.segments.map(item => ({ ...item }));
-  if (directive.action === "remove") {
-    if (segments.length <= 5) throw new Error("Removing this scene would leave fewer than five scenes. Replace it instead.");
-    segments.splice(scene - 1, 1);
-  } else if (directive.action === "replace") {
-    if (!clip?.id || clip.media_kind !== "video") throw new Error("A verified uploaded video is required.");
-    const existing = segments[scene - 1];
-    // Existing narration, order and estimated timing stay unchanged unless the operator asks otherwise.
-    segments[scene - 1] = {
-      ...existing,
-      asset_id: clip.id,
-      media_asset_id: clip.id,
-      suggested_visual: clip.name,
-      shot_status: "owned",
-      media_type: clip.media_type,
-      source_duration_seconds: clip.source_duration_seconds,
-    };
-  } else {
-    throw new Error("Unsupported feedback operation.");
+  const edited = new Set();
+  for (const operation of actions) {
+    const scene = Number(operation?.scene);
+    if (!Number.isInteger(scene) || scene < 1 || scene > length) {
+      throw new Error("Slide " + String(operation?.scene) + " is not present in this proposal.");
+    }
+    if (edited.has(scene)) throw new Error("Conflicting edits for slide " + scene + ".");
+    edited.add(scene);
+    if (operation.action === "move" &&
+        (operation.target_scene < 1 || operation.target_scene > length ||
+         operation.target_scene===scene || removed.has(operation.target_scene))) {
+      throw new Error("The move target must be another scene that remains in the proposal.");
+    }
   }
-  return { ...timeline, segments };
+  for (const operation of actions) {
+    const row = initial[operation.scene - 1];
+    if (operation.action === "remove" || operation.action === "move") continue;
+    if (operation.action === "replace") {
+      const candidate = operation.clip || (clip instanceof Map ? clip.get(normalizedClipName(operation.asset_name)) : clip);
+      if (!candidate?.id || candidate.media_kind !== "video") throw new Error("A verified uploaded video is required.");
+      Object.assign(row, {
+        asset_id:candidate.id,media_asset_id:candidate.id,
+        suggested_visual:candidate.name,shot_status:"owned",
+        media_type:candidate.media_type,source_duration_seconds:candidate.source_duration_seconds,
+      });
+    } else if (operation.action === "narration") {
+      if (!operation.text || operation.text.length > 500) throw new Error("Narration must contain 1 to 500 characters.");
+      row.voiceover_text=operation.text;
+    } else throw new Error("Unsupported feedback operation.");
+  }
+  const segments = initial.filter(row=>!removed.has(row._feedback_original));
+  for (const operation of actions.filter(x=>x.action==="move")) {
+    const original = segments.findIndex(row=>row._feedback_original===operation.scene);
+    const [moving] = segments.splice(original,1);
+    const anchor=segments.findIndex(row=>row._feedback_original===operation.target_scene);
+    if(anchor<0)throw new Error("The destination scene is no longer present.");
+    segments.splice(anchor+(operation.position==="after"?1:0),0,moving);
+  }
+  return { ...timeline, segments:segments.map(({_feedback_original,...row})=>row) };
 }
