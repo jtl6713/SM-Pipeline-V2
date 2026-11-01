@@ -8,6 +8,13 @@ const css=readFileSync(new URL('./assets/rendering-review-queue.css',import.meta
 test('Rendering Review has a dedicated navigation item and responsive page',()=>{
   assert.match(html,/data-page="rendering-review" id="navRenderingReview" hidden/);
   assert.match(html,/id="page-rendering-review" class="page"/);
+  assert.match(html,/<button class="nav-item" data-page="rendering-review" id="navRenderingReview" hidden>Post Production Edits<\\/button>/);
+  assert.match(html,/<h1>Post Production Edits<\\/h1>/);
+  assert.match(html,/id="page-rendering-review" class="page" aria-label="Post Production Edits"/);
+  assert.doesNotMatch(html,/>Rendering Review<\\/(?:button|h1)>/);
+  // Reuse existing navigation, session and API identities: this is a label-only release.
+  assert.match(js,/\\$\\('page-rendering-review'\\)/);
+  assert.match(js,/\\$\\('navRenderingReview'\\)/);
   for(const id of ['rrStatus','rrRefresh','rrCount','rrQueueList','rrDetail','rrVideo','rrOpenFile','rrMore']){
     assert.match(html,new RegExp('id="'+id+'"'));
   }
