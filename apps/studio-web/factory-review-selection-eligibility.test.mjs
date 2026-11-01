@@ -108,3 +108,7 @@ test("Mobile styling keeps ineligible checkbox and explanation visible", () => {
   assert.match(css, /\.factory-line-actions \.factory-batch-unavailable\{/);
   assert.doesNotMatch(css, /\.factory-batch-unavailable[^}]*display:none/);
 });
+
+test("Group selection skips disabled row checkboxes", () => {
+  assert.match(js, /querySelectorAll\("\[data-factory-select-output\]:not\(:disabled\)"\)/);
+});
