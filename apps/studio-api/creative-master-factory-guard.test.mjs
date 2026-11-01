@@ -14,6 +14,7 @@ const master={key,content_item_id:contentId,format:"Vertical Short Video",
 const c=x=>structuredClone(x);
 function fixture(){
  const row={id,fields:{Content_Item:[contentId],Format:"Vertical Short Video",
+  Output_Filename:"factory-eligible-video.mp4",
   Aspect_Ratio:"9:16",Final_File_ID:"1IGo6XG0bwiASF75VA6xS7qXS4UGmhuGW",
   Final_File_URL:"https://drive.google.com/file/d/1IGo6XG0bwiASF75VA6xS7qXS4UGmhuGW/view",
   Output_Status:"Ready for Review",Render_Status:"Rendered",
@@ -72,7 +73,9 @@ test("no approved master or different aspect/format leaves output unchanged",asy
  assert.equal((await f.run()).status,"no_master");
  f.content.fields[MASTER_FIELD]=JSON.stringify({schema:MASTER_SCHEMA,masters:{[key]:master}});
  f.row.fields.Format="Story";
+ f.row.fields.Output_Filename="image-story.jpg";
  assert.equal((await f.run()).status,"no_master");
+ f.row.fields.Output_Filename="factory-eligible-video.mp4";
  f.row.fields.Format="Vertical Short Video";
  f.row.fields.Aspect_Ratio="4:5";
  assert.equal((await f.run()).status,"no_master");
@@ -105,4 +108,20 @@ test("cross-content linkage is never adopted",async()=>{
  const f=fixture();f.row.fields.Content_Item=["recAAAAAAAAAAAAAA"];
  await assert.rejects(f.run(),e=>e.code==="CREATIVE_MASTER_FACTORY_CONTENT_DRIFT");
  assert.equal(f.writes,0);
+});
+
+test("a later 9:16 video Story selects approved video master but requires independent rereview",async()=>{
+ const f=fixture();
+ f.row.fields.Format="Story";
+ f.row.fields.Platform_Output_Type="Instagram Story";
+ f.row.fields.Output_Filename="new-video-story.mp4";
+ const result=await f.run();
+ assert.equal(result.status,"updated_requires_rereview");
+ assert.equal(result.key,key);
+ assert.equal(result.publishing_approved,false);
+ assert.equal(f.row.fields.Final_File_ID,fileId);
+ assert.equal(f.row.fields.Publish_Status,"Not Ready");
+ assert.equal(f.row.fields.Scheduled_Post_Date,"2026-11-15T11:30:00Z");
+ assert.equal((await f.run()).status,"unchanged");
+ assert.equal(f.writes,1);
 });
