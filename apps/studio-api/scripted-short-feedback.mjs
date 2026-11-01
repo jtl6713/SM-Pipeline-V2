@@ -14,7 +14,7 @@ const cleanClipTitle = value => clean(value)
   .replace(/^(?:the\s+)?(?:following\s+)?(?:clip|video|asset|footage|photo|image)\s*/i, "")
   .replace(/^(?:which\s+)?(?:i\s+)?(?:just\s+)?uploaded\b\s*[.:,-]*/i, "")
   .replace(/^(?:named|called|titled)\s+/i, "")
-  .replace(/^[-–—:"'“”]+|[-–—:"'“”.]+$/g, "").trim();
+  .replace(/^[-–—:"'“”]+|[-–—:;,"'“”.]+$/g, "").trim();
 
 export function parseScriptedShortFeedback(value) {
   const source = String(value ?? "").trim();
@@ -75,7 +75,7 @@ export function parseScriptedShortFeedback(value) {
       if (timing) {
         throw new Error("Scene timing is determined by recorded narration. Revise the narration text instead of setting seconds.");
       } else if (voice) {
-        const text = clean(voice[1]).replace(/^["'“”]+|["'“”]+$/g, "").trim();
+        const text = clean(voice[1]).replace(/^["'“”]+|[;"'“”]+$/g, "").trim();
         if (!text || text.length > 500) throw new Error("Narration must contain 1 to 500 characters.");
         actions.push({action:"narration",scene,text});
       } else {
