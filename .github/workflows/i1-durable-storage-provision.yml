@@ -31,18 +31,18 @@ jobs:
           try {
             $env:I1_SQLITE_PROBE=$probe
             $py=@'
-import os
-import sqlite3
-path=os.environ["I1_SQLITE_PROBE"]
-conn=sqlite3.connect(path)
-conn.execute("CREATE TABLE evidence(x INTEGER PRIMARY KEY)")
-conn.execute("INSERT INTO evidence VALUES(7)")
-conn.commit()
-conn.close()
-conn=sqlite3.connect(path)
-assert conn.execute("SELECT x FROM evidence").fetchone()[0] == 7
-conn.close()
-'@
+          import os
+          import sqlite3
+          path=os.environ["I1_SQLITE_PROBE"]
+          conn=sqlite3.connect(path)
+          conn.execute("CREATE TABLE evidence(x INTEGER PRIMARY KEY)")
+          conn.execute("INSERT INTO evidence VALUES(7)")
+          conn.commit()
+          conn.close()
+          conn=sqlite3.connect(path)
+          assert conn.execute("SELECT x FROM evidence").fetchone()[0] == 7
+          conn.close()
+          '@
             [IO.File]::WriteAllText($probeScript,$py,(New-Object System.Text.UTF8Encoding($false)))
             & python $probeScript
             if ($LASTEXITCODE -ne 0) { throw 'sqlite_persistent_roundtrip_failed' }
