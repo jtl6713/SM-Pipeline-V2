@@ -123,7 +123,7 @@ def test_terminal_shortfall_requires_manual_review(monkeypatch):
     client = FakeClient(initial=3, status="Failed")
     monkeypatch.setattr(q, "AirtableClient", lambda: client)
     monkeypatch.setattr(q, "process_request", lambda **kwargs: pytest.fail("model should not run"))
-    with pytest.raises(RuntimeError, match="already terminal"):
+    with pytest.raises(q.TerminalBatchMismatch, match="manual reconciliation required"):
         q._work(_job())
     assert client.batch["Status"] == "Failed"
 
