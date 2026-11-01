@@ -291,7 +291,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.829-vibe-upload-recovery";
+  const BUILD_ID = "item4-0.6.830-vibe-upload-preflight";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -6666,7 +6666,7 @@ function timedScriptAssetLabel(asset, index) {
       return {
         heal: "uploading",
         title: `Getting ${fileName} ready to upload.`,
-        body: vibeUploadUi.detail || "Creating the Production draft and checking the video metadata. Keep this tab open.",
+        body: vibeUploadUi.detail || "Registering the source. Upload has not started yet.",
         count: "1 selected · 0 ready.",
       };
     }
@@ -6744,11 +6744,11 @@ function timedScriptAssetLabel(asset, index) {
         vibeUploadUi = {
           ...vibeUploadUi,
           phase: "stalled",
-          detail: "No recent transfer progress was confirmed. Keep this tab open while Studio checks the transfer.",
+          detail: phase === "creating" ? "Production draft creation has not completed. No segments have uploaded. Retry will check for an existing saved draft first." : "No segment progress was confirmed. Select the same video to resume safely.",
         };
         renderVibeUploadUi(item4Workspace);
         updateItem4MasterProgress(item4Workspace || {});
-      }, phase === "saving" ? 300000 : VIBE_UPLOAD_STALL_MS);
+      }, phase === "saving" ? 300000 : phase === "creating" ? 120000 : VIBE_UPLOAD_STALL_MS);
     }
     if (changed || phase === "failed" || phase === "ready") {
       renderVibeUploadUi(item4Workspace);
@@ -9233,7 +9233,7 @@ function timedScriptAssetLabel(asset, index) {
     if (ezIsVibeCut() && nextFiles[0]) {
       setVibeUploadUi("creating", {
         file: nextFiles[0],
-        detail: "Creating the Production draft and checking the video metadata. Keep this tab open.",
+        detail: "Creating the Production draft. Video transfer has not started yet.",
         activityKey: `creating:${nextFiles[0].name}:${nextFiles[0].size}`,
       });
     }
@@ -9243,7 +9243,7 @@ function timedScriptAssetLabel(asset, index) {
     }
     try {
       let aspectBundle = null;
-      if (nextFiles.length && (ezIntakeKind === "finished-video" || ezIntakeKind === "vibe-cut" || ezIsAzFinishedPath())) {
+      if (nextFiles.length && !ezIsVibeCut() && pending?.inputKind !== "vibe-cut" && (ezIntakeKind === "finished-video" || ezIsAzFinishedPath())) {
         aspectBundle = await aspectPlanFromVideoFiles(nextFiles, {
           inputKind: pending?.inputKind || ezIntakeKind,
         });
@@ -9336,7 +9336,8 @@ function timedScriptAssetLabel(asset, index) {
         requestPayload.carousel_slide_count_mode = "Exact";
         requestPayload.carousel_slide_count_exact = photoCount;
       }
-      await ensureProductionRequestMusic();
+      if (!ezIsVibeCut() && pending?.inputKind !== "vibe-cut") await ensureProductionRequestMusic();
+      if (ezIsVibeCut()) setVibeUploadUi("creating", { file: nextFiles[0], detail: "Saving the Production draft. Segment upload starts immediately after it is saved.", activityKey: `draft:save:${activeIdea.id}` });
       const created = await createEzProductionRequest(activeIdea.id, requestPayload);
       if (ezIsVibeCut() || pending?.inputKind === "vibe-cut") {
         setVibeUploadUi("creating", {
@@ -9356,6 +9357,35 @@ function timedScriptAssetLabel(asset, index) {
         }
         renderEzPhotoStrip();
         startAzFinishedProgressPolling();
+        return true;
+      }
+      // Vibe uploads are the priority operation: never queue optional output
+      // matrix, workspace or request-list reads ahead of the 580 MB transfer.
+      // The upload session itself performs the authoritative snapshot check.
+      if (ezIsVibeCut() || pending?.inputKind === "vibe-cut") {
+        const uploadResult = await uploadItem4Files(nextFiles, { preserveOversizedNotice: true });
+        renderEzPhotoStrip();
+        if (!uploadResult?.ok || !vibeCutPersistedSource()) {
+          throw new Error(uploadResult?.error || "The source video is not yet verified. Select the same file to resume.");
+        }
+        // These reads are UI enrichment, not upload prerequisites. Never turn a
+        // successfully stored video back into a failed upload because one times out.
+        try {
+          await loadProductionRequestOutputs(created.record);
+          applyEzExtraOutputs(extras);
+          if (extras.length) await saveProductionRequestOutputs(created.record);
+          await loadItem4Workspace(activeProductionRequest);
+          await loadProductionRequests();
+        } catch (postUploadError) {
+          console.warn("Vibe post-upload workspace refresh deferred", postUploadError);
+          setEzMessage("Video received. Workspace refresh is delayed; your saved source is preserved.", "success");
+        }
+        const action = $("ezContinue");
+        if (action) {
+          action.textContent = "Save Video & Continue to Production";
+          action.hidden = !vibeCutReadySource();
+          action.disabled = !vibeCutReadySource();
+        }
         return true;
       }
       await loadProductionRequestOutputs(created.record);
@@ -10485,7 +10515,9 @@ function timedScriptAssetLabel(asset, index) {
     const format = ext || (isVideo ? "CLIP" : (item4IsHeicAsset(asset) ? "HEIC" : "IMAGE"));
     const seconds = item4KnownClipDuration(asset);
     const clipLabel = isVideo
-      ? (seconds > 0 ? `${formatLibraryClipDuration(seconds)} clip saved` : "Clip saved")
+      ? ((label && label !== "Preview unavailable" && label !== "Clip saved")
+        ? label
+        : ((asset?.upload_status === "complete" || asset?.uploaded_at) ? "Uploaded · processing" : "Upload not confirmed"))
       : label;
     return `<div class="item4-heic-placeholder item4-image-placeholder${isVideo ? " item4-clip-placeholder" : ""}">${isVideo ? `<span class="item4-clip-play" aria-hidden="true"></span>` : ""}<strong>${escapeHtml(format)}</strong><span>${escapeHtml(isVideo ? clipLabel : label)}</span></div>`;
   }
@@ -12598,7 +12630,9 @@ function timedScriptAssetLabel(asset, index) {
       throw new Error(`Videos must be ${Math.round(ITEM4_FINISHED_VIDEO_HARD_MAX_BYTES / (1024 * 1024))} MB or smaller`);
     }
     const originKind = ezIsVibeCut() ? "vibe-cut" : "finished-video";
-    const metadata = (await imageMetadataForFiles([file]))[0] || {};
+    // Do not decode a 580 MB iPhone MOV twice before sending its first byte.
+    // The server-side media pipeline probes Vibe sources after persistence.
+    const metadata = originKind === "vibe-cut" ? {} : (await imageMetadataForFiles([file]))[0] || {};
     let checkpoint = item4UploadCheckpoint(requestId);
     if (checkpoint && (checkpoint.name !== file.name || checkpoint.size !== sizeBytes)) {
       throw new Error("A different video has an unfinished upload. Re-select the original file to recover it, or explicitly remove that source before replacing it.");
@@ -12825,7 +12859,7 @@ function timedScriptAssetLabel(asset, index) {
       setVibeUploadUi("uploading", {
         file: files[0],
         pct: 0,
-        detail: "Secure upload started. Keep this tab open until every part reaches the server.",
+        detail: `0 of ${Math.ceil(files[0].size / (16 * 1024 * 1024))} segments uploaded. Creating a secure upload session…`,
         activityKey: `upload:${files[0].name}:0`,
       });
     }
@@ -12851,7 +12885,7 @@ function timedScriptAssetLabel(asset, index) {
         setEzMessage(accepted, "success");
         updateItem4MasterProgress(item4Workspace || {});
         let poster = null;
-        if (item4FileLooksLikeVideo(file)) {
+        if (item4FileLooksLikeVideo(file) && !ezIsVibeCut()) {
           poster = await Promise.race([
             item4ClipPosterFromFile(file).then((blob) => {
               if (blob) item4ApplyLocalClipPoster(file.name, blob);
@@ -12877,9 +12911,7 @@ function timedScriptAssetLabel(asset, index) {
                   setVibeUploadUi("uploading", {
                     file,
                     pct: safePct,
-                    detail: totalParts > 1
-                      ? `Part ${Math.min(doneParts + 1, totalParts)} of ${totalParts}. Keep this tab open.`
-                      : "Keep this tab open until the upload finishes.",
+                    detail: `${doneParts} of ${totalParts} segments uploaded · ${Math.round(sentBytes / (1024 * 1024))} of ${Math.round(file.size / (1024 * 1024))} MB transferred. ${doneParts === totalParts ? "Finalizing source…" : `Uploading segment ${Math.min(doneParts + 1, totalParts)}.`}`,
                     activityKey: `upload:${file.name}:${doneParts}:${sentBytes}`,
                   });
                 }

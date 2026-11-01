@@ -1,0 +1,48 @@
+/* Vibe Cut iPhone uploader: maintain legible text hierarchy and truthful progress. */
+#ezUploadZone > div:not(.item4-upload-icon) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  text-align: center;
+}
+#ezUploadZone #ezUploadTitle,
+#ezUploadZone #ezUploadHint {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.42;
+}
+#ezUploadZone #ezUploadHint { margin: 0; color: #526578; font-size: 0.9rem; }
+#ezUploadProgress, #item4UploadProgress { overflow-wrap: anywhere; min-width: 0; }
+#ezUploadProgress > strong,
+#ezUploadProgress > span,
+#ezUploadProgress .item4-upload-progress-count,
+#item4UploadProgress > strong,
+#item4UploadProgress > span,
+#item4UploadProgress .item4-upload-progress-count {
+  display: block;
+  max-width: 100%;
+  white-space: normal;
+  line-height: 1.42;
+}
+#ezUploadProgress > strong, #item4UploadProgress > strong { margin-bottom: 6px; }
+#ezUploadProgress .item4-upload-progress-count,
+#item4UploadProgress .item4-upload-progress-count { margin-top: 8px; font-style: normal; font-weight: 650; }
+#ezPhotoStrip .item4-heic-placeholder > span:last-child {
+  display: block;
+  opacity: 1;
+  color: #34455b;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 560px) {
+  #ezUploadZone > div:not(.item4-upload-icon) { gap: 10px; }
+  #ezUploadZone #ezUploadTitle { font-size: 1rem; }
+  #ezUploadZone #ezUploadHint { font-size: 0.86rem; }
+}
