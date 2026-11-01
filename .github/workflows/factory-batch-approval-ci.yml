@@ -45,6 +45,7 @@ jobs:
           node --test apps/studio-api/facebook-held-finalize.test.mjs
           node --test apps/studio-api/approved-exception-drilldown.test.mjs
           node --test apps/studio-api/home-pipeline-exception-parity.test.mjs
+          node --test apps/studio-web/factory-held-approval-visibility.test.mjs
           node --test apps/studio-web/factory-profile-filter-fast.test.mjs
           node --test apps/studio-web/factory-quality-recovery-progress.test.mjs
           node --test apps/studio-web/factory-batch-quality-agent.test.mjs apps/studio-web/ui-release-contract.test.mjs
