@@ -1,7 +1,7 @@
 "use strict";
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const {vibeReviewMusicFileId, vibeReviewAudioExtension} = require("./vibe-review-music-policy");
+const {vibeReviewMusicFileId, vibeReviewAudioExtension, verifyVibeReviewMusicStreams} = require("./vibe-review-music-policy");
 
 const SOURCE = "licensed_source_file_123456789";
 const canonical = "https://drive.google.com/uc?export=download&id=" + SOURCE;
@@ -55,4 +55,24 @@ test("private media response must contain recognizable audio, never HTML or JSON
   }
   assert.throws(() => vibeReviewAudioExtension(Buffer.from("ID3"),200),
     /bytes_invalid/);
+});
+
+test("Vibe music requires a decodable audio-only stream and bounded duration", () => {
+  const valid = {streams:[{codec_type:"audio",codec_name:"aac"}],
+                 format:{duration:"182.75"}};
+  assert.deepEqual(verifyVibeReviewMusicStreams(valid),
+    {duration_seconds:182.75,codec:"aac"});
+  const bad = [
+    {streams:[{codec_type:"video",codec_name:"h264"},{codec_type:"audio",codec_name:"aac"}],format:{duration:"30"}},
+    {streams:[{codec_type:"video",codec_name:"h264"}],format:{duration:"30"}},
+    {streams:[{codec_type:"audio",codec_name:"aac"},{codec_type:"audio",codec_name:"mp3"}],format:{duration:"30"}},
+    {streams:[{codec_type:"audio",codec_name:"aac"}],format:{duration:"NaN"}},
+    {streams:[{codec_type:"audio",codec_name:"aac"}],format:{duration:"99999"}},
+    {streams:[{codec_type:"audio",codec_name:"aac"},{codec_type:"subtitle",codec_name:"subrip"}],format:{duration:"30"}},
+    {streams:[],format:{duration:30}},
+    {format:{duration:30}},
+  ];
+  for (const probe of bad) {
+    assert.throws(() => verifyVibeReviewMusicStreams(probe),/vibe_review_music/);
+  }
 });
