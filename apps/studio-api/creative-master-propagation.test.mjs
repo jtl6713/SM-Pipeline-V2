@@ -23,6 +23,7 @@ function row(id,platform,format="Vertical Short Video",props={}){
     Platform:opt(platform),Platform_Output_Type:opt(platform+" Reel"),
     Output_ID:Number(id.slice(-4).replace(/[^0-9]/g,""))||999,
     Format:opt(format),Aspect_Ratio:opt("9:16"),
+    Output_Filename:"approved-"+platform.toLowerCase()+".mp4",
     Output_Status:opt("Ready for Review"),Render_Status:opt("Rendered"),
     Review_Status:opt("Review Sent"),Publish_Status:opt("Not Ready"),
     Final_File_ID:"1IGo6XG0bwiASF75VA6xS7qXS4UGmhuGW",
@@ -67,15 +68,16 @@ function fixture(){
     run:()=>propagateApprovedCreativeMaster({source_output_id:sourceId,
       content_item_id:contentId,master,operations:ops})};
 }
-test("approved 9:16 video master adopts all sibling videos (not Stories) without platform allowlist",async()=>{
+test("approved 9:16 video master adopts Reels, TikTok, Shorts and MP4 Stories without platform allowlist",async()=>{
  const f=fixture(),result=await f.run();
  assert.equal(result.associated_output_count,6);
- assert.equal(result.applied,3);
- assert.equal(result.incompatible,2);
+ assert.equal(result.applied,5);
+ assert.equal(result.incompatible,0);
  assert.equal(result.deferred,0);
- assert.equal(f.writes.length,3);
+ assert.equal(f.writes.length,5);
  assert.deepEqual(f.writes.map(x=>x.id),[
-   "recyYKgkfRksIZPun","rec8JDQW2Jilnzc9u","recgJR5bTcYfCCwAL"]);
+   "recyYKgkfRksIZPun","rec8JDQW2Jilnzc9u","recgJR5bTcYfCCwAL",
+   "recqw7DTgYsqYkl51","recZ1X5QfeFZTot1F"]);
  for(const {id,patch} of f.writes){
    const before=f.original.find(x=>x.id===id).fields;
    const after=f.map.get(id).fields;
@@ -98,18 +100,17 @@ test("approved 9:16 video master adopts all sibling videos (not Stories) without
      assert.equal(Object.hasOwn(patch,protectedField),false,protectedField);
  }
  assert.equal(f.map.get(sourceId).fields.Final_File_ID,f.original[0].fields.Final_File_ID);
- assert.equal(f.map.get("recqw7DTgYsqYkl51").fields.Final_File_ID,
-   f.original[4].fields.Final_File_ID);
+ assert.equal(f.map.get("recqw7DTgYsqYkl51").fields.Final_File_ID,fileId);
 });
 test("retries are idempotent and do not duplicate Airtable writes",async()=>{
  const f=fixture();await f.run();const r=await f.run();
- assert.equal(r.applied,0);assert.equal(r.already_current,3);
- assert.equal(f.writes.length,3);
+ assert.equal(r.applied,0);assert.equal(r.already_current,5);
+ assert.equal(f.writes.length,5);
 });
 test("newly-linked future matching output inherits without a hardcoded count",async()=>{
  const f=fixture(),later=row("recFFFFFFFFFFFFFF","FutureVideo");
  f.content.fields["Platform Outputs"].push(later.id);f.map.set(later.id,later);
- const r=await f.run();assert.equal(r.applied,4);
+ const r=await f.run();assert.equal(r.applied,6);
  assert.equal(f.map.get(later.id).fields.Final_File_ID,fileId);
 });
 test("published, dispatching, approved, held, and already-armed siblings are never changed",async()=>{
@@ -118,8 +119,8 @@ test("published, dispatching, approved, held, and already-armed siblings are nev
  f.map.get("rec8JDQW2Jilnzc9u").fields.Review_Status=opt("Approved");
  f.map.get("recgJR5bTcYfCCwAL").fields.Studio_Render_Review_Hold_ID="other-review-hold";
  const r=await f.run();
- assert.equal(r.applied,0);assert.equal(r.deferred,3);
- assert.equal(f.writes.length,0);
+ assert.equal(r.applied,2);assert.equal(r.deferred,3);
+ assert.equal(f.writes.length,2);
 });
 test("publish lock, Do_Not_Publish and Auto_Publish_Enabled protect adoption",()=>{
  const f=fixture(),row=f.map.get("rec8JDQW2Jilnzc9u");
@@ -143,8 +144,8 @@ test("partial write fails closed and resumed run only completes missing siblings
  assert.equal(f.writes.length,1);
  f.failId=null;
  const r=await f.run();
- assert.equal(r.applied,2);assert.equal(r.already_current,1);
- assert.equal(f.writes.length,3);
+ assert.equal(r.applied,4);assert.equal(r.already_current,1);
+ assert.equal(f.writes.length,5);
 });
 test("content/registry drift cannot redirect media or silently apply stale master",async()=>{
  const f=fixture();
@@ -165,4 +166,17 @@ test("source or registry must be explicit, verified, and creative-only",async()=
    source_output_id:sourceId,content_item_id:contentId,
    master:corrupt,operations:f.ops
  }),e=>e.code==="CREATIVE_MASTER_PROOF_UNVERIFIED"||e.code==="CREATIVE_MASTER_VERSION_CHANGED");
+});
+
+test("same-ratio image Story and another video aspect stay completely unchanged",async()=>{
+ const f=fixture();
+ const story=f.map.get("recqw7DTgYsqYkl51");
+ story.fields.Output_Filename="still-photo.jpg";
+ const other=f.map.get("recZ1X5QfeFZTot1F");
+ other.fields.Aspect_Ratio=opt("4:5");
+ const result=await f.run();
+ assert.equal(result.applied,3);
+ assert.equal(result.incompatible,2);
+ assert.equal(story.fields.Final_File_ID,f.original[4].fields.Final_File_ID);
+ assert.equal(other.fields.Final_File_ID,f.original[5].fields.Final_File_ID);
 });
