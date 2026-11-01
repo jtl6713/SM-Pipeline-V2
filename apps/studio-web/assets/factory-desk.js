@@ -1101,9 +1101,9 @@
         // Human review can be accepted without releasing the publishing hold.
         // Server verifies the actual saved creative approval before accepting.
         if(state.heldCreativeAccepted?.has(card.id)){
-          actions.push(`<button type="button" class="secondary-button" disabled title="Factory creative acceptance confirmed; publishing remains on hold for QA.">V2 accepted · QA pending</button>`);
+          actions.push(`<button type="button" class="secondary-button factory-held-creative-action" disabled title="Factory creative acceptance confirmed; publishing remains on hold for QA.">V2 accepted · QA pending</button>`);
         }else{
-          actions.push(`<button type="button" class="secondary-button" data-factory-accept-held="${esc(card.id)}" title="Accept the selected V2 creatively. Keeps watermark QA, scheduling and publishing on hold.">Accept V2 (QA hold)</button>`);
+          actions.push(`<button type="button" class="secondary-button factory-held-creative-action" data-factory-accept-held="${esc(card.id)}" title="Accept the selected V2 creatively. Keeps watermark QA, scheduling and publishing on hold.">Accept V2 (QA hold)</button>`);
         }
       }
       actions.push(`<button type="button" class="secondary-button" data-factory-send-back="${esc(card.id)}">Request Changes</button>`);
