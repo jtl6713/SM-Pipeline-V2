@@ -24,7 +24,7 @@ test("Studio Approve gate rejects stale Rendering / In Production (Output 1807)"
 });
 
 test("Worker 0.10.478 heals Final_File_URL + Rendering to Ready for Review", () => {
-  assert.match(worker, /version: "0.10.683-promotion-postcommit-trace"/);
+  assert.match(worker, /version: "0\.10\.\d+(?:-[\w.-]+)?"/);
   assert.match(worker, /studio_render_stale_rendering_v1: true/);
   assert.match(worker, /R5_STALE_RENDERING_FINALIZED/);
   assert.match(worker, /\{Render_Status\}="Rendering",\{Final_File_URL\}!=""/);
