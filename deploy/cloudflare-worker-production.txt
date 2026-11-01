@@ -837,3 +837,4 @@ Deploy Worker 0.10.717: verified creative redo with pending watermark QA; held o
 2026-11-01 Worker 0.10.721: idempotent large-video completion; verify stored bytes before marking uploaded. Preserve Airtable authority and publication safeguards.
 2026-11-01 Worker 0.10.722-vibe-auto-to-review: enqueue only verified original-video Vibe Cuts to the durable production queue, preserve master/plan, render through human approval gate; no publishing.
 2026-11-01: Studio UI 0.6.836 and Worker Vibe Cut verified-source handoff; auto-save output plan, prepare variants, promote into rendering and stop for human Approval. No automatic publish.
+2026-11-01 Worker 0.10.723 V2+ watermark verification bypass: retain V1 requirement and protected media/hold/approval checks; deliver approved held V2 to Factory.
