@@ -101,3 +101,21 @@ def test_no_extra_model_calls_after_one_candidate_saved(monkeypatch):
     assert result["generation_attempts"] == 1
     assert len(calls) == 1
     assert len(client.creates) == 1
+
+
+def test_empty_create_acknowledgement_requires_reconciliation_not_regeneration(monkeypatch):
+    client = CandidateClient()
+    client.create_records = lambda *args, **kwargs: []
+    monkeypatch.setattr(processor, "AirtableClient", lambda: client)
+    monkeypatch.setattr(processor, "_title_used_in_last_year", lambda *args: False)
+    calls = []
+    def generated(prompt):
+        calls.append(prompt)
+        return {"parsed": {"ideas": [{"candidate_title": "New Chicago Window Detail"}]}}
+    monkeypatch.setattr(processor, "generate_ideas", generated)
+    result = processor.process_request(profile_record_id="rec" + "P"*14, requested_count=1)
+    assert result["processed"] is False
+    assert result["reason"] == "candidate_create_unconfirmed"
+    assert result["partial_failure"] is True
+    assert result["retry_requires_reconciliation"] is True
+    assert len(calls) == 1

@@ -255,8 +255,21 @@ def process_request(
                     "error": str(exc),
                     **preview,
                 }
-            if created:
-                created_ids.append(created[0]["id"])
+            # Even a 2xx response with no confirmed ID is not proof that
+            # Airtable did not create a record. Stop and reconcile first.
+            if not isinstance(created, list) or not created or not isinstance(created[0], dict) or not created[0].get("id"):
+                preview["created_record_ids"] = created_ids
+                preview["created_count"] = len(created_ids)
+                preview["missing_count"] = max(0, remaining - len(created_ids))
+                preview["retry_requires_reconciliation"] = True
+                return {
+                    "processed": bool(created_ids),
+                    "partial_failure": True,
+                    "reason": "candidate_create_unconfirmed",
+                    "error": "Airtable POST returned no confirmed candidate ID",
+                    **preview,
+                }
+            created_ids.append(created[0]["id"])
         # The durable worker owns shortfall reconciliation after any accepted
         # candidate. Never generate a new slate inside a partly written pass.
         if created_ids:
