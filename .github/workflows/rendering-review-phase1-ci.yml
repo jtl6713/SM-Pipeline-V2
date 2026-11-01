@@ -8,6 +8,8 @@ on:
       - 'apps/studio-api/rendering-review-factory-handoff.*'
       - 'apps/studio-api/creative-master-registry.*'
       - 'apps/studio-api/creative-master-propagation.*'
+      - 'apps/studio-api/creative-master-factory-guard.*'
+      - 'apps/studio-api/worker-functions-04.mjs'
       - 'apps/studio-api/rendering-review-workspace.*'
       - 'apps/studio-web/rendering-review-queue.test.mjs'
       - 'apps/studio-api/worker.js'
@@ -33,7 +35,8 @@ jobs:
           node --check apps/studio-api/rendering-review-factory-handoff.mjs
           node --check apps/studio-api/creative-master-registry.mjs
           node --check apps/studio-api/creative-master-propagation.mjs
+          node --check apps/studio-api/creative-master-factory-guard.mjs
           node --check apps/studio-api/rendering-review-workspace.mjs
           node --check apps/studio-api/worker.js
       - name: Isolated storage and dispatch guard contracts
-        run: node --test apps/studio-api/rendering-review-airtable-contract.test.mjs apps/studio-api/rendering-review-policy.test.mjs apps/studio-api/rendering-review-coordinator.test.mjs apps/studio-api/rendering-review-factory-handoff.test.mjs apps/studio-api/rendering-review-approval-http.test.mjs apps/studio-api/creative-master-registry.test.mjs apps/studio-api/creative-master-propagation.test.mjs apps/studio-api/rendering-review-workspace.test.mjs apps/studio-web/rendering-review-queue.test.mjs
+        run: node --test apps/studio-api/rendering-review-airtable-contract.test.mjs apps/studio-api/rendering-review-policy.test.mjs apps/studio-api/rendering-review-coordinator.test.mjs apps/studio-api/rendering-review-factory-handoff.test.mjs apps/studio-api/rendering-review-approval-http.test.mjs apps/studio-api/creative-master-registry.test.mjs apps/studio-api/creative-master-propagation.test.mjs apps/studio-api/creative-master-factory-guard.test.mjs apps/studio-api/rendering-review-workspace.test.mjs apps/studio-web/rendering-review-queue.test.mjs
