@@ -78,6 +78,17 @@ test("A failed progress read never invents Producer failure or loses the saved r
   assert.equal(app.panel.hidden,false);
 });
 
+test("Lost submission acknowledgement never reuses an older completed revision", async () => {
+  const app=harness();
+  app.ui.begin({requestId:ID,title:"New unconfirmed change"});
+  app.ui.uncertain({requestId:ID,title:"New unconfirmed change",message:"Connection lost"});
+  app.setReply({ok:true,record:{id:ID,status:"Promoted",revision:{id:REV,state:"completed"},job:{id:REV,step:"done",quality_passed:true}}});
+  await app.ui.refresh(true);
+  assert.equal(app.rows()[0].status,"uncertain");
+  assert.equal(app.rows()[0].revision_id,"");
+  assert.match(app.list.innerHTML,/unconfirmed/);
+});
+
 test("Manual Producer feedback displays correct next step, never a phantom render", () => {
   const app=harness();
   app.ui.accept({requestId:ID,title:"Manual revision",result:{producer_queued:false,producer_reason:"Select media first."}});
