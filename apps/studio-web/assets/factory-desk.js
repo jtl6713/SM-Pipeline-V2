@@ -2155,7 +2155,14 @@
     const savedMessage = desk.message || ACTION_STATUS[payload.action] || "Updated.";
     if (desk.lanes) {
       renderDesk(desk);
-    } else if (desk.ok && (payload.action === "request_changes_content" || payload.action === "return_to_review" || payload.action === "accept_held_creative")) {
+    } else if (desk.ok && payload.action === "accept_held_creative") {
+      // The exact-version acceptance POST is already committed and includes
+      // a checked receipt. The click handler updates its row immediately.
+      // Do NOT start a second expensive Desk read that can mask success
+      // with an unrelated "Loading Factory Desk" status.
+      setStatus(savedMessage);
+      return desk;
+    } else if (desk.ok && (payload.action === "request_changes_content" || payload.action === "return_to_review")) {
       // The Airtable write is already committed; do not block acceptance on
       // a slow Factory queue read or convert a successful POST into an error.
       setStatus(savedMessage);
