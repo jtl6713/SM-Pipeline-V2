@@ -6752,7 +6752,7 @@ function timedScriptAssetLabel(asset, index) {
           phase: "stalled",
           detail: phase === "creating"
             ? "Studio setup has not responded yet. No video segments are confirmed. The current request must finish before retry is enabled."
-            : "Segment transfer has stopped reporting progress. The saved segments remain available for retry.",
+            : "No recent transfer progress was confirmed. Previously uploaded segments remain available for retry.",
         };
         renderVibeUploadUi(item4Workspace);
         updateItem4MasterProgress(item4Workspace || {});
