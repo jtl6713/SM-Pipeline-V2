@@ -151,6 +151,21 @@ test("Content 841-style Story stays In Flight when studio_state is Ready but Out
   }), "needs_eyes");
 });
 
+test("Factory cannot count or approve an incomplete native-photo review package", () => {
+  const base = {
+    id: "recPilsen00000001", kind: "output", output_id: 9682,
+    studio_state: "Preparing Assets", output_status: "Ready for Review",
+    render_status: "Native Photo Route", review_package_ready: false,
+  };
+  const unresolved = partitionFactoryLanes([base]);
+  assert.equal(unresolved.summary.needs_eyes, 0);
+  assert.equal(unresolved.summary.auto_high, 1);
+  const valid = { ...base, studio_state: "Ready for Review", review_package_ready: true };
+  assert.equal(classifyFactoryLane(valid), "needs_eyes");
+  assert.equal(partitionFactoryLanes([valid]).summary.needs_eyes, 1);
+  assert.equal(factoryCardFromRow(valid).review_package_ready, true);
+});
+
 test("classifyFactoryLane priority: manual > needs_eyes > needs_assets > auto_high", () => {
   assert.equal(classifyFactoryLane({ id: "rec1", lane: "stuck", stuck_kind: "produce_clip_mismatch" }), "manual");
   assert.equal(classifyFactoryLane({ id: "rec2", kind: "output", studio_state: "Ready for Review", output_status: "Ready for Review", lane: "review" }), "needs_eyes");
