@@ -2947,21 +2947,27 @@ export async function listAssetLibrary(request, env, url, authorization) {
       crossScope,
       profileName: f(scopeProfile, "Profile_Name") || "",
     });
+  const pageOptions = {
+    limit: requestedIds.length ? Math.min(ASSET_LIBRARY_MAX_PAGE_SIZE, Math.max(requestedIds.length, 1)) : limit,
+    offset,
+    sortField: requestedIds.length ? undefined : sort.sortField,
+    sortDirection: requestedIds.length ? undefined : sort.sortDirection,
+    filterFormula: requestedIds.length
+      ? libraryRecordIdsFilterFormula(requestedIds)
+      : combineAirtableFormulas(
+        assetLibraryFilterFormula(query, needsProfile ? "" : kind, needsProfile),
+        libraryAddedDateFilterFormula(addedFrom, addedTo, "Added_At"),
+        scopeFormula,
+      ),
+  };
+  // Coalesce duplicate Library refreshes only when their authoritative
+  // Airtable filter, offset and sort are identical. Cache read results,
+  // never response headers or user permissions. Relevant writes invalidate.
   const [page, profiles] = await Promise.all([
-    listRecordsPage(env, env.AIRTABLE_MEDIA_TABLE_ID, {
-      limit: requestedIds.length ? Math.min(ASSET_LIBRARY_MAX_PAGE_SIZE, Math.max(requestedIds.length, 1)) : limit,
-      offset,
-      sortField: requestedIds.length ? undefined : sort.sortField,
-      sortDirection: requestedIds.length ? undefined : sort.sortDirection,
-      filterFormula: requestedIds.length
-        ? libraryRecordIdsFilterFormula(requestedIds)
-        : combineAirtableFormulas(
-          assetLibraryFilterFormula(query, needsProfile ? "" : kind, needsProfile),
-          libraryAddedDateFilterFormula(addedFrom, addedTo, "Added_At"),
-          scopeFormula,
-        ),
-    }),
-    listContentProfileRecords(env).catch(() => []),
+    studioReadCoalesce("library:page:" + JSON.stringify(pageOptions), 8000,
+      () => listRecordsPage(env, env.AIRTABLE_MEDIA_TABLE_ID, pageOptions)),
+    studioReadCoalesce("library:profiles", 15000,
+      () => listContentProfileRecords(env)).catch(() => []),
   ]);
   const profilesById = Object.fromEntries((profiles || []).map((row) => [row.id, row]));
   const mapped = page.records
