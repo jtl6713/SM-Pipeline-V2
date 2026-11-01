@@ -11,6 +11,7 @@ const { authoritativeRenderPlan } = require('./authoritative-duration');
 const { verifyFirstFrame } = require('./first-frame-verify');
 const {selectedVibeWatermarkFileId} = require('./profile-watermark-policy');
 const {noVoiceoverForVibeReview} = require('./vibe-audio-policy');
+const {vibeReviewMusicFileId, vibeReviewAudioExtension} = require('./vibe-review-music-policy');
 
 const app = express();
 
@@ -896,54 +897,66 @@ async function rewriteClipAssets({ clips, jobId, jobAssetDir, job }) {
     return rewrittenClips;
 }
 
-async function rewriteMusicAsset({ music, jobAssetDir, job }) {
+async function rewriteMusicAsset({ music, jobAssetDir, job, studioRevision }) {
+    // No direct public Drive retrieval is permitted for a protected Vibe review.
+    // Only a verified canonical Drive ID is accepted; fetch through the same
+    // private Runner media route used by source clips and profile watermarks.
+    const vibeMusicId = vibeReviewMusicFileId({ music, studioRevision });
     if (!music) {
         return undefined;
     }
 
     if (isHttpUrl(music.url)) {
-        const ext = getExtensionFromUrl(music.url, '.mp3');
-        const filename = `music${ext}`;
-        const destination = path.join(jobAssetDir, filename);
+        const sourceUrl = vibeMusicId
+            ? `${PIPELINE_RUNNER_INTERNAL_URL}/internal/drive-media/${encodeURIComponent(vibeMusicId)}`
+            : music.url;
+        const ext = vibeMusicId ? '.mp3' : getExtensionFromUrl(music.url, '.mp3');
+        let destination = path.join(jobAssetDir, `music${ext}`);
 
-        appendLog(job, `Downloading music from ${music.url}`);
-        await downloadUrlToFile(music.url, destination);
+        appendLog(job, vibeMusicId
+            ? 'Downloading licensed Vibe music from private Drive authority'
+            : `Downloading music from ${music.url}`);
+        // In protected review a redirect could expose an unapproved third-
+        // party source or Access HTML. Do not follow it or use a public fallback.
+        await downloadUrlToFile(sourceUrl, destination, vibeMusicId ? 0 : 5);
+        if (vibeMusicId) {
+            const size = fs.statSync(destination).size;
+            const file = fs.openSync(destination, 'r');
+            const header = Buffer.alloc(16);
+            try {
+                fs.readSync(file, header, 0, header.length, 0);
+            } finally {
+                fs.closeSync(file);
+            }
+            const audioExt = vibeReviewAudioExtension(header, size);
+            if (audioExt !== ext) {
+                const renamed = path.join(jobAssetDir, `music${audioExt}`);
+                fs.renameSync(destination, renamed);
+                destination = renamed;
+            }
+        }
         appendLog(job, `Downloaded music to ${toProjectRelative(destination)}`);
 
         const rewrittenMusic = {
             ...music,
             src: toPublicSrc(destination),
         };
-
         delete rewrittenMusic.url;
-
         return rewrittenMusic;
     }
 
     if (music.src) {
-        const rewrittenMusic = {
-            ...music,
-        };
-
+        const rewrittenMusic = {...music};
         delete rewrittenMusic.url;
-
         return rewrittenMusic;
     }
-
     if (music.url && !isHttpUrl(music.url)) {
-        const rewrittenMusic = {
-            ...music,
-            src: music.url,
-        };
-
+        const rewrittenMusic = {...music, src: music.url};
         delete rewrittenMusic.url;
-
         return rewrittenMusic;
     }
-
     return undefined;
 }
-
 
 function normalizeVoiceover(body) {
     if (!body || typeof body !== 'object') {
@@ -1179,6 +1192,7 @@ async function buildRewrittenProps({ body, jobId, job }) {
 
     const rewrittenMusic = await rewriteMusicAsset({
         music: body.music,
+        studioRevision: body.studioRevision,
         jobAssetDir,
         job,
     });
