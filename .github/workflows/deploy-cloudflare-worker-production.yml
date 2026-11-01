@@ -589,6 +589,7 @@ jobs:
               const url = new URL(request.url);
               const michiganPreview = url.pathname === "/$TOKEN/michigan-preview";
               const scriptedFeedbackProbe = url.pathname === "/$TOKEN/scripted-short-revise-probe";
+              const scriptedMulti = scriptedFeedbackProbe && url.searchParams.get("mode") === "multi";
               const michiganOutput = String(url.searchParams.get("output_id") || "");
               const michiganAllowlist = ["recPnNYghmcJYivOA","recyYKgkfRksIZPun","rec8JDQW2Jilnzc9u","recgJR5bTcYfCCwAL","recqw7DTgYsqYkl51","recZ1X5QfeFZTot1F"];
               if (michiganPreview && !michiganAllowlist.includes(michiganOutput)) return new Response("Invalid output", {status:400});
@@ -632,7 +633,15 @@ jobs:
               const internal = new Request("https://studio.chicagoshining.com" + path, {
                 method,
                 headers,
-                body: scriptedFeedbackProbe ? '{"feedback":""}' : qualityFacebookPreview
+                body: scriptedFeedbackProbe ? (scriptedMulti ? JSON.stringify({
+                  creative_brief:"An uplifting urban night walk",
+                  profile_id:"recT2rbKX3MF7cVFU",
+                  timeline:{duration_seconds:28,segments:Array.from({length:7},(_,i)=>({
+                    voiceover_text:"Scene "+(i+1),suggested_visual:"Urban skyline "+(i+1),
+                    duration_seconds:4,asset_id:""
+                  }))},
+                  feedback:"Remove slides 2 and 4"
+                }) : '{"feedback":""}') : qualityFacebookPreview
                   ? '{"quality_rate_limit_recovery":true,"quality_rate_limit_preview":true}'
                   : ((overviewRefresh || summaryReconcile) ? "{}" : undefined),
               });
@@ -646,7 +655,17 @@ jobs:
                 }, {headers:{"Cache-Control":"no-store"}});
                 throw error;
               }
-              if (scriptedFeedbackProbe) return Response.json({status:response.status,route:"/api/scripted-short/revise"}, {headers:{"Cache-Control":"no-store"}});
+              if (scriptedFeedbackProbe) {
+                const result = scriptedMulti ? await response.json().catch(()=>({})) : null;
+                return Response.json({
+                  status:response.status,route:"/api/scripted-short/revise",
+                  ...(scriptedMulti ? {
+                    ok:result?.ok===true,scene_count:result?.scene_count,
+                    revision_count:result?.revision?.actions?.length,
+                    remaining_voiceovers:result?.timeline?.segments?.map(s=>s.voiceover_text),
+                  } : {}),
+                }, {headers:{"Cache-Control":"no-store"}});
+              }
               if (michiganPreview) {
                 // No raw private MP4 bytes or access tokens leave this temporary canary.
                 return Response.json({
@@ -737,6 +756,18 @@ jobs:
           curl -fsS --max-time 60 "$URL" -o /tmp/scripted-short-revise-probe.json
           jq -e '.route=="/api/scripted-short/revise" and .status==400' /tmp/scripted-short-revise-probe.json >/dev/null
           echo "scripted_short_revise_authenticated_no_write_canary=PASS status=400"
+
+      - name: Verify live transactional multi-scene revision without saving or publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
+          TOKEN=$(cat /tmp/verify-token.txt)
+          URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/scripted-short-revise-probe?mode=multi"
+          curl -fsS --max-time 60 "$URL" -o /tmp/scripted-short-multi-probe.json
+          jq -e '.status==200 and .ok==true and .scene_count==5 and .revision_count==2
+            and .remaining_voiceovers==["Scene 1","Scene 3","Scene 5","Scene 6","Scene 7"]' /tmp/scripted-short-multi-probe.json >/dev/null
+          echo "scripted_short_multi_scene_live_no_write_canary=PASS remaining=1,3,5,6,7"
 
       - name: Verify Michigan Avenue V2 private MP4 previews in all six Factory cards
         shell: bash
