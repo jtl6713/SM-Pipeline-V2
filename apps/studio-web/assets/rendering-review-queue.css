@@ -130,7 +130,12 @@
 .rr-progress-stage--complete{border-color:#3f8d60;background:rgba(63,141,96,.08)}
 .rr-progress-stage--complete .rr-progress-stage-state{color:inherit}
 .rr-progress-stage--current{border-color:var(--accent,#679cde);border-width:2px}
-.rr-progress-stage--attention{border-color:#c65b52;border-width:2px}
+.rr-progress-stage--attention{border-color:#b42318;border-width:2px;
+  background:rgba(220,38,38,.14);color:#8f1d18}
+.rr-progress-stage--attention .rr-progress-stage-state{color:#991b1b;font-weight:800}
+.rr-activity--attention{border-color:#c2413b!important;border-left:4px solid #b42318!important}
+.rr-progress-top--attention{border-left-color:#b42318!important;
+  background:rgba(220,38,38,.1);color:var(--text,#19243a)}
 .rr-progress-checked{color:var(--muted,#768392);font-size:.8rem;margin:4px 0}
 .rr-activity>button{justify-self:start}
 @media(max-width:760px){.rr-progress-stages{grid-template-columns:repeat(2,minmax(0,1fr))}
