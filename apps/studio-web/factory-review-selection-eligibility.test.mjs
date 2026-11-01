@@ -118,12 +118,12 @@ test("Held #9593 explains the blocked checkbox directly beneath Output #, above 
   const actions = html.indexOf('class="factory-line-actions"');
   assert.ok(title >= 0 && reason > title && reason < profile && profile < actions,
     "Hold explanation must be near the title, not beyond the action buttons and fixed mobile footer");
-  assert.match(html, /Approval unavailable:<\\/strong> Review-held revision:/);
+  assert.ok(html.includes("Approval unavailable:</strong> Review-held revision:"));
   assert.match(selectionTag(html), /aria-describedby="factory-batch-reason-recMichigan9593"/);
   assert.match(html, /id="factory-batch-reason-recMichigan9593"/);
   assert.equal((html.match(/class="factory-batch-unavailable"/g)||[]).length,1,
     "Do not duplicate the warning after the actions");
-  assert.match(css, /\\.factory-line-title:has\\(\\.factory-batch-unavailable\\)/);
+  assert.ok(css.includes(".factory-line-title:has(.factory-batch-unavailable)"));
   assert.match(css, /white-space:normal;overflow:visible;text-overflow:clip/);
 });
 
