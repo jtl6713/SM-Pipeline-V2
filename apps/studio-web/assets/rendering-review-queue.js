@@ -288,7 +288,7 @@
       const saved=await get('/api/rendering-review/outputs/'+encodeURIComponent(entry.output_id));
       if(seq!==state.request||state.selected!==entry.output_id)return;
       if(saved.integrity_error)detail.append(elem('p','Hold integrity issue: '+saved.integrity_error,'rr-notice'));
-      if(!saved.publication_hold_verified){
+      if(!saved.publication_hold_verified&&saved.factory_handoff_gate?.status!=='transferred'){
         detail.append(elem('p','Authoritative publication hold could not be verified. Discussion actions are disabled.','rr-notice'));
         return;
       }
@@ -622,12 +622,66 @@
       }
       if(session?.state==='approved'){
         const approved=attempts.find(a=>a.id===session.approved_attempt_id);
-        const transferred=session.factory_handoff?.attempt_id===session.approved_attempt_id &&
+        const version='V'+(approved?.number||session.latest_attempt_number||2);
+        const gate=saved.factory_handoff_gate;
+        const transferred=gate?.status==='transferred'&&
+          session.factory_handoff?.attempt_id===session.approved_attempt_id &&
           session.review_hold?.active===false;
-        detail.append(elem('p','V'+(approved?.number||session.latest_attempt_number||2)+
-          (transferred?' approved and moved to Factory. Continue with normal Factory approval or scheduling.':
-            ' creatively approved; Factory handoff is being verified.')+
-          ' No Instagram publication has been authorized.','rr-notice'));
+        const notice=transferred?
+          version+' creatively approved and transferred to Factory. Normal approval is still required.':
+          version+' creatively approved. Factory transfer is '+(
+            gate?.status==='blocked'?'blocked by media QA.':
+            gate?.status==='unavailable'?'awaiting a reliable QA record.':
+            gate?.status==='ready'?'ready to complete.':'not yet verified.');
+        detail.append(elem('p',notice+' No Instagram publication has been authorized.','rr-notice'));
+        if(!transferred){
+          if(gate?.message){
+            const reason=elem('p',gate.message,'rr-feedback-receipt');
+            reason.setAttribute('role','status');
+            detail.append(reason);
+          }
+          if(gate?.status==='ready'){
+            // This resumes only the saved creative acceptance. It does not
+            // submit another approval, authorize a render, or publish.
+            const transfer=elem('button','Complete Factory transfer (no publishing)','secondary-button');
+            transfer.type='button';
+            const feedback=elem('p','','rr-feedback-status');
+            feedback.hidden=true;
+            feedback.setAttribute('role','status');
+            feedback.setAttribute('aria-live','polite');
+            transfer.addEventListener('click',async()=>{
+              if(state.actionBusy)return;
+              state.actionBusy=true;
+              transfer.disabled=true;
+              transfer.setAttribute('aria-busy','true');
+              feedback.hidden=false;feedback.dataset.state='working';
+              feedback.textContent='Verifying V2 and completing the protected Factory handoff…';
+              try{
+                const result=await post('/api/rendering-review/outputs/'+
+                  encodeURIComponent(entry.output_id)+'/factory-handoff',{});
+                if(result.factory_ready!==true||result.review_hold_active!==false||
+                   result.approved_for_publishing!==false)
+                  throw new Error('Factory handoff readback was not verified');
+                feedback.dataset.state='success';
+                feedback.textContent='V2 transferred. Factory approval is still required; nothing was published.';
+                say('V2 is back in Factory for approval.');
+                await open(entry);
+              }catch(error){
+                feedback.dataset.state='error';
+                feedback.textContent='Factory transfer did not complete: '+
+                  (error?.message||'Status unavailable')+
+                  '. Your creative approval remains saved; check status before retrying.';
+                say('Factory handoff needs attention; creative approval remains saved.',true);
+              }finally{
+                state.actionBusy=false;
+                transfer.removeAttribute('aria-busy');
+                transfer.disabled=false;
+              }
+            });
+            detail.append(transfer,feedback);
+          }
+          detail.append(actionButton('Recheck QA / Factory status',async()=>{await open(entry);}));
+        }
       }
       if(session?.state==='ready_for_review'&&
          saved.flags?.creative_approval_enabled===true&&
