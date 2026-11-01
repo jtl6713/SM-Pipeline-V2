@@ -15,12 +15,45 @@ export const CREATIVE_MASTER_SIBLING_READ_FIELDS=Object.freeze([
   "Studio_Scheduled_At","YouTube_Scheduled_Publish_At",
   "Studio_Render_Review_Hold_Active","Studio_Render_Review_Hold_ID",
   "Studio_Review_Hold_ID","Do_Not_Publish",
+  "Output_Filename","Final_File_Name",
 ]);
 
 export function creativeMasterKey(format,aspectRatio){
   const f=norm(format),a=norm(aspectRatio).replace(/\s/g,"");
   if(!f||!a||f==="unknown"||a==="unknown"||!/^(?:\d+:\d+)$/.test(a))return "";
   return f+"|"+a;
+}
+/**
+ * A video Content Item can share an *identical* 9:16 MP4 with a video Story
+ * even though Airtable names Story as a different Format. Aspect ratio alone
+ * is not enough: require a video content family AND an actual MP4 output.
+ * Other formats (including still-image Stories) retain exact-key isolation.
+ */
+export function videoMasterTargetCompatible({masterFormat,masterAspectRatio,
+  contentType,targetFormat,targetAspectRatio,targetFileName}){
+  const masterKey=creativeMasterKey(masterFormat,masterAspectRatio);
+  const targetKey=creativeMasterKey(targetFormat,targetAspectRatio);
+  if(!masterKey||!targetKey)return false;
+  if(masterKey===targetKey)return true;
+  return norm(contentType)==="vertical short video" &&
+    norm(masterFormat)==="vertical short video" &&
+    norm(targetFormat)==="story" &&
+    masterKey.split("|")[1]===targetKey.split("|")[1] &&
+    String(targetFileName||"").trim().toLowerCase().endsWith(".mp4");
+}
+
+/** Resolve only a uniquely compatible, already-approved creative master. */
+export function resolveCreativeMasterForOutput({content,output}){
+  const registry=readCreativeMasterRegistry(content?.fields?.[MASTER_FIELD]);
+  const f=output?.fields||{},hits=Object.values(registry.masters).filter(master=>
+    videoMasterTargetCompatible({
+      masterFormat:master?.format,masterAspectRatio:master?.aspect_ratio,
+      contentType:content?.fields?.Content_Type,
+      targetFormat:f.Format,targetAspectRatio:f.Aspect_Ratio,
+      targetFileName:f.Output_Filename||f.Final_File_Name,
+    }));
+  if(hits.length>1)fail("CREATIVE_MASTER_AMBIGUOUS_COMPATIBLE_VIDEO");
+  return hits[0]||null;
 }
 export function readCreativeMasterRegistry(raw){
   if(!raw)return {schema:MASTER_SCHEMA,masters:{}};
@@ -53,7 +86,12 @@ export function projectCreativeMasterGroup({source,content,outputs,requireComple
       id(outputFields(output).Content_Item)!==contentId)
       fail("CREATIVE_MASTER_MEMBER_CONTENT_MISMATCH");
     const f=outputFields(output);
-    if(creativeMasterKey(f.Format,f.Aspect_Ratio)!==key)continue;
+    if(!videoMasterTargetCompatible({
+      masterFormat:sf.Format,masterAspectRatio:sf.Aspect_Ratio,
+      contentType:cf.Content_Type,targetFormat:f.Format,
+      targetAspectRatio:f.Aspect_Ratio,
+      targetFileName:f.Output_Filename||f.Final_File_Name,
+    }))continue;
     const choice=x=>typeof x==="object"&&x!==null?x.name||"":x||"";
     const dispatched=["Published_At","Platform_Post_ID","Platform_Post_URL",
       "Publish_Started_At","Publish_Locked_At","Publish_Locked_By"].some(k=>Boolean(f[k]));

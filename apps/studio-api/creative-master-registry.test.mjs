@@ -11,7 +11,7 @@ const a='rrimport_9593_864436ce242983f69fceaa68f37ac4';
 const v=(name)=>({name});
 function output(id,platform,type,format='Vertical Short Video',ratio='9:16'){
   return {id,fields:{Content_Item:[contentId],Platform:v(platform),
-    Platform_Output_Type:v(type),Output_ID:9593,
+    Platform_Output_Type:v(type),Output_ID:9593,Output_Filename:'review-'+type+'.mp4',
     Format:v(format),Aspect_Ratio:v(ratio),Publish_Status:v('Not Ready')}};
 }
 function fixture(){
@@ -35,23 +35,32 @@ function fixture(){
     google_drive_verified:true,google_drive_mime_type:'video/mp4'};
   return {outputs,content,session,attempt,proof};
 }
-test('exact content + format + ratio, never a fixed platform count',()=>{
+test('video content + matching aspect and MP4, never a fixed platform count',()=>{
   const f=fixture();
   const result=projectCreativeMasterGroup({source:f.outputs[0],content:f.content,
     outputs:f.outputs});
-  assert.equal(result.linked_count,4);
+  assert.equal(result.linked_count,6);
   assert.equal(result.key,'vertical short video|9:16');
   assert.equal(result.master,null);
-  assert.deepEqual(result.outputs.map(o=>o.platform),['Instagram','Facebook','TikTok','YouTube']);
+  assert.deepEqual(result.outputs.map(o=>o.platform),['Instagram','Facebook','TikTok','YouTube','Instagram','Facebook']);
   const newOne=output('recA1B2C3D4E5F6G7','Future Social','New Video Type');
   f.content.fields['Platform Outputs'].push(newOne.id);
   assert.equal(projectCreativeMasterGroup({source:f.outputs[0],content:f.content,
-    outputs:[...f.outputs,newOne]}).linked_count,5);
+    outputs:[...f.outputs,newOne]}).linked_count,7);
 });
-test('same 9:16 Stories do not inherit video creative',()=>{
+test('9:16 MP4 Stories inherit video master, image/other-ratio Stories do not',()=>{
   const f=fixture();
+  assert.equal(projectCreativeMasterGroup({source:f.outputs[0],content:f.content,
+    outputs:f.outputs}).linked_count,6);
   assert.equal(projectCreativeMasterGroup({source:f.outputs[4],content:f.content,
     outputs:f.outputs}).linked_count,2);
+  f.outputs[4].fields.Output_Filename='photo.jpg';
+  assert.equal(projectCreativeMasterGroup({source:f.outputs[0],content:f.content,
+    outputs:f.outputs}).linked_count,5);
+  f.outputs[4].fields.Output_Filename='review-story.mp4';
+  f.outputs[4].fields.Aspect_Ratio=v('4:5');
+  assert.equal(projectCreativeMasterGroup({source:f.outputs[0],content:f.content,
+    outputs:f.outputs}).linked_count,5);
   assert.notEqual(creativeMasterKey('Story','9:16'),creativeMasterKey('Vertical Short Video','9:16'));
 });
 test('scheduled or published sibling remains linked but untouched',()=>{
@@ -74,7 +83,7 @@ test('approved creative master registry version is content-owned, with QA eviden
   f.content.fields[MASTER_FIELD]=JSON.stringify(r.registry);
   const shown=projectCreativeMasterGroup({source:f.outputs[0],content:f.content,
     outputs:f.outputs});
-  assert.equal(shown.master.approved_attempt_id,a);assert.equal(shown.linked_count,4);
+  assert.equal(shown.master.approved_attempt_id,a);assert.equal(shown.linked_count,6);
   assert.equal(nextApprovedCreativeMaster({...f,evidence:f.proof,source:f.outputs[0],
     at:'2026-10-31T21:56:00Z'}).changed,false);
 });
