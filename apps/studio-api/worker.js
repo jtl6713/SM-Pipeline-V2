@@ -16,6 +16,7 @@ import { nextApprovedCreativeMaster, projectCreativeMasterGroup, MASTER_FIELD } 
 import { propagateApprovedCreativeMaster } from "./creative-master-propagation.mjs";
 import { returnFactoryRevisionToProducer } from "./rendering-review-factory-return.mjs";
 import { acceptFactoryHeldCreative } from "./rendering-review-factory-accept-held.mjs";
+import { confirmHeldWatermarkReview } from "./rendering-review-watermark-confirm.mjs";
 import { serveFactorySelectedReviewVideo, factorySelectedReviewAttempt } from "./rendering-review-factory-preview.mjs";
 import { MICHIGAN_V2, ensureMichiganV2CachedPreview } from "./michigan-review-preview-cache.mjs";
 import { composeRenderingReviewEnrollmentOperations } from "./rendering-review-enrollment-wiring.mjs";
@@ -1277,7 +1278,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.722-vibe-auto-to-review" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
+          version: "0.10.723-factory-watermark-human-qa" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
@@ -2659,6 +2660,22 @@ export default {
         if (request.method === "POST") {
           assertWriteRequest(request, env);
           const input = await request.clone().json().catch(() => null);
+          if(input?.action==="confirm_held_watermark"){
+            // Human visual review is a separate audited step, never proof
+            // that automatic watermark scanning passed.
+            requirePermission(authorization,"outputs_review");
+            const result=await confirmHeldWatermarkReview({
+              output_id:input.id,actor_id:authorization.user?.record_id,
+              expected_version:input.expected_version,
+              client_request_id:input.client_request_id,
+              attempt_id:input.attempt_id,artifact_id:input.artifact_id,
+              confirmed_visible:input.confirmed_visible,
+              operations:makeReviewFactoryHandoffOperations(env),
+            });
+            return respond(request,env,{ok:true,action:"confirm_held_watermark",
+              result,refresh_required:true,
+              message:"Visual watermark QA recorded. Protected Factory transfer is next."});
+          }
           if (input?.action === "accept_held_creative") {
             // Factory creative acceptance is distinct from publishing authority.
             // Never modify output media, watermark evidence, hold or scheduler.
