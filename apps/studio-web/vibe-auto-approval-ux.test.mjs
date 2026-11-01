@@ -35,6 +35,6 @@ test("ready-source gating remains server authoritative; Production view is optio
 
 test("new release version is consistently reflected in HTML and app", () => {
   assert.match(html, /UI build 0\.6\.836/);
-  assert.match(html, /app-item4-1008\.js\?v=0\.6\.836-vibe-auto-approval-ux/);
-  assert.match(app, /BUILD_ID = "item4-0\.6\.836-vibe-auto-approval-ux"/);
+  assert.match(html, /app-item4-1008\.js\?v=0\.6\.836-vibe-auto-review-final/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.836-vibe-auto-review-final"/);
 });
