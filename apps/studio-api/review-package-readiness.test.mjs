@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { evaluateReviewPackage, verifyReviewImages, safeReviewPromotion } from "./review-package-readiness.mjs";
+import { evaluateReviewPackage, verifyReviewImages, safeReviewPromotion, factoryReviewVisibility } from "./review-package-readiness.mjs";
 
 const cdn = "https://media.chicagoshining.com/";
 const asRecord = (fields, id = "recPilsenReady0001") => ({ id, fields });
@@ -83,4 +83,25 @@ test("ready video requires actual finished file; reconcile only unheld unapprove
   assert.equal(safeReviewPromotion(asRecord({ ...video.fields, Publish_Status: "Scheduled" }), ready), false);
   assert.equal(safeReviewPromotion(asRecord({ ...video.fields, Review_Status: "Changes Requested" }), ready), false);
   assert.equal(evaluateReviewPackage(asRecord({ ...video.fields, Final_File_URL: "" })).readiness, "BLOCKED");
+});
+
+test("Michigan 9593 held review stays previewable in Needs Eyes but cannot approve", () => {
+  const held = asRecord({ ...photo, Output_Status: "Ready for Review", Review_Status: "Review Sent",
+    Studio_Render_Review_Hold_Active: true, Do_Not_Publish: true }, "recPnNYghmcJYivOA");
+  const status = evaluateReviewPackage(held);
+  assert.equal(status.readiness, "IN_PROGRESS");
+  const visibility = factoryReviewVisibility(held, status, "Ready for Review", true);
+  assert.deepEqual(visibility, { visible: true, incomplete: false, held_preview_only: true });
+  assert.equal(safeReviewPromotion(held, status), false);
+  assert.equal(factoryReviewVisibility(held, status, "Ready for Review", false).visible, false);
+  assert.equal(factoryReviewVisibility({ ...held, fields: { ...held.fields, Do_Not_Publish: false } }, status, "Ready for Review", true).visible, false);
+});
+
+test("missing deliverable is excluded from Needs Eyes and sent for repair", () => {
+  const bad = asRecord({ ...photo, Studio_Preview_URL: "" });
+  const readiness = evaluateReviewPackage(bad);
+  assert.equal(readiness.readiness, "BLOCKED");
+  const visibility = factoryReviewVisibility(bad, readiness, "Preparing Assets", false);
+  assert.equal(visibility.visible, false);
+  assert.equal(visibility.incomplete, true);
 });

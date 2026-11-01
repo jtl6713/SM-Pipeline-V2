@@ -1,5 +1,5 @@
 import { matchNewlyCreatedIdeaPhotos } from "./worker-functions-03.mjs";
-import { evaluateReviewPackage, verifyReviewImages } from "./review-package-readiness.mjs";
+import { evaluateReviewPackage, verifyReviewImages, factoryReviewVisibility } from "./review-package-readiness.mjs";
 import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 import { autonomousPlanOutputSpilloverRepair } from "./autonomous-plan-output-recovery.mjs";
 import { verifyFactoryRenderedMedia } from "./factory-producer-render-evidence.mjs";
@@ -11308,8 +11308,10 @@ export async function getStudioOperationsQueue(request, env, authorization) {
     );
     const contentNumber = content ? f(content, "Content_ID") : null;
     const readiness = evaluateReviewPackage(record);
-    const readinessException = String(mapped.output_status || "").trim() === "Ready for Review"
-      && readiness.readiness !== "READY";
+    const reviewVisibility = factoryReviewVisibility(
+      record, readiness, studioState, outputCreativeAvailable(record),
+    );
+    const readinessException = reviewVisibility.incomplete;
     const outputRow = {
       kind: "output",
       id: record.id,
@@ -11364,7 +11366,8 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       creative_available: outputCreativeAvailable(record),
       // One shared review-package validator governs Factory counts/eligibility.
       // This is metadata validation; the approval route probes actual CDN bytes.
-      review_package_ready: readiness.readiness === "READY" && studioState === "Ready for Review",
+      review_package_ready: reviewVisibility.visible,
+      review_package_held_preview_only: reviewVisibility.held_preview_only,
       review_package_readiness: readiness.readiness,
       review_package_missing: readiness.missing_requirements,
       review_package_reason: readiness.reason,
