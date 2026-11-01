@@ -5,6 +5,7 @@ on:
     paths:
       - 'apps/studio-api/rendering-review-airtable-contract.*'
       - 'apps/studio-api/rendering-review-policy.*'
+      - 'apps/studio-api/rendering-review-held-redo.*'
       - 'apps/studio-api/rendering-review-factory-handoff.*'
       - 'apps/studio-api/rendering-review-factory-gate.*'
       - 'apps/studio-api/rendering-review-factory-preview.*'
@@ -35,6 +36,8 @@ jobs:
         run: |
           node --check apps/studio-api/rendering-review-airtable-contract.mjs
           node --check apps/studio-api/rendering-review-airtable-contract.test.mjs
+          node --check apps/studio-api/rendering-review-held-redo.mjs
+          node --check apps/studio-api/rendering-review-held-redo.test.mjs
           node --check apps/studio-api/rendering-review-factory-handoff.mjs
           node --check apps/studio-api/rendering-review-factory-gate.mjs
           node --check apps/studio-api/rendering-review-factory-gate.test.mjs
@@ -46,4 +49,4 @@ jobs:
           node --check apps/studio-api/rendering-review-workspace.mjs
           node --check apps/studio-api/worker.js
       - name: Isolated storage and dispatch guard contracts
-        run: node --test apps/studio-api/rendering-review-airtable-contract.test.mjs apps/studio-api/rendering-review-policy.test.mjs apps/studio-api/rendering-review-coordinator.test.mjs apps/studio-api/rendering-review-factory-handoff.test.mjs apps/studio-api/rendering-review-factory-gate.test.mjs apps/studio-api/rendering-review-factory-preview.test.mjs apps/studio-api/michigan-review-preview-cache.test.mjs apps/studio-api/rendering-review-approval-http.test.mjs apps/studio-api/creative-master-registry.test.mjs apps/studio-api/creative-master-propagation.test.mjs apps/studio-api/creative-master-factory-guard.test.mjs apps/studio-api/rendering-review-workspace.test.mjs apps/studio-web/rendering-review-queue.test.mjs
+        run: node --test apps/studio-api/rendering-review-held-redo.test.mjs apps/studio-api/rendering-review-airtable-contract.test.mjs apps/studio-api/rendering-review-policy.test.mjs apps/studio-api/rendering-review-coordinator.test.mjs apps/studio-api/rendering-review-factory-handoff.test.mjs apps/studio-api/rendering-review-factory-gate.test.mjs apps/studio-api/rendering-review-factory-preview.test.mjs apps/studio-api/michigan-review-preview-cache.test.mjs apps/studio-api/rendering-review-approval-http.test.mjs apps/studio-api/creative-master-registry.test.mjs apps/studio-api/creative-master-propagation.test.mjs apps/studio-api/creative-master-factory-guard.test.mjs apps/studio-api/rendering-review-workspace.test.mjs apps/studio-web/rendering-review-queue.test.mjs
