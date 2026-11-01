@@ -1468,6 +1468,7 @@
       return;
     }
     state.pendingFactoryFeedback = { payload, title: title || "Production change request", focusedElement: document.activeElement };
+    void loadFactoryCorrectionReadOnlyPreview(state.pendingFactoryFeedback);
     const heading = $("factoryFeedbackTarget");
     const detail = $("factoryFeedbackScope");
     const error = $("factoryFeedbackError");
@@ -1511,6 +1512,8 @@
     if (backdrop) backdrop.hidden = true;
     const origin = state.pendingFactoryFeedback?.focusedElement;
     state.pendingFactoryFeedback = null;
+    const readOnly=$("factoryReadOnlyInventory");
+    if(readOnly)readOnly.hidden=true;
     if (origin?.isConnected) origin.focus?.();
   }
 
