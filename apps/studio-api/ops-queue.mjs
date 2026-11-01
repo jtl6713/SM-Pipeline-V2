@@ -67,6 +67,7 @@ export const OPS_QUEUE_OUTPUT_FIELDS = [
   "Last_Publish_Attempt_At",
   "Test_Run_ID",
   "Do_Not_Publish",
+  "Studio_Render_Review_Hold_Active",
 ];
 
 export const OPS_QUEUE_REQUEST_FIELDS = [
