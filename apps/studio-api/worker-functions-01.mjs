@@ -1,4 +1,5 @@
 import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
+import { vibeAutoReviewDecision } from "./vibe-auto-review.mjs";
 import { facebookPreapprovalRecoveryReason, facebookPreapprovalRecoveryFields, FACEBOOK_PREAPPROVAL_FORMULA } from "./facebook-preapproval-recovery.mjs";
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
 import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
@@ -574,6 +575,7 @@ import {
   studioFirstLinkedId,
   studioContinuationLoadContext,
   studioContinuationStampPackage,
+  continueParkedProductionAfterPromote,
   studioOutputReadyForPublishApproval,
   studioActivePipelineSettings,
   studioFetchImageBytes,
@@ -10650,6 +10652,108 @@ export async function resumeAzFinishedVideoRequests(env, ctx = null) {
   return { resumed: results.length, results };
 }
 /*__STUDIO_WORKER_END:resumeAzFinishedVideoRequests__*/
+
+/**
+ * Vibe Cut is hands-off AFTER a verified upload: plan/prepare/promote/render,
+ * stopping at Ready for Review. Unlike AZ finished video, this NEVER approves,
+ * schedules or publishes a platform output. Preserve Airtable write authority.
+ */
+export async function advanceVibeCutTowardApproval(env, requestId, authorization, ctx = null) {
+  if (!/^rec[A-Za-z0-9]+$/.test(String(requestId || ""))) {
+    return { step: "skip", reason: "invalid_request_id" };
+  }
+  const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+  const notes = studioRequestNotesText(record);
+  const decision = vibeAutoReviewDecision({
+    notes,
+    requestStatus: f(record, "Request_Status"),
+    masterStatus: f(record, "Studio_Master_Asset_Status"),
+    planStatus: f(record, "Studio_Output_Plan_Status"),
+    assets: item4AssetManifest(record),
+    revisionOpen: productionRequestRevisionOpen(record),
+    disabled: env?.STUDIO_VIBE_AUTO_REVIEW_DISABLED === "true",
+  });
+  if (["skip", "wait", "complete"].includes(decision.step)) {
+    return { ...decision, production_request_id: requestId };
+  }
+  const auth = authorization?.organization?.record_id
+    ? authorization : await resolveStudioCronAuthorization(env);
+  if (decision.step === "plan") {
+    const defaults = decision.defaults;
+    const call = studioInternalJsonRequest(`/api/production-requests/${requestId}/plan`, {
+      platforms: defaults.platforms,
+      overrides: defaults.overrides,
+      extras: defaults.extras,
+      package: "video",
+    });
+    const response = await buildItem4OutputPlan(call.request, env, call.url, auth);
+    if (!response.ok) return { step: "plan", waiting: "plan_not_ready", status: response.status, production_request_id: requestId };
+    return { step: "plan", waiting: "preparing_platform_media", production_request_id: requestId };
+  }
+  if (decision.step === "finalize") {
+    const ideaId = studioFirstLinkedId(f(record, "Idea_Candidate"));
+    if (!ideaId) return { step: "finalize", waiting: "idea_link_missing", production_request_id: requestId };
+    const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId);
+    if (!promotionCompleted(idea)) return { step: "finalize", waiting: "awaiting_promotion_fanout", production_request_id: requestId };
+    await finalizeProductionRequestPromotion(env, requestId, idea, ctx);
+    const after = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+    if (String(f(after, "Request_Status") || "") !== "Promoted") {
+      return { step: "finalize", waiting: "submitted_reconciliation", production_request_id: requestId };
+    }
+    continueParkedProductionAfterPromote(ctx, env, requestId);
+    return { step: "render", waiting: "render_and_human_approval", production_request_id: requestId };
+  }
+  // Promotion's existing source bridge preflight performs variant preparation
+  // and refuses to promote until all verified Drive/preview media is ready.
+  // A 409 is not license to bypass an invariant: the cron retries later.
+  const call = studioInternalJsonRequest(`/api/production-requests/${requestId}/promote`, {});
+  let response;
+  try {
+    response = await promoteProductionRequestViaI3I4(call.request, env, call.url, auth, ctx);
+  } catch (error) {
+    if (Number(error?.status || 0) === 409) {
+      return { step: "promote", waiting: "media_preflight_or_variants", reason: String(error.message || "").slice(0, 300), production_request_id: requestId };
+    }
+    throw error;
+  }
+  if (!response?.ok) return { step: "promote", waiting: "promotion_not_confirmed", status: response?.status, production_request_id: requestId };
+  continueParkedProductionAfterPromote(ctx, env, requestId);
+  return { step: "render", waiting: "render_and_human_approval", production_request_id: requestId };
+}
+/*__STUDIO_WORKER_END:advanceVibeCutTowardApproval__*/
+
+/**
+ * One Vibe production handoff per pass, prioritizing already-ready media.
+ * The existing production/render/QA queue owns completion to human Approval.
+ * This is an independent bounded sweep, not a broad content re-run.
+ */
+export async function resumeVibeCutsTowardApproval(env, ctx = null) {
+  if (env?.STUDIO_VIBE_AUTO_REVIEW_DISABLED === "true") return { skipped: "disabled" };
+  const rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    limit: 20,
+    sortField: "Created_At",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),FIND("ez-input=vibe-cut",{Production_Notes}&"")>0,FIND("origin=ez-wizard",{Production_Notes}&"")>0,OR({Request_Status}="Draft",{Request_Status}="Ready",{Request_Status}="Submitted"))',
+  });
+  if (!rows.length) return { resumed: 0 };
+  const candidates = [
+    ...rows.filter(row => String(f(row, "Studio_Master_Asset_Status") || "") === "Ready"
+      || String(f(row, "Request_Status") || "") === "Submitted"),
+    ...rows.filter(row => String(f(row, "Studio_Master_Asset_Status") || "") !== "Ready"
+      && String(f(row, "Request_Status") || "") !== "Submitted"),
+  ];
+  const results = [];
+  for (const row of candidates.slice(0, 1)) {
+    try {
+      results.push(await advanceVibeCutTowardApproval(env, row.id, null, ctx));
+    } catch (error) {
+      results.push({ production_request_id: row.id, error: String(error?.message || error).slice(0, 300) });
+      console.warn("Vibe Cut automatic handoff deferred", row.id, error);
+    }
+  }
+  return { resumed: results.length, results, final_approval: "human_only" };
+}
+/*__STUDIO_WORKER_END:resumeVibeCutsTowardApproval__*/
 
 export function studioVibeCutOutputNeedsRemount(row, vibeTarget = 0) {
   const count = Number(f(row, "Selected_Clip_Count") || 0) || 0;
