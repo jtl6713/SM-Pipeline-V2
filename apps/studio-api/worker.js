@@ -2402,11 +2402,11 @@ export default {
 
       if (isAiApiRoute) {
         requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
-        if (request.method === "GET") return getStudioAiApiStatus(request, env);
+        if (request.method === "GET") return await getStudioAiApiStatus(request, env);
         if (request.method === "PATCH") {
           requirePermission(authorization, "tenant_admin");
           assertWriteRequest(request, env);
-          return patchStudioAiApiPreference(request, env);
+          return await patchStudioAiApiPreference(request, env);
         }
         throw new HttpError(405, "Method not allowed");
       }
@@ -3475,9 +3475,9 @@ export default {
       if (url.pathname === "/api/library") {
         if (request.method === "POST") {
           assertUploadWriteRequest(request, env);
-          return uploadAssetLibraryItems(request, env, authorization, ctx);
+          return await uploadAssetLibraryItems(request, env, authorization, ctx);
         }
-        return listAssetLibrary(request, env, url, authorization);
+        return await listAssetLibrary(request, env, url, authorization);
       }
 
       return respond(request, env, { ok: false, error: "Not found" }, 404);
