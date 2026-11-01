@@ -680,6 +680,56 @@
             });
             detail.append(transfer,feedback);
           }
+          // QA is a delivery check, not a prerequisite to asking Producer for
+          // another creative pass. Keep the original held output unpublished.
+          if(session.review_hold?.active===true&&saved.publication_hold_verified===true){
+            const redo=elem('section',null,'rr-chat-form rr-producer-chat-primary');
+            redo.append(elem('strong','Need another version?','rr-producer-label'));
+            redo.append(elem('p','You can request another creative redo even while watermark verification is pending. This does not publish or start a render.','rr-muted'));
+            const direction=elem('textarea');
+            direction.rows=3;direction.maxLength=3000;
+            direction.setAttribute('aria-label','Instructions for another creative revision');
+            direction.value='Redo this version while keeping the approved creative changes.';
+            redo.append(direction);
+            const notice=elem('p','','rr-feedback-status');
+            notice.hidden=true;notice.setAttribute('role','status');
+            notice.setAttribute('aria-live','polite');
+            let pendingKey='',pendingNote='';
+            const send=elem('button','Request another revision','secondary-button');
+            send.type='button';
+            send.addEventListener('click',async()=>{
+              if(state.actionBusy)return;
+              const note=String(direction.value||'').trim();
+              if(!note){notice.hidden=false;notice.dataset.state='error';notice.textContent='Enter your requested revision.';return;}
+              if(note!==pendingNote){pendingNote=note;pendingKey=safeRequestId();}
+              state.actionBusy=true;send.disabled=true;
+              send.setAttribute('aria-busy','true');
+              notice.hidden=false;notice.dataset.state='working';
+              notice.textContent='Saving your revision request under the existing publication hold…';
+              try{
+                const result=await post('/api/rendering-review/outputs/'+
+                  encodeURIComponent(entry.output_id)+'/request-redo',{
+                  expected_version:session.version,client_request_id:pendingKey,note,
+                });
+                if(result.redo_requested!==true||result.review_hold_active!==true||
+                   result.render_queued!==false||result.public_post_created!==false)
+                  throw new Error('The held creative revision receipt was not verified');
+                notice.dataset.state='success';
+                notice.textContent='Redo requested. Continue with Producer; no render or publication started.';
+                pendingKey='';pendingNote='';
+                say('Redo direction saved under the existing hold.');
+                await open(entry);
+              }catch(error){
+                notice.dataset.state='error';
+                notice.textContent='Redo request status: '+(error?.message||'Not verified')+
+                  '. Check the saved conversation before retrying.';
+              }finally{
+                state.actionBusy=false;send.disabled=false;send.removeAttribute('aria-busy');
+              }
+            });
+            redo.append(send,notice);
+            detail.append(redo);
+          }
           detail.append(actionButton('Recheck QA / Factory status',async()=>{await open(entry);}));
         }
       }
@@ -725,12 +775,23 @@
               expected_version:session.version,attempt_id:current.id,
               client_request_id:state.approvalKeys.get(approvalKey),
             });
-            if(result.accepted!==true||result.factory_ready!==true||
-               result.factory_handoff?.factory_ready!==true||
-               result.review_hold_active!==false||
+            if(result.accepted!==true||
                result.publication_changed!==false||
                result.instagram_upload_created!==false)
-              throw new Error('Creative approval receipt not verified');
+              throw new Error('Creative acceptance receipt not verified');
+            if(result.factory_ready!==true){
+              approval.textContent='V'+versionNumber+' creatively approved';
+              approvalStatus.dataset.state='success';
+              approvalStatus.textContent='V'+versionNumber+
+                ' creatively approved and preserved. Final Factory transfer still needs verification. '+ 
+                'You can request another creative revision regardless of watermark status. Nothing was published.';
+              say('Creative approval saved; Factory delivery QA is still pending.');
+              await open(entry);
+              return;
+            }
+            if(result.factory_handoff?.factory_ready!==true||
+               result.review_hold_active!==false)
+              throw new Error('Factory handoff readback not verified');
             approval.textContent='V'+versionNumber+' approved — in Factory';
             approvalStatus.dataset.state='success';
             approvalStatus.textContent='V'+versionNumber+
