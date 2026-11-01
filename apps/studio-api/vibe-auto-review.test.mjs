@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import * as fs from "node:fs";
-import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import { vibeAutoReviewVerifiedSource } from "./vibe-auto-review.mjs";
 
 const notes = `origin=ez-wizard; ez-input=vibe-cut; ez-caption=ai; ez-package=video
@@ -97,7 +96,6 @@ test("Vibe source, notes and chosen outputs are preserved throughout automatic p
 
 const worker = fs.readFileSync(new URL("./worker.js", import.meta.url), "utf8");
 const logic = fs.readFileSync(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
-const source = readStudioWorkerSource();
 
 function part(begin, end) {
   const a = logic.indexOf(begin);
@@ -135,5 +133,5 @@ test("Vibe review continuation preserves original media and final human approval
   assert.match(method, /ctx\.waitUntil\(continueReview\(\)/);
   assert.match(method, /publishing: false/);
   assert.doesNotMatch(method, /publish-kick|publish-now|approve-all/);
-  assert.match(source, /readyProductionOutputsAwaitingFinalApproval/);
+  assert.match(logic, /readyProductionOutputsAwaitingFinalApproval/);
 });
