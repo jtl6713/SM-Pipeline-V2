@@ -713,6 +713,7 @@ import {
   watchIdeaPhotosRoute,
   matchIdeaPhotosRoute,
   proposeScriptedShortRoute,
+  reviseScriptedShortRoute,
   acceptScriptedShortRoute,
   planVibeCutRoute,
   anotherVibeCutRoute,
@@ -920,6 +921,7 @@ export default {
       const isIdeaProductionRequestRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/production-request$/.test(url.pathname);
       const isIdeaGenerateRoute = url.pathname === "/api/ideas/generate";
       const isScriptedShortProposeRoute = url.pathname === "/api/scripted-short/propose";
+      const isScriptedShortReviseRoute = url.pathname === "/api/scripted-short/revise";
       const isScriptedShortAcceptRoute = url.pathname === "/api/scripted-short/accept";
       const isIdeaGenerateStatusRoute = /^\/api\/ideas\/generate\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isProductionRequestRecordRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+$/.test(url.pathname);
@@ -1057,6 +1059,7 @@ export default {
       const isIdeaCreateRoute = url.pathname === "/api/ideas" && request.method === "POST";
       const isIdeaGenerateWrite = isIdeaGenerateRoute && request.method === "POST";
       const isScriptedShortProposeWrite = isScriptedShortProposeRoute && request.method === "POST";
+      const isScriptedShortReviseWrite = isScriptedShortReviseRoute && request.method === "POST";
       const isScriptedShortAcceptWrite = isScriptedShortAcceptRoute && request.method === "POST";
       const isIdeaEditRoute = isIdeaRecordRoute && request.method === "PATCH";
       const isIdeaDeleteRoute = isIdeaRecordRoute && request.method === "DELETE";
@@ -1142,6 +1145,7 @@ export default {
         isIdeaCreateRoute ||
         isIdeaGenerateWrite ||
         isScriptedShortProposeWrite ||
+        isScriptedShortReviseWrite ||
         isScriptedShortAcceptWrite ||
         isIdeaEditRoute ||
         isIdeaDeleteRoute ||
@@ -2909,6 +2913,13 @@ export default {
         assertWriteRequest(request, env);
         requirePermission(authorization, "ideas_create");
         return await proposeScriptedShortRoute(request, env, authorization, url);
+      }
+
+      if (isScriptedShortReviseRoute) {
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "ideas_create");
+        return await reviseScriptedShortRoute(request, env, authorization, url);
       }
 
       if (isScriptedShortAcceptRoute) {
