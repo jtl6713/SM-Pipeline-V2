@@ -11390,6 +11390,16 @@ export async function factoryDeskRefreshPayload(request, env, authorization, con
 }
 /*__STUDIO_WORKER_END:factoryDeskRefreshPayload__*/
 
+async function studioAdoptCreativeMasterReviewMediaOnly(env,id,fields){
+  // Airtable review-media-only patch. Intentionally no schedule fields, approval
+  // state, publish flags, or task dispatch. The per-output Factory lease is
+  // acquired by the separate creative-master guard before this write.
+  return airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id,{
+    method:"PATCH",skipSupabaseWriteThrough:true,
+    body:JSON.stringify({fields,typecast:false}),
+  });
+}
+
 export async function factoryApproveOutput(env, id, actor, note, ctx = null, scheduleOptions = {}) {
   const existing = scheduleOptions.prefetchedFactoryRecord?.id === id
     ? scheduleOptions.prefetchedFactoryRecord
@@ -11422,10 +11432,7 @@ export async function factoryApproveOutput(env, id, actor, note, ctx = null, sch
       readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
       readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
       withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
-      patchOutput:(id,fields)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id,{
-        method:"PATCH",skipSupabaseWriteThrough:true,
-        body:JSON.stringify({fields,typecast:false}),
-      }),
+      patchOutput:(id,fields)=>studioAdoptCreativeMasterReviewMediaOnly(env,id,fields),
       syncOutput:row=>studioSupabaseWriteThroughOutput(env,row,
         "creative-master-factory-catchup"),
     },
