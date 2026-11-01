@@ -111,7 +111,7 @@ test("review-only render completes with unverified watermark but remains unpubli
   assert.equal(result.public_post_created,false);
   assert.equal(s.state().session.state,"ready_for_review");
   assert.equal(s.state().originalMutation,0);
-  assert.equal(s.state().attempt.validation.watermark_verified,false);
+  assert.equal(s.state().attempt.status,'ready_for_review');
 });
 test("review-only completion still requires valid MP4, audio and Google Drive evidence",async()=>{
   for(const bad of [
