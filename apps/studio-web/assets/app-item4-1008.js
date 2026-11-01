@@ -6640,9 +6640,9 @@ function timedScriptAssetLabel(asset, index) {
     if (phase === "failed") {
       return {
         heal: "error",
-        title: `${fileName} failed to upload.`,
-        body: vibeUploadUi.detail || "The video was not persisted. Choose the same file to try again.",
-        count: "0 of 1 ready.",
+        title: `${fileName} needs upload attention.`,
+        body: vibeUploadUi.detail || "The video was not persisted. Select the same file to resume.",
+        count: vibeUploadUi.totalParts > 0 ? `${vibeUploadUi.doneParts || 0} of ${vibeUploadUi.totalParts} segments confirmed.` : "0 segments confirmed.",
       };
     }
     if (phase === "stalled") {
@@ -9437,6 +9437,14 @@ function timedScriptAssetLabel(asset, index) {
         : error.message;
       setEzMessage(message, "error-text");
       setRequestMessage(error.message, "error-text");
+      if (ezIsVibeCut() && ["creating", "stalled", "selected"].includes(String(vibeUploadUi.phase || ""))) {
+        const confirmed = Number(vibeUploadUi.doneParts || 0);
+        setVibeUploadUi("failed", {
+          file: nextFiles[0],
+          detail: `${confirmed ? `${confirmed} video segments were confirmed earlier.` : "No video segments have been confirmed."} Setup/transfer error: ${error.message}. Select the same file to retry safely.`,
+          activityKey: `start-failed:${nextFiles[0]?.name || "video"}:${Date.now()}`,
+        });
+      }
       if (ezIsAzFinishedPath()) {
         setAzFinishedMessage(error.message || "Could not start publish.", "error-text");
         $("azFinishedDrop")?.classList.remove("is-busy");
@@ -9445,6 +9453,7 @@ function timedScriptAssetLabel(asset, index) {
     } finally {
       ezStarting = false;
       if (continueBtn) continueBtn.disabled = ezIsVibeCut() ? !vibeCutReadySource() : false;
+      renderVibeUploadUi(item4Workspace || {});
       drainPendingMasterUploads();
     }
   }
