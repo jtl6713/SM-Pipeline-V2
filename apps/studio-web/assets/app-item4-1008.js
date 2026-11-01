@@ -191,6 +191,10 @@
   let vibeUploadAbortController = null;
   let vibeUploadRetryRequested = false;
   let vibeUploadRetryInFlight = false;
+  const vibeAutoReviewAttempted = new Set();
+  const vibeAutoReviewInFlight = new Set();
+  const vibeAutoReviewQueued = new Set();
+  const vibeAutoReviewErrors = new Map();
   let item4PreparingVariants = false;
   let item4PrepareError = "";
   let item4PrepareClockTimer = 0;
@@ -291,7 +295,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.835-vibe-auto-approval-ux";
+  const BUILD_ID = "item4-0.6.836-vibe-auto-review-final";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -6642,7 +6646,11 @@ function timedScriptAssetLabel(asset, index) {
       return {
         heal: "ready",
         title: `Video ready: ${fileName}`,
-        body: "The uploaded video is saved and verified. Studio automatically completes production, renders the Vibe Cut and routes it to your approval. No Save click is required; nothing publishes automatically.",
+        body: vibeAutoReviewErrors.get(String(activeProductionRequest?.id || ""))
+          ? `Video verified, but the review handoff needs attention: ${vibeAutoReviewErrors.get(String(activeProductionRequest?.id || ""))}. Use Retry advance to approval; do not reupload.`
+          : vibeAutoReviewQueued.has(String(activeProductionRequest?.id || ""))
+            ? "Video verified and the production-to-review handoff is confirmed. Nothing publishes automatically."
+            : "The uploaded video is saved and verified. Studio automatically completes production, renders the Vibe Cut and routes it to your approval. No Save click is required; nothing publishes automatically.",
         count: "1 of 1 uploaded · 1 of 1 ready.",
         guidance: {
           steps: [
@@ -6839,11 +6847,63 @@ function timedScriptAssetLabel(asset, index) {
     setVibeUploadUi("selected", { file, activityKey: `selected:${file.name}:${file.size}` });
   }
 
+  async function maybeAutoAdvanceVibeCutToReview(status = item4Workspace, { manual = false } = {}) {
+    if (!ezIsVibeCut() || !vibeCutReadySource(status) || item4Uploading || ezStarting) return null;
+    const id = String(activeProductionRequest?.id || "");
+    if (!/^rec[A-Za-z0-9]+$/.test(id) || activeProductionRequest?.revision_open === true) return null;
+    const currentState = String(activeProductionRequest?.status || "Draft");
+    if (!["Draft", "Ready", "Promoted"].includes(currentState) || (currentState === "Promoted" && !manual)) return null;
+    if (vibeAutoReviewInFlight.has(id) || (!manual && vibeAutoReviewAttempted.has(id))) return null;
+    if (/origin=prepare-to-review/i.test(String(activeProductionRequest?.production_notes || ""))) {
+      vibeAutoReviewQueued.add(id);
+      return { queued: true, already_started: true };
+    }
+    vibeAutoReviewAttempted.add(id);
+    vibeAutoReviewInFlight.add(id);
+    vibeAutoReviewErrors.delete(id);
+    try {
+      const result = await api(`/api/production-requests/${encodeURIComponent(id)}/vibe-to-review`, {
+        method: "POST", body: "{}", timeoutMs: 30000, retries: 0,
+      });
+      if (result?.queued !== true) throw new Error("Server did not confirm the review handoff");
+      vibeAutoReviewQueued.add(id);
+      if (activeProductionRequest?.id === id) {
+        setRequestMessage("The original video is verified. Its production job is in the durable review queue, with final human approval required. You can leave; nothing publishes automatically.", "success");
+      }
+      return result;
+    } catch (error) {
+      // A request may time out after Airtable accepted it; read before considering a retry.
+      let record = null;
+      try {
+        const saved = await api(`/api/production-requests/${encodeURIComponent(id)}`, { retries: 0 });
+        record = saved?.record || saved?.production_request || null;
+      } catch {}
+      if (/origin=prepare-to-review/i.test(String(record?.production_notes || ""))
+          || ["Submitted", "Promoted"].includes(String(record?.status || ""))) {
+        vibeAutoReviewQueued.add(id);
+        if (activeProductionRequest?.id === id) activeProductionRequest = { ...activeProductionRequest, ...record };
+        return { queued: true, already_started: true };
+      }
+      vibeAutoReviewErrors.set(id, String(error?.message || "The handoff could not be confirmed"));
+      if (activeProductionRequest?.id === id) {
+        setRequestMessage("Automatic review needs attention. Your video is saved. Tap Retry advance to approval; do not upload it again.", "error-text");
+      }
+      return null;
+    } finally {
+      vibeAutoReviewInFlight.delete(id);
+      if (activeProductionRequest?.id === id) {
+        updateItem4MasterProgress(item4Workspace || {});
+        renderVibeCutCommitAction(item4Workspace);
+      }
+    }
+  }
+
   function syncVibeUploadUiFromWorkspace(status = item4Workspace) {
     if (!ezIsVibeCut()) return;
     const source = vibeCutPersistedSource(status);
     if (vibeCutReadySource(status)) {
       setVibeUploadUi("ready", { detail: "The persisted source video is fully processed.", activityKey: `ready:${source?.id || "video"}` });
+      void maybeAutoAdvanceVibeCutToReview(status);
       return;
     }
     if (item4WorkspaceCompressionFailed(status) || String(status?.assets_status || "") === "Error") {
@@ -6899,7 +6959,12 @@ function timedScriptAssetLabel(asset, index) {
       : "No usable source video is attached. The photo timeline cannot be saved as a Vibe Cut. Upload your MOV/MP4 again.";
     if (save) {
       save.disabled = !editable || !source || item4Uploading || ezStarting;
-      save.textContent = source ? "Save Vibe Cut & Continue" : "Waiting for source video";
+      const id = String(activeProductionRequest?.id || "");
+      save.disabled = save.disabled || vibeAutoReviewInFlight.has(id) || vibeAutoReviewQueued.has(id);
+      save.textContent = !source ? "Waiting for source video" : vibeAutoReviewInFlight.has(id)
+        ? "Starting review handoff…" : vibeAutoReviewQueued.has(id)
+          ? "Continuing automatically" : vibeAutoReviewErrors.has(id)
+            ? "Retry advance to approval" : "Advance to Approval";
     }
     if (retry) {
       retry.hidden = !editable || Boolean(source);
@@ -9538,6 +9603,7 @@ function timedScriptAssetLabel(asset, index) {
       // Retry availability must be recomputed after ezStarting clears.
       // Otherwise the button stays disabled even after setup has failed.
       renderVibeUploadUi(item4Workspace || {});
+      if (ezIsVibeCut() && vibeCutReadySource()) void maybeAutoAdvanceVibeCutToReview(item4Workspace);
       drainPendingMasterUploads();
     }
   }
@@ -9888,8 +9954,8 @@ function timedScriptAssetLabel(asset, index) {
         ezAutoPlanAfterUpload = true;
         switchToPage("content");
         showProductionRequestWorkspace();
-        setRequestMessage("Source video saved. Review the source clip and output settings before rendering.", "success");
-        Promise.resolve().then(() => maybeAutoEzPlan());
+        setRequestMessage("Video saved. Studio is automatically continuing through production toward approval.", "success");
+        void maybeAutoAdvanceVibeCutToReview(item4Workspace || {});
         return;
       }
       if (activeProductionRequest?.id && ezPersistedAssetCount()) return;
@@ -11722,8 +11788,16 @@ function timedScriptAssetLabel(asset, index) {
         return;
       }
       if (item4WorkspaceNeedsCompression(item4Workspace)) {
-        setRequestMessage(item4CompressionProgressLabel(item4Workspace), "success");
-        setEzMessage(item4CompressionProgressLabel(item4Workspace), "success");
+        // Vibe Cut has one authoritative, detailed progress card. Do not display
+        // a second banner claiming "keep this tab open" after the server
+        // already verified the completed transfer.
+        if (ezIsVibeCut()) {
+          setRequestMessage("");
+          setEzMessage("");
+        } else {
+          setRequestMessage(item4CompressionProgressLabel(item4Workspace), "success");
+          setEzMessage(item4CompressionProgressLabel(item4Workspace), "success");
+        }
         if (ezIsAzFinishedPath()) {
           setAzFinishedProgress("compressing");
           setAzFinishedMessage(item4CompressionProgressLabel(item4Workspace), "success");
@@ -13167,6 +13241,7 @@ function timedScriptAssetLabel(asset, index) {
       item4UploadBatchTotal = 0;
       item4UploadBatchDone = 0;
       if (button) button.disabled = !(item4Workspace?.assets?.length);
+      if (ezIsVibeCut() && !ezStarting && vibeCutReadySource()) void maybeAutoAdvanceVibeCutToReview(item4Workspace);
       drainPendingMasterUploads();
     }
   }
@@ -15140,24 +15215,12 @@ function timedScriptAssetLabel(asset, index) {
   });
   $("item4VibeSaveContinue")?.addEventListener("click", async (event) => {
     event.preventDefault();
-    const source = vibeCutReadySource();
-    if (!source || !["Draft", "Ready"].includes(String(activeProductionRequest?.status || "Draft"))) {
-      setRequestMessage("A saved and fully processed source MOV/MP4 is required. Studio will not use the asset-library photo timeline.", "error-text");
-      setProductionWorkspaceTab("media");
+    if (!vibeCutReadySource()) {
+      setRequestMessage("Source processing is not yet Ready. Do not upload it again.", "error-text");
       return;
     }
-    const button = $("item4VibeSaveContinue");
-    button.disabled = true;
-    try {
-      await saveActiveProductionRequest({ quiet: false });
-      if (item4Workspace?.plan_status !== "Ready") await buildItem4Plan();
-      setProductionWorkspaceTab("formats");
-      setRequestMessage("Vibe Cut source and draft saved. Review platform outputs, then Approve when ready.", "success");
-    } catch (error) {
-      setRequestMessage(error?.message || "Could not save Vibe Cut.", "error-text");
-    } finally {
-      renderVibeCutCommitAction(item4Workspace);
-    }
+    const result = await maybeAutoAdvanceVibeCutToReview(item4Workspace, { manual: true });
+    if (result?.queued) setRequestMessage("Vibe Cut is heading through production to Awaiting Approval. Nothing publishes automatically.", "success");
   });
   $("item4ChooseMedia")?.addEventListener("click", (event) => {
     event.stopPropagation();

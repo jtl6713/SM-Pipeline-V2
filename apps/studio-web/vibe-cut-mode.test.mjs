@@ -48,12 +48,15 @@ test("Vibe Cut client helper stamps music-driven defaults", () => {
   assert.match(app, /vibeCut \? "Yes"/);
 });
 
-test("Vibe Cut uses a saved source video and explicit Save/Continue", () => {
+test("Vibe Cut automatically advances a verified saved source to human approval", () => {
   assert.match(html, /id="item4VibeCommitActions"/);
   assert.match(html, /id="item4VibeSaveContinue"/);
   assert.match(html, /id="item4VibeRetryVideo"/);
   assert.match(app, /function vibeCutReadySource\(/);
   assert.match(app, /function renderVibeCutCommitAction\(/);
   assert.match(app, /return !ezIsVibeCut\(\) && Boolean\(productionTimedScript/);
-  assert.match(app, /await saveActiveProductionRequest\(\{ quiet: false \}\)/);
+  assert.match(app, /maybeAutoAdvanceVibeCutToReview/);
+  assert.match(app, /vibe-to-review/);
+  const action = app.slice(app.indexOf('$("item4VibeSaveContinue")?.addEventListener'), app.indexOf('$("item4ChooseMedia")?.addEventListener'));
+  assert.doesNotMatch(action, /await saveActiveProductionRequest/);
 });
