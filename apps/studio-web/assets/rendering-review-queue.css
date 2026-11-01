@@ -100,3 +100,15 @@
 .rr-message-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap}
 .rr-message-time{font-size:.78rem;color:var(--muted,#768392);font-variant-numeric:tabular-nums}
 .rr-conversation-live .rr-thread{max-height:440px}
+
+/* Compact media previews: one globally shared NEEDS ASSET visual for missing or
+   inaccessible thumbnails; the video itself is still reviewed in the player. */
+.rr-entry{grid-template-columns:52px minmax(0,1fr);align-items:center;gap:10px}
+.rr-entry-thumb{display:block;width:52px;height:68px;min-width:0;overflow:hidden;
+  border:1px solid var(--line,#d6dce3);border-radius:7px;background:#122846}
+.rr-entry-thumb img{display:block;width:100%;height:100%;object-fit:cover}
+.rr-entry-body{display:grid;gap:5px;min-width:0;overflow-wrap:anywhere}
+@media(max-width:430px){
+  .rr-entry{grid-template-columns:46px minmax(0,1fr);gap:9px;padding:10px}
+  .rr-entry-thumb{width:46px;height:61px}
+}

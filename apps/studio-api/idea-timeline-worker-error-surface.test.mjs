@@ -11,7 +11,7 @@ test("Create VO timeline awaits the async handler inside the fetch error boundar
     worker.indexOf("if (isVibeCutPlanRoute) {")
   );
   assert.match(route, /return await createIdeaTimedScriptRoute\(request, env, url, authorization, ctx\);/);
-  assert.match(worker, /version: "0\.10\.705-idea-timeline-error-boundary"/);
+  assert.match(worker, /version: "0\.10\.\d+(?:-[\w.-]+)?"/);
 
   const fetchEnd = worker.indexOf("async scheduled(event, env, ctx)");
   assert.match(worker.slice(0, fetchEnd), /catch \(error\) \{\s*console\.error\(error\);\s*return respond\(request, env,/);

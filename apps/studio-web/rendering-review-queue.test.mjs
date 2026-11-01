@@ -337,13 +337,30 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
       return {ok:true,json:async()=>({
         ok:true,publication_hold_verified:true,
         flags:{creative_approval_enabled:true},
+        creative_group:{key:'vertical short video|9:16',
+          content_item_id:'recYhIjy4BW0U3WaW',format:'Vertical Short Video',
+          aspect_ratio:'9:16',linked_count:5,master:ready?{
+            version:1,file_id:revised,approved_attempt_id:attemptId}:null,
+          outputs:[{output_id:output,platform:'Instagram',output_type:'Instagram Reel',
+            output_number:8447,held:true},
+            {output_id:'recBBBBBBBBBBBBBB',platform:'Facebook',
+              output_type:'Facebook Reel',output_number:8448,scheduled:true},
+            {output_id:'recCCCCCCCCCCCCCC',platform:'TikTok',
+              output_type:'TikTok Video Draft',output_number:8449,dispatched:true},
+            {output_id:'recDDDDDDDDDDDDDD',platform:'YouTube',
+              output_type:'YouTube Short',output_number:8450},
+            {output_id:'recEEEEEEEEEEEEEE',platform:'New Platform',
+              output_type:'Future Video Type',output_number:8451}]},
         session:{version:ready?4:3,state:ready?'ready_for_review':'queued',
           current_attempt_id:attemptId,
           latest_attempt_number:2,review_hold:{active:true},
           attempts:[{number:1,status:'ready_for_review',artifact_id:original},
             {id:attemptId,number:2,status:ready?'ready_for_review':'queued',
-              artifact_id:ready?revised:null}],
-          messages:[]},
+              artifact_id:ready?revised:null,
+              ...(ready?{provenance:{kind:'manual_verified_review_import'}}:{})}],
+          history:ready?[{at:'2026-10-31T21:50:00.000Z'}]:[],
+          messages:ready?[{role:'producer',content:'Old message: waiting for V2',
+            at:'2026-10-31T21:00:00.000Z'}]:[]},
       })};
     }
     throw Error('Unexpected '+url);
@@ -384,6 +401,17 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
   assert.equal(nodes.rrVersionLabel.textContent,'Version V2');
   assert.equal(nodes.rrOriginalVersion.hidden,false);
   const descendants=node=>[node,...node.children.flatMap(descendants)];
+  const activityTitles=descendants(nodes.rrDetail).filter(n=>
+    n.className==='rr-activity-heading').map(n=>n.textContent);
+  assert.ok(activityTitles.some(t=>t.includes('One creative master · 5 matching outputs')));
+  const memberList=descendants(nodes.rrDetail).find(n=>
+    n.className==='rr-creative-master-members');
+  assert.equal(memberList?.children.length,5);
+  assert.ok(memberList.children.some(n=>n.textContent.includes('already dispatched')));
+  assert.ok(memberList.children.some(n=>n.textContent.includes('scheduled')));
+  assert.ok(activityTitles.some(t=>t.includes('V2 · Ready for review (verified imported edit)')));
+  assert.ok(!activityTitles.some(t=>t.includes('V2 NOT STARTED')),
+    'A verified imported V2 must supersede obsolete Producer conversation');
   const approval=descendants(nodes.rrDetail).find(n=>n.tag==='button'&&
     n.textContent==='Approve selected version');
   assert.ok(approval,'Current V2 offers the requested exact approval label');

@@ -14,8 +14,11 @@ import { handleRenderingReviewFeedbackRequest, reviewFeedbackWriteEnabled } from
 import { handleRenderingReviewEnrollRequest, reviewEnrollmentWriteEnabled, globalReviewEnrollmentEnabled } from "./rendering-review-enrollment-http.mjs";
 import { acceptReviewCreativeOnly } from "./rendering-review-approval-http.mjs";
 import { handoffApprovedReviewToFactory } from "./rendering-review-factory-handoff.mjs";
+import { nextApprovedCreativeMaster, projectCreativeMasterGroup, MASTER_FIELD } from "./creative-master-registry.mjs";
+import { propagateApprovedCreativeMaster } from "./creative-master-propagation.mjs";
 import { returnFactoryRevisionToProducer } from "./rendering-review-factory-return.mjs";
-import { serveFactorySelectedReviewVideo } from "./rendering-review-factory-preview.mjs";
+import { serveFactorySelectedReviewVideo, factorySelectedReviewAttempt } from "./rendering-review-factory-preview.mjs";
+import { MICHIGAN_V2, ensureMichiganV2CachedPreview } from "./michigan-review-preview-cache.mjs";
 import { composeRenderingReviewEnrollmentOperations } from "./rendering-review-enrollment-wiring.mjs";
 import { handleReviewProducerProposal, reviewProducerBridgeEnabled } from "./rendering-review-producer-bridge.mjs";
 import { persistReviewProducerCandidate, producerConversationWritesEnabled } from "./rendering-review-producer-persist.mjs";
@@ -86,6 +89,70 @@ function makeReviewFactoryHandoffOperations(env,{
       method:"PATCH",skipSupabaseWriteThrough:true,
       body:JSON.stringify({fields,typecast:false}),
     }),
+    // Content-owned creative authority is separate from platform publishing.
+    // A second, content-level lease serializes concurrent source approvals.
+    recordApprovedCreativeMaster:async ({source,session,attempt,evidence,at})=>{
+      const links=source?.fields?.Content_Item;
+      if(!Array.isArray(links)||links.length!==1||
+         !/^rec[A-Za-z0-9]{14}$/.test(String(links[0]||"")))
+        throw new HttpError(409,"Creative master content identity unavailable");
+      const contentId=links[0],table="tblwzN9AXWvmKVKPs";
+      return withOutputApprovalLock(env.STUDIO_MEDIA,contentId,async()=>{
+        const content=await airtableFetch(env,table,contentId);
+        if(content?.id!==contentId)
+          throw new HttpError(503,"Authoritative content record unavailable");
+        const proposal=nextApprovedCreativeMaster({
+          source,content,attempt,session,evidence,at,
+        });
+        if(proposal.changed){
+          await airtableFetch(env,table,contentId,{
+            method:"PATCH",body:JSON.stringify({
+              fields:{[MASTER_FIELD]:JSON.stringify(proposal.registry)},typecast:false,
+            }),
+          });
+        }
+        const saved=await airtableFetch(env,table,contentId);
+        const selected=projectCreativeMasterGroup({
+          source,content:saved,outputs:[source],requireComplete:false,
+        }).master;
+        if(selected?.approved_attempt_id!==attempt.id||
+           selected?.file_id!==attempt.artifact_id||
+           selected?.version!==proposal.master.version)
+          throw new HttpError(503,"Creative master Airtable readback mismatch");
+        return {content_item_id:contentId,key:proposal.master.key,
+          version:proposal.master.version,file_id:proposal.master.file_id,
+          already_registered:!proposal.changed};
+      });
+    },
+    // Propagation is fenced per sibling by the SAME output approval lock used
+    // by Factory. The registry is re-read for every output before adoption.
+    propagateApprovedCreativeMaster:async({source_output_id,content_item_id,
+      master_key,master_version,master_file_id})=>{
+      const table="tblwzN9AXWvmKVKPs";
+      const content=await airtableFetch(env,table,content_item_id);
+      const raw=content?.fields?.[MASTER_FIELD];
+      let registry;
+      try{registry=JSON.parse(raw||"")}catch{
+        throw new HttpError(409,"Approved creative master registry unavailable");
+      }
+      const master=registry?.masters?.[master_key];
+      if(!master||master.source_output_id!==source_output_id||
+        master.version!==master_version||master.file_id!==master_file_id)
+        throw new HttpError(409,"Creative master changed during source handoff");
+      return propagateApprovedCreativeMaster({
+        source_output_id,content_item_id,master,
+        operations:{
+          readContent:id=>airtableFetch(env,table,id),
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+          withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+          patchOutput:(id,fields)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id,{
+            method:"PATCH",skipSupabaseWriteThrough:true,
+            body:JSON.stringify({fields,typecast:false}),
+          }),
+          syncOutput:row=>reviewFactorySyncOutput(env,row,"creative-master-fanout"),
+        },
+      });
+    },
     syncOutput:row=>reviewFactorySyncOutput(env,row,"render-review-factory-handoff"),
   };
 }
@@ -656,6 +723,7 @@ import {
   watchIdeaPhotosRoute,
   matchIdeaPhotosRoute,
   proposeScriptedShortRoute,
+  reviseScriptedShortRoute,
   acceptScriptedShortRoute,
   planVibeCutRoute,
   anotherVibeCutRoute,
@@ -863,6 +931,7 @@ export default {
       const isIdeaProductionRequestRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/production-request$/.test(url.pathname);
       const isIdeaGenerateRoute = url.pathname === "/api/ideas/generate";
       const isScriptedShortProposeRoute = url.pathname === "/api/scripted-short/propose";
+      const isScriptedShortReviseRoute = url.pathname === "/api/scripted-short/revise";
       const isScriptedShortAcceptRoute = url.pathname === "/api/scripted-short/accept";
       const isIdeaGenerateStatusRoute = /^\/api\/ideas\/generate\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isProductionRequestRecordRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+$/.test(url.pathname);
@@ -1000,6 +1069,7 @@ export default {
       const isIdeaCreateRoute = url.pathname === "/api/ideas" && request.method === "POST";
       const isIdeaGenerateWrite = isIdeaGenerateRoute && request.method === "POST";
       const isScriptedShortProposeWrite = isScriptedShortProposeRoute && request.method === "POST";
+      const isScriptedShortReviseWrite = isScriptedShortReviseRoute && request.method === "POST";
       const isScriptedShortAcceptWrite = isScriptedShortAcceptRoute && request.method === "POST";
       const isIdeaEditRoute = isIdeaRecordRoute && request.method === "PATCH";
       const isIdeaDeleteRoute = isIdeaRecordRoute && request.method === "DELETE";
@@ -1085,6 +1155,7 @@ export default {
         isIdeaCreateRoute ||
         isIdeaGenerateWrite ||
         isScriptedShortProposeWrite ||
+        isScriptedShortReviseWrite ||
         isScriptedShortAcceptWrite ||
         isIdeaEditRoute ||
         isIdeaDeleteRoute ||
@@ -1207,7 +1278,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.708-vibe-cut-video-ideas" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
+          version: "0.10.714-insights-connection-status-clarity" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
@@ -2354,11 +2425,11 @@ export default {
 
       if (isAiApiRoute) {
         requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
-        if (request.method === "GET") return getStudioAiApiStatus(request, env);
+        if (request.method === "GET") return await getStudioAiApiStatus(request, env);
         if (request.method === "PATCH") {
           requirePermission(authorization, "tenant_admin");
           assertWriteRequest(request, env);
-          return patchStudioAiApiPreference(request, env);
+          return await patchStudioAiApiPreference(request, env);
         }
         throw new HttpError(405, "Method not allowed");
       }
@@ -2445,7 +2516,7 @@ export default {
 
       if (isOperationsRoute) {
         requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
-        return getStudioOperations(request, env, authorization);
+        return await getStudioOperations(request, env, authorization);
       }
 
       if (isOperationsProfilesListRoute) {
@@ -3075,7 +3146,7 @@ export default {
         if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
         assertWriteRequest(request, env);
         requirePermission(authorization, "ideas_create");
-        return startStudioIdeaGeneration(request, env, authorization, ctx);
+        return await startStudioIdeaGeneration(request, env, authorization, ctx);
       }
 
       if (isScriptedShortProposeRoute) {
@@ -3083,6 +3154,13 @@ export default {
         assertWriteRequest(request, env);
         requirePermission(authorization, "ideas_create");
         return await proposeScriptedShortRoute(request, env, authorization, url);
+      }
+
+      if (isScriptedShortReviseRoute) {
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "ideas_create");
+        return await reviseScriptedShortRoute(request, env, authorization, url);
       }
 
       if (isScriptedShortAcceptRoute) {
@@ -3094,7 +3172,7 @@ export default {
       }
 
       if (isIdeaGenerateStatusRoute) {
-        return studioIdeaGenerationStatus(request, env, url, authorization);
+        return await studioIdeaGenerationStatus(request, env, url, authorization);
       }
 
       if (url.pathname === "/api/ideas") {
@@ -3484,8 +3562,27 @@ export default {
         const o=makeReviewFactoryHandoffOperations(env,{
           authorizedProfileIds:profiles.map(p=>p.id),globalReview,
         });
-        if(await o.readSession(outputId)){
+        const sourceSession=await o.readSession(outputId);
+        if(sourceSession){
           requirePermission(authorization,"outputs_review");
+          if(outputId===MICHIGAN_V2.source_output_id){
+            const raw=await o.readRawOutput(outputId);
+            const profile=(await o.readNormalizedOutput(outputId)).profile_id;
+            const selected=factorySelectedReviewAttempt({
+              session:sourceSession,row:raw,profile,outputId,
+            });
+            if(selected?.id===MICHIGAN_V2.attempt_id&&
+               selected.artifact_id===MICHIGAN_V2.file_id){
+              // One verified private preview cache for all compatible outputs.
+              // Neither this copy nor serving it changes Airtable or publishes.
+              await ensureMichiganV2CachedPreview({
+                env,sourceOutputId:outputId,attemptId:selected.id,
+                fetchVerifiedVideo:(id,attemptId,probe)=>fetchTrustedRunnerReviewMedia({
+                  env,outputId:id,attemptId,request:probe,
+                }),
+              });
+            }
+          }
           const live=await o.readNormalizedOutput(outputId);
           if(live?.id!==outputId||
              !profiles.some(p=>p.id===live.profile_id)||
@@ -3642,9 +3739,9 @@ export default {
       if (url.pathname === "/api/library") {
         if (request.method === "POST") {
           assertUploadWriteRequest(request, env);
-          return uploadAssetLibraryItems(request, env, authorization, ctx);
+          return await uploadAssetLibraryItems(request, env, authorization, ctx);
         }
-        return listAssetLibrary(request, env, url, authorization);
+        return await listAssetLibrary(request, env, url, authorization);
       }
 
       return respond(request, env, { ok: false, error: "Not found" }, 404);
@@ -6017,6 +6114,7 @@ const STUDIO_TRISTATE = new Set(["Use Profile Default", "Yes", "No"]);
 /*__STUDIO_WORKER_EXTRACT:pulseIdeaTimedScriptWriter__*/
 /*__STUDIO_WORKER_EXTRACT:scriptedShortUnassignedMessage__*/
 /*__STUDIO_WORKER_EXTRACT:proposeScriptedShortRoute__*/
+/*__STUDIO_WORKER_EXTRACT:reviseScriptedShortRoute__*/
 /*__STUDIO_WORKER_EXTRACT:acceptScriptedShortRoute__*/
 /*__STUDIO_WORKER_EXTRACT:feedPostNotesWithoutTimeline__*/
 /*__STUDIO_WORKER_EXTRACT:acceptSingleImageFeedPost__*/

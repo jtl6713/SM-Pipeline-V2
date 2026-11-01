@@ -5,6 +5,7 @@
     desk: null,
     expandedReviewGroup: null,
     needsEyesPage: 0,
+    needsEyesSearch: "",
     pendingFactoryFeedback: null,
     selectedOutputs: new Set(),
     submittingBatch: false,
@@ -30,6 +31,19 @@
   const FACTORY_LAST_BATCH_KEY = "studio.factory.last-batch.v1";
   const FACTORY_PENDING_REQUEST_KEY = "studio.factory.pending-approval-request.v1";
   const FACTORY_ACCEPTED_OUTPUTS_KEY = "studio.factory.accepted-output-ids.v1";
+  // Reuse the one global missing-asset image; do not borrow another profile's media.
+  const NEEDS_ASSET_THUMB = "/assets/needs-asset.svg";
+  document.addEventListener("error", (event) => {
+    const image = event.target;
+    if (!(image instanceof HTMLImageElement) ||
+        !image.matches("#page-factory .factory-line-thumb img") ||
+        image.getAttribute("src") === NEEDS_ASSET_THUMB) return;
+    image.src = NEEDS_ASSET_THUMB;
+    image.alt = "NEEDS ASSET";
+    const label = image.closest(".factory-output-visual")?.querySelector(".factory-output-visual-label");
+    if (label) label.textContent = "Needs asset";
+  }, true);
+
   // A successful accept must remain visible even if the Desk still has an old
   // Ready-for-Review snapshot. This is a UX fence; R2 claims are authoritative.
   function recentFactoryAccepted() {
@@ -154,6 +168,9 @@
   function canReviewActions(card, { pile = false, candidate = false } = {}) {
     if (pile || candidate || state.submittingOutputIds?.has(card?.id) || recentFactoryAccepted()[String(card?.id || "")]) return false;
     if (card?.kind !== "output") return false;
+    // Held revisions must be discoverable and previewable, never approvable
+    // from Factory until their separate review and QA handoff completes.
+    if (card.review_hold_active === true || card.do_not_publish === true) return false;
     // studio_state can paint Ready for Review while Output_Status is still
     // In Production. Approve all must only claim Airtable-ready rows.
     const output = String(card.output_status || "").trim().toLowerCase();
@@ -327,6 +344,25 @@
     const option = [...($("factoryProfileFilter")?.options || [])].find(row => row.value === id);
     return option?.textContent?.trim() || "City profile";
   }
+  // Make the Factory-specific scope visible beside the review queue.
+  // Explicit Needs eyes search currently spans all city profiles.
+  function renderFactoryProfileFilterNotice() {
+    const notice = $("factoryActiveProfileFilter");
+    if (!notice) return;
+    const id = factoryProfileId();
+    notice.hidden = !id;
+    if (!id) return;
+    const label = factoryProfileLabel(id);
+    const searchingAll = Boolean(String(state.needsEyesSearch || "").trim());
+    const scope = $("factoryActiveProfileScope");
+    if (scope) scope.textContent = searchingAll
+      ? `Searching all profiles (Factory filter: ${label})`
+      : `Showing ${label} only`;
+    const context = $("factoryActiveProfileContext");
+    if (context) context.textContent = searchingAll
+      ? "Search temporarily includes all profiles; clearing search restores this profile filter."
+      : "Other profiles are hidden from Factory queues.";
+  }
   function syncFactoryFilterOptions() {
     const select = $("factoryProfileFilter");
     if (!select) return;
@@ -345,6 +381,7 @@
       [...profiles.entries()].sort((a, b) => a[1].localeCompare(b[1]))
         .map(([id, name]) => `<option value="${esc(id)}">${esc(name)}</option>`).join("");
     select.value = profiles.has(prior) ? prior : "";
+    renderFactoryProfileFilterNotice();
   }
   function factoryMatchesProfile(card) {
     return !factoryProfileId() || String(card?.profile_id || "") === factoryProfileId();
@@ -1008,6 +1045,34 @@
     }
   }
 
+  // A Needs Eyes card is not necessarily authorized for batch approval.
+  // Always show the selection control and explain the policy/readiness outcome
+  // instead of silently omitting the checkbox while leaving Approve active.
+  function factoryBatchSelectionReason(card) {
+    if (card?.kind !== "output") return "Only platform outputs can be batch approved.";
+    if (recentFactoryAccepted()[String(card?.id || "")]) return "Already accepted for approval. Refresh Activity to verify the result.";
+    if (state.submittingOutputIds?.has(card?.id)) return "Approval is already being submitted. Check Activity.";
+    if (card?.review_hold_active === true) return "Review-held revision: complete QA handoff before approval.";
+    if (card?.do_not_publish === true) return "Publishing hold is active for this output.";
+    const render = String(card?.render_status || "").trim().toLowerCase();
+    if (/^(failed|blocked)$/.test(render)) return `Render status is ${card.render_status}. Repair the render before approval.`;
+    if (/ready for render|waiting in render queue|^rendering$/.test(render)) return "Render is still queued or running; wait for completion.";
+    const output = String(card?.output_status || "").trim().toLowerCase();
+    if (["in production", "rendering", "ready for render", "failed", "blocked"].includes(output)) {
+      return `Airtable Output Status is ${card.output_status}; not yet approved for review.`;
+    }
+    if (!canReviewActions(card)) return "Not yet review-ready according to the authoritative output/review status.";
+    if (state.batchApprovalsEnabled === false) return "Batch approvals are disabled by the server; individual approval is available.";
+    if (canSelectBatchOutput(card)) return "";
+    if (state.batchGlobal?.enabled) {
+      const platform = String(card?.platform || "").trim();
+      const allowed = state.batchGlobal.allowed_platforms || [];
+      if (!allowed.includes(platform)) return `${platform || "This platform"} is not enabled for batch approval; use individual Approve.`;
+      return `${String(card?.studio_output_type || card?.format || "This output type").trim()} is outside the server-authorized ${platform} batch formats; use individual Approve.`;
+    }
+    return "This profile or output type is outside the current batch rollout; use individual Approve.";
+  }
+
   function renderCard(card, { pile = false, candidate = false, lane = "" } = {}) {
     const actions = [];
     actions.push(`<button type="button" class="text-button" data-factory-open="${esc(card.id)}">Open</button>`);
@@ -1019,27 +1084,49 @@
     if (canPreview(card) && (lane === "needs_eyes" || canReviewActions(card, { pile, candidate }) || lane === "auto_high" || lane === "manual")) {
       actions.push(`<button type="button" class="secondary-button" data-factory-preview="${esc(card.id)}">Preview</button>`);
     }
-    if (card.kind === "output" && (canReviewActions(card, { pile, candidate }) || lane === "needs_eyes")) {
-      actions.push(`<button type="button" class="primary-button" data-factory-approve="${esc(card.id)}">Approve</button>`);
+    const reviewAllowed = canReviewActions(card, { pile, candidate });
+    const needsEyesOutput = lane === "needs_eyes" && card.kind === "output";
+    const batchReason = needsEyesOutput ? factoryBatchSelectionReason(card) : "";
+    const reasonId = batchReason ? `factory-batch-reason-${card.id}` : "";
+    if (card.kind === "output" && (reviewAllowed || needsEyesOutput)) {
+      // A stale review badge/held revision must never present a live Approve
+      // action merely because the server grouped the row under Needs Eyes.
+      actions.push(`<button type="button" class="primary-button" data-factory-approve="${esc(card.id)}" ${reviewAllowed ? "" : `disabled title="${esc(batchReason || "Not yet eligible for approval")}"`}>Approve</button>`);
       actions.push(`<button type="button" class="secondary-button" data-factory-send-back="${esc(card.id)}">Request Changes</button>`);
     }
     if (canDelete(card, { candidate })) {
       actions.push(`<button type="button" class="secondary-button factory-delete" data-factory-delete="${esc(card.id)}">Delete</button>`);
     }
     const thumb = String(card.thumbnail_url || "").trim();
+    const hasSharedCover = Boolean(needsEyesOutput && card.content_item_id && thumb.includes(
+      "/studio/previews/thumbnails/" + String(card.content_item_id) + "/"));
+    const outputLabel = card.output_id ? "Output #" + card.output_id : "this output";
+    const thumbImage = thumb
+      ? `<img src="${esc(thumb)}" alt="" loading="lazy" decoding="async">`
+      : `<img src="/assets/needs-asset.svg" alt="NEEDS ASSET" loading="lazy">`;
     const media = canPreview(card)
-      ? `<button type="button" class="factory-line-thumb" data-factory-preview="${esc(card.id)}" aria-label="Preview ${esc(cardLabel(card))}">
-          ${thumb ? `<img src="${esc(thumb)}" alt="" loading="lazy">` : `<span class="factory-line-play">▶</span>`}
+      ? `<button type="button" class="factory-line-thumb" data-factory-preview="${esc(card.id)}" aria-label="Preview ${esc(outputLabel)}: ${esc(cardLabel(card))}" title="Preview ${esc(outputLabel)}">
+          ${thumbImage}
         </button>`
-      : `<span class="factory-line-thumb factory-line-thumb-empty" aria-hidden="true"></span>`;
+      : `<span class="factory-line-thumb factory-line-thumb-empty" role="img" aria-label="NEEDS ASSET">${thumbImage}</span>`;
+    // The preview button opens the exact Platform Output. A cover sourced from
+    // the Content Item is not an output-specific video frame: label it honestly.
+    const outputVisual = needsEyesOutput
+      ? `<span class="factory-output-visual">${media}<small class="factory-output-visual-label">${hasSharedCover ? "Shared cover" : (thumb ? "Output image" : "Needs asset")}</small></span>`
+      : media;
     const alert = card.stuck_kind || card.produce_error || "";
     const stateLabel = card.studio_state || (alert ? "Needs repair" : "—");
     const cell = (value) => `<span class="factory-line-cell">${esc(value || "—")}</span>`;
     return `<div class="factory-line" data-factory-id="${esc(card.id)}" data-factory-kind="${esc(card.kind || "")}" data-lane="${esc(lane)}" title="${esc(cardLabel(card))}">
-      ${lane === "needs_eyes" && card.kind === "output" && canReviewActions(card) && canSelectBatchOutput(card)
-        ? `<span class="factory-media-select"><input type="checkbox" data-factory-select-output="${esc(card.id)}" aria-label="Select ${esc(cardLabel(card))}" ${state.selectedOutputs.has(card.id) ? "checked" : ""}>${media}</span>`
+      ${needsEyesOutput
+        ? `<span class="factory-media-select"><label class="factory-output-select" title="${esc(batchReason || "Select for batch approval")}"><input type="checkbox" data-factory-select-output="${esc(card.id)}" aria-label="${esc(batchReason ? `Batch selection unavailable for ${cardLabel(card)}` : `Select ${cardLabel(card)}`)}" ${reasonId ? `aria-describedby="${esc(reasonId)}"` : ""} ${batchReason ? "disabled" : (state.selectedOutputs.has(card.id) ? "checked" : "")}></label></span>`
         : media}
-      <span class="factory-line-title">${esc(card.title || cardLabel(card))}${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}</span>
+      <span class="factory-line-title">
+        ${needsEyesOutput
+          ? `<span class="factory-output-heading">${outputVisual}<span class="factory-output-title-copy"><span class="factory-output-title-name">${esc(card.title || cardLabel(card))}</span>${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}</span></span>`
+          : `${esc(card.title || cardLabel(card))}${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}`}
+        ${needsEyesOutput && batchReason ? `<span id="${esc(reasonId)}" class="factory-batch-unavailable" role="status"><strong>Approval unavailable:</strong> ${esc(batchReason)}</span>` : ""}
+      </span>
       ${cell(card.profile_name)}
       ${cell(card.platform)}
       ${cell(card.studio_output_type)}
@@ -1074,6 +1161,17 @@
       index.get(key).cards.push(card);
     }
     return groups;
+  }
+
+  function reviewGroupMatchesSearch(group, raw) {
+    const terms = String(raw || "").toLowerCase().replace(/[#]/g,"").match(/[a-z0-9]+/g) || [];
+    const meaningful = terms.filter(word => !["content","output","items","review","video"].includes(word) && (word.length >= 5 || /^[0-9]{3,}$/.test(word)));
+    if (!meaningful.length) return !terms.length;
+    const haystack = (group.cards || []).map(card=> [
+      card.title,card.content_id,card.output_id,card.content_item_id,
+      card.platform,card.studio_output_type,
+    ].filter(Boolean).join(" ")).join(" ").toLowerCase();
+    return meaningful.every(term => haystack.includes(term));
   }
 
   function readyContentCards(group) {
@@ -1152,7 +1250,8 @@
   function renderContentBar(group, expanded) {
     const ready = readyContentCards(group);
     const pending = pendingSiblingOutputsForGroup(group);
-    const pendingLabel = pendingSiblingMeta(pending);
+    const heldRevisions = (group.cards || []).filter(card => card.review_hold_active === true);
+    const pendingLabel = heldRevisions.length ? "Review-held V2 — preview only" : pendingSiblingMeta(pending);
     const first = group.cards[0] || {};
     const contentId = String(first.content_id || "").trim();
     const title = first.title || "Untitled";
@@ -1162,8 +1261,8 @@
     if (pendingLabel) bits.push(pendingLabel);
     const meta = bits.join(" · ");
     const approveAll = ready.length > 1
-      ? (pending.length
-        ? `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}" disabled title="Wait until sibling Stories finish rendering, then Approve all together">${esc(`Approve all (${ready.length}) — wait for Stories`)}</button>`
+      ? (pending.length || heldRevisions.length
+        ? `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}" disabled title="${heldRevisions.length ? "Review-held V2 is not yet eligible for publishing" : "Wait until sibling Stories finish rendering, then Approve all together"}">${esc(`Approve all (${ready.length}) — ${heldRevisions.length ? "review held" : "wait for Stories"}`)}</button>`
         : `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}">Approve all (${ready.length})</button>`)
       : "";
     const batchReady = ready.filter(canSelectBatchOutput);
@@ -1171,7 +1270,7 @@
     const selectContent = `<label class="factory-content-batch-select">
       <input type="checkbox" data-factory-select-content="${esc(group.key)}"
         aria-label="Select all review-ready outputs for ${esc(title)}"
-        ${contentSelected ? "checked" : ""} ${(!batchReady.length || pending.length) ? "disabled" : ""}>
+        ${contentSelected ? "checked" : ""} ${(!batchReady.length || pending.length || heldRevisions.length) ? "disabled" : ""}>
       Select eligible outputs</label>`;
     return `<div class="factory-content-bar" data-factory-content="${esc(group.key)}">
       ${selectContent}
@@ -1192,7 +1291,13 @@
       return;
     }
     if (options.groupContent) {
-      const groups = groupByContent(cards);
+      const allGroups = groupByContent(cards);
+      const search = String(state.needsEyesSearch || "").trim();
+      const groups = search ? allGroups.filter(group => reviewGroupMatchesSearch(group,search)) : allGroups;
+      if (!groups.length) {
+        node.innerHTML = '<p class="subtle factory-lane-empty">No matching review content. Try Michigan, 1869 or 9593.</p>';
+        return;
+      }
       const FACTORY_REVIEW_GROUPS_PER_PAGE = 12;
       // Bound the iPad DOM: rendering hundreds of off-screen accordions made
       // Safari show one row followed by a large apparently empty review list.
@@ -1205,7 +1310,7 @@
       if (state.expandedReviewGroup !== "" && !pageGroups.some((group) => group.key === state.expandedReviewGroup)) {
         state.expandedReviewGroup = pageGroups[0]?.key || null;
       }
-      const pageLabel = `Showing ${start + 1}–${start + pageGroups.length} of ${groups.length} content items · ${cards.length} outputs in queue`;
+      const pageLabel = `Showing ${start + 1}–${start + pageGroups.length} of ${groups.length} ${search ? "matching" : ""} content items · ${cards.length} outputs in queue`;
       const pager = `<nav class="factory-review-pagination" aria-label="Needs eyes queue pages">
         <span class="factory-review-page-count">${esc(pageLabel)}</span>
         <span class="factory-review-page-actions">
@@ -1391,7 +1496,7 @@
       setStatus("Review notes window is unavailable. Refresh Studio before sending back.", true);
       return;
     }
-    state.pendingFactoryFeedback = { payload, focusedElement: document.activeElement, matches: [] };
+    state.pendingFactoryFeedback = { payload, title: title || "Production change request", focusedElement: document.activeElement, matches: [] };
     void loadFactoryCorrectionMatches(state.pendingFactoryFeedback);
     const heading = $("factoryFeedbackTarget");
     const detail = $("factoryFeedbackScope");
@@ -1459,6 +1564,11 @@
     const submit = $("factoryFeedbackSubmit");
     if (submit) { submit.disabled = true; submit.textContent = "Sending back…"; }
     if (error) { error.hidden = true; error.textContent = ""; }
+    const tracked = pending.payload?.action === "request_changes_content";
+    const trackingRequestId = String(pending.payload?.production_request_id || "").trim();
+    if (tracked) window.StudioFactoryProducerProgress?.begin({
+      requestId: trackingRequestId, title: pending.title,
+    });
     try {
       closeFactoryPreview();
       const applyAll = $("factoryFeedbackApplyAll");
@@ -1489,6 +1599,9 @@
         }),
       } : await mutateDesk({ ...pending.payload, note: notes });
       const requestId = String(desk?.result?.production_request_id || pending.payload.production_request_id || "").trim();
+      if (tracked) window.StudioFactoryProducerProgress?.accept({
+        requestId, title: pending.title, result: desk?.result,
+      });
       if (matching && (desk?.result?.status !== "accepted" ||
           !desk?.result?.outputs || typeof desk.result.outputs !== "object")) {
         throw new Error("Selected outputs were not all placed on verified review holds. Check correction status before retrying.");
@@ -1531,6 +1644,9 @@
         setStatus("Review notes saved. Open the returned item in Production for changes.");
       }
     } catch (err) {
+      if (tracked) window.StudioFactoryProducerProgress?.uncertain({
+        requestId: trackingRequestId, title: pending.title, message: err?.message || String(err),
+      });
       if (submit) { submit.disabled = false; submit.textContent = ["return_to_review","start_render_review"].includes(pending.payload?.action) ? "Send to Rendering Review" : pending.payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
       if (error) { error.hidden = false; error.textContent = String(err?.message || err); }
       setStatus("Could not send back: " + (err?.message || err), true);
@@ -1663,7 +1779,7 @@
         const group = checkbox.closest(".factory-content-rows")?.previousElementSibling;
         const groupBox = group?.querySelector("[data-factory-select-content]");
         if (groupBox) {
-          const ids = [...checkbox.closest(".factory-content-rows").querySelectorAll("[data-factory-select-output]")];
+          const ids = [...checkbox.closest(".factory-content-rows").querySelectorAll("[data-factory-select-output]:not(:disabled)")];
           groupBox.checked = ids.length > 0 && ids.every((input) => input.checked);
           groupBox.indeterminate = ids.some((input) => input.checked) && !groupBox.checked;
         }
@@ -1680,7 +1796,7 @@
         saveFactorySelection();
         updateFactoryBatchToolbar();
         const rows = checkbox.closest(".factory-content-bar")?.nextElementSibling;
-        rows?.querySelectorAll("[data-factory-select-output]").forEach((input) => { input.checked = checkbox.checked; });
+        rows?.querySelectorAll("[data-factory-select-output]:not(:disabled)").forEach((input) => { input.checked = checkbox.checked; });
         checkbox.indeterminate = false;
       });
     });
@@ -1803,7 +1919,12 @@
     state.desk = desk;
     syncFactoryFilterOptions();
     const hiddenApprovals = new Set([...Object.keys(recentFactoryAccepted()), ...(state.submittingOutputIds || [])]);
-    const filtered = (cards) => (cards || []).filter(card => factoryMatchesProfile(card) && !(card?.kind === "output" && hiddenApprovals.has(card.id)));
+    const searching = Boolean(String(state.needsEyesSearch || "").trim());
+    // An explicit search should find reviewable items across profiles and should
+    // not silently conceal records due to a stale browser-only acceptance fence.
+    const filtered = (cards) => (cards || []).filter(card =>
+      (searching || factoryMatchesProfile(card)) &&
+      !(card?.kind === "output" && hiddenApprovals.has(card.id) && !searching));
     const visibleDesk = { ...desk, lanes: { ...desk.lanes,
       needs_eyes: (desk.lanes?.needs_eyes || []).filter(card => !hiddenApprovals.has(card.id)) } };
     // Global counts come from the authoritative Desk summary. With a Factory
@@ -1898,6 +2019,10 @@
     }
     const cards = (state.desk?.lanes?.needs_eyes || []).filter((card) => contentGroupKey(card) === key);
     const ready = readyContentCards({ cards });
+    if (cards.some(card => card.review_hold_active === true)) {
+      setStatus("This content has a protected V2 review hold. Preview it first; Factory cannot approve this group.", true);
+      return;
+    }
     if (ready.length < 2) {
       setStatus("This content does not have multiple outputs waiting for approval.", true);
       return;
@@ -2010,6 +2135,9 @@
   }
 
   async function loadFactoryDesk(force = false) {
+    // Producer progress lives in its own durable panel, not the disposable
+    // Factory Desk status line. Refresh both independently.
+    window.StudioFactoryProducerProgress?.refresh(true).catch(() => {});
     // One authoritative Desk snapshot at a time, including forced refreshes.
     if (state.loading) return state.desk;
     state.loading = true;
@@ -2122,16 +2250,42 @@
       childList: true, subtree: true, characterData: true,
     });
   }
-  $("factoryProfileFilter")?.addEventListener("change", () => {
+  function applyFactoryProfileScopeChange() {
     state.completedOpen = false;
     state.completedBatch = null;
     state.completedOffset = 0;
     state.inspectedBatchKey = "";
     if (state.desk) renderDesk(state.desk);
+    else renderFactoryProfileFilterNotice();
     refreshFactoryBatchActivity(true).catch(() => {});
     window.StudioFactoryBatchQuality?.refresh?.(true);
+  }
+  $("factoryProfileFilter")?.addEventListener("change", () => {
+    applyFactoryProfileScopeChange();
+  });
+  $("factoryClearProfileFilter")?.addEventListener("click", () => {
+    const select = $("factoryProfileFilter");
+    if (!select || !select.value) return;
+    select.value = "";
+    applyFactoryProfileScopeChange();
+    select.focus?.();
   });
   // Studio profile changes must not alter global Factory monitoring.
+  $("factoryNeedsEyesSearch")?.addEventListener("input", (event) => {
+    state.needsEyesSearch = String(event.target.value || "").slice(0,120);
+    state.needsEyesPage = 0;
+    state.expandedReviewGroup = null;
+    if (state.needsEyesSearch.trim()) {
+      const body=$("factoryBandBodyNeedsEyes");
+      const band=body?.closest(".factory-band");
+      band?.classList.remove("is-collapsed");
+      band?.querySelector("[data-factory-band-toggle]")?.setAttribute("aria-expanded","true");
+      const chevron=band?.querySelector(".factory-band-chevron");
+      if(chevron) chevron.textContent="▾";
+    }
+    if (state.desk) renderDesk(state.desk);
+    else renderFactoryProfileFilterNotice();
+  });
   $("factoryDeskRefresh")?.addEventListener("click", () => {
     loadFactoryDesk(true).catch(() => {});
   });

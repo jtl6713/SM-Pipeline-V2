@@ -43,6 +43,14 @@ const isDispatching = o => Boolean(o?.publish_started_at || o?.publish_locked_at
   o?.irreversible_dispatch_started);
 const humanIntent = v => v === "explicit_button" || v === "explicit_go_ahead";
 const current = s => s.attempts.find(a => a.id === s.current_attempt_id);
+// Conversation is not a rejection of a completed V2. Keep it reviewable until
+// an actual edit plan/commit supersedes it; V1 feedback still starts discussion.
+const currentV2ReadyForReview = s =>
+  s.state === "ready_for_review" &&
+  s.review_hold?.active === true &&
+  current(s)?.number > 1 &&
+  current(s)?.status === "ready_for_review" &&
+  Boolean(text(current(s)?.artifact_id));
 // A review scope is always constructed server-side from authenticated profile
 // membership and persisted output mappings. '*' removes a format allowlist,
 // NOT the profile check or the existing publication/render safety checks.
@@ -173,7 +181,7 @@ export function applyReviewEvent(session, event) {
         s.state="discussing";
       }
     }
-    if (s.state === "ready_for_review") s.state = "discussing";
+    if (s.state === "ready_for_review" && !currentV2ReadyForReview(s)) s.state = "discussing";
     // Messages during rendering are feedback for the NEXT attempt, never job mutation.
   } else if (kind === "PRODUCER_CANDIDATE") {
     // This event is authorized ONLY by the trusted Worker after its model
@@ -211,7 +219,10 @@ export function applyReviewEvent(session, event) {
     // conditional 'render when uploaded' authorization.
     s.plan=null;
     s.pending_authorization=null;
-    s.state="discussing";
+    // A later chat or suggestion must not hide a completed, current V2 or
+    // prevent its human review/creative acceptance. New plan events may still
+    // replace that state through the normal protected flow.
+    if (!currentV2ReadyForReview(s)) s.state="discussing";
   } else if (kind === "PROPOSE_PLAN") {
     if(s.producer_candidate?.stale)
       fail("STALE_PRODUCER_CANDIDATE","Refresh the Producer proposal after new creative feedback");

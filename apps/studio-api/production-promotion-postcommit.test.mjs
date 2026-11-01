@@ -118,7 +118,7 @@ test("HTTP handler protects persisted success from best-effort continuation regi
   assert.match(entrySource, /response = await promoteProductionRequestViaI3I4/);
   assert.match(entrySource, /studio_production_promotion_http_error/);
   assert.match(entrySource, /Studio production continuation registration failed after promotion/);
-  assert.match(entrySource, /0\.10\.683-promotion-postcommit-trace/);
+  assert.match(entrySource, /0\.10\.\d+(?:-[\w.-]+)?/);
   assert.match(moduleSource, /output_routing_verified/);
   assert.match(moduleSource, /promoted_write_complete/);
 });

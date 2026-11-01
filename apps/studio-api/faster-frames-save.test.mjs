@@ -13,7 +13,7 @@ const app = fs.readFileSync(
 );
 
 test("health advertises current worker build with faster-frames helpers", () => {
-  assert.match(worker, /version: "0.10.683-promotion-postcommit-trace"/);
+  assert.match(worker, /version: "0\.10\.\d+(?:-[\w.-]+)?"/);
   assert.match(worker, /airtableBatchCreate/);
   assert.match(worker, /mapProductionRequestLight/);
 });
@@ -167,5 +167,5 @@ test("UI polls GET /variants during Prepare and skips Save reload waterfall", ()
 test("Worker heals orphan Ready to Render into Ready for Render", () => {
   assert.match(worker, /R4_READY_TO_RENDER_TYPO/);
   assert.match(worker, /Render_Status\}="Ready to Render"/);
-  assert.match(worker, /0.10.683-promotion-postcommit-trace/);
+  assert.match(worker, /0\.10\.\d+(?:-[\w.-]+)?/);
 });

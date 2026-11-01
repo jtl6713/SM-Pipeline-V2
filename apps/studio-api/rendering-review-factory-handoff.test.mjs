@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {handoffApprovedReviewToFactory} from "./rendering-review-factory-handoff.mjs";
 import {classifyFactoryLane} from "./factory-desk.mjs";
 import {renderingReviewHoldPresent} from "./rendering-review-publication-hold.mjs";
+import {nextApprovedCreativeMaster,MASTER_FIELD} from "./creative-master-registry.mjs";
 
 const id="rec0uVrVeiUM6shp9",chicago="recT2rbKX3MF7cVFU";
 const v1="1XZ-_ARlXoP5mwILho13f81vmWQlpgTs4";
@@ -30,7 +31,10 @@ function fixture(){
  };
  let raw={id,fields:{
   Platform:"Instagram",Platform_Output_Type:"Instagram Reel",
+  Content_Item:["recA1B2C3D4E5F6G7"],
+  Format:"Vertical Short Video",Aspect_Ratio:"9:16",
   Render_Status:"Rendered",Final_File_ID:v1,Final_File_URL:url(v1),
+   Render_Server_URL:"https://render.chicagoshining.com/out/old-source.mp4",
   Output_URL:url(v1),Auto_Publish_Enabled:true,Do_Not_Publish:true,
   Studio_Render_Review_Hold_Active:true,
   Studio_Render_Review_Hold_ID:holdId,
@@ -51,7 +55,10 @@ function fixture(){
    watermark_profile_id:chicago,watermark_frame_sample_count:3
   })
  }};
- let writes=0,saves=0,syncs=0,failStep="";
+ let writes=0,saves=0,syncs=0,masterWrites=0,fanoutCalls=0,failStep="";
+ let content={id:"recA1B2C3D4E5F6G7",fields:{
+   Content_Type:"Vertical Short Video","Platform Outputs":[id],
+ }};
  const ops={
   withOutputLock:async (out,cb)=>{assert.equal(out,id);return cb()},
   readRawOutput:async()=>c(raw),
@@ -59,6 +66,26 @@ function fixture(){
    platform:raw.fields.Platform,output_type:raw.fields.Platform_Output_Type}),
   readSession:async()=>c(session),readAttempt:async()=>c(independent),
   readField:(record,key)=>record.fields[key],
+  recordApprovedCreativeMaster:async({source,session:live,attempt,evidence,at})=>{
+    const m=nextApprovedCreativeMaster({source,content,session:live,attempt,evidence,at});
+    if(m.changed){
+      content.fields[MASTER_FIELD]=JSON.stringify(m.registry);masterWrites++;
+    }
+    return {key:m.master.key,version:m.master.version,
+      content_item_id:content.id,file_id:m.master.file_id};
+  },
+  propagateApprovedCreativeMaster:async({source_output_id,content_item_id,
+    master_key,master_version,master_file_id})=>{
+    if(failStep==="fanout")throw Error("simulated sibling propagation failure");
+    assert.equal(source_output_id,id);
+    assert.equal(content_item_id,content.id);
+    assert.equal(master_key,"vertical short video|9:16");
+    assert.equal(master_version,1);
+    assert.equal(master_file_id,v2);
+    fanoutCalls++;
+    return {source_output_id:id,content_item_id:content.id,
+      applied:0,already_current:0,deferred:0,results:[]};
+  },
   saveSessionIfVersion:async ({expected_version,next})=>{
    assert.equal(session.version,expected_version);
    if(failStep==="session")throw Error("simulated interrupted session save");
@@ -75,6 +102,8 @@ function fixture(){
  return {ops,env,independent,
   get raw(){return raw},get session(){return session},
   get writes(){return writes},get saves(){return saves},get syncs(){return syncs},
+  get content(){return content},get masterWrites(){return masterWrites},
+  get fanoutCalls(){return fanoutCalls},
   fail:step=>{failStep=step},
   handoff:()=>handoffApprovedReviewToFactory({output_id:id,env,operations:ops}),
  };
@@ -95,6 +124,7 @@ test("real #8447 V2 creative approval becomes Factory Needs Eyes, never schedule
  assert.equal(result.public_post_created,false);
  assert.equal(result.artifact_id,v2);
  assert.equal(f.raw.fields.Final_File_ID,v2);
+  assert.equal(f.raw.fields.Render_Server_URL,null);
  assert.equal(f.raw.fields.Final_File_URL,url(v2));
  assert.equal(f.raw.fields.Output_URL,url(v2));
  assert.equal(f.raw.fields.Do_Not_Publish,false);
@@ -117,6 +147,12 @@ test("real #8447 V2 creative approval becomes Factory Needs Eyes, never schedule
  assert.equal(f.session.factory_handoff.original_artifact_id,v1);
  assert.equal(f.session.factory_handoff.artifact_id,v2);
  assert.equal(f.session.version,13);
+ assert.equal(f.masterWrites,1);
+ assert.equal(JSON.parse(f.content.fields[MASTER_FIELD]).masters['vertical short video|9:16'].file_id,v2);
+ assert.equal(result.creative_master.linked_by_compatibility,true);
+ assert.equal(result.creative_master.sibling_publish_changes,0);
+ assert.equal(result.creative_master.siblings_updated,0);
+ assert.equal(f.fanoutCalls,1);
  assert.equal(f.writes,2);
  assert.equal(f.saves,1);
  assert.equal(f.syncs,1);
@@ -128,6 +164,7 @@ test("repeated handoff does not mutate output or duplicate review event",async()
  assert.equal(result.already_transferred,true);
  assert.equal(f.writes,priorWrites);
  assert.equal(f.saves,priorSaves);
+ assert.equal(f.masterWrites,1);
  assert.equal(f.session.version,13);
 });
 test("retry after asset selection interruption promotes only the original approved V2",async()=>{
@@ -210,6 +247,22 @@ test("wrong output denies and completed approval drains even if creative admissi
  });
  assert.equal(result.factory_ready,true);
  assert.equal(f.raw.fields.Do_Not_Publish,false);
+});
+
+test("failed sibling fanout keeps source hold and can resume without duplicating master",async()=>{
+  const f=fixture();
+  f.fail("fanout");
+  await assert.rejects(f.handoff(),/simulated sibling propagation failure/);
+  assert.equal(f.session.state,"approved");
+  assert.equal(f.session.review_hold.active,true);
+  assert.equal(f.raw.fields.Final_File_ID,v1);
+  assert.equal(f.raw.fields.Do_Not_Publish,true);
+  assert.equal(f.masterWrites,1);
+  f.fail("");
+  const result=await f.handoff();
+  assert.equal(result.factory_ready,true);
+  assert.equal(f.masterWrites,1);
+  assert.equal(f.fanoutCalls,1);
 });
 
 test("independently validated 16:9 Vibe Cut returns to Factory without enabling publication",async()=>{

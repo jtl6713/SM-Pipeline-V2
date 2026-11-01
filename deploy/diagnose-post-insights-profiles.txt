@@ -1,0 +1,2 @@
+Read-only Post Insights four-profile auth and service diagnostics, 2026-11-01. No credentials rotated, no publishing, no record mutations.
+Retry with existing encrypted credential envelope after direct AIRTABLE_PAT unavailable in Actions, 2026-11-01.

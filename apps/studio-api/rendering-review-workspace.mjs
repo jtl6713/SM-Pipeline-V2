@@ -5,6 +5,7 @@ import { reviewEnrollmentWriteEnabled } from './rendering-review-enrollment-http
 import { producerConversationWritesEnabled } from './rendering-review-producer-persist.mjs';
 import { renderAttemptCommitEnabled } from './rendering-review-attempt-outbox.mjs';
 import {reviewStillStoryboard} from './rendering-review-storyboard.mjs';
+import {projectCreativeMasterGroup,CREATIVE_MASTER_SIBLING_READ_FIELDS} from './creative-master-registry.mjs';
 
 const text=x=>String(x??'').trim();
 const rec=x=>/^rec[A-Za-z0-9]{14}$/.test(text(x));
@@ -50,7 +51,7 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
       limit:40,offset:cursor||null,
       filterFormula:'AND(OR({Final_File_ID}!="",{Final_File_URL}!=""),OR({Studio_Render_Review_Hold_Active}=TRUE(),{Studio_Render_Review_Hold_ID}!="",{Studio_Render_Review_Session_ID}!=""))',
       fields:['Content_Item','Platform','Platform_Output_Type','Render_Status',
-        'Final_File_ID','Final_File_URL','Output_Title','Output_ID','Output_Status',
+        'Final_File_ID','Final_File_URL','Thumbnail_URL','Output_Title','Output_ID','Output_Status',
         'Publish_Status','Published_At','Platform_Post_ID','Platform_Post_URL',
         'Platform_Media_ID','Publish_Started_At',
         'Publish_Locked_At','Publish_Locked_By','Do_Not_Publish',
@@ -113,6 +114,7 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
         output_number:f.Output_ID||null,title:text(f.Output_Title)||('Output '+(f.Output_ID||row.id)),
         render_status:text(f.Render_Status),final_file_id:text(f.Final_File_ID)||null,
         final_file_url:text(f.Final_File_URL)||null,
+        thumbnail_url:text(f.Thumbnail_URL)||null,
         review_held:held,dispatch_started:Boolean(f.Publish_Started_At||f.Publish_Locked_At||f.Publish_Locked_By),
         manual_admission_enabled:false,
       });
@@ -165,6 +167,31 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
     f[RENDER_REVIEW_OUTPUT_FIELDS.hold_id]===session.review_hold.id&&
     f[RENDER_REVIEW_OUTPUT_FIELDS.hold_owner]===session.id&&
     f[RENDER_REVIEW_OUTPUT_FIELDS.session_id]===session.id;
+  let creative_group=null,creative_group_error=null;
+  // Read all siblings through the content item's canonical links. No fixed
+  // platform count or allowlist. Never write sibling files/approvals here.
+  try{
+    const linked=content.fields?.['Platform Outputs'];
+    if(!Array.isArray(linked))throw new Error('Content output links missing');
+    const ids=linked.map(x=>String(x?.id||x||''));
+    const siblings=[];
+    for(let i=0;i<ids.length;i+=40){
+      const chunk=ids.slice(i,i+40);
+      const fetched=await operations.listRecords(env,env.AIRTABLE_OUTPUT_TABLE_ID,{
+        limit:chunk.length,
+        filterFormula:'OR('+chunk.map(id=>'RECORD_ID()="'+id+'"').join(',')+')',
+        fields:CREATIVE_MASTER_SIBLING_READ_FIELDS,
+      });
+      siblings.push(...fetched);
+    }
+    // Original row is the independently verified source of format metadata.
+    creative_group=projectCreativeMasterGroup({
+      source:output,content,outputs:siblings,requireComplete:true,
+    });
+  }catch(error){
+    // A partial read must never show an apparently complete fanout group.
+    creative_group_error='Creative master mapping could not be verified';
+  }
   let storyboard=[];
   if(held&&session.producer_candidate?.candidate){
     const requestId=content?.fields?.Production_Request;
@@ -190,6 +217,7 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
     }
   }
   return {ok:true,...summary(row),session,storyboard,
+    creative_group,creative_group_error,
     publication_hold_verified:held,
     integrity_error:session.review_hold.active&&!held?'HOLD_NOT_VERIFIED':null,
     preview:{file_id:f.Final_File_ID||null,url:f.Final_File_URL||null,

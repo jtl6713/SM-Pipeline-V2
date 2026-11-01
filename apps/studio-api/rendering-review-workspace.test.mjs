@@ -72,6 +72,7 @@ test('Chicago completed render queue uses exactly two bounded paginated reads an
       id:outputId,fields:{
         Content_Item:[f.content.id],Platform:'Instagram',Platform_Output_Type:'Instagram Reel',
         Final_File_ID:'drive-file',Final_File_URL:'https://example.test/video',
+        Thumbnail_URL:'https://cdn.example.test/chicago-cover.jpg',
         Output_Title:'Chicago skyline',Output_ID:2507,Render_Status:'Rendered',
         Publish_Status:'Not Published',
         Studio_Render_Review_Hold_Active:true,
@@ -88,6 +89,8 @@ test('Chicago completed render queue uses exactly two bounded paginated reads an
   const result=await read(f.args);
   assert.equal(result.queue.length,1);
   assert.equal(result.queue[0].title,'Chicago skyline');
+  assert.equal(result.queue[0].thumbnail_url,'https://cdn.example.test/chicago-cover.jpg');
+  assert.ok(calls[0].options.fields.includes('Thumbnail_URL'));
   assert.equal(result.queue[0].profile_id,CHICAGO_PROFILE_ID);
   assert.equal(result.queue[0].manual_admission_enabled,false);
   assert.equal(result.next_cursor,'itrNextPage');

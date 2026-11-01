@@ -39,18 +39,19 @@ test("Needs eyes shows a bounded iPad page and can reach all review groups", () 
   const render=()=>{node.bound={};renderLane("needsEyes",cards,"Empty",{groupContent:true});};
   ctx.renderDesk=render;
   render();
-  assert.match(node.innerHTML,/Showing 1–12 of 31 content items · 31 outputs in queue/);
+  // The optional search-result qualifier can vary; pagination counts must remain exact.
+  assert.match(node.innerHTML,/Showing 1–12 of 31\s+content items · 31 outputs in queue/);
   assert.match(node.innerHTML,/output0/);
   assert.doesNotMatch(node.innerHTML,/output12/);
   const next=()=>node.querySelectorAll("[data-factory-review-page]").find(b=>b.dataset.factoryReviewPage==="next").click();
   next();
   assert.equal(state.needsEyesPage,1);
-  assert.match(node.innerHTML,/Showing 13–24 of 31 content items/);
+  assert.match(node.innerHTML,/Showing 13–24 of 31\s+content items/);
   assert.match(node.innerHTML,/output12/);
   assert.doesNotMatch(node.innerHTML,/output0/);
   next();
   assert.equal(state.needsEyesPage,2);
-  assert.match(node.innerHTML,/Showing 25–31 of 31 content items/);
+  assert.match(node.innerHTML,/Showing 25–31 of 31\s+content items/);
   assert.match(node.innerHTML,/output30/);
   assert.equal(state.selectedOutputs.has("recSELECTED"),true,"review paging must not discard saved batch selection");
 });

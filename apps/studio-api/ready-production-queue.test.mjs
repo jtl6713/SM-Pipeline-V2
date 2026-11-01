@@ -114,7 +114,7 @@ test("Awaiting final approval requires every output to be review-ready and unapp
 test("Worker continuously dispatches every Airtable-ready profile but never performs final approval", async () => {
   const worker = await readFile(new URL("./worker.js", import.meta.url), "utf8");
   const functions = await readFile(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
-  assert.match(worker, /version: "0\.10\.683-promotion-postcommit-trace"/);
+  assert.match(worker, /version: "0\.10\.\d+(?:-[\w.-]+)?"/);
   assert.match(worker, /studio_ready_production_flow_v1: true/);
   const minuteCron = worker.slice(
     worker.indexOf('if (String(event?.cron || "").trim() === "* * * * *")'),

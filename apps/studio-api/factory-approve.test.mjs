@@ -15,7 +15,7 @@ function harness(fields) {
   class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
   const factory = new Function("airtableFetch", "f", "HttpError", "studioOutputReadyForPublishApproval",
     "approveOutputRecordForPublishing", "studioPublishCanDispatchNow", "studioDispatchApprovedPublishAndSchedule",
-    "studioScheduleMs",
+    "studioScheduleMs","reconcileCreativeMasterAtFactoryApproval",
     source + "\nreturn factoryApproveOutput;")(
       async () => output, (record, key) => record.fields[key],
       HttpError, () => true,
@@ -25,6 +25,7 @@ function harness(fields) {
         const ms = Date.parse(String(value || ""));
         return Number.isFinite(ms) ? ms : null;
       },
+      async () => ({status:"no_master"}),
     );
   return { approve: () => factory({ AIRTABLE_OUTPUT_TABLE_ID: "tblOutputs" }, output.id, "tester", ""), get writes() { return writes; } };
 }

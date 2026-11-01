@@ -10,6 +10,7 @@ import {
   scriptedShortProducerPlanFromNotes,
   validateScriptedShortProductionConstraints,
 } from "./scripted-short-producer-plan.mjs";
+import { parseScriptedShortFeedback, chooseScriptedShortLibraryClip, applyScriptedShortFeedback } from "./scripted-short-feedback.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import { scheduleReservationAuthorityEnabled, scheduleReservationLaneEnabled } from "./schedule-reservation-authority.mjs";
 import { creativeSettingName, parseCreativeGuidance } from "./profile-creative-guidance.mjs";
@@ -3654,6 +3655,34 @@ export async function getProductionRequest(request, env, url, authorization, ctx
   void ctx;
   const recordId = productionRequestRecordIdFromPath(url);
   const record = await loadAuthorizedProductionRequest(env, recordId, authorization);
+  // Factory polls this small, tenant-authorized projection instead of a heavy
+  // Production Request document. Airtable remains the only progress authority.
+  if (String(url.searchParams.get("fields") || "").trim().toLowerCase() === "producer-progress") {
+    const notes = String(f(record, "Production_Notes") || "");
+    const marker = [...notes.matchAll(/\[factory-producer-revision id=(fpr-[a-f0-9]+) state=(pending|completed|needs_attention)\]/g)].at(-1);
+    const job = parseStudioProductionJob(record);
+    const safeJob = job && /^fpr-[a-f0-9]+$/.test(String(job.job_id || ""))
+      ? {
+          id: job.job_id,
+          step: String(job.step || "").slice(0, 60),
+          detail: String(job.detail || "").slice(0, 220),
+          error: String(job.error || "").slice(0, 220),
+          quality_passed: job.producer_quality?.passed === true ? true
+            : job.producer_quality?.passed === false ? false : null,
+          quality_errors: (Array.isArray(job.producer_quality?.errors)
+            ? job.producer_quality.errors : []).slice(0, 3).map(value => String(value).slice(0, 180)),
+        } : null;
+    return respond(request, env, {
+      ok: true,
+      record: {
+        id: record.id,
+        status: String(f(record, "Request_Status") || ""),
+        updated_at: f(record, "Updated_At") || null,
+        revision: marker ? {id: marker[1], state: marker[2]} : null,
+        job: safeJob,
+      },
+    });
+  }
   const ideaId = ideaRecordIdFromProductionRequest(record);
   const ideaTitles = await loadIdeaTitlesByRecordId(env, [ideaId]);
   const light = String(url.searchParams.get("fields") || "").trim().toLowerCase() === "light";
@@ -8356,7 +8385,9 @@ export async function studioInsightsMetaIdentity(id, token, version, fields) {
 export function studioInsightsConnectionStateFromError(error) {
   const status = Number(error?.status || 0);
   const message = sanitizeAnalyticsError(error);
-  const auth = status === 400 || status === 401 || status === 403
+  // A provider or auth-worker 5xx is a service failure, not proof that the
+  // account owner needs OAuth consent. Never recommend reconnecting on 5xx.
+  const auth = status >= 500 ? false : status === 400 || status === 401 || status === 403
     || /permission|oauth|token|authoriz|scope|credential/i.test(message);
   return {
     status: auth ? "needs_authorization" : "error",
@@ -8532,6 +8563,13 @@ export async function getInsightsConnections(request, env, url, authorization) {
           result.youtube.error = "YouTube uploader is reachable but is running an older build without /youtube/oauth/status. Sync and restart this profile's uploader service.";
           return;
         }
+        // A 401/403 at this protected *service* endpoint means the Studio
+        // service key is rejected. Google consent cannot repair that key.
+        if (response.status === 401 || response.status === 403) {
+          result.youtube.status = "error";
+          result.youtube.error = "YouTube uploader service authentication failed. Verify this profile's uploader shared secret matches the uploader service; do not reconnect Google OAuth until the service key is fixed.";
+          return;
+        }
         const body = await studioInsightsSafeJson(response);
         result.youtube.account_name = body?.channel_title || null;
         result.youtube.account_id = body?.channel_id || result.youtube.account_id;
@@ -8566,7 +8604,9 @@ export async function getInsightsConnections(request, env, url, authorization) {
         result.tiktok.status = body?.authorized && body?.required_scopes_granted ? "connected" : "needs_authorization";
         result.tiktok.error = result.tiktok.status === "connected"
           ? null
-          : "Reconnect TikTok to grant owned-video analytics access.";
+          : (body?.authorized
+            ? "TikTok OAuth is stored, but required permissions are missing. Reconnect this creator and grant all requested permissions, including video.list."
+            : "Reconnect TikTok to grant owned-video analytics access.");
       } catch (error) {
         Object.assign(result.tiktok, studioInsightsConnectionStateFromError(error));
       }
@@ -11810,6 +11850,89 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
 }
 /*__STUDIO_WORKER_END:proposeScriptedShortRoute__*/
 
+export async function reviseScriptedShortRoute(request, env, authorization, url = null) {
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  let creativeBrief, directive;
+  try {
+    creativeBrief = normalizeScriptedShortBrief(payload?.creative_brief || payload?.prompt);
+    directive = parseScriptedShortFeedback(payload?.feedback);
+  } catch (error) {
+    throw new HttpError(400, error?.message || "Invalid proposal feedback");
+  }
+  if (creativeBrief.length < 3 || !scriptedShortProposalReady(payload?.timeline)) {
+    throw new HttpError(400, "Submit and review a complete Script a Short proposal before revising.");
+  }
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url, payload));
+  const policy = parseScriptedShortAssetPolicy(creativeBrief);
+  const profileMarket = String(f(profile, "Market_Name") || "").trim();
+  const operations = Array.isArray(directive.actions) ? directive.actions : [directive];
+  const uniqueClips = [...new Set(operations.filter(x=>x.action==="replace").map(x=>x.asset_name))];
+  if (uniqueClips.length > 6) throw new HttpError(400,"Replace at most six clips in one revision.");
+  const clips = new Map();
+  // Every title is resolved against authoritative Airtable, exactly and in the selected profile.
+  // Never accept file metadata or an identity asserted by the browser.
+  for (const name of uniqueClips) {
+    const formula = libraryAssetNameFindFormula(name);
+    const table = env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE;
+    let offset = "", all = [];
+    for (let page = 0; page < 3; page++) {
+      const params = new URLSearchParams({ filterByFormula: formula, pageSize: "100" });
+      if (offset) params.set("offset", offset);
+      const response = await airtableFetch(env, table, "?" + params.toString());
+      all.push(...(Array.isArray(response?.records) ? response.records : []));
+      offset = String(response?.offset || "");
+      if (!offset) break;
+    }
+    if (offset) throw new HttpError(409, "Too many matching library files. Rename the clip uniquely, then try again.");
+    try { clips.set(name, chooseScriptedShortLibraryClip(all, name, profile.id)); }
+    catch (error) { throw new HttpError(409, error.message); }
+  }
+  const authorized = operations.map(op=>op.action==="replace" ? {...op,clip:clips.get(op.asset_name)} : op);
+  let updated;
+  try { updated = applyScriptedShortFeedback(payload.timeline, {actions:authorized}); }
+  catch (error) { throw new HttpError(400, error.message); }
+  const timeline = buildTimelineFromScenes(updated.segments);
+  if (!scriptedShortProposalReady(timeline)) {
+    throw new HttpError(409, "This change would make an invalid storyboard. Keep at least five scenes.");
+  }
+  // Check ALL surviving scene media, not only the newly replaced clips.
+  const ids = [...new Set(timeline.segments.map(row=>String(row.asset_id||"").trim()).filter(Boolean))];
+  if (ids.some(id=>!/^rec[A-Za-z0-9]+$/.test(id))) {
+    throw new HttpError(409, "A scene references an invalid library record. Please propose again.");
+  }
+  const records = await Promise.all(ids.map(id=>airtableFetch(env,env.AIRTABLE_MEDIA_TABLE_ID||ITEM4_MEDIA_ASSET_TABLE,id)));
+  const catalog = records.map(ideaTimedScriptCatalogRow);
+  const validation = validateScriptedShortAssets(timeline,catalog,policy,profile.id);
+  if (!validation.ok) {
+    throw new HttpError(409, "Quality Agent blocked missing, wrong-profile or wrong-location media. No revisions were applied.");
+  }
+  const plan = buildScriptedShortProducerPlan({
+    brief:creativeBrief,timeline,catalog,assetPolicy:policy,
+    profileId:profile.id,profileName:profileMarket,
+  });
+  const summary = authorized.map(op=>{
+    if (op.action==="replace") return "Replaced slide "+op.scene+" with '"+op.clip.name+"'";
+    if (op.action==="remove") return "Removed slide "+op.scene;
+    if (op.action==="move") return "Moved slide "+op.scene+" "+op.position+" slide "+op.target_scene;
+    if (op.action==="narration") return "Updated narration on slide "+op.scene;
+    return "Adjusted duration on slide "+op.scene;
+  });
+  const publicOperations = authorized.map(({clip,...op})=>({
+    ...op,...(clip?{asset_id:clip.id,asset_name:clip.name}:{}),
+  }));
+  return respond(request,env,{
+    ok:true,source:"proposal-feedback",prompt:creativeBrief.replace(/\s+/g," "),
+    creative_brief:creativeBrief,timeline,markdown:formatTimedScriptMarkdown(timeline),
+    duration_seconds:timeline.duration_seconds,scene_count:timeline.segments.length,
+    owned_count:validation.verified,suggestion_count:validation.unassigned,
+    asset_policy:policy,asset_validation:validation,producer_plan:plan,
+    revision:{... (publicOperations.length===1?publicOperations[0]:{}),actions:publicOperations},
+    message:summary.join("; ")+". Review the updated proposal before Accept.",
+  });
+}
+/*__STUDIO_WORKER_END:reviseScriptedShortRoute__*/
+
 export async function acceptScriptedShortRoute(request, env, authorization, ctx = null, url = null) {
   let payload = {};
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
@@ -11913,7 +12036,10 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
   }
   const script = exactVoiceoverText(timeline);
   const notes = withProductionPhotoWaitManual(mergeTimedScriptNotes("", timeline));
-  const stampedNotes = `${notes}\n${serializeScriptedShortProducerPlan(producerPlan)}\nidea-vo-timeline=1\nscripted-short=proposal`.trim();
+  const feedbackLines = (Array.isArray(payload?.proposal_feedback) ? payload.proposal_feedback : [])
+    .slice(-5).map(line => String(line || "").trim().slice(0, 220)).filter(Boolean);
+  const feedbackAudit = feedbackLines.length ? `\n[proposal-feedback]\n${feedbackLines.join("\n")}\n[/proposal-feedback]` : "";
+  const stampedNotes = `${notes}\n${serializeScriptedShortProducerPlan(producerPlan)}${feedbackAudit}\nidea-vo-timeline=1\nscripted-short=proposal`.trim();
   if (stampedNotes.length > 10000) {
     throw new HttpError(409, "The detailed Producer Plan is too large to save safely. Shorten the brief or scene count, then propose again.");
   }

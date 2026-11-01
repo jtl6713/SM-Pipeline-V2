@@ -22,7 +22,7 @@ const helpers = [
   slice("  function isStoryOutputCard(", "  function renderContentBar("),
 ].join("\n");
 const factory = (lanes) => {
-  const ctx = { state: { desk: { lanes: { auto_high: lanes.auto_high || [], manual: lanes.manual || [] } } } };
+  const ctx = { state: { desk: { lanes: { auto_high: lanes.auto_high || [], manual: lanes.manual || [] } } }, recentFactoryAccepted: () => ({}) };
   return vm.runInNewContext(helpers + "\n({ pendingSiblingOutputsForGroup, pendingSiblingMeta, canReviewActions })", ctx);
 };
 const contentItem = "recContent924AaBbCc";

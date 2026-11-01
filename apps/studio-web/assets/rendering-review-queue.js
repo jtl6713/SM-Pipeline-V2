@@ -8,6 +8,7 @@
   const nav = $('navRenderingReview');
   if (!root || !nav) return;
   const chicago = 'recT2rbKX3MF7cVFU';
+  const NEEDS_ASSET_THUMB = '/assets/needs-asset.svg';
   const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map(),pollTimer:null,activeEntry:null,lastReplyNotice:null,lastReplyNoticeNode:null,viewingVersion:null,approvalButton:null,approvalVersion:null,approvalLocks:new Set(),approvalKeys:new Map()};
   const list = $('rrQueueList'), detail = $('rrDetail'), status = $('rrStatus');
 
@@ -192,11 +193,24 @@
       const button=elem('button',null,'rr-entry');
       button.type='button';button.dataset.outputId=entry.output_id;
       button.setAttribute('aria-pressed',String(entry.output_id===state.selected));
-      button.append(elem('strong',entry.title||'Untitled Reel'),
+      const thumb = elem('span',null,'rr-entry-thumb');
+      const cover = elem('img');
+      const coverUrl = safeUrl(entry.thumbnail_url);
+      cover.loading='lazy';cover.decoding='async';
+      cover.alt=coverUrl?'':'NEEDS ASSET';
+      cover.src=coverUrl||NEEDS_ASSET_THUMB;
+      cover.addEventListener('error',()=>{
+        if(cover.getAttribute('src')===NEEDS_ASSET_THUMB)return;
+        cover.src=NEEDS_ASSET_THUMB;cover.alt='NEEDS ASSET';
+      });
+      thumb.append(cover);
+      const copy=elem('span',null,'rr-entry-body');
+      copy.append(elem('strong',entry.title||'Untitled Reel'),
         elem('span','Instagram Reel'+(entry.output_number?' · #'+entry.output_number:''),
           'rr-entry-meta'),
         elem('span',entry.review_held?'Review hold present':entry.dispatch_started?
           'Dispatch already started':'Completed render · review not started','rr-entry-meta'));
+      button.append(thumb,copy);
       button.addEventListener('click',()=>open(entry));
       list.append(button);
     }
@@ -279,22 +293,61 @@
         return;
       }
       const session=saved.session;
+      const creativeGroup=saved.creative_group;
+      if(creativeGroup?.key&&Array.isArray(creativeGroup.outputs)){
+        const section=elem('section',null,'rr-activity');
+        section.setAttribute('aria-label','Creative master and matching outputs');
+        section.append(elem('strong','One creative master · '+creativeGroup.linked_count+
+          ' matching output'+(creativeGroup.linked_count===1?'':'s'),'rr-activity-heading'));
+        section.append(elem('p','Content '+creativeGroup.content_item_id+
+          ' · '+creativeGroup.format+' · '+creativeGroup.aspect_ratio,'rr-activity-detail'));
+        section.append(elem('p',creativeGroup.master?
+          'Creative master V'+creativeGroup.master.version+
+          ' recorded. Matching outputs share its reference, but retain independent videos, captions, schedules, and publishing approvals.':
+          'These outputs match the source creative. A shared approved master will be registered only after independently verified creative acceptance and Factory handoff.','rr-activity-detail'));
+        const linked=elem('ul',null,'rr-creative-master-members');
+        for(const sibling of creativeGroup.outputs.slice().sort((a,b)=>
+          Number(a.output_number||0)-Number(b.output_number||0))){
+          linked.append(elem('li',(sibling.output_number?'#'+sibling.output_number+' · ':'')+
+            sibling.platform+' · '+sibling.output_type+
+            (sibling.dispatched?' · already dispatched':
+              sibling.scheduled?' · scheduled':
+              sibling.held?' · held':' · not scheduled')+
+            ' · publishing unchanged'));
+        }
+        section.append(linked);
+        detail.append(section);
+      }else if(saved.creative_group_error){
+        detail.append(elem('p',saved.creative_group_error+
+          '. No automatic sibling changes were made.','rr-notice'));
+      }
       const messages=Array.isArray(session?.messages)?session.messages:[];
       const last=messages.length?messages[messages.length-1]:null;
       const producer=[...messages].reverse().find(m=>m.role==='producer');
       const rendering=['queued','rendering','validating'].includes(session?.state);
       const planReady=session?.state==='plan_ready'&&session?.plan?.frozen===true&&
         Array.isArray(session.plan?.missing_assets)&&session.plan.missing_assets.length===0;
+      // A separately validated, registered V2 must override stale Producer chatter.
+      const completedAttempt=Array.isArray(session?.attempts)?
+        session.attempts.find(a=>a?.id===session?.current_attempt_id&&
+          Number(a?.number)>1&&a?.status==='ready_for_review'&&
+          typeof a?.artifact_id==='string'&&a.artifact_id.length>0):null;
       const activity=elem('section',null,'rr-activity');
       activity.setAttribute('aria-label','Producer and render status');
-      const title=rendering?'V'+(Number(session.latest_attempt_number)||2)+' · '+
+      const title=completedAttempt&&session.state==='ready_for_review'?
+        'V'+completedAttempt.number+' · Ready for review'+
+        (completedAttempt.provenance?.kind==='manual_verified_review_import'?
+          ' (verified imported edit)':''):
+        rendering?'V'+(Number(session.latest_attempt_number)||2)+' · '+
         ({queued:'Queued for rendering',rendering:'Rendering',validating:'Validating'}[session.state]):
         planReady?'Revision plan ready · Make revised video to begin render':
         producer?'Producer replied · V2 NOT STARTED':
         messages.length?'Factory comments saved · Producer has not replied':'No saved messages';
       activity.append(elem('strong',title,'rr-activity-heading'));
-      if(last?.at)activity.append(elem('p','Last saved: '+chicagoTime(last.at),'rr-activity-time'));
-      if(!rendering&&!planReady&&producer){
+      const lastActivityAt=completedAttempt?
+        session.history?.[session.history.length-1]?.at:last?.at;
+      if(lastActivityAt)activity.append(elem('p','Last saved: '+chicagoTime(lastActivityAt),'rr-activity-time'));
+      if(!completedAttempt&&!rendering&&!planReady&&producer){
         activity.append(elem('p','The Producer responded, but no render-ready plan or V2 job exists. Chat messages do not queue a render.','rr-activity-detail'));
         const needs=session?.producer_candidate?.candidate?.requirements;
         if(Array.isArray(needs)&&needs.some(x=>x?.description)){

@@ -509,6 +509,7 @@ import {
   STUDIO_RENDER_QUEUE_CANDIDATE_FORMULA,
   STUDIO_RFR_MISSING_COVER_FORMULA,
   STUDIO_IDEA_PROFILE_TABLE_ID,
+  STUDIO_PIPELINE_SETTINGS_TABLE_ID,
 } from "./worker.js";
 import {
   item4PulsePipelineStage,
@@ -1056,6 +1057,19 @@ export function studioInvalidateHotReads(env, tableId, method) {
   const verb = String(method || "GET").toUpperCase();
   if (verb === "GET" || verb === "HEAD") return;
   const id = String(tableId || "");
+  // Operations reads profile settings, output queues and media intake.
+  // Never serve a pre-write snapshot after an authoritative Airtable mutation.
+  if ([env?.AIRTABLE_OUTPUT_TABLE_ID, env?.AIRTABLE_MEDIA_TABLE_ID,
+       STUDIO_IDEA_PROFILE_TABLE_ID, STUDIO_PIPELINE_SETTINGS_TABLE_ID,
+       "Production Requests"].includes(id)) {
+    studioReadCacheDropPrefix("operations:");
+  }
+  // Media uploads, profile assignments, and profile changes must invalidate
+  // both the cached Library page and the profile-label lookup immediately.
+  if (id === String(env?.AIRTABLE_MEDIA_TABLE_ID || "") ||
+      id === String(STUDIO_IDEA_PROFILE_TABLE_ID)) {
+    studioReadCacheDropPrefix("library:");
+  }
   if (env?.AIRTABLE_OUTPUT_TABLE_ID && id === env.AIRTABLE_OUTPUT_TABLE_ID) {
     studioMarkMappedListDirty();
     studioReadCacheDropPrefix("outputs:");

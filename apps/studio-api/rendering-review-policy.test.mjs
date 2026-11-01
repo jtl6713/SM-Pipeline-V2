@@ -266,6 +266,79 @@ test("new creative plan has increasing plan and attempt version after success", 
   assert.equal(s.attempts[1].status,"ready_for_review");
 });
 
+test("Michigan Avenue Stroll: completed V2 stays reviewable after later Producer conversation", () => {
+  let s=rendered(commit(plan(create())));
+  const v2=s.current_attempt_id, artifact=s.attempts[1].artifact_id;
+  assert.equal(s.latest_attempt_number,2);
+  assert.equal(s.state,"ready_for_review");
+
+  s=transition(s,"MESSAGE",{message_id:"message-stroll-00001",role:"user",
+    content:"OK this is great. Now how can we get this applied across all like output types?"});
+  assert.equal(s.state,"ready_for_review");
+  assert.equal(s.review_hold.active,true);
+  assert.equal(s.current_attempt_id,v2);
+  assert.equal(s.attempts[1].artifact_id,artifact);
+
+  const candidate={
+    explanation:"Discuss matching outputs only; do not publish",
+    narration:"Existing edited V2 is retained for human review",
+    changes:[],timeline:[],requirements:[],acceptance_checks:[],
+  };
+  s=transition(s,"PRODUCER_CANDIDATE",{
+    candidate,candidate_hash:"a".repeat(64),evidence_hash:"b".repeat(64),
+    user_message_id:"message-stroll-00002",producer_message_id:"message-stroll-00003",
+    direction:"How can this edit be applied to matching types?",
+    summary:"The master can fan out only after independent QA and approval",
+  });
+  assert.equal(s.state,"ready_for_review");
+  assert.equal(s.current_attempt_id,v2);
+  assert.equal(s.attempts[1].status,"ready_for_review");
+  assert.equal(s.producer_candidate.source_attempt_id,v2);
+  assert.equal(s.plan,null);
+  assert.equal(s.active_job,null);
+  assert.equal(s.approved_attempt_id,null);
+  assert.equal(s.review_hold.active,true);
+  assert.equal(reviewDispatchGate(s,base,{attempt_id:v2,artifact_id:artifact}).allowed,false);
+
+  // Human creative acceptance remains possible; it is not publishing approval.
+  s=transition(s,"APPROVE_ATTEMPT",{
+    pilot_creative_only:true,attempt_id:v2,artifact_id:artifact,
+  });
+  assert.equal(s.state,"approved");
+  assert.equal(s.review_hold.active,true);
+  assert.equal(reviewDispatchGate(s,base,{attempt_id:v2,artifact_id:artifact}).allowed,false);
+});
+
+test("only a completed current V2 is preserved; V1, invalid V2 and new plan still transition", () => {
+  let v1=transition(create(),"MESSAGE",{
+    role:"producer",message_id:"message-stroll-v1-01",content:"Let's revise V1",
+  });
+  assert.equal(v1.state,"discussing");
+
+  let s=rendered(commit(plan(create())));
+  const unvalidated=structuredClone(s);
+  unvalidated.attempts[1].artifact_id=null;
+  assert.equal(transition(unvalidated,"MESSAGE",{
+    role:"user",message_id:"message-stroll-bad-01",content:"Revise",
+  }).state,"discussing");
+
+  const heldLost=structuredClone(s);
+  heldLost.review_hold.active=false;
+  throws(()=>transition(heldLost,"PRODUCER_CANDIDATE",{
+    candidate:{explanation:"x",narration:"x",changes:[],timeline:[],requirements:[],acceptance_checks:[]},
+    candidate_hash:"a".repeat(64),evidence_hash:"b".repeat(64),
+    user_message_id:"message-stroll-lost-01",producer_message_id:"message-stroll-lost-02",
+    direction:"go",summary:"respond",
+  }),"PRODUCER_NOT_EDITABLE");
+
+  s=transition(s,"MESSAGE",{
+    role:"user",message_id:"message-stroll-new-01",content:"Please make another revision",
+  });
+  s=plan(s,{plan_hash:"planhash-stroll-03"});
+  assert.equal(s.state,"plan_ready");
+  assert.equal(s.current_attempt_id,"attempt-00000002");
+});
+
 test("feedback during rendering persists but cannot change in-flight job", () => {
   let s=commit(plan(create()));
   const jobId=s.active_job.id;

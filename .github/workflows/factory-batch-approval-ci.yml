@@ -32,6 +32,8 @@ jobs:
           node --check apps/studio-api/factory-global-rollout-health.mjs
           node --check apps/studio-api/output-approval-lease.mjs
           node --check apps/studio-web/assets/factory-desk.js
+          node --test apps/studio-api/factory-desk.test.mjs apps/studio-api/ops-queue.test.mjs
+          node --test apps/studio-web/global-needs-asset-thumbnail.test.mjs apps/studio-web/studio-nav-autoclose.test.mjs
       - name: Factory single and batch approval regressions
         run: |
           node --check apps/studio-api/schedule-occupancy-90-day.test.mjs
@@ -49,7 +51,7 @@ jobs:
           node --test apps/studio-web/factory-batch-quality-agent.test.mjs apps/studio-web/ui-release-contract.test.mjs
           node --test apps/studio-api/schedule-occupancy-90-day.test.mjs
           node --test apps/studio-api/factory-approval-output-claims.test.mjs
-          node --test apps/studio-api/approve-all-batch.test.mjs apps/studio-api/factory-approve.test.mjs apps/studio-api/factory-batch-approval.test.mjs apps/studio-api/factory-approval-queue.test.mjs apps/studio-api/factory-approval-groups.test.mjs apps/studio-api/factory-batch-global-policy.test.mjs apps/studio-api/factory-real-record-publish-route.staging.test.mjs apps/studio-api/output-approval-lease.test.mjs apps/studio-web/factory-desk.test.mjs apps/studio-web/factory-batch-approval.test.mjs
+          node --test apps/studio-api/approve-all-batch.test.mjs apps/studio-api/factory-approve.test.mjs apps/studio-api/factory-batch-approval.test.mjs apps/studio-api/factory-approval-queue.test.mjs apps/studio-api/factory-approval-groups.test.mjs apps/studio-api/factory-batch-global-policy.test.mjs apps/studio-api/factory-real-record-publish-route.staging.test.mjs apps/studio-api/output-approval-lease.test.mjs apps/studio-web/factory-desk.test.mjs apps/studio-web/factory-batch-approval.test.mjs apps/studio-web/factory-review-selection-eligibility.test.mjs
       - name: Validate signed Factory global deployment contract and reject drift
         shell: bash
         run: |
