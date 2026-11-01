@@ -291,7 +291,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.806-scripted-proposal-feedback";
+  const BUILD_ID = "item4-0.6.807-scripted-proposal-compat";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -2781,6 +2781,109 @@
     }
   });
 
+  function scriptedShortFallbackDirective(feedback) {
+    const raw = String(feedback || "").trim();
+    const references = [...raw.matchAll(/\b(?:slide|scene)\s*#?\s*(\d{1,2})\b/gi)];
+    if (references.length !== 1) throw new Error("Name exactly one slide, such as slide 4.");
+    const scene = Number(references[0][1]);
+    if (!/\b(?:replace|swap|substitute)\b/i.test(raw)) {
+      if (/\b(?:remove|delete|drop)\b/i.test(raw)) return { scene, action: "remove" };
+      throw new Error("Request a specific slide removal or replacement.");
+    }
+    const bullet = raw.match(/(?:^|\n)\s*[-•]\s*([^\r\n]{3,150})\s*$/m)
+      || raw.match(/\b(?:uploaded|named|called|titled)\s*[.:]\s*[-–—]\s*([^\r\n]{3,150})\s*$/i);
+    const afterWith = raw.match(/\b(?:replace|swap|substitute)\b[\s\S]*?\bwith\s+([\s\S]+)$/i);
+    const name = String(bullet?.[1] || afterWith?.[1] || "")
+      .replace(/^(?:the\s+)?(?:following\s+)?(?:clip|video|asset|footage)\b\s*/i, "")
+      .replace(/^(?:which\s+)?(?:i\s+)?(?:just\s+)?uploaded\b\s*[.:,-]*\s*/i, "")
+      .replace(/^(?:named|called|titled)\s+/i, "")
+      .replace(/^[-–—:"'“”]+|[-–—:"'“”.]+$/g, "").trim();
+    if (!name || name.length > 150 || /\b(?:which|i just uploaded)\b/i.test(name)) {
+      throw new Error("Specify the uploaded video's exact name after 'with' or on a separate bullet line.");
+    }
+    return { scene, action: "replace", asset_name: name };
+  }
+
+  function scriptedShortFallbackName(value) {
+    return String(value || "").trim().toLowerCase()
+      .replace(/\.(?:mp4|mov|m4v|webm|avi)$/i, "").replace(/[_–—-]+/g, " ")
+      .replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+  }
+
+  function scriptedShortFallbackApply(base, directive, clip = null) {
+    const original = base?.timeline?.segments;
+    if (!Array.isArray(original) || !original.length) throw new Error("A proposal is required.");
+    if (!Number.isInteger(directive.scene) || directive.scene < 1 || directive.scene > original.length) {
+      throw new Error("Slide " + directive.scene + " does not exist in this proposal.");
+    }
+    const segments = original.map(item => ({ ...item }));
+    if (directive.action === "remove") {
+      if (segments.length <= 5) throw new Error("At least five scenes are required. Replace this slide instead.");
+      segments.splice(directive.scene - 1, 1);
+    } else {
+      if (!clip?.id || clip.media_kind !== "video") throw new Error("A verified library video is required.");
+      segments[directive.scene - 1] = {
+        ...segments[directive.scene - 1],
+        asset_id: clip.id,
+        media_asset_id: clip.id,
+        suggested_visual: clip.name,
+        shot_status: "owned",
+        media_type: clip.mime_type || "video",
+        source_duration_seconds: Number(clip.duration_seconds) || null,
+      };
+    }
+    let cursor = 0;
+    const updatedSegments = segments.map((scene, index) => {
+      const duration = Math.max(0, Number(scene.duration_seconds) || 0);
+      const start = Math.round(cursor * 1000) / 1000;
+      cursor += duration;
+      return { ...scene, index: index + 1, start_seconds: start,
+        end_seconds: Math.round(cursor * 1000) / 1000 };
+    });
+    const count = updatedSegments.filter(scene => !String(scene.asset_id || "").trim()).length;
+    return { ...base, source: "existing-library-api", timeline: {
+      ...base.timeline, segments: updatedSegments,
+      duration_seconds: Math.round(cursor * 1000) / 1000,
+    }, scene_count: updatedSegments.length, duration_seconds: cursor,
+    suggestion_count: count, owned_count: updatedSegments.length - count,
+    // A locally revised proposal cannot claim to have passed the server Quality Agent.
+    producer_plan: null, asset_validation: null, revision: {
+      action: directive.action, scene: directive.scene, asset_name: clip?.name || null,
+    }, message: "Revised proposal ready. Accept will perform authoritative Quality Agent checks before saving." };
+  }
+
+  async function scriptedShortLegacyApiRevision(base, feedback, profile) {
+    const directive = scriptedShortFallbackDirective(feedback);
+    if (directive.action === "remove") return scriptedShortFallbackApply(base, directive);
+    let offset = "";
+    const all = [];
+    for (let page = 0; page < 3; page += 1) {
+      const query = new URLSearchParams({
+        q: '"' + directive.asset_name + '"', kind: "video",
+        limit: "100", content_profile_id: profile,
+      });
+      if (offset) query.set("offset", offset);
+      const payload = await api("/api/library?" + query.toString(), { timeoutMs: 35000 });
+      if (payload.content_profile_id && String(payload.content_profile_id) !== String(profile)) {
+        throw new Error("The library returned another profile's media. Revision was not applied.");
+      }
+      all.push(...(Array.isArray(payload.records) ? payload.records : []));
+      offset = String(payload.offset || "");
+      if (!offset) break;
+    }
+    if (offset) throw new Error("Too many similar library clips. Rename the upload uniquely.");
+    const key = scriptedShortFallbackName(directive.asset_name);
+    const candidates = all.filter(row => scriptedShortFallbackName(row.name) === key
+      && String(row.content_profile_id || "") === String(profile));
+    if (!candidates.length) throw new Error("Clip '" + directive.asset_name + "' was not found in this profile's library.");
+    if (candidates.length !== 1) throw new Error("Multiple uploaded clips have that name. Rename one uniquely.");
+    const clip = candidates[0];
+    if (clip.do_not_use || clip.media_kind !== "video" || !clip.google_drive_file_id) {
+      throw new Error("That upload is unavailable, not video, or incomplete in Google Drive.");
+    }
+    return scriptedShortFallbackApply(base, directive, clip);
+  }
+
   $("scriptedShortRevise")?.addEventListener("click", async () => {
     const base = scriptedShortProposal;
     const feedbackInput = $("scriptedShortFeedback");
@@ -2803,17 +2906,26 @@
     if (accept) accept.disabled = true;
     if (status) status.textContent = "Checking the named clip and updating the proposal…";
     try {
-      const result = await api("/api/scripted-short/revise", {
-        method: "POST",
-        body: JSON.stringify({
-          prompt: base.prompt,
-          creative_brief: base.creative_brief || base.prompt,
-          content_profile_id: profile,
-          timeline: base.timeline,
-          feedback,
-        }),
-        timeoutMs: 150000,
-      });
+      let result;
+      try {
+        result = await api("/api/scripted-short/revise", {
+          method: "POST",
+          body: JSON.stringify({
+            prompt: base.prompt,
+            creative_brief: base.creative_brief || base.prompt,
+            content_profile_id: profile,
+            timeline: base.timeline,
+            feedback,
+          }),
+          timeoutMs: 150000,
+          retries: 1,
+        });
+      } catch (error) {
+        // A phased Worker rollout may lag behind Pages. Never fallback on a
+        // Quality Agent rejection, permission failure or infrastructure error.
+        if (error?.status !== 404 && error?.status !== 405) throw error;
+        result = await scriptedShortLegacyApiRevision(base, feedback, profile);
+      }
       if (scriptedShortProposal !== base || selectedProfileId !== profile) {
         if (status) status.textContent = "The proposal or profile changed. That revision was not applied.";
         return;
