@@ -6658,6 +6658,27 @@ function timedScriptAssetLabel(asset, index) {
     const phase = String(vibeUploadUi.phase || "idle");
     if (phase === "idle" && !source) return null;
     if (phase === "failed") {
+      const processingFailed = uploadConfirmed && (
+        String(source?.compression_status || "").trim().toLowerCase() === "failed"
+        || String(status?.assets_status || "") === "Error"
+      );
+      if (processingFailed) {
+        return {
+          heal: "error",
+          title: `Video uploaded; preparation needs attention: ${fileName}`,
+          body: `${vibeUploadUi.detail || "The server could not prepare this video."} Your original upload remains saved. This is not a transfer failure; Studio has not confirmed it is Ready.`,
+          count: "1 of 1 uploaded · 0 of 1 ready.",
+          guidance: {
+            steps: [
+              { state: "done", label: "Original upload verified and saved" },
+              { state: "active", label: "Server-side video processing needs attention" },
+              { state: "pending", label: "Verification and Continue are still blocked" },
+            ],
+            leave: "Yes, your original upload is saved. Leaving will not restart failed processing.",
+            returnTo,
+          },
+        };
+      }
       return {
         heal: "error",
         title: `${fileName} failed to upload.`,
