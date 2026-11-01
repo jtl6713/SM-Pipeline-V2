@@ -112,6 +112,9 @@ export async function propagateApprovedCreativeMaster({source_output_id,content_
      master?.source_output_id!==source_output_id||
      master?.content_item_id!==content_item_id)
     fail("CREATIVE_MASTER_SOURCE_IDENTITY_MISMATCH");
+  // Reject caller-supplied incomplete/unauthorized master metadata before
+  // reading siblings; the fresh Airtable registry is checked again per output.
+  validMaster(master,{id:content_item_id},master?.key);
   const first=await o.readContent(content_item_id);
   const refs=first?.fields?.["Platform Outputs"];
   if(!Array.isArray(refs)||refs.some(x=>!rec.test(str(x?.id||x)))||
