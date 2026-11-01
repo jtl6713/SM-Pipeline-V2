@@ -2307,6 +2307,9 @@
   <button type="button" class="primary-button" id="factoryBatchSubmit" disabled>Submit Approvals</button>
  </div>
  <div class="factory-lanes" id="factoryLanes">
+ <label for="factoryNeedsEyesSearch" class="subtle">Find content or output
+ <input type="search" id="factoryNeedsEyesSearch" autocomplete="off" placeholder="Michigan Avenue, Content #1869, Output #9593" aria-label="Search all Ready for Review content and outputs">
+ </label>
  <section class="factory-band factory-band-eyes is-collapsed" aria-labelledby="factoryLaneNeedsEyesHeading">
  <button type="button" class="factory-band-head" data-factory-band-toggle aria-expanded="false" aria-controls="factoryBandBodyNeedsEyes">
  <span class="factory-band-chevron" aria-hidden="true">▸</span>
@@ -2314,9 +2317,6 @@
  <span class="factory-band-count" id="factoryCountNeedsEyes">0</span>
  </button>
  <div class="factory-band-body" id="factoryBandBodyNeedsEyes">
- <label for="factoryNeedsEyesSearch" class="subtle">Find content or output
- <input type="search" id="factoryNeedsEyesSearch" autocomplete="off" placeholder="Michigan Avenue, Content #1869, Output #9593" aria-label="Search all Ready for Review content and outputs">
- </label>
  <div class="factory-cols" aria-hidden="true"><span></span><span>Item</span><span>Profile</span><span>Platform</span><span>Type</span><span>State</span><span>Actions</span></div>
  <div class="factory-lane-list" id="factoryLaneNeedsEyes"></div>
  </div>
