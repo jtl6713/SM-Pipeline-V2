@@ -112,3 +112,26 @@
   .rr-entry{grid-template-columns:46px minmax(0,1fr);gap:9px;padding:10px}
   .rr-entry-thumb{width:46px;height:61px}
 }
+
+
+/* Source-of-truth review progress is visible even before a render job exists.
+   Stage labels describe confirmed milestones; no fictional percent complete. */
+.rr-progress-top{margin:10px 0 16px;padding:12px 14px;border:1px solid var(--line,#d6dce3);
+  border-left:4px solid var(--accent,#679cde);border-radius:10px;font-weight:600;line-height:1.5}
+.rr-progress-top[hidden]{display:none!important}
+.rr-progress-heading{font-size:1rem;margin:6px 0 0}
+.rr-progress-summary{line-height:1.5;margin:2px 0 8px;font-weight:600}
+.rr-progress-stages{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;
+  padding:0;list-style:none;margin:8px 0}
+.rr-progress-stage{display:flex;flex-direction:column;gap:4px;min-width:0;
+  border:1px solid var(--line,#d6dce3);border-radius:8px;padding:9px}
+.rr-progress-stage-name{font-weight:600;font-size:.85rem}
+.rr-progress-stage-state{font-size:.75rem;color:var(--muted,#768392)}
+.rr-progress-stage--complete{border-color:#3f8d60;background:rgba(63,141,96,.08)}
+.rr-progress-stage--complete .rr-progress-stage-state{color:inherit}
+.rr-progress-stage--current{border-color:var(--accent,#679cde);border-width:2px}
+.rr-progress-stage--attention{border-color:#c65b52;border-width:2px}
+.rr-progress-checked{color:var(--muted,#768392);font-size:.8rem;margin:4px 0}
+.rr-activity>button{justify-self:start}
+@media(max-width:760px){.rr-progress-stages{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .rr-progress-stage{padding:8px}.rr-activity>button{min-height:44px}}
