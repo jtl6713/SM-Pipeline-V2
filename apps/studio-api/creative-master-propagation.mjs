@@ -1,9 +1,9 @@
 /**
  * A QA-approved creative master is materialized to eligible, unapproved
- * same-content, same-format/ratio output previews. It is NOT publishing approval.
+ * same-content, compatible 9:16 MP4 video output previews. It is NOT publishing approval.
  * All source media stays in Drive; output metadata/scheduling remains local.
  */
-import {creativeMasterKey,readCreativeMasterRegistry,MASTER_FIELD} from "./creative-master-registry.mjs";
+import {creativeMasterKey,readCreativeMasterRegistry,videoMasterTargetCompatible,MASTER_FIELD} from "./creative-master-registry.mjs";
 
 export const OUTPUT_MASTER_FIELD="Studio_Creative_Master_Ref_JSON";
 const rec=/^rec[A-Za-z0-9]{14}$/;
@@ -39,8 +39,12 @@ export function planCreativeMasterAdoption({content,output,master}){
     fail("CREATIVE_MASTER_OUTPUT_LINK_MISSING","Content does not list the exact output");
   const key=creativeMasterKey(f.Format,f.Aspect_Ratio);
   if(!key)return {status:"incompatible",reason:"missing_format_or_ratio"};
-  if(key!==master.key)return {status:"incompatible",reason:"different_format_or_ratio"};
-  validMaster(master,content,key);
+  if(!videoMasterTargetCompatible({
+    masterFormat:master.format,masterAspectRatio:master.aspect_ratio,
+    contentType:cf.Content_Type,targetFormat:f.Format,targetAspectRatio:f.Aspect_Ratio,
+    targetFileName:f.Output_Filename||f.Final_File_Name,
+  }))return {status:"incompatible",reason:"different_video_format_or_ratio"};
+  validMaster(master,content,master.key);
   if(output.id===master.source_output_id)return {status:"source",reason:"approved_source"};
   const existingRef=str(f[OUTPUT_MASTER_FIELD]);
   let old=null;
@@ -48,7 +52,7 @@ export function planCreativeMasterAdoption({content,output,master}){
     fail("CREATIVE_MASTER_ADOPTION_STAMP_INVALID","Previous master reference is malformed");
   }}
   if(old&&(old.schema!=="studio.creative-output-ref.1"||
-    old.content_item_id!==content.id||old.format_key!==key))
+    old.content_item_id!==content.id||old.format_key!==master.key))
     fail("CREATIVE_MASTER_ADOPTION_STAMP_INVALID","Output has conflicting master provenance");
   if(old?.version>master.version)
     fail("CREATIVE_MASTER_VERSION_REGRESSED","Refuse an older approved master");
