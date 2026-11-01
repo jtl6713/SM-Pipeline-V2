@@ -32,6 +32,8 @@ test("Vibe Cut reports truthful selection, upload, save, process, ready, stall, 
   assert.match(markup, /Video ready:/);
   assert.match(markup, /This upload may be stalled/);
   assert.match(markup, /failed to upload/);
+  assert.match(markup, /Video uploaded; preparation needs attention/);
+  assert.match(markup, /Your original upload remains saved/);
   assert.match(markup, /1 selected · 0 ready/);
   assert.match(markup, /1 uploaded · 0 ready/);
   assert.match(markup, /1 of 1 ready/);
