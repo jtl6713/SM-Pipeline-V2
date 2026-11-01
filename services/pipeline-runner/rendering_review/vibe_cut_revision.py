@@ -114,7 +114,7 @@ def compile_vibe_review_payload(*,job,plan,source,music,watermark,authorized_pro
             not finite(cut["start_seconds"]) or
             not finite(cut["end_seconds"]) or
             cut["start_seconds"]<0 or cut["end_seconds"]>source["duration_seconds"]+1e-6 or
-            cut["end_seconds"]-cut["start_seconds"]<.2 or
+            cut["end_seconds"]-cut["start_seconds"]<.2-1e-6 or
             cut["end_seconds"]-cut["start_seconds"]>30):
             deny("vibe_cut_outside_owned_source")
         frames=round((cut["end_seconds"]-cut["start_seconds"])*FPS)
