@@ -28,6 +28,8 @@ on:
       - 'services/pipeline-runner/rendering_review/profile_watermark.py'
       - 'services/pipeline-runner/rendering_review/vibe_cut_validation.py'
       - 'services/pipeline-runner/rendering_review/vibe_cut_revision.py'
+      - 'services/remotion-renderer/profile-watermark-policy*.js'
+      - 'services/remotion-renderer/render-server.js'
       - 'services/pipeline-runner/rendering_review/gallery_attempt.py'
       - 'services/pipeline-runner/rendering_review/gallery_media_io.py'
       - 'services/pipeline-runner/tests/test_rendering_review_vibe_cut_revision.py'
@@ -85,6 +87,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Vibe Cut renderer profile branding policy (fail-closed)
+        run: |
+          node --check services/remotion-renderer/profile-watermark-policy.js
+          node --check services/remotion-renderer/render-server.js
+          node --test services/remotion-renderer/profile-watermark-policy.test.js
       - name: Check policy and tests syntax
         run: |
           node --check apps/studio-api/rendering-review-approval-http.mjs
