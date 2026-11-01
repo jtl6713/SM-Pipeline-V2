@@ -464,7 +464,7 @@ def render_exact_attempt(output_id,job_id,*,client=None,drive=None,
     # Optional, best-effort branding on rerenders. No watermark failures
     # may prevent V2+ rendering. Initial V1 render policy is unchanged.
     try:
-        brand_url=brand_watermark_url(client)
+        brand_url=str(brand_watermark_url(client) or "")
     except Exception:
         brand_url=""
     if not brand_url.startswith("https://"):
