@@ -23,7 +23,7 @@ test("manual I1 opts into persistent runner before legacy waitUntil", () => {
 
 test("durable I1 does not falsely expire on the 15-minute legacy timeout", () => {
   const body = section("studioIdeaGenerationStatus", "chicagoNowParts");
-  assert.match(body, /!\\["1", "true"\\]\.includes\(String\(env\.STUDIO_I1_DURABLE_JOBS/);
+  assert.ok(body.includes('!["1", "true"].includes(String(env.STUDIO_I1_DURABLE_JOBS'));
   assert.match(body, /ageMs > 15 \* 60 \* 1000/);
 });
 
