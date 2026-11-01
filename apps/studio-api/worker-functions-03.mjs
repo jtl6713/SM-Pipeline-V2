@@ -2934,12 +2934,19 @@ export async function listAssetLibrary(request, env, url, authorization) {
   const addedTo = parseLibraryDateParam(url.searchParams.get("added_to"));
   const sort = resolveLibraryListSort(url.searchParams.get("sort"), { published: false });
   const crossScope = await resolveLibraryCrossScope(env, url, { useSetting: false });
+  // A single resolved profile drives both server-side Airtable scoping and the
+  // response's profile filter. Previously each path independently reloaded
+  // profiles, amplifying Airtable 429s whenever Library refreshed.
+  const scopeProfile = requestedIds.length || needsProfile
+    ? null : await resolveLibraryScopeProfile(env, authorization, url);
   const scopedProfileId = requestedIds.length || needsProfile || crossScope
-    ? ""
-    : await resolveLibraryScopeProfileId(env, authorization, url);
+    ? "" : (scopeProfile?.id || "");
   const scopeFormula = requestedIds.length || needsProfile
-    ? null
-    : await libraryProfileScopeFormula(env, authorization, url, { includeUnscoped: false, crossScope });
+    ? null : mediaAssetProfileScopeFormula(scopeProfile?.id || "", {
+      includeUnscoped: false,
+      crossScope,
+      profileName: f(scopeProfile, "Profile_Name") || "",
+    });
   const [page, profiles] = await Promise.all([
     listRecordsPage(env, env.AIRTABLE_MEDIA_TABLE_ID, {
       limit: requestedIds.length ? Math.min(ASSET_LIBRARY_MAX_PAGE_SIZE, Math.max(requestedIds.length, 1)) : limit,
