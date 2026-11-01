@@ -168,6 +168,7 @@
   function canReviewActions(card, { pile = false, candidate = false } = {}) {
     if (pile || candidate || state.submittingOutputIds?.has(card?.id) || recentFactoryAccepted()[String(card?.id || "")]) return false;
     if (card?.kind !== "output") return false;
+    if (card.review_package_ready === false) return false;
     // Held revisions must be discoverable and previewable, never approvable
     // from Factory until their separate review and QA handoff completes.
     if (card.review_hold_active === true || card.do_not_publish === true) return false;
@@ -1050,6 +1051,9 @@
   // instead of silently omitting the checkbox while leaving Approve active.
   function factoryBatchSelectionReason(card) {
     if (card?.kind !== "output") return "Only platform outputs can be batch approved.";
+    if (card.review_package_ready === false) {
+      return "Review package incomplete: " + ((card.review_package_missing || []).join(", ") || card.review_package_reason || "required assets not verified");
+    }
     if (recentFactoryAccepted()[String(card?.id || "")]) return "Already accepted for approval. Refresh Activity to verify the result.";
     if (state.submittingOutputIds?.has(card?.id)) return "Approval is already being submitted. Check Activity.";
     if (card?.review_hold_active === true) return "Review-held revision: complete QA handoff before approval.";
@@ -1115,7 +1119,10 @@
       ? `<span class="factory-output-visual">${media}<small class="factory-output-visual-label">${hasSharedCover ? "Shared cover" : (thumb ? "Output image" : "Needs asset")}</small></span>`
       : media;
     const alert = card.stuck_kind || card.produce_error || "";
-    const stateLabel = card.studio_state || (alert ? "Needs repair" : "—");
+    const stateLabel = card.review_package_ready === false
+      ? (card.review_package_readiness === "IN_PROGRESS" ? "Preparing Assets" : "Review blocked")
+      : (card.studio_state || (alert ? "Needs repair" : "—"));
+    const reviewReason = (card.review_package_missing || []).join(", ") || card.review_package_reason || "";
     const cell = (value) => `<span class="factory-line-cell">${esc(value || "—")}</span>`;
     return `<div class="factory-line" data-factory-id="${esc(card.id)}" data-factory-kind="${esc(card.kind || "")}" data-lane="${esc(lane)}" title="${esc(cardLabel(card))}">
       ${needsEyesOutput
@@ -1130,7 +1137,7 @@
       ${cell(card.profile_name)}
       ${cell(card.platform)}
       ${cell(card.studio_output_type)}
-      <span class="factory-line-cell factory-line-state"${alert ? ` title="${esc(alert)}"` : ""}>${esc(stateLabel)}</span>
+      <span class="factory-line-cell factory-line-state"${alert || reviewReason ? ` title="${esc([alert, reviewReason].filter(Boolean).join("; "))}"` : ""}>${esc(stateLabel)}</span>
       <div class="factory-line-actions">${actions.join("")}</div>
     </div>`;
   }
@@ -1371,7 +1378,7 @@
       response=await fetch("/api/rendering-review/outputs/"+encodeURIComponent(card.id),{
         credentials:"same-origin",cache:"no-store",headers:{Accept:"application/json"}
       });
-    } catch(error) { throw new Error("Cannot verify Rendering Review handoff: "+error.message); }
+    } catch(error) { throw new Error("Cannot verify Post Production Edits handoff: "+error.message); }
     if(response.status===404)return false;
     if(!response.ok)throw new Error("Could not verify this revision's review session ("+response.status+")");
     const data=await response.json().catch(()=>null);
@@ -1399,7 +1406,7 @@
       setStatus("Review notes window is unavailable. Refresh Studio before sending back.", true);
       return;
     }
-    state.pendingFactoryFeedback = { payload, focusedElement: document.activeElement };
+    state.pendingFactoryFeedback = { payload, title: title || "Production change request", focusedElement: document.activeElement };
     const heading = $("factoryFeedbackTarget");
     const detail = $("factoryFeedbackScope");
     const error = $("factoryFeedbackError");
@@ -1411,14 +1418,14 @@
     const hints = document.querySelector("#factoryFeedbackHintsText");
     if (intro) intro.textContent = returnReview
       ? payload?.action === "start_render_review"
-        ? "Describe what you want changed. Your comments are required, and they will start a Rendering Review conversation with your Producer."
-        : "Tell your Producer what needs to change in everyday language. Your comments will be added to the existing Rendering Review conversation."
+        ? "Describe what you want changed. Your comments are required, and they will start a Post Production Edits conversation with your Producer."
+        : "Tell your Producer what needs to change in everyday language. Your comments will be added to the existing Post Production Edits conversation."
       : auto
       ? "Tell the Producer what to change in everyday language. Precise caption, narration, duration and uniquely identified photo/clip instructions can restart production automatically. Other creative requests are saved for guided editing."
       : "Describe exactly what needs to change. Studio saves these review notes with the linked Production Request.";
     if (hints) hints.textContent = returnReview
       ? payload?.action === "start_render_review"
-        ? "Your current render is preserved and publishing is held. After submitting, continue with your Producer in Rendering Review. No new render starts until you authorize it."
+        ? "Your current render is preserved and publishing is held. After submitting, continue with your Producer in Post Production Edits. No new render starts until you authorize it."
         : "Your selected V2 stays preserved and publishing is held while you continue with the Producer. No new render starts until you authorize it."
       : auto
       ? "Examples: Please make it 20 seconds. · Add the photo named Chicago River Night. · Replace narration with: Welcome to Chicago. Unresolved photos/clips stay on hold for selection."
@@ -1428,7 +1435,7 @@
     const count = $("factoryFeedbackCount");
     if (count) count.textContent = "0 / 3000";
     const submit = $("factoryFeedbackSubmit");
-    if (submit) { submit.disabled = false; submit.textContent = returnReview ? "Send to Rendering Review" : payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
+    if (submit) { submit.disabled = false; submit.textContent = returnReview ? "Send to Post Production Edits" : payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
     backdrop.hidden = false;
     const transcript = $("factoryProducerTranscript");
     if (transcript) transcript.hidden = !auto;
@@ -1460,15 +1467,23 @@
     const submit = $("factoryFeedbackSubmit");
     if (submit) { submit.disabled = true; submit.textContent = "Sending back…"; }
     if (error) { error.hidden = true; error.textContent = ""; }
+    const tracked = pending.payload?.action === "request_changes_content";
+    const trackingRequestId = String(pending.payload?.production_request_id || "").trim();
+    if (tracked) window.StudioFactoryProducerProgress?.begin({
+      requestId: trackingRequestId, title: pending.title,
+    });
     try {
       closeFactoryPreview();
       const desk = await mutateDesk({ ...pending.payload, note: notes });
       const requestId = String(desk?.result?.production_request_id || pending.payload.production_request_id || "").trim();
+      if (tracked) window.StudioFactoryProducerProgress?.accept({
+        requestId, title: pending.title, result: desk?.result,
+      });
       closeFactoryFeedback();
       if (pending.payload?.action === "return_to_review" || pending.payload?.action === "start_render_review") {
         if (desk?.result?.review_notes_saved!==true || desk?.result?.review_hold_active!==true)
           throw new Error("Review notes or publication hold could not be verified.");
-        const notice = desk.result.message || "Request received. Continue the conversation with your Producer in Rendering Review.";
+        const notice = desk.result.message || "Request received. Continue the conversation with your Producer in Post Production Edits.";
         setStatus(notice);
         window.alert(notice);
         if (typeof window.StudioRenderingReview?.openOutputById === "function") {
@@ -1493,7 +1508,10 @@
         setStatus("Review notes saved. Open the returned item in Production for changes.");
       }
     } catch (err) {
-      if (submit) { submit.disabled = false; submit.textContent = ["return_to_review","start_render_review"].includes(pending.payload?.action) ? "Send to Rendering Review" : pending.payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
+      if (tracked) window.StudioFactoryProducerProgress?.uncertain({
+        requestId: trackingRequestId, title: pending.title, message: err?.message || String(err),
+      });
+      if (submit) { submit.disabled = false; submit.textContent = ["return_to_review","start_render_review"].includes(pending.payload?.action) ? "Send to Post Production Edits" : pending.payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
       if (error) { error.hidden = false; error.textContent = String(err?.message || err); }
       setStatus("Could not send back: " + (err?.message || err), true);
     }
@@ -1582,7 +1600,7 @@
               return;
             }
           }catch(error){
-            setStatus("Rendering Review lookup failed: "+(error.message||error),true);
+            setStatus("Post Production Edits lookup failed: "+(error.message||error),true);
             return;
           }
         }
@@ -1695,7 +1713,7 @@
             return;
           }
         } catch(error) {
-          setStatus("Could not verify Rendering Review handoff: "+(error.message||error),true);
+          setStatus("Could not verify Post Production Edits handoff: "+(error.message||error),true);
           return;
         }
         if(isConversationalReviewCandidate(card)){
@@ -1946,7 +1964,7 @@
     setStatus("Saving…");
     if(payload?.action==="start_render_review"){
       // The Factory dialog is the only new-session UI. Direct enrollment
-      // from Rendering Review is absent and the server requires the note.
+      // from Post Production Edits is absent and the server requires the note.
       const receipt=await fetchJson("/api/rendering-review/factory/outputs/"+
         encodeURIComponent(payload.id)+"/request-changes",{
         method:"POST",
@@ -1981,6 +1999,9 @@
   }
 
   async function loadFactoryDesk(force = false) {
+    // Producer progress lives in its own durable panel, not the disposable
+    // Factory Desk status line. Refresh both independently.
+    window.StudioFactoryProducerProgress?.refresh(true).catch(() => {});
     // One authoritative Desk snapshot at a time, including forced refreshes.
     if (state.loading) return state.desk;
     state.loading = true;
