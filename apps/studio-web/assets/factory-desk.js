@@ -163,11 +163,41 @@
     const output = String(card.output_status || "").trim().toLowerCase();
     const review = String(card.review_status || "").trim().toLowerCase();
     const render = String(card.render_status || "").trim().toLowerCase();
+    if (["approved", "rejected", "skipped"].includes(review)) return false;
     if (/ready for render|waiting in render queue|^rendering$|^failed$|^blocked$/.test(render)) return false;
     if (["in production", "rendering", "ready for render", "failed", "blocked"].includes(output)) return false;
     if (output === "ready for review") return true;
     if (review === "review sent" || review === "ready for review") return true;
     return /ready for review/i.test(String(card.studio_state || ""));
+  }
+
+  // Explain every disabled checkbox and approval control. A Ready for Review
+  // display badge is NOT permission to bypass an active Rendering Review hold.
+  function factoryApprovalUnavailableReason(card, { batch = false } = {}) {
+    if (state.submittingOutputIds?.has(card?.id) || recentFactoryAccepted()[String(card?.id || "")])
+      return "Approval was already submitted. Check Activity before attempting another approval.";
+    if (card?.review_hold_active === true)
+      return "Rendering Review hold is active. Complete the separate review and release its hold before approving.";
+    if (card?.do_not_publish === true)
+      return "Do Not Publish is enabled. Resolve the publishing restriction before approving.";
+    const review = String(card?.review_status || "").trim().toLowerCase();
+    if (["approved", "rejected", "skipped"].includes(review))
+      return "Review was already completed. Refresh Factory to see the latest output status.";
+    const render = String(card?.render_status || "").trim().toLowerCase();
+    if (/ready for render|waiting in render queue|^rendering$/.test(render))
+      return "Rendering is still in progress. Approval becomes available after the render and review handoff finish.";
+    if (/^failed$|^blocked$/.test(render))
+      return "Rendering failed or is blocked. Resolve the render problem before approving.";
+    const output = String(card?.output_status || "").trim().toLowerCase();
+    if (["in production", "rendering", "ready for render", "failed", "blocked"].includes(output))
+      return "Output is not ready for approval. Current Output Status: " + (card.output_status || "unknown") + ".";
+    if (!canReviewActions(card))
+      return "Output has not cleared the approval readiness checks. Refresh Factory or inspect the output.";
+    if (batch && state.batchApprovalsEnabled === false)
+      return "Batch approvals are disabled; individual approval remains available.";
+    if (batch && !canSelectBatchOutput(card))
+      return "Batch selection is not authorized for this profile and output type; individual approval remains available.";
+    return "";
   }
 
   function canDelete(card, { candidate = false } = {}) {
@@ -1014,19 +1044,29 @@
 
   function renderCard(card, { pile = false, candidate = false, lane = "" } = {}) {
     const actions = [];
+    const reviewable = canReviewActions(card, { pile, candidate });
+    const reviewReason = lane === "needs_eyes" && card.kind === "output"
+      ? factoryApprovalUnavailableReason(card, { batch: true }) : "";
+    const batchEligible = lane === "needs_eyes" && card.kind === "output"
+      && reviewable && canSelectBatchOutput(card);
     actions.push(`<button type="button" class="text-button" data-factory-open="${esc(card.id)}">Open</button>`);
     if (pile) {
       actions.push(`<button type="button" class="secondary-button" data-factory-unpin="${esc(card.id)}">Remove</button>`);
     } else if (candidate) {
       actions.push(`<button type="button" class="primary-button" data-factory-pin="${esc(card.id)}">Add</button>`);
     }
-    if (canPreview(card) && (lane === "needs_eyes" || canReviewActions(card, { pile, candidate }) || lane === "auto_high" || lane === "manual")) {
+    if (canPreview(card) && (lane === "needs_eyes" || reviewable || lane === "auto_high" || lane === "manual")) {
       actions.push(`<button type="button" class="secondary-button" data-factory-preview="${esc(card.id)}">Preview</button>`);
     }
-    if (card.kind === "output" && (canReviewActions(card, { pile, candidate }) || lane === "needs_eyes")) {
-      actions.push(`<button type="button" class="primary-button" data-factory-approve="${esc(card.id)}">Approve</button>`);
+    if (card.kind === "output" && (reviewable || lane === "needs_eyes")) {
+      if (reviewable) {
+        actions.push(`<button type="button" class="primary-button" data-factory-approve="${esc(card.id)}">Approve</button>`);
+      } else {
+        actions.push(`<button type="button" class="primary-button" disabled title="${esc(factoryApprovalUnavailableReason(card))}">Approval on hold</button>`);
+      }
       actions.push(`<button type="button" class="secondary-button" data-factory-send-back="${esc(card.id)}">Request Changes</button>`);
     }
+    if (reviewReason) actions.push(`<p class="factory-approval-unavailable" role="status">${esc(reviewReason)}</p>`);
     if (canDelete(card, { candidate })) {
       actions.push(`<button type="button" class="secondary-button factory-delete" data-factory-delete="${esc(card.id)}">Delete</button>`);
     }
@@ -1037,11 +1077,15 @@
         </button>`
       : `<span class="factory-line-thumb factory-line-thumb-empty" aria-hidden="true"></span>`;
     const alert = card.stuck_kind || card.produce_error || "";
-    const stateLabel = card.studio_state || (alert ? "Needs repair" : "—");
+    const stateLabel = card.review_hold_active === true ? "Rendering Review hold"
+      : card.do_not_publish === true ? "Publishing blocked"
+      : (card.studio_state || (alert ? "Needs repair" : "—"));
     const cell = (value) => `<span class="factory-line-cell">${esc(value || "—")}</span>`;
     return `<div class="factory-line" data-factory-id="${esc(card.id)}" data-factory-kind="${esc(card.kind || "")}" data-lane="${esc(lane)}" title="${esc(cardLabel(card))}">
-      ${lane === "needs_eyes" && card.kind === "output" && canReviewActions(card) && canSelectBatchOutput(card)
-        ? `<span class="factory-media-select"><input type="checkbox" data-factory-select-output="${esc(card.id)}" aria-label="Select ${esc(cardLabel(card))}" ${state.selectedOutputs.has(card.id) ? "checked" : ""}>${media}</span>`
+      ${lane === "needs_eyes" && card.kind === "output"
+        ? `<span class="factory-media-select">${batchEligible
+          ? `<input type="checkbox" data-factory-select-output="${esc(card.id)}" aria-label="Select ${esc(cardLabel(card))}" ${state.selectedOutputs.has(card.id) ? "checked" : ""}>`
+          : `<input type="checkbox" disabled aria-label="Cannot select ${esc(cardLabel(card))}: ${esc(reviewReason || "Batch approval not available")}" title="${esc(reviewReason || "Batch approval not available")}">`}${media}</span>`
         : media}
       <span class="factory-line-title">${esc(card.title || cardLabel(card))}${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}</span>
       ${cell(card.profile_name)}
@@ -1580,6 +1624,10 @@
         const card = byId.get(id);
         if (!card) {
           setStatus(`Approve failed: card ${id || "(missing)"} not found in desk payload.`, true);
+          return;
+        }
+        if (!canReviewActions(card)) {
+          setStatus(factoryApprovalUnavailableReason(card), true);
           return;
         }
         if (!window.confirm(`Approve “${cardLabel(card)}” for publishing?\n\nStudio will use the next open morning, afternoon, or evening. It will not publish immediately. TikTok stays a draft.`)) return;
