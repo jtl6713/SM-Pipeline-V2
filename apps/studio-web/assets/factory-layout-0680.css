@@ -678,3 +678,33 @@
 /* The sticky selected-output toolbar must never cover the global navigation
    drawer or its backdrop (18/20). Keep it above Factory rows only. */
 #page-factory .factory-batch-toolbar{z-index:10}
+/* Show Factory's active city scope beside the review queue, including on mobile. */
+#page-factory .factory-active-filter[hidden]{display:none!important}
+#page-factory .factory-active-filter{
+  display:flex;align-items:center;flex-wrap:wrap;gap:10px 12px;
+  box-sizing:border-box;width:100%;padding:11px 14px;margin:1px 0 7px;
+  border:1px solid #c99834;border-left:5px solid #bf871a;border-radius:10px;
+  background:#fff8e9;color:#49300d;
+}
+#page-factory .factory-active-filter-dot{color:#9b680b;font-size:1rem;flex:0 0 auto}
+#page-factory .factory-active-filter-copy{
+  flex:1 1 230px;min-width:0;display:flex;flex-direction:column;gap:2px;
+  line-height:1.3;overflow-wrap:anywhere;
+}
+#page-factory .factory-active-filter-kicker{
+  font-size:.68rem;font-weight:800;letter-spacing:.06em;color:#76500e;
+}
+#page-factory #factoryActiveProfileScope{font-size:.92rem;font-weight:800;color:#402800}
+#page-factory #factoryActiveProfileContext{font-size:.78rem;color:#6c4c1e}
+#page-factory #factoryClearProfileFilter{
+  min-height:36px;white-space:nowrap;border:1px solid #b7832b;
+  background:#fff;color:#5b3d0e;font-weight:750;
+}
+#page-factory #factoryClearProfileFilter:focus-visible{
+  outline:3px solid #175cd3;outline-offset:2px;
+}
+@media(max-width:560px){
+  #page-factory .factory-active-filter{align-items:flex-start;padding:10px 12px;gap:8px}
+  #page-factory .factory-active-filter-copy{flex-basis:calc(100% - 30px)}
+  #page-factory #factoryClearProfileFilter{margin-left:23px;white-space:normal}
+}
