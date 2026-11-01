@@ -13247,43 +13247,53 @@ export async function getStudioReadyProductionDiagnostic(request, env, url) {
 /*__STUDIO_WORKER_END:getStudioReadyProductionDiagnostic__*/
 
 export async function getStudioOperations(request, env, authorization) {
-  const chicago = chicagoNowParts();
-  const lastDaily = await studioSettingsByName(env, STUDIO_I1_LAST_DAILY_SETTING);
-  const lastAutonomous = await studioSettingsByName(env, STUDIO_AUTONOMOUS_LAST_SETTING);
-  const libraryCrossScopeRow = await studioSettingsByName(env, LIBRARY_CROSS_SCOPE_SETTING).catch(() => null);
-  const [profiles, readyToSchedule, readyToPublish, published, oversized, needingClassification, compressionJobs] = await Promise.all([
-    listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 }),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 50, view: STUDIO_PUB1_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 50, view: STUDIO_PUB2_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 25, view: STUDIO_PUB3_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
-    listOversizedMedia(env).catch(() => []),
-    listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, { limit: 25, view: STUDIO_A3_CLASSIFY_VIEW_ID }).catch(() => []),
-    listActiveA1CompressionJobs(env).catch(() => []),
-  ]);
-  const libraryIntake = mapLibraryIntakeSnapshot(needingClassification, oversized);
-  // Read-only watchlist for Ops; do not block Profiles on ensure/upsert side effects.
-  const similarAccounts = await studioReadSimilarWatchlist(env).catch(() => []);
+  // This dashboard fans out across settings, profile, output and media tables.
+  // Coalesce repeat poll/refresh calls *per organization* before they reach
+  // Airtable's shared per-base rate limit. Authorization-sensitive flags are
+  // computed outside the cached payload and never shared between callers.
+  const orgId = String(authorization?.organization?.record_id || "global");
+  const data = await studioReadCoalesce(`operations:overview:${orgId}`, 15000, async () => {
+    const chicago = chicagoNowParts();
+    const lastDaily = await studioSettingsByName(env, STUDIO_I1_LAST_DAILY_SETTING);
+    const lastAutonomous = await studioSettingsByName(env, STUDIO_AUTONOMOUS_LAST_SETTING);
+    const libraryCrossScopeRow = await studioSettingsByName(env, LIBRARY_CROSS_SCOPE_SETTING).catch(() => null);
+    const [profiles, readyToSchedule, readyToPublish, published, oversized, needingClassification, compressionJobs] = await Promise.all([
+      listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 }),
+      listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 50, view: STUDIO_PUB1_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
+      listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 50, view: STUDIO_PUB2_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
+      listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 25, view: STUDIO_PUB3_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
+      listOversizedMedia(env).catch(() => []),
+      listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, { limit: 25, view: STUDIO_A3_CLASSIFY_VIEW_ID }).catch(() => []),
+      listActiveA1CompressionJobs(env).catch(() => []),
+    ]);
+    const libraryIntake = mapLibraryIntakeSnapshot(needingClassification, oversized);
+    // Read-only watchlist for Ops; do not block Profiles on ensure/upsert side effects.
+    const similarAccounts = await studioReadSimilarWatchlist(env).catch(() => []);
+    return {
+      timezone: "America/Chicago",
+      chicago_date: chicago.date,
+      chicago_hour: chicago.hour,
+      last_daily_idea_date: f(lastDaily, "Setting_Value") || null,
+      last_autonomous_run: parseAutonomousLastRun(f(lastAutonomous, "Setting_Value")),
+      profiles: profiles.map(mapOperationsProfile),
+      ready_to_schedule: readyToSchedule.map(mapOperationsOutput),
+      ready_to_publish: readyToPublish.map(mapOperationsOutput),
+      recently_published: published.map(mapOperationsOutput),
+      oversized_media: attachCompressionJobs(oversized, compressionJobs),
+      compression_jobs: compressionJobs,
+      compression_headline: compressionJobs[0]?.headline || null,
+      a1s_oversize_bytes: STUDIO_A1S_OVERSIZE_BYTES,
+      library_intake: libraryIntake,
+      similar_accounts: similarAccounts,
+      library_include_cross_scope: libraryCrossScopeEnabled(f(libraryCrossScopeRow, "Setting_Value")),
+    };
+  });
   return respond(request, env, {
     ok: true,
     page: "operations",
-    timezone: "America/Chicago",
-    chicago_date: chicago.date,
-    chicago_hour: chicago.hour,
-    last_daily_idea_date: f(lastDaily, "Setting_Value") || null,
-    last_autonomous_run: parseAutonomousLastRun(f(lastAutonomous, "Setting_Value")),
+    ...data,
     can_edit_profiles: Boolean(authorization?.permissions?.tenant_admin),
     can_publish_queue: Boolean(authorization?.permissions?.publishing_control),
-    profiles: profiles.map(mapOperationsProfile),
-    ready_to_schedule: readyToSchedule.map(mapOperationsOutput),
-    ready_to_publish: readyToPublish.map(mapOperationsOutput),
-    recently_published: published.map(mapOperationsOutput),
-    oversized_media: attachCompressionJobs(oversized, compressionJobs),
-    compression_jobs: compressionJobs,
-    compression_headline: compressionJobs[0]?.headline || null,
-    a1s_oversize_bytes: STUDIO_A1S_OVERSIZE_BYTES,
-    library_intake: libraryIntake,
-    similar_accounts: similarAccounts,
-    library_include_cross_scope: libraryCrossScopeEnabled(f(libraryCrossScopeRow, "Setting_Value")),
   });
 }
 /*__STUDIO_WORKER_END:getStudioOperations__*/
