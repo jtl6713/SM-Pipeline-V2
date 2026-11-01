@@ -76,6 +76,19 @@ test("Worker revision is authenticated, preview-only and independent of acceptan
   assert.match(functions, /proposal_feedback/);
 });
 
+test("semicolon-separated conversational feedback retains exact clip titles",()=>{
+  const parsed=parseScriptedShortFeedback("Replace slide 2 with Times Square 2; remove slide 4; move slide 5 before slide 3");
+  assert.deepEqual(parsed,{actions:[
+    {action:"replace",scene:2,asset_name:"Times Square 2"},
+    {action:"remove",scene:4},
+    {action:"move",scene:5,position:"before",target_scene:3},
+  ]});
+  const candidate={id:"recTimesSquare2",name:"Times Square 2.mp4",media_kind:"video",media_type:"video/mp4"};
+  const revised=applyScriptedShortFeedback(base,{actions:parsed.actions.map(x=>x.action==="replace"?{...x,clip:candidate}:x)});
+  assert.equal(revised.segments.length,5);
+  assert.equal(revised.segments[1].asset_id,candidate.id);
+  assert.deepEqual(revised.segments.map(s=>s.voiceover_text),["Narration 1","Narration 2","Narration 5","Narration 3","Narration 6"]);
+});
 test("one natural-language request removes multiple scenes by their ORIGINAL positions", () => {
   const plan = { ...base, segments: [...segments, {voiceover_text:"Narration 7"}] };
   const parsed = parseScriptedShortFeedback("Please remove slides 2 and 4");
