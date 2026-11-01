@@ -24,7 +24,7 @@ const same=(a,b)=>str(a)===str(b);
 function requireFunctions(ops){
   for(const name of ["withOutputLock","readRawOutput","readNormalizedOutput","readSession",
     "readAttempt","readField","saveSessionIfVersion","patchOutput","syncOutput",
-    "recordApprovedCreativeMaster"]){
+    "recordApprovedCreativeMaster","propagateApprovedCreativeMaster"]){
     if(typeof ops?.[name]!=="function")
       deny("FACTORY_HANDOFF_ADAPTER_MISSING","Factory handoff requires "+name,503);
   }
@@ -133,6 +133,17 @@ export async function handoffApprovedReviewToFactory({output_id,env,operations,n
        creativeMaster?.file_id!==fileId)
       deny("FACTORY_CREATIVE_MASTER_UNVERIFIED",
         "Approved master must be durably recorded before Factory hold release",503);
+    // Distribute QA-approved creative media to every eligible matching
+    // sibling while publishing remains independently gated on each output.
+    // Failures are retryable and do not release the source review hold.
+    const fanout=await o.propagateApprovedCreativeMaster({
+      source_output_id:output_id,content_item_id:creativeMaster.content_item_id,
+      master_key:creativeMaster.key,master_version:creativeMaster.version,
+      master_file_id:fileId,
+    });
+    if(!fanout||fanout.source_output_id!==output_id||
+       fanout.content_item_id!==creativeMaster.content_item_id)
+      deny("FACTORY_CREATIVE_FANOUT_UNVERIFIED","Creative master fanout did not verify",503);
     const alreadyTransferred=s.review_hold?.active===false;
     const receipt=s.factory_handoff;
     if(alreadyTransferred &&
@@ -226,6 +237,9 @@ export async function handoffApprovedReviewToFactory({output_id,env,operations,n
       mirror_synced:mirror?.ok===true||mirror?.skipped===true,
       creative_master:{key:creativeMaster.key,content_item_id:creativeMaster.content_item_id,
         version:creativeMaster.version,linked_by_compatibility:true,
-        sibling_publish_changes:0}};
+        sibling_publish_changes:0,
+        siblings_updated:fanout.applied,siblings_already_current:fanout.already_current,
+        siblings_deferred:fanout.deferred,
+        sibling_results:fanout.results}};
   });
 }
