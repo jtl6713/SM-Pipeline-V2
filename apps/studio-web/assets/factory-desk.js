@@ -1378,7 +1378,7 @@
       response=await fetch("/api/rendering-review/outputs/"+encodeURIComponent(card.id),{
         credentials:"same-origin",cache:"no-store",headers:{Accept:"application/json"}
       });
-    } catch(error) { throw new Error("Cannot verify Rendering Review handoff: "+error.message); }
+    } catch(error) { throw new Error("Cannot verify Post Production Edits handoff: "+error.message); }
     if(response.status===404)return false;
     if(!response.ok)throw new Error("Could not verify this revision's review session ("+response.status+")");
     const data=await response.json().catch(()=>null);
@@ -1418,14 +1418,14 @@
     const hints = document.querySelector("#factoryFeedbackHintsText");
     if (intro) intro.textContent = returnReview
       ? payload?.action === "start_render_review"
-        ? "Describe what you want changed. Your comments are required, and they will start a Rendering Review conversation with your Producer."
-        : "Tell your Producer what needs to change in everyday language. Your comments will be added to the existing Rendering Review conversation."
+        ? "Describe what you want changed. Your comments are required, and they will start a Post Production Edits conversation with your Producer."
+        : "Tell your Producer what needs to change in everyday language. Your comments will be added to the existing Post Production Edits conversation."
       : auto
       ? "Tell the Producer what to change in everyday language. Precise caption, narration, duration and uniquely identified photo/clip instructions can restart production automatically. Other creative requests are saved for guided editing."
       : "Describe exactly what needs to change. Studio saves these review notes with the linked Production Request.";
     if (hints) hints.textContent = returnReview
       ? payload?.action === "start_render_review"
-        ? "Your current render is preserved and publishing is held. After submitting, continue with your Producer in Rendering Review. No new render starts until you authorize it."
+        ? "Your current render is preserved and publishing is held. After submitting, continue with your Producer in Post Production Edits. No new render starts until you authorize it."
         : "Your selected V2 stays preserved and publishing is held while you continue with the Producer. No new render starts until you authorize it."
       : auto
       ? "Examples: Please make it 20 seconds. · Add the photo named Chicago River Night. · Replace narration with: Welcome to Chicago. Unresolved photos/clips stay on hold for selection."
@@ -1435,7 +1435,7 @@
     const count = $("factoryFeedbackCount");
     if (count) count.textContent = "0 / 3000";
     const submit = $("factoryFeedbackSubmit");
-    if (submit) { submit.disabled = false; submit.textContent = returnReview ? "Send to Rendering Review" : payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
+    if (submit) { submit.disabled = false; submit.textContent = returnReview ? "Send to Post Production Edits" : payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
     backdrop.hidden = false;
     const transcript = $("factoryProducerTranscript");
     if (transcript) transcript.hidden = !auto;
@@ -1483,7 +1483,7 @@
       if (pending.payload?.action === "return_to_review" || pending.payload?.action === "start_render_review") {
         if (desk?.result?.review_notes_saved!==true || desk?.result?.review_hold_active!==true)
           throw new Error("Review notes or publication hold could not be verified.");
-        const notice = desk.result.message || "Request received. Continue the conversation with your Producer in Rendering Review.";
+        const notice = desk.result.message || "Request received. Continue the conversation with your Producer in Post Production Edits.";
         setStatus(notice);
         window.alert(notice);
         if (typeof window.StudioRenderingReview?.openOutputById === "function") {
@@ -1511,7 +1511,7 @@
       if (tracked) window.StudioFactoryProducerProgress?.uncertain({
         requestId: trackingRequestId, title: pending.title, message: err?.message || String(err),
       });
-      if (submit) { submit.disabled = false; submit.textContent = ["return_to_review","start_render_review"].includes(pending.payload?.action) ? "Send to Rendering Review" : pending.payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
+      if (submit) { submit.disabled = false; submit.textContent = ["return_to_review","start_render_review"].includes(pending.payload?.action) ? "Send to Post Production Edits" : pending.payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
       if (error) { error.hidden = false; error.textContent = String(err?.message || err); }
       setStatus("Could not send back: " + (err?.message || err), true);
     }
@@ -1600,7 +1600,7 @@
               return;
             }
           }catch(error){
-            setStatus("Rendering Review lookup failed: "+(error.message||error),true);
+            setStatus("Post Production Edits lookup failed: "+(error.message||error),true);
             return;
           }
         }
@@ -1713,7 +1713,7 @@
             return;
           }
         } catch(error) {
-          setStatus("Could not verify Rendering Review handoff: "+(error.message||error),true);
+          setStatus("Could not verify Post Production Edits handoff: "+(error.message||error),true);
           return;
         }
         if(isConversationalReviewCandidate(card)){
@@ -1964,7 +1964,7 @@
     setStatus("Saving…");
     if(payload?.action==="start_render_review"){
       // The Factory dialog is the only new-session UI. Direct enrollment
-      // from Rendering Review is absent and the server requires the note.
+      // from Post Production Edits is absent and the server requires the note.
       const receipt=await fetchJson("/api/rendering-review/factory/outputs/"+
         encodeURIComponent(payload.id)+"/request-changes",{
         method:"POST",
