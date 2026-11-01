@@ -136,7 +136,9 @@
     const expected = row.revision_id;
     // Older client clicks or interrupted responses can recover their receipt
     // from the latest Airtable revision marker. Never invent success if absent.
-    if (!expected && revisionOk(marker?.id)) row.revision_id = marker.id;
+    // A lost HTTP acknowledgement must not be mistaken for an earlier
+    // revision's completion. Recover an id only after the POST was confirmed.
+    if (!expected && revisionOk(marker?.id) && !["submitting","uncertain"].includes(row.status)) row.revision_id = marker.id;
     if (expected && revisionOk(marker?.id) && marker.id !== expected) {
       row.status = "superseded";row.phase = 1;
       row.detail = "Another revision was submitted later. Open Production to inspect the current version.";
@@ -170,9 +172,9 @@
     row.checked_at = Date.now();
     if (row.status !== "needs_attention") row.error = "";
   }
-  async function refresh(force = false) {
+  async function refresh(force = false, requestId = "") {
     if (checking || (!force && (document.hidden || !$("page-factory")?.classList.contains("active")))) return;
-    const pending = entries.filter(row => !ended(row.status)).slice(0, 4);
+    const pending = entries.filter(row => requestId ? row.request_id === requestId : !ended(row.status)).slice(0, 4);
     if (!pending.length) return;
     checking = true;
     try {
@@ -204,11 +206,8 @@
       button.getAttribute("data-producer-progress-dismiss");
     if (!idOk(id)) return;
     if (button.hasAttribute("data-producer-progress-refresh")) {
-      const row = entries.find(entry => entry.request_id === id);
-      if (row && ended(row.status) && row.status !== "manual") {
-        row.status = "queued"; // an explicit check may discover newer authoritative state
-      }
-      refresh(true);
+      // Checking a completed revision must never clear a verified result.
+      refresh(true, id);
     } else if (button.hasAttribute("data-producer-progress-open")) {
       if (typeof window.StudioOpenProductionRequestById === "function")
         Promise.resolve(window.StudioOpenProductionRequestById(id)).catch(error => {
