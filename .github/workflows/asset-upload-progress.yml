@@ -1,0 +1,25 @@
+name: Asset Manager Upload Progress
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-web/**'
+      - '.github/workflows/asset-upload-progress.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/studio-web/**'
+      - '.github/workflows/asset-upload-progress.yml'
+permissions:
+  contents: read
+jobs:
+  asset-upload-progress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: |
+          node --check apps/studio-web/assets/app-item4-1008.js
+          node --test apps/studio-web/asset-upload-progress.test.mjs apps/studio-web/library-cards.test.mjs apps/studio-web/library-picker-previews.test.mjs
