@@ -8,6 +8,7 @@
     needsEyesSearch: "",
     pendingFactoryFeedback: null,
     selectedOutputs: new Set(),
+    heldCreativeAccepted: new Set(),
     submittingBatch: false,
     batch: null,
     completedBatch: null,
@@ -1056,7 +1057,7 @@
     }
     if (recentFactoryAccepted()[String(card?.id || "")]) return "Already accepted for approval. Refresh Activity to verify the result.";
     if (state.submittingOutputIds?.has(card?.id)) return "Approval is already being submitted. Check Activity.";
-    if (card?.review_hold_active === true) return "Review-held revision: complete QA handoff before approval.";
+    if (card?.review_hold_active === true) return "Publishing approval is held for media QA. You can accept V2 creatively or request another revision.";
     if (card?.do_not_publish === true) return "Publishing hold is active for this output.";
     const render = String(card?.render_status || "").trim().toLowerCase();
     if (/^(failed|blocked)$/.test(render)) return `Render status is ${card.render_status}. Repair the render before approval.`;
@@ -1096,6 +1097,15 @@
       // A stale review badge/held revision must never present a live Approve
       // action merely because the server grouped the row under Needs Eyes.
       actions.push(`<button type="button" class="primary-button" data-factory-approve="${esc(card.id)}" ${reviewAllowed ? "" : `disabled title="${esc(batchReason || "Not yet eligible for approval")}"`}>Approve</button>`);
+      if(needsEyesOutput && card.review_hold_active===true && card.do_not_publish===true) {
+        // Human review can be accepted without releasing the publishing hold.
+        // Server verifies the actual saved creative approval before accepting.
+        if(state.heldCreativeAccepted?.has(card.id)){
+          actions.push(`<button type="button" class="secondary-button" disabled title="Factory creative acceptance confirmed; publishing remains on hold for QA.">V2 accepted · QA pending</button>`);
+        }else{
+          actions.push(`<button type="button" class="secondary-button" data-factory-accept-held="${esc(card.id)}" title="Accept the selected V2 creatively. Keeps watermark QA, scheduling and publishing on hold.">Accept V2 (QA hold)</button>`);
+        }
+      }
       actions.push(`<button type="button" class="secondary-button" data-factory-send-back="${esc(card.id)}">Request Changes</button>`);
     }
     if (canDelete(card, { candidate })) {
@@ -1132,7 +1142,7 @@
         ${needsEyesOutput
           ? `<span class="factory-output-heading">${outputVisual}<span class="factory-output-title-copy"><span class="factory-output-title-name">${esc(card.title || cardLabel(card))}</span>${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}</span></span>`
           : `${esc(card.title || cardLabel(card))}${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}`}
-        ${needsEyesOutput && batchReason ? `<span id="${esc(reasonId)}" class="factory-batch-unavailable" role="status"><strong>Approval unavailable:</strong> ${esc(batchReason)}</span>` : ""}
+        ${needsEyesOutput && batchReason ? `<span id="${esc(reasonId)}" class="factory-batch-unavailable" role="status"><strong>${card.review_hold_active===true ? "Publishing approval held:" : "Approval unavailable:"}</strong> ${esc(batchReason)}</span>` : ""}
       </span>
       ${cell(card.profile_name)}
       ${cell(card.platform)}
@@ -1371,6 +1381,25 @@
     setCount("factoryCountManual", String(Number(summary.manual) || 0));
   }
 
+  async function readHeldFactoryReview(card) {
+    if(card?.kind!=="output" || !/^rec[A-Za-z0-9]{14}$/.test(String(card.id||"")))
+      throw new Error("Exact Platform Output required for held review.");
+    const response=await fetch("/api/rendering-review/outputs/"+encodeURIComponent(card.id),{
+      credentials:"same-origin",cache:"no-store",headers:{Accept:"application/json"}
+    });
+    if(!response.ok)throw new Error("Could not verify saved V2 review ("+response.status+").");
+    const data=await response.json();
+    const session=data?.session;
+    if(data?.ok!==true||!session||
+       session.output_id!==card.id||session.state!=="approved"||
+       session.review_hold?.active!==true||data.publication_hold_verified!==true||
+       session.current_attempt_id!==session.approved_attempt_id)
+      throw new Error("This output is not a creatively approved, safely held V2.");
+    if(session.factory_review?.status==="accepted_pending_qa")
+      return {session,alreadyAccepted:true};
+    return {session,alreadyAccepted:false};
+  }
+
   async function reviewedFactoryRevision(card) {
     if(card?.kind!=="output" || !/^rec[A-Za-z0-9]{14}$/.test(String(card.id||"")))return false;
     let response;
@@ -1484,7 +1513,7 @@
     const error = $("factoryFeedbackError");
     if (heading) heading.textContent = title || "Untitled content";
     if (detail) detail.textContent = scope || "Review changes";
-    const returnReview = payload?.action === "return_to_review" || payload?.action === "start_render_review";
+    const returnReview = ["return_to_review","return_to_review_held","start_render_review"].includes(payload?.action);
     const auto = payload?.action === "request_changes_content";
     const intro = $("factoryFeedbackIntro");
     const hints = document.querySelector("#factoryFeedbackHintsText");
@@ -1554,7 +1583,7 @@
         requestId, title: pending.title, result: desk?.result,
       });
       closeFactoryFeedback();
-      if (pending.payload?.action === "return_to_review" || pending.payload?.action === "start_render_review") {
+      if (["return_to_review","return_to_review_held","start_render_review"].includes(pending.payload?.action)) {
         if (desk?.result?.review_notes_saved!==true || desk?.result?.review_hold_active!==true)
           throw new Error("Review notes or publication hold could not be verified.");
         const notice = desk.result.message || "Request received. Continue the conversation with your Producer in Post Production Edits.";
@@ -1749,6 +1778,41 @@
         });
       });
     });
+    root.querySelectorAll("[data-factory-accept-held]").forEach((button) => {
+      button.addEventListener("click",async()=>{
+        const id=button.getAttribute("data-factory-accept-held");
+        const card=byId.get(id);
+        if(!card){setStatus("Held review output not found; refresh Factory.",true);return;}
+        button.disabled=true;
+        try{
+          const reviewed=await readHeldFactoryReview(card);
+          if(reviewed.alreadyAccepted){
+            state.heldCreativeAccepted.add(card.id);
+            if(state.desk)renderDesk(state.desk);
+            setStatus("Factory V2 creative acceptance is already saved. Publishing remains held for QA.");
+            return;
+          }
+          if(!window.confirm("Accept the selected V2 creatively in Factory?\\n\\nThis does NOT authorize publishing, release the watermark QA hold, schedule or upload anything."))return;
+          const receipt=await mutateDesk({
+            action:"accept_held_creative",kind:"output",id:card.id,
+            expected_version:reviewed.session.version,
+            client_request_id:"factorycreative_"+crypto.randomUUID().replace(/-/g,""),
+          });
+          const result=receipt?.result;
+          if(result?.factory_creative_accepted!==true||result.qa_pending!==true||
+             result.review_hold_active!==true||result.publishing_authorized!==false||
+             result.scheduled!==false||result.public_post_created!==false)
+            throw new Error("Factory creative acceptance was not verified.");
+          state.heldCreativeAccepted.add(card.id);
+          if(state.desk)renderDesk(state.desk);
+          setStatus("V2 accepted for Factory creative review. Watermark QA and publishing remain held.");
+        }catch(error){
+          const message=error?.message||String(error);
+          setStatus("Factory creative acceptance needs attention: "+message,true);
+          window.alert("Factory creative acceptance not confirmed:\\n"+message);
+        }finally{button.disabled=false;}
+      });
+    });
     root.querySelectorAll("[data-factory-approve]").forEach((button) => {
       button.addEventListener("click", () => {
         const id = button.getAttribute("data-factory-approve");
@@ -1777,6 +1841,17 @@
           return;
         }
         try {
+          if(card.review_hold_active===true&&card.do_not_publish===true){
+            const reviewed=await readHeldFactoryReview(card);
+            openFactoryFeedback({
+              title:card.title||cardLabel(card),
+              scope:[card.platform,card.studio_output_type,"Held V2 creative redo"].filter(Boolean).join(" · "),
+              payload:{action:"return_to_review_held",id:card.id,kind:"output",
+                expected_version:reviewed.session.version,
+                client_request_id:"factoryreview_"+crypto.randomUUID().replace(/-/g,"")},
+            });
+            return;
+          }
           if(await reviewedFactoryRevision(card)) {
             const clientKey = "factoryreview_" + crypto.randomUUID().replace(/-/g,"");
             openFactoryFeedback({
@@ -2036,6 +2111,23 @@
 
   async function mutateDesk(payload) {
     setStatus("Saving…");
+    if(payload?.action==="return_to_review_held"){
+      // A held, creatively accepted version has an EXISTING review session.
+      // Resume that conversation; never try to enroll a second session.
+      const receipt=await fetchJson("/api/rendering-review/outputs/"+
+        encodeURIComponent(payload.id)+"/request-redo",{
+        method:"POST",
+        body:JSON.stringify({note:payload.note,
+          client_request_id:payload.client_request_id,
+          expected_version:payload.expected_version}),
+      });
+      if(receipt?.redo_requested!==true||receipt.review_hold_active!==true||
+         receipt.render_queued!==false||receipt.public_post_created!==false)
+        throw new Error("Held revision request was not durably verified");
+      state.heldCreativeAccepted.delete(payload.id);
+      const message="Creative revision requested in the existing Producer conversation. V2 is preserved; nothing was rendered or published.";
+      return {ok:true,result:{...receipt,review_notes_saved:true,message},message};
+    }
     if(payload?.action==="start_render_review"){
       // The Factory dialog is the only new-session UI. Direct enrollment
       // from Post Production Edits is absent and the server requires the note.
