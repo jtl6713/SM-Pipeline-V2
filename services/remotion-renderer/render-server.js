@@ -10,6 +10,7 @@ const { registerRemotionCleanup } = require('./remotion-cleanup');
 const { authoritativeRenderPlan } = require('./authoritative-duration');
 const { verifyFirstFrame } = require('./first-frame-verify');
 const {selectedVibeWatermarkFileId} = require('./profile-watermark-policy');
+const {noVoiceoverForVibeReview} = require('./vibe-audio-policy');
 
 const app = express();
 
@@ -947,6 +948,11 @@ async function rewriteMusicAsset({ music, jobAssetDir, job }) {
 function normalizeVoiceover(body) {
     if (!body || typeof body !== 'object') {
         return undefined;
+    }
+    // Vibe Cut is music-only: its {enabled:false} sentinel must NOT be
+    // downloaded as a synthesized voiceover. Reject any incidental narration.
+    if (body.studioRevision?.source === 'rendering_review_vibe_cut') {
+        return noVoiceoverForVibeReview(body);
     }
 
     if (body.voiceover && typeof body.voiceover === 'object') {
