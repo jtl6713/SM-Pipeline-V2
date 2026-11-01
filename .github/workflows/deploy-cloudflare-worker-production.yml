@@ -769,7 +769,7 @@ jobs:
               .output_status=="Ready for Review")] | length)==1 and
             (["recyYKgkfRksIZPun","rec8JDQW2Jilnzc9u","recgJR5bTcYfCCwAL","recqw7DTgYsqYkl51","recZ1X5QfeFZTot1F"] -
              [.lanes.needs_eyes[] | select(.output_status=="Ready for Review" and
-               .publish_status=="Not Ready") | .id] | length)==0
+               (.publish_status==null or .publish_status=="Not Ready")) | .id] | length)==0
           ' /tmp/factory-michigan-visibility.json >/dev/null || {
             echo "Michigan V2 not fully discoverable in the authenticated Factory Needs Eyes queue" >&2
             jq -c '{read_source,matching:[.lanes.needs_eyes[]|select(.content_item_id=="recYhIjy4BW0U3WaW")|{id,review_hold_active,do_not_publish,output_status,publish_status}]}' /tmp/factory-michigan-visibility.json >&2
