@@ -570,7 +570,7 @@ test('held #8447 surfaces a verified Morning alternative and saves correction on
   const sandbox={
     document:{getElementById:id=>nodes[id],createElement:tag=>new Node(tag)},
     window:{location:{href:'https://studio.test/'},CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''},
-      setTimeout:fn=>{slowTimers.push(fn);return slowTimers.length;},
+      setTimeout:(fn,ms)=>{slowTimers.push({fn,ms});return slowTimers.length;},
       clearTimeout:()=>{}},
     MutationObserver:class {constructor(fn){notify=fn;}observe(){}},
     fetch:fetchStub,URL,URLSearchParams,
@@ -608,8 +608,11 @@ test('held #8447 surfaces a verified Morning alternative and saves correction on
   assert.equal(progress.hidden,false);
   assert.match(progress.textContent,/Sending your feedback/);
   assert.equal(progress.dataset.state,'working');
-  assert.equal(slowTimers.length,1);
-  slowTimers[0]();
+  assert.equal(slowTimers.filter(timer=>timer.ms===20000).length,1,
+    'the held review session has one independent status poll');
+  assert.equal(slowTimers.filter(timer=>timer.ms===8000).length,1,
+    'Producer request retains its own delayed waiting notice');
+  slowTimers.find(timer=>timer.ms===8000).fn();
   assert.match(progress.textContent,/Still waiting for the Producer/);
   assert.equal(calls.filter(x=>x.method==='POST').length,1);
   await send.listeners.click();
