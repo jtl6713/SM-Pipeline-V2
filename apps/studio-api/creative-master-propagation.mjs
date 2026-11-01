@@ -86,7 +86,7 @@ export function planCreativeMasterAdoption({content,output,master}){
     Final_File_ID:master.file_id,Final_File_URL:drive(master.file_id),
     Output_URL:drive(master.file_id),
     Studio_Preview_URL:null,Studio_Preview_R2_Key:"",
-    Studio_Preview_Updated_At:null,Publish_Asset_URL:null,
+    Studio_Preview_Updated_At:null,Render_Server_URL:null,Publish_Asset_URL:null,
     Publish_Asset_Host:null,Publish_Asset_Ready_At:null,
     Publish_Asset_File_Name:null,
     [OUTPUT_MASTER_FIELD]:expectedRef,

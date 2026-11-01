@@ -166,6 +166,7 @@ export async function handoffApprovedReviewToFactory({output_id,env,operations,n
           Studio_Preview_URL:null,
           Studio_Preview_R2_Key:"",
           Studio_Preview_Updated_At:null,
+          Render_Server_URL:null,
           Publish_Asset_URL:null,
           Publish_Asset_Host:null,
           Publish_Asset_Ready_At:null,

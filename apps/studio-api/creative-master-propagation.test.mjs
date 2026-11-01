@@ -32,6 +32,7 @@ function row(id,platform,format="Vertical Short Video",props={}){
     Output_Caption:"Caption for "+platform,Hashtags:"#city",
     Studio_Preview_URL:"https://cdn.example/stale.mp4",
     Studio_Preview_R2_Key:"old_preview.mp4",
+    Render_Server_URL:"https://render.chicagoshining.com/out/stale-original.mp4",
     Publish_Asset_URL:"https://cdn.example/stale-public.mp4",
     ...props}};
 }
@@ -91,6 +92,7 @@ test("approved 9:16 video master adopts Reels, TikTok, Shorts and MP4 Stories wi
    assert.equal(after.Review_Status.name,"Review Sent");
    assert.equal(after.Output_Status.name,"Ready for Review");
    assert.equal(after.Studio_Preview_URL,null);
+   assert.equal(after.Render_Server_URL,null);
    assert.equal(after.Publish_Asset_URL,null);
    assert.equal(JSON.parse(after[OUTPUT_MASTER_FIELD]).sha256,master.sha256);
    for(const protectedField of ["Scheduled_Post_Date","Studio_Scheduled_At",

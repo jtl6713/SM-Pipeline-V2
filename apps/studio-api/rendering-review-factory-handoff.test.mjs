@@ -34,6 +34,7 @@ function fixture(){
   Content_Item:["recA1B2C3D4E5F6G7"],
   Format:"Vertical Short Video",Aspect_Ratio:"9:16",
   Render_Status:"Rendered",Final_File_ID:v1,Final_File_URL:url(v1),
+   Render_Server_URL:"https://render.chicagoshining.com/out/old-source.mp4",
   Output_URL:url(v1),Auto_Publish_Enabled:true,Do_Not_Publish:true,
   Studio_Render_Review_Hold_Active:true,
   Studio_Render_Review_Hold_ID:holdId,
@@ -122,6 +123,7 @@ test("real #8447 V2 creative approval becomes Factory Needs Eyes, never schedule
  assert.equal(result.public_post_created,false);
  assert.equal(result.artifact_id,v2);
  assert.equal(f.raw.fields.Final_File_ID,v2);
+  assert.equal(f.raw.fields.Render_Server_URL,null);
  assert.equal(f.raw.fields.Final_File_URL,url(v2));
  assert.equal(f.raw.fields.Output_URL,url(v2));
  assert.equal(f.raw.fields.Do_Not_Publish,false);
