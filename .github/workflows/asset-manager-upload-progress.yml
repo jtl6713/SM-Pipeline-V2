@@ -1,0 +1,34 @@
+name: Asset Manager Upload Progress
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-web/assets/library-upload-progress-0832.js'
+      - 'apps/studio-web/assets/library-upload-progress-0832.css'
+      - 'apps/studio-web/assets/app-item4-1008.js'
+      - 'apps/studio-web/index.html'
+      - 'apps/studio-web/asset-manager-upload-progress.test.mjs'
+      - '.github/workflows/asset-manager-upload-progress.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/studio-web/assets/library-upload-progress-0832.js'
+      - 'apps/studio-web/assets/library-upload-progress-0832.css'
+      - 'apps/studio-web/assets/app-item4-1008.js'
+      - 'apps/studio-web/index.html'
+      - 'apps/studio-web/asset-manager-upload-progress.test.mjs'
+permissions:
+  contents: read
+jobs:
+  library-upload-progress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate client and upload progress
+        run: |
+          node --check apps/studio-web/assets/library-upload-progress-0832.js
+          node --check apps/studio-web/assets/app-item4-1008.js
+          node --test apps/studio-web/asset-manager-upload-progress.test.mjs

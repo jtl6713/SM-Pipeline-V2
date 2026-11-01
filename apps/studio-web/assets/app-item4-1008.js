@@ -291,7 +291,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.831-vibe-setup-retry";
+  const BUILD_ID = "item4-0.6.832-asset-upload-progress";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -23432,6 +23432,8 @@ function timedScriptAssetLabel(asset, index) {
 
   bindMusicUpload();
 
+  const libraryUploadProgress = details => window.StudioLibraryUploadProgress?.render(details);
+
   function setLibraryUploadMessage(text, className = "") {
     const node = $("libraryUploadMessage");
     if (!node) return;
@@ -24348,6 +24350,7 @@ function timedScriptAssetLabel(asset, index) {
 
   async function uploadLibraryFiles(fileList) {
     libraryDisarmPicker();
+    if (libraryUploadMessageBusy()) return;
     let files = Array.from(fileList || []).filter((file) => {
       const name = String(file.name || "");
       const type = String(file.type || "");
@@ -24394,6 +24397,9 @@ function timedScriptAssetLabel(asset, index) {
             ? `Adding ${chunk[0].name}…`
             : `Adding ${completedFiles + 1} of ${files.length}: ${chunk[0].name}…`);
         setLibraryUploadMessage(progressLabel, "");
+        const currentFile = chunk[0];
+        libraryUploadProgress({ phase: "preparing", file: currentFile, index: completedFiles + 1,
+          totalFiles: files.length, confirmedFiles: uploaded, failedFiles: errors.length });
         const form = new FormData();
         for (const file of chunk) form.append("files", file, file.name);
         if (location) form.append("location", location);
@@ -24410,10 +24416,24 @@ function timedScriptAssetLabel(asset, index) {
           } catch {}
         }
         try {
-          const result = await api("/api/library", { method: "POST", body: form, timeoutMs: 180000, retries: 0 });
-          const count = Number(result?.uploaded || chunk.length) || chunk.length;
+          if (!window.StudioLibraryUploadProgress?.post) {
+            throw new Error("The Asset Manager progress module did not load. Reload Studio before uploading.");
+          }
+          const result = await window.StudioLibraryUploadProgress.post({
+            url: `${apiBase}${withStudioProfile("/api/library")}`,
+            form, file: currentFile,
+            onProgress: ({ phase, sentBytes }) => libraryUploadProgress({
+              phase, file: currentFile, index: completedFiles + 1,
+              totalFiles: files.length, confirmedFiles: uploaded,
+              failedFiles: errors.length, sentBytes,
+            }),
+          });
+          const count = Number(result?.uploaded || (Array.isArray(result?.records) ? result.records.length : result?.id ? 1 : 0));
           uploaded += count;
           completedFiles += chunk.length;
+          libraryUploadProgress({ phase: "saved", file: currentFile, index: completedFiles,
+            totalFiles: files.length, confirmedFiles: uploaded, failedFiles: errors.length,
+            sentBytes: currentFile.size });
           const assigned = Array.isArray(result?.batch_names) ? result.batch_names.filter(Boolean) : [];
           if (assigned.length) namedUploads.push(...assigned);
           else if (Array.isArray(result?.records)) {
@@ -24430,10 +24450,15 @@ function timedScriptAssetLabel(asset, index) {
             : "";
           const label = chunk[0]?.name || "file";
           errors.push(`${label}: ${raw}${hint}`);
+          libraryUploadProgress({ phase: "failed", file: currentFile, index: completedFiles,
+            totalFiles: files.length, confirmedFiles: uploaded, failedFiles: errors.length,
+            error: raw });
         }
       }
       inputs.forEach((input) => { input.value = ""; });
       if (zone) delete zone.dataset.busy;
+      libraryUploadProgress({ phase: errors.length ? "partial" : "complete",
+        totalFiles: files.length, confirmedFiles: uploaded, failedFiles: errors.length });
       if (uploaded) await startLibraryBrowse();
       const namedSummary = namedUploads.length === 1
         ? `Added as ${namedUploads[0]}.`
