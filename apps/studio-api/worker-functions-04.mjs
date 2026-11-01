@@ -718,6 +718,7 @@ import {
   studioReadSimilarWatchlist,
   finalizeProductionRequestPromotion,
   promoteProductionRequestViaI3I4,
+  loadAuthorizedProductionRequest,
   promotionCompleted,
   waitForPromotionResult,
   ideaPhotoWatchRange,
@@ -12752,6 +12753,64 @@ export async function prepareIdeaToReview(request, env, url, authorization, ctx 
   });
 }
 /*__STUDIO_WORKER_END:prepareIdeaToReview__*/
+
+/**
+ * Explicit, exact-Vibe recovery control. Uses the SAME durable R2 queue as
+ * the automatic cron instead of launching a competing promotion/render job.
+ * This never approves, schedules or publishes outputs.
+ */
+export async function advanceVibeCutToReview(request, env, url, authorization, ctx = null) {
+  const match = /^\/api\/production-requests\/(rec[A-Za-z0-9]+)\/vibe-to-review$/.exec(url.pathname);
+  if (!match) throw new HttpError(400, "Invalid Vibe Cut review route");
+  const requestId = match[1];
+  const record = await loadAuthorizedProductionRequest(env, requestId, authorization);
+  const notes = String(f(record, "Production_Notes") || "");
+  if (!isVibeCutNotes(notes)) throw new HttpError(409, "This request is not a Vibe Cut");
+  if (productionNotesRevisionOpen(notes)) throw new HttpError(409, "Factory revisions need explicit human approval");
+  const state = String(f(record, "Request_Status") || "").trim();
+  if (!["Draft", "Ready", "Submitted", "Promoted"].includes(state)) {
+    throw new HttpError(409, `Vibe Cut is ${state || "not ready"} and cannot advance`);
+  }
+  if (!vibeAutoReviewVerifiedSource({
+    notes, assets: item4AssetManifest(record),
+    masterStatus: f(record, "Studio_Master_Asset_Status"),
+    masterCount: f(record, "Studio_Master_Asset_Count"),
+  })) {
+    throw new HttpError(409, "Original video has not passed the complete-upload and saved-Drive verification");
+  }
+  const ideaIds = linkedRecordIds(f(record, "Idea_Candidate"));
+  if (ideaIds.length !== 1) throw new HttpError(409, "Vibe Cut must link to exactly one Idea");
+  const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaIds[0]);
+  if (!idea?.id || ["On Hold", "Rejected"].includes(String(f(idea, "Candidate_Status") || ""))) {
+    throw new HttpError(409, "Linked Idea cannot advance toward approval");
+  }
+  if (state === "Promoted") {
+    // This is the existing idempotent monitor/resume, not a second promotion.
+    const progress = monitorReadyProductionRequest(env, record);
+    if (ctx?.waitUntil) ctx.waitUntil(progress.catch((error) =>
+      console.warn("Vibe promoted review recovery deferred", requestId, String(error?.message || error).slice(0, 180))));
+    else await progress;
+    return respond(request, env, {
+      ok: true, queued: true, already_started: true, stage: "production_review_resumed",
+      production_request_id: requestId, publishing: false,
+    }, 202);
+  }
+  if (!env?.STUDIO_MEDIA) throw new HttpError(503, "Durable production queue is unavailable");
+  const queued = await readyProductionEnqueue(env.STUDIO_MEDIA, {
+    ideaId: idea.id,
+    profileId: firstLinkedRecordId(f(idea, "Content_Profile")) || null,
+    createdAt: f(idea, "Create_Date") || idea.createdTime || null,
+  });
+  // The scheduled queue owns promotion/render concurrency. Do not dispatch a
+  // second render here, mutate media, or falsify Ready-for-Review completion.
+  return respond(request, env, {
+    ok: true, queued: true, already_started: !queued.created,
+    stage: "queued_for_production",
+    production_request_id: requestId, publishing: false,
+    message: "Vibe Cut entered the existing production queue and will stop at human approval.",
+  }, 202);
+}
+/*__STUDIO_WORKER_END:advanceVibeCutToReview__*/
 
 const READY_PRODUCTION_IDEA_FORMULA =
   "AND({Test_Run_ID}=BLANK(),{Studio_Photo_Wait_Status}='Ready',{Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK(),{Candidate_Status}!='On Hold',{Candidate_Status}!='Rejected',{Candidate_Status}!='Promoted')";

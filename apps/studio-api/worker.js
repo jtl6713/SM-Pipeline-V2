@@ -862,6 +862,7 @@ import {
   pauseStudioOperationsQueueItem,
   reorderStudioOperationsRenderQueue,
   prepareIdeaToReview,
+  advanceVibeCutToReview,
   getStudioOperations,
   getStudioOperationsProfiles,
   patchStudioOperationsProfile,
@@ -932,6 +933,7 @@ export default {
       const isProductionRequestRecordRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isProducerConversationRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/producer-conversation$/.test(url.pathname);
       const isProductionRequestPromoteRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/promote$/.test(url.pathname);
+      const isVibeCutToReviewRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/vibe-to-review$/.test(url.pathname);
       const isProductionRequestBridgePreflightRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/bridge-preflight$/.test(url.pathname);
       const isProductionRequestSyncDirectivesRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/sync-directives$/.test(url.pathname);
       const isProductionRequestTimedScriptRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/timed-script$/.test(url.pathname);
@@ -1084,6 +1086,7 @@ export default {
       const isProductionRequestEditWrite = isProductionRequestRecordRoute && request.method === "PATCH";
       const isProducerConversationWrite = isProducerConversationRoute && request.method === "POST";
       const isProductionRequestPromoteWrite = isProductionRequestPromoteRoute && request.method === "POST";
+      const isVibeCutToReviewWrite = isVibeCutToReviewRoute && request.method === "POST";
       const isProductionRequestSyncDirectivesWrite = isProductionRequestSyncDirectivesRoute && request.method === "POST";
       const isProductionRequestTimedScriptWrite = isProductionRequestTimedScriptRoute && request.method === "POST";
       const isProductionRequestOutputsSyncWrite = isProductionRequestOutputsRoute && request.method === "PUT";
@@ -1165,6 +1168,7 @@ export default {
         isProductionRequestEditWrite ||
         isProducerConversationWrite ||
         isProductionRequestPromoteWrite ||
+        isVibeCutToReviewWrite ||
         isProductionRequestSyncDirectivesWrite ||
         isProductionRequestTimedScriptWrite ||
         isProductionRequestOutputsSyncWrite ||
@@ -1273,7 +1277,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.722-vibe-auto-to-review" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
+          version: "0.10.723-vibe-review-resume" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
@@ -3285,6 +3289,13 @@ export default {
       if (isProductionRequestBridgePreflightRoute) {
         requirePermission(authorization, "production_configure");
         return productionRequestBridgePreflightRoute(request, env, url, authorization);
+      }
+
+      if (isVibeCutToReviewRoute) {
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "ideas_promote");
+        requirePermission(authorization, "production_configure");
+        return advanceVibeCutToReview(request, env, url, authorization, ctx);
       }
 
       if (isProductionRequestPromoteRoute) {
@@ -7326,6 +7337,7 @@ let studioAiApiPreferenceCache = { preferred: "OpenAI", failoverEnabled: true, a
 /*__STUDIO_WORKER_EXTRACT:reorderStudioOperationsRenderQueue__*/
 /*__STUDIO_WORKER_EXTRACT:stampPrepareToReviewNotes__*/
 /*__STUDIO_WORKER_EXTRACT:prepareIdeaToReview__*/
+/*__STUDIO_WORKER_EXTRACT:advanceVibeCutToReview__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioReadyProductionDiagnostic__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioOperations__*/
 /** Lean Profiles tab payload — Content Profiles only (voice/music settings). */

@@ -5,6 +5,8 @@ on:
       - 'apps/studio-api/vibe-cut.mjs'
       - 'apps/studio-api/vibe-auto-review.mjs'
       - 'apps/studio-api/vibe-auto-review.test.mjs'
+      - 'apps/studio-api/vibe-review-handoff-route.test.mjs'
+      - 'apps/studio-web/vibe-auto-review.test.mjs'
       - 'apps/studio-api/worker-functions-*.mjs'
       - 'apps/studio-api/vibe-cut-idea-contract.test.mjs'
       - 'apps/studio-web/assets/ez-plan.js'
@@ -44,6 +46,8 @@ jobs:
             apps/studio-api/vibe-cut-idea-contract.test.mjs \
             apps/studio-api/vibe-cut.test.mjs \
             apps/studio-api/vibe-auto-review.test.mjs \
+            apps/studio-api/vibe-review-handoff-route.test.mjs \
+            apps/studio-web/vibe-auto-review.test.mjs \
             apps/studio-api/ready-production-queue.test.mjs \
             apps/studio-api/vibe-cut-source-regression.test.mjs \
             apps/studio-api/video-carousel-count-guard.test.mjs \
