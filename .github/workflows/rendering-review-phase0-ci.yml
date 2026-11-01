@@ -30,6 +30,7 @@ on:
       - 'services/pipeline-runner/rendering_review/vibe_cut_revision.py'
       - 'services/remotion-renderer/profile-watermark-policy*.js'
       - 'services/remotion-renderer/vibe-audio-policy*.js'
+      - 'services/remotion-renderer/vibe-review-music-policy*.js'
       - 'services/remotion-renderer/render-server.js'
       - 'services/pipeline-runner/rendering_review/gallery_attempt.py'
       - 'services/pipeline-runner/rendering_review/gallery_media_io.py'
@@ -95,6 +96,8 @@ jobs:
           node --test services/remotion-renderer/profile-watermark-policy.test.js
           node --check services/remotion-renderer/vibe-audio-policy.js
           node --test services/remotion-renderer/vibe-audio-policy.test.js
+          node --check services/remotion-renderer/vibe-review-music-policy.js
+          node --test services/remotion-renderer/vibe-review-music-policy.test.js
       - name: Check policy and tests syntax
         run: |
           node --check apps/studio-api/rendering-review-approval-http.mjs
