@@ -24,7 +24,7 @@ test("Factory is global by default with an independent optional profile filter",
  assert.doesNotMatch(desk.slice(desk.indexOf("async function refreshFactoryBatchActivity"),
     desk.indexOf("async function submitFactoryBatchApprovals")),/studioProfileSelect/);
  assert.match(quality,/new URLSearchParams\(\{ scope: "all" \}\)/);
- assert.match(desk,/filter\(factoryMatchesProfile\)/);
+ assert.match(desk,/includeOtherProfiles \|\| factoryMatchesProfile\(card\)/);
 });
 
 test("Factory counts and Quality Agent appear as compact metrics; no raw IDs in ordinary rows", () => {

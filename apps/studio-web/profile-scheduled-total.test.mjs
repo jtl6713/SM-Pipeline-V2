@@ -11,6 +11,8 @@ test("all-profiles overview shows per-output approved future and past-due totals
   const host = {
     innerHTML: "",
     querySelectorAll() { return []; },
+    querySelector() { return null; },
+    addEventListener() {},
   };
   const future = Date.now() + 120000;
   const past = Date.now() - 120000;
