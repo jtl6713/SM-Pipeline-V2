@@ -62,6 +62,7 @@ jobs:
             apps/studio-web/production-progress-timeline-truth.test.mjs \
             apps/studio-web/production-render-layout.test.mjs \
             apps/studio-web/factory-needs-eyes-layout.test.mjs \
+            apps/studio-web/factory-producer-progress.test.mjs \
             apps/studio-web/collapsible-nav.test.mjs \
             apps/studio-web/studio-nav-autoclose.test.mjs \
             apps/studio-web/factory-review-selection-eligibility.test.mjs \
