@@ -28,7 +28,7 @@ function fixture(){
   const session={id:'rrsession_6a40a9aa1fc63d4d48d411bd3fa8ed923ed6fb158a79a666',
     output_id:igId,state:'approved',current_attempt_id:a,approved_attempt_id:a,
     review_hold:{active:true}};
-  const attempt={id:a,status:'ready_for_review',artifact_id:revised};
+  const attempt={id:a,number:2,status:'ready_for_review',artifact_id:revised};
   const proof={sha256:'864436ce242983f69fceaa68f37ac4002c2c382ab8c8189098bdc5cab2072d34',
     byte_count:46824860,mime_type:'video/mp4',
     audio_verified:true,watermark_verified:true,
@@ -104,7 +104,6 @@ test('independent media proof and current creative approval required',()=>{
     v=>v.session.review_hold.active=false,
     v=>v.session.approved_attempt_id='different',
     v=>v.proof.audio_verified=false,
-    v=>v.proof.watermark_verified=false,
     v=>v.proof.google_drive_verified=false,
     v=>v.proof.sha256='invalid',
   ]){
@@ -112,6 +111,30 @@ test('independent media proof and current creative approval required',()=>{
     assert.throws(()=>nextApprovedCreativeMaster({...candidate,evidence:candidate.proof,source:candidate.outputs[0],
       at:'2026-10-31'}));
   }
+});
+test('V2, V3 and later approved masters accept false or absent watermark verification',()=>{
+ for(const number of [2,3,8]){
+   for(const watermark of [false,null,undefined]){
+     const f=fixture();
+     f.attempt.number=number;
+     f.proof.watermark_verified=watermark;
+     if(watermark===undefined)delete f.proof.watermark_verified;
+     const result=nextApprovedCreativeMaster({
+       ...f,source:f.outputs[0],evidence:f.proof,at:'2026-11-01'
+     });
+     assert.equal(result.changed,true);
+     assert.equal(result.master.file_id,revised);
+     assert.equal(result.master.publishing_authorized,false);
+   }
+ }
+});
+test('V1 watermark verification remains required and invalid media still fails',()=>{
+ const f=fixture();
+ f.attempt.number=1;
+ f.proof.watermark_verified=false;
+ assert.throws(()=>nextApprovedCreativeMaster({
+   ...f,source:f.outputs[0],evidence:f.proof,at:'2026-11-01'
+ }),e=>e.code==='CREATIVE_MASTER_ARTIFACT_NOT_INDEPENDENTLY_VALIDATED');
 });
 test('refuse cross-content, missing format and incomplete membership',()=>{
   const f=fixture();

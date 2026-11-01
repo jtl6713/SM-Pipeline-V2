@@ -461,10 +461,15 @@ def render_exact_attempt(output_id,job_id,*,client=None,drive=None,
          **{k:claim[k] for k in ("output_id","job_id","attempt_id",
          "plan_hash","session_id","lease_owner","lease_fence")}}
     narration=_voiceover(client,drive,item,plan,claim)
-    brand_url=brand_watermark_url(client)
+    # Optional, best-effort branding on rerenders. No watermark failures
+    # may prevent V2+ rendering. Initial V1 render policy is unchanged.
+    try:
+        brand_url=str(brand_watermark_url(client) or "")
+    except Exception:
+        brand_url=""
     if not brand_url.startswith("https://"):
-        fail("review_watermark_url_unavailable")
-    watermark={"verified":True,"authority":"server",
+        brand_url=""
+    watermark={"verified":False,"authority":"server",
         "profile_id":CHICAGO,"policy":"retain_current_approved",
         "url":brand_url}
     renderer_base=_review_renderer_base()
@@ -504,7 +509,7 @@ def render_exact_attempt(output_id,job_id,*,client=None,drive=None,
         int(meta.get("size") or 0)!=len(mp4)):
         fail("review_attempt2_drive_upload_unverified")
     validation.update(google_drive_verified=True,google_drive_mime_type="video/mp4",
-      watermark_verified=True, # Built-in watermarkRequired Remotion composition.
+      watermark_verified=False, # V2+ not independently checked; no gate.
       render_job_id=result["remotion_job_id"])
     receipt=_complete(worker,secret,claim,"ready",
         artifact_id=file_id,validation=validation)

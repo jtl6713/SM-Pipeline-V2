@@ -106,7 +106,7 @@ class IsolatedRenderTests(unittest.TestCase):
         self.assertEqual(result["clips"][0]["durationFrames"],150)
         self.assertEqual(result["clips"][1]["startFrame"],150)
         self.assertEqual(result["voiceoverText"],NARRATION)
-        self.assertTrue(result["watermarkRequired"])
+        self.assertFalse(result["watermarkRequired"])
         self.assertFalse(result["music"]["enabled"])
         self.assertEqual(result["studioRevision"]["attempt_id"],ATTEMPT_ID)
         self.assertEqual(result["studioRevision"]["job_id"],JOB_ID)
@@ -132,7 +132,7 @@ class IsolatedRenderTests(unittest.TestCase):
         self.assertEqual(result["music"],original_music)
         self.assertFalse(result["spokenCaptionsEnabled"])
         self.assertEqual(result["spokenCaptionWordsPerPage"],4)
-        self.assertTrue(result["watermarkRequired"])
+        self.assertFalse(result["watermarkRequired"])
         self.assertFalse(result["studioRevision"].get("publish",False))
         for change in [
             {"verified":False},
@@ -237,11 +237,19 @@ class IsolatedRenderTests(unittest.TestCase):
         self.denied(lambda:compile_isolated_render_payload(**missing),
                     "scene_requires_exactly_one_verified_asset")
 
-    def test_unverified_watermark_policy_never_gets_silently_replaced(self):
+    def test_v2_plus_watermark_verification_missing_does_not_block_re_render(self):
+        for value in [False, None]:
+            parts=fixture()
+            parts["watermark"]["verified"]=value
+            parts["watermark"]["url"]=""
+            rendered=compile_isolated_render_payload(**parts)
+            self.assertFalse(rendered["watermarkRequired"])
+            self.assertEqual(rendered["watermarkUrl"],"")
+            self.assertEqual(rendered["expectedClipCount"],2)
         parts=fixture()
-        parts["watermark"]["verified"]=False
-        self.denied(lambda:compile_isolated_render_payload(**parts),
-                    "branding_policy_not_verified")
+        parts["watermark"]={"url": "bad-url", "verified": False}
+        rendered=compile_isolated_render_payload(**parts)
+        self.assertEqual(rendered["watermarkUrl"],"")
 
     def test_original_r4_mutations_are_never_called(self):
         import inspect

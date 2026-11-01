@@ -13,6 +13,7 @@
 import {CHICAGO_PROFILE_ID,applyReviewEvent} from "./rendering-review-policy.mjs";
 import {renderingReviewHoldPresent} from "./rendering-review-publication-hold.mjs";
 import {nextApprovedCreativeMaster} from "./creative-master-registry.mjs";
+import {watermarkVerificationSatisfied} from "./rendering-review-watermark-policy.mjs";
 
 const rec=/^rec[A-Za-z0-9]{14}$/;
 const file=/^[A-Za-z0-9_-]{20,}$/;
@@ -63,7 +64,7 @@ function validateArtifact(record,session,attempt){
   if(!sha.test(str(evidence.sha256)) || !Number.isSafeInteger(evidence.byte_count) ||
      evidence.byte_count<100000 || evidence.mime_type!=="video/mp4" ||
      evidence.width!==1080 || evidence.height!==1920 ||
-     evidence.audio_verified!==true || evidence.watermark_verified!==true ||
+     evidence.audio_verified!==true || !watermarkVerificationSatisfied(attempt,evidence) ||
      evidence.google_drive_verified!==true || evidence.google_drive_mime_type!=="video/mp4")
     deny("FACTORY_VALIDATION_FAILED","Only independently verified playable V2 is eligible");
   return evidence;

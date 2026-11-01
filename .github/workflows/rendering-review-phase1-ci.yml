@@ -8,6 +8,7 @@ on:
       - 'apps/studio-api/rendering-review-held-redo.*'
       - 'apps/studio-api/rendering-review-factory-handoff.*'
       - 'apps/studio-api/rendering-review-factory-gate.*'
+      - 'apps/studio-api/rendering-review-watermark-policy.*'
       - 'apps/studio-api/rendering-review-factory-preview.*'
       - 'apps/studio-api/michigan-review-preview-cache.*'
       - 'apps/studio-api/creative-master-registry.*'
@@ -40,7 +41,8 @@ jobs:
           node --check apps/studio-api/rendering-review-held-redo.test.mjs
           node --check apps/studio-api/rendering-review-factory-handoff.mjs
           node --check apps/studio-api/rendering-review-factory-gate.mjs
-          node --check apps/studio-api/rendering-review-factory-gate.test.mjs
+          node --check apps/studio-api/rendering-review-watermark-policy.mjs
+          node --check apps/studio-api/rendering-review-factory-gate.test.mjs apps/studio-api/rendering-review-watermark-policy.test.mjs
           node --check apps/studio-api/rendering-review-factory-preview.mjs
           node --check apps/studio-api/michigan-review-preview-cache.mjs
           node --check apps/studio-api/creative-master-registry.mjs
