@@ -8995,6 +8995,15 @@ export async function startStudioIdeaGeneration(request, env, authorization, ctx
     throw new HttpError(400, "Quality must be Highest Quality, Balanced, or Quantity");
   }
 
+  // Reject missing durable prerequisites BEFORE creating an Airtable batch
+  // or acquiring a Manual_Idea_Batch profile lock.
+  const useDurableI1 = ["1", "true"].includes(String(env.STUDIO_I1_DURABLE_JOBS || "").toLowerCase());
+  if (useDurableI1) {
+    const { runnerUrl } = pipelineStageBackend(env, "I1");
+    if (!runnerUrl || !String(env.PIPELINE_RUNNER_SHARED_SECRET || "")) {
+      throw new HttpError(503, "Durable I1 runner URL and authentication must be configured before admission");
+    }
+  }
   const profileId = requestedProfileId(null, payload);
   // Blocks a second Generate while Manual_Idea_Batch is still linked.
   const profile = await studioIdeaEnabledProfile(env, authorization, profileId);
@@ -9038,7 +9047,14 @@ export async function startStudioIdeaGeneration(request, env, authorization, ctx
         message: "Batch saved but runner acknowledgment was interrupted. Check this batch before retrying.",
       }, 202);
     }
-    if (response.status !== 202 || !receipt?.accepted) {
+    if (response.status === 202 && !receipt?.accepted) {
+      return respond(request, env, {
+        ok: true, accepted: true, completed: false, status: "Pending",
+        dispatch_unconfirmed: true, batch_record_id: batch.id,
+        message: "Runner response was ambiguous; check the existing batch before retrying.",
+      }, 202);
+    }
+    if (response.status !== 202) {
       const message = String(receipt?.error || receipt?.message || "Runner rejected durable I1 admission").slice(0, 700);
       await studioIdeaUpdateBatch(env, batch.id, {
         Status: "Failed", Completed_At: new Date().toISOString(), Error: message,
