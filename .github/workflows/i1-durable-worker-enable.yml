@@ -1,0 +1,87 @@
+name: Enable Durable I1 Studio Worker After Runner Proof
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/i1-durable-worker-enable.txt"
+permissions:
+  contents: read
+concurrency:
+  group: i1-durable-worker-activation
+  cancel-in-progress: false
+jobs:
+  enable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER: chicagoshining-studio-api
+      RUNNER_VERSION: "2026-11-01-i1-durable-queue-v1"
+    steps:
+      - name: Guard exact enabled runner and current Worker binding inventory
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CF_TOKEN" && test -n "$ACCOUNT_ID"
+          curl -fsS --max-time 20 https://pipeline.chicagoshining.com/health -o /tmp/i1-runner-health.json
+          jq -e --arg v "$RUNNER_VERSION" \
+            '.ok==true and .version==$v and .i1_durable_jobs==true' /tmp/i1-runner-health.json >/dev/null
+          echo "i1_durable_runner_health=ENABLED_AND_VERIFIED"
+          API="https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/workers/scripts/$WORKER"
+          curl -fsS --max-time 20 "$API/settings" -H "Authorization: Bearer $CF_TOKEN" -o /tmp/i1-worker-before.json
+          jq -e '.success==true and ([.result.bindings[]? | select(.name=="STUDIO_I1_DURABLE_JOBS")] | length)==0' \
+            /tmp/i1-worker-before.json >/dev/null
+          curl -fsS --max-time 20 "$API/deployments" -H "Authorization: Bearer $CF_TOKEN" -o /tmp/i1-deploy-before.json
+          jq -e '.success==true and (.result.deployments[0].versions | length)==1 and .result.deployments[0].versions[0].percentage==100' \
+            /tmp/i1-deploy-before.json >/dev/null
+          echo "i1_worker_preflight=PASS"
+
+      - name: Add one feature flag as a versioned Worker secret without replacing other bindings
+        id: put
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/workers/scripts/$WORKER"
+          code=$(curl -sS --max-time 30 -o /tmp/i1-secret-result.json -w '%{http_code}' -X PUT \
+            "$API/secrets" -H "Authorization: Bearer $CF_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data '{"name":"STUDIO_I1_DURABLE_JOBS","type":"secret_text","text":"true"}')
+          test "$code" -ge 200 -a "$code" -lt 300
+          jq -e '.success==true and .result.name=="STUDIO_I1_DURABLE_JOBS" and .result.type=="secret_text"' \
+            /tmp/i1-secret-result.json >/dev/null
+          echo "i1_worker_feature_secret_created=PASS"
+
+      - name: Verify the active production Worker version has durable flag binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/workers/scripts/$WORKER"
+          for n in {1..10}; do
+            curl -fsS --max-time 20 "$API/deployments" -H "Authorization: Bearer $CF_TOKEN" -o /tmp/i1-deploy-after.json
+            version=$(jq -r '.result.deployments[0].versions | max_by(.percentage) | .version_id // empty' /tmp/i1-deploy-after.json)
+            if [[ -n "$version" ]]; then
+              curl -fsS --max-time 20 "$API/versions/$version" -H "Authorization: Bearer $CF_TOKEN" -o /tmp/i1-worker-active.json
+              if jq -e \
+                '.success==true and ([.result.resources.bindings[]? | select(.name=="STUDIO_I1_DURABLE_JOBS" and .type=="secret_text")] | length)==1' \
+                /tmp/i1-worker-active.json >/dev/null; then
+                echo "i1_worker_active_version_secret_binding=PASS"
+                exit 0
+              fi
+            fi
+            sleep 3
+          done
+          echo "i1_worker_active_version_secret_binding=FAILED"
+          exit 1
+
+      - name: Roll back only the newly introduced I1 feature secret if activation fails
+        if: failure() && steps.guard.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/workers/scripts/$WORKER"
+          curl -fsS --max-time 30 -X DELETE "$API/secrets/STUDIO_I1_DURABLE_JOBS" \
+            -H "Authorization: Bearer $CF_TOKEN" -o /tmp/i1-secret-rollback.json
+          jq -e '.success==true' /tmp/i1-secret-rollback.json >/dev/null
+          echo "i1_worker_secret_rollback=PASS"
