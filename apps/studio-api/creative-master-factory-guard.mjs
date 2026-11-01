@@ -5,7 +5,7 @@
  * The first approval click may select a new master video, but MUST NOT approve
  * or publish that changed video. The reviewer must see it and click again.
  */
-import {creativeMasterKey,readCreativeMasterRegistry,MASTER_FIELD} from "./creative-master-registry.mjs";
+import {creativeMasterKey,readCreativeMasterRegistry,resolveCreativeMasterForOutput,MASTER_FIELD} from "./creative-master-registry.mjs";
 import {planCreativeMasterAdoption} from "./creative-master-propagation.mjs";
 const rec=/^rec[A-Za-z0-9]{14}$/;
 const str=x=>String(x||"").trim();
@@ -27,11 +27,12 @@ export async function reconcileCreativeMasterAtFactoryApproval({output_id,operat
     if(!key)return {status:"unmapped",reason:"missing_render_format"};
     const content=await o.readContent(contentId);
     if(content?.id!==contentId)err("CREATIVE_MASTER_FACTORY_CONTENT_DRIFT");
-    const master=readCreativeMasterRegistry(content.fields?.[MASTER_FIELD]).masters[key];
+    const master=resolveCreativeMasterForOutput({content,output:row});
     if(!master)return {status:"no_master",key};
+    const sourceKey=master.key;
     const plan=planCreativeMasterAdoption({content,output:row,master});
     if(plan.status!=="apply")
-      return {status:plan.status,reason:plan.reason,key,version:master.version};
+      return {status:plan.status,reason:plan.reason,key:sourceKey,version:master.version};
     // Only review media and cache fields are patched. Never mark this approval
     // successful. Ordinary Factory uses a fresh click and a fresh preview.
     await o.patchOutput(output_id,plan.fields);
@@ -43,7 +44,7 @@ export async function reconcileCreativeMasterAtFactoryApproval({output_id,operat
     // Check the content registry again to detect a racing source revision.
     const confirmed=await o.readContent(contentId);
     const same=readCreativeMasterRegistry(
-      confirmed?.fields?.[MASTER_FIELD]).masters[key];
+      confirmed?.fields?.[MASTER_FIELD]).masters[sourceKey];
     if(!same||same.version!==master.version||same.file_id!==master.file_id||
       same.sha256!==master.sha256)
       err("CREATIVE_MASTER_FACTORY_CHANGED",
@@ -54,7 +55,7 @@ export async function reconcileCreativeMasterAtFactoryApproval({output_id,operat
           String(error?.message||error));
       }
     }
-    return {status:"updated_requires_rereview",key,
+    return {status:"updated_requires_rereview",key:sourceKey,
       version:master.version,output_id,file_id:master.file_id,
       publishing_approved:false,scheduled:false,public_post_created:false};
   });
