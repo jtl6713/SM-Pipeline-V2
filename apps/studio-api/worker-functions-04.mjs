@@ -8655,8 +8655,10 @@ export async function studioIdeaManualBatchStillRunning(env, batchId) {
   if (!["Pending", "Running"].includes(status)) return false;
   const requestedAt = Date.parse(String(f(batch, "Requested_At") || batch.createdTime || ""));
   const ageMs = Number.isFinite(requestedAt) ? Date.now() - requestedAt : Infinity;
-  // Abandoned waitUntil / crashed clears left Pending forever; only a fresh
-  // batch should block Generate.
+  // Durable jobs may legitimately exceed the legacy 20-minute lock window.
+  // Do not allow a second manual batch while the runner is still the owner.
+  if (["1", "true"].includes(String(env.STUDIO_I1_DURABLE_JOBS || "").toLowerCase())) return true;
+  // Legacy waitUntil jobs retain their bounded stale-lock recovery.
   return ageMs <= 20 * 60 * 1000;
 }
 /*__STUDIO_WORKER_END:studioIdeaManualBatchStillRunning__*/
