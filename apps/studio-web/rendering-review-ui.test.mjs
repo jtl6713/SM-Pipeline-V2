@@ -10,6 +10,12 @@ test('Rendering Review has a dedicated navigation item and responsive page',()=>
   assert.match(html,/id="page-rendering-review" class="page"/);
   assert.match(html,/<button class="nav-item" data-page="rendering-review" id="navRenderingReview" hidden>Post Production Edits<\/button>/);
   assert.match(html,/<h1>Post Production Edits<\/h1>/);
+  assert.match(html,/id="rrProgressSummary"/);
+  assert.match(js,/function appendRevisionProgress\(/);
+  assert.match(js,/function watchReview\(/);
+  assert.match(js,/20000/);
+  assert.match(js,/Check latest status/);
+  assert.match(css,/rr-progress-stages/);
   assert.match(html,/id="page-rendering-review" class="page" aria-label="Post Production Edits"/);
   assert.doesNotMatch(html,/>Rendering Review<\/(?:button|h1)>/);
   // Reuse existing navigation, session and API identities: this is a label-only release.
