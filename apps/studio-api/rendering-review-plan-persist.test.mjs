@@ -134,13 +134,13 @@ test("unsourced factual claims never become a frozen executable plan",async()=>{
   assert.ok(result.blockers.some(b=>b.kind==="research"));
 });
 
-test("a separately validated V2 MP4 is the source for a V3 plan",async()=>{
+test("a playable V2 MP4 with pending watermark QA is reusable for a V3 creative plan",async()=>{
   const f=fixture(),state=f.getSession();
   const previous=state.current_attempt_id;
   const revisedId="rrattempt_verified_second_12345678";
   const revisedFile="1AbCdEfGhIjKlMnOpQrStUvWxYz012345";
   const proof={sha256:"a".repeat(64),byte_count:840000,mime_type:"video/mp4",
-    width:1080,height:1920,audio_verified:true,watermark_verified:true,
+    width:1080,height:1920,audio_verified:true,watermark_verified:false,
     google_drive_verified:true};
   state.attempts.push({id:revisedId,number:2,parent_id:previous,
     artifact_id:revisedFile,status:"ready_for_review"});
