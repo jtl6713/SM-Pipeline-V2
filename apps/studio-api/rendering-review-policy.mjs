@@ -138,6 +138,11 @@ export function applyReviewEvent(session, event) {
   if (kind === "MESSAGE") {
     if (s.state === "cancelled" || s.state === "approved")
       fail("SESSION_CLOSED", "This review is no longer open");
+    // A separately authorized in-flight note is for the NEXT revision only.
+    // Never let a stale request alter a finished job or a new frozen plan.
+    if (event.in_flight_only === true &&
+        (!inProgress.has(s.state) || !s.review_hold.active || !s.active_job?.id))
+      fail("IN_FLIGHT_FEEDBACK_NOT_ALLOWED", "This render has advanced. Refresh before commenting",409);
     if (!["user", "producer"].includes(event.role) ||
         !text(event.content) || text(event.content).length > 3000 ||
         !validId(event.message_id))

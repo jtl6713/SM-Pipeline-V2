@@ -36,7 +36,7 @@ async function digest(value) {
  */
 export async function submitManualReviewFeedback({
   output_id, content, expected_version, client_request_id,
-  timestamp_seconds = null, operations, now = () => new Date(),
+  timestamp_seconds = null, in_flight_only = false, operations, now = () => new Date(),
 }) {
   if (typeof operations?.getAuthenticatedActor !== "function")
     deny(503, "AUTH_INTEGRATION_MISSING", "Trusted Studio authentication adapter is required");
@@ -72,6 +72,7 @@ export async function submitManualReviewFeedback({
     fingerprint: "rrfp_" + payloadDigest,
     expected_version,
     timestamp_seconds,
+    ...(in_flight_only === true ? {in_flight_only:true} : {}),
     at: now().toISOString(),
   };
   // This uses the existing server-only serialized coordinator. The input

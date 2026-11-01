@@ -9,7 +9,7 @@
   if (!root || !nav) return;
   const chicago = 'recT2rbKX3MF7cVFU';
   const NEEDS_ASSET_THUMB = '/assets/needs-asset.svg';
-  const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map(),pollTimer:null,activeEntry:null,progressCheckNode:null,lastVerifiedSummary:null,lastReplyNotice:null,lastReplyNoticeNode:null,viewingVersion:null,approvalButton:null,approvalVersion:null,approvalLocks:new Set(),approvalKeys:new Map()};
+  const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map(),pollTimer:null,activeEntry:null,nextRevisionDrafts:new Map(),nextRevisionKeys:new Map(),progressCheckNode:null,lastVerifiedSummary:null,lastReplyNotice:null,lastReplyNoticeNode:null,viewingVersion:null,approvalButton:null,approvalVersion:null,approvalLocks:new Set(),approvalKeys:new Map()};
   const list = $('rrQueueList'), detail = $('rrDetail'), status = $('rrStatus');
   const topProgress = $('rrProgressSummary');
 
@@ -276,7 +276,7 @@
       }
     },20000);
   }
-  function appendRevisionProgress(activity,session,messages,producer,planReady,completedAttempt,entry) {
+  function appendRevisionProgress(activity,session,messages,producer,planReady,completedAttempt,entry,saved) {
     const attempts=Array.isArray(session?.attempts)?session.attempts:[];
     const approvedV2=session?.state==='approved'&&attempts.some(a=>
       a?.id===session.approved_attempt_id&&Number(a?.number)>1);
@@ -285,26 +285,45 @@
     const failed=session?.state==='revision_failed';
     const stage=readyV2?5:session?.state==='validating'?4:
       rendering||failed?3:planReady?2:producer?1:0;
+
+    // Red means a verified operator action is possible, NOT that a background
+    // job is still processing. Gated/unavailable actions are never invented.
+    const canReply=!!producer&&saved?.flags?.producer_conversation_enabled===true&&
+      ['discussing','awaiting_assets'].includes(session?.state);
+    const canRender=planReady&&!!session?.plan?.immutable_manifest&&
+      session?.review_hold?.active===true&&saved?.publication_hold_verified===true&&
+      saved?.flags?.attempt_commit_enabled===true&&
+      session?.producer_candidate?.stale!==true;
+    const current=attempts.find(a=>a?.id===session?.current_attempt_id);
+    const canApprove=readyV2&&session?.state==='ready_for_review'&&
+      saved?.flags?.creative_approval_enabled===true&&
+      saved?.publication_hold_verified===true&&
+      current?.status==='ready_for_review'&&!!attemptMedia(current,entry);
+    const requiresInput=(stage===1&&canReply)||(stage===2&&canRender)||
+      (stage===5&&canApprove);
     const steps=['Feedback received','Producer review','Plan ready',
       'Rendering','Quality check','Ready for review'];
     const rail=elem('ol',null,'rr-progress-stages');
     rail.setAttribute('aria-label','Verified post-production stages');
     for(let i=0;i<steps.length;i++){
-      const phase=readyV2||i<stage?'complete':i===stage?
-        failed?'attention': 'current':'pending';
+      const phase=(readyV2&&session?.state==='approved')||i<stage?'complete':i===stage?
+        requiresInput||failed?'attention':'current':'pending';
       const item=elem('li',null,'rr-progress-stage rr-progress-stage--'+phase);
       item.append(elem('span',steps[i],'rr-progress-stage-name'));
       item.append(elem('span',phase==='complete'?'Completed':
-        phase==='attention'?'Needs attention':
+        phase==='attention'?(requiresInput?'Requires your attention':'Needs attention'):
         phase==='current'?(session?.state==='queued'&&i===3?'Queued — not started':
           session?.state==='rendering'&&i===3?'In progress':
           i===0&&!messages.length?'Not started':'Current'):'Not started','rr-progress-stage-state'));
       rail.append(item);
     }
+    if(requiresInput)activity.classList.add('rr-activity--attention');
     const heading=elem('h3','Post-production progress','rr-progress-heading');
     const summary=session?.state==='approved'&&approvedV2?
       'V2 creative approval is saved. Factory handoff must be verified before normal scheduling or publishing.':
-      readyV2?'Revised V2 is ready for review. Publication remains held until approval.':
+      readyV2?(canApprove?
+        'Requires your attention: V2 is ready for review. Select V2 and approve only if satisfied. Publication remains held.':
+        'Revised V2 is ready for review. Publication remains held until approval.'):
       session?.state==='validating'?
         'V2 render completed its rendering stage; media validation is in progress.':
       session?.state==='rendering'?
@@ -312,8 +331,12 @@
       session?.state==='queued'?
         'V2 render job is queued. Rendering has not been confirmed started.':
       failed?'The revised render needs attention; V1 remains preserved.':
-      planReady?'V2 plan is saved. No render has started. Render authorization is a separate action when enabled.':
-      producer?'Producer replied, but V2 has NOT started. No verified render-ready plan or V2 render job exists. Continue the conversation to resolve remaining requirements.':
+      planReady?(canRender?
+        'Requires your attention: V2 plan is saved. Select Make the revised video to authorize rendering. No render has started.':
+        'V2 plan is saved. No render has started. Render authorization is a separate action when enabled.'):
+      producer?(canReply?
+        'Requires your attention: Producer replied, but V2 has NOT started. Review the proposed changes and reply with your direction. No render-ready plan or V2 job exists.':
+        'Producer replied, but V2 has NOT started. No verified render-ready plan or V2 render job exists. Continue the conversation to resolve remaining requirements.'):
       messages.length?'Feedback was saved. No verified Producer reply or V2 job yet.':
       'Review is held. No Producer activity or V2 render job is verified.';
     activity.append(heading,elem('p',summary,'rr-progress-summary'),rail);
@@ -324,6 +347,7 @@
     state.lastVerifiedSummary={outputId:entry.output_id,summary};
     if(topProgress){
       topProgress.hidden=false;
+      topProgress.classList.toggle('rr-progress-top--attention',requiresInput);
       topProgress.textContent=(entry.output_number?'#'+entry.output_number+' · ':'')+summary;
     }
   }
@@ -332,7 +356,8 @@
     const changedOutput=state.selected!==entry.output_id;
     state.selected=entry.output_id;state.activeEntry=entry;
     state.progressCheckNode=null;
-    if(topProgress&&changedOutput)topProgress.hidden=true;
+    if(topProgress&&changedOutput){topProgress.hidden=true;
+      topProgress.classList.remove('rr-progress-top--attention');}
     state.approvalButton=null;state.approvalVersion=null;
     renderList();clearMedia();
     detail.replaceChildren();
@@ -352,6 +377,7 @@
     appendLine(detail,'Review:',entry.review_held?'Existing hold detected — do not clear automatically':
       entry.dispatch_started?'Already being dispatched — not eligible to claim':'Not enrolled');
     if(!entry.review_held){
+      if(topProgress){topProgress.hidden=true;topProgress.classList.remove('rr-progress-top--attention');}
       detail.append(elem('p','To request changes, open this output in Factory, select Request Changes, and enter comments before submitting.','rr-notice'));
       return;
     }
@@ -364,8 +390,8 @@
       if(seq!==state.request||state.selected!==entry.output_id)return;
       if(saved.integrity_error)detail.append(elem('p','Hold integrity issue: '+saved.integrity_error,'rr-notice'));
       if(!saved.publication_hold_verified){
-        if(topProgress){topProgress.hidden=false;topProgress.textContent=
-          'Status paused: authoritative publication hold could not be verified.';}
+        if(topProgress){topProgress.hidden=false;topProgress.classList.remove('rr-progress-top--attention');
+          topProgress.textContent='Status paused: authoritative publication hold could not be verified.';}
         detail.append(elem('p','Authoritative publication hold could not be verified. Discussion actions are disabled.','rr-notice'));
         return;
       }
@@ -435,7 +461,7 @@
           prompt.append(list);activity.append(prompt);
         }
       }
-      appendRevisionProgress(activity,session,messages,producer,planReady,completedAttempt,entry);
+      appendRevisionProgress(activity,session,messages,producer,planReady,completedAttempt,entry,saved);
       detail.append(activity);
       if(messages.length){
         const history=elem('section',null,'rr-conversation-live');
@@ -637,6 +663,11 @@
         if(toShow.length){
           const section=elem('section',null,'rr-proposal-storyboard');
           section.append(elem('h3','Take a look at these photos'));
+          if(rendering)section.append(elem('p',
+            'These photos are previews of the plan already queued for V'+
+            (Number(session.latest_attempt_number)||2)+
+            '. New image suggestions can be saved below for a later version, but cannot change this in-flight job.',
+            'rr-review-progress'));
           for(const frame of toShow){
             const item=elem('div',null,'rr-storyboard-row');
             const time=Number(frame.start_seconds).toFixed(2)+'–'+Number(frame.end_seconds).toFixed(2)+'s';
@@ -676,6 +707,75 @@
           }
           detail.append(section);
         }
+      }
+      // Feedback during a held render is saved as a user note for the NEXT
+      // creative revision. It cannot edit, cancel, or implicitly retry the
+      // immutable job that has already been authorized.
+      if(rendering&&saved.flags?.producer_conversation_enabled===true&&
+         session?.review_hold?.active===true&&session?.active_job?.id){
+        const next=elem('section',null,'rr-next-revision-comments');
+        next.setAttribute('aria-label','Comments for next revision');
+        next.append(elem('h3','Suggest photo changes for the next version'));
+        next.append(elem('p','V'+(Number(session.latest_attempt_number)||2)+
+          ' is already queued or processing. Describe different photos, scene numbers or other changes here. '+
+          'Your comments will be saved to this review for the next Producer conversation; they will NOT alter the current render or start another one.',
+          'rr-muted'));
+        const draft=elem('textarea');
+        draft.rows=4;draft.maxLength=3000;
+        draft.placeholder='For example: Replace scene 3 with a close-up of the planet display, and use the dome exterior for scene 5.';
+        draft.setAttribute('aria-label','Photo and scene suggestions for the next revision');
+        draft.value=state.nextRevisionDrafts.get(entry.output_id)||'';
+        draft.addEventListener('input',()=>state.nextRevisionDrafts.set(entry.output_id,draft.value));
+        next.append(draft);
+        const noteStatus=elem('p','','rr-feedback-status');
+        noteStatus.hidden=true;noteStatus.setAttribute('role','status');
+        noteStatus.setAttribute('aria-live','polite');
+        const submit=elem('button','Save feedback for next revision','secondary-button');
+        submit.type='button';
+        submit.addEventListener('click',async()=>{
+          if(state.actionBusy)return;
+          const content=String(draft.value||'').trim();
+          if(!content){
+            noteStatus.hidden=false;noteStatus.dataset.state='error';
+            noteStatus.textContent='Enter your photo or scene suggestions before saving.';
+            return;
+          }
+          const identity=entry.output_id+':'+content;
+          if(!state.nextRevisionKeys.has(identity))state.nextRevisionKeys.set(identity,safeRequestId());
+          state.actionBusy=true;submit.disabled=true;
+          submit.textContent='Saving review comments…';
+          noteStatus.hidden=false;noteStatus.dataset.state='working';
+          noteStatus.textContent='Saving your suggestions for a future revision; the current render remains unchanged.';
+          try{
+            const receipt=await post('/api/rendering-review/outputs/'+
+              encodeURIComponent(entry.output_id)+'/next-revision-feedback',{
+              content,expected_version:session.version,
+              client_request_id:state.nextRevisionKeys.get(identity),
+            });
+            if(receipt.ok!==true||receipt.review_hold_active!==true||
+               !Number.isSafeInteger(receipt.session_version)||receipt.message_count<1)
+              throw new Error('Saved feedback could not be independently confirmed.');
+            state.nextRevisionDrafts.delete(entry.output_id);
+            state.nextRevisionKeys.delete(identity);
+            state.lastReplyNotice={outputId:entry.output_id,message:
+              'Your photo suggestions were saved for the next revision. V'+
+              (Number(session.latest_attempt_number)||2)+
+              ' remains unchanged; review its result before requesting another version.'};
+            say('Future revision feedback saved; current render unchanged.');
+            await open(entry);
+          }catch(error){
+            state.nextRevisionDrafts.set(entry.output_id,content);
+            noteStatus.dataset.state='error';
+            noteStatus.textContent='Could not confirm saved comments: '+
+              (error?.message||'Status unavailable')+
+              '. Your text remains available; check status before retrying.';
+            say('Comments have not been confirmed saved.',true);
+          }finally{
+            state.actionBusy=false;submit.disabled=false;
+            submit.textContent='Save feedback for next revision';
+          }
+        });
+        next.append(submit,noteStatus);detail.append(next);
       }
       if(attempts.length>1){
         const heading=elem('h3','Video versions');detail.append(heading);
