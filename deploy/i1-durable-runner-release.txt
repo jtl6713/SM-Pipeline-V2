@@ -1,0 +1,1 @@
+2026-11-01 stage runner durable I1 implementation with both I1_DURABLE_ENABLED and STUDIO_I1_DURABLE_JOBS off. Deploy via protected Ops job, confirm production /health exact version and authentication. Storage and activation are separate guarded steps.

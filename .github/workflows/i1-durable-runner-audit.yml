@@ -1,0 +1,76 @@
+name: I1 Durable Runner Storage Read-Only Audit
+on:
+  pull_request:
+    paths:
+      - "services/pipeline-runner/i1/durable_jobs.py"
+      - ".github/workflows/i1-durable-runner-audit.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.number == 1436)
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Inspect runner host without altering files, processes, or secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          python - <<'PY' > /tmp/i1-host-audit.json
+          import json
+          command = r'''$ErrorActionPreference='Stop'
+          $root=(Get-Location).Path
+          $envCandidates=@((Join-Path $root 'Services\pipeline-runner\service\.env'),(Join-Path $root 'services\pipeline-runner\.env'))
+          Write-Output ('runner_root_exists='+[bool](Test-Path $root))
+          foreach($p in $envCandidates) {
+            $exists=Test-Path $p
+            Write-Output ('runner_env_candidate_exists='+[bool]$exists)
+            if($exists) {
+              $names=@('I1_DURABLE_ENABLED','I1_JOB_DB_PATH','PIPELINE_RUNNER_SHARED_SECRET','AIRTABLE_PAT','AIRTABLE_BASE_ID')
+              $lines=@(Get-Content $p)
+              foreach($name in $names) {
+                $found=@($lines | Where-Object { $_ -match ('^\s*'+[regex]::Escape($name)+'\s*=\s*\S') }).Count -gt 0
+                Write-Output ('runner_env_key_'+$name+'_present='+[bool]$found)
+              }
+            }
+          }
+          $parent=Join-Path $env:ProgramData 'ChicagoShining\pipeline-runner'
+          Write-Output ('runner_programdata_present='+[bool](Test-Path $env:ProgramData))
+          Write-Output ('runner_durable_directory_exists='+[bool](Test-Path $parent))
+          if(Test-Path $parent) {
+            $d=Get-Item $parent
+            Write-Output ('runner_durable_directory_is_container='+[bool]$d.PSIsContainer)
+          }
+          $running=@(Get-CimInstance Win32_Process | Where-Object { ($_.Name -match '^python(w)?\.exe$') -and ($_.CommandLine -match '(?i)app\.py|pipeline-runner') })
+          Write-Output ('runner_python_processes='+$running.Count)
+          foreach($p in $running) { Write-Output ('runner_process_id='+[int]$p.ProcessId) }
+          '''
+          print(json.dumps({"command":command,"confirm":True}))
+          PY
+          code=$(curl -sS --max-time 20 -w '%{http_code}' -o /tmp/i1-audit-start.json \
+            -X POST 'https://ops.chicagoshining.com/api/shell' \
+            -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/i1-host-audit.json)
+          if [[ "$code" != "202" && "$code" != "200" ]]; then echo "host_audit_start_failed=$code"; exit 1; fi
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/i1-audit-start.json)
+          test -n "$job"
+          for n in {1..30}; do
+            curl -sS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/i1-audit-result.json
+            state=$(jq -r '.job.status // empty' /tmp/i1-audit-result.json)
+            if [[ "$state" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/i1-audit-result.json | grep '^runner_' || true
+              exit 0
+            fi
+            if [[ "$state" == "failed" ]]; then
+              echo "read_only_host_audit_failed"
+              jq -r '.job.log // ""' /tmp/i1-audit-result.json | tail -12 | cut -c1-180
+              exit 1
+            fi
+            sleep 3
+          done
+          echo "host_audit_incomplete"; exit 1

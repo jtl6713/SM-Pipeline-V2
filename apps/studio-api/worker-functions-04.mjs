@@ -8655,8 +8655,10 @@ export async function studioIdeaManualBatchStillRunning(env, batchId) {
   if (!["Pending", "Running"].includes(status)) return false;
   const requestedAt = Date.parse(String(f(batch, "Requested_At") || batch.createdTime || ""));
   const ageMs = Number.isFinite(requestedAt) ? Date.now() - requestedAt : Infinity;
-  // Abandoned waitUntil / crashed clears left Pending forever; only a fresh
-  // batch should block Generate.
+  // Durable jobs may legitimately exceed the legacy 20-minute lock window.
+  // Do not allow a second manual batch while the runner is still the owner.
+  if (["1", "true"].includes(String(env.STUDIO_I1_DURABLE_JOBS || "").toLowerCase())) return true;
+  // Legacy waitUntil jobs retain their bounded stale-lock recovery.
   return ageMs <= 20 * 60 * 1000;
 }
 /*__STUDIO_WORKER_END:studioIdeaManualBatchStillRunning__*/
@@ -8995,11 +8997,82 @@ export async function startStudioIdeaGeneration(request, env, authorization, ctx
     throw new HttpError(400, "Quality must be Highest Quality, Balanced, or Quantity");
   }
 
+  // Reject missing durable prerequisites BEFORE creating an Airtable batch
+  // or acquiring a Manual_Idea_Batch profile lock.
+  const useDurableI1 = ["1", "true"].includes(String(env.STUDIO_I1_DURABLE_JOBS || "").toLowerCase());
+  if (useDurableI1) {
+    const { runnerUrl } = pipelineStageBackend(env, "I1");
+    if (!runnerUrl || !String(env.PIPELINE_RUNNER_SHARED_SECRET || "")) {
+      throw new HttpError(503, "Durable I1 runner URL and authentication must be configured before admission");
+    }
+  }
   const profileId = requestedProfileId(null, payload);
   // Blocks a second Generate while Manual_Idea_Batch is still linked.
   const profile = await studioIdeaEnabledProfile(env, authorization, profileId);
   const batch = await studioIdeaCreateBatch(env, profile, count, quality, authorization);
   await studioIdeaSetProfileOverrides(env, profile.id, batch.id, count, quality);
+
+  // Opt-in durable I1: the runner persists a job receipt before this request
+  // responds. The 300-second model call never runs under Worker waitUntil.
+  const durableI1 = ["1", "true"].includes(String(env.STUDIO_I1_DURABLE_JOBS || "").toLowerCase());
+  if (durableI1) {
+    const { runnerUrl } = pipelineStageBackend(env, "I1");
+    if (!runnerUrl) throw new HttpError(503, "Durable I1 requires a configured pipeline runner");
+    const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+    if (!secret) throw new HttpError(503, "Durable I1 requires runner authentication");
+    let response;
+    let receipt;
+    try {
+      response = await fetch(runnerUrl + "/jobs/i1-durable", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Pipeline-Secret": secret,
+        },
+        body: JSON.stringify({
+          batch_record_id: batch.id,
+          profile_record_id: profile.id,
+          requested_count: count,
+          quality,
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+      receipt = await response.json().catch(() => ({}));
+    } catch (error) {
+      // Network uncertainty is not a failed job: the runner may have queued it.
+      console.error("I1 durable dispatch unconfirmed", batch.id, error);
+      return respond(request, env, {
+        ok: true, accepted: true, completed: false,
+        status: "Pending", dispatch_unconfirmed: true,
+        batch_record_id: batch.id, profile_record_id: profile.id,
+        requested_count: count, backend: "durable-runner",
+        message: "Batch saved but runner acknowledgment was interrupted. Check this batch before retrying.",
+      }, 202);
+    }
+    if (response.status === 202 && !receipt?.accepted) {
+      return respond(request, env, {
+        ok: true, accepted: true, completed: false, status: "Pending",
+        dispatch_unconfirmed: true, batch_record_id: batch.id,
+        message: "Runner response was ambiguous; check the existing batch before retrying.",
+      }, 202);
+    }
+    if (response.status !== 202) {
+      const message = String(receipt?.error || receipt?.message || "Runner rejected durable I1 admission").slice(0, 700);
+      await studioIdeaUpdateBatch(env, batch.id, {
+        Status: "Failed", Completed_At: new Date().toISOString(), Error: message,
+      }).catch(() => {});
+      await studioIdeaClearProfileOverrides(env, profile.id).catch(() => {});
+      throw new HttpError(502, message);
+    }
+    return respond(request, env, {
+      ok: true, accepted: true, completed: false, status: "Pending",
+      batch_record_id: batch.id,
+      batch_id: String(f(batch, "Batch_ID") || ""),
+      requested_count: count, quality, profile_record_id: profile.id,
+      backend: "durable-runner",
+      message: "Queued " + count + " idea(s) in the durable runner.",
+    }, 202);
+  }
 
   // Mobile Safari aborts long sync Generate posts ("Fetch is aborted") while I1
   // + photo listening still run. Accept the batch immediately and finish in
@@ -9075,7 +9148,8 @@ export async function studioIdeaGenerationStatus(request, env, url) {
     updates.Status = "Complete";
     updates.Completed_At = new Date().toISOString();
     updates.Error = null;
-  } else if (["Pending", "Running"].includes(view.status) && ageMs > 15 * 60 * 1000) {
+  } else if (!["1", "true"].includes(String(env.STUDIO_I1_DURABLE_JOBS || "").toLowerCase())
+    && ["Pending", "Running"].includes(view.status) && ageMs > 15 * 60 * 1000) {
     updates.Status = "Failed";
     updates.Completed_At = new Date().toISOString();
     updates.Error = `Generation stopped after creating ${view.generated_count} of ${view.requested_count} requested ideas.`;

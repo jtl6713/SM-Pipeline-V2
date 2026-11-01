@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/deploy-pipeline-runner-via-ops.yml'
+      - 'deploy/i1-durable-runner-release.txt'
 
 permissions:
   contents: read
@@ -31,6 +32,7 @@ jobs:
             services/pipeline-runner/tests/test_a2b_existing_lookup.py \
             services/pipeline-runner/tests/test_i1_title_uniqueness.py \
             services/pipeline-runner/tests/test_i1_partial_creation.py \
+            services/pipeline-runner/tests/test_i1_durable_jobs.py \
             services/pipeline-runner/tests/test_idea_chain.py \
             services/pipeline-runner/tests/test_airtable_atomic_upsert.py \
             services/pipeline-runner/tests/test_airtable_egress_monitor.py \
