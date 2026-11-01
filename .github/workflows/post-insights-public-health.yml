@@ -1,0 +1,31 @@
+name: Read-only Post Insights Public Service Health
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/post-insights-public-health.py'
+      - '.github/workflows/post-insights-public-health.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/post-insights-public-health.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: python -m py_compile scripts/post-insights-public-health.py
+
+  probe:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v6
+      - name: Probe public health and status without secrets or mutations
+        run: python scripts/post-insights-public-health.py
