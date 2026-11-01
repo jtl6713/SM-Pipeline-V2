@@ -30,15 +30,30 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
-      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       REPORT_PATH: /tmp/post-insights-4-profile-diagnostic.json
     steps:
       - name: Checkout
         uses: actions/checkout@v6
       - name: Verify source syntax
         run: python -m py_compile scripts/diagnose-post-insights-profiles.py
-      - name: Check four profiles without changing accounts or publishing
-        run: python scripts/diagnose-post-insights-profiles.py
+      - name: Check four profiles using existing protected credential envelope
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          trap 'rm -f /tmp/postinsights-envelope-key.pem /tmp/postinsights-pat.enc /tmp/postinsights-pat.txt' EXIT
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN \
+            -in deploy/credential-envelope/private.pem.enc -out /tmp/postinsights-envelope-key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/postinsights-pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/postinsights-envelope-key.pem \
+            -in /tmp/postinsights-pat.enc -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 \
+            -out /tmp/postinsights-pat.txt
+          test -s /tmp/postinsights-pat.txt
+          echo "::add-mask::$(cat /tmp/postinsights-pat.txt)"
+          AIRTABLE_PAT="$(cat /tmp/postinsights-pat.txt)" python scripts/diagnose-post-insights-profiles.py
       - name: Upload redacted connection report
         if: always()
         uses: actions/upload-artifact@v4
