@@ -26,13 +26,25 @@ const qa=(watermark=false)=>[{
  })
  }}];
 
-test('Michigan #9593: creative approval cannot promote media with watermark QA false',()=>{
+test('Michigan #9593: post-V1 is Factory-ready even when watermark QA is false',()=>{
  const s=session();
  const result=classifyApprovedFactoryHandoff({session:s,held:true,attemptRecords:qa(false)});
- assert.equal(result.status,'blocked');
- assert.equal(result.code,'WATERMARK_QA_REQUIRED');
+ assert.equal(result.status,'ready');
+ assert.equal(result.code,'QA_PREFLIGHT_PASSED');
  assert.equal(s.review_hold.active,true);
  assert.equal(s.approved_attempt_id,aid);
+});
+test('V3+ with false or absent watermark evidence is eligible after independent media QA',()=>{
+ for(const watermark of [false,null,undefined]){
+   const s=session();
+   s.attempts[1].number=3;
+   const records=qa(watermark);
+   records[0].fields.Attempt_Number=3;
+   const evidence=JSON.parse(records[0].fields.Validation_Evidence_JSON);
+   if(watermark===undefined)delete evidence.watermark_verified;
+   records[0].fields.Validation_Evidence_JSON=JSON.stringify(evidence);
+   assert.equal(classifyApprovedFactoryHandoff({session:s,held:true,attemptRecords:records}).status,'ready');
+ }
 });
 test('same exact saved V2 can become preflight ready only after independent evidence',()=>{
  const result=classifyApprovedFactoryHandoff({session:session(),held:true,attemptRecords:qa(true)});
