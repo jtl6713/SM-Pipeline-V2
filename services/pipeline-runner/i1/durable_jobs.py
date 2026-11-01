@@ -12,6 +12,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -62,6 +63,17 @@ def _connect() -> sqlite3.Connection:
     return db
 
 
+
+@contextmanager
+def _db():
+    db = _connect()
+    try:
+        with db:
+            yield db
+    finally:
+        db.close()
+
+
 def enqueue(batch_id: str, profile_id: str, count: int, quality: str) -> dict:
     """Idempotent admission; identical batch requests never enqueue twice."""
     if not enabled():
@@ -71,7 +83,7 @@ def enqueue(batch_id: str, profile_id: str, count: int, quality: str) -> dict:
     if not isinstance(count, int) or not 1 <= count <= 10 or quality not in _QUALITIES:
         raise ValueError("invalid I1 request")
     now = time.time()
-    with _connect() as db:
+    with _db() as db:
         db.execute(
             """INSERT OR IGNORE INTO jobs
             (batch_id, profile_id, requested_count, quality, status, created_at, updated_at)
@@ -91,7 +103,7 @@ def enqueue(batch_id: str, profile_id: str, count: int, quality: str) -> dict:
 def status(batch_id: str) -> dict | None:
     if not _RECORD.fullmatch(batch_id):
         return None
-    with _connect() as db:
+    with _db() as db:
         row = db.execute("SELECT * FROM jobs WHERE batch_id=?", (batch_id,)).fetchone()
     return ({"batch_record_id": row["batch_id"], "status": row["status"],
              "attempts": row["attempts"], "error": row["error"]} if row else None)
@@ -100,7 +112,7 @@ def status(batch_id: str) -> dict | None:
 def _claim() -> dict | None:
     now = time.time()
     token = uuid.uuid4().hex
-    with _connect() as db:
+    with _db() as db:
         db.execute("BEGIN IMMEDIATE")
         row = db.execute(
             """SELECT * FROM jobs WHERE status='queued'
@@ -121,7 +133,7 @@ def _heartbeat(batch_id: str, token: str, stop: threading.Event) -> None:
     while not stop.wait(15):
         now = time.time()
         try:
-            with _connect() as db:
+            with _db() as db:
                 changed = db.execute(
                     """UPDATE jobs SET lease_until=?, updated_at=?
                     WHERE batch_id=? AND run_token=? AND status='running'""",
@@ -134,7 +146,7 @@ def _heartbeat(batch_id: str, token: str, stop: threading.Event) -> None:
 
 
 def _finish(job: dict, outcome: str, error: str | None = None) -> None:
-    with _connect() as db:
+    with _db() as db:
         db.execute(
             """UPDATE jobs SET status=?, error=?, lease_until=0, updated_at=?
             WHERE batch_id=? AND run_token=? AND status='running'""",
@@ -268,7 +280,7 @@ def start_consumer() -> None:
     with _LOCK:
         if _STARTED:
             return
-        with _connect():  # fail closed on missing/unwritable persistent path
+        with _db():  # fail closed on missing/unwritable persistent path
             pass
         thread = threading.Thread(target=_consume, daemon=True, name="i1-durable-consumer")
         thread.start()
