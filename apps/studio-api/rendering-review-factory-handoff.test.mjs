@@ -50,7 +50,7 @@ function fixture(){
   Validation_Evidence_JSON:JSON.stringify({
    sha256:"8ee06c1f0234959c5ff4610b020d6bb72a005200ffa5d6590d920754b3c0f77e",
    byte_count:21961807,mime_type:"video/mp4",width:1080,height:1920,
-   audio_verified:true,watermark_verified:true,google_drive_verified:true,
+   audio_verified:true,watermark_verified:false,google_drive_verified:true,
    google_drive_mime_type:"video/mp4",render_job_id:"job-20261029042719-d8b6ef01"
   })
  }};
@@ -113,7 +113,7 @@ function readyOutput(f){
   review_status:f.raw.fields.Review_Status,
   publish_status:f.raw.fields.Publish_Status,render_status:"Rendered"};
 }
-test("real #8447 V2 creative approval becomes Factory Needs Eyes, never scheduled/published",async()=>{
+test("V2 with watermark verification FALSE moves to Factory without publishing",async()=>{
  const f=fixture();
  const result=await f.handoff();
  assert.equal(result.ok,true);
