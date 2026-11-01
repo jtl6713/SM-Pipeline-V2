@@ -64,6 +64,8 @@
   let ideaGenerationPollTimer = null;
   let ideaGenerationInFlight = false;
   let scriptedShortProposal = null;
+  let scriptedShortProposalVersions = [];
+  let scriptedShortFeedbackBusy = false;
   let activeProductionRequest = null;
   let productionRequestMusic = [];
   let productionRequestOutputs = [];
@@ -289,7 +291,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.805-factory-output-preview-ownership";
+  const BUILD_ID = "item4-0.6.806-scripted-proposal-feedback";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -2633,6 +2635,16 @@
       meta.textContent = `${proposal.scene_count || proposal.timeline.segments.length} scenes · about ${seconds.toFixed(0)} seconds estimated · ${suggestions} shot${suggestions === 1 ? "" : "s"} still to create. The recorded voiceover sets the real length.`;
     }
     renderScriptedShortProducerPlan(proposal.producer_plan || null);
+    const version = $("scriptedShortRevisionCount");
+    if (version) version.textContent = `Proposal version ${Math.max(1, scriptedShortProposalVersions.length)}`;
+    const undo = $("scriptedShortUndo");
+    if (undo) undo.disabled = scriptedShortFeedbackBusy || scriptedShortProposalVersions.length <= 1;
+    const changes = $("scriptedShortFeedbackHistory");
+    if (changes) {
+      const edits = scriptedShortProposalVersions.slice(1).map((entry, index) => `<li><strong>Revision ${index + 1}:</strong> ${escapeHtml(entry.feedback || "")}</li>`);
+      changes.innerHTML = edits.join("");
+      changes.hidden = !edits.length;
+    }
     host.innerHTML = proposal.timeline.segments.map((segment, index) => {
       const owned = Boolean(String(segment.asset_id || "").trim()) && segment.shot_status !== "suggestion";
       const clock = window.StudioTimedScript
@@ -2647,6 +2659,11 @@
 
   function clearScriptedShortProposal() {
     scriptedShortProposal = null;
+    scriptedShortProposalVersions = [];
+    const feedback = $("scriptedShortFeedback");
+    if (feedback) feedback.value = "";
+    const status = $("scriptedShortFeedbackStatus");
+    if (status) status.textContent = "";
     renderScriptedShortProposal(null);
   }
 
@@ -2750,6 +2767,7 @@
         timeoutMs: 150000,
       });
       scriptedShortProposal = result;
+      scriptedShortProposalVersions = [{ proposal: result, feedback: null }];
       renderScriptedShortProposal(result);
       setScriptedShortMessage(result.message || "Proposal ready. Accept keeps it. Decline throws it away.", "success");
     } catch (error) {
@@ -2761,6 +2779,69 @@
         button.textContent = "Propose";
       }
     }
+  });
+
+  $("scriptedShortRevise")?.addEventListener("click", async () => {
+    const base = scriptedShortProposal;
+    const feedbackInput = $("scriptedShortFeedback");
+    const feedback = String(feedbackInput?.value || "").trim();
+    const status = $("scriptedShortFeedbackStatus");
+    if (!base?.timeline) {
+      if (status) status.textContent = "Create a proposal before requesting changes.";
+      return;
+    }
+    if (!feedback || feedback.length > 3000) {
+      if (status) status.textContent = "Describe your changes in 1–3,000 characters.";
+      return;
+    }
+    if (scriptedShortFeedbackBusy) return;
+    scriptedShortFeedbackBusy = true;
+    const profile = selectedProfileId;
+    const button = $("scriptedShortRevise");
+    const accept = $("scriptedShortAccept");
+    if (button) { button.disabled = true; button.textContent = "Revising…"; }
+    if (accept) accept.disabled = true;
+    if (status) status.textContent = "Checking the named clip and updating the proposal…";
+    try {
+      const result = await api("/api/scripted-short/revise", {
+        method: "POST",
+        body: JSON.stringify({
+          prompt: base.prompt,
+          creative_brief: base.creative_brief || base.prompt,
+          content_profile_id: profile,
+          timeline: base.timeline,
+          feedback,
+        }),
+        timeoutMs: 150000,
+      });
+      if (scriptedShortProposal !== base || selectedProfileId !== profile) {
+        if (status) status.textContent = "The proposal or profile changed. That revision was not applied.";
+        return;
+      }
+      scriptedShortProposal = result;
+      scriptedShortProposalVersions.push({ proposal: result, feedback });
+      renderScriptedShortProposal(result);
+      if (feedbackInput) feedbackInput.value = "";
+      if (status) status.textContent = result.message || "Revised proposal ready. Review it before accepting.";
+      setScriptedShortMessage("The revised proposal is ready for your review.", "success");
+    } catch (error) {
+      if (status) status.textContent = error.message || "Could not revise the proposal. Your earlier proposal is unchanged.";
+    } finally {
+      scriptedShortFeedbackBusy = false;
+      if (button) { button.disabled = false; button.textContent = "Revise proposal"; }
+      if (accept) accept.disabled = false;
+      const undo = $("scriptedShortUndo");
+      if (undo) undo.disabled = scriptedShortProposalVersions.length <= 1;
+    }
+  });
+
+  $("scriptedShortUndo")?.addEventListener("click", () => {
+    if (scriptedShortFeedbackBusy || scriptedShortProposalVersions.length <= 1) return;
+    scriptedShortProposalVersions.pop();
+    scriptedShortProposal = scriptedShortProposalVersions.at(-1).proposal;
+    renderScriptedShortProposal(scriptedShortProposal);
+    const status = $("scriptedShortFeedbackStatus");
+    if (status) status.textContent = "Restored the previous proposal version. Nothing was saved or published.";
   });
 
   $("scriptedShortDecline")?.addEventListener("click", () => {
@@ -2787,6 +2868,7 @@
           creative_brief: scriptedShortProposal.creative_brief || scriptedShortProposal.prompt || $("scriptedShortPrompt")?.value || "",
           content_profile_id: selectedProfileId,
           timeline: scriptedShortProposal.timeline,
+          proposal_feedback: scriptedShortProposalVersions.slice(1).map(entry => entry.feedback),
         }),
         timeoutMs: 150000,
       });
