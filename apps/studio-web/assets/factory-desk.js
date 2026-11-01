@@ -1082,7 +1082,7 @@
 
   function reviewGroupMatchesSearch(group, raw) {
     const terms = String(raw || "").toLowerCase().replace(/[#]/g,"").match(/[a-z0-9]+/g) || [];
-    const meaningful = terms.filter(word => word.length >= 5 || /^[0-9]{3,}$/.test(word));
+    const meaningful = terms.filter(word => !["content","output","items","review","video"].includes(word) && (word.length >= 5 || /^[0-9]{3,}$/.test(word)));
     if (!meaningful.length) return !terms.length;
     const haystack = (group.cards || []).map(card=> [
       card.title,card.content_id,card.output_id,card.content_item_id,
