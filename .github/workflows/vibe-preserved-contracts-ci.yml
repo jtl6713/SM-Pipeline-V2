@@ -1,4 +1,4 @@
-name: Preserved Vibe Contracts CI (unmounted)
+name: Vibe Isolated Renderer Integration CI (no live writes)
 on:
   pull_request:
     paths:
@@ -7,6 +7,9 @@ on:
       - 'services/pipeline-runner/tests/test_rendering_review_vibe_*.py'
       - 'services/pipeline-runner/tests/test_rendering_review_video_watermark_qa.py'
       - 'services/remotion-renderer/**/vibe-*'
+      - 'services/remotion-renderer/render-server.js'
+      - 'services/remotion-renderer/src/Root.tsx'
+      - 'services/remotion-renderer/src/ChicagoShiningPhotoSequence.tsx'
       - '.github/workflows/vibe-preserved-contracts-ci.yml'
   workflow_dispatch:
 permissions:
@@ -30,5 +33,13 @@ jobs:
         run: |
           python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_vibe_*.py' -v
           python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_video_watermark_qa.py' -v
-      - name: Vibe Remotion pure contracts
-        run: node --test services/remotion-renderer/vibe-audio-policy.test.js services/remotion-renderer/vibe-review-music-policy.test.js services/remotion-renderer/vibe-review-timing.test.js
+      - name: Vibe Remotion music, branding, timing and renderer syntax
+        run: |
+          node --check services/remotion-renderer/render-server.js
+          node --test services/remotion-renderer/vibe-audio-policy.test.js services/remotion-renderer/profile-watermark-policy.test.js services/remotion-renderer/vibe-review-music-policy.test.js services/remotion-renderer/vibe-review-timing.test.js
+      - name: Compile exact Vibe timeline and Remotion bundle
+        working-directory: services/remotion-renderer
+        run: |
+          npm ci --ignore-scripts
+          npx tsc --noEmit
+          npm run build
