@@ -1,0 +1,1 @@
+Enable runner-side I1 durable jobs only after PR #1436 merge and production Worker+runner+storage canaries have all passed. This does NOT enable the Studio Worker flag. Back up Windows .env, set durable ProgramData path, redeploy runner via Ops, verify /health, rollback on failure.
