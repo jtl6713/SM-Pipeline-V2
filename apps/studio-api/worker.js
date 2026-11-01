@@ -2493,7 +2493,7 @@ export default {
 
       if (isOperationsRoute) {
         requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
-        return getStudioOperations(request, env, authorization);
+        return await getStudioOperations(request, env, authorization);
       }
 
       if (isOperationsProfilesListRoute) {
@@ -2901,7 +2901,7 @@ export default {
         if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
         assertWriteRequest(request, env);
         requirePermission(authorization, "ideas_create");
-        return startStudioIdeaGeneration(request, env, authorization, ctx);
+        return await startStudioIdeaGeneration(request, env, authorization, ctx);
       }
 
       if (isScriptedShortProposeRoute) {
@@ -2920,7 +2920,7 @@ export default {
       }
 
       if (isIdeaGenerateStatusRoute) {
-        return studioIdeaGenerationStatus(request, env, url, authorization);
+        return await studioIdeaGenerationStatus(request, env, url, authorization);
       }
 
       if (url.pathname === "/api/ideas") {
