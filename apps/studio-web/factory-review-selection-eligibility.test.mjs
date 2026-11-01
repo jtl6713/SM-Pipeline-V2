@@ -105,8 +105,26 @@ test("Recently submitted output cannot be selected or approved again from search
 test("Mobile styling keeps ineligible checkbox and explanation visible", () => {
   assert.match(css, /\.factory-media-select \.factory-output-select\{/);
   assert.match(css, /\.factory-output-select input:disabled\{/);
-  assert.match(css, /\.factory-line-actions \.factory-batch-unavailable\{/);
+  assert.match(css, /\.factory-line-title \.factory-batch-unavailable\{/);
   assert.doesNotMatch(css, /\.factory-batch-unavailable[^}]*display:none/);
+});
+
+test("Held #9593 explains the blocked checkbox directly beneath Output #, above actions", () => {
+  const { renderCard } = setup();
+  const html = renderCard({...chicagoReel, review_hold_active:true,do_not_publish:true}, {lane:"needs_eyes"});
+  const reason = html.indexOf('class="factory-batch-unavailable" role="status"');
+  const title = html.indexOf('class="factory-line-title"');
+  const profile = html.indexOf("ChicagoShining - Chicago", title);
+  const actions = html.indexOf('class="factory-line-actions"');
+  assert.ok(title >= 0 && reason > title && reason < profile && profile < actions,
+    "Hold explanation must be near the title, not beyond the action buttons and fixed mobile footer");
+  assert.match(html, /Approval unavailable:<\\/strong> Review-held revision:/);
+  assert.match(selectionTag(html), /aria-describedby="factory-batch-reason-recMichigan9593"/);
+  assert.match(html, /id="factory-batch-reason-recMichigan9593"/);
+  assert.equal((html.match(/class="factory-batch-unavailable"/g)||[]).length,1,
+    "Do not duplicate the warning after the actions");
+  assert.match(css, /\\.factory-line-title:has\\(\\.factory-batch-unavailable\\)/);
+  assert.match(css, /white-space:normal;overflow:visible;text-overflow:clip/);
 });
 
 test("Group selection skips disabled row checkboxes", () => {
