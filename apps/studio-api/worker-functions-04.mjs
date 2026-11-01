@@ -1,4 +1,5 @@
 import { matchNewlyCreatedIdeaPhotos } from "./worker-functions-03.mjs";
+import { evaluateReviewPackage, verifyReviewImages } from "./review-package-readiness.mjs";
 import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 import { autonomousPlanOutputSpilloverRepair } from "./autonomous-plan-output-recovery.mjs";
 import { verifyFactoryRenderedMedia } from "./factory-producer-render-evidence.mjs";
@@ -11306,6 +11307,9 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       f(record, "Content_Profile") || (content ? f(content, "Content_Profile") : null),
     );
     const contentNumber = content ? f(content, "Content_ID") : null;
+    const readiness = evaluateReviewPackage(record);
+    const readinessException = String(mapped.output_status || "").trim() === "Ready for Review"
+      && readiness.readiness !== "READY";
     const outputRow = {
       kind: "output",
       id: record.id,
@@ -11345,9 +11349,10 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       produce_percent: parentRequest?.produce_percent || null,
       produce_paused: producePaused,
       render_paused: renderPaused,
-      stuck_kind: stuck?.kind || parentRequest?.stuck_kind || null,
-      stuck_class: stuck?.class || parentRequest?.stuck_class || null,
-      produce_error: stuck?.error || parentRequest?.produce_error || mapped.remotion_error_message || null,
+      stuck_kind: stuck?.kind || (readinessException ? "review_package_incomplete" : null) || parentRequest?.stuck_kind || null,
+      stuck_class: stuck?.class || (readinessException ? "code_bug" : null) || parentRequest?.stuck_class || null,
+      produce_error: stuck?.error || (readinessException ? readiness.missing_requirements.join(", ") || readiness.reason : null)
+        || parentRequest?.produce_error || mapped.remotion_error_message || null,
       lane: queueLaneForStudioState(studioState, {
         producePaused,
         renderPaused,
@@ -11357,10 +11362,12 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       platforms: parentRequest?.platforms || (mapped.platform ? [mapped.platform] : []),
       scheduled_at: mapped.scheduled_at || mapped.scheduled_post_date || null,
       creative_available: outputCreativeAvailable(record),
-      // A Studio state is a projection; only the review-ready projection with
-      // required caption and preview evidence may enter Needs Eyes.
-      review_package_ready: studioState === "Ready for Review"
-        && Boolean(String(f(record, "Output_Caption") || "").trim()),
+      // One shared review-package validator governs Factory counts/eligibility.
+      // This is metadata validation; the approval route probes actual CDN bytes.
+      review_package_ready: readiness.readiness === "READY" && studioState === "Ready for Review",
+      review_package_readiness: readiness.readiness,
+      review_package_missing: readiness.missing_requirements,
+      review_package_reason: readiness.reason,
       updated_at: outputUpdatedAt,
     };
     outputRow.e2e = buildOpsE2eStages({
@@ -11500,7 +11507,12 @@ export async function factoryApproveOutput(env, id, actor, note, ctx = null, sch
     throw new HttpError(409, `Cannot approve yet: rendering is incomplete (${renderStatus}). The output will return to Needs Eyes after rendering finishes.`);
   }
   if (!studioOutputReadyForPublishApproval(existing)) {
-    throw new HttpError(409, "Cannot approve this output yet: a finished render and Ready for Review are required.");
+    const readiness = evaluateReviewPackage(existing);
+    throw new HttpError(409, "Cannot approve: " + (readiness.missing_requirements.join(", ") || readiness.reason || "review package incomplete"));
+  }
+  const verifiedReview = await verifyReviewImages(evaluateReviewPackage(existing));
+  if (verifiedReview.readiness !== "READY") {
+    throw new HttpError(409, "Cannot approve: " + (verifiedReview.missing_requirements.join(", ") || verifiedReview.reason));
   }
   // A future/newly-added sibling may have rendered AFTER the shared creative
   // master was approved. Catch it up under the canonical output approval lock,
