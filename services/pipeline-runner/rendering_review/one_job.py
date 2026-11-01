@@ -23,7 +23,8 @@ import requests
 
 from airtable.client import AirtableClient
 from audio.voiceover_duration import probe_audio_duration_bytes
-from branding.watermark import brand_watermark_url
+from rendering_review.profile_watermark import resolve_profile_watermark
+from rendering_review.video_watermark_qa import verify_video_profile_watermark
 from integrations.google_drive import GoogleDriveClient
 from p2.constants import VOICEOVER_DRIVE_FOLDER_ID
 from p2.elevenlabs_client import resolve_content_voice_id, synthesize_voiceover_by_id
@@ -452,24 +453,18 @@ def render_exact_attempt(output_id,job_id,*,client=None,drive=None,
     assets=_render_sources(client,req,originals,props,plan,drive=drive,profile_id=profile_id)
     mix=_source_mix(drive,props,output_id)
     # Reject missing or cross-city watermark branding BEFORE claiming a job.
-    if profile_id==CHICAGO:
-        brand_url=brand_watermark_url(client)
-    else:
-        # A previously rendered URL is not a rights/tenant receipt. Before
-        # touching a non-Chicago review job, verify its exact profile-owned
-        # Watermark Media Asset in authoritative Airtable and Google Drive.
-        from rendering_review.profile_watermark import (
-            require_owned_profile_watermark_url, ProfileWatermarkUnavailable,
-        )
-        brand_url=str(props.get("watermarkUrl") or "")
-        try:
-            require_owned_profile_watermark_url(
-                client=client,drive=drive,profile_id=profile_id,url=brand_url,
-            )
-        except ProfileWatermarkUnavailable:
-            fail("review_profile_watermark_unverified")
-    if not brand_url.startswith("https://"):
-        fail("review_watermark_url_unavailable")
+    # Brand identity must come from the selected Content Profile, never
+    # from the Chicago global default, browser props, or a guessed logo.
+    # The exact bytes are also needed later for decoded-frame QA.
+    try:
+        owned=resolve_profile_watermark(
+            client=client,drive=drive,profile_id=profile_id)
+    except Exception as exc:
+        raise ExactReviewRenderDenied("review_profile_watermark_unverified") from exc
+    logo_bytes=owned["bytes"]
+    brand_url="https://drive.google.com/uc?export=download&id="+owned["receipt"]["drive_file_id"]
+    if str(props.get("watermarkUrl") or "")!=brand_url:
+        fail("review_source_watermark_profile_mismatch")
     # Claim only the requested exact job. No scanning and no broad scheduler.
     request_id="rrclaim_"+hashlib.sha256(
         ("profile-render-v1|"+profile_id+"|"+output_id+"|"+job_id).encode()).hexdigest()[:48]
@@ -526,8 +521,14 @@ def render_exact_attempt(output_id,job_id,*,client=None,drive=None,
         meta.get("id")!=file_id or meta.get("mimeType")!="video/mp4" or
         int(meta.get("size") or 0)!=len(mp4)):
         fail("review_attempt2_drive_upload_unverified")
+    # Remotion's watermarkRequired flag is NOT visual proof. Inspect three
+    # decoded frames against the exact authorized profile's Drive PNG.
+    branding=verify_video_profile_watermark(mp4,logo_bytes,profile_id,
+        duration_seconds=validation["duration_seconds"],width=1080)
     validation.update(google_drive_verified=True,google_drive_mime_type="video/mp4",
-      watermark_verified=True, # Built-in watermarkRequired Remotion composition.
+      watermark_verified=branding["verified"],
+      watermark_profile_id=profile_id,
+      watermark_frame_sample_count=branding["frame_sample_count"],
       render_job_id=result["remotion_job_id"])
     receipt=_complete(worker,secret,claim,"ready",
         artifact_id=file_id,validation=validation)
