@@ -26,4 +26,4 @@ jobs:
       - run: |
           node --check apps/studio-web/assets/app-item4-1008.js
           node --check apps/studio-api/worker-functions-01.mjs
-          node --test apps/studio-web/vibe-upload-reliability.test.mjs apps/studio-web/vibe-upload-status.test.mjs apps/studio-web/vibe-upload-confirm.test.mjs apps/studio-web/vibe-cut-large-upload.test.mjs apps/studio-api/large-video-upload-recovery.test.mjs
+          node --test apps/studio-web/vibe-upload-reliability.test.mjs apps/studio-web/vibe-upload-status.test.mjs apps/studio-web/vibe-upload-user-guidance.test.mjs apps/studio-web/vibe-upload-confirm.test.mjs apps/studio-web/vibe-cut-large-upload.test.mjs apps/studio-api/large-video-upload-recovery.test.mjs
