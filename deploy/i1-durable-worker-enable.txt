@@ -1,0 +1,1 @@
+Activate STUDIO_I1_DURABLE_JOBS=true only after production runner version 2026-11-01-i1-durable-queue-v1 has passed persistent storage/restart/health verification. Use Cloudflare single-secret versioned binding update with active deployment readback and fail-safe delete on error. No automatic test publishing.
