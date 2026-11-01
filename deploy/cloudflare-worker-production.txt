@@ -835,3 +835,4 @@ Deploy Worker 0.10.717: verified creative redo with pending watermark QA; held o
 2026-11-01 Worker 0.10.720: Gallery-compatible Factory held V2 creative acceptance, exact hold preserved, no publishing approval.
 
 2026-11-01 Worker 0.10.721: idempotent large-video completion; verify stored bytes before marking uploaded. Preserve Airtable authority and publication safeguards.
+2026-11-01 Worker 0.10.722-vibe-auto-to-review: enqueue only verified original-video Vibe Cuts to the durable production queue, preserve master/plan, render through human approval gate; no publishing.
