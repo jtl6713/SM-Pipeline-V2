@@ -652,6 +652,7 @@ import {
   cadenceScenarioManagedByPython,
   opsForceAzNavyPierTitle,
   resumeAzFinishedVideoRequests,
+  resumeVibeCutsTowardApproval,
   enqueueStudioProductionJob,
   studioOutputProductionRequestId,
   startOrphanedStudioProductionJobs,
@@ -3678,6 +3679,19 @@ export default {
           console.warn("Factory one-minute recovery failed", error);
         }
       })());
+      // The Vibe Cut video transfer is complete when Studio reports Ready;
+      // advance the saved Production draft to render/human Approval without a
+      // user keeping their browser open. This never performs final approval or
+      // publishing, and uses only one existing draft every two-minute tick.
+      const vibeTick = Number(event?.scheduledTime);
+      const vibeMinute = new Date(Number.isFinite(vibeTick) && vibeTick > 1e12 ? vibeTick : Date.now()).getUTCMinutes();
+      if (vibeMinute % 2 === 0 && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+        ctx.waitUntil(resumeVibeCutsTowardApproval(env, ctx)
+          .then((outcome) => {
+            if (outcome?.resumed) console.info("Vibe Cut to human Approval", outcome);
+          })
+          .catch((error) => console.warn("Vibe Cut to human Approval deferred", error)));
+      }
       // The separate light cron can be skipped under heavy queue/cooldown
       // pressure. Keep a low-cost listener on the reliable minute cadence:
       // it ONLY marks two legacy unscanned Ideas as Waiting; ranked library
@@ -5221,6 +5235,8 @@ const AZ_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
 /*__STUDIO_WORKER_EXTRACT:advanceAzFinishedVideo__*/
 /*__STUDIO_WORKER_EXTRACT:opsForceAzNavyPierTitle__*/
 /*__STUDIO_WORKER_EXTRACT:resumeAzFinishedVideoRequests__*/
+/*__STUDIO_WORKER_EXTRACT:advanceVibeCutTowardApproval__*/
+/*__STUDIO_WORKER_EXTRACT:resumeVibeCutsTowardApproval__*/
 /*__STUDIO_WORKER_EXTRACT:studioVibeCutOutputNeedsRemount__*/
 /*__STUDIO_WORKER_EXTRACT:studioClearVibeCutPassthroughOutputs__*/
 /*__STUDIO_WORKER_EXTRACT:enqueueStudioProductionJob__*/
