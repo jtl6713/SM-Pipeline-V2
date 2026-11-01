@@ -638,3 +638,5 @@ Deploy Studio UI 0.6.825: approved held V2 can request another revision independ
 2026-11-01 Pages 0.6.828: Factory held V2 creative acceptance, Request Changes resumes saved Producer session, truthful V2 progress.
 
 2026-11-01 UI 0.6.829: Vibe upload metadata deadline, byte progress, safe multipart recovery; preserve uploaded originals.
+
+2026-11-01 UI 0.6.830: Vibe transfer begins before optional workspace reads; 0-of-N segment progress and mobile layout; do not pre-decode MOV or mislabel unconfirmed clips.

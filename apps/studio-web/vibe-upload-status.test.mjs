@@ -44,7 +44,8 @@ test("Vibe Cut exposes stalled feedback and a non-destructive recovery path", ()
   const state = section("function setVibeUploadUi(", "function beginVibeUploadFeedback(");
   assert.match(state, /VIBE_UPLOAD_STALL_MS/);
   assert.match(state, /phase: "stalled"/);
-  assert.match(state, /No recent transfer progress was confirmed/);
+  assert.match(state, /No segment progress was confirmed/);
+  assert.match(state, /Production draft creation has not completed/);
 
   const retry = section("function retryVibeUpload(", "function receiveMasterPhotos(");
   assert.match(retry, /vibeUploadAbortController\.abort\(\)/);
