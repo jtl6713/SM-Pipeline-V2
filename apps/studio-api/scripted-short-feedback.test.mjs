@@ -57,9 +57,9 @@ test("unmatched, ambiguous, wrong-profile, nonvideo and unready clips fail close
   assert.throws(() => chooseScriptedShortLibraryClip([{ ...clips[0], fields: {...clips[0].fields, MIME_Type: "image/jpeg", "Asset Name":"Central Park At Night 1"}}], "Central Park At Night 1", "recNYC"), /not a video/);
   assert.throws(() => chooseScriptedShortLibraryClip([{ ...clips[0], fields: {...clips[0].fields, "Google Drive File ID":""}}], "Central Park At Night 1", "recNYC"), /Google Drive/);
 });
-test("unknown, multi-slide and out-of-range feedback does not modify the proposal", () => {
-  assert.throws(() => parseScriptedShortFeedback("Make it exciting"), /identify one slide/);
-  assert.throws(() => parseScriptedShortFeedback("Remove slide 2 and slide 4"), /identify one slide/);
+test("unknown, out-of-range and ambiguous feedback does not modify the proposal", () => {
+  assert.throws(() => parseScriptedShortFeedback("Make it exciting"), /specific slide/);
+  assert.throws(() => parseScriptedShortFeedback("Change slide 3"), /narration.*duration/);
   assert.throws(() => applyScriptedShortFeedback(base, { action:"remove", scene: 9 }), /not present/);
 });
 test("Worker revision is authenticated, preview-only and independent of acceptance", () => {
@@ -69,9 +69,52 @@ test("Worker revision is authenticated, preview-only and independent of acceptan
   assert.match(worker, /isScriptedShortReviseWrite/);
   assert.match(worker, /return await reviseScriptedShortRoute\(request, env, authorization, url\)/);
   assert.match(functions, /export async function reviseScriptedShortRoute/);
-  assert.match(functions, /chooseScriptedShortLibraryClip\(all, directive.asset_name, profile.id\)/);
+  assert.match(functions, /chooseScriptedShortLibraryClip\(all, name, profile.id\)/);
   assert.match(functions, /validateScriptedShortAssets\(timeline, catalog, policy, profile.id\)/);
   const revision = functions.split("export async function reviseScriptedShortRoute")[1].split("export async function acceptScriptedShortRoute")[0];
   assert.doesNotMatch(revision, /method:\s*"POST"|Publish_Status\s*:/);
   assert.match(functions, /proposal_feedback/);
+});
+
+test("one natural-language request removes multiple scenes by their ORIGINAL positions", () => {
+  const plan = { ...base, segments: [...segments, {voiceover_text:"Narration 7"}] };
+  const parsed = parseScriptedShortFeedback("Please remove slides 2 and 4");
+  assert.deepEqual(parsed,{actions:[{action:"remove",scene:2},{action:"remove",scene:4}]});
+  const revised=applyScriptedShortFeedback(plan,parsed);
+  assert.deepEqual(revised.segments.map(s=>s.voiceover_text),["Narration 1","Narration 3","Narration 5","Narration 6","Narration 7"]);
+  assert.equal(plan.segments.length,7);
+});
+test("distinct replacement assets in the same feedback remain correctly scoped and atomic", () => {
+  const parsed=parseScriptedShortFeedback("Replace slide 2 with Central Park At Night 1 and replace slide 5 with Times Square 2");
+  assert.deepEqual(parsed.actions.map(x=>x.scene),[2,5]);
+  const a=chooseScriptedShortLibraryClip(clips,parsed.actions[0].asset_name,"recNYC");
+  const b={...a,id:"recTimesSquare2",name:"Times Square 2.mp4"};
+  const revised=applyScriptedShortFeedback(base,{actions:[{...parsed.actions[0],clip:a},{...parsed.actions[1],clip:b}]});
+  assert.equal(revised.segments[1].asset_id,a.id);
+  assert.equal(revised.segments[4].asset_id,b.id);
+  assert.equal(revised.segments[4].voiceover_text,"Narration 5");
+  assert.equal(base.segments[1].asset_id,"recExisting1");
+});
+test("move and narration updates resolve original scene references and preserve the other segments",()=>{
+  const parsed=parseScriptedShortFeedback('Move slide 5 before slide 2; change slide 3 narration to "Welcome to New York after sunset"');
+  assert.deepEqual(parsed,{actions:[
+    {action:"move",scene:5,position:"before",target_scene:2},
+    {action:"narration",scene:3,text:"Welcome to New York after sunset"},
+  ]});
+  const revised=applyScriptedShortFeedback(base,parsed);
+  assert.deepEqual(revised.segments.map(s=>s.voiceover_text),[
+    "Narration 1","Narration 5","Narration 2","Welcome to New York after sunset","Narration 4","Narration 6"
+  ]);
+});
+test("multi-removal and conflicting edits fail closed without changing the original",()=>{
+  const parsed=parseScriptedShortFeedback("Remove slides 2 and 4");
+  assert.throws(()=>applyScriptedShortFeedback(base,parsed),/fewer than five/);
+  assert.throws(()=>parseScriptedShortFeedback("Remove slide 2 and replace slide 2 with Times Square 2"),/conflicting/);
+  assert.throws(()=>parseScriptedShortFeedback("Set slide 2 duration to 6 seconds"),/recorded narration/);
+  assert.deepEqual(base.segments,segments);
+});
+test("unhandled extra creative instructions cannot be silently marked as completed",()=>{
+  assert.throws(()=>parseScriptedShortFeedback("Replace slide 3 with Central Park At Night 1 and make the intro punchier"),/unsupported/);
+  assert.throws(()=>applyScriptedShortFeedback(base,parseScriptedShortFeedback("Move slide 3 after slide 99")),/move target/);
+  assert.deepEqual(base.segments,segments);
 });

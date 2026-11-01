@@ -588,6 +588,7 @@ jobs:
             async fetch(request, env) {
               const url = new URL(request.url);
               const michiganPreview = url.pathname === "/$TOKEN/michigan-preview";
+              const scriptedFeedbackProbe = url.pathname === "/$TOKEN/scripted-short-revise-probe";
               const michiganOutput = String(url.searchParams.get("output_id") || "");
               const michiganAllowlist = ["recPnNYghmcJYivOA","recyYKgkfRksIZPun","rec8JDQW2Jilnzc9u","recgJR5bTcYfCCwAL","recqw7DTgYsqYkl51","recZ1X5QfeFZTot1F"];
               if (michiganPreview && !michiganAllowlist.includes(michiganOutput)) return new Response("Invalid output", {status:400});
@@ -607,9 +608,10 @@ jobs:
               const readyProductionDiagnostic = url.pathname === "/$TOKEN/ready-production-diagnostic";
               const summary = url.pathname === "/$TOKEN/summary";
               const summaryReconcile = url.pathname === "/$TOKEN/summary-reconcile";
-              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !failedOutputCensus && !qualityFacebookPreview && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic && !summary && !summaryReconcile && !reviewSessions && !reviewQueue && !michiganPreview) return new Response("Not found", {status:404});
+              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !failedOutputCensus && !qualityFacebookPreview && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic && !summary && !summaryReconcile && !reviewSessions && !reviewQueue && !michiganPreview && !scriptedFeedbackProbe) return new Response("Not found", {status:404});
               const generation = String(url.searchParams.get("generation") || "");
-              const path = michiganPreview ? "/api/factory/outputs/" + michiganOutput + "/preview"
+              const path = scriptedFeedbackProbe ? "/api/scripted-short/revise"
+                : michiganPreview ? "/api/factory/outputs/" + michiganOutput + "/preview"
                 : reviewSessions ? "/api/rendering-review/sessions?profile_id=recT2rbKX3MF7cVFU"
                 : reviewQueue ? "/api/rendering-review/queue?profile_id=recT2rbKX3MF7cVFU"
                 : qualityFacebookPreview ? "/api/operations/outputs/" + previewOutputId + "/schedule"
@@ -624,13 +626,13 @@ jobs:
                 : globalCanary ? "/api/factory/approval-batches?scope=all&status_only=1"
                 : chicagoCanary ? "/api/factory/approval-batches?profile=recT2rbKX3MF7cVFU"
                 : factoryStatus ? "/api/factory/approval-batches?profile=recF7UAn0LkMZZrWZ" : "/api/session";
-              const method = michiganPreview ? "HEAD" : ((overviewRefresh || summaryReconcile || qualityFacebookPreview) ? "POST" : "GET");
+              const method = michiganPreview ? "HEAD" : ((overviewRefresh || summaryReconcile || qualityFacebookPreview || scriptedFeedbackProbe) ? "POST" : "GET");
               const headers = {"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Accept":"application/json"};
-              if (overviewRefresh || summaryReconcile || qualityFacebookPreview) headers["Content-Type"] = "application/json";
+              if (overviewRefresh || summaryReconcile || qualityFacebookPreview || scriptedFeedbackProbe) headers["Content-Type"] = "application/json";
               const internal = new Request("https://studio.chicagoshining.com" + path, {
                 method,
                 headers,
-                body: qualityFacebookPreview
+                body: scriptedFeedbackProbe ? '{"feedback":""}' : qualityFacebookPreview
                   ? '{"quality_rate_limit_recovery":true,"quality_rate_limit_preview":true}'
                   : ((overviewRefresh || summaryReconcile) ? "{}" : undefined),
               });
@@ -644,6 +646,7 @@ jobs:
                 }, {headers:{"Cache-Control":"no-store"}});
                 throw error;
               }
+              if (scriptedFeedbackProbe) return Response.json({status:response.status,route:"/api/scripted-short/revise"}, {headers:{"Cache-Control":"no-store"}});
               if (michiganPreview) {
                 // No raw private MP4 bytes or access tokens leave this temporary canary.
                 return Response.json({
@@ -723,6 +726,17 @@ jobs:
           echo "rendering_review_chicago_queue_read=PASS count=$(jq '.queue|length' /tmp/rendering-review-queue.json)"
           jq -c '{admission_enabled:.flags.admission_enabled,automatic_sampling_percent:.flags.automatic_sampling_percent,integration_verified:.flags.integration_verified}' /tmp/rendering-review-queue.json
           # Never print private conversation/session records or secret binding values.
+
+      - name: Verify authenticated Script a Short revision route is deployed (no-write negative probe)
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
+          TOKEN=$(cat /tmp/verify-token.txt)
+          URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/scripted-short-revise-probe"
+          curl -fsS --max-time 60 "$URL" -o /tmp/scripted-short-revise-probe.json
+          jq -e '.route=="/api/scripted-short/revise" and .status==400' /tmp/scripted-short-revise-probe.json >/dev/null
+          echo "scripted_short_revise_authenticated_no_write_canary=PASS status=400"
 
       - name: Verify Michigan Avenue V2 private MP4 previews in all six Factory cards
         shell: bash
