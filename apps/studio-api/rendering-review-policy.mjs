@@ -366,6 +366,7 @@ export function applyReviewEvent(session, event) {
       at:text(event.at),attempt_id:attempt.id,timestamp_seconds:null});
     s.approved_attempt_id=null;
     s.factory_review=null;
+    s.factory_watermark_qa=null;
     s.producer_candidate=null;
     s.plan=null;
     s.pending_authorization=null;
@@ -392,6 +393,7 @@ export function applyReviewEvent(session, event) {
     s.review_hold.active=true;
     s.approved_attempt_id=null;
     s.factory_review=null;
+    s.factory_watermark_qa=null;
     s.factory_handoff.status="returned_for_changes";
     s.factory_handoff.returned_at=text(event.at);
     s.producer_candidate=null;
@@ -399,6 +401,28 @@ export function applyReviewEvent(session, event) {
     s.pending_authorization=null;
     s.active_job=null;
     s.state="discussing";
+  } else if (kind === "FACTORY_CONFIRM_WATERMARK_QA") {
+    // Explicit human visual QA of the exact approved video. Do not change the
+    // automatic watermark_verified result and do not unlock publication here.
+    const attempt=current(s);
+    if(s.state!=="approved"||s.review_hold?.active!==true||
+       s.factory_review?.status!=="accepted_pending_qa"||
+       s.factory_review?.attempt_id!==s.approved_attempt_id||
+       s.current_attempt_id!==s.approved_attempt_id||
+       !attempt||Number(attempt.number)<2||attempt.status!=="ready_for_review"||
+       event.attempt_id!==attempt.id||event.artifact_id!==attempt.artifact_id||
+       event.hold_id!==s.review_hold.id||event.hold_owner!==s.id||
+       !/^rec[A-Za-z0-9]{14}$/.test(text(event.reviewer_id))||
+       !/^[a-f0-9]{64}$/.test(text(event.sha256))||
+       !Number.isFinite(Date.parse(text(event.at)))||
+       event.confirmed_visible!==true||s.active_job)
+      fail("WATERMARK_QA_CONFIRM_DENIED",
+        "The current approved and held V2 must be explicitly inspected before QA confirmation");
+    s.factory_watermark_qa={status:"confirmed",
+      method:"explicit_human_visual_review",
+      confirmed_visible:true,attempt_id:attempt.id,
+      artifact_id:attempt.artifact_id,sha256:text(event.sha256),
+      reviewer_id:text(event.reviewer_id),at:text(event.at)};
   } else if (kind === "FACTORY_HANDOFF") {
     // Factory is a distinct human approval stage. The orchestrator must first
     // verify the accepted V2 artifact is selected on the original output while
