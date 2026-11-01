@@ -89,10 +89,10 @@ test("Manual Producer feedback displays correct next step, never a phantom rende
 test("Factory progress state is anchored outside the disposable desk and uses safe HTML", () => {
   assert.match(html,/id="factoryProducerProgress"/);
   assert.match(html,/id="factoryProducerProgressList"[^>]*aria-live="polite"/);
-  assert.match(html,/factory-producer-progress\\.js/);
-  assert.match(factory,/StudioFactoryProducerProgress\\?\\.begin/);
-  assert.match(factory,/StudioFactoryProducerProgress\\?\\.accept/);
-  assert.match(factory,/StudioFactoryProducerProgress\\?\\.uncertain/);
+  assert.match(html,/factory-producer-progress\.js/);
+  assert.match(factory,/StudioFactoryProducerProgress\\?\.begin/);
+  assert.match(factory,/StudioFactoryProducerProgress\\?\.accept/);
+  assert.match(factory,/StudioFactoryProducerProgress\\?\.uncertain/);
   const app=harness();
   app.ui.begin({requestId:ID,title:'<img src=x onerror=alert(1)>'});
   assert.match(app.list.innerHTML,/&lt;img/);
