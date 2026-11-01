@@ -1101,9 +1101,9 @@
         // Human review can be accepted without releasing the publishing hold.
         // Server verifies the actual saved creative approval before accepting.
         if(state.heldCreativeAccepted?.has(card.id)){
-          actions.push(`<button type="button" class="secondary-button" disabled title="Factory creative acceptance confirmed; publishing remains on hold for QA.">V2 accepted · QA pending</button>`);
+          actions.push(`<button type="button" class="secondary-button factory-held-creative-action" disabled title="Factory creative acceptance confirmed; publishing remains on hold for QA.">V2 accepted · QA pending</button>`);
         }else{
-          actions.push(`<button type="button" class="secondary-button" data-factory-accept-held="${esc(card.id)}" title="Accept the selected V2 creatively. Keeps watermark QA, scheduling and publishing on hold.">Accept V2 (QA hold)</button>`);
+          actions.push(`<button type="button" class="secondary-button factory-held-creative-action" data-factory-accept-held="${esc(card.id)}" title="Accept the selected V2 creatively. Keeps watermark QA, scheduling and publishing on hold.">Accept V2 (QA hold)</button>`);
         }
       }
       actions.push(`<button type="button" class="secondary-button" data-factory-send-back="${esc(card.id)}">Request Changes</button>`);
@@ -1784,6 +1784,9 @@
         const card=byId.get(id);
         if(!card){setStatus("Held review output not found; refresh Factory.",true);return;}
         button.disabled=true;
+        const originalLabel=button.textContent;
+        button.textContent="Verifying saved V2…";
+        button.setAttribute("aria-busy","true");
         try{
           const reviewed=await readHeldFactoryReview(card);
           if(reviewed.alreadyAccepted){
@@ -1793,6 +1796,7 @@
             return;
           }
           if(!window.confirm("Accept the selected V2 creatively in Factory?\\n\\nThis does NOT authorize publishing, release the watermark QA hold, schedule or upload anything."))return;
+          button.textContent="Saving creative acceptance…";
           const receipt=await mutateDesk({
             action:"accept_held_creative",kind:"output",id:card.id,
             expected_version:reviewed.session.version,
@@ -1810,7 +1814,11 @@
           const message=error?.message||String(error);
           setStatus("Factory creative acceptance needs attention: "+message,true);
           window.alert("Factory creative acceptance not confirmed:\\n"+message);
-        }finally{button.disabled=false;}
+        }finally{
+          button.removeAttribute("aria-busy");
+          button.textContent=originalLabel;
+          button.disabled=false;
+        }
       });
     });
     root.querySelectorAll("[data-factory-approve]").forEach((button) => {
@@ -2147,6 +2155,13 @@
     const savedMessage = desk.message || ACTION_STATUS[payload.action] || "Updated.";
     if (desk.lanes) {
       renderDesk(desk);
+    } else if (desk.ok && payload.action === "accept_held_creative") {
+      // The exact-version acceptance POST is already committed and includes
+      // a checked receipt. The click handler updates its row immediately.
+      // Do NOT start a second expensive Desk read that can mask success
+      // with an unrelated "Loading Factory Desk" status.
+      setStatus(savedMessage);
+      return desk;
     } else if (desk.ok && (payload.action === "request_changes_content" || payload.action === "return_to_review")) {
       // The Airtable write is already committed; do not block acceptance on
       // a slow Factory queue read or convert a successful POST into an error.

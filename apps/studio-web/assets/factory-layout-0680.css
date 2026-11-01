@@ -718,3 +718,27 @@
 #factoryReadOnlyInventoryStatus{margin:7px 0;font-size:.92rem;line-height:1.45}
 #factoryReadOnlyInventoryRows{padding-left:21px;margin:6px 0 0;max-height:180px;overflow:auto}
 #factoryReadOnlyInventoryRows li{padding:3px 0;overflow-wrap:anywhere}
+
+/* Give the held V2 action a dedicated full-width row; preserve other actions. */
+#page-factory .factory-band-eyes .factory-line-actions:has(> .factory-held-creative-action){
+  grid-template-rows:repeat(2,minmax(30px,auto)) minmax(38px,auto);
+}
+#page-factory .factory-band-eyes .factory-line-actions:has(> .factory-held-creative-action) > [data-factory-send-back]{
+  grid-column:1 / span 2;
+  grid-row:2;
+}
+#page-factory .factory-band-eyes .factory-line-actions:has(> .factory-held-creative-action) > [data-factory-delete]{
+  grid-column:3;
+  grid-row:2;
+}
+#page-factory .factory-band-eyes .factory-line-actions > .factory-held-creative-action{
+  grid-column:1 / -1;
+  grid-row:3;
+  min-width:0;
+  max-width:100%;
+  min-height:38px;
+  padding:8px 12px;
+  white-space:normal;
+  overflow-wrap:anywhere;
+  line-height:1.3;
+}
