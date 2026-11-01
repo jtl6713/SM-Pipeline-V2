@@ -11257,6 +11257,8 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       remotion_job_id: mapped.remotion_job_id || null,
       review_status: mapped.review_status,
       publish_status: mapped.publish_status,
+      review_hold_active: f(record, "Studio_Render_Review_Hold_Active") === true,
+      do_not_publish: f(record, "Do_Not_Publish") === true,
       thumbnail_url: mapped.thumbnail_url || null,
       final_file_url: mapped.final_file_url || null,
       render_queue_position: mapped.render_queue_position,
