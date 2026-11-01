@@ -59,7 +59,7 @@ test("unmatched, ambiguous, wrong-profile, nonvideo and unready clips fail close
 });
 test("unknown, out-of-range and ambiguous feedback does not modify the proposal", () => {
   assert.throws(() => parseScriptedShortFeedback("Make it exciting"), /specific slide/);
-  assert.throws(() => parseScriptedShortFeedback("Change slide 3"), /narration.*duration/);
+  assert.throws(() => parseScriptedShortFeedback("Change slide 3"), /narration.*Timing/);
   assert.throws(() => applyScriptedShortFeedback(base, { action:"remove", scene: 9 }), /not present/);
 });
 test("Worker revision is authenticated, preview-only and independent of acceptance", () => {
@@ -70,7 +70,7 @@ test("Worker revision is authenticated, preview-only and independent of acceptan
   assert.match(worker, /return await reviseScriptedShortRoute\(request, env, authorization, url\)/);
   assert.match(functions, /export async function reviseScriptedShortRoute/);
   assert.match(functions, /chooseScriptedShortLibraryClip\(all, name, profile.id\)/);
-  assert.match(functions, /validateScriptedShortAssets\(timeline, catalog, policy, profile.id\)/);
+  assert.match(functions, /validateScriptedShortAssets\(timeline,\s*catalog,\s*policy,\s*profile.id\)/);
   const revision = functions.split("export async function reviseScriptedShortRoute")[1].split("export async function acceptScriptedShortRoute")[0];
   assert.doesNotMatch(revision, /method:\s*"POST"|Publish_Status\s*:/);
   assert.match(functions, /proposal_feedback/);
