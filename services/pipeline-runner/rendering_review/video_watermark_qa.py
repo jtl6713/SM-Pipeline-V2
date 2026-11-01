@@ -14,7 +14,7 @@ import tempfile
 
 from PIL import Image, UnidentifiedImageError
 
-RECORD = re.compile(r"rec[A-Za-z0-9]{14}\\Z")
+RECORD = re.compile(r"rec[A-Za-z0-9]{14}\Z")
 
 
 class VideoWatermarkUnverified(ValueError):
@@ -40,7 +40,7 @@ def inspect_logo_frames(frames, logo_png, profile_id, *,
         _deny("video_watermark_profile_identity_invalid")
     if not isinstance(frames,(tuple,list)) or len(frames)<3:
         _deny("video_watermark_frame_samples_missing")
-    if not isinstance(logo_png,bytes) or not logo_png.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+    if not isinstance(logo_png,bytes) or not logo_png.startswith(b"\x89PNG\r\n\x1a\n"):
         _deny("video_watermark_source_not_png")
     try:
         with Image.open(BytesIO(logo_png)) as img:
