@@ -291,7 +291,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.834-vibe-processing-guidance";
+  const BUILD_ID = "item4-0.6.835-vibe-auto-approval";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -6637,20 +6637,21 @@ function timedScriptAssetLabel(asset, index) {
     const uploadConfirmed = Boolean(source && !item4Uploading
       && !["multipart_pending", "uploading", "pending", "failed"].includes(uploadState)
       && (["complete", "completed", "uploaded", "ready"].includes(uploadState) || source.uploaded_at));
-    const returnTo = "Return to Studio > Production > Drafts, and reopen this Vibe Cut. When it is Ready, Continue to Production will be available.";
+    const returnTo = "Open Studio > Production > Drafts while this Vibe Cut is being prepared. After rendering, find the outputs in Approval Factory (Ready for Review).";
     if (ready) {
       return {
         heal: "ready",
         title: `Video ready: ${fileName}`,
-        body: "Studio has finished preparing and verifying the uploaded source. Continue to Production is available now.",
+        body: "The original video is saved and ready. Studio now advances automatically through platform preparation, editing, rendering, and quality checks to Approval Factory. You do not need to press Save. Final approval stays with you.",
         count: "1 of 1 uploaded · 1 of 1 ready.",
         guidance: {
           steps: [
             { state: "done", label: "Upload verified and stored" },
             { state: "done", label: "Video preparation complete" },
             { state: "done", label: "Source ready for Vibe Cut editing" },
+            { state: "pending", label: "Automatic render and quality review before human Approval" },
           ],
-          leave: "Yes. The upload and preparation are complete.",
+          leave: "Yes. Server-side production continues after you close this screen.",
           returnTo,
         },
       };
@@ -6731,7 +6732,7 @@ function timedScriptAssetLabel(asset, index) {
           steps: [
             { state: "active", label: "Confirming every segment is saved" },
             { state: "pending", label: "Preparing video for editing" },
-            { state: "pending", label: "Enabling Continue to Production" },
+            { state: "pending", label: "Automatically preparing for human Approval" },
           ],
           leave: "Not yet. Keep this screen open until Studio verifies the full upload.",
           returnTo,
@@ -6763,7 +6764,7 @@ function timedScriptAssetLabel(asset, index) {
             { state: uploadConfirmed ? "done" : "active", label: uploadConfirmed ? "Original upload verified and saved" : "Confirming original upload is complete" },
             { state: uploadConfirmed ? "active" : "pending", label: stage },
             { state: "pending", label: "Verifying saved media and preview" },
-            { state: "pending", label: "Enabling Continue to Production" },
+            { state: "pending", label: "Automatically preparing for human Approval" },
           ],
           leave: uploadConfirmed
             ? "Yes. You can close this screen; server-side preparation continues without this tab."
@@ -6890,15 +6891,15 @@ function timedScriptAssetLabel(asset, index) {
     const save = $("item4VibeSaveContinue");
     const retry = $("item4VibeRetryVideo");
     if (message) message.textContent = !editable
-      ? "This request is already in production. Start a new Vibe Cut if the original video failed."
+      ? "This Vibe Cut has advanced beyond its editable draft. Follow its outputs in Pipeline and Approval Factory."
       : source
-      ? "Original video verified and saved. Continue to choose the Vibe Cut outputs."
+      ? "Original video verified and saved. Studio will advance automatically to rendering and human Approval. You may still review settings."
       : staged
       ? "Video upload received, but processing is not Ready. Wait for completion or replace the source video."
       : "No usable source video is attached. The photo timeline cannot be saved as a Vibe Cut. Upload your MOV/MP4 again.";
     if (save) {
       save.disabled = !editable || !source || item4Uploading || ezStarting;
-      save.textContent = source ? "Save Vibe Cut & Continue" : "Waiting for source video";
+      save.textContent = source ? "Save edits & view outputs" : "Waiting for source video";
     }
     if (retry) {
       retry.hidden = !editable || Boolean(source);
@@ -6906,7 +6907,7 @@ function timedScriptAssetLabel(asset, index) {
     }
     const wizard = $("ezContinue");
     if (wizard && vibe) {
-      wizard.textContent = "Save Video & Continue to Production";
+      wizard.textContent = "View Production (optional)";
       wizard.hidden = !source || !editable;
       wizard.disabled = !source || !editable || item4Uploading || ezStarting;
     }
@@ -9458,7 +9459,7 @@ function timedScriptAssetLabel(asset, index) {
         }
         const action = $("ezContinue");
         if (action) {
-          action.textContent = "Save Video & Continue to Production";
+          action.textContent = "View Production (optional)";
           action.hidden = !vibeCutReadySource();
           action.disabled = !vibeCutReadySource();
         }
@@ -9495,11 +9496,11 @@ function timedScriptAssetLabel(asset, index) {
           applyEzToAdvanced({ force: true });
           const action = $("ezContinue");
           if (action) {
-            action.textContent = "Save Video & Continue to Production";
+            action.textContent = "View Production (optional)";
             action.hidden = !vibeCutReadySource();
             action.disabled = !vibeCutReadySource();
           }
-          setEzMessage(vibeCutReadySource() ? "Source video saved and verified. Select Save Video & Continue." : "Video received. Processing must finish before you can continue; Studio will not substitute photos.", "success");
+          setEzMessage(vibeCutReadySource() ? "Source verified. Studio advances to Approval automatically; reviewing Production is optional." : "Video received. Processing must finish before you can continue; Studio will not substitute photos.", "success");
           setRequestMessage("Vibe Cut source video saved and attached to this Production request.", "success");
         }
       }
