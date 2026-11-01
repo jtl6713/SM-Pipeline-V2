@@ -12,7 +12,8 @@ import { handoffApprovedReviewToFactory } from "./rendering-review-factory-hando
 import { nextApprovedCreativeMaster, projectCreativeMasterGroup, MASTER_FIELD } from "./creative-master-registry.mjs";
 import { propagateApprovedCreativeMaster } from "./creative-master-propagation.mjs";
 import { returnFactoryRevisionToProducer } from "./rendering-review-factory-return.mjs";
-import { serveFactorySelectedReviewVideo } from "./rendering-review-factory-preview.mjs";
+import { serveFactorySelectedReviewVideo, factorySelectedReviewAttempt } from "./rendering-review-factory-preview.mjs";
+import { MICHIGAN_V2, ensureMichiganV2CachedPreview } from "./michigan-review-preview-cache.mjs";
 import { composeRenderingReviewEnrollmentOperations } from "./rendering-review-enrollment-wiring.mjs";
 import { handleReviewProducerProposal, reviewProducerBridgeEnabled } from "./rendering-review-producer-bridge.mjs";
 import { persistReviewProducerCandidate, producerConversationWritesEnabled } from "./rendering-review-producer-persist.mjs";
@@ -3304,8 +3305,27 @@ export default {
         const outputId=url.pathname.split("/")[4];
         // Only saved exact-output sessions activate protected revision preview.
         const o=makeReviewFactoryHandoffOperations(env);
-        if(await o.readSession(outputId)){
+        const sourceSession=await o.readSession(outputId);
+        if(sourceSession){
           requirePermission(authorization,"outputs_review");
+          if(outputId===MICHIGAN_V2.source_output_id){
+            const raw=await o.readRawOutput(outputId);
+            const profile=(await o.readNormalizedOutput(outputId)).profile_id;
+            const selected=factorySelectedReviewAttempt({
+              session:sourceSession,row:raw,profile,outputId,
+            });
+            if(selected?.id===MICHIGAN_V2.attempt_id&&
+               selected.artifact_id===MICHIGAN_V2.file_id){
+              // One verified private preview cache for all compatible outputs.
+              // Neither this copy nor serving it changes Airtable or publishes.
+              await ensureMichiganV2CachedPreview({
+                env,sourceOutputId:outputId,attemptId:selected.id,
+                fetchVerifiedVideo:(id,attemptId,probe)=>fetchTrustedRunnerReviewMedia({
+                  env,outputId:id,attemptId,request:probe,
+                }),
+              });
+            }
+          }
           return serveFactorySelectedReviewVideo({
             request,env,outputId,authorization,
             readSession:o.readSession,

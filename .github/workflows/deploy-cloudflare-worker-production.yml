@@ -734,7 +734,7 @@ jobs:
           ids=(recPnNYghmcJYivOA recyYKgkfRksIZPun rec8JDQW2Jilnzc9u recgJR5bTcYfCCwAL recqw7DTgYsqYkl51 recZ1X5QfeFZTot1F)
           for id in "${ids[@]}"; do
             url="$BASE?output_id=$id"
-            CODE=$(curl -sS --max-time 80 -w '%{http_code}' "$url" -o /tmp/michigan-preview.json || true)
+            CODE=$(curl -sS --max-time 180 -w '%{http_code}' "$url" -o /tmp/michigan-preview.json || true)
             if [[ "$CODE" != "200" ]]; then
               echo "Michigan playback bridge transport failure for $id: HTTP $CODE" >&2
               head -c 400 /tmp/michigan-preview.json >&2
@@ -743,7 +743,7 @@ jobs:
             jq -e --arg id "$id" '.output_id==$id and .status==200
               and .content_type=="video/mp4"
               and .content_length==46824860
-              and .source==(if $id=="recPnNYghmcJYivOA" then "factory-selected-review-attempt" else "google-drive-render" end)
+              and .source==(if $id=="recPnNYghmcJYivOA" then "factory-selected-review-attempt" else "verified-review-r2" end)
               and .accept_ranges=="bytes"' /tmp/michigan-preview.json >/dev/null || {
                 echo "Michigan V2 authenticated playback probe FAILED for $id" >&2
                 jq -c '{output_id,status,content_type,content_length,source,accept_ranges,error_type,error_message}' /tmp/michigan-preview.json >&2

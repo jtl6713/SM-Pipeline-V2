@@ -1,3 +1,4 @@
+import { serveMichiganV2CachedPreview } from "./michigan-review-preview-cache.mjs";
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
 import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 import { readyProductionEnqueue } from "./ready-production-queue.mjs";
@@ -5725,6 +5726,11 @@ export async function outputPreview(request, env, url, authorization) {
 
   const recordId = outputPreviewRecordIdFromPath(url);
   const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId);
+  // The canonical Drive file wins over stale render-server/cache hints when its
+  // separately authenticated review-only MP4 is safely staged in private R2.
+  const chosenFileId=String(f(record,"Final_File_ID")||"").trim();
+  const cached=await serveMichiganV2CachedPreview({request,env,fileId:chosenFileId});
+  if(cached)return cached;
   const studioPreviewUrl = [
     f(record, "Publish_Asset_URL"),
     f(record, "Final_File_URL"),
