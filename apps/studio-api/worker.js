@@ -5861,6 +5861,7 @@ const STUDIO_TRISTATE = new Set(["Use Profile Default", "Yes", "No"]);
 /*__STUDIO_WORKER_EXTRACT:pulseIdeaTimedScriptWriter__*/
 /*__STUDIO_WORKER_EXTRACT:scriptedShortUnassignedMessage__*/
 /*__STUDIO_WORKER_EXTRACT:proposeScriptedShortRoute__*/
+/*__STUDIO_WORKER_EXTRACT:reviseScriptedShortRoute__*/
 /*__STUDIO_WORKER_EXTRACT:acceptScriptedShortRoute__*/
 /*__STUDIO_WORKER_EXTRACT:feedPostNotesWithoutTimeline__*/
 /*__STUDIO_WORKER_EXTRACT:acceptSingleImageFeedPost__*/
