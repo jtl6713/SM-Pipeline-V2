@@ -17,7 +17,7 @@ export const OPS_QUEUE_OUTPUT_FORMULA =
  */
 /** Isolated human-review fetch: scheduled backlog cannot hide Needs Eyes. */
 export const OPS_QUEUE_REVIEW_FORMULA =
-  'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),OR({Output_Status}="Ready for Review",AND({Review_Status}="Review Sent",{Output_Status}!="Approved",{Output_Status}!="Approved for Publishing",{Output_Status}!="Scheduled",{Output_Status}!="Published")))';
+  'AND({Test_Run_ID}=BLANK(),OR(NOT({Do_Not_Publish}),AND({Do_Not_Publish},{Studio_Render_Review_Hold_Active},{Output_Status}="Ready for Review",{Review_Status}="Review Sent")),OR({Output_Status}="Ready for Review",AND({Review_Status}="Review Sent",{Output_Status}!="Approved",{Output_Status}!="Approved for Publishing",{Output_Status}!="Scheduled",{Output_Status}!="Published")))';
 
 export const OPS_QUEUE_RENDER_FORMULA =
   'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),OR({Render_Status}="Ready for Render",{Render_Status}="Ready to Render",{Render_Status}="Waiting in Render Queue",{Render_Status}="Rendering",{Render_Status}="Failed",{Render_Status}="Blocked",{Output_Status}="Ready for Render",{Output_Status}="Rendering"))';
@@ -67,6 +67,7 @@ export const OPS_QUEUE_OUTPUT_FIELDS = [
   "Last_Publish_Attempt_At",
   "Test_Run_ID",
   "Do_Not_Publish",
+  "Studio_Render_Review_Hold_Active",
 ];
 
 export const OPS_QUEUE_REQUEST_FIELDS = [
