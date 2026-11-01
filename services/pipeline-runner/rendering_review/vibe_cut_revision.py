@@ -131,6 +131,11 @@ def compile_vibe_review_payload(*,job,plan,source,music,watermark,authorized_pro
             "inSeconds":cut["start_seconds"],
             "outSeconds":cut["end_seconds"],
             "keepSourceAudio":False,"muted":True,
+            # For beat/fast-cut revisions, the source windows must remain
+            # exact. A default Remotion crossfade would obscure most of a
+            # 0.2-second cut. Future authored transitions require a separately
+            # reviewed transition contract and duration proof.
+            "transition":{"type":"none","durationFrames":0},
             "motionStyle":"none",
             "timingMode":"authoritative",
             "timingSource":"owned_vibe_cut_plan",
