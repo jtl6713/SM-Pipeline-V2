@@ -5,6 +5,10 @@ on:
     paths:
       - 'apps/studio-api/rendering-review-gallery-*'
       - 'apps/studio-api/factory-correction-*.mjs'
+      - 'apps/studio-web/assets/factory-desk.js'
+      - 'apps/studio-web/assets/factory-layout-0680.css'
+      - 'apps/studio-web/index.html'
+      - 'apps/studio-web/factory-gallery-inventory-preview.test.mjs'
       - 'services/pipeline-runner/rendering_review/gallery_*'
       - 'services/pipeline-runner/rendering_review/profile_watermark.py'
       - 'services/pipeline-runner/tests/test_rendering_review_gallery_*'
@@ -44,6 +48,8 @@ jobs:
       - name: Profile-scoped Factory matching, durable batch and capability safety
         run: |
           node --test apps/studio-api/factory-correction-authority.test.mjs apps/studio-api/factory-correction-batch.test.mjs apps/studio-api/factory-correction-receipts.test.mjs apps/studio-api/factory-correction-render-capability.test.mjs apps/studio-api/factory-correction-selection.test.mjs
+          node --check apps/studio-web/assets/factory-desk.js
+          node --test apps/studio-web/factory-gallery-inventory-preview.test.mjs apps/studio-web/factory-review-feedback.test.mjs
 
   gallery-runner:
     runs-on: ubuntu-latest
