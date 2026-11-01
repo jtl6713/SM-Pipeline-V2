@@ -146,9 +146,12 @@ try{
   assert.equal(await phone.locator("[data-factory-select-output]").count(),0);
   await phone.locator("#factoryProfileFilter").selectOption("");
   await phone.locator('[data-factory-band-toggle]').first().click();
-  assert.equal(await phone.locator("[data-factory-select-output]").count(),3,
-    "Accepted Chicago Reel is concealed while other outputs remain visibly ineligible");
-  assert.equal(await phone.locator("[data-factory-select-output]:not(:disabled)").count(),0);
+  // New browser context starts without the desktop's local acceptance cache.
+  // The synthetic Desk is intentionally stale, but Activity is restored
+  // without sending a second approval.
+  assert.equal(await phone.locator("[data-factory-select-output]").count(),4,
+    "All synthetic Needs Eyes outputs remain visible in a fresh phone context");
+  assert.equal(await phone.locator("[data-factory-select-output]:not(:disabled)").count(),1);
   assert.equal(await phone.locator("[data-factory-select-output]:disabled").count(),3);
   assert.deepEqual(posts.map(x=>x.record_ids),[[cards[0].id]]);
   assert.deepEqual(jsErrors,[]);
