@@ -15,6 +15,7 @@ import {
     FacebookImageSlideshow9x16,
     type FacebookImageSlideshowProps,
 } from './FacebookImageSlideshow9x16';
+import {clipFrameDurations} from './vibe-review-timing';
 import {
     ChicagoShiningPhotoSequence,
     type ChicagoShiningPhotoSequenceProps,
@@ -267,14 +268,12 @@ export const RemotionRoot: React.FC = () => {
                     const fps = 30;
                     const clips = Array.isArray(props.clips) ? props.clips : [];
 
-                    const clipFrames = clips.reduce((total, clip) => {
-                        const raw = Number(clip.durationFrames);
-                        return total + (
-                            Number.isFinite(raw)
-                                ? Math.max(fps, Math.round(raw))
-                                : fps * 3
-                        );
-                    }, 0);
+                    // This must exactly match the composition's clip budget.
+                    // Protected Vibe cuts may be 0.2 seconds, unlike regular
+                    // PhotoSequence slides which retain a 1-second minimum.
+                    const clipFrames = clipFrameDurations(
+                        clips, fps, props.studioRevision,
+                    ).reduce((total, frames) => total + frames, 0);
 
                     const endHold = Math.max(
                         0,
