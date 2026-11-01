@@ -34,6 +34,8 @@ on:
       - 'services/pipeline-runner/tests/test_rendering_review_vibe_cut_validation.py'
       - 'services/pipeline-runner/tests/test_rendering_review_gallery_attempt.py'
       - 'services/pipeline-runner/tests/test_rendering_review_gallery_media_io.py'
+      - 'services/pipeline-runner/rendering_review/video_watermark_qa.py'
+      - 'services/pipeline-runner/tests/test_rendering_review_video_watermark_qa.py'
       - 'services/pipeline-runner/rendering_review/vibe_cut_launch.py'
       - 'services/pipeline-runner/tests/test_rendering_review_vibe_cut_launch.py'
       - 'services/pipeline-runner/tests/test_rendering_review_profile_watermark.py'
@@ -175,6 +177,9 @@ jobs:
           PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_vibe_cut_validation.py' -v
           PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_gallery_attempt.py' -v
           PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_gallery_media_io.py' -v
+      - name: Independent city watermark decoded-frame QA
+        run: |
+          PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_video_watermark_qa.py' -v
       - name: Protected music-only Vibe Cut single-launch ledger contract
         run: |
           PYTHONPATH=services/pipeline-runner python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_vibe_cut_launch.py' -v
