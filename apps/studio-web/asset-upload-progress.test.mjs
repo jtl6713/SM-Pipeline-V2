@@ -126,5 +126,5 @@ test("queue remains one asset at a time with real result counts and no implicit 
     assert.match(html,new RegExp('id="' + id + '"'));
   }
   assert.match(css,/#libraryUploadProgress/);
-  assert.match(html,/UI build 0\.6\.833/);
+  assert.match(html,/UI build 0\.6\.\d+/);
 });
