@@ -36,7 +36,8 @@ test("missing required preview, missing slide or bad manifest prevents review", 
   assert.equal(evaluateReviewPackage(asRecord({ ...photo, Selected_Assets_JSON: "{broken" })).readiness, "BLOCKED");
   assert.equal(evaluateReviewPackage(asRecord({ ...photo, Output_Caption: "" })).readiness, "BLOCKED");
   assert.equal(evaluateReviewPackage(asRecord({ ...photo, Selected_Assets_JSON: "" })).readiness, "READY", "compact queue projection uses linked canonical slides");
-  assert.equal(evaluateReviewPackage(asRecord({ ...photo, Selected_Assets_JSON: "", "Carousel Slides": [] })).readiness, "BLOCKED");
+  assert.equal(evaluateReviewPackage(asRecord({ ...photo, Selected_Assets_JSON: "", "Carousel Slides": [] })).readiness, "READY", "Supabase compact review projection has selected count and CDN cover and preview");
+  assert.equal(evaluateReviewPackage(asRecord({ ...photo, Output_Status: "In Production", Selected_Assets_JSON: "", "Carousel Slides": [] })).readiness, "BLOCKED", "automatic recovery requires full manifest or canonical slide links");
 });
 
 test("active job, failed preparation, completed approval and revision cannot be promoted", () => {
