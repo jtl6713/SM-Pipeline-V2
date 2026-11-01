@@ -1977,13 +1977,13 @@ export default {
 
       // An approved held revision can be reopened for creative redo without
       // watermark QA. The original hold and publishing restrictions remain.
-      const heldRedoMatch=/^\\/api\\/rendering-review\\/outputs\\/(rec[A-Za-z0-9]{14})\\/request-redo$/.exec(url.pathname);
+      const heldRedoMatch=/^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/request-redo$/.exec(url.pathname);
       if(heldRedoMatch&&request.method==="POST"){
         requirePermission(authorization,"outputs_review");
         if(!(await reviewAuthorizedProfiles(env,authorization)).some(p=>p.id===CHICAGO_PROFILE_ID))
           throw new HttpError(403,"Chicago review membership required");
         assertWriteRequest(request,env);
-        if(!/^application\\/json(?:\\s*;|$)/i.test(String(request.headers.get("Content-Type")||"")))
+        if(!/^application\/json(?:\s*;|$)/i.test(String(request.headers.get("Content-Type")||"")))
           throw new HttpError(415,"JSON required");
         const raw=await request.text();
         if(raw.length>3800)throw new HttpError(413,"Redo request too large");
