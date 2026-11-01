@@ -140,3 +140,37 @@ test("processing alone never triggers an upload retry countdown or false Clip sa
   assert.doesNotMatch(strip, /"Clip saved"/);
   assert.match(strip, /"Upload not confirmed"/);
 });
+
+test("Vibe transfers before nonessential output and workspace reads", () => {
+  const flow = section("async function startEzProduction(", "function bindEzWizard(");
+  const created = flow.slice(flow.indexOf("const created = await createEzProductionRequest("));
+  const prioritize = created.slice(created.indexOf('if (ezIsVibeCut() || pending?.inputKind === "vibe-cut")'));
+  assert.ok(prioritize.indexOf("await uploadItem4Files(nextFiles") < prioritize.indexOf("await loadProductionRequestOutputs(created.record)"));
+  assert.match(prioritize, /post-upload workspace refresh deferred/);
+  assert.match(flow, /if \(!ezIsVibeCut\(\) && pending\?\.inputKind !== "vibe-cut"\) await ensureProductionRequestMusic\(\)/);
+  assert.match(flow, /!ezIsVibeCut\(\) && pending\?\.inputKind !== "vibe-cut"/);
+});
+test("Vibe bypasses client MOV metadata and poster probing before transfer", () => {
+  const large = section("async function postItem4LargeFinishedVideo(", "function item4ShouldUseLargeFinishedUpload(");
+  assert.match(large, /originKind === "vibe-cut" \? \{\} :/);
+  const upload = section("async function uploadItem4Files(", "const item4PendingRemoves =");
+  assert.match(upload, /item4FileLooksLikeVideo\(file\) && !ezIsVibeCut\(\)/);
+});
+test("Segment progress displays confirmed segments and transferred MB", () => {
+  const upload = section("async function uploadItem4Files(", "const item4PendingRemoves =");
+  assert.match(upload, /\$\{doneParts\} of \$\{totalParts\} segments uploaded/);
+  assert.match(upload, /\$\{Math\.round\(sentBytes \/ \(1024 \* 1024\)\)\} of/);
+});
+test("An unverified Vibe thumbnail does not claim that a clip was saved", () => {
+  const placeholder = section("function item4AssetPlaceholder(", "function item4AssetThumb(");
+  const context = vm.createContext({
+    item4AssetLooksLikeVideo: () => true,
+    item4AssetExtension: () => "mov",
+    item4KnownClipDuration: () => 0,
+    escapeHtml: x => String(x),
+  });
+  vm.runInContext(placeholder, context);
+  const rendered = context.item4AssetPlaceholder({ name: "source.mov" }, "Upload not confirmed");
+  assert.match(rendered, /Upload not confirmed/);
+  assert.doesNotMatch(rendered, /Clip saved/);
+});
