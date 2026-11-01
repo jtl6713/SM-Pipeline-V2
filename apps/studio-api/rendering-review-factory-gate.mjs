@@ -1,3 +1,4 @@
+import {watermarkReviewReceipt} from "./rendering-review-watermark-qa.mjs";
 /** Read-only preflight for a creatively approved V2 waiting on Factory.
  * Never infer QA from a successful approval or a playable preview.
  * A gate verdict is advisory; POST handoff independently re-reads all evidence.
@@ -38,7 +39,7 @@ export function classifyApprovedFactoryHandoff({session,held,attemptRecords}){
   try{evidence=JSON.parse(str(f.Validation_Evidence_JSON));}
   catch{return blocked('QA_EVIDENCE_MISSING',
     'The selected V2 has no readable independent media validation receipt.');}
-  if(evidence.watermark_verified!==true)
+  if(!watermarkReviewReceipt(evidence,session,attempt))
     return {status:'blocked',code:'WATERMARK_QA_REQUIRED',redo_allowed:true,
       message:'Watermark verification is pending for publishing readiness only. Your creative approval is saved, and you may request another video revision without this check. Factory release remains held.'};
   if(evidence.audio_verified!==true)
