@@ -142,7 +142,8 @@ export function safeReviewPromotion(record, readiness) {
   const publish = lower(read(record, "Publish_Status"));
   const render = lower(read(record, "Render_Status"));
   return status === "in production"
-    && !review && !publish
+    && (!review || review === "pending" || review === "review sent")
+    && (!publish || publish === "not ready")
     && !read(record, "Studio_Render_Review_Hold_Active")
     && !read(record, "Do_Not_Publish")
     && (render === "native photo route" || render === "rendered")
