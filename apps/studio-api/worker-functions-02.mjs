@@ -8356,7 +8356,9 @@ export async function studioInsightsMetaIdentity(id, token, version, fields) {
 export function studioInsightsConnectionStateFromError(error) {
   const status = Number(error?.status || 0);
   const message = sanitizeAnalyticsError(error);
-  const auth = status === 400 || status === 401 || status === 403
+  // A provider or auth-worker 5xx is a service failure, not proof that the
+  // account owner needs OAuth consent. Never recommend reconnecting on 5xx.
+  const auth = status >= 500 ? false : status === 400 || status === 401 || status === 403
     || /permission|oauth|token|authoriz|scope|credential/i.test(message);
   return {
     status: auth ? "needs_authorization" : "error",
@@ -8532,6 +8534,13 @@ export async function getInsightsConnections(request, env, url, authorization) {
           result.youtube.error = "YouTube uploader is reachable but is running an older build without /youtube/oauth/status. Sync and restart this profile's uploader service.";
           return;
         }
+        // A 401/403 at this protected *service* endpoint means the Studio
+        // service key is rejected. Google consent cannot repair that key.
+        if (response.status === 401 || response.status === 403) {
+          result.youtube.status = "error";
+          result.youtube.error = "YouTube uploader service authentication failed. Verify this profile's uploader shared secret matches the uploader service; do not reconnect Google OAuth until the service key is fixed.";
+          return;
+        }
         const body = await studioInsightsSafeJson(response);
         result.youtube.account_name = body?.channel_title || null;
         result.youtube.account_id = body?.channel_id || result.youtube.account_id;
@@ -8566,7 +8575,9 @@ export async function getInsightsConnections(request, env, url, authorization) {
         result.tiktok.status = body?.authorized && body?.required_scopes_granted ? "connected" : "needs_authorization";
         result.tiktok.error = result.tiktok.status === "connected"
           ? null
-          : "Reconnect TikTok to grant owned-video analytics access.";
+          : (body?.authorized
+            ? "TikTok OAuth is stored, but required permissions are missing. Reconnect this creator and grant all requested permissions, including video.list."
+            : "Reconnect TikTok to grant owned-video analytics access.");
       } catch (error) {
         Object.assign(result.tiktok, studioInsightsConnectionStateFromError(error));
       }
