@@ -2316,6 +2316,15 @@
   <button type="button" class="primary-button" id="factoryBatchSubmit" disabled>Submit Approvals</button>
  </div>
  <div class="factory-lanes" id="factoryLanes">
+  <div class="factory-active-filter" id="factoryActiveProfileFilter" role="group" aria-label="Active Factory profile filter" hidden>
+   <span class="factory-active-filter-dot" aria-hidden="true">●</span>
+   <div class="factory-active-filter-copy">
+    <span class="factory-active-filter-kicker">FACTORY PROFILE FILTER ACTIVE</span>
+    <strong id="factoryActiveProfileScope" aria-live="polite">Showing selected profile only</strong>
+    <span id="factoryActiveProfileContext">Other profiles are hidden from Factory queues.</span>
+   </div>
+   <button type="button" class="secondary-button" id="factoryClearProfileFilter">Show all profiles</button>
+  </div>
  <label for="factoryNeedsEyesSearch" class="subtle">Find content or output
  <input type="search" id="factoryNeedsEyesSearch" autocomplete="off" placeholder="Michigan Avenue, Content #1869, Output #9593" aria-label="Search all Ready for Review content and outputs">
  </label>

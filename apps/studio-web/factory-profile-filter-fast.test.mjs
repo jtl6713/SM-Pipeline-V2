@@ -72,3 +72,55 @@ test("Factory profile selector is independent of Factory Desk network completion
   const change = source.indexOf('$(\"factoryProfileFilter\")?.addEventListener("change"');
   assert.ok(init > 0 && change > init);
 });
+
+test("Factory shows and clears explicit profile scope without changing Studio profile", () => {
+  const html = fs.readFileSync(path.join(here, "index.html"), "utf8");
+  const css = fs.readFileSync(path.join(here, "assets/factory-layout-0680.css"), "utf8");
+  assert.match(html, /id="factoryActiveProfileFilter"[^>]*hidden/);
+  assert.match(html, /id="factoryClearProfileFilter"/);
+  assert.match(css, /\.factory-active-filter\[hidden\]\{display:none!important\}/);
+
+  const node = (values = {}) => ({
+    hidden: false, textContent: "", listeners: {},
+    addEventListener(type, callback) { this.listeners[type] = callback; },
+    ...values,
+  });
+  const navbar = createSelect([
+    { value: "recNYC123", textContent: "NYC - New York City" },
+    { value: "recCHI123", textContent: "Chicago" },
+  ]);
+  const factory = Object.assign(createSelect([{ value: "", textContent: "All Profiles" }]), {
+    listeners: {}, addEventListener(type, callback) { this.listeners[type] = callback; }, focus() {},
+  });
+  const notice = node({ hidden: true });
+  const scope = node();
+  const detail = node();
+  const clear = node();
+  const search = node({ value: "" });
+  const elements = {
+    studioProfileSelect: navbar, factoryProfileFilter: factory,
+    factoryActiveProfileFilter: notice, factoryActiveProfileScope: scope,
+    factoryActiveProfileContext: detail, factoryClearProfileFilter: clear,
+    factoryNeedsEyesSearch: search,
+  };
+  const ctx = {
+    document: { getElementById(id) { return elements[id] || null; }, addEventListener() {} },
+    window: {}, localStorage: { getItem() { return null; } },
+    setInterval() { return 1; },
+  };
+  vm.runInNewContext(source, ctx);
+  assert.equal(notice.hidden, true, "All Profiles hides the notice");
+  factory.value = "recCHI123";
+  factory.listeners.change();
+  assert.equal(notice.hidden, false);
+  assert.equal(scope.textContent, "Showing Chicago only");
+  assert.match(detail.textContent, /Other profiles are hidden/);
+  assert.equal(navbar.value, "recNYC123", "Factory never changes the topbar city");
+  search.listeners.input({ target: { value: "1894" } });
+  assert.match(scope.textContent, /Searching all profiles/);
+  assert.match(detail.textContent, /Search temporarily includes all profiles/);
+  clear.listeners.click();
+  assert.equal(factory.value, "");
+  assert.equal(notice.hidden, true);
+  assert.equal(navbar.value, "recNYC123");
+});

@@ -345,6 +345,25 @@
     const option = [...($("factoryProfileFilter")?.options || [])].find(row => row.value === id);
     return option?.textContent?.trim() || "City profile";
   }
+  // Make the Factory-specific scope visible beside the review queue.
+  // Explicit Needs eyes search currently spans all city profiles.
+  function renderFactoryProfileFilterNotice() {
+    const notice = $("factoryActiveProfileFilter");
+    if (!notice) return;
+    const id = factoryProfileId();
+    notice.hidden = !id;
+    if (!id) return;
+    const label = factoryProfileLabel(id);
+    const searchingAll = Boolean(String(state.needsEyesSearch || "").trim());
+    const scope = $("factoryActiveProfileScope");
+    if (scope) scope.textContent = searchingAll
+      ? `Searching all profiles (Factory filter: ${label})`
+      : `Showing ${label} only`;
+    const context = $("factoryActiveProfileContext");
+    if (context) context.textContent = searchingAll
+      ? "Search temporarily includes all profiles; clearing search restores this profile filter."
+      : "Other profiles are hidden from Factory queues.";
+  }
   function syncFactoryFilterOptions() {
     const select = $("factoryProfileFilter");
     if (!select) return;
@@ -363,6 +382,7 @@
       [...profiles.entries()].sort((a, b) => a[1].localeCompare(b[1]))
         .map(([id, name]) => `<option value="${esc(id)}">${esc(name)}</option>`).join("");
     select.value = profiles.has(prior) ? prior : "";
+    renderFactoryProfileFilterNotice();
   }
   function factoryMatchesProfile(card) {
     return !factoryProfileId() || String(card?.profile_id || "") === factoryProfileId();
@@ -2070,14 +2090,25 @@
       childList: true, subtree: true, characterData: true,
     });
   }
-  $("factoryProfileFilter")?.addEventListener("change", () => {
+  function applyFactoryProfileScopeChange() {
     state.completedOpen = false;
     state.completedBatch = null;
     state.completedOffset = 0;
     state.inspectedBatchKey = "";
     if (state.desk) renderDesk(state.desk);
+    else renderFactoryProfileFilterNotice();
     refreshFactoryBatchActivity(true).catch(() => {});
     window.StudioFactoryBatchQuality?.refresh?.(true);
+  }
+  $("factoryProfileFilter")?.addEventListener("change", () => {
+    applyFactoryProfileScopeChange();
+  });
+  $("factoryClearProfileFilter")?.addEventListener("click", () => {
+    const select = $("factoryProfileFilter");
+    if (!select || !select.value) return;
+    select.value = "";
+    applyFactoryProfileScopeChange();
+    select.focus?.();
   });
   // Studio profile changes must not alter global Factory monitoring.
   $("factoryNeedsEyesSearch")?.addEventListener("input", (event) => {
@@ -2093,6 +2124,7 @@
       if(chevron) chevron.textContent="▾";
     }
     if (state.desk) renderDesk(state.desk);
+    else renderFactoryProfileFilterNotice();
   });
   $("factoryDeskRefresh")?.addEventListener("click", () => {
     loadFactoryDesk(true).catch(() => {});
