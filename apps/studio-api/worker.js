@@ -23,6 +23,7 @@ import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title
 import { readProducerThread, appendProducerThreadMessage, producerConversationHistory } from "./producer-conversation.mjs";
 import { scriptedShortProducerPlanFromNotes } from "./scripted-short-producer-plan.mjs";
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
+import { sweepPreFactoryReady, PRE_FACTORY_READY_FORMULA } from "./pre-factory-ready-recovery.mjs";
 import { claimChicagoInstagramDispatch, igDispatchClaimEnabled } from "./rendering-review-ig-dispatch-claim.mjs";
 import { claimReviewRenderJob, reviewRendererJobClaimEnabled } from "./rendering-review-job-claim.mjs";
 import { handleReviewLaunchLedger, reviewLaunchLedgerEnabled } from "./rendering-review-launch-ledger.mjs";
@@ -3782,6 +3783,32 @@ export default {
         await studioHealPhantomRerender(env, { limit: 8 });
       } catch (error) {
         console.warn("phantom rerender heal failed", error);
+      }
+      // On heavy ticks only, examine bounded canonical pre-Factory candidates.
+      // Do not regenerate assets or approve: this repairs a stale In Production
+      // status only after complete review deliverables and safe Airtable readback.
+      if (cadence.heavy) {
+        try {
+          const candidates = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+            limit: 24, sortField: "Output_ID", sortDirection: "desc",
+            filterFormula: PRE_FACTORY_READY_FORMULA,
+          });
+          const recovery = await sweepPreFactoryReady({
+            candidates,
+            read: id => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id),
+            patch: (id, fields) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
+              method: "PATCH", body: JSON.stringify({ fields, typecast: false }),
+            }),
+            lock: (id, task) => withOutputApprovalLock(env.STUDIO_MEDIA, id, task),
+            mirror: record => reviewFactorySyncOutput(env, record, "pre-factory-ready-reconcile"),
+            limit: 4,
+          });
+          if (recovery.reconciled || recovery.blocked || recovery.errors) {
+            console.info("Pre-Factory readiness reconcile", JSON.stringify(recovery));
+          }
+        } catch (error) {
+          console.warn("Pre-Factory readiness reconcile unavailable", error);
+        }
       }
       try {
         const scheduleQuality = await studioScheduleReservationQualitySweep(env, {
