@@ -5,6 +5,7 @@
     desk: null,
     expandedReviewGroup: null,
     needsEyesPage: 0,
+    needsEyesSearch: "",
     pendingFactoryFeedback: null,
     selectedOutputs: new Set(),
     submittingBatch: false,
@@ -1079,6 +1080,17 @@
     return groups;
   }
 
+  function reviewGroupMatchesSearch(group, raw) {
+    const terms = String(raw || "").toLowerCase().replace(/[#]/g,"").match(/[a-z0-9]+/g) || [];
+    const meaningful = terms.filter(word => word.length >= 5 || /^\\d{3,}$/.test(word));
+    if (!meaningful.length) return !terms.length;
+    const haystack = (group.cards || []).map(card=> [
+      card.title,card.content_id,card.output_id,card.content_item_id,
+      card.platform,card.studio_output_type,
+    ].filter(Boolean).join(" ")).join(" ").toLowerCase();
+    return meaningful.every(term => haystack.includes(term));
+  }
+
   function readyContentCards(group) {
     return (group?.cards || []).filter((card) => card?.kind === "output" && canReviewActions(card) && /^rec[A-Za-z0-9]+$/.test(String(card.id || "")));
   }
@@ -1155,7 +1167,8 @@
   function renderContentBar(group, expanded) {
     const ready = readyContentCards(group);
     const pending = pendingSiblingOutputsForGroup(group);
-    const pendingLabel = pendingSiblingMeta(pending);
+    const heldRevisions = (group.cards || []).filter(card => card.review_hold_active === true);
+    const pendingLabel = heldRevisions.length ? "Review-held V2 — preview only" : pendingSiblingMeta(pending);
     const first = group.cards[0] || {};
     const contentId = String(first.content_id || "").trim();
     const title = first.title || "Untitled";
@@ -1165,7 +1178,7 @@
     if (pendingLabel) bits.push(pendingLabel);
     const meta = bits.join(" · ");
     const approveAll = ready.length > 1
-      ? (pending.length
+      ? (pending.length || heldRevisions.length
         ? `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}" disabled title="Wait until sibling Stories finish rendering, then Approve all together">${esc(`Approve all (${ready.length}) — wait for Stories`)}</button>`
         : `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}">Approve all (${ready.length})</button>`)
       : "";
@@ -1174,7 +1187,7 @@
     const selectContent = `<label class="factory-content-batch-select">
       <input type="checkbox" data-factory-select-content="${esc(group.key)}"
         aria-label="Select all review-ready outputs for ${esc(title)}"
-        ${contentSelected ? "checked" : ""} ${(!batchReady.length || pending.length) ? "disabled" : ""}>
+        ${contentSelected ? "checked" : ""} ${(!batchReady.length || pending.length || heldRevisions.length) ? "disabled" : ""}>
       Select eligible outputs</label>`;
     return `<div class="factory-content-bar" data-factory-content="${esc(group.key)}">
       ${selectContent}
@@ -1195,7 +1208,13 @@
       return;
     }
     if (options.groupContent) {
-      const groups = groupByContent(cards);
+      const allGroups = groupByContent(cards);
+      const search = String(state.needsEyesSearch || "").trim();
+      const groups = search ? allGroups.filter(group => reviewGroupMatchesSearch(group,search)) : allGroups;
+      if (!groups.length) {
+        node.innerHTML = '<p class="subtle factory-lane-empty">No matching review content. Try Michigan, 1869 or 9593.</p>';
+        return;
+      }
       const FACTORY_REVIEW_GROUPS_PER_PAGE = 12;
       // Bound the iPad DOM: rendering hundreds of off-screen accordions made
       // Safari show one row followed by a large apparently empty review list.
@@ -1208,7 +1227,7 @@
       if (state.expandedReviewGroup !== "" && !pageGroups.some((group) => group.key === state.expandedReviewGroup)) {
         state.expandedReviewGroup = pageGroups[0]?.key || null;
       }
-      const pageLabel = `Showing ${start + 1}–${start + pageGroups.length} of ${groups.length} content items · ${cards.length} outputs in queue`;
+      const pageLabel = `Showing ${start + 1}–${start + pageGroups.length} of ${groups.length} ${search ? "matching" : ""} content items · ${cards.length} outputs in queue`;
       const pager = `<nav class="factory-review-pagination" aria-label="Needs eyes queue pages">
         <span class="factory-review-page-count">${esc(pageLabel)}</span>
         <span class="factory-review-page-actions">
@@ -1663,7 +1682,12 @@
     state.desk = desk;
     syncFactoryFilterOptions();
     const hiddenApprovals = new Set([...Object.keys(recentFactoryAccepted()), ...(state.submittingOutputIds || [])]);
-    const filtered = (cards) => (cards || []).filter(card => factoryMatchesProfile(card) && !(card?.kind === "output" && hiddenApprovals.has(card.id)));
+    const searching = Boolean(String(state.needsEyesSearch || "").trim());
+    // An explicit search should find reviewable items across profiles and should
+    // not silently conceal records due to a stale browser-only acceptance fence.
+    const filtered = (cards) => (cards || []).filter(card =>
+      (searching || factoryMatchesProfile(card)) &&
+      !(card?.kind === "output" && hiddenApprovals.has(card.id) && !searching));
     const visibleDesk = { ...desk, lanes: { ...desk.lanes,
       needs_eyes: (desk.lanes?.needs_eyes || []).filter(card => !hiddenApprovals.has(card.id)) } };
     // Global counts come from the authoritative Desk summary. With a Factory
@@ -1982,6 +2006,20 @@
     window.StudioFactoryBatchQuality?.refresh?.(true);
   });
   // Studio profile changes must not alter global Factory monitoring.
+  $("factoryNeedsEyesSearch")?.addEventListener("input", (event) => {
+    state.needsEyesSearch = String(event.target.value || "").slice(0,120);
+    state.needsEyesPage = 0;
+    state.expandedReviewGroup = null;
+    if (state.needsEyesSearch.trim()) {
+      const body=$("factoryBandBodyNeedsEyes");
+      const band=body?.closest(".factory-band");
+      band?.classList.remove("is-collapsed");
+      band?.querySelector("[data-factory-band-toggle]")?.setAttribute("aria-expanded","true");
+      const chevron=band?.querySelector(".factory-band-chevron");
+      if(chevron) chevron.textContent="▾";
+    }
+    if (state.desk) renderDesk(state.desk);
+  });
   $("factoryDeskRefresh")?.addEventListener("click", () => {
     loadFactoryDesk(true).catch(() => {});
   });
