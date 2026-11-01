@@ -22,7 +22,7 @@ class DurableEgressTests(unittest.TestCase):
                 out = read_airtable_egress(24)
                 self.assertTrue(out["ok"])
                 self.assertEqual(sum(x["attempts"] for x in out["hourly"]), 3)
-                self.assertEqual({x["status_class"] for x in out["hourly"]}, {"2xx", "4xx"})
+                self.assertEqual({x["status_class"] for x in out["hourly"]}, {"2xx", "429"})
 
     def test_not_configured_not_reported_as_zero(self):
         with patch.dict(os.environ, {"AIRTABLE_EGRESS_SQLITE_PATH": ""}):
