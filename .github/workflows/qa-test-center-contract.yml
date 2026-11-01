@@ -22,8 +22,9 @@ jobs:
           node --check apps/studio-api/qa-test-core.mjs
           node --check apps/studio-api/qa-governance.mjs
           node --check apps/studio-api/qa-registry.mjs
+          node --check apps/studio-api/qa-airtable-ledger.mjs
       - name: Execute QA governance and automation contract tests
-        run: node --test apps/studio-api/qa-test-core.test.mjs apps/studio-api/qa-governance.test.mjs apps/studio-api/qa-registry.test.mjs
+        run: node --test apps/studio-api/qa-test-core.test.mjs apps/studio-api/qa-governance.test.mjs apps/studio-api/qa-registry.test.mjs apps/studio-api/qa-airtable-ledger.test.mjs
       - name: Validate catalog schema basics
         run: |
           node --input-type=module -e "
