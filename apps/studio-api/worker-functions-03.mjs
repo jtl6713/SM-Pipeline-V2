@@ -10815,6 +10815,10 @@ export function studioOutputReadyForPublishApproval(record) {
   if (["Approved"].includes(reviewStatus) || outputStatus === "Approved for Publishing") return false;
   if (["Published", "Publishing"].includes(publishStatus)) return false;
   if (Boolean(f(record, "Do_Not_Publish"))) return false;
+  // Factory must validate the actual review package, never just Ready for Review text.
+  // Native photo proposals require their selected slides/preview and cover; video
+  // proposals require a finished file and any required review cover.
+  if (!studioOutputHasReviewableDeliverable(record)) return false;
   if (outputStatus === "In Production" || ["Ready for Render", "Rendering"].includes(String(f(record, "Render_Status") || "").trim())) return false;
   const rendered = String(f(record, "Render_Status") || "").trim() === "Rendered" && Boolean(String(f(record, "Final_File_URL") || "").trim());
   const finished = studioIsFinishedPassthrough(record);
