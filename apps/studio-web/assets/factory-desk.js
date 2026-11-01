@@ -1081,8 +1081,7 @@
       ${cell(card.platform)}
       ${cell(card.studio_output_type)}
       <span class="factory-line-cell factory-line-state"${alert ? ` title="${esc(alert)}"` : ""}>${esc(stateLabel)}</span>
-      ${needsEyesOutput && batchReason ? `<span class="factory-batch-unavailable" role="status">${esc(batchReason)}</span>` : ""}
-      <div class="factory-line-actions">${actions.join("")}</div>
+      <div class="factory-line-actions">${actions.join("")}${needsEyesOutput && batchReason ? `<span class="factory-batch-unavailable" role="status">${esc(batchReason)}</span>` : ""}</div>
     </div>`;
   }
 
