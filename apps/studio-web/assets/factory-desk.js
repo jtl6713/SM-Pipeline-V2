@@ -1082,7 +1082,7 @@
 
   function reviewGroupMatchesSearch(group, raw) {
     const terms = String(raw || "").toLowerCase().replace(/[#]/g,"").match(/[a-z0-9]+/g) || [];
-    const meaningful = terms.filter(word => word.length >= 5 || /^\\d{3,}$/.test(word));
+    const meaningful = terms.filter(word => word.length >= 5 || /^[0-9]{3,}$/.test(word));
     if (!meaningful.length) return !terms.length;
     const haystack = (group.cards || []).map(card=> [
       card.title,card.content_id,card.output_id,card.content_item_id,
@@ -1179,7 +1179,7 @@
     const meta = bits.join(" · ");
     const approveAll = ready.length > 1
       ? (pending.length || heldRevisions.length
-        ? `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}" disabled title="Wait until sibling Stories finish rendering, then Approve all together">${esc(`Approve all (${ready.length}) — wait for Stories`)}</button>`
+        ? `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}" disabled title="${heldRevisions.length ? "Review-held V2 is not yet eligible for publishing" : "Wait until sibling Stories finish rendering, then Approve all together"}">${esc(`Approve all (${ready.length}) — ${heldRevisions.length ? "review held" : "wait for Stories"}`)}</button>`
         : `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}">Approve all (${ready.length})</button>`)
       : "";
     const batchReady = ready.filter(canSelectBatchOutput);
@@ -1782,6 +1782,10 @@
     }
     const cards = (state.desk?.lanes?.needs_eyes || []).filter((card) => contentGroupKey(card) === key);
     const ready = readyContentCards({ cards });
+    if (cards.some(card => card.review_hold_active === true)) {
+      setStatus("This content has a protected V2 review hold. Preview it first; Factory cannot approve this group.", true);
+      return;
+    }
     if (ready.length < 2) {
       setStatus("This content does not have multiple outputs waiting for approval.", true);
       return;
