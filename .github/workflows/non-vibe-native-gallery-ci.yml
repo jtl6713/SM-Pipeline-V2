@@ -40,7 +40,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install native-image requirements
-        run: python -m pip install --disable-pip-version-check 'pillow==12.3.0'
+        run: python -m pip install --disable-pip-version-check -r services/pipeline-runner/requirements.txt
       - name: Isolated gallery generation, branding and Drive evidence
         env:
           PYTHONPATH: services/pipeline-runner
