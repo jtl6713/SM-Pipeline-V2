@@ -154,7 +154,8 @@ export class StudioProfileSummary {
   }
   recordAirtableEgress(source, method, status, at = Date.now()) {
     const hour = new Date(at).toISOString().slice(0,13) + ":00:00Z";
-    const statusClass = status === 0 ? "network" : String(Math.floor(status / 100)) + "xx";
+    // Preserve a dedicated 429 bucket for quota diagnostics; old 4xx history remains ambiguous.
+    const statusClass = status === 429 ? "429" : status === 0 ? "network" : String(Math.floor(status / 100)) + "xx";
     this.sql.exec("INSERT INTO airtable_egress_hourly (hour_utc,source,method,status_class,attempts) VALUES (?,?,?,?,1) ON CONFLICT(hour_utc,source,method,status_class) DO UPDATE SET attempts=attempts+1",
       hour, source, method, statusClass);
   }
