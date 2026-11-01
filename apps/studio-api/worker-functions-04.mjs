@@ -514,6 +514,7 @@ import {
   selectsFromSceneTimestamps,
   vibeCutProductionDefaults,
   vibeCutRenderSettings,
+  validateVibeCutSourceAssets,
 } from "./vibe-cut.mjs";
 import {
   capabilityMatrixResponse,
@@ -718,6 +719,7 @@ import {
   studioReadSimilarWatchlist,
   finalizeProductionRequestPromotion,
   promoteProductionRequestViaI3I4,
+  loadAuthorizedProductionRequest,
   promotionCompleted,
   waitForPromotionResult,
   ideaPhotoWatchRange,
@@ -12752,6 +12754,95 @@ export async function prepareIdeaToReview(request, env, url, authorization, ctx 
   });
 }
 /*__STUDIO_WORKER_END:prepareIdeaToReview__*/
+
+/**
+ * Exactly one verified Vibe Cut request may opt into the existing durable
+ * prepare-to-review queue. Never treat a partial multipart transfer as Ready,
+ * replace the source video, approve publishing, or reopen Factory revisions.
+ */
+export async function advanceVibeCutToReview(request, env, url, authorization, ctx = null) {
+  const match = /^\/api\/production-requests\/(rec[A-Za-z0-9]+)\/vibe-to-review$/.exec(url.pathname);
+  if (!match) throw new HttpError(400, "Invalid Vibe Cut advancement route");
+  const requestId = match[1];
+  let record = await loadAuthorizedProductionRequest(env, requestId, authorization);
+  const notes = String(f(record, "Production_Notes") || "");
+  if (!isVibeCutNotes(notes)) throw new HttpError(409, "Only a Vibe Cut can advance automatically to review");
+  if (productionNotesRevisionOpen(notes)) throw new HttpError(409, "Factory revisions require explicit human approval");
+  const state = String(f(record, "Request_Status") || "").trim();
+  if (state === "Promoted" || state === "Submitted") {
+    return respond(request, env, {
+      ok: true, queued: true, already_started: true, stage: state === "Promoted" ? "rendering_for_review" : "promotion_processing",
+      production_request_id: requestId, publishing: false,
+    }, 202);
+  }
+  if (!["Draft", "Ready"].includes(state)) {
+    throw new HttpError(409, `This Vibe Cut is ${state || "not ready"} and cannot auto-advance`);
+  }
+  if (String(f(record, "Studio_Master_Asset_Status") || "") !== "Ready") {
+    throw new HttpError(409, "Original video is still being prepared. Auto-advance can start after Ready.");
+  }
+  const media = item4AssetManifest(record);
+  const validation = validateVibeCutSourceAssets(media);
+  if (!validation.ok) throw new HttpError(409, validation.reason);
+  const ideaIds = Array.isArray(f(record, "Idea_Candidate")) ? f(record, "Idea_Candidate") : [];
+  if (ideaIds.length !== 1) throw new HttpError(409, "Vibe Cut must have exactly one linked Idea Candidate");
+  const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaIds[0]);
+  if (!idea?.id || String(f(idea, "Candidate_Status") || "") === "On Hold") {
+    throw new HttpError(409, "Linked idea is unavailable or On Hold");
+  }
+  // Only the first accepted request starts a background run. Subsequent
+  // requests are read-only and the periodic ready-to-produce queue resumes it.
+  if (/(?:^|\n)origin=prepare-to-review(?:\n|$)/i.test(notes)) {
+    return respond(request, env, {
+      ok: true, queued: true, already_started: true, stage: "preparing_for_review",
+      production_request_id: requestId, publishing: false,
+    }, 202);
+  }
+  const platforms = autonomousItem4Platforms(canonicalProductionPlatforms(
+    Array.isArray(f(record, "Target_Platforms")) ? f(record, "Target_Platforms") : []
+  ), { fallback: false });
+  if (!platforms.length) throw new HttpError(409, "Select at least one platform before Vibe Cut auto-advance");
+  // Airtable is the sole write authority. The durable marker permits a fresh
+  // Worker invocation to resume after the browser or request closes.
+  record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: { Production_Notes: stampPrepareToReviewNotes(notes) },
+      typecast: true,
+    }),
+  });
+  const continueReview = async () => {
+    let current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+    if (!autonomousHasUsableItem4Plan(current)) {
+      const planCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/plan`, {
+        platforms, overrides: autonomousPlanOverrides("Vertical Short Video"),
+        extras: [], package: "video", skip_fbs1_guard: true,
+      });
+      await buildItem4OutputPlan(planCall.request, env, planCall.url, authorization);
+      current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+    }
+    // Pass no incoming library IDs: the uploaded video is already authoritative.
+    // The existing production continuation handles variants, promotion,
+    // rendering, and the final human review gate without publishing.
+    return finishAutonomousProductionRequest(env, authorization, ctx, idea, current,
+      { media_asset_ids: [], content_type: "" }, { awaitFinish: true, scheduled: true });
+  };
+  if (ctx?.waitUntil) {
+    ctx.waitUntil(continueReview().catch((error) => {
+      console.warn("Vibe Cut auto-to-review deferred to durable resume", requestId,
+        String(error?.message || error).slice(0, 240));
+    }));
+  } else {
+    await continueReview();
+  }
+  return respond(request, env, {
+    ok: true, queued: true, stage: "preparing_for_review",
+    production_request_id: requestId, publishing: false,
+    message: "Vibe Cut is automatically preparing outputs for human approval.",
+  }, 202);
+}
+/*__STUDIO_WORKER_END:advanceVibeCutToReview__*/
+
 
 const READY_PRODUCTION_IDEA_FORMULA =
   "AND({Test_Run_ID}=BLANK(),{Studio_Photo_Wait_Status}='Ready',{Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK(),{Candidate_Status}!='On Hold',{Candidate_Status}!='Rejected',{Candidate_Status}!='Promoted')";

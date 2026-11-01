@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
+import * as fs from "node:fs";
+import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 import { vibeAutoReviewVerifiedSource } from "./vibe-auto-review.mjs";
 
 const notes = `origin=ez-wizard; ez-input=vibe-cut; ez-caption=ai; ez-package=video
@@ -91,4 +93,47 @@ test("Vibe source, notes and chosen outputs are preserved throughout automatic p
   assert.match(finish, /promoteProductionRequestViaI3I4/);
   assert.match(finish, /enqueueStudioProductionJob/);
   assert.match(finish, /advanceStudioProductionOutputs/);
+});
+
+const worker = fs.readFileSync(new URL("./worker.js", import.meta.url), "utf8");
+const logic = fs.readFileSync(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+const source = readStudioWorkerSource();
+
+function part(begin, end) {
+  const a = logic.indexOf(begin);
+  const b = logic.indexOf(end, a + begin.length);
+  assert.ok(a >= 0 && b > a, `Missing ${begin}/${end}`);
+  return logic.slice(a, b);
+}
+
+test("Vibe auto-to-review is authenticated and explicit write-gated", () => {
+  assert.match(worker, /isVibeCutToReviewRoute/);
+  assert.match(worker, /isVibeCutToReviewWrite\s*\|\|/);
+  assert.match(worker, /requirePermission\(authorization, "ideas_promote"\)/);
+  assert.match(worker, /requirePermission\(authorization, "production_configure"\)/);
+  assert.match(worker, /return advanceVibeCutToReview\(request, env, url, authorization, ctx\)/);
+});
+
+test("Vibe advancement requires verified original, Ready state and no open Factory revision", () => {
+  const method = part("export async function advanceVibeCutToReview(", "/*__STUDIO_WORKER_END:advanceVibeCutToReview__*/");
+  assert.match(method, /loadAuthorizedProductionRequest\(env, requestId, authorization\)/);
+  assert.match(method, /isVibeCutNotes\(notes\)/);
+  assert.match(method, /productionNotesRevisionOpen\(notes\)/);
+  assert.match(method, /Studio_Master_Asset_Status/);
+  assert.match(method, /validateVibeCutSourceAssets\(media\)/);
+  assert.match(method, /Request_Status/);
+  assert.match(method, /\["Draft", "Ready"\]/);
+  assert.match(method, /origin=prepare-to-review/);
+  assert.match(method, /stampPrepareToReviewNotes\(notes\)/);
+  assert.match(method, /already_started: true/);
+});
+
+test("Vibe review continuation preserves original media and final human approval", () => {
+  const method = part("export async function advanceVibeCutToReview(", "/*__STUDIO_WORKER_END:advanceVibeCutToReview__*/");
+  assert.match(method, /media_asset_ids: \[\]/);
+  assert.match(method, /finishAutonomousProductionRequest\(/);
+  assert.match(method, /ctx\.waitUntil\(continueReview\(\)/);
+  assert.match(method, /publishing: false/);
+  assert.doesNotMatch(method, /publish-kick|publish-now|approve-all/);
+  assert.match(source, /readyProductionOutputsAwaitingFinalApproval/);
 });

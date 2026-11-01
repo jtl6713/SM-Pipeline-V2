@@ -9572,7 +9572,7 @@ export function studioIsVibeCut(recordOrNotes) {
 /*__STUDIO_WORKER_END:studioIsVibeCut__*/
 
 export function skipsProductionApprove(text) {
-  return String(text || "").includes("origin=autonomous") || /origin=az-finished-video/i.test(String(text || ""));
+  return /origin=(?:autonomous|az-finished-video|prepare-to-review)/i.test(String(text || ""));
 }
 /*__STUDIO_WORKER_END:skipsProductionApprove__*/
 
