@@ -1398,6 +1398,77 @@
       (type==="instagram reel" || type==="reel");
   }
 
+  // Source/compatible-output discovery is strictly read-only. An inventory is
+  // never permission to generate, select an unrequested output or publish.
+  async function loadFactoryCorrectionReadOnlyPreview(pending) {
+    const panel=$("factoryReadOnlyInventory");
+    const status=$("factoryReadOnlyInventoryStatus");
+    const rows=$("factoryReadOnlyInventoryRows");
+    if(!panel||!status||!rows)return;
+    panel.hidden=true;
+    rows.replaceChildren();
+    const payload=pending?.payload||{};
+    const id=String(payload.id||"");
+    const requestId=String(payload.production_request_id||"");
+    if(payload.kind!=="output"||!/^rec[A-Za-z0-9]{14}$/.test(id))return;
+    panel.hidden=false;
+    status.textContent="Checking compatible outputs and original source media (read-only)…";
+    const current=()=>state.pendingFactoryFeedback===pending;
+    // Separate requests: unavailable/unmapped Factory match information
+    // must NEVER suppress a legitimate photo/carousel source inventory.
+    const readMatches=async()=>{
+      if(!/^rec[A-Za-z0-9]{14}$/.test(requestId))
+        return "Compatible-output matching requires an exact Production Request.";
+      try{
+        const match=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
+          "/correction-matches?production_request_id="+encodeURIComponent(requestId));
+        if(!current())return "";
+        if(match?.source_output_id!==id||match?.production_request_id!==requestId||
+           match?.batch_enabled!==false)
+          throw new Error("Correction matching identity or disabled write gate could not be verified");
+        const outputs=Array.isArray(match.matching_outputs)?match.matching_outputs:[];
+        for(const output of outputs.slice(0,40)){
+          const li=document.createElement("li");
+          li.textContent=[output.platform,output.output_type,
+            output.review_render_supported===true?"render capability detected":
+              "revision unavailable: "+(output.review_render_reason||"unsupported")]
+              .filter(Boolean).join(" · ");
+          rows.appendChild(li);
+        }
+        return outputs.length+" compatible review-ready output(s). Batch correction remains disabled.";
+      }catch(error){
+        return "Compatible-output preview unavailable: "+String(error?.message||error)+".";
+      }
+    };
+    const readGallery=async()=>{
+      try{
+        const inventory=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
+          "/gallery-inventory");
+        if(!current())return "";
+        if(inventory?.output_id!==id||inventory?.can_generate!==false||
+           inventory?.publication_authorized!==false||
+           inventory?.source_kind!=="airtable_metadata_only")
+          throw new Error("Original gallery source verification contract is unavailable");
+        for(const slide of (inventory.slides||[]).slice(0,80)){
+          const li=document.createElement("li");
+          li.textContent="Slide "+slide.order+" · "+
+            (slide.blockers?.length?slide.blockers.join(", "):
+             "Airtable source present; Drive rights/branding not yet verified");
+          rows.appendChild(li);
+        }
+        return "Original image inventory: "+inventory.slide_count+
+          " slide(s). Drive rights/branding verification is still required.";
+      }catch(error){
+        // The source is often video or an unpublished/non-gallery output;
+        // this cannot block sending normal Factory review comments.
+        return "Native image inventory not ready for this output.";
+      }
+    };
+    const [matching,gallery]=await Promise.all([readMatches(),readGallery()]);
+    if(!current())return;
+    status.textContent=[matching,gallery].filter(Boolean).join(" ");
+  }
+
   // Review feedback is entered before any state-changing request is sent.
   function openFactoryFeedback({ title, scope, payload }) {
     const backdrop = $("factoryFeedbackBackdrop");
@@ -1407,6 +1478,7 @@
       return;
     }
     state.pendingFactoryFeedback = { payload, title: title || "Production change request", focusedElement: document.activeElement };
+    void loadFactoryCorrectionReadOnlyPreview(state.pendingFactoryFeedback);
     const heading = $("factoryFeedbackTarget");
     const detail = $("factoryFeedbackScope");
     const error = $("factoryFeedbackError");
@@ -1450,6 +1522,8 @@
     if (backdrop) backdrop.hidden = true;
     const origin = state.pendingFactoryFeedback?.focusedElement;
     state.pendingFactoryFeedback = null;
+    const readOnly=$("factoryReadOnlyInventory");
+    if(readOnly)readOnly.hidden=true;
     if (origin?.isConnected) origin.focus?.();
   }
 

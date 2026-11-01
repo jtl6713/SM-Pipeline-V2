@@ -1,3 +1,5 @@
+import { loadAuthoritativeFactoryCorrection } from "./factory-correction-authority.mjs";
+import { readAuthoritativeGalleryInventory } from "./rendering-review-gallery-inventory-http.mjs";
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
 import { serveReviewAttemptVideo, fetchTrustedRunnerReviewMedia } from "./rendering-review-attempt-video.mjs";
 import { completeReviewAttempt } from "./rendering-review-completion-http.mjs";
@@ -1270,7 +1272,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.718-inflight-review-notes" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
+          version: "0.10.719-non-vibe-gallery-readonly" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
@@ -1282,6 +1284,8 @@ export default {
           studio_profile_summary_home_membership_v1: true,
           photo_match_error_json_v1: true,
           factory_batch_canary_revision: "chicago-ig-reel-v1",
+          factory_correction_matching_readonly_v1: true,
+          factory_gallery_inventory_readonly_v1: true,
           factory_batch_phase2a_post_gate_fix_v1: true,
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
@@ -2571,6 +2575,77 @@ export default {
           return factoryBatchSubmitRoute(request, env, authorization, ctx);
         }
         throw new HttpError(405, "Method not allowed");
+      }
+
+      // Read-only, Airtable-authoritative Factory correction discovery.
+      // This endpoint cannot create holds, generate media, or publish. The
+      // native gallery Runner/Factory integration has not passed its release
+      // gate, so no client may treat this preview as an enabled POST batch.
+      const correctionMatchesRoute = /^\/api\/factory\/outputs\/(rec[A-Za-z0-9]{14})\/correction-matches$/.exec(url.pathname);
+      if (correctionMatchesRoute) {
+        if (request.method !== "GET") throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        const productionRequestId=String(url.searchParams.get("production_request_id")||"");
+        if(!/^rec[A-Za-z0-9]{14}$/.test(productionRequestId))
+          throw new HttpError(400,"Exact Production Request is required");
+        const authorized=await reviewAuthorizedProfiles(env,authorization);
+        const snapshot=await loadAuthoritativeFactoryCorrection({
+          outputId:correctionMatchesRoute[1],
+          productionRequestId,
+          authorizedProfileIds:authorized.map(row=>row.id),
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+          readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+          readMappings:async id=>{
+            const endpoint=new URL("/api/production-requests/"+id+"/outputs",url);
+            const result=await listProductionRequestOutputs(request,env,endpoint,authorization,ctx);
+            if(!result.ok)throw new HttpError(result.status,"Authoritative Factory mappings unavailable");
+            return result.json();
+          },
+          readWatermarkCatalog:()=>reviewListRecords(env,"tblSITCujCsJTNcDe",{
+            limit:200,
+            filterFormula:'AND({Asset_Role}="Watermark",{Asset_Status}="Available")',
+            fields:["Asset Name","Asset_Role","Asset_Status","Rights_Status",
+              "Active","Do_Not_Use","MIME_Type","Google Drive File ID","Content_Profile"],
+          }),
+          field:f,
+        });
+        return respond(request,env,{
+          ok:true,
+          source_output_id:correctionMatchesRoute[1],
+          production_request_id:productionRequestId,
+          batch_enabled:false,
+          render_format:snapshot.source?.render_format||null,
+          matching_outputs:snapshot.matches.map(row=>({
+            id:row.id,platform:row.platform,output_type:row.output_type,
+            review_render_supported:row.review_render_supported===true,
+            review_render_reason:row.review_render_reason||null,
+          })),
+        });
+      }
+
+      // Preview original gallery/source metadata only. This is deliberately
+      // read-only and never substitutes Airtable links for a verified Drive,
+      // rights or profile-watermark receipt.
+      const galleryInventoryMatch = /^\/api\/factory\/outputs\/(rec[A-Za-z0-9]{14})\/gallery-inventory$/.exec(url.pathname);
+      if (galleryInventoryMatch) {
+        if (request.method !== "GET") throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        const profiles=await reviewAuthorizedProfiles(env,authorization);
+        const source=await readAuthoritativeGalleryInventory({
+          output_id:galleryInventoryMatch[1],
+          authorized_profile_ids:profiles.map(p=>p.id),
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+          readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+          readSlides:async ids=>reviewListRecords(env,"tblcnQDBvUngpjDED",{
+            limit:ids.length,
+            filterFormula:'OR('+ids.map(id=>'RECORD_ID()="'+id+'"').join(',')+')',
+            fields:["Content Item","Platform Output","Platform","Slide Number",
+              "Aspect Ratio","Deleted From Carousel","Approved For Final",
+              "Review Status","Asset_4x5_File_ID","Asset_1x1_File_ID",
+              "Asset_9x16_File_ID","Final Google Drive File ID"],
+          }),
+        });
+        return respond(request,env,source);
       }
 
       if (isFactoryDeskRoute) {

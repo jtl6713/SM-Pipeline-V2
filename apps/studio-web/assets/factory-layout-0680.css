@@ -708,3 +708,13 @@
   #page-factory .factory-active-filter-copy{flex-basis:calc(100% - 30px)}
   #page-factory #factoryClearProfileFilter{margin-left:23px;white-space:normal}
 }
+
+/* Native image/gallery correction: server-authoritative read-only source check. */
+#factoryReadOnlyInventory[hidden]{display:none!important}
+#factoryReadOnlyInventory{
+  display:block;padding:12px;margin:10px 0;border:1px solid #9aa7b5;
+  border-radius:9px;background:transparent;
+}
+#factoryReadOnlyInventoryStatus{margin:7px 0;font-size:.92rem;line-height:1.45}
+#factoryReadOnlyInventoryRows{padding-left:21px;margin:6px 0 0;max-height:180px;overflow:auto}
+#factoryReadOnlyInventoryRows li{padding:3px 0;overflow-wrap:anywhere}
