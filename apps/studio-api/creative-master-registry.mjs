@@ -7,6 +7,15 @@ const id=x=>Array.isArray(x)&&x.length===1?String(x[0]?.id||x[0]||""):null;
 const fail=(code)=>{const e=new Error(code);e.code=code;e.status=409;throw e;};
 export const MASTER_FIELD="Studio_Creative_Masters_JSON";
 export const MASTER_SCHEMA="studio.creative-masters.1";
+export const CREATIVE_MASTER_SIBLING_READ_FIELDS=Object.freeze([
+  "Content_Item","Platform","Platform_Output_Type","Output_ID",
+  "Format","Aspect_Ratio","Publish_Status","Published_At",
+  "Platform_Post_ID","Platform_Post_URL","Publish_Started_At",
+  "Publish_Locked_At","Publish_Locked_By","Scheduled_Post_Date",
+  "Studio_Scheduled_At","YouTube_Scheduled_Publish_At",
+  "Studio_Render_Review_Hold_Active","Studio_Render_Review_Hold_ID",
+  "Studio_Review_Hold_ID","Do_Not_Publish",
+]);
 
 export function creativeMasterKey(format,aspectRatio){
   const f=norm(format),a=norm(aspectRatio).replace(/\s/g,"");

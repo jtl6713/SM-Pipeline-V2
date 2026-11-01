@@ -5,7 +5,7 @@ import { reviewEnrollmentWriteEnabled } from './rendering-review-enrollment-http
 import { producerConversationWritesEnabled } from './rendering-review-producer-persist.mjs';
 import { renderAttemptCommitEnabled } from './rendering-review-attempt-outbox.mjs';
 import {reviewStillStoryboard} from './rendering-review-storyboard.mjs';
-import {projectCreativeMasterGroup} from './creative-master-registry.mjs';
+import {projectCreativeMasterGroup,CREATIVE_MASTER_SIBLING_READ_FIELDS} from './creative-master-registry.mjs';
 
 const text=x=>String(x??'').trim();
 const rec=x=>/^rec[A-Za-z0-9]{14}$/.test(text(x));
@@ -179,13 +179,7 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
       const fetched=await operations.listRecords(env,env.AIRTABLE_OUTPUT_TABLE_ID,{
         limit:chunk.length,
         filterFormula:'OR('+chunk.map(id=>'RECORD_ID()="'+id+'"').join(',')+')',
-        fields:['Content_Item','Platform','Platform_Output_Type','Output_ID',
-          'Format','Aspect_Ratio','Publish_Status','Published_At',
-          'Platform_Post_ID','Platform_Post_URL','Publish_Started_At',
-          'Publish_Locked_At','Publish_Locked_By','Scheduled_Post_Date',
-          'Studio_Scheduled_At','YouTube_Scheduled_Publish_At',
-          'Studio_Render_Review_Hold_Active','Studio_Render_Review_Hold_ID',
-          'Studio_Review_Hold_ID','Do_Not_Publish'],
+        fields:CREATIVE_MASTER_SIBLING_READ_FIELDS,
       });
       siblings.push(...fetched);
     }
