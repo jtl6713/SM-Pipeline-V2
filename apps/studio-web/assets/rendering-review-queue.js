@@ -276,7 +276,7 @@
       }
     },20000);
   }
-  function appendRevisionProgress(activity,session,messages,producer,planReady,completedAttempt,entry) {
+  function appendRevisionProgress(activity,session,messages,producer,planReady,completedAttempt,entry,saved) {
     const attempts=Array.isArray(session?.attempts)?session.attempts:[];
     const approvedV2=session?.state==='approved'&&attempts.some(a=>
       a?.id===session.approved_attempt_id&&Number(a?.number)>1);
@@ -285,26 +285,45 @@
     const failed=session?.state==='revision_failed';
     const stage=readyV2?5:session?.state==='validating'?4:
       rendering||failed?3:planReady?2:producer?1:0;
+
+    // Red means a verified operator action is possible, NOT that a background
+    // job is still processing. Gated/unavailable actions are never invented.
+    const canReply=!!producer&&saved?.flags?.producer_conversation_enabled===true&&
+      ['discussing','awaiting_assets'].includes(session?.state);
+    const canRender=planReady&&!!session?.plan?.immutable_manifest&&
+      session?.review_hold?.active===true&&saved?.publication_hold_verified===true&&
+      saved?.flags?.attempt_commit_enabled===true&&
+      session?.producer_candidate?.stale!==true;
+    const current=attempts.find(a=>a?.id===session?.current_attempt_id);
+    const canApprove=readyV2&&session?.state==='ready_for_review'&&
+      saved?.flags?.creative_approval_enabled===true&&
+      saved?.publication_hold_verified===true&&
+      current?.status==='ready_for_review'&&!!attemptMedia(current,entry);
+    const requiresInput=(stage===1&&canReply)||(stage===2&&canRender)||
+      (stage===5&&canApprove);
     const steps=['Feedback received','Producer review','Plan ready',
       'Rendering','Quality check','Ready for review'];
     const rail=elem('ol',null,'rr-progress-stages');
     rail.setAttribute('aria-label','Verified post-production stages');
     for(let i=0;i<steps.length;i++){
-      const phase=readyV2||i<stage?'complete':i===stage?
-        failed?'attention': 'current':'pending';
+      const phase=readyV2&&session?.state==='approved'||i<stage?'complete':i===stage?
+        requiresInput||failed?'attention':'current':'pending';
       const item=elem('li',null,'rr-progress-stage rr-progress-stage--'+phase);
       item.append(elem('span',steps[i],'rr-progress-stage-name'));
       item.append(elem('span',phase==='complete'?'Completed':
-        phase==='attention'?'Needs attention':
+        phase==='attention'?(requiresInput?'Requires your attention':'Needs attention'):
         phase==='current'?(session?.state==='queued'&&i===3?'Queued — not started':
           session?.state==='rendering'&&i===3?'In progress':
           i===0&&!messages.length?'Not started':'Current'):'Not started','rr-progress-stage-state'));
       rail.append(item);
     }
+    if(requiresInput)activity.classList.add('rr-activity--attention');
     const heading=elem('h3','Post-production progress','rr-progress-heading');
     const summary=session?.state==='approved'&&approvedV2?
       'V2 creative approval is saved. Factory handoff must be verified before normal scheduling or publishing.':
-      readyV2?'Revised V2 is ready for review. Publication remains held until approval.':
+      readyV2?(canApprove?
+        'Requires your attention: V2 is ready for review. Select V2 and approve only if satisfied. Publication remains held.':
+        'Revised V2 is ready for review. Publication remains held until approval.'):
       session?.state==='validating'?
         'V2 render completed its rendering stage; media validation is in progress.':
       session?.state==='rendering'?
@@ -312,8 +331,12 @@
       session?.state==='queued'?
         'V2 render job is queued. Rendering has not been confirmed started.':
       failed?'The revised render needs attention; V1 remains preserved.':
-      planReady?'V2 plan is saved. No render has started. Render authorization is a separate action when enabled.':
-      producer?'Producer replied, but V2 has NOT started. No verified render-ready plan or V2 render job exists. Continue the conversation to resolve remaining requirements.':
+      planReady?(canRender?
+        'Requires your attention: V2 plan is saved. Select Make the revised video to authorize rendering. No render has started.':
+        'V2 plan is saved. No render has started. Render authorization is a separate action when enabled.'):
+      producer?(canReply?
+        'Requires your attention: Producer replied, but V2 has NOT started. Review the proposed changes and reply with your direction. No render-ready plan or V2 job exists.':
+        'Producer replied, but V2 has NOT started. No verified render-ready plan or V2 render job exists. Continue the conversation to resolve remaining requirements.'):
       messages.length?'Feedback was saved. No verified Producer reply or V2 job yet.':
       'Review is held. No Producer activity or V2 render job is verified.';
     activity.append(heading,elem('p',summary,'rr-progress-summary'),rail);
@@ -324,6 +347,7 @@
     state.lastVerifiedSummary={outputId:entry.output_id,summary};
     if(topProgress){
       topProgress.hidden=false;
+      topProgress.classList.toggle('rr-progress-top--attention',requiresInput);
       topProgress.textContent=(entry.output_number?'#'+entry.output_number+' · ':'')+summary;
     }
   }
@@ -435,7 +459,7 @@
           prompt.append(list);activity.append(prompt);
         }
       }
-      appendRevisionProgress(activity,session,messages,producer,planReady,completedAttempt,entry);
+      appendRevisionProgress(activity,session,messages,producer,planReady,completedAttempt,entry,saved);
       detail.append(activity);
       if(messages.length){
         const history=elem('section',null,'rr-conversation-live');
