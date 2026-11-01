@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 80" role="img" aria-labelledby="title desc">
+  <title id="title">NEEDS ASSET</title>
+  <desc id="desc">Shared thumbnail placeholder for missing media assets</desc>
+  <rect width="64" height="80" rx="6" fill="#122846"/>
+  <rect x="5" y="5" width="54" height="70" rx="4" fill="none" stroke="#8ea8c7" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <rect x="18" y="15" width="28" height="25" rx="2" fill="none" stroke="#bad1e8" stroke-width="2"/>
+  <circle cx="37" cy="23" r="3" fill="#bad1e8"/>
+  <path d="m20 37 8-10 6 7 4-4 6 7" fill="none" stroke="#bad1e8" stroke-width="1.8" stroke-linejoin="round"/>
+  <text x="32" y="56" fill="#ffffff" font-family="Arial,sans-serif" font-size="10" font-weight="700" text-anchor="middle">NEEDS</text>
+  <text x="32" y="68" fill="#ffffff" font-family="Arial,sans-serif" font-size="10" font-weight="700" text-anchor="middle">ASSET</text>
+</svg>

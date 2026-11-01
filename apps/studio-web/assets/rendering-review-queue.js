@@ -8,6 +8,7 @@
   const nav = $('navRenderingReview');
   if (!root || !nav) return;
   const chicago = 'recT2rbKX3MF7cVFU';
+  const NEEDS_ASSET_THUMB = '/assets/needs-asset.svg';
   const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map(),pollTimer:null,activeEntry:null,lastReplyNotice:null,lastReplyNoticeNode:null,viewingVersion:null,approvalButton:null,approvalVersion:null,approvalLocks:new Set(),approvalKeys:new Map()};
   const list = $('rrQueueList'), detail = $('rrDetail'), status = $('rrStatus');
 
@@ -192,11 +193,24 @@
       const button=elem('button',null,'rr-entry');
       button.type='button';button.dataset.outputId=entry.output_id;
       button.setAttribute('aria-pressed',String(entry.output_id===state.selected));
-      button.append(elem('strong',entry.title||'Untitled Reel'),
+      const thumb = elem('span',null,'rr-entry-thumb');
+      const cover = elem('img');
+      const coverUrl = safeUrl(entry.thumbnail_url);
+      cover.loading='lazy';cover.decoding='async';
+      cover.alt=coverUrl?'':'NEEDS ASSET';
+      cover.src=coverUrl||NEEDS_ASSET_THUMB;
+      cover.addEventListener('error',()=>{
+        if(cover.getAttribute('src')===NEEDS_ASSET_THUMB)return;
+        cover.src=NEEDS_ASSET_THUMB;cover.alt='NEEDS ASSET';
+      });
+      thumb.append(cover);
+      const copy=elem('span',null,'rr-entry-body');
+      copy.append(elem('strong',entry.title||'Untitled Reel'),
         elem('span','Instagram Reel'+(entry.output_number?' · #'+entry.output_number:''),
           'rr-entry-meta'),
         elem('span',entry.review_held?'Review hold present':entry.dispatch_started?
           'Dispatch already started':'Completed render · review not started','rr-entry-meta'));
+      button.append(thumb,copy);
       button.addEventListener('click',()=>open(entry));
       list.append(button);
     }

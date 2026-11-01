@@ -53,7 +53,7 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
       limit:40,offset:cursor||null,
       filterFormula:'AND({Platform_Output_Type}="Instagram Reel",OR({Final_File_ID}!="",{Final_File_URL}!=""),OR({Studio_Render_Review_Hold_Active}=TRUE(),{Studio_Render_Review_Hold_ID}!="",{Studio_Render_Review_Session_ID}!=""))',
       fields:['Content_Item','Platform','Platform_Output_Type','Render_Status',
-        'Final_File_ID','Final_File_URL','Output_Title','Output_ID','Output_Status',
+        'Final_File_ID','Final_File_URL','Thumbnail_URL','Output_Title','Output_ID','Output_Status',
         'Publish_Status','Published_At','Platform_Post_ID','Platform_Post_URL',
         'Platform_Media_ID','Publish_Started_At',
         'Publish_Locked_At','Publish_Locked_By','Do_Not_Publish',
@@ -114,6 +114,7 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
         output_number:f.Output_ID||null,title:text(f.Output_Title)||('Output '+(f.Output_ID||row.id)),
         render_status:text(f.Render_Status),final_file_id:text(f.Final_File_ID)||null,
         final_file_url:text(f.Final_File_URL)||null,
+        thumbnail_url:text(f.Thumbnail_URL)||null,
         review_held:held,dispatch_started:Boolean(f.Publish_Started_At||f.Publish_Locked_At||f.Publish_Locked_By),
         manual_admission_enabled:false,
       });
