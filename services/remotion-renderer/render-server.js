@@ -9,6 +9,7 @@ const { spawn } = require('child_process');
 const { registerRemotionCleanup } = require('./remotion-cleanup');
 const { authoritativeRenderPlan } = require('./authoritative-duration');
 const { verifyFirstFrame } = require('./first-frame-verify');
+const {selectedVibeWatermarkFileId} = require('./profile-watermark-policy');
 
 const app = express();
 
@@ -1017,16 +1018,25 @@ async function rewriteVoiceoverAsset({ voiceover, jobAssetDir, job }) {
     throw new Error('Voiceover must include either src or url.');
 }
 
-async function rewriteWatermarkAsset({ watermarkUrl, jobAssetDir, job }) {
+async function rewriteWatermarkAsset({ watermarkUrl, jobAssetDir, job, studioRevision }) {
     const raw = String(watermarkUrl || '').trim();
-    if (!raw) return '';
+    // The protected Vibe Cut Runner must bind the exact owned profile PNG;
+    // even a valid Drive URL is not authority without an operator-managed
+    // profile->file mapping. Never silently substitute Chicago's watermark.
+    const reviewFileId = selectedVibeWatermarkFileId({
+        watermarkUrl: raw,
+        studioRevision,
+        profileWatermarksJson: process.env.REMOTION_REVIEW_PROFILE_WATERMARKS_JSON,
+    });
+    if (!raw && !reviewFileId) return '';
 
-    // ChicagoShining brand watermark is a single known Drive PNG. Never trust an
-    // arbitrary Drive id from props — R4/catalog have sent VO/music/clip ids and
-    // Remotion then saved ID3/MP4 bytes as watermark.png (CI 239–243).
+    // Original production retains the hard-pinned Chicago asset. Only the
+    // separately verified review flow can select an allowlisted city logo.
     const extractedId = googleDriveFileIdFromUrl(raw);
-    const driveFileId = CHICAGO_WATERMARK_DRIVE_FILE_ID;
-    if (extractedId && extractedId !== driveFileId) {
+    const driveFileId = reviewFileId || CHICAGO_WATERMARK_DRIVE_FILE_ID;
+    if (reviewFileId) {
+        appendLog(job, 'Using configured profile-owned Vibe review watermark');
+    } else if (extractedId && extractedId !== driveFileId) {
         appendLog(
             job,
             `Ignoring non-brand watermark Drive id ${extractedId}; using authority ${driveFileId}`
@@ -1175,6 +1185,7 @@ async function buildRewrittenProps({ body, jobId, job }) {
 
     const rewrittenWatermarkUrl = await rewriteWatermarkAsset({
         watermarkUrl: body.watermarkUrl,
+        studioRevision: body.studioRevision,
         jobAssetDir,
         job,
     });
