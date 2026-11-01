@@ -1,0 +1,1 @@
+2026-11-01. One-time read-only public health/status probe of four verified profile service URLs. No credentials.
