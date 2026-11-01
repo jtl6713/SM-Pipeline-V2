@@ -1410,53 +1410,63 @@
     const payload=pending?.payload||{};
     const id=String(payload.id||"");
     const requestId=String(payload.production_request_id||"");
-    if(payload.kind!=="output"||!/^rec[A-Za-z0-9]{14}$/.test(id)||
-       !/^rec[A-Za-z0-9]{14}$/.test(requestId))return;
+    if(payload.kind!=="output"||!/^rec[A-Za-z0-9]{14}$/.test(id))return;
     panel.hidden=false;
-    status.textContent="Checking source media and compatible outputs (read-only)…";
-    try {
-      const match=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
-        "/correction-matches?production_request_id="+encodeURIComponent(requestId));
-      if(state.pendingFactoryFeedback!==pending)return;
-      if(match?.source_output_id!==id||match?.production_request_id!==requestId)
-        throw new Error("Authoritative output identity changed");
-      const outputs=Array.isArray(match.matching_outputs)?match.matching_outputs:[];
-      status.textContent=outputs.length+" compatible output(s). "+
-        (match.batch_enabled===true
-          ? "Cross-output correction requires separate verified approval."
-          : "Protected batch correction is not enabled.");
-      for(const output of outputs.slice(0,40)){
-        const li=document.createElement("li");
-        li.textContent=[output.platform,output.output_type,
-          output.review_render_supported===true?"revision contract detected":
-          "revision unavailable: "+(output.review_render_reason||"unverified")]
-          .filter(Boolean).join(" · ");
-        rows.appendChild(li);
+    status.textContent="Checking compatible outputs and original source media (read-only)…";
+    const current=()=>state.pendingFactoryFeedback===pending;
+    // Separate requests: unavailable/unmapped Factory match information
+    // must NEVER suppress a legitimate photo/carousel source inventory.
+    const readMatches=async()=>{
+      if(!/^rec[A-Za-z0-9]{14}$/.test(requestId))
+        return "Compatible-output matching requires an exact Production Request.";
+      try{
+        const match=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
+          "/correction-matches?production_request_id="+encodeURIComponent(requestId));
+        if(!current())return "";
+        if(match?.source_output_id!==id||match?.production_request_id!==requestId||
+           match?.batch_enabled!==false)
+          throw new Error("Correction matching identity or disabled write gate could not be verified");
+        const outputs=Array.isArray(match.matching_outputs)?match.matching_outputs:[];
+        for(const output of outputs.slice(0,40)){
+          const li=document.createElement("li");
+          li.textContent=[output.platform,output.output_type,
+            output.review_render_supported===true?"render capability detected":
+              "revision unavailable: "+(output.review_render_reason||"unsupported")]
+              .filter(Boolean).join(" · ");
+          rows.appendChild(li);
+        }
+        return outputs.length+" compatible review-ready output(s). Batch correction remains disabled.";
+      }catch(error){
+        return "Compatible-output preview unavailable: "+String(error?.message||error)+".";
       }
-      const format=[match.render_format?.format,match.render_format?.output_type,
-        match.render_format?.pipeline_family].join(" ").toLowerCase();
-      if(!/(?:photo|image|carousel|gallery|picture)/.test(format))return;
-      const inventory=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+"/gallery-inventory");
-      if(state.pendingFactoryFeedback!==pending)return;
-      if(inventory?.output_id!==id||inventory?.can_generate!==false||
-         inventory?.publication_authorized!==false||
-         inventory?.source_kind!=="airtable_metadata_only")
-        throw new Error("Gallery source inventory evidence is not trustworthy");
-      const suffix=" Original slide metadata: "+inventory.slide_count+
-        " item(s); Google Drive/rights/brand verification still required.";
-      status.textContent+=suffix;
-      for(const slide of (inventory.slides||[]).slice(0,80)){
-        const li=document.createElement("li");
-        li.textContent="Slide "+slide.order+" · "+
-          (slide.blockers?.length?slide.blockers.join(", "):
-            "Airtable metadata present — media bytes not yet verified");
-        rows.appendChild(li);
+    };
+    const readGallery=async()=>{
+      try{
+        const inventory=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
+          "/gallery-inventory");
+        if(!current())return "";
+        if(inventory?.output_id!==id||inventory?.can_generate!==false||
+           inventory?.publication_authorized!==false||
+           inventory?.source_kind!=="airtable_metadata_only")
+          throw new Error("Original gallery source verification contract is unavailable");
+        for(const slide of (inventory.slides||[]).slice(0,80)){
+          const li=document.createElement("li");
+          li.textContent="Slide "+slide.order+" · "+
+            (slide.blockers?.length?slide.blockers.join(", "):
+             "Airtable source present; Drive rights/branding not yet verified");
+          rows.appendChild(li);
+        }
+        return "Original image inventory: "+inventory.slide_count+
+          " slide(s). Drive rights/branding verification is still required.";
+      }catch(error){
+        // The source is often video or an unpublished/non-gallery output;
+        // this cannot block sending normal Factory review comments.
+        return "Native image inventory not ready for this output.";
       }
-    } catch(error) {
-      if(state.pendingFactoryFeedback!==pending)return;
-      status.textContent="Source/compatibility preview unavailable: "+
-        String(error?.message||error)+". Existing single-content feedback is unchanged.";
-    }
+    };
+    const [matching,gallery]=await Promise.all([readMatches(),readGallery()]);
+    if(!current())return;
+    status.textContent=[matching,gallery].filter(Boolean).join(" ");
   }
 
   // Review feedback is entered before any state-changing request is sent.
