@@ -9,7 +9,7 @@ const last = app.indexOf('  $("scriptedShortRevise")?.addEventListener', first);
 assert.ok(first > 0 && last > first, "fallback helper methods should be available");
 const snippet = app.slice(first, last);
 const run = async (command, api = async () => ({ ok: true })) => {
-  const ctx = { URLSearchParams, api };
+  const ctx = { URLSearchParams, api, proposal, clip };
   vm.createContext(ctx);
   return vm.runInContext("(async()=>{" + snippet + "\n" + command + "})()", ctx);
 };
