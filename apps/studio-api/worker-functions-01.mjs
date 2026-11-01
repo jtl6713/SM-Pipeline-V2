@@ -1056,6 +1056,13 @@ export function studioInvalidateHotReads(env, tableId, method) {
   const verb = String(method || "GET").toUpperCase();
   if (verb === "GET" || verb === "HEAD") return;
   const id = String(tableId || "");
+  // Operations reads profile settings, output queues and media intake.
+  // Never serve a pre-write snapshot after an authoritative Airtable mutation.
+  if ([env?.AIRTABLE_OUTPUT_TABLE_ID, env?.AIRTABLE_MEDIA_TABLE_ID,
+       STUDIO_IDEA_PROFILE_TABLE_ID, STUDIO_PIPELINE_SETTINGS_TABLE_ID,
+       "Production Requests"].includes(id)) {
+    studioReadCacheDropPrefix("operations:");
+  }
   if (env?.AIRTABLE_OUTPUT_TABLE_ID && id === env.AIRTABLE_OUTPUT_TABLE_ID) {
     studioMarkMappedListDirty();
     studioReadCacheDropPrefix("outputs:");
