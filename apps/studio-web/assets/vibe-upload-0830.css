@@ -46,3 +46,41 @@
   #ezUploadZone #ezUploadTitle { font-size: 1rem; }
   #ezUploadZone #ezUploadHint { font-size: 0.86rem; }
 }
+
+/* Post-upload status is guidance, not a single ambiguous "processing" sentence. */
+#ezUploadProgress .vibe-upload-guidance,
+#item4UploadProgress .vibe-upload-guidance {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(91, 87, 28, 0.2);
+  text-align: left;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.vibe-upload-guidance-title {
+  font-weight: 750;
+  margin-bottom: 8px;
+}
+.vibe-upload-guidance-steps {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+.vibe-upload-guidance-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 5px 0;
+}
+.vibe-upload-guidance-steps li::before {
+  content: "○";
+  flex: 0 0 16px;
+  text-align: center;
+  color: #6d706e;
+  font-weight: 750;
+}
+.vibe-upload-guidance-steps li[data-state="done"]::before { content: "✓"; color: #207044; }
+.vibe-upload-guidance-steps li[data-state="active"]::before { content: "●"; color: #9b6c09; }
+.vibe-upload-guidance p { margin: 8px 0 0; }
+.vibe-upload-guidance p strong { display: inline; font-weight: 750; }
