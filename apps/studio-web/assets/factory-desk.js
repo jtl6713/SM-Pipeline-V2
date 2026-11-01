@@ -1575,7 +1575,7 @@
         const group = checkbox.closest(".factory-content-rows")?.previousElementSibling;
         const groupBox = group?.querySelector("[data-factory-select-content]");
         if (groupBox) {
-          const ids = [...checkbox.closest(".factory-content-rows").querySelectorAll("[data-factory-select-output]")];
+          const ids = [...checkbox.closest(".factory-content-rows").querySelectorAll("[data-factory-select-output]:not(:disabled)")];
           groupBox.checked = ids.length > 0 && ids.every((input) => input.checked);
           groupBox.indeterminate = ids.some((input) => input.checked) && !groupBox.checked;
         }
@@ -1592,7 +1592,7 @@
         saveFactorySelection();
         updateFactoryBatchToolbar();
         const rows = checkbox.closest(".factory-content-bar")?.nextElementSibling;
-        rows?.querySelectorAll("[data-factory-select-output]").forEach((input) => { input.checked = checkbox.checked; });
+        rows?.querySelectorAll("[data-factory-select-output]:not(:disabled)").forEach((input) => { input.checked = checkbox.checked; });
         checkbox.indeterminate = false;
       });
     });
