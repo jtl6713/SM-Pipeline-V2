@@ -4,9 +4,9 @@ import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 
 const source = readStudioWorkerSource();
 const section = (name, next) => {
-  const start = source.indexOf("export async function " + name + "(");
+  const start = source.indexOf("async function " + name + "(");
   assert.notEqual(start, -1, name + " missing");
-  return source.slice(start, next ? source.indexOf("export async function " + next + "(", start + 1) : start + 7000);
+  return source.slice(start, next ? source.indexOf("async function " + next + "(", start + 1) : start + 7000);
 };
 
 test("manual I1 opts into persistent runner before legacy waitUntil", () => {
