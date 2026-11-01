@@ -752,6 +752,31 @@ jobs:
             echo "michigan_v2_preview=PASS output=$id bytes=46824860"
           done
 
+      - name: Verify Michigan Avenue held review visibility across all six Factory cards
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
+          TOKEN=$(cat /tmp/verify-token.txt)
+          URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/factory-desk"
+          curl -fsS --max-time 90 "$URL" -o /tmp/factory-michigan-visibility.json
+          jq -e '
+            .ok==true and .read_source=="airtable" and
+            ([.lanes.needs_eyes[] | select(.content_item_id=="recYhIjy4BW0U3WaW")] | length)==6 and
+            ([.lanes.needs_eyes[] | select(
+              .id=="recPnNYghmcJYivOA" and .review_hold_active==true and
+              .do_not_publish==true and .can_preview==true and
+              .output_status=="Ready for Review")] | length)==1 and
+            (["recyYKgkfRksIZPun","rec8JDQW2Jilnzc9u","recgJR5bTcYfCCwAL","recqw7DTgYsqYkl51","recZ1X5QfeFZTot1F"] -
+             [.lanes.needs_eyes[] | select(.output_status=="Ready for Review" and
+               .publish_status=="Not Ready") | .id] | length)==0
+          ' /tmp/factory-michigan-visibility.json >/dev/null || {
+            echo "Michigan V2 not fully discoverable in the authenticated Factory Needs Eyes queue" >&2
+            jq -c '{read_source,matching:[.lanes.needs_eyes[]|select(.content_item_id=="recYhIjy4BW0U3WaW")|{id,review_hold_active,do_not_publish,output_status,publish_status}]}' /tmp/factory-michigan-visibility.json >&2
+            exit 1
+          }
+          echo "michigan_factory_needs_eyes=PASS six_of_six including preview-only held source"
+
       - name: Verify authoritative All Profiles force refresh through service binding
         shell: bash
         run: |
