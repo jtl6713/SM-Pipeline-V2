@@ -29,6 +29,10 @@ _LOCK = threading.Lock()
 _STARTED = False
 
 
+class TerminalBatchMismatch(RuntimeError):
+    """Operator reconciliation required: do not modify an existing terminal batch."""
+
+
 def enabled() -> bool:
     return os.environ.get("I1_DURABLE_ENABLED", "").lower() in {"1", "true"}
 
@@ -189,9 +193,10 @@ def _work(job: dict) -> None:
         # A completed batch is immutable; do not downgrade it to Failed even
         # if its linked-record count later changes or a stale lease is reclaimed.
         if str(fields.get("Status") or "") in {"Failed", "Complete"} and existing < expected:
-            _LOG.error("I1 terminal batch requires manual reconciliation batch=%s state=%s linked=%s expected=%s",
-                       batch_id, fields.get("Status"), existing, expected)
-            return
+            raise TerminalBatchMismatch(
+                f"Terminal batch {fields.get('Status')} has {existing}/{expected} linked ideas; "
+                "manual reconciliation required"
+            )
         if existing >= expected:
             client.update_record(IDEA_BATCHES_TABLE, batch_id, {
                 "Status": "Complete", "Generated_Count": existing,
@@ -236,6 +241,10 @@ def _work(job: dict) -> None:
         }, typecast=True)
     except Exception as exc:
         _LOG.exception("I1 durable job failed batch=%s", batch_id)
+        if isinstance(exc, TerminalBatchMismatch):
+            # Do not downgrade, clear, or overwrite the authority's terminal
+            # record merely because this ledger was replayed.
+            raise
         try:
             batch = client.get_record(IDEA_BATCHES_TABLE, batch_id)
             actual = _linked_idea_count(batch)
