@@ -6665,6 +6665,23 @@ function timedScriptAssetLabel(asset, index) {
         count: "1 of 1 ready.",
       };
     }
+    // Once the backend confirms upload, old browser-phase messages are not authoritative.
+    if (source && (item4WorkspaceCompressionFailed(status) || String(status?.assets_status || "") === "Error")) {
+      return {
+        heal: "error",
+        title: `Studio could not prepare ${fileName}.`,
+        body: String(source.compression_error || "Video preparation failed. The saved upload is preserved; review the error before retrying.").trim(),
+        count: "1 of 1 uploaded · 0 ready.",
+      };
+    }
+    if (vibeCutServerUploadComplete(source)) {
+      return {
+        heal: "uploading",
+        title: `Upload complete — preparing ${fileName}.`,
+        body: vibeCutServerPreparationDetail(status),
+        count: "1 of 1 uploaded · 0 ready.",
+      };
+    }
     const phase = String(vibeUploadUi.phase || "idle");
     if (phase === "idle" && !source) return null;
     if (phase === "failed") {
