@@ -126,5 +126,6 @@ test("queue remains one asset at a time with real result counts and no implicit 
     assert.match(html,new RegExp('id="' + id + '"'));
   }
   assert.match(css,/#libraryUploadProgress/);
-  assert.match(html,/UI build 0\.6\.832/);
+  const release = html.match(/UI build 0\.6\.(\d+)/);
+  assert.ok(release && Number(release[1]) >= 832, "Asset Manager progress needs UI 0.6.832 or newer");
 });
