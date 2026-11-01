@@ -1,4 +1,4 @@
-/* Chicago Rendering Review: authenticated, exact-output media and review.
+/* Chicago Post Production Edits: authenticated, exact-output media and review.
  * Preview never claims a hold or bypasses publication safeguards.
  */
 (() => {
@@ -40,7 +40,7 @@
     });
     const body = await response.json().catch(()=>({}));
     if(!response.ok || body.ok!==true){
-      const error = new Error(body.error||body.message||'Rendering Review request failed ('+response.status+')');
+      const error = new Error(body.error||body.message||'Post Production Edits request failed ('+response.status+')');
       error.status=response.status;throw error;
     }
     return body;
@@ -59,7 +59,7 @@
     if(!response.ok||result.ok!==true){
       const detail=typeof result.error==='string'&&result.error.trim()?result.error:
         typeof result.message==='string'&&result.message.trim()?result.message:
-        'Rendering Review request failed ('+response.status+')';
+        'Post Production Edits request failed ('+response.status+')';
       const error=new Error(detail);
       error.status=response.status;throw error;
     }
@@ -758,7 +758,7 @@
       if(data.flags?.automatic_sampling_percent!==0 ||
          typeof data.flags?.admission_enabled!=='boolean' ||
          typeof data.flags?.producer_conversation_enabled!=='boolean')
-        throw new Error('Unsafe Rendering Review feature configuration; rendering queue withheld');
+        throw new Error('Unsafe Post Production Edits feature configuration; rendering queue withheld');
       state.flags=data.flags;
       if(!next)state.records=[];
       const previousIds=new Set(state.records.map(v=>v.output_id));
@@ -773,7 +773,7 @@
       renderList();
       if(!state.selected && state.records.length)open(state.records[0]);
     }catch(error){
-      say(error.message||'Rendering Review is unavailable',true);
+      say(error.message||'Post Production Edits is unavailable',true);
       if(!next){state.records=[];state.cursor=null;clearMedia();renderList();}
     }finally{
       state.busy=false;refresh.disabled=false;more.disabled=!state.cursor;
@@ -807,7 +807,7 @@
     if(root.classList.contains('active'))await load(false);
     const entry=state.records.find(v=>v.output_id===outputId);
     if(entry)await open(entry);
-    else say("Rendering Review opened. Refresh to find the saved revision.",true);
+    else say("Post Production Edits opened. Refresh to find the saved revision.",true);
   }
   window.StudioRenderingReview={load,openOutputById};
 })();
