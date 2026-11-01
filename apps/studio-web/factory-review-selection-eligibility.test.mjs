@@ -68,7 +68,7 @@ test("Chicago Reel #9593: review-ready output has an enabled selectable checkbox
 test("Review hold, failed render and not-ready Airtable state show disabled selection and Approve", () => {
   const { renderCard } = setup();
   const cases = [
-    [{review_hold_active:true}, /Review-held revision/],
+    [{review_hold_active:true}, /Publishing approval is held/],
     [{do_not_publish:true}, /Publishing hold/],
     [{render_status:"Failed"}, /Render status is Failed/],
     [{output_status:"In Production"}, /Airtable Output Status is In Production/],
@@ -82,6 +82,16 @@ test("Review hold, failed render and not-ready Airtable state show disabled sele
     assert.match(html, /class="factory-batch-unavailable" role="status"/);
     assert.match(html, /data-factory-send-back="recMichigan9593"/);
   }
+});
+test("held, not-publishable V2 can receive an independent creative-only Factory action",()=>{
+  const {renderCard}=setup();
+  const html=renderCard({...chicagoReel,review_hold_active:true,
+    do_not_publish:true},{lane:"needs_eyes"});
+  assert.match(html,/data-factory-approve="recMichigan9593" disabled/);
+  assert.match(html,/data-factory-accept-held="recMichigan9593"/);
+  assert.match(html,/Accept V2 \(QA hold\)/);
+  assert.match(html,/Publishing approval held:/);
+  assert.match(selectionTag(html),/\bdisabled\b/);
 });
 test("incomplete review package never offers a live Approve action", () => {
   const { renderCard } = setup();
@@ -131,7 +141,7 @@ test("Held #9593 explains the blocked checkbox directly beneath Output #, above 
   const actions = html.indexOf('class="factory-line-actions"');
   assert.ok(title >= 0 && reason > title && reason < profile && profile < actions,
     "Hold explanation must be near the title, not beyond the action buttons and fixed mobile footer");
-  assert.ok(html.includes("Approval unavailable:</strong> Review-held revision:"));
+  assert.ok(html.includes("Publishing approval held:</strong> Publishing approval is held for media QA."));
   assert.match(selectionTag(html), /aria-describedby="factory-batch-reason-recMichigan9593"/);
   assert.match(html, /id="factory-batch-reason-recMichigan9593"/);
   assert.equal((html.match(/class="factory-batch-unavailable"/g)||[]).length,1,
