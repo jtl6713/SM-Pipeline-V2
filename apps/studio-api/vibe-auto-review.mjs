@@ -1,4 +1,4 @@
-import { isVibeCutNotes, validateVibeCutSourceAssets } from "./vibe-cut.mjs";
+import { isVibeCutNotes, parseVibeCutDirective, validateVibeCutSourceAssets } from "./vibe-cut.mjs";
 
 /**
  * An explicitly uploaded Vibe Cut may proceed automatically to human review
@@ -7,7 +7,7 @@ import { isVibeCutNotes, validateVibeCutSourceAssets } from "./vibe-cut.mjs";
  */
 export function vibeAutoReviewVerifiedSource({ notes = "", assets = [], masterStatus = "", masterCount = 0 } = {}) {
   const text = String(notes || "");
-  if (!isVibeCutNotes(text) || !/\bez-input=vibe-cut\b/i.test(text)) return false;
+  if (!isVibeCutNotes(text) || !/\bez-input=vibe-cut\b/i.test(text) || !parseVibeCutDirective(text)) return false;
   if (String(masterStatus || "").trim() !== "Ready" || Number(masterCount) !== 1) return false;
   if (!Array.isArray(assets) || assets.length !== 1) return false;
   const source = assets[0] || {};
