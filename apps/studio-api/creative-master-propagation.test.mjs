@@ -32,6 +32,7 @@ function row(id,platform,format="Vertical Short Video",props={}){
     Output_Caption:"Caption for "+platform,Hashtags:"#city",
     Studio_Preview_URL:"https://cdn.example/stale.mp4",
     Studio_Preview_R2_Key:"old_preview.mp4",
+    Render_Server_URL:"https://render.chicagoshining.com/out/stale-original.mp4",
     Publish_Asset_URL:"https://cdn.example/stale-public.mp4",
     ...props}};
 }
