@@ -168,6 +168,7 @@
   function canReviewActions(card, { pile = false, candidate = false } = {}) {
     if (pile || candidate || state.submittingOutputIds?.has(card?.id) || recentFactoryAccepted()[String(card?.id || "")]) return false;
     if (card?.kind !== "output") return false;
+    if (card.review_package_ready === false) return false;
     // Held revisions must be discoverable and previewable, never approvable
     // from Factory until their separate review and QA handoff completes.
     if (card.review_hold_active === true || card.do_not_publish === true) return false;
@@ -1030,6 +1031,9 @@
   // instead of silently omitting the checkbox while leaving Approve active.
   function factoryBatchSelectionReason(card) {
     if (card?.kind !== "output") return "Only platform outputs can be batch approved.";
+    if (card.review_package_ready === false) {
+      return "Review package incomplete: " + ((card.review_package_missing || []).join(", ") || card.review_package_reason || "required assets not verified");
+    }
     if (recentFactoryAccepted()[String(card?.id || "")]) return "Already accepted for approval. Refresh Activity to verify the result.";
     if (state.submittingOutputIds?.has(card?.id)) return "Approval is already being submitted. Check Activity.";
     if (card?.review_hold_active === true) return "Review-held revision: complete QA handoff before approval.";
@@ -1095,7 +1099,10 @@
       ? `<span class="factory-output-visual">${media}<small class="factory-output-visual-label">${hasSharedCover ? "Shared cover" : (thumb ? "Output image" : "Needs asset")}</small></span>`
       : media;
     const alert = card.stuck_kind || card.produce_error || "";
-    const stateLabel = card.studio_state || (alert ? "Needs repair" : "—");
+    const stateLabel = card.review_package_ready === false
+      ? (card.review_package_readiness === "IN_PROGRESS" ? "Preparing Assets" : "Review blocked")
+      : (card.studio_state || (alert ? "Needs repair" : "—"));
+    const reviewReason = (card.review_package_missing || []).join(", ") || card.review_package_reason || "";
     const cell = (value) => `<span class="factory-line-cell">${esc(value || "—")}</span>`;
     return `<div class="factory-line" data-factory-id="${esc(card.id)}" data-factory-kind="${esc(card.kind || "")}" data-lane="${esc(lane)}" title="${esc(cardLabel(card))}">
       ${needsEyesOutput
@@ -1110,7 +1117,7 @@
       ${cell(card.profile_name)}
       ${cell(card.platform)}
       ${cell(card.studio_output_type)}
-      <span class="factory-line-cell factory-line-state"${alert ? ` title="${esc(alert)}"` : ""}>${esc(stateLabel)}</span>
+      <span class="factory-line-cell factory-line-state"${alert || reviewReason ? ` title="${esc([alert, reviewReason].filter(Boolean).join("; "))}"` : ""}>${esc(stateLabel)}</span>
       <div class="factory-line-actions">${actions.join("")}</div>
     </div>`;
   }
