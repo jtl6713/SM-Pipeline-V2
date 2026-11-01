@@ -331,6 +331,22 @@ export function applyReviewEvent(session, event) {
     // orchestrator must retain the durable hold until a separate scheduler-authorized release.
     s.approved_attempt_id = s.current_attempt_id;
     s.state = "approved";
+  } else if (kind === "FACTORY_ACCEPT_HELD_CREATIVE") {
+    // Human Factory acceptance is NOT approval for publishing. An unverified
+    // watermark cannot prevent a reviewer from accepting the creative cut.
+    // Keep the owned publication hold, original delivery status, and media.
+    const attempt=current(s);
+    if(s.state!=="approved"||s.review_hold.active!==true||
+       s.current_attempt_id!==s.approved_attempt_id||
+       !attempt||attempt.number<2||attempt.status!=="ready_for_review"||
+       event.attempt_id!==attempt.id||event.artifact_id!==attempt.artifact_id||
+       event.hold_id!==s.review_hold.id||event.hold_owner!==s.id||
+       s.active_job||s.factory_review?.status==="accepted_pending_qa")
+      fail("FACTORY_HELD_CREATIVE_NOT_ELIGIBLE",
+        "Only the current creatively approved and publication-held V2 may receive a Factory creative decision");
+    s.factory_review={status:"accepted_pending_qa",
+      attempt_id:attempt.id,artifact_id:attempt.artifact_id,
+      at:text(event.at),publishing_authorized:false};
   } else if (kind === "REOPEN_APPROVED_HELD_REDO") {
     // Creative work is independent of delivery QA. In particular, a missing
     // watermark must never prevent the reviewer from asking for another V2/V3.
@@ -349,6 +365,7 @@ export function applyReviewEvent(session, event) {
     s.messages.push({id:event.message_id,role:"user",content:text(event.note),
       at:text(event.at),attempt_id:attempt.id,timestamp_seconds:null});
     s.approved_attempt_id=null;
+    s.factory_review=null;
     s.producer_candidate=null;
     s.plan=null;
     s.pending_authorization=null;
