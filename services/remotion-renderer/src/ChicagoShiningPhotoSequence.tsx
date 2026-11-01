@@ -16,6 +16,7 @@ import {
   linearTiming,
   useTransitionProgress,
 } from "@remotion/transitions";
+import {clipFrameDurations} from "./vibe-review-timing";
 import {fade} from "@remotion/transitions/fade";
 import {slide} from "@remotion/transitions/slide";
 
@@ -176,6 +177,7 @@ export type ChicagoShiningPhotoClip = {
 };
 
 export type ChicagoShiningPhotoSequenceProps = {
+  studioRevision?: {source?: string};
   clips: ChicagoShiningPhotoClip[];
   transitionFrames?: number;
   endHoldFrames?: number;
@@ -1348,6 +1350,7 @@ React.FC<ChicagoShiningPhotoSequenceProps> = ({
   brandText = "",
   watermarkUrl = "",
   watermarkRequired = false,
+  studioRevision,
 }) => {
   const {fps} = useVideoConfig();
 
@@ -1400,12 +1403,9 @@ React.FC<ChicagoShiningPhotoSequenceProps> = ({
       clampNumber(music?.fadeOutFrames, 0, fps * 5, fps * 0.5),
     ),
   );
-  const baseDurations = safeClips.map((clip) => {
-    const requested = Number(clip.durationFrames);
-    return Number.isFinite(requested)
-      ? Math.max(fps, Math.round(requested))
-      : fps * 3;
-  });
+  // Same duration policy as Root.calculateMetadata: never stretch a
+  // six-frame music beat cut into a full second. Normal posts are unchanged.
+  const baseDurations = clipFrameDurations(safeClips, fps, studioRevision);
 
   const normalizedEndHoldFrames = Math.max(0, Math.round(endHoldFrames));
   const contentDurations = baseDurations.map((duration, index) =>
