@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - "deploy/i1-durable-runner-release.txt"
+      - ".github/workflows/i1-durable-storage-provision.yml"
 permissions:
   contents: read
 jobs:
@@ -26,15 +27,31 @@ jobs:
           New-Item -ItemType Directory -Path $dir -Force | Out-Null
           if (-not (Test-Path $dir -PathType Container)) { throw 'i1_storage_dir_missing' }
           $probe=Join-Path $dir ('i1-sqlite-probe-'+[guid]::NewGuid().ToString('N')+'.sqlite3')
+          $probeScript=Join-Path $env:TEMP ('i1-sqlite-verify-'+[guid]::NewGuid().ToString('N')+'.py')
           try {
             $env:I1_SQLITE_PROBE=$probe
-            python -c 'import os,sqlite3; p=os.environ["I1_SQLITE_PROBE"]; c=sqlite3.connect(p); c.execute("CREATE TABLE evidence(x INTEGER PRIMARY KEY)"); c.execute("INSERT INTO evidence VALUES(7)"); c.commit(); c.close(); c=sqlite3.connect(p); assert c.execute("SELECT x FROM evidence").fetchone()[0]==7; c.close()'
+            $py=@'
+          import os
+          import sqlite3
+          path=os.environ["I1_SQLITE_PROBE"]
+          conn=sqlite3.connect(path)
+          conn.execute("CREATE TABLE evidence(x INTEGER PRIMARY KEY)")
+          conn.execute("INSERT INTO evidence VALUES(7)")
+          conn.commit()
+          conn.close()
+          conn=sqlite3.connect(path)
+          assert conn.execute("SELECT x FROM evidence").fetchone()[0] == 7
+          conn.close()
+          '@
+            [IO.File]::WriteAllText($probeScript,$py,(New-Object System.Text.UTF8Encoding($false)))
+            & python $probeScript
             if ($LASTEXITCODE -ne 0) { throw 'sqlite_persistent_roundtrip_failed' }
             Write-Output 'i1_storage_directory=provisioned'
             Write-Output 'i1_sqlite_roundtrip=PASS'
             Write-Output 'i1_durable_activation=NOT_ENABLED'
           }
           finally {
+            Remove-Item -Path $probeScript -Force -ErrorAction SilentlyContinue
             Remove-Item -Path $probe -Force -ErrorAction SilentlyContinue
             Remove-Item -Path ($probe+'-wal') -Force -ErrorAction SilentlyContinue
             Remove-Item -Path ($probe+'-shm') -Force -ErrorAction SilentlyContinue
