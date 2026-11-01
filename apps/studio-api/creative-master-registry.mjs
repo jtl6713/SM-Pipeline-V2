@@ -1,4 +1,5 @@
 /** Dynamic, content-owned creative master. Never authorizes publication or rewrites sibling assets. */
+import {watermarkReviewReceipt} from "./rendering-review-watermark-qa.mjs";
 const rec=/^rec[A-Za-z0-9]{14}$/;
 const file=/^[A-Za-z0-9_-]{20,}$/;
 const sha=/^[a-f0-9]{64}$/;
@@ -139,7 +140,7 @@ export function nextApprovedCreativeMaster({source,content,attempt,session,evide
   if(!held&&!transferred)fail("CREATIVE_MASTER_HOLD_OR_HANDOFF_UNVERIFIED");
   if(attempt.status!=="ready_for_review"||!file.test(attempt.artifact_id||"")||
     !sha.test(evidence?.sha256||"")||evidence?.audio_verified!==true||
-    evidence?.watermark_verified!==true||evidence?.google_drive_verified!==true||
+    !watermarkReviewReceipt(evidence,session,attempt)||evidence?.google_drive_verified!==true||
     evidence?.google_drive_mime_type!=="video/mp4"||
     evidence?.mime_type!=="video/mp4"||
     !Number.isSafeInteger(evidence?.byte_count)||evidence.byte_count<100000)
