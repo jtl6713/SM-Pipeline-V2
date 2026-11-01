@@ -38,8 +38,8 @@ export function videoMasterTargetCompatible({masterFormat,masterAspectRatio,
   return norm(contentType)==="vertical short video" &&
     norm(masterFormat)==="vertical short video" &&
     norm(targetFormat)==="story" &&
-    norm(masterAspectRatio).replace(/\\s/g,"")===norm(targetAspectRatio).replace(/\\s/g,"") &&
-    /\\.mp4$/i.test(String(targetFileName||"").trim());
+    masterKey.split("|")[1]===targetKey.split("|")[1] &&
+    String(targetFileName||"").trim().toLowerCase().endsWith(".mp4");
 }
 
 /** Resolve only a uniquely compatible, already-approved creative master. */
