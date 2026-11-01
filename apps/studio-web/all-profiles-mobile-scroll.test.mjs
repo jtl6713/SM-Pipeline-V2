@@ -27,3 +27,16 @@ test("cached snapshots and automatic 12-second polling stay intact", () => {
   assert.match(source, /function refreshMatchesSnapshot/);
   assert.match(source, /function overviewViewActive/);
 });
+
+test("pipeline total is the first metric column and uses the same style as platforms", () => {
+  const profileHeader = source.indexOf('>Profile</th>');
+  const totalHeader = source.indexOf('>Pipeline · Total</th>');
+  const platformGroup = source.indexOf('>Future + Review platform outputs</th>');
+  assert.ok(profileHeader >= 0 && profileHeader < totalHeader && totalHeader < platformGroup);
+  const totalCell = '<td data-label="Pipeline total">${calendar.pipelineTotal}</td>';
+  const platformCells = '${platformOrder.map((p) => `<td data-label="${p} future and review outputs">';
+  const totalPosition = source.indexOf(totalCell);
+  const platformPosition = source.indexOf(platformCells);
+  assert.ok(totalPosition >= 0 && platformPosition > totalPosition);
+  assert.doesNotMatch(source, /<td data-label="Pipeline total" class="overview-tone-ok">/);
+});
