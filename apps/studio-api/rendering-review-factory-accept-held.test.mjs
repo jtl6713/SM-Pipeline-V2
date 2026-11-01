@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {acceptFactoryHeldCreative} from "./rendering-review-factory-accept-held.mjs";
-import {REVIEW_SCHEMA,CHICAGO_PROFILE_ID,reviewDispatchGate} from "./rendering-review-policy.mjs";
+import {REVIEW_SCHEMA,CHICAGO_PROFILE_ID,reviewDispatchGate,applyReviewEvent} from "./rendering-review-policy.mjs";
 
 const outputId="recPnNYghmcJYivOA";
 const actor="recABCDEFGHIJKLMN";
@@ -98,4 +98,36 @@ test("held acceptance requires current creative approval, exact actor and versio
   await assert.rejects(acceptFactoryHeldCreative(args(f.o)),
     e=>e.code==="FACTORY_CREATIVE_NOT_HELD");
   assert.equal(f.writes,0);
+});
+
+test("Factory QA resolution replaces pending label without erasing human acceptance",async()=>{
+  const f=fixture();await acceptFactoryHeldCreative(args(f.o));
+  const accepted=f.session;
+  const next=applyReviewEvent(accepted,{
+    type:"FACTORY_HANDOFF",expected_version:accepted.version,
+    attempt_id:attemptId,artifact_id:file,original_artifact_id:source,
+    factory_receipt_verified:true,hold_id:hid,hold_owner:sid,
+    idempotency_key:"rrfactoryhand_9593",fingerprint:"rrfactoryhand_9593",
+    at:"2026-11-02T10:00:00Z",
+  }).session;
+  assert.equal(next.factory_review.status,"handoff_verified");
+  assert.equal(next.factory_review.publishing_authorized,false);
+  assert.equal(next.review_hold.active,false);
+  assert.equal(next.factory_handoff.status,"ready_for_factory_approval");
+});
+test("requesting another creative redo invalidates the prior Factory human acceptance",async()=>{
+  const f=fixture();await acceptFactoryHeldCreative(args(f.o));
+  const before=f.session;
+  const next=applyReviewEvent(before,{
+    type:"REOPEN_APPROVED_HELD_REDO",expected_version:before.version,
+    attempt_id:attemptId,artifact_id:file,
+    hold_id:hid,hold_owner:sid,
+    message_id:"rr_factory_redo_9593_note",note:"Please remove the phone glance.",
+    idempotency_key:"rr_factory_redo_9593",fingerprint:"rr_factory_redo_9593",
+    at:"2026-11-02T10:05:00Z",
+  }).session;
+  assert.equal(next.factory_review,null);
+  assert.equal(next.state,"discussing");
+  assert.equal(next.review_hold.active,true);
+  assert.equal(next.approved_attempt_id,null);
 });
