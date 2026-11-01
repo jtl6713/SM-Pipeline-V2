@@ -140,3 +140,38 @@ test("processing alone never triggers an upload retry countdown or false Clip sa
   assert.doesNotMatch(strip, /"Clip saved"/);
   assert.match(strip, /"Upload not confirmed"/);
 });
+
+test("Vibe Cut sends source segments immediately after draft creation instead of loading extra screens first", () => {
+  const flow = section("async function startEzProduction(", "function bindEzWizard(");
+  const draft = flow.indexOf("const created = await createEzProductionRequest(");
+  const upload = flow.indexOf("const uploadResult = await uploadItem4Files(nextFiles");
+  const slowReads = flow.indexOf("await loadProductionRequestOutputs(created.record)");
+  assert.ok(draft >= 0 && upload > draft && slowReads > upload, "upload must precede secondary Studio reads");
+  assert.match(flow, /if \(!ezIsVibeCut\(\)\) await ensureProductionRequestMusic\(\)/);
+  assert.match(flow, /return true;\s*}\s*if \(ezIsAzFinishedPath\(\)\)/);
+});
+
+test("580 MB upload explains zero segments before transfer and keeps exact completed segment counts", async () => {
+  const h = harness();
+  await h.run();
+  const setup = h.progress.find(p => p.stage === "preparing");
+  assert.equal(setup.doneParts, 0);
+  assert.equal(setup.totalParts, 37);
+  assert.ok(h.progress.some(p => p.doneParts === 18 && p.totalParts === 37));
+  assert.equal(h.progress.at(-1).doneParts, 37);
+});
+
+test("Vibe upload badge uses separate lines, a progress bar and honest source placeholders", () => {
+  const markup = section("function updateItem4MasterProgress(", "function mergeItem4WorkspaceStatus(");
+  assert.match(markup, /item4-upload-meter/);
+  assert.match(markup, /<\/span>\$\{countHtml}/);
+  const placeholder = section("function item4AssetPlaceholder(", "function item4AssetThumb(");
+  assert.doesNotMatch(placeholder, /"Clip saved"/);
+  assert.match(placeholder, /Video not uploaded/);
+  const uploader = section("async function uploadItem4Files(", "const item4PendingRemoves =");
+  assert.match(uploader, /segments uploaded/);
+  assert.match(uploader, /MB transferred/);
+  const css = fs.readFileSync(new URL("./assets/production-progress-0601.css", import.meta.url), "utf8");
+  assert.match(css, /#ezUploadZone > div:nth-child\(4\)/);
+  assert.match(css, /#ezUploadHint/);
+});
