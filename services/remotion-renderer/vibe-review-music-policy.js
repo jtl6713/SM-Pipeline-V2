@@ -51,4 +51,32 @@ function vibeReviewAudioExtension(buffer, byteCount) {
   throw new Error("vibe_review_music_not_audio");
 }
 
-module.exports = {vibeReviewMusicFileId, vibeReviewAudioExtension};
+/**
+ * ffprobe stream evidence after private download. An ftyp container may be
+ * a video MP4 rather than music, and MP3 magic bytes may be spoofed. Reject
+ * any video track and missing/invalid duration even if the header looks audio.
+ */
+function verifyVibeReviewMusicStreams(probe) {
+  if (!probe || typeof probe !== "object" || !Array.isArray(probe.streams) ||
+      probe.streams.length < 1 || probe.streams.length > 8 ||
+      !probe.format || typeof probe.format !== "object") {
+    throw new Error("vibe_review_music_probe_unverified");
+  }
+  const audio = probe.streams.filter(s => s?.codec_type === "audio");
+  if (audio.length !== 1 || probe.streams.some(s =>
+       s?.codec_type === "video" || s?.codec_type === "subtitle" ||
+       s?.codec_type === "data") ||
+      probe.streams.some(s => s?.codec_type !== "audio" &&
+        s?.codec_type !== "attachment") ||
+      typeof audio[0].codec_name !== "string" ||
+      !/^[a-z0-9_]{2,30}$/.test(audio[0].codec_name)) {
+    throw new Error("vibe_review_music_not_audio_only");
+  }
+  const duration = Number(probe.format.duration || audio[0].duration);
+  if (!Number.isFinite(duration) || duration < 0.25 || duration > 3600) {
+    throw new Error("vibe_review_music_duration_unverified");
+  }
+  return {duration_seconds: duration, codec: audio[0].codec_name};
+}
+
+module.exports = {vibeReviewMusicFileId, vibeReviewAudioExtension, verifyVibeReviewMusicStreams};
