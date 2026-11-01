@@ -82,7 +82,12 @@ export function evaluateReviewPackage(record, { validatedAt = new Date().toISOSt
         missing.push("Selected_Assets_JSON validation");
       }
     } else if (!slideCount) {
-      missing.push("Selected_Assets_JSON or Carousel Slides");
+      // The Supabase Factory mirror omits linked Carousel Slides. Its existing
+      // RFR marker + counted native selection + public CDN preview/cover are a
+      // compact projection, not a verified full record. Every approval reloads
+      // canonical Airtable and validates the full package + public HTTP bytes.
+      if (status !== "ready for review" || !count) missing.push("Selected_Assets_JSON or Carousel Slides");
+      else evidence.push("compact_status_and_selected_count:" + count);
     } else {
       evidence.push("compact_linked_slides:" + slideCount);
     }
