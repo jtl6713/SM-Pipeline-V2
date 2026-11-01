@@ -66,7 +66,8 @@ async function sourceReceipt({output,session,readField,output_id,loadCompletedAt
        !Number.isSafeInteger(proof?.byte_count)||proof.byte_count<100000||
        proof.mime_type!=="video/mp4"||
        proof.width!==1080||proof.height!==1920||
-       proof.audio_verified!==true||proof.watermark_verified!==true||
+       proof.audio_verified!==true||
+       // Creative redo may reuse a held V2 with pending watermark QA.
        proof.google_drive_verified!==true)
       fail("REVIEW_SOURCE_NOT_VERIFIED","Source revision differs from the validated Drive attempt");
     fileId=attempt.artifact_id;

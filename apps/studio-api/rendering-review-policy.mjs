@@ -138,6 +138,11 @@ export function applyReviewEvent(session, event) {
   if (kind === "MESSAGE") {
     if (s.state === "cancelled" || s.state === "approved")
       fail("SESSION_CLOSED", "This review is no longer open");
+    // A separately authorized in-flight note is for the NEXT revision only.
+    // Never let a stale request alter a finished job or a new frozen plan.
+    if (event.in_flight_only === true &&
+        (!inProgress.has(s.state) || !s.review_hold.active || !s.active_job?.id))
+      fail("IN_FLIGHT_FEEDBACK_NOT_ALLOWED", "This render has advanced. Refresh before commenting",409);
     if (!["user", "producer"].includes(event.role) ||
         !text(event.content) || text(event.content).length > 3000 ||
         !validId(event.message_id))
@@ -326,6 +331,30 @@ export function applyReviewEvent(session, event) {
     // orchestrator must retain the durable hold until a separate scheduler-authorized release.
     s.approved_attempt_id = s.current_attempt_id;
     s.state = "approved";
+  } else if (kind === "REOPEN_APPROVED_HELD_REDO") {
+    // Creative work is independent of delivery QA. In particular, a missing
+    // watermark must never prevent the reviewer from asking for another V2/V3.
+    // No output hold, publishing authority or render job changes here.
+    const attempt=current(s);
+    if(s.state!=="approved"||s.review_hold.active!==true||
+       s.current_attempt_id!==s.approved_attempt_id||
+       !attempt||Number(attempt.number)<2||attempt.status!=="ready_for_review"||
+       event.attempt_id!==attempt.id||event.artifact_id!==attempt.artifact_id||
+       event.hold_id!==s.review_hold.id||event.hold_owner!==s.id||
+       !validId(event.message_id)||!text(event.note)||
+       text(event.note).length>3000||
+       s.messages.some(m=>m.id===event.message_id)||s.active_job)
+      fail("APPROVED_REDO_NOT_ALLOWED",
+        "Only the exact approved, held and idle V2 can reopen for creative changes");
+    s.messages.push({id:event.message_id,role:"user",content:text(event.note),
+      at:text(event.at),attempt_id:attempt.id,timestamp_seconds:null});
+    s.approved_attempt_id=null;
+    s.producer_candidate=null;
+    s.plan=null;
+    s.pending_authorization=null;
+    s.state="discussing";
+    // The approved artifact stays in attempt history and remains the selected
+    // held review-only file until the reviewer separately starts a new render.
   } else if (kind === "FACTORY_REQUEST_CHANGES") {
     // The Factory writer has already re-established and read back the exact
     // output hold while holding the shared per-output approval lease.

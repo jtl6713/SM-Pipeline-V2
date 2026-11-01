@@ -570,7 +570,7 @@ test('held #8447 surfaces a verified Morning alternative and saves correction on
   const sandbox={
     document:{getElementById:id=>nodes[id],createElement:tag=>new Node(tag)},
     window:{location:{href:'https://studio.test/'},CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''},
-      setTimeout:fn=>{slowTimers.push(fn);return slowTimers.length;},
+      setTimeout:(fn,ms)=>{slowTimers.push({fn,ms});return slowTimers.length;},
       clearTimeout:()=>{}},
     MutationObserver:class {constructor(fn){notify=fn;}observe(){}},
     fetch:fetchStub,URL,URLSearchParams,
@@ -608,8 +608,11 @@ test('held #8447 surfaces a verified Morning alternative and saves correction on
   assert.equal(progress.hidden,false);
   assert.match(progress.textContent,/Sending your feedback/);
   assert.equal(progress.dataset.state,'working');
-  assert.equal(slowTimers.length,1);
-  slowTimers[0]();
+  assert.equal(slowTimers.filter(timer=>timer.ms===20000).length,1,
+    'the held review session has one independent status poll');
+  assert.equal(slowTimers.filter(timer=>timer.ms===8000).length,1,
+    'Producer request retains its own delayed waiting notice');
+  slowTimers.find(timer=>timer.ms===8000).fn();
   assert.match(progress.textContent,/Still waiting for the Producer/);
   assert.equal(calls.filter(x=>x.method==='POST').length,1);
   await send.listeners.click();
@@ -644,4 +647,149 @@ test('Rendering Review labels the playing video without unchanged-video explanat
   assert.doesNotMatch(script,/I haven\\'t changed the video yet/);
   assert.match(css,/rr-version-bar/);
   assert.doesNotMatch(script,/showMedia\(.*candidate\.candidate\.timeline/);
+});
+
+
+test('held Producer reply shows V2 not started; saved plan and render progress refresh automatically',async()=>{
+  const output='recA1B2C3D4E5F6G7';
+  const ids=['page-rendering-review','navRenderingReview','rrQueueList','rrDetail','rrStatus',
+    'rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile','rrProgressSummary'];
+  const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
+  let notify,version=2,state='discussing',plan=null,attempts=[],timerId=0;
+  let currentAttemptId=null,approvedAttemptId=null,allowActions=true;
+  let reads=0,failNextRead=false;const timers=new Map();let savedNote='';let notePosts=0;
+  const saved=()=>({ok:true,publication_hold_verified:true,
+    flags:{producer_conversation_enabled:allowActions,attempt_commit_enabled:allowActions,
+      creative_approval_enabled:allowActions},
+    session:{
+    id:'review-session',version,state,review_hold:{active:true},
+    current_attempt_id:currentAttemptId,approved_attempt_id:approvedAttemptId,
+    active_job:['queued','rendering','validating'].includes(state)?{id:'rrjob-queued-123'}:null,
+    latest_attempt_number:attempts.length?2:1,
+    messages:[{role:'user',content:'Change narration only',at:'2026-11-01T16:00:00Z'},
+      {role:'producer',content:'I will keep the same eight photos',at:'2026-11-01T16:01:00Z'},
+      ...(savedNote?[{role:'user',content:savedNote,at:'2026-11-01T16:02:00Z'}]:[])],
+    producer_candidate:{stale:false,candidate:{narration:'New script',changes:[],requirements:[]}},
+    plan,attempts,
+  }});
+  const fetchStub=async(url,options)=>{
+    if(url==='/api/rendering-review/outputs/'+output+'/next-revision-feedback'){
+      assert.equal(options.method,'POST');
+      const body=JSON.parse(options.body);
+      assert.match(body.content,/Replace scene 3/);
+      assert.equal(body.expected_version,version);
+      savedNote=body.content;notePosts++;version++;
+      return {ok:true,json:async()=>({ok:true,review_hold_active:true,
+        session_version:version,message_count:3})};
+    }
+    assert.equal(options.method,'GET','polling must never initiate a render or publish');
+    if(url==='/api/session')return {ok:true,json:async()=>({
+      ok:true,authenticated:true,authorized:true,permissions:{outputs_review:true}})};
+    if(url.startsWith('/api/rendering-review/queue?'))return {ok:true,json:async()=>({
+      ok:true,flags:{admission_enabled:false,producer_conversation_enabled:true,
+        automatic_sampling_percent:0},
+      queue:[{output_id:output,profile_id:'recT2rbKX3MF7cVFU',
+        output_type:'Instagram Reel',output_number:9664,title:'Adler View Photo Set',
+        render_status:'Rendered',review_held:true,final_file_url:'https://example.org/v1.mp4'}],
+      next_cursor:null})};
+    if(url==='/api/rendering-review/outputs/'+output){
+      reads++;
+      if(failNextRead){failNextRead=false;return {ok:false,status:503,
+        json:async()=>({ok:false,error:'Session temporarily unavailable'})};}
+      return {ok:true,json:async()=>saved()};
+    }
+    throw new Error('Unexpected request '+url);
+  };
+  const sandbox={
+    document:{getElementById:id=>nodes[id],createElement:tag=>new Node(tag)},
+    window:{location:{href:'https://studio.test/'},CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''},
+      setTimeout:(cb,ms)=>{assert.equal(ms,20000);const id=++timerId;timers.set(id,cb);return id;},
+      clearTimeout:id=>timers.delete(id)},
+    MutationObserver:class {constructor(fn){notify=fn;}observe(){}},
+    fetch:fetchStub,URL,URLSearchParams,
+    crypto:{randomUUID:()=> 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'},
+  };
+  vm.runInNewContext(script,sandbox,{filename:'rendering-review-queue.js'});
+  await tick();await tick();
+  nodes['page-rendering-review'].classList.add('active');notify();
+  for(let i=0;i<10;i++)await tick();
+  const descendants=root=>[root,...root.children.flatMap(descendants)];
+  const textAll=()=>descendants(nodes.rrDetail).map(n=>n.textContent).join(' ');
+  assert.equal(nodes.rrProgressSummary.hidden,false);
+  assert.match(nodes.rrProgressSummary.textContent,/V2 has NOT started/);
+  assert.match(textAll(),/Post-production progress/);
+  assert.match(textAll(),/Plan ready/);
+  assert.match(textAll(),/Not started/);
+  assert.match(textAll(),/Requires your attention/);
+  assert.ok(nodes.rrProgressSummary.classList.contains('rr-progress-top--attention'));
+  assert.ok(descendants(nodes.rrDetail).some(n=>n.className.includes('rr-progress-stage--attention')));
+  assert.ok(descendants(nodes.rrDetail).some(n=>n.tag==='button'&&n.textContent==='Check latest status'));
+  assert.equal(timers.size,1);
+  // Unchanged saved state: verify again without resetting the V1 playback.
+  const firstTimer=timers.values().next().value;timers.clear();await firstTimer();
+  assert.equal(reads,2);assert.equal(timers.size,1);
+  assert.match(textAll(),/Last verified/);
+  // A separately saved, frozen plan becomes visible without a manual refresh.
+  version=3;state='plan_ready';
+  plan={frozen:true,missing_assets:[],hash:'plan123',version:1,immutable_manifest:'manifest'};
+  const second=timers.values().next().value;timers.clear();await second();
+  for(let i=0;i<5;i++)await tick();
+  assert.match(nodes.rrProgressSummary.textContent,/plan is saved/);
+  assert.match(nodes.rrProgressSummary.textContent,/No render has started/);
+  assert.match(nodes.rrProgressSummary.textContent,/Requires your attention/);
+  assert.ok(descendants(nodes.rrDetail).some(n=>n.className.includes('rr-progress-stage--attention')));
+  assert.equal(timers.size,1);
+  // Only a server-confirmed queue changes the UI to rendering queued.
+  version=4;state='queued';attempts=[{id:'attempt2',number:2,status:'queued'}];
+  const third=timers.values().next().value;timers.clear();await third();
+  for(let i=0;i<5;i++)await tick();
+  assert.match(nodes.rrProgressSummary.textContent,/render job is queued/);
+  assert.match(textAll(),/Queued — not started/);
+  assert.ok(!nodes.rrProgressSummary.classList.contains('rr-progress-top--attention'),
+    'queued render is automatic work, not a user-action warning');
+  assert.ok(!descendants(nodes.rrDetail).some(n=>n.className.includes('rr-progress-stage--attention')));
+  assert.ok(!/V2 is ready for review/.test(nodes.rrProgressSummary.textContent));
+  const draft=descendants(nodes.rrDetail).find(n=>n.tag==='textarea'&&
+    n.attrs['aria-label']==='Photo and scene suggestions for the next revision');
+  const saveNote=descendants(nodes.rrDetail).find(n=>n.tag==='button'&&
+    n.textContent==='Save feedback for next revision');
+  assert.ok(draft&&saveNote,'queued render must still accept next-version comments');
+  draft.value='Replace scene 3 with another planetarium photo';
+  draft.listeners.input();
+  await saveNote.listeners.click();
+  for(let i=0;i<5;i++)await tick();
+  assert.equal(notePosts,1);
+  assert.match(textAll(),/Replace scene 3/);
+  assert.ok(!/current render was changed/i.test(textAll()));
+  assert.ok(!nodes.rrProgressSummary.classList.contains('rr-progress-top--attention'));
+  // Transient manual check failures must not erase the previously verified stage.
+  failNextRead=true;
+  const check=descendants(nodes.rrDetail).find(n=>
+    n.tag==='button'&&n.textContent==='Check latest status');
+  assert.ok(check);
+  await check.listeners.click();
+  for(let i=0;i<4;i++)await tick();
+  assert.match(nodes.rrProgressSummary.textContent,/Latest status unavailable/);
+  assert.match(nodes.rrProgressSummary.textContent,/render job is queued/);
+  // Once a verified V2 exists, only enabled creative approval requires attention.
+  state='ready_for_review';version=5;currentAttemptId='attempt2abc';
+  attempts=[{id:currentAttemptId,number:2,status:'ready_for_review',artifact_id:'artifact123'}];
+  await nodes.rrQueueList.children[0].listeners.click();
+  for(let i=0;i<5;i++)await tick();
+  assert.match(nodes.rrProgressSummary.textContent,/Requires your attention/);
+  assert.match(nodes.rrProgressSummary.textContent,/ready for review/);
+  assert.ok(descendants(nodes.rrDetail).some(n=>n.className.includes('rr-progress-stage--attention')));
+  // A disabled approval gate must not invent an operator action.
+  allowActions=false;
+  await nodes.rrQueueList.children[0].listeners.click();
+  for(let i=0;i<5;i++)await tick();
+  assert.ok(!nodes.rrProgressSummary.classList.contains('rr-progress-top--attention'));
+  // Approved V2 is complete, never an outstanding user approval.
+  state='approved';approvedAttemptId=currentAttemptId;version=6;
+  await nodes.rrQueueList.children[0].listeners.click();
+  for(let i=0;i<5;i++)await tick();
+  assert.ok(!descendants(nodes.rrDetail).some(n=>n.className.includes('rr-progress-stage--attention')));
+  assert.ok(descendants(nodes.rrDetail).some(n=>n.className.includes('rr-progress-stage--complete')));
+  nodes['page-rendering-review'].classList.remove('active');notify();
+  assert.equal(timers.size,0,'polling cancels when the page is closed');
 });

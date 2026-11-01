@@ -6,6 +6,7 @@ import { producerConversationWritesEnabled } from './rendering-review-producer-p
 import { renderAttemptCommitEnabled } from './rendering-review-attempt-outbox.mjs';
 import {reviewStillStoryboard} from './rendering-review-storyboard.mjs';
 import {projectCreativeMasterGroup,CREATIVE_MASTER_SIBLING_READ_FIELDS} from './creative-master-registry.mjs';
+import {classifyApprovedFactoryHandoff} from './rendering-review-factory-gate.mjs';
 
 const text=x=>String(x??'').trim();
 const rec=x=>/^rec[A-Za-z0-9]{14}$/.test(text(x));
@@ -216,8 +217,27 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
       }
     }
   }
+  // Authoritative, read-only explanation for an accepted V2 which has not
+  // reached Factory. The existing guarded POST rechecks everything itself.
+  let factory_handoff_gate=null;
+  if(session.state==='approved'){
+    let attemptRecords=[];
+    const approvedId=text(session.approved_attempt_id);
+    if(held&&/^[A-Za-z0-9_-]{8,120}$/.test(approvedId)){
+      try{
+        attemptRecords=await operations.listRecords(env,RENDER_REVIEW_TABLES.attempts,{
+          limit:2,filterFormula:'{Attempt_ID}="'+approvedId+'"',
+          fields:['Attempt_ID','Session_ID','Output_Record_ID','Attempt_Number',
+            'Attempt_Status','Artifact_File_ID','Artifact_URL','Validation_Evidence_JSON'],
+        });
+      }catch{attemptRecords=null;}
+    }
+    factory_handoff_gate=classifyApprovedFactoryHandoff({
+      session,held,attemptRecords,
+    });
+  }
   return {ok:true,...summary(row),session,storyboard,
-    creative_group,creative_group_error,
+    factory_handoff_gate,creative_group,creative_group_error,
     publication_hold_verified:held,
     integrity_error:session.review_hold.active&&!held?'HOLD_NOT_VERIFIED':null,
     preview:{file_id:f.Final_File_ID||null,url:f.Final_File_URL||null,
