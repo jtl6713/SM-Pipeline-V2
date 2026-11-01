@@ -1065,19 +1065,30 @@
       actions.push(`<button type="button" class="secondary-button factory-delete" data-factory-delete="${esc(card.id)}">Delete</button>`);
     }
     const thumb = String(card.thumbnail_url || "").trim();
+    const hasSharedCover = Boolean(needsEyesOutput && card.content_item_id && thumb.includes(
+      "/studio/previews/thumbnails/" + String(card.content_item_id) + "/"));
+    const outputLabel = card.output_id ? "Output #" + card.output_id : "this output";
     const media = canPreview(card)
-      ? `<button type="button" class="factory-line-thumb" data-factory-preview="${esc(card.id)}" aria-label="Preview ${esc(cardLabel(card))}">
+      ? `<button type="button" class="factory-line-thumb" data-factory-preview="${esc(card.id)}" aria-label="Preview ${esc(outputLabel)}: ${esc(cardLabel(card))}" title="Preview ${esc(outputLabel)}">
           ${thumb ? `<img src="${esc(thumb)}" alt="" loading="lazy">` : `<span class="factory-line-play">▶</span>`}
         </button>`
       : `<span class="factory-line-thumb factory-line-thumb-empty" aria-hidden="true"></span>`;
+    // The preview button opens the exact Platform Output. A cover sourced from
+    // the Content Item is not an output-specific video frame: label it honestly.
+    const outputVisual = needsEyesOutput
+      ? `<span class="factory-output-visual">${media}<small class="factory-output-visual-label">${hasSharedCover ? "Shared cover" : (thumb ? "Output image" : "Output preview")}</small></span>`
+      : media;
     const alert = card.stuck_kind || card.produce_error || "";
     const stateLabel = card.studio_state || (alert ? "Needs repair" : "—");
     const cell = (value) => `<span class="factory-line-cell">${esc(value || "—")}</span>`;
     return `<div class="factory-line" data-factory-id="${esc(card.id)}" data-factory-kind="${esc(card.kind || "")}" data-lane="${esc(lane)}" title="${esc(cardLabel(card))}">
       ${needsEyesOutput
-        ? `<span class="factory-media-select"><label class="factory-output-select" title="${esc(batchReason || "Select for batch approval")}"><input type="checkbox" data-factory-select-output="${esc(card.id)}" aria-label="${esc(batchReason ? `Batch selection unavailable for ${cardLabel(card)}` : `Select ${cardLabel(card)}`)}" ${reasonId ? `aria-describedby="${esc(reasonId)}"` : ""} ${batchReason ? "disabled" : (state.selectedOutputs.has(card.id) ? "checked" : "")}></label>${media}</span>`
+        ? `<span class="factory-media-select"><label class="factory-output-select" title="${esc(batchReason || "Select for batch approval")}"><input type="checkbox" data-factory-select-output="${esc(card.id)}" aria-label="${esc(batchReason ? `Batch selection unavailable for ${cardLabel(card)}` : `Select ${cardLabel(card)}`)}" ${reasonId ? `aria-describedby="${esc(reasonId)}"` : ""} ${batchReason ? "disabled" : (state.selectedOutputs.has(card.id) ? "checked" : "")}></label></span>`
         : media}
-      <span class="factory-line-title">${esc(card.title || cardLabel(card))}${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}
+      <span class="factory-line-title">
+        ${needsEyesOutput
+          ? `<span class="factory-output-heading">${outputVisual}<span class="factory-output-title-copy"><span class="factory-output-title-name">${esc(card.title || cardLabel(card))}</span>${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}</span></span>`
+          : `${esc(card.title || cardLabel(card))}${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}`}
         ${needsEyesOutput && batchReason ? `<span id="${esc(reasonId)}" class="factory-batch-unavailable" role="status"><strong>Approval unavailable:</strong> ${esc(batchReason)}</span>` : ""}
       </span>
       ${cell(card.profile_name)}

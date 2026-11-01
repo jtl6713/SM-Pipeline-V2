@@ -620,3 +620,50 @@
   #page-factory .factory-review-page-actions{width:100%;justify-content:space-between}
   #page-factory .factory-review-page-actions button{min-height:42px}
 }
+
+/* Review image ownership: checkbox belongs to the individual Platform Output,
+   and its preview/cover stays next to that Output's title, never under the
+   Content Item heading or isolated beneath a selection checkbox. */
+#page-factory .factory-band-eyes .factory-line-title:has(.factory-output-heading){
+  display:block;min-width:0;white-space:normal;overflow:visible;text-overflow:clip;
+}
+#page-factory .factory-band-eyes .factory-output-heading{
+  display:flex;align-items:flex-start;gap:10px;min-width:0;width:100%;
+}
+#page-factory .factory-band-eyes .factory-output-visual{
+  display:flex;flex:0 0 58px;flex-direction:column;align-items:center;gap:4px;
+  min-width:0;
+}
+#page-factory .factory-band-eyes .factory-output-visual .factory-line-thumb{
+  box-sizing:border-box;width:58px;height:74px;min-width:0;min-height:0;
+  border:1px solid #c5d0df;border-radius:6px;overflow:hidden;
+  background:#0d2445;
+}
+#page-factory .factory-band-eyes .factory-output-visual .factory-line-thumb img{
+  display:block;width:100%;height:100%;object-fit:cover;
+}
+#page-factory .factory-band-eyes .factory-output-visual-label{
+  display:block;max-width:100%;font-size:.61rem;line-height:1.2;
+  font-weight:600;color:#64728a;text-align:center;
+  white-space:normal;overflow-wrap:anywhere;
+}
+#page-factory .factory-band-eyes .factory-output-title-copy{
+  display:flex;flex:1 1 auto;min-width:0;flex-direction:column;gap:3px;
+}
+#page-factory .factory-band-eyes .factory-output-title-name{
+  display:block;white-space:normal;overflow-wrap:anywhere;font-weight:800;
+  line-height:1.3;color:#153253;
+}
+#page-factory .factory-band-eyes .factory-output-title-copy .factory-output-number{
+  display:block;margin:0;font-weight:700;line-height:1.3;
+}
+@media(max-width:560px){
+  #page-factory .factory-band-eyes .factory-output-visual{flex-basis:54px}
+  #page-factory .factory-band-eyes .factory-output-visual .factory-line-thumb{
+    width:54px;height:70px;
+  }
+  #page-factory .factory-band-eyes .factory-output-heading{gap:9px}
+  #page-factory .factory-band-eyes .factory-line-title .factory-batch-unavailable{
+    margin-top:10px;
+  }
+}
