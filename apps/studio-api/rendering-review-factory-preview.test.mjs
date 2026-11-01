@@ -45,6 +45,42 @@ test("Michigan 9593 current completed V2 is privately previewable while review h
   assert.equal(x.row.fields.Studio_Render_Review_Hold_Active,true);
 });
 
+test("approved current V2 stays privately previewable while its exact owned hold remains active",()=>{
+  const x=heldV2();
+  x.session.state="approved";
+  x.session.approved_attempt_id=attemptId;
+  assert.equal(factorySelectedReviewAttempt(x)?.id,attemptId);
+  assert.equal(x.session.review_hold.active,true);
+  assert.equal(x.row.fields.Do_Not_Publish,true);
+  assert.equal(x.row.fields.Studio_Render_Review_Hold_Active,true);
+});
+
+test("approved-but-held preview cannot bypass source, identity, publication or handoff guards",()=>{
+  const changes=[
+    x=>{x.session.review_hold.active=false},
+    x=>{x.row.fields.Studio_Render_Review_Hold_Active=false},
+    x=>{x.row.fields.Studio_Render_Review_Hold_Owner="other"},
+    x=>{x.row.fields.Do_Not_Publish=false},
+    x=>{x.session.approved_attempt_id=null},
+    x=>{x.session.active_job={id:"running"}},
+    x=>{x.session.factory_handoff={status:"incomplete"}},
+    x=>{x.row.fields.Output_Status="Approved for Publishing"},
+    x=>{x.row.fields.Publish_Status="Ready to Schedule"},
+    x=>{x.row.fields.Auto_Publish_Enabled=true},
+    x=>{x.row.fields.Final_File_ID=v1},
+    x=>{x.row.fields.Review_Status="Approved"},
+    x=>{x.row.fields.Published_At="2026-11-01T00:00:00Z"},
+    x=>{x.profile="recDifferentProfile1"},
+  ];
+  for(const change of changes){
+    const x=clone(heldV2());
+    x.session.state="approved";
+    x.session.approved_attempt_id=attemptId;
+    change(x);
+    assert.equal(factorySelectedReviewAttempt(x),null,String(change));
+  }
+});
+
 test("held V2 previews refuse hold loss, unrelated ownership, artifact drift or dispatch",()=>{
   const changes=[
     x=>{x.session.review_hold.active=false},

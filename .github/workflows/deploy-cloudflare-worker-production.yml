@@ -103,7 +103,7 @@ jobs:
           node --check apps/studio-api/rendering-review-factory-handoff.mjs
           node --check apps/studio-api/rendering-review-factory-preview.mjs
           node --check apps/studio-api/rendering-review-factory-return.mjs
-          node --test apps/studio-api/rendering-review-factory-bridge.test.mjs apps/studio-api/rendering-review-factory-handoff.test.mjs apps/studio-api/rendering-review-factory-entry-gate.test.mjs apps/studio-api/rendering-review-approval-http.test.mjs
+          node --test apps/studio-api/rendering-review-factory-preview.test.mjs apps/studio-api/rendering-review-factory-bridge.test.mjs apps/studio-api/rendering-review-factory-handoff.test.mjs apps/studio-api/rendering-review-factory-entry-gate.test.mjs apps/studio-api/rendering-review-approval-http.test.mjs
           node --test apps/studio-api/rendering-review-plan-persist.test.mjs
           node --test apps/studio-api/engagement-auth-recovery.test.mjs
           node --test apps/studio-api/idea-list-authoritative-fresh.test.mjs
@@ -752,7 +752,7 @@ jobs:
             echo "michigan_v2_preview=PASS output=$id bytes=46824860"
           done
 
-      - name: Verify Michigan Avenue held review visibility across all six Factory cards
+      - name: Verify Michigan Avenue held source and pending sibling in Factory
         shell: bash
         run: |
           set -euo pipefail
@@ -760,22 +760,31 @@ jobs:
           TOKEN=$(cat /tmp/verify-token.txt)
           URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/factory-desk"
           curl -fsS --max-time 90 "$URL" -o /tmp/factory-michigan-visibility.json
+          # The original six-output video canary above still checks every
+          # private MP4. Factory visibility must reflect canonical lifecycle:
+          # four siblings are already Approved for Publishing and no longer
+          # belong in Needs Eyes; 9593 held + 9596 remain review-ready.
           jq -e '
             .ok==true and .read_source=="airtable" and
-            ([.lanes.needs_eyes[] | select(.content_item_id=="recYhIjy4BW0U3WaW")] | length)==6 and
+            ([.lanes.needs_eyes[] | select(.content_item_id=="recYhIjy4BW0U3WaW")] | length)==2 and
             ([.lanes.needs_eyes[] | select(
               .id=="recPnNYghmcJYivOA" and .review_hold_active==true and
               .do_not_publish==true and .can_preview==true and
               .output_status=="Ready for Review")] | length)==1 and
-            (["recyYKgkfRksIZPun","rec8JDQW2Jilnzc9u","recgJR5bTcYfCCwAL","recqw7DTgYsqYkl51","recZ1X5QfeFZTot1F"] -
-             [.lanes.needs_eyes[] | select(.output_status=="Ready for Review" and
-               (.publish_status==null or .publish_status=="Not Ready")) | .id] | length)==0
+            ([.lanes.needs_eyes[] | select(
+              .id=="recgJR5bTcYfCCwAL" and
+              .output_status=="Ready for Review")] | length)==1 and
+            ([.lanes.needs_eyes[] | select(
+              .id=="recyYKgkfRksIZPun" or
+              .id=="rec8JDQW2Jilnzc9u" or
+              .id=="recqw7DTgYsqYkl51" or
+              .id=="recZ1X5QfeFZTot1F")] | length)==0
           ' /tmp/factory-michigan-visibility.json >/dev/null || {
-            echo "Michigan V2 not fully discoverable in the authenticated Factory Needs Eyes queue" >&2
-            jq -c '{read_source,matching:[.lanes.needs_eyes[]|select(.content_item_id=="recYhIjy4BW0U3WaW")|{id,review_hold_active,do_not_publish,output_status,publish_status}]}' /tmp/factory-michigan-visibility.json >&2
+            echo "Michigan Factory review visibility disagrees with authoritative held/approved lifecycle" >&2
+            jq -c '{read_source,matching:[.lanes.needs_eyes[]|select(.content_item_id=="recYhIjy4BW0U3WaW")|{id,review_hold_active,do_not_publish,can_preview,output_status,publish_status}]}' /tmp/factory-michigan-visibility.json >&2
             exit 1
           }
-          echo "michigan_factory_needs_eyes=PASS six_of_six including preview-only held source"
+          echo "michigan_factory_needs_eyes=PASS held_9593_and_review_ready_9596; four approved siblings excluded"
 
       - name: Verify authoritative All Profiles force refresh through service binding
         shell: bash
