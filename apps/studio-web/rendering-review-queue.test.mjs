@@ -656,9 +656,15 @@ test('held Producer reply shows V2 not started; saved plan and render progress r
     'rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile','rrProgressSummary'];
   const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
   let notify,version=2,state='discussing',plan=null,attempts=[],timerId=0;
+  let currentAttemptId=null,approvedAttemptId=null,allowActions=true;
   let reads=0,failNextRead=false;const timers=new Map();
-  const saved=()=>({ok:true,publication_hold_verified:true,session:{
-    id:'review-session',version,state,latest_attempt_number:attempts.length?2:1,
+  const saved=()=>({ok:true,publication_hold_verified:true,
+    flags:{producer_conversation_enabled:allowActions,attempt_commit_enabled:allowActions,
+      creative_approval_enabled:allowActions},
+    session:{
+    id:'review-session',version,state,review_hold:{active:true},
+    current_attempt_id:currentAttemptId,approved_attempt_id:approvedAttemptId,
+    latest_attempt_number:attempts.length?2:1,
     messages:[{role:'user',content:'Change narration only',at:'2026-11-01T16:00:00Z'},
       {role:'producer',content:'I will keep the same eight photos',at:'2026-11-01T16:01:00Z'}],
     producer_candidate:{stale:false,candidate:{narration:'New script',changes:[],requirements:[]}},
@@ -702,6 +708,9 @@ test('held Producer reply shows V2 not started; saved plan and render progress r
   assert.match(textAll(),/Post-production progress/);
   assert.match(textAll(),/Plan ready/);
   assert.match(textAll(),/Not started/);
+  assert.match(textAll(),/Requires your attention/);
+  assert.ok(nodes.rrProgressSummary.classList.contains('rr-progress-top--attention'));
+  assert.ok(descendants(nodes.rrDetail).some(n=>n.className.includes('rr-progress-stage--attention')));
   assert.ok(descendants(nodes.rrDetail).some(n=>n.tag==='button'&&n.textContent==='Check latest status'));
   assert.equal(timers.size,1);
   // Unchanged saved state: verify again without resetting the V1 playback.
@@ -715,6 +724,8 @@ test('held Producer reply shows V2 not started; saved plan and render progress r
   for(let i=0;i<5;i++)await tick();
   assert.match(nodes.rrProgressSummary.textContent,/plan is saved/);
   assert.match(nodes.rrProgressSummary.textContent,/No render has started/);
+  assert.match(nodes.rrProgressSummary.textContent,/Requires your attention/);
+  assert.ok(descendants(nodes.rrDetail).some(n=>n.className.includes('rr-progress-stage--attention')));
   assert.equal(timers.size,1);
   // Only a server-confirmed queue changes the UI to rendering queued.
   version=4;state='queued';attempts=[{id:'attempt2',number:2,status:'queued'}];
@@ -722,6 +733,9 @@ test('held Producer reply shows V2 not started; saved plan and render progress r
   for(let i=0;i<5;i++)await tick();
   assert.match(nodes.rrProgressSummary.textContent,/render job is queued/);
   assert.match(textAll(),/Queued — not started/);
+  assert.ok(!nodes.rrProgressSummary.classList.contains('rr-progress-top--attention'),
+    'queued render is automatic work, not a user-action warning');
+  assert.ok(!descendants(nodes.rrDetail).some(n=>n.className.includes('rr-progress-stage--attention')));
   assert.ok(!/V2 is ready for review/.test(nodes.rrProgressSummary.textContent));
   // Transient manual check failures must not erase the previously verified stage.
   failNextRead=true;
@@ -732,6 +746,25 @@ test('held Producer reply shows V2 not started; saved plan and render progress r
   for(let i=0;i<4;i++)await tick();
   assert.match(nodes.rrProgressSummary.textContent,/Latest status unavailable/);
   assert.match(nodes.rrProgressSummary.textContent,/render job is queued/);
+  // Once a verified V2 exists, only enabled creative approval requires attention.
+  state='ready_for_review';version=5;currentAttemptId='attempt2abc';
+  attempts=[{id:currentAttemptId,number:2,status:'ready_for_review',artifact_id:'artifact123'}];
+  await nodes.rrQueueList.children[0].listeners.click();
+  for(let i=0;i<5;i++)await tick();
+  assert.match(nodes.rrProgressSummary.textContent,/Requires your attention/);
+  assert.match(nodes.rrProgressSummary.textContent,/ready for review/);
+  assert.ok(descendants(nodes.rrDetail).some(n=>n.className.includes('rr-progress-stage--attention')));
+  // A disabled approval gate must not invent an operator action.
+  allowActions=false;
+  await nodes.rrQueueList.children[0].listeners.click();
+  for(let i=0;i<5;i++)await tick();
+  assert.ok(!nodes.rrProgressSummary.classList.contains('rr-progress-top--attention'));
+  // Approved V2 is complete, never an outstanding user approval.
+  state='approved';approvedAttemptId=currentAttemptId;version=6;
+  await nodes.rrQueueList.children[0].listeners.click();
+  for(let i=0;i<5;i++)await tick();
+  assert.ok(!descendants(nodes.rrDetail).some(n=>n.className.includes('rr-progress-stage--attention')));
+  assert.ok(descendants(nodes.rrDetail).some(n=>n.className.includes('rr-progress-stage--complete')));
   nodes['page-rendering-review'].classList.remove('active');notify();
   assert.equal(timers.size,0,'polling cancels when the page is closed');
 });
