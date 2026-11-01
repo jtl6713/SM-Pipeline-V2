@@ -7,7 +7,7 @@ from rendering_review.vibe_owned_video import validate_owned_vibe_mp4
 from rendering_review.vibe_cut_validation import VibeMediaDenied
 from test_rendering_review_vibe_cut_validation import MP4,probe,PROFILE
 
-LOGO=b"\\x89PNG\\r\\n\\x1a\\n"+b"logo"*64
+LOGO=b"\x89PNG\r\n\x1a\n"+b"logo"*64
 FILE="drive_profile_logo_abcdefghijklmnopqrstuvwxyz"
 def owned():
     return {"bytes":LOGO,"receipt":{
