@@ -31,6 +31,10 @@ on:
       - 'services/remotion-renderer/profile-watermark-policy*.js'
       - 'services/remotion-renderer/vibe-audio-policy*.js'
       - 'services/remotion-renderer/vibe-review-music-policy*.js'
+      - 'services/remotion-renderer/vibe-review-timing.test.js'
+      - 'services/remotion-renderer/src/vibe-review-timing.*'
+      - 'services/remotion-renderer/src/Root.tsx'
+      - 'services/remotion-renderer/src/ChicagoShiningPhotoSequence.tsx'
       - 'services/remotion-renderer/render-server.js'
       - 'services/pipeline-runner/rendering_review/gallery_attempt.py'
       - 'services/pipeline-runner/rendering_review/gallery_media_io.py'
@@ -98,6 +102,13 @@ jobs:
           node --test services/remotion-renderer/vibe-audio-policy.test.js
           node --check services/remotion-renderer/vibe-review-music-policy.js
           node --test services/remotion-renderer/vibe-review-music-policy.test.js
+          node --test services/remotion-renderer/vibe-review-timing.test.js
+      - name: Compile native Remotion Vibe duration changes
+        working-directory: services/remotion-renderer
+        run: |
+          npm ci --ignore-scripts
+          npx tsc --noEmit
+          npm run build
       - name: Check policy and tests syntax
         run: |
           node --check apps/studio-api/rendering-review-approval-http.mjs
