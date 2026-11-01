@@ -46,3 +46,9 @@
   #ezUploadZone #ezUploadTitle { font-size: 1rem; }
   #ezUploadZone #ezUploadHint { font-size: 0.86rem; }
 }
+
+/* Ready is a successful handoff, not an upload error: use the ready color for its count. */
+#ezUploadProgress[data-heal="ready"] .item4-upload-progress-count,
+#item4UploadProgress[data-heal="ready"] .item4-upload-progress-count {
+  color: #17665e;
+}
