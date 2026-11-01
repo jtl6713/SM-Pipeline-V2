@@ -636,3 +636,5 @@ Deploy Studio UI 0.6.825: approved held V2 can request another revision independ
 
 2026-11-01: Studio 0.6.827 non-Vibe read-only Factory Request Changes source/compatible-output panel. Preserve 0.6.826 held V2 comments and attention stages. No new generation/approval/publishing controls. Verify Worker 0.10.719, Pages BUILD_ID, asset cache consistency and custom domain after protected production deployment.
 2026-11-01 Pages 0.6.828: Factory held V2 creative acceptance, Request Changes resumes saved Producer session, truthful V2 progress.
+
+2026-11-01 UI 0.6.829: Vibe upload metadata deadline, byte progress, safe multipart recovery; preserve uploaded originals.

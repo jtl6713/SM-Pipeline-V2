@@ -37,19 +37,20 @@ test("Vibe Cut reports truthful selection, upload, save, process, ready, stall, 
   assert.doesNotMatch(markup, /0 of 1 saved/);
 });
 
-test("Vibe Cut exposes a one-minute stalled warning and a real retry path", () => {
+test("Vibe Cut exposes stalled feedback and a non-destructive recovery path", () => {
   assert.match(html, /id="ezUploadRetryActions" hidden/);
   assert.match(html, /id="ezUploadRetry">Retry video upload/);
 
   const state = section("function setVibeUploadUi(", "function beginVibeUploadFeedback(");
   assert.match(state, /VIBE_UPLOAD_STALL_MS/);
   assert.match(state, /phase: "stalled"/);
-  assert.match(state, /No upload or processing progress was confirmed for one minute/);
+  assert.match(state, /No recent transfer progress was confirmed/);
 
   const retry = section("function retryVibeUpload(", "function receiveMasterPhotos(");
   assert.match(retry, /vibeUploadAbortController\.abort\(\)/);
   assert.match(retry, /replaceIncompleteVibeSourceAndUpload/);
-  assert.match(retry, /method: "DELETE"/);
+  assert.doesNotMatch(retry, /method: "DELETE"/);
+  assert.match(retry, /snapshot=1/);
   assert.match(retry, /uploadItem4Files\(files/);
 
   const workspaceRetry = section('$("item4VibeRetryVideo")', "let item4LibraryItems");

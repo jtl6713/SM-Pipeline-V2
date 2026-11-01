@@ -5881,7 +5881,17 @@ export async function completeItem4LargeVideoUploadSession(request, env, url, au
   if (!parts.length) throw new HttpError(400, "parts are required");
   const assets = item4AssetManifest(record);
   const draft = item4FindLargeUploadDraft(assets, assetId);
-  if (!draft) throw new HttpError(404, "Upload session not found");
+  if (!draft) {
+    const saved = assets.find(row => String(row?.id || "") === assetId && row?.upload_status === "complete");
+    if (!saved) throw new HttpError(404, "Upload session not found");
+    // The completion response may have been lost after the canonical write.
+    // Return existing state without duplicating queue work or replacing media.
+    return respond(request, env, {
+      ok: true, uploaded: 1, assets, record: mapProductionRequest(record),
+      authority_status: String(f(record, "Studio_Master_Asset_Status") || "Uploading"),
+      compression_pending: item4AssetCompressionPending(saved),
+    });
+  }
   const multipart = env.STUDIO_MEDIA.resumeMultipartUpload(draft.r2_key, draft.multipart_upload_id);
   const normalizedParts = parts
     .map((row) => ({
@@ -5890,10 +5900,21 @@ export async function completeItem4LargeVideoUploadSession(request, env, url, au
     }))
     .filter((row) => row.partNumber > 0 && row.etag)
     .sort((a, b) => a.partNumber - b.partNumber);
-  if (!normalizedParts.length) throw new HttpError(400, "No valid upload parts were provided");
-  await multipart.complete(normalizedParts);
-  const object = await env.STUDIO_MEDIA.head(draft.r2_key).catch(() => null);
-  const sizeBytes = Number(object?.size || draft.size_bytes || 0);
+  if (!normalizedParts.length || normalizedParts.length !== parts.length
+    || normalizedParts.some((part, index) => !Number.isInteger(part.partNumber) || part.partNumber !== index + 1)) {
+    throw new HttpError(400, "Upload parts must be complete, unique, and consecutive");
+  }
+  // Recover a lost response between R2 completion and the Airtable write.
+  // Never infer success from the declared size when the stored object is absent.
+  let object = await env.STUDIO_MEDIA.head(draft.r2_key);
+  if (!object) {
+    await multipart.complete(normalizedParts);
+    object = await env.STUDIO_MEDIA.head(draft.r2_key);
+  }
+  if (!object || Number(object.size) !== Number(draft.size_bytes)) {
+    throw new HttpError(409, "Stored video size does not match the selected file. Source preserved for recovery.");
+  }
+  const sizeBytes = Number(object.size);
   const durationSeconds = Number(body?.duration_seconds || body?.durationSeconds || 0);
   const width = Number(body?.width || 0) || null;
   const height = Number(body?.height || 0) || null;
