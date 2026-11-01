@@ -793,3 +793,14 @@ test('held Producer reply shows V2 not started; saved plan and render progress r
   nodes['page-rendering-review'].classList.remove('active');notify();
   assert.equal(timers.size,0,'polling cancels when the page is closed');
 });
+
+test('approved imported V2 never reverts its activity heading to V2 NOT STARTED',()=>{
+  const approved=script.indexOf("const title=completedAttempt&&session.state==='approved'?");
+  const ready=script.indexOf("completedAttempt&&session.state==='ready_for_review'?",approved);
+  const stale=script.indexOf("producer?'Producer replied · V2 NOT STARTED'",ready);
+  assert.ok(approved>0&&ready>approved&&stale>ready,
+    'approved V2 must take precedence over stale Producer messages');
+  assert.match(script,/Factory creative review accepted — QA pending/);
+  assert.match(script,/V2 creative approval is saved\. Factory can accept/);
+  assert.match(script,/Sibling creative-master propagation is deferred while watermark QA is pending/);
+});

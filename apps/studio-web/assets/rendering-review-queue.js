@@ -320,7 +320,9 @@
     if(requiresInput)activity.classList.add('rr-activity--attention');
     const heading=elem('h3','Post-production progress','rr-progress-heading');
     const summary=session?.state==='approved'&&approvedV2?
-      'V2 creative approval is saved. Factory handoff must be verified before normal scheduling or publishing.':
+      (session.factory_review?.status==='accepted_pending_qa'?
+        'Factory has accepted the V2 creative cut. Watermark QA is still pending; publication and scheduling remain held.':
+        'V2 creative approval is saved. Factory can accept the creative cut under a QA hold without scheduling or publishing.'):
       readyV2?(canApprove?
         'Requires your attention: V2 is ready for review. Select V2 and approve only if satisfied. Publication remains held.':
         'Revised V2 is ready for review. Publication remains held until approval.'):
@@ -421,8 +423,11 @@
         section.append(linked);
         detail.append(section);
       }else if(saved.creative_group_error){
-        detail.append(elem('p',saved.creative_group_error+
-          '. No automatic sibling changes were made.','rr-notice'));
+        const qaPending=session?.state==='approved'&&
+          saved.factory_handoff_gate?.code==='WATERMARK_QA_REQUIRED';
+        detail.append(elem('p',qaPending?
+          'Sibling creative-master propagation is deferred while watermark QA is pending. V2 is still creatively approved and can receive a Factory creative decision or another revision. No sibling media or publishing was changed.':
+          saved.creative_group_error+'. No automatic sibling changes were made.','rr-notice'));
       }
       const messages=Array.isArray(session?.messages)?session.messages:[];
       const last=messages.length?messages[messages.length-1]:null;
@@ -437,7 +442,11 @@
           typeof a?.artifact_id==='string'&&a.artifact_id.length>0):null;
       const activity=elem('section',null,'rr-activity');
       activity.setAttribute('aria-label','Producer and render status');
-      const title=completedAttempt&&session.state==='ready_for_review'?
+      const title=completedAttempt&&session.state==='approved'?
+        'V'+completedAttempt.number+(session.factory_review?.status==='accepted_pending_qa'?
+          ' · Factory creative review accepted — QA pending':
+          ' · Creatively approved — Factory review available'):
+        completedAttempt&&session.state==='ready_for_review'?
         'V'+completedAttempt.number+' · Ready for review'+
         (completedAttempt.provenance?.kind==='manual_verified_review_import'?
           ' (verified imported edit)':''):
