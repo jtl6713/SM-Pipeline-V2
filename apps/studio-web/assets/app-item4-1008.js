@@ -291,7 +291,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.833-asset-upload-confirm";
+  const BUILD_ID = "item4-0.6.834-vibe-processing-guidance";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -5032,21 +5032,26 @@
       return ["pending", "queued", "compressing", "downloading"].includes(state) || row?.compression_needed === true;
     });
     const name = asset?.name || "video";
+    const uploadState = String(asset?.upload_status || "").trim().toLowerCase();
+    const vibeUploadVerified = ezIsVibeCut() && !item4Uploading && Boolean(asset)
+      && !["multipart_pending", "uploading", "pending", "failed"].includes(uploadState)
+      && (["complete", "completed", "uploaded", "ready"].includes(uploadState) || asset.uploaded_at);
+    const canLeave = ezIsAzFinishedPath() || vibeUploadVerified;
     const pct = Number(asset?.compression_progress);
     if (Number.isFinite(pct) && pct > 0) {
       const finishing = pct >= 95;
       const suffix = finishing
         ? "Finishing Drive copy and preview…"
-        : (ezIsAzFinishedPath()
+        : (canLeave
           ? "You can close this tab."
           : "Keep this tab open.");
       return finishing
         ? `Compressing ${name} · ${Math.round(pct)}%. ${suffix}`
-        : (ezIsAzFinishedPath()
+        : (canLeave
           ? `Compressing ${name} · ${Math.round(pct)}%. You can close this tab.`
           : `Compressing ${name} · ${Math.round(pct)}%. Keep this tab open.`);
     }
-    return ezIsAzFinishedPath()
+    return canLeave
       ? `Studio is compressing ${name}. You can close this tab.`
       : `Studio is compressing ${name}. Keep this tab open.`;
   }
@@ -6627,17 +6632,53 @@ function timedScriptAssetLabel(asset, index) {
     const ready = vibeCutReadySource(status);
     const source = vibeCutPersistedSource(status);
     const fileName = String(ready?.name || source?.name || vibeUploadUi.fileName || "source video");
+    const uploadState = String(source?.upload_status || "").trim().toLowerCase();
+    // A persisted draft or a completed browser transfer is not proof that all bytes reached the server.
+    const uploadConfirmed = Boolean(source && !item4Uploading
+      && !["multipart_pending", "uploading", "pending", "failed"].includes(uploadState)
+      && (["complete", "completed", "uploaded", "ready"].includes(uploadState) || source.uploaded_at));
+    const returnTo = "Return to Studio > Production > Drafts, and reopen this Vibe Cut. When it is Ready, Continue to Production will be available.";
     if (ready) {
       return {
         heal: "ready",
-        title: `${fileName} is ready.`,
-        body: "The server confirmed the persisted video is fully processed. Continue is now available.",
-        count: "1 of 1 ready.",
+        title: `Video ready: ${fileName}`,
+        body: "Studio has finished preparing and verifying the uploaded source. Continue to Production is available now.",
+        count: "1 of 1 uploaded · 1 of 1 ready.",
+        guidance: {
+          steps: [
+            { state: "done", label: "Upload verified and stored" },
+            { state: "done", label: "Video preparation complete" },
+            { state: "done", label: "Source ready for Vibe Cut editing" },
+          ],
+          leave: "Yes. The upload and preparation are complete.",
+          returnTo,
+        },
       };
     }
     const phase = String(vibeUploadUi.phase || "idle");
     if (phase === "idle" && !source) return null;
     if (phase === "failed") {
+      const processingFailed = uploadConfirmed && (
+        String(source?.compression_status || "").trim().toLowerCase() === "failed"
+        || String(status?.assets_status || "") === "Error"
+      );
+      if (processingFailed) {
+        return {
+          heal: "error",
+          title: `Video uploaded; preparation needs attention: ${fileName}`,
+          body: `${vibeUploadUi.detail || "The server could not prepare this video."} Your original upload remains saved. This is not a transfer failure; Studio has not confirmed it is Ready.`,
+          count: "1 of 1 uploaded · 0 of 1 ready.",
+          guidance: {
+            steps: [
+              { state: "done", label: "Original upload verified and saved" },
+              { state: "active", label: "Server-side video processing needs attention" },
+              { state: "pending", label: "Verification and Continue are still blocked" },
+            ],
+            leave: "Yes, your original upload is saved. Leaving will not restart failed processing.",
+            returnTo,
+          },
+        };
+      }
       return {
         heal: "error",
         title: `${fileName} failed to upload.`,
@@ -6650,7 +6691,7 @@ function timedScriptAssetLabel(asset, index) {
         heal: "error",
         title: "This upload may be stalled.",
         body: vibeUploadUi.detail || "No recent transfer progress was confirmed. Keep this tab open while Studio checks the transfer.",
-        count: source?.upload_status === "complete" || source?.uploaded_at ? "1 uploaded · 0 ready." : "1 selected · 0 ready.",
+        count: uploadConfirmed ? "1 uploaded · 0 ready." : "Upload not verified · 0 ready.",
       };
     }
     if (phase === "selected") {
@@ -6680,20 +6721,55 @@ function timedScriptAssetLabel(asset, index) {
         count: "1 uploading · 0 ready.",
       };
     }
-    if (phase === "saving") {
+    if (phase === "saving" && !uploadConfirmed) {
       return {
         heal: "uploading",
-        title: `Upload complete. Saving ${fileName}.`,
-        body: vibeUploadUi.detail || "The server received every part and is finalizing the persisted video.",
-        count: "1 uploaded · 0 ready.",
+        title: `Upload transfer finished. Confirming ${fileName}.`,
+        body: "Studio is checking that the server received and permanently saved every segment.",
+        count: "Upload confirmation pending · 0 ready.",
+        guidance: {
+          steps: [
+            { state: "active", label: "Confirming every segment is saved" },
+            { state: "pending", label: "Preparing video for editing" },
+            { state: "pending", label: "Enabling Continue to Production" },
+          ],
+          leave: "Not yet. Keep this screen open until Studio verifies the full upload.",
+          returnTo,
+        },
       };
     }
     if (phase === "processing" || source) {
+      const compressionState = String(source?.compression_status || "").trim().toLowerCase();
+      const numericProgress = Number(source?.compression_progress);
+      const progress = source?.compression_progress !== null && source?.compression_progress !== undefined
+        && source?.compression_progress !== "" && Number.isFinite(numericProgress) && numericProgress > 0
+        ? ` · ${Math.min(100, Math.round(numericProgress))}%` : "";
+      const stage = compressionState === "compressing"
+        ? `Creating a video optimized for editing${progress}`
+        : compressionState === "downloading"
+          ? "Retrieving the saved source for processing"
+          : ["pending", "queued"].includes(compressionState)
+            ? "Waiting for server-side video processing"
+            : "Checking the prepared video, Drive copy, and preview";
       return {
         heal: "uploading",
-        title: `Processing ${fileName}.`,
-        body: vibeUploadUi.detail || item4CompressionProgressLabel(status),
-        count: "1 uploaded · 0 ready.",
+        title: uploadConfirmed ? `Upload complete: ${fileName}` : `Checking uploaded video: ${fileName}`,
+        body: uploadConfirmed
+          ? "Your video is safely uploaded. Studio is preparing it for Vibe Cut editing; Continue unlocks after verification."
+          : "Studio has a video record but has not verified that the full upload is safely stored.",
+        count: uploadConfirmed ? "1 of 1 uploaded · 0 of 1 ready." : "Upload confirmation pending · 0 ready.",
+        guidance: {
+          steps: [
+            { state: uploadConfirmed ? "done" : "active", label: uploadConfirmed ? "Original upload verified and saved" : "Confirming original upload is complete" },
+            { state: uploadConfirmed ? "active" : "pending", label: stage },
+            { state: "pending", label: "Verifying saved media and preview" },
+            { state: "pending", label: "Enabling Continue to Production" },
+          ],
+          leave: uploadConfirmed
+            ? "Yes. You can close this screen; server-side preparation continues without this tab."
+            : "Not yet. Keep this screen open until Studio verifies the complete upload.",
+          returnTo,
+        },
       };
     }
     return null;
@@ -11563,8 +11639,18 @@ function timedScriptAssetLabel(asset, index) {
       const countHtml = markup.count
         ? ` <em class="item4-upload-progress-count">${escapeHtml(markup.count)}</em>`
         : "";
-      progress.innerHTML = `<strong>${escapeHtml(markup.title)}</strong><span>${escapeHtml(markup.body)}${countHtml}</span>`;
-      const tip = `${markup.title} ${markup.body}`.trim();
+      const guide = markup.guidance;
+      const guidanceHtml = guide
+        ? `<div class="vibe-upload-guidance">
+            <div class="vibe-upload-guidance-title">What Studio is doing</div>
+            <ul class="vibe-upload-guidance-steps">${guide.steps.map((step) =>
+              `<li data-state="${escapeHtml(step.state)}">${escapeHtml(step.label)}</li>`
+            ).join("")}</ul>
+            <p><strong>Can I leave?</strong> ${escapeHtml(guide.leave)}</p>
+            <p><strong>Where will I find it?</strong> ${escapeHtml(guide.returnTo)}</p>
+          </div>` : "";
+      progress.innerHTML = `<strong>${escapeHtml(markup.title)}</strong><span>${escapeHtml(markup.body)}${countHtml}</span>${guidanceHtml}`;
+      const tip = `${markup.title} ${markup.body} ${guide ? `${guide.leave} ${guide.returnTo}` : ""}`.trim();
       progress.dataset.phase6Tooltip = tip;
       if (typeof window.studioLockTooltip === "function") window.studioLockTooltip(progress, tip);
     });
