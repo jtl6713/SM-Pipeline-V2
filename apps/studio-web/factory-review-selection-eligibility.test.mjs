@@ -127,6 +127,47 @@ test("Held #9593 explains the blocked checkbox directly beneath Output #, above 
   assert.match(css, /white-space:normal;overflow:visible;text-overflow:clip/);
 });
 
+test("Reel preview visual belongs to the exact output row beside its title", () => {
+  const {renderCard} = setup();
+  const contentItem = "recYhIjy4BW0U3WaW";
+  const sharedCover = "https://media.chicagoshining.com/studio/previews/thumbnails/" + contentItem + "/cover-9x16.png";
+  const reel = {
+    ...chicagoReel, id:"recPnNYghmcJYivOA", content_item_id:contentItem,
+    thumbnail_url:sharedCover, review_hold_active:true
+  };
+  const html = renderCard(reel, {lane:"needs_eyes"});
+  const heading = html.indexOf('class="factory-output-heading"');
+  const thumbnail = html.indexOf('data-factory-preview="recPnNYghmcJYivOA"', heading);
+  const title = html.indexOf('class="factory-output-title-name"', thumbnail);
+  const number = html.indexOf("Output #9593", title);
+  const reason = html.indexOf('class="factory-batch-unavailable"', number);
+  const actions = html.indexOf('class="factory-line-actions"', reason);
+  assert.ok(heading > 0 && heading < thumbnail && thumbnail < title &&
+    title < number && number < reason && reason < actions,
+    "Output preview, title and hold reason must form one output-level unit before actions");
+  assert.match(html, /aria-label="Preview Output #9593:/);
+  assert.ok(html.includes('class="factory-output-visual-label">Shared cover</small>'));
+  assert.doesNotMatch(html.slice(0,heading), /factory-line-thumb/,
+    "The thumbnail must not be detached under the selection checkbox");
+  assert.ok(css.includes(".factory-band-eyes .factory-output-heading{"));
+  assert.ok(css.includes(".factory-output-visual .factory-line-thumb{"));
+});
+
+test("Two sibling platform outputs use distinct output previews even with one shared cover", () => {
+  const {renderCard} = setup();
+  const source = "https://media.chicagoshining.com/studio/previews/thumbnails/recContentSibling123/cover-9x16.png";
+  const base = {...chicagoReel, content_item_id:"recContentSibling123",
+    thumbnail_url:source, review_hold_active:false};
+  const reel = renderCard({...base,id:"recOutputReel001",output_id:9593},{lane:"needs_eyes"});
+  const story = renderCard({...base,id:"recOutputStory02",output_id:9594,studio_output_type:"Story"},{lane:"needs_eyes"});
+  assert.match(reel, /data-factory-preview="recOutputReel001"/);
+  assert.doesNotMatch(reel, /data-factory-preview="recOutputStory02"/);
+  assert.match(story, /data-factory-preview="recOutputStory02"/);
+  assert.doesNotMatch(story, /data-factory-preview="recOutputReel001"/);
+  assert.match(reel, /Shared cover/);
+  assert.match(story, /Shared cover/);
+});
+
 test("Group selection skips disabled row checkboxes", () => {
   assert.match(js, /querySelectorAll\("\[data-factory-select-output\]:not\(:disabled\)"\)/);
 });
