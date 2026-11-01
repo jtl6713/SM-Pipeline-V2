@@ -711,7 +711,7 @@ test('held Producer reply shows V2 not started; saved plan and render progress r
   plan={frozen:true,missing_assets:[],hash:'plan123',version:1,immutable_manifest:'manifest'};
   const second=timers.values().next().value;timers.clear();await second();
   for(let i=0;i<5;i++)await tick();
-  assert.match(nodes.rrProgressSummary.textContent,/plan is ready/);
+  assert.match(nodes.rrProgressSummary.textContent,/plan is saved/);
   assert.match(nodes.rrProgressSummary.textContent,/No render has started/);
   assert.equal(timers.size,1);
   // Only a server-confirmed queue changes the UI to rendering queued.
@@ -719,6 +719,7 @@ test('held Producer reply shows V2 not started; saved plan and render progress r
   const third=timers.values().next().value;timers.clear();await third();
   for(let i=0;i<5;i++)await tick();
   assert.match(nodes.rrProgressSummary.textContent,/render job is queued/);
+  assert.match(textAll(),/Queued — not started/);
   assert.ok(!/V2 is ready for review/.test(nodes.rrProgressSummary.textContent));
   nodes['page-rendering-review'].classList.remove('active');notify();
   assert.equal(timers.size,0,'polling cancels when the page is closed');
