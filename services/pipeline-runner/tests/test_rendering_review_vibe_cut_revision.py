@@ -67,6 +67,7 @@ class TestVibeCutRevision(unittest.TestCase):
         self.assertEqual(data["source"],source_copy)
         self.assertTrue(all(x["mediaKind"]=="video" and x["muted"] and
                        not x["keepSourceAudio"] for x in payload["clips"]))
+        self.assertEqual(payload["studioRevision"]["profile_id"], profile)
         self.assertFalse(payload["studioRevision"]["allow_public_publish"])
 
   def test_no_claim_without_profile_hold_or_explicit_button(self):
