@@ -650,3 +650,4 @@ Deploy Studio UI 0.6.825: approved held V2 can request another revision independ
 2026-11-01 UI 0.6.834: Explain Vibe source upload confirmation, queued/transcoding/verify statuses, safe exit and Drafts resume; distinguish saved-video processing failure from transfer failure.
 2026-11-01: Deploy UI 0.6.835 Vibe verified upload automatically transitions to render/human Approval; optional Production inspection, no publishing. Backend merged #1484; UI PR pending.
 2026-11-01: Studio UI 0.6.836 and Worker Vibe Cut verified-source handoff; auto-save output plan, prepare variants, promote into rendering and stop for human Approval. No automatic publish.
+Deploy Studio UI 0.6.837-pipeline-total-first: Home overview Pipeline Total is first metric column and has neutral platform styling; preserve city/profile totals. Trigger Pages production verification.
