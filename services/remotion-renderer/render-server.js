@@ -11,7 +11,7 @@ const { authoritativeRenderPlan } = require('./authoritative-duration');
 const { verifyFirstFrame } = require('./first-frame-verify');
 const {selectedVibeWatermarkFileId} = require('./profile-watermark-policy');
 const {noVoiceoverForVibeReview} = require('./vibe-audio-policy');
-const {vibeReviewMusicFileId, vibeReviewAudioExtension} = require('./vibe-review-music-policy');
+const {vibeReviewMusicFileId, vibeReviewAudioExtension, verifyVibeReviewMusicStreams} = require('./vibe-review-music-policy');
 
 const app = express();
 
@@ -897,6 +897,44 @@ async function rewriteClipAssets({ clips, jobId, jobAssetDir, job }) {
     return rewrittenClips;
 }
 
+async function probeVibeReviewMusicAudio(filePath) {
+    const evidence = await new Promise((resolve, reject) => {
+        const probe = spawn('ffprobe', [
+            '-v', 'error', '-show_entries',
+            'stream=codec_type,codec_name,duration:format=duration',
+            '-of', 'json', filePath,
+        ], {cwd: PROJECT_DIR, windowsHide: true});
+        let output = '';
+        let oversized = false;
+        const timeout = setTimeout(() => probe.kill(), 15000);
+        probe.stdout.on('data', (chunk) => {
+            output += chunk.toString();
+            if (output.length > 65536) {
+                oversized = true;
+                probe.kill();
+            }
+        });
+        probe.stderr.on('data', () => {}); // Never expose raw provider/file details.
+        probe.on('error', () => {
+            clearTimeout(timeout);
+            reject(new Error('vibe_review_music_ffprobe_unavailable'));
+        });
+        probe.on('close', (code, signal) => {
+            clearTimeout(timeout);
+            if (oversized || signal || code !== 0 || !output) {
+                reject(new Error('vibe_review_music_ffprobe_failed'));
+                return;
+            }
+            try {
+                resolve(JSON.parse(output));
+            } catch {
+                reject(new Error('vibe_review_music_probe_invalid'));
+            }
+        });
+    });
+    return verifyVibeReviewMusicStreams(evidence);
+}
+
 async function rewriteMusicAsset({ music, jobAssetDir, job, studioRevision }) {
     // No direct public Drive retrieval is permitted for a protected Vibe review.
     // Only a verified canonical Drive ID is accepted; fetch through the same
@@ -929,6 +967,9 @@ async function rewriteMusicAsset({ music, jobAssetDir, job, studioRevision }) {
                 fs.closeSync(file);
             }
             const audioExt = vibeReviewAudioExtension(header, size);
+            // Accepting the ftyp container header as m4a is not proof that
+            // its actual streams are music-only, nor that MP3 frames decode.
+            await probeVibeReviewMusicAudio(destination);
             if (audioExt !== ext) {
                 const renamed = path.join(jobAssetDir, `music${audioExt}`);
                 fs.renameSync(destination, renamed);
