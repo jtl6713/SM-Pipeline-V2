@@ -13247,6 +13247,12 @@ export async function getStudioReadyProductionDiagnostic(request, env, url) {
 /*__STUDIO_WORKER_END:getStudioReadyProductionDiagnostic__*/
 
 export async function getStudioOperations(request, env, authorization) {
+  // This dashboard fans out across settings, profile, output and media tables.
+  // Coalesce repeat poll/refresh calls *per organization* before they reach
+  // Airtable's shared per-base rate limit. Authorization-sensitive flags are
+  // computed outside the cached payload and never shared between callers.
+  const orgId = String(authorization?.organization?.record_id || "global");
+  const data = await studioReadCoalesce(`operations:overview:${orgId}`, 15000, async () => {
   const chicago = chicagoNowParts();
   const lastDaily = await studioSettingsByName(env, STUDIO_I1_LAST_DAILY_SETTING);
   const lastAutonomous = await studioSettingsByName(env, STUDIO_AUTONOMOUS_LAST_SETTING);
@@ -13263,16 +13269,12 @@ export async function getStudioOperations(request, env, authorization) {
   const libraryIntake = mapLibraryIntakeSnapshot(needingClassification, oversized);
   // Read-only watchlist for Ops; do not block Profiles on ensure/upsert side effects.
   const similarAccounts = await studioReadSimilarWatchlist(env).catch(() => []);
-  return respond(request, env, {
-    ok: true,
-    page: "operations",
+  return {
     timezone: "America/Chicago",
     chicago_date: chicago.date,
     chicago_hour: chicago.hour,
     last_daily_idea_date: f(lastDaily, "Setting_Value") || null,
     last_autonomous_run: parseAutonomousLastRun(f(lastAutonomous, "Setting_Value")),
-    can_edit_profiles: Boolean(authorization?.permissions?.tenant_admin),
-    can_publish_queue: Boolean(authorization?.permissions?.publishing_control),
     profiles: profiles.map(mapOperationsProfile),
     ready_to_schedule: readyToSchedule.map(mapOperationsOutput),
     ready_to_publish: readyToPublish.map(mapOperationsOutput),
@@ -13284,6 +13286,14 @@ export async function getStudioOperations(request, env, authorization) {
     library_intake: libraryIntake,
     similar_accounts: similarAccounts,
     library_include_cross_scope: libraryCrossScopeEnabled(f(libraryCrossScopeRow, "Setting_Value")),
+  };
+  });
+  return respond(request, env, {
+    ok: true,
+    page: "operations",
+    ...data,
+    can_edit_profiles: Boolean(authorization?.permissions?.tenant_admin),
+    can_publish_queue: Boolean(authorization?.permissions?.publishing_control),
   });
 }
 /*__STUDIO_WORKER_END:getStudioOperations__*/
