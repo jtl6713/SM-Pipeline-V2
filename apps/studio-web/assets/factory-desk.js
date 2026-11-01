@@ -154,6 +154,9 @@
   function canReviewActions(card, { pile = false, candidate = false } = {}) {
     if (pile || candidate || state.submittingOutputIds?.has(card?.id) || recentFactoryAccepted()[String(card?.id || "")]) return false;
     if (card?.kind !== "output") return false;
+    // Held revisions must be discoverable and previewable, never approvable
+    // from Factory until their separate review and QA handoff completes.
+    if (card.review_hold_active === true || card.do_not_publish === true) return false;
     // studio_state can paint Ready for Review while Output_Status is still
     // In Production. Approve all must only claim Airtable-ready rows.
     const output = String(card.output_status || "").trim().toLowerCase();
