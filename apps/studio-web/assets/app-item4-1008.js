@@ -6623,8 +6623,6 @@ function timedScriptAssetLabel(asset, index) {
     return `${(bytes / (1024 * 1024)).toFixed(bytes >= 100 * 1024 * 1024 ? 0 : 1)} MB`;
   }
 
-
-  // Status is based on the saved server asset, not an earlier transfer toast.
   function vibeCutServerUploadComplete(source) {
     if (!source) return false;
     const transfer = String(source.upload_status || "").trim().toLowerCase();
@@ -24439,8 +24437,9 @@ function timedScriptAssetLabel(asset, index) {
     xhr.onload=()=>{
      let result={};try{result=JSON.parse(xhr.responseText||"{}");}
      catch{finish(fail("The upload finished but the server confirmation was unreadable.",xhr.status));return;}
-     if(xhr.status<200||xhr.status>=300||result.ok===false){finish(fail(result.error||result.message||`Request failed (${xhr.status})`,xhr.status));return;}
-     if(Number.isFinite(Number(result.uploaded))&&result.uploaded!==undefined&&Number(result.uploaded)<1){finish(fail("The server did not confirm a saved asset.",xhr.status));return;}
+     if(xhr.status<200||xhr.status>=300||result?.ok===false){finish(fail(result?.error||result?.message||`Request failed (${xhr.status})`,xhr.status));return;}
+     const confirmed=Number(result?.uploaded ?? (Array.isArray(result?.records)?result.records.length:(result?.id?1:0)));
+     if(!Number.isFinite(confirmed)||confirmed<1){finish(fail("The server did not confirm a saved asset.",xhr.status));return;}
      finish(null,result);
     };
     xhr.onerror=()=>finish(fail("Connection interrupted. The upload result is unconfirmed."));
@@ -24522,7 +24521,7 @@ function timedScriptAssetLabel(asset, index) {
           const result = await uploadLibraryFileWithProgress(form, { profileId, file: currentFile,
             onTransfer: ({ stage, loadedBytes }) => renderLibraryUploadProgress({ phase: stage, file: currentFile, fileIndex, fileCount: files.length, uploaded, loadedBytes }),
           });
-          const count = Number(result?.uploaded || chunk.length) || chunk.length;
+          const count = Math.min(chunk.length, Number(result?.uploaded ?? (Array.isArray(result?.records) ? result.records.length : result?.id ? 1 : 0)));
           uploaded += count;
           completedFiles += chunk.length;
           renderLibraryUploadProgress({ phase: "saved", file: currentFile, fileIndex, fileCount: files.length, uploaded, loadedBytes: Number(currentFile?.size) || 0, message: `Server confirmed ${currentFile.name} saved (${uploaded} of ${files.length} assets).` });
