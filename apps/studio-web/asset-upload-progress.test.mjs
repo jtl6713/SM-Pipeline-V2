@@ -86,7 +86,7 @@ test("single-request library upload reports sent bytes and only resolves after s
 });
 
 test("failed and zero-save responses are never counted as confirmed", async () => {
-  for (const response of [{status:503,body:{error:"Service unavailable"}},{status:200,body:{ok:true,uploaded:0}}]) {
+  for (const response of [{status:503,body:{error:"Service unavailable"}},{status:200,body:{ok:true,uploaded:0}},{status:200,body:{ok:true}},{status:200,body:null},{status:200,body:{ok:true,uploaded:"invalid"}}]) {
     class FakeXHR {
       constructor(){this.upload={};}
       open(){}
@@ -126,5 +126,5 @@ test("queue remains one asset at a time with real result counts and no implicit 
     assert.match(html,new RegExp('id="' + id + '"'));
   }
   assert.match(css,/#libraryUploadProgress/);
-  assert.match(html,/UI build 0\.6\.832/);
+  assert.match(html,/UI build 0\.6\.833/);
 });
