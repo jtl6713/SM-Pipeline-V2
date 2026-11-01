@@ -183,55 +183,97 @@ def process_request(
     if dry_run:
         return {"processed": False, "dry_run": True, "prompt": prompt, **preview}
 
-    generated = generate_ideas(prompt)
-    ideas = list((generated.get("parsed") or {}).get("ideas") or [])[:remaining]
-    preview["openai_idea_count"] = len(ideas)
+    # Only retry a model response before any candidate write is acknowledged.
+    # An ambiguous Airtable POST is never retried here; the durable consumer
+    # reconciles the linked records and fails closed on uncertain outcomes.
     created_ids: list[str] = []
     skipped_duplicate_titles: list[str] = []
     seen_titles: set[str] = set()
-    for idea in ideas:
-        title = str(idea.get("candidate_title") or "").strip()
-        if not title:
-            continue
-        title_key = _title_key(title)
-        if title_key in seen_titles or _title_used_in_last_year(client, title):
-            skipped_duplicate_titles.append(title)
-            continue
-        seen_titles.add(title_key)
-        try:
-            created = client.create_records(
-                SOURCE_CANDIDATES_TABLE,
-                [
-                    _candidate_fields(
-                        idea,
-                        profile_id=profile["id"],
-                        batch_id=batch_record_id,
-                        test_run_id=test_run_id,
-                    )
-                ],
-                typecast=True,
+    invalid_ai_responses = 0
+    invalid_idea_entries = 0
+    max_generation_attempts = 2
+    for attempt in range(1, max_generation_attempts + 1):
+        preview["generation_attempts"] = attempt
+        attempt_prompt = prompt
+        if attempt > 1:
+            excluded = ", ".join(skipped_duplicate_titles[-10:]) or "Prior response had no usable idea entries"
+            attempt_prompt += (
+                "\n\nMANDATORY REGENERATION CORRECTION\n"
+                "The previous model response produced ZERO accepted Idea Candidates. "
+                "Generate a genuinely different, specific concept; do not reuse "
+                "a title by adding a number or minor wording change.\n"
+                f"Rejected titles or invalid response: {excluded}\n"
+                f"Return a valid JSON object containing exactly {remaining} "
+                "new entries in the ideas array, with nonempty candidate_title."
             )
-        except Exception as exc:
-            # Preserve acknowledged writes. A timed-out write may also have
-            # succeeded remotely, so the caller must reconcile before retrying.
-            preview["created_record_ids"] = created_ids
-            preview["created_count"] = len(created_ids)
-            preview["missing_count"] = max(0, remaining - len(created_ids))
-            preview["retry_requires_reconciliation"] = True
-            return {
-                "processed": bool(created_ids),
-                "partial_failure": True,
-                "reason": "candidate_create_failed",
-                "error": str(exc),
-                **preview,
-            }
-        if created:
-            created_ids.append(created[0]["id"])
+        generated = generate_ideas(attempt_prompt)
+        parsed = generated.get("parsed") if isinstance(generated, dict) else None
+        raw_ideas = parsed.get("ideas") if isinstance(parsed, dict) else None
+        if not isinstance(raw_ideas, list) or not raw_ideas:
+            invalid_ai_responses += 1
+            continue
+
+        ideas = raw_ideas[:remaining]
+        preview["openai_idea_count"] = len(ideas)
+        for idea in ideas:
+            if not isinstance(idea, dict):
+                invalid_idea_entries += 1
+                continue
+            title = str(idea.get("candidate_title") or "").strip()
+            if not title:
+                invalid_idea_entries += 1
+                continue
+            title_key = _title_key(title)
+            if title_key in seen_titles or _title_used_in_last_year(client, title):
+                skipped_duplicate_titles.append(title)
+                continue
+            seen_titles.add(title_key)
+            try:
+                created = client.create_records(
+                    SOURCE_CANDIDATES_TABLE,
+                    [
+                        _candidate_fields(
+                            idea,
+                            profile_id=profile["id"],
+                            batch_id=batch_record_id,
+                            test_run_id=test_run_id,
+                        )
+                    ],
+                    typecast=True,
+                )
+            except Exception as exc:
+                # Do not make another model or Airtable write after an
+                # uncertain POST; operators must reconcile the batch first.
+                preview["created_record_ids"] = created_ids
+                preview["created_count"] = len(created_ids)
+                preview["missing_count"] = max(0, remaining - len(created_ids))
+                preview["retry_requires_reconciliation"] = True
+                return {
+                    "processed": bool(created_ids),
+                    "partial_failure": True,
+                    "reason": "candidate_create_failed",
+                    "error": str(exc),
+                    **preview,
+                }
+            if created:
+                created_ids.append(created[0]["id"])
+        # The durable worker owns shortfall reconciliation after any accepted
+        # candidate. Never generate a new slate inside a partly written pass.
+        if created_ids:
+            break
 
     preview["created_record_ids"] = created_ids
     preview["skipped_duplicate_titles"] = skipped_duplicate_titles
+    preview["invalid_ai_responses"] = invalid_ai_responses
+    preview["invalid_idea_entries"] = invalid_idea_entries
     if not created_ids:
-        return {"processed": False, "reason": "no_ideas_created", **preview}
+        if skipped_duplicate_titles:
+            reason = "no_unique_candidates_after_regeneration"
+        elif invalid_ai_responses or invalid_idea_entries:
+            reason = "empty_or_invalid_ai_ideas_after_regeneration"
+        else:
+            reason = "no_ideas_created"
+        return {"processed": False, "reason": reason, **preview}
 
     next_result = None
     from i2.constants import I2_EMAIL_ENABLED
