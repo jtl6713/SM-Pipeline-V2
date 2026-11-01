@@ -656,7 +656,7 @@ test('held Producer reply shows V2 not started; saved plan and render progress r
     'rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile','rrProgressSummary'];
   const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
   let notify,version=2,state='discussing',plan=null,attempts=[],timerId=0;
-  let reads=0;const timers=new Map();
+  let reads=0,failNextRead=false;const timers=new Map();
   const saved=()=>({ok:true,publication_hold_verified:true,session:{
     id:'review-session',version,state,latest_attempt_number:attempts.length?2:1,
     messages:[{role:'user',content:'Change narration only',at:'2026-11-01T16:00:00Z'},
@@ -677,6 +677,8 @@ test('held Producer reply shows V2 not started; saved plan and render progress r
       next_cursor:null})};
     if(url==='/api/rendering-review/outputs/'+output){
       reads++;
+      if(failNextRead){failNextRead=false;return {ok:false,status:503,
+        json:async()=>({ok:false,error:'Session temporarily unavailable'})};}
       return {ok:true,json:async()=>saved()};
     }
     throw new Error('Unexpected request '+url);
@@ -721,6 +723,15 @@ test('held Producer reply shows V2 not started; saved plan and render progress r
   assert.match(nodes.rrProgressSummary.textContent,/render job is queued/);
   assert.match(textAll(),/Queued — not started/);
   assert.ok(!/V2 is ready for review/.test(nodes.rrProgressSummary.textContent));
+  // Transient manual check failures must not erase the previously verified stage.
+  failNextRead=true;
+  const check=descendants(nodes.rrDetail).find(n=>
+    n.tag==='button'&&n.textContent==='Check latest status');
+  assert.ok(check);
+  await check.listeners.click();
+  for(let i=0;i<4;i++)await tick();
+  assert.match(nodes.rrProgressSummary.textContent,/Latest status unavailable/);
+  assert.match(nodes.rrProgressSummary.textContent,/render job is queued/);
   nodes['page-rendering-review'].classList.remove('active');notify();
   assert.equal(timers.size,0,'polling cancels when the page is closed');
 });
