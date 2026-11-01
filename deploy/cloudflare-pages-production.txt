@@ -646,3 +646,5 @@ Deploy Studio UI 0.6.825: approved held V2 can request another revision independ
 2026-11-01 UI 0.6.832: Asset Manager shows per-file transfer bytes/percent, current asset, confirmed-file counts, server confirmation and failed queue summaries; uses one-request XHR without publishing or storage changes.
 
 2026-11-01 UI 0.6.833: Asset Manager HTTP 200 without an authoritative saved count no longer claims success or increments file totals; retain previous release functionality.
+
+2026-11-01 UI 0.6.834: Explain Vibe source upload confirmation, queued/transcoding/verify statuses, safe exit and Drafts resume; distinguish saved-video processing failure from transfer failure.
