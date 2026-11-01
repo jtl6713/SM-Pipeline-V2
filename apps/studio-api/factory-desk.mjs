@@ -131,6 +131,7 @@ function isReadyForReview(row) {
   // Output 3431 / Content 654 had Output_Status=Ready for Review while Remotion
   // still reported Waiting in Render Queue, so Factory incorrectly offered Approve.
   if (row?.kind === "output" && isRenderQueueActive(row)) return false;
+  if (row?.kind === "output" && row.review_package_ready === false) return false;
   const state = String(row?.studio_state || "").trim().toLowerCase();
   const output = String(row?.output_status || "").trim().toLowerCase();
   const review = String(row?.review_status || "").trim().toLowerCase();
@@ -296,6 +297,7 @@ export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
     studio_state: row.studio_state || "",
     output_status: row.output_status || null,
     review_status: row.review_status || null,
+    review_package_ready: row.review_package_ready !== false,
     render_status: row.render_status || null,
     review_hold_active: row.review_hold_active === true,
     do_not_publish: row.do_not_publish === true,
