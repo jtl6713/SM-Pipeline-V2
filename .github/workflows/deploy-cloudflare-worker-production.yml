@@ -634,7 +634,16 @@ jobs:
                   ? '{"quality_rate_limit_recovery":true,"quality_rate_limit_preview":true}'
                   : ((overviewRefresh || summaryReconcile) ? "{}" : undefined),
               });
-              const response = await env.STUDIO_API.fetch(internal);
+              let response;
+              try {
+                response = await env.STUDIO_API.fetch(internal);
+              } catch (error) {
+                if (michiganPreview) return Response.json({
+                  output_id:michiganOutput,status:-1,error_type:String(error?.name || "Error"),
+                  error_message:String(error?.message || "").slice(0,200),
+                }, {headers:{"Cache-Control":"no-store"}});
+                throw error;
+              }
               if (michiganPreview) {
                 // No raw private MP4 bytes or access tokens leave this temporary canary.
                 return Response.json({
@@ -725,14 +734,19 @@ jobs:
           ids=(recPnNYghmcJYivOA recyYKgkfRksIZPun rec8JDQW2Jilnzc9u recgJR5bTcYfCCwAL recqw7DTgYsqYkl51 recZ1X5QfeFZTot1F)
           for id in "${ids[@]}"; do
             url="$BASE?output_id=$id"
-            curl -fsS --max-time 80 "$url" -o /tmp/michigan-preview.json
+            CODE=$(curl -sS --max-time 80 -w '%{http_code}' "$url" -o /tmp/michigan-preview.json || true)
+            if [[ "$CODE" != "200" ]]; then
+              echo "Michigan playback bridge transport failure for $id: HTTP $CODE" >&2
+              head -c 400 /tmp/michigan-preview.json >&2
+              exit 1
+            fi
             jq -e --arg id "$id" '.output_id==$id and .status==200
               and .content_type=="video/mp4"
               and .content_length==46824860
               and .source=="google-drive-render"
               and .accept_ranges=="bytes"' /tmp/michigan-preview.json >/dev/null || {
                 echo "Michigan V2 authenticated playback probe FAILED for $id" >&2
-                jq -c '{output_id,status,content_type,content_length,source,accept_ranges}' /tmp/michigan-preview.json >&2
+                jq -c '{output_id,status,content_type,content_length,source,accept_ranges,error_type,error_message}' /tmp/michigan-preview.json >&2
                 exit 1
               }
             echo "michigan_v2_preview=PASS output=$id bytes=46824860"
