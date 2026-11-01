@@ -1,4 +1,5 @@
 import { serveMichiganV2CachedPreview } from "./michigan-review-preview-cache.mjs";
+import { evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
 import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 import { readyProductionEnqueue } from "./ready-production-queue.mjs";
@@ -10819,6 +10820,7 @@ export function studioOutputReadyForPublishApproval(record) {
   // Native photo proposals require their selected slides/preview and cover; video
   // proposals require a finished file and any required review cover.
   if (!studioOutputHasReviewableDeliverable(record)) return false;
+  if (evaluateReviewPackage(record).readiness !== "READY") return false;
   if (outputStatus === "In Production" || ["Ready for Render", "Rendering"].includes(String(f(record, "Render_Status") || "").trim())) return false;
   const rendered = String(f(record, "Render_Status") || "").trim() === "Rendered" && Boolean(String(f(record, "Final_File_URL") || "").trim());
   const finished = studioIsFinishedPassthrough(record);
