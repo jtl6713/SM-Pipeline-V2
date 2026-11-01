@@ -1264,7 +1264,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.708-vibe-cut-video-ideas" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
+          version: "0.10.709-ideas-error-boundary" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
@@ -2493,7 +2493,7 @@ export default {
 
       if (isOperationsRoute) {
         requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
-        return getStudioOperations(request, env, authorization);
+        return await getStudioOperations(request, env, authorization);
       }
 
       if (isOperationsProfilesListRoute) {
@@ -2901,7 +2901,7 @@ export default {
         if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
         assertWriteRequest(request, env);
         requirePermission(authorization, "ideas_create");
-        return startStudioIdeaGeneration(request, env, authorization, ctx);
+        return await startStudioIdeaGeneration(request, env, authorization, ctx);
       }
 
       if (isScriptedShortProposeRoute) {
@@ -2920,7 +2920,7 @@ export default {
       }
 
       if (isIdeaGenerateStatusRoute) {
-        return studioIdeaGenerationStatus(request, env, url, authorization);
+        return await studioIdeaGenerationStatus(request, env, url, authorization);
       }
 
       if (url.pathname === "/api/ideas") {
