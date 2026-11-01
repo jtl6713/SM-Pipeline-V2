@@ -1,0 +1,13 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {qaAirtableAdapter} from "./qa-airtable-ledger.mjs";
+const client=()=>({calls:[],async list(t,q){this.calls.push(["list",t,q]);return []},async create(t,fields){this.calls.push(["create",t,fields]);return {id:"rec123"}}});
+test("requires real Airtable transport",()=>assert.throws(()=>qaAirtableAdapter({}),/transport/));
+test("bounded history prevents full table scans",async()=>{const c=client(),a=qaAirtableAdapter(c);await assert.rejects(a.listRuns(101),/Unbounded/);assert.equal(c.calls.length,0);});
+test("requires an exact run identity",async()=>{const a=qaAirtableAdapter(client());await assert.rejects(a.listEvents("all records"),/Invalid run/);});
+test("append-only interface exposes no update/delete",()=>{const a=qaAirtableAdapter(client());assert.equal(a.update,undefined);assert.equal(a.delete,undefined);});
+test("reject noncanonical event",async()=>{const a=qaAirtableAdapter(client());await assert.rejects(a.appendEvent({appendOnly:false},"key-123456","hash"),/authorized/);});
+test("canonical Airtable write requires receipt",async()=>{const c=client(),a=qaAirtableAdapter(c);const r=await a.appendEvent({appendOnly:true,writeAuthority:"Airtable",runId:"r",testId:"t",kind:"ManualResult",actorId:"admin",atUtc:"2026-10-31T12:00:00Z",payload:{status:"Fail"}},"key-123456","hash");assert.equal(r.record.id,"rec123");assert.equal(c.calls[1][0],"create");});
+test("identical retry reuses existing event",async()=>{const c=client();c.list=async()=>[{id:"existing",fields:{"Payload Hash":"hash"}}];const r=await qaAirtableAdapter(c).appendRun({runId:"r",catalogRevision:"1",environment:"qa",deployment:{},createdBy:"admin",createdAtUtc:"2026-10-31T12:00:00Z",status:"Open"},"key-123456","hash");assert.equal(r.reused,true);});
+test("different retry payload is rejected",async()=>{const c=client();c.list=async()=>[{id:"existing",fields:{"Payload Hash":"other"}}];await assert.rejects(qaAirtableAdapter(c).appendRun({runId:"r",catalogRevision:"1",environment:"qa",deployment:{},createdBy:"admin",createdAtUtc:"now",status:"Open"},"key-123456","hash"),/conflict/);});
+test("duplicate keys never silently pass",async()=>{const c=client();c.list=async()=>[{},{}];await assert.rejects(qaAirtableAdapter(c).appendRun({runId:"r",catalogRevision:"1",environment:"qa",deployment:{},createdBy:"admin",createdAtUtc:"now",status:"Open"},"key-123456","hash"),/Duplicate/);});
