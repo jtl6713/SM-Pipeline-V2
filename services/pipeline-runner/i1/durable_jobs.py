@@ -82,20 +82,23 @@ def enqueue(batch_id: str, profile_id: str, count: int, quality: str) -> dict:
         raise ValueError("valid batch_record_id and profile_record_id are required")
     if not isinstance(count, int) or not 1 <= count <= 10 or quality not in _QUALITIES:
         raise ValueError("invalid I1 request")
+    # Start/check the consumer BEFORE committing a receipt. Otherwise a startup
+    # failure could return HTTP 503 after admission while the Worker incorrectly
+    # marks the Airtable batch Failed, even though the job may run later.
+    start_consumer()
     now = time.time()
     with _db() as db:
-        db.execute(
+        inserted = db.execute(
             """INSERT OR IGNORE INTO jobs
             (batch_id, profile_id, requested_count, quality, status, created_at, updated_at)
             VALUES (?,?,?,?, 'queued', ?,?)""",
             (batch_id, profile_id, count, quality, now, now),
-        )
+        ).rowcount == 1
         row = db.execute("SELECT * FROM jobs WHERE batch_id=?", (batch_id,)).fetchone()
         if (row["profile_id"], row["requested_count"], row["quality"]) != (profile_id, count, quality):
             raise ValueError("batch_id already exists with different immutable parameters")
         result = {"accepted": True, "batch_record_id": batch_id, "job_status": row["status"],
-                  "already_exists": row["created_at"] != now}
-    start_consumer()
+                  "already_exists": not inserted}
     _WAKE.set()
     return result
 
@@ -183,8 +186,12 @@ def _work(job: dict) -> None:
         if profile_id not in profile_links or int(fields.get("Requested_Count") or 0) != expected:
             raise RuntimeError("batch profile/count mismatch: refusing generation")
         existing = _linked_idea_count(batch)
+        # A completed batch is immutable; do not downgrade it to Failed even
+        # if its linked-record count later changes or a stale lease is reclaimed.
         if str(fields.get("Status") or "") in {"Failed", "Complete"} and existing < expected:
-            raise RuntimeError("batch already terminal: manual reconciliation required")
+            _LOG.error("I1 terminal batch requires manual reconciliation batch=%s state=%s linked=%s expected=%s",
+                       batch_id, fields.get("Status"), existing, expected)
+            return
         if existing >= expected:
             client.update_record(IDEA_BATCHES_TABLE, batch_id, {
                 "Status": "Complete", "Generated_Count": existing,
