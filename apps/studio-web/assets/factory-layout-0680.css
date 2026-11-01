@@ -667,3 +667,14 @@
     margin-top:10px;
   }
 }
+
+/* Missing or failed covers use the same global static asset in every Factory
+   lane; never paint a blank or misleading image of another output. */
+#page-factory .factory-line-thumb-empty img,
+#page-factory .factory-line-thumb img[src="/assets/needs-asset.svg"]{
+  display:block;width:100%;height:100%;object-fit:contain;background:#122846;
+}
+
+/* The sticky selected-output toolbar must never cover the global navigation
+   drawer or its backdrop (18/20). Keep it above Factory rows only. */
+#page-factory .factory-batch-toolbar{z-index:10}

@@ -31,6 +31,19 @@
   const FACTORY_LAST_BATCH_KEY = "studio.factory.last-batch.v1";
   const FACTORY_PENDING_REQUEST_KEY = "studio.factory.pending-approval-request.v1";
   const FACTORY_ACCEPTED_OUTPUTS_KEY = "studio.factory.accepted-output-ids.v1";
+  // Reuse the one global missing-asset image; do not borrow another profile's media.
+  const NEEDS_ASSET_THUMB = "/assets/needs-asset.svg";
+  document.addEventListener("error", (event) => {
+    const image = event.target;
+    if (!(image instanceof HTMLImageElement) ||
+        !image.matches("#page-factory .factory-line-thumb img") ||
+        image.getAttribute("src") === NEEDS_ASSET_THUMB) return;
+    image.src = NEEDS_ASSET_THUMB;
+    image.alt = "NEEDS ASSET";
+    const label = image.closest(".factory-output-visual")?.querySelector(".factory-output-visual-label");
+    if (label) label.textContent = "Needs asset";
+  }, true);
+
   // A successful accept must remain visible even if the Desk still has an old
   // Ready-for-Review snapshot. This is a UX fence; R2 claims are authoritative.
   function recentFactoryAccepted() {
@@ -1068,15 +1081,18 @@
     const hasSharedCover = Boolean(needsEyesOutput && card.content_item_id && thumb.includes(
       "/studio/previews/thumbnails/" + String(card.content_item_id) + "/"));
     const outputLabel = card.output_id ? "Output #" + card.output_id : "this output";
+    const thumbImage = thumb
+      ? `<img src="${esc(thumb)}" alt="" loading="lazy" decoding="async">`
+      : `<img src="/assets/needs-asset.svg" alt="NEEDS ASSET" loading="lazy">`;
     const media = canPreview(card)
       ? `<button type="button" class="factory-line-thumb" data-factory-preview="${esc(card.id)}" aria-label="Preview ${esc(outputLabel)}: ${esc(cardLabel(card))}" title="Preview ${esc(outputLabel)}">
-          ${thumb ? `<img src="${esc(thumb)}" alt="" loading="lazy">` : `<span class="factory-line-play">▶</span>`}
+          ${thumbImage}
         </button>`
-      : `<span class="factory-line-thumb factory-line-thumb-empty" aria-hidden="true"></span>`;
+      : `<span class="factory-line-thumb factory-line-thumb-empty" role="img" aria-label="NEEDS ASSET">${thumbImage}</span>`;
     // The preview button opens the exact Platform Output. A cover sourced from
     // the Content Item is not an output-specific video frame: label it honestly.
     const outputVisual = needsEyesOutput
-      ? `<span class="factory-output-visual">${media}<small class="factory-output-visual-label">${hasSharedCover ? "Shared cover" : (thumb ? "Output image" : "Output preview")}</small></span>`
+      ? `<span class="factory-output-visual">${media}<small class="factory-output-visual-label">${hasSharedCover ? "Shared cover" : (thumb ? "Output image" : "Needs asset")}</small></span>`
       : media;
     const alert = card.stuck_kind || card.produce_error || "";
     const stateLabel = card.studio_state || (alert ? "Needs repair" : "—");
