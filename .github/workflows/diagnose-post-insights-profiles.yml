@@ -1,0 +1,49 @@
+name: Diagnose Post Insights Four Profiles (read only)
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/diagnose-post-insights-profiles.py'
+      - '.github/workflows/diagnose-post-insights-profiles.yml'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/diagnose-post-insights-profiles.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diagnose-post-insights-four-profiles
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: python -m py_compile scripts/diagnose-post-insights-profiles.py
+
+  diagnose:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+      REPORT_PATH: /tmp/post-insights-4-profile-diagnostic.json
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Verify source syntax
+        run: python -m py_compile scripts/diagnose-post-insights-profiles.py
+      - name: Check four profiles without changing accounts or publishing
+        run: python scripts/diagnose-post-insights-profiles.py
+      - name: Upload redacted connection report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-insights-four-profile-read-only-${{ github.run_id }}
+          path: /tmp/post-insights-4-profile-diagnostic.json
+          if-no-files-found: ignore
+          retention-days: 7
