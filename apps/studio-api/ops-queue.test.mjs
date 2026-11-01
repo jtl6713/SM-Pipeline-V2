@@ -244,6 +244,12 @@ test("ops queue Airtable field lists avoid unknown column names", () => {
   assert.equal(OPS_QUEUE_REQUEST_FIELDS.includes("Idea_Title"), false);
   assert.equal(OPS_QUEUE_CONTENT_FIELDS.includes("Working_Title"), false);
   assert.ok(OPS_QUEUE_OUTPUT_FIELDS.includes("Studio_Preview_Updated_At"));
+  // Pilsen Murals outputs 9682-9684 have eight finished native stills, but the
+  // former Factory projection dropped these fields and painted Preparing Assets.
+  for (const field of ["Selected_Clip_Count", "Studio_Preview_URL", "Carousel Slides"]) {
+    assert.ok(OPS_QUEUE_OUTPUT_FIELDS.includes(field), `Factory native-photo evidence missing: ${field}`);
+  }
+  assert.ok(!OPS_QUEUE_OUTPUT_FIELDS.includes("Selected_Assets_JSON"), "no large manifest on hot path");
 });
 
 test("ops queue request formula excludes Cancelled and finished Promoted produce", () => {
