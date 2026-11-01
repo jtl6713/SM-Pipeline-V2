@@ -13,3 +13,13 @@
 .studio-producer-entry-mode{margin:5px 0 8px;letter-spacing:.01em}
 .studio-producer-chat-jump{max-width:100%;white-space:normal}
 @media(max-width:600px){.studio-producer-chat-jump{font-size:.85rem;padding:8px 10px}}
+
+
+/* Script a Short — review and revise before draft acceptance. */
+.scripted-short-feedback-review{margin:1rem 0;padding:1rem;border:1px solid var(--border-color,#d6dce5);border-radius:12px}
+.scripted-short-feedback-review h3{margin:.1rem 0 .45rem}
+.scripted-short-feedback-review label{display:block;font-weight:650;margin:.65rem 0 .35rem}
+.scripted-short-feedback-review textarea{display:block;width:100%;min-height:6rem;box-sizing:border-box;padding:.7rem;border:1px solid var(--border-color,#cfd7e2);border-radius:8px;background:var(--panel-bg,#fff);color:inherit;resize:vertical}
+.scripted-short-feedback-review .idea-generate-actions{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem;margin-top:.7rem}
+.scripted-short-feedback-history{margin:.75rem 0 0;padding-left:1.6rem;max-height:11rem;overflow:auto}
+.scripted-short-feedback-history li{margin:.3rem 0;overflow-wrap:anywhere}
