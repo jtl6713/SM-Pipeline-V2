@@ -174,3 +174,14 @@ test("Unverified Vibe previews never say Clip saved", () => {
   assert.match(rendered, /Upload not confirmed/);
   assert.doesNotMatch(rendered, /Clip saved/);
 });
+
+test("Vibe preflight failure becomes actionable, with retry enabled after setup finishes", () => {
+  const flow = section("async function startEzProduction(", "function bindEzWizard(");
+  const fail = flow.slice(flow.indexOf("    } catch (error) {"), flow.indexOf("  function bindEzWizard("));
+  assert.match(fail, /setup-failed:/);
+  assert.match(fail, /setVibeUploadUi\("failed"/);
+  assert.match(fail, /No upload segments were confirmed/);
+  const clear = flow.indexOf("ezStarting = false;", flow.indexOf("    } finally {"));
+  const rerender = flow.indexOf("renderVibeUploadUi(item4Workspace || {})", clear);
+  assert.ok(clear >= 0 && rerender > clear, "retry button must be enabled after request settles");
+});

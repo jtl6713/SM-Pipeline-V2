@@ -291,7 +291,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.830-vibe-upload-preflight";
+  const BUILD_ID = "item4-0.6.831-vibe-setup-retry";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -9439,6 +9439,17 @@ function timedScriptAssetLabel(asset, index) {
         : error.message;
       setEzMessage(message, "error-text");
       setRequestMessage(error.message, "error-text");
+      // A failed Idea or Production draft request must not leave the Vibe
+      // banner waiting forever as though an upload is still underway.
+      // Do not replace a more specific multipart error or touch saved media.
+      if ((ezIsVibeCut() || pending?.inputKind === "vibe-cut")
+        && ["creating", "selected", "stalled"].includes(String(vibeUploadUi.phase || ""))) {
+        setVibeUploadUi("failed", {
+          file: nextFiles[0],
+          detail: `No upload segments were confirmed. Studio could not complete setup: ${error.message}. Select the same video to retry.`,
+          activityKey: `setup-failed:${nextFiles[0]?.name || "video"}:${Date.now()}`,
+        });
+      }
       if (ezIsAzFinishedPath()) {
         setAzFinishedMessage(error.message || "Could not start publish.", "error-text");
         $("azFinishedDrop")?.classList.remove("is-busy");
@@ -9447,6 +9458,9 @@ function timedScriptAssetLabel(asset, index) {
     } finally {
       ezStarting = false;
       if (continueBtn) continueBtn.disabled = ezIsVibeCut() ? !vibeCutReadySource() : false;
+      // Retry availability must be recomputed after ezStarting clears.
+      // Otherwise the button stays disabled even after setup has failed.
+      renderVibeUploadUi(item4Workspace || {});
       drainPendingMasterUploads();
     }
   }
