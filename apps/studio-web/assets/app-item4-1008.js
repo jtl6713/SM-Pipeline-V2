@@ -291,7 +291,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.831-vibe-setup-retry";
+  const BUILD_ID = "item4-0.6.832-asset-upload-progress";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -24346,8 +24346,58 @@ function timedScriptAssetLabel(asset, index) {
     }
   }
 
+  // Asset Manager uploads one file per request; only the response confirms persistence.
+  function renderLibraryUploadProgress({phase="uploading",file=null,fileIndex=1,fileCount=1,uploaded=0,loadedBytes=0,message=""}={}){
+   const panel=$("libraryUploadProgress"); if(!panel)return;
+   const total=Math.max(1,Number(fileCount)||1);
+   const index=Math.min(total,Math.max(1,Number(fileIndex)||1));
+   const bytes=Math.max(0,Number(file?.size)||0);
+   const loaded=Math.max(0,Math.min(bytes,Number(loadedBytes)||0));
+   const percent=phase==="saved"||phase==="complete"?100:Math.min(99,Math.floor((bytes>0?loaded/bytes:0)*100));
+   const fileName=String(file?.name||(phase==="complete"||phase==="partial"?"Upload batch":"Current asset"));
+   const heading=phase==="complete"?"Asset Manager upload complete":phase==="partial"?"Some assets need attention":phase==="failed"?"Asset upload not confirmed":phase==="saved"?"Asset saved":phase==="verifying"?`Confirming asset ${index} of ${total}`:`Uploading asset ${index} of ${total}`;
+   const status=phase==="complete"?`${uploaded} of ${total} assets confirmed saved.`:phase==="partial"?`${uploaded} of ${total} assets confirmed saved; ${total-uploaded} unconfirmed.`:phase==="saved"?`Saved ${uploaded} of ${total} assets.`:phase==="verifying"?"Transfer sent. Waiting for server and Google Drive confirmation.":phase==="failed"?"The server did not confirm this asset. Check the library before retrying.":`File ${index} of ${total} · ${uploaded} assets confirmed saved.`;
+   panel.hidden=false;panel.dataset.state=phase;
+   const update=(id,value)=>{const element=$(id);if(element)element.textContent=value;};
+   update("libraryUploadProgressTitle",heading);
+   update("libraryUploadProgressFile",fileName);
+   update("libraryUploadProgressPercent",`${percent}%`);
+   update("libraryUploadProgressFiles",`${uploaded} of ${total} assets saved`);
+   update("libraryUploadProgressBytes",`${(loaded/(1024*1024)).toFixed(1)} of ${(bytes/(1024*1024)).toFixed(1)} MB transferred`);
+   update("libraryUploadProgressStage",message||status);
+   const meter=$("libraryUploadMeter");
+   if(meter){meter.max=100;meter.value=percent;meter.setAttribute("aria-label",`${fileName}: ${percent}% transfer progress`);}
+  }
+
+  function uploadLibraryFileWithProgress(form,{profileId,file,onTransfer}={}){
+   return new Promise((resolve,reject)=>{
+    const xhr=new XMLHttpRequest();let settled=false,lastStage="";
+    const finish=(error,result)=>{if(settled)return;settled=true;if(error)reject(error);else resolve(result);};
+    const fail=(message,status=0)=>Object.assign(new Error(message),{status});
+    const notify=(stage,loadedBytes)=>{if(settled)return;if(stage==="verifying"&&lastStage==="verifying")return;lastStage=stage;onTransfer?.({stage,loadedBytes:Math.max(0,Math.min(Number(file?.size)||0,Number(loadedBytes)||0))});};
+    // Keep request scope stable even if the header Content Profile changes mid-batch.
+    xhr.open("POST",`${apiBase}/api/library?profile=${encodeURIComponent(String(profileId||""))}`);
+    xhr.timeout=180000;
+    // Do not set Content-Type: XHR supplies the multipart FormData boundary.
+    xhr.upload.onprogress=event=>{if(!event.lengthComputable||!event.total)return;const loaded=Math.round((event.loaded/event.total)*(Number(file?.size)||0));notify(event.loaded>=event.total?"verifying":"uploading",loaded);};
+    xhr.upload.onload=()=>notify("verifying",Number(file?.size)||0);
+    xhr.onload=()=>{
+     let result={};try{result=JSON.parse(xhr.responseText||"{}");}
+     catch{finish(fail("The upload finished but the server confirmation was unreadable.",xhr.status));return;}
+     if(xhr.status<200||xhr.status>=300||result.ok===false){finish(fail(result.error||result.message||`Request failed (${xhr.status})`,xhr.status));return;}
+     if(Number.isFinite(Number(result.uploaded))&&result.uploaded!==undefined&&Number(result.uploaded)<1){finish(fail("The server did not confirm a saved asset.",xhr.status));return;}
+     finish(null,result);
+    };
+    xhr.onerror=()=>finish(fail("Connection interrupted. The upload result is unconfirmed."));
+    xhr.ontimeout=()=>finish(fail("Upload confirmation timed out. Check the asset list before retrying."));
+    xhr.onabort=()=>finish(fail("Upload interrupted. The server did not confirm this asset."));
+    xhr.send(form);
+   });
+  }
+
   async function uploadLibraryFiles(fileList) {
     libraryDisarmPicker();
+    if (libraryUploadMessageBusy()) return;
     let files = Array.from(fileList || []).filter((file) => {
       const name = String(file.name || "");
       const type = String(file.type || "");
@@ -24383,6 +24433,7 @@ function timedScriptAssetLabel(asset, index) {
     const uploadedClassifyIds = [];
     let uploaded = 0;
     let completedFiles = 0;
+    renderLibraryUploadProgress({ phase: "uploading", file: files[0], fileCount: files.length, fileIndex: 1 });
     try {
       for (let start = 0; start < files.length; start += chunkSize) {
         const chunk = files.slice(start, start + chunkSize);
@@ -24394,6 +24445,9 @@ function timedScriptAssetLabel(asset, index) {
             ? `Adding ${chunk[0].name}…`
             : `Adding ${completedFiles + 1} of ${files.length}: ${chunk[0].name}…`);
         setLibraryUploadMessage(progressLabel, "");
+        const currentFile = chunk[0];
+        const fileIndex = completedFiles + 1;
+        renderLibraryUploadProgress({ phase: "uploading", file: currentFile, fileIndex, fileCount: files.length, uploaded, loadedBytes: 0, message: "Starting transfer. Waiting for the first bytes…" });
         const form = new FormData();
         for (const file of chunk) form.append("files", file, file.name);
         if (location) form.append("location", location);
@@ -24410,10 +24464,13 @@ function timedScriptAssetLabel(asset, index) {
           } catch {}
         }
         try {
-          const result = await api("/api/library", { method: "POST", body: form, timeoutMs: 180000, retries: 0 });
+          const result = await uploadLibraryFileWithProgress(form, { profileId, file: currentFile,
+            onTransfer: ({ stage, loadedBytes }) => renderLibraryUploadProgress({ phase: stage, file: currentFile, fileIndex, fileCount: files.length, uploaded, loadedBytes }),
+          });
           const count = Number(result?.uploaded || chunk.length) || chunk.length;
           uploaded += count;
           completedFiles += chunk.length;
+          renderLibraryUploadProgress({ phase: "saved", file: currentFile, fileIndex, fileCount: files.length, uploaded, loadedBytes: Number(currentFile?.size) || 0, message: `Server confirmed ${currentFile.name} saved (${uploaded} of ${files.length} assets).` });
           const assigned = Array.isArray(result?.batch_names) ? result.batch_names.filter(Boolean) : [];
           if (assigned.length) namedUploads.push(...assigned);
           else if (Array.isArray(result?.records)) {
@@ -24430,9 +24487,11 @@ function timedScriptAssetLabel(asset, index) {
             : "";
           const label = chunk[0]?.name || "file";
           errors.push(`${label}: ${raw}${hint}`);
+          renderLibraryUploadProgress({ phase: "failed", file: currentFile, fileIndex, fileCount: files.length, uploaded, message: `${label}: ${raw}. Check the asset list before retrying to avoid duplicates.` });
         }
       }
       inputs.forEach((input) => { input.value = ""; });
+      renderLibraryUploadProgress({ phase: errors.length ? "partial" : "complete", file: files[files.length - 1], fileIndex: files.length, fileCount: files.length, uploaded, loadedBytes: Number(files[files.length - 1]?.size) || 0 });
       if (zone) delete zone.dataset.busy;
       if (uploaded) await startLibraryBrowse();
       const namedSummary = namedUploads.length === 1
