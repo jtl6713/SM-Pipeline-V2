@@ -40,8 +40,8 @@ test("held V2 QA action occupies its own full-width row without text overlap",()
 });
 
 test("successful held V2 acceptance acknowledges POST without waiting for a full Factory desk reload",()=>{
-  assert.match(script,/payload\.action === "accept_held_creative"/);
-  assert.match(script,/setStatus\(savedMessage\);\s*loadFactoryDesk\(true\)\.catch\(\(\) => \{\}\);\s*return desk;/s);
+  assert.match(script,/desk\.ok && payload\.action === "accept_held_creative"/);
+  assert.match(script,/desk\.ok && payload\.action === "accept_held_creative"\)[\s\S]*?setStatus\(savedMessage\);\s*return desk;/);
   assert.match(script,/button\.textContent="Verifying saved V2…"/);
   assert.match(script,/button\.textContent="Saving creative acceptance…"/);
   assert.match(script,/state\.heldCreativeAccepted\.add\(card\.id\)/);
