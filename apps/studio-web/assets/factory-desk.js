@@ -1012,6 +1012,34 @@
     }
   }
 
+  // A Needs Eyes card is not necessarily authorized for batch approval.
+  // Always show the selection control and explain the policy/readiness outcome
+  // instead of silently omitting the checkbox while leaving Approve active.
+  function factoryBatchSelectionReason(card) {
+    if (card?.kind !== "output") return "Only platform outputs can be batch approved.";
+    if (recentFactoryAccepted()[String(card?.id || "")]) return "Already accepted for approval. Refresh Activity to verify the result.";
+    if (state.submittingOutputIds?.has(card?.id)) return "Approval is already being submitted. Check Activity.";
+    if (card?.review_hold_active === true) return "Review-held revision: complete QA handoff before approval.";
+    if (card?.do_not_publish === true) return "Publishing hold is active for this output.";
+    const render = String(card?.render_status || "").trim().toLowerCase();
+    if (/^(failed|blocked)$/.test(render)) return `Render status is ${card.render_status}. Repair the render before approval.`;
+    if (/ready for render|waiting in render queue|^rendering$/.test(render)) return "Render is still queued or running; wait for completion.";
+    const output = String(card?.output_status || "").trim().toLowerCase();
+    if (["in production", "rendering", "ready for render", "failed", "blocked"].includes(output)) {
+      return `Airtable Output Status is ${card.output_status}; not yet approved for review.`;
+    }
+    if (!canReviewActions(card)) return "Not yet review-ready according to the authoritative output/review status.";
+    if (state.batchApprovalsEnabled === false) return "Batch approvals are disabled by the server; individual approval is available.";
+    if (canSelectBatchOutput(card)) return "";
+    if (state.batchGlobal?.enabled) {
+      const platform = String(card?.platform || "").trim();
+      const allowed = state.batchGlobal.allowed_platforms || [];
+      if (!allowed.includes(platform)) return `${platform || "This platform"} is not enabled for batch approval; use individual Approve.`;
+      return `${String(card?.studio_output_type || card?.format || "This output type").trim()} is outside the server-authorized ${platform} batch formats; use individual Approve.`;
+    }
+    return "This profile or output type is outside the current batch rollout; use individual Approve.";
+  }
+
   function renderCard(card, { pile = false, candidate = false, lane = "" } = {}) {
     const actions = [];
     actions.push(`<button type="button" class="text-button" data-factory-open="${esc(card.id)}">Open</button>`);
@@ -1023,8 +1051,13 @@
     if (canPreview(card) && (lane === "needs_eyes" || canReviewActions(card, { pile, candidate }) || lane === "auto_high" || lane === "manual")) {
       actions.push(`<button type="button" class="secondary-button" data-factory-preview="${esc(card.id)}">Preview</button>`);
     }
-    if (card.kind === "output" && (canReviewActions(card, { pile, candidate }) || lane === "needs_eyes")) {
-      actions.push(`<button type="button" class="primary-button" data-factory-approve="${esc(card.id)}">Approve</button>`);
+    const reviewAllowed = canReviewActions(card, { pile, candidate });
+    const needsEyesOutput = lane === "needs_eyes" && card.kind === "output";
+    const batchReason = needsEyesOutput ? factoryBatchSelectionReason(card) : "";
+    if (card.kind === "output" && (reviewAllowed || needsEyesOutput)) {
+      // A stale review badge/held revision must never present a live Approve
+      // action merely because the server grouped the row under Needs Eyes.
+      actions.push(`<button type="button" class="primary-button" data-factory-approve="${esc(card.id)}" ${reviewAllowed ? "" : `disabled title="${esc(batchReason || "Not yet eligible for approval")}"`}>Approve</button>`);
       actions.push(`<button type="button" class="secondary-button" data-factory-send-back="${esc(card.id)}">Request Changes</button>`);
     }
     if (canDelete(card, { candidate })) {
@@ -1040,15 +1073,15 @@
     const stateLabel = card.studio_state || (alert ? "Needs repair" : "—");
     const cell = (value) => `<span class="factory-line-cell">${esc(value || "—")}</span>`;
     return `<div class="factory-line" data-factory-id="${esc(card.id)}" data-factory-kind="${esc(card.kind || "")}" data-lane="${esc(lane)}" title="${esc(cardLabel(card))}">
-      ${lane === "needs_eyes" && card.kind === "output" && canReviewActions(card) && canSelectBatchOutput(card)
-        ? `<span class="factory-media-select"><input type="checkbox" data-factory-select-output="${esc(card.id)}" aria-label="Select ${esc(cardLabel(card))}" ${state.selectedOutputs.has(card.id) ? "checked" : ""}>${media}</span>`
+      ${needsEyesOutput
+        ? `<span class="factory-media-select"><label class="factory-output-select" title="${esc(batchReason || "Select for batch approval")}"><input type="checkbox" data-factory-select-output="${esc(card.id)}" aria-label="${esc(batchReason ? `Batch selection unavailable for ${cardLabel(card)}: ${batchReason}` : `Select ${cardLabel(card)}`)}" ${batchReason ? "disabled" : (state.selectedOutputs.has(card.id) ? "checked" : "")}></label>${media}</span>`
         : media}
       <span class="factory-line-title">${esc(card.title || cardLabel(card))}${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}</span>
       ${cell(card.profile_name)}
       ${cell(card.platform)}
       ${cell(card.studio_output_type)}
       <span class="factory-line-cell factory-line-state"${alert ? ` title="${esc(alert)}"` : ""}>${esc(stateLabel)}</span>
-      <div class="factory-line-actions">${actions.join("")}</div>
+      <div class="factory-line-actions">${actions.join("")}${needsEyesOutput && batchReason ? `<span class="factory-batch-unavailable" role="status">${esc(batchReason)}</span>` : ""}</div>
     </div>`;
   }
 
@@ -1542,7 +1575,7 @@
         const group = checkbox.closest(".factory-content-rows")?.previousElementSibling;
         const groupBox = group?.querySelector("[data-factory-select-content]");
         if (groupBox) {
-          const ids = [...checkbox.closest(".factory-content-rows").querySelectorAll("[data-factory-select-output]")];
+          const ids = [...checkbox.closest(".factory-content-rows").querySelectorAll("[data-factory-select-output]:not(:disabled)")];
           groupBox.checked = ids.length > 0 && ids.every((input) => input.checked);
           groupBox.indeterminate = ids.some((input) => input.checked) && !groupBox.checked;
         }
@@ -1559,7 +1592,7 @@
         saveFactorySelection();
         updateFactoryBatchToolbar();
         const rows = checkbox.closest(".factory-content-bar")?.nextElementSibling;
-        rows?.querySelectorAll("[data-factory-select-output]").forEach((input) => { input.checked = checkbox.checked; });
+        rows?.querySelectorAll("[data-factory-select-output]:not(:disabled)").forEach((input) => { input.checked = checkbox.checked; });
         checkbox.indeterminate = false;
       });
     });

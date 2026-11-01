@@ -117,9 +117,11 @@ try{
   await page.evaluate(()=>window.StudioFactoryDesk.load());
   await page.locator('[data-factory-band-toggle]').first().click();
   await page.getByText(/Chicago Instagram pilot: select up to five Reels or Stories per batch/i).waitFor();
-  assert.equal(await page.locator("[data-factory-select-output]").count(),5,
-    "Exactly four Chicago Reels and one Story may expose pilot batch checkboxes");
-  const eligibleSelection = await page.locator("[data-factory-select-output]").evaluateAll(
+  assert.equal(await page.locator("[data-factory-select-output]").count(),8);
+  assert.equal(await page.locator("[data-factory-select-output]:not(:disabled)").count(),5,
+    "Exactly four Chicago Reels and one Story may be selected for pilot approval");
+  assert.equal(await page.locator("[data-factory-select-output]:disabled").count(),3);
+  const eligibleSelection = await page.locator("[data-factory-select-output]:not(:disabled)").evaluateAll(
     inputs => inputs.map(node => node.getAttribute("data-factory-select-output")));
   assert.ok(eligibleSelection.includes(cards[4].id),
     "The selected Chicago Instagram Story must be available in the v3 pilot");
@@ -152,7 +154,9 @@ try{
   assert.equal(await phone.locator("[data-factory-select-output]").count(),0);
   await phone.locator("#factoryProfileFilter").selectOption("");
   await phone.locator('[data-factory-band-toggle]').first().click();
-  assert.equal(await phone.locator("[data-factory-select-output]").count(),5);
+  assert.equal(await phone.locator("[data-factory-select-output]").count(),8);
+  assert.equal(await phone.locator("[data-factory-select-output]:not(:disabled)").count(),5);
+  assert.equal(await phone.locator("[data-factory-select-output]:disabled").count(),3);
   assert.deepEqual(posts.map(x=>x.record_ids),[cards.slice(0,5).map(card=>card.id)]);
   assert.deepEqual(jsErrors,[]);
   assert.deepEqual(errors,[]);

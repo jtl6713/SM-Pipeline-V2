@@ -483,6 +483,22 @@
 }
 #page-factory .factory-media-select input,
 #page-factory .factory-content-batch-select input{width:18px;height:18px;cursor:pointer;accent-color:#123e73}
+/* Each Needs Eyes output has an accessible selection affordance, even when
+   backend readiness or rollout policy disables it. Never hide the reason. */
+#page-factory .factory-media-select .factory-output-select{
+  display:flex;align-items:center;justify-content:center;min-height:32px;width:100%;
+  cursor:pointer;
+}
+#page-factory .factory-media-select .factory-output-select input{margin:0;flex-shrink:0}
+#page-factory .factory-media-select .factory-output-select input:disabled{cursor:not-allowed;opacity:.65}
+#page-factory .factory-line-actions .factory-batch-unavailable{
+  grid-column:1/-1;display:block;min-width:0;font-size:.75rem;line-height:1.35;
+  color:#744a00;background:#fff8e7;border:1px solid #efd8a8;
+  border-radius:7px;padding:7px 9px;white-space:normal;overflow-wrap:anywhere;
+}
+#page-factory .factory-band-eyes .factory-line-actions > [data-factory-approve]:disabled{
+  opacity:.55;cursor:not-allowed;background:#687c9a;border-color:#687c9a;
+}
 #page-factory .factory-band-eyes .factory-content-bar{
   grid-template-columns:auto minmax(0,1fr) auto auto;
 }

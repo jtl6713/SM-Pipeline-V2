@@ -117,8 +117,10 @@ try{
   await page.evaluate(()=>window.StudioFactoryDesk.load());
   await page.locator('[data-factory-band-toggle]').first().click();
   await page.getByText(/Chicago Reel pilot: select up to five Instagram Reels per batch/i).waitFor();
-  assert.equal(await page.locator("[data-factory-select-output]").count(),5,
-    "Exactly five Chicago Instagram Reels may expose pilot batch checkboxes");
+  assert.equal(await page.locator("[data-factory-select-output]").count(),8);
+  assert.equal(await page.locator("[data-factory-select-output]:not(:disabled)").count(),5,
+    "Exactly five Chicago Instagram Reels may be selected for pilot batch approval");
+  assert.equal(await page.locator("[data-factory-select-output]:disabled").count(),3);
   await page.locator("[data-factory-select-content]").first().check();
   assert.match(await page.locator("#factoryBatchSelectionCount").innerText(),/5 outputs selected/);
   assert.equal(await page.locator("#factoryBatchSubmit").isEnabled(),true);
@@ -146,7 +148,9 @@ try{
   assert.equal(await phone.locator("[data-factory-select-output]").count(),0);
   await phone.locator("#factoryProfileFilter").selectOption("");
   await phone.locator('[data-factory-band-toggle]').first().click();
-  assert.equal(await phone.locator("[data-factory-select-output]").count(),5);
+  assert.equal(await phone.locator("[data-factory-select-output]").count(),8);
+  assert.equal(await phone.locator("[data-factory-select-output]:not(:disabled)").count(),5);
+  assert.equal(await phone.locator("[data-factory-select-output]:disabled").count(),3);
   assert.deepEqual(posts.map(x=>x.record_ids),[cards.slice(0,5).map(card=>card.id)]);
   assert.deepEqual(jsErrors,[]);
   assert.deepEqual(errors,[]);
