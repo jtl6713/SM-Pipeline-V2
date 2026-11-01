@@ -3655,6 +3655,34 @@ export async function getProductionRequest(request, env, url, authorization, ctx
   void ctx;
   const recordId = productionRequestRecordIdFromPath(url);
   const record = await loadAuthorizedProductionRequest(env, recordId, authorization);
+  // Factory polls this small, tenant-authorized projection instead of a heavy
+  // Production Request document. Airtable remains the only progress authority.
+  if (String(url.searchParams.get("fields") || "").trim().toLowerCase() === "producer-progress") {
+    const notes = String(f(record, "Production_Notes") || "");
+    const marker = [...notes.matchAll(/\[factory-producer-revision id=(fpr-[a-f0-9]+) state=(pending|completed|needs_attention)\]/g)].at(-1);
+    const job = parseStudioProductionJob(record);
+    const safeJob = job && /^fpr-[a-f0-9]+$/.test(String(job.job_id || ""))
+      ? {
+          id: job.job_id,
+          step: String(job.step || "").slice(0, 60),
+          detail: String(job.detail || "").slice(0, 220),
+          error: String(job.error || "").slice(0, 220),
+          quality_passed: job.producer_quality?.passed === true ? true
+            : job.producer_quality?.passed === false ? false : null,
+          quality_errors: (Array.isArray(job.producer_quality?.errors)
+            ? job.producer_quality.errors : []).slice(0, 3).map(value => String(value).slice(0, 180)),
+        } : null;
+    return respond(request, env, {
+      ok: true,
+      record: {
+        id: record.id,
+        status: String(f(record, "Request_Status") || ""),
+        updated_at: f(record, "Updated_At") || null,
+        revision: marker ? {id: marker[1], state: marker[2]} : null,
+        job: safeJob,
+      },
+    });
+  }
   const ideaId = ideaRecordIdFromProductionRequest(record);
   const ideaTitles = await loadIdeaTitlesByRecordId(env, [ideaId]);
   const light = String(url.searchParams.get("fields") || "").trim().toLowerCase() === "light";
