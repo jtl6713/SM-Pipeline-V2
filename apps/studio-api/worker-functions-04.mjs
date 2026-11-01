@@ -42,6 +42,7 @@ import {
   readProfilesOverviewRefreshStateRecord,
 } from "./profiles-overview-refresh.mjs";
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
+import { reconcileCreativeMasterAtFactoryApproval } from "./creative-master-factory-guard.mjs";
 import { creativeSettingName, parseCreativeGuidance, resolveCreativeGuidance, validateCreativeGuidancePatch } from "./profile-creative-guidance.mjs";
 import {
   reconcileScheduleReservation,
@@ -11410,6 +11411,30 @@ export async function factoryApproveOutput(env, id, actor, note, ctx = null, sch
   }
   if (!studioOutputReadyForPublishApproval(existing)) {
     throw new HttpError(409, "Cannot approve this output yet: a finished render and Ready for Review are required.");
+  }
+  // A future/newly-added sibling may have rendered AFTER the shared creative
+  // master was approved. Catch it up under the canonical output approval lock,
+  // then require the operator to review the newly selected file separately.
+  // Do NOT continue from the same Approve click into scheduling/publishing.
+  const masterCheck=await reconcileCreativeMasterAtFactoryApproval({
+    output_id:id,
+    operations:{
+      readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+      readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+      withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+      patchOutput:(id,fields)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id,{
+        method:"PATCH",skipSupabaseWriteThrough:true,
+        body:JSON.stringify({fields,typecast:false}),
+      }),
+      syncOutput:row=>studioSupabaseWriteThroughOutput(env,row,
+        "creative-master-factory-catchup"),
+    },
+  });
+  if(masterCheck.status==="updated_requires_rereview"){
+    throw new HttpError(409,"A newer approved creative master video was selected for this output. Refresh the preview, review the updated video, then click Approve again. Nothing was scheduled or published.");
+  }
+  if(masterCheck.status==="deferred"){
+    throw new HttpError(409,"This output has an approved creative master but is held, already armed, or otherwise not eligible for media adoption. Resolve its independent review or publishing lock before approving.");
   }
   const stamp = new Date().toISOString();
   // An authoritative Airtable schedule commit completes approval. Supabase is
