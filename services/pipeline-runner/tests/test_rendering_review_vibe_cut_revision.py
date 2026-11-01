@@ -70,6 +70,19 @@ class TestVibeCutRevision(unittest.TestCase):
         self.assertEqual(payload["studioRevision"]["profile_id"], profile)
         self.assertFalse(payload["studioRevision"]["allow_public_publish"])
 
+  def test_subsecond_beat_cuts_are_exact_and_never_default_to_fade(self):
+    data=fixture()
+    data["plan"]["cuts"]=[
+       {"start_seconds":10,"end_seconds":10.2},
+       {"start_seconds":30,"end_seconds":34},
+       {"start_seconds":0,"end_seconds":5}]
+    payload=run(data)
+    self.assertEqual([x["durationFrames"] for x in payload["clips"]],[6,120,150])
+    self.assertEqual(payload["durationInFrames"],276)
+    self.assertEqual(payload["expectedClipCount"],3)
+    self.assertTrue(all(x["transition"]=={"type":"none","durationFrames":0}
+                        for x in payload["clips"]))
+
   def test_no_claim_without_profile_hold_or_explicit_button(self):
     for key,change in [
       ("job",lambda x:x.update(lease_verified=False)),
