@@ -27,6 +27,7 @@ class TestVibeMedia(unittest.TestCase):
         self.assertTrue(result["music_only"])
         self.assertFalse(result["voiceover_expected"])
         self.assertTrue(result["watermark_verified"])
+        self.assertEqual(result["watermark_frame_sample_count"],5)
         self.assertFalse(result["ready_for_publication"])
         self.assertEqual(result["byte_count"],len(MP4))
     def test_horizontal_vibe_preserves_16_by_9_and_identical_validation(self):

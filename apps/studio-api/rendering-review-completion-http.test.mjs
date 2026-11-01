@@ -27,7 +27,8 @@ const proof={sha256:"c".repeat(64),byte_count:1500000,mime_type:"video/mp4",
   width:1080,height:1920,duration_seconds:13.8,
   audio_verified:true,watermark_verified:true,google_drive_verified:true,
   google_drive_mime_type:"video/mp4",
-  render_job_id:receipt.remotion_job_id};
+  render_job_id:receipt.remotion_job_id,
+  watermark_profile_id:"recT2rbKX3MF7cVFU",watermark_frame_sample_count:3};
 function scenario({missingHold=false,alreadyDispatched=false}={}){
   const session={id:sessionId,output_id:output,
     profile_id:"recT2rbKX3MF7cVFU",output_type:"Instagram Reel",

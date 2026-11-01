@@ -21,6 +21,9 @@ export function validateReviewVideoEvidence({validation:v,session:s,
      !Number.isFinite(v.duration_seconds)||v.duration_seconds<1||
      v.duration_seconds>180||v.audio_verified!==true||
      v.watermark_verified!==true||v.google_drive_verified!==true||
+     v.watermark_profile_id!==s.profile_id||
+     !Number.isSafeInteger(v.watermark_frame_sample_count)||
+     v.watermark_frame_sample_count<3||
      !ID.test(String(v.render_job_id||""))||
      (expectedRenderJobId!==null&&v.render_job_id!==expectedRenderJobId))
     fail();

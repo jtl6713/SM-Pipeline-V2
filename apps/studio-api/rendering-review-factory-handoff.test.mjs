@@ -47,7 +47,8 @@ function fixture(){
    sha256:"8ee06c1f0234959c5ff4610b020d6bb72a005200ffa5d6590d920754b3c0f77e",
    byte_count:21961807,mime_type:"video/mp4",width:1080,height:1920,
    audio_verified:true,watermark_verified:true,google_drive_verified:true,
-   google_drive_mime_type:"video/mp4",render_job_id:"job-20261029042719-d8b6ef01"
+   google_drive_mime_type:"video/mp4",render_job_id:"job-20261029042719-d8b6ef01",
+   watermark_profile_id:chicago,watermark_frame_sample_count:3
   })
  }};
  let writes=0,saves=0,syncs=0,failStep="";

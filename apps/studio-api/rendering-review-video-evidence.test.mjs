@@ -5,7 +5,8 @@ const profile="recF7UAn0LkMZZrWZ",out="recA1B2C3D4E5F6G7",id="rrsession_12345678
 const base={sha256:"a".repeat(64),byte_count:500000,mime_type:"video/mp4",
   google_drive_mime_type:"video/mp4",width:1080,height:1920,
   duration_seconds:20,audio_verified:true,watermark_verified:true,
-  google_drive_verified:true,render_job_id:"remotion_12345678"};
+  google_drive_verified:true,render_job_id:"remotion_12345678",
+  watermark_profile_id:profile,watermark_frame_sample_count:3};
 const session={id,profile_id:profile,output_id:out};
 const vibe=(ratio="16:9")=>({...session,plan:{immutable_manifest:{
   schema:"studio.render-review.vibe.1",mode:"vibe_cut",source_kind:"video",
@@ -41,4 +42,12 @@ test("foreign logo, fabricated Vibe type or altered plan never pass Factory rece
   const altered=vibe();altered.plan.immutable_manifest.profile_id="recT2rbKX3MF7cVFU";
   assert.throws(()=>verify({validation:music(),session:altered}),
     {code:"REVIEW_VIDEO_EVIDENCE_INVALID"});
+});
+ 
+test("a single frame or wrong city cannot count as verified branding",()=>{
+  const proof=music();
+  assert.throws(()=>verify({validation:{...proof,watermark_frame_sample_count:1},
+    session:vibe()}),{code:"REVIEW_VIDEO_EVIDENCE_INVALID"});
+  assert.throws(()=>verify({validation:{...proof,watermark_profile_id:"recT2rbKX3MF7cVFU"},
+    session:vibe()}),{code:"REVIEW_VIDEO_EVIDENCE_INVALID"});
 });

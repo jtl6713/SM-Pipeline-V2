@@ -88,5 +88,6 @@ def validate_vibe_mp4(data:bytes, *, aspect_ratio:str, expected_duration:float,
       "duration_seconds":seconds,"audio_verified":True,
       "music_only":True,"voiceover_expected":False,
       "watermark_verified":True,"watermark_profile_id":branding["profile_id"],
+      "watermark_frame_sample_count":branding["frame_sample_count"],
       "ready_for_publication":False,
     }
