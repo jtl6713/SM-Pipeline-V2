@@ -152,7 +152,8 @@ def compile_vibe_review_payload(*,job,plan,source,music,watermark,authorized_pro
                  "volume":music["volume"],"duckingEnabled":False},
         "watermarkUrl":watermark["render_url"],"watermarkRequired":True,
         "studioRevision":{"source":"rendering_review_vibe_cut",
-             "output_id":output,"attempt_id":attempt,"job_id":job_id,
+             "output_id":output,"profile_id":profile,
+             "attempt_id":attempt,"job_id":job_id,
              "plan_hash":plan_hash,"lease_fence":job["lease_fence"],
              "allow_platform_upload":False,"allow_public_publish":False}
     }
