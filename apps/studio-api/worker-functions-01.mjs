@@ -1063,6 +1063,12 @@ export function studioInvalidateHotReads(env, tableId, method) {
        "Production Requests"].includes(id)) {
     studioReadCacheDropPrefix("operations:");
   }
+  // Media uploads, profile assignments, and profile changes must invalidate
+  // both the cached Library page and the profile-label lookup immediately.
+  if (id === String(env?.AIRTABLE_MEDIA_TABLE_ID || "") ||
+      id === String(STUDIO_IDEA_PROFILE_TABLE_ID)) {
+    studioReadCacheDropPrefix("library:");
+  }
   if (env?.AIRTABLE_OUTPUT_TABLE_ID && id === env.AIRTABLE_OUTPUT_TABLE_ID) {
     studioMarkMappedListDirty();
     studioReadCacheDropPrefix("outputs:");

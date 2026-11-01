@@ -1264,7 +1264,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.711-i1-durable-disabled" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
+          version: "0.10.712-library-read-reliability" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
@@ -2402,11 +2402,11 @@ export default {
 
       if (isAiApiRoute) {
         requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
-        if (request.method === "GET") return getStudioAiApiStatus(request, env);
+        if (request.method === "GET") return await getStudioAiApiStatus(request, env);
         if (request.method === "PATCH") {
           requirePermission(authorization, "tenant_admin");
           assertWriteRequest(request, env);
-          return patchStudioAiApiPreference(request, env);
+          return await patchStudioAiApiPreference(request, env);
         }
         throw new HttpError(405, "Method not allowed");
       }
@@ -3475,9 +3475,9 @@ export default {
       if (url.pathname === "/api/library") {
         if (request.method === "POST") {
           assertUploadWriteRequest(request, env);
-          return uploadAssetLibraryItems(request, env, authorization, ctx);
+          return await uploadAssetLibraryItems(request, env, authorization, ctx);
         }
-        return listAssetLibrary(request, env, url, authorization);
+        return await listAssetLibrary(request, env, url, authorization);
       }
 
       return respond(request, env, { ok: false, error: "Not found" }, 404);
