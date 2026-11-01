@@ -11433,6 +11433,9 @@ export async function factoryApproveOutput(env, id, actor, note, ctx = null, sch
   if(masterCheck.status==="updated_requires_rereview"){
     throw new HttpError(409,"A newer approved creative master video was selected for this output. Refresh the preview, review the updated video, then click Approve again. Nothing was scheduled or published.");
   }
+  if(masterCheck.status==="deferred"){
+    throw new HttpError(409,"This output has an approved creative master but is held, already armed, or otherwise not eligible for media adoption. Resolve its independent review or publishing lock before approving.");
+  }
   const stamp = new Date().toISOString();
   // An authoritative Airtable schedule commit completes approval. Supabase is
   // a downstream read mirror, so it must not keep the output lock held.

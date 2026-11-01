@@ -75,7 +75,7 @@ test("no approved master or different aspect/format leaves output unchanged",asy
  assert.equal((await f.run()).status,"no_master");
  f.row.fields.Format="Vertical Short Video";
  f.row.fields.Aspect_Ratio="4:5";
- await assert.rejects(f.run(),e=>e.code==="CREATIVE_MASTER_FACTORY_CONTENT_DRIFT");
+ assert.equal((await f.run()).status,"no_master");
  assert.equal(f.writes,0);
 });
 test("published, dispatching, already approved, held outputs cannot be mutated",async()=>{
@@ -103,6 +103,6 @@ test("failed Airtable write/readback and racing master keep publication blocked"
 });
 test("cross-content linkage is never adopted",async()=>{
  const f=fixture();f.row.fields.Content_Item=["recAAAAAAAAAAAAAA"];
- assert.equal((await f.run()).status,"no_master");
+ await assert.rejects(f.run(),e=>e.code==="CREATIVE_MASTER_FACTORY_CONTENT_DRIFT");
  assert.equal(f.writes,0);
 });

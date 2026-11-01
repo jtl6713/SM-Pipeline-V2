@@ -92,12 +92,13 @@ test("20 actual LA record identities pass canonical Factory approval route again
  const factory=new Function("airtableFetch","f","HttpError",
   "studioOutputReadyForPublishApproval","approveOutputRecordForPublishing",
   "studioPublishCanDispatchNow","studioDispatchApprovedPublishAndSchedule",
-  "studioScheduleMs",
+  "studioScheduleMs","reconcileCreativeMasterAtFactoryApproval",
   approvalSource+"\nreturn factoryApproveOutput")(
    async(_env,_table,id)=>rows.get(id),
    lookup,HttpError,eligible,wouldApprove,()=>false,
    async()=>{stagedDispatchCalls++;return{skipped:"test-only"}},
-   studioScheduleMs
+   studioScheduleMs,
+   async()=>({status:"no_master"})
  );
  const bucket=new MemoryR2();
  const profileId=PROFILE,requestId="factory_live_record_stage_20";
