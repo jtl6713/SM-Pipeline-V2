@@ -306,7 +306,7 @@
     const rail=elem('ol',null,'rr-progress-stages');
     rail.setAttribute('aria-label','Verified post-production stages');
     for(let i=0;i<steps.length;i++){
-      const phase=readyV2&&session?.state==='approved'||i<stage?'complete':i===stage?
+      const phase=(readyV2&&session?.state==='approved')||i<stage?'complete':i===stage?
         requiresInput||failed?'attention':'current':'pending';
       const item=elem('li',null,'rr-progress-stage rr-progress-stage--'+phase);
       item.append(elem('span',steps[i],'rr-progress-stage-name'));
@@ -356,7 +356,10 @@
     const changedOutput=state.selected!==entry.output_id;
     state.selected=entry.output_id;state.activeEntry=entry;
     state.progressCheckNode=null;
-    if(topProgress&&changedOutput)topProgress.hidden=true;
+    if(topProgress&&changedOutput){
+      topProgress.hidden=true;
+      topProgress.classList.remove('rr-progress-top--attention');
+    }
     state.approvalButton=null;state.approvalVersion=null;
     renderList();clearMedia();
     detail.replaceChildren();
@@ -376,6 +379,7 @@
     appendLine(detail,'Review:',entry.review_held?'Existing hold detected — do not clear automatically':
       entry.dispatch_started?'Already being dispatched — not eligible to claim':'Not enrolled');
     if(!entry.review_held){
+      if(topProgress){topProgress.hidden=true;topProgress.classList.remove('rr-progress-top--attention');}
       detail.append(elem('p','To request changes, open this output in Factory, select Request Changes, and enter comments before submitting.','rr-notice'));
       return;
     }
@@ -388,8 +392,11 @@
       if(seq!==state.request||state.selected!==entry.output_id)return;
       if(saved.integrity_error)detail.append(elem('p','Hold integrity issue: '+saved.integrity_error,'rr-notice'));
       if(!saved.publication_hold_verified){
-        if(topProgress){topProgress.hidden=false;topProgress.textContent=
-          'Status paused: authoritative publication hold could not be verified.';}
+        if(topProgress){
+          topProgress.hidden=false;
+          topProgress.classList.remove('rr-progress-top--attention');
+          topProgress.textContent='Status paused: authoritative publication hold could not be verified.';
+        }
         detail.append(elem('p','Authoritative publication hold could not be verified. Discussion actions are disabled.','rr-notice'));
         return;
       }
@@ -844,6 +851,7 @@
     }catch(err){
       if(seq===state.request && state.selected===entry.output_id){
         if(topProgress){
+          topProgress.classList.remove('rr-progress-top--attention');
           const prior=state.lastVerifiedSummary?.outputId===entry.output_id?
             ' Last verified: '+state.lastVerifiedSummary.summary:'';
           topProgress.textContent='Latest status unavailable; no change can be confirmed.'+prior;
