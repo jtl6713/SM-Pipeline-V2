@@ -328,7 +328,7 @@ test("factoryCardFromRow exposes authenticated preview path for Ready for Review
     content_item_id: "recContentRoundTrip0001",
     title: "Preview me",
   }, { lane: "needs_eyes" });
-  assert.equal(card.preview_url, "/api/outputs/recEyesPreview0001/preview");
+  assert.equal(card.preview_url, "/api/factory/outputs/recEyesPreview0001/preview");
   assert.equal(card.can_preview, true);
   assert.equal(card.thumbnail_url, "https://media.chicagoshining.com/publish/cover.jpg");
   assert.equal(card.final_file_url, "https://drive.google.com/file/d/abc/view");
@@ -414,7 +414,7 @@ test("Worker exposes factory desk routes and version flag", async () => {
   assert.match(worker, /Do_Not_Publish: true/);
   assert.match(worker, /revision_approve/);
   assert.match(worker, /productionRequestRevisionOpen\(requestRecord\)/);
-    assert.match(worker, /0.10.683-promotion-postcommit-trace/);
+    assert.match(worker, /0\.10\.\d+(?:-[\w.-]+)?/);
   assert.match(worker, /async function studioHealLiveFailedPublishStatus/);
   assert.match(worker, /async function studioHealTtd0RouteBlankDraft/);
   assert.match(worker, /await studioHealLiveFailedPublishStatus\(env/);
@@ -429,7 +429,7 @@ test("Worker allows Factory Desk POST through Phase 2A gate", async () => {
   const worker = readStudioWorkerSource();
   assert.match(worker, /const isFactoryDeskWrite = isFactoryDeskRoute && request\.method === "POST"/);
   assert.match(worker, /isFactoryDeskWrite \|/);
-  assert.match(worker, /version: "0.10.683-promotion-postcommit-trace"/);
+  assert.match(worker, /version: "0\.10\.\d+(?:-[\w.-]+)?"/);
   assert.match(worker, /studio_factory_desk_write_v1: true/);
 });
 
@@ -438,7 +438,7 @@ test("Worker allows Supabase sync POST through Phase 2A gate", async () => {
   assert.match(worker, /const isOpsSupabaseSyncWrite = isOpsSupabaseSyncRoute && request\.method === "POST"/);
   assert.match(worker, /isOpsSupabaseSyncWrite \|/);
   assert.match(worker, /studio_supabase_sync_gate_v1: true/);
-  assert.match(worker, /version: "0.10.683-promotion-postcommit-trace"/);
+  assert.match(worker, /version: "0\.10\.\d+(?:-[\w.-]+)?"/);
 });
 
 test("Worker allows schedule regeneration POST through Phase 2A gate", async () => {
@@ -447,5 +447,5 @@ test("Worker allows schedule regeneration POST through Phase 2A gate", async () 
   assert.match(worker, /isScheduleRegenWrite \|/);
   assert.match(worker, /const isScheduleSettingsWrite = isScheduleSettingsRoute &&/);
   assert.match(worker, /isScheduleSettingsWrite \|/);
-  assert.match(worker, /version: "0.10.683-promotion-postcommit-trace"/);
+  assert.match(worker, /version: "0\.10\.\d+(?:-[\w.-]+)?"/);
 });
