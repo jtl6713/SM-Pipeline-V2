@@ -50,6 +50,12 @@ export const OPS_QUEUE_OUTPUT_FIELDS = [
   "Render_Status",
   "Remotion_Job_ID",
   "Final_File_URL",
+  // Lightweight canonical evidence for native-photo review readiness. Without
+  // these fields, the Factory projects a finished 8-slide package as Preparing Assets.
+  // Keep Selected_Assets_JSON off this hot list; the detail/approval path reads it.
+  "Selected_Clip_Count",
+  "Studio_Preview_URL",
+  "Carousel Slides",
   "Thumbnail_URL",
   "Output_Title",
   "Output_Caption",
