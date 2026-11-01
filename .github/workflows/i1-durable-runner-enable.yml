@@ -136,7 +136,36 @@ jobs:
           }'''
           print(json.dumps({"command":ps.replace('RUN_TOKEN',run),"confirm":True}))
           PY
-          curl -sS --max-time 20 -X POST https://ops.chicagoshining.com/api/shell \
+          code=$(curl -sS --max-time 20 -o /tmp/rollback-submit.json -w '%{http_code}' -X POST https://ops.chicagoshining.com/api/shell \
             -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' \
-            --data-binary @/tmp/i1-restore.json -o /tmp/rollback-submit.json
-          echo "i1_activation_failed_worker_flag_remains_off=true"
+            --data-binary @/tmp/i1-restore.json)
+          [[ "$code" == "200" || "$code" == "202" ]] || { echo "i1_rollback_submission_failed=$code"; exit 1; }
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/rollback-submit.json)
+          [[ -n "$job" ]] || exit 1
+          restored=false
+          for n in {1..30}; do
+            curl -sS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/rollback-status.json
+            status=$(jq -r '.job.status // empty' /tmp/rollback-status.json)
+            if [[ "$status" == "ok" ]]; then
+              if jq -e '.job.log | contains("i1_runner_environment_rollback=RESTORED")' /tmp/rollback-status.json >/dev/null; then restored=true; fi
+              break
+            fi
+            if [[ "$status" == "failed" ]]; then break; fi
+            sleep 3
+          done
+          if [[ "$restored" != "true" ]]; then echo "i1_rollback_backup_not_restored"; exit 1; fi
+          code=$(curl -sS --max-time 30 -o /tmp/rollback-restart.json -w '%{http_code}' -X POST https://ops.chicagoshining.com/api/run \
+            -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data '{"action":"deploy","service":"pipeline-runner","confirm":true}')
+          [[ "$code" == "202" || "$code" == "409" ]] || { echo "i1_rollback_restart_rejected=$code"; exit 1; }
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/rollback-restart.json)
+          [[ -n "$job" ]] || exit 1
+          for n in {1..95}; do
+            curl -sS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/rollback-restart-status.json
+            status=$(jq -r '.job.status // empty' /tmp/rollback-restart-status.json)
+            if [[ "$status" == "ok" ]]; then echo "i1_runner_rollback_restart=PASS"; exit 0; fi
+            if [[ "$status" == "failed" ]]; then echo "i1_runner_rollback_restart=FAILED"; exit 1; fi
+            sleep 5
+          done
+          echo "i1_runner_rollback_restart=TIMEOUT"
+          exit 1
