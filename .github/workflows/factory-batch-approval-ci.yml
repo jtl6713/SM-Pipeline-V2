@@ -33,6 +33,7 @@ jobs:
           node --check apps/studio-api/output-approval-lease.mjs
           node --check apps/studio-web/assets/factory-desk.js
           node --test apps/studio-api/factory-desk.test.mjs apps/studio-api/ops-queue.test.mjs
+          node --test apps/studio-api/review-package-readiness.test.mjs apps/studio-api/pre-factory-ready-recovery.test.mjs
           node --test apps/studio-web/global-needs-asset-thumbnail.test.mjs apps/studio-web/studio-nav-autoclose.test.mjs
       - name: Factory single and batch approval regressions
         run: |
