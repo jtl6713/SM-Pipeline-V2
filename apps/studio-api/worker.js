@@ -10,6 +10,7 @@ import { handleRenderingReviewEnrollRequest, reviewEnrollmentWriteEnabled } from
 import { acceptReviewCreativeOnly } from "./rendering-review-approval-http.mjs";
 import { handoffApprovedReviewToFactory } from "./rendering-review-factory-handoff.mjs";
 import { nextApprovedCreativeMaster, projectCreativeMasterGroup, MASTER_FIELD } from "./creative-master-registry.mjs";
+import { propagateApprovedCreativeMaster } from "./creative-master-propagation.mjs";
 import { returnFactoryRevisionToProducer } from "./rendering-review-factory-return.mjs";
 import { serveFactorySelectedReviewVideo } from "./rendering-review-factory-preview.mjs";
 import { composeRenderingReviewEnrollmentOperations } from "./rendering-review-enrollment-wiring.mjs";
@@ -110,6 +111,35 @@ function makeReviewFactoryHandoffOperations(env) {
         return {content_item_id:contentId,key:proposal.master.key,
           version:proposal.master.version,file_id:proposal.master.file_id,
           already_registered:!proposal.changed};
+      });
+    },
+    // Propagation is fenced per sibling by the SAME output approval lock used
+    // by Factory. The registry is re-read for every output before adoption.
+    propagateApprovedCreativeMaster:async({source_output_id,content_item_id,
+      master_key,master_version,master_file_id})=>{
+      const table="tblwzN9AXWvmKVKPs";
+      const content=await airtableFetch(env,table,content_item_id);
+      const raw=content?.fields?.[MASTER_FIELD];
+      let registry;
+      try{registry=JSON.parse(raw||"")}catch{
+        throw new HttpError(409,"Approved creative master registry unavailable");
+      }
+      const master=registry?.masters?.[master_key];
+      if(!master||master.source_output_id!==source_output_id||
+        master.version!==master_version||master.file_id!==master_file_id)
+        throw new HttpError(409,"Creative master changed during source handoff");
+      return propagateApprovedCreativeMaster({
+        source_output_id,content_item_id,master,
+        operations:{
+          readContent:id=>airtableFetch(env,table,id),
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+          withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+          patchOutput:(id,fields)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id,{
+            method:"PATCH",skipSupabaseWriteThrough:true,
+            body:JSON.stringify({fields,typecast:false}),
+          }),
+          syncOutput:row=>reviewFactorySyncOutput(env,row,"creative-master-fanout"),
+        },
       });
     },
     syncOutput:row=>reviewFactorySyncOutput(env,row,"render-review-factory-handoff"),

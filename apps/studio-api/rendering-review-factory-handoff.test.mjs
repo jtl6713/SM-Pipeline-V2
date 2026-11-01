@@ -53,7 +53,7 @@ function fixture(){
    google_drive_mime_type:"video/mp4",render_job_id:"job-20261029042719-d8b6ef01"
   })
  }};
- let writes=0,saves=0,syncs=0,masterWrites=0,failStep="";
+ let writes=0,saves=0,syncs=0,masterWrites=0,fanoutCalls=0,failStep="";
  let content={id:"recA1B2C3D4E5F6G7",fields:{
    Content_Type:"Vertical Short Video","Platform Outputs":[id],
  }};
@@ -72,6 +72,18 @@ function fixture(){
     return {key:m.master.key,version:m.master.version,
       content_item_id:content.id,file_id:m.master.file_id};
   },
+  propagateApprovedCreativeMaster:async({source_output_id,content_item_id,
+    master_key,master_version,master_file_id})=>{
+    if(failStep==="fanout")throw Error("simulated sibling propagation failure");
+    assert.equal(source_output_id,id);
+    assert.equal(content_item_id,content.id);
+    assert.equal(master_key,"vertical short video|9:16");
+    assert.equal(master_version,1);
+    assert.equal(master_file_id,v2);
+    fanoutCalls++;
+    return {source_output_id:id,content_item_id:content.id,
+      applied:0,already_current:0,deferred:0,results:[]};
+  },
   saveSessionIfVersion:async ({expected_version,next})=>{
    assert.equal(session.version,expected_version);
    if(failStep==="session")throw Error("simulated interrupted session save");
@@ -89,6 +101,7 @@ function fixture(){
   get raw(){return raw},get session(){return session},
   get writes(){return writes},get saves(){return saves},get syncs(){return syncs},
   get content(){return content},get masterWrites(){return masterWrites},
+  get fanoutCalls(){return fanoutCalls},
   fail:step=>{failStep=step},
   handoff:()=>handoffApprovedReviewToFactory({output_id:id,env,operations:ops}),
  };
@@ -135,6 +148,8 @@ test("real #8447 V2 creative approval becomes Factory Needs Eyes, never schedule
  assert.equal(JSON.parse(f.content.fields[MASTER_FIELD]).masters['vertical short video|9:16'].file_id,v2);
  assert.equal(result.creative_master.linked_by_compatibility,true);
  assert.equal(result.creative_master.sibling_publish_changes,0);
+ assert.equal(result.creative_master.siblings_updated,0);
+ assert.equal(f.fanoutCalls,1);
  assert.equal(f.writes,2);
  assert.equal(f.saves,1);
  assert.equal(f.syncs,1);
@@ -229,4 +244,20 @@ test("wrong output denies and completed approval drains even if creative admissi
  });
  assert.equal(result.factory_ready,true);
  assert.equal(f.raw.fields.Do_Not_Publish,false);
+});
+
+test("failed sibling fanout keeps source hold and can resume without duplicating master",async()=>{
+  const f=fixture();
+  f.fail("fanout");
+  await assert.rejects(f.handoff(),/simulated sibling propagation failure/);
+  assert.equal(f.session.state,"approved");
+  assert.equal(f.session.review_hold.active,true);
+  assert.equal(f.raw.fields.Final_File_ID,v1);
+  assert.equal(f.raw.fields.Do_Not_Publish,true);
+  assert.equal(f.masterWrites,1);
+  f.fail("");
+  const result=await f.handoff();
+  assert.equal(result.factory_ready,true);
+  assert.equal(f.masterWrites,1);
+  assert.equal(f.fanoutCalls,1);
 });
