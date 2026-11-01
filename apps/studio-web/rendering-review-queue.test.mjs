@@ -657,20 +657,31 @@ test('held Producer reply shows V2 not started; saved plan and render progress r
   const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
   let notify,version=2,state='discussing',plan=null,attempts=[],timerId=0;
   let currentAttemptId=null,approvedAttemptId=null,allowActions=true;
-  let reads=0,failNextRead=false;const timers=new Map();
+  let reads=0,failNextRead=false;const timers=new Map();let savedNote='';let notePosts=0;
   const saved=()=>({ok:true,publication_hold_verified:true,
     flags:{producer_conversation_enabled:allowActions,attempt_commit_enabled:allowActions,
       creative_approval_enabled:allowActions},
     session:{
     id:'review-session',version,state,review_hold:{active:true},
     current_attempt_id:currentAttemptId,approved_attempt_id:approvedAttemptId,
+    active_job:['queued','rendering','validating'].includes(state)?{id:'rrjob-queued-123'}:null,
     latest_attempt_number:attempts.length?2:1,
     messages:[{role:'user',content:'Change narration only',at:'2026-11-01T16:00:00Z'},
-      {role:'producer',content:'I will keep the same eight photos',at:'2026-11-01T16:01:00Z'}],
+      {role:'producer',content:'I will keep the same eight photos',at:'2026-11-01T16:01:00Z'},
+      ...(savedNote?[{role:'user',content:savedNote,at:'2026-11-01T16:02:00Z'}]:[])],
     producer_candidate:{stale:false,candidate:{narration:'New script',changes:[],requirements:[]}},
     plan,attempts,
   }});
   const fetchStub=async(url,options)=>{
+    if(url==='/api/rendering-review/outputs/'+output+'/next-revision-feedback'){
+      assert.equal(options.method,'POST');
+      const body=JSON.parse(options.body);
+      assert.match(body.content,/Replace scene 3/);
+      assert.equal(body.expected_version,version);
+      savedNote=body.content;notePosts++;version++;
+      return {ok:true,json:async()=>({ok:true,review_hold_active:true,
+        session_version:version,message_count:3})};
+    }
     assert.equal(options.method,'GET','polling must never initiate a render or publish');
     if(url==='/api/session')return {ok:true,json:async()=>({
       ok:true,authenticated:true,authorized:true,permissions:{outputs_review:true}})};
@@ -696,6 +707,7 @@ test('held Producer reply shows V2 not started; saved plan and render progress r
       clearTimeout:id=>timers.delete(id)},
     MutationObserver:class {constructor(fn){notify=fn;}observe(){}},
     fetch:fetchStub,URL,URLSearchParams,
+    crypto:{randomUUID:()=> 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'},
   };
   vm.runInNewContext(script,sandbox,{filename:'rendering-review-queue.js'});
   await tick();await tick();
@@ -737,6 +749,19 @@ test('held Producer reply shows V2 not started; saved plan and render progress r
     'queued render is automatic work, not a user-action warning');
   assert.ok(!descendants(nodes.rrDetail).some(n=>n.className.includes('rr-progress-stage--attention')));
   assert.ok(!/V2 is ready for review/.test(nodes.rrProgressSummary.textContent));
+  const draft=descendants(nodes.rrDetail).find(n=>n.tag==='textarea'&&
+    n.attrs['aria-label']==='Photo and scene suggestions for the next revision');
+  const saveNote=descendants(nodes.rrDetail).find(n=>n.tag==='button'&&
+    n.textContent==='Save feedback for next revision');
+  assert.ok(draft&&saveNote,'queued render must still accept next-version comments');
+  draft.value='Replace scene 3 with another planetarium photo';
+  draft.listeners.input();
+  await saveNote.listeners.click();
+  for(let i=0;i<5;i++)await tick();
+  assert.equal(notePosts,1);
+  assert.match(textAll(),/Replace scene 3/);
+  assert.ok(!/current render was changed/i.test(textAll()));
+  assert.ok(!nodes.rrProgressSummary.classList.contains('rr-progress-top--attention'));
   // Transient manual check failures must not erase the previously verified stage.
   failNextRead=true;
   const check=descendants(nodes.rrDetail).find(n=>
