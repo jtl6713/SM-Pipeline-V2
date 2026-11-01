@@ -1054,6 +1054,7 @@
     const reviewAllowed = canReviewActions(card, { pile, candidate });
     const needsEyesOutput = lane === "needs_eyes" && card.kind === "output";
     const batchReason = needsEyesOutput ? factoryBatchSelectionReason(card) : "";
+    const reasonId = batchReason ? `factory-batch-reason-${card.id}` : "";
     if (card.kind === "output" && (reviewAllowed || needsEyesOutput)) {
       // A stale review badge/held revision must never present a live Approve
       // action merely because the server grouped the row under Needs Eyes.
@@ -1074,14 +1075,16 @@
     const cell = (value) => `<span class="factory-line-cell">${esc(value || "—")}</span>`;
     return `<div class="factory-line" data-factory-id="${esc(card.id)}" data-factory-kind="${esc(card.kind || "")}" data-lane="${esc(lane)}" title="${esc(cardLabel(card))}">
       ${needsEyesOutput
-        ? `<span class="factory-media-select"><label class="factory-output-select" title="${esc(batchReason || "Select for batch approval")}"><input type="checkbox" data-factory-select-output="${esc(card.id)}" aria-label="${esc(batchReason ? `Batch selection unavailable for ${cardLabel(card)}: ${batchReason}` : `Select ${cardLabel(card)}`)}" ${batchReason ? "disabled" : (state.selectedOutputs.has(card.id) ? "checked" : "")}></label>${media}</span>`
+        ? `<span class="factory-media-select"><label class="factory-output-select" title="${esc(batchReason || "Select for batch approval")}"><input type="checkbox" data-factory-select-output="${esc(card.id)}" aria-label="${esc(batchReason ? `Batch selection unavailable for ${cardLabel(card)}` : `Select ${cardLabel(card)}`)}" ${reasonId ? `aria-describedby="${esc(reasonId)}"` : ""} ${batchReason ? "disabled" : (state.selectedOutputs.has(card.id) ? "checked" : "")}></label>${media}</span>`
         : media}
-      <span class="factory-line-title">${esc(card.title || cardLabel(card))}${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}</span>
+      <span class="factory-line-title">${esc(card.title || cardLabel(card))}${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}
+        ${needsEyesOutput && batchReason ? `<span id="${esc(reasonId)}" class="factory-batch-unavailable" role="status"><strong>Approval unavailable:</strong> ${esc(batchReason)}</span>` : ""}
+      </span>
       ${cell(card.profile_name)}
       ${cell(card.platform)}
       ${cell(card.studio_output_type)}
       <span class="factory-line-cell factory-line-state"${alert ? ` title="${esc(alert)}"` : ""}>${esc(stateLabel)}</span>
-      <div class="factory-line-actions">${actions.join("")}${needsEyesOutput && batchReason ? `<span class="factory-batch-unavailable" role="status">${esc(batchReason)}</span>` : ""}</div>
+      <div class="factory-line-actions">${actions.join("")}</div>
     </div>`;
   }
 
