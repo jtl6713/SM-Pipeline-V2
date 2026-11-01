@@ -2,6 +2,7 @@ import { matchNewlyCreatedIdeaPhotos } from "./worker-functions-03.mjs";
 import { evaluateReviewPackage, verifyReviewImages, factoryReviewVisibility } from "./review-package-readiness.mjs";
 import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 import { autonomousPlanOutputSpilloverRepair } from "./autonomous-plan-output-recovery.mjs";
+import { vibeAutoReviewVerifiedSource } from "./vibe-auto-review.mjs";
 import { verifyFactoryRenderedMedia } from "./factory-producer-render-evidence.mjs";
 import { appendVerifiedLibraryAssets } from "./factory-producer-library-append.mjs";
 import { applyGroundedMediaEdits } from "./factory-producer-media-edits.mjs";
@@ -12755,6 +12756,15 @@ export async function prepareIdeaToReview(request, env, url, authorization, ctx 
 const READY_PRODUCTION_IDEA_FORMULA =
   "AND({Test_Run_ID}=BLANK(),{Studio_Photo_Wait_Status}='Ready',{Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK(),{Candidate_Status}!='On Hold',{Candidate_Status}!='Rejected',{Candidate_Status}!='Promoted')";
 
+function readyProductionVerifiedVibeDraft(requestRecord) {
+  return vibeAutoReviewVerifiedSource({
+    notes: f(requestRecord, "Production_Notes"),
+    assets: item4AssetManifest(requestRecord),
+    masterStatus: f(requestRecord, "Studio_Master_Asset_Status"),
+    masterCount: f(requestRecord, "Studio_Master_Asset_Count"),
+  });
+}
+
 function readyProductionExistingDraftEligible(idea, requestRecord) {
   // Some hourly autonomous Ideas deliberately disable photo-wait. Their
   // reciprocal Production Request already contains verified master assets;
@@ -12767,6 +12777,10 @@ function readyProductionExistingDraftEligible(idea, requestRecord) {
   if (!(Number(f(requestRecord, "Studio_Master_Asset_Count") || 0) > 0)) return false;
   const notes = String(f(requestRecord, "Production_Notes") || "");
   if (productionNotesRevisionOpen(notes)) return false;
+  // Vibe Cut upload is an explicit user request to create an edit. Once its
+  // one original is saved and verified, proceed to Factory review without
+  // requiring the newly generated Idea to be Approved first.
+  if (readyProductionVerifiedVibeDraft(requestRecord)) return true;
   if (/(?:^|\s)origin=(?:autonomous|prepare-to-review)(?:\s|$)/i.test(notes)) return true;
   // Approved, ready-master requests also qualify even when an older
   // timed-script/manual proposal omitted the autonomous origin stamp.
@@ -12838,6 +12852,20 @@ async function discoverAssetReadyProductionDrafts(env, { limit = 120 } = {}) {
       "Created_At",
       "Active",
     ],
+  });
+}
+
+async function discoverReadyVibeProductionDrafts(env, { limit = 25 } = {}) {
+  // Prioritize newly verified uploads without displacing the oldest first
+  // autonomous/photo-ready backfill. A reciprocal Idea + verified original
+  // still gates every claim before any write or work is started.
+  return listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    limit: Math.max(1, Math.min(25, Number(limit) || 25)),
+    sortField: "Updated_At",
+    sortDirection: "desc",
+    filterFormula: "AND({Test_Run_ID}=BLANK(),{Active}=1,OR({Request_Status}='Draft',{Request_Status}='Ready',{Request_Status}='Submitted'),{Studio_Master_Asset_Status}='Ready',{Studio_Master_Asset_Count}=1,FIND('ez-input=vibe-cut',{Production_Notes})>0)",
+    fields: ["Idea_Candidate", "Request_Status", "Studio_Master_Asset_Status",
+      "Studio_Master_Asset_Count", "Production_Notes", "Created_At", "Active"],
   });
 }
 
@@ -13024,7 +13052,8 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
   // Existing manual Approved candidates need the same autonomous profile gate
   // as ordinary generated ideas. Never reactivate operator-disabled profiles.
   const requestNotesForGate = String(f(requestRecord, "Production_Notes") || "");
-  if (requestRecord
+  const verifiedVibeDraft = Boolean(requestRecord && readyProductionVerifiedVibeDraft(requestRecord));
+  if (requestRecord && !verifiedVibeDraft
       && String(f(idea, "Studio_Photo_Wait_Status") || "").trim() !== "Ready"
       && !/(?:^|\s)origin=(?:autonomous|prepare-to-review)(?:\s|$)/i.test(requestNotesForGate)) {
     const profileId = firstLinkedRecordId(f(idea, "Content_Profile"));
@@ -13041,7 +13070,7 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
   }
 
   const plan = readyProductionIdeaPlan(idea, requestRecord);
-  const manualAssetSelection = Boolean(requestRecord
+  const manualAssetSelection = verifiedVibeDraft || Boolean(requestRecord
     && String(f(idea, "Candidate_Status") || "").trim() === "Approved"
     && productionPhotoWaitAutoOff(f(requestRecord, "Production_Notes")));
   const selectedMasterIds = requestRecord
@@ -13082,7 +13111,7 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
   }
   requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
   const notes = String(f(requestRecord, "Production_Notes") || "");
-  if (!/origin=(prepare-to-review|autonomous|az-finished-video)/i.test(notes)) {
+  if (!verifiedVibeDraft && !/origin=(prepare-to-review|autonomous|az-finished-video)/i.test(notes)) {
     requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id, {
       method: "PATCH",
       body: JSON.stringify({
@@ -13203,8 +13232,15 @@ async function studioReadyProductionCronResume(env, ctx = null, options = {}) {
   stage = "draft_backfill";
   const known = new Map(jobs.map((job) => [job.idea_id, job]));
   let backfilled = 0;
-  const existingDrafts = await discoverAssetReadyProductionDrafts(env, {
-    limit: options.draftDiscoveryLimit || 120,
+  const [recentVibes, ordinaryDrafts] = await Promise.all([
+    discoverReadyVibeProductionDrafts(env, { limit: options.vibeDiscoveryLimit || 25 }),
+    discoverAssetReadyProductionDrafts(env, { limit: options.draftDiscoveryLimit || 120 }),
+  ]);
+  const scannedDrafts = new Set();
+  const existingDrafts = [...recentVibes, ...ordinaryDrafts].filter((draft) => {
+    if (!draft?.id || scannedDrafts.has(draft.id)) return false;
+    scannedDrafts.add(draft.id);
+    return true;
   });
   for (const draft of existingDrafts) {
     if (backfilled >= Math.min(8, Math.max(1, Number(options.maxBackfillPerTick) || 8))) break;
@@ -13950,7 +13986,13 @@ export async function finishAutonomousProductionRequest(env, authorization, ctx,
     item4ParseJson(f(current, "Studio_Master_Assets_JSON"), []),
     pick.media_asset_ids
   );
-  if (incoming.length) {
+  // Vibe Cut must never acquire additional library stills or a second source.
+  if (incoming.length && !vibeAutoReviewVerifiedSource({
+    notes: f(current, "Production_Notes"),
+    assets: item4AssetManifest(current),
+    masterStatus: f(current, "Studio_Master_Asset_Status"),
+    masterCount: f(current, "Studio_Master_Asset_Count"),
+  })) {
     await attachItem4LibraryAssetIds(env, requestId, incoming, authorization);
     current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
   }
