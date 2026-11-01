@@ -11357,6 +11357,10 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       platforms: parentRequest?.platforms || (mapped.platform ? [mapped.platform] : []),
       scheduled_at: mapped.scheduled_at || mapped.scheduled_post_date || null,
       creative_available: outputCreativeAvailable(record),
+      // A Studio state is a projection; only the review-ready projection with
+      // required caption and preview evidence may enter Needs Eyes.
+      review_package_ready: studioState === "Ready for Review"
+        && Boolean(String(f(record, "Output_Caption") || "").trim()),
       updated_at: outputUpdatedAt,
     };
     outputRow.e2e = buildOpsE2eStages({
