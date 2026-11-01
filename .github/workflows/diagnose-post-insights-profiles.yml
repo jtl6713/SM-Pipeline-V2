@@ -1,6 +1,10 @@
 name: Diagnose Post Insights Four Profiles (read only)
 
 on:
+  pull_request:
+    paths:
+      - 'scripts/diagnose-post-insights-profiles.py'
+      - '.github/workflows/diagnose-post-insights-profiles.yml'
   workflow_dispatch:
   push:
     branches: [main]
@@ -15,7 +19,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: python -m py_compile scripts/diagnose-post-insights-profiles.py
+
   diagnose:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
