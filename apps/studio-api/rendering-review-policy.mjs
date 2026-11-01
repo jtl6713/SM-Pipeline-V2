@@ -391,6 +391,7 @@ export function applyReviewEvent(session, event) {
       at:text(event.at),attempt_id:attempt.id,timestamp_seconds:null});
     s.review_hold.active=true;
     s.approved_attempt_id=null;
+    s.factory_review=null;
     s.factory_handoff.status="returned_for_changes";
     s.factory_handoff.returned_at=text(event.at);
     s.producer_candidate=null;
@@ -420,6 +421,10 @@ export function applyReviewEvent(session, event) {
       original_artifact_id:original.artifact_id,at:text(event.at),
       status:"ready_for_factory_approval",
     };
+    if(s.factory_review?.status==="accepted_pending_qa"&&
+       s.factory_review.attempt_id===active.id)
+      s.factory_review={...s.factory_review,status:"handoff_verified",
+        qa_pending:false,verified_at:text(event.at)};
     // The authoritative output hold remains active until a separate verified
     // exact-owner Airtable release AFTER this session update is persisted.
     s.review_hold.active=false;
