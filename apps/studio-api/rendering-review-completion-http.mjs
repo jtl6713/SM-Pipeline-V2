@@ -51,10 +51,10 @@ function validateReadyEvidence(b,receipt){
      !Number.isSafeInteger(v.byte_count)||v.byte_count<100000||
      v.mime_type!=="video/mp4"||v.width!==1080||v.height!==1920||
      typeof v.duration_seconds!=="number"||v.duration_seconds<1||v.duration_seconds>180||
-     v.audio_verified!==true||v.watermark_verified!==true||
+     v.audio_verified!==true||
      v.google_drive_verified!==true||v.render_job_id!==receipt.remotion_job_id||
      !v.google_drive_mime_type||v.google_drive_mime_type!=="video/mp4")
-    deny("RENDER_NOT_VALIDATED","A real MP4, audio, watermark, dimensions and Drive readback are required");
+    deny("RENDER_NOT_VALIDATED","A real MP4, audio, dimensions and Drive readback are required for creative review");
 }
 export async function completeReviewAttempt({request,env,operations,now=()=>new Date()}){
   if(!reviewCompletionEnabled(env))

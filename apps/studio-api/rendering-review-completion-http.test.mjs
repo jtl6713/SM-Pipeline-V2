@@ -102,10 +102,25 @@ test("hold loss, prior Meta dispatch and wrong Runner secret fail closed",async(
   await assert.rejects(scenario().call("started","wrong-secret"),
     {code:"RENDER_CALLBACK_UNAUTHORIZED"});
 });
-test("no acceptance without real vertical MP4 audio, watermark and Drive checks",async()=>{
+test("review-only render completes with unverified watermark but remains unpublished",async()=>{
   const s=scenario();await s.call("started");await s.call("validating");
-  await assert.rejects(s.call("ready",secret,{
+  const result=await s.call("ready",secret,{
     validation:{...proof,watermark_verified:false},
-  }),{code:"RENDER_NOT_VALIDATED"});
-  assert.equal(s.state().session.state,"validating");
+  });
+  assert.equal(result.stage,"ready");
+  assert.equal(result.public_post_created,false);
+  assert.equal(s.state().session.state,"ready_for_review");
+  assert.equal(s.state().originalMutation,0);
+  assert.equal(s.state().attempt.status,'ready_for_review');
+});
+test("review-only completion still requires valid MP4, audio and Google Drive evidence",async()=>{
+  for(const bad of [
+    {audio_verified:false},{google_drive_verified:false},
+    {mime_type:"image/png"},{byte_count:0},
+  ]){
+    const s=scenario();await s.call("started");await s.call("validating");
+    await assert.rejects(s.call("ready",secret,{validation:{...proof,...bad}}),
+      {code:"RENDER_NOT_VALIDATED"});
+    assert.equal(s.state().session.state,"validating");
+  }
 });

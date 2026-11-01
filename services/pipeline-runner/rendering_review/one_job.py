@@ -216,7 +216,8 @@ def _evidence(client,drive,output_id,job_id):
             validated.get("mime_type")!="video/mp4" or
             validated.get("width")!=1080 or validated.get("height")!=1920 or
             validated.get("audio_verified") is not True or
-            validated.get("watermark_verified") is not True or
+            # A failed/unverified watermark never blocks creative rework of
+            # the exact owned V2. Delivery QA is enforced separately.
             validated.get("google_drive_verified") is not True):
             fail("review_source_attempt_validation_unverified")
     meta=drive.get_file(source_file)
