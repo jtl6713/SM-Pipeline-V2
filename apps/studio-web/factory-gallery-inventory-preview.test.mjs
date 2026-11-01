@@ -14,7 +14,8 @@ test("Factory feedback exposes accurate non-publishing gallery and compatible-ou
  assert.match(html,/factoryReadOnlyInventoryStatus"[^>]*role="status" aria-live="polite"/);
  assert.match(source,/function loadFactoryCorrectionReadOnlyPreview/);
  assert.match(source,/void loadFactoryCorrectionReadOnlyPreview\(state\.pendingFactoryFeedback\)/);
- assert.match(source,/if\(state\.pendingFactoryFeedback!==pending\)return/);
+ assert.match(source,/const current=\(\)=>state\.pendingFactoryFeedback===pending/);
+ assert.match(source,/if\(!current\(\)\)return/);
  assert.match(css,/#factoryReadOnlyInventory\[hidden\]\{display:none!important\}/);
 });
 test("UI uses read-only exact server endpoints, never selects siblings or enables generation",()=>{
