@@ -1,3 +1,4 @@
+import { loadAuthoritativeFactoryCorrection } from "./factory-correction-authority.mjs";
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
 import { serveReviewAttemptVideo, fetchTrustedRunnerReviewMedia } from "./rendering-review-attempt-video.mjs";
 import { completeReviewAttempt } from "./rendering-review-completion-http.mjs";
@@ -2531,6 +2532,52 @@ export default {
           return factoryBatchSubmitRoute(request, env, authorization, ctx);
         }
         throw new HttpError(405, "Method not allowed");
+      }
+
+      // Read-only, Airtable-authoritative Factory correction discovery.
+      // This endpoint cannot create holds, generate media, or publish. The
+      // native gallery Runner/Factory integration has not passed its release
+      // gate, so no client may treat this preview as an enabled POST batch.
+      const correctionMatchesRoute = /^\\/api\\/factory\\/outputs\\/(rec[A-Za-z0-9]{14})\\/correction-matches$/.exec(url.pathname);
+      if (correctionMatchesRoute) {
+        if (request.method !== "GET") throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        const productionRequestId=String(url.searchParams.get("production_request_id")||"");
+        if(!/^rec[A-Za-z0-9]{14}$/.test(productionRequestId))
+          throw new HttpError(400,"Exact Production Request is required");
+        const authorized=await reviewAuthorizedProfiles(env,authorization);
+        const snapshot=await loadAuthoritativeFactoryCorrection({
+          outputId:correctionMatchesRoute[1],
+          productionRequestId,
+          authorizedProfileIds:authorized.map(row=>row.id),
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+          readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+          readMappings:async id=>{
+            const endpoint=new URL("/api/production-requests/"+id+"/outputs",url);
+            const result=await listProductionRequestOutputs(request,env,endpoint,authorization,ctx);
+            if(!result.ok)throw new HttpError(result.status,"Authoritative Factory mappings unavailable");
+            return result.json();
+          },
+          readWatermarkCatalog:()=>reviewListRecords(env,"tblSITCujCsJTNcDe",{
+            limit:200,
+            filterFormula:'AND({Asset_Role}="Watermark",{Asset_Status}="Available")',
+            fields:["Asset Name","Asset_Role","Asset_Status","Rights_Status",
+              "Active","Do_Not_Use","MIME_Type","Google Drive File ID","Content_Profile"],
+          }),
+          field:f,
+        });
+        return respond(request,env,{
+          ok:true,
+          source_output_id:correctionMatchesRoute[1],
+          production_request_id:productionRequestId,
+          batch_enabled:false,
+          render_format:snapshot.source?.render_format||null,
+          matching_outputs:snapshot.matches.map(row=>({
+            id:row.id,platform:row.platform,output_type:row.output_type,
+            review_render_supported:row.review_render_supported===true,
+            review_render_reason:row.review_render_reason||null,
+          })),
+        });
       }
 
       if (isFactoryDeskRoute) {
