@@ -11,9 +11,9 @@ import re
 from rendering_review.video_watermark_qa import verify_video_profile_watermark
 from rendering_review.vibe_cut_validation import validate_vibe_mp4,VibeMediaDenied
 
-RECORD=re.compile(r"rec[A-Za-z0-9]{14}\\Z")
-DRIVE=re.compile(r"[A-Za-z0-9_-]{20,}\\Z")
-SHA=re.compile(r"[a-f0-9]{64}\\Z")
+RECORD=re.compile(r"rec[A-Za-z0-9]{14}\Z")
+DRIVE=re.compile(r"[A-Za-z0-9_-]{20,}\Z")
+SHA=re.compile(r"[a-f0-9]{64}\Z")
 
 def validate_owned_vibe_mp4(video, *, profile_id, owned_logo, aspect_ratio,
                             expected_duration, probe=None):
