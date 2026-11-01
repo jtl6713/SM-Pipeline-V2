@@ -9,6 +9,7 @@ import { handleRenderingReviewFeedbackRequest, reviewFeedbackWriteEnabled } from
 import { handleRenderingReviewEnrollRequest, reviewEnrollmentWriteEnabled } from "./rendering-review-enrollment-http.mjs";
 import { acceptReviewCreativeOnly } from "./rendering-review-approval-http.mjs";
 import { handoffApprovedReviewToFactory } from "./rendering-review-factory-handoff.mjs";
+import { requestApprovedHeldCreativeRedo } from "./rendering-review-held-redo.mjs";
 import { nextApprovedCreativeMaster, projectCreativeMasterGroup, MASTER_FIELD } from "./creative-master-registry.mjs";
 import { propagateApprovedCreativeMaster } from "./creative-master-propagation.mjs";
 import { returnFactoryRevisionToProducer } from "./rendering-review-factory-return.mjs";
@@ -1133,7 +1134,7 @@ export default {
       // Exact Chicago review writes are authorized again by their protected handlers.
       // The old global Phase-2A allowlist must not reject them before inspection.
       const isChicagoReviewPost = request.method === "POST" &&
-        (/^\/api\/rendering-review\/outputs\/rec[A-Za-z0-9]{14}\/(?:producer-conversation|producer-proposal|commit-attempt|messages|approve|factory-handoff)$/.test(url.pathname) ||
+        (/^\/api\/rendering-review\/outputs\/rec[A-Za-z0-9]{14}\/(?:producer-conversation|producer-proposal|commit-attempt|messages|approve|factory-handoff|request-redo)$/.test(url.pathname) ||
          /^\/api\/rendering-review\/factory\/outputs\/rec[A-Za-z0-9]{14}\/request-changes$/.test(url.pathname) ||
          /^\/(?:api\/)?internal\/rendering-review\/(?:claim-render-job|launch-ledger|complete-attempt|qa-audio-rebind|ig-dispatch-claim|factory-handoff)$/.test(url.pathname));
       const allowedMethod =
@@ -1973,6 +1974,31 @@ export default {
         throw new HttpError(403, authorization.authorization_error || "Studio membership required");
       }
 
+      // Approved V2 creative redo is available under the original hold even
+      // when watermark/media QA is incomplete. This does not render or publish.
+      const heldRedoMatch=/^\\/api\\/rendering-review\\/outputs\\/(rec[A-Za-z0-9]{14})\\/request-redo$/.exec(url.pathname);
+      if(heldRedoMatch&&request.method==="POST"){
+        requirePermission(authorization,"outputs_review");
+        if(!(await reviewAuthorizedProfiles(env,authorization)).some(p=>p.id===CHICAGO_PROFILE_ID))
+          throw new HttpError(403,"Chicago review membership required");
+        assertWriteRequest(request,env);
+        if(!/^application\\/json(?:\\s*;|$)/i.test(String(request.headers.get("Content-Type")||"")))
+          throw new HttpError(415,"JSON required");
+        const raw=await request.text();
+        if(raw.length>3800)throw new HttpError(413,"Redo request too large");
+        let body;try{body=JSON.parse(raw)}catch{throw new HttpError(400,"Invalid JSON")}
+        if(!body||typeof body!=="object"||Array.isArray(body)||
+           Object.keys(body).length!==3||
+           Object.keys(body).some(k=>!["note","client_request_id","expected_version"].includes(k)))
+          throw new HttpError(400,"Exact creative redo input required");
+        return respond(request,env,await requestApprovedHeldCreativeRedo({
+          output_id:heldRedoMatch[1],note:body.note,
+          client_request_id:body.client_request_id,expected_version:body.expected_version,
+          actor_id:authorization.user?.record_id,
+          operations:makeReviewFactoryHandoffOperations(env),
+        }));
+      }
+
       // Factory promotion is a separate, authenticated retry for a review
       // that was creatively accepted before the automatic handoff existed.
       const factoryMatch=/^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/factory-handoff$/.exec(url.pathname);
@@ -2224,17 +2250,28 @@ export default {
             request,env,authorization,output_id:acceptMatch[1],
             assertWriteRequest,operations:adapter,
           });
-          // Creative acceptance is already durable. Finish the Factory
-          // handoff automatically; a replay of the same accept request can
-          // resume a partial transfer without requiring another approval.
-          const transferred=await handoffApprovedReviewToFactory({
-            output_id:acceptMatch[1],env,
-            operations:makeReviewFactoryHandoffOperations(env),
-          });
-          return respond(request,env,{...accepted,
-            factory_handoff:transferred,factory_ready:transferred.factory_ready,
-            review_hold_active:false,
-          });
+          // Creative acceptance is already durable. A subsequent Factory
+          // delivery QA error MUST NOT turn it into a failed approval, nor
+          // prevent a held creative redo. Publishing remains separately gated.
+          try{
+            const transferred=await handoffApprovedReviewToFactory({
+              output_id:acceptMatch[1],env,
+              operations:makeReviewFactoryHandoffOperations(env),
+            });
+            return respond(request,env,{...accepted,
+              factory_handoff:transferred,factory_ready:transferred.factory_ready,
+              review_hold_active:false,
+            });
+          }catch(error){
+            console.warn("Approved V2 Factory handoff deferred",acceptMatch[1],
+              String(error?.code||error?.message||"UNKNOWN"));
+            return respond(request,env,{...accepted,
+              factory_ready:false,factory_handoff_pending:true,
+              factory_handoff_code:String(error?.code||"FACTORY_HANDOFF_UNVERIFIED"),
+              review_hold_active:true,
+              publication_changed:false,instagram_upload_created:false,
+            });
+          }
         }
         const enrollmentMatch = /^\/api\/rendering-review\/factory\/outputs\/(rec[A-Za-z0-9]{14})\/request-changes$/.exec(url.pathname);
         if (enrollmentMatch && request.method === "POST") {
