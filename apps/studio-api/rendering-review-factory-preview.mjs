@@ -45,12 +45,12 @@ export function factorySelectedReviewAttempt({session,row,profile,outputId}){
     str(field(row,"Publish_Status"))==="Not Ready";
   const factoryReady=session.state==="approved"&&
     session.current_attempt_id===session.approved_attempt_id&&
-    session.factory_handoff.status==="ready_for_factory_approval"&&
+    session.factory_handoff?.status==="ready_for_factory_approval"&&
     session.review_hold.active===false&&!active&&
     field(row,"Do_Not_Publish")!==true&&
     field(row,"Auto_Publish_Enabled")!==true;
   const backWithProducer=session.state==="discussing"&&
-    session.factory_handoff.status==="returned_for_changes"&&
+    session.factory_handoff?.status==="returned_for_changes"&&
     session.review_hold.active===true&&owned;
   return (waitingForReview||factoryReady||backWithProducer)?attempt:null;
 }
