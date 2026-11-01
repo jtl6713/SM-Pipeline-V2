@@ -154,3 +154,23 @@ export function safeReviewPromotion(record, readiness) {
     && (render === "native photo route" || render === "rendered")
     && !/ready for render|waiting|rendering/.test(render);
 }
+
+/**
+ * Held creative revisions belong in Needs Eyes for preview/send-back only.
+ * They are NOT eligible for Approve: the separate Do_Not_Publish and review
+ * hold checks continue to prohibit all approval and publishing routes.
+ */
+export function factoryReviewVisibility(record, readiness, studioState, creativeAvailable) {
+  const heldVisible = read(record, "Studio_Render_Review_Hold_Active") === true
+    && read(record, "Do_Not_Publish") === true
+    && lower(read(record, "Output_Status")) === "ready for review"
+    && lower(read(record, "Review_Status")) === "review sent"
+    && creativeAvailable === true;
+  return {
+    visible: studioState === "Ready for Review"
+      && (readiness?.readiness === "READY" || heldVisible),
+    incomplete: lower(read(record, "Output_Status")) === "ready for review"
+      && readiness?.readiness !== "READY" && !heldVisible,
+    held_preview_only: heldVisible,
+  };
+}
