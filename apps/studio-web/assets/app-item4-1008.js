@@ -291,7 +291,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.832-asset-upload-progress";
+  const BUILD_ID = "item4-0.6.834-vibe-status-guidance";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -5027,6 +5027,7 @@
   }
 
   function item4CompressionProgressLabel(status = item4Workspace) {
+    if (ezIsVibeCut() && vibeCutPersistedSource(status)) return vibeCutServerPreparationDetail(status);
     const asset = (Array.isArray(status?.assets) ? status.assets : []).find((row) => {
       const state = String(row?.compression_status || "").toLowerCase();
       return ["pending", "queued", "compressing", "downloading"].includes(state) || row?.compression_needed === true;
@@ -6622,6 +6623,35 @@ function timedScriptAssetLabel(asset, index) {
     return `${(bytes / (1024 * 1024)).toFixed(bytes >= 100 * 1024 * 1024 ? 0 : 1)} MB`;
   }
 
+
+  // Status is based on the saved server asset, not an earlier transfer toast.
+  function vibeCutServerUploadComplete(source) {
+    if (!source) return false;
+    const transfer = String(source.upload_status || "").trim().toLowerCase();
+    if (["multipart_pending", "uploading", "pending", "failed"].includes(transfer)) return false;
+    return ["complete", "uploaded", "ready"].includes(transfer) || Boolean(source.uploaded_at);
+  }
+
+  function vibeCutServerPreparationDetail(status = item4Workspace) {
+    const source = vibeCutPersistedSource(status);
+    const stage = String(source?.compression_status || "").trim().toLowerCase();
+    const progress = Number(source?.compression_progress);
+    const pct = Number.isFinite(progress) && progress > 0 && progress <= 100
+      ? ` (${Math.round(progress)}%)` : "";
+    const work = stage === "queued" || stage === "pending"
+      ? "Studio has queued the video for preparation"
+      : stage === "downloading"
+        ? "Studio is retrieving the uploaded video for preparation"
+        : stage === "compressing"
+          ? `Studio is creating a production-ready video copy${pct}`
+          : "Studio is preparing and verifying the video for Production";
+    const next = "Next: finish the working copy and preview, verify the saved video, then unlock Save Video & Continue to Production.";
+    const navigation = "Find this item later in Production → Drafts.";
+    return vibeCutServerUploadComplete(source)
+      ? `Upload confirmed (1 of 1 files). ${work}. ${next} You can leave this screen; processing continues on the server. ${navigation}`
+      : `${work}. Keep this tab open until the upload is confirmed complete. ${next}`;
+  }
+
   function vibeUploadProgressMarkup(status = item4Workspace) {
     if (!ezIsVibeCut()) return null;
     const ready = vibeCutReadySource(status);
@@ -6631,7 +6661,7 @@ function timedScriptAssetLabel(asset, index) {
       return {
         heal: "ready",
         title: `${fileName} is ready.`,
-        body: "The server confirmed the persisted video is fully processed. Continue is now available.",
+        body: "Upload verified, preparation complete, and the video is ready for Production. Select Save Video & Continue to Production to choose outputs. You can also return later via Production → Drafts.",
         count: "1 of 1 ready.",
       };
     }
@@ -6649,7 +6679,7 @@ function timedScriptAssetLabel(asset, index) {
       return {
         heal: "error",
         title: "This upload may be stalled.",
-        body: vibeUploadUi.detail || "No recent transfer progress was confirmed. Keep this tab open while Studio checks the transfer.",
+        body: vibeCutServerUploadComplete(source) ? vibeCutServerPreparationDetail(status) : (vibeUploadUi.detail || "No recent transfer progress was confirmed. Keep this tab open while Studio checks the transfer."),
         count: source?.upload_status === "complete" || source?.uploaded_at ? "1 uploaded · 0 ready." : "1 selected · 0 ready.",
       };
     }
@@ -6689,11 +6719,12 @@ function timedScriptAssetLabel(asset, index) {
       };
     }
     if (phase === "processing" || source) {
+      const uploadConfirmed = vibeCutServerUploadComplete(source);
       return {
         heal: "uploading",
-        title: `Processing ${fileName}.`,
-        body: vibeUploadUi.detail || item4CompressionProgressLabel(status),
-        count: "1 uploaded · 0 ready.",
+        title: uploadConfirmed ? `Upload complete — preparing ${fileName}.` : `Processing ${fileName}.`,
+        body: uploadConfirmed ? vibeCutServerPreparationDetail(status) : (vibeUploadUi.detail || item4CompressionProgressLabel(status)),
+        count: uploadConfirmed ? "1 of 1 uploaded · 0 ready." : "1 selected · 0 ready.",
       };
     }
     return null;
@@ -6816,13 +6847,18 @@ function timedScriptAssetLabel(asset, index) {
     if (message) message.textContent = !editable
       ? "This request is already in production. Start a new Vibe Cut if the original video failed."
       : source
-      ? "Original video verified and saved. Continue to choose the Vibe Cut outputs."
+      ? "Video uploaded, verified and ready. Select Save Vibe Cut & Continue to choose outputs."
       : staged
-      ? "Video upload received, but processing is not Ready. Wait for completion or replace the source video."
+      ? vibeCutServerPreparationDetail(status)
       : "No usable source video is attached. The photo timeline cannot be saved as a Vibe Cut. Upload your MOV/MP4 again.";
+    // A past compression toast must never contradict the server-authoritative banner.
+    const ezNotice = $("ezMessage");
+    if (staged && ezNotice && /^(Studio is compressing|Compressing |Video received\. Processing|Upload complete\. Studio is processing)/i.test(String(ezNotice.textContent || "").trim())) {
+      setEzMessage("", "");
+    }
     if (save) {
       save.disabled = !editable || !source || item4Uploading || ezStarting;
-      save.textContent = source ? "Save Vibe Cut & Continue" : "Waiting for source video";
+      save.textContent = source ? "Save Vibe Cut & Continue" : "Preparing uploaded video…";
     }
     if (retry) {
       retry.hidden = !editable || Boolean(source);
@@ -11636,7 +11672,8 @@ function timedScriptAssetLabel(asset, index) {
       }
       if (item4WorkspaceNeedsCompression(item4Workspace)) {
         setRequestMessage(item4CompressionProgressLabel(item4Workspace), "success");
-        setEzMessage(item4CompressionProgressLabel(item4Workspace), "success");
+        if (ezIsVibeCut()) setEzMessage("", "");
+        else setEzMessage(item4CompressionProgressLabel(item4Workspace), "success");
         if (ezIsAzFinishedPath()) {
           setAzFinishedProgress("compressing");
           setAzFinishedMessage(item4CompressionProgressLabel(item4Workspace), "success");
@@ -11659,6 +11696,7 @@ function timedScriptAssetLabel(asset, index) {
       if (state === "Ready") {
         stopItem4MasterPolling();
         setRequestMessage(item4MasterReadyMessage(item4Workspace || {}), "success");
+        if (ezIsVibeCut()) setEzMessage("Source video is ready. Select Save Video & Continue to Production, or find it later under Production → Drafts.", "success");
         if (ezIsAzFinishedPath()) {
           startAzFinishedProgressPolling();
           return;
