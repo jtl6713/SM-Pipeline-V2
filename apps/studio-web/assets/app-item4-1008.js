@@ -6651,7 +6651,7 @@ function timedScriptAssetLabel(asset, index) {
             { state: "done", label: "Source ready for automatic Vibe Cut production" },
             { state: "pending", label: "Rendering and quality checks before your approval" },
           ],
-          leave: "Yes. Studio continues production in the background after you leave.";
+          leave: "Yes. Studio continues production in the background after you leave.",
           returnTo,
         },
       };
