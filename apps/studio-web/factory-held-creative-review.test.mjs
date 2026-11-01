@@ -38,3 +38,12 @@ test("held V2 QA action occupies its own full-width row without text overlap",()
   assert.match(layout,/\.factory-line-actions:has\(> \.factory-held-creative-action\) > \[data-factory-send-back\]\{[^}]*grid-row:2;/s);
   assert.match(layout,/\.factory-line-actions:has\(> \.factory-held-creative-action\) > \[data-factory-delete\]\{[^}]*grid-row:2;/s);
 });
+
+test("successful held V2 acceptance acknowledges POST without waiting for a full Factory desk reload",()=>{
+  assert.match(script,/payload\.action === "accept_held_creative"/);
+  assert.match(script,/setStatus\(savedMessage\);\s*loadFactoryDesk\(true\)\.catch\(\(\) => \{\}\);\s*return desk;/s);
+  assert.match(script,/button\.textContent="Verifying saved V2…"/);
+  assert.match(script,/button\.textContent="Saving creative acceptance…"/);
+  assert.match(script,/state\.heldCreativeAccepted\.add\(card\.id\)/);
+  assert.match(script,/setStatus\("V2 accepted for Factory creative review\. Watermark QA and publishing remain held\."\)/);
+});
