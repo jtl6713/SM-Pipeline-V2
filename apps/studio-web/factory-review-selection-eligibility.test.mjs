@@ -83,6 +83,19 @@ test("Review hold, failed render and not-ready Airtable state show disabled sele
     assert.match(html, /data-factory-send-back="recMichigan9593"/);
   }
 });
+test("incomplete review package never offers a live Approve action", () => {
+  const { renderCard } = setup();
+  const html = renderCard({
+    ...chicagoReel, review_package_ready: false,
+    review_package_readiness: "BLOCKED",
+    review_package_missing: ["Studio_Preview_URL"],
+  }, { lane: "needs_eyes" });
+  assert.match(selectionTag(html), /disabled/);
+  assert.match(html, /Review package incomplete: Studio_Preview_URL/);
+  assert.match(html, /data-factory-approve="recMichigan9593" disabled/);
+  assert.match(html, /Review blocked/);
+});
+
 test("Server policy exclusion disables only batch selection, not legitimate individual approval", () => {
   const { state, renderCard } = setup();
   const html = renderCard({...chicagoReel, platform:"TikTok", studio_output_type:"Video Draft"},{lane:"needs_eyes"});
