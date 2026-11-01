@@ -2538,7 +2538,7 @@ export default {
       // This endpoint cannot create holds, generate media, or publish. The
       // native gallery Runner/Factory integration has not passed its release
       // gate, so no client may treat this preview as an enabled POST batch.
-      const correctionMatchesRoute = /^\\/api\\/factory\\/outputs\\/(rec[A-Za-z0-9]{14})\\/correction-matches$/.exec(url.pathname);
+      const correctionMatchesRoute = /^\/api\/factory\/outputs\/(rec[A-Za-z0-9]{14})\/correction-matches$/.exec(url.pathname);
       if (correctionMatchesRoute) {
         if (request.method !== "GET") throw new HttpError(405,"Method not allowed");
         requirePermission(authorization,"outputs_review");
