@@ -24,7 +24,8 @@ test("UI uses read-only exact server endpoints, never selects siblings or enable
  const body=source.slice(begin,end);
  assert.match(body,/\/correction-matches\?production_request_id=/);
  assert.match(body,/\/gallery-inventory/);
- assert.match(body,/batch_enabled===true/);
+ assert.match(body,/batch_enabled!==false/);
+ assert.match(body,/Promise\.all\(\[readMatches\(\),readGallery\(\)\]\)/);
  assert.match(body,/inventory\?\.can_generate!==false/);
  assert.match(body,/inventory\?\.publication_authorized!==false/);
  assert.doesNotMatch(body,/method:\s*["']POST["']/);
