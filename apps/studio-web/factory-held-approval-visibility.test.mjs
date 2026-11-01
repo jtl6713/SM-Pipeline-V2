@@ -9,7 +9,9 @@ const css = readFileSync(new URL("./assets/factory-layout-0680.css", import.meta
 function extractFunction(name) {
   const start = source.indexOf("  function " + name + "(");
   assert.ok(start >= 0, name + " exists");
-  const open = source.indexOf("{", start);
+  const declarationEnd = source.indexOf(") {", start);
+  assert.ok(declarationEnd > start, name + " declaration ends");
+  const open = declarationEnd + 2;
   let depth = 0;
   for (let i = open; i < source.length; i++) {
     if (source[i] === "{") depth++;
