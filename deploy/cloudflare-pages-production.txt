@@ -644,3 +644,4 @@ Deploy Studio UI 0.6.825: approved held V2 can request another revision independ
 2026-11-01 UI 0.6.831: Vibe setup errors now stop the preparation spinner, show the actual failure, and unlock safe retry without deleting saved media.
 
 2026-11-01 UI 0.6.832: Asset Manager shows per-file transfer bytes/percent, current asset, confirmed-file counts, server confirmation and failed queue summaries; uses one-request XHR without publishing or storage changes.
+Deploy UI 0.6.834-vibe-status-guidance: Vibe Cut confirmed upload, server preparation, safe leave/return, and consistent Ready/Continue state.
