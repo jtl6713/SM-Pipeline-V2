@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { readUiReleaseContract } from "./ui-release-contract.mjs";
 
 const app = fs.readFileSync(new URL("./assets/app-item4-1008.js", import.meta.url), "utf8");
 const html = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
@@ -34,7 +35,8 @@ test("ready-source gating remains server authoritative; Production view is optio
 });
 
 test("new release version is consistently reflected in HTML and app", () => {
-  assert.match(html, /UI build 0\.6\.836/);
-  assert.match(html, /app-item4-1008\.js\?v=0\.6\.836-vibe-auto-review-final/);
-  assert.match(app, /BUILD_ID = "item4-0\.6\.836-vibe-auto-review-final"/);
+  const contract = readUiReleaseContract(html, app);
+  assert.ok(html.includes(`UI build ${contract.version}`));
+  assert.ok(html.includes(contract.expectedJsUrl));
+  assert.ok(app.includes(`BUILD_ID = "${contract.expectedBuildId}"`));
 });
