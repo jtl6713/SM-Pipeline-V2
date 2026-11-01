@@ -1,0 +1,142 @@
+name: Enable I1 Durable Runner (Worker remains off)
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/i1-durable-runner-enable.txt"
+permissions:
+  contents: read
+concurrency:
+  group: i1-durable-runner-activation
+  cancel-in-progress: false
+jobs:
+  enable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      RUN_ID: ${{ github.run_id }}
+      REQUIRED_VERSION: "2026-11-01-i1-durable-queue-v1"
+    steps:
+      - name: Verify disabled runner source is in production
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          curl -fsS --retry 3 --max-time 20 https://pipeline.chicagoshining.com/health -o /tmp/preflight.json
+          jq -e --arg version "$REQUIRED_VERSION" '.ok==true and .version==$version' /tmp/preflight.json >/dev/null
+          echo "i1_runner_source_version=VERIFIED"
+
+      - name: Configure backed-up service env on persistent Windows ProgramData volume
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' > /tmp/i1-enable-runner-env.json
+          import json,os
+          run=os.environ["RUN_ID"]
+          ps=r'''$ErrorActionPreference='Stop'
+          $root=(Get-Location).Path
+          $envFile=Join-Path $root 'Services\pipeline-runner\service\.env'
+          if (-not (Test-Path $envFile -PathType Leaf)) { throw 'runner_env_file_missing' }
+          $directory=Join-Path $env:ProgramData 'ChicagoShining\pipeline-runner'
+          if (-not (Test-Path $directory -PathType Container)) { throw 'persistent_queue_directory_missing' }
+          $db=Join-Path $directory 'i1-jobs.sqlite3'
+          $backup=$envFile+'.i1-'+RUN_TOKEN+'.backup'
+          if (Test-Path $backup) { throw 'backup_conflict' }
+          Copy-Item -LiteralPath $envFile -Destination $backup -ErrorAction Stop
+          $lines=[IO.File]::ReadAllLines($envFile)
+          $hasAuth=@($lines|Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*=\s*\S'}).Count -gt 0
+          $hasPat=@($lines|Where-Object {$_ -match '^\s*AIRTABLE_PAT\s*=\s*\S'}).Count -gt 0
+          if (-not $hasAuth -or -not $hasPat) { throw 'runner_authority_not_configured' }
+          $remaining=@($lines|Where-Object {$_ -notmatch '^\s*(I1_DURABLE_ENABLED|I1_JOB_DB_PATH)\s*='})
+          $updated=@($remaining)+@('I1_DURABLE_ENABLED=1',('I1_JOB_DB_PATH='+$db))
+          $tmp=$envFile+'.i1-tmp-'+RUN_TOKEN
+          try {
+            [IO.File]::WriteAllLines($tmp,[string[]]$updated,(New-Object System.Text.UTF8Encoding($false)))
+            Move-Item -LiteralPath $tmp -Destination $envFile -Force
+          } finally {
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+          }
+          Write-Output 'i1_runner_environment_configured=true'
+          Write-Output 'i1_runner_storage_configured=true'
+          '''
+          ps=ps.replace('RUN_TOKEN',run)
+          print(json.dumps({"command":ps,"confirm":True}))
+          PY
+          code=$(curl -sS --max-time 20 -o /tmp/i1-enabled-setup.json -w '%{http_code}' -X POST \
+            https://ops.chicagoshining.com/api/shell -H "Authorization: Bearer $OPS_TOKEN" \
+            -H 'Content-Type: application/json' --data-binary @/tmp/i1-enable-runner-env.json)
+          if [[ "$code" != "202" && "$code" != "200" ]]; then echo "i1_environment_setup_rejected=$code"; exit 1; fi
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/i1-enabled-setup.json)
+          test -n "$job"
+          for n in {1..30}; do
+            curl -sS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/i1-setup-poll.json
+            status=$(jq -r '.job.status // empty' /tmp/i1-setup-poll.json)
+            if [[ "$status" == "ok" ]]; then
+              jq -e '.job.log | contains("i1_runner_storage_configured=true")' /tmp/i1-setup-poll.json >/dev/null
+              echo "i1_runner_config=PASS"
+              exit 0
+            fi
+            if [[ "$status" == "failed" ]]; then echo "i1_runner_config=FAILED"; exit 1; fi
+            sleep 3
+          done
+          echo "i1_runner_config=TIMEOUT"; exit 1
+
+      - name: Restart only pipeline-runner using existing allowlisted deploy action
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS --max-time 30 -o /tmp/i1-restart.json -w '%{http_code}' -X POST \
+            https://ops.chicagoshining.com/api/run \
+            -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data '{"action":"deploy","service":"pipeline-runner","confirm":true}')
+          if [[ "$code" != "202" && "$code" != "409" ]]; then echo "i1_restart_rejected=$code"; exit 1; fi
+          job=$(jq -r '.job.id // .jobId // .jobId // empty' /tmp/i1-restart.json)
+          test -n "$job"
+          for n in {1..95}; do
+            curl -sS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/i1-restart-status.json
+            status=$(jq -r '.job.status // empty' /tmp/i1-restart-status.json)
+            if [[ "$status" == "ok" ]]; then echo "i1_runner_restart=PASS"; exit 0; fi
+            if [[ "$status" == "failed" ]]; then echo "i1_runner_restart=FAILED"; exit 1; fi
+            sleep 5
+          done
+          echo "i1_runner_restart=TIMEOUT"; exit 1
+
+      - name: Verify runner has actually opened durable database
+        shell: bash
+        run: |
+          set -euo pipefail
+          for n in {1..18}; do
+            code=$(curl -sS --max-time 20 -o /tmp/i1-enabled-health.json -w '%{http_code}' https://pipeline.chicagoshining.com/health || true)
+            if [[ "$code" == "200" ]] && jq -e --arg v "$REQUIRED_VERSION" \
+              '.ok==true and .version==$v and .i1_durable_jobs==true' /tmp/i1-enabled-health.json >/dev/null 2>&1; then
+              echo "i1_runner_health_enabled=PASS"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "i1_runner_health_enabled=FAILED"; exit 1
+
+      - name: Fail-safe restore runner environment when activation unsuccessful
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          python - <<'PY' > /tmp/i1-restore.json
+          import json,os
+          run=os.environ["RUN_ID"]
+          ps=r'''$root=(Get-Location).Path
+          $envFile=Join-Path $root 'Services\pipeline-runner\service\.env'
+          $backup=$envFile+'.i1-'+RUN_TOKEN+'.backup'
+          if(Test-Path $backup) {
+            Copy-Item -LiteralPath $backup -Destination $envFile -Force
+            Write-Output 'i1_runner_environment_rollback=RESTORED'
+          }else{
+            Write-Output 'i1_runner_environment_rollback=BACKUP_UNAVAILABLE'
+          }'''
+          print(json.dumps({"command":ps.replace('RUN_TOKEN',run),"confirm":True}))
+          PY
+          curl -sS --max-time 20 -X POST https://ops.chicagoshining.com/api/shell \
+            -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/i1-restore.json -o /tmp/rollback-submit.json
+          echo "i1_activation_failed_worker_flag_remains_off=true"
