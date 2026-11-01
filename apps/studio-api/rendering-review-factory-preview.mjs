@@ -19,8 +19,9 @@ export function factorySelectedReviewAttempt({session,row,profile,outputId}){
      dispatched(row))return null;
   const attempt=session.attempts?.find(a=>a.id===session.current_attempt_id);
   if(!attempt||Number(attempt.number)<2||attempt.status!=="ready_for_review"||
-     !session.factory_handoff||session.factory_handoff.attempt_id!==attempt.id||
-     session.factory_handoff.artifact_id!==attempt.artifact_id||
+     (session.factory_handoff&&
+       (session.factory_handoff.attempt_id!==attempt.id||
+        session.factory_handoff.artifact_id!==attempt.artifact_id))||
      str(field(row,"Final_File_ID"))!==attempt.artifact_id||
      str(field(row,"Final_File_URL"))!=="https://drive.google.com/file/d/"+attempt.artifact_id+"/view")
     return null;
@@ -29,6 +30,19 @@ export function factorySelectedReviewAttempt({session,row,profile,outputId}){
     field(row,"Do_Not_Publish")===true &&
     field(row,"Studio_Render_Review_Hold_ID")===session.review_hold?.id &&
     field(row,"Studio_Render_Review_Hold_Owner")===session.id;
+  // Private preview is essential *before* creative acceptance. A completed,
+  // actively held V2 selected as the exact final Drive file remains viewable
+  // in Factory even without a Factory handoff receipt. This grants no approval,
+  // publish, scheduling or hold-release authority.
+  const waitingForReview=session.state==="ready_for_review"&&
+    !session.factory_handoff&&
+    session.approved_attempt_id==null&&
+    !session.active_job&&
+    session.review_hold?.active===true&&owned&&
+    str(field(row,"Output_Status"))==="Ready for Review"&&
+    str(field(row,"Review_Status"))==="Review Sent"&&
+    str(field(row,"Render_Status"))==="Rendered"&&
+    str(field(row,"Publish_Status"))==="Not Ready";
   const factoryReady=session.state==="approved"&&
     session.current_attempt_id===session.approved_attempt_id&&
     session.factory_handoff.status==="ready_for_factory_approval"&&
@@ -38,7 +52,7 @@ export function factorySelectedReviewAttempt({session,row,profile,outputId}){
   const backWithProducer=session.state==="discussing"&&
     session.factory_handoff.status==="returned_for_changes"&&
     session.review_hold.active===true&&owned;
-  return (factoryReady||backWithProducer)?attempt:null;
+  return (waitingForReview||factoryReady||backWithProducer)?attempt:null;
 }
 export async function serveFactorySelectedReviewVideo({request,env,outputId,authorization,
   readSession,readRow,readProfile,readVideo,copyHeaders}){
