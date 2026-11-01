@@ -1399,7 +1399,7 @@
       setStatus("Review notes window is unavailable. Refresh Studio before sending back.", true);
       return;
     }
-    state.pendingFactoryFeedback = { payload, focusedElement: document.activeElement };
+    state.pendingFactoryFeedback = { payload, title: title || "Production change request", focusedElement: document.activeElement };
     const heading = $("factoryFeedbackTarget");
     const detail = $("factoryFeedbackScope");
     const error = $("factoryFeedbackError");
@@ -1460,10 +1460,18 @@
     const submit = $("factoryFeedbackSubmit");
     if (submit) { submit.disabled = true; submit.textContent = "Sending back…"; }
     if (error) { error.hidden = true; error.textContent = ""; }
+    const tracked = pending.payload?.action === "request_changes_content";
+    const trackingRequestId = String(pending.payload?.production_request_id || "").trim();
+    if (tracked) window.StudioFactoryProducerProgress?.begin({
+      requestId: trackingRequestId, title: pending.title,
+    });
     try {
       closeFactoryPreview();
       const desk = await mutateDesk({ ...pending.payload, note: notes });
       const requestId = String(desk?.result?.production_request_id || pending.payload.production_request_id || "").trim();
+      if (tracked) window.StudioFactoryProducerProgress?.accept({
+        requestId, title: pending.title, result: desk?.result,
+      });
       closeFactoryFeedback();
       if (pending.payload?.action === "return_to_review" || pending.payload?.action === "start_render_review") {
         if (desk?.result?.review_notes_saved!==true || desk?.result?.review_hold_active!==true)
@@ -1493,6 +1501,9 @@
         setStatus("Review notes saved. Open the returned item in Production for changes.");
       }
     } catch (err) {
+      if (tracked) window.StudioFactoryProducerProgress?.uncertain({
+        requestId: trackingRequestId, title: pending.title, message: err?.message || String(err),
+      });
       if (submit) { submit.disabled = false; submit.textContent = ["return_to_review","start_render_review"].includes(pending.payload?.action) ? "Send to Rendering Review" : pending.payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
       if (error) { error.hidden = false; error.textContent = String(err?.message || err); }
       setStatus("Could not send back: " + (err?.message || err), true);
@@ -1981,6 +1992,9 @@
   }
 
   async function loadFactoryDesk(force = false) {
+    // Producer progress lives in its own durable panel, not the disposable
+    // Factory Desk status line. Refresh both independently.
+    window.StudioFactoryProducerProgress?.refresh(true).catch(() => {});
     // One authoritative Desk snapshot at a time, including forced refreshes.
     if (state.loading) return state.desk;
     state.loading = true;
