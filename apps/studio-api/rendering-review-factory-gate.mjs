@@ -39,8 +39,8 @@ export function classifyApprovedFactoryHandoff({session,held,attemptRecords}){
   catch{return blocked('QA_EVIDENCE_MISSING',
     'The selected V2 has no readable independent media validation receipt.');}
   if(evidence.watermark_verified!==true)
-    return blocked('WATERMARK_QA_REQUIRED',
-      'Watermark verification has not passed for this V2. Independent visual QA must verify the exact file before Factory transfer; creative approval remains saved.');
+    return {status:'blocked',code:'WATERMARK_QA_REQUIRED',redo_allowed:true,
+      message:'Watermark verification is pending for publishing readiness only. Your creative approval is saved, and you may request another video revision without this check. Factory release remains held.'};
   if(evidence.audio_verified!==true)
     return blocked('AUDIO_QA_REQUIRED',
       'Audio verification has not passed for this V2. Factory transfer remains on hold.');
