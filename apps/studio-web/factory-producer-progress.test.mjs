@@ -90,9 +90,9 @@ test("Factory progress state is anchored outside the disposable desk and uses sa
   assert.match(html,/id="factoryProducerProgress"/);
   assert.match(html,/id="factoryProducerProgressList"[^>]*aria-live="polite"/);
   assert.match(html,/factory-producer-progress\.js/);
-  assert.match(factory,/StudioFactoryProducerProgress\\?\.begin/);
-  assert.match(factory,/StudioFactoryProducerProgress\\?\.accept/);
-  assert.match(factory,/StudioFactoryProducerProgress\\?\.uncertain/);
+  assert.match(factory,/StudioFactoryProducerProgress\?\.begin/);
+  assert.match(factory,/StudioFactoryProducerProgress\?\.accept/);
+  assert.match(factory,/StudioFactoryProducerProgress\?\.uncertain/);
   const app=harness();
   app.ui.begin({requestId:ID,title:'<img src=x onerror=alert(1)>'});
   assert.match(app.list.innerHTML,/&lt;img/);
@@ -108,5 +108,5 @@ test("Producer progress GET uses tenant-checked request and only a bounded proje
   assert.match(section,/factory-producer-revision id=/);
   assert.match(section,/quality_passed/);
   assert.match(section,/quality_errors/);
-  assert.doesNotMatch(section,/production_notes:\\s*notes/);
+  assert.doesNotMatch(section,/production_notes:\s*notes/);
 });
