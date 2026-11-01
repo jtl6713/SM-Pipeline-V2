@@ -9,7 +9,7 @@
   if (!root || !nav) return;
   const chicago = 'recT2rbKX3MF7cVFU';
   const NEEDS_ASSET_THUMB = '/assets/needs-asset.svg';
-  const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map(),pollTimer:null,activeEntry:null,progressCheckNode:null,lastVerifiedSummary:null,lastReplyNotice:null,lastReplyNoticeNode:null,viewingVersion:null,approvalButton:null,approvalVersion:null,approvalLocks:new Set(),approvalKeys:new Map()};
+  const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map(),pollTimer:null,activeEntry:null,nextRevisionDrafts:new Map(),nextRevisionKeys:new Map(),progressCheckNode:null,lastVerifiedSummary:null,lastReplyNotice:null,lastReplyNoticeNode:null,viewingVersion:null,approvalButton:null,approvalVersion:null,approvalLocks:new Set(),approvalKeys:new Map()};
   const list = $('rrQueueList'), detail = $('rrDetail'), status = $('rrStatus');
   const topProgress = $('rrProgressSummary');
 
@@ -663,6 +663,11 @@
         if(toShow.length){
           const section=elem('section',null,'rr-proposal-storyboard');
           section.append(elem('h3','Take a look at these photos'));
+          if(rendering)section.append(elem('p',
+            'These photos are previews of the plan already queued for V'+
+            (Number(session.latest_attempt_number)||2)+
+            '. New image suggestions can be saved below for a later version, but cannot change this in-flight job.',
+            'rr-review-progress'));
           for(const frame of toShow){
             const item=elem('div',null,'rr-storyboard-row');
             const time=Number(frame.start_seconds).toFixed(2)+'–'+Number(frame.end_seconds).toFixed(2)+'s';
@@ -702,6 +707,75 @@
           }
           detail.append(section);
         }
+      }
+      // Feedback during a held render is saved as a user note for the NEXT
+      // creative revision. It cannot edit, cancel, or implicitly retry the
+      // immutable job that has already been authorized.
+      if(rendering&&saved.flags?.producer_conversation_enabled===true&&
+         session?.review_hold?.active===true&&session?.active_job?.id){
+        const next=elem('section',null,'rr-next-revision-comments');
+        next.setAttribute('aria-label','Comments for next revision');
+        next.append(elem('h3','Suggest photo changes for the next version'));
+        next.append(elem('p','V'+(Number(session.latest_attempt_number)||2)+
+          ' is already queued or processing. Describe different photos, scene numbers or other changes here. '+
+          'Your comments will be saved to this review for the next Producer conversation; they will NOT alter the current render or start another one.',
+          'rr-muted'));
+        const draft=elem('textarea');
+        draft.rows=4;draft.maxLength=3000;
+        draft.placeholder='For example: Replace scene 3 with a close-up of the planet display, and use the dome exterior for scene 5.';
+        draft.setAttribute('aria-label','Photo and scene suggestions for the next revision');
+        draft.value=state.nextRevisionDrafts.get(entry.output_id)||'';
+        draft.addEventListener('input',()=>state.nextRevisionDrafts.set(entry.output_id,draft.value));
+        next.append(draft);
+        const noteStatus=elem('p','','rr-feedback-status');
+        noteStatus.hidden=true;noteStatus.setAttribute('role','status');
+        noteStatus.setAttribute('aria-live','polite');
+        const submit=elem('button','Save feedback for next revision','secondary-button');
+        submit.type='button';
+        submit.addEventListener('click',async()=>{
+          if(state.actionBusy)return;
+          const content=String(draft.value||'').trim();
+          if(!content){
+            noteStatus.hidden=false;noteStatus.dataset.state='error';
+            noteStatus.textContent='Enter your photo or scene suggestions before saving.';
+            return;
+          }
+          const identity=entry.output_id+':'+content;
+          if(!state.nextRevisionKeys.has(identity))state.nextRevisionKeys.set(identity,safeRequestId());
+          state.actionBusy=true;submit.disabled=true;
+          submit.textContent='Saving review comments…';
+          noteStatus.hidden=false;noteStatus.dataset.state='working';
+          noteStatus.textContent='Saving your suggestions for a future revision; the current render remains unchanged.';
+          try{
+            const receipt=await post('/api/rendering-review/outputs/'+
+              encodeURIComponent(entry.output_id)+'/next-revision-feedback',{
+              content,expected_version:session.version,
+              client_request_id:state.nextRevisionKeys.get(identity),
+            });
+            if(receipt.ok!==true||receipt.review_hold_active!==true||
+               !Number.isSafeInteger(receipt.session_version)||receipt.message_count<1)
+              throw new Error('Saved feedback could not be independently confirmed.');
+            state.nextRevisionDrafts.delete(entry.output_id);
+            state.nextRevisionKeys.delete(identity);
+            state.lastReplyNotice={outputId:entry.output_id,message:
+              'Your photo suggestions were saved for the next revision. V'+
+              (Number(session.latest_attempt_number)||2)+
+              ' remains unchanged; review its result before requesting another version.'};
+            say('Future revision feedback saved; current render unchanged.');
+            await open(entry);
+          }catch(error){
+            state.nextRevisionDrafts.set(entry.output_id,content);
+            noteStatus.dataset.state='error';
+            noteStatus.textContent='Could not confirm saved comments: '+
+              (error?.message||'Status unavailable')+
+              '. Your text remains available; check status before retrying.';
+            say('Comments have not been confirmed saved.',true);
+          }finally{
+            state.actionBusy=false;submit.disabled=false;
+            submit.textContent='Save feedback for next revision';
+          }
+        });
+        next.append(submit,noteStatus);detail.append(next);
       }
       if(attempts.length>1){
         const heading=elem('h3','Video versions');detail.append(heading);
