@@ -3659,7 +3659,7 @@ export async function getProductionRequest(request, env, url, authorization, ctx
   // Production Request document. Airtable remains the only progress authority.
   if (String(url.searchParams.get("fields") || "").trim().toLowerCase() === "producer-progress") {
     const notes = String(f(record, "Production_Notes") || "");
-    const marker = [...notes.matchAll(/\\[factory-producer-revision id=(fpr-[a-f0-9]+) state=(pending|completed|needs_attention)\\]/g)].at(-1);
+    const marker = [...notes.matchAll(/\[factory-producer-revision id=(fpr-[a-f0-9]+) state=(pending|completed|needs_attention)\]/g)].at(-1);
     const job = parseStudioProductionJob(record);
     const safeJob = job && /^fpr-[a-f0-9]+$/.test(String(job.job_id || ""))
       ? {
