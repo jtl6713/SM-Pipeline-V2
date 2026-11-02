@@ -21,8 +21,8 @@ from rendering_review.one_job import JOBS
 from rendering_review.recovery import require_unlaunched_authority
 
 _LOG = logging.getLogger("pipeline-runner.rendering-review-dispatch")
-_RECORD = re.compile(r"rec[A-Za-z0-9]{14}\\Z")
-_JOB = re.compile(r"rrjob_[A-Za-z0-9_-]{12,110}\\Z")
+_RECORD = re.compile(r"rec[A-Za-z0-9]{14}\Z")
+_JOB = re.compile(r"rrjob_[A-Za-z0-9_-]{12,110}\Z")
 _MIN_AGE = 120
 _SCAN_SECONDS = 30
 _MAX_SCAN = 10
