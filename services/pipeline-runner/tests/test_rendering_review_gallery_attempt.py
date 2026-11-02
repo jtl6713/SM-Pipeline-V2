@@ -10,8 +10,9 @@ from rendering_review.gallery_attempt import (
 
 OID = "rec00000000000001"
 PID = "rec00000000000002"
+CID = "rec00000000000003"
 JOB = {
-    "output_id": OID, "profile_id": PID,
+    "output_id": OID, "profile_id": PID, "content_item_id": CID,
     "attempt_id": "rrattempt_01234567890",
     "job_id": "rrjob_01234567890",
     "session_id": "rrsession_01234567890",
@@ -32,13 +33,13 @@ def original():
             "canonical_media_authority": "google_drive", "authority": "server",
             "verified": True, "google_drive_verified": True,
             "watermark_verified": True, "rights_verified": True,
-            "output_id": OID, "profile_id": PID,
+            "output_id": OID, "profile_id": PID, "content_item_id": CID,
         })
     return {
         "schema": "studio.render-review.gallery.1",
         "source_kind": "original", "media_kind": "image-set",
         "authority": "server", "verified": True,
-        "output_id": OID, "profile_id": PID, "aspect_ratio": "4:5",
+        "output_id": OID, "profile_id": PID, "content_item_id": CID, "aspect_ratio": "4:5",
         "manifest_sha256": "b" * 64, "artifacts": slides,
     }
 
