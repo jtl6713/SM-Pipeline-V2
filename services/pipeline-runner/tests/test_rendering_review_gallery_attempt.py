@@ -117,7 +117,7 @@ class Operations:
         assert output_id == OID and slot_id == "rec00000000000002"
         assert file_id.startswith("file-new-owned")
         assert "daytime" in prompt and len(sha256) == 64
-        return True
+        return {"verified": True, "media_asset_record_id": "rec00000000000008"}
 
     def commit_manifest(self, job, manifest):
         assert job["attempt_id"] == manifest["attempt_id"]
@@ -154,6 +154,8 @@ class TestIsolatedGallery(unittest.TestCase):
         self.assertNotEqual(target["artifacts"][1]["drive_file_id"],
                             saved["artifacts"][1]["drive_file_id"])
         self.assertTrue(target["artifacts"][1]["watermark_verified"])
+        self.assertEqual(target["artifacts"][1]["revision_media_asset_id"],
+                         "rec00000000000008")
         self.assertFalse(target["publish_approved"])
         self.assertFalse(target["factory_approved"])
 
@@ -230,6 +232,21 @@ class TestIsolatedGallery(unittest.TestCase):
             run(ops=ops)
         self.assertIsNone(ops.committed)
         self.assertEqual(ops.uploaded, 1)
+
+    def test_boolean_rights_receipt_is_insufficient_without_new_catalog_identity(self):
+        ops=Operations()
+        ops.verify_generated_rights=lambda *args: True
+        with self.assertRaisesRegex(GalleryRevisionDenied, "rights_unverified"):
+            run(ops=ops)
+        self.assertIsNone(ops.committed)
+
+    def test_original_media_asset_record_cannot_be_reused_for_revision(self):
+        data=original()
+        data["artifacts"][1]["source_media_asset_id"]="rec00000000000008"
+        ops=Operations()
+        with self.assertRaisesRegex(GalleryRevisionDenied, "rights_unverified"):
+            run(source=data,ops=ops)
+        self.assertIsNone(ops.committed)
 
     def test_generated_image_without_independent_rights_receipt_is_denied(self):
         ops=Operations()
