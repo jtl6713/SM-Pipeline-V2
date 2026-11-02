@@ -138,7 +138,11 @@ def build_isolated_gallery_attempt(
     new_by_slot = {x["slot_id"]: x for x in plan["replacements"]}
     if operations.verify_hold(output, job["session_id"]) is not True:
         deny("gallery_publication_hold_lost")
-    # Metadata-only manifests cannot authorize generation. The trusted\n    # operations bridge must independently inspect original Drive bytes.\n    if operations.verify_original_sources(original) is not True:\n        deny("gallery_original_drive_bytes_unverified")\n    canonical = json.dumps(
+    # Metadata-only manifests cannot authorize generation.
+    # The trusted operations bridge must independently inspect original Drive bytes.
+    if operations.verify_original_sources(original) is not True:
+        deny("gallery_original_drive_bytes_unverified")
+    canonical = json.dumps(
         [job["output_id"], job["attempt_id"], job["plan_hash"],
          original["manifest_sha256"], plan["replacements"]],
         sort_keys=True, separators=(",", ":"),
