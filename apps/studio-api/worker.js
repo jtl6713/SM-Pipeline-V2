@@ -1149,7 +1149,10 @@ export default {
         (/^\/api\/rendering-review\/outputs\/rec[A-Za-z0-9]{14}\/(?:producer-conversation|producer-proposal|commit-attempt|messages|next-revision-feedback|review-feedback|approve|factory-handoff|request-redo)$/.test(url.pathname) ||
          /^\/api\/rendering-review\/factory\/outputs\/rec[A-Za-z0-9]{14}\/request-changes$/.test(url.pathname) ||
          /^\/(?:api\/)?internal\/rendering-review\/(?:claim-render-job|launch-ledger|complete-attempt|qa-audio-rebind|ig-dispatch-claim|factory-handoff)$/.test(url.pathname));
+      const isNativeGalleryGeneratePost = request.method === "POST" &&
+        /^\/api\/factory\/outputs\/rec[A-Za-z0-9]{14}\/gallery-generate$/.test(url.pathname);
       const allowedMethod =
+        isNativeGalleryGeneratePost ||
         isChicagoReviewPost ||
         request.method === "GET" ||
         (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isMediaAssetStreamRoute || isPublicBrandWatermarkRoute || isOutputPreviewRoute || isFactoryOutputPreviewRoute || isReviewAttemptPreviewRoute || isVoicePreviewRoute)) ||
@@ -2782,6 +2785,9 @@ export default {
         "^/api/factory/outputs/(rec[A-Za-z0-9]{14})/gallery-generate$"
       ).exec(url.pathname);
       if(galleryGenerateMatch){
+        if(request.method!=="POST")throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        assertWriteRequest(request,env);
         const output_id=galleryGenerateMatch[1];
         const authorized=await reviewAuthorizedProfiles(env,authorization);
         const inventoryReader=async()=>readAuthoritativeGalleryInventory({
