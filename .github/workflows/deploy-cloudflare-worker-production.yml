@@ -108,6 +108,8 @@ jobs:
           node --check apps/studio-api/rendering-review-factory-return.mjs
           node --test apps/studio-api/rendering-review-factory-preview.test.mjs apps/studio-api/rendering-review-factory-bridge.test.mjs apps/studio-api/rendering-review-factory-handoff.test.mjs apps/studio-api/rendering-review-factory-entry-gate.test.mjs apps/studio-api/rendering-review-approval-http.test.mjs
           node --test apps/studio-api/rendering-review-plan-persist.test.mjs
+          node --test apps/studio-api/rendering-review-plan-preflight.test.mjs
+          node --test apps/studio-api/rendering-review-catalog-assets.test.mjs apps/studio-api/rendering-review-library-prepare.test.mjs
           node --test apps/studio-api/engagement-auth-recovery.test.mjs
           node --test apps/studio-api/idea-list-authoritative-fresh.test.mjs
           node --test apps/studio-api/production-photo-wait-visibility.test.mjs
