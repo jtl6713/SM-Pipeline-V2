@@ -66,8 +66,8 @@ test("Asset Manager source may bind exact completed 9:16 crop, no V2 writes",asy
   assert.equal(proof.render_url,url);
   assert.equal(proof.profile_id,C);
 });
-test("wrong profile, rights, or ineligible Graphic is blocked not auto-corrected",async()=>{
-  for(const change of [{"Media_Class":"Graphic"},{"Rights_Status":"Unknown"},
+test("wrong profile or ownership is blocked without source substitution",async()=>{
+  for(const change of [{"Media_Class":"Video"},{"Rights_Status":"Unknown"},
     {"Content_Profile":["rec44444444444444"]},{"Do_Not_Use":true},
     {"Google Drive File ID":"anotherfileabcdefghijklmn"}]){
     const result=await run(change);
@@ -104,4 +104,11 @@ test("unknown catalog token does not fetch unrelated assets",async()=>{
     readVariants:async()=>{throw Error("should not query");}
   });
   assert.deepEqual(result,{receipts:[],unresolved:[]});
+});
+
+test("owned Graphic JPEG is a valid, explicitly identified still only with source Graphic provenance",async()=>{
+  const result=await run({"Media_Class":"Graphic","MIME_Type":"image/jpeg"});
+  assert.equal(result.receipts.length,1);
+  assert.equal(result.receipts[0].source_media_class,"Graphic");
+  assert.equal(result.receipts[0].media_type,"image");
 });
