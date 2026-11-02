@@ -23,6 +23,7 @@
     batchApprovalsEnabled: null,
     batchRollout: null,
     batchGlobal: null,
+    batchSubmissionError: null,
     reconciledBatchDeskKey: "",
     reconcilingBatchDesk: false,
     batchDeskReconcileNextAttempt: 0,
@@ -88,6 +89,11 @@
     if (!node) return;
     node.textContent = message || "";
     node.classList.toggle("error-text", Boolean(isError));
+  }
+
+  function setBatchSubmissionError(message) {
+    state.batchSubmissionError = message ? String(message) : null;
+    if (state.batchSubmissionError) setStatus(state.batchSubmissionError, true);
   }
 
   async function fetchJson(path, options = {}) {
@@ -896,6 +902,7 @@
       })); } catch {}
     };
     persistRemaining(planned);
+    setBatchSubmissionError(null);
     state.submittingBatch = true;
     state.submittingOutputIds = new Set(selectionIds);
     if (state.desk) renderDesk(state.desk);
@@ -953,12 +960,13 @@
       }
       if (state.desk) renderDesk(state.desk);
       closeFactoryPreview();
+      setBatchSubmissionError(null);
       setStatus(`All ${ready.length} outputs accepted as ${acceptedBatches} durable approval batch${acceptedBatches === 1 ? "" : "es"}. Server processing continues after leaving Factory.`);
       refreshFactoryBatchActivity(true).catch(() => {});
       // Never wait for all approvals in the click handler.
     } catch (error) {
       const remaining = state.selectedOutputs.size;
-      setStatus(`Submitted ${acceptedOutputs} of ${ready.length} outputs. ${remaining} remain selected. ${error.message || error} Check Activity before retrying.`, true);
+      setBatchSubmissionError(`Submitted ${acceptedOutputs} of ${ready.length} outputs. ${remaining} remain selected. ${error.message || error} Check Activity before retrying.`);
       await refreshFactoryBatchActivity();
     } finally {
       state.submittingOutputIds = null;
@@ -2348,7 +2356,8 @@
       }, 5000);
       const desk = await fetchJson("/api/factory/desk", { cache: "no-store" });
       renderDesk(desk);
-      setStatus(desk.warning || "Factory Desk ready.");
+      if (state.batchSubmissionError) setStatus(state.batchSubmissionError, true);
+      else setStatus(desk.warning || "Factory Desk ready.");
       reconcilePersistedFactoryPending(true).catch(() => {});
       return desk;
     } catch (error) {
@@ -2379,6 +2388,8 @@
   $("factoryBatchSubmit")?.addEventListener("click", () => { submitFactoryBatchApprovals().catch((error) => setStatus(error.message || String(error), true)); });
   $("factoryBatchClear")?.addEventListener("click", () => {
     state.selectedOutputs.clear();
+    setBatchSubmissionError(null);
+    setStatus("Selection cleared.");
     saveFactorySelection();
     if (state.desk) renderDesk(state.desk);
   });

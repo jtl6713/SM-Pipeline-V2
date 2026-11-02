@@ -150,6 +150,12 @@ test("Ambiguous global POST responses reconcile only an exact durable Activity m
   assert.match(js,/Recovered a confirmed server submission after a connection error/);
 });
 
+test("A rejected submission stays visible across the automatic Desk refresh", () => {
+  assert.match(js, /batchSubmissionError: null/);
+  assert.match(js, /setBatchSubmissionError\(`Submitted \$\{acceptedOutputs\} of \$\{ready\.length\} outputs/);
+  assert.match(js, /if \(state\.batchSubmissionError\) setStatus\(state\.batchSubmissionError, true\);\s*else setStatus\(desk\.warning \|\| "Factory Desk ready\."\);/);
+});
+
 test("Expired browser-only submissions clear only after an authoritative exact-ID miss", () => {
   const missingFn = extractNamedFunction(js, "factoryActivityProvesPlanMissing");
   const factoryActivityProvesPlanMissing = new Function(

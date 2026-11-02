@@ -664,3 +664,4 @@ Deploy Studio UI 0.6.855 confirmed-save meter: add a distinct filled batch-progr
 
 2026-11-02: Deploy Studio UI 0.6.862 (#1526). Rename Post Production Edits left heading to Reviewer Edit Requests. Verify production custom-domain footer, BUILD_ID and heading; preserve review holds and publishing restrictions.
 2026-11-02: Deploy Studio UI 0.6.863-factory-stale-resume-reset. Clear expired browser-only Factory submissions after an authoritative exact-ID miss so current selections can be submitted; preserve real in-flight locks.
+2026-11-02: Deploy Studio UI 0.6.864-factory-submit-error-visible. Keep a failed Submit Approvals reason visible across automatic Desk refreshes so operators know nothing was accepted and when it is safe to retry.

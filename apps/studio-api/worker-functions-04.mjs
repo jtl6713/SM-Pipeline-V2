@@ -4188,22 +4188,33 @@ export async function getApproveAllJobStatus(request, env, authorization) {
 }
 /*__STUDIO_WORKER_END:getApproveAllJobStatus__*/
 
-export async function studioFetchApproveAllRecordsByIds(env, ids = []) {
+export async function studioFetchApproveAllRecordsByIds(env, ids = [], options = {}) {
   const unique = [...new Set((ids || []).map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
   if (!unique.length) return new Map();
+  const allowIndividualFallback = options.allowIndividualFallback !== false;
   const byId = new Map();
   for (let i = 0; i < unique.length; i += 10) {
     const chunk = unique.slice(i, i + 10);
     const formula = chunk.length === 1
       ? `RECORD_ID()="${chunk[0]}"`
       : `OR(${chunk.map((id) => `RECORD_ID()="${id}"`).join(",")})`;
-    const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit: chunk.length,
-      filterFormula: formula,
-    }).catch(() => []);
+    let rows;
+    try {
+      rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+        limit: chunk.length,
+        filterFormula: formula,
+      });
+    } catch (error) {
+      // Interactive Factory submit must fail fast as one authoritative read.
+      // Turning one batch failure into ten serial GETs recreates the timeout
+      // that leaves the browser unsure whether anything was accepted.
+      if (!allowIndividualFallback) throw error;
+      rows = [];
+    }
     for (const row of rows || []) {
       if (row?.id) byId.set(row.id, row);
     }
+    if (!allowIndividualFallback) continue;
     for (const id of chunk) {
       if (byId.has(id)) continue;
       try {
@@ -17453,8 +17464,9 @@ export async function factoryBatchSubmitRoute(request, env, authorization, ctx =
  * batch those hops (OR of 10) so a 10-output NYC/Miami chunk cannot hang the
  * HTTP accept path long enough for Cloudflare to return an empty 500.
  */
-async function factoryResolveGroupOwnershipIds(env, recordsById, ids) {
+async function factoryResolveGroupOwnershipIds(env, recordsById, ids, options = {}) {
   const ownership = new Map();
+  const allowIndividualFallback = options.allowIndividualFallback !== false;
   const needContent = [];
   for (const id of ids) {
     const record = recordsById.get(id);
@@ -17475,13 +17487,20 @@ async function factoryResolveGroupOwnershipIds(env, recordsById, ids) {
     const formula = chunk.length === 1
       ? `RECORD_ID()="${chunk[0]}"`
       : `OR(${chunk.map((id) => `RECORD_ID()="${id}"`).join(",")})`;
-    const rows = await listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
-      limit: chunk.length,
-      filterFormula: formula,
-    }).catch(() => []);
+    let rows;
+    try {
+      rows = await listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
+        limit: chunk.length,
+        filterFormula: formula,
+      });
+    } catch (error) {
+      if (!allowIndividualFallback) throw error;
+      rows = [];
+    }
     for (const row of rows || []) {
       if (row?.id) contentById.set(row.id, row);
     }
+    if (!allowIndividualFallback) continue;
     for (const contentId of chunk) {
       if (contentById.has(contentId)) continue;
       try {
@@ -17598,11 +17617,9 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
     return respond(request,env,{...resumed,accepted:true,already_submitted:true});
   }
 
-  // Accept-first: desk cards already proved Ready-for-Review + platform/format.
-  // Do NOT call studioFetchApproveAllRecordsByIds / ownership hops on this path —
-  // hung Airtable GETs were returning Cloudflare's empty HTML 500 with
-  // Submitted 0 of N even after the 18s Promise.race budget. Drain re-verifies
-  // each row authoritatively before factoryApproveOutput.
+  // Fail closed before claims: browser desk cards are not proof of current
+  // readiness, ownership, or Do_Not_Publish state. The authoritative preflight
+  // below uses bounded batch reads and never falls back to serial per-row GETs.
   const coolMs = airtableCooldownWaitMs();
   if (coolMs > AIRTABLE_SLOT_FAIL_FAST_MS) {
     throw new HttpError(503,
@@ -17734,7 +17751,9 @@ async function factoryGroupRecordsFromAirtablePreflight(env, authorization, ids,
   deadline();
   let byId;
   try {
-    byId = await studioFetchApproveAllRecordsByIds(env, ids);
+    byId = await studioFetchApproveAllRecordsByIds(env, ids, {
+      allowIndividualFallback: false,
+    });
   } catch (error) {
     throw factoryMapSubmitAirtableError(error);
   }
@@ -17750,7 +17769,9 @@ async function factoryGroupRecordsFromAirtablePreflight(env, authorization, ids,
   }
   let ownershipCache;
   try {
-    ownershipCache = await factoryResolveGroupOwnershipIds(env, byId, ids);
+    ownershipCache = await factoryResolveGroupOwnershipIds(env, byId, ids, {
+      allowIndividualFallback: false,
+    });
   } catch (error) {
     throw factoryMapSubmitAirtableError(error);
   }
