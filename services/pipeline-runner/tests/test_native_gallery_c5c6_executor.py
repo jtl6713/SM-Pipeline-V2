@@ -133,7 +133,8 @@ class C5C6Tests(unittest.TestCase):
             patch("rendering_review.native_gallery_c5c6_executor.private_permissions",
                   return_value=True),
             patch("rendering_review.native_gallery_c5c6_executor.register_native_gallery_rights",
-                  return_value={"media_asset_record_id": R}),
+                  return_value={"media_asset_record_id": R,
+                                "verified": True, "publication_authorized": False}),
         ]
         with patch.dict(os.environ, {"NATIVE_GALLERY_RUNNER_EXECUTE_ENABLED": "true"}):
             for p in patches:
