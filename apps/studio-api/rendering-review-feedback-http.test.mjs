@@ -48,7 +48,8 @@ function fixture(){
     });
     return handle({request,env:opts.env||flags,authorization:opts.authorization||auth,
       output_id,assertWriteRequest:()=>{writeAuthCalls++;},operations,
-      in_flight_only:opts.in_flight_only===true});
+      in_flight_only:opts.in_flight_only===true,
+      conversation_only:opts.conversation_only===true});
   };
   return {send,writes,setState:fn=>{fn(state);},get state(){return state;},get writeAuthCalls(){return writeAuthCalls;}};
 }
@@ -148,5 +149,44 @@ test("in-flight comments reject completed, unlocked, or stale sessions without w
   assert.deepEqual(f.writes,[]);
   const disabled={...producerFlags};delete disabled.RENDERING_REVIEW_DISPATCH_FENCE_VERIFIED;
   await assert.rejects(()=>f.send(data,{env:disabled,in_flight_only:true}),e=>e.status===405);
+  assert.deepEqual(f.writes,[]);
+});
+
+test("discussion-only comments persist without invoking Producer, freezing a plan or launching a job",async()=>{
+  const f=fixture();
+  f.setState(s=>{
+    s.state="plan_ready";s.version=4;
+    s.producer_candidate={hash:"candidate-hash",stale:false};
+    s.plan={version:1,hash:"plan-hash",frozen:true,missing_assets:[]};
+  });
+  const result=await f.send({...data,expected_version:4,content:
+    "Change frame 2 to the Adler dome photo, please."},{env:producerFlags,conversation_only:true});
+  assert.equal(result.ok,true);
+  assert.equal(f.state.state,"discussing");
+  assert.equal(f.state.producer_candidate.stale,true);
+  assert.equal(f.state.plan.frozen,false);
+  assert.equal(f.state.messages.at(-1).content,
+    "Change frame 2 to the Adler dome photo, please.");
+  assert.equal(f.state.active_job,null);
+  assert.equal(f.state.review_hold.active,true);
+  assert.equal(f.state.latest_attempt_number,1);
+  assert.deepEqual(f.writes,[5]);
+});
+
+test("discussion-only endpoint denies in-flight, closed or unauthorized writes",async()=>{
+  const f=fixture();
+  f.setState(s=>{s.state="queued";s.active_job={id:"job-12345678"};});
+  await assert.rejects(()=>f.send(data,{env:producerFlags,conversation_only:true}),
+    e=>e.code==="DISCUSSION_FEEDBACK_NOT_ALLOWED");
+  f.setState(s=>{s.state="approved";});
+  await assert.rejects(()=>f.send(data,{env:producerFlags,conversation_only:true}),
+    e=>e.code==="SESSION_CLOSED");
+  f.setState(s=>{s.state="ready_for_review";s.review_hold.active=false;});
+  await assert.rejects(()=>f.send(data,{env:producerFlags,conversation_only:true}),
+    e=>e.code==="DISCUSSION_FEEDBACK_NOT_ALLOWED");
+  const disabled={...producerFlags};delete disabled.RENDERING_REVIEW_SCHEDULER_VACATE_VERIFIED;
+  await assert.rejects(()=>f.send(data,{env:disabled,conversation_only:true}),e=>e.status===405);
+  await assert.rejects(()=>f.send(data,{env:producerFlags,conversation_only:true,
+    authorization:{...auth,permissions:{outputs_review:false}}}),e=>e.status===403);
   assert.deepEqual(f.writes,[]);
 });
