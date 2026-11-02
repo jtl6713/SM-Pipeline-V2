@@ -87,7 +87,8 @@ def require_unlaunched_authority(output_id: str, job_id: str, *, client=None) ->
     if (af.get("Attempt_ID") != attempt_id or
         af.get("Output_Record_ID") != output_id or
         af.get("Job_ID") != job_id or
-        af.get("Attempt_Number") != 2 or
+        not isinstance(af.get("Attempt_Number"), int) or
+        af.get("Attempt_Number") < 2 or
         af.get("Attempt_Status") != "queued" or
         af.get("Artifact_File_ID") or
         af.get("Artifact_URL") or
@@ -115,7 +116,9 @@ def require_unlaunched_authority(output_id: str, job_id: str, *, client=None) ->
         active.get("attempt_id") != attempt_id or
         active.get("plan_hash") != jf["Plan_Hash"] or
         not original or original.get("artifact_id") != of["Final_File_ID"] or
-        not current or current.get("status") != "queued" or
+        not current or current.get("number") != af["Attempt_Number"] or
+        state.get("latest_attempt_number") != af["Attempt_Number"] or
+        current.get("status") != "queued" or
         current.get("artifact_id") or current.get("job_id") != job_id):
         raise ReviewRecoveryDenied("review_session_not_unlaunched")
     return True

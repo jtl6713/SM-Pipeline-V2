@@ -1,0 +1,161 @@
+name: Activate held V2 review auto-dispatch via Ops
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/review-auto-dispatch-activate.txt'
+permissions:
+  contents: read
+concurrency:
+  group: enable-rendering-review-auto-dispatch
+  cancel-in-progress: false
+jobs:
+  enable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require deployed reviewed Runner code before enabling any queue consumer
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED='2026-11-02-review-auto-dispatch-v1'
+          grep -Fq "PIPELINE_RUNNER_CODE_VERSION = \"$EXPECTED\"" services/pipeline-runner/config.py
+          curl -fsS --max-time 20 'https://pipeline.chicagoshining.com/health' -o /tmp/runner-before.json
+          jq -e --arg v "$EXPECTED" '.ok==true and .version==$v' /tmp/runner-before.json >/dev/null
+          echo "review_auto_dispatch_preflight_runner_version=$EXPECTED"
+      - name: Update only the local protected opt-in flag through Ops
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://ops.chicagoshining.com'
+          selected=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            [[ -z "$candidate" ]] && continue
+            code=$(curl -sS --max-time 20 -o /tmp/ops-catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == '200' ]] && jq -e '.ok==true' /tmp/ops-catalog.json >/dev/null; then
+              selected="$candidate"; break
+            fi
+          done
+          test -n "$selected"
+          echo "::add-mask::$selected"
+          printf '%s' "$selected" >/tmp/ops-selected-token
+          cat >/tmp/opt-in.ps1 <<'PS1'
+          $ErrorActionPreference='Stop'
+          $file=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+          if(-not (Test-Path -LiteralPath $file)){throw 'runner_env_not_found'}
+          $lines=@(Get-Content -LiteralPath $file)
+          $flagRows=@($lines|Where-Object {$_ -match '^\s*RENDERING_REVIEW_AUTO_DISPATCH_ENABLED\s*='})
+          if($flagRows.Count -gt 1){throw 'duplicate_dispatch_flag'}
+          $found=$false
+          $next=@(foreach($line in $lines){
+            if($line -match '^\s*RENDERING_REVIEW_AUTO_DISPATCH_ENABLED\s*='){
+              'RENDERING_REVIEW_AUTO_DISPATCH_ENABLED=true';$found=$true
+            }else{$line}
+          })
+          if(-not $found){$next+= 'RENDERING_REVIEW_AUTO_DISPATCH_ENABLED=true'}
+          # Preserve secrets and avoid PowerShell 5.1 UTF8 BOM on the first variable.
+          [System.IO.File]::WriteAllLines($file,$next,([System.Text.UTF8Encoding]::new($false)))
+          $readback=@(Get-Content -LiteralPath $file|Where-Object {$_ -eq 'RENDERING_REVIEW_AUTO_DISPATCH_ENABLED=true'})
+          if($readback.Count -ne 1){throw 'dispatch_flag_readback_failed'}
+          Write-Output 'review_auto_dispatch_flag_configured=true'
+          PS1
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/opt-in.json').write_text(json.dumps({'command':Path('/tmp/opt-in.ps1').read_text(),'confirm':True}))
+          PY
+          code=$(curl -sS --max-time 25 -o /tmp/opt-in-result.json -w '%{http_code}' \
+            -X POST "$BASE/api/shell" -H "Authorization: Bearer $selected" \
+            -H 'Content-Type: application/json' --data-binary @/tmp/opt-in.json || true)
+          [[ "$code" == '200' || "$code" == '202' ]]
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/opt-in-result.json);test -n "$job"
+          for i in $(seq 1 40); do
+            curl -fsS --max-time 15 -H "Authorization: Bearer $selected" \
+              "$BASE/api/jobs/$job" -o /tmp/opt-in-status.json
+            state=$(jq -r '.job.status // empty' /tmp/opt-in-status.json)
+            if [[ "$state" == 'ok' ]];then
+              jq -e '.job.log|contains("review_auto_dispatch_flag_configured=true")' /tmp/opt-in-status.json >/dev/null
+              echo 'review_auto_dispatch_flag_written=true';exit 0
+            fi
+            [[ "$state" == 'failed' ]] && exit 1
+            sleep 3
+          done
+          exit 1
+      - name: Restart Runner once via allowlisted Ops action
+        shell: bash
+        run: |
+          set -euo pipefail
+          token=$(cat /tmp/ops-selected-token)
+          base='https://ops.chicagoshining.com'
+          code=$(curl -sS --max-time 20 -o /tmp/restart.json -w '%{http_code}' \
+            -X POST "$base/api/run" -H "Authorization: Bearer $token" \
+            -H 'Content-Type: application/json' \
+            --data '{"action":"restart-one","service":"pipeline-runner","confirm":true}' || true)
+          [[ "$code" == '202' ]]
+          job=$(jq -r '.job.id // empty' /tmp/restart.json);test -n "$job"
+          for n in $(seq 1 60);do
+            curl -fsS --max-time 15 -H "Authorization: Bearer $token" \
+              "$base/api/jobs/$job" -o /tmp/restart-status.json
+            status=$(jq -r '.job.status // empty' /tmp/restart-status.json)
+            [[ "$status" == 'ok' ]] && { echo 'review_dispatch_runner_restarted=true';exit 0; }
+            [[ "$status" == 'failed' ]] && exit 1
+            sleep 4
+          done
+          exit 1
+      - name: Verify active Runner version and protected consumer heartbeat without triggering a render
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='2026-11-02-review-auto-dispatch-v1'
+          for i in $(seq 1 15);do
+            curl -fsS --max-time 15 'https://pipeline.chicagoshining.com/health' -o /tmp/health-after.json || true
+            if jq -e --arg v "$expected" '.ok==true and .version==$v' /tmp/health-after.json >/dev/null 2>&1;then break;fi
+            sleep 4
+          done
+          jq -e --arg v "$expected" '.ok==true and .version==$v' /tmp/health-after.json >/dev/null
+          token=$(cat /tmp/ops-selected-token)
+          cat >/tmp/verify-dispatch.ps1 <<'PS1'
+          $ErrorActionPreference='Stop'
+          $file=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+          $auth=@(Get-Content $file|Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='})
+          if($auth.Count -ne 1){throw 'runner_secret_missing'}
+          $secret=([string]($auth[0] -split '=',2)[1]).Trim().Trim('"').Trim([char]39)
+          if($secret.Length -lt 24){throw 'runner_secret_invalid'}
+          $response=Invoke-RestMethod -Method GET -TimeoutSec 20 -Headers @{'X-Pipeline-Secret'=$secret} -Uri 'http://127.0.0.1:3350/jobs/rendering-review/dispatch-health'
+          if($response.ok -ne $true -or $response.enabled -ne $true -or $response.started -ne $true){
+            throw 'review_auto_dispatch_not_started'
+          }
+          Write-Output 'review_auto_dispatch_enabled=true'
+          Write-Output 'review_auto_dispatch_consumer_started=true'
+          Write-Output ('review_auto_dispatch_last_result='+[string]$response.last_result)
+          PS1
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/verify-dispatch.json').write_text(json.dumps({'command':Path('/tmp/verify-dispatch.ps1').read_text(),'confirm':True}))
+          PY
+          base='https://ops.chicagoshining.com'
+          code=$(curl -sS --max-time 20 -o /tmp/verify-start.json -w '%{http_code}' \
+            -X POST "$base/api/shell" -H "Authorization: Bearer $token" \
+            -H 'Content-Type: application/json' --data-binary @/tmp/verify-dispatch.json || true)
+          [[ "$code" == '200' || "$code" == '202' ]]
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/verify-start.json);test -n "$job"
+          for i in $(seq 1 35);do
+            curl -fsS --max-time 15 -H "Authorization: Bearer $token" \
+              "$base/api/jobs/$job" -o /tmp/verify-status.json
+            state=$(jq -r '.job.status // empty' /tmp/verify-status.json)
+            if [[ "$state" == 'ok' ]]; then
+              jq -r '.job.log // ""' /tmp/verify-status.json | grep '^review_auto_dispatch_' || true
+              jq -e '.job.log|contains("review_auto_dispatch_consumer_started=true")' /tmp/verify-status.json >/dev/null
+              exit 0
+            fi
+            [[ "$state" == 'failed' ]] && exit 1
+            sleep 3
+          done
+          exit 1

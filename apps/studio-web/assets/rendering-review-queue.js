@@ -227,7 +227,7 @@
   }
   // Observe only the held review session. This is an authoritative saved-state
   // check, NOT a claim that Producer chat automatically queued an isolated render.
-  function reviewSignature(session) {
+  function reviewSignature(session,renderJob) {
     const messages=Array.isArray(session?.messages)?session.messages:[];
     const last=messages[messages.length-1];
     const history=Array.isArray(session?.history)?session.history:[];
@@ -237,6 +237,15 @@
       session?.plan?.frozen,session?.producer_candidate?.stale,
       session?.attempts?.length,last?.at,last?.content,
       history[history.length-1]?.at,
+      renderJob?.verified===true?renderJob.state:null,
+      renderJob?.verified===true?renderJob.stage:null,
+      renderJob?.verified===true?renderJob.progress_percent:null,
+      renderJob?.verified===true?renderJob.dispatch_attempts:null,
+      renderJob?.verified===true&&renderJob.created_at&&
+        Date.now()-Date.parse(renderJob.created_at)>=240000&&renderJob.state==='queued'?'queued_stalled':null,
+      renderJob?.verified===true&&renderJob.created_at&&
+        Date.now()-Date.parse(renderJob.created_at)>=900000&&renderJob.state==='claimed'&&
+        Number(renderJob.progress_percent||0)===0?'claimed_stalled':null,
     ]);
   }
   function watchReview(entry,seenSignature,requestSequence) {
@@ -256,7 +265,7 @@
           say('Review hold could not be verified; automatic status checks paused.',true);
           return;
         }
-        if(reviewSignature(latest.session)!==seenSignature){
+        if(reviewSignature(latest.session,latest.render_job)!==seenSignature){
           // Never interrupt a playing V1/V2 video just to update a status card.
           if($('rrVideo')?.paused===false){
             if(state.progressCheckNode)state.progressCheckNode.textContent=
@@ -283,6 +292,13 @@
     const readyV2=!!completedAttempt||approvedV2;
     const rendering=['queued','rendering','validating'].includes(session?.state);
     const failed=session?.state==='revision_failed';
+    const job=saved?.render_job;
+    const jobAgeMs=job?.created_at?Date.now()-Date.parse(job.created_at):NaN;
+    const stalledQueued=session?.state==='queued'&&job?.verified===true&&
+      job?.state==='queued'&&Number.isFinite(jobAgeMs)&&jobAgeMs>=240000;
+    const stalledClaimed=session?.state==='queued'&&job?.verified===true&&
+      job?.state==='claimed'&&Number(job.progress_percent||0)===0&&
+      Number.isFinite(jobAgeMs)&&jobAgeMs>=900000;
     const stage=readyV2?5:session?.state==='validating'?4:
       rendering||failed?3:planReady?2:producer?1:0;
 
@@ -307,7 +323,7 @@
       saved?.publication_hold_verified===true&&
       current?.status==='ready_for_review'&&!!attemptMedia(current,entry);
     const requiresInput=canRequestEdits||(stage===1&&canReply)||
-      (stage===2&&canRender)||(stage===5&&canApprove);
+      (stage===2&&canRender)||(stage===5&&canApprove)||stalledQueued||stalledClaimed;
     const steps=['Feedback received','Producer review','Plan ready',
       'Rendering','Quality check','Ready for review'];
     const rail=elem('ol',null,'rr-progress-stages');
@@ -337,8 +353,13 @@
         'V2 render completed its rendering stage; media validation is in progress.':
       session?.state==='rendering'?
         'V2 render is running. Quality validation and review are not complete.':
-      session?.state==='queued'?
-        'V2 render job is queued. Rendering has not been confirmed started.':
+      session?.state==='queued'?(stalledQueued?
+        'Requires your attention: V2 has been queued for over four minutes without a verified Runner claim. Automatic recovery has not completed. Check latest status; do not start another render.':
+        stalledClaimed?
+        'Requires your attention: The Runner claimed this V2 job but no progress was verified after fifteen minutes. Reconciliation is required; do not start another render.':
+        job?.verified===true&&job?.state==='claimed'?
+        'The Runner has claimed this exact V2 job. Waiting for rendering progress; publication remains held.':
+        'V2 render job is queued. Automatic dispatch starts any unclaimed job after two minutes; rendering has not been confirmed started.'):
       failed?'The revised render needs attention; V1 remains preserved.':
       planReady?(canRender?
         'Requires your attention: V2 plan is saved. Select Make the revised video to authorize rendering. No render has started.':
@@ -1001,7 +1022,7 @@
         if(candidate.stale)draft.append(elem('p','An additional comment was added. Ask the Producer to refresh this plan.','rr-notice'));
         detail.append(draft);
       }
-      watchReview(entry,reviewSignature(session),seq);
+      watchReview(entry,reviewSignature(session,saved.render_job),seq);
 
     }catch(err){
       if(seq===state.request && state.selected===entry.output_id){
