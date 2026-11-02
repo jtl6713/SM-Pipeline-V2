@@ -746,3 +746,62 @@ test('held review progress displays a recovery warning for an unclaimed stale V2
   assert.match(source,/do not start another render/);
   assert.match(source,/reviewSignature\(latest\.session,latest\.render_job\)/);
 });
+
+test('completed V2 and pending V3 have separate, non-authorizing progress states',async()=>{
+  const ids=['page-rendering-review','navRenderingReview','rrQueueList','rrDetail',
+    'rrStatus','rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile','rrProgressSummary'];
+  const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
+  let activate;const calls=[];
+  const output='recA1B2C3D4E5F6G7';
+  const entry={output_id:output,profile_id:'recT2rbKX3MF7cVFU',
+    output_type:'Instagram Reel',output_number:9664,title:'Adler View Photo Set',
+    review_held:true,final_file_url:'https://example.org/v1.mp4'};
+  const producer={
+    source_attempt_id:'attempt-v2',stale:false,
+    candidate:{explanation:'Keep skyline and select seven exteriors',
+      requirements:[{kind:'asset',description:'Verify existing Adler photo 5'}]}};
+  const fetchStub=async(url,opts)=>{
+    calls.push({url,method:opts?.method||'GET'});
+    if(url==='/api/session')return {ok:true,json:async()=>({
+      ok:true,authenticated:true,authorized:true,permissions:{outputs_review:true}})};
+    if(url.startsWith('/api/rendering-review/queue?'))return {ok:true,json:async()=>({
+      ok:true,queue:[entry],next_cursor:null,
+      flags:{admission_enabled:false,producer_conversation_enabled:true,
+        automatic_sampling_percent:0}})};
+    if(url==='/api/rendering-review/outputs/'+output)return {ok:true,json:async()=>({
+      ok:true,publication_hold_verified:true,
+      flags:{producer_conversation_enabled:true,attempt_commit_enabled:false,
+        creative_approval_enabled:false},
+      session:{id:'session-12345678',version:6,state:'ready_for_review',
+        profile_id:'recT2rbKX3MF7cVFU',current_attempt_id:'attempt-v2',
+        latest_attempt_number:2,review_hold:{active:true,id:'held-1234'},
+        attempts:[{id:'attempt-v1',number:1,status:'ready_for_review',artifact_id:'originalfile123456789'},
+          {id:'attempt-v2',number:2,status:'ready_for_review',artifact_id:'renderedfile123456789'}],
+        messages:[
+          {role:'user',content:'Use Adler Planetarium 3, 5, 12, 13, 14, 17, 18',
+            attempt_id:'attempt-v2',at:'2026-11-02T01:20:00Z'},
+          {role:'producer',content:'Seven photos need linking',
+            attempt_id:'attempt-v2',at:'2026-11-02T01:21:00Z'}],
+        producer_candidate:producer,plan:null}})};
+    throw Error('Unexpected '+url);
+  };
+  const sandbox={
+    document:{getElementById:id=>nodes[id],createElement:tag=>new Node(tag)},
+    window:{location:{href:'https://studio.test/'},
+      CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''}},
+    MutationObserver:class{constructor(cb){activate=cb;}observe(){}},
+    fetch:fetchStub,URL,URLSearchParams,
+    crypto:{randomUUID:()=> '12345678-1234-1234-1234-123456789012'},
+  };
+  vm.runInNewContext(script,sandbox,{filename:'rendering-review-queue.js'});
+  for(let i=0;i<5;i++)await tick();
+  nodes['page-rendering-review'].classList.add('active');activate();
+  for(let i=0;i<10;i++)await tick();
+  const descend=root=>[root,...root.children.flatMap(descend)];
+  const text=descend(nodes.rrDetail).map(n=>n.textContent).filter(Boolean).join('\n');
+  assert.match(text,/V2 · Ready for review/);
+  assert.match(text,/V3 · Proposed changes — not rendered/);
+  assert.match(text,/1 checks or assets remain unresolved/);
+  assert.match(text,/Not authorized \/ not started/);
+  assert.ok(calls.every(x=>x.method==='GET'),'page read cannot authorize any edits or render');
+});
