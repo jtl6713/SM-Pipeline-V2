@@ -117,7 +117,7 @@ def build_isolated_gallery_attempt(
 
     Trusted operations:
       verify_hold(output_id, session_id) -> bool
-      reserve_attempt(job, original_hash, changes_hash) -> bool (atomic once)
+      verify_original_sources(original) -> bool (independent Drive bytes + identity/rights)\n      reserve_attempt(job, original_hash, changes_hash) -> bool (atomic once)
       generate_image(prompt, ratio) -> PNG bytes
       watermark_image(image_bytes, profile_id) -> PNG bytes
       upload_image(name, bytes) -> {id} (Drive staging folder, never original)
@@ -127,7 +127,7 @@ def build_isolated_gallery_attempt(
       commit_manifest(job, manifest) -> bool (durable CAS)
       read_manifest(job) -> manifest (readback)
     """
-    needed = ("verify_hold", "reserve_attempt", "generate_image",
+    needed = ("verify_hold", "verify_original_sources", "reserve_attempt", "generate_image",
               "watermark_image", "upload_image", "verify_drive_image",
               "verify_generated_rights", "commit_manifest", "read_manifest")
     if not all(callable(getattr(operations, n, None)) for n in needed):
@@ -138,7 +138,7 @@ def build_isolated_gallery_attempt(
     new_by_slot = {x["slot_id"]: x for x in plan["replacements"]}
     if operations.verify_hold(output, job["session_id"]) is not True:
         deny("gallery_publication_hold_lost")
-    canonical = json.dumps(
+    # Metadata-only manifests cannot authorize generation. The trusted\n    # operations bridge must independently inspect original Drive bytes.\n    if operations.verify_original_sources(original) is not True:\n        deny("gallery_original_drive_bytes_unverified")\n    canonical = json.dumps(
         [job["output_id"], job["attempt_id"], job["plan_hash"],
          original["manifest_sha256"], plan["replacements"]],
         sort_keys=True, separators=(",", ":"),
