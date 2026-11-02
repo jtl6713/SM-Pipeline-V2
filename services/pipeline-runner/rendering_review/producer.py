@@ -24,9 +24,13 @@ Check the *existing* asset catalog BEFORE asking for any new upload or
 generated image. assets[] contains authoritative, already linked Reel images,
 including time_of_day, descriptive metadata and exact asset IDs.
 original_timeline[] contains the actual source scene order and durations.
-library_candidates[] contains other existing Chicago-owned photos, but these
-are search suggestions, not verified renderer assets. Names/time-of-day are
-metadata, not evidence that frames were visually inspected.
+library_candidates[] contains existing Chicago-owned photos with synthetic
+library_<MediaAssetRecordID> IDs. They are eligible for a proposed timeline but
+NOT render-verified until an independent 9:16 Drive crop and rights preflight
+passes. Do not claim they are already linked or usable; never fabricate an ID.
+Use the exact library ID when a named photo exists in this list. Missing crop
+validation must be described as pending verification, not missing upload.
+Names/time-of-day are metadata, not evidence that frames were visually inspected.
 library_ineligible[] contains exact named, owned Chicago catalog records that
 exist but cannot yet be used as photographs (for example Media_Class Graphic).
 Describe these as FOUND BUT BLOCKED, not missing. Request validation of their
@@ -95,7 +99,7 @@ explanation: substantive string;
 narration: complete proposed narration string;
 preserve: array of strings;
 changes: array of strings;
-reuse_asset_ids: array of inventory IDs;
+reuse_asset_ids: array of original or offered library ID tokens;
 timeline: array of {start_seconds:number,end_seconds:number,direction:string,asset_ids:array};
 requirements: array of {description:string,kind:'asset'|'research'|'clarification',alternatives:array};
 claims: array of {claim:string,source_ids:array};
@@ -142,7 +146,8 @@ def conversational_candidate(model: dict, evidence: dict, direction: str) -> dic
             return []
         return [x for x in value[:80] if isinstance(x, str) and x.strip() and len(x) <= 2000]
 
-    inventory = {a["id"] for a in evidence.get("assets", [])
+    inventory = {a["id"] for a in [*evidence.get("assets", []),
+                                   *evidence.get("library_candidates", [])]
                  if isinstance(a, dict) and isinstance(a.get("id"), str)}
     sources = {a["id"] for a in evidence.get("sources", [])
                if isinstance(a, dict) and isinstance(a.get("id"), str)}
@@ -328,7 +333,9 @@ def validate_candidate(candidate: dict, evidence: dict, *, allow_conversation_on
             raise ValueError("Producer response invalid " + key)
     if not candidate["changes"] or not candidate["acceptance_checks"] or (not candidate["timeline"] and not allow_conversation_only):
         raise ValueError("Producer must propose actionable changes and acceptance checks")
-    inventory = {a["id"] for a in evidence.get("assets", []) if isinstance(a, dict) and isinstance(a.get("id"), str)}
+    inventory = {a["id"] for a in [*evidence.get("assets", []),
+                                   *evidence.get("library_candidates", [])]
+                 if isinstance(a, dict) and isinstance(a.get("id"), str)}
     references = list(candidate["reuse_asset_ids"])
     previous_end = 0
     for scene in candidate["timeline"]:
