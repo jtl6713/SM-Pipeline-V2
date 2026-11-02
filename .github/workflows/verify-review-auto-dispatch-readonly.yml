@@ -1,0 +1,63 @@
+name: Verify active held V2 dispatch heartbeat read-only
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-review-auto-dispatch-readonly.yml'
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Audit private consumer without admitting or rendering jobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          cat >/tmp/dispatch-observe.ps1 <<'PS1'
+          $ErrorActionPreference='Stop'
+          $file=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+          if(-not (Test-Path $file)){throw 'runner_env_missing'}
+          $auth=@(Get-Content $file|Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='})
+          if($auth.Count -ne 1){throw 'runner_auth_missing'}
+          $secret=([string]($auth[0] -split '=',2)[1]).Trim().Trim('"').Trim([char]39)
+          if($secret.Length -lt 24){throw 'runner_auth_invalid'}
+          $r=Invoke-RestMethod -Method GET -Headers @{'X-Pipeline-Secret'=$secret} -Uri 'http://127.0.0.1:3350/jobs/rendering-review/dispatch-health' -TimeoutSec 20
+          Write-Output ('review_dispatch_enabled='+[bool]$r.enabled)
+          Write-Output ('review_dispatch_started='+[bool]$r.started)
+          Write-Output ('review_dispatch_last_result='+[string]$r.last_result)
+          Write-Output ('review_dispatch_last_error='+[string]$r.last_error_code)
+          Write-Output ('review_dispatch_scanned='+[int]$r.scanned_count)
+          Write-Output ('review_dispatch_eligible='+[int]$r.eligible_count)
+          Write-Output ('review_dispatch_has_scan='+[bool]$r.last_scan_utc)
+          if($r.ok -ne $true -or $r.enabled -ne $true -or $r.started -ne $true -or -not $r.last_scan_utc){
+            throw 'review_dispatch_not_scanning'
+          }
+          if([string]$r.last_result -eq 'requires_attention'){throw 'review_dispatch_requires_attention'}
+          PS1
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/dispatch-observe.json').write_text(json.dumps({'command':Path('/tmp/dispatch-observe.ps1').read_text(),'confirm':True}))
+          PY
+          code=$(curl -sS --max-time 20 -o /tmp/dispatch-start.json -w '%{http_code}' \
+            -X POST 'https://ops.chicagoshining.com/api/shell' \
+            -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/dispatch-observe.json || true)
+          [[ "$code" == '200' || "$code" == '202' ]]
+          id=$(jq -r '.job.id // .jobId // empty' /tmp/dispatch-start.json);test -n "$id"
+          for i in $(seq 1 40);do
+            curl -fsS --max-time 15 -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$id" -o /tmp/dispatch-status.json
+            state=$(jq -r '.job.status // empty' /tmp/dispatch-status.json)
+            if [[ "$state" == 'ok' || "$state" == 'failed' ]];then
+              jq -r '.job.log // ""' /tmp/dispatch-status.json | grep '^review_dispatch_' || true
+              [[ "$state" == 'ok' ]] && exit 0 || exit 1
+            fi
+            sleep 3
+          done
+          exit 1
