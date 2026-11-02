@@ -1,3 +1,9 @@
+> **2026-11-01 amendment (#1495):** The user explicitly authorized one shared ChicagoShining watermark for all profiles, including future profiles, until further notice. All older statements in this document requiring separate LA/NYC/Miami watermark files, forbidding the Chicago shared branding asset or treating their absence as a blocker are superseded. This is a narrow branding exception only; no cross-profile source media or publishing identity is authorized. The original historical audit below is preserved for traceability.
+>
+> **Implementation slice:** `feat/1495-shared-native-gallery-watermark-20261101` adds `resolve_native_gallery_watermark` and integrates it into the isolated native gallery media adapter. This checks the actual target Content Profile, resolves and byte-verifies the exact Chicago-owned canonical Media Asset `recTnq3abS2rcsTzK` / Drive `1WQyd5W1__HkaEkWyC38IMErW8702Rd4u`, and stamps separate target-profile and source-owner identifiers. An explicit `shared_watermark_enabled=False` restores the earlier per-profile policy. Existing `resolve_profile_watermark` and Vibe functions remain untouched. A targeted unit test was added, but **CI and production media canary evidence must still be verified**; this is not full end-to-end completion.
+>
+> **Still blocked:** Runner durable job orchestration, manifest/source byte verification, generation endpoint, review/creative acceptance, Factory publishing approval, MAE package handoff, Admin QA and live non-public canaries. No publication permission is conferred. Issue #1495 stays open.
+>
 # Non-Vibe Studio corrections — verified continuation handoff (2026-11-01)
 
 **Branch:** `feat/non-vibe-native-gallery-20261101` (draft PR #1462)  
