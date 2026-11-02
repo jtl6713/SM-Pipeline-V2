@@ -62,6 +62,9 @@ jobs:
             services/pipeline-runner/tests/test_rendering_review_media_http.py \
             services/pipeline-runner/tests/test_rendering_review_isolated_render.py \
             services/pipeline-runner/tests/test_rendering_review_isolated_launch.py \
+            services/pipeline-runner/tests/test_rendering_review_catalog_render_sources.py \
+            services/pipeline-runner/tests/test_rendering_review_graphic_fit.py \
+            services/pipeline-runner/tests/test_rendering_review_original_audio.py \
             services/pipeline-runner/tests/test_ame_encoder.py \
             services/pipeline-runner/tests/test_studio_compress.py \
             services/pipeline-runner/tests/test_a1s_eligibility.py \
