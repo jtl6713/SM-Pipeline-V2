@@ -163,6 +163,7 @@ export async function inspectReviewPlan({
       ...(a.origin==="review_library"?{
         origin:"review_library",
         source_media_record_id:str(a.source_media_record_id),
+        source_media_class:str(a.source_media_class),
         variant_transfer_record_id:str(a.variant_transfer_record_id),
         variant_media_record_id:str(a.variant_media_record_id),
         source_asset_id:str(a.source_asset_id),
