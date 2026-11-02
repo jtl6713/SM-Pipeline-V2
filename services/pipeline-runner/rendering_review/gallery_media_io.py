@@ -1,9 +1,6 @@
 """Trusted private Google Drive/image/watermark backend for gallery review V2.
 
-No write to the original Output, Content Item or Carousel Slides. Never uses
-the Chicago watermark as a fallback for another profile. The caller must load
-the signed profile watermark bytes + SHA receipt from the authoritative
-Content Profile configuration before construction.
+No write to the original Output, Content Item or Carousel Slides. Native\ngalleries may use only the explicitly approved, verified shared ChicagoShining\nbrand asset; ordinary cross-profile source media remain forbidden.
 
 The review job coordinator supplies durable hold/lease/ledger operations.
 """
@@ -52,11 +49,12 @@ class GalleryMediaIO:
     @classmethod
     def from_profile_catalog(cls, *, client, drive, profile_id,
                              staging_folder_id, generator=generate_carousel_png,
-                             watermarker=watermark_photo_bytes):
-        # Verify the linked catalog Media Asset and Google Drive bytes for
-        # this profile. Do not use the global Chicago watermark catalog view.
-        from rendering_review.profile_watermark import resolve_profile_watermark
-        owned=resolve_profile_watermark(client=client,drive=drive,profile_id=profile_id)
+                             watermarker=watermark_photo_bytes, shared_watermark_enabled=True):
+        # This exception is strictly for native-gallery branding, not source
+        # media access, Vibe, Factory approval or social publishing identity.
+        from rendering_review.profile_watermark import resolve_native_gallery_watermark
+        owned=resolve_native_gallery_watermark(client=client,drive=drive,
+            profile_id=profile_id,shared_policy_enabled=shared_watermark_enabled)
         return cls(profile_id=profile_id,profile_watermark=owned["bytes"],
                    profile_watermark_receipt=owned["receipt"],
                    drive=drive,staging_folder_id=staging_folder_id,
