@@ -38,7 +38,7 @@ async function getOwned({env,adapter,output_id,profile_id,content_item_id}){
      !TOKEN.test(S(f.Studio_Render_Review_Hold_ID))||
      !TOKEN.test(S(f.Studio_Render_Review_Hold_Owner))||
      !TOKEN.test(S(f.Studio_Render_Review_Session_ID))||
-     S(f.Studio_Render_Review_Hold_Owner)!==S(f.Studio_Render_Review_Session_ID)))
+     S(f.Studio_Render_Review_Hold_Owner)!==S(f.Studio_Render_Review_Session_ID))
     deny("NATIVE_GALLERY_OUTPUT_HOLD_NOT_VERIFIED");
   if(f.Published_At||f.Platform_Post_ID||f.Platform_Post_URL||
      f.Platform_Media_ID||f.Publish_Started_At||f.Publish_Locked_At||
