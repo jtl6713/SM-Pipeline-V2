@@ -10,6 +10,7 @@ import hmac
 import os
 
 from flask import Blueprint, jsonify, request
+from carousel.image_gen import generate_carousel_png
 
 from rendering_review.native_gallery_c5c6_executor import (
     NativeGalleryExecutionDenied, execute_one_native_gallery,
@@ -52,12 +53,18 @@ def create_native_gallery_execute_blueprint(
         try:
             # Reject bad licensing configuration BEFORE claiming a job.
             rights = rights_policy_factory(settings)
+            account = getattr(rights, "preferred_account", None)
+            def pinned_generator(prompt, *, ratio):
+                return generate_carousel_png(
+                    prompt, ratio=ratio, preferred_account=account,
+                    settings_override=dict(settings))
             result = executor(
                 client=client_factory(), drive=drive_factory(),
                 worker_base=os.environ.get("NATIVE_GALLERY_WORKER_BASE_URL", ""),
                 shared_secret=os.environ.get("NATIVE_GALLERY_JOB_SHARED_SECRET", ""),
                 consumer_identity=os.environ.get("NATIVE_GALLERY_RUNNER_CONSUMER_ID", ""),
                 staging_folder_id=folder, rights_clearance=rights,
+                generator=pinned_generator,
             )
         except NativeGalleryRightsPolicyDenied:
             return jsonify(ok=False, error="native_gallery_rights_policy_not_approved"), 503
