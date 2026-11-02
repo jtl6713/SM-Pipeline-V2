@@ -7,6 +7,7 @@
  * Fail closed on missing publisher fence, source rights/branding, hold, or
  * unexpected Airtable response. No publishing, original-media or MAE writes.
  */
+import {nativeGalleryHasScheduledOccupancy} from "./native-gallery-publisher-gate.mjs";
 export const NATIVE_GALLERY_JOBS_TABLE="tbl5sq9xBrF6bgPph";
 const RECORD=/^rec[A-Za-z0-9]{14}$/;
 const TOKEN=/^[A-Za-z0-9_-]{8,120}$/;
@@ -47,8 +48,7 @@ async function getOwned({env,adapter,output_id,profile_id,content_item_id}){
      f.Platform_Media_ID||f.Publish_Started_At||f.Publish_Locked_At||
      f.Publish_Locked_By||/^(published|publishing|dispatched)$/i.test(
        choice(f.Publish_Status))||
-     f.Scheduled_Post_Date||f.Studio_Scheduled_At||
-     f.YouTube_Scheduled_Publish_At)
+     nativeGalleryHasScheduledOccupancy(f))
     deny("NATIVE_GALLERY_OUTPUT_DISPATCH_OR_SCHEDULE_PRESENT");
   const content=await adapter.airtableFetch(env,"tblwzN9AXWvmKVKPs",content_item_id);
   if(content?.id!==content_item_id||!Array.isArray(content?.fields?.Content_Profile)||
