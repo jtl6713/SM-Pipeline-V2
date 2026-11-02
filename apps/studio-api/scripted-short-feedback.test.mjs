@@ -131,3 +131,55 @@ test("unhandled extra creative instructions cannot be silently marked as complet
   assert.throws(()=>applyScriptedShortFeedback(base,parseScriptedShortFeedback("Move slide 3 after slide 99")),/move target/);
   assert.deepEqual(base.segments,segments);
 });
+
+test("named media labels identify unique original scenes in a seven-replacement batch", () => {
+  const originals = [
+    "Summit One Observation Deck 3", "Summit One Observation Deck 2",
+    "Summit One Observation Deck 1", "Empire State Building Observation Deck 7",
+    "Empire State Building Observation Deck 1", "Empire State Building Observation Deck 4",
+    "Empire State Building Observation Deck 2",
+  ];
+  const proposal = { segments: originals.map((name, index) => ({
+    asset_id:"recOriginal" + index, suggested_visual:name + ".mp4",
+    voiceover_text:"Narration " + (index + 1), duration_seconds:4,
+  })) };
+  const targets = originals.map((_, index) => "Gantry Plaza State Park " + (index + 1));
+  const request = originals.map((name, index) =>
+    "Replace " + name + " with " + targets[index] + (index === 5 ? "," : "")
+  ).join("\n");
+  const parsed = parseScriptedShortFeedback(request, proposal);
+  assert.equal(parsed.actions.length, 7);
+  assert.deepEqual(parsed.actions.map(a => a.scene), [1,2,3,4,5,6,7]);
+  assert.deepEqual(parsed.actions.map(a => a.asset_name), targets);
+  const authorized = parsed.actions.map((action, index) => ({
+    ...action, clip:{id:"recGantry" + index, name:targets[index] + ".mp4",
+      media_kind:"video", media_type:"video/mp4"},
+  }));
+  const updated = applyScriptedShortFeedback(proposal, {actions:authorized});
+  assert.deepEqual(updated.segments.map(s => s.suggested_visual), targets.map(t => t + ".mp4"));
+  assert.deepEqual(updated.segments.map(s => s.voiceover_text), proposal.segments.map(s => s.voiceover_text));
+  assert.deepEqual(proposal.segments.map(s => s.suggested_visual), originals.map(t => t + ".mp4"));
+});
+
+test("named replacements fail closed for missing, repeated, duplicate and mixed references", () => {
+  const proposal = {segments:[
+    {suggested_visual:"Empire State Building Observation Deck 7"},
+    {suggested_visual:"Summit One Observation Deck 1"},
+  ]};
+  assert.throws(() => parseScriptedShortFeedback(
+    "Replace Empire State Building Observation Deck 5 with Gantry Plaza State Park 1", proposal),
+  /not shown/);
+  assert.throws(() => parseScriptedShortFeedback(
+    "Replace Empire State Building Observation Deck 7 with Gantry Plaza State Park 1",
+    {segments:[proposal.segments[0], proposal.segments[0]]}), /multiple scenes/);
+  assert.throws(() => parseScriptedShortFeedback(
+    "Replace Empire State Building Observation Deck 7 with Gantry Plaza State Park 1\n" +
+    "Replace Empire State Building Observation Deck 7 with Gantry Plaza State Park 2", proposal),
+  /conflicting edits/);
+  assert.throws(() => parseScriptedShortFeedback(
+    "Replace Empire State Building Observation Deck 7 with Gantry Plaza State Park 1; remove slide 2", proposal),
+  /Separate named-media/);
+  assert.throws(() => parseScriptedShortFeedback(
+    "Replace Empire State Building Observation Deck 7 with Gantry Plaza State Park 1"),
+  /current proposal/);
+});

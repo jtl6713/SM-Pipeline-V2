@@ -9,6 +9,7 @@ on:
       - 'apps/studio-web/producer-conversation-ui.test.mjs'
       - 'apps/studio-api/scripted-short-producer-plan.*'
       - 'apps/studio-api/scripted-short-asset-policy.*'
+      - 'apps/studio-api/scripted-short-feedback.*'
       - 'apps/studio-api/factory-producer-feedback.*'
       - 'apps/studio-api/idea-producer-direction.*'
       - 'apps/studio-api/worker-functions-02.mjs'
@@ -46,6 +47,7 @@ jobs:
           node --check apps/studio-web/assets/producer-conversation-ui.js
           node --check apps/studio-api/scripted-short-producer-plan.mjs
           node --check apps/studio-api/scripted-short-asset-policy.mjs
+          node --check apps/studio-api/scripted-short-feedback.mjs
           node --check apps/studio-api/factory-producer-feedback.mjs
           node --check apps/studio-api/idea-producer-direction.mjs
           node --check apps/studio-api/worker-functions-02.mjs
@@ -56,4 +58,4 @@ jobs:
           node --check apps/studio-api/worker.js
           node --check apps/studio-web/assets/factory-desk.js
       - name: Run producer and Factory contracts
-        run: node --test apps/studio-api/producer-conversation.test.mjs apps/studio-web/producer-conversation-ui.test.mjs apps/studio-api/conversational-producer-plan.test.mjs apps/studio-api/scripted-short-producer-plan.test.mjs apps/studio-api/scripted-short-asset-policy.test.mjs apps/studio-api/idea-producer-direction.test.mjs apps/studio-api/idea-producer-direction-contract.test.mjs apps/studio-api/factory-producer-feedback.test.mjs apps/studio-api/factory-producer-media-edits.test.mjs apps/studio-api/factory-producer-render-evidence.test.mjs apps/studio-api/factory-producer-library-append.test.mjs apps/studio-api/factory-producer-workflow.test.mjs apps/studio-api/factory-producer-dispatch.test.mjs apps/studio-api/factory-producer-execution-lock.test.mjs apps/studio-web/factory-review-feedback.test.mjs apps/studio-web/scripted-short-enhancement.test.mjs
+        run: node --test apps/studio-api/producer-conversation.test.mjs apps/studio-web/producer-conversation-ui.test.mjs apps/studio-api/conversational-producer-plan.test.mjs apps/studio-api/scripted-short-producer-plan.test.mjs apps/studio-api/scripted-short-asset-policy.test.mjs apps/studio-api/scripted-short-feedback.test.mjs apps/studio-api/idea-producer-direction.test.mjs apps/studio-api/idea-producer-direction-contract.test.mjs apps/studio-api/factory-producer-feedback.test.mjs apps/studio-api/factory-producer-media-edits.test.mjs apps/studio-api/factory-producer-render-evidence.test.mjs apps/studio-api/factory-producer-library-append.test.mjs apps/studio-api/factory-producer-workflow.test.mjs apps/studio-api/factory-producer-dispatch.test.mjs apps/studio-api/factory-producer-execution-lock.test.mjs apps/studio-web/factory-review-feedback.test.mjs apps/studio-web/scripted-short-enhancement.test.mjs
