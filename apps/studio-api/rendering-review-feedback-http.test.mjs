@@ -158,7 +158,8 @@ test("save-only review comments remain a separate choice from Producer planning 
   const response=await f.send({...data,content:"Use the original frame two photo."},{
     env:producerFlags,review_note_only:true});
   assert.equal(response.ok,true);
-  assert.equal(f.state.state,before.state);
+  assert.equal(before.state,"ready_for_review");
+  assert.equal(f.state.state,"discussing","saved feedback makes V1 discussable, without applying edits");
   assert.equal(f.state.messages.at(-1).role,"user");
   assert.equal(f.state.messages.at(-1).content,"Use the original frame two photo.");
   assert.deepEqual(f.state.attempts,before.attempts);
