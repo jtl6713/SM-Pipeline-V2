@@ -1,0 +1,36 @@
+name: Review Original Narration Reuse CI
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-api/rendering-review-plan-persist.*'
+      - 'apps/studio-api/rendering-review-plan-preflight.*'
+      - 'services/pipeline-runner/rendering_review/one_job.py'
+      - 'services/pipeline-runner/tests/test_rendering_review_original_audio.py'
+      - '.github/workflows/review-original-narration-reuse-ci.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  preserved-audio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install runner dependencies
+        run: pip install -r services/pipeline-runner/requirements.txt
+      - name: Verify server-issued and immutable original-narration flag
+        run: |
+          node --test apps/studio-api/rendering-review-plan-preflight.test.mjs
+          node --test apps/studio-api/rendering-review-plan-persist.test.mjs
+      - name: Verify voiceover reuses real Drive bytes without TTS, upload or rendering
+        env:
+          PYTHONPATH: services/pipeline-runner
+        run: |
+          python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_original_audio.py' -v
+          python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_source_mix.py' -v
