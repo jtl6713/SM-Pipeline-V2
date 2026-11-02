@@ -22,6 +22,7 @@ import { composeRenderingReviewEnrollmentOperations } from "./rendering-review-e
 import { handleReviewProducerProposal, reviewProducerBridgeEnabled } from "./rendering-review-producer-bridge.mjs";
 import { persistReviewProducerCandidate, producerConversationWritesEnabled } from "./rendering-review-producer-persist.mjs";
 import { persistReadyReviewPlan } from "./rendering-review-plan-persist.mjs";
+import { prepareReviewLibraryStills } from "./rendering-review-library-prepare.mjs";
 import { listRecords as reviewListRecords, listRecordsPage as reviewListRecordsPage, resolveAuthorizedContentProfiles as reviewAuthorizedProfiles, studioSupabaseWriteThroughOutput as reviewFactorySyncOutput } from "./worker-functions-01.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { readProducerThread, appendProducerThreadMessage, producerConversationHistory } from "./producer-conversation.mjs";
@@ -2060,6 +2061,55 @@ export default {
         // genuine model replies, through the existing versioned session owner.
         // Explicit human commit of a verified frozen creative plan.
         // Completely OFF until the isolated renderer/outbox consumer exists.
+        // User explicitly requests source-library crop PREPARATION, not a
+        // Producer message, render, approval, schedule, or publication.
+        const prepareLibraryMatch = /^\\/api\\/rendering-review\\/outputs\\/(rec[A-Za-z0-9]{14})\\/prepare-library-stills$/.exec(url.pathname);
+        if(prepareLibraryMatch&&request.method==="POST"){
+          if(!producerConversationWritesEnabled(env))
+            throw new HttpError(405,"Review library preparation is not enabled");
+          assertWriteRequest(request,env);
+          if(!(await reviewAuthorizedProfiles(env,authorization)).some(p=>p.id===CHICAGO_PROFILE_ID))
+            throw new HttpError(403,"Chicago review membership required");
+          if(!/^application\\/json(?:\\s*;|$)/i.test(String(request.headers.get("Content-Type")||"")))
+            throw new HttpError(415,"JSON required");
+          const raw=await request.text();
+          if(raw.length>800)throw new HttpError(413,"Prepare request too large");
+          let body;try{body=JSON.parse(raw)}catch{throw new HttpError(400,"Invalid JSON")}
+          if(!body||Array.isArray(body)||typeof body!=="object"||
+             Object.keys(body).length!==3||
+             Object.keys(body).some(k=>!["intent","expected_version","client_request_id"].includes(k))||
+             body.intent!=="prepare_selected_photos_no_render"||
+             typeof body.client_request_id!=="string"||
+             !/^[A-Za-z0-9_-]{8,120}$/.test(body.client_request_id))
+            throw new HttpError(400,"Explicit photo preparation intent required");
+          let adapter;
+          const authorizeOutput=async outputId=>{
+            const view=await adapter.readOutput(outputId);
+            return view.profile_id===CHICAGO_PROFILE_ID&&
+              view.output_type==="Instagram Reel"&&view.platform==="Instagram";
+          };
+          adapter=makeRenderingReviewAirtableOperations({
+            env,airtableFetch,listRecords:reviewListRecords,readField:f,
+            withOutputApprovalLock,authorizeReview:authorizeOutput,
+            authorizeEvent:async()=>false,
+            revokeScheduleUnderHold:async()=>{throw new HttpError(405,"Schedule changes prohibited");},
+            mutationGate:false,
+          });
+          const result=await prepareReviewLibraryStills({
+            output_id:prepareLibraryMatch[1],
+            expected_version:body.expected_version,operations:adapter,
+            readRecord:(table,id)=>airtableFetch(env,table,id),readField:f,
+            listRecords:(table,params)=>reviewListRecords(env,table,params),
+            createQueue:async fields=>{
+              const result=await airtableFetch(env,"tblBZLXPd1p2NRWRK","",{
+                method:"POST",body:JSON.stringify({records:[{fields}],typecast:false}),
+              });
+              return result.records||[];
+            },
+            withLock:(outputId,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,outputId,fn),
+          });
+          return respond(request,env,result);
+        }
         const commitAttemptMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/commit-attempt$/.exec(url.pathname);
         if (commitAttemptMatch && request.method === "POST") {
           if (!renderAttemptCommitEnabled(env))
