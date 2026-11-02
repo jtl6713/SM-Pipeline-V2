@@ -1141,7 +1141,7 @@ export default {
       // Exact Chicago review writes are authorized again by their protected handlers.
       // The old global Phase-2A allowlist must not reject them before inspection.
       const isChicagoReviewPost = request.method === "POST" &&
-        (/^\/api\/rendering-review\/outputs\/rec[A-Za-z0-9]{14}\/(?:producer-conversation|producer-proposal|commit-attempt|messages|next-revision-feedback|approve|factory-handoff|request-redo)$/.test(url.pathname) ||
+        (/^\/api\/rendering-review\/outputs\/rec[A-Za-z0-9]{14}\/(?:producer-conversation|producer-proposal|commit-attempt|messages|review-feedback|next-revision-feedback|approve|factory-handoff|request-redo)$/.test(url.pathname) ||
          /^\/api\/rendering-review\/factory\/outputs\/rec[A-Za-z0-9]{14}\/request-changes$/.test(url.pathname) ||
          /^\/(?:api\/)?internal\/rendering-review\/(?:claim-render-job|launch-ledger|complete-attempt|qa-audio-rebind|ig-dispatch-claim|factory-handoff)$/.test(url.pathname));
       const allowedMethod =
@@ -2345,12 +2345,13 @@ export default {
           });
           return respond(request, env, result);
         }
-        const feedbackMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/(messages|next-revision-feedback)$/.exec(url.pathname);
+        const feedbackMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/(messages|review-feedback|next-revision-feedback)$/.exec(url.pathname);
         if (feedbackMatch && request.method === "POST") {
           const inFlightOnly=feedbackMatch[2]==="next-revision-feedback";
+          const conversationOnly=feedbackMatch[2]==="review-feedback";
           // This note-only route inherits the existing Producer rollout gates.
           // Legacy /messages retains its independent deny-by-default flags.
-          if (inFlightOnly ? !producerConversationWritesEnabled(env) :
+          if ((inFlightOnly||conversationOnly) ? !producerConversationWritesEnabled(env) :
               !reviewFeedbackWriteEnabled(env))
             throw new HttpError(405, "Rendering Review feedback is not enabled");
           const permitted = (await reviewAuthorizedProfiles(env, authorization))
@@ -2392,6 +2393,7 @@ export default {
           const result = await handleRenderingReviewFeedbackRequest({
             request,env,authorization,output_id:feedbackMatch[1],
             assertWriteRequest,operations,in_flight_only:inFlightOnly,
+            conversation_only:conversationOnly,
           });
           return respond(request,env,result);
         }
