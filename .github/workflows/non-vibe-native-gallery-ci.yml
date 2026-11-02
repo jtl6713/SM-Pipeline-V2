@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'apps/studio-api/rendering-review-gallery-*'
+      - 'apps/studio-api/native-gallery-job-airtable*'
       - 'apps/studio-api/factory-correction-*.mjs'
       - 'apps/studio-web/assets/factory-desk.js'
       - 'apps/studio-web/assets/factory-layout-0680.css'
@@ -40,6 +41,7 @@ jobs:
           node-version: '22'
       - name: Gallery artifact and original source verification
         run: |
+          node --check apps/studio-api/native-gallery-job-airtable.mjs
           node --check apps/studio-api/rendering-review-gallery-artifacts.mjs
           node --check apps/studio-api/rendering-review-gallery-source.mjs
           node --check apps/studio-api/rendering-review-gallery-inventory.mjs
@@ -49,6 +51,7 @@ jobs:
           node --check apps/studio-api/rendering-review-gallery-lifecycle.mjs
           node --check apps/studio-api/rendering-review-gallery-status-http.mjs
           node --check apps/studio-api/factory-correction-branding-preflight.mjs
+          node --test apps/studio-api/native-gallery-job-airtable.test.mjs
           node --test apps/studio-api/rendering-review-gallery-artifacts.test.mjs apps/studio-api/rendering-review-gallery-source.test.mjs apps/studio-api/rendering-review-gallery-inventory.test.mjs apps/studio-api/rendering-review-gallery-inventory-http.test.mjs apps/studio-api/rendering-review-gallery-selection-preview.test.mjs apps/studio-api/rendering-review-gallery-lifecycle.test.mjs apps/studio-api/rendering-review-gallery-status-http.test.mjs apps/studio-api/rendering-review-gallery-byte-preflight.test.mjs apps/studio-api/factory-correction-branding-preflight.test.mjs
 
   factory-selection:
