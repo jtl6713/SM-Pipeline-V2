@@ -571,7 +571,7 @@ test('Rendering Review labels the playing video without unchanged-video explanat
   assert.match(script,/Make edits based on the latest feedback/);
   assert.match(script,/Save comment \(no edits yet\)/);
   assert.match(script,/Suggested morning photo/);
-  assert.match(script,/created\.persisted!==true\|\|created\.render_queued!==false/);
+  assert.match(script,/receipt\.persisted!==true\|\|receipt\.render_queued!==false/);
   assert.doesNotMatch(script,/ORIGINAL V1 — unchanged/);
   assert.doesNotMatch(script,/The video has not changed/);
   assert.doesNotMatch(script,/I haven\\'t changed the video yet/);
@@ -603,7 +603,7 @@ test('held Producer reply shows V2 not started; saved plan and render progress r
     plan,attempts,
   }});
   const fetchStub=async(url,options)=>{
-    if(url==='/api/rendering-review/outputs/'+output+'/next-revision-feedback'){
+    if(url==='/api/rendering-review/outputs/'+output+'/review-feedback'){
       assert.equal(options.method,'POST');
       const body=JSON.parse(options.body);
       assert.match(body.content,/Replace scene 3/);
@@ -680,10 +680,10 @@ test('held Producer reply shows V2 not started; saved plan and render progress r
   assert.ok(!descendants(nodes.rrDetail).some(n=>n.className.includes('rr-progress-stage--attention')));
   assert.ok(!/V2 is ready for review/.test(nodes.rrProgressSummary.textContent));
   const draft=descendants(nodes.rrDetail).find(n=>n.tag==='textarea'&&
-    n.attrs['aria-label']==='Photo and scene suggestions for the next revision');
+    n.attrs['aria-label']==='Creative direction for Producer');
   const saveNote=descendants(nodes.rrDetail).find(n=>n.tag==='button'&&
-    n.textContent==='Save feedback for next revision');
-  assert.ok(draft&&saveNote,'queued render must still accept next-version comments');
+    n.textContent==='Save comment (no edits yet)');
+  assert.ok(draft&&saveNote,'queued render must still accept comments');
   draft.value='Replace scene 3 with another planetarium photo';
   draft.listeners.input();
   await saveNote.listeners.click();
