@@ -48,7 +48,8 @@ function fixture(){
     });
     return handle({request,env:opts.env||flags,authorization:opts.authorization||auth,
       output_id,assertWriteRequest:()=>{writeAuthCalls++;},operations,
-      in_flight_only:opts.in_flight_only===true});
+      in_flight_only:opts.in_flight_only===true,
+      review_note_only:opts.review_note_only===true});
   };
   return {send,writes,setState:fn=>{fn(state);},get state(){return state;},get writeAuthCalls(){return writeAuthCalls;}};
 }
@@ -148,5 +149,31 @@ test("in-flight comments reject completed, unlocked, or stale sessions without w
   assert.deepEqual(f.writes,[]);
   const disabled={...producerFlags};delete disabled.RENDERING_REVIEW_DISPATCH_FENCE_VERIFIED;
   await assert.rejects(()=>f.send(data,{env:disabled,in_flight_only:true}),e=>e.status===405);
+  assert.deepEqual(f.writes,[]);
+});
+
+test("save-only review comments remain a separate choice from Producer planning and rendering",async()=>{
+  const f=fixture();
+  const before=clone(f.state);
+  const response=await f.send({...data,content:"Use the original frame two photo."},{
+    env:producerFlags,review_note_only:true});
+  assert.equal(response.ok,true);
+  assert.equal(before.state,"ready_for_review");
+  assert.equal(f.state.state,"discussing","saved feedback makes V1 discussable, without applying edits");
+  assert.equal(f.state.messages.at(-1).role,"user");
+  assert.equal(f.state.messages.at(-1).content,"Use the original frame two photo.");
+  assert.deepEqual(f.state.attempts,before.attempts);
+  assert.deepEqual(f.state.active_job,before.active_job);
+  assert.equal(f.state.review_hold.active,true);
+  assert.equal(f.state.producer_candidate,undefined);
+  assert.equal(f.state.plan,null);
+});
+test("save-only review comments require an active hold and Producer rollout flags",async()=>{
+  const f=fixture();
+  f.setState(x=>x.review_hold.active=false);
+  await assert.rejects(()=>f.send(data,{env:producerFlags,review_note_only:true}),
+    e=>e.code==="REVIEW_NOTE_NOT_ALLOWED");
+  const disabled={...producerFlags};delete disabled.RENDERING_REVIEW_PRODUCER_WRITES_ENABLED;
+  await assert.rejects(()=>f.send(data,{env:disabled,review_note_only:true}),e=>e.status===405);
   assert.deepEqual(f.writes,[]);
 });

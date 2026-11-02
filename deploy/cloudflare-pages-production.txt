@@ -654,3 +654,4 @@ Deploy Studio UI 0.6.837-pipeline-total-first: Home overview Pipeline Total is f
 Deploy Studio UI 0.6.838: Factory held V2 acceptance button gets full-width third action row and immediate saved receipt confirmation, with publishing hold unchanged. 2026-11-01.
 
 2026-11-01: Release Studio UI 0.6.850-render-queue-recovery. Warn on stalled unclaimed/claimed V2 jobs and preserve explicit human render intent.
+2026-11-01: Deploy Studio UI 0.6.851-explicit-producer-feedback. Keep one persistent Producer comment box after suggested photos in all active held review stages, preserve typed drafts on polling, save comments without planning/renders, show explicit Make edits based on latest feedback button only after saved feedback, and preserve separate authorized render button. Require UI/regression and custom-domain BUILD_ID verification.
