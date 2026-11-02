@@ -80,8 +80,8 @@ export async function decideNativeGalleryCreative({
      fail("GALLERY_CREATIVE_FOREIGN_PROFILE",403);
    const resolved=body.decision==="accept"?"accepted":"rejected";
    const finalState=body.decision==="accept"?"creative_accepted":"rejected";
-   if(j.Creative_Decision||["creative_accepted","rejected"].includes(choice(j.Job_State))){
-     if(j.Creative_Decision===resolved&&
+   if(choice(j.Creative_Decision)||["creative_accepted","rejected"].includes(choice(j.Job_State))){
+     if(choice(j.Creative_Decision)===resolved&&
         j.Creative_Decision_Actor===actor&&
         choice(j.Job_State)===finalState&&
         j.Revised_Manifest_SHA256===body.manifest_sha256)
@@ -121,7 +121,7 @@ export async function decideNativeGalleryCreative({
    });
    const saved=await ops.readJob(job_id);
    if(saved?.id!==job.id||choice(saved.fields?.Job_State)!==finalState||
-      saved.fields.Creative_Decision!==resolved||
+      choice(saved.fields.Creative_Decision)!==resolved||
       saved.fields.Creative_Decision_Actor!==actor||
       saved.fields.Revised_Manifest_SHA256!==body.manifest_sha256||
       saved.fields.Row_Version!==5)
