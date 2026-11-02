@@ -34,6 +34,8 @@ class FakeDrive:
                 "size":len(self.raw),"trashed":False}
     def download_file(self,fid):
         return self.raw,"image/png"
+    def list_file_permissions(self,fid):
+        return getattr(self,"permissions",[{"type":"user","role":"owner"}])
 
 
 def run(raw=None, modify=None, source=None, rights=None):
@@ -86,6 +88,16 @@ class TestStagedRevision(unittest.TestCase):
     def test_missing_watermark_pixels_denied(self,_):
         with self.assertRaisesRegex(RevisedGalleryDenied,"watermark_pixels_missing"):
             run()
+
+    @patch("rendering_review.native_gallery_revised_verify.visible_source_watermark",
+           return_value=True)
+    def test_publicly_shared_staging_media_denied(self,_):
+        with self.assertRaisesRegex(RevisedGalleryDenied,"permissions"):
+            # No staging file can be promoted if it is available to anyone.
+            def bad_drive(*args, **kwargs):
+                return [{"type":"anyone","role":"reader"}]
+            with patch.object(FakeDrive,"list_file_permissions",bad_drive):
+                run()
 
     @patch("rendering_review.native_gallery_revised_verify.visible_source_watermark",
            return_value=True)
