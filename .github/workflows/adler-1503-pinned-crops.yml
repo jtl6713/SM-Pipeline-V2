@@ -25,6 +25,10 @@ jobs:
           import json
           # Scope the existing SMV1 queue to ONLY the already-verified Adler
           # Production Request. This stage prepares still crops, NOT videos.
+          # Reconcile 2026-11-02 current-source crop receipts for Adler 12/13/14.
+          # Older Ready variants reference retired source Drive IDs and cannot
+          # satisfy immutable review-library source binding. Only pending
+          # crops from the same existing request may be processed here.
           script = r'''$ErrorActionPreference="Stop";
           $p=Join-Path (Get-Location) "Services\pipeline-runner\service\.env";
           if(-not (Test-Path $p)){throw "runner_env_absent"};
