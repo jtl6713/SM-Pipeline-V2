@@ -64,8 +64,10 @@ def visible_source_watermark(original: bytes, watermark: bytes) -> bool:
                     r, g, b, alpha = logo_pixels[x, y]
                     if alpha < 248:
                         continue
-                    for nx, ny in ((x - 1, y), (x + 1, y),
-                                   (x, y - 1), (x, y + 1)):
+                    for nx, ny in ((x - 3, y), (x + 3, y),
+                                   (x, y - 3), (x, y + 3)):
+                        if not (0 <= nx < target_width and 0 <= ny < target_height):
+                            continue
                         if logo_pixels[nx, ny][3] > 8:
                             continue
                         edges += 1
