@@ -133,3 +133,20 @@ test("Worker mounts persisted Producer route without any render or approval muta
   assert.match(route,/mutationGate: true/);
   assert.doesNotMatch(route,/graph\.publish\(|approveOutputRecordForPublishing|RELEASE_REVIEW_HOLD|COMMIT_PLAN/);
 });
+
+test("explicit edits reuse already saved reviewer feedback instead of duplicating it",async()=>{
+  const f=fixture();
+  const session=f.session;
+  session.state="discussing";session.version=2;
+  session.messages.push({id:"rrm_saved1234567890",role:"user",content:direction,
+    at:"2026-10-28T13:21:00Z",attempt_id:session.current_attempt_id});
+  f.setSession(session);
+  const result=await f.send({expected_version:2});
+  assert.equal(result.persisted,true);
+  assert.equal(result.render_queued,false);
+  assert.equal(f.session.messages.length,2);
+  assert.deepEqual(f.session.messages.map(x=>x.role),["user","producer"]);
+  assert.equal(f.session.messages[0].content,direction);
+  assert.equal(f.session.review_hold.active,true);
+  assert.equal(f.session.active_job,null);
+});
