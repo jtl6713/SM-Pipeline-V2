@@ -255,3 +255,31 @@ test('unflagged completed outputs never appear in conversational review queue',a
   assert.deepEqual(result.queue,[]);
   assert.equal(result.flags.admission_enabled,false);
 });
+
+
+test('held queued V2 exposes only the exact authoritative job for stall detection',async()=>{
+  const f=fixture();
+  const current=JSON.parse(f.row.fields.Session_JSON);
+  current.state='queued';current.active_job={id:'rrjob_abcdefghijklmnopqrstuvwxyz123456'};
+  f.row.fields.Session_JSON=JSON.stringify(current);
+  const job={id:'rec12345678901234',createdTime:'2026-11-01T20:00:00Z',
+    fields:{Job_ID:current.active_job.id,Session_ID:current.id,
+      Output_Record_ID:outputId,Attempt_ID:current.current_attempt_id,
+      Job_State:'queued',Progress_Stage:'awaiting_isolated_renderer',
+      Progress_Percent:0,Retry_Count:1,Lease_Fence:0}};
+  f.args.operations.listRecords=async(_env,table,opts)=>{
+    if(table==='tblUkZB6SMtf9Ib6I'){
+      assert.equal(opts.limit,2);
+      assert.match(opts.filterFormula,/rrjob_abcdefghijklmnopqrstuvwxyz123456/);
+      return [job];
+    }
+    return [f.row];
+  };
+  const ready=await read(f.args);
+  assert.equal(ready.render_job.verified,true);
+  assert.equal(ready.render_job.dispatch_attempts,1);
+  assert.equal(ready.render_job.state,'queued');
+  assert.equal(ready.render_job.created_at,'2026-11-01T20:00:00Z');
+  job.fields.Output_Record_ID='rec99999999999999';
+  assert.equal((await read(f.args)).render_job.verified,false);
+});
