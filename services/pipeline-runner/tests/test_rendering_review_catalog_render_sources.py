@@ -51,6 +51,7 @@ def fixture():
         "Source_Drive_File_ID":SOURCE_FILE,"Source_Size_Bytes":len(original),
         "Source_Asset_ID":SOURCE_ASSET,"Generated_Media_Asset":[DERIVED_ID],
         "Production_Request_Record_ID":REQUEST_ID,"Drive_File_ID":VARIANT_FILE,
+        "Transfer_ID":"ITEM4-VARIANT-fill-crop-v2-"+REQUEST_ID+"-"+SOURCE_ASSET+"-9x16",
         "Target_File_Name":"Adler-Planetarium-12__9x16__fill-crop-v2.jpg",
         "Preview_URL":URL}
     rows={(MEDIA,MASTER_ID):{"id":MASTER_ID,"fields":source},
@@ -98,6 +99,12 @@ class CatalogRendererBindingTests(unittest.TestCase):
     def test_explicit_graphic_jpeg_preserves_original_media_class(self):
         client,drive,rows,payload,frozen=fixture()
         rows[MEDIA,MASTER_ID]["fields"]["Media_Class"]="Graphic"
+        rows[QUEUE,TRANSFER_ID]["fields"]["Variant_Style"]="graphic_fit"
+        rows[QUEUE,TRANSFER_ID]["fields"]["Transfer_ID"]="ITEM4-VARIANT-graphic-fit-v1-"+REQUEST_ID+"-"+SOURCE_ASSET+"-9x16"
+        rows[QUEUE,TRANSFER_ID]["fields"]["Target_File_Name"]="Adler-Planetarium-5__9x16__graphic-fit-v1.jpg"
+        rows[QUEUE,TRANSFER_ID]["fields"]["Preview_URL"]=URL.replace("fill-crop-v2","graphic-fit-v1")
+        frozen["render_url"]=URL.replace("fill-crop-v2","graphic-fit-v1")
+        frozen["crop_recipe"]="graphic-fit-v1"
         rows[MEDIA,MASTER_ID]["fields"]["MIME_Type"]="image/jpeg"
         source_bytes=image_bytes((800,600),"JPEG")
         payload[SOURCE_FILE]=(source_bytes,"image/jpeg")
