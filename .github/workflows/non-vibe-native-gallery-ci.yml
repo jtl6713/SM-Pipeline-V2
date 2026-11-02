@@ -19,6 +19,9 @@ on:
       - 'services/pipeline-runner/tests/test_native_gallery_source_operations.py'
       - 'services/pipeline-runner/tests/test_native_gallery_review_transition.py'
       - 'services/pipeline-runner/rendering_review/gallery_review_transition.py'
+      - 'services/pipeline-runner/tests/test_native_gallery_authoritative.py'
+      - 'services/pipeline-runner/tests/test_native_gallery_preflight_http.py'
+      - 'services/pipeline-runner/app.py'
       - 'services/pipeline-runner/rendering_review/gallery_source_operations.py'
       - '.github/workflows/non-vibe-native-gallery-ci.yml'
   workflow_dispatch:
@@ -42,10 +45,11 @@ jobs:
           node --check apps/studio-api/rendering-review-gallery-inventory.mjs
           node --check apps/studio-api/rendering-review-gallery-inventory-http.mjs
           node --check apps/studio-api/rendering-review-gallery-selection-preview.mjs
+          node --check apps/studio-api/rendering-review-gallery-byte-preflight.mjs
           node --check apps/studio-api/rendering-review-gallery-lifecycle.mjs
           node --check apps/studio-api/rendering-review-gallery-status-http.mjs
           node --check apps/studio-api/factory-correction-branding-preflight.mjs
-          node --test apps/studio-api/rendering-review-gallery-artifacts.test.mjs apps/studio-api/rendering-review-gallery-source.test.mjs apps/studio-api/rendering-review-gallery-inventory.test.mjs apps/studio-api/rendering-review-gallery-inventory-http.test.mjs apps/studio-api/rendering-review-gallery-selection-preview.test.mjs apps/studio-api/rendering-review-gallery-lifecycle.test.mjs apps/studio-api/rendering-review-gallery-status-http.test.mjs apps/studio-api/factory-correction-branding-preflight.test.mjs
+          node --test apps/studio-api/rendering-review-gallery-artifacts.test.mjs apps/studio-api/rendering-review-gallery-source.test.mjs apps/studio-api/rendering-review-gallery-inventory.test.mjs apps/studio-api/rendering-review-gallery-inventory-http.test.mjs apps/studio-api/rendering-review-gallery-selection-preview.test.mjs apps/studio-api/rendering-review-gallery-lifecycle.test.mjs apps/studio-api/rendering-review-gallery-status-http.test.mjs apps/studio-api/rendering-review-gallery-byte-preflight.test.mjs apps/studio-api/factory-correction-branding-preflight.test.mjs
 
   factory-selection:
     runs-on: ubuntu-latest
@@ -82,3 +86,5 @@ jobs:
           python -m unittest discover -s services/pipeline-runner/tests -p 'test_native_gallery_source_verification.py' -v
           python -m unittest discover -s services/pipeline-runner/tests -p 'test_native_gallery_source_operations.py' -v
           python -m unittest discover -s services/pipeline-runner/tests -p 'test_native_gallery_review_transition.py' -v
+          python -m unittest discover -s services/pipeline-runner/tests -p 'test_native_gallery_authoritative.py' -v
+          python -m unittest discover -s services/pipeline-runner/tests -p 'test_native_gallery_preflight_http.py' -v
