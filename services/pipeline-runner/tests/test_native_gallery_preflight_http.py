@@ -21,6 +21,7 @@ def success(**kwargs):
         sources_byte_verified=True, source_rights_verified=True,
         shared_watermark_asset_verified=True,
         original_artifacts_sha256="a"*64,
+        original_artifact_watermark_verified=False,
         can_generate=False, publication_authorized=False,
         blockers=["GALLERY_ORIGINAL_BRANDING_PLACEMENT_NOT_VERIFIED"],
     )
