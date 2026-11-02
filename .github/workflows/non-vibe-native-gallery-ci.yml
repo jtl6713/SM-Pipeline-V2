@@ -42,8 +42,9 @@ jobs:
           node --check apps/studio-api/rendering-review-gallery-inventory.mjs
           node --check apps/studio-api/rendering-review-gallery-inventory-http.mjs
           node --check apps/studio-api/rendering-review-gallery-selection-preview.mjs
+          node --check apps/studio-api/rendering-review-gallery-lifecycle.mjs
           node --check apps/studio-api/factory-correction-branding-preflight.mjs
-          node --test apps/studio-api/rendering-review-gallery-artifacts.test.mjs apps/studio-api/rendering-review-gallery-source.test.mjs apps/studio-api/rendering-review-gallery-inventory.test.mjs apps/studio-api/rendering-review-gallery-inventory-http.test.mjs apps/studio-api/rendering-review-gallery-selection-preview.test.mjs apps/studio-api/factory-correction-branding-preflight.test.mjs
+          node --test apps/studio-api/rendering-review-gallery-artifacts.test.mjs apps/studio-api/rendering-review-gallery-source.test.mjs apps/studio-api/rendering-review-gallery-inventory.test.mjs apps/studio-api/rendering-review-gallery-inventory-http.test.mjs apps/studio-api/rendering-review-gallery-selection-preview.test.mjs apps/studio-api/rendering-review-gallery-lifecycle.test.mjs apps/studio-api/factory-correction-branding-preflight.test.mjs
 
   factory-selection:
     runs-on: ubuntu-latest
