@@ -6,3 +6,5 @@ Deploy pipeline-runner rendering-review source reuse correction: watermark_verif
 2026-11-01: Deploy guarded review auto-dispatch Runner 2026-11-02-review-auto-dispatch-v1 after PR #1496. Runtime opt-in flag remains false until separate verified Ops activation; no renders or publication by deploy.
 
 2026-11-02: Release guarded Rendering Review Asset Manager source-to-crop provenance on Runner. Independently recheck canonical Chicago Media Asset, source Drive file, exact completed 9:16 variant transfer, derived Drive bytes and identical R2 preview before any render job claim. No manual reupload, no original V2 changes, no auto V3 render or publish. PR #1504; validate runner code version and auth-gated review endpoints.
+
+2026-11-02: Runner v2 staged #1503: verify explicitly selected raster Graphic JPEG's original class, require decoded source and completed 1080x1920 Drive crop, exact immutable transfer ID and byte-identical preview before any held V3 render claim. Preserve original Chicago output #9664 V2 and all publication holds. No V3 run is authorized by deployment.
