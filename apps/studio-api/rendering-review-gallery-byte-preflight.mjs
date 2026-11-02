@@ -59,6 +59,7 @@ export async function verifyGallerySourceBytes({
     payload.sources_byte_verified!==true||
     payload.source_rights_verified!==true||
     payload.shared_watermark_asset_verified!==true||
+    typeof payload.original_artifact_watermark_verified!=="boolean"||
     payload.can_generate!==false||
     payload.can_approve!==false||
     payload.publication_authorized!==false||
@@ -70,7 +71,7 @@ export async function verifyGallerySourceBytes({
    slide_count:payload.slide_count,aspect_ratio:payload.aspect_ratio,
    sources_byte_verified:true,source_rights_verified:true,
    shared_watermark_asset_verified:true,
-   original_artifact_watermark_verified:false,
+   original_artifact_watermark_verified:payload.original_artifact_watermark_verified,
    original_artifacts_sha256:payload.original_artifacts_sha256,
    can_generate:false,can_approve:false,publication_authorized:false,
    blockers:payload.blockers};
