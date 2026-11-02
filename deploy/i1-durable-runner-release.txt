@@ -4,3 +4,5 @@ Deploy pipeline-runner rendering-review source reuse correction: watermark_verif
 2026-11-01 Runner v2plus-no-watermark-verification-v2: V2+ watermark optional in isolated render, visual verification not required, V1 untouched.
 
 2026-11-01: Deploy guarded review auto-dispatch Runner 2026-11-02-review-auto-dispatch-v1 after PR #1496. Runtime opt-in flag remains false until separate verified Ops activation; no renders or publication by deploy.
+
+2026-11-02: Release guarded Rendering Review Asset Manager source-to-crop provenance on Runner. Independently recheck canonical Chicago Media Asset, source Drive file, exact completed 9:16 variant transfer, derived Drive bytes and identical R2 preview before any render job claim. No manual reupload, no original V2 changes, no auto V3 render or publish. PR #1504; validate runner code version and auth-gated review endpoints.
