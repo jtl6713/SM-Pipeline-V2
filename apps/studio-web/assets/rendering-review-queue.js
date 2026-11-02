@@ -290,6 +290,13 @@
     // job is still processing. Gated/unavailable actions are never invented.
     const canReply=!!producer&&saved?.flags?.producer_conversation_enabled===true&&
       ['discussing','awaiting_assets'].includes(session?.state);
+    const producerIndex=messages.map(m=>m.role).lastIndexOf('producer');
+    const hasSavedFeedback=messages.slice(producerIndex+1).some(m=>m.role==='user');
+    const canRequestEdits=hasSavedFeedback&&
+      saved?.flags?.producer_conversation_enabled===true&&
+      saved?.publication_hold_verified===true&&session?.review_hold?.active===true&&
+      ['ready_for_review','discussing','awaiting_assets','plan_ready','revision_failed']
+        .includes(session?.state);
     const canRender=planReady&&!!session?.plan?.immutable_manifest&&
       session?.review_hold?.active===true&&saved?.publication_hold_verified===true&&
       saved?.flags?.attempt_commit_enabled===true&&
@@ -299,8 +306,8 @@
       saved?.flags?.creative_approval_enabled===true&&
       saved?.publication_hold_verified===true&&
       current?.status==='ready_for_review'&&!!attemptMedia(current,entry);
-    const requiresInput=(stage===1&&canReply)||(stage===2&&canRender)||
-      (stage===5&&canApprove);
+    const requiresInput=canRequestEdits||(stage===1&&canReply)||
+      (stage===2&&canRender)||(stage===5&&canApprove);
     const steps=['Feedback received','Producer review','Plan ready',
       'Rendering','Quality check','Ready for review'];
     const rail=elem('ol',null,'rr-progress-stages');
@@ -339,7 +346,9 @@
       producer?(canReply?
         'Requires your attention: Producer replied, but V2 has NOT started. Review the proposed changes and reply with your direction. No render-ready plan or V2 job exists.':
         'Producer replied, but V2 has NOT started. No verified render-ready plan or V2 render job exists. Continue the conversation to resolve remaining requirements.'):
-      messages.length?'Feedback was saved. No verified Producer reply or V2 job yet.':
+      messages.length?(canRequestEdits?
+        'Requires your attention: Your feedback is saved. Select Make edits based on the latest feedback to ask Producer to prepare changes. No render has started.':
+        'Feedback was saved. No verified Producer reply or V2 job yet.'):
       'Review is held. No Producer activity or V2 render job is verified.';
     activity.append(heading,elem('p',summary,'rr-progress-summary'),rail);
     const checked=elem('p','Verified from the saved review session · '+chicagoTime(new Date().toISOString())+
