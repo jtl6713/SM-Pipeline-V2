@@ -26,29 +26,41 @@ def _clean_name(value):
     return name
 
 
-def requested_library_names(messages):
-    """Extract explicit batch labels, newest user turns first; never use model replies.
+def latest_explicit_photo_list(messages):
+    """Newest complete named-photo selection, not a union of superseded turns.
 
-    Covers separate lines ("Adler Planetarium 12") and comma-number sequences
-    ("Adler Planetarium 3, 5, 12"). Does not infer a name from a fuzzy request.
+    A later user's explicit list replaces earlier lists. Incidental references
+    to removed photos in prose cannot reintroduce them into a V3 proposal.
+    Only human messages participate; no model text is allowed here.
     """
-    found, seen = [], set()
-
-    def add(value):
-        name = _clean_name(value)
-        key = name.casefold()
-        if name and key not in seen and len(found) < MAX_REQUESTED_NAMES:
-            seen.add(key)
-            found.append(name)
-
-    for message in reversed(messages[-30:] if isinstance(messages, list) else []):
+    if not isinstance(messages, list):
+        return []
+    for message in reversed(messages[-30:]):
         if not isinstance(message, dict) or message.get("role") != "user":
             continue
         content = str(message.get("content") or "")[:3000]
+        current, seen = [], set()
+        unmarked, unmarked_seen = [], set()
+
+        def add(value):
+            name = _clean_name(value)
+            key = name.casefold()
+            if name and key not in seen and len(current) < MAX_REQUESTED_NAMES:
+                current.append(name)
+                seen.add(key)
+
         for line in content.splitlines():
-            stripped = line.strip().lstrip("-*\u2022 ").strip()
-            # One exact asset title per line is the safest human instruction.
-            add(stripped)
+            stripped = line.strip()
+            # A marked list has higher authority than incidental names in prose.
+            if stripped.startswith(("-", "*", "\u2022")):
+                add(stripped.lstrip("-*\u2022 ").strip())
+            else:
+                # Historic saved reviews sometimes use one unmarked title per
+                # line. Accept a complete multi-line list, never a prose mention.
+                bare = _clean_name(stripped)
+                if bare and bare.casefold() not in unmarked_seen:
+                    unmarked_seen.add(bare.casefold())
+                    unmarked.append(bare)
             for match in _BATCH.finditer(line):
                 base = match.group("base").strip().split()
                 while len(base) > 2 and base[0] in _LEADING_INSTRUCTION:
@@ -56,9 +68,23 @@ def requested_library_names(messages):
                 stem = " ".join(base)
                 for number in [match.group("first"), *re.findall(r"\d{1,3}", match.group("tail"))]:
                     add(f"{stem} {number}")
-        if len(found) >= MAX_REQUESTED_NAMES:
-            break
-    return found
+        if len(current) >= 2:
+            return current
+        if len(unmarked) >= 2:
+            return unmarked[:MAX_REQUESTED_NAMES]
+    return []
+
+
+def requested_library_names(messages):
+    """Discover the current requested list without resurrecting deleted images.
+
+    A complete newer selection is authoritative for discovery. A single-name
+    casual remark is not a replacement for an earlier multi-image selection.
+    """
+    explicit = latest_explicit_photo_list(messages)
+    if explicit:
+        return explicit
+    return []
 
 
 def exact_library_name_formula(names):

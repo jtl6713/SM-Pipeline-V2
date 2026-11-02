@@ -806,11 +806,18 @@
             if(receipt.persisted!==true||receipt.render_queued!==false)
               throw new Error('Producer edit request was not verified.');
             state.producerApplyKeys.delete(identity);
-            state.lastReplyNotice={outputId:entry.output_id,message:
-              receipt.plan_ready&&receipt.plan_persisted?
-                'Producer edits were prepared. Review the changes; a separate Make revised video action is required to render.':
-                'Producer replied to your saved comments. Continue the conversation or review the remaining requirements. No render started.'};
-            say('Producer edits prepared; no render authorized.');
+            const planSaved=receipt.plan_ready===true&&receipt.plan_persisted===true;
+            const blockers=Array.isArray(receipt.plan_blockers)?
+              receipt.plan_blockers.filter(x=>x&&typeof x.description==='string')
+                .slice(0,3).map(x=>x.description.slice(0,220)).join('; '):'';
+            state.lastReplyNotice={outputId:entry.output_id,message:planSaved?
+              'Verified revision plan saved. Review its changes; Make revised video is a separate action. No render started.':
+              'Producer proposal saved, but the revision plan is NOT ready for rendering. '+
+                (blockers?'Unresolved checks: '+blockers+'. ':
+                  'Review the proposed changes and required verification. ')+
+                'No render was started.'};
+            say(planSaved?'Verified plan saved; no render authorized.':
+              'Proposal saved, but render plan is not ready. No render started.',!planSaved);
             await open(entry);
           }catch(error){
             feedback.dataset.state='error';
