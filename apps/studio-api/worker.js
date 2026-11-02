@@ -2903,7 +2903,7 @@ export default {
           readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
           listRecords:(table,params)=>reviewListRecords(env,table,params),
         });
-        return respond(request,env,{...status,private_preview_available:env.NATIVE_GALLERY_PRIVATE_PREVIEW_ENABLED==="true"});
+        return respond(request,env,{...status,private_preview_available:env.NATIVE_GALLERY_PRIVATE_PREVIEW_ENABLED==="true",creative_review_available:nativeGalleryCreativeReviewEnabled(env)});
       }
 
       // Preview original gallery/source metadata only. This is deliberately
