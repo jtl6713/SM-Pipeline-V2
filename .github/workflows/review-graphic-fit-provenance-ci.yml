@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install Runner test requirements
-        run: pip install -r services/pipeline-runner/requirements.txt
+        run: pip install -r services/pipeline-runner/requirements.txt pytest
       - name: Verify exact Worker catalog and queue tests
         run: |
           node --test apps/studio-api/rendering-review-catalog-assets.test.mjs
