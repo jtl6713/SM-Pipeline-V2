@@ -68,7 +68,7 @@ export async function claimNativeGalleryJob({
       !SHA.test(str(j.Original_Manifest_SHA256))||
       !SHA.test(str(j.Plan_SHA256))||
       !SHA.test(str(j.Request_Fingerprint))||
-      j.Client_Request_ID===undefined||
+      !TOKEN.test(str(j.Client_Request_ID))||
       !TOKEN.test(str(j.Hold_ID))||!TOKEN.test(str(j.Hold_Owner))||
       !Number.isSafeInteger(j.Row_Version)||j.Row_Version<1||
       !Number.isSafeInteger(j.Lease_Fence)||j.Lease_Fence<0)
@@ -84,6 +84,7 @@ export async function claimNativeGalleryJob({
       f.Publish_Locked_By||f.Platform_Media_ID||f.Platform_Post_ID||
       f.Scheduled_Post_Date||f.Studio_Scheduled_At||
       f.YouTube_Scheduled_Publish_At||
+      !/(image|photo|carousel|gallery|picture)/i.test(state(f.Platform_Output_Type))||
       /^(published|publishing|dispatched)$/i.test(state(f.Publish_Status)))
      fail("GALLERY_CLAIM_PUBLICATION_HOLD_CHANGED");
    const content=await operations.readContent(j.Content_Item_Record_ID);
@@ -97,7 +98,8 @@ export async function claimNativeGalleryJob({
      plan=JSON.parse(j.Plan_JSON);
      history=JSON.parse(j.Event_History_JSON);
    }catch{fail("GALLERY_CLAIM_LEDGER_INVALID",503);}
-   if(!plan||plan.output_id!==body.output_id||
+   if(!plan||await digest(JSON.stringify(plan))!==j.Plan_SHA256||
+      plan.output_id!==body.output_id||
       plan.content_item_id!==j.Content_Item_Record_ID||
       plan.profile_id!==j.Profile_Record_ID||
       plan.original_manifest_sha256!==j.Original_Manifest_SHA256||
@@ -105,19 +107,24 @@ export async function claimNativeGalleryJob({
       plan.mutate_original_production_request!==false||
       plan.mutate_sibling_outputs!==false||
       plan.human_intent!=="explicit_button"||
-      !Array.isArray(history)||history.length!==1||
+      !Array.isArray(history)||history.length<1||history.length>2||
       history[0]?.event!=="native_gallery_job_created"||
       history[0]?.fingerprint!==j.Request_Fingerprint||
       history[0]?.publication_authorized!==false)
      fail("GALLERY_CLAIM_PLAN_NOT_VERIFIED");
    if(state(j.Job_State)==="claimed"){
-     if(j.Lease_Owner!==owner||j.Lease_Fence<1)
+     if(history.length!==2||
+        history[1]?.event!=="native_gallery_job_claimed"||
+        history[1]?.lease_owner!==owner||
+        history[1]?.lease_fence!==j.Lease_Fence||
+        history[1]?.publication_authorized!==false||
+        j.Lease_Owner!==owner||j.Lease_Fence<1)
        fail("GALLERY_JOB_ALREADY_CLAIMED");
      return {ok:true,replay:true,output_id:body.output_id,
        job_id:body.job_id,lease_owner:owner,lease_fence:j.Lease_Fence,
        lease_verified:true,render_started:false,publication_authorized:false};
    }
-   if(state(j.Job_State)!=="held_queued"||str(j.Lease_Owner)||
+   if(history.length!==1||state(j.Job_State)!=="held_queued"||str(j.Lease_Owner)||
       j.Lease_Fence!==0||j.Row_Version!==1)
      fail("GALLERY_JOB_NOT_CLAIMABLE");
    const stamp=now();
