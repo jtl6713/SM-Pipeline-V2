@@ -135,3 +135,79 @@ def test_ig_saved_container_must_reconcile_not_recreate():
     assert result["remote_identity_saved"] is True
     assert result["action"] == "verify_existing_provider_post"
     assert result["auto_repair_safe"] is False
+
+
+def test_ig_guarded_recovery_never_mutates_with_live_or_unknown_runner():
+    from quality_agent.signatures import reconcile_ig_stale_upload
+    events = []
+    mutation = []
+    row = _ig_row()
+    for probe in ({"verified": False}, {"verified": True, "active": True,
+                                        "owner_fenceable": True}):
+        result = reconcile_ig_stale_upload(
+            row, now_utc=_NOW, read_authoritative=lambda _: row,
+            inspect_runner=lambda _: probe,
+            inspect_provider=lambda _: (_ for _ in ()).throw(AssertionError("no provider")),
+            append_audit=events.append,
+            recover_under_fence=lambda *_a, **_k: mutation.append(1),
+        )
+        assert result["outcome"] == "blocked"
+    assert mutation == []
+
+
+def test_ig_guarded_recovery_requires_verified_provider_absence():
+    from quality_agent.signatures import reconcile_ig_stale_upload
+    row = _ig_row()
+    logs = []
+    results = []
+    runner = lambda _: {"verified": True, "active": False, "owner_fenceable": True}
+    for state in ("published", "processing", "ambiguous", "missing"):
+        event = reconcile_ig_stale_upload(
+            row, now_utc=_NOW, read_authoritative=lambda _: row,
+            inspect_runner=runner,
+            inspect_provider=lambda _, state=state: {"verified": True, "state": state},
+            append_audit=logs.append,
+            recover_under_fence=lambda *_a, **_k: results.append(1),
+        )
+        assert event["outcome"] == "blocked"
+    assert results == []
+
+
+def test_ig_guarded_recovery_audits_and_confirms_atomic_reservation():
+    from quality_agent.signatures import reconcile_ig_stale_upload
+    row = _ig_row()
+    events = []
+    calls = []
+    event = reconcile_ig_stale_upload(
+        row, now_utc=_NOW, read_authoritative=lambda _: row,
+        inspect_runner=lambda _: {"verified": True, "active": False,
+                                  "owner_fenceable": True},
+        inspect_provider=lambda _: {"verified": True,
+                                    "state": "conclusively_absent",
+                                    "identity_match": True},
+        append_audit=events.append,
+        recover_under_fence=lambda *_a, **kw: (
+            calls.append(kw) or {"committed": True, "reservation_id": "r1",
+                                 "scheduled_at": "2026-12-01T11:30:00Z"}),
+    )
+    assert event["outcome"] == "rescheduled"
+    assert [e["outcome"] for e in events] == ["authorized_intent", "rescheduled"]
+    assert calls[0]["audit_intent"]["duplicate_possible"] is True
+
+
+def test_ig_guarded_recovery_audit_failure_prevents_mutation():
+    from quality_agent.signatures import reconcile_ig_stale_upload
+    import pytest
+    row = _ig_row()
+    with pytest.raises(OSError):
+        reconcile_ig_stale_upload(
+            row, now_utc=_NOW, read_authoritative=lambda _: row,
+            inspect_runner=lambda _: {"verified": True, "active": False,
+                                      "owner_fenceable": True},
+            inspect_provider=lambda _: {"verified": True,
+                                        "state": "conclusively_absent",
+                                        "identity_match": True},
+            append_audit=lambda _: (_ for _ in ()).throw(OSError("audit unavailable")),
+            recover_under_fence=lambda *_a, **_k: (_ for _ in ()).throw(
+                AssertionError("should not mutate")),
+        )
