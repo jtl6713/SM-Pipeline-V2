@@ -14,6 +14,7 @@ on:
       - 'services/pipeline-runner/rendering_review/profile_watermark.py'
       - 'services/pipeline-runner/tests/test_rendering_review_gallery_*'
       - 'services/pipeline-runner/tests/test_rendering_review_profile_watermark.py'
+      - 'services/pipeline-runner/tests/test_native_gallery_shared_watermark.py'
       - '.github/workflows/non-vibe-native-gallery-ci.yml'
   workflow_dispatch:
 
@@ -70,3 +71,4 @@ jobs:
           python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_gallery_attempt.py' -v
           python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_gallery_media_io.py' -v
           python -m unittest discover -s services/pipeline-runner/tests -p 'test_rendering_review_profile_watermark.py' -v
+          python -m unittest discover -s services/pipeline-runner/tests -p 'test_native_gallery_shared_watermark.py' -v
