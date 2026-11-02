@@ -1,0 +1,39 @@
+name: Airtable Exact 429 Reconciliation CI
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-api/profile-summary-do.mjs'
+      - 'apps/studio-api/airtable-egress-exact-429.test.mjs'
+      - 'services/pipeline-runner/airtable/egress_monitor.py'
+      - 'services/pipeline-runner/tests/test_airtable_durable_egress.py'
+      - 'services/pipeline-runner/tests/test_airtable_egress_monitor.py'
+      - 'repair/scripts/airtable_hourly_rollup.py'
+      - 'repair/scripts/airtable_hourly_rollup_test.py'
+      - '.github/workflows/airtable-exact-429-reconciliation-ci.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  exact-429-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install required Python test dependency
+        run: pip install requests python-dotenv
+      - name: Worker exact status class and immutable counter test
+        run: node --test apps/studio-api/airtable-egress-exact-429.test.mjs
+      - name: Read-only rollup safety and historical class accounting
+        run: python -m unittest discover -s repair/scripts -p 'airtable_hourly_rollup_test.py' -v
+      - name: Runner persisted SQLite and source monitor regressions
+        env:
+          PYTHONPATH: services/pipeline-runner
+        run: |
+          python -m unittest discover -s services/pipeline-runner/tests -p 'test_airtable_durable_egress.py' -v
+          python -m unittest discover -s services/pipeline-runner/tests -p 'test_airtable_egress_monitor.py' -v

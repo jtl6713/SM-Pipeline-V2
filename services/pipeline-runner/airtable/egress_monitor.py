@@ -35,7 +35,7 @@ def persist_airtable_egress(method: str, status: int, at=None) -> bool:
             db.execute("PRAGMA busy_timeout=3000")
             db.execute("CREATE TABLE IF NOT EXISTS hourly (hour_utc TEXT NOT NULL, source TEXT NOT NULL, method TEXT NOT NULL, status_class TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(hour_utc,source,method,status_class))")
             hour = at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:00:00Z")
-            cls = str(status // 100) + "xx" if status else "network"
+            cls = "429" if status == 429 else (str(status // 100) + "xx" if status else "network")
             db.execute("INSERT INTO hourly (hour_utc,source,method,status_class,attempts) VALUES (?,?,?,?,1) ON CONFLICT(hour_utc,source,method,status_class) DO UPDATE SET attempts=attempts+1",
                        (hour, "pipeline_runner_http", method.upper(), cls))
         return True
