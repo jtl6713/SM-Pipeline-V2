@@ -29,10 +29,16 @@ test("UI uses read-only exact server endpoints, never selects siblings or enable
  assert.match(body,/Promise\.all\(\[readMatches\(\),readGallery\(\)\]\)/);
  assert.match(body,/inventory\?\.can_generate!==false/);
  assert.match(body,/inventory\?\.publication_authorized!==false/);
- assert.doesNotMatch(body,/method:\s*["']POST["']/);
+ assert.match(body,/\/gallery-selection-preview/);
+ assert.match(body,/method:"POST"/);
+ assert.match(body,/proposal\.can_generate!==false/);
+ assert.match(body,/proposal\.publication_authorized!==false/);
  assert.doesNotMatch(body,/mutateDesk|selected_output_ids|render_this_plan|publishNow/);
  assert.match(body,/document\.createElement\("li"\)/);
  assert.doesNotMatch(body,/innerHTML/);
+ assert.match(body,/factory-gallery-select-slide/);
+ assert.match(body,/factory-gallery-slide-instruction/);
+ assert.match(body,/Validate selected photo changes \(no render\)/);
 });
 test("Factory module and styles are cache-busted without changing the release build",()=>{
  assert.match(html,/factory-desk\.js\?v=0\.6\.\d+-[^"\s]*gallery_inventory=read_only_v1/);
