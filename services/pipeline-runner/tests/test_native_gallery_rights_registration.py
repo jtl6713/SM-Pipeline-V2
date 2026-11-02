@@ -64,7 +64,7 @@ def register(client=None, drive=None, clearance=approved):
 
 
 class RightsTests(unittest.TestCase):
-    @patch("rendering_review.native_gallery_rights_registration.matching_owned_media",
+    @patch("rendering_review.native_gallery_rights_registration.matching_staged_native_media",
            return_value=RID)
     @patch("rendering_review.native_gallery_rights_registration.actual_image",
            return_value=({"mime_type": "image/png", "sha256": SHA,
@@ -78,6 +78,8 @@ class RightsTests(unittest.TestCase):
         self.assertEqual(client.fields["Content_Profile"], [P])
         self.assertEqual(client.fields["Google Drive File ID"], D)
         self.assertEqual(client.fields["Rights_Status"], "Owned")
+        self.assertFalse(client.fields["Active"])
+        self.assertTrue(client.fields["Do_Not_Use"])
         self.assertNotIn("Google Drive URL", client.fields)
 
     @patch("rendering_review.native_gallery_rights_registration.actual_image",
