@@ -55,6 +55,18 @@ class OriginalVoiceoverTests(unittest.TestCase):
         self.assertEqual(drive.uploads,[])
         self.assertEqual(drive.shares,[])
 
+    def test_original_adler_id_first_audio_url_is_reused_without_tts(self):
+        drive=Drive()
+        original={"voiceoverText":SCRIPT,
+                  "voiceover":{"url":"https://drive.google.com/uc?id="+FILE+"&export=download"}}
+        with patch("rendering_review.one_job.synthesize_voiceover_by_id",
+                   side_effect=AssertionError("TTS forbidden")), \
+             patch("rendering_review.one_job.probe_audio_duration_bytes",return_value=11.8):
+            result=_voiceover(None,drive,{},plan(),CLAIM,original_props=original)
+        self.assertTrue(result["source_audio_reused"])
+        self.assertEqual(result["audio_url"],original["voiceover"]["url"])
+        self.assertEqual(drive.uploads,[])
+
     def test_untrusted_source_text_and_links_fail_without_tts_fallback(self):
         for changed in [
             {"voiceoverText":"Changed narration"},
@@ -63,7 +75,7 @@ class OriginalVoiceoverTests(unittest.TestCase):
             {"voiceover":{"url":URL+"&unsafe=1"}},
             {"voiceover":{"url":URL+"#fragment"}},
             {"voiceover":{"url":"http://drive.google.com/uc?export=download&id="+FILE}},
-            {"voiceover":{"url":"https://drive.google.com/uc?id="+FILE+"&export=download"}},
+            {"voiceover":{"url":"https://drive.google.com/uc?id="+FILE+"&export=download&x=1"}},
         ]:
             props={**self.props(),**changed}
             drive=Drive()
