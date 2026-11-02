@@ -1488,15 +1488,15 @@
           if(revision?.ok!==true||revision.output_id!==id||
              revision.profile_id!==inventory.profile_id||
              revision.can_generate!==false||revision.can_publish!==false||
-             !Array.isArray(revision.attempts))
+             !Array.isArray(revision.jobs))
             throw new Error("Gallery history authority mismatch");
           const history=document.createElement("li");
-          history.textContent=revision.attempts.length?
-            "Gallery attempt history: "+revision.attempts.slice(0,10)
+          history.textContent=revision.jobs.length?
+            "Gallery job history: "+revision.jobs.slice(0,10)
               .map(item=>String(item.status||"unknown")+" ("+
-                String(item.attempt_id||"unknown")+")").join("; ")+
+                String(item.job_id||"unknown")+")").join("; ")+
               ". Revised artifacts are not verified for acceptance.":
-            "Gallery attempt history: no verified revision attempts available.";
+            "Gallery job history: no native-gallery revision jobs recorded.";
           rows.appendChild(history);
         }catch(error){
           if(current()){
