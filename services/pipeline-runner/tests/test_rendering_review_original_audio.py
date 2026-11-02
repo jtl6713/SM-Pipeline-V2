@@ -45,7 +45,7 @@ class OriginalVoiceoverTests(unittest.TestCase):
     def test_visual_only_reuses_identical_source_audio_without_tts_or_write(self):
         drive=Drive()
         with patch("rendering_review.one_job.synthesize_voiceover_by_id",
-                   side_effect=AssertionError("TTS forbidden")), \\
+                   side_effect=AssertionError("TTS forbidden")), \
              patch("rendering_review.one_job.probe_audio_duration_bytes",return_value=11.8):
             proof=_voiceover(None,drive,{},plan(),CLAIM,original_props=self.props())
         self.assertTrue(proof["source_audio_reused"])
@@ -98,9 +98,9 @@ class OriginalVoiceoverTests(unittest.TestCase):
 
     def test_changed_script_keeps_original_tts_path(self):
         drive=Drive()
-        with patch("rendering_review.one_job.resolve_content_voice_id",return_value="voice-id"), \\
-             patch("rendering_review.one_job.synthesize_voiceover_by_id",return_value=b"new audio") as synth, \\
-             patch("rendering_review.one_job.normalize_voiceover",return_value=(None,b"new-mp3")), \\
+        with patch("rendering_review.one_job.resolve_content_voice_id",return_value="voice-id"), \
+             patch("rendering_review.one_job.synthesize_voiceover_by_id",return_value=b"new audio") as synth, \
+             patch("rendering_review.one_job.normalize_voiceover",return_value=(None,b"new-mp3")), \
              patch("rendering_review.one_job.probe_audio_duration_bytes",return_value=12.0):
             proof=_voiceover(None,drive,{},plan(reuse=False),CLAIM,original_props=self.props())
         synth.assert_called_once()
