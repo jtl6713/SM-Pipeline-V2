@@ -202,7 +202,7 @@ export async function inspectReviewPlan({
   const preserveOriginalAudio=
     typeof source.original_voiceover_text==="string"&&
     source.original_voiceover_text===c.narration&&
-    /^https:\/\/drive\.google\.com\/uc\?export=download&id=[A-Za-z0-9_-]{8,120}$/
+    /^https:\/\/drive\.google\.com\/uc\?(?:export=download&id=[A-Za-z0-9_-]{8,120}|id=[A-Za-z0-9_-]{8,120}&export=download)$/
       .test(String(source.original_voiceover_url||""));
   const plan={
     plan_version:Number(session.latest_plan_version||0)+1,
