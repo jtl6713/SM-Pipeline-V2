@@ -49,6 +49,7 @@ on:
       - 'services/pipeline-runner/rendering_review/native_gallery_rights_policy.py'
       - 'services/pipeline-runner/tests/test_native_gallery_execute_http.py'
       - 'services/pipeline-runner/tests/test_native_gallery_rights_registration.py'
+      - 'services/pipeline-runner/tests/test_native_gallery_rights_policy.py'
       - 'services/pipeline-runner/tests/test_native_gallery_c5c6_executor.py'
       - 'services/pipeline-runner/rendering_review/gallery_source_operations.py'
       - '.github/workflows/non-vibe-native-gallery-ci.yml'
@@ -137,5 +138,6 @@ jobs:
           python -m unittest discover -s services/pipeline-runner/tests -p 'test_native_gallery_revised_http.py' -v
           python -m unittest discover -s services/pipeline-runner/tests -p 'test_native_gallery_preview_http.py' -v
           python -m unittest discover -s services/pipeline-runner/tests -p 'test_native_gallery_rights_registration.py' -v
+          python -m unittest discover -s services/pipeline-runner/tests -p 'test_native_gallery_rights_policy.py' -v
           python -m unittest discover -s services/pipeline-runner/tests -p 'test_native_gallery_execute_http.py' -v
           python -m unittest discover -s services/pipeline-runner/tests -p 'test_native_gallery_c5c6_executor.py' -v
