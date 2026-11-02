@@ -1643,22 +1643,22 @@
       const instruction=String(li?.querySelector(".factory-gallery-slide-instruction")?.value||"").trim();
       const id=String(input.dataset.slideId||"");
       const order=String(li?.querySelector("label span")?.textContent||"")
-        .match(/^Slide (\\d+) /)?.[1]||"";
+        .match(/^Slide (\d+) /)?.[1]||"";
       return {id,order,instruction};
     });
     if(selectedGallerySlides.some(item=>
       !/^rec[A-Za-z0-9]{14}$/.test(item.id)||
-      !/^\\d{1,2}$/.test(item.order)||
+      !/^\d{1,2}$/.test(item.order)||
       item.instruction.length<8||item.instruction.length>3000)){
       if(error){error.hidden=false;error.textContent=
         "Each selected photo needs a correction description of 8–3000 characters.";}
       return;
     }
     const photoNotes=selectedGallerySlides.length
-      ? "Selected photo corrections (slide-specific reviewer instructions; no render authorized):\\n"+
-        selectedGallerySlides.map(x=>"- Slide "+x.order+" ["+x.id+"]: "+x.instruction).join("\\n")
+      ? "Selected photo corrections (slide-specific reviewer instructions; no render authorized):\n"+
+        selectedGallerySlides.map(x=>"- Slide "+x.order+" ["+x.id+"]: "+x.instruction).join("\n")
       : "";
-    const notes=[freeformNotes,photoNotes].filter(Boolean).join("\\n\\n");
+    const notes=[freeformNotes,photoNotes].filter(Boolean).join("\n\n");
     if (!notes||notes.length>3000) {
       if (error) { error.hidden = false; error.textContent =
         !notes?"Describe the changes needed before sending back.":
