@@ -3,7 +3,7 @@ export const SCRIPTED_SHORT_FEEDBACK_LIMIT = 3000;
 
 const clean = value => String(value ?? "").replace(/\s+/g, " ").trim();
 export const normalizedClipName = value => clean(value).toLowerCase()
-  .replace(/\.(?:mp4|mov|m4v|webm|avi)$/i, "")
+  .replace(/\.(?:mp4|mov|m4v|webm|avi|jpe?g|png|webp|heic|heif|avif)$/i, "")
   .replace(/[_–—-]+/g, " ")
   .replace(/[^a-z0-9 ]/g, "")
   .replace(/\s+/g, " ").trim();
@@ -167,9 +167,13 @@ export function chooseScriptedShortLibraryClip(rows, assetName, profileId = "") 
   const mime = clean(f.MIME_Type || row.media_type).toLowerCase();
   const type = clean(f["Asset Type"] || f.Media_Class || row.media_kind).toLowerCase();
   const name = clean(f["Asset Name"] || row.name);
-  if (!(mime.startsWith("video/") || type.includes("video") || /\.(mp4|mov|m4v|webm)$/i.test(name))) {
-    throw new Error("The requested library asset is not a video clip.");
-  }
+  const mediaKind = mime.startsWith("video/") ? "video"
+    : mime.startsWith("image/") ? "photo"
+    : /\b(?:video|clip)\b/.test(type) || /\.(?:mp4|mov|m4v|webm|avi)$/i.test(name) ? "video"
+    : /\b(?:photo|image|still|graphic)\b/.test(type) || /\.(?:jpe?g|png|webp|heic|heif|avif)$/i.test(name) ? "photo"
+    : "";
+  if (!mediaKind) throw new Error("The named library asset is not a supported image or video.");
+
   if (!clean(f["Google Drive File ID"] || row.google_drive_file_id)) {
     throw new Error("The clip has not finished saving to Google Drive. Complete its upload before revising.");
   }
@@ -177,8 +181,8 @@ export function chooseScriptedShortLibraryClip(rows, assetName, profileId = "") 
   return {
     id: row.id,
     name,
-    media_kind: "video",
-    media_type: mime || "video",
+    media_kind: mediaKind,
+    media_type: mime || (mediaKind === "video" ? "video" : "image"),
     source_duration_seconds: Number(f.Duration_Seconds || row.duration_seconds || 0) || null,
     profile_id: profileId,
   };
@@ -215,7 +219,7 @@ export function applyScriptedShortFeedback(timeline, directive, clip = null) {
     if (operation.action === "remove" || operation.action === "move") continue;
     if (operation.action === "replace") {
       const candidate = operation.clip || (clip instanceof Map ? clip.get(normalizedClipName(operation.asset_name)) : clip);
-      if (!candidate?.id || candidate.media_kind !== "video") throw new Error("A verified uploaded video is required.");
+      if (!candidate?.id || !["video","photo"].includes(candidate.media_kind)) throw new Error("A verified uploaded photo or video is required.");
       Object.assign(row, {
         asset_id:candidate.id,media_asset_id:candidate.id,
         suggested_visual:candidate.name,shot_status:"owned",
