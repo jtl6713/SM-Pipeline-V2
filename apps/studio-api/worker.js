@@ -2,6 +2,7 @@ import { loadAuthoritativeFactoryCorrection } from "./factory-correction-authori
 import { readAuthoritativeGalleryInventory } from "./rendering-review-gallery-inventory-http.mjs";
 import { previewNativeGalleryCorrection } from "./rendering-review-gallery-selection-preview.mjs";
 import { readGalleryRevisionStatus } from "./rendering-review-gallery-status-http.mjs";
+import { verifyGallerySourceBytes } from "./rendering-review-gallery-byte-preflight.mjs";
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
 import { serveReviewAttemptVideo, fetchTrustedRunnerReviewMedia } from "./rendering-review-attempt-video.mjs";
 import { completeReviewAttempt } from "./rendering-review-completion-http.mjs";
@@ -2700,6 +2701,33 @@ export default {
             review_render_reason:row.review_render_reason||null,
           })),
         });
+      }
+
+      // Verified, read-only source inspection: actual Drive bytes and catalog
+      // rights via the protected Runner. No generation or publishing permission.
+      const galleryBytesMatch = new RegExp("^/api/factory/outputs/(rec[A-Za-z0-9]{14})/gallery-source-preflight$").exec(url.pathname);
+      if (galleryBytesMatch) {
+        if (request.method !== "GET") throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        const profiles=await reviewAuthorizedProfiles(env,authorization);
+        const inventory=await readAuthoritativeGalleryInventory({
+          output_id:galleryBytesMatch[1],
+          authorized_profile_ids:profiles.map(p=>p.id),
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+          readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+          readSlides:async ids=>reviewListRecords(env,"tblcnQDBvUngpjDED",{
+            limit:ids.length,
+            filterFormula:'OR('+ids.map(id=>'RECORD_ID()="'+id+'"').join(',')+')',
+            fields:["Content Item","Platform Output","Platform","Slide Number",
+              "Aspect Ratio","Deleted From Carousel","Approved For Final",
+              "Review Status","Asset_4x5_File_ID","Asset_1x1_File_ID",
+              "Asset_9x16_File_ID","Final Google Drive File ID"],
+          }),
+        });
+        const verification=await verifyGallerySourceBytes({
+          env,output_id:galleryBytesMatch[1],inventory,
+        });
+        return respond(request,env,verification);
       }
 
       // Read-only native gallery revision history: exact authenticated profile
