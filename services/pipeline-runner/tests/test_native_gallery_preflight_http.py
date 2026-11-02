@@ -88,6 +88,51 @@ class EndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(self.called, [])
 
+    def test_private_manifest_requires_separate_flag_and_byte_verified_logo(self):
+        private = "/jobs/native-gallery/private-source-manifest"
+        with patch.dict(os.environ, {}, clear=True):
+            blocked = self.client.post(private, json=self.body, headers=self.headers)
+        self.assertEqual(blocked.status_code, 405)
+        with patch.dict(os.environ, {"NATIVE_GALLERY_SOURCE_MANIFEST_ENABLED": "true"}):
+            # Ordinary source-preflight receipts never self-authorize by
+            # presenting a watermark catalog asset.
+            denied = self.client.post(private, json=self.body, headers=self.headers)
+            self.assertEqual(denied.status_code, 409)
+            forbidden = self.client.post(private, json=self.body,
+                                         headers={"X-Pipeline-Secret": "wrong"})
+            self.assertEqual(forbidden.status_code, 403)
+
+    def test_private_manifest_is_not_in_public_source_preflight(self):
+        private = "/jobs/native-gallery/private-source-manifest"
+        def certified(**kwargs):
+            result = success(**kwargs)
+            result["original_artifact_watermark_verified"] = True
+            result["artifacts"] = [{
+                "slot_id": "rec00000000000005", "order": 1,
+                "output_id": kwargs["output_id"],
+                "profile_id": kwargs["expected_profile_id"],
+                "rights_verified": True, "watermark_verified": True,
+                "drive_file_id": "private-original-drive-123456789",
+            }]
+            return result
+        app = Flask("private-manifest-test")
+        app.register_blueprint(create_native_gallery_preflight_blueprint(
+            {"pipeline_runner_shared_secret": SECRET},
+            client_factory=lambda: object(),drive_factory=lambda: object(),
+            verifier=certified))
+        with patch.dict(os.environ, {
+            "NATIVE_GALLERY_SOURCE_MANIFEST_ENABLED": "true",
+            "NATIVE_GALLERY_SOURCE_PREFLIGHT_ENABLED": "true",
+        }):
+            client = app.test_client()
+            private_reply = client.post(private, json=self.body, headers=self.headers)
+            public_reply = client.post(PATH, json=self.body, headers=self.headers)
+        self.assertEqual(private_reply.status_code, 200)
+        self.assertEqual(private_reply.get_json()["original_artifacts"][0][
+            "drive_file_id"], "private-original-drive-123456789")
+        self.assertNotIn("original_artifacts", public_reply.get_json())
+        self.assertEqual(private_reply.headers["Cache-Control"], "no-store")
+
     def test_source_denial_does_not_return_private_bytes(self):
         app = Flask("source-denial-test")
         def denied(**_kwargs):
