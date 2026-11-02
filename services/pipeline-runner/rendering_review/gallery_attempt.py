@@ -43,8 +43,10 @@ def _source(job: dict, original: dict, plan: dict, authorized_profiles: list) ->
         deny("gallery_context_missing")
     profile = job.get("profile_id")
     output = job.get("output_id")
+    content = job.get("content_item_id")
     if (not REC.fullmatch(str(output or "")) or
-        not REC.fullmatch(str(profile or "")) or profile not in authorized_profiles or
+        not REC.fullmatch(str(profile or "")) or
+        not REC.fullmatch(str(content or "")) or profile not in authorized_profiles or
         not TOKEN.fullmatch(str(job.get("attempt_id") or "")) or
         not TOKEN.fullmatch(str(job.get("job_id") or "")) or
         not SHA.fullmatch(str(job.get("plan_hash") or "")) or
@@ -67,6 +69,7 @@ def _source(job: dict, original: dict, plan: dict, authorized_profiles: list) ->
     if (original.get("schema") != SCHEMA or original.get("source_kind") != "original" or
         original.get("authority") != "server" or original.get("verified") is not True or
         original.get("output_id") != output or original.get("profile_id") != profile or
+        original.get("content_item_id") != content or
         not SHA.fullmatch(str(original.get("manifest_sha256") or "")) or
         plan.get("original_manifest_sha256") != original["manifest_sha256"]):
         deny("gallery_original_manifest_changed")
@@ -84,6 +87,7 @@ def _source(job: dict, original: dict, plan: dict, authorized_profiles: list) ->
             row.get("rights_verified") is not True or
             row.get("canonical_media_authority") != "google_drive" or
             row.get("output_id") != output or row.get("profile_id") != profile or
+            row.get("content_item_id") != content or
             row.get("mime_type") not in MIME or
             not SHA.fullmatch(str(row.get("sha256") or "")) or
             type(row.get("byte_count")) is not int or row["byte_count"] < 1024 or
