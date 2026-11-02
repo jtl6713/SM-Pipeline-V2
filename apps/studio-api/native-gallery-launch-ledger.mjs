@@ -142,8 +142,9 @@ export async function reserveNativeGalleryLaunch({request,env,operations:ops,
        lease_fence:body.lease_fence,may_generate:false,
        publication_authorized:false};
    }
-   if(v.Launch_Intent_SHA256||v.Launch_Receipt_JSON||
-      body.action!=="reserve_intent")
+   if(v.Launch_Intent_SHA256||v.Launch_Receipt_JSON)
+     deny("GALLERY_LAUNCH_LEDGER_INCOMPLETE",503);
+   if(body.action!=="reserve_intent")
      return {ok:true,replay:false,intent_verified:false,
        job_id:body.job_id,output_id:body.output_id,
        may_generate:false,publication_authorized:false};
