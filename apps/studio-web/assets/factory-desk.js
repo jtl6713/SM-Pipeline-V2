@@ -1530,7 +1530,10 @@
                 throw new Error("The independent source verification receipt was not trusted");
               status.textContent=evidence.slide_count+
                 " original slide(s): Drive bytes and source ownership verified. "+
-                "Brand placement and durable render holds still require certification. "+
+                (evidence.original_artifact_watermark_verified===true?
+                  "Official logo pixels also verified. ":
+                  "Original logo placement remains unverified. ")+
+                "The durable render hold and generation gates remain disabled. "+
                 "Generation and publishing remain unavailable.";
             }catch(error){
               if(current())status.textContent="Original source verification blocked: "+
