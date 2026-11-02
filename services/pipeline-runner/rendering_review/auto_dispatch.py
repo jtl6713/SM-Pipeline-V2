@@ -97,7 +97,10 @@ def sweep_once(*, client=None, now=None, sender=None, authority=None) -> dict:
     try:
         rows = client.list_records(
             JOBS,
-            formula='AND({Job_State}="queued",{Progress_Stage}="awaiting_isolated_renderer")',
+            formula=('AND({Job_State}="queued",{Progress_Stage}="awaiting_isolated_renderer",'
+                     'OR({Retry_Count}=0,{Retry_Count}=BLANK()),'
+                     'OR({Lease_Fence}=0,{Lease_Fence}=BLANK()),'
+                     '{Lease_Owner}="",{Event_History_JSON}="[]")'),
             max_records=_MAX_SCAN,
             fields=["Job_ID", "Output_Record_ID", "Job_State", "Progress_Stage",
                     "Retry_Count", "Progress_Percent", "Lease_Fence", "Lease_Owner",
