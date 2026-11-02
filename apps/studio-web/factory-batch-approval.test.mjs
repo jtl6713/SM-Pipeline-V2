@@ -152,8 +152,19 @@ test("Ambiguous global POST responses reconcile only an exact durable Activity m
 
 test("A rejected submission stays visible across the automatic Desk refresh", () => {
   assert.match(js, /batchSubmissionError: null/);
+  assert.match(js, /FACTORY_SUBMISSION_ERROR_KEY = "studio\.factory\.submission-error\.v1"/);
+  assert.match(js, /sessionStorage\.setItem\(FACTORY_SUBMISSION_ERROR_KEY/);
   assert.match(js, /setBatchSubmissionError\(`Submitted \$\{acceptedOutputs\} of \$\{ready\.length\} outputs/);
   assert.match(js, /if \(state\.batchSubmissionError\) setStatus\(state\.batchSubmissionError, true\);\s*else setStatus\(desk\.warning \|\| "Factory Desk ready\."\);/);
+  assert.match(js, /submitFactoryBatchApprovals\(\)\.catch\(\(error\) => setBatchSubmissionError/);
+});
+
+test("Retryable Factory submit failures reuse the exact request ID once", () => {
+  assert.match(js, /function factorySubmitRetryDelayMs\(error\)/);
+  assert.match(js, /\[429, 502, 503, 504\]\.includes\(status\)/);
+  assert.match(js, /const submitPlan = \(\) => fetchJson/);
+  assert.match(js, /Keeping the same request ID and retrying safely/);
+  assert.match(js, /batch = await submitPlan\(\);[\s\S]{0,500}recoverSubmittedFactoryPlan\(plan, retryError\)/);
 });
 
 test("Expired browser-only submissions clear only after an authoritative exact-ID miss", () => {

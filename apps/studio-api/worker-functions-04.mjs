@@ -17737,7 +17737,10 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
  * a hung Airtable hop cannot surface as Cloudflare's empty HTML 500.
  */
 async function factoryGroupRecordsFromAirtablePreflight(env, authorization, ids, payload, policy) {
-  const SUBMIT_BUDGET_MS = 12000;
+  // Strict mode performs only two batch reads (outputs, then ownership). Give
+  // those reads room to wait through the normal shared Airtable slot without
+  // restoring the old serial per-record fallback that caused ambiguous 500s.
+  const SUBMIT_BUDGET_MS = 25000;
   const started = Date.now();
   const deadline = () => {
     if (Date.now() - started > SUBMIT_BUDGET_MS) {

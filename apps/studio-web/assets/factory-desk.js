@@ -33,6 +33,7 @@
   const FACTORY_LAST_BATCH_KEY = "studio.factory.last-batch.v1";
   const FACTORY_PENDING_REQUEST_KEY = "studio.factory.pending-approval-request.v1";
   const FACTORY_ACCEPTED_OUTPUTS_KEY = "studio.factory.accepted-output-ids.v1";
+  const FACTORY_SUBMISSION_ERROR_KEY = "studio.factory.submission-error.v1";
   const FACTORY_PENDING_MISSING_GRACE_MS = 90 * 1000;
   // Reuse the one global missing-asset image; do not borrow another profile's media.
   const NEEDS_ASSET_THUMB = "/assets/needs-asset.svg";
@@ -73,6 +74,10 @@
       : []);
     const latest = JSON.parse(localStorage.getItem(FACTORY_LAST_BATCH_KEY) || "{}");
     state.lastBatchProfile = String(latest.profile_id || "");
+    const savedError = JSON.parse(sessionStorage.getItem(FACTORY_SUBMISSION_ERROR_KEY) || "null");
+    if (savedError?.message && Date.now() - Number(savedError.saved_ms || 0) < 30 * 60 * 1000) {
+      state.batchSubmissionError = String(savedError.message);
+    }
   } catch { /* storage disabled: selection still persists while page is open */ }
 
   function esc(value) {
@@ -93,6 +98,12 @@
 
   function setBatchSubmissionError(message) {
     state.batchSubmissionError = message ? String(message) : null;
+    try {
+      if (state.batchSubmissionError) sessionStorage.setItem(FACTORY_SUBMISSION_ERROR_KEY, JSON.stringify({
+        message: state.batchSubmissionError, saved_ms: Date.now(),
+      }));
+      else sessionStorage.removeItem(FACTORY_SUBMISSION_ERROR_KEY);
+    } catch {}
     if (state.batchSubmissionError) setStatus(state.batchSubmissionError, true);
   }
 
@@ -110,16 +121,26 @@
     try { body = await response.json(); } catch { body = null; }
     if (!response.ok) {
       const detail = body?.error || body?.message || "";
-      if (detail) throw new Error(detail);
-      if (response.status === 503) {
-        throw new Error("Factory desk is busy (503). Wait a moment, check Activity, then retry.");
-      }
-      if (response.status >= 500) {
-        throw new Error(`Factory desk timed out or failed (${response.status}). Check Activity before retrying — the batch may not have been stored.`);
-      }
-      throw new Error(`Factory desk failed (${response.status})`);
+      const message = detail || (response.status === 503
+        ? "Factory desk is busy (503). Wait a moment, check Activity, then retry."
+        : response.status >= 500
+          ? `Factory desk timed out or failed (${response.status}). Check Activity before retrying — the batch may not have been stored.`
+          : `Factory desk failed (${response.status})`);
+      const error = new Error(message);
+      error.status = response.status;
+      error.retryAfterSeconds = Number(response.headers.get("Retry-After") || 0) || 0;
+      throw error;
     }
     return body || {};
+  }
+
+  function factorySubmitRetryDelayMs(error) {
+    const status = Number(error?.status || 0);
+    if (![429, 502, 503, 504].includes(status)) return 0;
+    const message = String(error?.message || "");
+    const secondsInMessage = Number(message.match(/(?:busy|cooling down)\s*\((\d+)s\)/i)?.[1] || 0);
+    const seconds = Math.max(Number(error?.retryAfterSeconds || 0), secondsInMessage);
+    return Math.min(35_000, Math.max(2_000, (seconds ? seconds * 1000 + 750 : 3_000)));
   }
 
   function cardLabel(card) {
@@ -915,28 +936,41 @@
         const chunk = plan.ids.map((id) => byId.get(id)).filter(Boolean);
         if (chunk.length !== plan.ids.length) throw new Error("Factory selection changed before all batches were submitted.");
         const profiles = [...new Set(chunk.map((card) => String(card.profile_id || "").trim()))];
+        const requestBody = JSON.stringify({
+          action: "start_group",
+          request_id: plan.request_id,
+          notes: "Studio Factory Batch Approval",
+          record_ids: chunk.map((card) => card.id),
+          items: chunk.map((card) => ({
+            id: card.id, output_id: card.output_id || null,
+            title: card.title || null, content_id: card.content_id || null,
+            profile_id: card.profile_id || null,
+            platform: card.platform || null, format: card.studio_output_type || null,
+          })),
+        });
+        const submitPlan = () => fetchJson("/api/factory/approval-batches", {
+          method: "POST", body: requestBody,
+        });
         let batch;
         try {
-          batch = await fetchJson("/api/factory/approval-batches", {
-            method: "POST",
-            body: JSON.stringify({
-              action: "start_group",
-              request_id: plan.request_id,
-              notes: "Studio Factory Batch Approval",
-              record_ids: chunk.map((card) => card.id),
-              items: chunk.map((card) => ({
-                id: card.id, output_id: card.output_id || null,
-                title: card.title || null, content_id: card.content_id || null,
-                profile_id: card.profile_id || null,
-                platform: card.platform || null, format: card.studio_output_type || null,
-              })),
-            }),
-          });
+          batch = await submitPlan();
         } catch (error) {
           // The POST may have committed even if iOS/networking lost the response.
           // Prove the exact request ID + output set exists in authoritative Activity
           // before treating it as accepted and continuing to the next chunk.
-          batch = await recoverSubmittedFactoryPlan(plan, error);
+          try {
+            batch = await recoverSubmittedFactoryPlan(plan, error);
+          } catch (unconfirmedError) {
+            const retryMs = factorySubmitRetryDelayMs(unconfirmedError);
+            if (!retryMs) throw unconfirmedError;
+            setStatus(`Airtable is temporarily busy. Keeping the same request ID and retrying safely in ${Math.ceil(retryMs / 1000)} seconds — do not click Submit again.`);
+            await new Promise((resolve) => setTimeout(resolve, retryMs));
+            try {
+              batch = await submitPlan();
+            } catch (retryError) {
+              batch = await recoverSubmittedFactoryPlan(plan, retryError);
+            }
+          }
         }
         if (!batch.accepted) throw new Error("Approval queue did not acknowledge the batch.");
         acceptedOutputs += chunk.length;
@@ -2385,7 +2419,9 @@
     }
   });
 
-  $("factoryBatchSubmit")?.addEventListener("click", () => { submitFactoryBatchApprovals().catch((error) => setStatus(error.message || String(error), true)); });
+  $("factoryBatchSubmit")?.addEventListener("click", () => {
+    submitFactoryBatchApprovals().catch((error) => setBatchSubmissionError(error.message || String(error)));
+  });
   $("factoryBatchClear")?.addEventListener("click", () => {
     state.selectedOutputs.clear();
     setBatchSubmissionError(null);
