@@ -8,6 +8,8 @@ on:
       - 'apps/studio-api/native-gallery-generation-http*'
       - 'apps/studio-api/native-gallery-job-claim*'
       - 'apps/studio-api/native-gallery-launch-ledger*'
+      - 'apps/studio-api/native-gallery-manifest-commit*'
+      - 'apps/studio-api/native-gallery-revision-readback*'
       - 'apps/studio-api/native-gallery-private-manifest*'
       - 'apps/studio-api/factory-correction-*.mjs'
       - 'apps/studio-web/assets/factory-desk.js'
@@ -33,6 +35,8 @@ on:
       - 'services/pipeline-runner/tests/test_native_gallery_launch_client.py'
       - 'services/pipeline-runner/tests/test_native_gallery_launch_http.py'
       - 'services/pipeline-runner/tests/test_native_gallery_branding_pixels.py'
+      - 'services/pipeline-runner/tests/test_native_gallery_revised_verify.py'
+      - 'services/pipeline-runner/tests/test_native_gallery_revised_http.py'
       - 'services/pipeline-runner/app.py'
       - 'services/pipeline-runner/rendering_review/gallery_source_operations.py'
       - '.github/workflows/non-vibe-native-gallery-ci.yml'
@@ -56,6 +60,8 @@ jobs:
           node --check apps/studio-api/native-gallery-generation-http.mjs
           node --check apps/studio-api/native-gallery-job-claim.mjs
           node --check apps/studio-api/native-gallery-launch-ledger.mjs
+          node --check apps/studio-api/native-gallery-manifest-commit.mjs
+          node --check apps/studio-api/native-gallery-revision-readback.mjs
           node --check apps/studio-api/native-gallery-private-manifest.mjs
           node --check apps/studio-api/rendering-review-gallery-artifacts.mjs
           node --check apps/studio-api/rendering-review-gallery-source.mjs
@@ -66,7 +72,7 @@ jobs:
           node --check apps/studio-api/rendering-review-gallery-lifecycle.mjs
           node --check apps/studio-api/rendering-review-gallery-status-http.mjs
           node --check apps/studio-api/factory-correction-branding-preflight.mjs
-          node --test apps/studio-api/native-gallery-job-airtable.test.mjs apps/studio-api/native-gallery-generation-http.test.mjs apps/studio-api/native-gallery-job-claim.test.mjs apps/studio-api/native-gallery-launch-ledger.test.mjs apps/studio-api/native-gallery-private-manifest.test.mjs
+          node --test apps/studio-api/native-gallery-job-airtable.test.mjs apps/studio-api/native-gallery-generation-http.test.mjs apps/studio-api/native-gallery-job-claim.test.mjs apps/studio-api/native-gallery-launch-ledger.test.mjs apps/studio-api/native-gallery-manifest-commit.test.mjs apps/studio-api/native-gallery-revision-readback.test.mjs apps/studio-api/native-gallery-private-manifest.test.mjs
           node --test apps/studio-api/rendering-review-gallery-artifacts.test.mjs apps/studio-api/rendering-review-gallery-source.test.mjs apps/studio-api/rendering-review-gallery-inventory.test.mjs apps/studio-api/rendering-review-gallery-inventory-http.test.mjs apps/studio-api/rendering-review-gallery-selection-preview.test.mjs apps/studio-api/rendering-review-gallery-lifecycle.test.mjs apps/studio-api/rendering-review-gallery-status-http.test.mjs apps/studio-api/rendering-review-gallery-byte-preflight.test.mjs apps/studio-api/factory-correction-branding-preflight.test.mjs
 
   factory-selection:
@@ -111,3 +117,5 @@ jobs:
           python -m unittest discover -s services/pipeline-runner/tests -p 'test_native_gallery_launch_client.py' -v
           python -m unittest discover -s services/pipeline-runner/tests -p 'test_native_gallery_launch_http.py' -v
           python -m unittest discover -s services/pipeline-runner/tests -p 'test_native_gallery_branding_pixels.py' -v
+          python -m unittest discover -s services/pipeline-runner/tests -p 'test_native_gallery_revised_verify.py' -v
+          python -m unittest discover -s services/pipeline-runner/tests -p 'test_native_gallery_revised_http.py' -v
