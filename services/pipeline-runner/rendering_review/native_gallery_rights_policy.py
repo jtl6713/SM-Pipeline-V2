@@ -54,4 +54,5 @@ def build_approved_native_gallery_clearance(settings):
                     ": " + basis + " (" + reference + ")"
                 )[:500]}
 
+    approve.preferred_account = account
     return approve
