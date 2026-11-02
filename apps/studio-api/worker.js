@@ -1,5 +1,6 @@
 import { loadAuthoritativeFactoryCorrection } from "./factory-correction-authority.mjs";
 import { readAuthoritativeGalleryInventory } from "./rendering-review-gallery-inventory-http.mjs";
+import { previewNativeGalleryCorrection } from "./rendering-review-gallery-selection-preview.mjs";
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
 import { serveReviewAttemptVideo, fetchTrustedRunnerReviewMedia } from "./rendering-review-attempt-video.mjs";
 import { completeReviewAttempt } from "./rendering-review-completion-http.mjs";
@@ -1278,7 +1279,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.726-adler-library-crop-prep" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
+          version: "0.10.727-gallery-selection-preview" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           quality_autonomous_verification_recovery_v1: true,
@@ -2723,6 +2724,42 @@ export default {
           }),
         });
         return respond(request,env,source);
+      }
+
+      // Exact per-slide gallery correction proposal; no generation, approval,
+      // Drive upload, Airtable mutation, or publication. The POST body supplies
+      // only slide IDs and user instructions; the source is reloaded under the
+      // authenticated profile authority in this same request.
+      const gallerySelectionPreviewMatch = /^\/api\/factory\/outputs\/(rec[A-Za-z0-9]{14})\/gallery-selection-preview$/.exec(url.pathname);
+      if (gallerySelectionPreviewMatch) {
+        if (request.method !== "POST") throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        assertWriteRequest(request,env);
+        const supplied=await request.clone().json().catch(()=>null);
+        if(!supplied||Array.isArray(supplied)||typeof supplied!=="object")
+          throw new HttpError(400,"Exact slide selection required");
+        const authorized=await reviewAuthorizedProfiles(env,authorization);
+        const inventory=await readAuthoritativeGalleryInventory({
+          output_id:gallerySelectionPreviewMatch[1],
+          authorized_profile_ids:authorized.map(p=>p.id),
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+          readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+          readSlides:async ids=>reviewListRecords(env,"tblcnQDBvUngpjDED",{
+            limit:ids.length,
+            filterFormula:'OR('+ids.map(id=>'RECORD_ID()="'+id+'"').join(',')+')',
+            fields:["Content Item","Platform Output","Platform","Slide Number",
+              "Aspect Ratio","Deleted From Carousel","Approved For Final",
+              "Review Status","Asset_4x5_File_ID","Asset_1x1_File_ID",
+              "Asset_9x16_File_ID","Final Google Drive File ID"],
+          }),
+        });
+        const proposal=await previewNativeGalleryCorrection({
+          output_id:gallerySelectionPreviewMatch[1],
+          client_request_id:supplied.client_request_id,
+          selected_slides:supplied.selected_slides,
+          inventory,
+        });
+        return respond(request,env,proposal);
       }
 
       if (isFactoryDeskRoute) {

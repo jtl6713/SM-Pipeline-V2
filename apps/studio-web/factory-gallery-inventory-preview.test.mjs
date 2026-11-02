@@ -29,12 +29,40 @@ test("UI uses read-only exact server endpoints, never selects siblings or enable
  assert.match(body,/Promise\.all\(\[readMatches\(\),readGallery\(\)\]\)/);
  assert.match(body,/inventory\?\.can_generate!==false/);
  assert.match(body,/inventory\?\.publication_authorized!==false/);
- assert.doesNotMatch(body,/method:\s*["']POST["']/);
+ assert.match(body,/\/gallery-selection-preview/);
+ assert.match(body,/method:"POST"/);
+ assert.match(body,/proposal\.can_generate!==false/);
+ assert.match(body,/proposal\.publication_authorized!==false/);
  assert.doesNotMatch(body,/mutateDesk|selected_output_ids|render_this_plan|publishNow/);
  assert.match(body,/document\.createElement\("li"\)/);
  assert.doesNotMatch(body,/innerHTML/);
+ assert.match(body,/factory-gallery-select-slide/);
+ assert.match(body,/factory-gallery-slide-instruction/);
+ assert.match(body,/Validate selected photo changes \(no render\)/);
 });
 test("Factory module and styles are cache-busted without changing the release build",()=>{
  assert.match(html,/factory-desk\.js\?v=0\.6\.\d+-[^"\s]*gallery_inventory=read_only_v1/);
  assert.match(html,/factory-layout-0680\.css\?v=0\.6\.\d+-[^"\s]*gallery_inventory=read_only_v1/);
+});
+
+test("selected slide instructions are actually included in existing saved Factory feedback",()=>{
+ const start=source.indexOf("async function submitFactoryFeedback(");
+ const finish=source.indexOf("  function ",start+32);
+ assert.ok(start>=0&&finish>start);
+ const body=source.slice(start,finish);
+ assert.match(body,/selectedGallerySlides/);
+ assert.match(body,/\.factory-gallery-select-slide:checked/);
+ assert.match(body,/\.factory-gallery-slide-instruction/);
+ assert.match(body,/Selected photo corrections/);
+ assert.match(body,/const notes=\[freeformNotes,photoNotes\]/);
+ assert.match(body,/mutateDesk\(\{ \.\.\.pending\.payload, note: notes \}\)/);
+ assert.match(body,/notes\.length\s*>\s*3000/);
+});
+
+test("automatic Producer request cannot silently turn photo selection into a render",()=>{
+ assert.match(source,/const canSaveWithoutAutoRender = pending\?\.payload\?\.action !== "request_changes_content"/);
+ assert.match(source,/if\(selectable\.length && canSaveWithoutAutoRender\)/);
+ assert.match(source,/if\(!canSaveWithoutAutoRender\)/);
+ assert.match(source,/entry\.checkbox\.disabled=true/);
+ assert.match(source,/if\(selectedGallerySlides\.length && pending\.payload\?\.action==="request_changes_content"\)/);
 });
