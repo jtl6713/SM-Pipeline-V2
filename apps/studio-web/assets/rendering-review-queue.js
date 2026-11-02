@@ -634,7 +634,7 @@
         const outstanding=messages.slice(recentProducerIndex+1).filter(m=>m.role==='user');
         const latestDirection=outstanding.map(m=>m.content||'').filter(Boolean)
           .join('\n').slice(-3000);
-        const section=elem('section',null,'rr-next-revision-comments rr-producer-chat-primary');
+        const section=elem('section',null,'rr-next-revision-comments rr-chat-form rr-producer-chat-primary');
         section.setAttribute('aria-label','Producer conversation and next edit authorization');
         section.append(elem('h3',inFlight?
           'Comment on the photos for the next revision':'Talk to your Producer'));
