@@ -95,6 +95,25 @@ class CatalogRendererBindingTests(unittest.TestCase):
                 verify_catalog_render_source(c,d,plan,
                     transport=lambda *_a,**_k:Transport(payload[VARIANT_FILE][0]))
 
+    def test_explicit_graphic_jpeg_preserves_original_media_class(self):
+        client,drive,rows,payload,frozen=fixture()
+        rows[MEDIA,MASTER_ID]["fields"]["Media_Class"]="Graphic"
+        rows[MEDIA,MASTER_ID]["fields"]["MIME_Type"]="image/jpeg"
+        source_bytes=image_bytes((800,600),"JPEG")
+        payload[SOURCE_FILE]=(source_bytes,"image/jpeg")
+        rows[MEDIA,MASTER_ID]["fields"]["File_Size_Bytes"]=len(source_bytes)
+        rows[QUEUE,TRANSFER_ID]["fields"]["Source_Size_Bytes"]=len(source_bytes)
+        frozen["source_size_bytes"]=len(source_bytes)
+        frozen["source_media_class"]="Graphic"
+        receipt=verify_catalog_render_source(client,drive,frozen,
+            transport=lambda *_a,**_kw:Transport(payload[VARIANT_FILE][0]))
+        self.assertEqual(receipt["asset_id"],"library_"+MASTER_ID)
+        self.assertEqual(rows[MEDIA,MASTER_ID]["fields"]["Media_Class"],"Graphic")
+        frozen["source_media_class"]="Image"
+        with self.assertRaises(CatalogSourceDenied):
+            verify_catalog_render_source(client,drive,frozen,
+                transport=lambda *_a,**_kw:Transport(payload[VARIANT_FILE][0]))
+
     def test_stale_queue_crop_link_or_recipe_denied(self):
         for patch in ({"Source_Drive_File_ID":"1stale_abcdefghijklmnopqrst"},
                       {"Generated_Media_Asset":["rec44444444444444"]},
