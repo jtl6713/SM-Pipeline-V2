@@ -270,3 +270,63 @@ test("an MP4 variant cannot substitute another Drive file or HTML view URL",asyn
   assert.equal(result.ready,false);
   assert.ok(result.blockers.some(x=>x.kind==="asset"));
 });
+
+test("library source enters immutable revision-only plan without modifying V1 request",async()=>{
+  const f=fixture(),state=f.getSession();
+  const masterId="rec12345678901234",derivedId="rec99999999999999";
+  const queueId="rec77777777777777",originId="rec88888888888888";
+  const masterDrive="1abcdefghijklmnopqRSTUVWxy1234Z";
+  const cropDrive="1_abcdefghijklmnopqrstuvwxyz123";
+  const transferAssetId="800c0da312e24b19aa",size=86462;
+  const url="https://media.chicagoshining.com/studio/previews/item4/"+
+    originId+"/ITEM4-VARIANT-fill-crop-v2-"+originId+"-"+
+    transferAssetId+"-9x16-"+cropDrive+".jpg";
+  const book=state.producer_candidate.candidate;
+  book.reuse_asset_ids=["library_"+masterId];
+  book.timeline=[{start_seconds:0,end_seconds:10,direction:"Use the owned Adler exterior",
+    asset_ids:["library_"+masterId]}];
+  f.rows.set(masterId,{id:masterId,fields:{
+    "Google Drive File ID":masterDrive,"File_Size_Bytes":size,
+    "Asset_Status":"Available","Media_Class":"Image","Rights_Status":"Owned",
+    "Active":true,"Do_Not_Use":false,
+    "Content_Profile":[CHICAGO_PROFILE_ID]}});
+  f.rows.set(derivedId,{id:derivedId,fields:{
+    "Google Drive File ID":cropDrive,"MIME_Type":"image/jpeg",
+    "Asset_Status":"Available","Media_Class":"Image","Rights_Status":"Owned",
+    "Active":true,"Do_Not_Use":false,
+    "Content_Profile":[CHICAGO_PROFILE_ID]}});
+  f.argumentsToPass.readLibraryVariants=async fileIds=>{
+    assert.deepEqual(fileIds,[masterDrive]);
+    return [{id:queueId,fields:{
+      "Source_Media_Asset":[masterId],"Source_Drive_File_ID":masterDrive,
+      "Source_Size_Bytes":size,"Source_Asset_ID":transferAssetId,
+      "Production_Request_Record_ID":originId,"Asset_Kind":"Platform Variant",
+      "Aspect_Ratio":"9:16","Variant_Style":"center",
+      "Transfer_Status":"Ready","Preview_Status":"Ready",
+      "Drive_File_ID":cropDrive,"Generated_Media_Asset":[derivedId],
+      "Preview_URL":url,
+      "Target_File_Name":"Adler-Planetarium-12__9x16__fill-crop-v2.jpg",
+      "Completed_At":"2026-10-12T19:00:00.000Z"
+    }}];
+  };
+  const originalSource=f.rows.get(P).fields.Studio_Master_Assets_JSON;
+  const originalCrop=f.rows.get(P).fields.Studio_Variant_Manifest_JSON;
+  const originalProps=f.rows.get(O).fields.Remotion_Props_JSON;
+  const result=await persistReadyReviewPlan(f.argumentsToPass);
+  assert.equal(result.ready,true);
+  const newPlan=f.getSession().plan.immutable_manifest;
+  const linked=newPlan.asset_manifest[0];
+  assert.equal(linked.origin,"review_library");
+  assert.equal(linked.asset_id,"library_"+masterId);
+  assert.equal(linked.source_media_record_id,masterId);
+  assert.equal(linked.variant_transfer_record_id,queueId);
+  assert.equal(linked.variant_media_record_id,derivedId);
+  assert.equal(linked.render_variant_drive_file_id,cropDrive);
+  assert.equal(linked.render_url,url);
+  assert.equal(newPlan.allow_public_publish,false);
+  assert.equal(newPlan.allow_platform_upload,false);
+  assert.equal(f.rows.get(P).fields.Studio_Master_Assets_JSON,originalSource);
+  assert.equal(f.rows.get(P).fields.Studio_Variant_Manifest_JSON,originalCrop);
+  assert.equal(f.rows.get(O).fields.Remotion_Props_JSON,originalProps);
+  assert.equal(f.getSession().active_job,null);
+});

@@ -2180,6 +2180,26 @@ export default {
               env, output_id:conversationMatch[1], operations:adapter,
               readRecord:(table,id)=>airtableFetch(env,table,id),
               readField:f,
+              // Resolve library crops by immutable source Drive identities
+              // in the same authoritative Airtable scope as the review.
+              readLibraryVariants:async fileIds=>{
+                if(!Array.isArray(fileIds)||fileIds.length>16||
+                   fileIds.some(id=>!/^[A-Za-z0-9_-]{16,}$/.test(id)))
+                  throw new HttpError(400,"Invalid catalog source identities");
+                if(!fileIds.length)return [];
+                const formula='AND({Asset_Kind}="Platform Variant",'+
+                  'OR('+fileIds.map(id=>
+                    '{Source_Drive_File_ID}="'+id+'"').join(',')+'))';
+                return reviewListRecords(env,"tblBZLXPd1p2NRWRK",{
+                  limit:400,filterFormula:formula,
+                  fields:["Source_Media_Asset","Source_Drive_File_ID",
+                    "Source_Size_Bytes","Source_Asset_ID","Asset_Kind",
+                    "Aspect_Ratio","Variant_Style","Transfer_Status",
+                    "Preview_Status","Preview_URL","Drive_File_ID",
+                    "Generated_Media_Asset","Target_File_Name",
+                    "Production_Request_Record_ID","Completed_At"],
+                });
+              },
               // A later V3+ revision must independently verify the completed
               // V2 MP4 projection, never silently fall back to original V1.
               loadCompletedAttempt:async attemptId=>{

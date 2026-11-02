@@ -38,6 +38,12 @@ def tested_function():
         "fail":lambda message:(_ for _ in ()).throw(Denied(message)),
         "ExactReviewRenderDenied":Denied,
         "requests":SimpleNamespace(get=lambda *a,**k:Stream(),RequestException=Exception),
+        "verify_catalog_render_source":lambda client,drive,plan:{
+            "asset_id":plan["asset_id"],"drive_file_id":plan["drive_file_id"],
+            "render_url":plan["render_url"],"media_kind":"image",
+            "verified":True,"authority":"server",
+            "canonical_media_authority":"google_drive",
+            "profile_id":CHICAGO,"rights_receipt_id":plan["rights_receipt_id"]},
     }
     exec(compile(ast.Module(body=[fn],type_ignores=[]),str(path),"exec"),namespace)
     return namespace["_render_sources"]
@@ -172,6 +178,32 @@ class VariantContract(unittest.TestCase):
             "mimeType":"video/mp4","size":"78925885"})
         with self.assertRaisesRegex(Denied,"crop_not_verified"):
             tested_function()(client,request,master,props,plan,drive=drive)
+
+
+    def test_library_asset_is_resolved_by_isolated_catalog_guard_not_original_props(self):
+        client,request,originals,props,plan=fixture()
+        library_source="rec12345678901234"
+        library_id="library_"+library_source
+        new_file="1abcdefghijklmnopqRSTUVWxy1234Z"
+        url="https://media.chicagoshining.com/studio/previews/item4/test.jpg"
+        plan["asset_manifest"]=[{
+            "origin":"review_library","asset_id":library_id,
+            "source_media_record_id":library_source,
+            "drive_file_id":new_file,"render_url":url,
+            "rights_receipt_id":"rrcatalogrights_"+library_source,
+        }]
+        result=tested_function()(client,request,originals,props,plan,drive=object())
+        self.assertEqual([x["asset_id"] for x in result],[library_id])
+        self.assertEqual(result[0]["render_url"],url)
+        self.assertEqual(len(props["clips"]),1)
+        self.assertEqual(len(originals),1)
+
+    def test_library_source_without_drive_adapter_never_uses_v2_crop(self):
+        client,request,originals,props,plan=fixture()
+        plan["asset_manifest"]=[{"origin":"review_library",
+                                  "asset_id":"library_rec12345678901234"}]
+        with self.assertRaisesRegex(Denied,"catalog_drive_reader_unavailable"):
+            tested_function()(client,request,originals,props,plan)
 
 if __name__=="__main__":
     unittest.main()

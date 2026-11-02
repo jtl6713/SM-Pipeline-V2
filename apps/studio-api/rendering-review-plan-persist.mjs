@@ -9,6 +9,7 @@
 import {inspectReviewPlan} from "./rendering-review-plan-preflight.mjs";
 import {mutateReviewSessionCommand} from "./rendering-review-coordinator.mjs";
 import {CHICAGO_PROFILE_ID} from "./rendering-review-policy.mjs";
+import {resolveReviewCatalogAssets,catalogRecordId} from "./rendering-review-catalog-assets.mjs";
 
 const rec = v => /^rec[A-Za-z0-9]{14}$/.test(String(v||""));
 const drive = v => /^[A-Za-z0-9_-]{16,}$/.test(String(v||""));
@@ -153,7 +154,7 @@ function rightsReceipt(row,entry,readField,variant){
  */
 export async function persistReadyReviewPlan({
   env,output_id,operations,readRecord,readField,
-  loadCompletedAttempt=null,now=()=>new Date(),
+  loadCompletedAttempt=null,readLibraryVariants=null,now=()=>new Date(),
 }={}){
   if(!rec(output_id)||!env?.AIRTABLE_OUTPUT_TABLE_ID||
      !env?.AIRTABLE_MEDIA_TABLE_ID||
@@ -226,6 +227,17 @@ export async function persistReadyReviewPlan({
     const variant=verifiedReelVariant(entry,variantManifest,originalProps,reqId);
     const receipt=rightsReceipt(row,entry,readField,variant);
     if(receipt)assets.push(receipt);
+  }
+  const libraryTokens=ids.filter(id=>catalogRecordId(id));
+  if(libraryTokens.length){
+    if(typeof readLibraryVariants!=="function")
+      fail("REVIEW_CATALOG_NOT_CONFIGURED",
+        "Trusted review library crop resolver is unavailable",503);
+    const discovered=await resolveReviewCatalogAssets({
+      tokens:libraryTokens,readRecord,readField,readVariants:readLibraryVariants,
+      mediaTable:env.AIRTABLE_MEDIA_TABLE_ID,
+    });
+    assets.push(...discovered.receipts);
   }
   const result=await inspectReviewPlan({
     session,source:await sourceReceipt({output,session,readField,output_id,

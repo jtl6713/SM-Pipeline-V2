@@ -157,6 +157,18 @@ export async function inspectReviewPlan({
       ...(a.render_variant_drive_file_id&&a.render_url?{
         render_variant_drive_file_id:str(a.render_variant_drive_file_id),
         render_url:str(a.render_url),
+      }:{}),
+      // A library media receipt must be reverified by the independent Runner
+      // against the transfer queue and the two canonical Drive files.
+      ...(a.origin==="review_library"?{
+        origin:"review_library",
+        source_media_record_id:str(a.source_media_record_id),
+        variant_transfer_record_id:str(a.variant_transfer_record_id),
+        variant_media_record_id:str(a.variant_media_record_id),
+        source_asset_id:str(a.source_asset_id),
+        source_request_id:str(a.source_request_id),
+        source_size_bytes:a.source_size_bytes,
+        crop_recipe:str(a.crop_recipe),
       }:{})});
   }
   for(const [i,r] of c.requirements.entries()){

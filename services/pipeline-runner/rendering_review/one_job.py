@@ -32,6 +32,7 @@ from render.remotion_client import RemotionClient
 from render.settings import get_google_drive_folder_id
 from rendering_review.isolated_launch import launch_review_render_once
 from rendering_review.remote_ledger import RemoteLaunchLedger, _NoRedirect, _validate_base, _access_headers
+from rendering_review.catalog_render_sources import verify_catalog_render_source
 
 CHICAGO="recT2rbKX3MF7cVFU"
 OUTPUTS="tblrlPeboBthkplH0"
@@ -260,6 +261,11 @@ def _render_sources(client,request,original_by_id,props,plan,*,drive=None):
     clips_by_record={c.get("mediaAssetRecordId"):c for c in all_clips}
     assets=[]
     for frozen in plan.get("asset_manifest",[]):
+        if frozen.get("origin")=="review_library":
+            if drive is None:
+                fail("review_catalog_drive_reader_unavailable")
+            assets.append(verify_catalog_render_source(client,drive,frozen))
+            continue
         asset_id=frozen.get("asset_id")
         source=original_by_id.get(asset_id)
         if (not isinstance(source,dict) or
