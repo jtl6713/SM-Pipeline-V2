@@ -240,6 +240,11 @@ def execute_one_native_gallery(*, client, drive, worker_base,
             byte_count=proof["byte_count"],
             rights_clearance=rights_clearance,
             staging_folder_id=staging_folder_id)
+        if (not isinstance(rights, dict) or
+            rights.get("verified") is not True or
+            rights.get("publication_authorized") is not False or
+            not REC.fullmatch(str(rights.get("media_asset_record_id") or ""))):
+            deny("native_gallery_executor_rights_receipt_invalid")
         result.append({**old, "drive_file_id": file_id,
                        "sha256": proof["sha256"],
                        "mime_type": "image/png",
