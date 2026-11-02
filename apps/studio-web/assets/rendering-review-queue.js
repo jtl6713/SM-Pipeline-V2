@@ -241,8 +241,11 @@
       renderJob?.verified===true?renderJob.stage:null,
       renderJob?.verified===true?renderJob.progress_percent:null,
       renderJob?.verified===true?renderJob.dispatch_attempts:null,
-      renderJob?.verified===true&&renderJob.state==='queued'&&renderJob.created_at&&
-        Date.now()-Date.parse(renderJob.created_at)>=240000?'queued_stalled':null,
+      renderJob?.verified===true&&renderJob.created_at&&
+        Date.now()-Date.parse(renderJob.created_at)>=240000&&renderJob.state==='queued'?'queued_stalled':null,
+      renderJob?.verified===true&&renderJob.created_at&&
+        Date.now()-Date.parse(renderJob.created_at)>=900000&&renderJob.state==='claimed'&&
+        Number(renderJob.progress_percent||0)===0?'claimed_stalled':null,
     ]);
   }
   function watchReview(entry,seenSignature,requestSequence) {
@@ -293,6 +296,9 @@
     const jobAgeMs=job?.created_at?Date.now()-Date.parse(job.created_at):NaN;
     const stalledQueued=session?.state==='queued'&&job?.verified===true&&
       job?.state==='queued'&&Number.isFinite(jobAgeMs)&&jobAgeMs>=240000;
+    const stalledClaimed=session?.state==='queued'&&job?.verified===true&&
+      job?.state==='claimed'&&Number(job.progress_percent||0)===0&&
+      Number.isFinite(jobAgeMs)&&jobAgeMs>=900000;
     const stage=readyV2?5:session?.state==='validating'?4:
       rendering||failed?3:planReady?2:producer?1:0;
 
@@ -310,7 +316,7 @@
       saved?.publication_hold_verified===true&&
       current?.status==='ready_for_review'&&!!attemptMedia(current,entry);
     const requiresInput=(stage===1&&canReply)||(stage===2&&canRender)||
-      (stage===5&&canApprove)||stalledQueued;
+      (stage===5&&canApprove)||stalledQueued||stalledClaimed;
     const steps=['Feedback received','Producer review','Plan ready',
       'Rendering','Quality check','Ready for review'];
     const rail=elem('ol',null,'rr-progress-stages');
@@ -342,6 +348,10 @@
         'V2 render is running. Quality validation and review are not complete.':
       session?.state==='queued'?(stalledQueued?
         'Requires your attention: V2 has been queued for over four minutes without a verified Runner claim. Automatic recovery has not completed. Check latest status; do not start another render.':
+        stalledClaimed?
+        'Requires your attention: The Runner claimed this V2 job but no progress was verified after fifteen minutes. Reconciliation is required; do not start another render.':
+        job?.verified===true&&job?.state==='claimed'?
+        'The Runner has claimed this exact V2 job. Waiting for rendering progress; publication remains held.':
         'V2 render job is queued. Automatic dispatch starts any unclaimed job after two minutes; rendering has not been confirmed started.'):
       failed?'The revised render needs attention; V1 remains preserved.':
       planReady?(canRender?
