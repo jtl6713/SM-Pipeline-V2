@@ -488,120 +488,85 @@ test('a failed feedback save retains the draft and idempotency without calling P
   assert.ok(!all(nodes.rrDetail).some(n=>n.textContent==='Producer is working…'));
 });
 
-test('held #8447 surfaces a verified Morning alternative and saves correction only on reviewer click',async()=>{
+test('photo suggestions keep comments available after feedback, explicit edit, and refreshed proposal',async()=>{
+  const output='rec0uVrVeiUM6shp9';
   const ids=['page-rendering-review','navRenderingReview','rrQueueList','rrDetail',
     'rrStatus','rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile'];
   const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
-  const output='rec0uVrVeiUM6shp9';
-  let notify, savedRevision=false,completeReply;
-  const slowTimers=[];
+  const original={name:'Old lake photo',time_of_day:'Night',preview_url:'https://example.org/old.jpg'};
+  const proposal={name:'Adler dome alternative',time_of_day:'Afternoon',
+    preview_url:'https://example.org/dome.jpg'};
+  const frames=()=>[{scene:2,start_seconds:4.87,end_seconds:9.7,
+    original,proposed:proposal,changed:true,proposed_ready:true}];
+  let notify,version=3,feedback='',producerDone=false;
   const calls=[];
-  const night={name:'Gibsons Italia 5',time_of_day:'Night',
-    preview_url:'https://media.chicagoshining.com/studio/previews/item4/night.jpg'};
-  const riverNight={name:'Chicago Riverwalk 10',time_of_day:'Night',
-    preview_url:'https://media.chicagoshining.com/studio/previews/item4/night-river.jpg'};
-  const morning={name:'Chicago Riverwalk 8',time_of_day:'Morning',
-    preview_url:'https://media.chicagoshining.com/studio/previews/item4/morning.jpg'};
-  const originals=[
-    {scene:1,start_seconds:0,end_seconds:3.567,original:night,
-      proposed:savedRevision?morning:night,changed:savedRevision,proposed_ready:true},
-    {scene:5,start_seconds:13.9,end_seconds:17.133,original:riverNight,
-      proposed:morning,changed:true,proposed_ready:true},
-    {scene:7,start_seconds:20.7,end_seconds:24.233,original:morning,
-      proposed:morning,changed:false,proposed_ready:true}];
-  const fetchStub=async (url,options)=>{
-    calls.push({url,method:options.method,body:options.body});
+  const fetchStub=async(url,options)=>{
+    calls.push({url,method:options.method});
     if(url==='/api/session')return {ok:true,json:async()=>({
       ok:true,authenticated:true,authorized:true,permissions:{outputs_review:true}})};
     if(url.startsWith('/api/rendering-review/queue?'))return {ok:true,json:async()=>({
       ok:true,flags:{admission_enabled:false,producer_conversation_enabled:true,
-        automatic_sampling_percent:0},
-      queue:[{output_id:output,profile_id:'recT2rbKX3MF7cVFU',review_held:true,
-        output_type:'Instagram Reel',output_number:8447,render_status:'Rendered',
-        title:'Chicago held Reel',final_file_url:'https://example.org/old.mp4'}],next_cursor:null})};
-    if(url==='/api/rendering-review/outputs/'+output)
-      return {ok:true,json:async()=>({ok:true,publication_hold_verified:true,
-        flags:{producer_conversation_enabled:true,attempt_commit_enabled:false},
-        session:{version:savedRevision?4:3,state:'discussing',review_hold:{active:true},
-          attempts:[{number:1,status:'ready_for_review',artifact_id:'source1'}],messages:[]},
-        storyboard:savedRevision?originals.map(f=>f.scene===1?
-          {...f,proposed:morning,changed:true}:f):originals})};
-    if(url.endsWith('/producer-conversation')){
+        automatic_sampling_percent:0},queue:[{
+        output_id:output,profile_id:'recT2rbKX3MF7cVFU',output_type:'Instagram Reel',
+        review_held:true,title:'Adler correction',final_file_url:'https://example.org/v1.mp4'}],
+      next_cursor:null})};
+    if(url==='/api/rendering-review/outputs/'+output)return {ok:true,json:async()=>({
+      ok:true,publication_hold_verified:true,
+      flags:{producer_conversation_enabled:true,attempt_commit_enabled:false},
+      session:{version,state:'discussing',review_hold:{active:true},
+        messages:[{role:'producer',content:'I suggest the dome',at:'2026-11-01T15:00:00Z'},
+          ...(feedback?[{role:'user',content:feedback,at:'2026-11-01T16:00:00Z'}]:[]),
+          ...(producerDone?[{role:'producer',content:'I will update that scene',at:'2026-11-01T16:01:00Z'}]:[])],
+        attempts:[{number:1,status:'ready_for_review',artifact_id:'source1'}]},
+      storyboard:frames()})};
+    if(url.endsWith('/review-feedback')){
       const body=JSON.parse(options.body);
       assert.equal(body.expected_version,3);
-      assert.equal(body.direction,'Yes, those look good.');
-      return new Promise(resolve=>{completeReply=()=>{
-        savedRevision=true;
-        resolve({ok:true,json:async()=>({ok:true,persisted:true,
-          render_queued:false,plan_ready:true,plan_persisted:true})});
-      };});
+      feedback=body.content;version=4;
+      return {ok:true,json:async()=>({ok:true,review_hold_active:true,session_version:4,message_count:2})};
     }
-    throw new Error('Unexpected request '+url);
+    if(url.endsWith('/producer-conversation')){
+      const body=JSON.parse(options.body);assert.equal(body.direction,feedback);
+      assert.equal(body.expected_version,4);
+      producerDone=true;version=5;
+      return {ok:true,json:async()=>({ok:true,persisted:true,render_queued:false,
+        plan_ready:false,plan_persisted:false})};
+    }
+    throw Error('Unexpected '+url);
   };
-  const sandbox={
-    document:{getElementById:id=>nodes[id],createElement:tag=>new Node(tag)},
-    window:{location:{href:'https://studio.test/'},CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''},
-      setTimeout:(fn,ms)=>{slowTimers.push({fn,ms});return slowTimers.length;},
-      clearTimeout:()=>{}},
-    MutationObserver:class {constructor(fn){notify=fn;}observe(){}},
+  const sandbox={document:{getElementById:id=>nodes[id],createElement:tag=>new Node(tag)},
+    window:{location:{href:'https://studio.test/'},
+      CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''},confirm:()=>true},
+    MutationObserver:class{constructor(fn){notify=fn;}observe(){}},
     fetch:fetchStub,URL,URLSearchParams,
-    crypto:{randomUUID:()=> 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'},
-  };
+    crypto:{randomUUID:()=> 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'}};
   vm.runInNewContext(script,sandbox,{filename:'rendering-review-queue.js'});
-  await tick();await tick();
-  nodes['page-rendering-review'].classList.add('active');
-  notify();
-  for(let i=0;i<12;i++)await tick();
-  const descendants=root=>[root,...root.children.flatMap(descendants)];
-  const before=descendants(nodes.rrDetail);
-  const reply=before.find(n=>n.tag==='textarea'&&
-    n.attributes?.['aria-label']==='Reply to your Producer')||
-    before.find(n=>n.tag==='textarea');
-  const send=before.find(n=>n.tag==='button'&&n.textContent==='Reply to Producer');
-  assert.ok(reply&&send,'Producer invites a natural-language reply next to verified photos');
-  assert.ok(before.some(n=>String(n.textContent).includes('Do these look right?')),
-    'Producer speaks naturally rather than showing an internal workflow warning');
-  assert.ok(before.some(n=>n.textContent==='Suggested morning photo'),
-    'the available Morning photo appears as a suggestion');
-  assert.ok(!before.some(n=>String(n.textContent).includes('Daytime correction not yet saved')),
-    'no technical system-status warning in the conversation');
-  assert.equal(calls.filter(x=>x.method==='POST').length,0,'read never changes the session');
-  reply.value='Yes, those look good.';
-  const conversation=before.find(n=>n.className==='rr-chat-form');
-  const progress=before.find(n=>n.className==='rr-feedback-status');
-  assert.ok(conversation&&progress);
-  assert.ok(conversation.children.indexOf(progress)<conversation.children.indexOf(send),
-    'progress status must be above the button so iPhone keyboard cannot hide it');
-  const response=send.listeners.click();
-  assert.equal(send.disabled,true);
-  assert.equal(send.textContent,'Producer is working…');
-  assert.equal(send.attrs['aria-busy'],'true');
-  assert.equal(progress.hidden,false);
-  assert.match(progress.textContent,/Sending your feedback/);
-  assert.equal(progress.dataset.state,'working');
-  assert.equal(slowTimers.filter(timer=>timer.ms===20000).length,1,
-    'the held review session has one independent status poll');
-  assert.equal(slowTimers.filter(timer=>timer.ms===8000).length,1,
-    'Producer request retains its own delayed waiting notice');
-  slowTimers.find(timer=>timer.ms===8000).fn();
-  assert.match(progress.textContent,/Still waiting for the Producer/);
-  assert.equal(calls.filter(x=>x.method==='POST').length,1);
-  await send.listeners.click();
-  assert.equal(calls.filter(x=>x.method==='POST').length,1,'no duplicate while pending');
-  completeReply();
-  await response;
-  for(let i=0;i<12;i++)await tick();
-  assert.equal(send.disabled,false);
-  assert.equal(send.textContent,'Reply to Producer');
-  assert.equal(calls.filter(x=>x.method==='POST').length,1);
-  assert.equal(savedRevision,true);
-  assert.ok(!calls.some(x=>/commit-attempt|publish|approve/.test(x.url)));
-  const after=descendants(nodes.rrDetail);
-  assert.ok(after.some(n=>n.className==='rr-feedback-receipt'&&
-    /photo choices were saved/.test(n.textContent)),
-    'the acknowledgement survives the detail rerender');
-  assert.ok(!after.some(n=>n.textContent==='Reply to Producer'));
-  assert.ok(after.some(n=>n.textContent==='Suggested replacement'));
+  for(let i=0;i<5;i++)await tick();
+  nodes['page-rendering-review'].classList.add('active');notify();
+  for(let i=0;i<10;i++)await tick();
+  const all=n=>[n,...n.children.flatMap(all)];
+  let elements=all(nodes.rrDetail);
+  assert.ok(elements.some(n=>n.textContent==='Suggested replacement'));
+  const draft=elements.find(n=>n.tag==='textarea'&&n.attrs['aria-label']===
+    'Feedback and photo suggestions for Producer');
+  const save=elements.find(n=>n.tag==='button'&&n.textContent==='Save feedback (no edits or render)');
+  assert.ok(draft&&save,'photo suggestions must have a comment box');
+  assert.equal(calls.filter(c=>c.method==='POST').length,0);
+  draft.value='Keep the dome for scene 2, but use a stronger image for scene 3.';
+  draft.listeners.input();await save.listeners.click();for(let i=0;i<5;i++)await tick();
+  elements=all(nodes.rrDetail);
+  assert.ok(elements.some(n=>n.textContent==='Suggested replacement'));
+  assert.ok(elements.some(n=>n.tag==='textarea'),'comment box persists after feedback');
+  assert.equal(producerDone,false,'saving comments does not start edit preparation');
+  const edits=elements.find(n=>n.tag==='button'&&
+    n.textContent==='Make edits based on the latest feedback');
+  assert.equal(edits.disabled,false);
+  await edits.listeners.click();for(let i=0;i<5;i++)await tick();
+  elements=all(nodes.rrDetail);
+  assert.equal(producerDone,true);
+  assert.ok(elements.some(n=>n.textContent==='Suggested replacement'));
+  assert.ok(elements.some(n=>n.tag==='textarea'),'comment box remains after Producer proposal');
+  assert.ok(!calls.some(c=>/commit-attempt|publish|approve/.test(c.url)));
 });
 
 test('Rendering Review labels the playing video without unchanged-video explanations',()=>{
@@ -609,8 +574,8 @@ test('Rendering Review labels the playing video without unchanged-video explanat
   assert.match(script,/rrVersionBar/);
   assert.match(html,/id="rrOriginalVersion"/);
   assert.match(script,/Suggested changes/);
-  assert.match(script,/Do these look right/);
-  assert.match(script,/Reply to Producer/);
+  assert.match(script,/Make edits based on the latest feedback/);
+  assert.match(script,/Save feedback \(no edits or render\)/);
   assert.match(script,/Suggested morning photo/);
   assert.match(script,/created\.persisted!==true\|\|created\.render_queued!==false/);
   assert.doesNotMatch(script,/ORIGINAL V1 — unchanged/);
