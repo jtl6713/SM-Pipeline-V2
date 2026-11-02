@@ -26,6 +26,7 @@ on:
       - 'services/pipeline-runner/tests/test_native_gallery_preflight_http.py'
       - 'services/pipeline-runner/tests/test_native_gallery_claim_client.py'
       - 'services/pipeline-runner/tests/test_native_gallery_claim_http.py'
+      - 'services/pipeline-runner/tests/test_native_gallery_branding_pixels.py'
       - 'services/pipeline-runner/app.py'
       - 'services/pipeline-runner/rendering_review/gallery_source_operations.py'
       - '.github/workflows/non-vibe-native-gallery-ci.yml'
@@ -99,3 +100,4 @@ jobs:
           python -m unittest discover -s services/pipeline-runner/tests -p 'test_native_gallery_preflight_http.py' -v
           python -m unittest discover -s services/pipeline-runner/tests -p 'test_native_gallery_claim_client.py' -v
           python -m unittest discover -s services/pipeline-runner/tests -p 'test_native_gallery_claim_http.py' -v
+          python -m unittest discover -s services/pipeline-runner/tests -p 'test_native_gallery_branding_pixels.py' -v
