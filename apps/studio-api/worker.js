@@ -2704,7 +2704,7 @@ export default {
 
       // Read-only native gallery revision history: exact authenticated profile
       // and Airtable attempt IDs. Metadata is never an approval receipt.
-      const galleryStatusMatch = /^\\/api\\/factory\\/outputs\\/(rec[A-Za-z0-9]{14})\\/gallery-revision-status$/.exec(url.pathname);
+      const galleryStatusMatch = new RegExp("^/api/factory/outputs/(rec[A-Za-z0-9]{14})/gallery-revision-status$").exec(url.pathname);
       if (galleryStatusMatch) {
         if (request.method !== "GET") throw new HttpError(405,"Method not allowed");
         requirePermission(authorization,"outputs_review");
