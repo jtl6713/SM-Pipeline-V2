@@ -66,13 +66,18 @@ class Operations:
         self.watermarked = 0
         self.uploaded = 0
         self.committed = None
-        self.last_branded = None\n        self.original_verified = True
+        self.last_branded = None
+        self.original_verified = True
 
     def verify_hold(self, output_id, session_id):
         assert output_id == OID and session_id == JOB["session_id"]
         return self.hold
 
-    def verify_original_sources(self, original):\n        assert original["source_kind"] == "original"\n        return self.original_verified\n\n    def reserve_attempt(self, job, original_hash, changes_hash):
+    def verify_original_sources(self, original):
+        assert original["source_kind"] == "original"
+        return self.original_verified
+
+    def reserve_attempt(self, job, original_hash, changes_hash):
         assert original_hash == "b"*64
         assert len(changes_hash) == 64
         if self.reserved:
@@ -151,7 +156,15 @@ class TestIsolatedGallery(unittest.TestCase):
         self.assertFalse(target["publish_approved"])
         self.assertFalse(target["factory_approved"])
 
-    def test_original_drive_bytes_missing_blocks_before_reservation(self):\n        ops = Operations()\n        ops.original_verified = False\n        with self.assertRaisesRegex(GalleryRevisionDenied, "original_drive_bytes_unverified"):\n            run(ops=ops)\n        self.assertFalse(ops.reserved)\n        self.assertEqual(ops.generated, 0)\n\n    def test_ambiguous_retry_does_not_regenerate_or_duplicate_drive_upload(self):
+    def test_original_drive_bytes_missing_blocks_before_reservation(self):
+        ops = Operations()
+        ops.original_verified = False
+        with self.assertRaisesRegex(GalleryRevisionDenied, "original_drive_bytes_unverified"):
+            run(ops=ops)
+        self.assertFalse(ops.reserved)
+        self.assertEqual(ops.generated, 0)
+
+    def test_ambiguous_retry_does_not_regenerate_or_duplicate_drive_upload(self):
         ops = Operations()
         run(ops=ops)
         with self.assertRaisesRegex(GalleryRevisionDenied, "already_claimed"):
