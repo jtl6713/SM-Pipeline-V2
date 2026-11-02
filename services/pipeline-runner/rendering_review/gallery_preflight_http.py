@@ -79,7 +79,8 @@ def create_native_gallery_preflight_blueprint(
                 result.get("profile_id") != body["expected_profile_id"] or
                 result.get("output_id") != body["output_id"] or
                 result.get("can_generate") is not False or
-                result.get("publication_authorized") is not False):
+                result.get("publication_authorized") is not False or
+                type(result.get("original_artifact_watermark_verified")) is not bool):
             return jsonify(ok=False, error="native_gallery_preflight_unverified"), 503
         # Do not disclose private original Drive IDs or Media Asset records
         # through a service response; a later trusted Runner job will reload.
@@ -92,7 +93,7 @@ def create_native_gallery_preflight_blueprint(
             "sources_byte_verified": result["sources_byte_verified"],
             "source_rights_verified": result["source_rights_verified"],
             "shared_watermark_asset_verified": result["shared_watermark_asset_verified"],
-            "original_artifact_watermark_verified": False,
+            "original_artifact_watermark_verified": result["original_artifact_watermark_verified"],
             "original_artifacts_sha256": result["original_artifacts_sha256"],
             "can_generate": False, "can_approve": False,
             "publication_authorized": False,
