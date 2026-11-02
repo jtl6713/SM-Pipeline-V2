@@ -15,6 +15,11 @@ from carousel.image_gen import generate_carousel_png
 from rendering_review.native_gallery_c5c6_executor import (
     NativeGalleryExecutionDenied, execute_one_native_gallery,
 )
+from rendering_review.native_gallery_claim_client import NativeGalleryClaimDenied
+from rendering_review.native_gallery_launch_client import NativeGalleryLaunchDenied
+from rendering_review.native_gallery_rights_registration import NativeGalleryRightsDenied
+from rendering_review.gallery_media_io import GalleryMediaDenied
+from rendering_review.gallery_authoritative import GalleryPreflightDenied
 from rendering_review.native_gallery_rights_policy import (
     NativeGalleryRightsPolicyDenied, build_approved_native_gallery_clearance,
 )
@@ -68,7 +73,9 @@ def create_native_gallery_execute_blueprint(
             )
         except NativeGalleryRightsPolicyDenied:
             return jsonify(ok=False, error="native_gallery_rights_policy_not_approved"), 503
-        except NativeGalleryExecutionDenied:
+        except (NativeGalleryExecutionDenied, NativeGalleryClaimDenied,
+                NativeGalleryLaunchDenied, NativeGalleryRightsDenied,
+                GalleryMediaDenied, GalleryPreflightDenied):
             # A denied or ambiguous reserved attempt is operator-only
             # reconciliation: never auto-requeue or auto-launch.
             return jsonify(ok=False, error="native_gallery_execution_requires_reconciliation"), 409
