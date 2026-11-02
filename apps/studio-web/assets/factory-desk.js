@@ -1478,15 +1478,89 @@
            inventory?.publication_authorized!==false||
            inventory?.source_kind!=="airtable_metadata_only")
           throw new Error("Original gallery source verification contract is unavailable");
+        // An exact slide-selection proposal is available without changing
+        // existing Factory feedback or enabling unverified media rendering.
+        // This preview never creates a job, modifies Airtable, or publishes.
+        const selectable=[];
         for(const slide of (inventory.slides||[]).slice(0,80)){
           const li=document.createElement("li");
-          li.textContent="Slide "+slide.order+" · "+
+          const label=document.createElement("label");
+          const checkbox=document.createElement("input");
+          checkbox.type="checkbox";
+          checkbox.className="factory-gallery-select-slide";
+          checkbox.dataset.slideId=String(slide.slide_id||"");
+          checkbox.disabled=Boolean(slide.blockers?.length);
+          const name=document.createElement("span");
+          name.textContent="Slide "+slide.order+" · "+
             (slide.blockers?.length?slide.blockers.join(", "):
-             "Airtable source present; Drive rights/branding not yet verified");
+             "Source metadata present; Drive/branding still unverified");
+          label.append(checkbox," ",name);
+          li.appendChild(label);
+          const instruction=document.createElement("textarea");
+          instruction.className="factory-gallery-slide-instruction";
+          instruction.placeholder="Describe the change to this selected slide (preview only)";
+          instruction.setAttribute("aria-label","Correction instructions for slide "+slide.order);
+          instruction.maxLength=3000;
+          instruction.rows=2;
+          instruction.disabled=true;
+          instruction.hidden=true;
+          checkbox.addEventListener("change",()=>{
+            instruction.disabled=!checkbox.checked;
+            instruction.hidden=!checkbox.checked;
+            if(checkbox.checked)instruction.focus();
+          });
+          li.appendChild(instruction);
           rows.appendChild(li);
+          if(!checkbox.disabled)selectable.push({slide,checkbox,instruction});
+        }
+        if(selectable.length){
+          const li=document.createElement("li");
+          const button=document.createElement("button");
+          button.type="button";
+          button.className="factory-gallery-preview-selection";
+          button.textContent="Validate selected photo changes (no render)";
+          li.appendChild(button);
+          rows.appendChild(li);
+          button.addEventListener("click",async()=>{
+            if(!current())return;
+            const selected=selectable.filter(x=>x.checkbox.checked).map(x=>({
+              slide_id:x.slide.slide_id,instruction:x.instruction.value.trim(),
+            }));
+            if(!selected.length){
+              status.textContent="Select at least one eligible slide to preview a proposed correction.";
+              return;
+            }
+            button.disabled=true;
+            status.textContent="Verifying selected slide identity against current Airtable records…";
+            try{
+              const proposal=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
+                "/gallery-selection-preview",{
+                  method:"POST",
+                  body:JSON.stringify({
+                    client_request_id:"gallery_preview_"+Date.now().toString(36)+
+                      "_"+Math.random().toString(36).slice(2,12),
+                    selected_slides:selected,
+                  }),
+                });
+              if(!current())return;
+              if(proposal?.ok!==true||proposal.output_id!==id||
+                 proposal.can_generate!==false||
+                 proposal.publication_authorized!==false)
+                throw new Error("Protected selection preview was not verified");
+              status.textContent="Selected slide(s): "+
+                proposal.selected.map(x=>x.order).join(", ")+
+                ". Unchanged: "+proposal.unchanged.map(x=>x.order).join(", ")+
+                ". Exact selection verified. This preview is not saved or rendered; "+
+                "Drive, branding, and production release gates remain required.";
+            }catch(error){
+              if(current())status.textContent="Slide preview blocked: "+
+                String(error?.message||error)+". No changes were generated.";
+            }finally{button.disabled=false;}
+          });
         }
         return "Original image inventory: "+inventory.slide_count+
-          " slide(s). Drive rights/branding verification is still required.";
+          " slide(s). Select slides for a guarded, unsaved correction preview; "+
+          "Drive rights/branding verification and rendering are still unavailable.";
       }catch(error){
         // The source is often video or an unpublished/non-gallery output;
         // this cannot block sending normal Factory review comments.
