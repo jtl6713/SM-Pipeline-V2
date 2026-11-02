@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import unittest
@@ -95,7 +96,9 @@ class Media:
     def verify_drive_image(self, file_id, _sha, count):
         assert file_id == ND
         assert count == len(b"branded")
-        return {"sha256": "c"*64, "byte_count": 4096,
+        return {"sha256": hashlib.sha256(b"branded").hexdigest(),
+                "byte_count": len(b"branded"), "mime_type": "image/png",
+                "google_drive_verified": True,
                 "width": 1080, "height": 1350}
 
 
