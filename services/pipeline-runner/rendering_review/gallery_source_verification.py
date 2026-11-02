@@ -56,6 +56,7 @@ def verify_original_gallery_sources(*, output_id, profile_id, content_item_id,
                 source.get("profile_id") != profile_id or
                 source.get("content_item_id") != content_item_id or
                 source.get("rights_verified") is not True or
+                source.get("watermark_verified") is not True or
                 source.get("airtable_identity_verified") is not True or
                 source.get("mime_type") not in FORMATS or
                 not HASH.fullmatch(str(source.get("sha256") or "")) or
