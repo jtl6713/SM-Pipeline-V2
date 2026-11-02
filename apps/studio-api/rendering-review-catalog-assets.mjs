@@ -16,11 +16,14 @@ export const catalogToken=recordId=>rec(recordId)?"library_"+recordId:null;
 export const catalogRecordId=token=>/^library_rec[A-Za-z0-9]{14}$/.test(str(token))?
   token.slice("library_".length):null;
 
-function authority(row,readField,expectedId,expectedDrive=null) {
+function authority(row,readField,expectedId,expectedDrive=null,allowGraphic=false) {
   if(row?.id!==expectedId||!row?.fields)return false;
   const f=k=>readField(row,k);
   const file=str(f("Google Drive File ID"));
-  return select(f("Media_Class"))==="Image"&&select(f("Asset_Status"))==="Available"&&
+  return (select(f("Media_Class"))==="Image"||
+      (allowGraphic&&select(f("Media_Class"))==="Graphic"&&
+       select(f("MIME_Type"))==="image/jpeg"))&&
+    select(f("Asset_Status"))==="Available"&&
     select(f("Rights_Status"))==="Owned"&&f("Active")===true&&
     f("Do_Not_Use")!==true&&
     one(f("Content_Profile"))===CHICAGO_PROFILE_ID&&drive(file)&&
@@ -69,13 +72,14 @@ export async function resolveReviewCatalogAssets({tokens,readRecord,readField,
   const masters=new Map(),missing=[];
   for(const id of ids){
     const row=await readRecord(mediaTable,id);
-    if(!authority(row,readField,id)){missing.push(id);continue;}
+    if(!authority(row,readField,id,null,true)){missing.push(id);continue;}
     const fileId=str(readField(row,"Google Drive File ID"));
     const sourceBytes=Number(readField(row,"File_Size_Bytes")||0);
     if(!Number.isSafeInteger(sourceBytes)||sourceBytes<1024){
       missing.push(id);continue;
     }
-    masters.set(id,{row,fileId,sourceBytes});
+    masters.set(id,{row,fileId,sourceBytes,
+      mediaClass:select(readField(row,"Media_Class"))});
   }
   const result=[];
   if(!masters.size)return {receipts:result,unresolved:missing};
@@ -112,6 +116,7 @@ export async function resolveReviewCatalogAssets({tokens,readRecord,readField,
       render_url:selected.preview_url,
       origin:"review_library",
       source_media_record_id:id,
+      source_media_class:master.mediaClass,
       variant_transfer_record_id:selected.queue_id,
       variant_media_record_id:selected.generated_media_id,
       source_asset_id:selected.source_asset_id,
