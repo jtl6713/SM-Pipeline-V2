@@ -75,6 +75,8 @@ app.register_blueprint(create_review_media_blueprint(settings))
 
 @app.get('/jobs/rendering-review/dispatch-health')
 def review_auto_dispatch_health():
+    if not settings.get('pipeline_runner_shared_secret', '').strip():
+        return jsonify(ok=False, error='runner_auth_unconfigured'), 503
     denied, code = _verify_secret()
     if denied is not None:
         return denied, code
