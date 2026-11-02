@@ -130,3 +130,90 @@ def detect_promoted_profile_drift(
         ],
         "auto_repair_safe": True,
     }
+
+IG_STALE_UPLOAD = "QA-IG-STALE-UPLOAD"
+IG_STALE_LOCK_SECONDS = 30 * 60
+
+
+def detect_ig_stale_upload(
+    row: dict[str, Any],
+    *,
+    now_utc: str,
+    runner_heartbeat_utc: str | None = None,
+    runner_lease_expires_utc: str | None = None,
+    threshold_seconds: int = IG_STALE_LOCK_SECONDS,
+) -> dict[str, Any] | None:
+    """Classify an orphaned AP1-IG lock; do not mutate or claim provider success.
+
+    The coordinator must independently verify lease ownership and remote identity
+    before executing any suggested recovery. Unknown heartbeat/lease is unsafe.
+    """
+    from datetime import datetime, timezone
+
+    def parse(value: object) -> datetime | None:
+        if not value:
+            return None
+        try:
+            result = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            return result.astimezone(timezone.utc) if result.tzinfo else None
+        except (ValueError, TypeError):
+            return None
+
+    fields = row.get("fields", row)
+    get = lambda name: fields.get(name)
+    if (
+        str(get("Platform") or "").lower() != "instagram"
+        or str(get("Platform_Output_Type") or "").lower() != "instagram reel"
+        or str(get("Publish_Status") or "") != "Publishing"
+        or str(get("Publish_Locked_By") or "") != "AP1-IG"
+        or str(get("Review_Status") or "") != "Approved"
+        or str(get("Output_Status") or "") != "Approved for Publishing"
+        or str(get("Publish_Method") or "") != "Automated"
+        or get("Auto_Publish_Enabled") is not True
+        or get("Do_Not_Publish") is True
+        or any(get(name) for name in (
+            "Test_Run_ID", "Replace_Transaction_ID", "Published_At",
+            "Studio_Render_Review_Hold_Active", "Studio_Render_Review_Hold_ID",
+            "Studio_Render_Review_Hold_Owner", "Studio_Review_Hold_ID",
+            "Studio_Review_Hold_Owner", "Studio_Render_Review_Session_ID",
+        ))
+    ):
+        return None
+    now = parse(now_utc)
+    locked = parse(get("Publish_Locked_At"))
+    attempted = parse(get("Last_Publish_Attempt_At"))
+    if not now or not locked or not attempted:
+        return None
+    age = (now - max(locked, attempted)).total_seconds()
+    if age < max(60, threshold_seconds):
+        return None
+    cooldown = parse(get("Publish_Next_Retry_At"))
+    if cooldown and cooldown > now:
+        return None
+    heartbeat = parse(runner_heartbeat_utc)
+    lease = parse(runner_lease_expires_utc)
+    if (heartbeat and (now - heartbeat).total_seconds() < max(60, threshold_seconds)
+            or lease and lease > now):
+        return None
+
+    remote = bool(get("Platform_Post_ID") or get("Platform_Post_URL")
+                  or get("Platform_Media_ID"))
+    # No provider identifiers is NOT proof that a Graph create never happened.
+    # Provider reconciliation is mandatory before releasing the exact lock.
+    return {
+        "id": IG_STALE_UPLOAD,
+        "record_id": row.get("id"),
+        "output_id": get("Output_ID"),
+        "stage": "AP1-IG",
+        "age_seconds": int(age),
+        "remote_identity_saved": remote,
+        "action": "verify_existing_provider_post" if remote else "reconcile_before_requeue",
+        "heartbeat_observed": heartbeat is not None,
+        "lease_observed": lease is not None,
+        "auto_repair_safe": False,
+        "requires": [
+            "fresh_authoritative_readback", "independent_runner_lease_probe",
+            "provider_identity_reconciliation", "exact_output_fencing",
+            "MAE_atomic_reservation", "append_only_recovery_audit",
+        ],
+    }
