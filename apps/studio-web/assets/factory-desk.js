@@ -1469,6 +1469,7 @@
         return "Compatible-output preview unavailable: "+String(error?.message||error)+".";
       }
     };
+    const canSaveWithoutAutoRender = pending?.payload?.action !== "request_changes_content";
     const readGallery=async()=>{
       try{
         const inventory=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
@@ -1478,15 +1479,95 @@
            inventory?.publication_authorized!==false||
            inventory?.source_kind!=="airtable_metadata_only")
           throw new Error("Original gallery source verification contract is unavailable");
+        // An exact slide-selection proposal is available without changing
+        // existing Factory feedback or enabling unverified media rendering.
+        // This preview never creates a job, modifies Airtable, or publishes.
+        const selectable=[];
         for(const slide of (inventory.slides||[]).slice(0,80)){
           const li=document.createElement("li");
-          li.textContent="Slide "+slide.order+" · "+
+          const label=document.createElement("label");
+          const checkbox=document.createElement("input");
+          checkbox.type="checkbox";
+          checkbox.className="factory-gallery-select-slide";
+          checkbox.dataset.slideId=String(slide.slide_id||"");
+          checkbox.disabled=Boolean(slide.blockers?.length);
+          const name=document.createElement("span");
+          name.textContent="Slide "+slide.order+" · "+
             (slide.blockers?.length?slide.blockers.join(", "):
-             "Airtable source present; Drive rights/branding not yet verified");
+             "Source metadata present; Drive/branding still unverified");
+          label.append(checkbox," ",name);
+          li.appendChild(label);
+          const instruction=document.createElement("textarea");
+          instruction.className="factory-gallery-slide-instruction";
+          instruction.placeholder="Describe the change to this selected slide (preview only)";
+          instruction.setAttribute("aria-label","Correction instructions for slide "+slide.order);
+          instruction.maxLength=3000;
+          instruction.rows=2;
+          instruction.disabled=true;
+          instruction.hidden=true;
+          checkbox.addEventListener("change",()=>{
+            instruction.disabled=!checkbox.checked;
+            instruction.hidden=!checkbox.checked;
+            if(checkbox.checked)instruction.focus();
+          });
+          li.appendChild(instruction);
           rows.appendChild(li);
+          if(!checkbox.disabled)selectable.push({slide,checkbox,instruction});
+        }
+        if(selectable.length && canSaveWithoutAutoRender){
+          const li=document.createElement("li");
+          const button=document.createElement("button");
+          button.type="button";
+          button.className="factory-gallery-preview-selection";
+          button.textContent="Validate selected photo changes (no render)";
+          li.appendChild(button);
+          rows.appendChild(li);
+          button.addEventListener("click",async()=>{
+            if(!current())return;
+            const selected=selectable.filter(x=>x.checkbox.checked).map(x=>({
+              slide_id:x.slide.slide_id,instruction:x.instruction.value.trim(),
+            }));
+            if(!selected.length){
+              status.textContent="Select at least one eligible slide to preview a proposed correction.";
+              return;
+            }
+            button.disabled=true;
+            status.textContent="Verifying selected slide identity against current Airtable records…";
+            try{
+              const proposal=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
+                "/gallery-selection-preview",{
+                  method:"POST",
+                  body:JSON.stringify({
+                    client_request_id:"gallery_preview_"+Date.now().toString(36)+
+                      "_"+Math.random().toString(36).slice(2,12),
+                    selected_slides:selected,
+                  }),
+                });
+              if(!current())return;
+              if(proposal?.ok!==true||proposal.output_id!==id||
+                 proposal.can_generate!==false||
+                 proposal.publication_authorized!==false)
+                throw new Error("Protected selection preview was not verified");
+              status.textContent="Selected slide(s): "+
+                proposal.selected.map(x=>x.order).join(", ")+
+                ". Unchanged: "+proposal.unchanged.map(x=>x.order).join(", ")+
+                ". Exact selection verified. To save these directions, use Send back with notes. "+
+                "No render is authorized; Drive, branding and release gates remain required.";
+            }catch(error){
+              if(current())status.textContent="Slide preview blocked: "+
+                String(error?.message||error)+". No changes were generated.";
+            }finally{button.disabled=false;}
+          });
+        }
+        if(!canSaveWithoutAutoRender) {
+          for(const entry of selectable)entry.checkbox.disabled=true;
+          return "Original image inventory: "+inventory.slide_count+
+            " slide(s). This Producer request may auto-start production; photo-by-photo "+
+            "selection is disabled until an explicit non-rendering review path is available.";
         }
         return "Original image inventory: "+inventory.slide_count+
-          " slide(s). Drive rights/branding verification is still required.";
+          " slide(s). Select slides for a guarded, unsaved correction preview; "+
+          "Drive rights/branding verification and rendering are still unavailable.";
       }catch(error){
         // The source is often video or an unpublished/non-gallery output;
         // this cannot block sending normal Factory review comments.
@@ -1560,10 +1641,44 @@
     event.preventDefault();
     const pending = state.pendingFactoryFeedback;
     if (!pending) return;
-    const notes = String($("factoryFeedbackNotes")?.value || "").trim();
+    const freeformNotes = String($("factoryFeedbackNotes")?.value || "").trim();
     const error = $("factoryFeedbackError");
+    const selectedGallerySlides = [...document.querySelectorAll(
+      "#factoryReadOnlyInventoryRows .factory-gallery-select-slide:checked"
+    )].map(input=>{
+      const li=input.closest("li");
+      const instruction=String(li?.querySelector(".factory-gallery-slide-instruction")?.value||"").trim();
+      const id=String(input.dataset.slideId||"");
+      const order=String(li?.querySelector("label span")?.textContent||"")
+        .match(/^Slide (\d+) /)?.[1]||"";
+      return {id,order,instruction};
+    });
+    if(selectedGallerySlides.length && pending.payload?.action==="request_changes_content") {
+      if(error){error.hidden=false;error.textContent=
+        "Photo-by-photo changes cannot auto-start production. Use manual review first.";}
+      return;
+    }
+    if(selectedGallerySlides.some(item=>
+      !/^rec[A-Za-z0-9]{14}$/.test(item.id)||
+      !/^\d{1,2}$/.test(item.order)||
+      item.instruction.length<8||item.instruction.length>3000)){
+      if(error){error.hidden=false;error.textContent=
+        "Each selected photo needs a correction description of 8–3000 characters.";}
+      return;
+    }
+    const photoNotes=selectedGallerySlides.length
+      ? "Selected photo corrections (slide-specific reviewer instructions; no render authorized):\n"+
+        selectedGallerySlides.map(x=>"- Slide "+x.order+" ["+x.id+"]: "+x.instruction).join("\n")
+      : "";
+    const notes=[freeformNotes,photoNotes].filter(Boolean).join("\n\n");
     if (!notes) {
       if (error) { error.hidden = false; error.textContent = "Describe the changes needed before sending back."; }
+      $("factoryFeedbackNotes")?.focus();
+      return;
+    }
+    if (notes.length > 3000) {
+      if (error) { error.hidden = false; error.textContent =
+        "Combined review notes are too long (3,000 characters maximum). Shorten the slide instructions."; }
       $("factoryFeedbackNotes")?.focus();
       return;
     }
