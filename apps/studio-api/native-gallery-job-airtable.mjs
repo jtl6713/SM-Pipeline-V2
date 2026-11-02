@@ -38,7 +38,7 @@ async function getOwned({env,adapter,output_id,profile_id,content_item_id}){
      !TOKEN.test(S(f.Studio_Render_Review_Hold_ID))||
      !TOKEN.test(S(f.Studio_Render_Review_Hold_Owner))||
      !TOKEN.test(S(f.Studio_Render_Review_Session_ID))||
-     S(f.Studio_Render_Review_Hold_Owner)!==S(f.Studio_Render_Review_Session_ID)) )
+     S(f.Studio_Render_Review_Hold_Owner)!==S(f.Studio_Render_Review_Session_ID)))
     deny("NATIVE_GALLERY_OUTPUT_HOLD_NOT_VERIFIED");
   if(f.Published_At||f.Platform_Post_ID||f.Platform_Post_URL||
      f.Platform_Media_ID||f.Publish_Started_At||f.Publish_Locked_At||
@@ -57,14 +57,14 @@ async function getOwned({env,adapter,output_id,profile_id,content_item_id}){
 }
 async function findJobs(env,adapter,output_id){
   const found=await adapter.listRecords(env,NATIVE_GALLERY_JOBS_TABLE,{
-    limit:30,filterFormula:'{Output_Record_ID}="'+output_id+'"',
+    limit:31,filterFormula:'{Output_Record_ID}="'+output_id+'"',
     fields:["Job_ID","Output_Record_ID","Profile_Record_ID",
       "Content_Item_Record_ID","Actor_Record_ID","Client_Request_ID",
       "Request_Fingerprint","Original_Manifest_SHA256","Plan_SHA256",
       "Job_State","Row_Version","Hold_ID","Hold_Owner","Lease_Fence",
       "Lease_Owner","Total_Slides","Completed_Slides","Created_At_UTC"],
   });
-  if(!Array.isArray(found)||found.length>30||
+  if(!Array.isArray(found)||found.length>=31||
      found.some(r=>!RECORD.test(S(r?.id))||
        S(r.fields?.Output_Record_ID)!==output_id||
        !TOKEN.test(S(r.fields?.Job_ID)))||
