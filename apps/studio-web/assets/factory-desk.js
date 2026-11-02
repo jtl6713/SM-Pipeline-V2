@@ -1498,6 +1498,54 @@
               ". Revised artifacts are not verified for acceptance.":
             "Gallery job history: no native-gallery revision jobs recorded.";
           rows.appendChild(history);
+          // Side-by-side V1/V2 images are fetched through authenticated
+          // Studio, never public Drive links. The Runner rechecks original
+          // and revised private Drive bytes on EVERY image request.
+          if(revision.private_preview_available===true){
+            const reviewable=revision.jobs.filter(job=>
+              ["ready_for_review","creative_accepted","rejected"].includes(
+                String(job.status||""))&&job.revised_manifest_stored===true);
+            for(const job of reviewable.slice(0,2)){
+              const title=document.createElement("li");
+              title.textContent="Private gallery comparison · "+job.job_id+
+                " · "+job.status+" (view only; Factory approval separate)";
+              rows.appendChild(title);
+              for(const slide of inventory.slides.slice(0,20)){
+                if(!/^rec[A-Za-z0-9]{14}$/.test(String(slide.slide_id||"")))continue;
+                const item=document.createElement("li");
+                const label=document.createElement("div");
+                label.textContent="Slide "+slide.order;
+                item.appendChild(label);
+                const pair=document.createElement("div");
+                pair.style.display="flex";
+                pair.style.flexWrap="wrap";
+                pair.style.gap="12px";
+                for(const version of ["original","revised"]){
+                  const picture=document.createElement("figure");
+                  picture.style.margin="0";
+                  picture.style.width="min(190px, 45%)";
+                  const note=document.createElement("figcaption");
+                  note.textContent=version==="original"?"Original V1":"Revised V2";
+                  const image=document.createElement("img");
+                  image.alt="Private "+version+" image for gallery slide "+slide.order;
+                  image.loading="lazy";
+                  image.style.width="100%";
+                  image.style.maxHeight="250px";
+                  image.style.objectFit="contain";
+                  image.src="/api/factory/outputs/"+encodeURIComponent(id)+
+                    "/gallery/jobs/"+encodeURIComponent(job.job_id)+
+                    "/slides/"+encodeURIComponent(slide.slide_id)+"/"+version;
+                  image.addEventListener("error",()=>{
+                    note.textContent=(version==="original"?"Original":"Revised")+
+                      " unavailable — verification or hold may have changed";
+                  });
+                  picture.appendChild(image);picture.appendChild(note);
+                  pair.appendChild(picture);
+                }
+                item.appendChild(pair);rows.appendChild(item);
+              }
+            }
+          }
         }catch(error){
           if(current()){
             const history=document.createElement("li");
