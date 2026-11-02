@@ -67,6 +67,7 @@ export async function commitNativeGalleryManifest({request,env,operations:ops,
       txt(o.Studio_Render_Review_Hold_ID)!==j.Hold_ID||
       txt(o.Studio_Render_Review_Hold_Owner)!==j.Hold_Owner||
       txt(o.Studio_Render_Review_Session_ID)!==j.Hold_Owner||
+      !/(image|photo|carousel|gallery|picture)/i.test(status(o.Platform_Output_Type))||
       o.Published_At||o.Platform_Post_ID||o.Platform_Media_ID||
       o.Publish_Started_At||o.Publish_Locked_At||o.Publish_Locked_By||
       /^(published|publishing|dispatched)$/i.test(status(o.Publish_Status))||
@@ -101,6 +102,7 @@ export async function commitNativeGalleryManifest({request,env,operations:ops,
       history.some(x=>x?.publication_authorized!==false))
      deny("GALLERY_COMMIT_PLAN_OR_INTENT_INVALID");
    const selected=new Set(plan.selected.map(x=>x.slide_id));
+   const allOriginalFiles=new Set(original.map(row=>row.drive_file_id));
    if(selected.size!==plan.selected.length)deny("GALLERY_COMMIT_SELECTED_DUPLICATES");
    let changed=0;
    const ids=new Set(),files=new Set();
@@ -120,7 +122,7 @@ export async function commitNativeGalleryManifest({request,env,operations:ops,
        deny("GALLERY_COMMIT_ARTIFACT_INVALID");
      ids.add(next.slot_id);files.add(next.drive_file_id);
      if(selected.has(prev.slot_id)){
-       if(next.drive_file_id===prev.drive_file_id||next.sha256===prev.sha256)
+       if(allOriginalFiles.has(next.drive_file_id)||next.sha256===prev.sha256)
          deny("GALLERY_COMMIT_SELECTED_NOT_REVISED");
        changed++;
      }else if(next.drive_file_id!==prev.drive_file_id||
