@@ -1,0 +1,53 @@
+name: Audit live V2 render dispatch configuration (read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/adler-v2-dispatch-config-audit.yml'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Inspect active production Worker version and only named render flags
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CF_TOKEN"
+          test -n "$CF_ACCOUNT"
+          root="https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/scripts/chicagoshining-studio-api"
+          curl -fsS --max-time 20 "$root/deployments" -H "Authorization: Bearer $CF_TOKEN" -o /tmp/deploy.json
+          active=$(jq -er '.result.deployments[0].versions | max_by(.percentage) | .version_id' /tmp/deploy.json)
+          curl -fsS --max-time 20 "$root/versions/$active" -H "Authorization: Bearer $CF_TOKEN" -o /tmp/worker-version.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          response=json.loads(Path('/tmp/worker-version.json').read_text())
+          assert response.get('success') is True, 'active_version_unavailable'
+          r=response.get('result') or {}
+          bindings=(r.get('resources') or {}).get('bindings') or []
+          allowlist=(
+            'RENDERING_REVIEW_EXACT_RENDER_TRIGGER_ENABLED',
+            'RENDERING_REVIEW_JOB_CLAIM_ENABLED',
+            'RENDERING_REVIEW_RENDER_OUTBOX_VERIFIED',
+            'RENDERING_REVIEW_ATTEMPT_COMMIT_ENABLED',
+            'RENDERING_REVIEW_MANUAL_ADMISSION_ENABLED',
+            'RENDERING_REVIEW_INTEGRATION_VERIFIED',
+            'RENDERING_REVIEW_DISPATCH_FENCE_VERIFIED',
+            'RENDERING_REVIEW_SCHEDULER_VACATE_VERIFIED',
+          )
+          values={b.get('name'):b.get('text') for b in bindings if b.get('type')=='plain_text' and b.get('name') in allowlist}
+          print('production_active_version_number='+str(r.get('number')))
+          for name in allowlist:
+            value=str(values.get(name,'absent')).lower()
+            print(name+'='+('true' if value=='true' else 'false' if value=='false' else 'absent_or_other'))
+          # This audit must not print arbitrary strings or secret binding values.
+          PY
+          curl -fsS --max-time 20 'https://pipeline.chicagoshining.com/health' -o /tmp/review-runner-health.json
+          jq -e '.ok==true' /tmp/review-runner-health.json >/dev/null
+          jq -r '"runner_version="+(.version // "unavailable")' /tmp/review-runner-health.json
