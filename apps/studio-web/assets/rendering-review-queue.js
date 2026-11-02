@@ -283,6 +283,8 @@
     const readyV2=!!completedAttempt||approvedV2;
     const rendering=['queued','rendering','validating'].includes(session?.state);
     const failed=session?.state==='revision_failed';
+    const pendingFeedback=messages.findLastIndex(m=>m.role==='user')>
+      messages.findLastIndex(m=>m.role==='producer');
     const stage=readyV2?5:session?.state==='validating'?4:
       rendering||failed?3:planReady?2:producer?1:0;
 
@@ -299,8 +301,9 @@
       saved?.flags?.creative_approval_enabled===true&&
       saved?.publication_hold_verified===true&&
       current?.status==='ready_for_review'&&!!attemptMedia(current,entry);
-    const requiresInput=(stage===1&&canReply)||(stage===2&&canRender)||
-      (stage===5&&canApprove);
+    const requiresInput=(stage===0&&pendingFeedback&&!rendering)||
+      (stage===1&&(canReply||pendingFeedback))||(stage===2&&canRender)||
+      (stage===5&&(canApprove||pendingFeedback));
     const steps=['Feedback received','Producer review','Plan ready',
       'Rendering','Quality check','Ready for review'];
     const rail=elem('ol',null,'rr-progress-stages');
@@ -336,10 +339,14 @@
       planReady?(canRender?
         'Requires your attention: V2 plan is saved. Select Make the revised video to authorize rendering. No render has started.':
         'V2 plan is saved. No render has started. Render authorization is a separate action when enabled.'):
-      producer?(canReply?
+      producer?(pendingFeedback?
+        'Requires your attention: feedback was saved but no new edits have been requested. Select Make edits based on the latest feedback to prepare a plan. V2 has NOT started.':
+        canReply?
         'Requires your attention: Producer replied, but V2 has NOT started. Review the proposed changes and reply with your direction. No render-ready plan or V2 job exists.':
         'Producer replied, but V2 has NOT started. No verified render-ready plan or V2 render job exists. Continue the conversation to resolve remaining requirements.'):
-      messages.length?'Feedback was saved. No verified Producer reply or V2 job yet.':
+      messages.length?(pendingFeedback?
+        'Requires your attention: feedback is saved. Select Make edits based on the latest feedback when ready. No edits or render have started.':
+        'Feedback was saved. No verified Producer reply or V2 job yet.'): 
       'Review is held. No Producer activity or V2 render job is verified.';
     activity.append(heading,elem('p',summary,'rr-progress-summary'),rail);
     const checked=elem('p','Verified from the saved review session · '+chicagoTime(new Date().toISOString())+
@@ -807,13 +814,16 @@
             const direction=elem('textarea');
             direction.rows=3;direction.maxLength=3000;
             direction.setAttribute('aria-label','Instructions for another creative revision');
-            direction.value='Redo this version while keeping the approved creative changes.';
+            direction.value=state.nextRevisionDrafts.get(entry.output_id)||
+              'Redo this version while keeping the approved creative changes.';
+            direction.addEventListener('input',()=>
+              state.nextRevisionDrafts.set(entry.output_id,direction.value));
             redo.append(direction);
             const notice=elem('p','','rr-feedback-status');
             notice.hidden=true;notice.setAttribute('role','status');
             notice.setAttribute('aria-live','polite');
             let pendingKey='',pendingNote='';
-            const send=elem('button','Request another revision','secondary-button');
+            const send=elem('button','Make edits based on the latest feedback','secondary-button');
             send.type='button';
             send.addEventListener('click',async()=>{
               if(state.actionBusy)return;
@@ -835,7 +845,8 @@
                 notice.dataset.state='success';
                 notice.textContent='Redo requested. Continue with Producer; no render or publication started.';
                 pendingKey='';pendingNote='';
-                say('Redo direction saved under the existing hold.');
+                state.nextRevisionDrafts.delete(entry.output_id);
+                say('Redo direction saved under the existing hold. No render started.');
                 await open(entry);
               }catch(error){
                 notice.dataset.state='error';
