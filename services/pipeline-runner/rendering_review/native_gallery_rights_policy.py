@@ -24,7 +24,7 @@ def build_approved_native_gallery_clearance(settings):
         raise NativeGalleryRightsPolicyDenied("native_gallery_rights_provider_failover_not_certified")
     account = get_preferred_account(settings)
     provider = account_to_provider(account)
-    approved_provider = os.environ.get("NATIVE_GALLERY_RIGHTS_APPROVED_PROVIDER", "").strip()
+    effective_model = (str(settings.get("openai_secondary_image_deployment") or "").strip()\n                       if account == "SECONDARY" else OPENAI_IMAGE_MODEL)\n    approved_provider = os.environ.get("NATIVE_GALLERY_RIGHTS_APPROVED_PROVIDER", "").strip()
     approved_model = os.environ.get("NATIVE_GALLERY_RIGHTS_APPROVED_MODEL", "").strip()
     basis = os.environ.get("NATIVE_GALLERY_RIGHTS_POLICY_BASIS", "").strip()
     reviewer = os.environ.get("NATIVE_GALLERY_RIGHTS_REVIEWER", "").strip()
@@ -32,7 +32,7 @@ def build_approved_native_gallery_clearance(settings):
     terms = urlsplit(reference)
     if (os.environ.get("NATIVE_GALLERY_RIGHTS_REVIEWED") != "true" or
         not approved_provider or approved_provider != provider or
-        approved_model != OPENAI_IMAGE_MODEL or
+        approved_model != effective_model or
         not re.fullmatch(r"[A-Za-z0-9._@-]{5,100}", reviewer) or
         not 8 <= len(basis) <= 220 or
         terms.scheme != "https" or not terms.hostname or
