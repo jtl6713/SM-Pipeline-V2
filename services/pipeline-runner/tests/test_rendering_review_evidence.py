@@ -123,10 +123,10 @@ class EvidenceTests(unittest.TestCase):
             photo(7, rights="Unknown")]
         result = load_evidence(client, OUTPUT, SESSION, 3)
         self.assertEqual({x["name"] for x in result["library_candidates"]},
-            {"Adler Planetarium " + str(n) for n in seven if n != 5})
+            {"Adler Planetarium " + str(n) for n in seven})
         self.assertEqual([(x["name"], x["media_class"], x["reason"])
             for x in result["library_ineligible"]],
-            [("Adler Planetarium 5", "Graphic", "not_a_verified_photo_source")])
+            [("Adler Planetarium 5", "Graphic", "graphic_requires_visual_review")])
         # Discovery must not silently mutate the original owned renderer list.
         self.assertEqual([x["id"] for x in result["assets"]], ["asset-1"])
         self.assertTrue(all(x["frames_inspected"] is False
