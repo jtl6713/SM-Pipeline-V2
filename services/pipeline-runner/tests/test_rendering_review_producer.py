@@ -377,12 +377,21 @@ class ProducerTests(unittest.TestCase):
         from rendering_review.library_discovery import latest_explicit_photo_list
         previous = "Then use these seven:\n" + "\n".join(
             "- Adler Planetarium " + str(n) for n in (3, 5, 12, 13, 14, 17, 18))
-        latest = ('Keep the original skyline opener, "Winter in Downtown Chicago 1".\n'
-                  'Then use these seven Adler photos:\n\n'
+        # Exact saved live review wording, including a period *inside* the
+        # quoted opener name and contradictory boilerplate from the older list.
+        latest = ('Keep the original skyline opener, "Winter in Downtown Chicago 1."\n'
+                  '\nThen use these seven Adler Planetarium exterior photos:\n\n\n'
                   + "\n".join("- " + name for name in names)
-                  + '\nPreserve the original narration and audio.\n'
-                    'Please validate Adler Planetarium 5 as in the older plan.\n'
-                    'This is NOT authorization to render.')
+                  + '\n\nRemove Adler Planetarium 4 and 7 and all interior imagery.\n'
+                    '\nPreserve the original narration and audio. '
+                    'The overall video duration may increase to accommodate the additional exterior photos.\n'
+                    '\nPlease resolve the existing Asset Manager references, '
+                    'validate all seven files (including the blank thumbnail for Adler Planetarium 5), '
+                    'and prepare the proposed sequence.\n'
+                    '\nThis message confirms my creative direction only. '
+                    'It is NOT authorization to render.\n'
+                    '\nWait for my explicit "Make edits based on latest feedback" authorization '
+                    'before producing V3. Preserve V2 unchanged.')
         self.assertEqual(latest_explicit_photo_list([
             {"role": "user", "content": previous},
             {"role": "producer", "content": "Use all seven old Adler files"},
