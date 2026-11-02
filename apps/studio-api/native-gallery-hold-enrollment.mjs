@@ -15,7 +15,8 @@ const digest=async x=>[...new Uint8Array(await crypto.subtle.digest("SHA-256",
 export function nativeGalleryEnrollmentEnabled(env){
  return env?.NATIVE_GALLERY_HOLD_ENROLLMENT_ENABLED==="true"&&
         env?.NATIVE_GALLERY_DISPATCH_FENCE_VERIFIED==="true"&&
-        env?.NATIVE_GALLERY_PUBLISHER_HOLD_VERIFIED==="true";
+        env?.NATIVE_GALLERY_PUBLISHER_HOLD_VERIFIED==="true"&&
+        env?.NATIVE_GALLERY_SCHEDULE_LANE_VERIFIED==="true";
 }
 function validateOutput(o,output_id,content_id){
  const f=o?.fields||{};
