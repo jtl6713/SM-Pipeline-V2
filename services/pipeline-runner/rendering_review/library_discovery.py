@@ -40,6 +40,7 @@ def latest_explicit_photo_list(messages):
             continue
         content = str(message.get("content") or "")[:3000]
         current, seen = [], set()
+        unmarked, unmarked_seen = [], set()
 
         def add(value):
             name = _clean_name(value)
@@ -53,6 +54,13 @@ def latest_explicit_photo_list(messages):
             # A marked list has higher authority than incidental names in prose.
             if stripped.startswith(("-", "*", "\u2022")):
                 add(stripped.lstrip("-*\u2022 ").strip())
+            else:
+                # Historic saved reviews sometimes use one unmarked title per
+                # line. Accept a complete multi-line list, never a prose mention.
+                bare = _clean_name(stripped)
+                if bare and bare.casefold() not in unmarked_seen:
+                    unmarked_seen.add(bare.casefold())
+                    unmarked.append(bare)
             for match in _BATCH.finditer(line):
                 base = match.group("base").strip().split()
                 while len(base) > 2 and base[0] in _LEADING_INSTRUCTION:
@@ -62,6 +70,8 @@ def latest_explicit_photo_list(messages):
                     add(f"{stem} {number}")
         if len(current) >= 2:
             return current
+        if len(unmarked) >= 2:
+            return unmarked[:MAX_REQUESTED_NAMES]
     return []
 
 
