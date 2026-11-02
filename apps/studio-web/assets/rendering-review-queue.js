@@ -372,6 +372,52 @@
         'Feedback was saved. No verified Producer reply or V2 job yet.'):
       'Review is held. No Producer activity or V2 render job is verified.';
     activity.append(heading,elem('p',summary,'rr-progress-summary'),rail);
+
+    // A completed V2 remains ready to review while new feedback is being
+    // discussed. Do not paint V3's *unstarted* steps green because V2 finished.
+    // These records are attached to the current completed attempt by the
+    // authoritative session writer; earlier V1 feedback cannot fake a V3.
+    const sourceId=completedAttempt?.id;
+    const pendingFeedback=sourceId?messages.filter(m=>
+      m?.role==='user'&&m?.attempt_id===sourceId):[];
+    if(sourceId&&pendingFeedback.length&&session.review_hold?.active===true){
+      const nextVersion=Math.max(1,...attempts.map(a=>Number(a?.number)||1))+1;
+      const candidate=session?.producer_candidate;
+      const freshCandidate=candidate?.source_attempt_id===sourceId&&
+        candidate?.stale!==true&&candidate?.candidate;
+      const freshPlan=planReady&&session.plan?.source_attempt_id===sourceId&&
+        session.plan?.frozen===true&&session.plan?.immutable_manifest;
+      const pending=elem('section',null,'rr-pending-revision');
+      pending.setAttribute('aria-label','Pending V'+nextVersion+' editing activity');
+      pending.append(elem('strong','V'+nextVersion+' · Proposed changes — not rendered',
+        'rr-pending-revision-heading'));
+      const requirements=Array.isArray(freshCandidate?.requirements)?
+        freshCandidate.requirements.filter(x=>x?.description):[];
+      const message=freshPlan?
+        'Verified revision plan is ready. A separate human render authorization is required. V'+
+          completedAttempt.number+' remains unchanged.':
+        freshCandidate?(requirements.length?
+          'Producer proposed changes, but '+requirements.length+
+          ' checks or assets remain unresolved. Editing and rendering have not started.':
+          'Producer replied. The revised media and timeline still require independent verification before rendering.'):
+        'Your comments are saved. Select Make edits based on the latest feedback to request a Producer plan. No edits or rendering have started.';
+      pending.append(elem('p',message,'rr-pending-revision-summary'));
+      const verification= freshPlan?'Verified plan ready':
+        freshCandidate?'Requires verification':'Not started';
+      const nextSteps=elem('ol',null,'rr-pending-revision-steps');
+      for(const [name,status] of [
+        ['Feedback received','Completed'],
+        ['Producer proposal',freshCandidate?'Received':'Not started'],
+        ['Asset and plan validation',verification],
+        ['V'+nextVersion+' rendering','Not authorized / not started']
+      ]){
+        const line=elem('li',null,'rr-pending-revision-step');
+        line.append(elem('strong',name),elem('span',status));
+        nextSteps.append(line);
+      }
+      pending.append(nextSteps);
+      activity.append(pending);
+    }
     const checked=elem('p','Verified from the saved review session · '+chicagoTime(new Date().toISOString())+
       ' · auto-check every 20 seconds while this page is open.','rr-progress-checked');
     state.progressCheckNode=checked;
