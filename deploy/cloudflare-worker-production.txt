@@ -840,3 +840,5 @@ Deploy Worker 0.10.717: verified creative redo with pending watermark QA; held o
 2026-11-01 Worker 0.10.723 V2+ watermark verification bypass: retain V1 requirement and protected media/hold/approval checks; deliver approved held V2 to Factory.
 
 2026-11-01: Release held Rendering Review queued Job read-only dispatch status; no change to publishing fences or Airtable SoR.
+
+2026-11-01: Re-run guarded Worker production deployment for Rendering Review durable job readback after exact Michigan approved-unpublished lifecycle verification correction PR #1501. No user output mutations or publish.
