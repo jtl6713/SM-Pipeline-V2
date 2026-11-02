@@ -2063,7 +2063,7 @@ export default {
         // Completely OFF until the isolated renderer/outbox consumer exists.
         // User explicitly requests source-library crop PREPARATION, not a
         // Producer message, render, approval, schedule, or publication.
-        const prepareLibraryMatch = /^\\/api\\/rendering-review\\/outputs\\/(rec[A-Za-z0-9]{14})\\/prepare-library-stills$/.exec(url.pathname);
+        const prepareLibraryMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/prepare-library-stills$/.exec(url.pathname);
         if(prepareLibraryMatch&&request.method==="POST"){
           if(!producerConversationWritesEnabled(env))
             throw new HttpError(405,"Review library preparation is not enabled");
