@@ -11856,7 +11856,7 @@ export async function reviseScriptedShortRoute(request, env, authorization, url 
   let creativeBrief, directive;
   try {
     creativeBrief = normalizeScriptedShortBrief(payload?.creative_brief || payload?.prompt);
-    directive = parseScriptedShortFeedback(payload?.feedback);
+    directive = parseScriptedShortFeedback(payload?.feedback, payload?.timeline);
   } catch (error) {
     throw new HttpError(400, error?.message || "Invalid proposal feedback");
   }
@@ -11868,7 +11868,7 @@ export async function reviseScriptedShortRoute(request, env, authorization, url 
   const profileMarket = String(f(profile, "Market_Name") || "").trim();
   const operations = Array.isArray(directive.actions) ? directive.actions : [directive];
   const uniqueClips = [...new Set(operations.filter(x=>x.action==="replace").map(x=>x.asset_name))];
-  if (uniqueClips.length > 6) throw new HttpError(400,"Replace at most six clips in one revision.");
+  if (uniqueClips.length > 12) throw new HttpError(400,"Replace at most twelve clips in one revision.");
   const clips = new Map();
   // Every title is resolved against authoritative Airtable, exactly and in the selected profile.
   // Never accept file metadata or an identity asserted by the browser.
