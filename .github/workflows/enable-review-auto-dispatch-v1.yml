@@ -59,7 +59,8 @@ jobs:
             }else{$line}
           })
           if(-not $found){$next+= 'RENDERING_REVIEW_AUTO_DISPATCH_ENABLED=true'}
-          # Preserve secrets and avoid PowerShell 5.1 UTF8 BOM on the first variable.\n          [System.IO.File]::WriteAllLines($file,$next,([System.Text.UTF8Encoding]::new($false)))
+          # Preserve secrets and avoid PowerShell 5.1 UTF8 BOM on the first variable.
+          [System.IO.File]::WriteAllLines($file,$next,([System.Text.UTF8Encoding]::new($false)))
           $readback=@(Get-Content -LiteralPath $file|Where-Object {$_ -eq 'RENDERING_REVIEW_AUTO_DISPATCH_ENABLED=true'})
           if($readback.Count -ne 1){throw 'dispatch_flag_readback_failed'}
           Write-Output 'review_auto_dispatch_flag_configured=true'
