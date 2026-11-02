@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from rendering_review.native_gallery_rights_registration import (
     NativeGalleryRightsDenied, register_native_gallery_rights,
+    matching_staged_native_media,
 )
 
 O = "rec00000000000001"
@@ -117,6 +118,30 @@ class RightsTests(unittest.TestCase):
         with self.assertRaisesRegex(NativeGalleryRightsDenied, "existing_or_ambiguous"):
             register(client=client)
         self.assertEqual(client.calls, 0)
+
+    def test_private_staged_lookup_excludes_active_or_foreign_assets(self):
+        class Catalog:
+            def __init__(self):
+                self.row = {"id": RID, "fields": {
+                    "Content_Profile": [P], "Google Drive File ID": D,
+                    "Media_Class": "Image", "Rights_Status": "Owned",
+                    "Asset_Status": "Available", "Active": False,
+                    "Do_Not_Use": True, "MIME_Type": "image/png",
+                    "Studio_Transfer_ID": "ngv2_0123456789"}}
+            def list_records(self, *_args, **_kwargs):
+                return [self.row]
+        client = Catalog()
+        self.assertEqual(matching_staged_native_media(client, P, D), RID)
+        for patch_fields in (
+            {"Active": True}, {"Do_Not_Use": False},
+            {"Content_Profile": [C]},
+            {"Studio_Transfer_ID": "ordinary_asset"},
+        ):
+            original = dict(client.row["fields"])
+            client.row["fields"].update(patch_fields)
+            with self.assertRaises(NativeGalleryRightsDenied):
+                matching_staged_native_media(client, P, D)
+            client.row["fields"] = original
 
     @patch("rendering_review.native_gallery_rights_registration.actual_image",
            return_value=({"mime_type": "image/png", "sha256": SHA,
