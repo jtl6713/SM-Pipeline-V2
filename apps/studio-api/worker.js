@@ -6,6 +6,8 @@ import { verifyGallerySourceBytes, gallerySourceBytePreflightEnabled } from "./r
 import { handleNativeGalleryGenerate } from "./native-gallery-generation-http.mjs";
 import { claimNativeGalleryJob, galleryClaimEnabled } from "./native-gallery-job-claim.mjs";
 import { reserveNativeGalleryLaunch, nativeGalleryLaunchIntentEnabled } from "./native-gallery-launch-ledger.mjs";
+import {commitNativeGalleryManifest, nativeGalleryManifestCommitEnabled} from "./native-gallery-manifest-commit.mjs";
+import {verifyNativeGalleryRevisionDrive} from "./native-gallery-revision-readback.mjs";
 import { NATIVE_GALLERY_JOBS_TABLE } from "./native-gallery-job-airtable.mjs";
 import { readNativeGalleryPrivateManifest } from "./native-gallery-private-manifest.mjs";
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
@@ -1770,6 +1772,45 @@ export default {
                 actual.original_artifact_watermark_verified===true&&
                 actual.publication_authorized===false;
             },
+          },
+        });
+        return respond(request,env,result);
+      }
+
+      // Exact held native-gallery V2 artifact commit, distinct from creative
+      // acceptance and independent of Factory/publishing. Service-only.
+      if(url.pathname==="/internal/native-gallery/commit-manifest"||
+         url.pathname==="/api/internal/native-gallery/commit-manifest"){
+        requireConfig(env);
+        if(!nativeGalleryManifestCommitEnabled(env))
+          throw new HttpError(405,"Native gallery revision commit disabled");
+        const readJob=async jobId=>{
+          if(!/^[A-Za-z0-9_-]{8,120}$/.test(String(jobId||"")))return null;
+          const rows=await reviewListRecords(env,NATIVE_GALLERY_JOBS_TABLE,{
+            limit:2,filterFormula:'{Job_ID}="'+jobId+'"',
+            fields:["Job_ID","Output_Record_ID","Content_Item_Record_ID",
+              "Profile_Record_ID","Request_Fingerprint","Original_Manifest_SHA256",
+              "Original_Manifest_JSON","Plan_SHA256","Plan_JSON",
+              "Event_History_JSON","Hold_ID","Hold_Owner","Job_State",
+              "Row_Version","Lease_Owner","Lease_Fence",
+              "Launch_Intent_SHA256","Revised_Manifest_SHA256",
+              "Revised_Manifest_JSON"],
+          });
+          if(!Array.isArray(rows)||rows.length!==1)return null;
+          return rows[0];
+        };
+        const result=await commitNativeGalleryManifest({
+          request,env,operations:{
+            withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+            readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+            readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+            readJob,
+            patchJob:(id,fields)=>airtableFetch(env,NATIVE_GALLERY_JOBS_TABLE,id,{
+              method:"PATCH",body:JSON.stringify({fields,typecast:false}),
+            }),
+            verifyRevisedDriveArtifacts:args=>verifyNativeGalleryRevisionDrive({
+              env,...args,
+            }),
           },
         });
         return respond(request,env,result);
