@@ -121,6 +121,44 @@ class CatalogRendererBindingTests(unittest.TestCase):
             verify_catalog_render_source(client,drive,frozen,
                 transport=lambda *_a,**_kw:Transport(payload[VARIANT_FILE][0]))
 
+    def test_graphic_requires_exact_fit_recipe_identity_and_matching_preview(self):
+        c,d,rows,payload,frozen=fixture()
+        source=image_bytes((800,600),"JPEG")
+        rows[MEDIA,MASTER_ID]["fields"].update({
+            "Media_Class":"Graphic","MIME_Type":"image/jpeg","File_Size_Bytes":len(source)})
+        payload[SOURCE_FILE]=(source,"image/jpeg")
+        rows[QUEUE,TRANSFER_ID]["fields"]["Source_Size_Bytes"]=len(source)
+        frozen.update({"source_size_bytes":len(source),"source_media_class":"Graphic"})
+        # A previously completed center crop cannot be reused for a Graphic.
+        with self.assertRaises(CatalogSourceDenied):
+            verify_catalog_render_source(c,d,frozen,
+                transport=lambda *_a,**_k:Transport(payload[VARIANT_FILE][0]))
+        recipe="graphic-fit-v1"
+        q=rows[QUEUE,TRANSFER_ID]["fields"]
+        q.update({"Variant_Style":"graphic_fit",
+            "Transfer_ID":"ITEM4-VARIANT-"+recipe+"-"+REQUEST_ID+"-"+SOURCE_ASSET+"-9x16",
+            "Target_File_Name":"Adler-Planetarium-5__9x16__"+recipe+".jpg",
+            "Preview_URL":URL.replace("fill-crop-v2",recipe)})
+        frozen.update({"render_url":q["Preview_URL"],"crop_recipe":recipe})
+        accepted=verify_catalog_render_source(c,d,frozen,
+            transport=lambda *_a,**_k:Transport(payload[VARIANT_FILE][0]))
+        self.assertTrue(accepted["verified"])
+        for field,stale in [
+            ("Variant_Style","center"),("Target_File_Name","Adler-Planetarium-5__9x16__fill-crop-v2.jpg"),
+            ("Transfer_ID","ITEM4-VARIANT-fill-crop-v2-"+REQUEST_ID+"-"+SOURCE_ASSET+"-9x16"),
+            ("Preview_URL",URL),
+        ]:
+            old=q[field]
+            q[field]=stale
+            with self.subTest(field=field):
+                with self.assertRaises(CatalogSourceDenied):
+                    verify_catalog_render_source(c,d,frozen,
+                        transport=lambda *_a,**_k:Transport(payload[VARIANT_FILE][0]))
+            q[field]=old
+        with self.assertRaisesRegex(CatalogSourceDenied,"preview_binary_changed"):
+            verify_catalog_render_source(c,d,frozen,
+                transport=lambda *_a,**_k:Transport(b"wrong preview binary"))
+
     def test_stale_queue_crop_link_or_recipe_denied(self):
         for patch in ({"Source_Drive_File_ID":"1stale_abcdefghijklmnopqrst"},
                       {"Generated_Media_Asset":["rec44444444444444"]},
