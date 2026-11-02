@@ -43,6 +43,7 @@ def snapshot():
             "Session_JSON": json.dumps({
                 "id": SESSION, "output_id": OUTPUT, "state": "queued",
                 "review_hold": {"active": True}, "current_attempt_id": ATTEMPT,
+                "latest_attempt_number": 2,
                 "active_job": {"id": JOB, "attempt_id": ATTEMPT,
                                "plan_hash": HASH},
                 "attempts": [
