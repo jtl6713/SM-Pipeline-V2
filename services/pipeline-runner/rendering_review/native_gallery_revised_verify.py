@@ -10,9 +10,10 @@ from __future__ import annotations
 import re
 
 from rendering_review.gallery_authoritative import (
-    read_authoritative_gallery_source, actual_image, matching_owned_media,
+    read_authoritative_gallery_source, actual_image,
 )
 from rendering_review.gallery_branding_pixels import visible_source_watermark
+from rendering_review.native_gallery_rights_registration import matching_staged_native_media
 from rendering_review.profile_watermark import resolve_native_gallery_watermark
 
 RECORD = re.compile(r"rec[A-Za-z0-9]{14}\Z")
@@ -33,7 +34,7 @@ def verify_staged_gallery_revision(
     *, client, drive, output_id, profile_id, content_item_id,
     original_artifacts, revision_artifacts, selected_slide_ids,
     staging_folder_id, source_loader=read_authoritative_gallery_source,
-    asset_lookup=matching_owned_media,
+    asset_lookup=matching_staged_native_media,
     branding_resolver=resolve_native_gallery_watermark,
 ):
     if not all(RECORD.fullmatch(str(x or "")) for x in
