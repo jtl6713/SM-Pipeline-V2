@@ -79,6 +79,14 @@ class EndpointTests(unittest.TestCase):
                     self.assertEqual(self.post(body=payload).status_code, 400)
         self.assertEqual(self.called, [])
 
+    def test_oversized_payload_cannot_trigger_source_read(self):
+        with patch.dict(os.environ, {"NATIVE_GALLERY_SOURCE_PREFLIGHT_ENABLED": "true"}):
+            response = self.client.post(
+                PATH, data='{"padding":"' + 'x'*900 + '"}',
+                headers={**self.headers, "Content-Type": "application/json"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.called, [])
+
     def test_source_denial_does_not_return_private_bytes(self):
         app = Flask("source-denial-test")
         def denied(**_kwargs):
