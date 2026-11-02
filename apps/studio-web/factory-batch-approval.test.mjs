@@ -150,6 +150,48 @@ test("Ambiguous global POST responses reconcile only an exact durable Activity m
   assert.match(js,/Recovered a confirmed server submission after a connection error/);
 });
 
+test("Expired browser-only submissions clear only after an authoritative exact-ID miss", () => {
+  const missingFn = extractNamedFunction(js, "factoryActivityProvesPlanMissing");
+  const factoryActivityProvesPlanMissing = new Function(
+    `${missingFn}; return factoryActivityProvesPlanMissing;`,
+  )();
+  const plan = {request_id: "req_stale_browser_only_123", ids: ["recOne"]};
+  assert.equal(factoryActivityProvesPlanMissing({
+    ok: true, exact_request_id: plan.request_id, batches: [],
+  }, plan), true);
+  assert.equal(factoryActivityProvesPlanMissing({
+    ok: true, exact_request_id: "req_different_123456", batches: [],
+  }, plan), false);
+  assert.equal(factoryActivityProvesPlanMissing({
+    ok: false, exact_request_id: plan.request_id, batches: [],
+  }, plan), false);
+  assert.equal(factoryActivityProvesPlanMissing({
+    ok: true, exact_request_id: plan.request_id, batches: [{request_id: plan.request_id}],
+  }, plan), false);
+  const clearFn = extractNamedFunction(js, "clearAuthoritativelyMissingGlobalPlans");
+  let stored = JSON.stringify({
+    profile_id: "global", ids: plan.ids, batches: [plan], saved_ms: 1_000,
+  });
+  const localStorage = {
+    getItem: () => stored,
+    setItem: (_key, value) => { stored = value; },
+    removeItem: () => { stored = null; },
+  };
+  const clearAuthoritativelyMissingGlobalPlans = new Function(
+    "localStorage", "pendingFactoryApproval", "setStatus",
+    "FACTORY_PENDING_REQUEST_KEY", "FACTORY_PENDING_MISSING_GRACE_MS",
+    `${clearFn}; return clearAuthoritativelyMissingGlobalPlans;`,
+  )(localStorage, () => stored ? JSON.parse(stored) : null, () => {}, "pending", 90_000);
+  assert.equal(clearAuthoritativelyMissingGlobalPlans(new Set([plan.request_id]), 90_999), 0,
+    "A request inside the grace period must stay locked");
+  assert.ok(stored);
+  assert.equal(clearAuthoritativelyMissingGlobalPlans(new Set([plan.request_id]), 91_000), 1);
+  assert.equal(stored, null, "An expired exact-ID miss must release the stale browser lock");
+  assert.match(js, /FACTORY_PENDING_MISSING_GRACE_MS = 90 \* 1000/);
+  assert.match(js, /clearAuthoritativelyMissingGlobalPlans\(authoritativelyMissing\)/);
+  assert.match(js, /Factory confirmed was never created/);
+});
+
 test("Submit Approvals hides queued and accepted outputs even with a stale Desk snapshot", () => {
   assert.match(js, /state\.submittingOutputIds = new Set\(selectionIds\)/);
   assert.match(js, /state\.submittingOutputIds = new Set\(ready\.map\(card => card\.id\)\)/);

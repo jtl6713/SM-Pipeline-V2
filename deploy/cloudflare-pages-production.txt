@@ -663,3 +663,4 @@ Deploy Studio UI 0.6.855 confirmed-save meter: add a distinct filled batch-progr
 2026-11-01: Protected Studio UI 0.6.860-non-vibe-gallery-selection (#1500). Add selected native-image correction notes, explicit identity-only validation, preserve concurrent 0.6.855 Asset Manager saved-meter and Adler UI. No render or publishing authority. Verify Pages deployment and custom-domain BUILD_ID.
 
 2026-11-02: Deploy Studio UI 0.6.862 (#1526). Rename Post Production Edits left heading to Reviewer Edit Requests. Verify production custom-domain footer, BUILD_ID and heading; preserve review holds and publishing restrictions.
+2026-11-02: Deploy Studio UI 0.6.863-factory-stale-resume-reset. Clear expired browser-only Factory submissions after an authoritative exact-ID miss so current selections can be submitted; preserve real in-flight locks.

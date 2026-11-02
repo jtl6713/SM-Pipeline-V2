@@ -32,6 +32,7 @@
   const FACTORY_LAST_BATCH_KEY = "studio.factory.last-batch.v1";
   const FACTORY_PENDING_REQUEST_KEY = "studio.factory.pending-approval-request.v1";
   const FACTORY_ACCEPTED_OUTPUTS_KEY = "studio.factory.accepted-output-ids.v1";
+  const FACTORY_PENDING_MISSING_GRACE_MS = 90 * 1000;
   // Reuse the one global missing-asset image; do not borrow another profile's media.
   const NEEDS_ASSET_THUMB = "/assets/needs-asset.svg";
   document.addEventListener("error", (event) => {
@@ -675,6 +676,38 @@
     return null;
   }
 
+  function factoryActivityProvesPlanMissing(activity, plan) {
+    return activity?.ok === true
+      && String(activity.exact_request_id || "") === String(plan?.request_id || "")
+      && Array.isArray(activity.batches)
+      && activity.batches.length === 0;
+  }
+
+  function clearAuthoritativelyMissingGlobalPlans(requestIds, now = Date.now()) {
+    const pending = pendingFactoryApproval();
+    const savedAt = Number(pending?.saved_ms || 0);
+    if (pending?.profile_id !== "global" || !Array.isArray(pending.batches)
+        || !requestIds?.size || !Number.isFinite(savedAt)
+        || now - savedAt < FACTORY_PENDING_MISSING_GRACE_MS) return 0;
+    const remaining = pending.batches.filter((plan) => !requestIds.has(String(plan?.request_id || "")));
+    const removed = pending.batches.length - remaining.length;
+    if (!removed) return 0;
+    try {
+      if (remaining.length) {
+        localStorage.setItem(FACTORY_PENDING_REQUEST_KEY, JSON.stringify({
+          profile_id: "global",
+          ids: remaining.flatMap((row) => row.ids || []),
+          batches: remaining,
+          saved_ms: savedAt,
+        }));
+      } else {
+        localStorage.removeItem(FACTORY_PENDING_REQUEST_KEY);
+      }
+    } catch { return 0; }
+    setStatus("Cleared an expired submission that Factory confirmed was never created. Your current selection is ready to submit.");
+    return removed;
+  }
+
   function reconcilePendingGlobalSelection(activity) {
     let pending = null;
     try { pending = JSON.parse(localStorage.getItem(FACTORY_PENDING_REQUEST_KEY) || "null"); } catch {}
@@ -722,6 +755,7 @@
     factoryPendingReconcileAt = Date.now();
     factoryPendingReconcileRunning = true;
     try {
+      const authoritativelyMissing = new Set();
       // Active Activity intentionally excludes completed batches. Read each
       // pending request by exact ID, including after reload or mobile timeout.
       for (const plan of pending.batches) {
@@ -730,8 +764,12 @@
             encodeURIComponent(plan.request_id), { cache: "no-store" });
           const confirmed = factoryActivityMatchesPlan(activity, plan);
           if (confirmed) reconcilePendingGlobalSelection({ batches: [confirmed] });
+          else if (factoryActivityProvesPlanMissing(activity, plan)) {
+            authoritativelyMissing.add(String(plan.request_id));
+          }
         } catch { /* Preserve unresolved request identity; never create a new one. */ }
       }
+      clearAuthoritativelyMissingGlobalPlans(authoritativelyMissing);
     } finally {
       factoryPendingReconcileRunning = false;
       updateFactoryBatchToolbar();
