@@ -29,13 +29,13 @@ function authority(row,readField,expectedId,expectedDrive=null,allowGraphic=fals
     one(f("Content_Profile"))===CHICAGO_PROFILE_ID&&drive(file)&&
     (expectedDrive===null||file===expectedDrive);
 }
-function variantProof(queue,readField,recordId,sourceFile,sourceSize) {
+function variantProof(queue,readField,recordId,sourceFile,sourceSize,mediaClass) {
   const f=k=>readField(queue,k);
   if(!rec(queue?.id)||one(f("Source_Media_Asset"))!==recordId||
      str(f("Source_Drive_File_ID"))!==sourceFile||
      select(f("Asset_Kind"))!=="Platform Variant"||
      select(f("Aspect_Ratio"))!=="9:16"||
-     select(f("Variant_Style"))!=="center"||
+     select(f("Variant_Style"))!==(mediaClass==="Graphic"?"graphic_fit":"center")||
      select(f("Transfer_Status"))!=="Ready"||
      select(f("Preview_Status"))!=="Ready"||
      (sourceSize>0&&Number(f("Source_Size_Bytes"))!==sourceSize))
@@ -47,11 +47,12 @@ function variantProof(queue,readField,recordId,sourceFile,sourceSize) {
   const srcAsset=str(f("Source_Asset_ID"));
   const request=str(f("Production_Request_Record_ID"));
   if(!rec(generated)||!rec(request)||!drive(variantFile)||
-     !/fill-crop-v2\.jpg$/i.test(recipe)||!recipe.includes("9x16")||
+     !(mediaClass==="Graphic"?/graphic-fit-v1\.jpg$/i.test(recipe):
+       /fill-crop-v2\.jpg$/i.test(recipe))||!recipe.includes("9x16")||
      !/^[A-Za-z0-9_-]{8,120}$/.test(srcAsset)||
      preview!==("https://media.chicagoshining.com/studio/previews/item4/"+
-       request+"/ITEM4-VARIANT-fill-crop-v2-"+request+"-"+srcAsset+
-       "-9x16-"+variantFile+".jpg"))
+       request+"/ITEM4-VARIANT-"+(mediaClass==="Graphic"?"graphic-fit-v1":"fill-crop-v2")+
+       "-"+request+"-"+srcAsset+"-9x16-"+variantFile+".jpg"))
     return null;
   return {queue_id:queue.id,variant_file_id:variantFile,preview_url:preview,
     generated_media_id:generated,source_asset_id:srcAsset,
@@ -90,7 +91,7 @@ export async function resolveReviewCatalogAssets({tokens,readRecord,readField,
     throw new Error("REVIEW_CATALOG_VARIANT_READ_INVALID");
   for(const [id,master] of masters){
     const options=transferRows.map(row=>variantProof(row,readField,id,
-      master.fileId,master.sourceBytes)).filter(Boolean);
+      master.fileId,master.sourceBytes,master.mediaClass)).filter(Boolean);
     const verified=[];
     for(const option of options){
       const rendered=await readRecord(mediaTable,option.generated_media_id);
@@ -122,7 +123,7 @@ export async function resolveReviewCatalogAssets({tokens,readRecord,readField,
       source_asset_id:selected.source_asset_id,
       source_request_id:selected.source_request_id,
       source_size_bytes:master.sourceBytes,
-      crop_recipe:"fill-crop-v2",
+      crop_recipe:master.mediaClass==="Graphic"?"graphic-fit-v1":"fill-crop-v2",
     });
   }
   return {receipts:result,unresolved:missing};
