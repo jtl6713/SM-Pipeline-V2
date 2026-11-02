@@ -282,3 +282,13 @@ or:
 ## Repository placement
 
 Lives in **SM-Pipeline-V2** under `services/pipeline-runner/` alongside the other local services.
+
+## Held V2+ Rendering Review automatic dispatch (November 2026)
+
+Once enabled with `RENDERING_REVIEW_AUTO_DISPATCH_ENABLED=true`, the local Runner scans at most ten canonical Airtable Rendering Review Job records every thirty seconds. It only considers a job at least two minutes old that is still `queued / awaiting_isolated_renderer`, with zero progress, no claim, zero lease, no prior attempt marker, no launch events, and an exact frozen plan/held Output/Attempt/Session verified independently by `require_unlaunched_authority`. It dispatches one job per scan to the existing authenticated local `run-exact` endpoint.
+
+Before submitting, the consumer durably writes and reads back `Retry_Count=1` on the **existing Job**. This is a one-shot dispatch marker, **not** authorization to create a new Attempt or retry Remotion. Ambiguous acknowledgments leave the original queued Job for operator reconciliation. A claimed job with an uncertain launch is never automatically retried. Publishing, scheduling, hold release, and V1 replacement are prohibited.
+
+The operator can inspect `GET /jobs/rendering-review/dispatch-health` using `X-Pipeline-Secret`; this private endpoint reports enabled/started, scan time and the last bounded result. The Studio highlights an unclaimed queue after four minutes and an unchanged claim after fifteen minutes. Turn the feature off by restoring `RENDERING_REVIEW_AUTO_DISPATCH_ENABLED=false` in the Runner environment and restarting the Runner. No Cloudflare Worker flag controls the autonomous consumer.
+
+**Rollout:** Merge code, pass Python/render UI CI, deploy/verify the exact Runner version, enable the separate Runner flag through Ops, restart and verify the protected dispatch-health endpoint. Do not use a synthetic live render to validate rollout; the next approved saved job is the only eligible work.

@@ -804,3 +804,16 @@ test('approved imported V2 never reverts its activity heading to V2 NOT STARTED'
   assert.match(script,/V2 creative approval is saved\. Factory can accept/);
   assert.match(script,/Sibling creative-master propagation is deferred while watermark QA is pending/);
 });
+
+
+test('held review progress displays a recovery warning for an unclaimed stale V2, never a second render action', async()=>{
+  const fs=await import('node:fs');
+  const source=fs.readFileSync(new URL('./assets/rendering-review-queue.js',import.meta.url),'utf8');
+  assert.match(source,/const stalledQueued=session\?\.state==='queued'/);
+  assert.match(source,/jobAgeMs>=240000/);
+  assert.match(source,/const stalledClaimed=session\?\.state==='queued'/);
+  assert.match(source,/jobAgeMs>=900000/);
+  assert.match(source,/Requires your attention: V2 has been queued/);
+  assert.match(source,/do not start another render/);
+  assert.match(source,/reviewSignature\(latest\.session,latest\.render_job\)/);
+});
