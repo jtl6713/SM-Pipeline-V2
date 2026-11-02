@@ -143,6 +143,10 @@ export function applyReviewEvent(session, event) {
     if (event.in_flight_only === true &&
         (!inProgress.has(s.state) || !s.review_hold.active || !s.active_job?.id))
       fail("IN_FLIGHT_FEEDBACK_NOT_ALLOWED", "This render has advanced. Refresh before commenting",409);
+    if (event.conversation_only === true &&
+        (inProgress.has(s.state) || !s.review_hold.active ||
+         !["ready_for_review","discussing","awaiting_assets","plan_ready","revision_failed"].includes(s.state)))
+      fail("DISCUSSION_FEEDBACK_NOT_ALLOWED", "Review changed; refresh before saving further feedback",409);
     if (!["user", "producer"].includes(event.role) ||
         !text(event.content) || text(event.content).length > 3000 ||
         !validId(event.message_id))
