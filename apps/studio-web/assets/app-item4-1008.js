@@ -295,7 +295,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.854-review-library-crop-prep";
+  const BUILD_ID = "item4-0.6.855-confirmed-save-meter";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -24500,6 +24500,8 @@ function timedScriptAssetLabel(asset, index) {
   function renderLibraryUploadProgress({phase="uploading",file=null,fileIndex=1,fileCount=1,uploaded=0,loadedBytes=0,message=""}={}){
    const panel=$("libraryUploadProgress"); if(!panel)return;
    const total=Math.max(1,Number(fileCount)||1);
+   const confirmed=Math.min(total,Math.max(0,Math.floor(Number(uploaded)||0)));
+   const savedLabel=`${confirmed} of ${total} assets saved`;
    const index=Math.min(total,Math.max(1,Number(fileIndex)||1));
    const bytes=Math.max(0,Number(file?.size)||0);
    const loaded=Math.max(0,Math.min(bytes,Number(loadedBytes)||0));
@@ -24518,7 +24520,14 @@ function timedScriptAssetLabel(asset, index) {
    update("libraryUploadProgressTitle",heading);
    update("libraryUploadProgressFile",fileName);
    update("libraryUploadProgressPercent",percentLabel);
-   update("libraryUploadProgressFiles",`${uploaded} of ${total} assets saved`);
+   update("libraryUploadProgressFiles",savedLabel);
+   const savedMeter=$("libraryUploadSavedMeter");
+   if(savedMeter){
+    savedMeter.max=total;
+    savedMeter.value=confirmed;
+    savedMeter.textContent=savedLabel;
+    savedMeter.setAttribute("aria-valuetext",savedLabel);
+   }
    update("libraryUploadProgressBytes",transferLabel);
    update("libraryUploadProgressStage",message||status);
    const meter=$("libraryUploadMeter");
