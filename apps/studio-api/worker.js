@@ -2,7 +2,7 @@ import { loadAuthoritativeFactoryCorrection } from "./factory-correction-authori
 import { readAuthoritativeGalleryInventory } from "./rendering-review-gallery-inventory-http.mjs";
 import { previewNativeGalleryCorrection } from "./rendering-review-gallery-selection-preview.mjs";
 import { readGalleryRevisionStatus } from "./rendering-review-gallery-status-http.mjs";
-import { verifyGallerySourceBytes } from "./rendering-review-gallery-byte-preflight.mjs";
+import { verifyGallerySourceBytes, gallerySourceBytePreflightEnabled } from "./rendering-review-gallery-byte-preflight.mjs";
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
 import { serveReviewAttemptVideo, fetchTrustedRunnerReviewMedia } from "./rendering-review-attempt-video.mjs";
 import { completeReviewAttempt } from "./rendering-review-completion-http.mjs";
@@ -2770,7 +2770,7 @@ export default {
               "Asset_9x16_File_ID","Final Google Drive File ID"],
           }),
         });
-        return respond(request,env,source);
+        return respond(request,env,{...source,source_byte_preflight_available:gallerySourceBytePreflightEnabled(env)});
       }
 
       // Exact per-slide gallery correction proposal; no generation, approval,
