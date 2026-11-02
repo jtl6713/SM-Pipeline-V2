@@ -2739,7 +2739,7 @@ export default {
         const authorized=await reviewAuthorizedProfiles(env,authorization);
         const status=await readGalleryRevisionStatus({
           output_id:galleryStatusMatch[1],
-          attempt_id:url.searchParams.get("attempt_id")||null,
+          job_id:url.searchParams.get("job_id")||null,
           authorized_profile_ids:authorized.map(p=>p.id),
           readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
           readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
