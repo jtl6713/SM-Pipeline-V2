@@ -440,60 +440,52 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
 });
 
 
-test('Producer failure is visible beside Send, preserves direction and reuses retry identity',async()=>{
+test('a failed feedback save retains the draft and idempotency without calling Producer',async()=>{
   const ids=['page-rendering-review','navRenderingReview','rrQueueList','rrDetail',
     'rrStatus','rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile'];
   const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
-  const output='recA1B2C3D4E5F6G7';
-  let activate,submissions=[];
+  const output='recA1B2C3D4E5F6G7';let activate;const submissions=[];
   const fetchStub=async(url,options)=>{
     if(url==='/api/session')return {ok:true,json:async()=>({
       authenticated:true,authorized:true,permissions:{outputs_review:true}})};
     if(url.startsWith('/api/rendering-review/queue?'))return {ok:true,json:async()=>({
-      ok:true,flags:{admission_enabled:true,producer_conversation_enabled:true,
-        attempt_commit_enabled:false,automatic_sampling_percent:0},
-      queue:[{output_id:output,profile_id:'recT2rbKX3MF7cVFU',
-        output_type:'Instagram Reel',output_number:8447,title:'Riverwalk Morning Reflections',
-        render_status:'Rendered',review_held:true,final_file_id:'source-1234567890'}],
+      ok:true,flags:{admission_enabled:false,producer_conversation_enabled:true,
+        automatic_sampling_percent:0},queue:[{
+        output_id:output,profile_id:'recT2rbKX3MF7cVFU',output_type:'Instagram Reel',
+        review_held:true,title:'Test held edit',final_file_url:'https://example.org/v1.mp4'}],
       next_cursor:null})};
     if(url==='/api/rendering-review/outputs/'+output)return {ok:true,json:async()=>({
-      ok:true,publication_hold_verified:true,session:{
-        version:1,state:'ready_for_review',messages:[],attempts:[]}})};
-    if(url.endsWith('/producer-conversation')){
+      ok:true,publication_hold_verified:true,flags:{producer_conversation_enabled:true},
+      session:{version:1,state:'discussing',review_hold:{active:true},
+        messages:[],attempts:[]}})};
+    if(url.endsWith('/review-feedback')){
       submissions.push(JSON.parse(options.body));
-      return {ok:false,status:502,json:async()=>({
-        ok:false,error:'The Producer returned an invalid revision proposal. Your feedback was not saved; please retry.'})};
+      return {ok:false,status:502,json:async()=>({ok:false,error:'Unable to verify saved feedback'})};
     }
-    throw Error('Unexpected '+url);
+    throw Error('Unexpected request '+url);
   };
-  const sandbox={
-    document:{getElementById:id=>nodes[id],createElement:tag=>new Node(tag)},
-    window:{location:{href:'https://studio.test/'},
-      CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''}},
+  const sandbox={document:{getElementById:id=>nodes[id],createElement:tag=>new Node(tag)},
+    window:{location:{href:'https://studio.test/'},CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''}},
     MutationObserver:class{constructor(cb){activate=cb;}observe(){}},
     fetch:fetchStub,URL,URLSearchParams,
-    crypto:{randomUUID:()=> '12345678-1234-1234-1234-123456789012'},
-  };
+    crypto:{randomUUID:()=> '12345678-1234-1234-1234-123456789012'}};
   vm.runInNewContext(script,sandbox,{filename:'rendering-review-queue.js'});
   for(let i=0;i<5;i++)await tick();
   nodes['page-rendering-review'].classList.add('active');activate();
   for(let i=0;i<10;i++)await tick();
-  const descendants=node=>[node,...node.children.flatMap(descendants)];
-  const composer=descendants(nodes.rrDetail).find(n=>n.tag==='textarea');
-  const send=descendants(nodes.rrDetail).find(n=>n.textContent==='Send to Producer');
-  assert.ok(composer&&send);
-  composer.value='Keep the morning opening, but show three more Riverwalk photos.';
-  await send.listeners.click();
-  const statuses=descendants(nodes.rrDetail).filter(n=>n.className==='rr-feedback-status');
-  assert.equal(statuses.length,1);
-  assert.match(statuses[0].textContent,/Could not confirm your reply: The Producer returned an invalid revision proposal/);
-  assert.equal(composer.value,'Keep the morning opening, but show three more Riverwalk photos.');
-  assert.equal(send.disabled,false);
-  await send.listeners.click();
+  const all=n=>[n,...n.children.flatMap(all)];
+  const draft=all(nodes.rrDetail).find(n=>n.tag==='textarea');
+  const save=all(nodes.rrDetail).find(n=>n.textContent==='Save feedback (no edits or render)');
+  assert.ok(draft&&save);
+  draft.value='Keep the opening, replace frame 2 with the museum dome.';
+  draft.listeners.input();await save.listeners.click();
+  assert.match(all(nodes.rrDetail).find(n=>n.className==='rr-feedback-status').textContent,
+    /Feedback save could not be verified/);
+  assert.equal(draft.value,'Keep the opening, replace frame 2 with the museum dome.');
+  await save.listeners.click();
   assert.equal(submissions.length,2);
   assert.equal(submissions[0].client_request_id,submissions[1].client_request_id);
-  assert.equal(submissions[0].expected_version,1);
-  assert.ok(!submissions.some(x=>x.publish||x.render));
+  assert.ok(!all(nodes.rrDetail).some(n=>n.textContent==='Producer is working…'));
 });
 
 test('held #8447 surfaces a verified Morning alternative and saves correction only on reviewer click',async()=>{
