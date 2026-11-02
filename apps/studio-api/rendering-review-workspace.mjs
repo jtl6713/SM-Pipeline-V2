@@ -217,6 +217,35 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
       }
     }
   }
+  // The separately persisted Job is authoritative for dispatch progress.
+  // A queued session alone cannot prove that any Runner ever received work.
+  // Read only its exact saved job ID and bind it to this held session/output.
+  let render_job=null;
+  const activeJobId=text(session.active_job?.id);
+  if(session.state==='queued'&&held&&/^[A-Za-z0-9_-]{8,120}$/.test(activeJobId)){
+    try{
+      const jobs=await operations.listRecords(env,RENDER_REVIEW_TABLES.jobs,{
+        limit:2,filterFormula:'{Job_ID}="'+activeJobId+'"',
+        fields:['Job_ID','Session_ID','Output_Record_ID','Attempt_ID','Job_State',
+          'Progress_Stage','Progress_Percent','Retry_Count','Lease_Fence','Lease_Owner'],
+      });
+      const job=jobs.length===1?jobs[0]:null;
+      const jf=job?.fields||{};
+      if(jf.Job_ID===activeJobId&&jf.Session_ID===session.id&&
+         jf.Output_Record_ID===outputId&&
+         jf.Attempt_ID===session.current_attempt_id){
+        render_job={
+          verified:true,job_id:activeJobId,state:text(jf.Job_State),
+          stage:text(jf.Progress_Stage),progress_percent:Number(jf.Progress_Percent||0),
+          dispatch_attempts:Number(jf.Retry_Count||0),
+          lease_claimed:Boolean(text(jf.Lease_Owner)||Number(jf.Lease_Fence||0)>0),
+          created_at:text(job.createdTime)||null,
+        };
+      }else render_job={verified:false};
+    }catch{
+      render_job={verified:false};
+    }
+  }
   // Authoritative, read-only explanation for an accepted V2 which has not
   // reached Factory. The existing guarded POST rechecks everything itself.
   let factory_handoff_gate=null;
@@ -237,7 +266,7 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
     });
   }
   return {ok:true,...summary(row),session,storyboard,
-    factory_handoff_gate,creative_group,creative_group_error,
+    render_job,factory_handoff_gate,creative_group,creative_group_error,
     publication_hold_verified:held,
     integrity_error:session.review_hold.active&&!held?'HOLD_NOT_VERIFIED':null,
     preview:{file_id:f.Final_File_ID||null,url:f.Final_File_URL||null,

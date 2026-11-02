@@ -838,4 +838,6 @@ Deploy Worker 0.10.717: verified creative redo with pending watermark QA; held o
 2026-11-01 Worker 0.10.722-vibe-auto-to-review: enqueue only verified original-video Vibe Cuts to the durable production queue, preserve master/plan, render through human approval gate; no publishing.
 2026-11-01: Studio UI 0.6.836 and Worker Vibe Cut verified-source handoff; auto-save output plan, prepare variants, promote into rendering and stop for human Approval. No automatic publish.
 2026-11-01 Worker 0.10.723 V2+ watermark verification bypass: retain V1 requirement and protected media/hold/approval checks; deliver approved held V2 to Factory.
+
+2026-11-01: Release held Rendering Review queued Job read-only dispatch status; no change to publishing fences or Airtable SoR.
 2026-11-01: Worker 0.10.724-explicit-producer-feedback. Add distinct review-feedback route for authenticated Chicago Reel held review under existing six-gated Producer rollout. Only durable MESSAGE events in non-inflight open sessions; retain next-revision-feedback during queued/rendering/validating; no automatic Producer proposal, render, approvals or publishing on save. Preserve Airtable authoritative transactions, idempotency, immutable in-flight job and existing release gates. Worker CI and production canaries required.

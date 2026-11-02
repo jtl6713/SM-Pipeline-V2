@@ -1,0 +1,1 @@
+2026-11-01: Enable the permanent, one-shot guarded V2 Runner dispatch consumer only after verified Runner 2026-11-02-review-auto-dispatch-v1 release. Airtable is SoR, no new attempts, no publish, no hold release. Monitor protected dispatch-health. Trigger once.

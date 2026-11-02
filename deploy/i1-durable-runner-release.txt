@@ -2,3 +2,5 @@
 2026-11-01: Deploy runner 2026-11-01-i1-unique-retry-v2. Repair I1 single-idea no_ideas_created: validate parsed AI ideas array; if zero candidates saved, make at most one bounded corrective AI regeneration excluding duplicate titles. Do not retry ambiguous Airtable writes; preserve durable batch ledger, Airtable authority, Supabase non-authoritative, Factory/publish holds. Verify runner health and safe one-idea acceptance separately; no automatic live generation.
 Deploy pipeline-runner rendering-review source reuse correction: watermark_verified does not block review-only creative redo; preserve exact Drive identity and publishing holds. 2026-11-01.
 2026-11-01 Runner v2plus-no-watermark-verification-v2: V2+ watermark optional in isolated render, visual verification not required, V1 untouched.
+
+2026-11-01: Deploy guarded review auto-dispatch Runner 2026-11-02-review-auto-dispatch-v1 after PR #1496. Runtime opt-in flag remains false until separate verified Ops activation; no renders or publication by deploy.
