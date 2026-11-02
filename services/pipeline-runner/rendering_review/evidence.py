@@ -86,7 +86,9 @@ def _library_candidates(client, already_owned, messages=None):
                 continue
             if any(item["media_asset_record_id"] == row["id"] for item in candidates):
                 continue
-            candidates.append(_summary(row))
+            candidates.append({**_summary(row), "id": "library_" + row["id"],
+                               "source_kind": "owned_catalog_photo",
+                               "render_verified": False})
             if len(candidates) >= 24:
                 return candidates, ineligible
     for daypart in DAYPARTS:
