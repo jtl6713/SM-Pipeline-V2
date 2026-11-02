@@ -22,13 +22,13 @@ export function reviewFeedbackWriteEnabled(env) {
 
 export async function handleRenderingReviewFeedbackRequest({
   request, env, authorization, output_id, assertWriteRequest, operations,
-  in_flight_only = false,
+  in_flight_only = false, conversation_only = false,
 }) {
   // Narrow in-flight feedback is enabled only under the existing six-gated
   // Producer rollout, scoped to queued/running/validating by the state policy.
   // All other legacy /messages writes keep their original independent gates.
-  if (in_flight_only === true ? !producerConversationWritesEnabled(env) :
-      !reviewFeedbackWriteEnabled(env))
+  if (in_flight_only === true || conversation_only === true ?
+      !producerConversationWritesEnabled(env) : !reviewFeedbackWriteEnabled(env))
     reject(405,"REVIEW_WRITES_DISABLED","Rendering Review feedback submissions are not enabled");
   if (request?.method !== "POST")
     reject(405,"METHOD_NOT_ALLOWED","POST required");
@@ -53,7 +53,7 @@ export async function handleRenderingReviewFeedbackRequest({
     output_id,content:body.content,expected_version:body.expected_version,
     client_request_id:body.client_request_id,
     timestamp_seconds:body.timestamp_seconds===undefined?null:body.timestamp_seconds,
-    in_flight_only,operations,
+    in_flight_only,conversation_only,operations,
   });
   return {
     ok:true,replay:result.replay,session_version:result.session.version,
