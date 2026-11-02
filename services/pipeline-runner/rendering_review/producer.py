@@ -263,9 +263,16 @@ def _explicit_ordered_stills_candidate(model: dict, evidence: dict, direction: s
         human, re.I | re.S)
     if not opener_match or not re.search(r"\b(?:preserve|keep|retain)\b.{0,32}\b(?:original\s+)?narration\b", human, re.I):
         return model
+    # Human quoted shot labels often include a sentence-ending period *inside*
+    # the quotes (e.g. "Winter in Downtown Chicago 1."). The canonical Asset
+    # Manager title does not. Accept only that single punctuation difference;
+    # require exactly one authoritative matching asset, never a fuzzy lookup.
     opener_name = opener_match.group(1).strip().casefold()
+    exact_names = {opener_name}
+    if opener_name.endswith("."):
+        exact_names.add(opener_name[:-1].rstrip())
     original = [a for a in evidence.get("assets", [])
-                if isinstance(a, dict) and str(a.get("name") or "").strip().casefold() == opener_name
+                if isinstance(a, dict) and str(a.get("name") or "").strip().casefold() in exact_names
                 and isinstance(a.get("id"), str)]
     if len(original) != 1:
         return model
