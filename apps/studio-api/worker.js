@@ -1,6 +1,7 @@
 import { loadAuthoritativeFactoryCorrection } from "./factory-correction-authority.mjs";
 import { readAuthoritativeGalleryInventory } from "./rendering-review-gallery-inventory-http.mjs";
 import { previewNativeGalleryCorrection } from "./rendering-review-gallery-selection-preview.mjs";
+import { readGalleryRevisionStatus } from "./rendering-review-gallery-status-http.mjs";
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
 import { serveReviewAttemptVideo, fetchTrustedRunnerReviewMedia } from "./rendering-review-attempt-video.mjs";
 import { completeReviewAttempt } from "./rendering-review-completion-http.mjs";
@@ -2699,6 +2700,24 @@ export default {
             review_render_reason:row.review_render_reason||null,
           })),
         });
+      }
+
+      // Read-only native gallery revision history: exact authenticated profile
+      // and Airtable attempt IDs. Metadata is never an approval receipt.
+      const galleryStatusMatch = /^\\/api\\/factory\\/outputs\\/(rec[A-Za-z0-9]{14})\\/gallery-revision-status$/.exec(url.pathname);
+      if (galleryStatusMatch) {
+        if (request.method !== "GET") throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        const authorized=await reviewAuthorizedProfiles(env,authorization);
+        const status=await readGalleryRevisionStatus({
+          output_id:galleryStatusMatch[1],
+          attempt_id:url.searchParams.get("attempt_id")||null,
+          authorized_profile_ids:authorized.map(p=>p.id),
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+          readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+          listRecords:(table,params)=>reviewListRecords(env,table,params),
+        });
+        return respond(request,env,status);
       }
 
       // Preview original gallery/source metadata only. This is deliberately
