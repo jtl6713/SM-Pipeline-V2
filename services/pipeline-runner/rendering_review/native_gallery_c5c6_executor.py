@@ -14,6 +14,7 @@ import os
 import re
 
 from airtable.constants import PLATFORM_OUTPUTS_TABLE
+from carousel.image_gen import build_c5_prompt
 from rendering_review.gallery_authoritative import read_authoritative_gallery_source
 from rendering_review.gallery_branding_pixels import visible_source_watermark
 from rendering_review.gallery_media_io import GalleryMediaIO
@@ -205,7 +206,14 @@ def execute_one_native_gallery(*, client, drive, worker_base,
             continue
         # Check the protected hold for every external C5 generation call.
         _held_output(client, job)
-        raw = media.generate_image(selected["instruction"], ratio)
+        refreshed, refreshed_plan, refreshed_original = _job_for_receipt(client, receipt)
+        if (refreshed.get("Plan_SHA256") != job["Plan_SHA256"] or
+            refreshed_plan != plan or refreshed_original != original):
+            deny("native_gallery_executor_lease_changed_before_c5")
+        prompt = build_c5_prompt(
+            replacement_prompt=selected["instruction"], review_notes="",
+            original_prompt="", platform=source["platform"], ratio=ratio)
+        raw = media.generate_image(prompt, ratio)
         branded = media.watermark_image(raw, job["Profile_Record_ID"])
         if not visible_source_watermark(branded, media.profile_watermark):
             deny("native_gallery_executor_c6_pixel_verification_failed")
