@@ -46,7 +46,16 @@ def create_native_gallery_preflight_blueprint(
             request.content_length is not None and request.content_length > 500
         ):
             return jsonify(ok=False, error="native_gallery_request_invalid"), 400
-        body = request.get_json(silent=True)
+        # Content-Length is optional on chunked service calls. Always bound
+        # the actual received body before parsing JSON.
+        raw = request.get_data(cache=False)
+        if len(raw) > 500:
+            return jsonify(ok=False, error="native_gallery_request_invalid"), 400
+        try:
+            import json
+            body = json.loads(raw)
+        except (TypeError, ValueError, UnicodeDecodeError):
+            return jsonify(ok=False, error="native_gallery_request_invalid"), 400
         if (not isinstance(body, dict) or set(body) !=
                 {"output_id", "expected_profile_id"} or
                 not _REC.fullmatch(str(body["output_id"] or "")) or
