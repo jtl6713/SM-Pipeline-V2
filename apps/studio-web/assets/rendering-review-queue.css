@@ -140,3 +140,17 @@
 .rr-activity>button{justify-self:start}
 @media(max-width:760px){.rr-progress-stages{grid-template-columns:repeat(2,minmax(0,1fr))}
   .rr-progress-stage{padding:8px}.rr-activity>button{min-height:44px}}
+
+/* A finished V2 and an unstarted V3 are different verified timelines. */
+.rr-pending-revision{display:grid;gap:8px;min-width:0;padding:12px;
+  margin:10px 0 4px;border:1px solid var(--line,#d6dce3);
+  border-left:4px solid #b16b28;border-radius:9px;background:rgba(177,107,40,.055)}
+.rr-pending-revision-heading{font-size:.97rem}
+.rr-pending-revision-summary{margin:0;line-height:1.45}
+.rr-pending-revision-steps{padding:0;margin:2px 0;list-style:none;
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.rr-pending-revision-step{display:flex;flex-direction:column;gap:3px;
+  border:1px solid var(--line,#d6dce3);border-radius:7px;padding:8px;min-width:0}
+.rr-pending-revision-step strong{font-size:.83rem}
+.rr-pending-revision-step span{font-size:.78rem;overflow-wrap:anywhere}
+@media(max-width:500px){.rr-pending-revision-steps{grid-template-columns:minmax(0,1fr)}}
