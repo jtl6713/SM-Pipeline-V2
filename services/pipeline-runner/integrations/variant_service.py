@@ -7,7 +7,7 @@ import tempfile
 from typing import Any
 
 import requests
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from config import load_settings
 from item4.constants import VARIANT_RECIPE_VERSION
@@ -187,6 +187,35 @@ def prepare_variant_source(
         raise RuntimeError(UNREADABLE_STILL_ERROR) from exc
 
 
+def graphic_fit_canvas_bytes(image_bytes: bytes) -> bytes:
+    """Preserve a complete wide title graphic in a 1080x1920 Reel frame.
+
+    Center-cropping an overlay headline removes the first/last words. A
+    revision-only graphic must keep the entire existing artwork visible,
+    including the original wording, without generating new copy or altering
+    the authoritative master. No external service, upload, or state mutation.
+    """
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as original:
+            original.load()
+            if original.width < 128 or original.height < 128:
+                raise RuntimeError("Graphic source dimensions are invalid")
+            image = original.convert("RGB")
+        canvas = Image.new("RGB", (1080, 1920), (11, 27, 52))
+        contained = ImageOps.contain(image, (1030, 1840), Image.Resampling.LANCZOS)
+        x = (1080 - contained.width)//2
+        y = (1920 - contained.height)//2
+        canvas.paste(contained, (x, y))
+        output = io.BytesIO()
+        canvas.save(output, "JPEG", quality=92, optimize=True, subsampling=0)
+        result = output.getvalue()
+        if not result or not pillow_image_decodable(result):
+            raise RuntimeError("Graphic fit did not decode")
+        return result
+    except (OSError,ValueError,UnidentifiedImageError) as exc:
+        raise RuntimeError(UNREADABLE_STILL_ERROR) from exc
+
+
 class VariantServiceClient:
     def __init__(self, settings: PipelineSettings | None = None) -> None:
         self._runtime = load_settings()
@@ -218,6 +247,13 @@ class VariantServiceClient:
         drive_id: str = "",
         ext: str = "",
     ) -> bytes:
+        if gravity == "graphic_fit":
+            if str(ratio).strip() not in {"9:16","9x16","9-16"}:
+                raise RuntimeError("Graphic fit is restricted to vertical 9:16")
+            payload = prepare_variant_source(
+                image_bytes, drive=drive, drive_id=drive_id, ext=ext,
+            )
+            return graphic_fit_canvas_bytes(payload)
         base = self._base_url()
         token = self._token()
         payload = prepare_variant_source(

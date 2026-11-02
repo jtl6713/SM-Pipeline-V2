@@ -88,6 +88,13 @@ test("explicit prep creates only unique versioned image and Graphic crop rows",a
   assert.deepEqual(f.writes.map(x=>x.fields.Source_Media_Asset),[[A],[B]]);
   assert.ok(f.writes.every(x=>x.fields.Target_Drive_Folder_ID===FOLDER));
   assert.ok(f.writes.every(x=>x.fields.Preview_Status==="Pending"));
+  assert.equal(f.writes[0].fields.Variant_Style,"center");
+  assert.match(f.writes[0].fields.Transfer_ID,/ITEM4-VARIANT-fill-crop-v2-/);
+  assert.match(f.writes[0].fields.Target_File_Name,/__9x16__fill-crop-v2\.jpg$/);
+  assert.equal(f.writes[1].fields.Variant_Style,"graphic_fit");
+  assert.match(f.writes[1].fields.Transfer_ID,/ITEM4-VARIANT-graphic-fit-v1-/);
+  assert.match(f.writes[1].fields.Target_File_Name,/__9x16__graphic-fit-v1\.jpg$/);
+  assert.notEqual(f.writes[0].fields.Transfer_ID,f.writes[1].fields.Transfer_ID);
   assert.deepEqual(f.rows[B].fields["Media_Class"],"Graphic");
   const second=await f.run();
   assert.equal(second.created,0);
