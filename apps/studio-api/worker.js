@@ -2658,7 +2658,7 @@ export default {
       // Drive upload, Airtable mutation, or publication. The POST body supplies
       // only slide IDs and user instructions; the source is reloaded under the
       // authenticated profile authority in this same request.
-      const gallerySelectionPreviewMatch = /^\\/api\\/factory\\/outputs\\/(rec[A-Za-z0-9]{14})\\/gallery-selection-preview$/.exec(url.pathname);
+      const gallerySelectionPreviewMatch = /^\/api\/factory\/outputs\/(rec[A-Za-z0-9]{14})\/gallery-selection-preview$/.exec(url.pathname);
       if (gallerySelectionPreviewMatch) {
         if (request.method !== "POST") throw new HttpError(405,"Method not allowed");
         requirePermission(authorization,"outputs_review");
