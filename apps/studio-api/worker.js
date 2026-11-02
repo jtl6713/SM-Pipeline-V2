@@ -2070,7 +2070,7 @@ export default {
           assertWriteRequest(request,env);
           if(!(await reviewAuthorizedProfiles(env,authorization)).some(p=>p.id===CHICAGO_PROFILE_ID))
             throw new HttpError(403,"Chicago review membership required");
-          if(!/^application\\/json(?:\\s*;|$)/i.test(String(request.headers.get("Content-Type")||"")))
+          if(!/^application\/json(?:\s*;|$)/i.test(String(request.headers.get("Content-Type")||"")))
             throw new HttpError(415,"JSON required");
           const raw=await request.text();
           if(raw.length>800)throw new HttpError(413,"Prepare request too large");
