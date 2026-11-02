@@ -70,6 +70,8 @@ export async function readGalleryRevisionStatus({
      updated_at:text(j.Updated_At_UTC)||null,
      hold_active:holdMatches,
      revised_manifest_stored:!!text(j.Revised_Manifest_SHA256),
+     revision_manifest_sha256:/^[a-f0-9]{64}$/.test(text(j.Revised_Manifest_SHA256))?
+       text(j.Revised_Manifest_SHA256):null,
      creative_decision:choice(j.Creative_Decision)||null,
      revised_drive_readback_verified:false,
      can_accept:false,can_publish:false});
