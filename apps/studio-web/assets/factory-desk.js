@@ -1550,8 +1550,8 @@
               status.textContent="Selected slide(s): "+
                 proposal.selected.map(x=>x.order).join(", ")+
                 ". Unchanged: "+proposal.unchanged.map(x=>x.order).join(", ")+
-                ". Exact selection verified. This preview is not saved or rendered; "+
-                "Drive, branding, and production release gates remain required.";
+                ". Exact selection verified. To save these directions, use Send back with notes. "+
+                "No render is authorized; Drive, branding and release gates remain required.";
             }catch(error){
               if(current())status.textContent="Slide preview blocked: "+
                 String(error?.message||error)+". No changes were generated.";
@@ -1634,10 +1634,35 @@
     event.preventDefault();
     const pending = state.pendingFactoryFeedback;
     if (!pending) return;
-    const notes = String($("factoryFeedbackNotes")?.value || "").trim();
+    const freeformNotes = String($("factoryFeedbackNotes")?.value || "").trim();
     const error = $("factoryFeedbackError");
-    if (!notes) {
-      if (error) { error.hidden = false; error.textContent = "Describe the changes needed before sending back."; }
+    const selectedGallerySlides = [...document.querySelectorAll(
+      "#factoryReadOnlyInventoryRows .factory-gallery-select-slide:checked"
+    )].map(input=>{
+      const li=input.closest("li");
+      const instruction=String(li?.querySelector(".factory-gallery-slide-instruction")?.value||"").trim();
+      const id=String(input.dataset.slideId||"");
+      const order=String(li?.querySelector("label span")?.textContent||"")
+        .match(/^Slide (\\d+) /)?.[1]||"";
+      return {id,order,instruction};
+    });
+    if(selectedGallerySlides.some(item=>
+      !/^rec[A-Za-z0-9]{14}$/.test(item.id)||
+      !/^\\d{1,2}$/.test(item.order)||
+      item.instruction.length<8||item.instruction.length>3000)){
+      if(error){error.hidden=false;error.textContent=
+        "Each selected photo needs a correction description of 8–3000 characters.";}
+      return;
+    }
+    const photoNotes=selectedGallerySlides.length
+      ? "Selected photo corrections (slide-specific reviewer instructions; no render authorized):\\n"+
+        selectedGallerySlides.map(x=>"- Slide "+x.order+" ["+x.id+"]: "+x.instruction).join("\\n")
+      : "";
+    const notes=[freeformNotes,photoNotes].filter(Boolean).join("\\n\\n");
+    if (!notes||notes.length>3000) {
+      if (error) { error.hidden = false; error.textContent =
+        !notes?"Describe the changes needed before sending back.":
+        "Combined review notes are too long (3,000 characters maximum). Shorten the slide instructions."; }
       $("factoryFeedbackNotes")?.focus();
       return;
     }
