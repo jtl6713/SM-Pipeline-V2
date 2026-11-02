@@ -468,6 +468,11 @@
       ? planFactoryApprovalBatches(selectedCards, limit, perProfile).length : (selectable ? 1 : 0);
     const count = $("factoryBatchSelectionCount");
     if (count) count.textContent = `${selectable} output${selectable === 1 ? "" : "s"} selected${planned > 1 ? ` · will submit as ${planned} batches` : ""}`;
+    const recover = $("factoryBatchRecoverPending");
+    if (recover) {
+      recover.hidden = !pendingFactoryApproval();
+      recover.disabled = state.submittingBatch || factoryPendingRecoveryRunning;
+    }
     const submit = $("factoryBatchSubmit");
     if (submit) {
       const pending = pendingFactoryApproval();
@@ -803,6 +808,96 @@
     }
   }
 
+  // Exact-ID recovery for interrupted global *and* legacy profile-local approvals.
+  // Never infer durable absence from an empty Active Activity list.
+  async function reconcileFactorySubmissionFence() {
+    const saved = pendingFactoryApproval();
+    if (!saved) return { resolved: true, count: 0 };
+    const isGlobal = saved.profile_id === "global";
+    const isLocal = /^rec[A-Za-z0-9]+$/.test(String(saved.profile_id || ""));
+    const plans = isGlobal && Array.isArray(saved.batches) ? saved.batches
+      : isLocal ? [{ request_id: saved.request_id, ids: saved.ids }] : [];
+    if (!plans.length || plans.some(plan =>
+        !/^[A-Za-z0-9_-]{12,128}$/.test(String(plan?.request_id || ""))
+        || !Array.isArray(plan.ids) || !plan.ids.length
+        || plan.ids.some(id => !/^rec[A-Za-z0-9]+$/.test(String(id))))) {
+      return { resolved: false, message: "Saved Factory approval identity is incomplete. Do not clear browser data or retry blindly." };
+    }
+    const ageMs = Date.now() - Number(saved.saved_ms || 0);
+    const graceExpired = Number(saved.saved_ms) > 0
+      && ageMs >= FACTORY_PENDING_MISSING_GRACE_MS;
+    const committed = [];
+    for (const plan of plans) {
+      const requestId = String(plan.request_id);
+      const url = isGlobal
+        ? "/api/factory/approval-batches?scope=all&request_id=" + encodeURIComponent(requestId)
+        : "/api/factory/approval-batches?profile=" + encodeURIComponent(saved.profile_id)
+          + "&request_id=" + encodeURIComponent(requestId);
+      let status;
+      try { status = await fetchJson(url, { cache: "no-store" }); }
+      catch (error) {
+        return { resolved: false, message: "Saved approval " + requestId
+          + " could not be verified (" + (error?.message || error) + "). Retry Recovery; do not create a new request." };
+      }
+      if (status?.ok !== true) {
+        return { resolved: false, message: "Authoritative status for saved approval " + requestId
+          + " is unavailable. Existing request ID is preserved." };
+      }
+      const row = isGlobal ? factoryActivityMatchesPlan(status, plan)
+        : (status.job_id ? status : null);
+      if (row) {
+        const actual = (Array.isArray(row.items) ? row.items : []).map(item => String(item.id)).sort();
+        const expected = plan.ids.map(String).sort();
+        const identityOk = isGlobal
+          ? status.exact_request_id === requestId
+          : String(row.request_id || "") === requestId
+            && String(row.profile_id || "") === String(saved.profile_id)
+            && String(row.job_id || "") === "fb_" + requestId;
+        if (!identityOk || actual.length !== expected.length
+            || !actual.every((id, index) => id === expected[index])) {
+          return { resolved: false, message: "Saved approval " + requestId
+            + " has a different profile or output set on the server. No replacement request was submitted." };
+        }
+        committed.push(...plan.ids);
+      } else {
+        const verifiedMissing = isGlobal
+          ? factoryActivityProvesPlanMissing(status, plan)
+          : status.batch === true && status.status === "idle"
+            && status.job_id == null;
+        if (!verifiedMissing) {
+          return { resolved: false, message: "Saved approval " + requestId
+            + " cannot yet be reconciled. Keep the original request ID and retry Recovery." };
+        }
+        if (!graceExpired) {
+          return { resolved: false, message: "Saved approval " + requestId
+            + " is within its 90-second commit window. Retry Recovery shortly." };
+        }
+      }
+    }
+    // Do not erase a request changed by another tab while exact-ID reads ran.
+    if (JSON.stringify(saved) !== JSON.stringify(pendingFactoryApproval())) {
+      return { resolved: false, message: "Saved submission changed during recovery. Refresh Activity first." };
+    }
+    try { localStorage.removeItem(FACTORY_PENDING_REQUEST_KEY); }
+    catch {
+      return { resolved: false, message: "The previous request was verified, but its browser lock could not be released." };
+    }
+    if (committed.length) {
+      rememberFactoryAccepted(committed);
+      committed.forEach(id => state.selectedOutputs.delete(id));
+      saveFactorySelection();
+    }
+    setBatchSubmissionError(null);
+    if (state.desk) renderDesk(state.desk);
+    updateFactoryBatchToolbar();
+    const message = committed.length
+      ? "Verified " + committed.length + " previously submitted outputs. Their original batches remain in history."
+      : "Verified saved approval was never created; submission is unblocked.";
+    setStatus(message);
+    return { resolved: true, count: committed.length, message };
+  }
+
+  let factoryPendingRecoveryRunning = false;
   async function recoverSubmittedFactoryPlan(plan, originalError) {
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt) await new Promise((resolve) => setTimeout(resolve, 350 * attempt));
@@ -895,16 +990,25 @@
   async function submitFactoryGlobalApprovalBatches(ready) {
     const maxTotal = Math.max(1, Number(state.batchGlobal?.max_total || 20));
     const maxPerProfile = Math.max(1, Number(state.batchGlobal?.max_per_profile || 10));
-    const selectionIds = ready.map((card) => card.id);
-    let pending = null;
-    try { pending = JSON.parse(localStorage.getItem(FACTORY_PENDING_REQUEST_KEY) || "null"); } catch {}
-    const reusable = pending?.profile_id === "global"
+    let selectionIds = ready.map(card => card.id);
+    let pending = pendingFactoryApproval();
+    let reusable = pending?.profile_id === "global"
       && Array.isArray(pending?.ids)
       && JSON.stringify(pending.ids) === JSON.stringify(selectionIds)
       && Array.isArray(pending?.batches)
-      && pending.batches.every((row) => Array.isArray(row?.ids) && row?.request_id);
+      && pending.batches.every(row => Array.isArray(row?.ids) && row?.request_id);
     if (pending && !reusable) {
-      throw new Error("A previous approval remains unresolved. Refresh Activity before starting any different submission.");
+      const recovery = await reconcileFactorySubmissionFence();
+      if (!recovery.resolved) throw new Error(recovery.message);
+      // Successful exact-ID recovery may remove already submitted selections.
+      ready = readyFactoryOutputs(true).filter(card => state.selectedOutputs.has(card.id));
+      if (!ready.length) {
+        setStatus("All selected outputs belong to a previously submitted batch. Review Completed Batches.");
+        return;
+      }
+      selectionIds = ready.map(card => card.id);
+      pending = pendingFactoryApproval();
+      reusable = false;
     }
     const planned = reusable
       ? pending.batches
@@ -2421,6 +2525,19 @@
 
   $("factoryBatchSubmit")?.addEventListener("click", () => {
     submitFactoryBatchApprovals().catch((error) => setBatchSubmissionError(error.message || String(error)));
+  });
+  $("factoryBatchRecoverPending")?.addEventListener("click", async () => {
+    if (state.submittingBatch || factoryPendingRecoveryRunning) return;
+    factoryPendingRecoveryRunning = true;
+    updateFactoryBatchToolbar();
+    try {
+      const result = await reconcileFactorySubmissionFence();
+      if (!result.resolved) setBatchSubmissionError(result.message);
+      await refreshFactoryBatchActivity(true);
+    } finally {
+      factoryPendingRecoveryRunning = false;
+      updateFactoryBatchToolbar();
+    }
   });
   $("factoryBatchClear")?.addEventListener("click", () => {
     state.selectedOutputs.clear();
