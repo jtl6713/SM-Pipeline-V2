@@ -212,8 +212,16 @@ def execute_one_native_gallery(*, client, drive, worker_base,
         filename = "review-%s-%s-%02d.png" % (
             receipt["output_id"], receipt["job_id"], old["order"])
         file_id = media.upload_image(filename, branded)["id"]
-        proof = media.verify_drive_image(
-            file_id, hashlib.sha256(branded).hexdigest(), len(branded))
+        expected_sha = hashlib.sha256(branded).hexdigest()
+        proof = media.verify_drive_image(file_id, expected_sha, len(branded))
+        if (not isinstance(proof, dict) or
+            proof.get("google_drive_verified") is not True or
+            proof.get("sha256") != expected_sha or
+            proof.get("byte_count") != len(branded) or
+            proof.get("mime_type") != "image/png" or
+            type(proof.get("width")) is not int or
+            type(proof.get("height")) is not int):
+            deny("native_gallery_executor_drive_receipt_invalid")
         private_permissions(drive, file_id)
         rights = register_native_gallery_rights(
             client=client, drive=drive, output_id=receipt["output_id"],
