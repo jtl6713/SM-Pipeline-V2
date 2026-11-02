@@ -1506,6 +1506,38 @@
             rows.appendChild(history);
           }
         }
+        if(inventory.source_byte_preflight_available===true){
+          const checkRow=document.createElement("li");
+          const verifyButton=document.createElement("button");
+          verifyButton.type="button";
+          verifyButton.textContent="Verify original image bytes and rights (private)";
+          verifyButton.className="factory-gallery-source-byte-check";
+          checkRow.appendChild(verifyButton);
+          rows.appendChild(checkRow);
+          verifyButton.addEventListener("click",async()=>{
+            if(!current())return;
+            verifyButton.disabled=true;
+            status.textContent="Independently reading Airtable source links and Google Drive image bytes…";
+            try{
+              const evidence=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
+                "/gallery-source-preflight");
+              if(!current())return;
+              if(evidence?.ok!==true||evidence.output_id!==id||
+                 evidence.profile_id!==inventory.profile_id||
+                 evidence.sources_byte_verified!==true||
+                 evidence.can_generate!==false||
+                 evidence.publication_authorized!==false)
+                throw new Error("The independent source verification receipt was not trusted");
+              status.textContent=evidence.slide_count+
+                " original slide(s): Drive bytes and source ownership verified. "+
+                "Brand placement and durable render holds still require certification. "+
+                "Generation and publishing remain unavailable.";
+            }catch(error){
+              if(current())status.textContent="Original source verification blocked: "+
+                String(error?.message||error)+". No render or media change occurred.";
+            }finally{verifyButton.disabled=false;}
+          });
+        }
         // An exact slide-selection proposal is available without changing
         // existing Factory feedback or enabling unverified media rendering.
         // This preview never creates a job, modifies Airtable, or publishes.
