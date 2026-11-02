@@ -759,7 +759,16 @@
         form.append(save);
         const lastProducerIndex=messages.map(m=>m.role).lastIndexOf('producer');
         const unprocessed=messages.slice(lastProducerIndex+1).filter(m=>m.role==='user');
-        const canApply=!rendering&&unprocessed.length>0&&
+        const latestHuman=messages.filter(m=>m.role==='user'&&
+          m.attempt_id===session?.current_attempt_id).at(-1);
+        // Re-evaluate a blocked proposal after library crops finish, using
+        // SAVED user direction. No duplicate comment or render authorization.
+        const needRefreshedPlan=!!latestHuman&&
+          session?.producer_candidate?.source_attempt_id===session?.current_attempt_id&&
+          session?.producer_candidate?.stale!==true&&
+          !session?.producer_candidate?.candidate?.timeline?.length;
+        const canApply=!rendering&&
+          (unprocessed.length>0||needRefreshedPlan)&&
           ['discussing','awaiting_assets','plan_ready','ready_for_review','revision_failed']
           .includes(session?.state);
         const apply=elem('button','Make edits based on the latest feedback','secondary-button rr-primary-render');
@@ -778,7 +787,8 @@
             feedback.textContent='Save the comment in the box first, then select Make edits based on the latest feedback.';
             return;
           }
-          const direction=unprocessed.map(m=>String(m.content||'').trim())
+          const direction=(unprocessed.length?unprocessed:[latestHuman])
+            .map(m=>String(m?.content||'').trim())
             .filter(Boolean).join('\n\n').slice(-3000);
           if(!direction)return;
           const identity=entry.output_id+':'+session.version+':'+direction;
@@ -812,7 +822,56 @@
             apply.removeAttribute('aria-busy');
           }
         });
-        form.append(apply,applyMessage,feedback);
+        form.append(apply,applyMessage);
+        // This is a separate user-initiated preparation step. It creates
+        // missing 9:16 crop requests from existing owned library files only.
+        // In particular, it must never dispatch a new V3 render.
+        if(!rendering&&session?.review_hold?.active===true&&
+           saved?.flags?.producer_conversation_enabled===true){
+          const prepare=elem('button','Prepare selected photos from Asset Manager (no render)',
+            'secondary-button');
+          prepare.type='button';
+          const label=elem('p',
+            'Uses the exact photos already named in your saved feedback. Existing successful crops are reused. Graphic images remain labeled Graphic and require visual review.',
+            'rr-muted');
+          prepare.addEventListener('click',async()=>{
+            if(state.actionBusy)return;
+            if(String(composer.value||'').trim()){
+              feedback.hidden=false;feedback.dataset.state='error';
+              feedback.textContent='Save your comment first; photo preparation never uses an unsaved draft.';
+              return;
+            }
+            state.actionBusy=true;prepare.disabled=true;save.disabled=true;
+            apply.disabled=true;
+            feedback.hidden=false;feedback.dataset.state='working';
+            feedback.textContent='Resolving existing owned images and requesting only missing 9:16 crops. No render will start.';
+            try{
+              const receipt=await post('/api/rendering-review/outputs/'+
+                encodeURIComponent(entry.output_id)+'/prepare-library-stills',{
+                intent:'prepare_selected_photos_no_render',
+                expected_version:session.version,client_request_id:safeRequestId(),
+              });
+              if(receipt.render_queued!==false||receipt.published!==false)
+                throw new Error('No-render preparation receipt could not be verified');
+              const states=(receipt.assets||[]).map(x=>x.name+' — '+x.state+
+                (x.kind==='Graphic'?' (Graphic, not a photo)':'')).join('; ');
+              state.lastReplyNotice={outputId:entry.output_id,message:
+                'Library preparation: '+receipt.created+' new crop requests, '+
+                receipt.reused+' existing/ongoing, '+
+                (receipt.blocked?.length||0)+' blocked. '+states+
+                '. V2 unchanged; no render authorized.'};
+              say('Photo preparation received. No render was started.');
+              await open(entry);
+            }catch(err){
+              feedback.dataset.state='error';
+              feedback.textContent='Photo preparation not verified: '+(err?.message||'unavailable')+
+                '. Check latest status before retrying.';
+            }finally{state.actionBusy=false;prepare.disabled=false;
+              save.disabled=false;apply.disabled=!canApply;}
+          });
+          form.append(prepare,label);
+        }
+        form.append(feedback);
         detail.append(form);
       }
       if(attempts.length>1){
