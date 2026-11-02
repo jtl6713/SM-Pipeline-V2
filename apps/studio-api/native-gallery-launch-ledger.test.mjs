@@ -113,6 +113,13 @@ test("ambiguous Airtable PATCH cannot claim an authorized launch",async()=>{
  await assert.rejects(run(f),/GALLERY_LAUNCH_DURABLE_READBACK_FAILED/);
  assert.equal(f.counts.verifications,1);
 });
+test("orphan launch hash without event history is a hard conflict",async()=>{
+ const f=fixture();
+ f.job.fields.Launch_Intent_SHA256=HASH;
+ await assert.rejects(run(f),/GALLERY_LAUNCH_LEDGER_INCOMPLETE/);
+ assert.equal(f.counts.patches,0);
+});
+
 test("second payload hash cannot reuse prior reserved intent",async()=>{
  const f=fixture();await run(f);
  await assert.rejects(run(f,req({...body,payload_hash:"e".repeat(64)})),
