@@ -73,6 +73,7 @@ test("exact accepted creative revision is durable, no Factory or publishing",asy
  const replay=await run(f);
  assert.equal(replay.replay,true);
  assert.equal(f.counts.patches,1);
+ assert.equal(f.counts.drive,2);
 });
 test("reject records an independent creative decision only",async()=>{
  const f=fixture();
@@ -117,4 +118,19 @@ test("wrong reviewer and disabled flag reject before reading Airtable",async()=>
   {...ENV,NATIVE_GALLERY_CREATIVE_DECISION_ENABLED:"false"}),
   /GALLERY_CREATIVE_DECISION_DISABLED/);
  assert.equal(f.counts.locks,0);
+});
+
+test("an accepted creative replay is denied if private Drive rights disappear",async()=>{
+ const f=fixture();
+ await run(f);
+ f.ops.verifyRevisedDriveArtifacts=async()=>false;
+ await assert.rejects(run(f),/GALLERY_CREATIVE_DRIVE_REVERIFICATION_FAILED/);
+ assert.equal(f.counts.patches,1);
+});
+test("an accepted creative replay requires the canonical version-5 state",async()=>{
+ const f=fixture();
+ await run(f);
+ f.job.fields.Row_Version=6;
+ await assert.rejects(run(f),/GALLERY_CREATIVE_DECISION_CONFLICT/);
+ assert.equal(f.counts.patches,1);
 });
