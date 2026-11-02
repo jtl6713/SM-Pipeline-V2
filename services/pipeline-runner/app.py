@@ -34,7 +34,6 @@ from rendering_review.media_http import create_review_media_blueprint
 from rendering_review.gallery_preflight_http import create_native_gallery_preflight_blueprint
 from rendering_review.native_gallery_claim_http import create_native_gallery_claim_blueprint
 from rendering_review.native_gallery_launch_http import create_native_gallery_launch_blueprint
-from rendering_review.native_gallery_revision_verify_http import create_native_gallery_revision_verify_blueprint
 from rendering_review.native_gallery_revised_http import create_native_gallery_revised_blueprint
 
 logger = logging.getLogger("pipeline-runner")
@@ -79,7 +78,6 @@ app.register_blueprint(create_review_media_blueprint(settings))
 app.register_blueprint(create_native_gallery_preflight_blueprint(settings))
 app.register_blueprint(create_native_gallery_claim_blueprint(settings))
 app.register_blueprint(create_native_gallery_launch_blueprint(settings))
-app.register_blueprint(create_native_gallery_revision_verify_blueprint(settings))
 app.register_blueprint(create_native_gallery_revised_blueprint(settings))
 
 
