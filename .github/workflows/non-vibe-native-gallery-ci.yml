@@ -6,6 +6,7 @@ on:
       - 'apps/studio-api/rendering-review-gallery-*'
       - 'apps/studio-api/native-gallery-job-airtable*'
       - 'apps/studio-api/native-gallery-generation-http*'
+      - 'apps/studio-api/native-gallery-job-claim*'
       - 'apps/studio-api/factory-correction-*.mjs'
       - 'apps/studio-web/assets/factory-desk.js'
       - 'apps/studio-web/assets/factory-layout-0680.css'
@@ -44,6 +45,7 @@ jobs:
         run: |
           node --check apps/studio-api/native-gallery-job-airtable.mjs
           node --check apps/studio-api/native-gallery-generation-http.mjs
+          node --check apps/studio-api/native-gallery-job-claim.mjs
           node --check apps/studio-api/rendering-review-gallery-artifacts.mjs
           node --check apps/studio-api/rendering-review-gallery-source.mjs
           node --check apps/studio-api/rendering-review-gallery-inventory.mjs
@@ -53,7 +55,7 @@ jobs:
           node --check apps/studio-api/rendering-review-gallery-lifecycle.mjs
           node --check apps/studio-api/rendering-review-gallery-status-http.mjs
           node --check apps/studio-api/factory-correction-branding-preflight.mjs
-          node --test apps/studio-api/native-gallery-job-airtable.test.mjs apps/studio-api/native-gallery-generation-http.test.mjs
+          node --test apps/studio-api/native-gallery-job-airtable.test.mjs apps/studio-api/native-gallery-generation-http.test.mjs apps/studio-api/native-gallery-job-claim.test.mjs
           node --test apps/studio-api/rendering-review-gallery-artifacts.test.mjs apps/studio-api/rendering-review-gallery-source.test.mjs apps/studio-api/rendering-review-gallery-inventory.test.mjs apps/studio-api/rendering-review-gallery-inventory-http.test.mjs apps/studio-api/rendering-review-gallery-selection-preview.test.mjs apps/studio-api/rendering-review-gallery-lifecycle.test.mjs apps/studio-api/rendering-review-gallery-status-http.test.mjs apps/studio-api/rendering-review-gallery-byte-preflight.test.mjs apps/studio-api/factory-correction-branding-preflight.test.mjs
 
   factory-selection:
