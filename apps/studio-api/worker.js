@@ -4,6 +4,7 @@ import { previewNativeGalleryCorrection } from "./rendering-review-gallery-selec
 import { readGalleryRevisionStatus } from "./rendering-review-gallery-status-http.mjs";
 import { verifyGallerySourceBytes, gallerySourceBytePreflightEnabled } from "./rendering-review-gallery-byte-preflight.mjs";
 import { handleNativeGalleryGenerate } from "./native-gallery-generation-http.mjs";
+import { enrollNativeGalleryHold } from "./native-gallery-hold-enrollment.mjs";
 import { claimNativeGalleryJob, galleryClaimEnabled } from "./native-gallery-job-claim.mjs";
 import { reserveNativeGalleryLaunch, nativeGalleryLaunchIntentEnabled } from "./native-gallery-launch-ledger.mjs";
 import {commitNativeGalleryManifest, nativeGalleryManifestCommitEnabled} from "./native-gallery-manifest-commit.mjs";
@@ -2927,6 +2928,36 @@ export default {
           }),
         });
         return respond(request,env,{...source,source_byte_preflight_available:gallerySourceBytePreflightEnabled(env)});
+      }
+
+      // Exact unscheduled native gallery hold: no schedule vacate, no render,
+      // and no source/publisher mutation beyond persistent blocked output.
+      const galleryEnrollMatch=new RegExp(
+        "^/api/factory/outputs/(rec[A-Za-z0-9]{14})/gallery-enroll$"
+      ).exec(url.pathname);
+      if(galleryEnrollMatch){
+        if(request.method!=="POST")throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        assertWriteRequest(request,env);
+        const authorized=await reviewAuthorizedProfiles(env,authorization);
+        const result=await enrollNativeGalleryHold({
+          request,env,output_id:galleryEnrollMatch[1],
+          authorization,assertWriteRequest,
+          operations:{
+            withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+            readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+            readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+            authorizeProfile:id=>authorized.some(p=>p.id===id),
+            listJobs:(id)=>reviewListRecords(env,NATIVE_GALLERY_JOBS_TABLE,{
+              limit:2,filterFormula:'{Output_Record_ID}="'+id+'"',
+              fields:["Job_ID","Output_Record_ID"],
+            }),
+            patchOutput:(id,fields)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id,{
+              method:"PATCH",body:JSON.stringify({fields,typecast:false}),
+            }),
+          },
+        });
+        return respond(request,env,result);
       }
 
       // Actual dedicated Airtable native-gallery generation intent, OFF by
