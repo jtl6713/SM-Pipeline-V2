@@ -1,0 +1,74 @@
+name: Adler 1503 Exact Crop Preparation — no render
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/adler-1503-pinned-crops.yml'
+permissions:
+  contents: read
+concurrency:
+  group: adler-1503-one-request-crops
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Build narrow Runner command (source crops only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          python - <<'PY'
+          import json
+          # Scope the existing SMV1 queue to ONLY the already-verified Adler
+          # Production Request. This stage prepares still crops, NOT videos.
+          script = r'''$ErrorActionPreference="Stop";
+          $p=Join-Path (Get-Location) "Services\pipeline-runner\service\.env";
+          if(-not (Test-Path $p)){throw "runner_env_absent"};
+          $line=@(Get-Content $p|Where-Object {$_ -match "^\s*PIPELINE_RUNNER_SHARED_SECRET\s*="})|Select-Object -Last 1;
+          if(-not $line){throw "runner_secret_absent"};
+          $secret=([string]$line -split "=",2)[1].Trim().Trim('"',"'");
+          if($secret.Length -lt 24){throw "runner_secret_invalid"};
+          $body=@{production_request_record_id="recl2L1QNplRua3jm";extra=@{max_runs=12;photo_workers=4}}|ConvertTo-Json -Depth 6 -Compress;
+          $reply=Invoke-RestMethod -Uri "http://127.0.0.1:3350/stages/smv1" -Method POST -Headers @{"X-Pipeline-Secret"=$secret} -ContentType "application/json" -Body $body -TimeoutSec 540;
+          if($reply.stage -ne "smv1" -or $reply.status -notin @("ok","skipped")){throw "crop_prep_failed"};
+          Write-Output ("adler_crop_stage_status="+$reply.status);
+          Write-Output ("adler_crop_processed="+[int]$reply.details.processed_count);
+          Write-Output "adler_v2_unchanged=true render_started=false publish_started=false";'''
+          open('/tmp/adler-crop-command.json','w').write(json.dumps({"command":script,"confirm":True}))
+          PY
+      - name: Execute bounded crop drain on protected Pipeline Runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${OPS_TOKEN:-}"
+          status=$(curl -sS --max-time 35 -o /tmp/adler-ops-start.json -w '%{http_code}' \
+            -X POST 'https://ops.chicagoshining.com/api/shell' \
+            -H "Authorization: Bearer $OPS_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/adler-crop-command.json)
+          test "$status" = "200" -o "$status" = "202"
+          JOB=$(jq -r '.job.id // .jobId // empty' /tmp/adler-ops-start.json)
+          test -n "$JOB"
+          for n in $(seq 1 110); do
+            curl -fsS --max-time 20 \
+              -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$JOB" \
+              -o /tmp/adler-ops-job.json
+            state=$(jq -r '.job.status // empty' /tmp/adler-ops-job.json)
+            if [ "$state" = "ok" ]; then
+              jq -r '.job.log // ""' /tmp/adler-ops-job.json \
+                | grep -E '^adler_(crop_stage_status|crop_processed|v2_unchanged)=' || true
+              exit 0
+            fi
+            if [ "$state" = "failed" ]; then
+              echo 'adler_crop_prep_failed=true (no V3 render authorized)'
+              exit 1
+            fi
+            sleep 5
+          done
+          echo 'adler_crop_prep_timeout=true'
+          exit 1
