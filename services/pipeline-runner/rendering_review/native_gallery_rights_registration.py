@@ -11,7 +11,7 @@ import hashlib
 import re
 
 from airtable.constants import MEDIA_ASSETS_TABLE
-from rendering_review.gallery_authoritative import matching_owned_media, actual_image
+from rendering_review.gallery_authoritative import actual_image
 
 REC = re.compile(r"rec[A-Za-z0-9]{14}\Z")
 FILE = re.compile(r"[A-Za-z0-9_-]{20,}\Z")
@@ -38,6 +38,31 @@ def private_permissions(drive, file_id):
     ):
         deny("native_gallery_file_not_private")
     return True
+
+
+def matching_staged_native_media(client, profile_id, file_id):
+    """Only a quarantined owned V2 asset qualifies for private review."""
+    if not REC.fullmatch(str(profile_id or "")) or not FILE.fullmatch(str(file_id or "")):
+        deny("native_gallery_staged_media_identity_invalid")
+    rows = client.list_records(
+        MEDIA_ASSETS_TABLE, formula='{Google Drive File ID}="' + file_id + '"',
+        max_records=2)
+    if not isinstance(rows, list) or len(rows) != 1:
+        deny("native_gallery_staged_media_missing_or_ambiguous")
+    row = rows[0]
+    f = row.get("fields") if isinstance(row, dict) else None
+    if (not REC.fullmatch(str(row.get("id") or "")) or not isinstance(f, dict) or
+        f.get("Content_Profile") != [profile_id] or
+        f.get("Google Drive File ID") != file_id or
+        f.get("Media_Class") != "Image" or
+        f.get("Rights_Status") != "Owned" or
+        f.get("Asset_Status") != "Available" or
+        f.get("Active") is True or
+        f.get("Do_Not_Use") is not True or
+        f.get("MIME_Type") != "image/png" or
+        not str(f.get("Studio_Transfer_ID") or "").startswith("ngv2_")):
+        deny("native_gallery_staged_media_not_quarantined")
+    return row["id"]
 
 
 def register_native_gallery_rights(*, client, drive, output_id, profile_id,
@@ -107,10 +132,9 @@ def register_native_gallery_rights(*, client, drive, output_id, profile_id,
         "File_Size_Bytes": byte_count,
         "Asset_Status": "Available",
         "Rights_Status": "Owned",
-        "Active": True,
-        "Do_Not_Use": False,
+        "Active": False,
+        "Do_Not_Use": True,
         "Content_Profile": [profile_id],
-        "Content Items": [content_item_id],
         "Asset_Description": (
             "Private non-Vibe revision; output " + output_id +
             "; job " + job_id + "; slot " + slot_id +
@@ -138,14 +162,13 @@ def register_native_gallery_rights(*, client, drive, output_id, profile_id,
         f.get("Google Drive File ID") != file_id or
         f.get("Rights_Status") != "Owned" or
         f.get("Asset_Status") != "Available" or
-        f.get("Active") is not True or
-        f.get("Do_Not_Use") is True or
+        f.get("Active") is True or
+        f.get("Do_Not_Use") is not True or
         f.get("Content_Profile") != [profile_id] or
-        f.get("Content Items") != [content_item_id] or
         f.get("MIME_Type") != "image/png" or
         f.get("File_Size_Bytes") != byte_count):
         deny("native_gallery_rights_catalog_readback_failed")
-    if matching_owned_media(client, profile_id, file_id) != record["id"]:
+    if matching_staged_native_media(client, profile_id, file_id) != record["id"]:
         deny("native_gallery_rights_duplicate_drive_identity")
     private_permissions(drive, file_id)
     return {"verified": True, "media_asset_record_id": record["id"],
