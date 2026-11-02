@@ -1479,6 +1479,33 @@
            inventory?.publication_authorized!==false||
            inventory?.source_kind!=="airtable_metadata_only")
           throw new Error("Original gallery source verification contract is unavailable");
+        // Read only authoritative attempt history. A status is not proof
+        // of generated Drive media and cannot grant creative acceptance.
+        try{
+          const revision=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
+            "/gallery-revision-status");
+          if(!current())return "";
+          if(revision?.ok!==true||revision.output_id!==id||
+             revision.profile_id!==inventory.profile_id||
+             revision.can_generate!==false||revision.can_publish!==false||
+             !Array.isArray(revision.attempts))
+            throw new Error("Gallery history authority mismatch");
+          const history=document.createElement("li");
+          history.textContent=revision.attempts.length?
+            "Gallery attempt history: "+revision.attempts.slice(0,10)
+              .map(item=>String(item.status||"unknown")+" ("+
+                String(item.attempt_id||"unknown")+")").join("; ")+
+              ". Revised artifacts are not verified for acceptance.":
+            "Gallery attempt history: no verified revision attempts available.";
+          rows.appendChild(history);
+        }catch(error){
+          if(current()){
+            const history=document.createElement("li");
+            history.textContent="Gallery attempt history unavailable: "+
+              String(error?.message||error);
+            rows.appendChild(history);
+          }
+        }
         // An exact slide-selection proposal is available without changing
         // existing Factory feedback or enabling unverified media rendering.
         // This preview never creates a job, modifies Airtable, or publishes.
