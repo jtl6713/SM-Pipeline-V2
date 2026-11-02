@@ -403,7 +403,9 @@ def _voiceover(client,drive,item,plan,claim,*,original_props=None):
            parts.path!="/uc" or query.get("export")!=["download"] or
            len(file_ids)!=1 or not IDENTITY.fullmatch(file_ids[0]) or
            set(query)!={"id","export"} or parts.fragment or
-           previous!="https://drive.google.com/uc?export=download&id="+file_ids[0]):
+           previous not in (
+               "https://drive.google.com/uc?export=download&id="+file_ids[0],
+               "https://drive.google.com/uc?id="+file_ids[0]+"&export=download")):
             fail("review_original_voiceover_url_untrusted")
         file_id=file_ids[0]
         meta=drive.get_file(file_id)
