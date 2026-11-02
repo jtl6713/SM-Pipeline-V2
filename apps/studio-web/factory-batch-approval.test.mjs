@@ -251,3 +251,128 @@ test("Factory counts only visible review rows and tolerates one empty active pol
   assert.match(js, /emptyActive && state\.emptyActivityPolls < 2 \? state\.batch : fetched/);
   assert.match(js, /batch === fetched && previousActive\.some/);
 });
+
+function factoryPendingRecoveryHarness(saved, fetchJson) {
+  let stored = saved ? JSON.stringify(saved) : null;
+  const calls = [], accepted = [], messages = [];
+  const state = { selectedOutputs: new Set(["recExistingA", "recExistingB", "recNewChicago"]), desk: null };
+  const localStorage = {
+    getItem: () => stored, setItem: (_key, value) => { stored = value; },
+    removeItem: () => { stored = null; },
+  };
+  const rowsFn = extractNamedFunction(js, "factoryActivityRows");
+  const matchesFn = extractNamedFunction(js, "factoryActivityMatchesPlan");
+  const missingFn = extractNamedFunction(js, "factoryActivityProvesPlanMissing");
+  const recoveryFn = extractNamedFunction(js, "reconcileFactorySubmissionFence");
+  const rows = new Function(rowsFn + "; return factoryActivityRows;")();
+  const matches = new Function("factoryActivityRows",
+    matchesFn + "; return factoryActivityMatchesPlan;")(rows);
+  const missing = new Function(missingFn + "; return factoryActivityProvesPlanMissing;")();
+  const reconcile = new Function(
+    "pendingFactoryApproval", "FACTORY_PENDING_MISSING_GRACE_MS",
+    "fetchJson", "localStorage", "FACTORY_PENDING_REQUEST_KEY",
+    "factoryActivityMatchesPlan", "factoryActivityProvesPlanMissing",
+    "rememberFactoryAccepted", "state", "saveFactorySelection",
+    "setBatchSubmissionError", "renderDesk", "updateFactoryBatchToolbar", "setStatus",
+    recoveryFn + "; return reconcileFactorySubmissionFence;",
+  )(
+    () => stored ? JSON.parse(stored) : null, 90_000,
+    (url, options) => { calls.push({url, options}); return fetchJson(url); },
+    localStorage, "pending", matches, missing,
+    ids => accepted.push(...ids), state, () => {},
+    () => {}, () => {}, () => {}, message => messages.push(message),
+  );
+  return { reconcile, state, calls, accepted, messages, pending: () => stored ? JSON.parse(stored) : null };
+}
+
+test("Factory reconciles legacy profile-local saved approvals by exact ID before new global submission", async () => {
+  const request_id = "legacy_factory_chicago_20261102";
+  const saved = {profile_id:"recChicago", request_id, ids:["recExistingA"], saved_ms:Date.now()-120_000};
+  const fixture = factoryPendingRecoveryHarness(saved, async url => {
+    assert.match(url, /profile=recChicago&request_id=legacy_factory_chicago_20261102/);
+    return {ok:true,batch:true,job_id:"fb_"+request_id,request_id,profile_id:"recChicago",
+      status:"completed",items:[{id:"recExistingA",status:"approved"}]};
+  });
+  const result = await fixture.reconcile();
+  assert.equal(result.resolved,true);
+  assert.deepEqual(fixture.accepted,["recExistingA"]);
+  assert.equal(fixture.pending(),null);
+  assert.ok(!fixture.state.selectedOutputs.has("recExistingA"));
+  assert.ok(fixture.state.selectedOutputs.has("recNewChicago"));
+  assert.equal(fixture.calls.length,1);
+  assert.deepEqual(fixture.calls[0].options,{cache:"no-store"});
+});
+
+test("Factory releases only positively absent legacy request after 90-second grace", async () => {
+  const request_id="legacy_factory_missing_20261102";
+  const old = factoryPendingRecoveryHarness(
+    {profile_id:"recChicago",request_id,ids:["recExistingA"],saved_ms:Date.now()-120_000},
+    async () => ({ok:true,batch:true,status:"idle",job_id:null,items:[]}));
+  assert.equal((await old.reconcile()).resolved,true);
+  assert.equal(old.pending(),null);
+  assert.equal(old.state.selectedOutputs.has("recExistingA"),true);
+  const recent = factoryPendingRecoveryHarness(
+    {profile_id:"recChicago",request_id,ids:["recExistingA"],saved_ms:Date.now()-1_000},
+    async () => ({ok:true,batch:true,status:"idle",job_id:null,items:[]}));
+  assert.equal((await recent.reconcile()).resolved,false);
+  assert.ok(recent.pending(),"an in-flight commit must retain its original ID");
+});
+
+test("Factory recovers committed global groups, including completed and failed rows", async () => {
+  const request_id="global_factory_committed_20261102";
+  const plan={request_id,ids:["recExistingB","recExistingA"]};
+  const old=factoryPendingRecoveryHarness(
+    {profile_id:"global",ids:plan.ids,batches:[plan],saved_ms:Date.now()-120_000},
+    async url => {
+      assert.match(url,/scope=all&request_id=global_factory_committed_20261102/);
+      return {ok:true,exact_request_id:request_id,batches:[{
+        job_id:"fg_"+request_id,request_id,status:"completed",
+        items:[{id:"recExistingA",status:"approved"},{id:"recExistingB",status:"failed"}]}]};
+    });
+  assert.equal((await old.reconcile()).resolved,true);
+  assert.equal(old.pending(),null);
+  assert.deepEqual(old.accepted,plan.ids);
+  assert.ok(old.state.selectedOutputs.has("recNewChicago"));
+});
+
+test("Factory preserves original fence when status unavailable or identity conflicts", async () => {
+  const request_id="legacy_factory_ambiguous_20261102";
+  const pending={profile_id:"recChicago",request_id,ids:["recExistingA"],saved_ms:Date.now()-120_000};
+  const cases = [
+    async () => { throw Error("429 Airtable cooling down"); },
+    async () => ({ok:false,batch:true,status:"idle",job_id:null}),
+    async () => ({ok:true,batch:true,job_id:"fb_"+request_id,request_id,
+      profile_id:"recOther",items:[{id:"recExistingA"}]}),
+    async () => ({ok:true,batch:true,job_id:"fb_"+request_id,request_id,
+      profile_id:"recChicago",items:[{id:"recDifferent"}]}),
+  ];
+  for (const response of cases) {
+    const h=factoryPendingRecoveryHarness(pending,response);
+    const result=await h.reconcile();
+    assert.equal(result.resolved,false);
+    assert.ok(h.pending(),"unverified job identity must not be discarded");
+    assert.equal(h.accepted.length,0);
+  }
+  assert.match(js,/await reconcileFactorySubmissionFence\(\)/);
+  assert.match(js,/ready = readyFactoryOutputs\(true\)\.filter\(card => state\.selectedOutputs\.has\(card\.id\)\)/);
+  assert.match(html,/id="factoryBatchRecoverPending"/);
+  assert.match(js,/factoryBatchRecoverPending"\)\?\.addEventListener/);
+  assert.match(html,/UI build 0\.6\.866/);
+});
+
+test("Factory partly committed global groups preserve unsubmitted selection", async () => {
+  const planA={request_id:"factory_group_committed_A",ids:["recExistingA"]};
+  const planB={request_id:"factory_group_uncommitted_B",ids:["recExistingB"]};
+  const h=factoryPendingRecoveryHarness({
+    profile_id:"global",ids:["recExistingA","recExistingB"],
+    batches:[planA,planB],saved_ms:Date.now()-120_000,
+  },async url => url.includes(planA.request_id)
+    ? {ok:true,exact_request_id:planA.request_id,batches:[{
+        request_id:planA.request_id,job_id:"fg_"+planA.request_id,
+        items:[{id:"recExistingA"}],status:"completed"}]}
+    : {ok:true,exact_request_id:planB.request_id,batches:[]});
+  assert.equal((await h.reconcile()).resolved,true);
+  assert.deepEqual(h.accepted,["recExistingA"]);
+  assert.ok(h.state.selectedOutputs.has("recExistingB"));
+  assert.ok(h.state.selectedOutputs.has("recNewChicago"));
+});
