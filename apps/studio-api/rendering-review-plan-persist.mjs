@@ -34,7 +34,7 @@ async function exact(readRecord,table,id){
     fail("REVIEW_SOURCE_UNAVAILABLE","Authoritative source record not readable",503);
   return row;
 }
-async function sourceReceipt({output,session,readField,output_id,loadCompletedAttempt}){
+async function sourceReceipt({output,session,readField,output_id,loadCompletedAttempt,originalProps}){
   const f=(row,key)=>readField(row,key);
   const attempt=(session.attempts||[]).find(x=>x.id===session.current_attempt_id);
   const originalFileId=str(f(output,"Final_File_ID"));
@@ -76,7 +76,13 @@ async function sourceReceipt({output,session,readField,output_id,loadCompletedAt
   return {verified:true,authority:"server",output_id,
     profile_id:CHICAGO_PROFILE_ID,artifact_id:fileId,
     attempt_id:attempt.id,drive_file_id:fileId,
-    canonical_media_authority:"google_drive"};
+    canonical_media_authority:"google_drive",
+    // Not a client assertion. These came from the selected source Output's
+    // canonical Remotion_Props_JSON and only enable an exact-text audio reuse.
+    original_voiceover_text:typeof originalProps?.voiceoverText==="string"?
+      originalProps.voiceoverText:null,
+    original_voiceover_url:typeof originalProps?.voiceover?.url==="string"?
+      originalProps.voiceover.url:null};
 }
 /**
  * Reconcile the authoritative Production Request's owned master assets with
@@ -241,7 +247,7 @@ export async function persistReadyReviewPlan({
   }
   const result=await inspectReviewPlan({
     session,source:await sourceReceipt({output,session,readField,output_id,
-      loadCompletedAttempt}),
+      loadCompletedAttempt,originalProps}),
     assets,visualReceipt:null,factReceipts:[],requirementReceipts:[],
   });
   if(!result.ready_to_commit){

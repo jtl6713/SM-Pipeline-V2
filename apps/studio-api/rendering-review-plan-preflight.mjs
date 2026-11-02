@@ -196,6 +196,14 @@ export async function inspectReviewPlan({
     err("DURATION_INCOMPATIBLE","The Instagram Reel plan must end within 180 seconds");
   const unresolvedResearch=blockers.some(x=>x.kind!=="asset");
   const frozen=!unresolvedResearch;
+  // A same-text visual-only revision can use V1's ORIGINAL recorded audio.
+  // The source fields are supplied only by the authoritative Airtable loader;
+  // missing or changed narration stays on the separate synthesis path.
+  const preserveOriginalAudio=
+    typeof source.original_voiceover_text==="string"&&
+    source.original_voiceover_text===c.narration&&
+    /^https:\/\/drive\.google\.com\/uc\?export=download&id=[A-Za-z0-9_-]{8,120}$/
+      .test(String(source.original_voiceover_url||""));
   const plan={
     plan_version:Number(session.latest_plan_version||0)+1,
     source_attempt_id:attempt.id,source_artifact_id:attempt.artifact_id,
@@ -206,6 +214,7 @@ export async function inspectReviewPlan({
       narration:c.narration,changes:c.changes,preserve:c.preserve,
       timeline,acceptance_checks:c.acceptance_checks,
       target_duration_seconds:duration,
+      preserve_original_audio:preserveOriginalAudio,
     },
     asset_manifest:resolved,preservation_manifest:preservation,
     factual_receipt_count:factReceipts.filter(r=>r?.verified===true&&
