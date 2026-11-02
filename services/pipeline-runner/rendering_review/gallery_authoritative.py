@@ -16,6 +16,7 @@ from airtable.constants import (
     MEDIA_ASSETS_TABLE,
 )
 from rendering_review.profile_watermark import resolve_native_gallery_watermark
+from rendering_review.gallery_branding_pixels import visible_source_watermark
 
 REC = re.compile(r"rec[A-Za-z0-9]{14}\Z")
 DRIVE = re.compile(r"[A-Za-z0-9_-]{20,}\Z")
@@ -110,7 +111,7 @@ def actual_image(drive, file_id):
             not 128 <= height <= 12000):
         deny("gallery_original_image_invalid")
     return {"mime_type": mime, "width": width, "height": height,
-            "byte_count": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+            "byte_count": len(data), "sha256": hashlib.sha256(data).hexdigest()}, data
 
 
 def read_authoritative_gallery_source(*, client, drive, output_id, expected_profile_id,
@@ -142,6 +143,12 @@ def read_authoritative_gallery_source(*, client, drive, output_id, expected_prof
         row = fields(client.get_record(CAROUSEL_SLIDES_TABLE, slide_id), slide_id)
         rows.append((slide_id, row))
     rows.sort(key=lambda x: x[1].get("Slide Number", 0))
+    branding = branding_resolver(client=client, drive=drive, profile_id=expected_profile_id)
+    if (not isinstance(branding, dict) or
+            branding.get("receipt", {}).get("verified") is not True or
+            branding["receipt"].get("profile_id") != expected_profile_id):
+        deny("gallery_shared_branding_unverified")
+    watermark_bytes = branding.get("bytes")
     aspect = None
     artifacts = []
     seen_files = set()
@@ -164,7 +171,7 @@ def read_authoritative_gallery_source(*, client, drive, output_id, expected_prof
             deny("gallery_original_drive_id_missing_or_duplicate")
         seen_files.add(file_id)
         asset_id = matching_owned_media(client, expected_profile_id, file_id)
-        verified = actual_image(drive, file_id)
+        verified, original_binary = actual_image(drive, file_id)
         a, b = map(int, ratio.split(":"))
         if abs(verified["width"] / verified["height"] - a / b) > .015:
             deny("gallery_original_aspect_ratio_changed")
@@ -179,13 +186,9 @@ def read_authoritative_gallery_source(*, client, drive, output_id, expected_prof
             "rights_verified": True, "airtable_identity_verified": True,
             # Source branding is NOT inferred from the existence of an
             # owned watermark asset; requires independent pixel evidence.
-            "watermark_verified": False, **verified,
+            "watermark_verified": visible_source_watermark(
+                original_binary, watermark_bytes), **verified,
         })
-    branding = branding_resolver(client=client, drive=drive, profile_id=expected_profile_id)
-    if (not isinstance(branding, dict) or
-            branding.get("receipt", {}).get("verified") is not True or
-            branding["receipt"].get("profile_id") != expected_profile_id):
-        deny("gallery_shared_branding_unverified")
     digest = hashlib.sha256(json.dumps(artifacts, sort_keys=True,
         separators=(",", ":")).encode()).hexdigest()
     return {
@@ -196,11 +199,13 @@ def read_authoritative_gallery_source(*, client, drive, output_id, expected_prof
         "original_artifacts_sha256": digest,
         "sources_byte_verified": True, "source_rights_verified": True,
         "shared_watermark_asset_verified": True,
-        "original_artifact_watermark_verified": False,
+        "original_artifact_watermark_verified": all(
+            artifact["watermark_verified"] for artifact in artifacts),
         "publication_hold_verified": False,
         "can_generate": False, "can_approve": False,
         "publication_authorized": False,
-        "blockers": ["GALLERY_ORIGINAL_BRANDING_PLACEMENT_NOT_VERIFIED",
-                     "GALLERY_DURABLE_HOLD_AND_LEASE_REQUIRED"],
+        "blockers": ([] if all(a["watermark_verified"] for a in artifacts)
+                     else ["GALLERY_ORIGINAL_BRANDING_PLACEMENT_NOT_VERIFIED"]) +
+                    ["GALLERY_DURABLE_HOLD_AND_LEASE_REQUIRED"],
         "artifacts": artifacts,
     }
