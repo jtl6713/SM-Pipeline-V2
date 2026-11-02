@@ -33,9 +33,7 @@ def deny(message: str):
 
 
 def _png(value: bytes, *, min_edge: int = 128) -> Image.Image:
-    if not isinstance(value, bytes) or len(value) < 128 or not value.startswith(b"\x89PNG\r
-\x1a
-"):
+    if not isinstance(value, bytes) or len(value) < 128 or not value.startswith(b"\x89PNG\r\n\x1a\n"):
         deny("gallery_png_required")
     try:
         with Image.open(BytesIO(value)) as image:
@@ -54,8 +52,7 @@ class GalleryMediaIO:
     def from_profile_catalog(cls, *, client, drive, profile_id,
                              staging_folder_id, generator=generate_carousel_png,
                              watermarker=watermark_photo_bytes, shared_watermark_enabled=True):
-        # This exception is strictly for native-gallery branding, not source
-        # media access, Vibe, Factory approval or social publishing identity.
+        # The shared-branding exception does not authorize foreign content.
         from rendering_review.profile_watermark import resolve_native_gallery_watermark
         owned=resolve_native_gallery_watermark(client=client,drive=drive,
             profile_id=profile_id,shared_policy_enabled=shared_watermark_enabled)
