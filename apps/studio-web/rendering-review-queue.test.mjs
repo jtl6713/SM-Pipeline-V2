@@ -703,6 +703,20 @@ test('held Producer reply shows V2 not started; saved plan and render progress r
   assert.ok(!nodes.rrProgressSummary.classList.contains('rr-progress-top--attention'));
   assert.ok(descendants(nodes.rrDetail).some(n=>n.tag==='textarea'),
     'comments remain available after the queued feedback refresh');
+  for(const phase of ['rendering','validating']){
+    state=phase;version++;
+    await nodes.rrQueueList.children[0].listeners.click();
+    for(let i=0;i<4;i++)await tick();
+    assert.ok(descendants(nodes.rrDetail).some(n=>n.tag==='textarea'&&
+      n.attrs['aria-label']==='Feedback and photo suggestions for Producer'),
+      'comments remain available while '+phase);
+    const action=descendants(nodes.rrDetail).find(n=>n.tag==='button'&&
+      n.textContent==='Make edits based on the latest feedback');
+    assert.ok(action?.disabled,'never edit active video during '+phase);
+  }
+  state='queued';version++;
+  await nodes.rrQueueList.children[0].listeners.click();
+  for(let i=0;i<4;i++)await tick();
   // Transient manual check failures must not erase the previously verified stage.
   failNextRead=true;
   const check=descendants(nodes.rrDetail).find(n=>
@@ -720,6 +734,11 @@ test('held Producer reply shows V2 not started; saved plan and render progress r
   assert.match(nodes.rrProgressSummary.textContent,/Requires your attention/);
   assert.match(nodes.rrProgressSummary.textContent,/ready for review/);
   assert.ok(descendants(nodes.rrDetail).some(n=>n.className.includes('rr-progress-stage--attention')));
+  assert.ok(descendants(nodes.rrDetail).some(n=>n.tag==='textarea'),
+    'comments return after V2 is ready for review');
+  assert.equal(descendants(nodes.rrDetail).find(n=>n.tag==='button'&&
+    n.textContent==='Make edits based on the latest feedback')?.disabled,false,
+    'saved in-flight feedback may be explicitly applied after V2 finishes');
   // A disabled approval gate must not invent an operator action.
   allowActions=false;
   await nodes.rrQueueList.children[0].listeners.click();
