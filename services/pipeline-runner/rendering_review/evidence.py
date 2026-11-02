@@ -3,6 +3,7 @@ import json
 import re
 
 from rendering_review.producer import CHICAGO_PROFILE_ID, canonical_hash
+from rendering_review.library_discovery import requested_library_names, exact_library_name_formula
 
 SESSIONS = "tblHX3UdoNszkoquG"
 OUTPUTS = "tblrlPeboBthkplH0"
@@ -25,18 +26,23 @@ def _daypart(fields):
     return value if isinstance(value, str) else ""
 
 
-def _owned_chicago_image(record, *, expected_file=None):
+def _owned_chicago_master(record, *, expected_file=None):
     if not isinstance(record, dict) or not re.fullmatch(r"rec[A-Za-z0-9]{14}", str(record.get("id") or "")):
         return False
     f = record.get("fields") or {}
     file_id = f.get("Google Drive File ID")
-    if (f.get("Media_Class") != "Image" or f.get("Asset_Status") != "Available"
+    if (f.get("Asset_Status") != "Available"
             or f.get("Rights_Status") != "Owned" or f.get("Active") is not True
             or f.get("Do_Not_Use") is True or
             f.get("Content_Profile") != [CHICAGO_PROFILE_ID] or
             not isinstance(file_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{16,}", file_id)):
         return False
     return expected_file is None or expected_file == file_id
+
+
+def _owned_chicago_image(record, *, expected_file=None):
+    return (_owned_chicago_master(record, expected_file=expected_file)
+            and record["fields"].get("Media_Class") == "Image")
 
 
 def _summary(record):
@@ -51,8 +57,38 @@ def _summary(record):
             "metadata_verified": True, "frames_inspected": False}
 
 
-def _library_candidates(client, already_owned):
-    candidates = []
+def _library_candidates(client, already_owned, messages=None):
+    candidates, ineligible = [], []
+    # Exact titles from the SAVED user conversation are searched before the
+    # original Chicago River pilot suggestions. This is discovery only: none
+    # of these matches becomes an executable source asset or render receipt.
+    requested = requested_library_names(messages)
+    formula = exact_library_name_formula(requested)
+    if formula:
+        requested_keys = {name.casefold() for name in requested}
+        rows = client.list_records(MEDIA, formula=formula, max_records=64,
+                                   fields=["Asset Name", "Media_Class", "Google Drive File ID",
+                                           "Asset_Status", "Rights_Status", "Active", "Do_Not_Use",
+                                           "Content_Profile", "Time_Of_Day",
+                                           "Asset_Description", "Location"])
+        for row in rows:
+            # Do not even disclose a differently owned, unavailable, disabled
+            # or unverified-Drive record to the reviewing Producer.
+            if not _owned_chicago_master(row) or row["id"] in already_owned:
+                continue
+            name = str(row.get("fields", {}).get("Asset Name") or "")
+            if name.casefold() not in requested_keys or "__" in name:
+                continue
+            if not _owned_chicago_image(row):
+                ineligible.append({"name": name, "media_asset_record_id": row["id"],
+                                   "media_class": str(row["fields"].get("Media_Class") or "Unknown"),
+                                   "reason": "not_a_verified_photo_source"})
+                continue
+            if any(item["media_asset_record_id"] == row["id"] for item in candidates):
+                continue
+            candidates.append(_summary(row))
+            if len(candidates) >= 24:
+                return candidates, ineligible
     for daypart in DAYPARTS:
         # Prefer early sun, then fallback to daytime; bound the work and
         # eliminate duplicate 9:16/4:5/16:9 variant records by taking masters.
@@ -72,8 +108,8 @@ def _library_candidates(client, already_owned):
                 continue
             candidates.append(_summary(row))
             if len(candidates) >= 24:
-                return candidates
-    return candidates
+                return candidates, ineligible
+    return candidates, ineligible
 
 
 def one_link(fields, name):
@@ -194,7 +230,7 @@ def load_evidence(client, output_id, session_id, expected_version):
     # Wider catalog suggestions remain *advisory* until the separate immutable
     # plan adapter verifies rights, a usable crop, and their exact ownership.
     # Never let a catalog photo's ID masquerade as a request-linked render asset.
-    library = _library_candidates(client, linked_ids)
+    library, library_ineligible = _library_candidates(client, linked_ids, session.get("messages", []))
     evidence = {
         "output_id": output_id, "session_id": session_id, "session_version": expected_version,
         "profile_id": CHICAGO_PROFILE_ID, "output_type": "Instagram Reel",
@@ -207,6 +243,7 @@ def load_evidence(client, output_id, session_id, expected_version):
         "profile_requirements": {k: profile.get("fields", {}).get(k) for k in ("Brand_Voice", "Profile_Override_Guidelines", "Production_Guideline_Overrides", "Fact_Verification_Overrides")},
         "assets": inventory, "original_timeline": original_timeline,
         "library_candidates": library,
+        "library_ineligible": library_ineligible,
         "messages": session.get("messages", []),
         "prior_plan": session.get("plan"), "sources": [],
         "inspection": {"video_watched": False, "frames_inspected": False},

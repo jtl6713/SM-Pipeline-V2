@@ -27,6 +27,10 @@ original_timeline[] contains the actual source scene order and durations.
 library_candidates[] contains other existing Chicago-owned photos, but these
 are search suggestions, not verified renderer assets. Names/time-of-day are
 metadata, not evidence that frames were visually inspected.
+library_ineligible[] contains exact named, owned Chicago catalog records that
+exist but cannot yet be used as photographs (for example Media_Class Graphic).
+Describe these as FOUND BUT BLOCKED, not missing. Request validation of their
+actual files and media type; do not silently reclassify them or claim a crop exists.
 Understand arbitrary conversational feedback: story arc, mismatched visuals,
 shot selection, sequence, rhythm, captions, narration, duration, mood, motion,
 music, accessibility and factual accuracy. Read prior messages to resolve

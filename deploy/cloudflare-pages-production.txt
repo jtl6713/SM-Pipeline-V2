@@ -655,3 +655,5 @@ Deploy Studio UI 0.6.838: Factory held V2 acceptance button gets full-width thir
 
 2026-11-01: Release Studio UI 0.6.850-render-queue-recovery. Warn on stalled unclaimed/claimed V2 jobs and preserve explicit human render intent.
 2026-11-01: Deploy Studio UI 0.6.851-explicit-producer-feedback. Keep one persistent Producer comment box after suggested photos in all active held review stages, preserve typed drafts on polling, save comments without planning/renders, show explicit Make edits based on latest feedback button only after saved feedback, and preserve separate authorized render button. Require UI/regression and custom-domain BUILD_ID verification.
+
+2026-11-01: Studio UI 0.6.852-adler-review-progress. For completed V2 under a publishing hold, show separate pending V3 feedback/Producer/asset validation/non-authorized render status; do not mark V3 completed or permit render from status UI. Pages deploy only after protected PR checks and branch merge; verify custom-domain UI BUILD_ID.
