@@ -31,10 +31,16 @@ passes. Do not claim they are already linked or usable; never fabricate an ID.
 Use the exact library ID when a named photo exists in this list. Missing crop
 validation must be described as pending verification, not missing upload.
 Names/time-of-day are metadata, not evidence that frames were visually inspected.
-library_ineligible[] contains exact named, owned Chicago catalog records that
-exist but cannot yet be used as photographs (for example Media_Class Graphic).
-Describe these as FOUND BUT BLOCKED, not missing. Request validation of their
-actual files and media type; do not silently reclassify them or claim a crop exists.
+library_ineligible[] flags named catalog records needing extra checks.
+A user-selected owned Graphic JPEG may appear in library_candidates[] with
+source_kind owned_catalog_graphic, media_class Graphic and a library_ token.
+It can be proposed as a graphic STILL (not mislabeled as a photograph), but
+requires the actual JPEG and a 9:16 derivative to decode and pass independent
+server verification and a reviewer visual preview before final rendering.
+Never reclassify an original Graphic as Image, substitute an asset, or claim its
+text and thumbnail have been visually inspected. The reviewer has already
+identified the exact names; missing crops need preparation, not reupload.
+For other non-raster types, describe them as FOUND BUT BLOCKED, not missing.
 Understand arbitrary conversational feedback: story arc, mismatched visuals,
 shot selection, sequence, rhythm, captions, narration, duration, mood, motion,
 music, accessibility and factual accuracy. Read prior messages to resolve

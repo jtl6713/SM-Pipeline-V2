@@ -79,16 +79,24 @@ def _library_candidates(client, already_owned, messages=None):
             name = str(row.get("fields", {}).get("Asset Name") or "")
             if name.casefold() not in requested_keys or "__" in name:
                 continue
-            if not _owned_chicago_image(row):
+            kind = str(row["fields"].get("Media_Class") or "Unknown")
+            if kind not in ("Image", "Graphic"):
                 ineligible.append({"name": name, "media_asset_record_id": row["id"],
-                                   "media_class": str(row["fields"].get("Media_Class") or "Unknown"),
-                                   "reason": "not_a_verified_photo_source"})
+                                   "media_class": kind, "reason": "not_a_raster_still"})
                 continue
+            if kind == "Graphic":
+                # An explicitly named promotional Graphic can be proposed
+                # unchanged without silently reclassifying the source.
+                # No validation of its actual JPEG or text visibility is
+                # asserted until the independent Runner reads its bytes.
+                ineligible.append({"name": name, "media_asset_record_id": row["id"],
+                                   "media_class": kind, "reason": "graphic_requires_visual_review"})
             if any(item["media_asset_record_id"] == row["id"] for item in candidates):
                 continue
             candidates.append({**_summary(row), "id": "library_" + row["id"],
-                               "source_kind": "owned_catalog_photo",
-                               "render_verified": False})
+                               "source_kind": "owned_catalog_graphic" if kind=="Graphic" else "owned_catalog_photo",
+                               "media_class": kind,
+                               "render_verified": False, "frames_inspected": False})
             if len(candidates) >= 24:
                 return candidates, ineligible
     for daypart in DAYPARTS:
