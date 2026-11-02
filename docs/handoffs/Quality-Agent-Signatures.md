@@ -586,3 +586,35 @@ Phase 6 write cutover.
 - **Evidence:** `studio/state/quality/idea-photo-matching/latest.json` in the Worker `STUDIO_MEDIA` R2 binding; records the scan timestamp, finding counts, exact Idea record IDs, and profile IDs.
 - **Safe recovery:** Only the existing bounded automatic listener, photo matcher, and idempotent ready-production queue may mutate eligible Ideas. Respect manually paused/held/rejected/promoted Ideas and preserve manually selected photo deletions.
 - **Escalate:** Repeat offenders that remain stale after the next successful, non-cooldown match attempt, or any result lacking authoritative profile-scoped media. Never create platform posts, bypass final human approval, or repeatedly manufacture a Production Request to clear this signature.
+
+
+## QA-IG-STALE-UPLOAD — Instagram Reel orphaned AP1-IG publishing lock
+
+**First identified:** 2026-11-02, 68 orphaned AP1-IG locks across NYC (23), Chicago (17), LA (16), Miami (12). A further NYC Reel #9098 had saved provider identifiers and requires separate receipt reconciliation.
+
+### Detection contract (30-minute default)
+
+- Approved, automated Instagram Reel with Publish_Status=Publishing and Publish_Locked_By=AP1-IG.
+- Publish_Locked_At and Last_Publish_Attempt_At both older than 30 minutes. The default threshold is configurable; do not treat the UI 85% bar as proof of ongoing activity.
+- Independently check runner instance heartbeat and lease-expiration/fencing token. A fresh heartbeat or valid lease forbids recovery; missing observations must be reported explicitly.
+- No test identity, review hold, Do_Not_Publish, publication receipt, active provider cooldown or replacement transaction.
+- A saved Platform_Media_ID / Platform_Post_ID / URL requires provider reconciliation, **not** another Graph create.
+- A missing saved provider ID is not proof that the provider request never committed.
+
+### Guarded recovery contract
+
+1. Read authoritative Airtable output immediately before claiming the exact output. Compare current owner, lock generation, attempt timestamps, approval, holds, cooldown and identity with the detected snapshot.
+2. Independently query runner heartbeat/lease state and fence the prior generation. If lease state is unknown or a remote create may have succeeded, escalate or reconcile before any new dispatch.
+3. Query Instagram for saved container, post and permalink. For a confirmed live post, persist the receipt only after identity proof. For a processing container, resume **that exact container**. If provider state remains ambiguous, mark Needs Eyes rather than claiming a safe retry.
+4. Only when remote identity is conclusively absent and old owner fenced, release Publish_Locked_By / Publish_Locked_At / Publish_Started_At, preserve attempts and historical notes, and reschedule via the **atomic MAE reservation authority** (profile-local time, configured horizon, 90-minute separation, priority windows then balanced overflow, blackout and lane contention). Do not directly stamp calendar dates without reservation reconciliation.
+5. Append an auditable attempt event with signature, output and profile IDs, source/stage, prior lock owner/generation, heartbeat and remote check result, old/new reservation, actor, UTC timestamps, and outcome. Make replay idempotent. Airtable is authoritative; Supabase is only a mirror.
+6. Publish only when the new scheduled time is due and a fresh attempt has acquired its own lease. Respect provider limits and holds. Accepting duplicate risk is not permission to bypass the review/publish safety gates.
+
+### Regression coverage
+
+- Crash after lock but before Graph create; after Graph create but before container ID write; after publish but before Airtable receipt; after Airtable schedule write but before reservation commit.
+- Fresh heartbeat, valid lease, changed generation, hold, replacement, existing provider ID, cooldown, insufficient media/caption and exhausted attempt controls.
+- NYC, Chicago, LA and Miami time zones, DST, full priority windows and balanced overflow; rescan idempotence, independent authoritative readback and audit write failures.
+- Render a stalled/Needs Eyes status rather than an indefinitely frozen 85% Uploading bar.
+
+**Implementation status:** Python detection helper and unit tests exist in `services/pipeline-runner/quality_agent/signatures.py` and `services/pipeline-runner/tests/test_quality_agent_signatures.py`. Autonomous coordinator, provider lookup adapter, cross-process heartbeat/lease authority, MAE transactional recovery and durable audit writer **are not mounted by this classifier alone**. Do not enable unattended recovery or claim the full feature deployed until those integrations are implemented and tested.
