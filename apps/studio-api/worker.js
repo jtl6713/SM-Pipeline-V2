@@ -3,6 +3,7 @@ import { readAuthoritativeGalleryInventory } from "./rendering-review-gallery-in
 import { previewNativeGalleryCorrection } from "./rendering-review-gallery-selection-preview.mjs";
 import { readGalleryRevisionStatus } from "./rendering-review-gallery-status-http.mjs";
 import { verifyGallerySourceBytes, gallerySourceBytePreflightEnabled } from "./rendering-review-gallery-byte-preflight.mjs";
+import { handleNativeGalleryGenerate } from "./native-gallery-generation-http.mjs";
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
 import { serveReviewAttemptVideo, fetchTrustedRunnerReviewMedia } from "./rendering-review-attempt-video.mjs";
 import { completeReviewAttempt } from "./rendering-review-completion-http.mjs";
@@ -2771,6 +2772,55 @@ export default {
           }),
         });
         return respond(request,env,{...source,source_byte_preflight_available:gallerySourceBytePreflightEnabled(env)});
+      }
+
+      // Actual dedicated Airtable native-gallery generation intent, OFF by
+      // default. Do not reuse the Chicago Reel job table or allow public
+      // publishing. Trusted Runner preflight still lacks original watermark
+      // placement/hold proof, so it cannot authorize generation yet.
+      const galleryGenerateMatch = new RegExp(
+        "^/api/factory/outputs/(rec[A-Za-z0-9]{14})/gallery-generate$"
+      ).exec(url.pathname);
+      if(galleryGenerateMatch){
+        const output_id=galleryGenerateMatch[1];
+        const authorized=await reviewAuthorizedProfiles(env,authorization);
+        const inventoryReader=async()=>readAuthoritativeGalleryInventory({
+          output_id,authorized_profile_ids:authorized.map(p=>p.id),
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+          readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+          readSlides:async ids=>reviewListRecords(env,"tblcnQDBvUngpjDED",{
+            limit:ids.length,
+            filterFormula:'OR('+ids.map(id=>'RECORD_ID()="'+id+'"').join(',')+')',
+            fields:["Content Item","Platform Output","Platform","Slide Number",
+              "Aspect Ratio","Deleted From Carousel","Approved For Final",
+              "Review Status","Asset_4x5_File_ID","Asset_1x1_File_ID",
+              "Asset_9x16_File_ID","Final Google Drive File ID"],
+          }),
+        });
+        const result=await handleNativeGalleryGenerate({
+          request,env,output_id,authorization,
+          assertWriteRequest,
+          loadInventory:inventoryReader,
+          jobAdapter:{
+            airtableFetch,
+            listRecords:(env,table,params)=>reviewListRecords(env,table,params),
+            withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+            verifySource:async()=>{
+              // An unmounted brand-placement verifier is never replaced by
+              // model metadata or by a verified brand asset. This always
+              // fails the strict authoritative creation gate until source
+              // watermark and owned hold are fully certified.
+              const inventory=await inventoryReader();
+              const preflight=await verifyGallerySourceBytes({
+                env,output_id,inventory,
+              });
+              return {...preflight,
+                original_manifest_sha256:preflight.original_artifacts_sha256,
+                original_artifacts:[],publication_hold_verified:false};
+            },
+          },
+        });
+        return respond(request,env,result);
       }
 
       // Exact per-slide gallery correction proposal; no generation, approval,
