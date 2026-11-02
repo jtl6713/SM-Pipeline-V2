@@ -99,7 +99,7 @@ def verify_catalog_render_source(client,drive,frozen,*,transport=requests.get):
        frozen.get("asset_id")!="library_"+record_id or
        frozen.get("profile_id")!=CHICAGO or
        frozen.get("media_type")!="image" or
-       frozen.get("crop_recipe")!="fill-crop-v2" or
+       frozen.get("crop_recipe") not in ("fill-crop-v2","graphic-fit-v1") or
        frozen.get("rights_receipt_id")!="rrcatalogrights_"+record_id or
        not re.fullmatch(r"[A-Za-z0-9_-]{8,120}",str(asset_id or "")) or
        type(source_size) is not int or source_size<1024 or
@@ -118,9 +118,11 @@ def verify_catalog_render_source(client,drive,frozen,*,transport=requests.get):
     if queue.get("id")!=transfer_id:
         deny("catalog_transfer_record_changed")
     q=queue.get("fields") or {}
+    recipe="graphic-fit-v1" if media_class=="Graphic" else "fill-crop-v2"
+    style="graphic_fit" if media_class=="Graphic" else "center"
     if(q.get("Asset_Kind")!="Platform Variant" or
        q.get("Aspect_Ratio")!="9:16" or
-       q.get("Variant_Style")!="center" or
+       q.get("Variant_Style")!=style or
        q.get("Transfer_Status")!="Ready" or
        q.get("Preview_Status")!="Ready" or
        only_link(q.get("Source_Media_Asset"))!=record_id or
@@ -130,13 +132,16 @@ def verify_catalog_render_source(client,drive,frozen,*,transport=requests.get):
        q.get("Production_Request_Record_ID")!=req_id or
        q.get("Drive_File_ID")!=crop or
        only_link(q.get("Generated_Media_Asset"))!=crop_record or
-       not str(q.get("Target_File_Name") or "").endswith("9x16__fill-crop-v2.jpg")):
+       frozen.get("crop_recipe")!=recipe or
+       q.get("Transfer_ID")!=("ITEM4-VARIANT-"+recipe+"-"+req_id+
+                             "-"+asset_id+"-9x16") or
+       not str(q.get("Target_File_Name") or "").endswith("9x16__"+recipe+".jpg")):
         deny("catalog_transfer_provenance_changed")
     derived=eligible(client.get_record(MEDIA,crop_record),crop_record,crop)
     if derived.get("MIME_Type")!="image/jpeg":
         deny("catalog_variant_mime_changed")
     expected_url=("https://media.chicagoshining.com/studio/previews/item4/"+
-                  req_id+"/ITEM4-VARIANT-fill-crop-v2-"+req_id+"-"+
+                  req_id+"/ITEM4-VARIANT-"+recipe+"-"+req_id+"-"+
                   asset_id+"-9x16-"+crop+".jpg")
     if(q.get("Preview_URL")!=expected_url or
        frozen.get("render_url")!=expected_url):
