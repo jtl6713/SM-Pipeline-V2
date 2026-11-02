@@ -381,13 +381,53 @@ def _source_mix(drive,props,output_id):
             "spoken_caption_words_per_page":int(props.get("spokenCaptionWordsPerPage") or 4)}
 
 
-def _voiceover(client,drive,item,plan,claim):
+def _voiceover(client,drive,item,plan,claim,*,original_props=None):
     spoken=plan["creative"]["narration"]
+    target=float(plan["creative"]["target_duration_seconds"])
+    # A visual-only edit must REUSE the actual previously approved audio.
+    # It may not silently synthesize a new voice or change pronunciation.
+    # The source output's canonical Remotion props are read under the job
+    # lease and both identity and exact text must be verified.
+    preserve=plan["creative"].get("preserve_original_audio") is True
+    if preserve:
+        props=original_props
+        if(not isinstance(props,dict) or
+           props.get("voiceoverText")!=spoken or
+           not isinstance(props.get("voiceover"),dict)):
+            fail("review_original_narration_changed")
+        previous=str(props["voiceover"].get("url") or "")
+        parts=urlsplit(previous)
+        query=parse_qs(parts.query)
+        file_ids=query.get("id") or []
+        if(parts.scheme!="https" or parts.netloc!="drive.google.com" or
+           parts.path!="/uc" or query.get("export")!=["download"] or
+           len(file_ids)!=1 or not IDENTITY.fullmatch(file_ids[0]) or
+           set(query)!={"id","export"} or parts.fragment):
+            fail("review_original_voiceover_url_untrusted")
+        file_id=file_ids[0]
+        meta=drive.get_file(file_id)
+        if(meta.get("id")!=file_id or meta.get("mimeType")!="audio/mpeg" or
+           not 1000<=int(meta.get("size") or 0)<=30000000):
+            fail("review_original_voiceover_drive_unverified")
+        contents,mime=drive.download_file(file_id)
+        if(mime!="audio/mpeg" or not isinstance(contents,bytes) or
+           len(contents)!=int(meta["size"])):
+            fail("review_original_voiceover_binary_changed")
+        seconds=probe_audio_duration_bytes(contents)
+        if not 1<=seconds<=180 or seconds>target+2.5 or target-seconds>35:
+            fail("review_original_voiceover_duration_mismatch")
+        return {"verified":True,"authority":"server",
+            "output_id":claim["output_id"],"attempt_id":claim["attempt_id"],
+            "plan_hash":claim["plan_hash"],
+            "narration_sha256":hashlib.sha256(spoken.encode()).hexdigest(),
+            "canonical_media_authority":"google_drive",
+            "drive_file_id":file_id,"duration_seconds":seconds,
+            "audio_url":previous,"source_audio_reused":True,
+            "source_audio_sha256":hashlib.sha256(contents).hexdigest()}
     voice_id=resolve_content_voice_id(item)
     audio=synthesize_voiceover_by_id(spoken,voice_id=voice_id)
     _,normalized=normalize_voiceover(audio,filename="review-"+claim["attempt_id"]+".mp3")
     seconds=probe_audio_duration_bytes(normalized)
-    target=float(plan["creative"]["target_duration_seconds"])
     if not 1<=seconds<=180 or abs(seconds-target)>2.5:
         fail("review_voiceover_duration_requires_revision")
     uploaded=drive.upload_file(VOICEOVER_DRIVE_FOLDER_ID,
@@ -466,7 +506,7 @@ def render_exact_attempt(output_id,job_id,*,client=None,drive=None,
     job={"state":"claimed","lease_verified":True,
          **{k:claim[k] for k in ("output_id","job_id","attempt_id",
          "plan_hash","session_id","lease_owner","lease_fence")}}
-    narration=_voiceover(client,drive,item,plan,claim)
+    narration=_voiceover(client,drive,item,plan,claim,original_props=props)
     # Optional, best-effort branding on rerenders. No watermark failures
     # may prevent V2+ rendering. Initial V1 render policy is unchanged.
     try:
