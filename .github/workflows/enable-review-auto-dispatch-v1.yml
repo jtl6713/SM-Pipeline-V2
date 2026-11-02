@@ -50,8 +50,8 @@ jobs:
           $file=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
           if(-not (Test-Path -LiteralPath $file)){throw 'runner_env_not_found'}
           $lines=@(Get-Content -LiteralPath $file)
-          $matches=@($lines|Where-Object {$_ -match '^\s*RENDERING_REVIEW_AUTO_DISPATCH_ENABLED\s*='})
-          if($matches.Count -gt 1){throw 'duplicate_dispatch_flag'}
+          $flagRows=@($lines|Where-Object {$_ -match '^\s*RENDERING_REVIEW_AUTO_DISPATCH_ENABLED\s*='})
+          if($flagRows.Count -gt 1){throw 'duplicate_dispatch_flag'}
           $found=$false
           $next=@(foreach($line in $lines){
             if($line -match '^\s*RENDERING_REVIEW_AUTO_DISPATCH_ENABLED\s*='){
@@ -59,7 +59,7 @@ jobs:
             }else{$line}
           })
           if(-not $found){$next+= 'RENDERING_REVIEW_AUTO_DISPATCH_ENABLED=true'}
-          Set-Content -LiteralPath $file -Value $next -Encoding UTF8
+          # Preserve secrets and avoid PowerShell 5.1 UTF8 BOM on the first variable.\n          [System.IO.File]::WriteAllLines($file,$next,([System.Text.UTF8Encoding]::new($false)))
           $readback=@(Get-Content -LiteralPath $file|Where-Object {$_ -eq 'RENDERING_REVIEW_AUTO_DISPATCH_ENABLED=true'})
           if($readback.Count -ne 1){throw 'dispatch_flag_readback_failed'}
           Write-Output 'review_auto_dispatch_flag_configured=true'
