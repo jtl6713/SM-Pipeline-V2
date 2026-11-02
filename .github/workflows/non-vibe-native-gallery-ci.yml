@@ -9,6 +9,7 @@ on:
       - 'apps/studio-web/assets/factory-layout-0680.css'
       - 'apps/studio-web/index.html'
       - 'apps/studio-web/factory-gallery-inventory-preview.test.mjs'
+      - 'apps/studio-api/worker.js'
       - 'services/pipeline-runner/rendering_review/gallery_*'
       - 'services/pipeline-runner/rendering_review/profile_watermark.py'
       - 'services/pipeline-runner/tests/test_rendering_review_gallery_*'
@@ -34,8 +35,9 @@ jobs:
           node --check apps/studio-api/rendering-review-gallery-source.mjs
           node --check apps/studio-api/rendering-review-gallery-inventory.mjs
           node --check apps/studio-api/rendering-review-gallery-inventory-http.mjs
+          node --check apps/studio-api/rendering-review-gallery-selection-preview.mjs
           node --check apps/studio-api/factory-correction-branding-preflight.mjs
-          node --test apps/studio-api/rendering-review-gallery-artifacts.test.mjs apps/studio-api/rendering-review-gallery-source.test.mjs apps/studio-api/rendering-review-gallery-inventory.test.mjs apps/studio-api/rendering-review-gallery-inventory-http.test.mjs apps/studio-api/factory-correction-branding-preflight.test.mjs
+          node --test apps/studio-api/rendering-review-gallery-artifacts.test.mjs apps/studio-api/rendering-review-gallery-source.test.mjs apps/studio-api/rendering-review-gallery-inventory.test.mjs apps/studio-api/rendering-review-gallery-inventory-http.test.mjs apps/studio-api/rendering-review-gallery-selection-preview.test.mjs apps/studio-api/factory-correction-branding-preflight.test.mjs
 
   factory-selection:
     runs-on: ubuntu-latest
