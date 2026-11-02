@@ -83,11 +83,33 @@ export async function decideNativeGalleryCreative({
    if(choice(j.Creative_Decision)||["creative_accepted","rejected"].includes(choice(j.Job_State))){
      if(choice(j.Creative_Decision)===resolved&&
         j.Creative_Decision_Actor===actor&&
-        choice(j.Job_State)===finalState&&
-        j.Revised_Manifest_SHA256===body.manifest_sha256)
+        choice(j.Job_State)===finalState&&j.Row_Version===5&&
+        j.Revised_Manifest_SHA256===body.manifest_sha256){
+       let priorOriginal,priorRevised,priorPlan;
+       try{
+         priorOriginal=JSON.parse(j.Original_Manifest_JSON);
+         priorRevised=JSON.parse(j.Revised_Manifest_JSON);
+         priorPlan=JSON.parse(j.Plan_JSON);
+       }catch{fail("GALLERY_CREATIVE_MANIFEST_UNREADABLE",503);}
+       if(!Array.isArray(priorOriginal)||!Array.isArray(priorRevised)||
+          priorOriginal.length!==priorRevised.length||!priorOriginal.length||
+          !Array.isArray(priorPlan?.selected)||!priorPlan.selected.length||
+          priorPlan.profile_id!==j.Profile_Record_ID||
+          priorPlan.output_id!==output_id||
+          await hash(JSON.stringify(priorRevised))!==body.manifest_sha256)
+         fail("GALLERY_CREATIVE_REVISED_MANIFEST_CHANGED");
+       const stillVerified=await ops.verifyRevisedDriveArtifacts({
+         output_id,job_id,profile_id:j.Profile_Record_ID,
+         content_item_id:j.Content_Item_Record_ID,
+         original_artifacts:priorOriginal,revision_artifacts:priorRevised,
+         selected_slide_ids:priorPlan.selected.map(x=>x.slide_id),
+       });
+       if(stillVerified!==true)
+         fail("GALLERY_CREATIVE_DRIVE_REVERIFICATION_FAILED");
        return {ok:true,replay:true,decision:body.decision,job_id,output_id,
          creative_approved:body.decision==="accept",
          factory_approved:false,publication_authorized:false};
+     }
      fail("GALLERY_CREATIVE_DECISION_CONFLICT");
    }
    if(choice(j.Job_State)!=="ready_for_review"||j.Row_Version!==4)
