@@ -35,6 +35,7 @@ from rendering_review.gallery_preflight_http import create_native_gallery_prefli
 from rendering_review.native_gallery_claim_http import create_native_gallery_claim_blueprint
 from rendering_review.native_gallery_launch_http import create_native_gallery_launch_blueprint
 from rendering_review.native_gallery_execute_http import create_native_gallery_execute_blueprint
+from rendering_review.native_gallery_auto_execute import start_consumer as start_native_gallery_consumer, snapshot as native_gallery_dispatch_snapshot
 from rendering_review.native_gallery_revised_http import create_native_gallery_revised_blueprint
 from rendering_review.native_gallery_preview_http import create_native_gallery_preview_blueprint
 
@@ -93,6 +94,16 @@ def review_auto_dispatch_health():
     if denied is not None:
         return denied, code
     return jsonify(ok=True, **review_dispatch_snapshot()), 200
+
+
+@app.get('/jobs/native-gallery/dispatch-health')
+def native_gallery_dispatch_health():
+    if not settings.get('pipeline_runner_shared_secret', '').strip():
+        return jsonify(ok=False, error='runner_auth_unconfigured'), 503
+    denied, code = _verify_secret()
+    if denied is not None:
+        return denied, code
+    return jsonify(ok=True, **native_gallery_dispatch_snapshot()), 200
 
 
 def _verify_secret() -> tuple[dict | None, int | None]:
@@ -911,6 +922,7 @@ def main() -> None:
     logging.basicConfig(level=settings.get("log_level", "info").upper())
     start_i1_consumer()  # disabled by default; startup fails if the configured spool is not durable
     start_review_dispatch_consumer()  # protected, off by default; bounded and fail-closed
+    start_native_gallery_consumer(settings)  # explicitly opt-in C5/C6; fail closed
     app.run(host=settings["host"], port=settings["port"], debug=False)
 
 
