@@ -125,7 +125,7 @@ class C5C6Tests(unittest.TestCase):
                                 "original_artifacts_sha256": "b"*64,
                                 "artifacts": [OLD], "sources_byte_verified": True,
                                 "original_artifact_watermark_verified": True,
-                                "aspect_ratio": "4:5"}),
+                                "aspect_ratio": "4:5", "platform": "Instagram"}),
             patch("rendering_review.native_gallery_c5c6_executor.GalleryMediaIO.from_profile_catalog",
                   return_value=media),
             patch("rendering_review.native_gallery_c5c6_executor.visible_source_watermark",
