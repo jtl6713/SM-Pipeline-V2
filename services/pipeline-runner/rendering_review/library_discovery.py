@@ -74,7 +74,7 @@ def exact_library_name_formula(names):
             safe.append('LOWER({Asset Name}&"")="' + clean.casefold() + '"')
     if not safe:
         return None
-    return ('AND({Media_Class}="Image",{Asset_Status}="Available",'
+    return ('AND({Asset_Status}="Available",'
             '{Rights_Status}="Owned",{Active}=1,NOT({Do_Not_Use}),'
             + ('OR(' + ",".join(safe) + ')' if len(safe) > 1 else safe[0]) + ')'
            )
