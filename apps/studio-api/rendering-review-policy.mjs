@@ -189,8 +189,17 @@ export function applyReviewEvent(session, event) {
       fail("INVALID_PRODUCER_CANDIDATE", "A bounded, validated candidate and two messages are required",400);
     if (s.messages.some(m=>m.id===event.user_message_id||m.id===event.producer_message_id))
       fail("DUPLICATE_PRODUCER_MESSAGE", "Review message identity must not be reused");
-    s.messages.push({id:event.user_message_id,role:"user",content:text(event.direction),
-      at:text(event.at),attempt_id:s.current_attempt_id,timestamp_seconds:null});
+    // The reviewer has already saved the literal feedback separately.
+    // Avoid echoing the same text as a second user message when the explicit
+    // Make edits action forwards the pending saved notes to the Producer.
+    const lastProducerIndex=s.messages.findLastIndex(m=>m.role==="producer");
+    const pendingNotes=s.messages.slice(lastProducerIndex+1)
+      .filter(m=>m.role==="user"&&String(m.id||"").startsWith("rrm_"));
+    const savedDirection=pendingNotes.map(m=>text(m.content)).filter(Boolean)
+      .join("\n").slice(-3000);
+    if(!pendingNotes.length||savedDirection!==text(event.direction))
+      s.messages.push({id:event.user_message_id,role:"user",content:text(event.direction),
+        at:text(event.at),attempt_id:s.current_attempt_id,timestamp_seconds:null});
     s.messages.push({id:event.producer_message_id,role:"producer",content:text(event.summary),
       at:text(event.at),attempt_id:s.current_attempt_id,timestamp_seconds:null});
     s.producer_candidate={
