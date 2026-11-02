@@ -106,9 +106,31 @@ test("unknown catalog token does not fetch unrelated assets",async()=>{
   assert.deepEqual(result,{receipts:[],unresolved:[]});
 });
 
-test("owned Graphic JPEG is a valid, explicitly identified still only with source Graphic provenance",async()=>{
-  const result=await run({"Media_Class":"Graphic","MIME_Type":"image/jpeg"});
+test("Graphic requires verified graphic-fit derivative; rejects legacy center crop",async()=>{
+  const graphic={"Media_Class":"Graphic","MIME_Type":"image/jpeg"};
+  const legacy=await run(graphic);
+  assert.equal(legacy.receipts.length,0);
+  assert.deepEqual(legacy.unresolved,[id]);
+  const targetUrl=url.replaceAll("fill-crop-v2","graphic-fit-v1");
+  const graphicFields={
+    "Variant_Style":"graphic_fit",
+    "Target_File_Name":"Gantry-Plaza-5__9x16__graphic-fit-v1.jpg",
+    "Preview_URL":targetUrl,
+  };
+  const result=await run(graphic,graphicFields);
   assert.equal(result.receipts.length,1);
   assert.equal(result.receipts[0].source_media_class,"Graphic");
   assert.equal(result.receipts[0].media_type,"image");
+  assert.equal(result.receipts[0].crop_recipe,"graphic-fit-v1");
+  assert.equal(result.receipts[0].render_url,targetUrl);
+  for (const change of [
+    {"Variant_Style":"center"},
+    {"Target_File_Name":"Gantry-Plaza-5__9x16__fill-crop-v2.jpg"},
+    {"Preview_URL":url},
+  ]) {
+    const wrong=await run(graphic,{...graphicFields,...change});
+    assert.equal(wrong.receipts.length,0);
+    assert.deepEqual(wrong.unresolved,[id]);
+  }
+  assert.equal((await run({"Media_Class":"Image"},graphicFields)).receipts.length,0);
 });
