@@ -26,7 +26,7 @@ function fixture(){
     Studio_Render_Review_Hold_ID:HOLD,
     Studio_Render_Review_Hold_Owner:OWNER,
     Studio_Render_Review_Session_ID:OWNER,
-    Publish_Status:"Not Ready"}};
+    Publish_Status:"Not Ready",Platform_Output_Type:"Instagram Carousel"}};
   const content={id:CONTENT,fields:{Content_Profile:[PROFILE]}};
   let created=0,locks=0,verified=0;
   const adapter={
