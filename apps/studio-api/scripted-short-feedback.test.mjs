@@ -54,8 +54,25 @@ test("unmatched, ambiguous, wrong-profile, nonvideo and unready clips fail close
   assert.throws(() => chooseScriptedShortLibraryClip(clips, "Other Clip", "recNYC"), /No exact/);
   assert.throws(() => chooseScriptedShortLibraryClip([...clips, ...clips], "Central Park At Night 1", "recNYC"), /More than one/);
   assert.throws(() => chooseScriptedShortLibraryClip(clips, "Central Park At Night 1", "recChicago"), /another profile/);
-  assert.throws(() => chooseScriptedShortLibraryClip([{ ...clips[0], fields: {...clips[0].fields, MIME_Type: "image/jpeg", "Asset Name":"Central Park At Night 1"}}], "Central Park At Night 1", "recNYC"), /not a video/);
+  assert.throws(() => chooseScriptedShortLibraryClip([{ ...clips[0], fields: {...clips[0].fields, MIME_Type: "application/pdf", "Asset Name":"Central Park At Night 1"}}], "Central Park At Night 1", "recNYC"), /not a supported/);
   assert.throws(() => chooseScriptedShortLibraryClip([{ ...clips[0], fields: {...clips[0].fields, "Google Drive File ID":""}}], "Central Park At Night 1", "recNYC"), /Google Drive/);
+});
+test("verified uploaded photos work as named storyboard replacements and retain their image MIME", () => {
+  const photos=[{id:"recGantryPhoto5",fields:{
+    "Asset Name":"Gantry Plaza State Park 5.jpg",
+    "Google Drive File ID":"drive-gantry-photo5",
+    MIME_Type:"image/jpeg", "Asset Type":"Photo",Content_Profile:["recNYC"],
+  }}];
+  const operation=parseScriptedShortFeedback("Replace slide 4 with Gantry Plaza State Park 5");
+  const candidate=chooseScriptedShortLibraryClip(photos,operation.asset_name,"recNYC");
+  assert.equal(candidate.media_kind,"photo");
+  assert.equal(candidate.media_type,"image/jpeg");
+  const revised=applyScriptedShortFeedback(base,operation,candidate);
+  assert.equal(revised.segments[3].asset_id,"recGantryPhoto5");
+  assert.equal(revised.segments[3].media_type,"image/jpeg");
+  assert.equal(revised.segments[3].voiceover_text,"Narration 4");
+  assert.equal(base.segments[3].asset_id,"recExisting3");
+  assert.throws(() => chooseScriptedShortLibraryClip(photos,"Gantry Plaza State Park 5","recChicago"),/another profile/);
 });
 test("unknown, out-of-range and ambiguous feedback does not modify the proposal", () => {
   assert.throws(() => parseScriptedShortFeedback("Make it exciting"), /specific slide/);
@@ -140,7 +157,7 @@ test("named media labels identify unique original scenes in a seven-replacement 
     "Empire State Building Observation Deck 2",
   ];
   const proposal = { segments: originals.map((name, index) => ({
-    asset_id:"recOriginal" + index, suggested_visual:name + ".mp4",
+    asset_id:"recOriginal" + index, suggested_visual:name + ".jpg",
     voiceover_text:"Narration " + (index + 1), duration_seconds:4,
   })) };
   const targets = originals.map((_, index) => "Gantry Plaza State Park " + (index + 1));
@@ -152,13 +169,13 @@ test("named media labels identify unique original scenes in a seven-replacement 
   assert.deepEqual(parsed.actions.map(a => a.scene), [1,2,3,4,5,6,7]);
   assert.deepEqual(parsed.actions.map(a => a.asset_name), targets);
   const authorized = parsed.actions.map((action, index) => ({
-    ...action, clip:{id:"recGantry" + index, name:targets[index] + ".mp4",
-      media_kind:"video", media_type:"video/mp4"},
+    ...action, clip:{id:"recGantry" + index, name:targets[index] + ".jpg",
+      media_kind:"photo", media_type:"image/jpeg"},
   }));
   const updated = applyScriptedShortFeedback(proposal, {actions:authorized});
-  assert.deepEqual(updated.segments.map(s => s.suggested_visual), targets.map(t => t + ".mp4"));
+  assert.deepEqual(updated.segments.map(s => s.suggested_visual), targets.map(t => t + ".jpg"));
   assert.deepEqual(updated.segments.map(s => s.voiceover_text), proposal.segments.map(s => s.voiceover_text));
-  assert.deepEqual(proposal.segments.map(s => s.suggested_visual), originals.map(t => t + ".mp4"));
+  assert.deepEqual(proposal.segments.map(s => s.suggested_visual), originals.map(t => t + ".jpg"));
 });
 
 test("named replacements fail closed for missing, repeated, duplicate and mixed references", () => {
