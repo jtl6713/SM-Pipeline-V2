@@ -6,7 +6,8 @@ const OUTPUT="rec00000000000001", CONTENT="rec00000000000002";
 const PROFILE="rec00000000000003",ACTOR="rec00000000000004";
 const ENV={NATIVE_GALLERY_HOLD_ENROLLMENT_ENABLED:"true",
  NATIVE_GALLERY_DISPATCH_FENCE_VERIFIED:"true",
- NATIVE_GALLERY_PUBLISHER_HOLD_VERIFIED:"true"};
+ NATIVE_GALLERY_PUBLISHER_HOLD_VERIFIED:"true",
+ NATIVE_GALLERY_SCHEDULE_LANE_VERIFIED:"true"};
 const AUTH={authenticated:true,authorized:true,
  permissions:{outputs_review:true},user:{record_id:ACTOR}};
 function request(body={client_request_id:"native_gallery_hold_request_12345"}){
