@@ -658,3 +658,5 @@ Deploy Studio UI 0.6.838: Factory held V2 acceptance button gets full-width thir
 
 2026-11-01: Studio UI 0.6.852-adler-review-progress. For completed V2 under a publishing hold, show separate pending V3 feedback/Producer/asset validation/non-authorized render status; do not mark V3 completed or permit render from status UI. Pages deploy only after protected PR checks and branch merge; verify custom-domain UI BUILD_ID.
 Deploy Studio UI 0.6.853 asset transfer clarity: show 100% sent pending Drive/Airtable confirmation and display small photos in KB. 2026-11-01.
+
+2026-11-01: Non-Vibe #1495 guarded slide-selection feedback preview UI 0.6.854 on top of Asset Manager 0.6.853. Explicit per-slide notes, exact-output selection preview, no automatic rendering or publishing. Require CI, protected Pages deploy and live cache/BUILD_ID verification.
