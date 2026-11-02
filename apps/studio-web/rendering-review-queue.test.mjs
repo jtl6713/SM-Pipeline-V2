@@ -87,104 +87,80 @@ test('queue UI does not write, respects Chicago scope, and renders a safe origin
 });
 
 
-test('Rendering Review never enrolls; Factory-submitted sessions retain Producer conversation',async()=>{
+test('review notes are saved separately and only explicit Make edits asks Producer',async()=>{
   const ids=['page-rendering-review','navRenderingReview','rrQueueList','rrDetail',
     'rrStatus','rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile'];
   const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
-  const calls=[];
-  let observerCallback;
-  let enrolled=true; // Review was admitted by Factory with required comments.
-  let conversation=false;
-  let admissionActive=false; // Direct admission is disabled.
+  const calls=[];let notify,version=1,savedNote='',conversation=false;
   const output='recA1B2C3D4E5F6G7';
-  const queue=()=>({ok:true,
-    flags:{admission_enabled:admissionActive,producer_conversation_enabled:true,
-      automatic_sampling_percent:0},
-    queue:[{output_id:output,profile_id:'recT2rbKX3MF7cVFU',
-      output_type:'Instagram Reel',manual_admission_enabled:!enrolled,
-      output_number:54,title:'Chicago train pilot',render_status:'Rendered',
-      review_held:enrolled,final_file_url:'https://example.org/clip.mp4'}],
-    next_cursor:null});
-  const saved=()=>({ok:true,publication_hold_verified:true,session:{
-    id:'rrsession-12345678',version:conversation?2:1,
-    state:conversation?'discussing':'ready_for_review',
-    messages:conversation?[
-      {role:'user',content:'Explain step by step',at:'2026-10-30T20:39:18.045Z'},
-      {role:'producer',content:'I propose a clearer journey example.',at:'2026-10-30T20:42:39.164Z'}]:[],
-    producer_candidate:conversation?{candidate:{narration:'Revised script',
-      changes:['Add a worked example'],requirements:[]}}:null,
-  }});
-  const fetchStub=async(url,options)=>{
-    calls.push({url,method:options.method,body:options.body});
-    if(url==='/api/session')return {ok:true,json:async()=>({
-      ok:true,authenticated:true,authorized:true,permissions:{outputs_review:true}})};
-    if(url.startsWith('/api/rendering-review/queue?'))
-      return {ok:true,json:async()=>queue()};
-    if(url==='/api/rendering-review/outputs/'+output)
-      return {ok:true,json:async()=>saved()};
-    if(url.endsWith('/enroll')){
-      assert.equal(options.method,'POST');
-      assert.deepEqual(Object.keys(JSON.parse(options.body)),['client_request_id']);
-      enrolled=true;
-      return {ok:true,json:async()=>({ok:true,review_hold_active:true})};
+  const saved=()=>({ok:true,publication_hold_verified:true,
+    flags:{producer_conversation_enabled:true,attempt_commit_enabled:false},
+    session:{version,state:'discussing',review_hold:{active:true},
+      latest_attempt_number:1,
+      attempts:[{id:'attemptv1',number:1,status:'ready_for_review'}],
+      messages:[...(savedNote?[{role:'user',content:savedNote,at:'2026-11-01T17:00:00Z'}]:[]),
+        ...(conversation?[{role:'producer',content:'I will adjust the narration',at:'2026-11-01T17:01:00Z'}]:[])],
+      producer_candidate:conversation?{candidate:{narration:'Updated script',changes:[],requirements:[]}}:null}});
+  const fetchStub=async(url,opts)=>{
+    calls.push({url,method:opts.method,body:opts.body});
+    if(url==='/api/session')return {ok:true,json:async()=>({ok:true,authenticated:true,authorized:true,
+      permissions:{outputs_review:true}})};
+    if(url.startsWith('/api/rendering-review/queue?'))return {ok:true,json:async()=>({
+      ok:true,flags:{admission_enabled:false,producer_conversation_enabled:true,automatic_sampling_percent:0},
+      queue:[{output_id:output,profile_id:'recT2rbKX3MF7cVFU',output_type:'Instagram Reel',
+        output_number:54,title:'Review',review_held:true,final_file_url:'https://example.org/v1.mp4'}],
+      next_cursor:null})};
+    if(url==='/api/rendering-review/outputs/'+output)return {ok:true,json:async()=>saved()};
+    if(url.endsWith('/review-feedback')){
+      const body=JSON.parse(opts.body);assert.equal(body.expected_version,1);
+      savedNote=body.content;version=2;
+      return {ok:true,json:async()=>({ok:true,review_hold_active:true,
+        session_version:version,message_count:1})};
     }
     if(url.endsWith('/producer-conversation')){
-      assert.equal(options.method,'POST');
-      const body=JSON.parse(options.body);
+      const body=JSON.parse(opts.body);assert.equal(body.expected_version,2);
       assert.equal(body.direction,'Explain step by step');
-      assert.equal(body.expected_version,1);
-      assert.deepEqual(Object.keys(body),['direction','expected_version','client_request_id']);
-      conversation=true;
-      return {ok:true,json:async()=>({
-        ok:true,persisted:true,render_queued:false,session_version:2,
-      })};
+      conversation=true;version=3;
+      return {ok:true,json:async()=>({ok:true,persisted:true,render_queued:false})};
     }
-    throw new Error('Unexpected external action '+url);
+    throw Error('Unexpected '+url);
   };
   const sandbox={
     document:{getElementById:id=>nodes[id],createElement:tag=>new Node(tag)},
-    window:{location:{href:'https://studio.test/'},
-      CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''}},
-    MutationObserver:class {constructor(fn){observerCallback=fn;}observe(){}},
+    window:{location:{href:'https://studio.test/'},CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''}},
+    MutationObserver:class{constructor(fn){notify=fn;}observe(){}},
     fetch:fetchStub,URL,URLSearchParams,
     crypto:{randomUUID:()=> '12345678-1234-1234-1234-123456789012'},
   };
   vm.runInNewContext(script,sandbox,{filename:'rendering-review-queue.js'});
-  await tick();await tick();
-  nodes['page-rendering-review'].classList.add('active');
-  observerCallback();
+  for(let i=0;i<5;i++)await tick();
+  nodes['page-rendering-review'].classList.add('active');notify();
   for(let i=0;i<10;i++)await tick();
   const descendants=root=>[root,...root.children.flatMap(descendants)];
-  const initial=descendants(nodes.rrDetail);
-  const enroll=initial.find(n=>n.tag==='button'&&n.textContent==='Review with Producer');
-  assert.equal(enroll,undefined,'Rendering Review must not offer its own enrollment control');
-  // Changing feature flags cannot bypass Factory-origin enrollment.
-  admissionActive=false;
-  await nodes.rrRefresh.listeners.click();
-  for(let i=0;i<10;i++)await tick();
-  const held=descendants(nodes.rrDetail);
-  const textarea=held.find(n=>n.tag==='textarea');
-  const send=held.find(n=>n.tag==='button'&&n.textContent==='Send to Producer');
-  assert.ok(textarea&&send);
-  textarea.value='Explain step by step';
-  await send.listeners.click();
-  for(let i=0;i<10;i++)await tick();
+  let all=descendants(nodes.rrDetail);
+  const input=all.find(n=>n.tag==='textarea'&&n.attrs['aria-label']==='Creative direction for Producer');
+  const save=all.find(n=>n.tag==='button'&&n.textContent==='Save comment (no edits yet)');
+  const apply=all.find(n=>n.tag==='button'&&n.textContent==='Make edits based on the latest feedback');
+  assert.ok(input&&save&&apply);
+  assert.equal(calls.filter(x=>x.method==='POST').length,0,'read must be inert');
+  assert.equal(apply.disabled,true,'no saved feedback');
+  input.value='Explain step by step';input.listeners.input();
+  await save.listeners.click();
+  for(let i=0;i<8;i++)await tick();
+  assert.equal(conversation,false,'saving comments must not invoke Producer');
+  assert.equal(calls.filter(x=>x.method==='POST').length,1);
+  assert.ok(calls.some(x=>x.url.endsWith('/review-feedback')));
+  all=descendants(nodes.rrDetail);
+  const applyNow=all.find(n=>n.tag==='button'&&n.textContent==='Make edits based on the latest feedback');
+  assert.equal(applyNow.disabled,false);
+  await applyNow.listeners.click();
+  for(let i=0;i<8;i++)await tick();
   assert.equal(conversation,true);
-  const activity=descendants(nodes.rrDetail);
-  assert.ok(activity.some(n=>n.textContent==='I propose a clearer journey example.'));
-  assert.ok(activity.some(n=>n.className==='rr-activity-heading'&&/V2 NOT STARTED/.test(n.textContent)));
-  const times=activity.filter(n=>n.className==='rr-message-time');
-  assert.equal(times.length,2);
-  assert.ok(times.some(n=>/3:39/.test(n.textContent)&&/CDT/.test(n.textContent)));
-  assert.ok(times.some(n=>/3:42/.test(n.textContent)&&/CDT/.test(n.textContent)));
-  assert.ok(activity.some(n=>n.className==='rr-conversation-live'),'Conversation must not be hidden');
-  const writes=calls.filter(v=>v.method==='POST');
-  assert.equal(writes.length,1);
-  assert.ok(writes.every(v=>v.url.endsWith('/producer-conversation')));
-  assert.ok(!calls.some(v=>v.url.endsWith('/enroll')));
-  assert.ok(!writes.some(v=>/\/(?:publish|render|approve)(?:\/|$)/.test(v.url)));
+  assert.equal(calls.filter(x=>x.method==='POST').length,2);
+  assert.ok(calls.some(x=>x.url.endsWith('/producer-conversation')));
+  assert.ok(!calls.some(x=>/commit-attempt|publish|approve|\/enroll/.test(x.url)));
+  assert.ok(descendants(nodes.rrDetail).some(n=>/I will adjust the narration/.test(n.textContent)));
 });
-
 
 test('real Drive /view source uses the authenticated Studio MP4 stream, not a Google iframe',async()=>{
   const ids=['page-rendering-review','navRenderingReview','rrQueueList','rrDetail',
