@@ -22,6 +22,7 @@ export function nativeGalleryJobsEnabled(env){
     env?.NATIVE_GALLERY_DISPATCH_FENCE_VERIFIED==="true"&&
     env?.NATIVE_GALLERY_SCHEDULE_VACATE_VERIFIED==="true"&&
     env?.NATIVE_GALLERY_SOURCE_PREFLIGHT_ENABLED==="true"&&
+    env?.NATIVE_GALLERY_SOURCE_MANIFEST_ENABLED==="true"&&
     env?.NATIVE_GALLERY_MEDIA_RENDER_VERIFIED==="true";
 }
 function required(adapter){
@@ -116,6 +117,7 @@ export async function createNativeGalleryJobIntent({
       output_id,profile_id:proposal.profile_id,
       content_item_id:proposal.content_item_id,
       selected:proposal.selected,original_proposal_sha256:proposal.proposal_sha256,
+      hold_id:hold.hold_id,hold_owner:hold.hold_owner,
     });
     if(evidence?.output_id!==output_id||
        evidence?.profile_id!==proposal.profile_id||
