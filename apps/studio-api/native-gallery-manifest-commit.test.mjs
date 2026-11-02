@@ -78,6 +78,7 @@ test("missing rights/bytes, wrong profile, lost hold and schedule block",async()
  const changes=[
   f=>{f.operations.verifyRevisedDriveArtifacts=async()=>false},
   f=>{f.output.fields.Do_Not_Publish=false},
+  f=>{f.output.fields.Platform_Output_Type="IG Reel"},
   f=>{f.output.fields.Studio_Scheduled_At="2026-11-04T13:00:00Z"},
   f=>{f.content.fields.Content_Profile=["rec99999999999999"]},
   f=>{f.job.fields.Lease_Fence=2},
