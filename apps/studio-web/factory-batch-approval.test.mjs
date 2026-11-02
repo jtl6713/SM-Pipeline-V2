@@ -263,7 +263,8 @@ function factoryPendingRecoveryHarness(saved, fetchJson) {
   const rowsFn = extractNamedFunction(js, "factoryActivityRows");
   const matchesFn = extractNamedFunction(js, "factoryActivityMatchesPlan");
   const missingFn = extractNamedFunction(js, "factoryActivityProvesPlanMissing");
-  const recoveryFn = extractNamedFunction(js, "reconcileFactorySubmissionFence");
+  // The generic extractor starts at "function" and omits the async modifier.
+  const recoveryFn = "async " + extractNamedFunction(js, "reconcileFactorySubmissionFence");
   const rows = new Function(rowsFn + "; return factoryActivityRows;")();
   const matches = new Function("factoryActivityRows",
     matchesFn + "; return factoryActivityMatchesPlan;")(rows);
