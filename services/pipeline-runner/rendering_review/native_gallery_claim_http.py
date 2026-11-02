@@ -33,7 +33,9 @@ def create_native_gallery_claim_blueprint(settings, *, client_factory=_client,
         actual = request.headers.get("X-Pipeline-Secret", "")
         if len(expected) < 24 or not actual or not hmac.compare_digest(expected, actual):
             return jsonify(ok=False, error="native_gallery_runner_auth_denied"), 403
-        if request.content_length is not None and request.content_length > 0:
+        # Some internal reverse proxies omit Content-Length on chunked POSTs.
+        # This endpoint accepts no body at all, even an empty JSON object.
+        if request.stream.read(1):
             return jsonify(ok=False, error="native_gallery_claim_body_not_allowed"), 400
         # No request parameters may select a job, profile, Drive file or URL.
         worker_base = os.environ.get("NATIVE_GALLERY_WORKER_BASE_URL", "")
