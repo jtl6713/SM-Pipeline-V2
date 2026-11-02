@@ -7,7 +7,9 @@ returning the source claims; this adapter never trusts a browser proposal.
 import hashlib
 import json
 
-from rendering_review.gallery_source_verification import verify_original_gallery_sources
+from rendering_review.gallery_source_verification import (
+    SourceVerificationDenied, verify_original_gallery_sources,
+)
 
 
 def canonical_digest(slides):
@@ -45,9 +47,12 @@ class VerifiedOriginalSourceOperation:
                 live.get("rights_verified") is not True or
                 live.get("hold_active") is not True):
             return False
-        verified = verify_original_gallery_sources(
-            output_id=output, profile_id=profile, content_item_id=content,
-            aspect_ratio=aspect, slides=live.get("slides"), drive=self.drive)
+        try:
+            verified = verify_original_gallery_sources(
+                output_id=output, profile_id=profile, content_item_id=content,
+                aspect_ratio=aspect, slides=live.get("slides"), drive=self.drive)
+        except SourceVerificationDenied:
+            return False
         originals = original.get("artifacts")
         if not isinstance(originals, list) or len(originals) != len(verified):
             return False
