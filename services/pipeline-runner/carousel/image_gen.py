@@ -55,8 +55,9 @@ def generate_carousel_png(prompt: str, *, ratio: str,
             "output_format": "png",
         },
         timeout=300,
-        preferred_account=preferred_account,
         stage="carousel",
+        **({"preferred_account": preferred_account}
+           if preferred_account is not None else {}),
     )
     if not response.ok:
         detail = (response.text or "").strip()[:400]
