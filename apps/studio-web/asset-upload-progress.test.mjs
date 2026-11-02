@@ -39,12 +39,28 @@ test("progress shows the current file and actual bytes independently of confirme
   assert.equal(nodes.get("libraryUploadProgressPercent").textContent, "40%");
   assert.equal(nodes.get("libraryUploadProgress").hidden, false);
   context.renderLibraryUploadProgress({ phase: "verifying", file, fileIndex: 2, fileCount: 4, uploaded: 1, loadedBytes: file.size });
-  assert.equal(nodes.get("libraryUploadMeter").value, 99);
-  assert.match(nodes.get("libraryUploadProgressStage").textContent, /Waiting for server and Google Drive confirmation/);
+  assert.equal(nodes.get("libraryUploadMeter").value, 100);
+  assert.equal(nodes.get("libraryUploadProgressPercent").textContent, "100% sent");
+  assert.match(nodes.get("libraryUploadProgressStage").textContent, /Google Drive storage and Airtable registration confirmation/);
+  assert.match(nodes.get("libraryUploadMeter")["aria-label"], /confirmation pending/);
   assert.equal(nodes.get("libraryUploadProgressFiles").textContent, "1 of 4 assets saved");
   context.renderLibraryUploadProgress({ phase: "saved", file, fileIndex: 2, fileCount: 4, uploaded: 2, loadedBytes: file.size });
   assert.equal(nodes.get("libraryUploadMeter").value, 100);
   assert.equal(nodes.get("libraryUploadProgressFiles").textContent, "2 of 4 assets saved");
+});
+
+test("small images report KB, never a misleading 0.0 of 0.0 MB", () => {
+  const {context,nodes}=contextFor();
+  const file={name:"tiny-photo.jpg",size:40*1024};
+  context.renderLibraryUploadProgress({phase:"uploading",file,fileIndex:1,fileCount:10,loadedBytes:20*1024,uploaded:0});
+  assert.equal(nodes.get("libraryUploadProgressBytes").textContent,"20.0 of 40.0 KB transferred");
+  assert.equal(nodes.get("libraryUploadProgressPercent").textContent,"50%");
+  context.renderLibraryUploadProgress({phase:"verifying",file,fileIndex:1,fileCount:10,loadedBytes:file.size,uploaded:0});
+  assert.equal(nodes.get("libraryUploadProgressBytes").textContent,"40.0 of 40.0 KB transferred");
+  assert.equal(nodes.get("libraryUploadProgressPercent").textContent,"100% sent");
+  assert.equal(nodes.get("libraryUploadProgressFiles").textContent,"0 of 10 assets saved");
+  context.renderLibraryUploadProgress({phase:"uploading",file:{name:"zero.jpg",size:0},fileCount:10});
+  assert.equal(nodes.get("libraryUploadProgressBytes").textContent,"Empty file (0 B)");
 });
 
 test("the current filename is always text, not executable HTML", () => {

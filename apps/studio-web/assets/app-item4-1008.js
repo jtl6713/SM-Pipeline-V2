@@ -295,7 +295,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.852-adler-review-progress";
+  const BUILD_ID = "item4-0.6.853-asset-transfer-clarity";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -24503,20 +24503,26 @@ function timedScriptAssetLabel(asset, index) {
    const index=Math.min(total,Math.max(1,Number(fileIndex)||1));
    const bytes=Math.max(0,Number(file?.size)||0);
    const loaded=Math.max(0,Math.min(bytes,Number(loadedBytes)||0));
-   const percent=phase==="saved"||phase==="complete"?100:Math.min(99,Math.floor((bytes>0?loaded/bytes:0)*100));
+   const percent=phase==="saved"||phase==="complete"||phase==="verifying"?100:Math.min(99,Math.floor((bytes>0?loaded/bytes:0)*100));
+   // A sent request is 100% transferred, not 99% saved. Server confirmation is a distinct stage.
+   const percentLabel=phase==="verifying"?"100% sent":`${percent}%`;
+   const byteUnit=bytes>0&&bytes<1024?"B":bytes<1024*1024/10?"KB":"MB";
+   const byteDivisor=byteUnit==="B"?1:byteUnit==="KB"?1024:1024*1024;
+   const formatBytes=value=>byteUnit==="B"?String(Math.round(value)):(value/byteDivisor).toFixed(1);
+   const transferLabel=bytes>0?`${formatBytes(loaded)} of ${formatBytes(bytes)} ${byteUnit} transferred`:(file&&Number(file.size)===0?"Empty file (0 B)":"Transfer size unavailable");
    const fileName=String(file?.name||(phase==="complete"||phase==="partial"?"Upload batch":"Current asset"));
    const heading=phase==="complete"?"Asset Manager upload complete":phase==="partial"?"Some assets need attention":phase==="failed"?"Asset upload not confirmed":phase==="saved"?"Asset saved":phase==="verifying"?`Confirming asset ${index} of ${total}`:`Uploading asset ${index} of ${total}`;
-   const status=phase==="complete"?`${uploaded} of ${total} assets confirmed saved.`:phase==="partial"?`${uploaded} of ${total} assets confirmed saved; ${total-uploaded} unconfirmed.`:phase==="saved"?`Saved ${uploaded} of ${total} assets.`:phase==="verifying"?"Transfer sent. Waiting for server and Google Drive confirmation.":phase==="failed"?"The server did not confirm this asset. Check the library before retrying.":`File ${index} of ${total} · ${uploaded} assets confirmed saved.`;
+   const status=phase==="complete"?`${uploaded} of ${total} assets confirmed saved.`:phase==="partial"?`${uploaded} of ${total} assets confirmed saved; ${total-uploaded} unconfirmed.`:phase==="saved"?`Saved ${uploaded} of ${total} assets.`:phase==="verifying"?"File transfer complete. Awaiting Google Drive storage and Airtable registration confirmation.":phase==="failed"?"The server did not confirm this asset. Check the library before retrying.":`File ${index} of ${total} · ${uploaded} assets confirmed saved.`;
    panel.hidden=false;panel.dataset.state=phase;
    const update=(id,value)=>{const element=$(id);if(element)element.textContent=value;};
    update("libraryUploadProgressTitle",heading);
    update("libraryUploadProgressFile",fileName);
-   update("libraryUploadProgressPercent",`${percent}%`);
+   update("libraryUploadProgressPercent",percentLabel);
    update("libraryUploadProgressFiles",`${uploaded} of ${total} assets saved`);
-   update("libraryUploadProgressBytes",`${(loaded/(1024*1024)).toFixed(1)} of ${(bytes/(1024*1024)).toFixed(1)} MB transferred`);
+   update("libraryUploadProgressBytes",transferLabel);
    update("libraryUploadProgressStage",message||status);
    const meter=$("libraryUploadMeter");
-   if(meter){meter.max=100;meter.value=percent;meter.setAttribute("aria-label",`${fileName}: ${percent}% transfer progress`);}
+   if(meter){meter.max=100;meter.value=percent;meter.setAttribute("aria-label",`${fileName}: ${percent}% transferred${phase==="verifying"?"; confirmation pending":""}`);}
   }
 
   function uploadLibraryFileWithProgress(form,{profileId,file,onTransfer}={}){
