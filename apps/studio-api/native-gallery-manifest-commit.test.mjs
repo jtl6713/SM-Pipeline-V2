@@ -31,7 +31,7 @@ function request(payload=body,secret=SECRET){
     "X-Native-Gallery-Job-Secret":secret},body:JSON.stringify(payload)});
 }
 function fixture(){
- const output={id:O,fields:{Content_Item:[C],Do_Not_Publish:true,
+ const output={id:O,fields:{Content_Item:[C],Platform_Output_Type:"IG Carousel",Do_Not_Publish:true,
   Studio_Render_Review_Hold_Active:true,Studio_Render_Review_Hold_ID:"hold_12345678",
   Studio_Render_Review_Hold_Owner:"owner_12345678",
   Studio_Render_Review_Session_ID:"owner_12345678"}};
