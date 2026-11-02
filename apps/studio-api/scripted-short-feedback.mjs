@@ -16,11 +16,59 @@ const cleanClipTitle = value => clean(value)
   .replace(/^(?:named|called|titled)\s+/i, "")
   .replace(/^[-–—:"'“”]+|[-–—:;,"'“”.]+$/g, "").trim();
 
-export function parseScriptedShortFeedback(value) {
+/**
+ * Named slide replacements are deliberately resolved against the current proposal.
+ * User-visible shot labels can be cited instead of slide numbers, but must match
+ * one and only one proposed scene. Never guess a scene or partially apply a batch.
+ */
+function parseNamedScriptedShortReplacements(source, timeline) {
+  const clauses = source.split(/[;\r\n]+/).map(value => value.trim()).filter(Boolean);
+  const syntax = /^(?:replace|swap|substitute)\s+(.+?)\s+(?:with|using)\s+(.+)$/i;
+  const numbered = /^(?:the\s+)?(?:slide|scene)s?\s*#?\s*\d{1,2}\b/i;
+  const matches = clauses.map(clause => {
+    const match = clause.match(syntax);
+    return match && !numbered.test(match[1]) ? match : null;
+  });
+  if (!matches.some(Boolean)) return null;
+  if (!matches.every(Boolean)) {
+    throw new Error("Separate named-media replacements from numbered scene changes. No changes were applied.");
+  }
+  if (!Array.isArray(timeline?.segments) || !timeline.segments.length) {
+    throw new Error("A current proposal is required to find scenes by their media names.");
+  }
+  if (matches.length > 12) throw new Error("Please revise at most 12 scenes at a time.");
+  const modified = new Set();
+  const actions = matches.map(match => {
+    const originalName = clean(match[1]).replace(/^[-–—:\"'“”]+|[-–—:;,\"'“”.]+$/g, "").trim();
+    const asset_name = cleanClipTitle(match[2]);
+    if (!originalName || originalName.length > 150 || !asset_name || asset_name.length > 150) {
+      throw new Error("Each replacement must name the current slide and the exact new library clip.");
+    }
+    const sourceKey = normalizedClipName(originalName);
+    const scenes = timeline.segments.map((segment, index) => (
+      normalizedClipName(segment?.suggested_visual) === sourceKey ? index + 1 : null
+    )).filter(Boolean);
+    if (scenes.length !== 1) {
+      const reason = scenes.length ? "is used by multiple scenes" : "is not shown in the current proposal";
+      throw new Error("Original media '" + originalName + "' " + reason + ". Use the numbered slide instead. No changes were applied.");
+    }
+    const scene = scenes[0];
+    if (modified.has(scene)) {
+      throw new Error("Slide " + scene + " has conflicting edits. No changes were applied.");
+    }
+    modified.add(scene);
+    return { action: "replace", scene, asset_name };
+  });
+  return actions.length === 1 ? actions[0] : { actions };
+}
+
+export function parseScriptedShortFeedback(value, timeline = null) {
   const source = String(value ?? "").trim();
   if (!source || source.length > SCRIPTED_SHORT_FEEDBACK_LIMIT) {
     throw new Error("Enter feedback of 1 to 3,000 characters.");
   }
+  const named = parseNamedScriptedShortReplacements(source, timeline);
+  if (named) return named;
   // A following scene with its own 'with' inherits the preceding replace verb.
   // Never infer missing clip names, scene numbers or creative instructions.
   const normalized = source.replace(/\band\s+((?:slide|scene)\s*#?\s*\d{1,2}\s+with\b)/gi, "and replace $1");
