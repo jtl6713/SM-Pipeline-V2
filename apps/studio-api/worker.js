@@ -4,6 +4,8 @@ import { previewNativeGalleryCorrection } from "./rendering-review-gallery-selec
 import { readGalleryRevisionStatus } from "./rendering-review-gallery-status-http.mjs";
 import { verifyGallerySourceBytes, gallerySourceBytePreflightEnabled } from "./rendering-review-gallery-byte-preflight.mjs";
 import { handleNativeGalleryGenerate } from "./native-gallery-generation-http.mjs";
+import { claimNativeGalleryJob, galleryClaimEnabled } from "./native-gallery-job-claim.mjs";
+import { NATIVE_GALLERY_JOBS_TABLE } from "./native-gallery-job-airtable.mjs";
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
 import { serveReviewAttemptVideo, fetchTrustedRunnerReviewMedia } from "./rendering-review-attempt-video.mjs";
 import { completeReviewAttempt } from "./rendering-review-completion-http.mjs";
@@ -1151,7 +1153,10 @@ export default {
          /^\/(?:api\/)?internal\/rendering-review\/(?:claim-render-job|launch-ledger|complete-attempt|qa-audio-rebind|ig-dispatch-claim|factory-handoff)$/.test(url.pathname));
       const isNativeGalleryGeneratePost = request.method === "POST" &&
         /^\/api\/factory\/outputs\/rec[A-Za-z0-9]{14}\/gallery-generate$/.test(url.pathname);
+      const isNativeGalleryServicePost = request.method === "POST" &&
+        /^\/(?:api\/)?internal\/native-gallery\/claim-job$/.test(url.pathname);
       const allowedMethod =
+        isNativeGalleryServicePost ||
         isNativeGalleryGeneratePost ||
         isChicagoReviewPost ||
         request.method === "GET" ||
@@ -1663,6 +1668,42 @@ export default {
           ok: true,
           ...authorization,
         }, authorization.authenticated ? 200 : 401);
+      }
+
+      // Native gallery claim has a dedicated table, exact R2 output lock,
+      // and a separate service credential. No Runner direct Airtable writes.
+      // All deployment flags are OFF by default; never grants publication.
+      if(url.pathname==="/internal/native-gallery/claim-job" ||
+         url.pathname==="/api/internal/native-gallery/claim-job"){
+        requireConfig(env);
+        if(!galleryClaimEnabled(env))
+          throw new HttpError(405,"Native gallery Runner claim disabled");
+        const readJob=async jobId=>{
+          if(!/^[A-Za-z0-9_-]{8,120}$/.test(String(jobId||"")))return null;
+          const rows=await reviewListRecords(env,NATIVE_GALLERY_JOBS_TABLE,{
+            limit:2,filterFormula:'{Job_ID}="'+jobId+'"',
+            fields:["Job_ID","Output_Record_ID","Content_Item_Record_ID",
+              "Profile_Record_ID","Actor_Record_ID","Client_Request_ID",
+              "Request_Fingerprint","Original_Manifest_SHA256",
+              "Plan_SHA256","Plan_JSON","Event_History_JSON",
+              "Hold_ID","Hold_Owner","Job_State","Row_Version",
+              "Lease_Owner","Lease_Fence"],
+          });
+          if(!Array.isArray(rows)||rows.length!==1)return null;
+          return rows[0];
+        };
+        const receipt=await claimNativeGalleryJob({
+          request,env,operations:{
+            withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+            readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+            readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+            readJob,
+            patchJob:(id,fields)=>airtableFetch(env,NATIVE_GALLERY_JOBS_TABLE,id,{
+              method:"PATCH",body:JSON.stringify({fields,typecast:false}),
+            }),
+          },
+        });
+        return respond(request,env,receipt);
       }
 
       // Internal render-worker claim, distinct from the public Studio API and
