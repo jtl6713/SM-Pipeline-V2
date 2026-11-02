@@ -110,7 +110,8 @@ class EvidenceTests(unittest.TestCase):
         def photo(number, profile=CHICAGO_PROFILE_ID, rights="Owned"):
             return {"id": "rec" + str(number).zfill(14), "fields": {
                 "Asset Name": "Adler Planetarium " + str(number),
-                "Media_Class": "Image", "Asset_Status": "Available",
+                "Media_Class": "Graphic" if number == 5 else "Image",
+                "Asset_Status": "Available",
                 "Rights_Status": rights, "Active": True, "Do_Not_Use": False,
                 "Content_Profile": [profile],
                 "Google Drive File ID": "1ABCDEFGHIJKLMNOPQRSTUV",
@@ -122,7 +123,10 @@ class EvidenceTests(unittest.TestCase):
             photo(7, rights="Unknown")]
         result = load_evidence(client, OUTPUT, SESSION, 3)
         self.assertEqual({x["name"] for x in result["library_candidates"]},
-            {"Adler Planetarium " + str(n) for n in seven})
+            {"Adler Planetarium " + str(n) for n in seven if n != 5})
+        self.assertEqual([(x["name"], x["media_class"], x["reason"])
+            for x in result["library_ineligible"]],
+            [("Adler Planetarium 5", "Graphic", "not_a_verified_photo_source")])
         # Discovery must not silently mutate the original owned renderer list.
         self.assertEqual([x["id"] for x in result["assets"]], ["asset-1"])
         self.assertTrue(all(x["frames_inspected"] is False
