@@ -39,11 +39,11 @@ def only_link(value):
     return None
 
 
-def eligible(row, identity, drive_id):
+def eligible(row, identity, drive_id, *, allowed_class="Image"):
     if not RECORD.fullmatch(str(identity)) or row.get("id")!=identity:
         deny("catalog_media_record_changed")
     f=row.get("fields") or {}
-    if(f.get("Media_Class")!="Image" or f.get("Asset_Status")!="Available" or
+    if(f.get("Media_Class")!=allowed_class or f.get("Asset_Status")!="Available" or
        f.get("Rights_Status")!="Owned" or f.get("Active") is not True or
        f.get("Do_Not_Use") is True or
        only_link(f.get("Content_Profile"))!=CHICAGO or
@@ -105,7 +105,13 @@ def verify_catalog_render_source(client,drive,frozen,*,transport=requests.get):
        type(source_size) is not int or source_size<1024 or
        source_size>MAX_SOURCE):
         deny("catalog_frozen_identity_invalid")
-    master=eligible(client.get_record(MEDIA,record_id),record_id,source)
+    media_class=frozen.get("source_media_class","Image")
+    if media_class not in ("Image","Graphic"):
+        deny("catalog_master_class_invalid")
+    master=eligible(client.get_record(MEDIA,record_id),record_id,source,
+                    allowed_class=media_class)
+    if media_class=="Graphic" and master.get("MIME_Type")!="image/jpeg":
+        deny("catalog_graphic_source_not_jpeg")
     if(master.get("File_Size_Bytes")!=source_size):
         deny("catalog_master_size_changed")
     queue=client.get_record(QUEUE,transfer_id)
