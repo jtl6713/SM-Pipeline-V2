@@ -6,6 +6,7 @@ import { verifyGallerySourceBytes, gallerySourceBytePreflightEnabled } from "./r
 import { handleNativeGalleryGenerate } from "./native-gallery-generation-http.mjs";
 import { claimNativeGalleryJob, galleryClaimEnabled } from "./native-gallery-job-claim.mjs";
 import { NATIVE_GALLERY_JOBS_TABLE } from "./native-gallery-job-airtable.mjs";
+import { readNativeGalleryPrivateManifest } from "./native-gallery-private-manifest.mjs";
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
 import { serveReviewAttemptVideo, fetchTrustedRunnerReviewMedia } from "./rendering-review-attempt-video.mjs";
 import { completeReviewAttempt } from "./rendering-review-completion-http.mjs";
@@ -2852,19 +2853,31 @@ export default {
             airtableFetch,
             listRecords:(env,table,params)=>reviewListRecords(env,table,params),
             withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
-            verifySource:async()=>{
-              // An unmounted brand-placement verifier is never replaced by
-              // model metadata or by a verified brand asset. This always
-              // fails the strict authoritative creation gate until source
-              // watermark and owned hold are fully certified.
+            verifySource:async ({output_id:sourceOutput,
+              profile_id,content_item_id,selected,hold_id})=>{
+              // Executable original media must come from a protected, private
+              // Runner manifest, not the metadata-only browser preflight.
+              // This closure executes INSIDE the canonical output lock, after
+              // Airtable Output + Content Item + owned Hold re-verification.
               const inventory=await inventoryReader();
-              const preflight=await verifyGallerySourceBytes({
-                env,output_id,inventory,
+              if(inventory.output_id!==sourceOutput||
+                 inventory.profile_id!==profile_id||
+                 inventory.content_item_id!==content_item_id)
+                throw new HttpError(409,"Gallery source identity changed");
+              const receipt=await readNativeGalleryPrivateManifest({
+                env,output_id:sourceOutput,profile_id,content_item_id,
+                aspect_ratio:inventory.aspect_ratio,
               });
-              return {...preflight,
-                original_manifest_sha256:preflight.original_artifacts_sha256,
-                original_artifacts:[],publication_hold_verified:false};
-            },
+              const expected=new Map(inventory.slides.map(slide=>[
+                slide.slide_id,slide.order,
+              ]));
+              if(receipt.original_artifacts.length!==inventory.slide_count||
+                 receipt.original_artifacts.some(row=>
+                   expected.get(row.slot_id)!==row.order)||
+                 selected.some(row=>expected.get(row.slide_id)!==row.order))
+                throw new HttpError(409,"Gallery selected sources changed");
+              return {...receipt,hold_id,publication_hold_verified:true};
+            }
           },
         });
         return respond(request,env,result);
