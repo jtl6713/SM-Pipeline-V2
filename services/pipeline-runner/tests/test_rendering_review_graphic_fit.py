@@ -24,7 +24,7 @@ class GraphicFitTests(unittest.TestCase):
     def test_title_edges_survive_full_fit_without_network_or_master_write(self):
         source=wide_graphic()
         client=object.__new__(VariantServiceClient)
-        with patch("integrations.variant_service.requests.post",side_effect=AssertionError("network forbidden")), \\
+        with patch("integrations.variant_service.requests.post",side_effect=AssertionError("network forbidden")), \
              patch.object(client,"_base_url",side_effect=AssertionError("external variant forbidden")):
             data=client.render(source,"9:16",gravity="graphic_fit",ext="jpg")
         self.assertEqual(source,wide_graphic())
@@ -52,9 +52,9 @@ class GraphicFitTests(unittest.TestCase):
 
     def test_generic_center_variant_never_invokes_graphic_fit(self):
         client=object.__new__(VariantServiceClient)
-        with patch("integrations.variant_service.graphic_fit_canvas_bytes",side_effect=AssertionError("wrong recipe")), \\
-             patch.object(client,"_base_url",return_value="https://variant.example"), \\
-             patch.object(client,"_token",return_value="test-token"), \\
+        with patch("integrations.variant_service.graphic_fit_canvas_bytes",side_effect=AssertionError("wrong recipe")), \
+             patch.object(client,"_base_url",return_value="https://variant.example"), \
+             patch.object(client,"_token",return_value="test-token"), \
              patch("integrations.variant_service.requests.post") as sender:
             sender.return_value.ok=True
             sender.return_value.content=b"center-cropped-by-existing-service"
