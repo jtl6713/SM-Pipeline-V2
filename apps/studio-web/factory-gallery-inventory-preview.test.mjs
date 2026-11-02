@@ -44,3 +44,17 @@ test("Factory module and styles are cache-busted without changing the release bu
  assert.match(html,/factory-desk\.js\?v=0\.6\.\d+-[^"\s]*gallery_inventory=read_only_v1/);
  assert.match(html,/factory-layout-0680\.css\?v=0\.6\.\d+-[^"\s]*gallery_inventory=read_only_v1/);
 });
+
+test("selected slide instructions are actually included in existing saved Factory feedback",()=>{
+ const start=source.indexOf("async function submitFactoryFeedback(");
+ const finish=source.indexOf("  function ",start+32);
+ assert.ok(start>=0&&finish>start);
+ const body=source.slice(start,finish);
+ assert.match(body,/selectedGallerySlides/);
+ assert.match(body,/\.factory-gallery-select-slide:checked/);
+ assert.match(body,/\.factory-gallery-slide-instruction/);
+ assert.match(body,/Selected photo corrections/);
+ assert.match(body,/const notes=\[freeformNotes,photoNotes\]/);
+ assert.match(body,/mutateDesk\(\{ \.\.\.pending\.payload, note: notes \}\)/);
+ assert.match(body,/notes\.length>3000/);
+});
