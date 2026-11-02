@@ -159,17 +159,23 @@ export async function prepareReviewLibraryStills({
         reused++;results.push({name,kind:choice(f(media,"Media_Class")),
           state:"crop_ready",source_media_id:mediaId});continue;
       }
+      const mediaKind=choice(f(media,"Media_Class"));
+      const graphic=mediaKind==="Graphic";
+      const recipe=graphic?"graphic-fit-v1":"fill-crop-v2";
+      const style=graphic?"graphic_fit":"center";
+      // Include recipe in the identity; a bad legacy center-crop must never
+      // be reused as a full-text-safe Graphic derivative.
       const assetId=await sourceToken(requestId,mediaId,driveId);
-      const transferId="ITEM4-VARIANT-fill-crop-v2-"+requestId+"-"+assetId+"-9x16";
+      const transferId="ITEM4-VARIANT-"+recipe+"-"+requestId+"-"+assetId+"-9x16";
       const filename=name.replace(/[^A-Za-z0-9]+/g,"-").replace(/^-|-$/g,"")+
-        "__9x16__fill-crop-v2.jpg";
+        "__9x16__"+recipe+".jpg";
       const fields={
         "Transfer_ID":transferId,"Production_Request_Record_ID":requestId,
         "Asset_Kind":"Platform Variant","Source_Asset_ID":assetId,
         "Source_Name":name,"Source_MIME_Type":"image/jpeg",
         "Source_Extension":"jpg","Source_Size_Bytes":sourceSize,
         "Source_Drive_File_ID":driveId,"Source_Media_Asset":[mediaId],
-        "Aspect_Ratio":"9:16","Variant_Style":"center",
+        "Aspect_Ratio":"9:16","Variant_Style":style,
         "Target_Drive_Folder_ID":folder,"Target_File_Name":filename,
         "Transfer_Status":"Pending","Preview_Status":"Pending",
       };
