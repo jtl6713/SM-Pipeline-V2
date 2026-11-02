@@ -169,4 +169,34 @@ class EvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "publication"):
             load_evidence(client, OUTPUT, SESSION, 3)
 
+
+    def test_newest_human_photo_list_overrides_superseded_assets(self):
+        from rendering_review.library_discovery import requested_library_names
+        latest = ("Then use these seven exterior photos:\n"
+                  "- Adler Planetarium 3\n"
+                  "- Adler Planetarium 13\n"
+                  "- Adler Planetarium 14\n"
+                  "- Adler Planetarium 17\n"
+                  "- Adler Planetarium 18\n"
+                  "Please validate Adler Planetarium 5 from previous discussion.")
+        old = ("Then use these seven photos:\n"
+               "- Adler Planetarium 3\n- Adler Planetarium 5\n"
+               "- Adler Planetarium 12\n- Adler Planetarium 13\n"
+               "- Adler Planetarium 14\n- Adler Planetarium 17\n"
+               "- Adler Planetarium 18")
+        messages = [{"role": "user", "content": old},
+                    {"role": "producer", "content": old},
+                    {"role": "user", "content": latest}]
+        self.assertEqual(requested_library_names(messages), [
+            "Adler Planetarium 3", "Adler Planetarium 13",
+            "Adler Planetarium 14", "Adler Planetarium 17",
+            "Adler Planetarium 18"])
+        self.assertEqual(requested_library_names(messages + [
+            {"role": "user", "content": "Proceed with the latest photos"}]),
+            requested_library_names(messages))
+        self.assertEqual(requested_library_names([
+            {"role": "user", "content": "Use Adler Planetarium 3, 13, 14"}]),
+            ["Adler Planetarium 3", "Adler Planetarium 13", "Adler Planetarium 14"])
+
+
 if __name__ == '__main__': unittest.main()
