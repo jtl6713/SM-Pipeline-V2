@@ -8,6 +8,7 @@ import { claimNativeGalleryJob, galleryClaimEnabled } from "./native-gallery-job
 import { reserveNativeGalleryLaunch, nativeGalleryLaunchIntentEnabled } from "./native-gallery-launch-ledger.mjs";
 import {commitNativeGalleryManifest, nativeGalleryManifestCommitEnabled} from "./native-gallery-manifest-commit.mjs";
 import {verifyNativeGalleryRevisionDrive} from "./native-gallery-revision-readback.mjs";
+import {serveNativeGalleryPreview} from "./native-gallery-preview.mjs";
 import { NATIVE_GALLERY_JOBS_TABLE } from "./native-gallery-job-airtable.mjs";
 import { readNativeGalleryPrivateManifest } from "./native-gallery-private-manifest.mjs";
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
@@ -2990,6 +2991,36 @@ export default {
           },
         });
         return respond(request,env,result);
+      }
+
+      // Private held native gallery side-by-side images (V1 / V2).
+      // Reviewer profile scope and per-job authority are rechecked, and
+      // Runner independently reads actual Google Drive media bytes.
+      const galleryPrivateMediaMatch = new RegExp(
+        "^/api/factory/outputs/(rec[A-Za-z0-9]{14})/gallery/jobs/"+
+        "([A-Za-z0-9_-]{8,120})/slides/(rec[A-Za-z0-9]{14})/(original|revised)$"
+      ).exec(url.pathname);
+      if(galleryPrivateMediaMatch){
+        requirePermission(authorization,"outputs_review");
+        const [,outputId,jobId,slideId,variant]=galleryPrivateMediaMatch;
+        const profiles=await reviewAuthorizedProfiles(env,authorization);
+        const readJob=async id=>{
+          const rows=await reviewListRecords(env,NATIVE_GALLERY_JOBS_TABLE,{
+            limit:2,filterFormula:'{Job_ID}="'+id+'"',
+            fields:["Job_ID","Output_Record_ID","Content_Item_Record_ID",
+              "Profile_Record_ID","Job_State","Hold_ID","Hold_Owner",
+              "Revised_Manifest_SHA256"],
+          });
+          return Array.isArray(rows)&&rows.length===1?rows[0]:null;
+        };
+        return serveNativeGalleryPreview({
+          request,env,authorization:{
+            ...authorization,authorized_profile_ids:profiles.map(p=>p.id),
+          },output_id:outputId,job_id:jobId,slide_id:slideId,variant,
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+          readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+          readJob,
+        });
       }
 
       // Exact per-slide gallery correction proposal; no generation, approval,
