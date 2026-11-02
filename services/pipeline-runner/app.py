@@ -35,6 +35,7 @@ from rendering_review.gallery_preflight_http import create_native_gallery_prefli
 from rendering_review.native_gallery_claim_http import create_native_gallery_claim_blueprint
 from rendering_review.native_gallery_launch_http import create_native_gallery_launch_blueprint
 from rendering_review.native_gallery_revised_http import create_native_gallery_revised_blueprint
+from rendering_review.native_gallery_preview_http import create_native_gallery_preview_blueprint
 
 logger = logging.getLogger("pipeline-runner")
 settings = load_settings()
@@ -79,6 +80,7 @@ app.register_blueprint(create_native_gallery_preflight_blueprint(settings))
 app.register_blueprint(create_native_gallery_claim_blueprint(settings))
 app.register_blueprint(create_native_gallery_launch_blueprint(settings))
 app.register_blueprint(create_native_gallery_revised_blueprint(settings))
+app.register_blueprint(create_native_gallery_preview_blueprint(settings))
 
 
 @app.get('/jobs/rendering-review/dispatch-health')
