@@ -29,6 +29,7 @@ from studio_compress.processor import start_job as start_studio_compress
 from ttd.client import TikTokDraftClient, load_tiktok_settings
 from rendering_review.http import create_rendering_review_producer_blueprint
 from rendering_review.one_job_http import create_exact_review_render_blueprint
+from rendering_review.auto_dispatch import start_consumer as start_review_dispatch_consumer, snapshot as review_dispatch_snapshot
 from rendering_review.media_http import create_review_media_blueprint
 
 logger = logging.getLogger("pipeline-runner")
@@ -70,6 +71,14 @@ app = Flask(__name__)
 app.register_blueprint(create_rendering_review_producer_blueprint(settings))
 app.register_blueprint(create_exact_review_render_blueprint(settings))
 app.register_blueprint(create_review_media_blueprint(settings))
+
+
+@app.get('/jobs/rendering-review/dispatch-health')
+def review_auto_dispatch_health():
+    denied, code = _verify_secret()
+    if denied is not None:
+        return denied, code
+    return jsonify(ok=True, **review_dispatch_snapshot()), 200
 
 
 def _verify_secret() -> tuple[dict | None, int | None]:
@@ -887,6 +896,7 @@ def run_studio_produce_ops_alert():
 def main() -> None:
     logging.basicConfig(level=settings.get("log_level", "info").upper())
     start_i1_consumer()  # disabled by default; startup fails if the configured spool is not durable
+    start_review_dispatch_consumer()  # protected, off by default; bounded and fail-closed
     app.run(host=settings["host"], port=settings["port"], debug=False)
 
 
