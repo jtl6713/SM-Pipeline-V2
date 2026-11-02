@@ -7,8 +7,8 @@ from unittest.mock import patch
 
 from rendering_review import auto_dispatch as d
 
-ROW_ID = "recA1B2C3D4E5F6G7"
-OUTPUT_ID = "recB1B2C3D4E5F6G7"
+ROW_ID = "rec12345678901234"
+OUTPUT_ID = "rec23456789012345"
 JOB_ID = "rrjob_abcdefghijklmnopqrstuvwxyz123456"
 
 
