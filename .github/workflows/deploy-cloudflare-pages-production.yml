@@ -79,7 +79,7 @@ jobs:
             apps/studio-web/all-profiles-force-refresh.test.mjs \
             apps/studio-web/idea-numeric-id-display.test.mjs \
             apps/studio-web/idea-archive-freshness.test.mjs \
-            apps/studio-web/ui-release-contract.test.mjs \
+            apps/studio-web/asset-upload-progress.test.mjs apps/studio-web/ui-release-contract.test.mjs \
             apps/studio-web/pages-production-deploy-contract.test.mjs \
             apps/studio-web/exception-recovery-overdue-format.test.mjs
 
