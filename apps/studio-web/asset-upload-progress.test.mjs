@@ -15,7 +15,7 @@ function contextFor(transportClass) {
   for (const name of [
     "libraryUploadProgress", "libraryUploadProgressTitle", "libraryUploadProgressFile",
     "libraryUploadProgressPercent", "libraryUploadProgressFiles", "libraryUploadProgressBytes",
-    "libraryUploadProgressStage", "libraryUploadMeter",
+    "libraryUploadProgressStage", "libraryUploadMeter", "libraryUploadSavedMeter",
   ]) nodes.set(name, { textContent: "", hidden: true, dataset: {}, setAttribute(name, value) { this[name] = value; } });
   const context = vm.createContext({
     $: id => nodes.get(id),
@@ -34,6 +34,9 @@ test("progress shows the current file and actual bytes independently of confirme
   assert.equal(nodes.get("libraryUploadProgressTitle").textContent, "Uploading asset 2 of 4");
   assert.equal(nodes.get("libraryUploadProgressFile").textContent, file.name);
   assert.equal(nodes.get("libraryUploadProgressFiles").textContent, "1 of 4 assets saved");
+  assert.equal(nodes.get("libraryUploadSavedMeter").max,4);
+  assert.equal(nodes.get("libraryUploadSavedMeter").value,1);
+  assert.equal(nodes.get("libraryUploadSavedMeter")["aria-valuetext"],"1 of 4 assets saved");
   assert.equal(nodes.get("libraryUploadProgressBytes").textContent, "8.0 of 20.0 MB transferred");
   assert.equal(nodes.get("libraryUploadMeter").value, 40);
   assert.equal(nodes.get("libraryUploadProgressPercent").textContent, "40%");
@@ -44,9 +47,37 @@ test("progress shows the current file and actual bytes independently of confirme
   assert.match(nodes.get("libraryUploadProgressStage").textContent, /Google Drive storage and Airtable registration confirmation/);
   assert.match(nodes.get("libraryUploadMeter")["aria-label"], /confirmation pending/);
   assert.equal(nodes.get("libraryUploadProgressFiles").textContent, "1 of 4 assets saved");
+  assert.equal(nodes.get("libraryUploadSavedMeter").value,1,"File transfer completion cannot advance saved count");
   context.renderLibraryUploadProgress({ phase: "saved", file, fileIndex: 2, fileCount: 4, uploaded: 2, loadedBytes: file.size });
   assert.equal(nodes.get("libraryUploadMeter").value, 100);
   assert.equal(nodes.get("libraryUploadProgressFiles").textContent, "2 of 4 assets saved");
+  assert.equal(nodes.get("libraryUploadSavedMeter").value,2);
+});
+
+test("batch save meter fills by confirmed assets and holds its fill through failures", () => {
+  const {context,nodes}=contextFor();
+  const file={name:"photo7.jpg",size:64000};
+  const show=(phase,uploaded)=>context.renderLibraryUploadProgress({
+    phase,file,fileCount:10,fileIndex:7,uploaded,loadedBytes:file.size,
+  });
+  show("uploading",6);
+  assert.equal(nodes.get("libraryUploadSavedMeter").max,10);
+  assert.equal(nodes.get("libraryUploadSavedMeter").value,6);
+  assert.equal(nodes.get("libraryUploadProgressFiles").textContent,"6 of 10 assets saved");
+  assert.equal(nodes.get("libraryUploadSavedMeter")["aria-valuetext"],"6 of 10 assets saved");
+  show("verifying",6);
+  assert.equal(nodes.get("libraryUploadSavedMeter").value,6);
+  show("failed",6);
+  assert.equal(nodes.get("libraryUploadSavedMeter").value,6);
+  show("partial",6);
+  assert.equal(nodes.get("libraryUploadSavedMeter").value,6);
+  show("saved",7);
+  assert.equal(nodes.get("libraryUploadSavedMeter").value,7);
+  show("complete",10);
+  assert.equal(nodes.get("libraryUploadSavedMeter").value,10);
+  assert.equal(nodes.get("libraryUploadProgressFiles").textContent,"10 of 10 assets saved");
+  show("complete",20);
+  assert.equal(nodes.get("libraryUploadSavedMeter").value,10,"Bar cannot overflow batch count");
 });
 
 test("small images report KB, never a misleading 0.0 of 0.0 MB", () => {
@@ -138,10 +169,13 @@ test("queue remains one asset at a time with real result counts and no implicit 
   assert.match(queue,/phase: errors.length \? "partial" : "complete"/);
   assert.match(queue,/if \(libraryUploadMessageBusy\(\)\) return/);
   assert.doesNotMatch(queue,/publish|\/api\/outputs/i);
-  for (const id of ["libraryUploadProgress","libraryUploadMeter","libraryUploadProgressFile","libraryUploadProgressBytes","libraryUploadProgressFiles"]) {
+  for (const id of ["libraryUploadProgress","libraryUploadMeter","libraryUploadSavedMeter","libraryUploadProgressFile","libraryUploadProgressBytes","libraryUploadProgressFiles"]) {
     assert.match(html,new RegExp('id="' + id + '"'));
   }
   assert.match(css,/#libraryUploadProgress/);
+  assert.match(css,/#libraryUploadSavedMeter/);
+  assert.match(html,/class="library-saved-progress"/);
+  assert.match(html,/id="libraryUploadProgressFiles" aria-hidden="true"/);
   const release = html.match(/UI build 0\.6\.(\d+)/);
   assert.ok(release && Number(release[1]) >= 833, "Asset Manager requires UI 0.6.833 or newer");
 });
