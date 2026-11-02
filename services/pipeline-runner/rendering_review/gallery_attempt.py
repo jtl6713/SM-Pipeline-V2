@@ -127,7 +127,7 @@ def build_isolated_gallery_attempt(
       upload_image(name, bytes) -> {id} (Drive staging folder, never original)
       verify_drive_image(file_id, sha256, byte_count) -> {
         mime_type, width, height, sha256, byte_count, google_drive_verified }
-      verify_generated_rights(output_id, slot_id, file_id, prompt, sha256) -> bool
+      verify_generated_rights(output_id, slot_id, file_id, prompt, sha256) -> {verified,media_asset_record_id}
       commit_manifest(job, manifest) -> bool (durable CAS)
       read_manifest(job) -> manifest (readback)
     """
@@ -187,13 +187,20 @@ def build_isolated_gallery_attempt(
             deny("gallery_revision_drive_readback_unverified")
         # An image-generation response alone is not a rights receipt.
         # Promotion requires an independent trusted clearance decision.
-        if operations.verify_generated_rights(
+        rights = operations.verify_generated_rights(
             output, old["slot_id"], drive_id, change["prompt"], sha(branded)
-        ) is not True:
+        )
+        # A boolean "yes" cannot identify the new *owned* Media Asset row.
+        # The independent Runner V2 verifier later reloads this exact record.
+        new_media_id = rights.get("media_asset_record_id") if isinstance(rights, dict) else None
+        if (not isinstance(rights, dict) or rights.get("verified") is not True or
+                not REC.fullmatch(str(new_media_id or "")) or
+                new_media_id == old.get("source_media_asset_id")):
             deny("gallery_generated_image_rights_unverified")
         results.append({**old, "drive_file_id": drive_id, "mime_type": "image/png",
           "width": verified["width"], "height": verified["height"],
           "byte_count": len(branded), "sha256": sha(branded),
+          "revision_media_asset_id": new_media_id,
           "watermark_verified": True, "google_drive_verified": True,
           "rights_verified": True})
     if operations.verify_hold(output, job["session_id"]) is not True:
