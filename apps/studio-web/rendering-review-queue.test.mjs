@@ -686,10 +686,13 @@ test('held Producer reply shows V2 not started; saved plan and render progress r
   assert.ok(!descendants(nodes.rrDetail).some(n=>n.className.includes('rr-progress-stage--attention')));
   assert.ok(!/V2 is ready for review/.test(nodes.rrProgressSummary.textContent));
   const draft=descendants(nodes.rrDetail).find(n=>n.tag==='textarea'&&
-    n.attrs['aria-label']==='Photo and scene suggestions for the next revision');
+    n.attrs['aria-label']==='Feedback and photo suggestions for Producer');
   const saveNote=descendants(nodes.rrDetail).find(n=>n.tag==='button'&&
-    n.textContent==='Save feedback for next revision');
+    n.textContent==='Save feedback (no edits or render)');
   assert.ok(draft&&saveNote,'queued render must still accept next-version comments');
+  const queuedEdit=descendants(nodes.rrDetail).find(n=>n.tag==='button'&&
+    n.textContent==='Make edits based on the latest feedback');
+  assert.ok(queuedEdit?.disabled,'queued V2 cannot be edited while immutable render is active');
   draft.value='Replace scene 3 with another planetarium photo';
   draft.listeners.input();
   await saveNote.listeners.click();
@@ -698,6 +701,8 @@ test('held Producer reply shows V2 not started; saved plan and render progress r
   assert.match(textAll(),/Replace scene 3/);
   assert.ok(!/current render was changed/i.test(textAll()));
   assert.ok(!nodes.rrProgressSummary.classList.contains('rr-progress-top--attention'));
+  assert.ok(descendants(nodes.rrDetail).some(n=>n.tag==='textarea'),
+    'comments remain available after the queued feedback refresh');
   // Transient manual check failures must not erase the previously verified stage.
   failNextRead=true;
   const check=descendants(nodes.rrDetail).find(n=>
