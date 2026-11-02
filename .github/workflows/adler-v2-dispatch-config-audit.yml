@@ -41,11 +41,15 @@ jobs:
             'RENDERING_REVIEW_DISPATCH_FENCE_VERIFIED',
             'RENDERING_REVIEW_SCHEDULER_VACATE_VERIFIED',
           )
-          values={b.get('name'):b.get('text') for b in bindings if b.get('type')=='plain_text' and b.get('name') in allowlist}
+          known={b.get('name'):b for b in bindings if b.get('name') in allowlist}
           print('production_active_version_number='+str(r.get('number')))
+          print('production_binding_total='+str(len(bindings)))
           for name in allowlist:
-            value=str(values.get(name,'absent')).lower()
-            print(name+'='+('true' if value=='true' else 'false' if value=='false' else 'absent_or_other'))
+            binding=known.get(name) or {}
+            kind=str(binding.get('type') or 'absent')
+            v=str(binding.get('text','')).lower() if kind=='plain_text' else ''
+            state='true' if v=='true' else 'false' if v=='false' else 'unknown'
+            print(name+'_binding_type='+kind+' value='+state)
           # This audit must not print arbitrary strings or secret binding values.
           PY
           curl -fsS --max-time 20 'https://pipeline.chicagoshining.com/health' -o /tmp/review-runner-health.json
