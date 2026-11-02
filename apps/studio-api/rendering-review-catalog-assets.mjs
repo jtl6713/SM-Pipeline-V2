@@ -46,9 +46,9 @@ function variantProof(queue,readField,recordId,sourceFile,sourceSize) {
   if(!rec(generated)||!rec(request)||!drive(variantFile)||
      !/fill-crop-v2\.jpg$/i.test(recipe)||!recipe.includes("9x16")||
      !/^[A-Za-z0-9_-]{8,120}$/.test(srcAsset)||
-     !preview.startsWith("https://media.chicagoshining.com/studio/previews/item4/"+
-                          request+"/ITEM4-VARIANT-fill-crop-v2-")||
-     !preview.includes("-"+srcAsset+"-9x16-"+variantFile+".jpg"))
+     preview!==("https://media.chicagoshining.com/studio/previews/item4/"+
+       request+"/ITEM4-VARIANT-fill-crop-v2-"+request+"-"+srcAsset+
+       "-9x16-"+variantFile+".jpg"))
     return null;
   return {queue_id:queue.id,variant_file_id:variantFile,preview_url:preview,
     generated_media_id:generated,source_asset_id:srcAsset,
@@ -114,6 +114,8 @@ export async function resolveReviewCatalogAssets({tokens,readRecord,readField,
       source_media_record_id:id,
       variant_transfer_record_id:selected.queue_id,
       variant_media_record_id:selected.generated_media_id,
+      source_asset_id:selected.source_asset_id,
+      source_request_id:selected.source_request_id,
       source_size_bytes:master.sourceBytes,
       crop_recipe:"fill-crop-v2",
     });
