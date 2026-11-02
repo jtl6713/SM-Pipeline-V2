@@ -40,6 +40,8 @@ async function getOwned({env,adapter,output_id,profile_id,content_item_id}){
      !TOKEN.test(S(f.Studio_Render_Review_Session_ID))||
      S(f.Studio_Render_Review_Hold_Owner)!==S(f.Studio_Render_Review_Session_ID))
     deny("NATIVE_GALLERY_OUTPUT_HOLD_NOT_VERIFIED");
+  if(!/(?:image|photo|carousel|gallery|picture)/i.test(choice(f.Platform_Output_Type)))
+    deny("NATIVE_GALLERY_NOT_IMAGE_OUTPUT");
   if(f.Published_At||f.Platform_Post_ID||f.Platform_Post_URL||
      f.Platform_Media_ID||f.Publish_Started_At||f.Publish_Locked_At||
      f.Publish_Locked_By||/^(published|publishing|dispatched)$/i.test(
@@ -62,7 +64,8 @@ async function findJobs(env,adapter,output_id){
       "Content_Item_Record_ID","Actor_Record_ID","Client_Request_ID",
       "Request_Fingerprint","Original_Manifest_SHA256","Plan_SHA256",
       "Job_State","Row_Version","Hold_ID","Hold_Owner","Lease_Fence",
-      "Lease_Owner","Total_Slides","Completed_Slides","Created_At_UTC"],
+      "Lease_Owner","Total_Slides","Completed_Slides","Created_At_UTC",
+      "Plan_JSON","Original_Manifest_JSON"],
   });
   if(!Array.isArray(found)||found.length>=31||
      found.some(r=>!RECORD.test(S(r?.id))||
@@ -72,12 +75,15 @@ async function findJobs(env,adapter,output_id){
     deny("NATIVE_GALLERY_JOB_LEDGER_INVALID",503);
   return found;
 }
-function compareStored(row,expected){
+function compareStored(row,expected,plan,original){
   const f=row?.fields;
   if(!f||Object.entries(expected).some(([key,val])=>f[key]!==val)||
      choice(f.Job_State)!=="held_queued"||
      f.Row_Version!==1||f.Lease_Fence!==0||
-     f.Completed_Slides!==0||!Number.isSafeInteger(f.Total_Slides)||
+     f.Completed_Slides!==0||
+     f.Plan_JSON!==JSON.stringify(plan)||
+     f.Original_Manifest_JSON!==JSON.stringify(original)||
+     !Number.isSafeInteger(f.Total_Slides)||
      f.Total_Slides<1)deny("NATIVE_GALLERY_JOB_READBACK_CONFLICT",503);
 }
 export async function createNativeGalleryJobIntent({
@@ -147,7 +153,7 @@ export async function createNativeGalleryJobIntent({
     const existing=await findJobs(env,adapter,output_id);
     const same=existing.filter(r=>r.fields.Job_ID===job_id);
     if(same.length===1){
-      compareStored(same[0],expected);
+      compareStored(same[0],expected,plan,evidence.original_artifacts);
       return {ok:true,replay:true,job_id,output_id,
         state:"held_queued",durable:true,hold_verified:true,
         source_bytes_verified:true,publication_authorized:false};
@@ -173,7 +179,7 @@ export async function createNativeGalleryJobIntent({
     });
     const read=await findJobs(env,adapter,output_id);
     if(read.length!==1)deny("NATIVE_GALLERY_JOB_READBACK_MISSING",503);
-    compareStored(read[0],expected);
+    compareStored(read[0],expected,plan,evidence.original_artifacts);
     const holdAfter=await getOwned({env,adapter,output_id,
       profile_id:proposal.profile_id,content_item_id:proposal.content_item_id});
     if(holdAfter.hold_id!==hold.hold_id||holdAfter.hold_owner!==hold.hold_owner)
