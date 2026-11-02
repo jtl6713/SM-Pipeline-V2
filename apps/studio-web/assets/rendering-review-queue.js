@@ -301,9 +301,12 @@
       saved?.flags?.creative_approval_enabled===true&&
       saved?.publication_hold_verified===true&&
       current?.status==='ready_for_review'&&!!attemptMedia(current,entry);
-    const requiresInput=(stage===0&&pendingFeedback&&!rendering)||
-      (stage===1&&(canReply||pendingFeedback))||(stage===2&&canRender)||
-      (stage===5&&(canApprove||pendingFeedback));
+    const canPrepareEdits=saved?.flags?.producer_conversation_enabled===true&&
+      session?.review_hold?.active===true&&!rendering;
+    const requiresInput=(stage===0&&pendingFeedback&&canPrepareEdits)||
+      (stage===1&&(canReply||pendingFeedback&&canPrepareEdits))||
+      (stage===2&&canRender)||
+      (stage===5&&(canApprove||pendingFeedback&&canPrepareEdits));
     const steps=['Feedback received','Producer review','Plan ready',
       'Rendering','Quality check','Ready for review'];
     const rail=elem('ol',null,'rr-progress-stages');
@@ -328,6 +331,8 @@
         'V2 creative approval is saved. Factory can accept the creative cut under a QA hold without scheduling or publishing.'):
       readyV2?(canApprove?
         'Requires your attention: V2 is ready for review. Select V2 and approve only if satisfied. Publication remains held.':
+        pendingFeedback&&canPrepareEdits?
+        'Requires your attention: V2 is ready and your newer feedback is saved. Make edits based on the latest feedback to prepare another plan, or review V2. Nothing is automatically rendered.':
         'Revised V2 is ready for review. Publication remains held until approval.'):
       session?.state==='validating'?
         'V2 render completed its rendering stage; media validation is in progress.':
