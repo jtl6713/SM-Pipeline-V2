@@ -1544,6 +1544,69 @@
                 }
                 item.appendChild(pair);rows.appendChild(item);
               }
+              if(revision.creative_review_available===true&&
+                 job.status==="ready_for_review"&&
+                 /^[a-f0-9]{64}$/.test(String(job.revision_manifest_sha256||""))){
+                const approval=document.createElement("li");
+                const confirmLabel=document.createElement("label");
+                const confirmBox=document.createElement("input");
+                confirmBox.type="checkbox";
+                confirmBox.style.marginRight="8px";
+                confirmLabel.appendChild(confirmBox);
+                confirmLabel.appendChild(document.createTextNode(
+                  "I have inspected the revised images and want to record a creative decision."));
+                approval.appendChild(confirmLabel);
+                const buttons=document.createElement("div");
+                buttons.style.display="flex";
+                buttons.style.flexWrap="wrap";
+                buttons.style.gap="8px";
+                buttons.style.marginTop="8px";
+                const accept=document.createElement("button");
+                accept.type="button";accept.textContent="Accept creative revision";
+                const reject=document.createElement("button");
+                reject.type="button";reject.textContent="Reject revision";
+                accept.disabled=true;reject.disabled=true;
+                confirmBox.addEventListener("change",()=>{
+                  accept.disabled=!confirmBox.checked;
+                  reject.disabled=!confirmBox.checked;
+                });
+                for(const [button,decision] of [[accept,"accept"],[reject,"reject"]]){
+                  button.addEventListener("click",async()=>{
+                    if(!current()||!confirmBox.checked)return;
+                    accept.disabled=true;reject.disabled=true;confirmBox.disabled=true;
+                    status.textContent="Checking the exact private Drive revision and recording "+
+                      decision+" in Airtable…";
+                    try{
+                      const result=await fetchJson("/api/factory/outputs/"+
+                        encodeURIComponent(id)+"/gallery/jobs/"+
+                        encodeURIComponent(job.job_id)+"/creative-decision",{
+                        method:"POST",body:JSON.stringify({
+                          decision,manifest_sha256:job.revision_manifest_sha256,
+                          confirm_reviewed:true,
+                        }),
+                      });
+                      if(!current())return;
+                      if(result?.ok!==true||result.decision!==decision||
+                         result.publication_authorized!==false||
+                         result.factory_approved!==false)
+                        throw new Error("The creative decision receipt was not independently verified");
+                      status.textContent="Gallery creative decision saved: "+decision+
+                        ". Factory approval and publication remain separate.";
+                    }catch(error){
+                      if(current()){
+                        confirmBox.disabled=false;
+                        accept.disabled=!confirmBox.checked;
+                        reject.disabled=!confirmBox.checked;
+                        status.textContent="Creative decision blocked: "+
+                          String(error?.message||error);
+                      }
+                    }
+                  });
+                  buttons.appendChild(button);
+                }
+                approval.appendChild(buttons);
+                rows.appendChild(approval);
+              }
             }
           }
         }catch(error){
