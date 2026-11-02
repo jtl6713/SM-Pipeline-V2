@@ -1,0 +1,95 @@
+name: Adler 9664 existing V2 read-only lookup
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/adler-9664-v2-existing-job-readonly.yml'
+permissions:
+  contents: read
+concurrency:
+  group: adler-9664-v2-readonly
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Inspect only Adler output and saved V2 job in authoritative Airtable
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          cat > /tmp/adler-v2-readonly.ps1 <<'PS1'
+          $ErrorActionPreference='Stop'
+          $envFile=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+          if(-not (Test-Path -LiteralPath $envFile)){throw 'runner_env_missing'}
+          $vars=@{}
+          foreach($line in (Get-Content -LiteralPath $envFile)){
+            if($line -match '^\s*([A-Z0-9_]+)\s*=\s*(.*)$'){
+              $vars[$matches[1]]=$matches[2].Trim().Trim('"').Trim([char]39)
+            }
+          }
+          $pat=[string]$vars['AIRTABLE_PAT']
+          $base=[string]$vars['AIRTABLE_BASE_ID']
+          if(-not $base){$base='appe33zkZn35yirTL'}
+          if($pat.Length -lt 20){throw 'airtable_auth_unavailable'}
+          $headers=@{'Authorization'=('Bearer '+$pat)}
+          function ReadRows([string]$table,[string]$formula){
+            $url='https://api.airtable.com/v0/'+$base+'/'+$table+'?maxRecords=2&filterByFormula='+[uri]::EscapeDataString($formula)
+            $result=Invoke-RestMethod -Method GET -Uri $url -Headers $headers -TimeoutSec 25
+            return @($result.records)
+          }
+          $outs=@(ReadRows 'tblrlPeboBthkplH0' '{Output_ID}=9664')
+          Write-Output ('adler_output_matches='+$outs.Count)
+          if($outs.Count -ne 1){throw 'output_9664_identity_unverified'}
+          $o=$outs[0];$f=$o.fields
+          $id=[string]$o.id
+          if($id -notmatch '^rec[A-Za-z0-9]{14}$'){throw 'output_record_invalid'}
+          Write-Output ('adler_output_record='+$id)
+          Write-Output ('adler_output_do_not_publish='+[string]$f.Do_Not_Publish)
+          Write-Output ('adler_output_hold='+[string]$f.Studio_Render_Review_Hold_Active)
+          if($f.Do_Not_Publish -ne $true -or $f.Studio_Render_Review_Hold_Active -ne $true){throw 'output_hold_not_verified'}
+          $jobs=@(ReadRows 'tblUkZB6SMtf9Ib6I' ('{Output_Record_ID}="'+$id+'"'))
+          Write-Output ('adler_job_matches='+$jobs.Count)
+          if($jobs.Count -ne 1){throw 'v2_job_not_unique'}
+          $j=$jobs[0].fields
+          Write-Output ('adler_job_id='+[string]$j.Job_ID)
+          Write-Output ('adler_job_state='+[string]$j.Job_State)
+          Write-Output ('adler_job_stage='+[string]$j.Progress_Stage)
+          Write-Output ('adler_job_progress='+[string]$j.Progress_Percent)
+          Write-Output ('adler_job_lease_fence='+[string]$j.Lease_Fence)
+          Write-Output ('adler_job_has_lease_owner='+[bool]$j.Lease_Owner)
+          Write-Output ('adler_job_history_present='+[bool]($j.Event_History_JSON -and $j.Event_History_JSON -ne '[]'))
+          if($j.Job_State -ne 'queued' -or $j.Progress_Stage -ne 'awaiting_isolated_renderer' -or
+             $j.Progress_Percent -ne 0 -or $j.Lease_Fence -ne 0 -or $j.Lease_Owner){
+            throw 'existing_job_not_safe_to_launch'
+          }
+          Write-Output 'adler_existing_v2_unclaimed_verified=true no_mutations=true'
+          PS1
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/adler-v2-readonly.json').write_text(json.dumps({
+              'command':Path('/tmp/adler-v2-readonly.ps1').read_text(),'confirm':True
+          }))
+          PY
+          code=$(curl -sS --max-time 25 -o /tmp/adler-ops-start.json -w '%{http_code}' \
+            -X POST 'https://ops.chicagoshining.com/api/shell' \
+            -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/adler-v2-readonly.json || true)
+          if [[ "$code" != '200' && "$code" != '202' ]]; then echo "ops_readonly_not_accepted_http=$code";exit 1;fi
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/adler-ops-start.json)
+          test -n "$job"
+          for i in $(seq 1 45); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/adler-ops-result.json
+            state=$(jq -r '.job.status // empty' /tmp/adler-ops-result.json)
+            if [[ "$state" == 'ok' || "$state" == 'failed' ]]; then
+              jq -r '.job.log // ""' /tmp/adler-ops-result.json | grep '^adler_' || true
+              [[ "$state" == 'ok' ]] && exit 0 || exit 1
+            fi
+            sleep 3
+          done
+          echo 'ops_readonly_unverified=true'; exit 1
