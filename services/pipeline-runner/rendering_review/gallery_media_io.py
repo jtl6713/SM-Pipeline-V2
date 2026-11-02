@@ -1,6 +1,8 @@
 """Trusted private Google Drive/image/watermark backend for gallery review V2.
 
-No write to the original Output, Content Item or Carousel Slides. Native\ngalleries may use only the explicitly approved, verified shared ChicagoShining\nbrand asset; ordinary cross-profile source media remain forbidden.
+No write to the original Output, Content Item or Carousel Slides. Native
+galleries may use only the explicitly approved, verified shared ChicagoShining
+brand asset; ordinary cross-profile source media remain forbidden.
 
 The review job coordinator supplies durable hold/lease/ledger operations.
 """
@@ -31,7 +33,9 @@ def deny(message: str):
 
 
 def _png(value: bytes, *, min_edge: int = 128) -> Image.Image:
-    if not isinstance(value, bytes) or len(value) < 128 or not value.startswith(b"\x89PNG\r\n\x1a\n"):
+    if not isinstance(value, bytes) or len(value) < 128 or not value.startswith(b"\x89PNG\r
+\x1a
+"):
         deny("gallery_png_required")
     try:
         with Image.open(BytesIO(value)) as image:
