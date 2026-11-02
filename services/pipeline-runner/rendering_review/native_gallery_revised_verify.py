@@ -96,6 +96,16 @@ def verify_staged_gallery_revision(
                 staging_folder_id not in metadata.get("parents", []) or
                 metadata.get("trashed") is True):
             deny("native_gallery_revision_not_private_staged_png")
+        # A private folder ID is insufficient if file permissions were
+        # subsequently broadened. Re-read effective exact-file permissions.
+        if not callable(getattr(drive, "list_file_permissions", None)):
+            deny("native_gallery_revision_permissions_unavailable")
+        permissions = drive.list_file_permissions(new["drive_file_id"])
+        if (not isinstance(permissions, list) or not permissions or
+                any(not isinstance(p, dict) or
+                    p.get("type") not in ("user", "group")
+                    for p in permissions)):
+            deny("native_gallery_revision_public_or_unverified_permissions")
         # The new file must have its OWN exact-profile owned Media Asset
         # identity; do not transfer the original slide's ownership receipt.
         new_media_id = asset_lookup(client, profile_id, new["drive_file_id"])
