@@ -407,6 +407,7 @@ def _voiceover(client,drive,item,plan,claim,*,original_props=None):
         file_id=file_ids[0]
         meta=drive.get_file(file_id)
         if(meta.get("id")!=file_id or meta.get("mimeType")!="audio/mpeg" or
+           meta.get("trashed") is True or
            not 1000<=int(meta.get("size") or 0)<=30000000):
             fail("review_original_voiceover_drive_unverified")
         contents,mime=drive.download_file(file_id)
