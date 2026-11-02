@@ -5,6 +5,7 @@ import { readGalleryRevisionStatus } from "./rendering-review-gallery-status-htt
 import { verifyGallerySourceBytes, gallerySourceBytePreflightEnabled } from "./rendering-review-gallery-byte-preflight.mjs";
 import { handleNativeGalleryGenerate } from "./native-gallery-generation-http.mjs";
 import { claimNativeGalleryJob, galleryClaimEnabled } from "./native-gallery-job-claim.mjs";
+import { reserveNativeGalleryLaunch, nativeGalleryLaunchIntentEnabled } from "./native-gallery-launch-ledger.mjs";
 import { NATIVE_GALLERY_JOBS_TABLE } from "./native-gallery-job-airtable.mjs";
 import { readNativeGalleryPrivateManifest } from "./native-gallery-private-manifest.mjs";
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
@@ -1705,6 +1706,73 @@ export default {
           },
         });
         return respond(request,env,receipt);
+      }
+
+      // A native gallery Runner must reserve its exact generation intent
+      // durably before its first model call. No repeat or implicit replay.
+      // Source bytes/owned branding are refreshed under the output R2 lock.
+      if(url.pathname==="/internal/native-gallery/reserve-launch" ||
+         url.pathname==="/api/internal/native-gallery/reserve-launch"){
+        requireConfig(env);
+        if(!nativeGalleryLaunchIntentEnabled(env))
+          throw new HttpError(405,"Native gallery launch ledger disabled");
+        const readJob=async jobId=>{
+          if(!/^[A-Za-z0-9_-]{8,120}$/.test(String(jobId||"")))return null;
+          const rows=await reviewListRecords(env,NATIVE_GALLERY_JOBS_TABLE,{
+            limit:2,filterFormula:'{Job_ID}="'+jobId+'"',
+            fields:["Job_ID","Output_Record_ID","Content_Item_Record_ID",
+              "Profile_Record_ID","Actor_Record_ID","Request_Fingerprint",
+              "Original_Manifest_SHA256","Original_Manifest_JSON",
+              "Plan_SHA256","Plan_JSON","Event_History_JSON",
+              "Hold_ID","Hold_Owner","Job_State","Row_Version",
+              "Lease_Owner","Lease_Fence","Launch_Intent_SHA256",
+              "Launch_Receipt_JSON"],
+          });
+          if(!Array.isArray(rows)||rows.length!==1)return null;
+          return rows[0];
+        };
+        const result=await reserveNativeGalleryLaunch({
+          request,env,operations:{
+            withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+            readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+            readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+            readJob,
+            patchJob:(id,fields)=>airtableFetch(env,NATIVE_GALLERY_JOBS_TABLE,id,{
+              method:"PATCH",body:JSON.stringify({fields,typecast:false}),
+            }),
+            verifyOriginalSources:async({output_id,profile_id,
+                content_item_id,original_manifest_sha256,original_artifacts})=>{
+              const inventory=await readAuthoritativeGalleryInventory({
+                output_id,authorized_profile_ids:[profile_id],
+                readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+                readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+                readSlides:async ids=>reviewListRecords(env,"tblcnQDBvUngpjDED",{
+                  limit:ids.length,
+                  filterFormula:'OR('+ids.map(id=>'RECORD_ID()="'+id+'"').join(',')+')',
+                  fields:["Content Item","Platform Output","Platform","Slide Number",
+                    "Aspect Ratio","Deleted From Carousel","Approved For Final",
+                    "Review Status","Asset_4x5_File_ID","Asset_1x1_File_ID",
+                    "Asset_9x16_File_ID","Final Google Drive File ID"],
+                }),
+              });
+              if(inventory.content_item_id!==content_item_id||
+                 inventory.profile_id!==profile_id||
+                 inventory.slide_count!==original_artifacts.length)
+                return false;
+              const actual=await readNativeGalleryPrivateManifest({
+                env,output_id,profile_id,content_item_id,
+                aspect_ratio:inventory.aspect_ratio,
+              });
+              return actual.original_manifest_sha256===original_manifest_sha256&&
+                JSON.stringify(actual.original_artifacts)===
+                  JSON.stringify(original_artifacts)&&
+                actual.sources_byte_verified===true&&
+                actual.original_artifact_watermark_verified===true&&
+                actual.publication_authorized===false;
+            },
+          },
+        });
+        return respond(request,env,result);
       }
 
       // Internal render-worker claim, distinct from the public Studio API and
