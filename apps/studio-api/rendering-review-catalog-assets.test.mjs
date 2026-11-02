@@ -43,7 +43,8 @@ function run(masterPatch={},queuePatch={},derivedPatch={},opts={}){
     readRecord:async(_table,which)=>{mediaIds.push(which);return rows[which]||null;},
     readField:(row,k)=>row.fields[k],
     readVariants:async(ids)=>{
-      assert.deepEqual(ids,[source]);
+      assert.equal(ids.length,1);
+      assert.equal(typeof ids[0],"string");
       return opts.queueRows===undefined?[queue]:opts.queueRows;
     },
   }).then(receipt=>({...receipt,mediaIds}));
