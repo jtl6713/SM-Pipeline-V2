@@ -78,14 +78,16 @@
       if(inlineStatus){
         inlineStatus.hidden=false;
         inlineStatus.dataset.state='working';
-        inlineStatus.textContent='Sending your feedback to the Producer…';
+        inlineStatus.textContent=textValue==='Make edits based on the latest feedback'?
+          'Producer is preparing changes from saved feedback. No render has started.':
+          'Sending your feedback to the Producer…';
         inlineStatus.classList.toggle('error-text',false);
         // The Producer request can take time, but there is no server-side
         // stage feed. Tell the truth rather than inventing a percentage.
         if(typeof window.setTimeout==='function'){
           slowNotice=window.setTimeout(()=>{
             if(inlineStatus.dataset.state==='working'){
-              inlineStatus.textContent='Still waiting for the Producer to respond. Your request is processing; please keep this page open.';
+              inlineStatus.textContent='Still waiting for the Producer to respond. No render has started; please keep this page open.';
             }
           },8000);
         }
@@ -702,6 +704,7 @@
           if(!window.confirm('Ask the Producer to prepare changes based on your saved feedback? This will NOT render or publish a video.'))return;
           const key=entry.output_id+':'+session.version+':'+latestDirection;
           if(!state.editRequestKeys.has(key))state.editRequestKeys.set(key,safeRequestId());
+          say('Producer preparing changes from saved feedback; no render started.');
           const created=await post('/api/rendering-review/outputs/'+
             encodeURIComponent(entry.output_id)+'/producer-conversation',{
             direction:latestDirection,expected_version:session.version,
@@ -716,7 +719,7 @@
             'Producer responded to the latest saved feedback. Continue discussing or resolving requirements. No render started.'};
           say('Producer edits prepared. No render started.');
           await open(entry);
-        },null);
+        },message);
         edit.classList.add('rr-primary-render');
         edit.disabled=inFlight||!latestDirection;
         edit.title=inFlight?'Available after the current V2 finishes and you review it.':
