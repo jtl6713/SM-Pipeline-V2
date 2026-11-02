@@ -3,7 +3,8 @@ import hashlib
 from io import BytesIO
 import unittest
 
-from PIL import Image
+from PIL import Image, ImageDraw
+from branding.watermark import watermark_photo_bytes
 from airtable.constants import (
     CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE, CAROUSEL_SLIDES_TABLE,
     MEDIA_ASSETS_TABLE,
@@ -72,11 +73,11 @@ def branding_resolver(**kwargs):
         "verified": True, "profile_id": kwargs["profile_id"]}}
 
 
-def check(client=None, drive=None):
+def check(client=None, drive=None, branding=branding_resolver):
     return read_authoritative_gallery_source(
         client=client or FakeClient(), drive=drive or FakeDrive(png()),
         output_id=OUTPUT, expected_profile_id=PROFILE,
-        branding_resolver=branding_resolver)
+        branding_resolver=branding)
 
 
 class AuthoritativeSourceTests(unittest.TestCase):
@@ -91,6 +92,25 @@ class AuthoritativeSourceTests(unittest.TestCase):
         self.assertFalse(result["can_generate"])
         self.assertFalse(result["publication_authorized"])
         self.assertEqual(len(result["artifacts"][0]["sha256"]), 64)
+
+    def test_actual_original_watermark_pixels_are_independently_certified(self):
+        mark = Image.new("RGBA", (190, 90), (0, 0, 0, 0))
+        artist = ImageDraw.Draw(mark)
+        artist.rectangle((24, 18, 165, 66), fill=(240, 20, 30, 255))
+        artist.rectangle((70, 30, 124, 54), fill=(20, 215, 40, 255))
+        logo = BytesIO()
+        mark.save(logo, format="PNG")
+        def owned_brand(**kwargs):
+            return {"bytes": logo.getvalue(), "receipt": {
+                "verified": True, "profile_id": kwargs["profile_id"]}}
+        branded = watermark_photo_bytes(png(), logo.getvalue(), output_format="png")
+        proof = check(drive=FakeDrive(branded), branding=owned_brand)
+        self.assertTrue(proof["original_artifact_watermark_verified"])
+        self.assertTrue(proof["artifacts"][0]["watermark_verified"])
+        self.assertNotIn("GALLERY_ORIGINAL_BRANDING_PLACEMENT_NOT_VERIFIED",
+                         proof["blockers"])
+        self.assertFalse(proof["can_generate"])
+        self.assertFalse(proof["publication_authorized"])
 
     def test_cross_profile_source_denied(self):
         client = FakeClient()
