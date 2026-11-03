@@ -12,7 +12,6 @@ const at = (value) => {
   const millis = Date.parse(String(value ?? ""));
   return Number.isFinite(millis) ? millis : NaN;
 };
-const quoted = (value) => String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 
 export function classifyStaleInstagramReel(row, {
   nowMs = Date.now(), thresholdMs = QA_IG_STALE_UPLOAD_THRESHOLD_MS,
