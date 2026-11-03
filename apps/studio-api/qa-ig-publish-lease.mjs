@@ -86,7 +86,17 @@ export async function mutateIgPublishLease(env, {
       // A previous irreversible Graph request, even one with lost response, is
       // NEVER a safe automatic new upload. A pre-remote expired lease must
       // explicitly be fenced and rescheduled by the Quality Agent first.
-      if (last && !["recovered","finished"].includes(last.phase))
+      // Crash between R2 claim and the Airtable lock write: if the output
+      // remains untouched and 30 minutes have passed, a new claim can
+      // supersede the pre-remote generation. Any late old-owner Graph intent
+      // fails its exact-generation CAS before issuing HTTP to Meta.
+      const staleUnusedClaim = last?.phase==="pre_remote"
+        && last.irreversible_possible===false
+        && nowMs>=Number(last.expires_ms)
+        && Number.isFinite(Date.parse(String(last.heartbeat_at||"")))
+        && nowMs-Date.parse(last.heartbeat_at)>=IG_LEASE_STALE_MS;
+      if (last && !["recovered","finished"].includes(last.phase)
+          && !staleUnusedClaim)
         fail("publish_lease_requires_reconciliation");
       const row=await readOutput(outputId);
       if (!supports(row,outputId) || text(row.fields.Publish_Status)!=="Ready to Publish"
