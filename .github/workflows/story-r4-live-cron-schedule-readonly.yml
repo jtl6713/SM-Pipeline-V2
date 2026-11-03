@@ -27,5 +27,5 @@ jobs:
             exit 1
           fi
           jq -e '.success==true' /tmp/schedules.json >/dev/null
-          jq -c '{crons:[.result[]?|.cron],five_minute_present:([.result[]?|.cron]|index("*/5 * * * *")!=null),minute_present:([.result[]?|.cron]|index("* * * * *")!=null)}' /tmp/schedules.json
+          jq -c '([.. | objects | .cron? // empty] | unique) as $crons | {crons:$crons,five_minute_present:($crons|index("*/5 * * * *")!=null),minute_present:($crons|index("* * * * *")!=null)}' /tmp/schedules.json
           echo "read_only=true airtable_changes=0 remotion_jobs=0 publish_changes=0"
