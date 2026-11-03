@@ -1,3 +1,4 @@
+import { r4StartConfirmed, rotateR4CandidatesAfterCursor } from "./r4-queue-admission.mjs";
 import { storySeedRenderStatus } from "./story-render-admission.mjs";
 import { ideaProducerDirection, mergeIdeaProducerDirection } from "./idea-producer-direction.mjs";
 import { scriptedShortPublishableTitle } from "./scripted-short-title.mjs";
@@ -1229,8 +1230,10 @@ export async function studioAdmitRenderQueue(env, options = {}) {
       controls,
     };
   }
-  const head = admitCandidates[0];
-  if (!head) {
+  const cursorKey = "ops/r4-skip-cursor-v1";
+  const cursor = await env.STUDIO_MEDIA.get(cursorKey).catch(() => null);
+  const queueOrder = rotateR4CandidatesAfterCursor(admitCandidates, cursor, controls);
+  if (!queueOrder.length) {
     return {
       admitted: false,
       reason: "shared_render_hold",
@@ -1242,37 +1245,80 @@ export async function studioAdmitRenderQueue(env, options = {}) {
       controls,
     };
   }
-  await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, head.id, {
-    method: "PATCH",
-    body: JSON.stringify({
-      fields: { Render_Status: RENDER_STATUS_READY },
-      typecast: true,
-    }),
-  }).catch(() => null);
-  let started = null;
-  try {
-    started = await item4PulseR4Python(env, {
-      outputRecordId: head.id,
-      forceSlot: true,
-      testRunId: options.testRunId,
-    });
-  } catch (error) {
+
+  // A skipped StageResult is HTTP 200 but does not hold the Remotion slot.
+  // Try a few distinct heads per tick, only for explicit no-launch reasons.
+  // Never start another render after an ambiguous result or a busy slot.
+  const safeSkippedReasons = new Set([
+    "no_eligible_platform_output",
+    "waiting_for_timing",
+    "waiting_for_voiceover",
+    "unfetchable_render_source",
+    "stale_render_package",
+    "studio_visual_integrity_blocked",
+    "voiceover_exceeds_video",
+  ]);
+  const manualPriority = Array.isArray(controls?.render_priority) && controls.render_priority.length > 0;
+  const maxAttempts = manualPriority ? 1 : Math.min(4, queueOrder.length);
+  const skipped = [];
+  for (const head of queueOrder.slice(0, maxAttempts)) {
+    try {
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, head.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: { Render_Status: RENDER_STATUS_READY },
+          typecast: true,
+        }),
+      });
+    } catch (error) {
+      return {
+        admitted: false, reason: "r4_ready_patch_failed", head: head.id,
+        waiting: total, skipped,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+
+    let started;
+    try {
+      started = await item4PulseR4Python(env, {
+        outputRecordId: head.id,
+        forceSlot: true,
+        testRunId: options.testRunId,
+      });
+    } catch (error) {
+      return {
+        admitted: false, reason: "r4_start_failed", head: head.id,
+        waiting: total, skipped,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+
+    if (r4StartConfirmed(started)) {
+      await env.STUDIO_MEDIA.put(cursorKey, head.id).catch(() => null);
+      return {
+        admitted: true, reason: "started_head", head: head.id,
+        waiting: Math.max(0, total - 1), stamped_waiting: stampedWaiting,
+        started, skipped,
+        shared_siblings_waiting: Math.max(0, candidates.length - total),
+      };
+    }
+
+    const skipReason = String(started?.details?.run?.reason || "").trim();
+    if (started?.status === "skipped" && safeSkippedReasons.has(skipReason)) {
+      skipped.push({ id: head.id, reason: skipReason });
+      await env.STUDIO_MEDIA.put(cursorKey, head.id).catch(() => null);
+      continue;
+    }
+
     return {
-      admitted: false,
-      reason: "r4_start_failed",
-      waiting: Math.max(0, total - 1),
-      head: head.id,
-      error: error instanceof Error ? error.message : String(error),
+      admitted: false, reason: "r4_launch_not_confirmed", head: head.id,
+      waiting: total, started, skipped,
     };
   }
   return {
-    admitted: Boolean(started?.processed || started?.details?.processed || started?.ok !== false),
-    reason: "started_head",
-    waiting: Math.max(0, total - 1),
+    admitted: false, reason: "no_render_started", waiting: total,
+    attempted: skipped.length, skipped,
     stamped_waiting: stampedWaiting,
-    head: head.id,
-    started,
-    shared_siblings_waiting: Math.max(0, candidates.length - total),
   };
 }
 /*__STUDIO_WORKER_END:studioAdmitRenderQueue__*/
