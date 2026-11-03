@@ -125,7 +125,7 @@ test("Live Factory claims diagnostic is tenant-admin read-only GET with no appro
   assert.match(worker,/url\.searchParams\.get\("claims_diagnostic"\) === "1"/);
   assert.match(worker,/if \(url\.searchParams\.get\("claims_diagnostic"\) === "1"\) \{[\s\S]{0,320}requirePermission\(authorization, "tenant_admin"\)/);
   assert.match(worker,/await readFactoryClaimsDiagnostic\(env\.STUDIO_MEDIA\)/);
-  assert.match(worker,/version: "0\.10\.739-story-r4-stale-hold-r5-reconcile"/);
+  assert.match(worker,/version: "0\.10\.740-story-r4-expired-priority-fairness"/);
   assert.match(worker,/if \(request\.method === "POST"\) \{\s*assertWriteRequest\(request, env\);\s*return factoryBatchSubmitRoute/);
   assert.doesNotMatch(inspector,/\.put\(|\.delete\(|airtableFetch|studioPublish/);
 });
