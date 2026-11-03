@@ -1231,7 +1231,8 @@ export async function studioAdmitRenderQueue(env, options = {}) {
     };
   }
   const cursorKey = "ops/r4-skip-cursor-v1";
-  const cursor = await env.STUDIO_MEDIA.get(cursorKey).catch(() => null);
+  const cursorObject = await env.STUDIO_MEDIA.get(cursorKey).catch(() => null);
+  const cursor = cursorObject ? await cursorObject.text().catch(() => null) : null;
   const queueOrder = rotateR4CandidatesAfterCursor(admitCandidates, cursor, controls);
   if (!queueOrder.length) {
     return {

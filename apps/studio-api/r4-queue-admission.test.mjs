@@ -34,3 +34,11 @@ test("Studio R4 dispatcher gates success on the verified job receipt and bounds 
   assert.match(source, /safeSkippedReasons\.has\(skipReason\)/);
   assert.match(source, /env\.STUDIO_MEDIA\.put\(cursorKey, head\.id\)/);
 });
+
+test("Cloudflare R2 cursor object is decoded rather than passed as an object identity", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
+  assert.match(source, /const cursorObject = await env\.STUDIO_MEDIA\.get\(cursorKey\)/);
+  assert.match(source, /cursorObject\.text\(\)/);
+  assert.doesNotMatch(source, /const cursor = await env\.STUDIO_MEDIA\.get\(cursorKey\)/);
+});
