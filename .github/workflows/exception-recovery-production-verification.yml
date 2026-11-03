@@ -30,6 +30,8 @@ jobs:
         with:
           node-version: '22'
       - run: node --check repair/scripts/exception-recovery-production-audit.mjs
+      - run: node --check repair/scripts/exception-recovery-disposition.mjs
+      - run: node --test repair/scripts/exception-recovery-disposition.test.mjs
       - run: node --test apps/studio-api/exception-recovery-conversation.test.mjs apps/studio-api/exception-recovery-home-parity.test.mjs apps/studio-api/exception-recovery-autonomous.test.mjs apps/studio-api/exception-recovery-qa-parity.test.mjs
       - name: Refuse any provider writes or broad output mutations in verification script
         shell: bash
