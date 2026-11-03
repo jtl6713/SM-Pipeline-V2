@@ -33,7 +33,13 @@ async function cf(path,options={}){
 }
 async function settingsPatch(bindings){
   const form=new FormData();
-  form.append('settings',new Blob([JSON.stringify({bindings})],{type:'application/json'}),'settings.json');
+  form.append('settings',new Blob([JSON.stringify({
+    bindings,
+    exports:{
+      StudioProfileSummary:{type:'durable-object',storage:'sqlite'},
+      ScheduleReservationLane:{type:'durable-object',storage:'sqlite'},
+    },
+  })],{type:'application/json'}),'settings.json');
   return cf('/workers/scripts/'+SCRIPT+'/settings',{method:'PATCH',body:form});
 }
 function byName(rows){return new Map(rows.map(x=>[x.name,x]));}
@@ -194,6 +200,9 @@ try{
   const mapped=byName(oldBindings);
   assert(mapped.get('STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED')?.text==='true','authority_not_enabled');
   assert(mapped.get('STUDIO_SCHEDULE_RESERVATIONS')?.type==='durable_object_namespace','do_binding_missing');
+  assert(mapped.get('STUDIO_SCHEDULE_RESERVATIONS')?.class_name==='ScheduleReservationLane','schedule_reservation_export_identity_mismatch');
+  assert(mapped.get('STUDIO_PROFILE_SUMMARIES')?.type==='durable_object_namespace' &&
+    mapped.get('STUDIO_PROFILE_SUMMARIES')?.class_name==='StudioProfileSummary','profile_summary_export_identity_mismatch');
   assert(mapped.get('AIRTABLE_PAT')?.type==='secret_text','airtable_secret_missing');
   assert(mapped.get('STUDIO_MEDIA')?.type==='r2_bucket','r2_binding_missing');
   oldAllowlist=String(mapped.get('STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST')?.text||'');
