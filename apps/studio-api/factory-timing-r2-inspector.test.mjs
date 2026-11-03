@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { readFactoryTimingReport } from "./factory-timing-r2-inspector.mjs";
+import { readFactoryTimingReport, readFactoryClaimsDiagnostic } from "./factory-timing-r2-inspector.mjs";
 
 const inspector = fs.readFileSync(new URL("./factory-timing-r2-inspector.mjs", import.meta.url), "utf8");
 const profile = "recgtK8Z7eNADNtVy";
@@ -66,4 +66,55 @@ test("Real Factory item timeline shape yields observed stage metrics, not invent
   assert.equal(report.combined_timing_report.metrics.airtable_schedule_commit.p50_ms,300);
   assert.equal(report.batches.length,2);
   assert.equal(report.batches[0].batch_wall_ms,40000);
+});
+
+
+test("Factory claims diagnostic is bounded, authenticated and strictly read-only", async () => {
+  const chi="recT2rbKX3MF7cVFU", la="recF7UAn0LkMZZrWZ";
+  const key="studio/state/factory-approvals/v2/output-claims-v1/"+chi+".json";
+  const groupRoot="studio/state/factory-approvals/v2/groups/";
+  const jobRoot="studio/state/factory-approvals/v2/jobs/"+chi+"/";
+  const now=Date.parse("2026-11-03T04:00:00.000Z");
+  const claims={
+    schema:"studio.factory-output-claims.1",profile_id:chi,
+    outputs:{
+      recA0000000000001:{request_id:"factory_unbacked_20261103",source:"submission",at:"2026-11-03T01:10:00.000Z"},
+      recA0000000000002:{request_id:"factory_unbacked_20261103",source:"submission",at:"2026-11-03T01:10:00.000Z"},
+      recA0000000000003:{request_id:"factory_backed_20261103",source:"submission",at:"2026-11-03T02:00:00.000Z"},
+      recA0000000000004:{request_id:"factory_local_20261103",source:"submission",at:"2026-11-03T02:00:00.000Z"},
+      recA0000000000005:{request_id:"factory_old_20261001",source:"legacy",at:"2026-10-01T02:00:00.000Z"},
+    },
+  };
+  const storage=new Map([
+    [key,claims],
+    [groupRoot+"factory_backed_20261103.json",{schema:"studio.factory-approval-group.1"}],
+    [jobRoot+"factory_local_20261103.json",{schema:"studio.factory-batch.2"}],
+  ]);
+  const bucket={
+    async put(){throw Error("Diagnostic must not write production R2");},
+    async delete(){throw Error("Diagnostic must not delete production R2");},
+    async list({prefix,limit}){
+      assert.equal(limit,1000,"R2 enumeration must be bounded");
+      return {objects:[],truncated:false};
+    },
+    async get(path){
+      const data=storage.get(path);
+      return data ? {text:async()=>JSON.stringify(data)} : null;
+    },
+  };
+  const result=await readFactoryClaimsDiagnostic(bucket,now);
+  assert.equal(result.read_only,true);
+  assert.equal(result.schema,"studio.factory-claims-readonly.1");
+  assert.equal(result.profiles.length,4);
+  assert.equal(result.unbacked_recent_owners,1);
+  const chicago=result.profiles.find(x=>x.profile_id===chi);
+  assert.equal(chicago.total_claims,5);
+  assert.equal(chicago.recent_claims,4);
+  assert.equal(chicago.recent_owners,3);
+  assert.deepEqual(chicago.recent_unbacked_owners.map(x=>x.request_id),
+    ["factory_unbacked_20261103"]);
+  assert.equal(chicago.recent_unbacked_owners[0].claim_count,2);
+  assert.equal(result.profiles.find(x=>x.profile_id===la).registry_present,false);
+  assert.match(inspector,/request\.headers\.get\("Authorization"\)/);
+  assert.doesNotMatch(inspector,/\.put\(|\.delete\(/);
 });
