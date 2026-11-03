@@ -25,3 +25,12 @@ test("production seed wires the tested status function and preserves a separate 
   assert.match(source, /Render_Status: storySeedRenderStatus\(\{ nativeReady, outputType: effective\.output_type, remotionReady \}\)/);
   assert.match(source, /Output_Status: nativeReady \? "Ready for Review" : "In Production"/);
 });
+
+test("global R4 selector admits prepared Stories instead of filtering them out", () => {
+  const source = readFileSync(new URL("./worker.js", import.meta.url), "utf8");
+  const selector = source.split("\n").find(line => line.startsWith("const STUDIO_RENDER_QUEUE_CANDIDATE_FORMULA")) || "";
+  assert.ok(selector.includes("Ready for Render"));
+  assert.ok(selector.includes("Render_Total_Frames"));
+  assert.ok(!selector.includes('Format}!="Story"'));
+  assert.ok(!selector.includes('Studio_Output_Type}!="Story"'));
+});
