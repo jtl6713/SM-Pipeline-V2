@@ -667,3 +667,4 @@ Deploy Studio UI 0.6.855 confirmed-save meter: add a distinct filled batch-progr
 2026-11-02: Deploy Studio UI 0.6.864-factory-submit-error-visible. Keep a failed Submit Approvals reason visible across automatic Desk refreshes so operators know nothing was accepted and when it is safe to retry.
 2026-11-02: Deploy Studio UI 0.6.865-factory-submit-safe-retry. Reuse the exact Factory request ID for one bounded Airtable-busy retry and preserve every final submission error across Desk refreshes.
 Deploy Studio UI 0.6.866: recover exact-ID legacy/global Factory pending approval fences (PR #1534, issue #1533).
+Deploy Studio UI 0.6.867: retry ambiguous Factory HTTP 500 once using exact saved request ID after read-only verification.
