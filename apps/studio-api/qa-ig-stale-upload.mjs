@@ -63,6 +63,39 @@ export function classifyStaleInstagramReel(row, {
   };
 }
 
+
+/** Authenticated, read-only GET of the exact saved Instagram container. */
+export async function verifySavedInstagramContainer(row, {
+  settings = {}, expectedAccountId, fetcher = fetch,
+} = {}) {
+  const id = str(row, "Platform_Media_ID");
+  const account = String(expectedAccountId ?? "").trim();
+  const token = String(settings.META_GRAPH_API_ACCESS_TOKEN || "").trim();
+  const version = /^v\d{1,2}\.\d$/.test(String(settings.META_GRAPH_API_VERSION || ""))
+    ? settings.META_GRAPH_API_VERSION : "v26.0";
+  const deny = reason => ({ verified: false, reason, read_only: true });
+  if (!/^\d{6,35}$/.test(id) || !/^\d{6,35}$/.test(account)
+    || !token || str(row, "Platform") !== "Instagram")
+    return deny("saved_container_or_scoped_credentials_missing");
+  let response, data;
+  try {
+    const url = "https://graph.facebook.com/" + version + "/" + id + "?fields=id,status_code";
+    response = await fetcher(url, { method: "GET", redirect: "manual",
+      signal: AbortSignal.timeout(10000),
+      headers: {Authorization: "Bearer " + token, Accept: "application/json"} });
+    if (response?.ok !== true || (response.status >= 300 && response.status < 400))
+      return deny("authenticated_container_get_rejected");
+    data = await response.json();
+  } catch { return deny("authenticated_container_get_unavailable"); }
+  const status = String(data?.status_code || "").toUpperCase();
+  if (String(data?.id || "") !== id
+    || !["IN_PROGRESS", "FINISHED", "ERROR", "EXPIRED", "PUBLISHED"].includes(status))
+    return deny("container_identity_or_status_unverified");
+  return {verified: true, container_id: id, status,
+    evidence: "authenticated_graph_get_exact_saved_container", read_only: true,
+    public_post_verified: false, new_containers: 0};
+}
+
 export function staleInstagramReelFormula(nowMs = Date.now(), thresholdMs = QA_IG_STALE_UPLOAD_THRESHOLD_MS) {
   // Formula-side limit avoids repeated large-table full scans on maintenance cron.
   const cutoff = new Date(nowMs - Math.max(thresholdMs, 60000)).toISOString();
@@ -73,7 +106,7 @@ export function staleInstagramReelFormula(nowMs = Date.now(), thresholdMs = QA_I
 }
 
 export async function auditStaleInstagramReels(env, {
-  airtableFetch, verifyProvider, nowMs = Date.now(), limit = 12,
+  airtableFetch, verifyProvider, verifyContainer, nowMs = Date.now(), limit = 12,
 } = {}) {
   if (typeof airtableFetch !== "function") throw new Error("QA stale Reel Airtable dependency missing");
   const bounded = Math.min(30, Math.max(1, Number(limit) || 12));
@@ -108,18 +141,33 @@ export async function auditStaleInstagramReels(env, {
           evidence: "provider_read_failed" };
       }
     }
+    let container = { verified: false, reason: "no_saved_container" };
+    if (!recheck.post_id_saved && recheck.container_id_saved) {
+      try {
+        container = typeof verifyContainer === "function"
+          ? await verifyContainer(current)
+          : { verified: false, reason: "container_verifier_not_connected" };
+      } catch { container = {verified: false, reason: "container_read_unavailable"}; }
+    }
     const confirmed = provider?.verified_public === true
       && provider?.ownership_verified === true
       && String(provider?.remote_id || "") === str(current, "Platform_Post_ID");
+    const containerConfirmed = container?.verified === true
+      && container?.container_id === str(current, "Platform_Media_ID");
     const outcome = confirmed ? "published_identity_verified_pending_reconciliation"
+      : containerConfirmed ? "saved_container_verified_pending_fenced_resume"
       : "stale_lock_needs_eyes";
     const evidence = {
       ...recheck, outcome,
       provider_evidence: String(provider?.evidence || "unverified").slice(0, 160),
       provider_public_verified: confirmed,
       provider_ownership_verified: confirmed,
+      container_identity_verified: containerConfirmed,
+      container_status: containerConfirmed ? String(container.status).slice(0,30) : null,
+      container_evidence: String(container?.evidence || container?.reason || "not_checked").slice(0,140),
       observed_at: new Date(nowMs).toISOString(),
       next_action: confirmed ? "use_existing_publication_receipt_reconciler"
+        : containerConfirmed ? "fence_previous_runner_then_resume_saved_container_only"
         : "verify_runner_lease_and_remote_identity_before_fenced_MAE_reschedule",
       release_lock: false, schedule_changed: false, graph_create_authorized: false,
     };
@@ -131,7 +179,9 @@ export async function auditStaleInstagramReels(env, {
         Event_Key: eventKey, Output_Record_ID: observed.id, Output_ID: decision.output_id,
         Platform: "Instagram", Output_Type: "Instagram Reel",
         Outcome: outcome, Evidence_Source: confirmed
-          ? "authenticated_account_scoped_graph_exact_post_id" : "airtable_stale_publish_lock",
+          ? "authenticated_account_scoped_graph_exact_post_id"
+          : containerConfirmed ? "authenticated_graph_get_exact_saved_container"
+          : "airtable_stale_publish_lock",
         Verified_At: new Date(nowMs).toISOString(), Actor: "studio-quality-agent",
         Details_JSON: JSON.stringify(evidence),
       } }] };
