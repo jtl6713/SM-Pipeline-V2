@@ -295,7 +295,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.870-factory-v2-handoff";
+  const BUILD_ID = "item4-0.6.871-vibe-mae-final-approval";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -8590,6 +8590,16 @@ function timedScriptAssetLabel(asset, index) {
     ezWizardLogAdd("user", label);
     if (ezWizardStep === "start") ezWizardAnswers = {};
     Object.assign(ezWizardAnswers, patch);
+    // Vibe scheduling is reserved by MAE at final human publishing approval.
+    // Do not force a provisional date-confirmation screen before source upload.
+    // Keep the existing confirmation step for other Studio intake paths.
+    if (nextStep === "confirm"
+      && (ezWizardAnswers.inputKind === "vibe-cut" || ezWizardAnswers.start === "vibe-cut")) {
+      delete ezWizardAnswers.schedules;
+      ezWizardLogAdd("bot", "Publish dates will be assigned when you give final approval.");
+      void finishEzWizard();
+      return;
+    }
     ezWizardGo(nextStep);
   }
 
