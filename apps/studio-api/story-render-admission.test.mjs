@@ -87,8 +87,12 @@ test("five-minute R4 admission runs independently of long cron maintenance witho
   assert.match(worker,/ctx\.waitUntil\(studioAdmitRenderQueue\(env, \{ limit: 80 \}\)/);
   assert.match(worker,/await healStuckStudioRenders\(env, \{ skipR4Admission: true \}\)/);
   assert.match(healer,/if \(!skipR4Admission\)/);
-  assert.ok(worker.indexOf("ctx.waitUntil(studioAdmitRenderQueue") <
-    worker.indexOf("await factoryBatchCronResume(env, ctx);"));
+  // The minute-cron branch above also calls Factory, but returns before this
+  // five-minute admission path. Compare only within the heavy/light cron.
+  const fiveMinuteCron = worker.split("const cadence = studioCronAirtableCadence")[1] || "";
+  assert.ok(fiveMinuteCron.includes("ctx.waitUntil(studioAdmitRenderQueue"));
+  assert.ok(fiveMinuteCron.indexOf("ctx.waitUntil(studioAdmitRenderQueue") <
+    fiveMinuteCron.indexOf("await healStuckStudioRenders(env, { skipR4Admission: true });"));
 });
 
 
