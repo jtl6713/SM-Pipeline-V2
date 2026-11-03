@@ -162,3 +162,25 @@ test("existing saved container is audited without new Graph create or lock relea
   assert.equal(outcomes[0].graph_create_authorized,false);
   assert.equal(outcomes[0].release_lock,false);
 });
+
+test("saved container with provider PUBLISHED status is never offered for re-publish", async () => {
+  const candidate=row({Platform_Media_ID:"18127559140783117"});
+  let persisted;
+  const events=await auditStaleInstagramReels({}, {
+    nowMs:NOW,verifyContainer:async () => ({
+      verified:true,container_id:"18127559140783117",status:"PUBLISHED",
+      evidence:"authenticated_graph_get_exact_saved_container",
+    }),
+    airtableFetch: async (_env, table, path, options) => {
+      if (options?.method==="PATCH") {
+        persisted=JSON.parse(options.body).records[0].fields;
+        return {records:[{id:"rec12345678901239"}]};
+      }
+      if (table==="Quality Agent Recovery Ledger") return {id:path,fields:persisted};
+      return String(path).startsWith("?") ? {records:[candidate]} : candidate;
+    },
+  });
+  assert.equal(events[0].outcome,"container_reports_published_receipt_unverified");
+  assert.equal(events[0].next_action,"verify_exact_public_post_receipt_no_publish");
+  assert.equal(events[0].graph_create_authorized,false);
+});
