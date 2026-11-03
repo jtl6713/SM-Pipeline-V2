@@ -358,7 +358,7 @@ test("Factory preserves original fence when status unavailable or identity confl
   assert.match(js,/ready = readyFactoryOutputs\(true\)\.filter\(card => state\.selectedOutputs\.has\(card\.id\)\)/);
   assert.match(html,/id="factoryBatchRecoverPending"/);
   assert.match(js,/factoryBatchRecoverPending"\)\?\.addEventListener/);
-  assert.match(html,/UI build 0\.6\.868/);
+  assert.match(html,/UI build 0\.6\.869/);
 });
 
 test("Factory partly committed global groups preserve unsubmitted selection", async () => {
@@ -458,5 +458,26 @@ test("Factory errors count the current attempted outputs only, not saved cross-c
   assert.match(js,/if \(pending\) \{\s*setBatchSubmissionError\("Saved Factory approval is unresolved/);
   assert.match(js,/if \(pendingFactoryApproval\(\) \|\| state\.submittingBatch/);
   assert.match(html,/id="factoryBatchPendingNotice"/);
-  assert.match(html,/UI build 0\.6\.868/);
+  assert.match(html,/UI build 0\.6\.869/);
+});
+
+
+test("Factory recovery button stays visually hidden when no saved request exists", () => {
+  assert.match(css, /#page-factory #factoryBatchRecoverPending\[hidden\][\s\S]{0,120}display:none!important/,
+    "Explicit author-level hidden rule is needed because shared secondary-button forces inline-flex");
+  assert.match(css, /#page-factory #factoryBatchPendingNotice\[hidden\]/,
+    "The pending notice must also be suppressed when no request is unresolved");
+  assert.match(js, /recover\.hidden = !pending/);
+  assert.match(js, /submit\.disabled = !selectable[\s\S]{0,200}Boolean\(pending\)/);
+});
+
+test("Factory does not restore a stale HTTP 500 banner after request is reconciled", () => {
+  assert.match(js, /if \(!pendingFactoryApproval\(\)\) \{\s*sessionStorage\.removeItem\(FACTORY_SUBMISSION_ERROR_KEY\);/,
+    "Hydration must clear session errors when no exact-ID pending fence exists");
+  assert.match(js, /if \(!pendingFactoryApproval\(\)\) setBatchSubmissionError\(null\)/,
+    "Confirmed-absent automatic reconciliation must clear the saved error");
+  assert.match(js, /if \(!pendingFactoryApproval\(\)\) \{\s*setBatchSubmissionError\(null\);\s*setStatus\("Previous Factory request verified in batch history/,
+    "Confirmed-committed automatic reconciliation must clear the saved error");
+  assert.match(js, /if \(savedError\?\.message && Date\.now\(\) - Number\(savedError\.saved_ms \|\| 0\) < 30 \* 60 \* 1000\)/,
+    "A real pending submission should retain its last error within the normal time window");
 });
