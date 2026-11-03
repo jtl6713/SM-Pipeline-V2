@@ -42,3 +42,21 @@ test("Cloudflare R2 cursor object is decoded rather than passed as an object ide
   assert.match(source, /cursorObject\.text\(\)/);
   assert.doesNotMatch(source, /const cursor = await env\.STUDIO_MEDIA\.get\(cursorKey\)/);
 });
+
+test("completed render priorities must not disable durable Story queue rotation", () => {
+  const rows = [{id:"old-head"},{id:"story-one"},{id:"story-two"}];
+  const stale = {render_priority:["finished-a","finished-b"]};
+  assert.deepEqual(rotateR4CandidatesAfterCursor(rows,"old-head",stale).map(x=>x.id),
+    ["story-one","story-two","old-head"]);
+  assert.deepEqual(rotateR4CandidatesAfterCursor(rows,"story-one",stale).map(x=>x.id),
+    ["story-two","old-head","story-one"]);
+  assert.equal(rotateR4CandidatesAfterCursor(rows,"old-head",{render_priority:["story-one"]}),rows);
+});
+
+test("R4 single-attempt operator fence applies only to live candidates", async () => {
+  const {readFileSync} = await import("node:fs");
+  const source = readFileSync(new URL("./worker-functions-02.mjs", import.meta.url),"utf8");
+  assert.match(source,/const eligibleAdmitIds = new Set/);
+  assert.match(source,/controls\.render_priority\.some\(id => eligibleAdmitIds\.has/);
+  assert.match(source,/const maxAttempts = manualPriority \? 1 : Math\.min\(4, queueOrder\.length\)/);
+});
