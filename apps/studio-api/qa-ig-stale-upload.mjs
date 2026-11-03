@@ -154,8 +154,13 @@ export async function auditStaleInstagramReels(env, {
       && String(provider?.remote_id || "") === str(current, "Platform_Post_ID");
     const containerConfirmed = container?.verified === true
       && container?.container_id === str(current, "Platform_Media_ID");
+    const containerStatus = containerConfirmed ? String(container.status).toUpperCase() : "";
+    const resumableContainer = ["IN_PROGRESS", "FINISHED"].includes(containerStatus);
     const outcome = confirmed ? "published_identity_verified_pending_reconciliation"
-      : containerConfirmed ? "saved_container_verified_pending_fenced_resume"
+      : containerConfirmed && containerStatus === "PUBLISHED"
+        ? "container_reports_published_receipt_unverified"
+      : containerConfirmed && resumableContainer
+        ? "saved_container_verified_pending_fenced_resume"
       : "stale_lock_needs_eyes";
     const evidence = {
       ...recheck, outcome,
@@ -163,11 +168,13 @@ export async function auditStaleInstagramReels(env, {
       provider_public_verified: confirmed,
       provider_ownership_verified: confirmed,
       container_identity_verified: containerConfirmed,
-      container_status: containerConfirmed ? String(container.status).slice(0,30) : null,
+      container_status: containerConfirmed ? containerStatus.slice(0,30) : null,
       container_evidence: String(container?.evidence || container?.reason || "not_checked").slice(0,140),
       observed_at: new Date(nowMs).toISOString(),
       next_action: confirmed ? "use_existing_publication_receipt_reconciler"
-        : containerConfirmed ? "fence_previous_runner_then_resume_saved_container_only"
+        : containerStatus === "PUBLISHED" ? "verify_exact_public_post_receipt_no_publish"
+        : containerConfirmed && resumableContainer
+          ? "fence_previous_runner_then_resume_saved_container_only"
         : "verify_runner_lease_and_remote_identity_before_fenced_MAE_reschedule",
       release_lock: false, schedule_changed: false, graph_create_authorized: false,
     };
