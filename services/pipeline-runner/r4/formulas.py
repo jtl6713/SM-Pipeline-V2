@@ -7,7 +7,7 @@ def r4_production_formula() -> str:
     return (
         'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",'
         '{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",'
-        '{Render_Total_Frames}>0,{Format}!="Story",{Studio_Output_Type}!="Story"))'
+        '{Render_Total_Frames}>0,{Final_File_URL}="",{Remotion_Job_ID}=""))'
     )
 
 
