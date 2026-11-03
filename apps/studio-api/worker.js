@@ -1286,9 +1286,12 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.731-factory-submit-airtable-window",
+          version: "0.10.732-qa-ig-fenced-pregraph-lease",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
+          qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
+          qa_ig_publish_lease_enabled: igPublishLeaseEnabled(env),
+          qa_ig_unattended_reschedule_enabled: igPublishLeaseEnabled(env) && env.STUDIO_IG_STALE_UPLOAD_AUTO_RECOVERY_ENABLED === "true",
           quality_autonomous_verification_recovery_v1: true,
           quality_durable_recovery_ledger_v1: true,
           quality_meta_story_readonly_verification_v1: true,
