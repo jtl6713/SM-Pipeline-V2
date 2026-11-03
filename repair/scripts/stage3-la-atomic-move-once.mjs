@@ -52,20 +52,26 @@ function assertBindingParity(before,after,expectedAllowlist){
 const bridgeToken=crypto.randomBytes(32).toString('hex');
 let origin='';
 async function bridge(op){
-  for(let attempt=1;attempt<=12;attempt++){
+  const attempts=op==='read'?25:1;
+  for(let attempt=1;attempt<=attempts;attempt++){
     const r=await fetch(origin+'/'+bridgeToken+'/'+op,{
       method:op==='move'?'POST':'GET',
       headers:{Accept:'application/json'},
       signal:AbortSignal.timeout(op==='move'?100000:65000),redirect:'error'
     });
     const txt=await r.text();
-    if((txt.includes('error code: 1042')||(r.status===404&&!txt.trim().startsWith('{'))) && attempt<12){
+    // Only idempotent GETs may retry edge readiness failures. Cloudflare
+    // sometimes serves a JSON 404 until a new workers.dev route propagates.
+    // NEVER automatically replay POST /move after any remote response.
+    if(op==='read'&&attempt<attempts&&
+       (txt.includes('error code: 1042')||[401,403,404,502,503,504].includes(r.status))){
+      console.log('stage3_read_bridge_not_ready_http='+r.status+' attempt='+attempt);
       await sleep(3000);continue;
     }
     let payload;try{payload=JSON.parse(txt)}catch{throw Error('bridge_non_json_'+op+'_'+r.status)}
     return {http:r.status,...payload};
   }
-  throw Error('bridge_not_ready_'+op);
+  throw Error('bridge_read_not_ready_after_25_attempts');
 }
 function checkRow(r,id,num,expected,story=false){
   assert(r?.id===id&&Number(r.output_id)===num,'source_identity_changed_'+num);
