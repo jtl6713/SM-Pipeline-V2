@@ -873,3 +873,5 @@ Deploy Worker 0.10.738-vibe-preflight-error-boundary (2026-11-03). Await Idea/Pr
 2026-11-03: Deploy Worker 0.10.739-story-r4-stale-hold-r5-reconcile. Before blocked Story queue admission, run bounded R5 polling of existing Airtable Rendering holds, re-read canonical holds, and fail closed on uncertain job state. No auto-approval, publish, or duplicate render.
 
 2026-11-03: Deploy Worker 0.10.740-story-r4-live-priority-fairness. Exact live R2 diagnostic confirmed eight obsolete operator priority IDs (#2777-#2786) are already Rendered and not eligible, yet they disabled fairness rotation and forced single-attempt dispatch. Apply priority restrictions only to eligible candidate IDs; preserve true live priority and single-slot/double-launch safety, Airtable authority and no publishing. Protected production deploy.
+
+2026-11-03: Deploy Worker 0.10.741-story-r4-admission-reason. Record bounded safe nonsecret admission reason, selected head ID, Runner status/reason, and skipped candidate reasons in existing cron logs. No change to queue or publish behavior. Required to diagnose remaining six Chicago Stories stuck after 0.10.740 fairness correction.

@@ -11827,7 +11827,18 @@ export async function healStuckStudioRenders(env) {
   if (pulses.length) {
     console.log("Studio stuck-render heal", JSON.stringify({
       count: pulses.length,
-      pulses: pulses.map((row) => ({ key: row.key, id: row.id, error: row.error || null })),
+      pulses: pulses.map((row) => ({
+        key: row.key, id: row.id, error: row.error || null,
+        ...(row.key === "R4_QUEUE_ADMIT" ? {
+          admitted: row.admitted === true,
+          reason: row.reason || null,
+          head: row.head || null,
+          runner_status: row.started?.status || null,
+          runner_reason: row.started?.details?.run?.reason || row.started?.details?.reason || null,
+          runner_message: String(row.started?.message || "").slice(0, 220),
+          skipped: (row.skipped || []).map(x => ({ id: x.id, reason: x.reason })),
+        } : {}),
+      })),
     }));
   }
   return pulses;
