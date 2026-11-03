@@ -110,7 +110,7 @@ export async function auditStaleInstagramReels(env, {
 } = {}) {
   if (typeof airtableFetch !== "function") throw new Error("QA stale Reel Airtable dependency missing");
   const bounded = Math.min(30, Math.max(1, Number(limit) || 12));
-  const formula = staleInstagramReelFormula(nowMs);
+  let queryNowMs = nowMs;
   // Rotate through the full stale set: without an R2 cursor the first eight
   // old incidents would hide every later lock indefinitely.
   const cursorKey = "studio/state/qa-ig-stale-upload/v1/cursor.json";
@@ -120,12 +120,16 @@ export async function auditStaleInstagramReels(env, {
       const prior = await env.STUDIO_MEDIA.get(cursorKey);
       const state = prior ? JSON.parse(await prior.text()) : {};
       if (typeof state.offset === "string" && state.offset.length <= 1024
-        && nowMs - Number(state.checked_at_ms) < 24 * 60 * 60 * 1000)
+        && Number.isFinite(Number(state.cutoff_ms))
+        && nowMs - Number(state.cutoff_ms) < 24 * 60 * 60 * 1000
+        && nowMs - Number(state.checked_at_ms) < 24 * 60 * 60 * 1000) {
         cursor = state.offset;
+        queryNowMs = Number(state.cutoff_ms); // Stable formula across pages.
+      }
     } catch { cursor = ""; }
   }
   const readPage = async offset => {
-    const params = "?filterByFormula=" + encodeURIComponent(formula)
+    const params = "?filterByFormula=" + encodeURIComponent(staleInstagramReelFormula(queryNowMs))
       + "&pageSize=" + bounded
       + (offset ? "&offset=" + encodeURIComponent(offset) : "");
     return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID || "Platform Outputs", params);
@@ -134,6 +138,7 @@ export async function auditStaleInstagramReels(env, {
   try { found = await readPage(cursor); }
   catch (error) {
     if (!cursor) throw error;
+    queryNowMs = nowMs;
     found = await readPage(""); // Expired pagination token; restart safely.
   }
   if (!Array.isArray(found?.records))
@@ -235,6 +240,7 @@ export async function auditStaleInstagramReels(env, {
       schema: "qa.ig-stale-upload-cursor.1",
       offset: typeof found.offset === "string" && found.offset.length <= 1024
         ? found.offset : null,
+      cutoff_ms: typeof found.offset === "string" ? queryNowMs : null,
       checked_at_ms: nowMs, candidate_count: found.records.length,
       audited_count: results.length,
     }), {httpMetadata:{contentType:"application/json"}});
