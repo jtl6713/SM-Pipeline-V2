@@ -135,3 +135,18 @@ test("read-only lease inspection does not expose a false configured state",async
   assert.deepEqual(state,{available:true,state:null});
   assert.equal((await readIgPublishLease({},OUTPUT)).available,false);
 });
+
+test("runner finish cannot erase a Graph-intent quarantine",async()=>{
+  const f=fixture();
+  const claim=await mutateIgPublishLease(f.env,{action:"claim",outputId:OUTPUT,
+    readOutput:f.readOutput,nowMs:now});
+  lock(f);
+  await mutateIgPublishLease(f.env,{action:"remote_intent",outputId:OUTPUT,
+    attemptId:claim.attempt_id,generation:claim.generation,
+    lockStamp:"2026-11-02T18:00:00Z",readOutput:f.readOutput,nowMs:now+1000});
+  await assert.rejects(mutateIgPublishLease(f.env,{action:"finish",outputId:OUTPUT,
+    attemptId:claim.attempt_id,generation:claim.generation,
+    lockStamp:"2026-11-02T18:00:00Z",readOutput:f.readOutput,nowMs:now+2000}),
+    /irreversible_intent_requires_provider_reconciliation/);
+  assert.equal(f.lease.phase,"remote_intent");
+});
