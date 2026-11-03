@@ -165,6 +165,8 @@ class ProcessorBoundaryTests(unittest.TestCase):
             return {"ok": True}
         namespace = {
             "shared_dispatch_claim_required": lambda _output_id=None: shared_claim,
+            "ig_publish_lease_required": lambda: False,
+            "IgPublishLeaseError": type("IgPublishLeaseError", (Exception,), {}),
             "ReviewDispatchClaimError": ClaimError,
             "is_chicago_reel": lambda _client, _output: True,
             "claim_chicago_dispatch": fake_claim,
