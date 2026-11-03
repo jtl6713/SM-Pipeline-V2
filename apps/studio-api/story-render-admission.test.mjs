@@ -67,3 +67,14 @@ test("R4 reconciles old Airtable Rendering holds through R5, without bypassing a
   assert.match(admit, /busy = \{ \.\.\.busy, busy: true \}/);
   assert.ok(admit.indexOf("await item4PulseR5Python") < admit.indexOf("if (busy.busy) {"));
 });
+
+test("R4 cron log exposes only bounded admission refusal, not render payload", () => {
+  const source = readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
+  const body = source.split("export async function healStuckStudioRenders")[1]
+    ?.split("/*__STUDIO_WORKER_END:healStuckStudioRenders__*/")[0] || "";
+  assert.match(body,/row.key === "R4_QUEUE_ADMIT"/);
+  assert.match(body,/runner_status: row.started\?\.status/);
+  assert.match(body,/runner_reason: row.started\?\.details\?\.run\?\.reason/);
+  assert.match(body,/runner_message: String\(row.started\?\.message \|\| ""\)\.slice\(0, 220\)/);
+  assert.doesNotMatch(body,/JSON\.stringify\(row\.started\)/);
+});
