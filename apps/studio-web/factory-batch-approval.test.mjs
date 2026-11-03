@@ -358,7 +358,7 @@ test("Factory preserves original fence when status unavailable or identity confl
   assert.match(js,/ready = readyFactoryOutputs\(true\)\.filter\(card => state\.selectedOutputs\.has\(card\.id\)\)/);
   assert.match(html,/id="factoryBatchRecoverPending"/);
   assert.match(js,/factoryBatchRecoverPending"\)\?\.addEventListener/);
-  assert.match(html,/UI build 0\.6\.867/);
+  assert.match(html,/UI build 0\.6\.868/);
 });
 
 test("Factory partly committed global groups preserve unsubmitted selection", async () => {
