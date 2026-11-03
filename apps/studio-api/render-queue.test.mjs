@@ -35,6 +35,19 @@ function row(fields, id = "rec1") {
   return { id, fields };
 }
 
+test("Stories stay independent Remotion queue jobs, not shared-render siblings", () => {
+  const common = { Content_Item: ["recContent"], Aspect_Ratio: "9:16", Composition_ID: "ChicagoShiningPhotoSequence" };
+  const inputs = [
+    row({ ...common, Output_ID: 100, Platform: "Instagram", Studio_Output_Type: "Reel", Format: "Vertical Short Video" }, "recMain"),
+    row({ ...common, Output_ID: 101, Platform: "Instagram", Studio_Output_Type: "Story", Format: "Story" }, "recIgStory"),
+    row({ ...common, Output_ID: 102, Platform: "Facebook", Studio_Output_Type: "Story", Format: "Story" }, "recFbStory"),
+  ];
+  const queue = assignRenderQueuePositions(inputs);
+  assert.equal(queue.total, 3);
+  assert.deepEqual(queue.admitCandidates.map(x => x.id), ["recMain", "recIgStory", "recFbStory"]);
+  assert.equal(queue.siblingMeta.size, 0);
+});
+
 test("render queue labels and ordering", () => {
   assert.equal(formatRenderQueueLabel(4, 12), "Waiting in render queue (#4 of 12)");
   assert.equal(formatRenderQueueLabel(0, 12), "Waiting in render queue");

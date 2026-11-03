@@ -1,3 +1,4 @@
+import { storySeedRenderStatus } from "./story-render-admission.mjs";
 import { ideaProducerDirection, mergeIdeaProducerDirection } from "./idea-producer-direction.mjs";
 import { scriptedShortPublishableTitle } from "./scripted-short-title.mjs";
 import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
@@ -6684,7 +6685,10 @@ export function platformOutputSeedFields(parentContentItem, requestRecord, outpu
     Platform_Output_Type: String(planItem.mapping_type || route.proven_mapping || effective.output_type || "").trim(),
     Aspect_Ratio: String(planItem.aspect_ratio || sourcePackage?.ratio || "").trim(),
     Output_Status: nativeReady ? "Ready for Review" : "In Production",
-    Render_Status: nativeReady ? "Native Photo Route" : null,
+    // Stories with an authoritative, complete Remotion package must be visible to R4 immediately.
+    // Otherwise the Story can remain indefinitely unqueued while its video siblings finish.
+    // Keep non-Story outputs on their existing R2/R3 admission path.
+    Render_Status: storySeedRenderStatus({ nativeReady, outputType: effective.output_type, remotionReady }),
     Studio_Preview_URL: nativeReady ? (String(clips[0]?.url || "").trim() || null) : null,
     Thumbnail_URL: (function thumbnailUrl() {
       const parentThumb = studioAiThumbnailUrl(f(parentContentItem, "Thumbnail_URL"));
