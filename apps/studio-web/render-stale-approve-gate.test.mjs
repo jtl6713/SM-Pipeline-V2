@@ -27,11 +27,11 @@ test("Worker reconciles uploaded R5 media in Rendering or stale Ready without re
   assert.match(worker, /version: "0\.10\.\d+(?:-[\w.-]+)?"/);
   assert.match(worker, /studio_render_stale_rendering_v1: true/);
   assert.match(worker, /R5_STALE_RENDERING_FINALIZED/);
-  assert.match(worker, /\\{Render_Status\\}="Rendering"/);
-  assert.match(worker, /\\{Render_Status\\}="Ready for Render"/);
-  assert.match(worker, /\\{Remotion_Job_ID\\}!=""/);
-  assert.match(worker, /\\{Final_File_URL\\}!=""/);
-  assert.match(worker, /\\{Final_File_Storage_Status\\}="Uploaded"/);
-  assert.match(worker, /completedRenderRecoveryFields\\(current, f\\)/);
+  assert.ok(worker.includes('{Render_Status}="Rendering"'));
+  assert.ok(worker.includes('{Render_Status}="Ready for Render"'));
+  assert.ok(worker.includes('{Remotion_Job_ID}!=""'));
+  assert.ok(worker.includes('{Final_File_URL}!=""'));
+  assert.ok(worker.includes('{Final_File_Storage_Status}="Uploaded"'));
+  assert.ok(worker.includes('completedRenderRecoveryFields(current, f)'));
   assert.match(worker, /Output_Status: "Ready for Review"/);
 });
