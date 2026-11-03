@@ -14,10 +14,10 @@ import { readStudioWorkerSource } from "./worker-source-reader.mjs";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const workerSource = readStudioWorkerSource();
 
-test("global automatic inventory has one stable Airtable Pipeline Setting and default 500", () => {
+test("global automatic inventory has one stable Airtable Pipeline Setting and default 1000", () => {
   assert.equal(GLOBAL_IDEA_TARGET_SETTING, "STUDIO_GLOBAL_AUTOMATIC_IDEA_TARGET");
-  assert.equal(parseGlobalIdeaTarget(undefined), 500);
-  assert.equal(parseGlobalIdeaTarget(null), 500);
+  assert.equal(parseGlobalIdeaTarget(undefined), 1000);
+  assert.equal(parseGlobalIdeaTarget(null), 1000);
   for (const value of [1, 250, 500, 800, 10000, "700"]) assert.equal(parseGlobalIdeaTarget(value), Number(value));
   for (const value of ["", "bad", 0, 10001, 1.5, -1, "12.5"]) assert.equal(parseGlobalIdeaTarget(value), null);
 });
@@ -36,9 +36,11 @@ test("inventory sums all cities and refuses incomplete or invalid counts", () =>
 test("shared cap applies to combined city total, never multiplied by four", () => {
   assert.equal(globalAutomaticIdeaBudget(500, 500), 0);
   assert.equal(globalAutomaticIdeaBudget(501, 500), 0);
-  assert.equal(globalAutomaticIdeaBudget(490, 500), 2);
-  assert.equal(globalAutomaticIdeaBudget(499, 500), 1);
+  assert.equal(globalAutomaticIdeaBudget(490, 500), 10);
+  assert.equal(globalAutomaticIdeaBudget(499, 500), 10);
   assert.equal(globalAutomaticIdeaBudget(650, 700), 10);
+  assert.equal(globalAutomaticIdeaBudget(999, 1000), 10);
+  assert.equal(globalAutomaticIdeaBudget(1000, 1000), 0);
   assert.equal(globalAutomaticIdeaBudget(499, 300), 0);
   assert.equal(globalAutomaticIdeaBudget(-1, 500), 0);
   assert.equal(globalAutomaticIdeaBudget(null, 500), 0);
