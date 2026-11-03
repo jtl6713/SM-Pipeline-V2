@@ -121,6 +121,8 @@ export async function mutateIgPublishLease(env, {
       fail("publisher_authoritative_lock_changed");
     if (action==="remote_intent" && last.phase!=="pre_remote")
       fail("irreversible_intent_already_recorded");
+    if (action==="finish" && (last.phase!=="pre_remote" || last.irreversible_possible))
+      fail("irreversible_intent_requires_provider_reconciliation");
     const phase = action==="remote_intent"?"remote_intent"
       :action==="finish"?"finished":last.phase;
     const next={...last,phase,
