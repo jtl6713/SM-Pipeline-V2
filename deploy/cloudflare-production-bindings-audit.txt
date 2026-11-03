@@ -9,3 +9,5 @@ Triggered: 2026-08-16 rerun
 2026-10-19: Re-audit after rollback-lifecycle repair. Emit sanitized Home/refill/shadow feature-flag values plus Durable Object namespace names; no secrets.
 
 # 2026-10-28 Chicago V1→V2 MVP: recheck protected production key presence and rollout flags (read only).
+
+2026-11-02: Read-only post-PR1531 deploy audit. Verify active Worker bindings, Durable Object scheduling namespace and sanitized relevant flags; do not enable QA-IG unattended recovery or mutate provider state.
