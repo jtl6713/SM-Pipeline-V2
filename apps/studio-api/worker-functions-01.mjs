@@ -281,6 +281,7 @@ import {
   isRealRemotionRetryFailure,
   isRenderQueueCandidateStatus,
   isRenderQueueWaitingStatus,
+  completedRenderRecoveryFields,
   remotionHealthLooksBusy,
   sortRenderQueueCandidates,
 } from "./render-queue.mjs";
@@ -11757,26 +11758,25 @@ export async function healStuckStudioRenders(env, { skipR4Admission = false } = 
       pulses.push({ key: "R4_QUEUE_ADMIT", error: error instanceof Error ? error.message : String(error) });
     }
   }
-  // Completed MP4 left on Render_Status=Rendering / Output_Status=In Production
-  // (Output 1807 YouTube Short). longRendering below requires a Remotion job and
-  // blank Final_File_URL, so it never heals this. Promote to Ready for Review.
+  // R5 may finish upload while an earlier R4 snapshot/legacy healer writes
+  // Ready/Waiting back over Rendered (observed #9639 and #9642). Reconcile
+  // only when a saved Remotion job AND an uploaded final MP4 already exist.
+  // Keep the same file/job, do not touch approval, scheduling or Review_Status;
+  // the RR1 workflow remains responsible for sending actual review mail.
   const staleRenderingDone = await listRecords(env, outputTable, {
     limit: 12,
     sortField: "Output_ID",
-    sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Render_Status}="Rendering",{Final_File_URL}!="",OR({Output_Status}="In Production",{Output_Status}="Rendering",AND({Review_Status}="Review Sent",{Output_Status}!="Ready for Review",{Output_Status}!="Approved for Publishing",{Output_Status}!="Published")))',
+    sortDirection: "asc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,OR({Render_Status}="Rendering",{Render_Status}="Ready for Render",{Render_Status}="Ready to Render",{Render_Status}="Waiting in Render Queue"),{Remotion_Job_ID}!="",{Final_File_URL}!="",{Final_File_Storage_Status}="Uploaded",OR({Output_Status}="In Production",{Output_Status}="Rendering"))',
   }).catch(() => []);
   for (const row of staleRenderingDone || []) {
     try {
-      const review = String(f(row, "Review_Status") || "").trim();
-      const fields = {
-        Render_Status: "Rendered",
-        Output_Status: "Ready for Review",
-        Remotion_Error_Message: "",
-        Final_File_Error_Message: "",
-      };
-      if (!review || review === "Pending" || review === "Ready for Review") {
-        fields.Review_Status = "Review Sent";
+      // A stale query cannot overwrite a human decision or newer render state.
+      const current = await airtableFetch(env, outputTable, row.id);
+      const fields = completedRenderRecoveryFields(current, f);
+      if (!fields) {
+        pulses.push({ key: "R5_STALE_RENDERING_FINALIZED", id: row.id, skipped: "no_longer_eligible" });
+        continue;
       }
       await airtableFetch(env, outputTable, row.id, {
         method: "PATCH",
