@@ -15,6 +15,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
+      - name: Check live Python R4 Runner health and release (read only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          STATUS=$(curl -sS --max-time 20 -o /tmp/r4-runner-health.json -w '%{http_code}' \
+            -H 'Accept: application/json' 'https://pipeline.chicagoshining.com/health' || true)
+          echo "r4_python_runner_health_http=$STATUS"
+          if [[ "$STATUS" == "200" ]]; then
+            jq -c '{ok,version,service,status}' /tmp/r4-runner-health.json
+          else
+            jq -c '{ok,error}' /tmp/r4-runner-health.json 2>/dev/null || true
+          fi
+          test "$STATUS" = 200
+
       - name: Read public Remotion health; no job creation or mutation
         shell: bash
         run: |
