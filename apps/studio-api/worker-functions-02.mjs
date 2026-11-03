@@ -1288,6 +1288,32 @@ export async function studioAdmitRenderQueue(env, options = {}) {
   const maxAttempts = manualPriority ? 1 : Math.min(4, queueOrder.length);
   const skipped = [];
   for (const head of queueOrder.slice(0, maxAttempts)) {
+    // Candidate enumeration can predate an R5 completion or parallel cron.
+    // Never turn a subsequently Rendered / reviewable output back to Ready.
+    let latest;
+    try {
+      latest = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, head.id);
+    } catch (error) {
+      return {
+        admitted: false, reason: "r4_preflight_read_failed", head: head.id,
+        waiting: total, skipped,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+    const currentRenderStatus = String(f(latest, "Render_Status") || "").trim();
+    const currentOutputStatus = String(f(latest, "Output_Status") || "").trim();
+    const expectedTestRun = String(options.testRunId || "").trim();
+    if (
+      !["Ready for Render", "Waiting in Render Queue"].includes(currentRenderStatus) ||
+      ["Rendered", "Ready for Review", "Approved", "Approved for Publishing", "Published"].includes(currentOutputStatus) ||
+      String(f(latest, "Test_Run_ID") || "").trim() !== expectedTestRun ||
+      Boolean(String(f(latest, "Remotion_Job_ID") || "").trim()) ||
+      Boolean(String(f(latest, "Final_File_URL") || "").trim())
+    ) {
+      skipped.push({ id: head.id, reason: "no_longer_eligible" });
+      await env.STUDIO_MEDIA.put(cursorKey, head.id).catch(() => null);
+      continue;
+    }
     try {
       await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, head.id, {
         method: "PATCH",

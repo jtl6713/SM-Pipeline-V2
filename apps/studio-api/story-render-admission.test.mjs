@@ -68,6 +68,34 @@ test("R4 reconciles old Airtable Rendering holds through R5, without bypassing a
   assert.ok(admit.indexOf("await item4PulseR5Python") < admit.indexOf("if (busy.busy) {"));
 });
 
+test("R4 rereads canonical output before a Ready patch and never relaunches finished Story media", () => {
+  const source = readFileSync(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
+  const admit = source.split("export async function studioAdmitRenderQueue")[1]
+    ?.split("/*__STUDIO_WORKER_END:studioAdmitRenderQueue__*/")[0] || "";
+  assert.match(admit, /latest = await airtableFetch\(env, env\.AIRTABLE_OUTPUT_TABLE_ID, head\.id\)/);
+  assert.match(admit, /f\(latest, "Remotion_Job_ID"\)/);
+  assert.match(admit, /f\(latest, "Final_File_URL"\)/);
+  assert.match(admit, /"Ready for Review"/);
+  assert.match(admit, /no_longer_eligible/);
+  assert.ok(admit.indexOf("latest = await airtableFetch") < admit.indexOf("fields: { Render_Status: RENDER_STATUS_READY }"));
+});
+
+
+test("five-minute R4 admission runs independently of long cron maintenance without duplicate late launch", () => {
+  const worker = readFileSync(new URL("./worker.js", import.meta.url), "utf8");
+  const healer = readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
+  assert.match(worker,/ctx\.waitUntil\(studioAdmitRenderQueue\(env, \{ limit: 80 \}\)/);
+  assert.match(worker,/await healStuckStudioRenders\(env, \{ skipR4Admission: true \}\)/);
+  assert.match(healer,/if \(!skipR4Admission\)/);
+  // The minute-cron branch above also calls Factory, but returns before this
+  // five-minute admission path. Compare only within the heavy/light cron.
+  const fiveMinuteCron = worker.split("const cadence = studioCronAirtableCadence")[1] || "";
+  assert.ok(fiveMinuteCron.includes("ctx.waitUntil(studioAdmitRenderQueue"));
+  assert.ok(fiveMinuteCron.indexOf("ctx.waitUntil(studioAdmitRenderQueue") <
+    fiveMinuteCron.indexOf("await healStuckStudioRenders(env, { skipR4Admission: true });"));
+});
+
+
 test("R4 cron log exposes only bounded admission refusal, not render payload", () => {
   const source = readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
   const body = source.split("export async function healStuckStudioRenders")[1]

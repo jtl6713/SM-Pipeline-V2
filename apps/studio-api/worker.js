@@ -686,6 +686,7 @@ import {
   studioSupabaseWriteThroughAirtableMutation,
 } from "./worker-functions-01.mjs";
 import {
+  studioAdmitRenderQueue,
   studioHealEscalatedProduce,
   item4PulsePipelineStage,
   handleRr2ReviewDecision,
@@ -1305,7 +1306,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.741-story-r4-admission-reason",
+          version: "0.10.742-story-r4-finished-media-fence",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -4253,6 +4254,26 @@ export default {
     const cronInstant = Number(event?.scheduledTime);
     const cadenceNow = Number.isFinite(cronInstant) && cronInstant > 1e12 ? new Date(cronInstant) : new Date();
     const cadence = studioCronAirtableCadence(cadenceNow, event?.cron || "");
+    // Render admission must not wait for the multi-minute Factory and publish
+    // maintenance chain. One bounded, independent admission on the five-minute
+    // cron; never approvals, scheduling, or public publishing.
+    if (airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioAdmitRenderQueue(env, { limit: 80 })
+        .then((result) => console.info("R4_QUEUE_ADMIT_INDEPENDENT", JSON.stringify({
+          admitted: result?.admitted === true,
+          reason: result?.reason || null,
+          head: result?.head || null,
+          runner_status: result?.started?.status || null,
+          runner_reason: result?.started?.details?.run?.reason ||
+            result?.started?.details?.reason || null,
+          runner_message: String(result?.started?.message || "").slice(0, 220),
+          skipped: (result?.skipped || []).map(x => ({ id: x.id, reason: x.reason })),
+        })))
+        .catch(error => console.warn("R4_QUEUE_ADMIT_INDEPENDENT failure",
+          error instanceof Error ? error.message : String(error))));
+    } else {
+      console.warn("R4_QUEUE_ADMIT_INDEPENDENT airtable_cooldown");
+    }
     // Production approval recovery must not sit behind dozens of unrelated
     // awaited publish/Factory jobs. Schedule one independent bounded sweep,
     // before the main cron workload, or stalled Submitted requests never move.
@@ -4538,7 +4559,7 @@ export default {
         console.warn("publish reconcile cron failed", error);
       }
       try {
-        await healStuckStudioRenders(env);
+        await healStuckStudioRenders(env, { skipR4Admission: true });
       } catch (error) {
         console.warn("studio stuck-render heal failed", error);
       }
