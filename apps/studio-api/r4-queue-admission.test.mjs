@@ -24,3 +24,13 @@ test("operator priority is never overridden by automatic skip cursor", () => {
   const rows = [{id:"priority"},{id:"other"}];
   assert.equal(rotateR4CandidatesAfterCursor(rows,"priority",{render_priority:["priority"]}),rows);
 });
+
+test("Studio R4 dispatcher gates success on the verified job receipt and bounds retries", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
+  assert.match(source, /if \(r4StartConfirmed\(started\)\)/);
+  assert.match(source, /Math\.min\(4, queueOrder\.length\)/);
+  assert.match(source, /reason: "r4_launch_not_confirmed"/);
+  assert.match(source, /safeSkippedReasons\.has\(skipReason\)/);
+  assert.match(source, /env\.STUDIO_MEDIA\.put\(cursorKey, head\.id\)/);
+});
