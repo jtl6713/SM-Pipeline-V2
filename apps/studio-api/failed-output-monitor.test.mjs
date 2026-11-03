@@ -109,7 +109,7 @@ test("render recovery counts only eligible failed-render attempts and remains bo
   assert.match(loop, /if \(failedOutputRetryGate\(row\)\) continue/);
   // The retry counter advances only AFTER a successful guarded Airtable
   // transition, never for a stale/ambiguous render skipped by the preflight.
-  assert.match(loop, /const current = await airtableFetch\\(env, outputTable, row\\.id\\)/);
+  assert.ok(loop.includes("const current = await airtableFetch(env, outputTable, row.id)"));
   assert.match(loop, /skipped: "ambiguous_or_changed_render"/);
   assert.ok(loop.indexOf('const current = await airtableFetch') < loop.indexOf('method: "PATCH"'));
   assert.ok(loop.indexOf('failedRenderRetries += 1;') > loop.indexOf('method: "PATCH"'));
