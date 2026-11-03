@@ -128,3 +128,46 @@ def resolve_vibe_review_watermark(*,client:Any,drive:Any,profile_id:str)->dict:
         "render_url":"https://drive.google.com/uc?export=download&id="+file_id,
         "catalog_receipt":receipt,
     }
+
+
+# Temporary, explicitly user-authorized branding exception for NATIVE GALLERIES ONLY.
+# The source asset and its ownership remain unchanged in Airtable. Do not use
+# this resolver for source slides, access control, Vibe or publishing identity.
+SHARED_NATIVE_GALLERY_WATERMARK_PROFILE = "recT2rbKX3MF7cVFU"
+SHARED_NATIVE_GALLERY_WATERMARK_ASSET = "recTnq3abS2rcsTzK"
+SHARED_NATIVE_GALLERY_WATERMARK_DRIVE = "1WQyd5W1__HkaEkWyC38IMErW8702Rd4u"
+SHARED_NATIVE_GALLERY_POLICY = "temporary-shared-chicagoshining-v1"
+
+
+def resolve_native_gallery_watermark(*, client: Any, drive: Any,
+                                     profile_id: str,
+                                     shared_policy_enabled: bool = True) -> dict:
+    """Read verified bytes for the *branding exception*, not foreign content.
+
+    The gallery output always retains its real profile. Switching the policy
+    off restores exact-profile watermark resolution with no record migrations.
+    """
+    if not shared_policy_enabled:
+        return resolve_profile_watermark(client=client, drive=drive,
+                                         profile_id=profile_id)
+    if not RECORD.fullmatch(str(profile_id or "")):
+        denied("profile_identity_invalid")
+    if not callable(getattr(client, "get_record", None)):
+        denied("profile_watermark_authoritative_clients_required")
+    actual = client.get_record(CONTENT_PROFILES_TABLE, profile_id)
+    if (not isinstance(actual, dict) or actual.get("id") != profile_id or
+            not field_str(actual, "Profile_Name")):
+        denied("profile_not_authoritative")
+    approved = resolve_profile_watermark(
+        client=client, drive=drive,
+        profile_id=SHARED_NATIVE_GALLERY_WATERMARK_PROFILE)
+    source = approved["receipt"]
+    if (source.get("media_asset_record_id") != SHARED_NATIVE_GALLERY_WATERMARK_ASSET
+            or source.get("drive_file_id") != SHARED_NATIVE_GALLERY_WATERMARK_DRIVE):
+        denied("shared_gallery_watermark_catalog_mismatch")
+    return {"bytes": approved["bytes"], "receipt": {
+        **source, "profile_id": profile_id,
+        "watermark_owner_profile_id": SHARED_NATIVE_GALLERY_WATERMARK_PROFILE,
+        "branding_policy": SHARED_NATIVE_GALLERY_POLICY,
+        "shared_branding_exception": True,
+    }}

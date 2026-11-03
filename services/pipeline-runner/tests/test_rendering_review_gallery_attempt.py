@@ -10,8 +10,9 @@ from rendering_review.gallery_attempt import (
 
 OID = "rec00000000000001"
 PID = "rec00000000000002"
+CID = "rec00000000000003"
 JOB = {
-    "output_id": OID, "profile_id": PID,
+    "output_id": OID, "profile_id": PID, "content_item_id": CID,
     "attempt_id": "rrattempt_01234567890",
     "job_id": "rrjob_01234567890",
     "session_id": "rrsession_01234567890",
@@ -32,13 +33,13 @@ def original():
             "canonical_media_authority": "google_drive", "authority": "server",
             "verified": True, "google_drive_verified": True,
             "watermark_verified": True, "rights_verified": True,
-            "output_id": OID, "profile_id": PID,
+            "output_id": OID, "profile_id": PID, "content_item_id": CID,
         })
     return {
         "schema": "studio.render-review.gallery.1",
         "source_kind": "original", "media_kind": "image-set",
         "authority": "server", "verified": True,
-        "output_id": OID, "profile_id": PID, "aspect_ratio": "4:5",
+        "output_id": OID, "profile_id": PID, "content_item_id": CID, "aspect_ratio": "4:5",
         "manifest_sha256": "b" * 64, "artifacts": slides,
     }
 
@@ -67,10 +68,15 @@ class Operations:
         self.uploaded = 0
         self.committed = None
         self.last_branded = None
+        self.original_verified = True
 
     def verify_hold(self, output_id, session_id):
         assert output_id == OID and session_id == JOB["session_id"]
         return self.hold
+
+    def verify_original_sources(self, original):
+        assert original["source_kind"] == "original"
+        return self.original_verified
 
     def reserve_attempt(self, job, original_hash, changes_hash):
         assert original_hash == "b"*64
@@ -111,7 +117,7 @@ class Operations:
         assert output_id == OID and slot_id == "rec00000000000002"
         assert file_id.startswith("file-new-owned")
         assert "daytime" in prompt and len(sha256) == 64
-        return True
+        return {"verified": True, "media_asset_record_id": "rec00000000000008"}
 
     def commit_manifest(self, job, manifest):
         assert job["attempt_id"] == manifest["attempt_id"]
@@ -148,8 +154,18 @@ class TestIsolatedGallery(unittest.TestCase):
         self.assertNotEqual(target["artifacts"][1]["drive_file_id"],
                             saved["artifacts"][1]["drive_file_id"])
         self.assertTrue(target["artifacts"][1]["watermark_verified"])
+        self.assertEqual(target["artifacts"][1]["revision_media_asset_id"],
+                         "rec00000000000008")
         self.assertFalse(target["publish_approved"])
         self.assertFalse(target["factory_approved"])
+
+    def test_original_drive_bytes_missing_blocks_before_reservation(self):
+        ops = Operations()
+        ops.original_verified = False
+        with self.assertRaisesRegex(GalleryRevisionDenied, "original_drive_bytes_unverified"):
+            run(ops=ops)
+        self.assertFalse(ops.reserved)
+        self.assertEqual(ops.generated, 0)
 
     def test_ambiguous_retry_does_not_regenerate_or_duplicate_drive_upload(self):
         ops = Operations()
@@ -216,6 +232,21 @@ class TestIsolatedGallery(unittest.TestCase):
             run(ops=ops)
         self.assertIsNone(ops.committed)
         self.assertEqual(ops.uploaded, 1)
+
+    def test_boolean_rights_receipt_is_insufficient_without_new_catalog_identity(self):
+        ops=Operations()
+        ops.verify_generated_rights=lambda *args: True
+        with self.assertRaisesRegex(GalleryRevisionDenied, "rights_unverified"):
+            run(ops=ops)
+        self.assertIsNone(ops.committed)
+
+    def test_original_media_asset_record_cannot_be_reused_for_revision(self):
+        data=original()
+        data["artifacts"][1]["source_media_asset_id"]="rec00000000000008"
+        ops=Operations()
+        with self.assertRaisesRegex(GalleryRevisionDenied, "rights_unverified"):
+            run(source=data,ops=ops)
+        self.assertIsNone(ops.committed)
 
     def test_generated_image_without_independent_rights_receipt_is_denied(self):
         ops=Operations()

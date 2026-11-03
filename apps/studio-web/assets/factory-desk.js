@@ -1716,6 +1716,179 @@
            inventory?.publication_authorized!==false||
            inventory?.source_kind!=="airtable_metadata_only")
           throw new Error("Original gallery source verification contract is unavailable");
+        // Read only authoritative attempt history. A status is not proof
+        // of generated Drive media and cannot grant creative acceptance.
+        try{
+          const revision=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
+            "/gallery-revision-status");
+          if(!current())return "";
+          if(revision?.ok!==true||revision.output_id!==id||
+             revision.profile_id!==inventory.profile_id||
+             revision.can_generate!==false||revision.can_publish!==false||
+             !Array.isArray(revision.jobs))
+            throw new Error("Gallery history authority mismatch");
+          const history=document.createElement("li");
+          history.textContent=revision.jobs.length?
+            "Gallery job history: "+revision.jobs.slice(0,10)
+              .map(item=>String(item.status||"unknown")+" ("+
+                String(item.job_id||"unknown")+")").join("; ")+
+              ". Revised artifacts are not verified for acceptance.":
+            "Gallery job history: no native-gallery revision jobs recorded.";
+          rows.appendChild(history);
+          // Side-by-side V1/V2 images are fetched through authenticated
+          // Studio, never public Drive links. The Runner rechecks original
+          // and revised private Drive bytes on EVERY image request.
+          if(revision.private_preview_available===true){
+            const reviewable=revision.jobs.filter(job=>
+              ["ready_for_review","creative_accepted","rejected"].includes(
+                String(job.status||""))&&job.revised_manifest_stored===true);
+            for(const job of reviewable.slice(0,2)){
+              const title=document.createElement("li");
+              title.textContent="Private gallery comparison · "+job.job_id+
+                " · "+job.status+" (view only; Factory approval separate)";
+              rows.appendChild(title);
+              for(const slide of inventory.slides.slice(0,20)){
+                if(!/^rec[A-Za-z0-9]{14}$/.test(String(slide.slide_id||"")))continue;
+                const item=document.createElement("li");
+                const label=document.createElement("div");
+                label.textContent="Slide "+slide.order;
+                item.appendChild(label);
+                const pair=document.createElement("div");
+                pair.style.display="flex";
+                pair.style.flexWrap="wrap";
+                pair.style.gap="12px";
+                for(const version of ["original","revised"]){
+                  const picture=document.createElement("figure");
+                  picture.style.margin="0";
+                  picture.style.width="min(190px, 45%)";
+                  const note=document.createElement("figcaption");
+                  note.textContent=version==="original"?"Original V1":"Revised V2";
+                  const image=document.createElement("img");
+                  image.alt="Private "+version+" image for gallery slide "+slide.order;
+                  image.loading="lazy";
+                  image.style.width="100%";
+                  image.style.maxHeight="250px";
+                  image.style.objectFit="contain";
+                  image.src="/api/factory/outputs/"+encodeURIComponent(id)+
+                    "/gallery/jobs/"+encodeURIComponent(job.job_id)+
+                    "/slides/"+encodeURIComponent(slide.slide_id)+"/"+version;
+                  image.addEventListener("error",()=>{
+                    note.textContent=(version==="original"?"Original":"Revised")+
+                      " unavailable — verification or hold may have changed";
+                  });
+                  picture.appendChild(image);picture.appendChild(note);
+                  pair.appendChild(picture);
+                }
+                item.appendChild(pair);rows.appendChild(item);
+              }
+              if(revision.creative_review_available===true&&
+                 job.status==="ready_for_review"&&
+                 /^[a-f0-9]{64}$/.test(String(job.revision_manifest_sha256||""))){
+                const approval=document.createElement("li");
+                const confirmLabel=document.createElement("label");
+                const confirmBox=document.createElement("input");
+                confirmBox.type="checkbox";
+                confirmBox.style.marginRight="8px";
+                confirmLabel.appendChild(confirmBox);
+                confirmLabel.appendChild(document.createTextNode(
+                  "I have inspected the revised images and want to record a creative decision."));
+                approval.appendChild(confirmLabel);
+                const buttons=document.createElement("div");
+                buttons.style.display="flex";
+                buttons.style.flexWrap="wrap";
+                buttons.style.gap="8px";
+                buttons.style.marginTop="8px";
+                const accept=document.createElement("button");
+                accept.type="button";accept.textContent="Accept creative revision";
+                const reject=document.createElement("button");
+                reject.type="button";reject.textContent="Reject revision";
+                accept.disabled=true;reject.disabled=true;
+                confirmBox.addEventListener("change",()=>{
+                  accept.disabled=!confirmBox.checked;
+                  reject.disabled=!confirmBox.checked;
+                });
+                for(const [button,decision] of [[accept,"accept"],[reject,"reject"]]){
+                  button.addEventListener("click",async()=>{
+                    if(!current()||!confirmBox.checked)return;
+                    accept.disabled=true;reject.disabled=true;confirmBox.disabled=true;
+                    status.textContent="Checking the exact private Drive revision and recording "+
+                      decision+" in Airtable…";
+                    try{
+                      const result=await fetchJson("/api/factory/outputs/"+
+                        encodeURIComponent(id)+"/gallery/jobs/"+
+                        encodeURIComponent(job.job_id)+"/creative-decision",{
+                        method:"POST",body:JSON.stringify({
+                          decision,manifest_sha256:job.revision_manifest_sha256,
+                          confirm_reviewed:true,
+                        }),
+                      });
+                      if(!current())return;
+                      if(result?.ok!==true||result.decision!==decision||
+                         result.publication_authorized!==false||
+                         result.factory_approved!==false)
+                        throw new Error("The creative decision receipt was not independently verified");
+                      status.textContent="Gallery creative decision saved: "+decision+
+                        ". Factory approval and publication remain separate.";
+                    }catch(error){
+                      if(current()){
+                        confirmBox.disabled=false;
+                        accept.disabled=!confirmBox.checked;
+                        reject.disabled=!confirmBox.checked;
+                        status.textContent="Creative decision blocked: "+
+                          String(error?.message||error);
+                      }
+                    }
+                  });
+                  buttons.appendChild(button);
+                }
+                approval.appendChild(buttons);
+                rows.appendChild(approval);
+              }
+            }
+          }
+        }catch(error){
+          if(current()){
+            const history=document.createElement("li");
+            history.textContent="Gallery attempt history unavailable: "+
+              String(error?.message||error);
+            rows.appendChild(history);
+          }
+        }
+        if(inventory.source_byte_preflight_available===true){
+          const checkRow=document.createElement("li");
+          const verifyButton=document.createElement("button");
+          verifyButton.type="button";
+          verifyButton.textContent="Verify original image bytes and rights (private)";
+          verifyButton.className="factory-gallery-source-byte-check";
+          checkRow.appendChild(verifyButton);
+          rows.appendChild(checkRow);
+          verifyButton.addEventListener("click",async()=>{
+            if(!current())return;
+            verifyButton.disabled=true;
+            status.textContent="Independently reading Airtable source links and Google Drive image bytes…";
+            try{
+              const evidence=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
+                "/gallery-source-preflight");
+              if(!current())return;
+              if(evidence?.ok!==true||evidence.output_id!==id||
+                 evidence.profile_id!==inventory.profile_id||
+                 evidence.sources_byte_verified!==true||
+                 evidence.can_generate!==false||
+                 evidence.publication_authorized!==false)
+                throw new Error("The independent source verification receipt was not trusted");
+              status.textContent=evidence.slide_count+
+                " original slide(s): Drive bytes and source ownership verified. "+
+                (evidence.original_artifact_watermark_verified===true?
+                  "Official logo pixels also verified. ":
+                  "Original logo placement remains unverified. ")+
+                "The durable render hold and generation gates remain disabled. "+
+                "Generation and publishing remain unavailable.";
+            }catch(error){
+              if(current())status.textContent="Original source verification blocked: "+
+                String(error?.message||error)+". No render or media change occurred.";
+            }finally{verifyButton.disabled=false;}
+          });
+        }
         // An exact slide-selection proposal is available without changing
         // existing Factory feedback or enabling unverified media rendering.
         // This preview never creates a job, modifies Airtable, or publishes.

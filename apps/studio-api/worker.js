@@ -2,6 +2,18 @@ import { loadAuthoritativeFactoryCorrection } from "./factory-correction-authori
 import { readFactoryClaimsDiagnostic } from "./factory-timing-r2-inspector.mjs";
 import { readAuthoritativeGalleryInventory } from "./rendering-review-gallery-inventory-http.mjs";
 import { previewNativeGalleryCorrection } from "./rendering-review-gallery-selection-preview.mjs";
+import { readGalleryRevisionStatus } from "./rendering-review-gallery-status-http.mjs";
+import { verifyGallerySourceBytes, gallerySourceBytePreflightEnabled } from "./rendering-review-gallery-byte-preflight.mjs";
+import { handleNativeGalleryGenerate } from "./native-gallery-generation-http.mjs";
+import { enrollNativeGalleryHold } from "./native-gallery-hold-enrollment.mjs";
+import { claimNativeGalleryJob, galleryClaimEnabled } from "./native-gallery-job-claim.mjs";
+import { reserveNativeGalleryLaunch, nativeGalleryLaunchIntentEnabled } from "./native-gallery-launch-ledger.mjs";
+import {commitNativeGalleryManifest, nativeGalleryManifestCommitEnabled} from "./native-gallery-manifest-commit.mjs";
+import {verifyNativeGalleryRevisionDrive} from "./native-gallery-revision-readback.mjs";
+import {serveNativeGalleryPreview} from "./native-gallery-preview.mjs";
+import {decideNativeGalleryCreative,nativeGalleryCreativeReviewEnabled} from "./native-gallery-creative-decision.mjs";
+import { NATIVE_GALLERY_JOBS_TABLE } from "./native-gallery-job-airtable.mjs";
+import { readNativeGalleryPrivateManifest } from "./native-gallery-private-manifest.mjs";
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
 import { serveReviewAttemptVideo, fetchTrustedRunnerReviewMedia } from "./rendering-review-attempt-video.mjs";
 import { completeReviewAttempt } from "./rendering-review-completion-http.mjs";
@@ -1153,7 +1165,13 @@ export default {
         (/^\/api\/rendering-review\/outputs\/rec[A-Za-z0-9]{14}\/(?:producer-conversation|producer-proposal|commit-attempt|messages|next-revision-feedback|review-feedback|approve|factory-handoff|request-redo)$/.test(url.pathname) ||
          /^\/api\/rendering-review\/factory\/outputs\/rec[A-Za-z0-9]{14}\/request-changes$/.test(url.pathname) ||
          /^\/(?:api\/)?internal\/rendering-review\/(?:claim-render-job|launch-ledger|complete-attempt|qa-audio-rebind|ig-dispatch-claim|factory-handoff)$/.test(url.pathname));
+      const isNativeGalleryGeneratePost = request.method === "POST" &&
+        /^\/api\/factory\/outputs\/rec[A-Za-z0-9]{14}\/gallery-generate$/.test(url.pathname);
+      const isNativeGalleryServicePost = request.method === "POST" &&
+        /^\/(?:api\/)?internal\/native-gallery\/claim-job$/.test(url.pathname);
       const allowedMethod =
+        isNativeGalleryServicePost ||
+        isNativeGalleryGeneratePost ||
         isChicagoReviewPost ||
         isInternalIgPublishLeasePost ||
         request.method === "GET" ||
@@ -1668,6 +1686,148 @@ export default {
           ok: true,
           ...authorization,
         }, authorization.authenticated ? 200 : 401);
+      }
+
+      // Native gallery claim has a dedicated table, exact R2 output lock,
+      // and a separate service credential. No Runner direct Airtable writes.
+      // All deployment flags are OFF by default; never grants publication.
+      if(url.pathname==="/internal/native-gallery/claim-job" ||
+         url.pathname==="/api/internal/native-gallery/claim-job"){
+        requireConfig(env);
+        if(!galleryClaimEnabled(env))
+          throw new HttpError(405,"Native gallery Runner claim disabled");
+        const readJob=async jobId=>{
+          if(!/^[A-Za-z0-9_-]{8,120}$/.test(String(jobId||"")))return null;
+          const rows=await reviewListRecords(env,NATIVE_GALLERY_JOBS_TABLE,{
+            limit:2,filterFormula:'{Job_ID}="'+jobId+'"',
+            fields:["Job_ID","Output_Record_ID","Content_Item_Record_ID",
+              "Profile_Record_ID","Actor_Record_ID","Client_Request_ID",
+              "Request_Fingerprint","Original_Manifest_SHA256",
+              "Plan_SHA256","Plan_JSON","Event_History_JSON",
+              "Hold_ID","Hold_Owner","Job_State","Row_Version",
+              "Lease_Owner","Lease_Fence"],
+          });
+          if(!Array.isArray(rows)||rows.length!==1)return null;
+          return rows[0];
+        };
+        const receipt=await claimNativeGalleryJob({
+          request,env,operations:{
+            withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+            readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+            readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+            readJob,
+            patchJob:(id,fields)=>airtableFetch(env,NATIVE_GALLERY_JOBS_TABLE,id,{
+              method:"PATCH",body:JSON.stringify({fields,typecast:false}),
+            }),
+          },
+        });
+        return respond(request,env,receipt);
+      }
+
+      // A native gallery Runner must reserve its exact generation intent
+      // durably before its first model call. No repeat or implicit replay.
+      // Source bytes/owned branding are refreshed under the output R2 lock.
+      if(url.pathname==="/internal/native-gallery/reserve-launch" ||
+         url.pathname==="/api/internal/native-gallery/reserve-launch"){
+        requireConfig(env);
+        if(!nativeGalleryLaunchIntentEnabled(env))
+          throw new HttpError(405,"Native gallery launch ledger disabled");
+        const readJob=async jobId=>{
+          if(!/^[A-Za-z0-9_-]{8,120}$/.test(String(jobId||"")))return null;
+          const rows=await reviewListRecords(env,NATIVE_GALLERY_JOBS_TABLE,{
+            limit:2,filterFormula:'{Job_ID}="'+jobId+'"',
+            fields:["Job_ID","Output_Record_ID","Content_Item_Record_ID",
+              "Profile_Record_ID","Actor_Record_ID","Request_Fingerprint",
+              "Original_Manifest_SHA256","Original_Manifest_JSON",
+              "Plan_SHA256","Plan_JSON","Event_History_JSON",
+              "Hold_ID","Hold_Owner","Job_State","Row_Version",
+              "Lease_Owner","Lease_Fence","Launch_Intent_SHA256",
+              "Launch_Receipt_JSON"],
+          });
+          if(!Array.isArray(rows)||rows.length!==1)return null;
+          return rows[0];
+        };
+        const result=await reserveNativeGalleryLaunch({
+          request,env,operations:{
+            withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+            readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+            readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+            readJob,
+            patchJob:(id,fields)=>airtableFetch(env,NATIVE_GALLERY_JOBS_TABLE,id,{
+              method:"PATCH",body:JSON.stringify({fields,typecast:false}),
+            }),
+            verifyOriginalSources:async({output_id,profile_id,
+                content_item_id,original_manifest_sha256,original_artifacts})=>{
+              const inventory=await readAuthoritativeGalleryInventory({
+                output_id,authorized_profile_ids:[profile_id],
+                readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+                readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+                readSlides:async ids=>reviewListRecords(env,"tblcnQDBvUngpjDED",{
+                  limit:ids.length,
+                  filterFormula:'OR('+ids.map(id=>'RECORD_ID()="'+id+'"').join(',')+')',
+                  fields:["Content Item","Platform Output","Platform","Slide Number",
+                    "Aspect Ratio","Deleted From Carousel","Approved For Final",
+                    "Review Status","Asset_4x5_File_ID","Asset_1x1_File_ID",
+                    "Asset_9x16_File_ID","Final Google Drive File ID"],
+                }),
+              });
+              if(inventory.content_item_id!==content_item_id||
+                 inventory.profile_id!==profile_id||
+                 inventory.slide_count!==original_artifacts.length)
+                return false;
+              const actual=await readNativeGalleryPrivateManifest({
+                env,output_id,profile_id,content_item_id,
+                aspect_ratio:inventory.aspect_ratio,
+              });
+              return actual.original_manifest_sha256===original_manifest_sha256&&
+                JSON.stringify(actual.original_artifacts)===
+                  JSON.stringify(original_artifacts)&&
+                actual.sources_byte_verified===true&&
+                actual.original_artifact_watermark_verified===true&&
+                actual.publication_authorized===false;
+            },
+          },
+        });
+        return respond(request,env,result);
+      }
+
+      // Exact held native-gallery V2 artifact commit, distinct from creative
+      // acceptance and independent of Factory/publishing. Service-only.
+      if(url.pathname==="/internal/native-gallery/commit-manifest"||
+         url.pathname==="/api/internal/native-gallery/commit-manifest"){
+        requireConfig(env);
+        if(!nativeGalleryManifestCommitEnabled(env))
+          throw new HttpError(405,"Native gallery revision commit disabled");
+        const readJob=async jobId=>{
+          if(!/^[A-Za-z0-9_-]{8,120}$/.test(String(jobId||"")))return null;
+          const rows=await reviewListRecords(env,NATIVE_GALLERY_JOBS_TABLE,{
+            limit:2,filterFormula:'{Job_ID}="'+jobId+'"',
+            fields:["Job_ID","Output_Record_ID","Content_Item_Record_ID",
+              "Profile_Record_ID","Request_Fingerprint","Original_Manifest_SHA256",
+              "Original_Manifest_JSON","Plan_SHA256","Plan_JSON",
+              "Event_History_JSON","Hold_ID","Hold_Owner","Job_State",
+              "Row_Version","Lease_Owner","Lease_Fence",
+              "Launch_Intent_SHA256","Revised_Manifest_SHA256",
+              "Revised_Manifest_JSON"],
+          });
+          if(!Array.isArray(rows)||rows.length!==1)return null;
+          return rows[0];
+        };
+        const result=await commitNativeGalleryManifest({
+          request,env,operations:{
+            withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+            readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+            readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+            readJob,
+            patchJob:(id,fields)=>airtableFetch(env,NATIVE_GALLERY_JOBS_TABLE,id,{
+              method:"PATCH",body:JSON.stringify({fields,typecast:false}),
+            }),
+            verifyRevisedDriveArtifacts:args=>verifyNativeGalleryRevisionDrive({
+              env,...args,
+            }),
+          },
+        });
+        return respond(request,env,result);
       }
 
       // Internal render-worker claim, distinct from the public Studio API and
@@ -2761,6 +2921,51 @@ export default {
         });
       }
 
+      // Verified, read-only source inspection: actual Drive bytes and catalog
+      // rights via the protected Runner. No generation or publishing permission.
+      const galleryBytesMatch = new RegExp("^/api/factory/outputs/(rec[A-Za-z0-9]{14})/gallery-source-preflight$").exec(url.pathname);
+      if (galleryBytesMatch) {
+        if (request.method !== "GET") throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        const profiles=await reviewAuthorizedProfiles(env,authorization);
+        const inventory=await readAuthoritativeGalleryInventory({
+          output_id:galleryBytesMatch[1],
+          authorized_profile_ids:profiles.map(p=>p.id),
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+          readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+          readSlides:async ids=>reviewListRecords(env,"tblcnQDBvUngpjDED",{
+            limit:ids.length,
+            filterFormula:'OR('+ids.map(id=>'RECORD_ID()="'+id+'"').join(',')+')',
+            fields:["Content Item","Platform Output","Platform","Slide Number",
+              "Aspect Ratio","Deleted From Carousel","Approved For Final",
+              "Review Status","Asset_4x5_File_ID","Asset_1x1_File_ID",
+              "Asset_9x16_File_ID","Final Google Drive File ID"],
+          }),
+        });
+        const verification=await verifyGallerySourceBytes({
+          env,output_id:galleryBytesMatch[1],inventory,
+        });
+        return respond(request,env,verification);
+      }
+
+      // Read-only native gallery revision history: exact authenticated profile
+      // and Airtable attempt IDs. Metadata is never an approval receipt.
+      const galleryStatusMatch = new RegExp("^/api/factory/outputs/(rec[A-Za-z0-9]{14})/gallery-revision-status$").exec(url.pathname);
+      if (galleryStatusMatch) {
+        if (request.method !== "GET") throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        const authorized=await reviewAuthorizedProfiles(env,authorization);
+        const status=await readGalleryRevisionStatus({
+          output_id:galleryStatusMatch[1],
+          job_id:url.searchParams.get("job_id")||null,
+          authorized_profile_ids:authorized.map(p=>p.id),
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+          readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+          listRecords:(table,params)=>reviewListRecords(env,table,params),
+        });
+        return respond(request,env,{...status,private_preview_available:env.NATIVE_GALLERY_PRIVATE_PREVIEW_ENABLED==="true",creative_review_available:nativeGalleryCreativeReviewEnabled(env)});
+      }
+
       // Preview original gallery/source metadata only. This is deliberately
       // read-only and never substitutes Airtable links for a verified Drive,
       // rights or profile-watermark receipt.
@@ -2783,7 +2988,176 @@ export default {
               "Asset_9x16_File_ID","Final Google Drive File ID"],
           }),
         });
-        return respond(request,env,source);
+        return respond(request,env,{...source,source_byte_preflight_available:gallerySourceBytePreflightEnabled(env)});
+      }
+
+      // Exact unscheduled native gallery hold: no schedule vacate, no render,
+      // and no source/publisher mutation beyond persistent blocked output.
+      const galleryEnrollMatch=new RegExp(
+        "^/api/factory/outputs/(rec[A-Za-z0-9]{14})/gallery-enroll$"
+      ).exec(url.pathname);
+      if(galleryEnrollMatch){
+        if(request.method!=="POST")throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        assertWriteRequest(request,env);
+        const authorized=await reviewAuthorizedProfiles(env,authorization);
+        const result=await enrollNativeGalleryHold({
+          request,env,output_id:galleryEnrollMatch[1],
+          authorization,assertWriteRequest,
+          operations:{
+            withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+            readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+            readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+            authorizeProfile:id=>authorized.some(p=>p.id===id),
+            listJobs:(id)=>reviewListRecords(env,NATIVE_GALLERY_JOBS_TABLE,{
+              limit:2,filterFormula:'{Output_Record_ID}="'+id+'"',
+              fields:["Job_ID","Output_Record_ID"],
+            }),
+            patchOutput:(id,fields)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id,{
+              method:"PATCH",body:JSON.stringify({fields,typecast:false}),
+            }),
+          },
+        });
+        return respond(request,env,result);
+      }
+
+      // Actual dedicated Airtable native-gallery generation intent, OFF by
+      // default. Do not reuse the Chicago Reel job table or allow public
+      // publishing. Trusted Runner preflight still lacks original watermark
+      // placement/hold proof, so it cannot authorize generation yet.
+      const galleryGenerateMatch = new RegExp(
+        "^/api/factory/outputs/(rec[A-Za-z0-9]{14})/gallery-generate$"
+      ).exec(url.pathname);
+      if(galleryGenerateMatch){
+        if(request.method!=="POST")throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        assertWriteRequest(request,env);
+        const output_id=galleryGenerateMatch[1];
+        const authorized=await reviewAuthorizedProfiles(env,authorization);
+        const inventoryReader=async()=>readAuthoritativeGalleryInventory({
+          output_id,authorized_profile_ids:authorized.map(p=>p.id),
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+          readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+          readSlides:async ids=>reviewListRecords(env,"tblcnQDBvUngpjDED",{
+            limit:ids.length,
+            filterFormula:'OR('+ids.map(id=>'RECORD_ID()="'+id+'"').join(',')+')',
+            fields:["Content Item","Platform Output","Platform","Slide Number",
+              "Aspect Ratio","Deleted From Carousel","Approved For Final",
+              "Review Status","Asset_4x5_File_ID","Asset_1x1_File_ID",
+              "Asset_9x16_File_ID","Final Google Drive File ID"],
+          }),
+        });
+        const result=await handleNativeGalleryGenerate({
+          request,env,output_id,authorization,
+          assertWriteRequest,
+          loadInventory:inventoryReader,
+          jobAdapter:{
+            airtableFetch,
+            listRecords:(env,table,params)=>reviewListRecords(env,table,params),
+            withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+            verifySource:async ({output_id:sourceOutput,
+              profile_id,content_item_id,selected,hold_id})=>{
+              // Executable original media must come from a protected, private
+              // Runner manifest, not the metadata-only browser preflight.
+              // This closure executes INSIDE the canonical output lock, after
+              // Airtable Output + Content Item + owned Hold re-verification.
+              const inventory=await inventoryReader();
+              if(inventory.output_id!==sourceOutput||
+                 inventory.profile_id!==profile_id||
+                 inventory.content_item_id!==content_item_id)
+                throw new HttpError(409,"Gallery source identity changed");
+              const receipt=await readNativeGalleryPrivateManifest({
+                env,output_id:sourceOutput,profile_id,content_item_id,
+                aspect_ratio:inventory.aspect_ratio,
+              });
+              const expected=new Map(inventory.slides.map(slide=>[
+                slide.slide_id,slide.order,
+              ]));
+              if(receipt.original_artifacts.length!==inventory.slide_count||
+                 receipt.original_artifacts.some(row=>
+                   expected.get(row.slot_id)!==row.order)||
+                 selected.some(row=>expected.get(row.slide_id)!==row.order))
+                throw new HttpError(409,"Gallery selected sources changed");
+              return {...receipt,hold_id,publication_hold_verified:true};
+            }
+          },
+        });
+        return respond(request,env,result);
+      }
+
+      // Private held native gallery side-by-side images (V1 / V2).
+      // Reviewer profile scope and per-job authority are rechecked, and
+      // Runner independently reads actual Google Drive media bytes.
+      const galleryPrivateMediaMatch = new RegExp(
+        "^/api/factory/outputs/(rec[A-Za-z0-9]{14})/gallery/jobs/"+
+        "([A-Za-z0-9_-]{8,120})/slides/(rec[A-Za-z0-9]{14})/(original|revised)$"
+      ).exec(url.pathname);
+      if(galleryPrivateMediaMatch){
+        requirePermission(authorization,"outputs_review");
+        const [,outputId,jobId,slideId,variant]=galleryPrivateMediaMatch;
+        const profiles=await reviewAuthorizedProfiles(env,authorization);
+        const readJob=async id=>{
+          const rows=await reviewListRecords(env,NATIVE_GALLERY_JOBS_TABLE,{
+            limit:2,filterFormula:'{Job_ID}="'+id+'"',
+            fields:["Job_ID","Output_Record_ID","Content_Item_Record_ID",
+              "Profile_Record_ID","Job_State","Hold_ID","Hold_Owner",
+              "Revised_Manifest_SHA256"],
+          });
+          return Array.isArray(rows)&&rows.length===1?rows[0]:null;
+        };
+        return serveNativeGalleryPreview({
+          request,env,authorization:{
+            ...authorization,authorized_profile_ids:profiles.map(p=>p.id),
+          },output_id:outputId,job_id:jobId,slide_id:slideId,variant,
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+          readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+          readJob,
+        });
+      }
+
+      // Human-only creative accept/reject for an exact revised gallery.
+      // This is NOT a Factory approval or publication state transition.
+      const galleryCreativeMatch = new RegExp(
+        "^/api/factory/outputs/(rec[A-Za-z0-9]{14})/gallery/jobs/"+
+        "([A-Za-z0-9_-]{8,120})/creative-decision$"
+      ).exec(url.pathname);
+      if(galleryCreativeMatch){
+        requirePermission(authorization,"outputs_review");
+        assertWriteRequest(request,env);
+        if(!nativeGalleryCreativeReviewEnabled(env))
+          throw new HttpError(405,"Native gallery creative review disabled");
+        const profiles=await reviewAuthorizedProfiles(env,authorization);
+        const [,outputId,jobId]=galleryCreativeMatch;
+        const readJob=async id=>{
+          const rows=await reviewListRecords(env,NATIVE_GALLERY_JOBS_TABLE,{
+            limit:2,filterFormula:'{Job_ID}="'+id+'"',
+            fields:["Job_ID","Output_Record_ID","Content_Item_Record_ID",
+              "Profile_Record_ID","Job_State","Row_Version","Hold_ID","Hold_Owner",
+              "Original_Manifest_SHA256","Original_Manifest_JSON",
+              "Revised_Manifest_SHA256","Revised_Manifest_JSON","Plan_JSON",
+              "Creative_Decision","Creative_Decision_Actor"],
+          });
+          return Array.isArray(rows)&&rows.length===1?rows[0]:null;
+        };
+        const decision=await decideNativeGalleryCreative({
+          request,env,output_id:outputId,job_id:jobId,
+          authorization:{...authorization,
+            authorized_profile_ids:profiles.map(p=>p.id)},
+          assertWriteRequest,
+          operations:{
+            withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+            readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+            readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+            readJob,
+            patchJob:(id,fields)=>airtableFetch(env,NATIVE_GALLERY_JOBS_TABLE,id,{
+              method:"PATCH",body:JSON.stringify({fields,typecast:false}),
+            }),
+            verifyRevisedDriveArtifacts:args=>verifyNativeGalleryRevisionDrive({
+              env,...args,
+            }),
+          },
+        });
+        return respond(request,env,decision);
       }
 
       // Exact per-slide gallery correction proposal; no generation, approval,

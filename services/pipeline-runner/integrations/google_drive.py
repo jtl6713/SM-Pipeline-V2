@@ -182,6 +182,43 @@ class GoogleDriveClient:
         response.raise_for_status()
         return response.json()
 
+    def list_file_permissions(self, file_id: str) -> list[dict[str, Any]]:
+        """Read effective file permission entries; never grants or changes access.
+
+        Used to deny public native-gallery staging files before creative review.
+        A missing or overflowing permissions list fails closed.
+        """
+        if not re.fullmatch(r"[A-Za-z0-9_-]{20,}", str(file_id or "")):
+            raise ValueError("Invalid Drive permission lookup file ID")
+        token = self.access_token()
+        permissions: list[dict[str, Any]] = []
+        page_token = ""
+        for _ in range(3):
+            params = {
+                "supportsAllDrives": "true",
+                "fields": "nextPageToken,permissions(id,type,role)",
+                "pageSize": 100,
+            }
+            if page_token:
+                params["pageToken"] = page_token
+            reply = requests.get(
+                f"https://www.googleapis.com/drive/v3/files/{file_id}/permissions",
+                params=params, headers={"Authorization": f"Bearer {token}"},
+                timeout=60,
+            )
+            reply.raise_for_status()
+            body = reply.json()
+            batch = body.get("permissions") if isinstance(body, dict) else None
+            if not isinstance(batch, list):
+                raise RuntimeError("Drive permission readback invalid")
+            permissions.extend(batch)
+            if len(permissions) > 200:
+                raise RuntimeError("Drive permissions exceed verifier bound")
+            page_token = str(body.get("nextPageToken") or "")
+            if not page_token:
+                return permissions
+        raise RuntimeError("Drive permission readback incomplete")
+
     def move_file(self, file_id: str, dest_folder_id: str, *, remove_parent_id: str | None = None) -> dict[str, Any]:
         token = self.access_token()
         current_parent = remove_parent_id

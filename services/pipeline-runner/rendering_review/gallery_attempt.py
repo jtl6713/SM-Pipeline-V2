@@ -43,8 +43,10 @@ def _source(job: dict, original: dict, plan: dict, authorized_profiles: list) ->
         deny("gallery_context_missing")
     profile = job.get("profile_id")
     output = job.get("output_id")
+    content = job.get("content_item_id")
     if (not REC.fullmatch(str(output or "")) or
-        not REC.fullmatch(str(profile or "")) or profile not in authorized_profiles or
+        not REC.fullmatch(str(profile or "")) or
+        not REC.fullmatch(str(content or "")) or profile not in authorized_profiles or
         not TOKEN.fullmatch(str(job.get("attempt_id") or "")) or
         not TOKEN.fullmatch(str(job.get("job_id") or "")) or
         not SHA.fullmatch(str(job.get("plan_hash") or "")) or
@@ -67,6 +69,7 @@ def _source(job: dict, original: dict, plan: dict, authorized_profiles: list) ->
     if (original.get("schema") != SCHEMA or original.get("source_kind") != "original" or
         original.get("authority") != "server" or original.get("verified") is not True or
         original.get("output_id") != output or original.get("profile_id") != profile or
+        original.get("content_item_id") != content or
         not SHA.fullmatch(str(original.get("manifest_sha256") or "")) or
         plan.get("original_manifest_sha256") != original["manifest_sha256"]):
         deny("gallery_original_manifest_changed")
@@ -84,6 +87,7 @@ def _source(job: dict, original: dict, plan: dict, authorized_profiles: list) ->
             row.get("rights_verified") is not True or
             row.get("canonical_media_authority") != "google_drive" or
             row.get("output_id") != output or row.get("profile_id") != profile or
+            row.get("content_item_id") != content or
             row.get("mime_type") not in MIME or
             not SHA.fullmatch(str(row.get("sha256") or "")) or
             type(row.get("byte_count")) is not int or row["byte_count"] < 1024 or
@@ -117,17 +121,17 @@ def build_isolated_gallery_attempt(
 
     Trusted operations:
       verify_hold(output_id, session_id) -> bool
-      reserve_attempt(job, original_hash, changes_hash) -> bool (atomic once)
+      verify_original_sources(original) -> bool (independent Drive bytes + identity/rights)\n      reserve_attempt(job, original_hash, changes_hash) -> bool (atomic once)
       generate_image(prompt, ratio) -> PNG bytes
       watermark_image(image_bytes, profile_id) -> PNG bytes
       upload_image(name, bytes) -> {id} (Drive staging folder, never original)
       verify_drive_image(file_id, sha256, byte_count) -> {
         mime_type, width, height, sha256, byte_count, google_drive_verified }
-      verify_generated_rights(output_id, slot_id, file_id, prompt, sha256) -> bool
+      verify_generated_rights(output_id, slot_id, file_id, prompt, sha256) -> {verified,media_asset_record_id}
       commit_manifest(job, manifest) -> bool (durable CAS)
       read_manifest(job) -> manifest (readback)
     """
-    needed = ("verify_hold", "reserve_attempt", "generate_image",
+    needed = ("verify_hold", "verify_original_sources", "reserve_attempt", "generate_image",
               "watermark_image", "upload_image", "verify_drive_image",
               "verify_generated_rights", "commit_manifest", "read_manifest")
     if not all(callable(getattr(operations, n, None)) for n in needed):
@@ -138,6 +142,10 @@ def build_isolated_gallery_attempt(
     new_by_slot = {x["slot_id"]: x for x in plan["replacements"]}
     if operations.verify_hold(output, job["session_id"]) is not True:
         deny("gallery_publication_hold_lost")
+    # Metadata-only manifests cannot authorize generation.
+    # The trusted operations bridge must independently inspect original Drive bytes.
+    if operations.verify_original_sources(original) is not True:
+        deny("gallery_original_drive_bytes_unverified")
     canonical = json.dumps(
         [job["output_id"], job["attempt_id"], job["plan_hash"],
          original["manifest_sha256"], plan["replacements"]],
@@ -179,13 +187,20 @@ def build_isolated_gallery_attempt(
             deny("gallery_revision_drive_readback_unverified")
         # An image-generation response alone is not a rights receipt.
         # Promotion requires an independent trusted clearance decision.
-        if operations.verify_generated_rights(
+        rights = operations.verify_generated_rights(
             output, old["slot_id"], drive_id, change["prompt"], sha(branded)
-        ) is not True:
+        )
+        # A boolean "yes" cannot identify the new *owned* Media Asset row.
+        # The independent Runner V2 verifier later reloads this exact record.
+        new_media_id = rights.get("media_asset_record_id") if isinstance(rights, dict) else None
+        if (not isinstance(rights, dict) or rights.get("verified") is not True or
+                not REC.fullmatch(str(new_media_id or "")) or
+                new_media_id == old.get("source_media_asset_id")):
             deny("gallery_generated_image_rights_unverified")
         results.append({**old, "drive_file_id": drive_id, "mime_type": "image/png",
           "width": verified["width"], "height": verified["height"],
           "byte_count": len(branded), "sha256": sha(branded),
+          "revision_media_asset_id": new_media_id,
           "watermark_verified": True, "google_drive_verified": True,
           "rights_verified": True})
     if operations.verify_hold(output, job["session_id"]) is not True:
