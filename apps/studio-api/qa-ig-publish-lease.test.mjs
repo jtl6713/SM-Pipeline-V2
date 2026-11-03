@@ -150,3 +150,21 @@ test("runner finish cannot erase a Graph-intent quarantine",async()=>{
     /irreversible_intent_requires_provider_reconciliation/);
   assert.equal(f.lease.phase,"remote_intent");
 });
+
+test("unused pre-lock claim can be reclaimed only after full stale threshold",async()=>{
+  const f=fixture();
+  const first=await mutateIgPublishLease(f.env,{action:"claim",outputId:OUTPUT,
+    readOutput:f.readOutput,nowMs:now});
+  await assert.rejects(mutateIgPublishLease(f.env,{action:"claim",outputId:OUTPUT,
+    readOutput:f.readOutput,nowMs:now+10*60_000}),/publish_lease_requires_reconciliation/);
+  const second=await mutateIgPublishLease(f.env,{action:"claim",outputId:OUTPUT,
+    readOutput:f.readOutput,nowMs:now+IG_LEASE_STALE_MS+1000});
+  assert.equal(second.generation,first.generation+1);
+  assert.notEqual(second.attempt_id,first.attempt_id);
+  lock(f);
+  await assert.rejects(mutateIgPublishLease(f.env,{action:"remote_intent",
+    outputId:OUTPUT,attemptId:first.attempt_id,generation:first.generation,
+    lockStamp:"2026-11-02T18:00:00Z",
+    readOutput:f.readOutput,nowMs:now+IG_LEASE_STALE_MS+2000}),
+    /publisher_fenced_or_lease_changed/);
+});
