@@ -1204,7 +1204,26 @@ export async function studioAdmitRenderQueue(env, options = {}) {
     limit: 16,
     filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
   }).catch(() => []);
-  const busy = await studioRemotionRenderBusy(env);
+  // A stale Airtable "Rendering" hold can block every Story indefinitely even
+  // when the real renderer has zero active jobs. First run the existing R5
+  // poll/reconciliation against the saved job IDs, then re-check the canonical
+  // holds. Never assume an idle renderer alone permits another R4 start.
+  let busy = await studioRemotionRenderBusy(env);
+  let staleHoldRecovery = null;
+  if (busy.busy && busy.source === "airtable") {
+    try {
+      const recovered = await item4PulseR5Python(env, { maxRuns: 5 });
+      staleHoldRecovery = { attempted: true, status: recovered?.status || null };
+      busy = await studioRemotionRenderBusy(env);
+    } catch (error) {
+      staleHoldRecovery = {
+        attempted: true,
+        error: error instanceof Error ? error.message : String(error),
+      };
+      // An uncertain R5 response cannot authorize a second Remotion start.
+      busy = { ...busy, busy: true };
+    }
+  }
   // One Remotion admission per shared 9:16 short group — siblings wait for produce
   // to copy Final_File_URL, they do not each claim a render slot.
   const { byId, total, admitCandidates } = assignRenderQueuePositions(candidates, f, {
@@ -1225,6 +1244,7 @@ export async function studioAdmitRenderQueue(env, options = {}) {
       waiting: total,
       stamped_waiting: stampedWaiting,
       busy,
+      stale_hold_recovery: staleHoldRecovery,
       queue: [...byId.values()],
       shared_siblings_waiting: Math.max(0, candidates.length - total),
       controls,
