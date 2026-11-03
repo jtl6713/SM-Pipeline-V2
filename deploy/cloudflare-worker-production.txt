@@ -871,3 +871,5 @@ Deploy Worker 0.10.738-vibe-preflight-error-boundary (2026-11-03). Await Idea/Pr
 2026-11-03: Retry guarded production Worker 0.10.738 for Vibe preflight 500/429 repair PR #1552, after retiring obsolete per-output Michigan V2 preview and fixed Factory-state canaries. Keep live Factory auth/approval/media checks, binding parity, independent safety smoke checks and automatic rollback. No publication or user media writes.
 
 2026-11-03: Deploy Worker 0.10.739-story-r4-stale-hold-r5-reconcile. Before blocked Story queue admission, run bounded R5 polling of existing Airtable Rendering holds, re-read canonical holds, and fail closed on uncertain job state. No auto-approval, publish, or duplicate render.
+
+2026-11-03: Release Worker 0.10.740-story-r4-expired-priority-fairness. Live R4 audit proved eight manual priority IDs all already Rendered/Published, which disabled fair cursor rotation and bounded multi-candidate admission. Treat only priorities of actually eligible current candidates as overrides; retain other safety fences and user controls. No Airtable output status, scheduling, publishing or R2 priority mutation.
