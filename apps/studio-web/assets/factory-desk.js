@@ -1337,7 +1337,7 @@
       if(needsEyesOutput && card.review_hold_active===true && card.do_not_publish===true) {
         // This is a separate protected handoff of an already-approved revision,
         // not a publishing approval. The server enforces the exact V2/session hold.
-        actions.push(`<button type="button" class="secondary-button factory-held-creative-action" data-factory-handoff-held="${esc(card.id)}" title="Verify approved V2 and release only its original owned review hold. Does not approve, schedule or publish.">Complete V2 Factory handoff</button>`);
+        actions.push(`<button type="button" class="secondary-button factory-held-handoff-action" data-factory-handoff-held="${esc(card.id)}" title="Verify approved V2 and release only its original owned review hold. Does not approve, schedule or publish.">Complete V2 Factory handoff</button>`);
         // Human review can be accepted without releasing the publishing hold.
         // Server verifies the actual saved creative approval before accepting.
         if(state.heldCreativeAccepted?.has(card.id)){
@@ -2332,7 +2332,7 @@
           state.selectedOutputs.delete(id);
           saveFactorySelection();
           setStatus("Approved V2 handoff verified. Refreshing Factory eligibility; no publishing approval was submitted.");
-          await loadFactoryDesk();
+          await loadFactoryDesk(true);
         } catch (error) {
           setStatus("Protected V2 handoff not completed: " + String(error?.message || error), true);
         } finally {
