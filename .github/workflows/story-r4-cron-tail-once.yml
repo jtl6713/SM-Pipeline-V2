@@ -9,7 +9,7 @@ permissions:
 jobs:
   observe:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 8
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -21,7 +21,7 @@ jobs:
           mkdir -p /tmp/story-tail
           npm install --prefix /tmp/story-tail --no-save --silent wrangler@4.123.0
           set +e
-          timeout -s INT 180s /tmp/story-tail/node_modules/.bin/wrangler tail chicagoshining-studio-api --format json >/tmp/story-tail.jsonl 2>/tmp/story-tail.err
+          timeout -s INT 335s /tmp/story-tail/node_modules/.bin/wrangler tail chicagoshining-studio-api --format json >/tmp/story-tail.jsonl 2>/tmp/story-tail.err
           RC=$?
           set -e
           echo "tail_exit=$RC"
@@ -38,11 +38,14 @@ jobs:
                   event=json.loads(raw)
               except Exception:
                   continue
-              if event.get('event',{}).get('cron') or event.get('event',{}).get('scheduledTime'):
-                  cron=True
-              else: cron=False
+              event_meta=event.get('event') or {}
+              if not isinstance(event_meta,dict): event_meta={}
+              cron=bool(event_meta.get('cron') or event_meta.get('scheduledTime'))
               for log in event.get('logs',[]) or []:
-                  msg=' '.join(str(v) for v in log.get('message',[])) if isinstance(log.get('message'),list) else str(log.get('message',''))
+                  if isinstance(log,dict):
+                      value=log.get('message','')
+                      msg=' '.join(str(v) for v in value) if isinstance(value,list) else str(value)
+                  else: msg=str(log)
                   if any(t.lower() in msg.lower() for t in tokens):
                       msg=re.sub(r'https?://\S+','[URL]',msg)
                       msg=re.sub(r'[\w.+-]+@[\w.-]+','[EMAIL]',msg)
