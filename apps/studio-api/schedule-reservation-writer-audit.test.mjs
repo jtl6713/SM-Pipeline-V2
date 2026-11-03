@@ -62,6 +62,7 @@ const EXPECTED_WRITER_SURFACE = [
   "worker-functions-04.mjs:factoryDeleteDeskItem",
   "worker-functions-04.mjs:resendStudioTiktokDraft",
   "worker-functions-04.mjs:scheduleStudioPublishOutput",
+  "worker-functions-04.mjs:studioRecoverFencedIgStaleUpload",
   "worker-functions-04.mjs:studioApproveOutputRecordAtomic",
   "worker-functions-04.mjs:studioAtomicApplyScheduleRegenEntry",
   "worker-functions-04.mjs:studioAtomicVacateSkippedOutput",
@@ -89,6 +90,7 @@ test("every true flag-on schedule mutation uses the shared transaction authority
     ["worker-functions-04.mjs", "studioAtomicApplyScheduleRegenEntry"],
     ["worker-functions-04.mjs", "studioAtomicVacateSkippedOutput"],
     ["worker-functions-04.mjs", "scheduleStudioPublishOutput"],
+    ["worker-functions-04.mjs", "studioRecoverFencedIgStaleUpload"],
   ];
   for (const [file, name] of atomic) {
     const body = topLevelFunctionBodies(sources[file]).get(name);
@@ -321,6 +323,13 @@ test("direct schedule-field mutations are confined to audited constructors, atom
         worker04,
         "export async function scheduleStudioPublishOutput",
         "/*__STUDIO_WORKER_END:scheduleStudioPublishOutput__*/",
+      ),
+      // This writer requires both a CAS-fenced pre-Graph lease and the shared
+      // Durable Object scheduling lane. No direct/legacy date mutation exists.
+      sourceRegion(
+        worker04,
+        "export async function studioRecoverFencedIgStaleUpload",
+        "/*__STUDIO_WORKER_END:studioRecoverFencedIgStaleUpload__*/",
       ),
     ]],
   ]);
