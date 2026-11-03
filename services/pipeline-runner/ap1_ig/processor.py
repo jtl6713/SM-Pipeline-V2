@@ -28,6 +28,7 @@ from carousel.timeutil import chicago_now, iso_utc, parse_utc, stamp_minutes, ut
 from item4.settings import PipelineSettings
 from publish.location import resolve_publish_location
 from publish.rendering_review import verify_before_reel_creation, verify_before_reel_publication
+from ap1_ig.publish_lease import IgPublishLease, IgPublishLeaseError, ig_publish_lease_required
 from publish.review_dispatch_claim import (
     ReviewDispatchClaimError, shared_dispatch_claim_required,
     is_chicago_reel, claim_chicago_dispatch,
@@ -175,6 +176,19 @@ def process_request(
         if prelock_reason:
             return {"processed": False, "reason": prelock_reason, **preview}
 
+    lease = None
+    if creating_container and ig_publish_lease_required():
+        # The all-profile lease and old Chicago-only pilot cannot both own
+        # the initial dispatch. Refuse rather than invoke conflicting claims.
+        if shared_dispatch_claim_required(output.get("id")):
+            return {"processed": False, "reason": "conflicting_ig_dispatch_lease_protocols", **preview}
+        try:
+            lease = IgPublishLease(record_id)
+            lease.claim()
+            preview["publish_lease_claimed"] = True
+        except IgPublishLeaseError as exc:
+            return {"processed": False, "reason": str(exc), **preview}
+
     # The default-off Chicago pilot requires a cross-runtime R2/Airtable
     # dispatch ownership claim shared with manual Rendering Review enrollment.
     # Claim BEFORE the existing Python Airtable lock PATCH or any Graph create.
@@ -247,6 +261,14 @@ def process_request(
         return {"processed": False, "reason": review_reason,
                 "attempt_count": attempt, **preview}
 
+    if lease is not None:
+        try:
+            lease.heartbeat(now)
+        except IgPublishLeaseError:
+            # No Graph create has been authorized. Leave the exact Airtable
+            # attempt untouched for the pre-remote fencing coordinator.
+            return {"processed": False, "reason": "publish_lease_heartbeat_unverified",
+                    "attempt_count": attempt, **preview}
     remote_side_effect_possible = bool(field_str(output, "Platform_Media_ID"))
     try:
         settings = graph_settings or load_instagram_graph_settings(pipeline_settings, output, client=client)
@@ -261,6 +283,11 @@ def process_request(
             preview["resumed_container_id"] = creation_id
         else:
             try:
+                if lease is not None:
+                    # One-way CAS transition BEFORE any HTTP POST to Meta.
+                    # Even a timeout after this transition forbids automatic
+                    # stale-lock recovery from making another container.
+                    lease.remote_intent(now)
                 remote_side_effect_possible = True  # HTTP request may commit before the response is saved.
                 created = graph.create_reel(body)
             except InstagramGraphError as exc:
@@ -339,6 +366,17 @@ def process_request(
         if not permalink and meta.get("shortcode"):
             permalink = f"https://www.instagram.com/p/{meta['shortcode']}/"
     except Exception as exc:
+        if isinstance(exc, IgPublishLeaseError):
+            # Intent receipt missing/ambiguous: never guess that Meta was not
+            # contacted, and never mark Ready to Publish on this path.
+            return {"processed": False, "reason": "publish_lease_intent_unverified",
+                    "attempt_count": attempt, **preview}
+        if lease is not None and not remote_side_effect_possible:
+            try:
+                lease.finish(now)  # Verified no Graph request was authorized.
+            except IgPublishLeaseError:
+                return {"processed": False, "reason": "publish_lease_pregraph_finalization_failed",
+                        "attempt_count": attempt, **preview}
         _mark_failed(client, output, exc,
                      remote_side_effect_possible=remote_side_effect_possible)
         if isinstance(exc, InstagramGraphError):
