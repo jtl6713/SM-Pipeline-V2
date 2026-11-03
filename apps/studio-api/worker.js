@@ -814,6 +814,7 @@ import {
   studioReconcileFacebookVideoCovers,
   studioReconcilePublishingInstagramStories,
   studioReconcilePublishingInstagramReels,
+  studioRecoverFencedIgStaleUpload,
   studioReconcileFacebookSlideshows,
   studioReconcileFacebookReels,
   startScheduleRegenJob,
@@ -3996,6 +3997,20 @@ export default {
         && env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false") {
       ctx.waitUntil(auditStaleInstagramReels(env, {
         airtableFetch, limit: 8,
+        inspectLease: row => readIgPublishLease(env,row.id),
+        recoverSafe: async (row) => {
+          if (env.STUDIO_IG_STALE_UPLOAD_AUTO_RECOVERY_ENABLED !== "true" ||
+              !igPublishLeaseEnabled(env))
+            return {committed:false,reason:"recovery_feature_not_enabled"};
+          // The only auto-recoverable case has positive R2 proof that the
+          // owner never received permission to make any Graph request.
+          const readOutput=id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id);
+          const fence=await fenceStaleIgPreRemoteLease(env,row.id,{readOutput});
+          if (!fence.safe) return {committed:false,reason:fence.reason};
+          return studioRecoverFencedIgStaleUpload(env,{
+            outputId:row.id,fence,
+          });
+        },
         verifyContainer: async (row) => {
           const profiles = row?.fields?.Content_Profile;
           if (!Array.isArray(profiles) || profiles.length !== 1)
@@ -4035,7 +4050,9 @@ export default {
           findings: rows.length,
           identities_verified: rows.filter(r => r.provider_public_verified).length,
           pending_lease_and_provider_reconciliation: rows.filter(r => !r.provider_public_verified).length,
-          graph_creates: 0, lock_releases: 0, reschedules: 0,
+          graph_creates: 0,
+          reschedules: rows.filter(r=>r.recovery_committed===true).length,
+          needs_eyes: rows.filter(r=>r.outcome==="graph_intent_ambiguous_needs_eyes").length,
         }));
       }).catch(error => console.warn("QA-IG-STALE-UPLOAD scan unavailable",
         String(error?.message || error))));
