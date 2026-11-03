@@ -2422,7 +2422,15 @@ export function mapOutput(record, job = null, queueMeta = null, contentRecord = 
   let studioState = normalizedOutputState(record);
   const renderStatus = String(f(record, "Render_Status") || "").trim();
   const hasJob = Boolean(String(f(record, "Remotion_Job_ID") || "").trim());
-  if (queueMeta?.label && isRenderQueueCandidateStatus(renderStatus) && !hasJob) {
+  const hasFinal = Boolean(String(f(record, "Final_File_URL") || "").trim());
+  // Historical R5 status regressions must never masquerade as a free R4
+  // admission. Preserve the raw Airtable Render_Status for diagnostics while
+  // showing a reconciliation state instead of a fake waiting position.
+  if (isRenderQueueCandidateStatus(renderStatus) && hasFinal) {
+    studioState = "Finished media recorded — status reconciliation";
+  } else if (isRenderQueueCandidateStatus(renderStatus) && hasJob) {
+    studioState = "Remotion job recorded — status reconciliation";
+  } else if (queueMeta?.label && isRenderQueueCandidateStatus(renderStatus)) {
     studioState = queueMeta.label;
   } else if (studioState === "Waiting in Render Queue") {
     studioState = queueMeta?.label || "Waiting in render queue";
