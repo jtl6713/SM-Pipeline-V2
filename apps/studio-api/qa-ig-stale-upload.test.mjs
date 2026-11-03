@@ -285,3 +285,35 @@ test("remote Graph intent without saved identity is quarantined, never reschedul
   assert.equal(output[0].recovery_committed,undefined);
   assert.equal(recoveryCalls,0);
 });
+
+test("failed MAE attempt may be retried from same already-fenced generation",async()=>{
+  const candidate=row();
+  let currentLedger=null,attempts=0;
+  const output=await auditStaleInstagramReels({},{
+    nowMs:NOW,
+    inspectLease:async()=>({available:true,state:{
+      phase:"fenced",irreversible_possible:false,
+      heartbeat_at:"2026-11-02T17:00:00Z",
+      expires_ms:NOW-20000,generation:8,attempt_id:"attempt_token_123456789",
+    }}),
+    recoverSafe:async(_row,proof)=>{
+      attempts++;
+      assert.equal(proof.lease_generation,8);
+      return {committed:true,output_id:candidate.id,generation:8,
+        scheduled_at:"2026-12-01T16:30:00Z"};
+    },
+    airtableFetch:async(_env,table,path,opts)=>{
+      if(table==="Quality Agent Recovery Ledger"){
+        if(opts?.method==="PATCH"){
+          currentLedger=JSON.parse(opts.body).records[0].fields;
+          return {records:[{id:"rec12345678901239"}]};
+        }
+        return {id:path,fields:currentLedger};
+      }
+      return String(path).startsWith("?") ? {records:[candidate]}:candidate;
+    },
+  });
+  assert.equal(output[0].recovery_committed,true);
+  assert.equal(output[0].outcome,"fenced_pregraph_mae_retry_candidate");
+  assert.equal(attempts,1);
+});
