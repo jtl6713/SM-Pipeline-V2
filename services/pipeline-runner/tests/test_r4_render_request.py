@@ -47,6 +47,27 @@ def test_r4_exact_eligibility_requires_ready_package():
     assert _eligible_exact_output(output) is False
 
 
+def test_r4_exact_ready_record_never_relaunches_existing_job_or_final_media():
+    ready = {
+        "fields": {
+            "Render_Status": "Ready for Render",
+            "Composition_ID": "ChicagoShiningPhotoSequence",
+            "Output_Filename": "studio-story.mp4",
+            "Render_Clip_List_JSON": '[{"url":"https://example.com/a.jpg"}]',
+            "Render_Total_Frames": 300,
+            "Studio_Output_Type": "Story",
+        }
+    }
+    assert _eligible_exact_output(ready) is True
+    ready["fields"]["Remotion_Job_ID"] = "job-existing"
+    assert _eligible_exact_output(ready) is False
+    del ready["fields"]["Remotion_Job_ID"]
+    ready["fields"]["Final_File_URL"] = "https://drive.google.com/file/d/finished/view"
+    assert _eligible_exact_output(ready) is False
+    assert '{Final_File_URL}=""' in r4_exact_output_formula("recEXACT", "")
+    assert '{Remotion_Job_ID}=""' in r4_exact_output_formula("recEXACT", "")
+
+
 def test_r4_no_voiceover_request_dimensions():
     output = {
         "fields": {
