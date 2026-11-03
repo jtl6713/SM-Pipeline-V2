@@ -38,10 +38,14 @@ jobs:
                   event=json.loads(raw)
               except Exception:
                   continue
-              event_meta=event.get('event') or {}
+              if not isinstance(event,dict):
+              continue
+          event_meta=event.get('event') or {}
               if not isinstance(event_meta,dict): event_meta={}
               cron=bool(event_meta.get('cron') or event_meta.get('scheduledTime'))
-              for log in event.get('logs',[]) or []:
+              logs=event.get('logs') or []
+          if not isinstance(logs,list): logs=[logs]
+          for log in logs:
                   if isinstance(log,dict):
                       value=log.get('message','')
                       msg=' '.join(str(v) for v in value) if isinstance(value,list) else str(value)
