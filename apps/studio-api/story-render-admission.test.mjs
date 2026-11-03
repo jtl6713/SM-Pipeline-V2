@@ -149,3 +149,23 @@ test("P0 #1542: R5 reconciles completed-but-Ready Stories without replacing medi
   assert.doesNotMatch(recovery, /Review_Status: "Review Sent"/);
   assert.doesNotMatch(recovery, /item4PulseR4Python/);
 });
+
+test("P0 #1542: automatic failed/source healers refuse ambiguous saved Remotion receipts", () => {
+  const source = readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
+  const healer = source.split("export async function healStuckStudioRenders")[1]
+    ?.split("/*__STUDIO_WORKER_END:healStuckStudioRenders__*/")[0] || "";
+  const invalid = healer.split("const invalidSourceRows")[1]?.split("const readyToTypo")[0] || "";
+  const failed = healer.split("const failedRenders")[1]?.split("if (pulses.length)")[0] || "";
+  const repair = source.split("export async function studioRepairUnfetchableRenderSources")[1]
+    ?.split("/*__STUDIO_WORKER_END:studioRepairUnfetchableRenderSources__*/")[0] || "";
+  assert.match(invalid, /\{Remotion_Job_ID\}=""/);
+  assert.match(invalid, /\{Final_File_URL\}=""/);
+  assert.match(repair, /current = await airtableFetch\(env, env\.AIRTABLE_OUTPUT_TABLE_ID, row\.id\)/);
+  assert.match(repair, /f\(current, "Remotion_Job_ID"\)/);
+  assert.match(repair, /f\(current, "Final_File_URL"\)/);
+  assert.match(failed, /\{Remotion_Job_ID\}=""/);
+  assert.match(failed, /\{Final_File_URL\}=""/);
+  assert.match(failed, /const current = await airtableFetch\(env, outputTable, row\.id\)/);
+  assert.match(failed, /skipped: "ambiguous_or_changed_render"/);
+  assert.doesNotMatch(failed, /Remotion_Job_ID: ""/);
+});
