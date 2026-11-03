@@ -373,6 +373,7 @@ import {
   isActiveRemotionHold,
   isRealRemotionRetryFailure,
   isRenderQueueCandidateStatus,
+  isOpsRenderQueueCandidate,
   isRenderQueueWaitingStatus,
   remotionHealthLooksBusy,
   sortRenderQueueCandidates,
@@ -11185,7 +11186,9 @@ export async function getStudioOperationsQueue(request, env, authorization) {
   const mergedOutputs = mergeOpsQueueOutputRecords(outputs, renderLaneOutputs, activeHolds, reviewOutputs);
   const profileMap = new Map((profiles || []).map((row) => [row.id, row]));
   const queueCandidates = sortRenderQueueCandidates(
-    mergedOutputs.filter((row) => isRenderQueueCandidateStatus(f(row, "Render_Status"))),
+    // Ops positions must match the true launch fence: a saved Remotion job or
+    // final URL is never waiting for a new R4 admission.
+    mergedOutputs.filter((row) => isOpsRenderQueueCandidate(row, f)),
     f,
     controls,
   );
