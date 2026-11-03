@@ -56,3 +56,16 @@ test("render queue and watchdog ignore outputs that already have final media", (
     assert.ok(!formula.includes('Format}!="Story"'), name + " must keep eligible Stories selectable");
   }
 });
+
+test("R4 does not let a stale Airtable Rendering hold starve Stories before R5 status reconciliation", () => {
+  const source = readFileSync(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
+  const admit = source.split("export async function studioAdmitRenderQueue")[1]
+    ?.split("/*__STUDIO_WORKER_END:studioAdmitRenderQueue__*/")[0] || "";
+  assert.match(admit, /busy\.busy && busy\.source === "airtable"/);
+  assert.match(admit, /await item4PulseR5Python\(env, \{ maxRuns: 5 \}\)/);
+  assert.match(admit, /busy = await studioRemotionRenderBusy\(env\)/);
+  assert.match(admit, /stale_hold_recovery: staleHoldRecovery/);
+  assert.match(admit, /busy = \{ \.\.\.busy, busy: true \}/);
+  assert.ok(admit.indexOf("await item4PulseR5Python") < admit.indexOf("if (busy.busy) {"),
+    "the old job must be reconciled before deciding R4 cannot admit the next Story");
+});
