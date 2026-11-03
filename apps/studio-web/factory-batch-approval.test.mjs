@@ -154,7 +154,7 @@ test("A rejected submission stays visible across the automatic Desk refresh", ()
   assert.match(js, /batchSubmissionError: null/);
   assert.match(js, /FACTORY_SUBMISSION_ERROR_KEY = "studio\.factory\.submission-error\.v1"/);
   assert.match(js, /sessionStorage\.setItem\(FACTORY_SUBMISSION_ERROR_KEY/);
-  assert.match(js, /setBatchSubmissionError\(`Submitted \$\{acceptedOutputs\} of \$\{ready\.length\} outputs/);
+  assert.match(js, /setBatchSubmissionError\(`Confirmed \$\{acceptedOutputs\} of \$\{ready\.length\} outputs accepted/);
   assert.match(js, /if \(state\.batchSubmissionError\) setStatus\(state\.batchSubmissionError, true\);\s*else setStatus\(desk\.warning \|\| "Factory Desk ready\."\);/);
   assert.match(js, /submitFactoryBatchApprovals\(\)\.catch\(\(error\) => setBatchSubmissionError/);
 });
@@ -391,4 +391,72 @@ test("Factory retries one HTTP 500 only under the saved exact request ID after r
   assert.match(js,/const submitPlan = \(\) => fetchJson\("\/api\/factory\/approval-batches"/);
   assert.match(js,/batch = await submitPlan\(\);[\s\S]*?batch = await recoverSubmittedFactoryPlan\(plan, retryError\)/,
     "retry must reuse the same request body and perform one more exact-ID recovery");
+});
+
+
+test("Factory pending approval makes Submit, Clear and Recovery mutually exclusive", () => {
+  const fn = extractNamedFunction(js, "updateFactoryBatchToolbar");
+  const make = (saved, busy = false) => {
+    const nodes = new Map();
+    const el = (id) => {
+      if (!nodes.has(id)) nodes.set(id,{
+        hidden:false,disabled:false,textContent:"",title:"",
+        removeAttribute(name){if(name==="title")this.title="";}
+      });
+      return nodes.get(id);
+    };
+    // The browser may retain 12 selected IDs from earlier city filters while
+    // only two remain actively reviewable. The toolbar counts eligible rows.
+    const selectedOutputs = new Set([
+      "recSelectedA", "recSelectedB",
+      ...Array.from({length:10},(_,i)=>"recLegacy"+i),
+    ]);
+    const state = {
+      selectedOutputs, submittingBatch:false,
+      batchGlobal:{enabled:true,max_total:20,max_per_profile:10,stage:"expanded",
+        allowed_platforms:["Instagram"]},
+      batchRollout:null,batchApprovalsEnabled:true,
+    };
+    const available = [{id:"recSelectedA",profile_id:"recChicago"},
+      {id:"recSelectedB",profile_id:"recChicago"}];
+    const compile = new Function("$","readyFactoryOutputs","state",
+      "planFactoryApprovalBatches","pendingFactoryApproval",
+      "factoryPendingRecoveryRunning","factoryPendingReconcileRunning",
+      fn+"; return updateFactoryBatchToolbar;");
+    const call = compile(el,()=>available,state,(cards)=>[cards],()=>saved,
+      busy,false);
+    call();
+    return {get:el,state};
+  };
+  const saved = {profile_id:"global",ids:["recSelectedA","recSelectedB"],
+    batches:[{ids:["recSelectedA","recSelectedB"],request_id:"saved_global_20261102"}],
+    saved_ms:Date.now()-300_000};
+  const pending=make(saved);
+  assert.match(pending.get("factoryBatchSelectionCount").textContent,/^2 outputs selected/);
+  assert.equal(pending.get("factoryBatchRecoverPending").hidden,false);
+  assert.equal(pending.get("factoryBatchRecoverPending").disabled,false);
+  assert.equal(pending.get("factoryBatchSubmit").disabled,true);
+  assert.equal(pending.get("factoryBatchClear").disabled,true);
+  assert.match(pending.get("factoryBatchPendingNotice").textContent,/saved_global_20261102/);
+  assert.match(pending.get("factoryBatchSubmit").textContent,/Recover saved submission first/);
+  const recovering=make(saved,true);
+  assert.equal(recovering.get("factoryBatchRecoverPending").disabled,true);
+  assert.equal(recovering.get("factoryBatchSubmit").disabled,true);
+  assert.equal(recovering.get("factoryBatchClear").disabled,true);
+  assert.match(recovering.get("factoryBatchPendingNotice").textContent,/No new submission is permitted/);
+  const absent=make(null);
+  assert.equal(absent.get("factoryBatchRecoverPending").hidden,true);
+  assert.equal(absent.get("factoryBatchSubmit").disabled,false);
+  assert.equal(absent.get("factoryBatchClear").disabled,false);
+});
+
+test("Factory errors count the current attempted outputs only, not saved cross-city selection", () => {
+  assert.match(js,/const remaining = ready\.filter\(card => state\.selectedOutputs\.has\(card\.id\)\)\.length/);
+  assert.doesNotMatch(js,/const remaining = state\.selectedOutputs\.size/);
+  assert.match(js,/Use Recover saved submission before another attempt/);
+  assert.match(js,/if \(unresolved\) \{\s*setBatchSubmissionError\("A previous approval request still needs exact-ID verification/);
+  assert.match(js,/if \(pending\) \{\s*setBatchSubmissionError\("Saved Factory approval is unresolved/);
+  assert.match(js,/if \(pendingFactoryApproval\(\) \|\| state\.submittingBatch/);
+  assert.match(html,/id="factoryBatchPendingNotice"/);
+  assert.match(html,/UI build 0\.6\.868/);
 });
