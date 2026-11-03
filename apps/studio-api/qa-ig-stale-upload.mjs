@@ -187,7 +187,7 @@ export async function auditStaleInstagramReels(env, {
     // heartbeat and irreversible-intent flag are the only positive proof.
     const heartbeatMs = Date.parse(String(liveLease?.heartbeat_at || ""));
     const leaseSafePreGraph = !recheck.post_id_saved && !recheck.container_id_saved
-      && liveLease?.phase === "pre_remote"
+      && ["pre_remote","fenced"].includes(liveLease?.phase)
       && liveLease.irreversible_possible === false
       && Number.isFinite(heartbeatMs)
       && nowMs - heartbeatMs >= QA_IG_STALE_UPLOAD_THRESHOLD_MS
@@ -205,7 +205,7 @@ export async function auditStaleInstagramReels(env, {
         ? "container_reports_published_receipt_unverified"
       : containerConfirmed && resumableContainer
         ? "saved_container_verified_pending_fenced_resume"
-      : leaseSafePreGraph ? "expired_pregraph_lease_recovery_candidate"
+      : leaseSafePreGraph ? (liveLease?.phase==="fenced" ? "fenced_pregraph_mae_retry_candidate" : "expired_pregraph_lease_recovery_candidate")
       : liveLease?.phase === "remote_intent" ? "graph_intent_ambiguous_needs_eyes"
       : "stale_lock_needs_eyes";
     const evidence = {
