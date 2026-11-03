@@ -25,10 +25,12 @@ export function classifyStaleInstagramReel(row, {
     || str(row, "Review_Status") !== "Approved"
     || str(row, "Output_Status") !== "Approved for Publishing"
     || row.fields?.Auto_Publish_Enabled !== true
+    || str(row, "Publish_Method") !== "Automated"
     || row.fields?.Do_Not_Publish === true
     || str(row, "Test_Run_ID")
     || str(row, "Replace_Transaction_ID")
     || str(row, "Published_At")
+    || str(row, "Studio_Render_Review_Session_ID")
     || str(row, "Studio_Render_Review_Hold_ID")
     || str(row, "Studio_Render_Review_Hold_Owner")
     || str(row, "Studio_Review_Hold_ID")
@@ -138,7 +140,16 @@ export async function auditStaleInstagramReels(env, {
       method: "PATCH", body: JSON.stringify(payload),
     });
     if (!Array.isArray(saved?.records) || saved.records.length !== 1)
-      throw new Error("QA stale Reel evidence write/readback incomplete");
+      throw new Error("QA stale Reel evidence write incomplete");
+    const persistedId = saved.records[0]?.id;
+    if (!/^rec[A-Za-z0-9]{14}$/.test(String(persistedId || "")))
+      throw new Error("QA stale Reel ledger record ID unverified");
+    const persisted = await airtableFetch(env, QA_IG_STALE_UPLOAD_LEDGER, persistedId);
+    if (persisted?.id !== persistedId
+      || persisted.fields?.Event_Key !== eventKey
+      || persisted.fields?.Outcome !== outcome
+      || Number(persisted.fields?.Output_ID) !== decision.output_id)
+      throw new Error("QA stale Reel ledger readback mismatch");
     results.push(evidence);
   }
   return results;
