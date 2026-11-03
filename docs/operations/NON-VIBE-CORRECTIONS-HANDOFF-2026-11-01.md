@@ -1,3 +1,13 @@
+## 2026-11-02 — PR #1521 reconciliation for integration into main
+
+**Scope of this pull request:** Merge the fail-closed native-gallery source verification, held job/lease/one-shot C5/C6 executor, private Drive staging, quarantined rights catalog, original/revised review, tests and disabled-by-default service routes. This is a **code integration**, not activation or full completion of Issue #1495. The remaining Factory/MAE approval and publishing package, actual Admin QA release gates, full four-profile private canaries and production Worker/Runner/Pages acceptance are separately tracked on Issue #1495 and must not be represented as passed.
+
+**Do not change release flags during merge.** Native gallery job creation, launch, execute, auto-dispatch, manifest commit, previews and creative decisions continue to require independent explicit flags and human authorization. No changes to Airtable SoR, original slide/media, existing scheduled/published outputs, or Vibe Cut. Before enabling generation in production, a named operator must certify the applicable provider/model rights policy and record authenticated job/Drive/Airtable readback, real private per-profile canary results and deployment identifiers. Any ambiguous provider, Drive or Airtable response is reconciliation-only; never silently regenerate. Preserve the common authorized ChicagoShining branding exception only for native gallery output.
+
+**Merge verification required:** Run all relevant CI checks on the latest PR head against current main, verify GitHub merged=true and main's merge SHA, then verify production deploy and still-disabled flags independently. If merge-only checks pass but live canaries are absent, leave Issue #1495 open and report it as an unfinished release rather than closing it.
+
+---
+
 ## 2026-11-02 — Issue #1495 C5/C6 executor continuation (DRAFT ONLY)
 
 The branch contains a new default-OFF Runner `POST /jobs/native-gallery/execute-next` endpoint. It accepts no body/query and requires the existing `X-Pipeline-Secret`. With independent operator-reviewed provider/model rights policy in place, the executor can claim one `held_queued` Airtable job, reserve the exact one-shot launch at the protected Worker, re-read job/hold/source Drive bytes, use the existing C5 generation prompt/provider and C6 watermark code, verify the actual watermark pixels, upload to a private staging folder, independently hash and check permissions, catalog an exact-profile generated Media Asset, and ask the Worker to CAS-commit the revised manifest. It NEVER updates the V1 slides or unlocks creative/Factory/public publishing.
