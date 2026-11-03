@@ -180,6 +180,7 @@ try{
   report.steps.push('production_binding_anchor_verified');
   await createBridge();
   const before=await bridge('read');
+  report.bridge_preflight={http:before.http,ok:before.ok,error:before.error||null,has_rows:Boolean(before.rows),do_ok:before.do?.ok||false};
   validateOutputState(before);
   report.steps.push('authenticated_source_and_exact_do_preflight_passed');
   const latestDeploy=await cf('/workers/scripts/'+SCRIPT+'/deployments');
