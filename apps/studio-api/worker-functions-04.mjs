@@ -4114,7 +4114,7 @@ export async function getStudioScheduleSettings(request, env, authorization) {
     mae_windows: [...MAE_PRIORITY_SCHEDULE_WINDOWS],
     blackout: "20:00-03:30",
     global_automatic_idea_target: globalTarget,
-    global_automatic_idea_target_default: 1000,
+    global_automatic_idea_target_default: 500,
     global_automatic_idea_setting_name: GLOBAL_IDEA_TARGET_SETTING,
     global_automatic_idea_target_invalid: globalTarget === null,
   });
@@ -14982,7 +14982,7 @@ export async function fillAutonomousScheduledHour(env, authorization, {
   for (const candidate of order) {
     const createBudget = Math.min(
       autonomousOpenIdeasCreateBudget(openIdeasCount, createdCount),
-      Math.max(0, Math.min(globalInventory.remaining_ideas, AUTONOMOUS_IDEAS_PER_HOUR) - createdCount),
+      Math.max(0, globalInventory.remaining_ideas - createdCount),
     );
     if (createBudget <= 0) break;
     if (!candidate?.id || !autonomousProfileHourOpen({ slot, ideas_by_profile: counts, hour_profile_skip: skips }, slot, candidate.id)) {
@@ -15750,12 +15750,11 @@ export async function executeStudioDailyIdeas(env, ctx, options = {}) {
   const skipped = [];
   const errors = [];
   let reservedOutputs = 0;
-  let reservedIdeas = 0;
   for (const profile of profiles) {
     const requested = Math.max(1, Math.min(10, Number(profile.daily_idea_limit) || 5));
     const count = options.scheduled
-      ? Math.min(requested, AUTONOMOUS_IDEAS_PER_HOUR - reservedIdeas, globalAutomaticIdeaBudget(
-          globalInventory.load, globalInventory.target))
+      ? Math.min(requested, globalAutomaticIdeaBudget(
+          globalInventory.load + reservedOutputs, globalInventory.target))
       : requested;
     if (options.scheduled && count === 0) {
       skipped.push({
@@ -15783,10 +15782,7 @@ export async function executeStudioDailyIdeas(env, ctx, options = {}) {
       }
       // Reserve this batch's expected output footprint before any later city
       // is admitted. Partial I1 failures conservatively retain the reservation.
-      if (options.scheduled) {
-        reservedIdeas += count;
-        reservedOutputs += count * AUTONOMOUS_EXPECTED_OUTPUTS_PER_IDEA;
-      }
+      if (options.scheduled) reservedOutputs += count * AUTONOMOUS_EXPECTED_OUTPUTS_PER_IDEA;
       const full = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profile.id);
       batch = await studioIdeaCreateBatch(env, full, count, "Balanced", { email: "studio-daily-cadence" });
       await studioIdeaSetProfileOverrides(env, profile.id, batch.id, count, "Balanced");
