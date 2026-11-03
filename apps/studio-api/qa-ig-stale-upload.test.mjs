@@ -220,3 +220,68 @@ test("durable pagination cursor eventually audits newer locks behind an old back
     new URLSearchParams(pages[1].slice(1)).get("filterByFormula"));
   assert.equal(JSON.parse(cursorBytes).offset,null);
 });
+
+test("pre-remote lease can recover only after durable finding audit",async()=>{
+  const candidate=row();
+  const events=[];
+  let currentLedger=null;
+  let recovered=0;
+  const output=await auditStaleInstagramReels({},{
+    nowMs:NOW,
+    inspectLease:async()=>({available:true,state:{
+      phase:"pre_remote",irreversible_possible:false,
+      heartbeat_at:"2026-11-02T17:00:00Z",
+      expires_ms:NOW-20000,generation:5,attempt_id:"attempt_token_123456789",
+    }}),
+    recoverSafe:async(_row,proof)=>{
+      assert.equal(events.length,1);
+      assert.equal(proof.lease_generation,5);
+      recovered++;
+      return {committed:true,output_id:candidate.id,generation:5,
+        scheduled_at:"2026-12-01T16:30:00Z",reservation_id:"reserved_1"};
+    },
+    airtableFetch:async(_env,table,path,opts)=>{
+      if(table==="Quality Agent Recovery Ledger"){
+        if(opts?.method==="PATCH"){
+          currentLedger=JSON.parse(opts.body).records[0].fields;
+          events.push(currentLedger);
+          return {records:[{id:"rec12345678901239"}]};
+        }
+        return {id:path,fields:currentLedger};
+      }
+      return String(path).startsWith("?") ? {records:[candidate]}:candidate;
+    },
+  });
+  assert.equal(recovered,1);
+  assert.equal(events.length,2);
+  assert.equal(events[1].Outcome,"fenced_pregraph_mae_rescheduled");
+  assert.equal(output[0].recovery_committed,true);
+  assert.equal(output[0].recovered_scheduled_at,"2026-12-01T16:30:00Z");
+});
+test("remote Graph intent without saved identity is quarantined, never rescheduled",async()=>{
+  const candidate=row();
+  let recoveryCalls=0,currentLedger=null;
+  const output=await auditStaleInstagramReels({},{
+    nowMs:NOW,
+    inspectLease:async()=>({available:true,state:{
+      phase:"remote_intent",irreversible_possible:true,
+      heartbeat_at:"2026-11-02T17:00:00Z",
+      expires_ms:NOW-20000,generation:5,attempt_id:"attempt_token_123456789",
+    }}),
+    recoverSafe:async()=>{recoveryCalls++;throw new Error("must not execute");},
+    airtableFetch:async(_env,table,path,opts)=>{
+      if(table==="Quality Agent Recovery Ledger"){
+        if(opts?.method==="PATCH"){
+          currentLedger=JSON.parse(opts.body).records[0].fields;
+          return {records:[{id:"rec12345678901239"}]};
+        }
+        return {id:path,fields:currentLedger};
+      }
+      return String(path).startsWith("?") ? {records:[candidate]}:candidate;
+    },
+  });
+  assert.equal(output[0].outcome,"graph_intent_ambiguous_needs_eyes");
+  assert.equal(output[0].irreversible_possible,true);
+  assert.equal(output[0].recovery_committed,undefined);
+  assert.equal(recoveryCalls,0);
+});
