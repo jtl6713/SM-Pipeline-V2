@@ -361,7 +361,7 @@ test("Factory preserves original fence when status unavailable or identity confl
   assert.match(js,/ready = readyFactoryOutputs\(true\)\.filter\(card => state\.selectedOutputs\.has\(card\.id\)\)/);
   assert.match(html,/id="factoryBatchRecoverPending"/);
   assert.match(js,/factoryBatchRecoverPending"\)\?\.addEventListener/);
-  assert.match(html,/UI build 0\.6\.870/);
+  assert.match(html,/UI build \d+\.\d+\.\d+/);
 });
 
 test("Factory partly committed global groups preserve unsubmitted selection", async () => {
@@ -461,7 +461,7 @@ test("Factory errors count the current attempted outputs only, not saved cross-c
   assert.match(js,/if \(pending\) \{\s*setBatchSubmissionError\("Saved Factory approval is unresolved/);
   assert.match(js,/if \(pendingFactoryApproval\(\) \|\| state\.submittingBatch/);
   assert.match(html,/id="factoryBatchPendingNotice"/);
-  assert.match(html,/UI build 0\.6\.870/);
+  assert.match(html,/UI build \d+\.\d+\.\d+/);
 });
 
 

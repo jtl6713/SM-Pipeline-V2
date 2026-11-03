@@ -53,6 +53,7 @@ jobs:
             apps/studio-web/production-record-identity.test.mjs \
             apps/studio-web/pipeline-rendering-terminal.test.mjs \
             apps/studio-web/vibe-cut-mode.test.mjs \
+            apps/studio-web/vibe-skip-upload-dates.test.mjs \
             apps/studio-web/vibe-upload-confirm.test.mjs \
             apps/studio-web/vibe-cut-passthrough-guard.test.mjs \
             apps/studio-web/pipeline-review-filter.test.mjs \
