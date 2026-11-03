@@ -23,10 +23,15 @@ test("Studio Approve gate rejects stale Rendering / In Production (Output 1807)"
   assert.match(app, /Output 1807/);
 });
 
-test("Worker 0.10.478 heals Final_File_URL + Rendering to Ready for Review", () => {
+test("Worker reconciles uploaded R5 media in Rendering or stale Ready without rerendering", () => {
   assert.match(worker, /version: "0\.10\.\d+(?:-[\w.-]+)?"/);
   assert.match(worker, /studio_render_stale_rendering_v1: true/);
   assert.match(worker, /R5_STALE_RENDERING_FINALIZED/);
-  assert.match(worker, /\{Render_Status\}="Rendering",\{Final_File_URL\}!=""/);
+  assert.match(worker, /\\{Render_Status\\}="Rendering"/);
+  assert.match(worker, /\\{Render_Status\\}="Ready for Render"/);
+  assert.match(worker, /\\{Remotion_Job_ID\\}!=""/);
+  assert.match(worker, /\\{Final_File_URL\\}!=""/);
+  assert.match(worker, /\\{Final_File_Storage_Status\\}="Uploaded"/);
+  assert.match(worker, /completedRenderRecoveryFields\\(current, f\\)/);
   assert.match(worker, /Output_Status: "Ready for Review"/);
 });
