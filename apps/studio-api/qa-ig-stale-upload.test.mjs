@@ -5,6 +5,7 @@ import {
   classifyStaleInstagramReel,
   staleInstagramReelFormula,
   auditStaleInstagramReels,
+  verifySavedInstagramContainer,
 } from "./qa-ig-stale-upload.mjs";
 
 const NOW = Date.parse("2026-11-02T18:00:00Z");
@@ -104,4 +105,60 @@ test("unknown provider state stays Needs Eyes; no Graph create", async () => {
   assert.equal(rows[0].provider_public_verified,false);
   assert.equal(rows[0].graph_create_authorized,false);
   assert.equal(logged.records[0].fields.Outcome,"stale_lock_needs_eyes");
+});
+
+test("authenticated exact-ID container GET is read-only and never asserts published post", async () => {
+  const candidate = row({Platform_Media_ID:"18127559140783117"});
+  let method = "";
+  const result = await verifySavedInstagramContainer(candidate, {
+    expectedAccountId:"17841400000000000",
+    settings:{META_GRAPH_API_ACCESS_TOKEN:"test-token",META_GRAPH_API_VERSION:"v26.0"},
+    fetcher: async (url, options) => {
+      method = options.method;
+      assert.match(url, /18127559140783117/);
+      return {ok:true,status:200,json: async () => ({
+        id:"18127559140783117",status_code:"FINISHED",
+      })};
+    },
+  });
+  assert.equal(method,"GET");
+  assert.equal(result.verified,true);
+  assert.equal(result.status,"FINISHED");
+  assert.equal(result.public_post_verified,false);
+  assert.equal(result.new_containers,0);
+});
+test("unexpected container identity cannot authorize recovery", async () => {
+  const result = await verifySavedInstagramContainer(
+    row({Platform_Media_ID:"18127559140783117"}), {
+    expectedAccountId:"17841400000000000",
+    settings:{META_GRAPH_API_ACCESS_TOKEN:"test-token"},
+    fetcher:async () => ({ok:true,status:200,json:async () => ({
+      id:"18127559140783118",status_code:"FINISHED",
+    })}),
+  });
+  assert.equal(result.verified,false);
+});
+test("existing saved container is audited without new Graph create or lock release", async () => {
+  const candidate=row({Platform_Media_ID:"18127559140783117"});
+  let persisted;
+  const outcomes=await auditStaleInstagramReels({}, {
+    nowMs:NOW,verifyContainer:async () => ({
+      verified:true,container_id:"18127559140783117",status:"IN_PROGRESS",
+      evidence:"authenticated_graph_get_exact_saved_container",
+    }),
+    airtableFetch: async (_env, table, path, options) => {
+      if (options?.method==="PATCH") {
+        persisted=JSON.parse(options.body).records[0].fields;
+        return {records:[{id:"rec12345678901239"}]};
+      }
+      if (table==="Quality Agent Recovery Ledger")
+        return {id:path,fields:persisted};
+      return String(path).startsWith("?") ? {records:[candidate]} : candidate;
+    },
+  });
+  assert.equal(outcomes[0].container_identity_verified,true);
+  assert.equal(outcomes[0].container_status,"IN_PROGRESS");
+  assert.equal(outcomes[0].outcome,"saved_container_verified_pending_fenced_resume");
+  assert.equal(outcomes[0].graph_create_authorized,false);
+  assert.equal(outcomes[0].release_lock,false);
 });
