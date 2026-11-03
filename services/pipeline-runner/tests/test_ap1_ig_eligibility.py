@@ -120,3 +120,59 @@ def test_ap1_ig_absent_review_fields_preserve_existing_publish_eligibility():
         Studio_Render_Review_Hold_ID="",
         Studio_Review_Hold_ID="",
     )) is None
+
+
+def test_ap1_ig_guard_early_return_releases_only_owned_lock_without_requeue():
+    from ap1_ig.processor import _release_preflight_lock_if_exact_owner
+    now = "2026-11-02T17:01:00Z"
+    class Fake:
+        def __init__(self):
+            self.fields = {
+                "Publish_Locked_By": "AP1-IG", "Publish_Locked_At": now,
+                "Last_Publish_Attempt_At": now, "Publish_Status": "Publishing",
+                "Platform_Media_ID": "18127559140783117",
+            }
+            self.writes = []
+        def get_record(self, table, record_id):
+            return {"id": record_id, "fields": self.fields}
+        def update_record(self, table, record_id, fields, **kwargs):
+            self.writes.append(fields)
+
+    client = Fake()
+    assert _release_preflight_lock_if_exact_owner(
+        client, "recABCDEFGHIJKLMN", now, reason="review_hold"
+    ) is True
+    update = client.writes[0]
+    assert update["Publish_Locked_By"] == ""
+    assert update["Publish_Locked_At"] is None
+    assert update["Publish_Retry_Eligible"] is False
+    assert "Publish_Status" not in update
+    assert "Platform_Media_ID" not in update
+
+def test_ap1_ig_guard_cannot_clear_changed_lock_or_published_output():
+    from ap1_ig.processor import _release_preflight_lock_if_exact_owner
+    now = "2026-11-02T17:01:00Z"
+    class Fake:
+        def __init__(self, **fields):
+            self.fields = {
+                "Publish_Locked_By": "AP1-IG", "Publish_Locked_At": now,
+                "Last_Publish_Attempt_At": now, "Publish_Status": "Publishing",
+                **fields,
+            }
+            self.writes = []
+        def get_record(self, table, record_id):
+            return {"id": record_id, "fields": self.fields}
+        def update_record(self, table, record_id, patch, **kwargs):
+            self.writes.append(patch)
+
+    for patch in [
+        {"Publish_Locked_At": "2026-11-02T17:30:00Z"},
+        {"Publish_Locked_By": "another_runner"},
+        {"Platform_Post_ID": "18168690085479740"},
+        {"Published_At": "2026-11-02T17:10:00Z"},
+    ]:
+        client = Fake(**patch)
+        assert _release_preflight_lock_if_exact_owner(
+            client, "recABCDEFGHIJKLMN", now, reason="review_hold"
+        ) is False
+        assert client.writes == []
