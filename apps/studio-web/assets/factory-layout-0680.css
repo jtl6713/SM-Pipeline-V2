@@ -468,6 +468,11 @@
 #page-factory #factoryBatchSelectionCount{
   flex:1 1 170px;min-width:0;font-weight:700;font-size:.86rem;overflow-wrap:anywhere;
 }
+/* The shared secondary-button uses display:inline-flex, which overrides the
+ * browser default [hidden] display rule. Never show recovery without a saved
+ * exact-ID request; likewise hide its pending notice after reconciliation. */
+#page-factory #factoryBatchRecoverPending[hidden],
+#page-factory #factoryBatchPendingNotice[hidden]{display:none!important}
 #page-factory .factory-batch-toolbar button{min-height:40px}
 #page-factory .factory-batch-item-list{
   list-style:none;padding:0;margin:0;display:grid;gap:5px;

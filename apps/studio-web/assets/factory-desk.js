@@ -75,7 +75,13 @@
     const latest = JSON.parse(localStorage.getItem(FACTORY_LAST_BATCH_KEY) || "{}");
     state.lastBatchProfile = String(latest.profile_id || "");
     const savedError = JSON.parse(sessionStorage.getItem(FACTORY_SUBMISSION_ERROR_KEY) || "null");
-    if (savedError?.message && Date.now() - Number(savedError.saved_ms || 0) < 30 * 60 * 1000) {
+    // A failure from an earlier UI session is not evidence of a current failed
+    // request. Keep the error only while its exact-ID pending fence is present.
+    // Once reconciliation has cleared that fence, historical HTTP 500 copy
+    // must not survive a reload as though a fresh submit failed.
+    if (!pendingFactoryApproval()) {
+      sessionStorage.removeItem(FACTORY_SUBMISSION_ERROR_KEY);
+    } else if (savedError?.message && Date.now() - Number(savedError.saved_ms || 0) < 30 * 60 * 1000) {
       state.batchSubmissionError = String(savedError.message);
     }
   } catch { /* storage disabled: selection still persists while page is open */ }
@@ -760,6 +766,7 @@
         localStorage.removeItem(FACTORY_PENDING_REQUEST_KEY);
       }
     } catch { return 0; }
+    if (!pendingFactoryApproval()) setBatchSubmissionError(null);
     setStatus("Cleared an expired submission that Factory confirmed was never created. Your current selection is ready to submit.");
     return removed;
   }
@@ -795,6 +802,10 @@
         localStorage.removeItem(FACTORY_PENDING_REQUEST_KEY);
       }
     } catch {}
+    if (!pendingFactoryApproval()) {
+      setBatchSubmissionError(null);
+      setStatus("Previous Factory request verified in batch history. No duplicate approval was submitted.");
+    }
     if (state.desk) renderDesk(state.desk);
     updateFactoryBatchToolbar();
     return recovered;

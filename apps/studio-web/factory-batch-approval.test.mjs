@@ -194,16 +194,19 @@ test("Expired browser-only submissions clear only after an authoritative exact-I
     setItem: (_key, value) => { stored = value; },
     removeItem: () => { stored = null; },
   };
+  let clearedErrors = 0;
   const clearAuthoritativelyMissingGlobalPlans = new Function(
-    "localStorage", "pendingFactoryApproval", "setStatus",
+    "localStorage", "pendingFactoryApproval", "setStatus", "setBatchSubmissionError",
     "FACTORY_PENDING_REQUEST_KEY", "FACTORY_PENDING_MISSING_GRACE_MS",
     `${clearFn}; return clearAuthoritativelyMissingGlobalPlans;`,
-  )(localStorage, () => stored ? JSON.parse(stored) : null, () => {}, "pending", 90_000);
+  )(localStorage, () => stored ? JSON.parse(stored) : null, () => {},
+    message => { if (message === null) clearedErrors++; }, "pending", 90_000);
   assert.equal(clearAuthoritativelyMissingGlobalPlans(new Set([plan.request_id]), 90_999), 0,
     "A request inside the grace period must stay locked");
   assert.ok(stored);
   assert.equal(clearAuthoritativelyMissingGlobalPlans(new Set([plan.request_id]), 91_000), 1);
   assert.equal(stored, null, "An expired exact-ID miss must release the stale browser lock");
+  assert.equal(clearedErrors, 1, "Reconciled request must also clear its stale failure banner");
   assert.match(js, /FACTORY_PENDING_MISSING_GRACE_MS = 90 \* 1000/);
   assert.match(js, /clearAuthoritativelyMissingGlobalPlans\(authoritativelyMissing\)/);
   assert.match(js, /Factory confirmed was never created/);
@@ -358,7 +361,7 @@ test("Factory preserves original fence when status unavailable or identity confl
   assert.match(js,/ready = readyFactoryOutputs\(true\)\.filter\(card => state\.selectedOutputs\.has\(card\.id\)\)/);
   assert.match(html,/id="factoryBatchRecoverPending"/);
   assert.match(js,/factoryBatchRecoverPending"\)\?\.addEventListener/);
-  assert.match(html,/UI build 0\.6\.868/);
+  assert.match(html,/UI build 0\.6\.869/);
 });
 
 test("Factory partly committed global groups preserve unsubmitted selection", async () => {
@@ -458,5 +461,26 @@ test("Factory errors count the current attempted outputs only, not saved cross-c
   assert.match(js,/if \(pending\) \{\s*setBatchSubmissionError\("Saved Factory approval is unresolved/);
   assert.match(js,/if \(pendingFactoryApproval\(\) \|\| state\.submittingBatch/);
   assert.match(html,/id="factoryBatchPendingNotice"/);
-  assert.match(html,/UI build 0\.6\.868/);
+  assert.match(html,/UI build 0\.6\.869/);
+});
+
+
+test("Factory recovery button stays visually hidden when no saved request exists", () => {
+  assert.match(css, /#page-factory #factoryBatchRecoverPending\[hidden\][\s\S]{0,120}display:none!important/,
+    "Explicit author-level hidden rule is needed because shared secondary-button forces inline-flex");
+  assert.match(css, /#page-factory #factoryBatchPendingNotice\[hidden\]/,
+    "The pending notice must also be suppressed when no request is unresolved");
+  assert.match(js, /recover\.hidden = !pending/);
+  assert.match(js, /submit\.disabled = !selectable[\s\S]{0,200}Boolean\(pending\)/);
+});
+
+test("Factory does not restore a stale HTTP 500 banner after request is reconciled", () => {
+  assert.match(js, /if \(!pendingFactoryApproval\(\)\) \{\s*sessionStorage\.removeItem\(FACTORY_SUBMISSION_ERROR_KEY\);/,
+    "Hydration must clear session errors when no exact-ID pending fence exists");
+  assert.match(js, /if \(!pendingFactoryApproval\(\)\) setBatchSubmissionError\(null\)/,
+    "Confirmed-absent automatic reconciliation must clear the saved error");
+  assert.match(js, /if \(!pendingFactoryApproval\(\)\) \{\s*setBatchSubmissionError\(null\);\s*setStatus\("Previous Factory request verified in batch history/,
+    "Confirmed-committed automatic reconciliation must clear the saved error");
+  assert.match(js, /if \(savedError\?\.message && Date\.now\(\) - Number\(savedError\.saved_ms \|\| 0\) < 30 \* 60 \* 1000\)/,
+    "A real pending submission should retain its last error within the normal time window");
 });
