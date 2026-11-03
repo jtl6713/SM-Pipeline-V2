@@ -11399,6 +11399,16 @@ export async function studioRepairUnfetchableRenderSources(env, row) {
   }
 
   if (!repaired || unresolved.length) return { repaired, unresolved };
+  // Remote media lookups can outlive the original preflight; check again
+  // immediately before replacing any render artifacts or manifest.
+  const latest = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
+  if (!["Ready for Render", "Failed"].includes(String(f(latest, "Render_Status") || "").trim()) ||
+      String(f(latest, "Remotion_Job_ID") || "").trim() ||
+      String(f(latest, "Final_File_URL") || "").trim() ||
+      String(f(latest, "Test_Run_ID") || "").trim() ||
+      String(f(latest, "Render_Clip_List_JSON") || "").trim() !== raw) {
+    return { repaired: 0, unresolved: [] };
+  }
   await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
     method: "PATCH",
     body: JSON.stringify({
