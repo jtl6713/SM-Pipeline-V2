@@ -14,6 +14,9 @@ on:
     paths:
       - 'apps/studio-web/**'
       - 'apps/studio-api/worker-functions-01.mjs'
+      - 'apps/studio-api/worker-functions-02.mjs'
+      - 'apps/studio-api/worker.js'
+      - 'apps/studio-api/vibe-preflight-500-boundary.test.mjs'
       - 'apps/studio-api/large-video-upload-recovery.test.mjs'
 permissions:
   contents: read
