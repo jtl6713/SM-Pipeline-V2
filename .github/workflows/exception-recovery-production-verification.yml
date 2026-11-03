@@ -1,4 +1,5 @@
 name: Exception Recovery Production Verification
+# Stage 3 read-only rerun: validate latest source/Home/QA parity after LA atomic repair.
 on:
   pull_request:
     paths:
