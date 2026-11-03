@@ -176,3 +176,64 @@ def test_ap1_ig_guard_cannot_clear_changed_lock_or_published_output():
             client, "recABCDEFGHIJKLMN", now, reason="review_hold"
         ) is False
         assert client.writes == []
+
+
+def test_ap1_ig_ambiguous_graph_failure_quarantines_without_erasing_container():
+    from ap1_ig.processor import _mark_failed
+    class Fake:
+        def __init__(self):
+            self.updates = []
+        def update_record(self, table, record_id, fields, **kwargs):
+            self.updates.append(fields)
+    client = Fake()
+    record = {"id": "recABCDEFGHIJKLMN", "fields": {
+        "Platform_Media_ID": "18127559140783117", "Output_Notes": "",
+    }}
+    _mark_failed(client, record, RuntimeError("Meta response lost"),
+                 remote_side_effect_possible=True)
+    fields = client.updates[0]
+    assert fields["Publish_Status"] == "Failed"
+    assert fields["Publish_Retry_Eligible"] is False
+    assert fields["Manual_Fallback_Required"] is True
+    assert fields["Publish_Next_Retry_At"] is None
+    assert "Platform_Media_ID" not in fields
+    assert "Last_Publish_Attempt_At" not in fields
+    assert "18127559140783117" in fields["Platform_Publish_Response_JSON"]
+
+
+def test_ap1_ig_graph_create_timeout_without_saved_id_cannot_blind_retry():
+    from ap1_ig.processor import _mark_failed
+    class Fake:
+        def __init__(self):
+            self.updates = []
+        def update_record(self, table, record_id, fields, **kwargs):
+            self.updates.append(fields)
+    client = Fake()
+    record = {"id": "recABCDEFGHIJKLMN", "fields": {
+        "Platform_Media_ID": "", "Output_Notes": "",
+    }}
+    _mark_failed(client, record, TimeoutError("Create response lost"),
+                 remote_side_effect_possible=True)
+    fields = client.updates[0]
+    assert fields["Publish_Status"] == "Failed"
+    assert fields["Publish_Retry_Eligible"] is False
+    assert fields["Manual_Fallback_Required"] is True
+    assert "Platform_Media_ID" not in fields
+
+
+def test_ap1_ig_pre_graph_failure_keeps_bounded_retry_when_no_request_was_sent():
+    from ap1_ig.processor import _mark_failed
+    class Fake:
+        def __init__(self):
+            self.updates = []
+        def update_record(self, table, record_id, fields, **kwargs):
+            self.updates.append(fields)
+    client = Fake()
+    _mark_failed(client, {"id": "recABCDEFGHIJKLMN", "fields": {
+        "Platform_Media_ID": "", "Output_Notes": "",
+    }}, RuntimeError("Graph configuration unavailable"),
+                 remote_side_effect_possible=False)
+    fields = client.updates[0]
+    assert fields["Publish_Status"] == "Ready to Publish"
+    assert fields["Publish_Retry_Eligible"] is True
+    assert fields["Platform_Media_ID"] == ""
