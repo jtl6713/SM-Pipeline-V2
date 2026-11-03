@@ -114,8 +114,25 @@ jobs:
           curl -fsS --max-time 25 -X POST -H "$AUTH" -H 'Content-Type: application/json' "$ROOT/workers/scripts/$WORKER/subdomain" --data '{"enabled":true,"previews_enabled":false}' >/tmp/p0-sub.json
           jq -e '.success==true' /tmp/p0-sub.json >/dev/null
           SUBDOMAIN=$(curl -fsS --max-time 20 -H "$AUTH" "$ROOT/workers/subdomain" | jq -er '.result.subdomain')
-          HTTP=$(curl -sS --max-time 100 -o /tmp/p0-result.json -w '%{http_code}' -X POST "https://$WORKER.$SUBDOMAIN.workers.dev/prioritize" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}')
-          jq -c . /tmp/p0-result.json
-          test "$HTTP" = 200 && jq -e '.ok==true' /tmp/p0-result.json >/dev/null
+          HTTP=000
+          for attempt in $(seq 1 12); do
+            HTTP=$(curl -sS --max-time 60 -o /tmp/p0-result.json -w '%{http_code}' -X POST "https://$WORKER.$SUBDOMAIN.workers.dev/prioritize" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}' || true)
+            if [[ "$HTTP" == 200 ]] && jq -e '.ok==true' /tmp/p0-result.json >/dev/null 2>&1; then
+              break
+            fi
+            if [[ "$HTTP" == 409 ]]; then
+              jq -c '{ok,error}' /tmp/p0-result.json 2>/dev/null || echo "p0_guard_rejected_unparseable"
+              echo "::error::Production queue rejected guarded priority preflight; no retry"
+              exit 6
+            fi
+            echo "p0_temporary_proxy_not_ready attempt=$attempt http=$HTTP"
+            sleep 5
+          done
+          if [[ "$HTTP" != 200 ]] || ! jq -e '.ok==true' /tmp/p0-result.json >/dev/null 2>&1; then
+            echo "::error::No confirmed prioritized queue write (http=$HTTP)"
+            jq -c '{ok,error}' /tmp/p0-result.json 2>/dev/null || true
+            exit 7
+          fi
+          jq -c '{ok,reordered,pending,existing,queued_before,priority_targets,no_direct_render_or_publish}' /tmp/p0-result.json
           echo "guarded_priority_control_completed=true"
           echo "No direct Remotion launch, approval, schedule, or publication"
