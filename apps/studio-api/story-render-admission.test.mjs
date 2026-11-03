@@ -68,6 +68,19 @@ test("R4 reconciles old Airtable Rendering holds through R5, without bypassing a
   assert.ok(admit.indexOf("await item4PulseR5Python") < admit.indexOf("if (busy.busy) {"));
 });
 
+test("R4 rereads canonical output before a Ready patch and never relaunches finished Story media", () => {
+  const source = readFileSync(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
+  const admit = source.split("export async function studioAdmitRenderQueue")[1]
+    ?.split("/*__STUDIO_WORKER_END:studioAdmitRenderQueue__*/")[0] || "";
+  assert.match(admit, /latest = await airtableFetch\(env, env\.AIRTABLE_OUTPUT_TABLE_ID, head\.id\)/);
+  assert.match(admit, /f\(latest, "Remotion_Job_ID"\)/);
+  assert.match(admit, /f\(latest, "Final_File_URL"\)/);
+  assert.match(admit, /"Ready for Review"/);
+  assert.match(admit, /no_longer_eligible/);
+  assert.ok(admit.indexOf("latest = await airtableFetch") < admit.indexOf("fields: { Render_Status: RENDER_STATUS_READY }"));
+});
+
+
 test("R4 cron log exposes only bounded admission refusal, not render payload", () => {
   const source = readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
   const body = source.split("export async function healStuckStudioRenders")[1]
