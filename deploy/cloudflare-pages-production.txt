@@ -672,3 +672,5 @@ Deploy Studio UI 0.6.868: reconcile pending Factory approval before enabling any
 Deploy Studio UI 0.6.869: fix hidden Factory recovery control and clear stale 500 banner after authoritative saved-request reconciliation.
 
 2026-11-03 UI 0.6.870 Michigan Avenue #9593 protected accepted-V2 Factory handoff action; gated existing POST, no approval or publication side effects. Regression and release check before deployment.
+
+2026-11-03: Deploy Studio Pages UI 0.6.871-vibe-mae-final-approval. Remove provisional publishing-date confirmation from Vibe Cut upload after version selection; immediately open video intake, leave schedule assignment to MAE on final human approval, retain manual scheduling and confirmation for non-Vibe flows. No Worker, approval, publishing, or Airtable changes.
