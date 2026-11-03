@@ -111,9 +111,31 @@ export async function auditStaleInstagramReels(env, {
   if (typeof airtableFetch !== "function") throw new Error("QA stale Reel Airtable dependency missing");
   const bounded = Math.min(30, Math.max(1, Number(limit) || 12));
   const formula = staleInstagramReelFormula(nowMs);
-  const params = "?filterByFormula=" + encodeURIComponent(formula)
-    + "&pageSize=" + bounded + "&maxRecords=" + bounded;
-  const found = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID || "Platform Outputs", params);
+  // Rotate through the full stale set: without an R2 cursor the first eight
+  // old incidents would hide every later lock indefinitely.
+  const cursorKey = "studio/state/qa-ig-stale-upload/v1/cursor.json";
+  let cursor = "";
+  if (env.STUDIO_MEDIA?.get) {
+    try {
+      const prior = await env.STUDIO_MEDIA.get(cursorKey);
+      const state = prior ? JSON.parse(await prior.text()) : {};
+      if (typeof state.offset === "string" && state.offset.length <= 1024
+        && nowMs - Number(state.checked_at_ms) < 24 * 60 * 60 * 1000)
+        cursor = state.offset;
+    } catch { cursor = ""; }
+  }
+  const readPage = async offset => {
+    const params = "?filterByFormula=" + encodeURIComponent(formula)
+      + "&pageSize=" + bounded
+      + (offset ? "&offset=" + encodeURIComponent(offset) : "");
+    return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID || "Platform Outputs", params);
+  };
+  let found;
+  try { found = await readPage(cursor); }
+  catch (error) {
+    if (!cursor) throw error;
+    found = await readPage(""); // Expired pagination token; restart safely.
+  }
   if (!Array.isArray(found?.records))
     throw new Error("QA stale Reel Airtable scan incomplete; no success assumed");
   const bucket = new Date(Math.floor(nowMs / 1800000) * 1800000).toISOString();
@@ -207,6 +229,15 @@ export async function auditStaleInstagramReels(env, {
       || Number(persisted.fields?.Output_ID) !== decision.output_id)
       throw new Error("QA stale Reel ledger readback mismatch");
     results.push(evidence);
+  }
+  if (env.STUDIO_MEDIA?.put) {
+    await env.STUDIO_MEDIA.put(cursorKey, JSON.stringify({
+      schema: "qa.ig-stale-upload-cursor.1",
+      offset: typeof found.offset === "string" && found.offset.length <= 1024
+        ? found.offset : null,
+      checked_at_ms: nowMs, candidate_count: found.records.length,
+      audited_count: results.length,
+    }), {httpMetadata:{contentType:"application/json"}});
   }
   return results;
 }
