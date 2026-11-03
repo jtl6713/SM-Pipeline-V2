@@ -24,7 +24,7 @@ from ap1_ig.constants import (
 from ap1_ig.eligibility import eligibility_reason
 from ap1_ig.graph import InstagramGraphError, InstagramReelClient, load_instagram_graph_settings
 from asset.helpers import parse_int
-from carousel.timeutil import chicago_now, iso_utc, stamp_minutes, utc_now
+from carousel.timeutil import chicago_now, iso_utc, parse_utc, stamp_minutes, utc_now
 from item4.settings import PipelineSettings
 from publish.location import resolve_publish_location
 from publish.rendering_review import verify_before_reel_creation, verify_before_reel_publication
@@ -68,9 +68,15 @@ def _release_preflight_lock_if_exact_owner(
     """
     try:
         fresh = client.get_record(PLATFORM_OUTPUTS_TABLE, output_id)
-        if (field_str(fresh, "Publish_Locked_By") != PUBLISH_LOCKED_BY
-                or field_str(fresh, "Publish_Locked_At") != lock_stamp
-                or field_str(fresh, "Last_Publish_Attempt_At") != lock_stamp
+        # Airtable can echo UTC dateTime values with .000Z while the runner
+        # writes whole seconds. Compare UTC instants, not literal strings.
+        expected_at = parse_utc(lock_stamp)
+        locked_at = parse_utc(field_str(fresh, "Publish_Locked_At"))
+        attempted_at = parse_utc(field_str(fresh, "Last_Publish_Attempt_At"))
+        if (expected_at is None or locked_at is None or attempted_at is None
+                or field_str(fresh, "Publish_Locked_By") != PUBLISH_LOCKED_BY
+                or locked_at != expected_at
+                or attempted_at != expected_at
                 or field_str(fresh, "Publish_Status") != PUBLISH_STATUS_PUBLISHING
                 or field_str(fresh, "Platform_Post_ID")
                 or field_str(fresh, "Published_At")):
