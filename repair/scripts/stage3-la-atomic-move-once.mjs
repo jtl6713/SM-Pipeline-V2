@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 
 const ACCOUNT=process.env.CLOUDFLARE_ACCOUNT_ID, TOKEN=process.env.CLOUDFLARE_API_TOKEN;
 const ROOT='https://api.cloudflare.com/client/v4/accounts/'+ACCOUNT;
@@ -58,7 +59,7 @@ async function bridge(op){
       signal:AbortSignal.timeout(op==='move'?100000:65000),redirect:'error'
     });
     const txt=await r.text();
-    if((txt.includes('error code: 1042')||(r.status===404&&!txt.startsWith('{'))) && attempt<12){
+    if((txt.includes('error code: 1042')||(r.status===404&&!txt.trim().startsWith('{'))) && attempt<12){
       await sleep(3000);continue;
     }
     let payload;try{payload=JSON.parse(txt)}catch{throw Error('bridge_non_json_'+op+'_'+r.status)}
@@ -116,19 +117,25 @@ async function createBridge(){
   let status=404;
   try{await cf(name+'/settings');status=200}catch(e){if(!String(e.message).includes('cloudflare_http_404_'))throw e}
   assert(status===404,'bridge_preexisting');
-  const form=new FormData();
-  form.append('metadata',new Blob([JSON.stringify({
-    main_module:'worker.js',compatibility_date:'2026-10-01',
-    bindings:[
-      {type:'service',name:'STUDIO_API',service:SCRIPT},
-      {type:'durable_object_namespace',name:'STUDIO_SCHEDULE_RESERVATIONS',
-        class_name:'ScheduleReservationLane',script_name:SCRIPT}
-    ]
-  })],{type:'application/json'}),'metadata.json');
-  form.append('worker.js',new Blob([bridgeSource],{type:'application/javascript+module'}),'worker.js');
-  await cf(name+'/content',{method:'PUT',body:form});
+  // Use the same pinned Wrangler service-binding deployment proven by live
+  // Stage 3 GET + Durable Object verification (run 41685151152).
+  const dir='/tmp/stage3-la-atomic-wrangler-'+String(process.env.GITHUB_RUN_ID||'local');
+  await fs.mkdir(dir,{recursive:true});
+  await fs.writeFile(dir+'/worker.mjs',bridgeSource);
+  await fs.writeFile(dir+'/wrangler.jsonc',JSON.stringify({
+    name:BRIDGE,main:'worker.mjs',compatibility_date:'2026-10-01',workers_dev:true,
+    services:[{binding:'STUDIO_API',service:SCRIPT}],
+    durable_objects:{bindings:[{
+      name:'STUDIO_SCHEDULE_RESERVATIONS',
+      class_name:'ScheduleReservationLane',script_name:SCRIPT,
+    }]}
+  },null,2));
+  const wrangler=process.env.GITHUB_WORKSPACE+'/node_modules/.bin/wrangler';
+  assert(process.env.GITHUB_WORKSPACE,'missing_github_workspace');
+  execFileSync(wrangler,['deploy','--config',dir+'/wrangler.jsonc','--name',BRIDGE],{
+    cwd:dir,env:process.env,timeout:120000,stdio:'pipe',
+  });
   bridgeCreated=true;
-  await cf(name+'/subdomain',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:true,previews_enabled:false})});
   const sub=(await cf('/workers/subdomain')).subdomain;
   assert(sub,'workers_subdomain_unavailable');
   origin='https://'+BRIDGE+'.'+sub+'.workers.dev';
