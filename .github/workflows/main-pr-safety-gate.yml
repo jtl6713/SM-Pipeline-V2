@@ -1,0 +1,41 @@
+name: Main PR Safety Gate
+
+# This job is unconditional for PRs into main, including docs-only and
+# workflow-only PRs. Never require a path-filtered deployment check instead.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pr-safety:
+    name: pr-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout proposed code
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Check Studio API syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check apps/studio-api/worker-functions-01.mjs
+          node --check apps/studio-api/worker-functions-02.mjs
+          node --check apps/studio-api/worker-functions-04.mjs
+
+      - name: Run isolated upload recovery assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            apps/studio-api/large-video-upload-recovery.test.mjs \
+            apps/studio-api/vibe-preflight-500-boundary.test.mjs
