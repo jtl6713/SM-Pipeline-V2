@@ -161,7 +161,7 @@ test("A rejected submission stays visible across the automatic Desk refresh", ()
 
 test("Retryable Factory submit failures reuse the exact request ID once", () => {
   assert.match(js, /function factorySubmitRetryDelayMs\(error\)/);
-  assert.match(js, /\[429, 502, 503, 504\]\.includes\(status\)/);
+  assert.match(js, /\[429, 500, 502, 503, 504\]\.includes\(status\)/);
   assert.match(js, /const submitPlan = \(\) => fetchJson/);
   assert.match(js, /Keeping the same request ID and retrying safely/);
   assert.match(js, /batch = await submitPlan\(\);[\s\S]{0,500}recoverSubmittedFactoryPlan\(plan, retryError\)/);
@@ -358,7 +358,7 @@ test("Factory preserves original fence when status unavailable or identity confl
   assert.match(js,/ready = readyFactoryOutputs\(true\)\.filter\(card => state\.selectedOutputs\.has\(card\.id\)\)/);
   assert.match(html,/id="factoryBatchRecoverPending"/);
   assert.match(js,/factoryBatchRecoverPending"\)\?\.addEventListener/);
-  assert.match(html,/UI build 0\.6\.866/);
+  assert.match(html,/UI build 0\.6\.867/);
 });
 
 test("Factory partly committed global groups preserve unsubmitted selection", async () => {
