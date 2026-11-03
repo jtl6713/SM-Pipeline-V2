@@ -1,0 +1,31 @@
+name: Story R4 Production Cron Schedule Read-Only
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/story-r4-live-cron-schedule-readonly.yml'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Inspect live production cron subscriptions, no mutations
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api/schedules"
+          CODE=$(curl -sS --max-time 25 -o /tmp/schedules.json -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API" || true)
+          echo "schedule_api_http=$CODE"
+          if [[ "$CODE" != "200" ]]; then
+            jq -c '{success,errors:[.errors[]?|{code}]}' /tmp/schedules.json || true
+            exit 1
+          fi
+          jq -e '.success==true' /tmp/schedules.json >/dev/null
+          jq -c '{crons:[.result[]?|.cron],five_minute_present:([.result[]?|.cron]|index("*/5 * * * *")!=null),minute_present:([.result[]?|.cron]|index("* * * * *")!=null)}' /tmp/schedules.json
+          echo "read_only=true airtable_changes=0 remotion_jobs=0 publish_changes=0"
