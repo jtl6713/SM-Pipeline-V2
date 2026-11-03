@@ -194,16 +194,19 @@ test("Expired browser-only submissions clear only after an authoritative exact-I
     setItem: (_key, value) => { stored = value; },
     removeItem: () => { stored = null; },
   };
+  let clearedErrors = 0;
   const clearAuthoritativelyMissingGlobalPlans = new Function(
-    "localStorage", "pendingFactoryApproval", "setStatus",
+    "localStorage", "pendingFactoryApproval", "setStatus", "setBatchSubmissionError",
     "FACTORY_PENDING_REQUEST_KEY", "FACTORY_PENDING_MISSING_GRACE_MS",
     `${clearFn}; return clearAuthoritativelyMissingGlobalPlans;`,
-  )(localStorage, () => stored ? JSON.parse(stored) : null, () => {}, "pending", 90_000);
+  )(localStorage, () => stored ? JSON.parse(stored) : null, () => {},
+    message => { if (message === null) clearedErrors++; }, "pending", 90_000);
   assert.equal(clearAuthoritativelyMissingGlobalPlans(new Set([plan.request_id]), 90_999), 0,
     "A request inside the grace period must stay locked");
   assert.ok(stored);
   assert.equal(clearAuthoritativelyMissingGlobalPlans(new Set([plan.request_id]), 91_000), 1);
   assert.equal(stored, null, "An expired exact-ID miss must release the stale browser lock");
+  assert.equal(clearedErrors, 1, "Reconciled request must also clear its stale failure banner");
   assert.match(js, /FACTORY_PENDING_MISSING_GRACE_MS = 90 \* 1000/);
   assert.match(js, /clearAuthoritativelyMissingGlobalPlans\(authoritativelyMissing\)/);
   assert.match(js, /Factory confirmed was never created/);
