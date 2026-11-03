@@ -107,7 +107,12 @@ test("render recovery counts only eligible failed-render attempts and remains bo
   const loop = healing.slice(declaration, loopEnd);
   assert.match(loop, /if \(failedRenderRetries >= 6\) break/);
   assert.match(loop, /if \(failedOutputRetryGate\(row\)\) continue/);
-  assert.match(loop, /failedRenderRetries\s*\+=\s*1;[\s\S]*?airtableFetch/);
+  // The retry counter advances only AFTER a successful guarded Airtable
+  // transition, never for a stale/ambiguous render skipped by the preflight.
+  assert.ok(loop.includes("const current = await airtableFetch(env, outputTable, row.id)"));
+  assert.match(loop, /skipped: "ambiguous_or_changed_render"/);
+  assert.ok(loop.indexOf('const current = await airtableFetch') < loop.indexOf('method: "PATCH"'));
+  assert.ok(loop.indexOf('failedRenderRetries += 1;') > loop.indexOf('method: "PATCH"'));
 });
 
 test("Facebook rate-limit failures can return to Approved only with safe publication and media evidence", () => {

@@ -286,6 +286,7 @@ import {
   isRealRemotionRetryFailure,
   isRenderQueueCandidateStatus,
   isRenderQueueWaitingStatus,
+  isRenderQueueWaitingStampEligible,
   remotionHealthLooksBusy,
   sortRenderQueueCandidates,
 } from "./render-queue.mjs";
@@ -1049,6 +1050,10 @@ export async function studioRemotionRenderBusy(env) {
 export async function studioStampRenderQueueWaiting(env, rowOrId) {
   const id = typeof rowOrId === "string" ? rowOrId : rowOrId?.id;
   if (!id) return null;
+  // R5 may have completed since the queue candidate scan. Fail closed on a
+  // fresh authoritative read rather than overwriting Rendered/Ready for Review.
+  const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+  if (!isRenderQueueWaitingStampEligible(current, f)) return null;
   return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
     method: "PATCH",
     body: JSON.stringify({
@@ -1232,8 +1237,8 @@ export async function studioAdmitRenderQueue(env, options = {}) {
   let stampedWaiting = 0;
   for (const row of candidates) {
     if (!isRenderQueueWaitingStatus(f(row, "Render_Status"))) {
-      await studioStampRenderQueueWaiting(env, row).catch(() => null);
-      stampedWaiting += 1;
+      const stamped = await studioStampRenderQueueWaiting(env, row).catch(() => null);
+      if (stamped) stampedWaiting += 1;
     }
   }
   if (busy.busy) {

@@ -23,6 +23,49 @@ export function isRenderQueueCandidateStatus(status) {
   return isRenderQueueWaitingStatus(status) || isRenderQueueReadyStatus(status);
 }
 
+/**
+ * Queue enumeration is a snapshot. R5 can finish a render before the Worker
+ * stamps Waiting, so each status-only stamp must use a fresh Airtable read.
+ * Never regress an existing job, final file or human-review state.
+ */
+export function isRenderQueueWaitingStampEligible(record, field = (row, name) => row?.fields?.[name]) {
+  const status = String(field(record, "Render_Status") || "").trim();
+  const output = String(field(record, "Output_Status") || "").trim();
+  return status === RENDER_STATUS_READY &&
+    !String(field(record, "Test_Run_ID") || "").trim() &&
+    !String(field(record, "Remotion_Job_ID") || "").trim() &&
+    !String(field(record, "Final_File_URL") || "").trim() &&
+    !["Rendered", "Ready for Review", "Approved", "Approved for Publishing", "Published"].includes(output);
+}
+
+/**
+ * Repair an Airtable status regression only when a real, uploaded final video
+ * and its original Remotion job are already saved. This never launches R4,
+ * changes media, sends review mail, or touches approvals/schedules.
+ */
+export function completedRenderRecoveryFields(record, field = (row, name) => row?.fields?.[name]) {
+  const render = String(field(record, "Render_Status") || "").trim();
+  const output = String(field(record, "Output_Status") || "").trim();
+  const review = String(field(record, "Review_Status") || "").trim();
+  if (!["Rendering", "Ready for Render", "Ready to Render", RENDER_STATUS_WAITING_QUEUE].includes(render) ||
+      !["In Production", "Rendering"].includes(output) ||
+      !String(field(record, "Remotion_Job_ID") || "").trim() ||
+      !String(field(record, "Final_File_URL") || "").trim() ||
+      String(field(record, "Final_File_Storage_Status") || "").trim() !== "Uploaded" ||
+      String(field(record, "Test_Run_ID") || "").trim() ||
+      String(field(record, "Published_At") || "").trim() ||
+      Boolean(field(record, "Do_Not_Publish")) ||
+      ["Approved", "Changes Requested", "Rejected"].includes(review)) {
+    return null;
+  }
+  return {
+    Render_Status: "Rendered",
+    Output_Status: "Ready for Review",
+    Remotion_Error_Message: "",
+    Final_File_Error_Message: "",
+  };
+}
+
 export function isActiveRemotionHold(record, field = (row, name) => row?.fields?.[name]) {
   const status = String(field(record, "Render_Status") || "").trim();
   const jobId = String(field(record, "Remotion_Job_ID") || "").trim();

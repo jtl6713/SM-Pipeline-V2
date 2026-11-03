@@ -124,3 +124,48 @@ test("healthy Drive watermark renders cannot be mistaken for failed R4 jobs", ()
   assert.ok(recovery.indexOf("const current = await airtableFetch") <
     recovery.indexOf("await studioResetPrivateDriveWatermarkRender"));
 });
+
+test("P0 #1542: waiting-status stamp rereads Airtable before any write", () => {
+  const source = readFileSync(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
+  const body = source.split("export async function studioStampRenderQueueWaiting")[1]
+    ?.split("/*__STUDIO_WORKER_END:studioStampRenderQueueWaiting__*/")[0] || "";
+  assert.match(body, /const current = await airtableFetch\(env, env\.AIRTABLE_OUTPUT_TABLE_ID, id\)/);
+  assert.match(body, /if \(!isRenderQueueWaitingStampEligible\(current, f\)\) return null/);
+  assert.ok(body.indexOf("const current = await airtableFetch") <
+    body.indexOf('method: "PATCH"'));
+});
+
+test("P0 #1542: R5 reconciles completed-but-Ready Stories without replacing media or review decisions", () => {
+  const source = readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
+  const heal = source.split("export async function healStuckStudioRenders")[1]
+    ?.split("/*__STUDIO_WORKER_END:healStuckStudioRenders__*/")[0] || "";
+  const recovery = heal.split("const staleRenderingDone")[1]?.split("const longRendering")[0] || "";
+  assert.match(recovery, /\{Render_Status\}="Ready for Render"/);
+  assert.match(recovery, /\{Final_File_Storage_Status\}="Uploaded"/);
+  assert.match(recovery, /\{Remotion_Job_ID\}!=""/);
+  assert.match(recovery, /\{Final_File_URL\}!=""/);
+  assert.match(recovery, /current = await airtableFetch\(env, outputTable, row\.id\)/);
+  assert.match(recovery, /completedRenderRecoveryFields\(current, f\)/);
+  assert.doesNotMatch(recovery, /Review_Status: "Review Sent"/);
+  assert.doesNotMatch(recovery, /item4PulseR4Python/);
+});
+
+test("P0 #1542: automatic failed/source healers refuse ambiguous saved Remotion receipts", () => {
+  const source = readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
+  const healer = source.split("export async function healStuckStudioRenders")[1]
+    ?.split("/*__STUDIO_WORKER_END:healStuckStudioRenders__*/")[0] || "";
+  const invalid = healer.split("const invalidSourceRows")[1]?.split("const readyToTypo")[0] || "";
+  const failed = healer.split("const failedRenders")[1]?.split("if (pulses.length)")[0] || "";
+  const repair = source.split("export async function studioRepairUnfetchableRenderSources")[1]
+    ?.split("/*__STUDIO_WORKER_END:studioRepairUnfetchableRenderSources__*/")[0] || "";
+  assert.match(invalid, /\{Remotion_Job_ID\}=""/);
+  assert.match(invalid, /\{Final_File_URL\}=""/);
+  assert.match(repair, /current = await airtableFetch\(env, env\.AIRTABLE_OUTPUT_TABLE_ID, row\.id\)/);
+  assert.match(repair, /f\(current, "Remotion_Job_ID"\)/);
+  assert.match(repair, /f\(current, "Final_File_URL"\)/);
+  assert.match(failed, /\{Remotion_Job_ID\}=""/);
+  assert.match(failed, /\{Final_File_URL\}=""/);
+  assert.match(failed, /const current = await airtableFetch\(env, outputTable, row\.id\)/);
+  assert.match(failed, /skipped: "ambiguous_or_changed_render"/);
+  assert.doesNotMatch(failed, /Remotion_Job_ID: ""/);
+});
