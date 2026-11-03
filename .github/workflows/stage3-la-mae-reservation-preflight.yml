@@ -1,4 +1,4 @@
-name: Stage 3 LA MAE live DO and authenticated Studio preflight
+name: Stage 3 LA MAE live DO and Studio preflight diagnostic
 
 on:
   push:
@@ -64,6 +64,7 @@ jobs:
                   request.headers.get("Authorization")!=="Bearer "+env.READ_TOKEN) {
                 return new Response("Not found",{status:404});
               }
+              try {
               const ns=env.STUDIO_SCHEDULE_RESERVATIONS;
               if (!ns?.get||!ns?.idFromName) return Response.json({ok:false,error:"namespace_missing"},{status:503});
               const reply=await ns.get(ns.idFromName(LANE)).fetch(new Request("https://schedule-reservation/status"));
@@ -82,6 +83,9 @@ jobs:
               }
               return Response.json({ok:reply.ok, status:reply.status, lane:LANE, data:raw, records},
                 {status:reply.ok?200:502,headers:{"cache-control":"no-store"}});
+              } catch (error) {
+                return Response.json({ok:false,stage:"bridge_inspection",error_name:String(error?.name||"unknown"),error:String(error?.message||error).slice(0,180)}, {status:502});
+              }
             }
           };
           WORKER
@@ -116,7 +120,7 @@ jobs:
               break
             fi
             if [[ "$CODE" =~ ^(401|403|404|502|503|504)$ ]] && [ "$i" -lt 12 ]; then sleep 3; continue; fi
-            echo "read_failed_http=$CODE"; exit 1
+            echo "read_failed_http=$CODE"; jq -c '{ok,stage,error_name,error,records:[.records[]? | {id,http,ok}]}' /tmp/stage3-la-status.json 2>/dev/null || true; exit 1
           done
           test "$success" = true
           jq '{ok,status,lane,data,records}' /tmp/stage3-la-status.json
