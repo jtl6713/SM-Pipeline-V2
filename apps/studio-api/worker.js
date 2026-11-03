@@ -789,7 +789,7 @@ import {
 } from "./worker-functions-03.mjs";
 import { auditReel368Holds } from "./facebook-reel-368-audit.mjs";
 import { qaInstagramCarouselMaintenance } from "./qa-instagram-carousel-maintenance.mjs";
-import { auditStaleInstagramReels } from "./qa-ig-stale-upload.mjs";
+import { auditStaleInstagramReels, verifySavedInstagramContainer } from "./qa-ig-stale-upload.mjs";
 import { verifyAuthenticatedInstagramReceipt } from "./exception-recovery-authenticated-receipt.mjs";
 import { studioActivePipelineSettings } from "./worker-functions-03.mjs";
 import {
@@ -3952,6 +3952,23 @@ export default {
         && env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false") {
       ctx.waitUntil(auditStaleInstagramReels(env, {
         airtableFetch, limit: 8,
+        verifyContainer: async (row) => {
+          const profiles = row?.fields?.Content_Profile;
+          if (!Array.isArray(profiles) || profiles.length !== 1)
+            return {verified: false, reason: "ambiguous_profile"};
+          const profile = await airtableFetch(env,
+            env.AIRTABLE_PROFILE_TABLE_ID || "Content Profiles", profiles[0]);
+          if (profile?.id !== profiles[0])
+            return {verified: false, reason: "profile_not_found"};
+          const settings = await studioActivePipelineSettings(env,
+            ["INSTAGRAM_BUSINESS_ACCOUNT_ID","META_GRAPH_API_ACCESS_TOKEN","META_GRAPH_API_VERSION"], profile);
+          const profileAccount = String(profile?.fields?.Instagram_Business_Account_ID || "").trim();
+          if (profileAccount && profileAccount !== String(settings.INSTAGRAM_BUSINESS_ACCOUNT_ID || "").trim())
+            return {verified: false, reason: "instagram_profile_account_setting_conflict"};
+          return verifySavedInstagramContainer(row, {
+            settings, expectedAccountId: settings.INSTAGRAM_BUSINESS_ACCOUNT_ID,
+          });
+        },
         verifyProvider: async (row) => {
           const profiles = row?.fields?.Content_Profile;
           if (!Array.isArray(profiles) || profiles.length !== 1)
