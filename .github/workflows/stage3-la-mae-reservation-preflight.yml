@@ -1,4 +1,4 @@
-name: Stage 3 LA MAE reservation live read-only preflight
+name: Stage 3 LA MAE live DO and authenticated Studio preflight
 
 on:
   push:
@@ -56,6 +56,8 @@ jobs:
           cd /tmp/stage3-la-mae
           cat >worker.mjs <<'WORKER'
           const LANE = "recF7UAn0LkMZZrWZ::instagram";
+          const IDS = ["rec6viJf8fDV0nxgo","recwCLxBKTQfEDSZU","recfUFn4lTzZ4yrEX"];
+          const EMAIL = "joseph.t.logan@gmail.com";
           export default {
             async fetch(request,env) {
               if (request.method!=="GET" || new URL(request.url).pathname!=="/read" ||
@@ -66,7 +68,19 @@ jobs:
               if (!ns?.get||!ns?.idFromName) return Response.json({ok:false,error:"namespace_missing"},{status:503});
               const reply=await ns.get(ns.idFromName(LANE)).fetch(new Request("https://schedule-reservation/status"));
               const raw=await reply.json();
-              return Response.json({ok:reply.ok, status:reply.status, lane:LANE, data:raw},
+              const headers = {Accept:"application/json",Origin:"https://studio.chicagoshining.com","Cf-Access-Authenticated-User-Email":EMAIL};
+              const records = [];
+              for (const id of IDS) {
+                const response = await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/outputs/"+id,{headers}));
+                const payload = await response.json().catch(()=>({}));
+                const r=payload.record||{};
+                records.push({id,http:response.status,ok:payload.ok===true,
+                  output_id:r.output_id,platform:r.platform,studio_output_type:r.studio_output_type,
+                  output_status:r.output_status,review_status:r.review_status,publish_status:r.publish_status,
+                  scheduled_post_date:r.scheduled_post_date,scheduled_at:r.scheduled_at,
+                  do_not_publish:r.do_not_publish,published_at:r.published_at});
+              }
+              return Response.json({ok:reply.ok, status:reply.status, lane:LANE, data:raw, records},
                 {status:reply.ok?200:502,headers:{"cache-control":"no-store"}});
             }
           };
@@ -77,6 +91,7 @@ jobs:
             "main":"worker.mjs",
             "compatibility_date":"2026-10-01",
             "workers_dev":true,
+            "services":[{"binding":"STUDIO_API","service":"chicagoshining-studio-api"}],
             "durable_objects":{"bindings":[{
               "name":"STUDIO_SCHEDULE_RESERVATIONS",
               "class_name":"ScheduleReservationLane",
@@ -104,7 +119,8 @@ jobs:
             echo "read_failed_http=$CODE"; exit 1
           done
           test "$success" = true
-          jq '{ok,status,lane,data}' /tmp/stage3-la-status.json
+          jq '{ok,status,lane,data,records}' /tmp/stage3-la-status.json
+          jq -e '.records|length==3 and all(.[];.http==200 and .ok==true)' /tmp/stage3-la-status.json >/dev/null
           echo "### Stage 3 LA DO status" >> "$GITHUB_STEP_SUMMARY"
           jq -r '"- Lane: "+.lane, "- Durable Object read: "+(.ok|tostring), "- Quarantine: "+(.data.quarantine // null|tostring), "- Recent committed reservations: "+((.data.recent_reservations // .data.committed_reservations // [])|length|tostring)' /tmp/stage3-la-status.json >> "$GITHUB_STEP_SUMMARY"
       - name: Confirm ephemeral Worker removed
