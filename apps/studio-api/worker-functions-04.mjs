@@ -1,4 +1,5 @@
 import { matchNewlyCreatedIdeaPhotos } from "./worker-functions-03.mjs";
+import { readR4DispatchAttempt } from "./r4-dispatch-diagnostic.mjs";
 import { readIgPublishLease, markIgLeaseRecovered, igPublishLeaseEnabled } from "./qa-ig-publish-lease.mjs";
 import { evaluateReviewPackage, verifyReviewImages, factoryReviewVisibility } from "./review-package-readiness.mjs";
 import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
@@ -11070,6 +11071,7 @@ export function mapOpsQueueProfileName(profileMap, linked) {
 
 export async function getStudioOperationsQueue(request, env, authorization) {
   const controls = await readOpsQueueControls(env);
+  const r4_last_attempt = await readR4DispatchAttempt(env.STUDIO_MEDIA);
   const fetchErrors = [];
   const settleList = async (label, promise) => {
     try {
@@ -11426,6 +11428,7 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       end_to_end: queues.end_to_end,
     },
     render_queue_total: renderQueueTotal,
+    r4_last_attempt,
     controls,
     can_edit_queue: Boolean(
       authorization?.permissions?.tenant_admin
