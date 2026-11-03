@@ -1,4 +1,5 @@
 import { r4StartConfirmed, rotateR4CandidatesAfterCursor } from "./r4-queue-admission.mjs";
+import { recordR4DispatchAttempt } from "./r4-dispatch-diagnostic.mjs";
 import { storySeedRenderStatus } from "./story-render-admission.mjs";
 import { ideaProducerDirection, mergeIdeaProducerDirection } from "./idea-producer-direction.mjs";
 import { scriptedShortPublishableTitle } from "./scripted-short-title.mjs";
@@ -1312,6 +1313,7 @@ export async function studioAdmitRenderQueue(env, options = {}) {
         testRunId: options.testRunId,
       });
     } catch (error) {
+      await recordR4DispatchAttempt(env.STUDIO_MEDIA, { head, error, outcome: "r4_start_failed" });
       return {
         admitted: false, reason: "r4_start_failed", head: head.id,
         waiting: total, skipped,
@@ -1320,6 +1322,7 @@ export async function studioAdmitRenderQueue(env, options = {}) {
     }
 
     if (r4StartConfirmed(started)) {
+      await recordR4DispatchAttempt(env.STUDIO_MEDIA, { head, started, outcome: "started" });
       await env.STUDIO_MEDIA.put(cursorKey, head.id).catch(() => null);
       return {
         admitted: true, reason: "started_head", head: head.id,
@@ -1331,11 +1334,13 @@ export async function studioAdmitRenderQueue(env, options = {}) {
 
     const skipReason = String(started?.details?.run?.reason || started?.details?.reason || "").trim();
     if (started?.status === "skipped" && safeSkippedReasons.has(skipReason)) {
+      await recordR4DispatchAttempt(env.STUDIO_MEDIA, { head, started, outcome: "safe_skipped" });
       skipped.push({ id: head.id, reason: skipReason });
       await env.STUDIO_MEDIA.put(cursorKey, head.id).catch(() => null);
       continue;
     }
 
+    await recordR4DispatchAttempt(env.STUDIO_MEDIA, { head, started, outcome: "r4_launch_not_confirmed" });
     return {
       admitted: false, reason: "r4_launch_not_confirmed", head: head.id,
       waiting: total, started, skipped,
