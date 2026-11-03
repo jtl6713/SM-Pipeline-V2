@@ -6684,7 +6684,10 @@ export function platformOutputSeedFields(parentContentItem, requestRecord, outpu
     Platform_Output_Type: String(planItem.mapping_type || route.proven_mapping || effective.output_type || "").trim(),
     Aspect_Ratio: String(planItem.aspect_ratio || sourcePackage?.ratio || "").trim(),
     Output_Status: nativeReady ? "Ready for Review" : "In Production",
-    Render_Status: nativeReady ? "Native Photo Route" : null,
+    // Stories with an authoritative, complete Remotion package must be visible to R4 immediately.
+    // Otherwise the Story can remain indefinitely unqueued while its video siblings finish.
+    // Keep non-Story outputs on their existing R2/R3 admission path.
+    Render_Status: nativeReady ? "Native Photo Route" : (effective.output_type === "Story" && remotionReady ? "Ready for Render" : null),
     Studio_Preview_URL: nativeReady ? (String(clips[0]?.url || "").trim() || null) : null,
     Thumbnail_URL: (function thumbnailUrl() {
       const parentThumb = studioAiThumbnailUrl(f(parentContentItem, "Thumbnail_URL"));
