@@ -768,3 +768,16 @@
   #factoryReadOnlyInventoryRows{max-height:34vh}
   #factoryReadOnlyInventoryRows .factory-gallery-preview-selection{width:100%}
 }
+
+/* Approved V2 handoff is a separate protected action, not creative acceptance. */
+#page-factory .factory-band-eyes .factory-line-actions:has(> .factory-held-handoff-action){
+  grid-template-rows:repeat(2,minmax(30px,auto)) repeat(2,minmax(38px,auto));
+}
+#page-factory .factory-band-eyes .factory-line-actions > .factory-held-handoff-action{
+  grid-column:1 / -1;
+  grid-row:4;
+  min-width:0;
+  max-width:100%;
+  white-space:normal;
+  overflow-wrap:anywhere;
+}

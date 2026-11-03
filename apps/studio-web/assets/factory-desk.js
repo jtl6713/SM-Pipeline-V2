@@ -1335,6 +1335,9 @@
       // action merely because the server grouped the row under Needs Eyes.
       actions.push(`<button type="button" class="primary-button" data-factory-approve="${esc(card.id)}" ${reviewAllowed ? "" : `disabled title="${esc(batchReason || "Not yet eligible for approval")}"`}>Approve</button>`);
       if(needsEyesOutput && card.review_hold_active===true && card.do_not_publish===true) {
+        // This is a separate protected handoff of an already-approved revision,
+        // not a publishing approval. The server enforces the exact V2/session hold.
+        actions.push(`<button type="button" class="secondary-button factory-held-handoff-action" data-factory-handoff-held="${esc(card.id)}" title="Verify approved V2 and release only its original owned review hold. Does not approve, schedule or publish.">Complete V2 Factory handoff</button>`);
         // Human review can be accepted without releasing the publishing hold.
         // Server verifies the actual saved creative approval before accepting.
         if(state.heldCreativeAccepted?.has(card.id)){
@@ -2301,6 +2304,42 @@
           setStatus(message, true);
           window.alert(`Factory Approve all failed:\n${message}`);
         });
+      });
+    });
+    root.querySelectorAll("[data-factory-handoff-held]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const id = button.getAttribute("data-factory-handoff-held");
+        const card = byId.get(id);
+        if (!card || card.review_hold_active !== true || card.do_not_publish !== true) {
+          setStatus("V2 review hold changed. Refresh Factory before proceeding.", true);
+          return;
+        }
+        if (!window.confirm("Complete the protected handoff of the already-approved V2?\\n\\nThis verifies the selected media and releases only its original review hold. It will NOT approve, schedule, or publish the output.")) return;
+        button.disabled = true;
+        const prior = button.textContent;
+        button.textContent = "Verifying protected V2 handoff…";
+        button.setAttribute("aria-busy", "true");
+        try {
+          const receipt = await fetchJson("/api/rendering-review/outputs/" + encodeURIComponent(id) + "/factory-handoff", {
+            method: "POST", body: JSON.stringify({ confirm: "PROMOTE-APPROVED-V2-TO-FACTORY" }),
+          });
+          if (receipt?.ok !== true || receipt?.factory_ready !== true ||
+              receipt?.output_id !== id || receipt?.review_hold_active !== false ||
+              receipt?.approved_for_publishing !== false ||
+              receipt?.scheduled !== false || receipt?.public_post_created !== false) {
+            throw new Error("Server did not verify the exact V2 handoff and hold release.");
+          }
+          state.selectedOutputs.delete(id);
+          saveFactorySelection();
+          setStatus("Approved V2 handoff verified. Refreshing Factory eligibility; no publishing approval was submitted.");
+          await loadFactoryDesk(true);
+        } catch (error) {
+          setStatus("Protected V2 handoff not completed: " + String(error?.message || error), true);
+        } finally {
+          button.removeAttribute("aria-busy");
+          button.textContent = prior;
+          button.disabled = false;
+        }
       });
     });
     root.querySelectorAll("[data-factory-accept-held]").forEach((button) => {
