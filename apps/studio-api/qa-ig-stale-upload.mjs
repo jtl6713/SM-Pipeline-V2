@@ -106,7 +106,8 @@ export function staleInstagramReelFormula(nowMs = Date.now(), thresholdMs = QA_I
 }
 
 export async function auditStaleInstagramReels(env, {
-  airtableFetch, verifyProvider, verifyContainer, nowMs = Date.now(), limit = 12,
+  airtableFetch, verifyProvider, verifyContainer, inspectLease, recoverSafe,
+  nowMs = Date.now(), limit = 12,
 } = {}) {
   if (typeof airtableFetch !== "function") throw new Error("QA stale Reel Airtable dependency missing");
   const bounded = Math.min(30, Math.max(1, Number(limit) || 12));
@@ -176,6 +177,22 @@ export async function auditStaleInstagramReels(env, {
           : { verified: false, reason: "container_verifier_not_connected" };
       } catch { container = {verified: false, reason: "container_read_unavailable"}; }
     }
+    let leaseInspection = {available:false,reason:"lease_not_connected"};
+    if (typeof inspectLease === "function") {
+      try { leaseInspection = await inspectLease(current); }
+      catch { leaseInspection = {available:false,reason:"lease_inspection_failed"}; }
+    }
+    const liveLease = leaseInspection?.available ? leaseInspection.state : null;
+    // An old Airtable lock is NOT proof of death. The cross-runtime R2
+    // heartbeat and irreversible-intent flag are the only positive proof.
+    const heartbeatMs = Date.parse(String(liveLease?.heartbeat_at || ""));
+    const leaseSafePreGraph = !recheck.post_id_saved && !recheck.container_id_saved
+      && liveLease?.phase === "pre_remote"
+      && liveLease.irreversible_possible === false
+      && Number.isFinite(heartbeatMs)
+      && nowMs - heartbeatMs >= QA_IG_STALE_UPLOAD_THRESHOLD_MS
+      && nowMs >= Number(liveLease.expires_ms)
+      && Number.isSafeInteger(liveLease.generation);
     const confirmed = provider?.verified_public === true
       && provider?.ownership_verified === true
       && String(provider?.remote_id || "") === str(current, "Platform_Post_ID");
@@ -188,6 +205,8 @@ export async function auditStaleInstagramReels(env, {
         ? "container_reports_published_receipt_unverified"
       : containerConfirmed && resumableContainer
         ? "saved_container_verified_pending_fenced_resume"
+      : leaseSafePreGraph ? "expired_pregraph_lease_recovery_candidate"
+      : liveLease?.phase === "remote_intent" ? "graph_intent_ambiguous_needs_eyes"
       : "stale_lock_needs_eyes";
     const evidence = {
       ...recheck, outcome,
@@ -197,12 +216,20 @@ export async function auditStaleInstagramReels(env, {
       container_identity_verified: containerConfirmed,
       container_status: containerConfirmed ? containerStatus.slice(0,30) : null,
       container_evidence: String(container?.evidence || container?.reason || "not_checked").slice(0,140),
+      lease_phase: liveLease?.phase || null,
+      lease_generation: Number.isSafeInteger(liveLease?.generation) ? liveLease.generation : null,
+      lease_expired: Boolean(liveLease && nowMs >= Number(liveLease.expires_ms)),
+      lease_heartbeat_stale: Boolean(Number.isFinite(heartbeatMs) &&
+        nowMs-heartbeatMs>=QA_IG_STALE_UPLOAD_THRESHOLD_MS),
+      irreversible_possible: liveLease?.irreversible_possible === true,
+      pregraph_proof: leaseSafePreGraph,
       observed_at: new Date(nowMs).toISOString(),
       next_action: confirmed ? "use_existing_publication_receipt_reconciler"
         : containerStatus === "PUBLISHED" ? "verify_exact_public_post_receipt_no_publish"
         : containerConfirmed && resumableContainer
           ? "fence_previous_runner_then_resume_saved_container_only"
-        : "verify_runner_lease_and_remote_identity_before_fenced_MAE_reschedule",
+        : leaseSafePreGraph ? "CAS_fence_then_atomic_MAE_reschedule"
+        : "needs_eyes_ambiguous_remote_or_unverified_lease",
       release_lock: false, schedule_changed: false, graph_create_authorized: false,
     };
     const eventKey = "QA-IG-STALE-UPLOAD:" + observed.id + ":" + bucket;
@@ -233,6 +260,58 @@ export async function auditStaleInstagramReels(env, {
       || persisted.fields?.Outcome !== outcome
       || Number(persisted.fields?.Output_ID) !== decision.output_id)
       throw new Error("QA stale Reel ledger readback mismatch");
+    // The audit finding and its durable readback MUST precede any fence.
+    // RecoverSafe never issues a Graph request; only exact CAS-fenced,
+    // never-remote-attempts can be moved by the atomic MAE lane.
+    if (leaseSafePreGraph && typeof recoverSafe === "function") {
+      try {
+        const recovery = await recoverSafe(current, {
+          lease_generation:liveLease.generation,
+          lease_attempt_id:liveLease.attempt_id,
+          observed_at:evidence.observed_at,
+        });
+        if (recovery?.committed === true &&
+            recovery?.output_id === observed.id &&
+            recovery?.generation === liveLease.generation &&
+            Number.isFinite(Date.parse(recovery.scheduled_at))) {
+          const outcomeKey = "QA-IG-STALE-RECOVERY:" + observed.id + ":" + liveLease.generation;
+          const recoveredFields = {
+            Event_Key:outcomeKey,Output_Record_ID:observed.id,
+            Output_ID:decision.output_id,Platform:"Instagram",
+            Output_Type:"Instagram Reel",Outcome:"fenced_pregraph_mae_rescheduled",
+            Evidence_Source:"cas_fenced_pre_remote_runner_lease_atomic_mae",
+            Verified_At:new Date(nowMs).toISOString(),Actor:"studio-quality-agent",
+            Details_JSON:JSON.stringify({
+              signature:QA_IG_STALE_UPLOAD_SIGNATURE,
+              output_id:decision.output_id,output_record_id:observed.id,
+              previous_lock_at:recheck.lock_at,
+              lease_generation:liveLease.generation,
+              scheduled_at:recovery.scheduled_at,
+              reservation_id:recovery.reservation_id||null,
+              graph_creates:0,provider_identity_saved:false,
+              outcome:"fenced_pregraph_mae_rescheduled",
+            }),
+          };
+          const outcomeSaved = await airtableFetch(env,QA_IG_STALE_UPLOAD_LEDGER,"",{
+            method:"PATCH",body:JSON.stringify({performUpsert:{
+              fieldsToMergeOn:["Event_Key"]},typecast:true,
+              records:[{fields:recoveredFields}]}),
+          });
+          const outcomeId=outcomeSaved?.records?.[0]?.id;
+          if(!/^rec[A-Za-z0-9]{14}$/.test(String(outcomeId||"")))
+            throw new Error("QA IG recovery outcome not durably stored");
+          const auditReadback=await airtableFetch(env,QA_IG_STALE_UPLOAD_LEDGER,outcomeId);
+          if(auditReadback?.fields?.Event_Key!==outcomeKey ||
+             auditReadback?.fields?.Outcome!=="fenced_pregraph_mae_rescheduled")
+            throw new Error("QA IG recovery outcome audit readback failed");
+          evidence.recovery_committed=true;
+          evidence.recovered_scheduled_at=recovery.scheduled_at;
+        } else throw new Error("QA IG recovery returned unverified reservation");
+      } catch (error) {
+        evidence.recovery_error=String(error?.message||"safe_recovery_failed").slice(0,180);
+        evidence.recovery_committed=false; // Do not claim a partial commit.
+      }
+    }
     results.push(evidence);
   }
   if (env.STUDIO_MEDIA?.put) {
