@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
   studioIdeaTitleKey, studioIdeaTitleYearFormula,
-  studioIdeaTitlesEquivalent, studioFindRecentDuplicateTitle,
+  studioIdeaTitlesEquivalent, studioFindRecentDuplicateTitle, studioRequiresUniqueIdeaTitleForCreate,
 } from "./idea-title-uniqueness.mjs";
 const dir=dirname(fileURLToPath(import.meta.url));
 const f01=fs.readFileSync(join(dir,"worker-functions-01.mjs"),"utf8");
@@ -46,4 +46,16 @@ test("manual, autonomous, and worker modules include guard before insertion",()=
   assert.match(f04,/export async function createAutonomousIdea[\s\S]*?studioFindRecentDuplicateTitle[\s\S]*?method: "POST"/);
   assert.match(f04,/autonomous hour skipped repeat subject/);
   assert.match(worker,/idea-title-uniqueness\.mjs/);
+});
+
+test("Vibe Cut media intake can reuse an existing title without weakening editorial idea uniqueness", () => {
+  assert.equal(studioRequiresUniqueIdeaTitleForCreate("vibe-cut"), false);
+  for (const kind of ["single-photo", "multiple-photos", "finished-video", "", "Vibe Cut", null]) {
+    assert.equal(studioRequiresUniqueIdeaTitleForCreate(kind), true, String(kind));
+  }
+  const createIdea = f01.split("export async function createIdea(")[1]
+    .split("/*__STUDIO_WORKER_END:createIdea__*/")[0];
+  assert.match(createIdea, /if \(studioRequiresUniqueIdeaTitleForCreate\(payload\?\.input_kind\)\) \{/);
+  assert.match(createIdea, /if \(studioRequiresUniqueIdeaTitleForCreate[\s\S]*?studioFindRecentDuplicateTitle[\s\S]*?if \(duplicateTitle\)[\s\S]*?\}/);
+  assert.match(createIdea, /const created = await airtableFetch\(env, env\.AIRTABLE_IDEA_TABLE_ID, "", \{/);
 });

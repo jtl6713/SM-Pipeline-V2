@@ -2,7 +2,7 @@ import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-ou
 import { facebookPreapprovalRecoveryReason, facebookPreapprovalRecoveryFields, FACEBOOK_PREAPPROVAL_FORMULA } from "./facebook-preapproval-recovery.mjs";
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
 import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
-import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
+import { studioIdeaTitleKey, studioFindRecentDuplicateTitle, studioRequiresUniqueIdeaTitleForCreate } from "./idea-title-uniqueness.mjs";
 import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
 import { isQueuedForPlatformDispatch } from "./overview-dispatch-counts.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
@@ -3707,13 +3707,18 @@ export async function createIdea(request, env, authorization, ctx = null) {
     throw new HttpError(400, "Vibe Cut source aspect must be vertical or horizontal");
   }
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
-  const duplicateTitle = await studioFindRecentDuplicateTitle(input.title, (kind, formula, field) => {
-    const table = kind === "idea" ? env.AIRTABLE_IDEA_TABLE_ID : env.AIRTABLE_CONTENT_TABLE_ID;
-    if (!table) throw new HttpError(503, "Title history unavailable: creation blocked");
-    return listRecords(env, table, { filterFormula: formula, fields: [field], limit: 1001 });
-  });
-  if (duplicateTitle) throw new HttpError(409,
-    `This title is already used within 365 days (${duplicateTitle.source}). Choose a genuinely different subject.`);
+  // A Vibe Cut records a new uploaded source, not a proposed new editorial
+  // subject. Reusing an existing title (including retries of the same video)
+  // must never block source upload. Keep the 365-day guard for all other Ideas.
+  if (studioRequiresUniqueIdeaTitleForCreate(payload?.input_kind)) {
+    const duplicateTitle = await studioFindRecentDuplicateTitle(input.title, (kind, formula, field) => {
+      const table = kind === "idea" ? env.AIRTABLE_IDEA_TABLE_ID : env.AIRTABLE_CONTENT_TABLE_ID;
+      if (!table) throw new HttpError(503, "Title history unavailable: creation blocked");
+      return listRecords(env, table, { filterFormula: formula, fields: [field], limit: 1001 });
+    });
+    if (duplicateTitle) throw new HttpError(409,
+      `This title is already used within 365 days (${duplicateTitle.source}). Choose a genuinely different subject.`);
+  }
   const fields = {
     Candidate_Title: input.title,
     Candidate_Status: "Generated",
