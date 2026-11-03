@@ -47,3 +47,15 @@ test("successful held V2 acceptance acknowledges POST without waiting for a full
   assert.match(script,/state\.heldCreativeAccepted\.add\(card\.id\)/);
   assert.match(script,/setStatus\("V2 accepted for Factory creative review\. Watermark QA and publishing remain held\."\)/);
 });
+
+test("approved held V2 exposes only protected handoff without claiming publishing approval",()=>{
+  assert.match(script,/data-factory-handoff-held/);
+  assert.match(script,/\/api\/rendering-review\/outputs\//);
+  assert.match(script,/\/factory-handoff/);
+  assert.match(script,/receipt\?\.factory_ready !== true/);
+  assert.match(script,/receipt\?\.review_hold_active !== false/);
+  assert.match(script,/receipt\?\.approved_for_publishing !== false/);
+  assert.match(script,/receipt\?\.scheduled !== false/);
+  assert.match(script,/receipt\?\.public_post_created !== false/);
+  assert.match(script,/await loadFactoryDesk\(true\)/);
+});
