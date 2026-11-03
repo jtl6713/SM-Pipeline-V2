@@ -184,3 +184,37 @@ test("saved container with provider PUBLISHED status is never offered for re-pub
   assert.equal(events[0].next_action,"verify_exact_public_post_receipt_no_publish");
   assert.equal(events[0].graph_create_authorized,false);
 });
+
+test("durable pagination cursor eventually audits newer locks behind an old backlog", async () => {
+  const first=row();
+  const second={...row({Output_ID:9290}),id:"rec12345678901236"};
+  const pages=[];
+  let cursorBytes=null, saved=null;
+  const bucket={
+    get:async () => cursorBytes ? {text:async()=>cursorBytes} : null,
+    put:async (_key,body) => {cursorBytes=body;},
+  };
+  const fetcher=async (_env,table,path,options) => {
+    if (options?.method==="PATCH") {
+      saved=JSON.parse(options.body).records[0].fields;
+      return {records:[{id:"rec12345678901239"}]};
+    }
+    if (table==="Quality Agent Recovery Ledger") return {id:path,fields:saved};
+    if (String(path).startsWith("?")) {
+      pages.push(path);
+      return path.includes("offset=page-two") ? {records:[second]}
+        : {records:[first],offset:"page-two"};
+    }
+    return path===first.id?first:second;
+  };
+  const firstRun=await auditStaleInstagramReels({STUDIO_MEDIA:bucket},{
+    nowMs:NOW,airtableFetch:fetcher,limit:1,
+  });
+  const secondRun=await auditStaleInstagramReels({STUDIO_MEDIA:bucket},{
+    nowMs:NOW+60000,airtableFetch:fetcher,limit:1,
+  });
+  assert.equal(firstRun[0].record_id,first.id);
+  assert.equal(secondRun[0].record_id,second.id);
+  assert.ok(pages[1].includes("offset=page-two"));
+  assert.equal(JSON.parse(cursorBytes).offset,null);
+});
