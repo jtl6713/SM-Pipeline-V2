@@ -91,3 +91,15 @@ The connected GitHub development integration can edit and merge PRs, but
 its available actions may not include ruleset administration. A ruleset
 administration outage may therefore require the owner's GitHub Settings
 access; this cannot be guaranteed recoverable solely by a code PR.
+
+
+## Protected-merge canary protocol
+
+This documentation-only amendment is the intentionally harmless canary PR.
+After the owner enables the branch ruleset, verify in the live ruleset API
+that only the default branch is targeted, then confirm the PR's `pr-safety`
+check passes and the normal GitHub connector can squash-merge this PR.
+Finally confirm that a direct-main push is not permitted by the ruleset's
+effective rules and that no application deployment was triggered by the
+docs-only change. Do not attempt destructive pushes, branch deletion, or
+force-push tests.
