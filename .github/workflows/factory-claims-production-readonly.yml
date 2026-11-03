@@ -1,0 +1,127 @@
+name: Factory R2 Claims Diagnostic via Existing Worker (Read Only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - deploy/factory-claims-production-readonly.txt
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: factory-claims-production-readonly
+  cancel-in-progress: false
+jobs:
+  audit:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      AUDIT_WORKER: studio-factory-claims-readonly-20261103
+    steps:
+      - name: Run temporary service-binding-only Worker and clean up
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          CODE="$(curl -sS --max-time 20 -o /tmp/factory-existing.json -w '%{http_code}' -H "$AUTH" "$API/workers/scripts/$AUDIT_WORKER/settings")"
+          if [[ "$CODE" != "404" ]]; then
+            echo "::error::Refusing to overwrite existing audit Worker, HTTP $CODE"
+            exit 1
+          fi
+          OWNED=0
+          cleanup() {
+            if [[ "$OWNED" == "1" ]]; then
+              curl -fsS --max-time 20 -X DELETE -H "$AUTH" "$API/workers/scripts/$AUDIT_WORKER" >/dev/null ||
+                echo "::warning::Temporary audit Worker requires cleanup; no production Studio Worker was changed"
+            fi
+          }
+          trap cleanup EXIT
+          TOKEN="$(openssl rand -hex 32)"
+          cat > /tmp/factory-audit-worker.mjs <<'JS'
+          export default {
+            async fetch(request,env) {
+              const path=new URL(request.url).pathname;
+              if (request.method !== "GET" ||
+                  !["/health","/report"].includes(path)) return new Response("Not found",{status:404});
+              if (request.headers.get("Authorization") !== "Bearer " + env.AUDIT_TOKEN) {
+                return new Response("Unauthorized",{status:401});
+              }
+              const internal = new Request(
+                path === "/health"
+                  ? "https://studio.chicagoshining.com/api/health"
+                  : "https://studio.chicagoshining.com/api/factory/approval-batches?claims_diagnostic=1",
+                {headers:{
+                  "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com",
+                  "Origin":"https://studio.chicagoshining.com",
+                  "Accept":"application/json"
+                }}
+              );
+              const answer=await env.STUDIO_API.fetch(internal);
+              return new Response(await answer.text(),{
+                status:answer.status,
+                headers:{"Content-Type":"application/json","Cache-Control":"no-store"}
+              });
+            }
+          };
+          JS
+          # Service binding only. No production R2 binding, Airtable secret,
+          # workflow approval mutation, or scheduling credentials in this Worker.
+          cat >/tmp/factory-audit-metadata.json <<EOF
+          {"main_module":"worker.mjs","compatibility_date":"2026-10-01","bindings":[{"type":"service","name":"STUDIO_API","service":"$TARGET_WORKER"},{"type":"plain_text","name":"AUDIT_TOKEN","text":"$TOKEN"}]}
+          EOF
+          PUT="$(curl -sS --max-time 30 -o /tmp/factory-audit-put.json -w '%{http_code}' -X PUT "$API/workers/scripts/$AUDIT_WORKER/content" -H "$AUTH" -F 'metadata=@/tmp/factory-audit-metadata.json;type=application/json' -F 'worker.mjs=@/tmp/factory-audit-worker.mjs;type=application/javascript+module;filename=worker.mjs')"
+          if ! [[ "$PUT" =~ ^2[0-9][0-9]$ ]] ||
+              ! jq -e '.success==true' /tmp/factory-audit-put.json >/dev/null; then
+            echo "::error::Temporary service-binding Worker could not be created (HTTP $PUT)"
+            jq -c '{success,errors:[.errors[]?|{code}]}' /tmp/factory-audit-put.json || true
+            exit 1
+          fi
+          OWNED=1
+          curl -fsS --max-time 20 -X POST -H "$AUTH" -H 'Content-Type: application/json' "$API/workers/scripts/$AUDIT_WORKER/subdomain" --data '{"enabled":true,"previews_enabled":false}' >/tmp/factory-audit-sub.json
+          jq -e '.success==true' /tmp/factory-audit-sub.json >/dev/null
+          SUBDOMAIN="$(curl -fsS --max-time 20 -H "$AUTH" "$API/workers/subdomain" | jq -er '.result.subdomain')"
+          BASE="https://$AUDIT_WORKER.$SUBDOMAIN.workers.dev"
+          # Push triggers Worker deploy and this audit concurrently. Read the
+          # actual live Worker version first, rather than probing old code.
+          LIVE="false"
+          for attempt in $(seq 1 35); do
+            STATUS="$(curl -sS --max-time 20 -o /tmp/factory-api-health.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BASE/health" || true)"
+            if [[ "$STATUS" == "200" ]] && jq -e '.version=="0.10.733-factory-claims-diagnostic-readonly"' /tmp/factory-api-health.json >/dev/null 2>&1; then
+              LIVE="true"
+              break
+            fi
+            sleep 5
+          done
+          if [[ "$LIVE" != "true" ]]; then
+            echo "::error::Worker 0.10.733 not verified; claims audit refused"
+            exit 1
+          fi
+          echo "factory_live_claims_worker_version=0.10.733"
+          URL="$BASE/report"
+          HTTP="000"
+          for attempt in $(seq 1 12); do
+            HTTP="$(curl -sS --max-time 45 -o /tmp/factory-claims-report.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$URL" || true)"
+            if [[ "$HTTP" == "200" ]]; then break; fi
+            sleep 3
+          done
+          if [[ "$HTTP" != "200" ]]; then
+            echo "::error::Read-only claims health unavailable; HTTP $HTTP"
+            jq -c '{error:(.error//null)}' /tmp/factory-claims-report.json 2>/dev/null || true
+            exit 1
+          fi
+          jq -e '.schema=="studio.factory-claims-readonly.1" and .read_only==true and (.profiles|length)==4' /tmp/factory-claims-report.json >/dev/null
+          echo "FACTORY_PRODUCTION_CLAIMS_READONLY=PASS"
+          jq -c '{schema,read_only,observed_at,group_objects_first_page,group_objects_more,unbacked_recent_owners,profiles:[.profiles[]|{name,profile_id,registry_present,registry_error,historical_jobs_first_page,historical_jobs_more,total_claims,recent_claims,recent_owners,checked_recent_owners,latest_claim_at,recent_unbacked_owners}]}' /tmp/factory-claims-report.json
+      - name: Attach sanitized audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: factory-production-claims-readonly-${{ github.run_id }}
+          path: /tmp/factory-claims-report.json
+          if-no-files-found: ignore
+          retention-days: 10
