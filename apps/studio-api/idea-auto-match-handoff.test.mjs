@@ -13,7 +13,7 @@ test("manual creation persists Waiting and schedules safe matching", () => {
   assert.ok(fn.indexOf('Studio_Photo_Wait_Status: "Waiting"') < fn.indexOf('const created = await airtableFetch'));
   assert.ok(fn.includes('ctx.waitUntil(matchNewlyCreatedIdeaPhotos(env, created, authorization)'));
   assert.ok(fn.includes('New Idea immediate photo match failed'));
-  assert.ok(read("worker.js").includes("return createIdea(request, env, authorization, ctx);"));
+  assert.ok(read("worker.js").includes("return await createIdea(request, env, authorization, ctx);"));
 });
 
 test("assetless autonomous generation matches immediately but retains chosen media", () => {

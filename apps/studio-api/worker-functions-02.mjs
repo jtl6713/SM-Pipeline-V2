@@ -3505,10 +3505,24 @@ export async function createProductionRequestFromBody(request, env, authorizatio
       sourceAspect: isHorizontalVibeCutAspect(input.production_notes) ? "horizontal" : "vertical",
       targetSeconds: parseVibeCutDirective(input.production_notes)?.target_seconds || input.video_duration_seconds || 15,
     });
-    idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
-      method: "PATCH",
-      body: JSON.stringify({ fields: target, typecast: true }),
+    // The Vibe Idea create route already writes these canonical fields. Do
+    // not spend a second Airtable write on every upload when they match;
+    // under base-wide 429 pressure that extra PATCH can stall the video before
+    // its first multipart segment. Still repair older/photo-classified Ideas.
+    const needsCorrection = Object.entries(target).some(([field, expected]) => {
+      const current = f(idea, field);
+      if (expected == null) return current != null && current !== "";
+      if (Array.isArray(expected) && expected.length === 0) {
+        return Array.isArray(current) ? current.length > 0 : Boolean(current);
+      }
+      return JSON.stringify(current) !== JSON.stringify(expected);
     });
+    if (needsCorrection) {
+      idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields: target, typecast: true }),
+      });
+    }
   }
   const created = await createDraftForIdea(env, idea, authorization, input, { preferredProfileId });
   return respond(request, env, {

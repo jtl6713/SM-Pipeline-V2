@@ -1305,7 +1305,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.737-story-r4-r2-cursor",
+          version: "0.10.738-vibe-preflight-error-boundary",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -3616,7 +3616,7 @@ export default {
         if (request.method === "POST") {
           assertWriteRequest(request, env);
           requirePermission(authorization, "ideas_create");
-          return createIdea(request, env, authorization, ctx);
+          return await createIdea(request, env, authorization, ctx);
         }
         return listIdeas(request, env, url, authorization, ctx);
       }
@@ -3688,14 +3688,14 @@ export default {
       if (isIdeaProductionRequestRoute) {
         assertWriteRequest(request, env);
         requirePermission(authorization, "production_configure");
-        return getOrCreateProductionRequestForIdea(request, env, url, authorization, ctx);
+        return await getOrCreateProductionRequestForIdea(request, env, url, authorization, ctx);
       }
 
       if (isProductionRequestCollectionRoute) {
         if (request.method === "POST") {
           assertWriteRequest(request, env);
           requirePermission(authorization, "production_configure");
-          return createProductionRequestFromBody(request, env, authorization, url, ctx);
+          return await createProductionRequestFromBody(request, env, authorization, url, ctx);
         }
         // Item 4 opens by loading the Production Request collection before a
         // specific request/status route is necessarily selected. Trigger the Make

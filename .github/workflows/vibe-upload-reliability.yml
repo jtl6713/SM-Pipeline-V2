@@ -4,6 +4,9 @@ on:
     paths:
       - 'apps/studio-web/**'
       - 'apps/studio-api/worker-functions-01.mjs'
+      - 'apps/studio-api/worker-functions-02.mjs'
+      - 'apps/studio-api/worker.js'
+      - 'apps/studio-api/vibe-preflight-500-boundary.test.mjs'
       - 'apps/studio-api/large-video-upload-recovery.test.mjs'
       - '.github/workflows/vibe-upload-reliability.yml'
   push:
@@ -11,6 +14,9 @@ on:
     paths:
       - 'apps/studio-web/**'
       - 'apps/studio-api/worker-functions-01.mjs'
+      - 'apps/studio-api/worker-functions-02.mjs'
+      - 'apps/studio-api/worker.js'
+      - 'apps/studio-api/vibe-preflight-500-boundary.test.mjs'
       - 'apps/studio-api/large-video-upload-recovery.test.mjs'
 permissions:
   contents: read
@@ -26,4 +32,6 @@ jobs:
       - run: |
           node --check apps/studio-web/assets/app-item4-1008.js
           node --check apps/studio-api/worker-functions-01.mjs
-          node --test apps/studio-web/vibe-upload-reliability.test.mjs apps/studio-web/vibe-upload-status.test.mjs apps/studio-web/vibe-upload-confirm.test.mjs apps/studio-web/vibe-cut-large-upload.test.mjs apps/studio-api/large-video-upload-recovery.test.mjs
+          node --check apps/studio-api/worker-functions-02.mjs
+          node --check apps/studio-api/worker.js
+          node --test apps/studio-web/vibe-upload-reliability.test.mjs apps/studio-web/vibe-upload-status.test.mjs apps/studio-web/vibe-upload-confirm.test.mjs apps/studio-web/vibe-cut-large-upload.test.mjs apps/studio-api/large-video-upload-recovery.test.mjs apps/studio-api/vibe-preflight-500-boundary.test.mjs
