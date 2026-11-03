@@ -46,7 +46,7 @@ jobs:
               try:
                   event,end=decoder.raw_decode(data,pos)
               except json.JSONDecodeError:
-                  newline=data.find('\\n',pos)
+                  newline=data.find('\n',pos)
                   if newline<0: break
                   pos=newline+1
                   continue
@@ -66,8 +66,8 @@ jobs:
                       msg=' '.join(str(v) for v in value) if isinstance(value,list) else str(value)
                   else: msg=str(log)
                   if any(t.lower() in msg.lower() for t in tokens):
-                      msg=re.sub(r'https?://\\S+','[URL]',msg)
-                      msg=re.sub(r'[\\w.+-]+@[\\w.-]+','[EMAIL]',msg)
+                      msg=re.sub(r'https?://\S+','[URL]',msg)
+                      msg=re.sub(r'[\w.+-]+@[\w.-]+','[EMAIL]',msg)
                       matches.append({'cron':cron,'message':msg[:450]})
           print('decoded_events=',decoded,'cron_events=',cron_events,'log_messages=',log_messages)
           print('tail_json_events=',len(lines),'matched_r4_logs=',len(matches))
