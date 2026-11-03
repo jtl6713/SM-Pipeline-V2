@@ -686,6 +686,7 @@ import {
   studioSupabaseWriteThroughAirtableMutation,
 } from "./worker-functions-01.mjs";
 import {
+  studioAdmitRenderQueue,
   studioHealEscalatedProduce,
   item4PulsePipelineStage,
   handleRr2ReviewDecision,
