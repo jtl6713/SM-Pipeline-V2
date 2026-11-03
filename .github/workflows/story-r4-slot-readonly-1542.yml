@@ -48,6 +48,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          AUDIT_WORKER="studio-story-r4-audit-${GITHUB_RUN_ID}"
           test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
@@ -121,7 +122,8 @@ jobs:
             sleep 5
           done
           if [[ "$LIVE" != "true" ]]; then
-            echo "::error::Live Worker health unavailable; read-only queue audit refused"
+            echo "::error::Live Worker health unavailable; read-only queue audit refused (HTTP $STATUS)"
+            jq -c '{ok,version,error:(.error//null)}' /tmp/factory-api-health.json 2>/dev/null || true
             exit 1
           fi
           echo "story_r4_live_worker_version=$(jq -r '.version // "unknown"' /tmp/factory-api-health.json)"
