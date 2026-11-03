@@ -790,6 +790,7 @@ import {
 import { auditReel368Holds } from "./facebook-reel-368-audit.mjs";
 import { qaInstagramCarouselMaintenance } from "./qa-instagram-carousel-maintenance.mjs";
 import { auditStaleInstagramReels, verifySavedInstagramContainer } from "./qa-ig-stale-upload.mjs";
+import { igPublishLeaseEnabled, mutateIgPublishLease, readIgPublishLease, fenceStaleIgPreRemoteLease, markIgLeaseRecovered } from "./qa-ig-publish-lease.mjs";
 import { verifyAuthenticatedInstagramReceipt } from "./exception-recovery-authenticated-receipt.mjs";
 import { studioActivePipelineSettings } from "./worker-functions-03.mjs";
 import {
@@ -1144,12 +1145,15 @@ export default {
       const isEngagementActionsWrite = isEngagementActionsRoute && request.method === "POST";
       // Exact Chicago review writes are authorized again by their protected handlers.
       // The old global Phase-2A allowlist must not reject them before inspection.
+      const isInternalIgPublishLeasePost = request.method === "POST" &&
+        /^\/(?:api\/)?internal\/quality\/ig-publish-lease$/.test(url.pathname);
       const isChicagoReviewPost = request.method === "POST" &&
         (/^\/api\/rendering-review\/outputs\/rec[A-Za-z0-9]{14}\/(?:producer-conversation|producer-proposal|commit-attempt|messages|next-revision-feedback|review-feedback|approve|factory-handoff|request-redo)$/.test(url.pathname) ||
          /^\/api\/rendering-review\/factory\/outputs\/rec[A-Za-z0-9]{14}\/request-changes$/.test(url.pathname) ||
          /^\/(?:api\/)?internal\/rendering-review\/(?:claim-render-job|launch-ledger|complete-attempt|qa-audio-rebind|ig-dispatch-claim|factory-handoff)$/.test(url.pathname));
       const allowedMethod =
         isChicagoReviewPost ||
+        isInternalIgPublishLeasePost ||
         request.method === "GET" ||
         (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isMediaAssetStreamRoute || isPublicBrandWatermarkRoute || isOutputPreviewRoute || isFactoryOutputPreviewRoute || isReviewAttemptPreviewRoute || isVoicePreviewRoute)) ||
         isProfilesOverviewRefreshWrite ||
@@ -1952,6 +1956,46 @@ export default {
           throw new HttpError(403,"One-time handoff requires Chicago output 8447");
         const result=await handoffApprovedReviewToFactory({
           output_id:outputId,env,operations:makeReviewFactoryHandoffOperations(env),
+        });
+        return respond(request,env,result);
+      }
+
+      // Protected cross-runtime AP1-IG lease. Only the Python runner holding
+      // the shared server secret may claim/renew/record Graph intent. No
+      // browser/Studio user credential grants access to these actions.
+      if (url.pathname === "/internal/quality/ig-publish-lease" ||
+          url.pathname === "/api/internal/quality/ig-publish-lease") {
+        requireConfig(env);
+        if (!igPublishLeaseEnabled(env))
+          throw new HttpError(503, "IG publish lease not enabled");
+        if (request.method !== "POST") throw new HttpError(405,"POST required");
+        const expected=String(env.STUDIO_IG_PUBLISH_LEASE_SHARED_SECRET||"").trim();
+        const supplied=String(request.headers.get("X-Ig-Publish-Lease-Secret")||"").trim();
+        if (expected.length<24 || supplied.length!==expected.length)
+          throw new HttpError(403,"Publisher lease credential required");
+        const digest=async value=>new Uint8Array(await crypto.subtle.digest("SHA-256",
+          new TextEncoder().encode(value)));
+        const [a,b]=await Promise.all([digest(expected),digest(supplied)]);
+        let difference=0;
+        for(let i=0;i<a.length;i++) difference |= a[i]^b[i];
+        if (difference) throw new HttpError(403,"Publisher lease credential required");
+        if (!/^application\/json(?:\s*;|$)/i.test(String(request.headers.get("Content-Type")||"")))
+          throw new HttpError(415,"JSON required");
+        const raw=await request.text();
+        if(raw.length>1600)throw new HttpError(413,"Publisher lease request too large");
+        let data;
+        try {data=JSON.parse(raw);}catch {throw new HttpError(400,"Malformed publisher lease request");}
+        const allowed=["action","output_id","attempt_id","generation","lock_stamp"];
+        if(!data || typeof data!=="object" || Array.isArray(data) ||
+           Object.keys(data).some(key=>!allowed.includes(key)))
+          throw new HttpError(400,"Invalid publisher lease arguments");
+        const result=await mutateIgPublishLease(env,{
+          action:String(data.action||""),
+          outputId:String(data.output_id||""),
+          attemptId:data.attempt_id,
+          generation:data.generation,
+          lockStamp:data.lock_stamp,
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
         });
         return respond(request,env,result);
       }
