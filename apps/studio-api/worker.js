@@ -3998,16 +3998,27 @@ export default {
       ctx.waitUntil(auditStaleInstagramReels(env, {
         airtableFetch, limit: 8,
         inspectLease: row => readIgPublishLease(env,row.id),
-        recoverSafe: async (row) => {
+        recoverSafe: async (row, proof) => {
           if (env.STUDIO_IG_STALE_UPLOAD_AUTO_RECOVERY_ENABLED !== "true" ||
               !igPublishLeaseEnabled(env))
             return {committed:false,reason:"recovery_feature_not_enabled"};
           const running=await verifyIgLeaseRunnerHealth(env);
           if(!running.ready) return {committed:false,reason:running.reason};
-          // The only auto-recoverable case has positive R2 proof that the
-          // owner never received permission to make any Graph request.
+          // A failed previous MAE transaction can leave a safely fenced
+          // publisher. Reuse its exact generation rather than trying to
+          // fence the already-fenced lease a second time.
           const readOutput=id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id);
-          const fence=await fenceStaleIgPreRemoteLease(env,row.id,{readOutput});
+          const observed=await readIgPublishLease(env,row.id);
+          let fence;
+          if(observed.available && observed.state?.phase==="fenced" &&
+             observed.state?.generation===proof.lease_generation &&
+             observed.state?.irreversible_possible===false) {
+            fence={safe:true,fenced:true,output_id:row.id,
+              generation:observed.state.generation,
+              lock_at:row.fields?.Publish_Locked_At};
+          } else {
+            fence=await fenceStaleIgPreRemoteLease(env,row.id,{readOutput});
+          }
           if (!fence.safe) return {committed:false,reason:fence.reason};
           return studioRecoverFencedIgStaleUpload(env,{
             outputId:row.id,fence,
