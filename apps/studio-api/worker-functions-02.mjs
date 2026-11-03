@@ -1279,7 +1279,12 @@ export async function studioAdmitRenderQueue(env, options = {}) {
     "voiceover_exceeds_video",
     "private_drive_watermark_renderer_not_updated",
   ]);
-  const manualPriority = Array.isArray(controls?.render_priority) && controls.render_priority.length > 0;
+  // Obsolete R2 priorities (#2777-#2786 are already rendered/published) are
+  // not operator priority for this queue. Otherwise an old pinned list
+  // keeps maxAttempts at one and suppresses the durable skip cursor forever.
+  const eligibleAdmitIds = new Set(queueOrder.map(row => String(row?.id || "")));
+  const manualPriority = Array.isArray(controls?.render_priority) &&
+    controls.render_priority.some(id => eligibleAdmitIds.has(String(id)));
   const maxAttempts = manualPriority ? 1 : Math.min(4, queueOrder.length);
   const skipped = [];
   for (const head of queueOrder.slice(0, maxAttempts)) {
