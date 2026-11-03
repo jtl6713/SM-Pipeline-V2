@@ -149,3 +149,35 @@ jobs:
           path: /tmp/story-r4-sanitized.json
           if-no-files-found: ignore
           retention-days: 7
+
+
+      - name: Read live R2 Story queue priority and skip cursor (no writes)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api"
+          curl -fsS --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API/deployments" -o /tmp/story-live-deploys.json
+          VERSION=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/story-live-deploys.json)
+          curl -fsS --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API/versions/$VERSION" -o /tmp/story-live-version.json
+          BUCKET=$(jq -er '.result.resources.bindings[] | select(.name=="STUDIO_MEDIA") | (.bucket_name // .bucket // empty)' /tmp/story-live-version.json)
+          test -n "$BUCKET"
+          mkdir -p /tmp/story-r2-audit
+          npm install --prefix /tmp/story-r2-audit --no-save --silent wrangler@4.123.0
+          W=/tmp/story-r2-audit/node_modules/.bin/wrangler
+          echo "live_r2_bucket_binding_present=true"
+          if "$W" r2 object get "$BUCKET/studio/state/ops-queue-controls.json" --file /tmp/story-queue-controls.json --remote >/tmp/story-r2-controls.log 2>&1; then
+            jq -c '{render_priority:(.render_priority//[]),render_paused_ids:((.render_paused//{})|keys),updated_at:(.updated_at//null),schema:(.schema//null)}' /tmp/story-queue-controls.json
+          else
+            echo "r2_queue_controls_read=unavailable"
+            tail -5 /tmp/story-r2-controls.log | sed -E 's/(token|key|secret)=[^ ]+/\1=[REDACTED]/Ig'
+          fi
+          if "$W" r2 object get "$BUCKET/ops/r4-skip-cursor-v1" --file /tmp/story-queue-cursor.txt --remote >/tmp/story-r2-cursor.log 2>&1; then
+            CURSOR=$(tr -cd '[:alnum:]' < /tmp/story-queue-cursor.txt)
+            echo "r4_cursor_record_id=$CURSOR"
+          else
+            echo "r4_cursor_read=unavailable"
+          fi
+          echo "read_only=true no_render=true no_airtable_write=true no_publish=true"
