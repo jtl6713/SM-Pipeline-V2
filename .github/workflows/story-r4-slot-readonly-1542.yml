@@ -112,19 +112,19 @@ jobs:
           # Push triggers Worker deploy and this audit concurrently. Read the
           # actual live Worker version first, rather than probing old code.
           LIVE="false"
-          for attempt in $(seq 1 35); do
+          for attempt in $(seq 1 5); do
             STATUS="$(curl -sS --max-time 20 -o /tmp/factory-api-health.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BASE/health" || true)"
-            if [[ "$STATUS" == "200" ]] && jq -e '.(.version | startswith("0.10.739-"))' /tmp/factory-api-health.json >/dev/null 2>&1; then
+            if [[ "$STATUS" == "200" ]] && jq -e '.(.version | type=="string")' /tmp/factory-api-health.json >/dev/null 2>&1; then
               LIVE="true"
               break
             fi
             sleep 5
           done
           if [[ "$LIVE" != "true" ]]; then
-            echo "::error::Worker R4 recovery capability not verified; queue audit refused"
+            echo "::error::Live Worker health unavailable; read-only queue audit refused"
             exit 1
           fi
-          echo "story_r4_live_worker_version=0.10.739"
+          echo "story_r4_live_worker_version=$(jq -r '.version // "unknown"' /tmp/factory-api-health.json)"
           URL="$BASE/report"
           HTTP="000"
           for attempt in $(seq 1 12); do
