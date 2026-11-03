@@ -43,11 +43,14 @@ jobs:
             const upload=await cf('/content',{method:'PUT',body}); 
             if (!upload.success) throw Error('sandbox_upload_failed_'+upload.http);
             created=true;
+            const secretValue='sandbox-secret-'+process.env.GITHUB_RUN_ID;
+            const added=await cf('/secrets',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'STAGE3_SECRET',text:secretValue,type:'secret_text'})});
+            if (!added.success) throw Error('sandbox_secret_create_failed_'+added.http);
             const old=await cf('/settings');
             if (!old.success) throw Error('sandbox_settings_read_failed');
             const base=old.result.bindings||[];
-            if (base.length!==2) throw Error('sandbox_binding_precondition_failed');
-            const payload={bindings:[{name:'STAGE3_ALPHA',type:'plain_text',text:'after'},{name:'STAGE3_BETA',type:'inherit'}]};
+            if (base.length!==3) throw Error('sandbox_binding_precondition_failed');
+            const payload={bindings:[{name:'STAGE3_ALPHA',type:'plain_text',text:'after'},{name:'STAGE3_BETA',type:'inherit'},{name:'STAGE3_SECRET',type:'inherit'}]};
             const form=new FormData();
             form.append('settings',new Blob([JSON.stringify(payload)],{type:'application/json'}),'settings.json');
             const patch=await cf('/settings',{method:'PATCH',body:form});
@@ -58,10 +61,11 @@ jobs:
             const bindings=next.result.bindings||[];
             const alpha=bindings.find(x=>x.name==='STAGE3_ALPHA')?.text;
             const beta=bindings.find(x=>x.name==='STAGE3_BETA')?.text;
+            const secretPreserved=bindings.some(x=>x.name==='STAGE3_SECRET' && x.type==='secret_text');
             const deploy=await cf('/deployments');
-            const out={patch_shape:shape,initial_count:base.length,final_count:bindings.length,alpha_changed:alpha==='after',beta_preserved:beta==='preserve',active_deployment_versions:deploy.result?.deployments?.[0]?.versions?.length||null};
+            const out={patch_shape:shape,initial_count:base.length,final_count:bindings.length,alpha_changed:alpha==='after',beta_preserved:beta==='preserve',secret_preserved:secretPreserved,active_deployment_versions:deploy.result?.deployments?.[0]?.versions?.length||null};
             console.log('STAGE3_SANDBOX '+JSON.stringify(out));
-            if (!out.alpha_changed || !out.beta_preserved) throw Error('partial_binding_patch_is_not_safe');
+            if (!out.alpha_changed || !out.beta_preserved || !out.secret_preserved) throw Error('partial_binding_patch_is_not_safe');
           }finally {
             if (created) {
               const deleted=await cf('',{method:'DELETE'});
