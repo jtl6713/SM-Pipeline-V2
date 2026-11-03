@@ -789,6 +789,8 @@ import {
 } from "./worker-functions-03.mjs";
 import { auditReel368Holds } from "./facebook-reel-368-audit.mjs";
 import { qaInstagramCarouselMaintenance } from "./qa-instagram-carousel-maintenance.mjs";
+import { auditStaleInstagramReels } from "./qa-ig-stale-upload.mjs";
+import { verifyAuthenticatedInstagramReceipt } from "./exception-recovery-authenticated-receipt.mjs";
 import { studioActivePipelineSettings } from "./worker-functions-03.mjs";
 import {
   healStaleManualFlagsOnPublishedRecord,
@@ -3941,6 +3943,41 @@ export default {
           graph_creates: 0,
         })))
         .catch((error) => console.warn("QA-1050 reel368 audit failed", String(error?.message || error))));
+    }
+    // QA-IG-STALE-UPLOAD: live half-hour detection and durable finding audit.
+    // Intentionally read-only toward Meta/Airtable publish state. An expired
+    // Airtable timestamp cannot fence an active Python process or prove that a
+    // remote create never happened; missing provider IDs remain Needs Eyes.
+    if (cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS
+        && env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false") {
+      ctx.waitUntil(auditStaleInstagramReels(env, {
+        airtableFetch, limit: 8,
+        verifyProvider: async (row) => {
+          const profiles = row?.fields?.Content_Profile;
+          if (!Array.isArray(profiles) || profiles.length !== 1)
+            return { verified_public: false, evidence: "ambiguous_profile" };
+          const profile = await airtableFetch(env,
+            env.AIRTABLE_PROFILE_TABLE_ID || "Content Profiles", profiles[0]);
+          if (profile?.id !== profiles[0])
+            return { verified_public: false, evidence: "profile_not_found" };
+          const settings = await studioActivePipelineSettings(env,
+            ["INSTAGRAM_BUSINESS_ACCOUNT_ID","META_GRAPH_API_ACCESS_TOKEN","META_GRAPH_API_VERSION"], profile);
+          const profileAccount = String(profile?.fields?.Instagram_Business_Account_ID || "").trim();
+          if (profileAccount && profileAccount !== String(settings.INSTAGRAM_BUSINESS_ACCOUNT_ID || "").trim())
+            return { verified_public: false, evidence: "instagram_profile_account_setting_conflict" };
+          return verifyAuthenticatedInstagramReceipt(row, {
+            settings, expectedAccountId: settings.INSTAGRAM_BUSINESS_ACCOUNT_ID,
+          });
+        },
+      }).then(rows => {
+        if (rows.length) console.warn("QA-IG-STALE-UPLOAD", JSON.stringify({
+          findings: rows.length,
+          identities_verified: rows.filter(r => r.provider_public_verified).length,
+          pending_lease_and_provider_reconciliation: rows.filter(r => !r.provider_public_verified).length,
+          graph_creates: 0, lock_releases: 0, reschedules: 0,
+        }));
+      }).catch(error => console.warn("QA-IG-STALE-UPLOAD scan unavailable",
+        String(error?.message || error))));
     }
     // Quality Agent runs on every half-hour maintenance tick, independently of
     // Factory and ordinary carousel dispatch. It ONLY re-arms existing child-ID
