@@ -1,4 +1,4 @@
-name: Stage 3 LA MAE live DO and Studio preflight diagnostic
+name: Stage 3 LA MAE DO export preservation audit
 
 on:
   push:
@@ -37,6 +37,14 @@ jobs:
           curl --fail-with-body -sS -H "$AUTH" "$API/chicagoshining-studio-api/versions/$ACTIVE" -o /tmp/stage3-active.json
           jq -e '.success==true' /tmp/stage3-active.json >/dev/null
           jq -e '[.result.resources.bindings[]? | select(.name=="STUDIO_SCHEDULE_RESERVATIONS" and .type=="durable_object_namespace")] | length==1' /tmp/stage3-active.json >/dev/null
+          curl --fail-with-body -sS -H "$AUTH" "$API/chicagoshining-studio-api/settings" -o /tmp/stage3-live-settings.json
+          jq -e '.success==true' /tmp/stage3-live-settings.json >/dev/null
+          jq -nc --slurpfile v /tmp/stage3-active.json --slurpfile s /tmp/stage3-live-settings.json '
+            {version_exports:($v[0].result.resources.exports // $v[0].result.script_runtime.exports // null),
+             current_settings_exports:($s[0].result.exports // null),
+             current_settings_export_keys:($s[0].result.exports // {} | keys),
+             active_binding_count:($v[0].result.resources.bindings|length),
+             settings_binding_count:($s[0].result.bindings|length)}' | tee /tmp/stage3-exports-readonly.json
           jq -nc --arg active "$ACTIVE" --arg lane "$LANE" --slurpfile doc /tmp/stage3-active.json '
             ($doc[0].result.resources.bindings // []) as $bindings |
             {active_worker_version:$active, lane:$lane,
