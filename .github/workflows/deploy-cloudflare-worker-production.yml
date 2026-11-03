@@ -592,12 +592,8 @@ jobs:
           export default {
             async fetch(request, env) {
               const url = new URL(request.url);
-              const michiganPreview = url.pathname === "/$TOKEN/michigan-preview";
               const scriptedFeedbackProbe = url.pathname === "/$TOKEN/scripted-short-revise-probe";
               const scriptedMulti = scriptedFeedbackProbe && url.searchParams.get("mode") === "multi";
-              const michiganOutput = String(url.searchParams.get("output_id") || "");
-              const michiganAllowlist = ["recPnNYghmcJYivOA","recyYKgkfRksIZPun","rec8JDQW2Jilnzc9u","recgJR5bTcYfCCwAL","recqw7DTgYsqYkl51","recZ1X5QfeFZTot1F"];
-              if (michiganPreview && !michiganAllowlist.includes(michiganOutput)) return new Response("Invalid output", {status:400});
               const reviewSessions = url.pathname === "/$TOKEN/rendering-review-sessions";
               const reviewQueue = url.pathname === "/$TOKEN/rendering-review-queue";
               const factoryStatus = url.pathname === "/$TOKEN/factory-status";
@@ -614,10 +610,9 @@ jobs:
               const readyProductionDiagnostic = url.pathname === "/$TOKEN/ready-production-diagnostic";
               const summary = url.pathname === "/$TOKEN/summary";
               const summaryReconcile = url.pathname === "/$TOKEN/summary-reconcile";
-              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !failedOutputCensus && !qualityFacebookPreview && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic && !summary && !summaryReconcile && !reviewSessions && !reviewQueue && !michiganPreview && !scriptedFeedbackProbe) return new Response("Not found", {status:404});
+              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !failedOutputCensus && !qualityFacebookPreview && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic && !summary && !summaryReconcile && !reviewSessions && !reviewQueue && !scriptedFeedbackProbe) return new Response("Not found", {status:404});
               const generation = String(url.searchParams.get("generation") || "");
               const path = scriptedFeedbackProbe ? "/api/scripted-short/revise"
-                : michiganPreview ? "/api/factory/outputs/" + michiganOutput + "/preview"
                 : reviewSessions ? "/api/rendering-review/sessions?profile_id=recT2rbKX3MF7cVFU"
                 : reviewQueue ? "/api/rendering-review/queue?profile_id=recT2rbKX3MF7cVFU"
                 : qualityFacebookPreview ? "/api/operations/outputs/" + previewOutputId + "/schedule"
@@ -632,7 +627,7 @@ jobs:
                 : globalCanary ? "/api/factory/approval-batches?scope=all&status_only=1"
                 : chicagoCanary ? "/api/factory/approval-batches?profile=recT2rbKX3MF7cVFU"
                 : factoryStatus ? "/api/factory/approval-batches?profile=recF7UAn0LkMZZrWZ" : "/api/session";
-              const method = michiganPreview ? "HEAD" : ((overviewRefresh || summaryReconcile || qualityFacebookPreview || scriptedFeedbackProbe) ? "POST" : "GET");
+              const method = (overviewRefresh || summaryReconcile || qualityFacebookPreview || scriptedFeedbackProbe) ? "POST" : "GET";
               const headers = {"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Accept":"application/json"};
               if (overviewRefresh || summaryReconcile || qualityFacebookPreview || scriptedFeedbackProbe) headers["Content-Type"] = "application/json";
               const internal = new Request("https://studio.chicagoshining.com" + path, {
@@ -650,16 +645,7 @@ jobs:
                   ? '{"quality_rate_limit_recovery":true,"quality_rate_limit_preview":true}'
                   : ((overviewRefresh || summaryReconcile) ? "{}" : undefined),
               });
-              let response;
-              try {
-                response = await env.STUDIO_API.fetch(internal);
-              } catch (error) {
-                if (michiganPreview) return Response.json({
-                  output_id:michiganOutput,status:-1,error_type:String(error?.name || "Error"),
-                  error_message:String(error?.message || "").slice(0,200),
-                }, {headers:{"Cache-Control":"no-store"}});
-                throw error;
-              }
+              const response = await env.STUDIO_API.fetch(internal);
               if (scriptedFeedbackProbe) {
                 const result = scriptedMulti ? await response.json().catch(()=>({})) : null;
                 return Response.json({
@@ -669,16 +655,6 @@ jobs:
                     revision_count:result?.revision?.actions?.length,
                     remaining_voiceovers:result?.timeline?.segments?.map(s=>s.voiceover_text),
                   } : {}),
-                }, {headers:{"Cache-Control":"no-store"}});
-              }
-              if (michiganPreview) {
-                // No raw private MP4 bytes or access tokens leave this temporary canary.
-                return Response.json({
-                  output_id:michiganOutput,status:response.status,
-                  content_type:response.headers.get("Content-Type"),
-                  content_length:Number(response.headers.get("Content-Length") || 0),
-                  source:response.headers.get("X-Studio-Preview-Source"),
-                  accept_ranges:response.headers.get("Accept-Ranges"),
                 }, {headers:{"Cache-Control":"no-store"}});
               }
               return new Response(await response.text(), {status:response.status,headers:{"Content-Type":"application/json","Cache-Control":"no-store"}});
@@ -774,73 +750,10 @@ jobs:
             and .remaining_voiceovers==["Scene 1","Scene 3","Scene 5","Scene 6","Scene 7"]' /tmp/scripted-short-multi-probe.json >/dev/null
           echo "scripted_short_multi_scene_live_no_write_canary=PASS remaining=1,3,5,6,7"
 
-      - name: Verify Michigan Avenue V2 private MP4 previews in all six Factory cards
-        shell: bash
-        run: |
-          set -euo pipefail
-          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
-          TOKEN=$(cat /tmp/verify-token.txt)
-          BASE="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/michigan-preview"
-          ids=(recPnNYghmcJYivOA recyYKgkfRksIZPun rec8JDQW2Jilnzc9u recgJR5bTcYfCCwAL recqw7DTgYsqYkl51 recZ1X5QfeFZTot1F)
-          for id in "${ids[@]}"; do
-            url="$BASE?output_id=$id"
-            CODE=$(curl -sS --max-time 180 -w '%{http_code}' "$url" -o /tmp/michigan-preview.json || true)
-            if [[ "$CODE" != "200" ]]; then
-              echo "Michigan playback bridge transport failure for $id: HTTP $CODE" >&2
-              head -c 400 /tmp/michigan-preview.json >&2
-              exit 1
-            fi
-            jq -e --arg id "$id" '.output_id==$id and .status==200
-              and .content_type=="video/mp4"
-              and .content_length==46824860
-              and .source==(if $id=="recPnNYghmcJYivOA" then "factory-selected-review-attempt" else "verified-review-r2" end)
-              and .accept_ranges=="bytes"' /tmp/michigan-preview.json >/dev/null || {
-                echo "Michigan V2 authenticated playback probe FAILED for $id" >&2
-                jq -c '{output_id,status,content_type,content_length,source,accept_ranges,error_type,error_message}' /tmp/michigan-preview.json >&2
-                exit 1
-              }
-            echo "michigan_v2_preview=PASS output=$id bytes=46824860"
-          done
-
-      - name: Verify Michigan Avenue held source and pending sibling in Factory
-        shell: bash
-        run: |
-          set -euo pipefail
-          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
-          TOKEN=$(cat /tmp/verify-token.txt)
-          URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/factory-desk"
-          curl -fsS --max-time 90 "$URL" -o /tmp/factory-michigan-visibility.json
-          # The six private MP4s above must still pass. Direct canonical
-          # Airtable evidence on 2026-11-02 (read-only run 41373261246)
-          # confirms 9593's review session is now APPROVED, its hold was
-          # released, no platform post exists and publishing is Not Ready.
-          # Both 9593 and 9596 are presently Factory review-ready.
-          # Four approved siblings must still be excluded from Needs Eyes.
-          # This exact-state canary does not release a hold or publish media.
-          jq -e '
-            .ok==true and .read_source=="airtable" and
-            ([.lanes.needs_eyes[] | select(.content_item_id=="recYhIjy4BW0U3WaW")] | length)==2 and
-            ([.lanes.needs_eyes[] | select(
-              .id=="recPnNYghmcJYivOA" and .review_hold_active==false and
-              .do_not_publish==false and .can_preview==true and
-              .publish_status==null and
-              .output_status=="Ready for Review")] | length)==1 and
-            ([.lanes.needs_eyes[] | select(
-              .id=="recgJR5bTcYfCCwAL" and .review_hold_active==false and
-              .do_not_publish==false and .can_preview==true and
-              .publish_status==null and
-              .output_status=="Ready for Review")] | length)==1 and
-            ([.lanes.needs_eyes[] | select(
-              .id=="recyYKgkfRksIZPun" or
-              .id=="rec8JDQW2Jilnzc9u" or
-              .id=="recqw7DTgYsqYkl51" or
-              .id=="recZ1X5QfeFZTot1F")] | length)==0
-          ' /tmp/factory-michigan-visibility.json >/dev/null || {
-            echo "Michigan Factory review visibility disagrees with authoritative held/approved lifecycle" >&2
-            jq -c '{read_source,matching:[.lanes.needs_eyes[]|select(.content_item_id=="recYhIjy4BW0U3WaW")|{id,review_hold_active,do_not_publish,can_preview,output_status,publish_status}]}' /tmp/factory-michigan-visibility.json >&2
-            exit 1
-          }
-          echo "michigan_factory_needs_eyes=PASS approved_9593_and_review_ready_9596_unpublished; four approved siblings excluded"
+      # Retired record-specific Michigan Avenue playback/Needs Eyes assumptions.
+      # Factory's actual media integrity, approval and publication guards remain
+      # enforced by its own routes and regression suite. Advancing one historical
+      # output must not block unrelated upload reliability releases.
 
       - name: Verify authoritative All Profiles force refresh through service binding
         shell: bash
