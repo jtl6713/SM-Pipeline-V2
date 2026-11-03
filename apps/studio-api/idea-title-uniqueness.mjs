@@ -3,6 +3,15 @@
  * Airtable is authoritative. This is a guard, not an atomic unique index.
  */
 export const IDEA_TITLE_UNIQUENESS_DAYS = 365;
+
+/** Vibe Cut is a source-video ingest, not a new editorial idea.
+ * Repeated subjects, re-edits and even retries of the same MOV must be
+ * allowed through the upload preflight. Dedup remains enforced for ordinary
+ * manual/autonomous idea proposals; this exception is explicit-input-only.
+ */
+export function studioRequiresUniqueIdeaTitleForCreate(inputKind) {
+  return String(inputKind || "").trim() !== "vibe-cut";
+}
 const TITLE_STOP = new Set(["a","an","and","the","at","in","on","of","for","to","with","from"]);
 function titleWithoutAutoNumber(title) {
   let text = String(title || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
