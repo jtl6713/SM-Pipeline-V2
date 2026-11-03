@@ -869,3 +869,5 @@ Deploy Worker 0.10.717: verified creative redo with pending watermark QA; held o
 Deploy Worker 0.10.738-vibe-preflight-error-boundary (2026-11-03). Await Idea/Production draft operations inside JSON error boundary to surface actual Airtable 429 instead of generic 500 and invoke existing bounded backoff; skip redundant canonical Vibe Idea PATCH; preserve one existing draft and all media. No publish action.
 
 2026-11-03: Retry guarded production Worker 0.10.738 for Vibe preflight 500/429 repair PR #1552, after retiring obsolete per-output Michigan V2 preview and fixed Factory-state canaries. Keep live Factory auth/approval/media checks, binding parity, independent safety smoke checks and automatic rollback. No publication or user media writes.
+
+2026-11-03: Deploy Worker 0.10.739-story-r4-stale-hold-r5-reconcile. Before blocked Story queue admission, run bounded R5 polling of existing Airtable Rendering holds, re-read canonical holds, and fail closed on uncertain job state. No auto-approval, publish, or duplicate render.
