@@ -213,3 +213,39 @@ export async function markIgLeaseRecovered(env,outputId,generation,{
   }
   fail("ig_recovery_fence_cas_conflict");
 }
+
+/** Verify the actual Windows runner opted into the same protocol before QA
+ * attempts to fence its old AP1-IG work. The deployment exclusivity flag must
+ * ALSO be independently verified; one healthy runner is not an inventory.
+ */
+export async function verifyIgLeaseRunnerHealth(env,{fetcher=fetch}={}) {
+  const deny=reason=>({ready:false,reason});
+  const base=String(env?.PIPELINE_RUNNER_URL||"").trim().replace(/\/+$/,"");
+  const secret=String(env?.PIPELINE_RUNNER_SHARED_SECRET||"").trim();
+  let url;
+  try {
+    url=new URL(base);
+    if (url.protocol!=="https:" ||
+        url.hostname!=="pipeline.chicagoshining.com" ||
+        url.username||url.password||url.search||url.hash||
+        (url.pathname!=="/" && url.pathname!==""))
+      return deny("runner_endpoint_not_trusted");
+  } catch {return deny("runner_endpoint_missing");}
+  if(secret.length<24)return deny("runner_health_auth_missing");
+  let response,data;
+  try{
+    response=await fetcher(base+"/health",{
+      method:"GET",redirect:"manual",signal:AbortSignal.timeout(7000),
+      headers:{"X-Pipeline-Secret":secret,Accept:"application/json"},
+    });
+    if(response?.ok!==true || (response.status>=300&&response.status<400))
+      return deny("runner_health_read_rejected");
+    data=await response.json();
+  }catch{return deny("runner_health_unavailable");}
+  if(data?.ok!==true || data?.service!=="pipeline-runner" ||
+     data?.ig_publish_lease_required!==true ||
+     data?.ig_publish_lease_protocol_version!==1)
+    return deny("runner_lease_protocol_not_enabled");
+  return {ready:true,protocol_version:1,
+    runner_version:String(data.version||"").slice(0,90)};
+}
