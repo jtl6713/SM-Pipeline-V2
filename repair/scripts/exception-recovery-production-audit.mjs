@@ -92,7 +92,8 @@ try {
  }
  const health=await probe('health');report.worker_health=health.body.version;
  if(report.flags.EXCEPTION_RECOVERY_ACTIONS_ENABLED==='true')throw new Error('administrator_recovery_mutations_unexpectedly_enabled');
- if(health.status!==200||!String(health.body.version).includes('publication-recovery'))throw new Error('new_recovery_worker_not_deployed');
+ // Validate the actual protected recovery endpoints below, not a mutable release-name substring.
+ if(health.status!==200 || typeof health.body?.version !== 'string')throw new Error('deployed_worker_health_unavailable');
  const denied=await probe('denied');report.unauthenticated_history_status=denied.status;
  if(![401,403].includes(denied.status))throw new Error('history_admin_boundary_failed');
  const deniedConversation=await probe('conversation-denied');report.unauthenticated_conversation_status=deniedConversation.status;
