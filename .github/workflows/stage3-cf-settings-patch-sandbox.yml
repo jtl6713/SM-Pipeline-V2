@@ -1,0 +1,74 @@
+name: Stage 3 isolated Cloudflare binding patch semantics test
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/stage3-cf-settings-patch-sandbox.yml']
+permissions:
+  contents: read
+jobs:
+  sandbox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test binding-patch isolation on an ephemeral Worker only
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const script='stage3-cf-settings-sandbox-'+process.env.GITHUB_RUN_ID;
+          const root='https://api.cloudflare.com/client/v4/accounts/'+process.env.CLOUDFLARE_ACCOUNT_ID+'/workers/scripts/'+script;
+          const auth={Authorization:'Bearer '+process.env.CLOUDFLARE_API_TOKEN};
+          async function cf(path,opts={}) {
+            const r=await fetch(root+path,{...opts,headers:{...auth,...(opts.headers||{})}});
+            const j=await r.json().catch(()=>({}));
+            return {http:r.status,...j};
+          }
+          let created=false;
+          try {
+            const absent=await cf('/settings');
+            if (absent.http!==404) throw Error('existing_sandbox_refusing_to_overwrite');
+            const body=new FormData();
+            body.append('metadata',new Blob([JSON.stringify({
+              main_module:'worker.js',compatibility_date:'2026-10-01',
+              bindings:[
+                {name:'STAGE3_ALPHA',type:'plain_text',text:'before'},
+                {name:'STAGE3_BETA',type:'plain_text',text:'preserve'}
+              ]
+            })],{type:'application/json'}),'metadata.json');
+            body.append('worker.js',new Blob(['export default {fetch(){return new Response("stage3 sandbox")}}'],{type:'application/javascript+module'}),'worker.js');
+            const upload=await cf('/content',{method:'PUT',body}); 
+            if (!upload.success) throw Error('sandbox_upload_failed_'+upload.http);
+            created=true;
+            const old=await cf('/settings');
+            if (!old.success) throw Error('sandbox_settings_read_failed');
+            const base=old.result.bindings||[];
+            if (base.length!==2) throw Error('sandbox_binding_precondition_failed');
+            const payload={bindings:[{name:'STAGE3_ALPHA',type:'plain_text',text:'after'}]};
+            let patch=await cf('/settings',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+            let shape='direct';
+            if (!patch.success && [400,415,422].includes(patch.http)) {
+              patch=await cf('/settings',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({settings:payload})});
+              shape='wrapped';
+            }
+            if (!patch.success) throw Error('sandbox_patch_rejected_http_'+patch.http);
+            const next=await cf('/settings');
+            if (!next.success) throw Error('sandbox_postread_failed');
+            const bindings=next.result.bindings||[];
+            const alpha=bindings.find(x=>x.name==='STAGE3_ALPHA')?.text;
+            const beta=bindings.find(x=>x.name==='STAGE3_BETA')?.text;
+            const deploy=await cf('/deployments');
+            const out={patch_shape:shape,initial_count:base.length,final_count:bindings.length,alpha_changed:alpha==='after',beta_preserved:beta==='preserve',active_deployment_versions:deploy.result?.deployments?.[0]?.versions?.length||null};
+            console.log('STAGE3_SANDBOX '+JSON.stringify(out));
+            if (!out.alpha_changed || !out.beta_preserved) throw Error('partial_binding_patch_is_not_safe');
+          }finally {
+            if (created) {
+              const deleted=await cf('',{method:'DELETE'});
+              console.log('temporary_sandbox_deleted='+deleted.success);
+              if (!deleted.success) process.exitCode=1;
+            }
+          }
+          NODE
