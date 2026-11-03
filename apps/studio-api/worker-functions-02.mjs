@@ -1,4 +1,4 @@
-import { r4StartConfirmed, rotateR4CandidatesAfterCursor } from "./r4-queue-admission.mjs";
+import { r4StartConfirmed, rotateR4CandidatesAfterCursor, hasEligibleManualRenderPriority } from "./r4-queue-admission.mjs";
 import { storySeedRenderStatus } from "./story-render-admission.mjs";
 import { ideaProducerDirection, mergeIdeaProducerDirection } from "./idea-producer-direction.mjs";
 import { scriptedShortPublishableTitle } from "./scripted-short-title.mjs";
@@ -1279,7 +1279,7 @@ export async function studioAdmitRenderQueue(env, options = {}) {
     "voiceover_exceeds_video",
     "private_drive_watermark_renderer_not_updated",
   ]);
-  const manualPriority = Array.isArray(controls?.render_priority) && controls.render_priority.length > 0;
+  const manualPriority = hasEligibleManualRenderPriority(queueOrder, controls);
   const maxAttempts = manualPriority ? 1 : Math.min(4, queueOrder.length);
   const skipped = [];
   for (const head of queueOrder.slice(0, maxAttempts)) {
