@@ -15,7 +15,10 @@ def test_r4_production_formula_requires_render_package():
     formula = r4_production_formula()
     assert '{Render_Status}="Ready for Render"' in formula
     assert "{Render_Total_Frames}>0" in formula
-    assert '{Studio_Output_Type}!="Story"' in formula
+    assert '{Studio_Output_Type}!="Story"' not in formula
+    assert '{Format}!="Story"' not in formula
+    assert '{Final_File_URL}=""' in formula
+    assert '{Remotion_Job_ID}=""' in formula
 
 
 def test_r4_exact_output_formula_pins_record():

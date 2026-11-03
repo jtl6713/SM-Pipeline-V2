@@ -39,6 +39,7 @@ jobs:
             services/pipeline-runner/tests/test_airtable_egress_monitor.py \
             services/pipeline-runner/tests/test_airtable_durable_egress.py \
             services/pipeline-runner/tests/test_r2_studio_exact_source.py \
+            services/pipeline-runner/tests/test_r4_render_request.py \
             services/pipeline-runner/tests/test_profile_music_policy.py \
             services/pipeline-runner/tests/test_item4_variant_batch.py \
             services/pipeline-runner/tests/test_fbs2_storage_retry.py \
