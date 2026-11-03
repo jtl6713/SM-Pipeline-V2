@@ -106,3 +106,21 @@ test("R4 cron log exposes only bounded admission refusal, not render payload", (
   assert.match(body,/runner_message: String\(row.started\?\.message \|\| ""\)\.slice\(0, 220\)/);
   assert.doesNotMatch(body,/JSON\.stringify\(row\.started\)/);
 });
+
+test("healthy Drive watermark renders cannot be mistaken for failed R4 jobs", () => {
+  const source = readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
+  const signature = source.split("export function studioPrivateDriveWatermarkSignature")[1]
+    ?.split("/*__STUDIO_WORKER_END:studioPrivateDriveWatermarkSignature__*/")[0] || "";
+  const healer = source.split("export async function healStuckStudioRenders")[1]
+    ?.split("/*__STUDIO_WORKER_END:healStuckStudioRenders__*/")[0] || "";
+  assert.match(signature, /return errorMatch;/);
+  assert.doesNotMatch(signature, /return propsMatch/);
+  const recovery = healer.split("const privateDriveWatermarkRows")[1]
+    ?.split("const invalidSourceRows")[0] || "";
+  assert.match(recovery, /"Blocked", "Failed"/);
+  assert.match(recovery, /current = await airtableFetch/);
+  assert.match(recovery, /f\(current, "Remotion_Job_ID"\)/);
+  assert.match(recovery, /f\(current, "Final_File_URL"\)/);
+  assert.ok(recovery.indexOf("const current = await airtableFetch") <
+    recovery.indexOf("await studioResetPrivateDriveWatermarkRender"));
+});

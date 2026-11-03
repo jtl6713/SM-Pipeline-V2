@@ -11410,11 +11410,11 @@ export async function studioRepairUnfetchableRenderSources(env, row) {
 export function studioPrivateDriveWatermarkSignature(row) {
   const props = String(f(row, "Remotion_Props_JSON") || "");
   const err = String(f(row, "Remotion_Error_Message") || f(row, "Final_File_Error_Message") || "");
-  const propsMatch = /"watermarkUrl"\s*:\s*"https?:\/\/(?:drive|docs)\.google\.com/i.test(props);
   const errorMatch = /PRIVATE_DRIVE_WATERMARK/i.test(err)
     || (/watermark/i.test(err)
       && /drive\.google\.com|ERR_BLOCKED_BY_ORB|HTTP status code:\s*403|Error loading image with src/i.test(err));
-  return propsMatch || errorMatch;
+  // A Drive-backed watermark is normal; only a reported failure authorizes recovery.
+  return errorMatch;
 }
 /*__STUDIO_WORKER_END:studioPrivateDriveWatermarkSignature__*/
 
@@ -11610,11 +11610,14 @@ export async function healStuckStudioRenders(env, { skipR4Admission = false } = 
     limit: 12,
     sortField: "Output_ID",
     sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),OR(FIND("drive.google.com",{Remotion_Props_JSON}&"")>0,FIND("PRIVATE_DRIVE_WATERMARK",{Remotion_Error_Message}&"")>0),OR({Render_Status}="Blocked",{Render_Status}="Failed",{Render_Status}="Rendering",{Render_Status}="Ready for Render"))',
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),OR(FIND("drive.google.com",{Remotion_Props_JSON}&"")>0,FIND("PRIVATE_DRIVE_WATERMARK",{Remotion_Error_Message}&"")>0),OR({Render_Status}="Blocked",{Render_Status}="Failed"),{Remotion_Job_ID}="",{Final_File_URL}="")',
   }).catch(() => []);
   let privateDriveRequeues = 0;
   for (const row of privateDriveWatermarkRows || []) {
     if (!studioPrivateDriveWatermarkSignature(row)) continue;
+    if (!["Blocked", "Failed"].includes(String(f(row, "Render_Status") || "").trim()) ||
+        String(f(row, "Remotion_Job_ID") || "").trim() ||
+        String(f(row, "Final_File_URL") || "").trim()) continue;
     if (!rendererSupportsPrivateDrive) {
       pulses.push({ key: "R4_PRIVATE_DRIVE_WATERMARK", id: row.id, skipped: "renderer_not_updated" });
       continue;
@@ -11624,7 +11627,17 @@ export async function healStuckStudioRenders(env, { skipR4Admission = false } = 
       continue;
     }
     try {
-      await studioResetPrivateDriveWatermarkRender(env, row);
+      // Fail closed on a stale scan. An R5 completion or new Remotion job
+      // since enumeration must never be cleared for watermark recovery.
+      const current = await airtableFetch(env, outputTable, row.id);
+      if (!["Blocked", "Failed"].includes(String(f(current, "Render_Status") || "").trim()) ||
+          String(f(current, "Remotion_Job_ID") || "").trim() ||
+          String(f(current, "Final_File_URL") || "").trim() ||
+          !studioPrivateDriveWatermarkSignature(current)) {
+        pulses.push({ key: "R4_PRIVATE_DRIVE_WATERMARK", id: row.id, skipped: "no_longer_failed" });
+        continue;
+      }
+      await studioResetPrivateDriveWatermarkRender(env, current);
       const payload = await item4PulseR4Python(env, { outputRecordId: row.id });
       privateDriveRequeues += 1;
       pulses.push({ key: "R4_PRIVATE_DRIVE_WATERMARK", id: row.id, payload, repaired: true });
