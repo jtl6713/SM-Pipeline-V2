@@ -4,6 +4,11 @@ on:
     branches: [main]
     paths:
       - "deploy/factory-nyc-timing-readonly.txt"
+  pull_request:
+    paths:
+      - "apps/studio-api/factory-timing-r2-inspector.mjs"
+      - "apps/studio-api/factory-timing-r2-inspector.test.mjs"
+      - ".github/workflows/factory-nyc-timing-readonly.yml"
   workflow_dispatch:
 permissions:
   contents: read
@@ -11,8 +16,23 @@ concurrency:
   group: factory-nyc-timing-readonly
   cancel-in-progress: false
 jobs:
+  validate-read-only-inspector:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Prove claims auditor is read-only on PR
+        run: |
+          node --check apps/studio-api/factory-timing-r2-inspector.mjs
+          node --test apps/studio-api/factory-timing-r2-inspector.test.mjs
   timing-audit:
-    if: github.repository == 'jtl6713/SM-Pipeline-V2'
+    if: github.repository == 'jtl6713/SM-Pipeline-V2' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -97,12 +117,24 @@ jobs:
           fi
           jq -e '.schema=="studio.factory-nyc-batch-timing-audit.1" and .read_only==true' /tmp/factory-timing-result.json >/dev/null
           jq -c '{schema,read_only,profile,active_group_scan,active_group_totals,active_groups,jobs_scanned,eligible_ten_output_batches,shown_bundles,combined_timing_report,batches}' /tmp/factory-timing-result.json
+          # Inspect current Factory R2 claim registries without enqueueing,
+          # reserving IDs, loading Airtable data, or publishing anything.
+          CLAIM_HTTP="$(curl -sS --max-time 55 -o /tmp/factory-claims-readonly.json -w '%{http_code}' -H "Authorization: Bearer $REPORT_TOKEN" "https://$AUDITOR_WORKER.$SUBDOMAIN.workers.dev/claims" || true)"
+          if [[ "$CLAIM_HTTP" != "200" ]]; then
+            echo "::error::Factory claim diagnostic failed HTTP $CLAIM_HTTP"
+            exit 1
+          fi
+          jq -e '.schema=="studio.factory-claims-readonly.1" and .read_only==true and (.profiles|length)==4' /tmp/factory-claims-readonly.json >/dev/null
+          jq -c '{schema,read_only,group_objects_first_page,group_objects_more,unbacked_recent_owners,profiles:[.profiles[]|{name,profile_id,registry_present,registry_error,historical_jobs_first_page,historical_jobs_more,total_claims,recent_claims,recent_owners,checked_recent_owners,latest_claim_at,recent_unbacked_owners}]}' /tmp/factory-claims-readonly.json
+          echo "factory_claims_readonly=PASS"
           echo "factory_real_r2_timing_readonly=PASS"
       - name: Upload sanitized performance report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: nyc-factory-approval-timing-${{ github.run_id }}
-          path: /tmp/factory-timing-result.json
+          path: |
+            /tmp/factory-timing-result.json
+            /tmp/factory-claims-readonly.json
           if-no-files-found: ignore
           retention-days: 14
