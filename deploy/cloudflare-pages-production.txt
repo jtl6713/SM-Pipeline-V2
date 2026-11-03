@@ -669,3 +669,4 @@ Deploy Studio UI 0.6.855 confirmed-save meter: add a distinct filled batch-progr
 Deploy Studio UI 0.6.866: recover exact-ID legacy/global Factory pending approval fences (PR #1534, issue #1533).
 Deploy Studio UI 0.6.867: retry ambiguous Factory HTTP 500 once using exact saved request ID after read-only verification.
 Deploy Studio UI 0.6.868: reconcile pending Factory approval before enabling any new submit; fix 2-of-12 stale counts.
+Deploy Studio UI 0.6.869: fix hidden Factory recovery control and clear stale 500 banner after authoritative saved-request reconciliation.
