@@ -1,4 +1,4 @@
-name: Stage 3 LA MAE atomic collision repair (binding diagnostics)
+name: Stage 3 LA MAE atomic collision repair (preserved DO exports)
 on:
   push:
     branches: [main]
