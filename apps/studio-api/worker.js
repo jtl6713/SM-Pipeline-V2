@@ -7190,6 +7190,7 @@ const STUDIO_OVERDUE_SCHEDULED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookVideoCovers__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcilePublishingInstagramStories__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcilePublishingInstagramReels__*/
+/*__STUDIO_WORKER_EXTRACT:studioRecoverFencedIgStaleUpload__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookSlideshows__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookReels__*/
 /*__STUDIO_WORKER_EXTRACT:studioStoryCompanionPlatformBlockers__*/
