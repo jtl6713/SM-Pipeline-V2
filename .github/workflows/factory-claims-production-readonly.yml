@@ -45,13 +45,16 @@ jobs:
           cat > /tmp/factory-audit-worker.mjs <<'JS'
           export default {
             async fetch(request,env) {
+              const path=new URL(request.url).pathname;
               if (request.method !== "GET" ||
-                  new URL(request.url).pathname !== "/report") return new Response("Not found",{status:404});
+                  !["/health","/report"].includes(path)) return new Response("Not found",{status:404});
               if (request.headers.get("Authorization") !== "Bearer " + env.AUDIT_TOKEN) {
                 return new Response("Unauthorized",{status:401});
               }
               const internal = new Request(
-                "https://studio.chicagoshining.com/api/factory/approval-batches?claims_diagnostic=1",
+                path === "/health"
+                  ? "https://studio.chicagoshining.com/api/health"
+                  : "https://studio.chicagoshining.com/api/factory/approval-batches?claims_diagnostic=1",
                 {headers:{
                   "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com",
                   "Origin":"https://studio.chicagoshining.com",
@@ -82,7 +85,24 @@ jobs:
           curl -fsS --max-time 20 -X POST -H "$AUTH" -H 'Content-Type: application/json' "$API/workers/scripts/$AUDIT_WORKER/subdomain" --data '{"enabled":true,"previews_enabled":false}' >/tmp/factory-audit-sub.json
           jq -e '.success==true' /tmp/factory-audit-sub.json >/dev/null
           SUBDOMAIN="$(curl -fsS --max-time 20 -H "$AUTH" "$API/workers/subdomain" | jq -er '.result.subdomain')"
-          URL="https://$AUDIT_WORKER.$SUBDOMAIN.workers.dev/report"
+          BASE="https://$AUDIT_WORKER.$SUBDOMAIN.workers.dev"
+          # Push triggers Worker deploy and this audit concurrently. Read the
+          # actual live Worker version first, rather than probing old code.
+          LIVE="false"
+          for attempt in $(seq 1 35); do
+            STATUS="$(curl -sS --max-time 20 -o /tmp/factory-api-health.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BASE/health" || true)"
+            if [[ "$STATUS" == "200" ]] && jq -e '.version=="0.10.733-factory-claims-diagnostic-readonly"' /tmp/factory-api-health.json >/dev/null 2>&1; then
+              LIVE="true"
+              break
+            fi
+            sleep 5
+          done
+          if [[ "$LIVE" != "true" ]]; then
+            echo "::error::Worker 0.10.733 not verified; claims audit refused"
+            exit 1
+          fi
+          echo "factory_live_claims_worker_version=0.10.733"
+          URL="$BASE/report"
           HTTP="000"
           for attempt in $(seq 1 12); do
             HTTP="$(curl -sS --max-time 45 -o /tmp/factory-claims-report.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$URL" || true)"
