@@ -80,7 +80,8 @@ try {
   throw new Error('verification_bridge_routing_unavailable');
  }
  const health=await probe('health');report.worker_health=health.body.version;
- if(health.status!==200||!String(health.body.version).includes('publication-recovery'))throw new Error('new_recovery_worker_not_deployed');
+ // Validate the actual protected recovery endpoints below, not a mutable release-name substring.
+ if(health.status!==200 || typeof health.body?.version !== 'string')throw new Error('deployed_worker_health_unavailable');
  const denied=await probe('denied');report.unauthenticated_history_status=denied.status;
  if(![401,403].includes(denied.status))throw new Error('history_admin_boundary_failed');
  const history=await probe('history');report.history={status:history.status,source:history.body.source,events:history.body.items?.length};
