@@ -715,12 +715,12 @@ jobs:
           SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
           TOKEN=$(cat /tmp/verify-token.txt)
           URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/rendering-review-sessions"
-          curl -fsS --retry 3 --max-time 60 "$URL" -o /tmp/rendering-review-sessions.json
+          curl -fsS --retry 8 --retry-all-errors --retry-delay 2 --max-time 60 "$URL" -o /tmp/rendering-review-sessions.json
           # Factory is the sole admission source: review workspace cannot offer direct enrollment.
           jq -e '.ok==true and (.sessions|type)=="array" and .flags.automatic_sampling_percent==0 and .flags.admission_enabled==false and .flags.integration_verified==true' /tmp/rendering-review-sessions.json >/dev/null
           echo "rendering_review_authenticated_read=PASS"
           QUEUE_URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/rendering-review-queue"
-          QUEUE_SECONDS=$(curl -fsS --retry 3 --max-time 60 -w '%{time_total}' "$QUEUE_URL" -o /tmp/rendering-review-queue.json)
+          QUEUE_SECONDS=$(curl -fsS --retry 8 --retry-all-errors --retry-delay 2 --max-time 60 -w '%{time_total}' "$QUEUE_URL" -o /tmp/rendering-review-queue.json)
           echo "rendering_review_chicago_queue_read_seconds=$QUEUE_SECONDS"
           jq -e '.ok==true and (.queue|type)=="array" and (.next_cursor==null or (.next_cursor|type)=="string") and .flags.automatic_sampling_percent==0 and .flags.admission_enabled==false and .flags.integration_verified==true and ([.queue[]|select(.manual_admission_enabled!=false or .review_held!=true)]|length)==0 and ([.queue[]|select(.profile_id!="recT2rbKX3MF7cVFU" or .output_type!="Instagram Reel")]|length)==0' /tmp/rendering-review-queue.json >/dev/null
           echo "rendering_review_chicago_queue_read=PASS count=$(jq '.queue|length' /tmp/rendering-review-queue.json)"
@@ -734,7 +734,7 @@ jobs:
           SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
           TOKEN=$(cat /tmp/verify-token.txt)
           URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/scripted-short-revise-probe"
-          curl -fsS --max-time 60 "$URL" -o /tmp/scripted-short-revise-probe.json
+          curl -fsS --retry 8 --retry-all-errors --retry-delay 2 --max-time 60 "$URL" -o /tmp/scripted-short-revise-probe.json
           jq -e '.route=="/api/scripted-short/revise" and .status==400' /tmp/scripted-short-revise-probe.json >/dev/null
           echo "scripted_short_revise_authenticated_no_write_canary=PASS status=400"
 
@@ -745,7 +745,7 @@ jobs:
           SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
           TOKEN=$(cat /tmp/verify-token.txt)
           URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN/scripted-short-revise-probe?mode=multi"
-          curl -fsS --max-time 60 "$URL" -o /tmp/scripted-short-multi-probe.json
+          curl -fsS --retry 8 --retry-all-errors --retry-delay 2 --max-time 60 "$URL" -o /tmp/scripted-short-multi-probe.json
           jq -e '.status==200 and .ok==true and .scene_count==5 and .revision_count==2
             and .remaining_voiceovers==["Scene 1","Scene 3","Scene 5","Scene 6","Scene 7"]' /tmp/scripted-short-multi-probe.json >/dev/null
           echo "scripted_short_multi_scene_live_no_write_canary=PASS remaining=1,3,5,6,7"
