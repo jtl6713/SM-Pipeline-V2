@@ -47,7 +47,7 @@ jobs:
             if (!old.success) throw Error('sandbox_settings_read_failed');
             const base=old.result.bindings||[];
             if (base.length!==2) throw Error('sandbox_binding_precondition_failed');
-            const payload={bindings:[{name:'STAGE3_ALPHA',type:'plain_text',text:'after'}]};
+            const payload={bindings:[{name:'STAGE3_ALPHA',type:'plain_text',text:'after'},{name:'STAGE3_BETA',type:'inherit'}]};
             const form=new FormData();
             form.append('settings',new Blob([JSON.stringify(payload)],{type:'application/json'}),'settings.json');
             const patch=await cf('/settings',{method:'PATCH',body:form});
