@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   mutateIgPublishLease,readIgPublishLease,fenceStaleIgPreRemoteLease,
-  markIgLeaseRecovered,igPublishLeaseEnabled,IG_LEASE_STALE_MS,
+  markIgLeaseRecovered,igPublishLeaseEnabled,IG_LEASE_STALE_MS,verifyIgLeaseRunnerHealth,
 } from "./qa-ig-publish-lease.mjs";
 
 const OUTPUT="rec12345678901234";
@@ -167,4 +167,38 @@ test("unused pre-lock claim can be reclaimed only after full stale threshold",as
     lockStamp:"2026-11-02T18:00:00Z",
     readOutput:f.readOutput,nowMs:now+IG_LEASE_STALE_MS+2000}),
     /publisher_fenced_or_lease_changed/);
+});
+
+test("unattended recovery requires a live runner reporting matching lease protocol",async()=>{
+  const env={PIPELINE_RUNNER_URL:"https://pipeline.chicagoshining.com",
+    PIPELINE_RUNNER_SHARED_SECRET:"x".repeat(32)};
+  const yes=await verifyIgLeaseRunnerHealth(env,{fetcher:async(url,opt)=>{
+    assert.equal(url,"https://pipeline.chicagoshining.com/health");
+    assert.equal(opt.headers["X-Pipeline-Secret"],"x".repeat(32));
+    return {ok:true,status:200,json:async()=>({
+      ok:true,service:"pipeline-runner",version:"test-canary",
+      ig_publish_lease_required:true,ig_publish_lease_protocol_version:1,
+    })};
+  }});
+  assert.equal(yes.ready,true);
+  const no=await verifyIgLeaseRunnerHealth(env,{fetcher:async()=>({
+    ok:true,status:200,json:async()=>({
+      ok:true,service:"pipeline-runner",
+      ig_publish_lease_required:false,ig_publish_lease_protocol_version:1,
+    })})});
+  assert.equal(no.ready,false);
+  assert.equal(no.reason,"runner_lease_protocol_not_enabled");
+});
+test("untrusted runner URL and missing secret fail closed",async()=>{
+  const a=await verifyIgLeaseRunnerHealth({
+    PIPELINE_RUNNER_URL:"https://elsewhere.example.com",
+    PIPELINE_RUNNER_SHARED_SECRET:"x".repeat(32),
+  });
+  assert.equal(a.ready,false);
+  assert.equal(a.reason,"runner_endpoint_not_trusted");
+  const b=await verifyIgLeaseRunnerHealth({
+    PIPELINE_RUNNER_URL:"https://pipeline.chicagoshining.com",
+    PIPELINE_RUNNER_SHARED_SECRET:"",
+  });
+  assert.equal(b.ready,false);
 });
