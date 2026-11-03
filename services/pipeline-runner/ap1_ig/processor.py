@@ -457,10 +457,10 @@ def _mark_failed(client: AirtableClient, output: dict[str, Any], exc: Exception,
                if ambiguous else f"Instagram Reel create failed. Meta status_code: {status_code}. Status: {status}")
     response_text = (
         "Instagram Reel create failure\n"
-        f"Media ID: none\n"
+        f"Media ID: {field_str(output, 'Platform_Media_ID') or 'none'}\n"
         f"Meta status_code: {status_code}\n"
         f"Meta status: {status}\n"
-        f"Retry eligible: {str(not replacing).lower()}\n"
+        f"Retry eligible: {str(not (replacing or ambiguous)).lower()}\n"
         f"Next retry: {retry_stamp}"
     )
     notes = _append_notes(
