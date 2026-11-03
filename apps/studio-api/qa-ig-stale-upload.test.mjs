@@ -16,7 +16,7 @@ function row(overrides = {}) {
     Publish_Locked_At: "2026-11-02T17:00:00Z",
     Last_Publish_Attempt_At: "2026-11-02T17:01:00Z",
     Output_Status: "Approved for Publishing", Review_Status: "Approved",
-    Auto_Publish_Enabled: true, Content_Profile: ["rec12345678901235"],
+    Auto_Publish_Enabled: true, Publish_Method: "Automated", Content_Profile: ["rec12345678901235"],
     ...overrides,
   }};
 }
@@ -37,6 +37,8 @@ test("ignores active, held, test, cooldown, replaced or published outputs", () =
     {Replace_Transaction_ID: "replace"}, {Published_At: "2026-11-02T17:50:00Z"},
     {Publish_Next_Retry_At: "2026-11-02T18:30:00Z"},
     {Publish_Locked_By: "other"},
+    {Publish_Method: "Manual"},
+    {Studio_Render_Review_Session_ID: "review-session"},
   ]) assert.equal(classifyStaleInstagramReel(row(patch), {nowMs:NOW}), null);
 });
 test("saved media identity changes the action, not the permission", () => {
@@ -55,6 +57,8 @@ test("records authenticated exact-ID receipt as a finding without mutating outpu
       writes.push(JSON.parse(options.body));
       return {records:[{id:"rec12345678901239"}]};
     }
+    if (table === "Quality Agent Recovery Ledger" && path === "rec12345678901239")
+      return {id:path,fields:writes[0].records[0].fields};
     throw new Error("Unexpected operation");
   };
   const results = await auditStaleInstagramReels({}, {
@@ -90,6 +94,8 @@ test("unknown provider state stays Needs Eyes; no Graph create", async () => {
   const rows=await auditStaleInstagramReels({}, {nowMs:NOW,
     airtableFetch:async (_env, table, path, options) => {
       if (options) { logged=JSON.parse(options.body); return {records:[{id:"rec12345678901239"}]}; }
+      if (table === "Quality Agent Recovery Ledger")
+        return {id:path,fields:logged.records[0].fields};
       return String(path).startsWith("?") ? {records:[candidate]} : candidate;
     },
     verifyProvider: async () => {throw new Error("provider offline");},
