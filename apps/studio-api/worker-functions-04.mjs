@@ -18081,9 +18081,8 @@ export async function factoryBatchCronResume(env, ctx = null) {
  * a finding and CAS-fenced the old publishing attempt. The atomic MAE lane
  * owns occupancy, Airtable write verification and mirror propagation.
  */
-export async function studioRecoverFencedIgStaleUpload(env, {
-  outputId, fence, nowMs = Date.now(),
-} = {}) {
+export async function studioRecoverFencedIgStaleUpload(env, options = {}) {
+  const {outputId,fence,nowMs=Date.now()}=options;
   if (!igPublishLeaseEnabled(env) ||
       env.STUDIO_IG_STALE_UPLOAD_AUTO_RECOVERY_ENABLED !== "true" ||
       !scheduleReservationAuthorityEnabled(env) ||
