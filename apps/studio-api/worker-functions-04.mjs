@@ -18142,9 +18142,19 @@ export async function studioRecoverFencedIgStaleUpload(env, {
         if(Number.isFinite(ms))slots.push(ms);
       }
       const zone=await studioScheduleTimeZoneForRecord(env,current,{});
+      const uniqueOccupied=[...new Set(slots.filter(Number.isFinite))];
+      const picked=maeScheduleNextSlot({
+        now:new Date(nowMs+60_000),timeZone:zone,
+        horizonDays:await studioScheduleHorizonDays(env),
+        occupiedMs:uniqueOccupied,platformOccupiedMs:uniqueOccupied,
+        gapMs:90*60_000,
+      });
+      if (!picked?.ok || !picked.iso)
+        throw new Error("ig_recovery_mae_capacity_unavailable");
       const fields=studioPublishScheduleFields({
-        scheduled_post_date:"auto",timezone:zone,
-      },current,{occupiedMs:[...new Set(slots)],forceWrite:true,timeZone:zone});
+        scheduled_post_date:picked.iso,timezone:zone,
+      },current,{occupiedMs:uniqueOccupied,forceWrite:true,
+        exactOverride:true,timeZone:zone});
       const scheduleIso=String(fields.Scheduled_Post_Date||"").trim();
       if (!Number.isFinite(Date.parse(scheduleIso)) ||
           Date.parse(scheduleIso)<=nowMs)
@@ -18160,7 +18170,8 @@ export async function studioRecoverFencedIgStaleUpload(env, {
           fence.generation+"; atomic future MAE slot "+scheduleIso+
           "; no new provider create performed.",
       });
-      return {action:"move",previousIso:String(a.Scheduled_Post_Date||""),
+      const previousIso=String(a.Scheduled_Post_Date||"");
+      return {action:Date.parse(previousIso)?"move":"reserve",previousIso,
         selectedIso:new Date(scheduleIso).toISOString(),fields};
     },
     write:async(plan,{signal})=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,outputId,{
@@ -18180,8 +18191,11 @@ export async function studioRecoverFencedIgStaleUpload(env, {
     },
     afterCommit:async written=>{
       studioInvalidateOccupiedScheduleCache();
+      // The non-authoritative Supabase mirror cannot invalidate a committed
+      // Airtable schedule or strand the runner's fenced lease transition.
       await studioSupabaseWriteThroughOutput(env,
-        written.__ig_verified_record||written,"quality_ig_stale_recovery");
+        written.__ig_verified_record||written,"quality_ig_stale_recovery")
+        .catch(error=>console.warn("ig stale schedule Supabase mirror pending",error));
     },
   });
   const finalRow=await readOutput(outputId);
