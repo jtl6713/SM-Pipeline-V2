@@ -117,6 +117,8 @@ def health():
             "service": "pipeline-runner",
             "version": settings["service_version"],
             "studio_write_source": settings.get("studio_write_source") or "airtable",
+            "ig_publish_lease_required": __import__("os").environ.get("IG_PUBLISH_LEASE_REQUIRED","").lower() == "true",
+            "ig_publish_lease_protocol_version": 1,
             "supabase_pipeline_writes": bool(settings.get("supabase_url") and settings.get("supabase_service_role_key")),
             "openai_account": settings.get("openai_account"),
             "t1_shorten_to_footage": True,
