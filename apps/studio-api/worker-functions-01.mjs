@@ -11345,6 +11345,16 @@ export function studioStreamMediaAssetId(value) {
 /*__STUDIO_WORKER_END:studioStreamMediaAssetId__*/
 
 export async function studioRepairUnfetchableRenderSources(env, row) {
+  // Do not overwrite a job/final from a late R4/R5 write. The returned
+  // manifest must come from the current authoritative record, not a scan.
+  const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
+  if (!["Ready for Render", "Failed"].includes(String(f(current, "Render_Status") || "").trim()) ||
+      String(f(current, "Remotion_Job_ID") || "").trim() ||
+      String(f(current, "Final_File_URL") || "").trim() ||
+      String(f(current, "Test_Run_ID") || "").trim()) {
+    return { repaired: 0, unresolved: [] };
+  }
+  row = current;
   const raw = String(f(row, "Render_Clip_List_JSON") || "").trim();
   if (!raw || !raw.includes("/api/media-assets/")) return { repaired: 0, unresolved: [] };
   let clips;
@@ -11655,7 +11665,7 @@ export async function healStuckStudioRenders(env, { skipR4Admission = false } = 
     limit: 12,
     sortField: "Output_ID",
     sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),FIND("/api/media-assets/",{Render_Clip_List_JSON}&"")>0,OR({Render_Status}="Ready for Render",{Render_Status}="Rendering",{Render_Status}="Failed"))',
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),FIND("/api/media-assets/",{Render_Clip_List_JSON}&"")>0,OR({Render_Status}="Ready for Render",{Render_Status}="Failed"),{Remotion_Job_ID}="",{Final_File_URL}="")',
   }).catch(() => []);
   for (const row of invalidSourceRows || []) {
     try {
@@ -11804,7 +11814,7 @@ export async function healStuckStudioRenders(env, { skipR4Admission = false } = 
   }
   const failedRenders = await scanOutstandingFailedOutputs(
     (options) => listRecordsPage(env, outputTable, options),
-    { filterFormula: 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Failed")' });
+    { filterFormula: 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Failed",{Remotion_Job_ID}="",{Final_File_URL}="")' });
   let failedRenderRetries = 0;
   for (const row of failedRenders) {
     if (failedRenderRetries >= 6) break;
@@ -11825,19 +11835,33 @@ export async function healStuckStudioRenders(env, { skipR4Admission = false } = 
       last_modified: f(row, "Last_Modified") || f(row, "Updated_At") || f(row, "Last_Render_Attempt_At"),
     })) continue;
     try {
-      failedRenderRetries += 1;
+      // Failed rows can receive a late R5 job/final after enumeration. Never
+      // erase either receipt or auto-launch an ambiguous remote job.
+      const current = await airtableFetch(env, outputTable, row.id);
+      if (String(f(current, "Render_Status") || "").trim() !== "Failed" ||
+          String(f(current, "Remotion_Job_ID") || "").trim() ||
+          String(f(current, "Final_File_URL") || "").trim() ||
+          String(f(current, "Test_Run_ID") || "").trim() ||
+          String(f(current, "Published_At") || "").trim() ||
+          Boolean(f(current, "Do_Not_Publish")) ||
+          failedOutputRetryGate(current) ||
+          studioPrivateDriveWatermarkSignature(current) ||
+          isDriveMusic404Error(String(f(current, "Remotion_Error_Message") || f(current, "Final_File_Error_Message") || ""))) {
+        pulses.push({ key: "R4_FAILED_REQUEUE", id: row.id, skipped: "ambiguous_or_changed_render" });
+        continue;
+      }
       await airtableFetch(env, outputTable, row.id, {
         method: "PATCH",
         body: JSON.stringify({
           fields: {
             Render_Status: "Ready for Render",
-            Remotion_Job_ID: "",
             Remotion_Error_Message: "",
             Final_File_Error_Message: "",
           },
           typecast: true,
         }),
       });
+      failedRenderRetries += 1;
       const payload = await item4PulseR4Python(env, { outputRecordId: row.id });
       pulses.push({ key: "R4_FAILED_REQUEUE", id: row.id, payload });
     } catch (error) {
