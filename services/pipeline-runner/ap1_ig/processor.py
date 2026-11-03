@@ -56,6 +56,40 @@ def _preview(*, output_record_id: str | None, test_run_id: str | None) -> dict[s
     }
 
 
+
+def _release_preflight_lock_if_exact_owner(
+    client: AirtableClient, output_id: str, lock_stamp: str, *, reason: str,
+) -> bool:
+    """Clear only this attempt's lock after a review guard refuses to proceed.
+
+    Called ONLY on return paths before remote media_publish. A saved container
+    remains Publishing so a later approved, fenced resume uses that identity.
+    Never change approval/hold flags, delete provider IDs or requeue a new create.
+    """
+    try:
+        fresh = client.get_record(PLATFORM_OUTPUTS_TABLE, output_id)
+        if (field_str(fresh, "Publish_Locked_By") != PUBLISH_LOCKED_BY
+                or field_str(fresh, "Publish_Locked_At") != lock_stamp
+                or field_str(fresh, "Last_Publish_Attempt_At") != lock_stamp
+                or field_str(fresh, "Publish_Status") != PUBLISH_STATUS_PUBLISHING
+                or field_str(fresh, "Platform_Post_ID")
+                or field_str(fresh, "Published_At")):
+            return False
+        client.update_record(PLATFORM_OUTPUTS_TABLE, output_id, {
+            "Publish_Locked_By": "",
+            "Publish_Locked_At": None,
+            "Publish_Started_At": None,
+            "Publish_Retry_Eligible": False,
+            "Output_Notes": _append_notes(field_str(fresh, "Output_Notes"),
+                f"QA-IG-STALE-UPLOAD: AP1-IG review guard refused continuation "
+                f"({reason}) at {stamp_minutes()}. Exact attempt lock released; "
+                "status and any saved Meta identity preserved for reconciliation."),
+        }, typecast=True)
+        return True
+    except Exception:
+        # If authoritative reads or writes fail, never assume the lock cleared.
+        return False
+
 def process_request(
     *,
     output_record_id: str | None,
@@ -201,6 +235,9 @@ def process_request(
     except Exception:
         review_reason = "review_authority_unavailable"
     if review_reason:
+        preview["preflight_lock_cleared"] = _release_preflight_lock_if_exact_owner(
+            client, record_id, now, reason=review_reason,
+        )
         return {"processed": False, "reason": review_reason,
                 "attempt_count": attempt, **preview}
 
@@ -270,6 +307,9 @@ def process_request(
         except Exception:
             review_reason = "review_authority_unavailable"
         if review_reason:
+            preview["prepublication_lock_cleared"] = _release_preflight_lock_if_exact_owner(
+                client, record_id, now, reason=review_reason,
+            )
             return {"processed": False, "reason": review_reason,
                     "creation_id": creation_id, "attempt_count": attempt, **preview}
         try:
