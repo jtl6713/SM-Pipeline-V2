@@ -462,7 +462,7 @@ def _mark_failed(client: AirtableClient, output: dict[str, Any], exc: Exception,
     message = (f"Instagram Reel result ambiguous; provider reconciliation required. Meta status_code: {status_code}. Status: {status}"
                if ambiguous else f"Instagram Reel create failed. Meta status_code: {status_code}. Status: {status}")
     response_text = (
-        "Instagram Reel create failure\n"
+        ("Instagram Reel operation outcome ambiguous\n" if ambiguous else "Instagram Reel create failure\n")
         f"Media ID: {field_str(output, 'Platform_Media_ID') or 'none'}\n"
         f"Meta status_code: {status_code}\n"
         f"Meta status: {status}\n"
@@ -472,7 +472,8 @@ def _mark_failed(client: AirtableClient, output: dict[str, Any], exc: Exception,
     notes = _append_notes(
         field_str(output, "Output_Notes"),
         (
-            f"AP1-IG Meta Reel create failed at {stamp_minutes()}.\n"
+            (f"AP1-IG Meta Reel outcome ambiguous at {stamp_minutes()}.\n" if ambiguous
+             else f"AP1-IG Meta Reel create failed at {stamp_minutes()}.\n")
             f"Status code: {status_code}\n"
             f"Status: {status}\n"
             + (
