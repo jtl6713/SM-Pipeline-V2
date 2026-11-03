@@ -141,5 +141,9 @@ test("global and profile-local routes share the same canonical output-ID fence",
   const ui = readFileSync(new URL("../studio-web/assets/factory-desk.js", import.meta.url), "utf8");
   assert.match(ui, /rememberFactoryAccepted\(plan\.ids\)/);
   assert.match(ui, /reconcilePersistedFactoryPending/);
-  assert.match(ui, /Resume previous submission \(same request\)/);
+  assert.match(ui, /Recover saved submission first/);
+  assert.match(ui, /approvalBusy \|\| Boolean\(pending\)/,
+    "Pending exact-ID recovery must block all new batch submissions");
+  assert.match(ui, /if \(unresolved\) \{/,
+    "Submission guards must reject unreconciled saved requests");
 });
