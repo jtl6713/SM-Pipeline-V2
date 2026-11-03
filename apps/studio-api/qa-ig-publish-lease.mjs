@@ -114,8 +114,9 @@ export async function mutateIgPublishLease(env, {
     const row=await readOutput(outputId);
     if (!supports(row,outputId) ||
         text(row.fields.Publish_Locked_By)!=="AP1-IG" ||
-        text(row.fields.Publish_Locked_At)!==text(lockStamp) ||
-        text(row.fields.Last_Publish_Attempt_At)!==text(lockStamp) ||
+        !Number.isFinite(Date.parse(String(lockStamp||""))) ||
+        Date.parse(String(row.fields.Publish_Locked_At||""))!==Date.parse(lockStamp) ||
+        Date.parse(String(row.fields.Last_Publish_Attempt_At||""))!==Date.parse(lockStamp) ||
         text(row.fields.Publish_Status)!=="Publishing")
       fail("publisher_authoritative_lock_changed");
     if (action==="remote_intent" && last.phase!=="pre_remote")
@@ -165,7 +166,10 @@ export async function fenceStaleIgPreRemoteLease(env,outputId,{
     if (!supports(row,outputId) || f.Publish_Status!=="Publishing" ||
         f.Publish_Locked_By!=="AP1-IG" ||
         !f.Publish_Locked_At || !f.Last_Publish_Attempt_At ||
-        Date.parse(f.Publish_Locked_At)>heartbeat ||
+        !Number.isFinite(Date.parse(f.Publish_Locked_At)) ||
+        Date.parse(f.Publish_Locked_At) < Date.parse(lease.acquired_at)-30_000 ||
+        Date.parse(f.Publish_Locked_At) > lease.expires_ms ||
+        Date.parse(f.Publish_Locked_At)!==Date.parse(f.Last_Publish_Attempt_At) ||
         f.Platform_Media_ID || f.Platform_Post_ID || f.Platform_Post_URL)
       return {safe:false,reason:"authoritative_publication_state_ambiguous"};
     const next={...lease,phase:"fenced",expires_ms:nowMs,
