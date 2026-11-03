@@ -114,7 +114,7 @@ jobs:
           LIVE="false"
           for attempt in $(seq 1 5); do
             STATUS="$(curl -sS --max-time 20 -o /tmp/factory-api-health.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BASE/health" || true)"
-            if [[ "$STATUS" == "200" ]] && jq -e '.(.version | type=="string")' /tmp/factory-api-health.json >/dev/null 2>&1; then
+            if [[ "$STATUS" == "200" ]] && jq -e '(.version | type)=="string"' /tmp/factory-api-health.json >/dev/null 2>&1; then
               LIVE="true"
               break
             fi
