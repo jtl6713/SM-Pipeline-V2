@@ -124,3 +124,28 @@ test("healthy Drive watermark renders cannot be mistaken for failed R4 jobs", ()
   assert.ok(recovery.indexOf("const current = await airtableFetch") <
     recovery.indexOf("await studioResetPrivateDriveWatermarkRender"));
 });
+
+test("P0 #1542: waiting-status stamp rereads Airtable before any write", () => {
+  const source = readFileSync(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
+  const body = source.split("export async function studioStampRenderQueueWaiting")[1]
+    ?.split("/*__STUDIO_WORKER_END:studioStampRenderQueueWaiting__*/")[0] || "";
+  assert.match(body, /const current = await airtableFetch\(env, env\.AIRTABLE_OUTPUT_TABLE_ID, id\)/);
+  assert.match(body, /if \(!isRenderQueueWaitingStampEligible\(current, f\)\) return null/);
+  assert.ok(body.indexOf("const current = await airtableFetch") <
+    body.indexOf('method: "PATCH"'));
+});
+
+test("P0 #1542: R5 reconciles completed-but-Ready Stories without replacing media or review decisions", () => {
+  const source = readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
+  const heal = source.split("export async function healStuckStudioRenders")[1]
+    ?.split("/*__STUDIO_WORKER_END:healStuckStudioRenders__*/")[0] || "";
+  const recovery = heal.split("const staleRenderingDone")[1]?.split("const longRendering")[0] || "";
+  assert.match(recovery, /\{Render_Status\}="Ready for Render"/);
+  assert.match(recovery, /\{Final_File_Storage_Status\}="Uploaded"/);
+  assert.match(recovery, /\{Remotion_Job_ID\}!=""/);
+  assert.match(recovery, /\{Final_File_URL\}!=""/);
+  assert.match(recovery, /current = await airtableFetch\(env, outputTable, row\.id\)/);
+  assert.match(recovery, /completedRenderRecoveryFields\(current, f\)/);
+  assert.doesNotMatch(recovery, /Review_Status: "Review Sent"/);
+  assert.doesNotMatch(recovery, /item4PulseR4Python/);
+});
