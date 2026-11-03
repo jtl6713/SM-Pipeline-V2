@@ -136,7 +136,10 @@
 
   function factorySubmitRetryDelayMs(error) {
     const status = Number(error?.status || 0);
-    if (![429, 502, 503, 504].includes(status)) return 0;
+    // A plain 500 can be a lost/timeout response after the group was committed.
+    // The caller first verifies the exact durable request ID, then permits only
+    // one bounded retry of that SAME idempotency key; never generate another ID.
+    if (![429, 500, 502, 503, 504].includes(status)) return 0;
     const message = String(error?.message || "");
     const secondsInMessage = Number(message.match(/(?:busy|cooling down)\s*\((\d+)s\)/i)?.[1] || 0);
     const seconds = Math.max(Number(error?.retryAfterSeconds || 0), secondsInMessage);
