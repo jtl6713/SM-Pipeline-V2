@@ -1,4 +1,4 @@
-name: Stage 3 LA MAE atomic collision repair (GET readiness)
+name: Stage 3 LA MAE atomic collision repair (binding diagnostics)
 on:
   push:
     branches: [main]
