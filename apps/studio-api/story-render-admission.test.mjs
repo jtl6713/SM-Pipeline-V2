@@ -34,3 +34,15 @@ test("global R4 selector admits prepared Stories instead of filtering them out",
   assert.ok(!selector.includes('Format}!="Story"'));
   assert.ok(!selector.includes('Studio_Output_Type}!="Story"'));
 });
+
+test("stale Story render packages can trigger the R4 watchdog", () => {
+  const worker = readFileSync(new URL("./worker.js", import.meta.url), "utf8");
+  const formula = worker.split("\n").find(line => line.startsWith("const STUDIO_R4_WORK_FORMULA")) || "";
+  assert.ok(formula.includes("Ready for Render"));
+  assert.ok(formula.includes("Test_Run_ID"));
+  assert.ok(formula.includes("Render_Total_Frames"));
+  assert.ok(!formula.includes('Format}!="Story"'));
+  assert.ok(!formula.includes('Studio_Output_Type}!="Story"'));
+  const watchdog = readFileSync(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
+  assert.ok(watchdog.includes("formula: `AND(${STUDIO_R4_WORK_FORMULA},${stale})`"));
+});
