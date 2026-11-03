@@ -11,6 +11,8 @@ import {
   collapseSharedRenderQueueCandidates,
   formatRenderQueueLabel,
   isActiveRemotionHold,
+  isRenderQueueWaitingStampEligible,
+  completedRenderRecoveryFields,
   isRealRemotionRetryFailure,
   isRenderQueueCandidateStatus,
   remotionHealthLooksBusy,
@@ -230,4 +232,56 @@ test("R4 and studio-produce park on busy Remotion slot", () => {
   assert.match(steps, /Waiting in Render Queue/);
   assert.match(steps, /waiting_for_remotion_slot/);
   assert.match(steps, /busy_rendering or started_r4/);
+});
+
+test("P0 #1542: stale R4 snapshot cannot demote completed Story media to Waiting", () => {
+  const ready = { Render_Status: "Ready for Render", Output_Status: "In Production" };
+  assert.equal(isRenderQueueWaitingStampEligible(row(ready)), true);
+  for (const finished of [
+    { ...ready, Render_Status: "Rendered" },
+    { ...ready, Remotion_Job_ID: "job-existing" },
+    { ...ready, Final_File_URL: "https://drive.google.com/file/d/final/view" },
+    { ...ready, Output_Status: "Ready for Review" },
+    { ...ready, Output_Status: "Approved for Publishing" },
+    { ...ready, Test_Run_ID: "synthetic" },
+  ]) {
+    assert.equal(isRenderQueueWaitingStampEligible(row(finished)), false);
+  }
+  assert.equal(isRenderQueueWaitingStampEligible(row({ ...ready, Render_Status: "Waiting in Render Queue" })), false);
+});
+
+test("P0 #1542: completed Story status regression recovers existing job/file but never an ambiguous render", () => {
+  const saved = {
+    Render_Status: "Ready for Render", Output_Status: "In Production",
+    Remotion_Job_ID: "job-20261103170604-dbad63c1",
+    Final_File_URL: "https://drive.google.com/file/d/finished/view",
+    Final_File_Storage_Status: "Uploaded",
+  };
+  const promoted = completedRenderRecoveryFields(row(saved));
+  assert.deepEqual(promoted, {
+    Render_Status: "Rendered",
+    Output_Status: "Ready for Review",
+    Remotion_Error_Message: "",
+    Final_File_Error_Message: "",
+  });
+  assert.ok(!("Remotion_Job_ID" in promoted) && !("Final_File_URL" in promoted));
+  assert.ok(!("Review_Status" in promoted) && !("Publish_Status" in promoted));
+  for (const render of ["Rendering", "Waiting in Render Queue", "Ready to Render"]) {
+    assert.deepEqual(completedRenderRecoveryFields(row({ ...saved, Render_Status: render })), promoted);
+  }
+  for (const invalid of [
+    { ...saved, Remotion_Job_ID: "" },
+    { ...saved, Final_File_URL: "" },
+    { ...saved, Final_File_Storage_Status: "Uploading" },
+    { ...saved, Final_File_Storage_Status: "Failed" },
+    { ...saved, Output_Status: "Approved for Publishing" },
+    { ...saved, Output_Status: "Published" },
+    { ...saved, Review_Status: "Approved" },
+    { ...saved, Review_Status: "Changes Requested" },
+    { ...saved, Published_At: "2026-11-03T17:00:00Z" },
+    { ...saved, Do_Not_Publish: true },
+    { ...saved, Test_Run_ID: "QA-only" },
+  ]) {
+    assert.equal(completedRenderRecoveryFields(row(invalid)), null);
+  }
 });
