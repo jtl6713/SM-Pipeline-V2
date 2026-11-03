@@ -241,6 +241,7 @@ def process_request(
         return {"processed": False, "reason": review_reason,
                 "attempt_count": attempt, **preview}
 
+    remote_side_effect_possible = bool(field_str(output, "Platform_Media_ID"))
     try:
         settings = graph_settings or load_instagram_graph_settings(pipeline_settings, output, client=client)
         graph = InstagramReelClient(
@@ -254,6 +255,7 @@ def process_request(
             preview["resumed_container_id"] = creation_id
         else:
             try:
+                remote_side_effect_possible = True  # HTTP request may commit before the response is saved.
                 created = graph.create_reel(body)
             except InstagramGraphError as exc:
                 # Invalid curated/search place IDs must not block the publish.
@@ -331,7 +333,8 @@ def process_request(
         if not permalink and meta.get("shortcode"):
             permalink = f"https://www.instagram.com/p/{meta['shortcode']}/"
     except Exception as exc:
-        _mark_failed(client, output, exc)
+        _mark_failed(client, output, exc,
+                     remote_side_effect_possible=remote_side_effect_possible)
         if isinstance(exc, InstagramGraphError):
             return {
                 "processed": False,
@@ -442,13 +445,16 @@ def _mark_processing(
     )
 
 
-def _mark_failed(client: AirtableClient, output: dict[str, Any], exc: Exception) -> None:
+def _mark_failed(client: AirtableClient, output: dict[str, Any], exc: Exception, *,
+                 remote_side_effect_possible: bool = False) -> None:
     status_code = getattr(exc, "status_code", "") or "unknown"
     status = getattr(exc, "status", "") or str(exc) or "No status returned"
     replacing = bool(field_str(output, "Replace_Transaction_ID"))
+    ambiguous = remote_side_effect_possible or bool(field_str(output, "Platform_Media_ID"))
     retry_at = utc_now() + timedelta(minutes=RETRY_MINUTES)
     retry_stamp = (chicago_now() + timedelta(minutes=RETRY_MINUTES)).strftime("%Y-%m-%d %H:%M")
-    message = f"Instagram Reel create failed. Meta status_code: {status_code}. Status: {status}"
+    message = (f"Instagram Reel result ambiguous; provider reconciliation required. Meta status_code: {status_code}. Status: {status}"
+               if ambiguous else f"Instagram Reel create failed. Meta status_code: {status_code}. Status: {status}")
     response_text = (
         "Instagram Reel create failure\n"
         f"Media ID: none\n"
@@ -466,7 +472,8 @@ def _mark_failed(client: AirtableClient, output: dict[str, Any], exc: Exception)
             + (
                 "Publish lock cleared; Item6 replacement blocked automatic retry."
                 if replacing
-                else f"Publish lock cleared; retry eligible after {retry_stamp}."
+                else ("Publish lock cleared; ambiguous Graph side effect requires receipt reconciliation, no new create."
+                      if ambiguous else f"Publish lock cleared; retry eligible after {retry_stamp}.")
             )
         ),
     )
@@ -478,7 +485,7 @@ def _mark_failed(client: AirtableClient, output: dict[str, Any], exc: Exception)
         "Publish_Started_At": None,
         "Publish_Error_Message": message[:1500],
         "Output_Notes": notes,
-        "Manual_Fallback_Required": replacing,
+        "Manual_Fallback_Required": replacing or ambiguous,
     }
     if replacing:
         fields.update(
@@ -495,6 +502,16 @@ def _mark_failed(client: AirtableClient, output: dict[str, Any], exc: Exception)
                 ),
             }
         )
+    elif ambiguous:
+        # A timed-out Graph create or a failure after media_publish may have
+        # succeeded remotely. Preserve every saved container and prohibit an
+        # unattended new Graph create until exact provider reconciliation.
+        fields.update({
+            "Publish_Status": PUBLISH_STATUS_FAILED,
+            "Publish_Retry_Eligible": False,
+            "Publish_Next_Retry_At": None,
+        })
+        fields.pop("Last_Publish_Attempt_At", None)
     else:
         fields.update(
             {
