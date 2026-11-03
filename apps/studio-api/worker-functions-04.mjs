@@ -22,6 +22,7 @@ import { assessRecoveryPreflight } from "./exception-recovery-preflight.mjs";
 import { withExceptionConversationLock } from "./exception-recovery-lock.mjs";
 import { verifyExistingProviderReceipt } from "./exception-recovery-receipt.mjs";
 import { reconcileExceptionCensus } from "./exception-recovery-counts.mjs";
+import { QA_HOME_FAILED_CANDIDATE_FORMULA, qaHomePastDueCandidateFormula, classifyQualityAgentHomeBuckets } from "./quality-agent-home-parity.mjs";
 import { compareHomeSnapshotToExceptionCensus } from "./exception-recovery-home-parity.mjs";
 import { readExceptionRecoveryCensusCache, persistExceptionRecoveryCensusCache } from "./exception-recovery-census-cache.mjs";
 import { FB3_ACTION, RECEIPT_REPAIR_ACTION, executeFb3AdminRecovery, executeApprovedReceiptRepair } from "./exception-recovery-actions.mjs";
@@ -9488,9 +9489,11 @@ async function loadStudioFailedOutputSnapshot(env, { fresh = false } = {}) {
   // Ordinary polling still uses a 60-second coalesced Airtable read.
   return studioReadCoalesce(fresh ? "quality-agent-census-fresh:" + Date.now()
     : "quality-agent-failed-output-census", fresh ? 0 : 60000, async () => {
+    const scanAtMs = Date.now();
     const [rows, profiles, recoveredScan, overdueScan] = await Promise.all([
       scanOutstandingFailedOutputs((options) =>
-        listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options)),
+        listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options),
+        { filterFormula: QA_HOME_FAILED_CANDIDATE_FORMULA, requireUnique: true }),
       listContentProfileRecords(env).catch(() => []),
       // Independent, persistent events survive overwritten dispatch notes.
       // Full pagination; never report an unavailable ledger as zero recovered.
@@ -9499,8 +9502,9 @@ async function loadStudioFailedOutputSnapshot(env, { fresh = false } = {}) {
       { filterFormula: 'AND({Outcome}="reconciled_published",{Reconciled_At}!="")' })
         .then((records) => ({ status: "ok", records }))
         .catch((error) => ({ status: "unavailable", records: [], error: String(error?.message || error) })),
-      scanApprovedPastDueOutputs((options) =>
-        listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options))
+      scanOutstandingFailedOutputs((options) =>
+        listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options),
+        { filterFormula: qaHomePastDueCandidateFormula(scanAtMs), requireUnique: true })
         .then((records) => ({ status: "ok", records }))
         .catch((error) => ({ status: "unavailable", records: [],
           error: "Past-due reconciliation scan unavailable; count unknown.",
@@ -9510,6 +9514,9 @@ async function loadStudioFailedOutputSnapshot(env, { fresh = false } = {}) {
       profile.id,
       String(f(profile, "Market_Name") || f(profile, "Profile_Name") || profile.id).trim(),
     ]));
+    // QA diagnostic candidates are intentionally broad. Only mapped Home
+    // predicates produce comparable Failed and Past Due category identities.
+    const canonical = classifyQualityAgentHomeBuckets(rows, overdueScan.records, mapOutput, scanAtMs);
     const items = rows.map((record) => {
       const item = describeFailedOutput(record);
       return { ...item, profile_name: profileNames.get(item.profile_id) || item.profile_id };
@@ -9517,14 +9524,19 @@ async function loadStudioFailedOutputSnapshot(env, { fresh = false } = {}) {
     return {
       status: "ok", scanned_at: new Date().toISOString(),
       count: rows.length, rows, items,
+      canonical_failed: { status: "ok", count: canonical.failed.length,
+        items: canonical.failed.map((record) => {
+          const item = describeFailedOutput(record, scanAtMs);
+          return { ...item, profile_name: profileNames.get(item.profile_id) || item.profile_id };
+        }) },
       verification_recovery: summarizeAutonomousVerification(rows, recoveredScan.records, {
         ledgerScanStatus: recoveredScan.status,
       }),
       approved_past_due: overdueScan.status === "ok" ? {
         status: "ok", scanned_at: new Date().toISOString(),
-        count: overdueScan.records.length,
-        items: overdueScan.records.map((record) => {
-          const item = classifyApprovedPastDue(record);
+        count: canonical.approved_past_due.length,
+        items: canonical.approved_past_due.map((record) => {
+          const item = classifyApprovedPastDue(record, scanAtMs);
           return { ...item, profile_name: profileNames.get(item.profile_id) || item.profile_id };
         }),
       } : { status: "unavailable", error: overdueScan.error },

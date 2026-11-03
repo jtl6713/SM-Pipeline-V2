@@ -75,12 +75,17 @@ export function buildExceptionRecoveryCenter(snapshot, filters = {}) {
   const asOf = str(snapshot.scanned_at) || null;
   const pastDueOk = snapshot.approved_past_due?.status === "ok"
     && Array.isArray(snapshot.approved_past_due.items);
-  const failed = snapshot.items.filter((r) => has(r?.record_id));
+  const canonicalFailedOk = snapshot.canonical_failed?.status === "ok"
+    && Array.isArray(snapshot.canonical_failed.items);
+  const failed = canonicalFailedOk ? snapshot.canonical_failed.items.filter((r) => has(r?.record_id)) : [];
   const overdue = pastDueOk ? snapshot.approved_past_due.items.filter((r) => has(r?.record_id)) : [];
+  // QA-only signals stay visible as diagnostics, not mislabeled Home failures.
+  const diagnostics = snapshot.items.filter((r) => has(r?.record_id));
   const rows = Array.isArray(snapshot.rows) ? snapshot.rows : [];
   const heldIds = new Set(rows.filter(isHeld).map((r) => str(r?.id)).filter(Boolean));
   const byId = new Map();
-  for (const [source, items] of [["failed", failed], ["approved_past_due", overdue]]) {
+  for (const [source, items] of [["failed", failed], ["approved_past_due", overdue],
+    ["quality_diagnostic", diagnostics]]) {
     for (const raw of items) {
       const item = safeItem(source, raw);
       byId.set(item.record_id, mergeItem(byId.get(item.record_id), item));
@@ -108,8 +113,11 @@ export function buildExceptionRecoveryCenter(snapshot, filters = {}) {
       "quality_agent_verification_signatures", "Observed Quality Agent verification signatures only; not a complete cross-platform count."),
     approved_past_due: observedBucket(overdue.length, pastDueOk ? "ok" : "unavailable",
       "QA-PUBLISH-001", "Observed approved-past-due candidates. Home parity not yet verified."),
-    failed: observedBucket(failed.length, "ok", "quality_agent_failed_output_formula",
-      "Quality Agent failure signals include publish, render and manual-action cases; not equivalent to Home Failed."),
+    failed: observedBucket(failed.length, canonicalFailedOk ? "ok" : "unavailable",
+      "independent_quality_agent_home_classifier",
+      "Shared Home Failed predicate applied to independent, complete Airtable QA candidates. Exact-ID parity remains subject to verification."),
+    quality_diagnostics: observedBucket(diagnostics.length, "ok", "quality_agent_diagnostic_scan",
+      "Broader render, publish and manual-action diagnostic signals. Not equivalent to Home Failed."),
     suspected_duplicates: unknown("Duplicate registry is not yet attached to the center."),
     held_deferred: observedBucket(heldIds.size, rows.length || failed.length === 0 ? "ok" : "unavailable",
       "failed_output_census_only", "Held records observed in failed scan only. Other intentional holds are not counted."),
@@ -125,10 +133,11 @@ export function buildExceptionRecoveryCenter(snapshot, filters = {}) {
     && (!platformFilter || str(item.platform).toLowerCase() === platformFilter)
     && (!categoryFilter || item.categories.includes(categoryFilter)));
   return {
-    status: pastDueOk && verificationOk ? "provisional" : "partial",
+    status: pastDueOk && canonicalFailedOk && verificationOk ? "provisional" : "partial",
     as_of: asOf, read_only: true, source_of_truth: "airtable",
     completeness: {
-      failed: "quality_agent_formula_scan", approved_past_due: pastDueOk ? "quality_agent_formula_scan" : "unavailable",
+      failed: canonicalFailedOk ? "independent_canonical_candidate_scan" : "unavailable",
+      approved_past_due: pastDueOk ? "independent_canonical_candidate_scan" : "unavailable",
       verified_recovery: verificationOk ? "ledger_subset" : "unavailable",
       home_pipeline_parity: "unverified",
     },
@@ -136,6 +145,6 @@ export function buildExceptionRecoveryCenter(snapshot, filters = {}) {
     visible_count: visibleItems.length,
     filters: { profile_id: profileFilter || null, platform: platformFilter || null,
       category: categoryFilter || null },
-    warning: "Observed figures are not canonical Home counts. Never interpret absent or unavailable data as zero.",
+    warning: "QA buckets use Home predicates, but independent exact-ID parity is not proven until a fresh production census matches. Broader diagnostic signals remain separate.",
   };
 }
