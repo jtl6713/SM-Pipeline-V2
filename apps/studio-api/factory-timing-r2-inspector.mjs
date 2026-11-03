@@ -148,7 +148,7 @@ export async function readFactoryClaimsDiagnostic(bucket, nowMs = Date.now()) {
     }
     summary.recent_owners=ownerMap.size;
     const owners=[...ownerMap].sort((a,b) =>
-      String(b[1]?.at||"").localeCompare(String(a[1]?.at||""))).slice(0,40);
+      String(b[1].at(-1)?.at||"").localeCompare(String(a[1].at(-1)?.at||""))).slice(0,24);
     for (const [owner, entries] of owners) {
       const [group, job]=await Promise.all([
         bucket.get(GROUPS_PREFIX+owner+".json"),
