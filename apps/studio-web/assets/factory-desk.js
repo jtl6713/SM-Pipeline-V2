@@ -836,7 +836,12 @@
   // Never infer durable absence from an empty Active Activity list.
   async function reconcileFactorySubmissionFence() {
     const saved = pendingFactoryApproval();
-    if (!saved) return { resolved: true, count: 0 };
+    if (!saved) {
+      setBatchSubmissionError(null);
+      setStatus("No saved approval request remains. Review the current selection before submitting.");
+      updateFactoryBatchToolbar();
+      return { resolved: true, count: 0 };
+    }
     const isGlobal = saved.profile_id === "global";
     const isLocal = /^rec[A-Za-z0-9]+$/.test(String(saved.profile_id || ""));
     const plans = isGlobal && Array.isArray(saved.batches) ? saved.batches
@@ -1016,6 +1021,12 @@
     const maxPerProfile = Math.max(1, Number(state.batchGlobal?.max_per_profile || 10));
     let selectionIds = ready.map(card => card.id);
     let pending = pendingFactoryApproval();
+    // A saved request must go through read-only exact-ID reconciliation first.
+    // The Submit action never resumes or replaces one, even if its IDs match.
+    if (pending) {
+      setBatchSubmissionError("Saved Factory approval is unresolved. Use Recover saved submission before submitting.");
+      return;
+    }
     let reusable = pending?.profile_id === "global"
       && Array.isArray(pending?.ids)
       && JSON.stringify(pending.ids) === JSON.stringify(selectionIds)
