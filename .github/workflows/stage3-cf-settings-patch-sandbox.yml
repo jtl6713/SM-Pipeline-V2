@@ -48,12 +48,10 @@ jobs:
             const base=old.result.bindings||[];
             if (base.length!==2) throw Error('sandbox_binding_precondition_failed');
             const payload={bindings:[{name:'STAGE3_ALPHA',type:'plain_text',text:'after'}]};
-            let patch=await cf('/settings',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-            let shape='direct';
-            if (!patch.success && [400,415,422].includes(patch.http)) {
-              patch=await cf('/settings',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({settings:payload})});
-              shape='wrapped';
-            }
+            const form=new FormData();
+            form.append('settings',new Blob([JSON.stringify(payload)],{type:'application/json'}),'settings.json');
+            const patch=await cf('/settings',{method:'PATCH',body:form});
+            const shape='multipart-settings';
             if (!patch.success) throw Error('sandbox_patch_rejected_http_'+patch.http);
             const next=await cf('/settings');
             if (!next.success) throw Error('sandbox_postread_failed');
