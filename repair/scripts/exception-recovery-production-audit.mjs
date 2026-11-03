@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import { compareIndependentQaCensus } from '../../apps/studio-api/exception-recovery-qa-parity.mjs';
+import { summarizeStage3ExceptionDispositions } from './exception-recovery-disposition.mjs';
 const account=process.env.CLOUDFLARE_ACCOUNT_ID;
 const api='https://api.cloudflare.com/client/v4/accounts/'+account;
 const target='chicagoshining-studio-api';
@@ -205,8 +206,10 @@ try {
  // Separate, authenticated, GET-only Quality Agent formula scan. Never force
  // this independent scan inside the 8k-record census: doing so caused 500s.
  // Full source exception-ID coverage, snapshot skew and QA scope must all pass.
+ let qualitySnapshot=null;
  try{
   const quality=await probe('quality');
+  if(quality.status===200) qualitySnapshot=quality.body;
   report.quality_agent_parity=quality.status===200
     ?compareIndependentQaCensus(c,quality.body)
     :{status:'unavailable',reason:'quality_agent_http_'+quality.status};
@@ -215,7 +218,11 @@ try {
   report.quality_agent_parity={status:'unavailable',
     reason:String(error?.message||error).slice(0,160)};
  }
-
+ // This is a read-only disposition manifest, not provider or Airtable recovery.
+ // Fail closed when the canonical census is truncated or a case is unclassified.
+ report.exception_disposition=summarizeStage3ExceptionDispositions(c,qualitySnapshot);
+ if(report.exception_disposition.status!=='classified_read_only')
+   throw new Error('complete_exception_disposition_unavailable_'+report.exception_disposition.reason);
 
  const ig=await probe('instagram');
  const post=ig.body||{};
