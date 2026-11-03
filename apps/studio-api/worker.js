@@ -790,7 +790,7 @@ import {
 import { auditReel368Holds } from "./facebook-reel-368-audit.mjs";
 import { qaInstagramCarouselMaintenance } from "./qa-instagram-carousel-maintenance.mjs";
 import { auditStaleInstagramReels, verifySavedInstagramContainer } from "./qa-ig-stale-upload.mjs";
-import { igPublishLeaseEnabled, mutateIgPublishLease, readIgPublishLease, fenceStaleIgPreRemoteLease, markIgLeaseRecovered } from "./qa-ig-publish-lease.mjs";
+import { igPublishLeaseEnabled, mutateIgPublishLease, readIgPublishLease, fenceStaleIgPreRemoteLease, markIgLeaseRecovered, verifyIgLeaseRunnerHealth } from "./qa-ig-publish-lease.mjs";
 import { verifyAuthenticatedInstagramReceipt } from "./exception-recovery-authenticated-receipt.mjs";
 import { studioActivePipelineSettings } from "./worker-functions-03.mjs";
 import {
@@ -4002,6 +4002,8 @@ export default {
           if (env.STUDIO_IG_STALE_UPLOAD_AUTO_RECOVERY_ENABLED !== "true" ||
               !igPublishLeaseEnabled(env))
             return {committed:false,reason:"recovery_feature_not_enabled"};
+          const running=await verifyIgLeaseRunnerHealth(env);
+          if(!running.ready) return {committed:false,reason:running.reason};
           // The only auto-recoverable case has positive R2 proof that the
           // owner never received permission to make any Graph request.
           const readOutput=id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id);
