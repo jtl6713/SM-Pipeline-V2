@@ -118,3 +118,14 @@ test("Factory claims diagnostic is bounded, authenticated and strictly read-only
   assert.match(inspector,/request\.headers\.get\("Authorization"\)/);
   assert.doesNotMatch(inspector,/\.put\(|\.delete\(/);
 });
+
+
+test("Live Factory claims diagnostic is tenant-admin read-only GET with no approval mutation", () => {
+  const worker=fs.readFileSync(new URL("./worker.js",import.meta.url),"utf8");
+  assert.match(worker,/url\.searchParams\.get\("claims_diagnostic"\) === "1"/);
+  assert.match(worker,/if \(url\.searchParams\.get\("claims_diagnostic"\) === "1"\) \{[\s\S]{0,320}requirePermission\(authorization, "tenant_admin"\)/);
+  assert.match(worker,/await readFactoryClaimsDiagnostic\(env\.STUDIO_MEDIA\)/);
+  assert.match(worker,/version: "0\.10\.733-factory-claims-diagnostic-readonly"/);
+  assert.match(worker,/if \(request\.method === "POST"\) \{\s*assertWriteRequest\(request, env\);\s*return factoryBatchSubmitRoute/);
+  assert.doesNotMatch(inspector,/\.put\(|\.delete\(|airtableFetch|studioPublish/);
+});
