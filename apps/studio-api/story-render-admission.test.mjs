@@ -46,3 +46,13 @@ test("stale Story render packages can trigger the R4 watchdog", () => {
   const watchdog = readFileSync(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
   assert.ok(watchdog.includes("formula: `AND(${STUDIO_R4_WORK_FORMULA},${stale})`"));
 });
+
+test("render queue and watchdog ignore outputs that already have final media", () => {
+  const worker = readFileSync(new URL("./worker.js", import.meta.url), "utf8");
+  for (const name of ["STUDIO_R4_WORK_FORMULA", "STUDIO_RENDER_QUEUE_CANDIDATE_FORMULA"]) {
+    const formula = worker.split("\n").find(line => line.startsWith("const " + name + " = ")) || "";
+    assert.ok(formula.includes('{Final_File_URL}=""'), name + " must not rerender finished media");
+    assert.ok(formula.includes("Render_Total_Frames"), name + " must require a valid render manifest");
+    assert.ok(!formula.includes('Format}!="Story"'), name + " must keep eligible Stories selectable");
+  }
+});
