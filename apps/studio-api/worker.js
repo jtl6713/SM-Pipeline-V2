@@ -789,6 +789,9 @@ import {
 } from "./worker-functions-03.mjs";
 import { auditReel368Holds } from "./facebook-reel-368-audit.mjs";
 import { qaInstagramCarouselMaintenance } from "./qa-instagram-carousel-maintenance.mjs";
+import { auditStaleInstagramReels, verifySavedInstagramContainer } from "./qa-ig-stale-upload.mjs";
+import { igPublishLeaseEnabled, mutateIgPublishLease, readIgPublishLease, fenceStaleIgPreRemoteLease, markIgLeaseRecovered, verifyIgLeaseRunnerHealth } from "./qa-ig-publish-lease.mjs";
+import { verifyAuthenticatedInstagramReceipt } from "./exception-recovery-authenticated-receipt.mjs";
 import { studioActivePipelineSettings } from "./worker-functions-03.mjs";
 import {
   healStaleManualFlagsOnPublishedRecord,
@@ -811,6 +814,7 @@ import {
   studioReconcileFacebookVideoCovers,
   studioReconcilePublishingInstagramStories,
   studioReconcilePublishingInstagramReels,
+  studioRecoverFencedIgStaleUpload,
   studioReconcileFacebookSlideshows,
   studioReconcileFacebookReels,
   startScheduleRegenJob,
@@ -1142,12 +1146,15 @@ export default {
       const isEngagementActionsWrite = isEngagementActionsRoute && request.method === "POST";
       // Exact Chicago review writes are authorized again by their protected handlers.
       // The old global Phase-2A allowlist must not reject them before inspection.
+      const isInternalIgPublishLeasePost = request.method === "POST" &&
+        /^\/(?:api\/)?internal\/quality\/ig-publish-lease$/.test(url.pathname);
       const isChicagoReviewPost = request.method === "POST" &&
         (/^\/api\/rendering-review\/outputs\/rec[A-Za-z0-9]{14}\/(?:producer-conversation|producer-proposal|commit-attempt|messages|next-revision-feedback|review-feedback|approve|factory-handoff|request-redo)$/.test(url.pathname) ||
          /^\/api\/rendering-review\/factory\/outputs\/rec[A-Za-z0-9]{14}\/request-changes$/.test(url.pathname) ||
          /^\/(?:api\/)?internal\/rendering-review\/(?:claim-render-job|launch-ledger|complete-attempt|qa-audio-rebind|ig-dispatch-claim|factory-handoff)$/.test(url.pathname));
       const allowedMethod =
         isChicagoReviewPost ||
+        isInternalIgPublishLeasePost ||
         request.method === "GET" ||
         (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isMediaAssetStreamRoute || isPublicBrandWatermarkRoute || isOutputPreviewRoute || isFactoryOutputPreviewRoute || isReviewAttemptPreviewRoute || isVoicePreviewRoute)) ||
         isProfilesOverviewRefreshWrite ||
@@ -1279,9 +1286,12 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.731-factory-submit-airtable-window",
+          version: "0.10.732-qa-ig-fenced-pregraph-lease",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
+          qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
+          qa_ig_publish_lease_enabled: igPublishLeaseEnabled(env),
+          qa_ig_unattended_reschedule_enabled: igPublishLeaseEnabled(env) && env.STUDIO_IG_STALE_UPLOAD_AUTO_RECOVERY_ENABLED === "true",
           quality_autonomous_verification_recovery_v1: true,
           quality_durable_recovery_ledger_v1: true,
           quality_meta_story_readonly_verification_v1: true,
@@ -1950,6 +1960,46 @@ export default {
           throw new HttpError(403,"One-time handoff requires Chicago output 8447");
         const result=await handoffApprovedReviewToFactory({
           output_id:outputId,env,operations:makeReviewFactoryHandoffOperations(env),
+        });
+        return respond(request,env,result);
+      }
+
+      // Protected cross-runtime AP1-IG lease. Only the Python runner holding
+      // the shared server secret may claim/renew/record Graph intent. No
+      // browser/Studio user credential grants access to these actions.
+      if (url.pathname === "/internal/quality/ig-publish-lease" ||
+          url.pathname === "/api/internal/quality/ig-publish-lease") {
+        requireConfig(env);
+        if (!igPublishLeaseEnabled(env))
+          throw new HttpError(503, "IG publish lease not enabled");
+        if (request.method !== "POST") throw new HttpError(405,"POST required");
+        const expected=String(env.STUDIO_IG_PUBLISH_LEASE_SHARED_SECRET||"").trim();
+        const supplied=String(request.headers.get("X-Ig-Publish-Lease-Secret")||"").trim();
+        if (expected.length<24 || supplied.length!==expected.length)
+          throw new HttpError(403,"Publisher lease credential required");
+        const digest=async value=>new Uint8Array(await crypto.subtle.digest("SHA-256",
+          new TextEncoder().encode(value)));
+        const [a,b]=await Promise.all([digest(expected),digest(supplied)]);
+        let difference=0;
+        for(let i=0;i<a.length;i++) difference |= a[i]^b[i];
+        if (difference) throw new HttpError(403,"Publisher lease credential required");
+        if (!/^application\/json(?:\s*;|$)/i.test(String(request.headers.get("Content-Type")||"")))
+          throw new HttpError(415,"JSON required");
+        const raw=await request.text();
+        if(raw.length>1600)throw new HttpError(413,"Publisher lease request too large");
+        let data;
+        try {data=JSON.parse(raw);}catch {throw new HttpError(400,"Malformed publisher lease request");}
+        const allowed=["action","output_id","attempt_id","generation","lock_stamp"];
+        if(!data || typeof data!=="object" || Array.isArray(data) ||
+           Object.keys(data).some(key=>!allowed.includes(key)))
+          throw new HttpError(400,"Invalid publisher lease arguments");
+        const result=await mutateIgPublishLease(env,{
+          action:String(data.action||""),
+          outputId:String(data.output_id||""),
+          attemptId:data.attempt_id,
+          generation:data.generation,
+          lockStamp:data.lock_stamp,
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
         });
         return respond(request,env,result);
       }
@@ -3941,6 +3991,87 @@ export default {
           graph_creates: 0,
         })))
         .catch((error) => console.warn("QA-1050 reel368 audit failed", String(error?.message || error))));
+    }
+    // QA-IG-STALE-UPLOAD: live half-hour detection and durable finding audit.
+    // Intentionally read-only toward Meta/Airtable publish state. An expired
+    // Airtable timestamp cannot fence an active Python process or prove that a
+    // remote create never happened; missing provider IDs remain Needs Eyes.
+    if (cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS
+        && env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false") {
+      ctx.waitUntil(auditStaleInstagramReels(env, {
+        airtableFetch, limit: 8,
+        inspectLease: row => readIgPublishLease(env,row.id),
+        recoverSafe: async (row, proof) => {
+          if (env.STUDIO_IG_STALE_UPLOAD_AUTO_RECOVERY_ENABLED !== "true" ||
+              !igPublishLeaseEnabled(env))
+            return {committed:false,reason:"recovery_feature_not_enabled"};
+          const running=await verifyIgLeaseRunnerHealth(env);
+          if(!running.ready) return {committed:false,reason:running.reason};
+          // A failed previous MAE transaction can leave a safely fenced
+          // publisher. Reuse its exact generation rather than trying to
+          // fence the already-fenced lease a second time.
+          const readOutput=id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id);
+          const observed=await readIgPublishLease(env,row.id);
+          let fence;
+          if(observed.available && observed.state?.phase==="fenced" &&
+             observed.state?.generation===proof.lease_generation &&
+             observed.state?.irreversible_possible===false) {
+            fence={safe:true,fenced:true,output_id:row.id,
+              generation:observed.state.generation,
+              lock_at:row.fields?.Publish_Locked_At};
+          } else {
+            fence=await fenceStaleIgPreRemoteLease(env,row.id,{readOutput});
+          }
+          if (!fence.safe) return {committed:false,reason:fence.reason};
+          return studioRecoverFencedIgStaleUpload(env,{
+            outputId:row.id,fence,
+          });
+        },
+        verifyContainer: async (row) => {
+          const profiles = row?.fields?.Content_Profile;
+          if (!Array.isArray(profiles) || profiles.length !== 1)
+            return {verified: false, reason: "ambiguous_profile"};
+          const profile = await airtableFetch(env,
+            env.AIRTABLE_PROFILE_TABLE_ID || "Content Profiles", profiles[0]);
+          if (profile?.id !== profiles[0])
+            return {verified: false, reason: "profile_not_found"};
+          const settings = await studioActivePipelineSettings(env,
+            ["INSTAGRAM_BUSINESS_ACCOUNT_ID","META_GRAPH_API_ACCESS_TOKEN","META_GRAPH_API_VERSION"], profile);
+          const profileAccount = String(profile?.fields?.Instagram_Business_Account_ID || "").trim();
+          if (profileAccount && profileAccount !== String(settings.INSTAGRAM_BUSINESS_ACCOUNT_ID || "").trim())
+            return {verified: false, reason: "instagram_profile_account_setting_conflict"};
+          return verifySavedInstagramContainer(row, {
+            settings, expectedAccountId: settings.INSTAGRAM_BUSINESS_ACCOUNT_ID,
+          });
+        },
+        verifyProvider: async (row) => {
+          const profiles = row?.fields?.Content_Profile;
+          if (!Array.isArray(profiles) || profiles.length !== 1)
+            return { verified_public: false, evidence: "ambiguous_profile" };
+          const profile = await airtableFetch(env,
+            env.AIRTABLE_PROFILE_TABLE_ID || "Content Profiles", profiles[0]);
+          if (profile?.id !== profiles[0])
+            return { verified_public: false, evidence: "profile_not_found" };
+          const settings = await studioActivePipelineSettings(env,
+            ["INSTAGRAM_BUSINESS_ACCOUNT_ID","META_GRAPH_API_ACCESS_TOKEN","META_GRAPH_API_VERSION"], profile);
+          const profileAccount = String(profile?.fields?.Instagram_Business_Account_ID || "").trim();
+          if (profileAccount && profileAccount !== String(settings.INSTAGRAM_BUSINESS_ACCOUNT_ID || "").trim())
+            return { verified_public: false, evidence: "instagram_profile_account_setting_conflict" };
+          return verifyAuthenticatedInstagramReceipt(row, {
+            settings, expectedAccountId: settings.INSTAGRAM_BUSINESS_ACCOUNT_ID,
+          });
+        },
+      }).then(rows => {
+        if (rows.length) console.warn("QA-IG-STALE-UPLOAD", JSON.stringify({
+          findings: rows.length,
+          identities_verified: rows.filter(r => r.provider_public_verified).length,
+          pending_lease_and_provider_reconciliation: rows.filter(r => !r.provider_public_verified).length,
+          graph_creates: 0,
+          reschedules: rows.filter(r=>r.recovery_committed===true).length,
+          needs_eyes: rows.filter(r=>r.outcome==="graph_intent_ambiguous_needs_eyes").length,
+        }));
+      }).catch(error => console.warn("QA-IG-STALE-UPLOAD scan unavailable",
+        String(error?.message || error))));
     }
     // Quality Agent runs on every half-hour maintenance tick, independently of
     // Factory and ordinary carousel dispatch. It ONLY re-arms existing child-ID
@@ -7075,6 +7206,7 @@ const STUDIO_OVERDUE_SCHEDULED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookVideoCovers__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcilePublishingInstagramStories__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcilePublishingInstagramReels__*/
+/*__STUDIO_WORKER_EXTRACT:studioRecoverFencedIgStaleUpload__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookSlideshows__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookReels__*/
 /*__STUDIO_WORKER_EXTRACT:studioStoryCompanionPlatformBlockers__*/

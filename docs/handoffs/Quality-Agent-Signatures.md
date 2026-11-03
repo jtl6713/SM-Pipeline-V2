@@ -586,3 +586,46 @@ Phase 6 write cutover.
 - **Evidence:** `studio/state/quality/idea-photo-matching/latest.json` in the Worker `STUDIO_MEDIA` R2 binding; records the scan timestamp, finding counts, exact Idea record IDs, and profile IDs.
 - **Safe recovery:** Only the existing bounded automatic listener, photo matcher, and idempotent ready-production queue may mutate eligible Ideas. Respect manually paused/held/rejected/promoted Ideas and preserve manually selected photo deletions.
 - **Escalate:** Repeat offenders that remain stale after the next successful, non-cooldown match attempt, or any result lacking authoritative profile-scoped media. Never create platform posts, bypass final human approval, or repeatedly manufacture a Production Request to clear this signature.
+
+
+## QA-IG-STALE-UPLOAD — Instagram Reel orphaned AP1-IG publishing lock
+
+**First identified:** 2026-11-02, 68 orphaned AP1-IG locks across NYC (23), Chicago (17), LA (16), Miami (12). A further NYC Reel #9098 had saved provider identifiers and requires separate receipt reconciliation.
+
+### Detection contract (30-minute default)
+
+- Approved, automated Instagram Reel with Publish_Status=Publishing and Publish_Locked_By=AP1-IG.
+- Publish_Locked_At and Last_Publish_Attempt_At both older than 30 minutes. The default threshold is configurable; do not treat the UI 85% bar as proof of ongoing activity.
+- Independently check runner instance heartbeat and lease-expiration/fencing token. A fresh heartbeat or valid lease forbids recovery; missing observations must be reported explicitly.
+- No test identity, review hold, Do_Not_Publish, publication receipt, active provider cooldown or replacement transaction.
+- A saved Platform_Media_ID / Platform_Post_ID / URL requires provider reconciliation, **not** another Graph create.
+- A missing saved provider ID is not proof that the provider request never committed.
+
+### Guarded recovery contract
+
+1. Read authoritative Airtable output immediately before claiming the exact output. Compare current owner, lock generation, attempt timestamps, approval, holds, cooldown and identity with the detected snapshot.
+2. Independently query runner heartbeat/lease state and fence the prior generation. If lease state is unknown or a remote create may have succeeded, escalate or reconcile before any new dispatch.
+3. Query Instagram for saved container, post and permalink. For a confirmed live post, persist the receipt only after identity proof. For a processing container, resume **that exact container**. If provider state remains ambiguous, mark Needs Eyes rather than claiming a safe retry.
+4. Only when remote identity is conclusively absent and old owner fenced, release Publish_Locked_By / Publish_Locked_At / Publish_Started_At, preserve attempts and historical notes, and reschedule via the **atomic MAE reservation authority** (profile-local time, configured horizon, 90-minute separation, priority windows then balanced overflow, blackout and lane contention). Do not directly stamp calendar dates without reservation reconciliation.
+5. Append an auditable attempt event with signature, output and profile IDs, source/stage, prior lock owner/generation, heartbeat and remote check result, old/new reservation, actor, UTC timestamps, and outcome. Make replay idempotent. Airtable is authoritative; Supabase is only a mirror.
+6. Publish only when the new scheduled time is due and a fresh attempt has acquired its own lease. Respect provider limits and holds. Accepting duplicate risk is not permission to bypass the review/publish safety gates.
+
+### Regression coverage
+
+- Crash after lock but before Graph create; after Graph create but before container ID write; after publish but before Airtable receipt; after Airtable schedule write but before reservation commit.
+- Fresh heartbeat, valid lease, changed generation, hold, replacement, existing provider ID, cooldown, insufficient media/caption and exhausted attempt controls.
+- NYC, Chicago, LA and Miami time zones, DST, full priority windows and balanced overflow; rescan idempotence, independent authoritative readback and audit write failures.
+- Render a stalled/Needs Eyes status rather than an indefinitely frozen 85% Uploading bar.
+
+**Implementation status (PR #1531, code integration):** Studio's bounded half-hour Quality Agent scanner uses a durable R2 pagination cursor, authoritative Airtable second reads, scoped read-only Meta post/container verification, and idempotent Quality Agent Recovery Ledger write/readback. Python AP1-IG has a default-off HTTPS client to the Worker's protected per-output R2 compare-and-swap lease. The runner claims before the Airtable publish lock, heartbeats after exact lock readback, and must record **irreversible Graph intent** through a Worker CAS before calling Meta Graph create. A lost/timed-out Graph reply cannot be treated as noncreation: once intent is recorded, the lease can never be auto-fenced for another upload. Unknown legacy attempts and missing remote IDs without positive *pre-Graph* proof remain Needs Eyes. Safe unattended recovery is limited to a verified, expired, 30-minute-stale **pre_remote** lease, fenced through R2 CAS, followed by the existing Durable Object atomic MAE transaction, configured horizon, 90-minute Instagram lane separation, authoritative schedule/lock readback, Supabase mirror attempt and a separate audited recovery-outcome record. Tests cover fencing, timeout, legacy unknown, hold, provider identity and persisted audit. Code is **default-off** until runtime opt-in and an independently verified exclusive Python publisher. Do not confuse the code's presence or CI success with deployment, operational exclusivity or a live canary.
+
+### Controlled activation and negative production canaries
+
+1. Ship Worker and Windows Python Runner from the same tested PR head. Verify runner/Worker revisions independently; disable competing Make/legacy Instagram Reel creation routes and confirm the Python runner alone can issue AP1-IG Graph creates for all four Content Profiles.
+2. Provision one strong matching secret in managed Worker and Runner environments, never in this document. Set Worker `STUDIO_IG_PUBLISH_LEASE_ENABLED=true`, `STUDIO_IG_PUBLISH_LEASE_EXCLUSIVE_VERIFIED=true`, and Runner `IG_PUBLISH_LEASE_REQUIRED=true` (with HTTPS `STUDIO_IG_PUBLISH_LEASE_WORKER_URL`). Check that every new Graph create is denied if lease claim/heartbeat/intent fails. Legacy Chicago-only claim must not be enabled concurrently on the same output.
+3. Confirm `STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED=true` for all four Instagram lanes, an operational Durable Object binding and complete Airtable occupancy read. Honor `STUDIO_SCHEDULE_HORIZON_DAYS` as configured (including 90 when set to 90); never hardcode 30/60.
+4. With `STUDIO_IG_STALE_UPLOAD_AUTO_RECOVERY_ENABLED=false`, exercise one isolated, protected **nonpublic** test per profile with an intentionally expired pre-Graph lease, then a missing saved-ID `remote_intent`, fresh heartbeat, changed lease generation, provider container, Do_Not_Publish and review hold. Require 0 Graph creates for every negative case.
+5. Only after all negative controls and end-to-end receipt audits pass, opt in `STUDIO_IG_STALE_UPLOAD_AUTO_RECOVERY_ENABLED=true`. Confirm a pre-Graph synthetic candidate CAS-fences, writes a new MAE reservation atomically, clears only its exact stale lock, preserves approval history, advances lease to recovered and records the exact recovery-outcome audit. Verify Supabase mirror asynchronously against Airtable. A remote-intent or unknown legacy attempt must stay Needs Eyes indefinitely unless an exact public receipt can be verified.
+6. Re-run across NYC, Chicago, Los Angeles and Miami, check daylight saving/blackout and 90-minute spacing, inspect logs for lease contention and monitor real account posts for duplicate IDs. Disable the auto-recovery flag immediately for any unverifiable output. Publishing is not authorized as part of QA validation.
+
+**Rollout is not complete until these runtime flags, deployment and live negative canaries are independently verified.** The older 68 directly rescheduled records do not retroactively acquire lease provenance; they must not be considered proof of successful unattended recovery.

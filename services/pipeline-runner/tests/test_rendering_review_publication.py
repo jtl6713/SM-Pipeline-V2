@@ -114,7 +114,8 @@ class ProcessorBoundaryTests(unittest.TestCase):
         # provider, Airtable, mirror, media, or scheduling service is contacted.
         source = Path(__file__).parents[1] / "ap1_ig" / "processor.py"
         tree = ast.parse(source.read_text())
-        names = {"_append_notes", "_preview", "process_request", "_is_in_progress"}
+        names = {"_append_notes", "_preview", "process_request", "_is_in_progress",
+                 "_release_preflight_lock_if_exact_owner"}
         selected = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in names]
         current = ReviewPublicationTests().record(
             Platform_Media_ID="" if new_container else "container-1"
@@ -164,6 +165,8 @@ class ProcessorBoundaryTests(unittest.TestCase):
             return {"ok": True}
         namespace = {
             "shared_dispatch_claim_required": lambda _output_id=None: shared_claim,
+            "ig_publish_lease_required": lambda: False,
+            "IgPublishLeaseError": type("IgPublishLeaseError", (Exception,), {}),
             "ReviewDispatchClaimError": ClaimError,
             "is_chicago_reel": lambda _client, _output: True,
             "claim_chicago_dispatch": fake_claim,

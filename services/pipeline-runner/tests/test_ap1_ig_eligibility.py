@@ -120,3 +120,157 @@ def test_ap1_ig_absent_review_fields_preserve_existing_publish_eligibility():
         Studio_Render_Review_Hold_ID="",
         Studio_Review_Hold_ID="",
     )) is None
+
+
+def test_ap1_ig_guard_early_return_releases_only_owned_lock_without_requeue():
+    from ap1_ig.processor import _release_preflight_lock_if_exact_owner
+    now = "2026-11-02T17:01:00Z"
+    class Fake:
+        def __init__(self):
+            self.fields = {
+                "Publish_Locked_By": "AP1-IG", "Publish_Locked_At": now,
+                "Last_Publish_Attempt_At": now, "Publish_Status": "Publishing",
+                "Platform_Media_ID": "18127559140783117",
+            }
+            self.writes = []
+        def get_record(self, table, record_id):
+            return {"id": record_id, "fields": self.fields}
+        def update_record(self, table, record_id, fields, **kwargs):
+            self.writes.append(fields)
+
+    client = Fake()
+    assert _release_preflight_lock_if_exact_owner(
+        client, "recABCDEFGHIJKLMN", now, reason="review_hold"
+    ) is True
+    update = client.writes[0]
+    assert update["Publish_Locked_By"] == ""
+    assert update["Publish_Locked_At"] is None
+    assert update["Publish_Retry_Eligible"] is False
+    assert "Publish_Status" not in update
+    assert "Platform_Media_ID" not in update
+
+def test_ap1_ig_guard_cannot_clear_changed_lock_or_published_output():
+    from ap1_ig.processor import _release_preflight_lock_if_exact_owner
+    now = "2026-11-02T17:01:00Z"
+    class Fake:
+        def __init__(self, **fields):
+            self.fields = {
+                "Publish_Locked_By": "AP1-IG", "Publish_Locked_At": now,
+                "Last_Publish_Attempt_At": now, "Publish_Status": "Publishing",
+                **fields,
+            }
+            self.writes = []
+        def get_record(self, table, record_id):
+            return {"id": record_id, "fields": self.fields}
+        def update_record(self, table, record_id, patch, **kwargs):
+            self.writes.append(patch)
+
+    for patch in [
+        {"Publish_Locked_At": "2026-11-02T17:30:00Z"},
+        {"Publish_Locked_By": "another_runner"},
+        {"Platform_Post_ID": "18168690085479740"},
+        {"Published_At": "2026-11-02T17:10:00Z"},
+    ]:
+        client = Fake(**patch)
+        assert _release_preflight_lock_if_exact_owner(
+            client, "recABCDEFGHIJKLMN", now, reason="review_hold"
+        ) is False
+        assert client.writes == []
+
+
+def test_ap1_ig_ambiguous_graph_failure_quarantines_without_erasing_container():
+    from ap1_ig.processor import _mark_failed
+    class Fake:
+        def __init__(self):
+            self.updates = []
+        def update_record(self, table, record_id, fields, **kwargs):
+            self.updates.append(fields)
+    client = Fake()
+    record = {"id": "recABCDEFGHIJKLMN", "fields": {
+        "Platform_Media_ID": "18127559140783117", "Output_Notes": "",
+    }}
+    _mark_failed(client, record, RuntimeError("Meta response lost"),
+                 remote_side_effect_possible=True)
+    fields = client.updates[0]
+    assert fields["Publish_Status"] == "Failed"
+    assert fields["Publish_Retry_Eligible"] is False
+    assert fields["Manual_Fallback_Required"] is True
+    assert fields["Publish_Next_Retry_At"] is None
+    assert "Platform_Media_ID" not in fields
+    assert "Last_Publish_Attempt_At" not in fields
+    assert "18127559140783117" in fields["Platform_Publish_Response_JSON"]
+
+
+def test_ap1_ig_graph_create_timeout_without_saved_id_cannot_blind_retry():
+    from ap1_ig.processor import _mark_failed
+    class Fake:
+        def __init__(self):
+            self.updates = []
+        def update_record(self, table, record_id, fields, **kwargs):
+            self.updates.append(fields)
+    client = Fake()
+    record = {"id": "recABCDEFGHIJKLMN", "fields": {
+        "Platform_Media_ID": "", "Output_Notes": "",
+    }}
+    _mark_failed(client, record, TimeoutError("Create response lost"),
+                 remote_side_effect_possible=True)
+    fields = client.updates[0]
+    assert fields["Publish_Status"] == "Failed"
+    assert fields["Publish_Retry_Eligible"] is False
+    assert fields["Manual_Fallback_Required"] is True
+    assert "Platform_Media_ID" not in fields
+
+
+def test_ap1_ig_pre_graph_failure_keeps_bounded_retry_when_no_request_was_sent():
+    from ap1_ig.processor import _mark_failed
+    class Fake:
+        def __init__(self):
+            self.updates = []
+        def update_record(self, table, record_id, fields, **kwargs):
+            self.updates.append(fields)
+    client = Fake()
+    _mark_failed(client, {"id": "recABCDEFGHIJKLMN", "fields": {
+        "Platform_Media_ID": "", "Output_Notes": "",
+    }}, RuntimeError("Graph configuration unavailable"),
+                 remote_side_effect_possible=False)
+    fields = client.updates[0]
+    assert fields["Publish_Status"] == "Ready to Publish"
+    assert fields["Publish_Retry_Eligible"] is True
+    assert fields["Platform_Media_ID"] == ""
+
+
+def test_ap1_ig_guard_cleanup_accepts_airtable_millisecond_utc_echo():
+    from ap1_ig.processor import _release_preflight_lock_if_exact_owner
+
+    lock_stamp = "2026-11-02T17:01:00Z"
+    class Fake:
+        def __init__(self, changed=False):
+            self.fields = {
+                "Publish_Locked_By": "AP1-IG",
+                "Publish_Locked_At": "2026-11-02T17:01:00.000Z",
+                "Last_Publish_Attempt_At":
+                    "2026-11-02T17:01:00.000+00:00",
+                "Publish_Status": "Publishing",
+                "Platform_Media_ID": "18127559140783117",
+            }
+            if changed:
+                self.fields["Publish_Locked_At"] = "2026-11-02T17:01:01.000Z"
+            self.writes = []
+        def get_record(self, table, record_id):
+            return {"id": record_id, "fields": self.fields}
+        def update_record(self, table, record_id, patch, **kwargs):
+            self.writes.append(patch)
+
+    client = Fake()
+    assert _release_preflight_lock_if_exact_owner(
+        client, "recABCDEFGHIJKLMN", lock_stamp, reason="review_hold"
+    ) is True
+    assert len(client.writes) == 1
+    assert client.writes[0]["Publish_Locked_By"] == ""
+    assert "Platform_Media_ID" not in client.writes[0]
+
+    moved = Fake(changed=True)
+    assert _release_preflight_lock_if_exact_owner(
+        moved, "recABCDEFGHIJKLMN", lock_stamp, reason="review_hold"
+    ) is False
+    assert moved.writes == []

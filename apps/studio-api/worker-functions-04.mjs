@@ -1,4 +1,5 @@
 import { matchNewlyCreatedIdeaPhotos } from "./worker-functions-03.mjs";
+import { readIgPublishLease, markIgLeaseRecovered, igPublishLeaseEnabled } from "./qa-ig-publish-lease.mjs";
 import { evaluateReviewPackage, verifyReviewImages, factoryReviewVisibility } from "./review-package-readiness.mjs";
 import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 import { autonomousPlanOutputSpilloverRepair } from "./autonomous-plan-output-recovery.mjs";
@@ -18073,3 +18074,136 @@ export async function factoryBatchCronResume(env, ctx = null) {
 /*__STUDIO_WORKER_END:factoryBatchCronResume__*/
 
 
+
+
+/**
+ * Fenced QA-IG pre-remote recovery. Invoked only after Quality Agent persisted
+ * a finding and CAS-fenced the old publishing attempt. The atomic MAE lane
+ * owns occupancy, Airtable write verification and mirror propagation.
+ */
+export async function studioRecoverFencedIgStaleUpload(env, options = {}) {
+  const {outputId,fence,nowMs=Date.now()}=options;
+  if (!igPublishLeaseEnabled(env) ||
+      env.STUDIO_IG_STALE_UPLOAD_AUTO_RECOVERY_ENABLED !== "true" ||
+      !scheduleReservationAuthorityEnabled(env) ||
+      env.STUDIO_IG_PUBLISH_LEASE_EXCLUSIVE_VERIFIED !== "true")
+    throw new Error("ig_stale_unattended_recovery_disabled");
+  if (!/^rec[A-Za-z0-9]{14}$/.test(String(outputId||"")) ||
+      !fence?.safe || !fence?.fenced ||
+      fence.output_id!==outputId || !Number.isSafeInteger(fence.generation))
+    throw new Error("ig_recovery_exact_fence_missing");
+  const readOutput = id => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+  const existing = await readOutput(outputId);
+  const profile = await item4ProductionProfileRecord(env,existing);
+  if (!profile?.id || !scheduleReservationLaneEnabled(env,profile.id,"Instagram"))
+    throw new Error("ig_recovery_atomic_lane_unavailable");
+  const check = async row => {
+    const a=row?.fields||{};
+    const lease=await readIgPublishLease(env,outputId);
+    if (!lease.available || lease.state?.phase!=="fenced" ||
+        lease.state?.generation!==fence.generation ||
+        lease.state?.irreversible_possible!==false ||
+        row?.id!==outputId || a.Publish_Status!=="Publishing" ||
+        a.Publish_Locked_By!=="AP1-IG" ||
+        a.Publish_Locked_At!==fence.lock_at ||
+        a.Output_Status!=="Approved for Publishing" ||
+        a.Review_Status!=="Approved" ||
+        a.Auto_Publish_Enabled!==true || a.Publish_Method!=="Automated" ||
+        a.Platform!=="Instagram" || a.Platform_Output_Type!=="Instagram Reel" ||
+        a.Do_Not_Publish || a.Test_Run_ID || a.Replace_Transaction_ID ||
+        a.Platform_Post_ID || a.Platform_Media_ID || a.Platform_Post_URL ||
+        a.Published_At || renderingReviewHoldPresent(field=>a[field]))
+      throw new Error("ig_recovery_authority_or_fence_changed");
+    const lockAge=nowMs-Date.parse(String(a.Publish_Locked_At||""));
+    if (!Number.isFinite(lockAge) || lockAge<30*60_000)
+      throw new Error("ig_recovery_lock_not_stale");
+    return a;
+  };
+  await check(existing);
+  const transaction = await runAtomicScheduleTransaction(env,{
+    content_profile_id:profile.id,platform:"Instagram",
+    output_type:"Instagram Reel",platform_output_record_id:outputId,
+    content_item_id: Array.isArray(existing.fields?.Content_Item)
+      ? existing.fields.Content_Item[0] : null,
+    operation_id:"quality-ig-stale:"+outputId+":"+fence.generation,
+  },{
+    legacy:async()=>{throw new Error("ig_recovery_legacy_scheduling_forbidden");},
+    plan:async ({occupied_reservations=[]})=>{
+      const current=await readOutput(outputId);
+      const a=await check(current);
+      studioInvalidateOccupiedScheduleCache();
+      const occupied=await studioOccupiedSchedulesOrEmpty(env,{
+        excludeIds:[outputId],profile,platform:"Instagram",requireComplete:true,
+      });
+      const slots=studioOccupiedForPlatform(occupied,"Instagram").slice();
+      for(const reservation of occupied_reservations){
+        const ms=Date.parse(String(reservation?.scheduled_iso||""));
+        if(Number.isFinite(ms))slots.push(ms);
+      }
+      const zone=await studioScheduleTimeZoneForRecord(env,current,{});
+      const uniqueOccupied=[...new Set(slots.filter(Number.isFinite))];
+      const picked=maeScheduleNextSlot({
+        now:new Date(nowMs+60_000),timeZone:zone,
+        horizonDays:await studioScheduleHorizonDays(env),
+        occupiedMs:uniqueOccupied,platformOccupiedMs:uniqueOccupied,
+        gapMs:90*60_000,
+      });
+      if (!picked?.ok || !picked.iso)
+        throw new Error("ig_recovery_mae_capacity_unavailable");
+      const fields=studioPublishScheduleFields({
+        scheduled_post_date:picked.iso,timezone:zone,
+      },current,{occupiedMs:uniqueOccupied,forceWrite:true,
+        exactOverride:true,timeZone:zone});
+      const scheduleIso=String(fields.Scheduled_Post_Date||"").trim();
+      if (!Number.isFinite(Date.parse(scheduleIso)) ||
+          Date.parse(scheduleIso)<=nowMs)
+        throw new Error("ig_recovery_future_mae_slot_missing");
+      Object.assign(fields,{
+        Publish_Status:"Ready to Schedule",Publish_Locked_By:"",
+        Publish_Locked_At:null,Publish_Started_At:null,
+        Publish_Next_Retry_At:null,Publish_Retry_Eligible:true,
+        Publish_Error_Message:"",Studio_Scheduled_At:null,
+        Output_Status:"Approved for Publishing",
+        Output_Notes:String(a.Output_Notes||"")+
+          "\\nQA-IG-STALE-UPLOAD fenced pre-Graph runner lease generation "+
+          fence.generation+"; atomic future MAE slot "+scheduleIso+
+          "; no new provider create performed.",
+      });
+      const previousIso=String(a.Scheduled_Post_Date||"");
+      return {action:Date.parse(previousIso)?"move":"reserve",previousIso,
+        selectedIso:new Date(scheduleIso).toISOString(),fields};
+    },
+    write:async(plan,{signal})=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,outputId,{
+      method:"PATCH",signal,skipSupabaseWriteThrough:true,
+      body:JSON.stringify({fields:plan.fields,typecast:true}),
+    }),
+    verify:async(written,plan)=>{
+      const row=await readOutput(outputId),a=row?.fields||{};
+      if(row?.id!==outputId || Date.parse(a.Scheduled_Post_Date)!==Date.parse(plan.selectedIso)
+        || a.Publish_Status!=="Ready to Schedule" ||
+        a.Publish_Locked_By || a.Publish_Locked_At ||
+        a.Publish_Started_At || a.Platform_Media_ID ||
+        a.Platform_Post_ID || a.Publish_Retry_Eligible!==true)
+        throw new Error("ig_recovery_authoritative_schedule_readback_failed");
+      written.__ig_verified_record=row;
+      return new Date(Date.parse(a.Scheduled_Post_Date)).toISOString();
+    },
+    afterCommit:async written=>{
+      studioInvalidateOccupiedScheduleCache();
+      // The non-authoritative Supabase mirror cannot invalidate a committed
+      // Airtable schedule or strand the runner's fenced lease transition.
+      await studioSupabaseWriteThroughOutput(env,
+        written.__ig_verified_record||written,"quality_ig_stale_recovery")
+        .catch(error=>console.warn("ig stale schedule Supabase mirror pending",error));
+    },
+  });
+  const finalRow=await readOutput(outputId);
+  if(finalRow?.fields?.Publish_Status!=="Ready to Schedule")
+    throw new Error("ig_recovery_schedule_not_verified_after_commit");
+  await markIgLeaseRecovered(env,outputId,fence.generation,{readOutput});
+  return {committed:true,output_id:outputId,generation:fence.generation,
+    reservation_id:transaction?.reservation?.reservation_id||null,
+    scheduled_at:finalRow.fields.Scheduled_Post_Date,
+    phase:"recovered",graph_creates:0};
+}
+/*__STUDIO_WORKER_END:studioRecoverFencedIgStaleUpload__*/

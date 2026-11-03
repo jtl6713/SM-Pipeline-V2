@@ -24,10 +24,11 @@ from ap1_ig.constants import (
 from ap1_ig.eligibility import eligibility_reason
 from ap1_ig.graph import InstagramGraphError, InstagramReelClient, load_instagram_graph_settings
 from asset.helpers import parse_int
-from carousel.timeutil import chicago_now, iso_utc, stamp_minutes, utc_now
+from carousel.timeutil import chicago_now, iso_utc, parse_utc, stamp_minutes, utc_now
 from item4.settings import PipelineSettings
 from publish.location import resolve_publish_location
 from publish.rendering_review import verify_before_reel_creation, verify_before_reel_publication
+from ap1_ig.publish_lease import IgPublishLease, IgPublishLeaseError, ig_publish_lease_required
 from publish.review_dispatch_claim import (
     ReviewDispatchClaimError, shared_dispatch_claim_required,
     is_chicago_reel, claim_chicago_dispatch,
@@ -55,6 +56,46 @@ def _preview(*, output_record_id: str | None, test_run_id: str | None) -> dict[s
         "format": "Reel",
     }
 
+
+
+def _release_preflight_lock_if_exact_owner(
+    client: AirtableClient, output_id: str, lock_stamp: str, *, reason: str,
+) -> bool:
+    """Clear only this attempt's lock after a review guard refuses to proceed.
+
+    Called ONLY on return paths before remote media_publish. A saved container
+    remains Publishing so a later approved, fenced resume uses that identity.
+    Never change approval/hold flags, delete provider IDs or requeue a new create.
+    """
+    try:
+        fresh = client.get_record(PLATFORM_OUTPUTS_TABLE, output_id)
+        # Airtable can echo UTC dateTime values with .000Z while the runner
+        # writes whole seconds. Compare UTC instants, not literal strings.
+        expected_at = parse_utc(lock_stamp)
+        locked_at = parse_utc(field_str(fresh, "Publish_Locked_At"))
+        attempted_at = parse_utc(field_str(fresh, "Last_Publish_Attempt_At"))
+        if (expected_at is None or locked_at is None or attempted_at is None
+                or field_str(fresh, "Publish_Locked_By") != PUBLISH_LOCKED_BY
+                or locked_at != expected_at
+                or attempted_at != expected_at
+                or field_str(fresh, "Publish_Status") != PUBLISH_STATUS_PUBLISHING
+                or field_str(fresh, "Platform_Post_ID")
+                or field_str(fresh, "Published_At")):
+            return False
+        client.update_record(PLATFORM_OUTPUTS_TABLE, output_id, {
+            "Publish_Locked_By": "",
+            "Publish_Locked_At": None,
+            "Publish_Started_At": None,
+            "Publish_Retry_Eligible": False,
+            "Output_Notes": _append_notes(field_str(fresh, "Output_Notes"),
+                f"QA-IG-STALE-UPLOAD: AP1-IG review guard refused continuation "
+                f"({reason}) at {stamp_minutes()}. Exact attempt lock released; "
+                "status and any saved Meta identity preserved for reconciliation."),
+        }, typecast=True)
+        return True
+    except Exception:
+        # If authoritative reads or writes fail, never assume the lock cleared.
+        return False
 
 def process_request(
     *,
@@ -135,6 +176,19 @@ def process_request(
         if prelock_reason:
             return {"processed": False, "reason": prelock_reason, **preview}
 
+    lease = None
+    if creating_container and ig_publish_lease_required():
+        # The all-profile lease and old Chicago-only pilot cannot both own
+        # the initial dispatch. Refuse rather than invoke conflicting claims.
+        if shared_dispatch_claim_required(output.get("id")):
+            return {"processed": False, "reason": "conflicting_ig_dispatch_lease_protocols", **preview}
+        try:
+            lease = IgPublishLease(record_id)
+            lease.claim()
+            preview["publish_lease_claimed"] = True
+        except IgPublishLeaseError as exc:
+            return {"processed": False, "reason": str(exc), **preview}
+
     # The default-off Chicago pilot requires a cross-runtime R2/Airtable
     # dispatch ownership claim shared with manual Rendering Review enrollment.
     # Claim BEFORE the existing Python Airtable lock PATCH or any Graph create.
@@ -201,9 +255,21 @@ def process_request(
     except Exception:
         review_reason = "review_authority_unavailable"
     if review_reason:
+        preview["preflight_lock_cleared"] = _release_preflight_lock_if_exact_owner(
+            client, record_id, now, reason=review_reason,
+        )
         return {"processed": False, "reason": review_reason,
                 "attempt_count": attempt, **preview}
 
+    if lease is not None:
+        try:
+            lease.heartbeat(now)
+        except IgPublishLeaseError:
+            # No Graph create has been authorized. Leave the exact Airtable
+            # attempt untouched for the pre-remote fencing coordinator.
+            return {"processed": False, "reason": "publish_lease_heartbeat_unverified",
+                    "attempt_count": attempt, **preview}
+    remote_side_effect_possible = bool(field_str(output, "Platform_Media_ID"))
     try:
         settings = graph_settings or load_instagram_graph_settings(pipeline_settings, output, client=client)
         graph = InstagramReelClient(
@@ -217,6 +283,12 @@ def process_request(
             preview["resumed_container_id"] = creation_id
         else:
             try:
+                if lease is not None:
+                    # One-way CAS transition BEFORE any HTTP POST to Meta.
+                    # Even a timeout after this transition forbids automatic
+                    # stale-lock recovery from making another container.
+                    lease.remote_intent(now)
+                remote_side_effect_possible = True  # HTTP request may commit before the response is saved.
                 created = graph.create_reel(body)
             except InstagramGraphError as exc:
                 # Invalid curated/search place IDs must not block the publish.
@@ -270,6 +342,9 @@ def process_request(
         except Exception:
             review_reason = "review_authority_unavailable"
         if review_reason:
+            preview["prepublication_lock_cleared"] = _release_preflight_lock_if_exact_owner(
+                client, record_id, now, reason=review_reason,
+            )
             return {"processed": False, "reason": review_reason,
                     "creation_id": creation_id, "attempt_count": attempt, **preview}
         try:
@@ -291,7 +366,19 @@ def process_request(
         if not permalink and meta.get("shortcode"):
             permalink = f"https://www.instagram.com/p/{meta['shortcode']}/"
     except Exception as exc:
-        _mark_failed(client, output, exc)
+        if isinstance(exc, IgPublishLeaseError):
+            # Intent receipt missing/ambiguous: never guess that Meta was not
+            # contacted, and never mark Ready to Publish on this path.
+            return {"processed": False, "reason": "publish_lease_intent_unverified",
+                    "attempt_count": attempt, **preview}
+        if lease is not None and not remote_side_effect_possible:
+            try:
+                lease.finish(now)  # Verified no Graph request was authorized.
+            except IgPublishLeaseError:
+                return {"processed": False, "reason": "publish_lease_pregraph_finalization_failed",
+                        "attempt_count": attempt, **preview}
+        _mark_failed(client, output, exc,
+                     remote_side_effect_possible=remote_side_effect_possible)
         if isinstance(exc, InstagramGraphError):
             return {
                 "processed": False,
@@ -402,31 +489,36 @@ def _mark_processing(
     )
 
 
-def _mark_failed(client: AirtableClient, output: dict[str, Any], exc: Exception) -> None:
+def _mark_failed(client: AirtableClient, output: dict[str, Any], exc: Exception, *,
+                 remote_side_effect_possible: bool = False) -> None:
     status_code = getattr(exc, "status_code", "") or "unknown"
     status = getattr(exc, "status", "") or str(exc) or "No status returned"
     replacing = bool(field_str(output, "Replace_Transaction_ID"))
+    ambiguous = remote_side_effect_possible or bool(field_str(output, "Platform_Media_ID"))
     retry_at = utc_now() + timedelta(minutes=RETRY_MINUTES)
     retry_stamp = (chicago_now() + timedelta(minutes=RETRY_MINUTES)).strftime("%Y-%m-%d %H:%M")
-    message = f"Instagram Reel create failed. Meta status_code: {status_code}. Status: {status}"
+    message = (f"Instagram Reel result ambiguous; provider reconciliation required. Meta status_code: {status_code}. Status: {status}"
+               if ambiguous else f"Instagram Reel create failed. Meta status_code: {status_code}. Status: {status}")
     response_text = (
-        "Instagram Reel create failure\n"
-        f"Media ID: none\n"
+        ("Instagram Reel operation outcome ambiguous\n" if ambiguous else "Instagram Reel create failure\n")
+        + f"Media ID: {field_str(output, 'Platform_Media_ID') or 'none'}\n"
         f"Meta status_code: {status_code}\n"
         f"Meta status: {status}\n"
-        f"Retry eligible: {str(not replacing).lower()}\n"
+        f"Retry eligible: {str(not (replacing or ambiguous)).lower()}\n"
         f"Next retry: {retry_stamp}"
     )
     notes = _append_notes(
         field_str(output, "Output_Notes"),
         (
-            f"AP1-IG Meta Reel create failed at {stamp_minutes()}.\n"
-            f"Status code: {status_code}\n"
+            (f"AP1-IG Meta Reel outcome ambiguous at {stamp_minutes()}.\n" if ambiguous
+             else f"AP1-IG Meta Reel create failed at {stamp_minutes()}.\n")
+            + f"Status code: {status_code}\n"
             f"Status: {status}\n"
             + (
                 "Publish lock cleared; Item6 replacement blocked automatic retry."
                 if replacing
-                else f"Publish lock cleared; retry eligible after {retry_stamp}."
+                else ("Publish lock cleared; ambiguous Graph side effect requires receipt reconciliation, no new create."
+                      if ambiguous else f"Publish lock cleared; retry eligible after {retry_stamp}.")
             )
         ),
     )
@@ -438,7 +530,7 @@ def _mark_failed(client: AirtableClient, output: dict[str, Any], exc: Exception)
         "Publish_Started_At": None,
         "Publish_Error_Message": message[:1500],
         "Output_Notes": notes,
-        "Manual_Fallback_Required": replacing,
+        "Manual_Fallback_Required": replacing or ambiguous,
     }
     if replacing:
         fields.update(
@@ -455,6 +547,16 @@ def _mark_failed(client: AirtableClient, output: dict[str, Any], exc: Exception)
                 ),
             }
         )
+    elif ambiguous:
+        # A timed-out Graph create or a failure after media_publish may have
+        # succeeded remotely. Preserve every saved container and prohibit an
+        # unattended new Graph create until exact provider reconciliation.
+        fields.update({
+            "Publish_Status": PUBLISH_STATUS_FAILED,
+            "Publish_Retry_Eligible": False,
+            "Publish_Next_Retry_At": None,
+        })
+        fields.pop("Last_Publish_Attempt_At", None)
     else:
         fields.update(
             {

@@ -61,6 +61,15 @@ function check(row) {
 /** Precise operator sentences. `kind` matches a classifier or tester assertion. */
 export const QUALITY_CHECKS = Object.freeze([
   check({
+    id: "ig_stale_upload",
+    signature: "QA-IG-STALE-UPLOAD",
+    title: "Flag orphaned Instagram Reel AP1-IG publish locks after 30 minutes for identity-safe recovery",
+    lane: "service",
+    kind: "ig_stale_upload",
+    actor: "desk_agent",
+    heal: "ticket_only", // fail closed until production lease/Meta/MAE adapters are proven
+  }),
+  check({
     id: "scripted_short_producer_constraints",
     signature: "QA-SCRIPTED-SHORT-PRODUCER-CONSTRAINTS",
     title: "Block scripted-short production when the saved Producer Plan, required uploads, scene assignments, profile, or requested topic no longer match",
