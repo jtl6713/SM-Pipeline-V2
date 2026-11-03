@@ -1,0 +1,38 @@
+name: Story R4 Slot Read-Only Diagnostic 1542
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/story-r4-slot-readonly-1542.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Read public Remotion health; no job creation or mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=$(curl --retry 1 --max-time 15 -sS -o /tmp/health.json -w '%{http_code}' \
+            -H 'Accept: application/json' \
+            'https://render.chicagoshining.com/health' || true)
+          echo "render_health_http=$status"
+          if [ "$status" != 200 ]; then
+            echo "render_health_unavailable=true"
+            exit 1
+          fi
+          jq -e 'type == "object"' /tmp/health.json >/dev/null
+          jq -c '{
+            active: (.remotionActiveRenders // null),
+            in_flight: (.remotionInFlightJobs // null),
+            max_concurrent: (.remotionMaxConcurrent // null),
+            queued: (.remotionQueuedRenders // null),
+            status: (.status // null)
+          }' /tmp/health.json
+          echo "read_only=true, render_requests=0, approval_changes=0, publish_changes=0"
