@@ -8,7 +8,7 @@ export const GLOBAL_IDEA_TARGET_SETTING = "STUDIO_GLOBAL_AUTOMATIC_IDEA_TARGET";
 export const GLOBAL_IDEA_TARGET_MAX = 10000;
 /** Missing setting preserves the existing default; a malformed saved setting fails closed. */
 export function parseGlobalIdeaTarget(raw) {
-  if (raw === undefined || raw === null) return 1000;
+  if (raw === undefined || raw === null) return 500;
   const value = typeof raw === "number" ? raw : Number(String(raw).trim());
   return Number.isSafeInteger(value) && value >= 1 && value <= GLOBAL_IDEA_TARGET_MAX ? value : null;
 }
@@ -23,12 +23,12 @@ export function globalIdeaPipelineLoad(scores, profileIds) {
   }
   return Number.isSafeInteger(total) ? total : null;
 }
-/** One 10-idea refill batch whenever verified global inventory is below the target. */
+/** Estimate five output slots per new idea; never create when global inventory is unverified. */
 export function globalAutomaticIdeaBudget(globalLoad, target) {
   if (!Number.isSafeInteger(globalLoad) || globalLoad < 0) return 0;
   const limit = parseGlobalIdeaTarget(target);
   if (limit === null) return 0;
-  return globalLoad < limit ? AUTONOMOUS_IDEAS_PER_HOUR : 0;
+  return Math.max(0, Math.ceil((limit - globalLoad) / AUTONOMOUS_EXPECTED_OUTPUTS_PER_IDEA));
 }
 
 /** All-Profiles load per city: keep Scheduled + Awaiting Approval at or above this. */
