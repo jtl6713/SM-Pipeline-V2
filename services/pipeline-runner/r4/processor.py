@@ -135,6 +135,10 @@ def _eligible_exact_output(
             return False
     elif actual_test:
         return False
+    # A stale Worker queue snapshot must never relaunch a saved or completed
+    # Remotion job, even if a stale admission changed Render_Status to Ready.
+    if field_str(output, "Remotion_Job_ID") or field_str(output, "Final_File_URL"):
+        return False
     if field_str(output, "Render_Status") != "Ready for Render":
         return False
     if not field_str(output, "Composition_ID"):
@@ -431,6 +435,17 @@ def process_one(
     # clearing old artifacts and again before launch so a concurrent Studio edit
     # cannot cause R4 to start an older visual/script revision.
     current = client.get_record(PLATFORM_OUTPUTS_TABLE, output["id"])
+    # Re-check the irreversible launch guard immediately before clearing prior
+    # artifacts. A final file or existing job is authoritative, irrespective
+    # of a concurrent Worker status-only Ready patch.
+    if field_str(current, "Remotion_Job_ID") or field_str(current, "Final_File_URL"):
+        return {
+            "processed": False,
+            "reason": "render_already_started",
+            "output_record_id": output["id"],
+            "output_id": field_str(output, "Output_ID"),
+            "make_scenario_id": MAKE_SCENARIO_ID,
+        }
     snapshot_error = render_snapshot_error(expected_snapshot, expected_revision, current)
     if snapshot_error:
         return {
