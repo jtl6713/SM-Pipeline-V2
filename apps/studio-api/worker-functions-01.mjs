@@ -11585,7 +11585,7 @@ export async function studioHealVoiceoverExceedsRender(env, options = {}) {
 }
 /*__STUDIO_WORKER_END:studioHealVoiceoverExceedsRender__*/
 
-export async function healStuckStudioRenders(env) {
+export async function healStuckStudioRenders(env, { skipR4Admission = false } = {}) {
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const pulses = [];
   const voCache = { parents: new Map(), requests: new Map() };
@@ -11731,11 +11731,13 @@ export async function healStuckStudioRenders(env) {
       continue;
     }
   }
-  try {
-    const admitted = await studioAdmitRenderQueue(env, { limit: 80 });
-    pulses.push({ key: "R4_QUEUE_ADMIT", ...admitted });
-  } catch (error) {
-    pulses.push({ key: "R4_QUEUE_ADMIT", error: error instanceof Error ? error.message : String(error) });
+  if (!skipR4Admission) {
+    try {
+      const admitted = await studioAdmitRenderQueue(env, { limit: 80 });
+      pulses.push({ key: "R4_QUEUE_ADMIT", ...admitted });
+    } catch (error) {
+      pulses.push({ key: "R4_QUEUE_ADMIT", error: error instanceof Error ? error.message : String(error) });
+    }
   }
   // Completed MP4 left on Render_Status=Rendering / Output_Status=In Production
   // (Output 1807 YouTube Short). longRendering below requires a Remotion job and
