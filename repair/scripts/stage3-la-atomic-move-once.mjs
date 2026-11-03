@@ -20,7 +20,15 @@ function assert(condition,why){if(!condition)throw Error(why)}
 async function cf(path,options={}){
   const r=await fetch(ROOT+path,{...options,headers:{Authorization:'Bearer '+TOKEN,...(options.headers||{})},signal:AbortSignal.timeout(45000)});
   const body=await r.json().catch(()=>({}));
-  if(!r.ok||body.success!==true)throw Error('cloudflare_http_'+r.status+'_'+path.split('/').slice(-1)[0]);
+  if(!r.ok||body.success!==true){
+    if(path.endsWith('/settings')&&options.method==='PATCH'){
+      report.cloudflare_settings_error=(body.errors||[]).map(e=>({
+        code:Number(e.code)||0,
+        message:String(e.message||'').slice(0,180),
+      })).slice(0,5);
+    }
+    throw Error('cloudflare_http_'+r.status+'_'+path.split('/').slice(-1)[0]);
+  }
   return body.result;
 }
 async function settingsPatch(bindings){
