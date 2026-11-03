@@ -1257,6 +1257,7 @@ export async function studioAdmitRenderQueue(env, options = {}) {
     "stale_render_package",
     "studio_visual_integrity_blocked",
     "voiceover_exceeds_video",
+    "private_drive_watermark_renderer_not_updated",
   ]);
   const manualPriority = Array.isArray(controls?.render_priority) && controls.render_priority.length > 0;
   const maxAttempts = manualPriority ? 1 : Math.min(4, queueOrder.length);
@@ -1303,7 +1304,7 @@ export async function studioAdmitRenderQueue(env, options = {}) {
       };
     }
 
-    const skipReason = String(started?.details?.run?.reason || "").trim();
+    const skipReason = String(started?.details?.run?.reason || started?.details?.reason || "").trim();
     if (started?.status === "skipped" && safeSkippedReasons.has(skipReason)) {
       skipped.push({ id: head.id, reason: skipReason });
       await env.STUDIO_MEDIA.put(cursorKey, head.id).catch(() => null);
