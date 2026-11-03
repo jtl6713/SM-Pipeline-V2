@@ -28,24 +28,39 @@ jobs:
           python - <<'PY'
           import json,re
           from pathlib import Path
-          lines=Path('/tmp/story-tail.jsonl').read_text(errors='replace').splitlines()
+          data=Path('/tmp/story-tail.jsonl').read_text(errors='replace')
+          lines=data.splitlines()
           matches=[]
           tokens=('R4_QUEUE_ADMIT','studio stuck-render','Studio output watchdog',
                   'cron skipped: Airtable cooling','R4 queue','r4_launch_not_confirmed',
                   'no_render_started','r4_start_failed','remotion_slot_busy','R4')
-          for raw in lines:
+          decoder=json.JSONDecoder()
+          pos=0
+          decoded=0
+          log_messages=0
+          cron_events=0
+          while pos < len(data):
+              while pos < len(data) and data[pos].isspace():
+                  pos+=1
+              if pos >= len(data): break
               try:
-                  event=json.loads(raw)
-              except Exception:
+                  event,end=decoder.raw_decode(data,pos)
+              except json.JSONDecodeError:
+                  newline=data.find('\n',pos)
+                  if newline<0: break
+                  pos=newline+1
                   continue
-              if not isinstance(event,dict):
-                  continue
+              pos=end
+              if not isinstance(event,dict): continue
+              decoded+=1
               event_meta=event.get('event') or {}
               if not isinstance(event_meta,dict): event_meta={}
               cron=bool(event_meta.get('cron') or event_meta.get('scheduledTime'))
+              if cron: cron_events+=1
               logs=event.get('logs') or []
               if not isinstance(logs,list): logs=[logs]
               for log in logs:
+                  log_messages+=1
                   if isinstance(log,dict):
                       value=log.get('message','')
                       msg=' '.join(str(v) for v in value) if isinstance(value,list) else str(value)
@@ -54,6 +69,7 @@ jobs:
                       msg=re.sub(r'https?://\S+','[URL]',msg)
                       msg=re.sub(r'[\w.+-]+@[\w.-]+','[EMAIL]',msg)
                       matches.append({'cron':cron,'message':msg[:450]})
+          print('decoded_events=',decoded,'cron_events=',cron_events,'log_messages=',log_messages)
           print('tail_json_events=',len(lines),'matched_r4_logs=',len(matches))
           for match in matches[:28]:
               print(json.dumps(match,ensure_ascii=True))
