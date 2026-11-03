@@ -670,3 +670,5 @@ Deploy Studio UI 0.6.866: recover exact-ID legacy/global Factory pending approva
 Deploy Studio UI 0.6.867: retry ambiguous Factory HTTP 500 once using exact saved request ID after read-only verification.
 Deploy Studio UI 0.6.868: reconcile pending Factory approval before enabling any new submit; fix 2-of-12 stale counts.
 Deploy Studio UI 0.6.869: fix hidden Factory recovery control and clear stale 500 banner after authoritative saved-request reconciliation.
+
+2026-11-03 UI 0.6.870 Michigan Avenue #9593 protected accepted-V2 Factory handoff action; gated existing POST, no approval or publication side effects. Regression and release check before deployment.
