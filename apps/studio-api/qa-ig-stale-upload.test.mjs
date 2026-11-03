@@ -216,5 +216,7 @@ test("durable pagination cursor eventually audits newer locks behind an old back
   assert.equal(firstRun[0].record_id,first.id);
   assert.equal(secondRun[0].record_id,second.id);
   assert.ok(pages[1].includes("offset=page-two"));
+  assert.equal(new URLSearchParams(pages[0].slice(1)).get("filterByFormula"),
+    new URLSearchParams(pages[1].slice(1)).get("filterByFormula"));
   assert.equal(JSON.parse(cursorBytes).offset,null);
 });
