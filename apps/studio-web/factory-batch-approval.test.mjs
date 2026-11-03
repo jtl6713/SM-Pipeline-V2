@@ -377,3 +377,18 @@ test("Factory partly committed global groups preserve unsubmitted selection", as
   assert.ok(h.state.selectedOutputs.has("recExistingB"));
   assert.ok(h.state.selectedOutputs.has("recNewChicago"));
 });
+
+test("Factory retries one HTTP 500 only under the saved exact request ID after reconciliation", () => {
+  const fn=extractNamedFunction(js,"factorySubmitRetryDelayMs");
+  const delay=new Function(fn+"; return factorySubmitRetryDelayMs;")();
+  assert.ok(delay(Object.assign(new Error("Factory desk timed out or failed (500)"),{status:500}))>=2000,
+    "ambiguous 500 should have a bounded same-ID retry path");
+  assert.equal(delay(Object.assign(new Error("Validation failed"),{status:409})),0,
+    "authorization and validation conflicts are never retried");
+  assert.equal(delay(Object.assign(new Error("Bad selection"),{status:400})),0);
+  assert.match(js,/batch = await recoverSubmittedFactoryPlan\(plan, error\)/,
+    "the exact original id must be checked before another POST");
+  assert.match(js,/const submitPlan = \(\) => fetchJson\("\/api\/factory\/approval-batches"/);
+  assert.match(js,/batch = await submitPlan\(\);[\s\S]*?batch = await recoverSubmittedFactoryPlan\(plan, retryError\)/,
+    "retry must reuse the same request body and perform one more exact-ID recovery");
+});
