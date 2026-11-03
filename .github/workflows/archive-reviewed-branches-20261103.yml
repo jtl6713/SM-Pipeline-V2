@@ -1,0 +1,197 @@
+name: Archive and retire 2026-11-03 reviewed branch heads
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/archive-reviewed-branches-20261103.yml'
+permissions:
+  contents: write
+  pull-requests: read
+  actions: read
+concurrency:
+  group: archived-branch-cleanup-20261103
+  cancel-in-progress: false
+jobs:
+  archive-and-prune:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Verify exact inactive refs, archive immutable heads, safely prune
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, subprocess, time
+          import urllib.parse, urllib.request, urllib.error
+          REPO = "jtl6713/SM-Pipeline-V2"
+          SELF = "chore/archive-reviewed-branches-20261103"
+          # All obsolete heads must have no open PRs; preserve every SHA first.
+          KEEP = set(["fix/story-r4-finished-media-duplicate-fence-20261103","feat/vibe-cut-isolated-contracts-20261101","feat/qa-test-center-foundation-20261031"])
+          KEEP_IDLE = set(["diag/r4-last-launch-receipt-20261103"])
+          # (exact branch SHA, closed-unmerged PR number). None = no PR.
+          CANDIDATES = {
+            "archive/pr-1417-mixed-source-20261101": ("1a2f5f333ebf2875b51c0f7bc24eb2cd3dd43013", None),
+            "diagnostic/1542-runner-binding-health": ("90de8340b7ad182c59ded3efbeb44ab314450b99", None),
+            "feat/creative-master-propagation": ("e446cd9d7e6a258e600d78ba991eab8b7a8aceb5", None),
+            "feat/factory-matching-correction-preflight-20261031": ("a53a6fd39d0802542c6578e12e81fd01e7cf7a58", None),
+            "feat/1495-current-main-v855-20261101": ("f149da602fed67b96e5c15b6f77491288ec13429", None),
+            "feat/1495-final-rebase-20261101": ("2a93e9e599fe131216a64ca5fb7cd77fd753efeb", None),
+            "feat/1495-gallery-selection-preflight-20261101": ("463487109228c49cfe7d3363483fd639c37c344b", None),
+            "feat/1495-release-reconciled-20261101": ("b7d789b89cf30ea79bf0cd30b66e7e6c0d9cec08", None),
+            "fix/asset-manager-upload-progress-20261101": ("1d9f84be04de50aaeec65c621447aa607ed7f2bc", None),
+            "fix/explicit-feedback-approval-continuous-comments-20261101": ("dca6604ebd6b7ca2c1fed018073b539898ea845b", None),
+            "fix/factory-held-approval-visibility-9593": ("ba75b7e2f55d2f6d86f5865f751cece2df9e62ee", None),
+            "fix/factory-held-v2-qa-rebased-20261101": ("317f6c36fbfdc64c67f51b78d0ed2ecc9706fd84", None),
+            "fix/factory-preflight-transient-diagnostics-20261103": ("21eeff3f0188ea70a400e936854bebc4c1140c49", None),
+            "fix/factory-watermark-qa-completion-20261101": ("b2d85146624cb55b6eac3059d5d567a611ff9a2e", None),
+            "fix/home-pipeline-total-left-20261101": ("fca40ac5c8f443b04e0851cc1746df2c4f8ed6e8", None),
+            "fix/qa-exclude-retired-stories-20261029": ("374e671ffd2fca2b43da6bd0716e03b3d494fa77", None),
+            "fix/render-review-v2-conversation-state": ("8f0eb5a011722b20548e991703d2e49489a2959c", None),
+            "fix/review-approved-handoff-qa-20261101": ("c486ba99ac1c6b7484834120ef1b5ed99d0fb834", None),
+            "fix/review-attention-stages-20261101": ("b85d33d65818afb04904743c8caad1c3901dbad1", None),
+            "fix/review-library-crop-prep-1503": ("9bd58ca8bbb3e1fec703e3af38f0ee6e6343a053", None),
+            "fix/stage3-la-bridge-propagation-retry": ("dfb44523a371120fd6e76eb40dd9d6ef0402d740", None),
+            "fix/story-r4-ignore-expired-manual-priorities-20261103": ("1195cf45182da9704453d627a63d45fd0c1f7cde", None),
+            "fix/story-r4-stale-active-hold-recovery-20261103": ("d5ac3553faa1a80bbe8f06a8070775c1b7efe0a1", None),
+            "fix/story-seed-occupancy-20261031": ("a18e4f87cf58146f9e9df11e5c57f084afd9b74a", None),
+            "fix/studio-missing-pipeline-settings-invalidation-20261101": ("b175820ff01f477cfef382a47a6a8c51c81c2af9", None),
+            "fix/vibe-auto-to-approval-20261101": ("2b7695ca0b23b622265297501f8f3d63303d1a97", None),
+            "fix/vibe-cut-ideas-20261031": ("76bab826a6de1a8d0dde693d328c85271bb1a247", None),
+            "fix/vibe-processing-guidance-20261101": ("4a46db4de25806a3e88da000b2980ff032ab0996", None),
+            "fix/vibe-review-reconciled-20261101": ("44c5e5db213db392644f854f32c385e1f2a7ca17", None),
+            "fix/vibe-upload-preflight-segments-20261101": ("813196bd69e3721b2085b28fbc96aeb876cd956c", None),
+            "fix/vibe-upload-processing-guidance-20261101": ("2c6ac25543e68707450866c6d4831a583c37d5f8", None),
+            "fix/vibe-upload-segment-progress-iphone": ("654879f6071c2c5ed62377a1263f790de7201422", None),
+            "fix/vibe-upload-status-guidance-20261101": ("864e253d1b5ac6cef9df27b2a793636843cb7341", None),
+            "ops/story-r4-clear-obsolete-priorities-20261103": ("93950cc1a4d999ab2bbf4906c6b605c7375a7278", None),
+            "perf/airtable-429-exact-telemetry-20261101": ("53eb8f60172a93ca08fceb35f2328470a2e72b60", None),
+            "release/studio-worker-0727-scripted-short-named-revisions": ("f08d310b18bfc3c543bb58efc04047c10c0cc420", None),
+            "test/i1-durable-production-canary-20261101": ("5c9cee1a38670c0cccb08ce072b3cfe5628e7b8b", None),
+          }
+          if os.getenv("GITHUB_REPOSITORY") != REPO or os.getenv("GITHUB_REF") != "refs/heads/main":
+              raise SystemExit("Refuse: wrong repository or ref")
+          headers = {
+              "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+              "Accept": "application/vnd.github+json",
+              "Content-Type": "application/json",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+          def api(path, method="GET", body=None):
+              req = urllib.request.Request(
+                  "https://api.github.com/repos/" + REPO + "/" + path,
+                  headers=headers, method=method,
+                  data=None if body is None else json.dumps(body).encode(),
+              )
+              with urllib.request.urlopen(req, timeout=40) as resp:
+                  data = resp.read().decode()
+                  return json.loads(data) if data else None
+          def branch_listing():
+              rows = api("branches?per_page=100")
+              if len(rows) >= 100:
+                  raise SystemExit("Refuse: incomplete branch inventory")
+              return {x["name"]: x for x in rows}
+          def check_active_prs(inventory):
+              rows = api("pulls?state=open&per_page=100")
+              if len(rows) >= 100:
+                  raise SystemExit("Refuse: possibly incomplete open PR list")
+              heads = {p["head"]["ref"] for p in rows
+                       if (p["head"].get("repo") or {}).get("full_name") == REPO}
+              if (set(CANDIDATES) | {SELF}) & heads:
+                  raise SystemExit("Refuse: reviewed cleanup candidate gained an open PR")
+              if (KEEP & set(inventory)) - heads:
+                  raise SystemExit("Refuse: retained branch has no active open PR")
+              return heads
+          def branch_path(name):
+              return urllib.parse.quote(name, safe="/")
+          # Fail closed BEFORE tagging or deletion on new/moving/unexpected branches.
+          inventory = branch_listing()
+          required = {"main"} | set(CANDIDATES)
+          allowed = required | {SELF} | KEEP | KEEP_IDLE
+          if not required.issubset(inventory) or set(inventory) - allowed:
+              raise SystemExit("Refuse: changed inventory " + repr(sorted(set(inventory) ^ allowed)))
+          check_active_prs(inventory)
+          for name, (sha, pr_number) in CANDIDATES.items():
+              row = inventory[name]
+              if row.get("protected") or row["commit"]["sha"] != sha:
+                  raise SystemExit("Refuse: protected/moved " + name)
+              head_prs = api("pulls?state=all&per_page=100&head=" +
+                            urllib.parse.quote("jtl6713:" + name, safe=""))
+              if any(p["state"] != "closed" or p["head"]["ref"] != name
+                     for p in head_prs):
+                  raise SystemExit("Refuse: branch has active PR " + name)
+          if SELF in inventory and inventory[SELF].get("protected"):
+              raise SystemExit("Refuse: protected maintenance PR branch")
+          self_prs = api("pulls?state=closed&per_page=100&head=" +
+                        urllib.parse.quote("jtl6713:" + SELF, safe=""))
+          merged_self = [p for p in self_prs if p.get("merged_at") and
+                         p["head"]["ref"] == SELF]
+          if len(merged_self) != 1:
+              raise SystemExit("Refuse: cleanup PR has not merged")
+          self_sha = merged_self[0]["head"]["sha"]
+          if SELF in inventory and inventory[SELF]["commit"]["sha"] != self_sha:
+              raise SystemExit("Refuse: maintenance branch moved")
+          # Do not delete a head running jobs: someone may be actively using it.
+          for name in CANDIDATES:
+              runs = api("actions/runs?per_page=30&branch=" +
+                         urllib.parse.quote(name, safe=""))
+              if any(r["status"] not in ("completed",) for r in runs.get("workflow_runs", [])):
+                  raise SystemExit("Refuse: active Actions run on " + name)
+          print("PREFLIGHT_OK branches=" + str(len(CANDIDATES)), flush=True)
+          heads = {name: pair[0] for name, pair in CANDIDATES.items()}
+          if SELF in inventory:
+              heads[SELF] = self_sha
+          # Preserve every historical branch head, including unique unmerged
+          # experiments, as an immutable recoverable tag before any deletion.
+          for name, sha in heads.items():
+              tag = "archive/branch-cleanup-20261103/" + name.replace("/", "--")
+              path = "git/ref/tags/" + branch_path(tag)
+              try:
+                  existing = api(path)
+                  if existing["object"]["sha"] != sha:
+                      raise SystemExit("Refuse: archive tag collision " + name)
+              except urllib.error.HTTPError as exc:
+                  if exc.code != 404:
+                      raise
+                  api("git/refs", "POST", {"ref": "refs/tags/" + tag, "sha": sha})
+              for attempt in range(12):
+                  try:
+                      if api(path)["object"]["sha"] != sha:
+                          raise SystemExit("Refuse: archive tag mismatch " + name)
+                      break
+                  except urllib.error.HTTPError as exc:
+                      if exc.code != 404:
+                          raise
+                      time.sleep(1)
+              else:
+                  raise SystemExit("Refuse: archive tag not verified " + name)
+              print("ARCHIVED " + name + " -> " + tag, flush=True)
+          print("ALL_HISTORY_ARCHIVED_BEFORE_DELETE", flush=True)
+          # Last-minute checks and lease-guarded remote delete: a new push cannot
+          # silently lose work. Any concurrency drift leaves the affected branch.
+          for name, sha in heads.items():
+              if name not in branch_listing():
+                  print("ALREADY_DELETED " + name, flush=True)
+                  continue
+              check_active_prs(branch_listing())
+              current = api("branches/" + branch_path(name))
+              if current.get("protected") or current["commit"]["sha"] != sha:
+                  raise SystemExit("Refuse: branch moved since archive " + name)
+              ref = "refs/heads/" + name
+              subprocess.run(["git", "push",
+                              "--force-with-lease=" + ref + ":" + sha,
+                              "origin", ":" + ref], check=True, timeout=60)
+              print("LEASE_DELETED " + name, flush=True)
+          final = branch_listing()
+          if set(final) != ({"main"} | KEEP | KEEP_IDLE):
+              raise SystemExit("Unexpected branch inventory after cleanup: " +
+                               repr(sorted(final)))
+          check_active_prs(final)
+          print("BRANCH_CLEANUP_COMPLETE retained=" + ",".join(sorted(final)) +
+                " archived=" + str(len(heads)))
+          PY
