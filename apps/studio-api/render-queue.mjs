@@ -24,6 +24,21 @@ export function isRenderQueueCandidateStatus(status) {
 }
 
 /**
+ * A display-only waiting position must describe a genuinely launchable queue
+ * row, not an old Waiting/Ready label whose Remotion job or final video exists.
+ * Actual R4 admission still independently checks the complete render manifest.
+ */
+export function isOpsRenderQueueCandidate(record, field = (row, name) => row?.fields?.[name]) {
+  const status = String(field(record, "Render_Status") || "").trim();
+  const output = String(field(record, "Output_Status") || "").trim();
+  return isRenderQueueCandidateStatus(status) &&
+    !String(field(record, "Test_Run_ID") || "").trim() &&
+    !String(field(record, "Remotion_Job_ID") || "").trim() &&
+    !String(field(record, "Final_File_URL") || "").trim() &&
+    !["Rendered", "Ready for Review", "Approved", "Approved for Publishing", "Published"].includes(output);
+}
+
+/**
  * Queue enumeration is a snapshot. R5 can finish a render before the Worker
  * stamps Waiting, so each status-only stamp must use a fresh Airtable read.
  * Never regress an existing job, final file or human-review state.
