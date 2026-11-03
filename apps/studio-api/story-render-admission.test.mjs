@@ -81,6 +81,17 @@ test("R4 rereads canonical output before a Ready patch and never relaunches fini
 });
 
 
+test("five-minute R4 admission runs independently of long cron maintenance without duplicate late launch", () => {
+  const worker = readFileSync(new URL("./worker.js", import.meta.url), "utf8");
+  const healer = readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
+  assert.match(worker,/ctx\.waitUntil\(studioAdmitRenderQueue\(env, \{ limit: 80 \}\)/);
+  assert.match(worker,/await healStuckStudioRenders\(env, \{ skipR4Admission: true \}\)/);
+  assert.match(healer,/if \(!skipR4Admission\)/);
+  assert.ok(worker.indexOf("ctx.waitUntil(studioAdmitRenderQueue") <
+    worker.indexOf("await factoryBatchCronResume(env, ctx);"));
+});
+
+
 test("R4 cron log exposes only bounded admission refusal, not render payload", () => {
   const source = readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
   const body = source.split("export async function healStuckStudioRenders")[1]
