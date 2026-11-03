@@ -237,3 +237,40 @@ def test_ap1_ig_pre_graph_failure_keeps_bounded_retry_when_no_request_was_sent()
     assert fields["Publish_Status"] == "Ready to Publish"
     assert fields["Publish_Retry_Eligible"] is True
     assert fields["Platform_Media_ID"] == ""
+
+
+def test_ap1_ig_guard_cleanup_accepts_airtable_millisecond_utc_echo():
+    from ap1_ig.processor import _release_preflight_lock_if_exact_owner
+
+    lock_stamp = "2026-11-02T17:01:00Z"
+    class Fake:
+        def __init__(self, changed=False):
+            self.fields = {
+                "Publish_Locked_By": "AP1-IG",
+                "Publish_Locked_At": "2026-11-02T17:01:00.000Z",
+                "Last_Publish_Attempt_At":
+                    "2026-11-02T17:01:00.000+00:00",
+                "Publish_Status": "Publishing",
+                "Platform_Media_ID": "18127559140783117",
+            }
+            if changed:
+                self.fields["Publish_Locked_At"] = "2026-11-02T17:01:01.000Z"
+            self.writes = []
+        def get_record(self, table, record_id):
+            return {"id": record_id, "fields": self.fields}
+        def update_record(self, table, record_id, patch, **kwargs):
+            self.writes.append(patch)
+
+    client = Fake()
+    assert _release_preflight_lock_if_exact_owner(
+        client, "recABCDEFGHIJKLMN", lock_stamp, reason="review_hold"
+    ) is True
+    assert len(client.writes) == 1
+    assert client.writes[0]["Publish_Locked_By"] == ""
+    assert "Platform_Media_ID" not in client.writes[0]
+
+    moved = Fake(changed=True)
+    assert _release_preflight_lock_if_exact_owner(
+        moved, "recABCDEFGHIJKLMN", lock_stamp, reason="review_hold"
+    ) is False
+    assert moved.writes == []
