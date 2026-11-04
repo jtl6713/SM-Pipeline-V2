@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   factoryOutputClaimReserve, factoryOutputClaimInspect,
-  FACTORY_OUTPUT_CLAIMS_PREFIX,
+  factoryOutputClaimReclaimIfSafe, FACTORY_OUTPUT_CLAIMS_PREFIX,
+  FACTORY_UNBACKED_CLAIM_GRACE_MS,
 } from "./factory-approval-output-claims.mjs";
 
 const profile = "recLosAngelesProfile";
@@ -100,6 +101,56 @@ test("interrupted enrollment remains claimed for its original request ID", async
   assert.equal(recovery.ok, true);
 });
 
+test("unbacked claims stay sticky inside grace then transfer to a new request ID", async () => {
+  const bucket = new R2();
+  const claimedAt = "2026-11-04T12:00:00.000Z";
+  await factoryOutputClaimReserve(bucket, { profileId: profile, requestId: groupA, ids });
+  const registry = bucket.items.get(FACTORY_OUTPUT_CLAIMS_PREFIX + "/" + profile + ".json");
+  for (const id of ids) registry.value.outputs[id].at = claimedAt;
+  const withinGrace = Date.parse(claimedAt) + FACTORY_UNBACKED_CLAIM_GRACE_MS - 1_000;
+  const blocked = await factoryOutputClaimReclaimIfSafe(bucket, {
+    profileId: profile, requestId: groupB, ids, nowMs: withinGrace,
+  });
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.conflicts[0].reason, "unbacked_within_grace");
+  const afterGrace = Date.parse(claimedAt) + FACTORY_UNBACKED_CLAIM_GRACE_MS + 1_000;
+  const reclaimed = await factoryOutputClaimReclaimIfSafe(bucket, {
+    profileId: profile, requestId: groupB, ids, nowMs: afterGrace,
+  });
+  assert.equal(reclaimed.ok, true);
+  assert.deepEqual(reclaimed.reclaimed, ids);
+  const reserved = await factoryOutputClaimReserve(bucket, {
+    profileId: profile, requestId: groupB, ids,
+  });
+  assert.equal(reserved.ok, true);
+  assert.equal(reserved.already_reserved, true);
+});
+
+test("terminal failed child ledger may be reclaimed; approved ownership may not", async () => {
+  const failedBucket = new R2();
+  await factoryOutputClaimReserve(failedBucket, { profileId: profile, requestId: groupA, ids });
+  const prefix = "studio/state/factory-approvals/v2/jobs/" + profile + "/";
+  await failedBucket.put(prefix + groupA + ".json", JSON.stringify(legacyJob(
+    "failed", groupA, ids.map(id => ({ id, status: "failed" })), "2026-11-04T12:00:00Z")));
+  const ok = await factoryOutputClaimReclaimIfSafe(failedBucket, {
+    profileId: profile, requestId: groupB, ids,
+  });
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.reclaimed, ids);
+
+  const approvedBucket = new R2();
+  await factoryOutputClaimReserve(approvedBucket, {
+    profileId: profile, requestId: groupA, ids: [ids[0]],
+  });
+  await approvedBucket.put(prefix + groupA + ".json", JSON.stringify(legacyJob(
+    "approved", groupA, [{ id: ids[0], status: "approved" }], "2026-11-04T12:05:00Z")));
+  const blocked = await factoryOutputClaimReclaimIfSafe(approvedBucket, {
+    profileId: profile, requestId: groupB, ids: [ids[0]],
+  });
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.conflicts[0].reason, "durable_active_or_approved");
+});
+
 test("legacy ledgers migrate oldest valid owner; superseded duplicates do not own claims", async () => {
   const bucket = new R2();
   const prefix = "studio/state/factory-approvals/v2/jobs/" + profile + "/";
@@ -136,6 +187,7 @@ test("global and profile-local routes share the same canonical output-ID fence",
   const worker = readFileSync(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
   assert.match(worker, /factoryOutputClaimReserve/);
   assert.match(worker, /factoryOutputClaimInspect/);
+  assert.match(worker, /factoryOutputClaimReclaimIfSafe/);
   assert.match(worker, /factoryGroupRecordsFromAirtablePreflight\(\s*env, authorization, ids, payload, policy/);
   assert.match(worker, /duplicate_prevented: true/);
   const ui = readFileSync(new URL("../studio-web/assets/factory-desk.js", import.meta.url), "utf8");
