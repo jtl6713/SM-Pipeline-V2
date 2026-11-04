@@ -22,6 +22,10 @@ export const PRIORITY_VERIFIED_EXISTING_POSTS = Object.freeze([
   "recqLmTDQRqyB9ytE", // YouTube #3344
   "recxkZ1hBhREpsJgj", // YouTube #8098
   "recI3x5A6Cz9vIQIs", // YouTube #9277: verified publicly released, private Studio handoff stale
+  // These two are approved/due with pre-existing IDs, NOT yet provider-verified.
+  // Authenticated exact-channel GET and status-only preflight remain compulsory.
+  "rece57RpkWLMOpZ47", // YouTube #5327 Miami, wuPzjhhUFLs
+  "reccenlA9uIF2MtSd", // YouTube #4146 Chicago, Qokdf8u-shY
 ]);
 export const recoveryStateKey=id=>PREFIX+"outputs/"+id+".json";
 export async function readRecoveryState(bucket,key) {
