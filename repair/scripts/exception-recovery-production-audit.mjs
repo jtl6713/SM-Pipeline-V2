@@ -15,7 +15,7 @@ if(!/^rec[A-Za-z0-9]{14}$/.test(String(rollout.canary_record_id)) ||
    !Number.isInteger(rollout.canary_output_id)) throw new Error('invalid_canary_manifest');
 const bridge='studio-exception-admin-audit-'+String(process.env.GITHUB_RUN_ID||Date.now());
 const token=crypto.randomBytes(32).toString('hex');
-const report={source:'deployed_studio_service_binding',provider_operations:'GET only',conversation_write_only:true,output_writes:0,remote_writes:0,started_at:new Date().toISOString()};
+const report={source:'deployed_studio_service_binding',provider_operations:'GET only',allowed_control_plane_writes:['administrator_conversation','guarded_R2_Home_snapshot_refresh'],output_writes:0,remote_writes:0,started_at:new Date().toISOString()};
 let bridgeCreated=false;
 async function cf(path,options={}) {
  const response=await fetch(api+path,{...options,headers:{Authorization:'Bearer '+process.env.CLOUDFLARE_API_TOKEN,...options.headers},signal:AbortSignal.timeout(30000)});
