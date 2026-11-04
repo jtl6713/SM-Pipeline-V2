@@ -763,6 +763,7 @@
     try {
       if (remaining.length) {
         localStorage.setItem(FACTORY_PENDING_REQUEST_KEY, JSON.stringify({
+          ...pending,
           profile_id: "global",
           ids: remaining.flatMap((row) => row.ids || []),
           batches: remaining,
@@ -778,6 +779,7 @@
   }
 
   function reconcilePendingGlobalSelection(activity) {
+    if (state.submittingBatch) return 0;
     let pending = null;
     try { pending = JSON.parse(localStorage.getItem(FACTORY_PENDING_REQUEST_KEY) || "null"); } catch {}
     if (pending?.profile_id !== "global" || !Array.isArray(pending?.batches) || !pending.batches.length) return 0;
@@ -799,6 +801,7 @@
     try {
       if (remaining.length) {
         localStorage.setItem(FACTORY_PENDING_REQUEST_KEY, JSON.stringify({
+          ...pending,
           profile_id: "global",
           ids: remaining.flatMap((row) => row.ids || []),
           batches: remaining,
@@ -2763,7 +2766,7 @@
       if (!state.batchTimer) state.batchTimer = setInterval(() => {
         if (!document.hidden && $("page-factory")?.classList.contains("active")) {
           reconcilePersistedFactoryPending().catch(() => {});
-          refreshFactoryBatchActivity(true).catch(() => {});
+          refreshFactoryBatchActivity().catch(() => {});
         }
       }, 5000);
       const desk = await fetchJson("/api/factory/desk", { cache: "no-store" });

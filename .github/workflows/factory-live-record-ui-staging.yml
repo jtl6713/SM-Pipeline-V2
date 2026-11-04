@@ -2,6 +2,7 @@ name: Factory Live-Record UI Staging (No Publishing)
 on:
   pull_request:
     paths:
+      - "apps/studio-web/factory-submit-recovery.browser.mjs"
       - "apps/studio-web/factory-real-record-ui.staging.mjs"
       - "apps/studio-web/factory-batch-canary-ui.staging.mjs"
       - "apps/studio-web/factory-batch-multi-reel-ui.staging.mjs"
