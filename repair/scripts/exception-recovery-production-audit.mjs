@@ -64,7 +64,8 @@ try {
     '/${token}/conversation-denied':'/api/admin/exception-recovery/${instagramCanaryRecord}/conversation',
     '/${token}/preflight':'/api/admin/exception-recovery/${instagramCanaryRecord}/preflight',
     '/${token}/counts':'/api/admin/exception-recovery/counts?fresh=1',
-    '/${token}/quality':'/api/admin/exception-recovery',
+    // A parity verification must compare a fresh independent Airtable QA scan.
+    '/${token}/quality':'/api/admin/exception-recovery?fresh=1',
     '/${token}/home-refresh':'/api/profiles/overview/refresh',
     '/${token}/home-refresh-status':'/api/profiles/overview/refresh-status',
     '/${token}/home-overview':'/api/profiles/overview',

@@ -10146,8 +10146,12 @@ export async function gatherStudioDeskInventory(env) {
  */
 export async function getStudioExceptionRecoveryCenter(request, env) {
   try {
-    const snapshot = await loadStudioFailedOutputSnapshot(env);
     const url = new URL(request.url);
+    // Production Stage 3 ID parity must bypass the normal 60-second QA cache.
+    // Ordinary Center polling remains coalesced and read-only.
+    const snapshot = await loadStudioFailedOutputSnapshot(env, {
+      fresh: url.searchParams.get("fresh") === "1",
+    });
     const view = buildExceptionRecoveryCenter(snapshot, {
       profile_id: url.searchParams.get("profile_id"),
       platform: url.searchParams.get("platform"),
