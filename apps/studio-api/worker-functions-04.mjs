@@ -17396,7 +17396,7 @@ export async function factoryBatchSubmitRoute(request, env, authorization, ctx =
   let payload;
   try { payload = await request.json(); } catch { throw new HttpError(400, "Invalid JSON"); }
   const action = String(payload?.action || "start").toLowerCase();
-  if (action==="start_group"||action==="retry_group") {
+  if (action==="start_group"||action==="retry_group"||action==="validate_group") {
     return factoryBatchGroupSubmitRoute(request,env,authorization,payload,ctx);
   }
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
@@ -17608,7 +17608,8 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
     }
     return respond(request,env,{...updated,accepted:true});
   }
-  if (action!=="start_group") throw new HttpError(400,"Invalid group action");
+  const validateOnly = action === "validate_group";
+  if (action!=="start_group" && !validateOnly) throw new HttpError(400,"Invalid group action");
   const rawIds=payload?.record_ids;
   if (!Array.isArray(rawIds)||!rawIds.length||rawIds.length>policy.max_total) {
     throw new HttpError(400,"Select 1–20 distinct outputs for global Factory batch");
@@ -17617,7 +17618,7 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
   if (ids.length>policy.max_total||ids.some(id=>!/^rec[A-Za-z0-9]+$/.test(id))) {
     throw new HttpError(400,"Invalid Factory output selection");
   }
-  const existing=await factoryApprovalGroupRead(env.STUDIO_MEDIA,requestId);
+  const existing=validateOnly ? null : await factoryApprovalGroupRead(env.STUDIO_MEDIA,requestId);
   if (existing) {
     if (existing.records.length!==ids.length||
         existing.records.some(row=>!ids.includes(row.id))) {
@@ -17674,6 +17675,14 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
   } catch (error) {
     throw new HttpError(400, error.message || "Invalid global Factory group");
   }
+
+  // Authenticated preflight diagnostics execute the identical canonical reads
+  // and profile checks, then stop BEFORE any R2 access, claim or approval.
+  if (validateOnly) return respond(request, env, {
+    accepted: false, read_only: true, preflight_valid: true,
+    request_id: requestId, records: records.map(({id, output_id, profile_id}) =>
+      ({id, output_id, profile_id})),
+  });
 
   // First inspect *every* profile before mutating any claim registry. This
   // avoids reservations for ordinary partial-overlap errors. The subsequent
@@ -17807,7 +17816,14 @@ async function factoryGroupRecordsFromAirtablePreflight(env, authorization, ids,
     const profileId = ownershipCache.get(id) || null;
     if (!profileId || !factoryGlobalAcceptsOutput(policy, record) ||
         Boolean(f(record, "Do_Not_Publish")) || !studioOutputReadyForPublishApproval(record)) {
-      throw new HttpError(409, "At least one selected output is not ready or eligible for global batch approval");
+      const readiness = evaluateReviewPackage(record);
+      const reason = !profileId ? "Content Profile ownership could not be verified"
+        : Boolean(f(record, "Do_Not_Publish")) ? "publishing hold is active"
+        : !factoryGlobalAcceptsOutput(policy, record) ? "platform/output type is not eligible"
+        : readiness.readiness !== "READY"
+          ? [readiness.reason, ...(readiness.missing_requirements || [])].join(": ")
+          : "output is no longer ready for approval";
+      throw new HttpError(409, `Output #${f(record, "Output_ID") || id}: ${reason}. No new batch was accepted.`);
     }
     const info = clientInfo.get(id) || {};
     records.push({
