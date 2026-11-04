@@ -684,3 +684,5 @@ Deploy Studio UI 0.6.869: fix hidden Factory recovery control and clear stale 50
 2026-11-04 UI 0.6.875: nonblocking Factory storage and reliable AI preference feedback.
 
 2026-11-04 UI 0.6.876-gallery-factory: guarded Factory private image review packet verification action for an explicitly creatively accepted native gallery job. New matching BUILD_ID and every asset cache key. No Factory approve/publish operation or feature-flag activation; release only through protected Pages validation.
+
+2026-11-04 UI 0.6.877: reveal actual automatic recovery failures; prioritize selected submission.

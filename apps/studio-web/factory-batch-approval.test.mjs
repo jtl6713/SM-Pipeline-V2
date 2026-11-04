@@ -474,25 +474,25 @@ function automaticRecoveryHarness(saved, response) {
     getItem(k){return store.get(k) ?? null;}, setItem(k,v){store.set(k,v);}, removeItem(k){store.delete(k);} };
   const state = {submittingBatch:false, selectedOutputs:new Set(['recExistingA','recNewChicago']),
     batchApprovalsEnabled:true,batchGlobal:{enabled:true,max_total:20},desk:null};
-  const submitted=[];
+  const submitted=[],messages=[];
   const functions = ['pendingFactoryApproval','factoryRecoveryEntries','archiveFactoryPending',
     'factoryRecoveringIds','waitingFactorySelection','factoryActivityRows','factoryActivityMatchesPlan',
     'factoryActivityProvesPlanMissing','factorySavedPayloadMatchesPlan'].map(n=>extractNamedFunction(js,n)).join('\n');
   const asyncFunctions=['retrySavedFactoryPlan','reconcileFactorySubmissionFence','reconcilePersistedFactoryPending',
     'submitFactoryBatchApprovals'].map(n=>'async '+extractNamedFunction(js,n)).join('\n');
-  const compile=new Function('localStorage','state','fetchJson','submitFactoryGlobalApprovalBatches',`
+  const compile=new Function('localStorage','state','fetchJson','submitFactoryGlobalApprovalBatches','messages',`
     const FACTORY_PENDING_REQUEST_KEY='pending', FACTORY_RECOVERY_PREFIX='recovery.',
       FACTORY_WAITING_SELECTION_KEY='waiting', FACTORY_PENDING_MISSING_GRACE_MS=90000;
     let factoryPendingReconcileAt=0, factoryPendingReconcileRunning=false;
-    const setBatchSubmissionError=()=>{},setStatus=()=>{},updateFactoryBatchToolbar=()=>{},
+    const setBatchSubmissionError=message=>messages.push(message),setStatus=()=>{},updateFactoryBatchToolbar=()=>{},
       saveFactorySelection=()=>{},renderDesk=()=>{},rememberFactoryAccepted=()=>{};
     const refreshFactoryApprovalPolicy=async()=>{};
     const readyFactoryOutputs=()=>[...state.selectedOutputs].map(id=>({id,profile_id:'recChicago'}));
     ${functions}\n${asyncFunctions}
     return {archiveFactoryPending,factoryRecoveryEntries,reconcilePersistedFactoryPending,submitFactoryBatchApprovals};
   `);
-  const api=compile(localStorage,state,response,async rows=>{submitted.push(rows.map(x=>x.id));});
-  return {...api,store,state,submitted};
+  const api=compile(localStorage,state,response,async rows=>{submitted.push(rows.map(x=>x.id));},messages);
+  return {...api,store,state,submitted,messages};
 }
 const interrupted = () => ({profile_id:'recChicago', request_id:'saved_request_20261104',
   ids:['recExistingA'],saved_ms:Date.now()-120000});
@@ -590,4 +590,5 @@ test('validation errors stay visible and do not become silent automatic POST loo
   const row=h.factoryRecoveryEntries()[0];
   assert.equal(posts,1);assert.equal(row.saved.retry_blocked,true);
   assert.equal(row.saved.last_error,'Output is held');
+  assert.ok(h.messages.some(message=>message?.includes('Output is held')), 'actual blocker must be displayed, not swallowed');
 });
