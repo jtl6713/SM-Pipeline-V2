@@ -70,7 +70,9 @@ try {
     '/${token}/home-overview':'/api/profiles/overview',
     '/${token}/yt3374':'/api/admin/exception-recovery/rec9uw6xfRJGXpqz1/receipt?authenticated=1',
     '/${token}/yt3241':'/api/admin/exception-recovery/recJOW1OsfNeNhRW4/receipt?authenticated=1',
-    '/${token}/yt9308':'/api/admin/exception-recovery/rec4R88s8mlZLE6UO/receipt?authenticated=1'
+    '/${token}/yt9308':'/api/admin/exception-recovery/rec4R88s8mlZLE6UO/receipt?authenticated=1',
+    '/${token}/yt9469':'/api/admin/exception-recovery/recd4mZzGBpVmGwZN/receipt?authenticated=1',
+    '/${token}/yt9277':'/api/admin/exception-recovery/recI3x5A6Cz9vIQIs/receipt?authenticated=1'
    };
    const path=routes[url.pathname];if(!path)return new Response('Not found',{status:404});
    const headers={'Accept':'application/json','Origin':'https://studio.chicagoshining.com'};
@@ -180,6 +182,9 @@ try {
   {route:'yt3374',id:3374,record:'rec9uw6xfRJGXpqz1',video:'BV72YCPUvEg'},
   {route:'yt3241',id:3241,record:'recJOW1OsfNeNhRW4',video:'1H4A-8pey78'},
   {route:'yt9308',id:9308,record:'rec4R88s8mlZLE6UO',video:'xu3c4I_PCTI'},
+  // Current Stage 3 exceptions: remote IDs alone cannot establish public posts.
+  {route:'yt9469',id:9469,record:'recd4mZzGBpVmGwZN',video:'lhKBEMYPv5M'},
+  {route:'yt9277',id:9277,record:'recI3x5A6Cz9vIQIs',video:'0DohtO-2vGQ'},
  ];
  report.youtube_candidates=[];
  for(const candidate of candidates){
@@ -187,7 +192,7 @@ try {
   try{response=await probe(candidate.route);}catch(error){report.youtube_candidates.push({output_id:candidate.id,status:'unavailable',reason:String(error?.message||error).slice(0,130)});continue;}
   const body=response.body||{};
   report.youtube_candidates.push({
-   output_id:candidate.id,http_status:response.status,
+   output_id:candidate.id,record_id:candidate.record,http_status:response.status,
    identity_match:Number(body.output_id)===candidate.id && body.remote_id===candidate.video,
    remote_id:body.remote_id||null,
    verified_delivery:body.verified_delivery===true,
