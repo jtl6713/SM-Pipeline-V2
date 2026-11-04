@@ -14,6 +14,7 @@ import {verifyNativeGalleryRevisionDrive} from "./native-gallery-revision-readba
 import {serveNativeGalleryPreview} from "./native-gallery-preview.mjs";
 import {decideNativeGalleryCreative,nativeGalleryCreativeReviewEnabled} from "./native-gallery-creative-decision.mjs";
 import {inspectNativeGalleryFactoryPreflight,nativeGalleryFactoryPreflightEnabled} from "./native-gallery-factory-preflight.mjs";
+import {handoffNativeGalleryToPrivateFactory,nativeGalleryPrivateFactoryHandoffEnabled} from "./native-gallery-private-factory-handoff.mjs";
 import { NATIVE_GALLERY_JOBS_TABLE } from "./native-gallery-job-airtable.mjs";
 import { readNativeGalleryPrivateManifest } from "./native-gallery-private-manifest.mjs";
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
@@ -2966,7 +2967,7 @@ export default {
           readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
           listRecords:(table,params)=>reviewListRecords(env,table,params),
         });
-        return respond(request,env,{...status,private_preview_available:env.NATIVE_GALLERY_PRIVATE_PREVIEW_ENABLED==="true",creative_review_available:nativeGalleryCreativeReviewEnabled(env),factory_preflight_available:nativeGalleryFactoryPreflightEnabled(env)});
+        return respond(request,env,{...status,private_preview_available:env.NATIVE_GALLERY_PRIVATE_PREVIEW_ENABLED==="true",creative_review_available:nativeGalleryCreativeReviewEnabled(env),factory_preflight_available:nativeGalleryFactoryPreflightEnabled(env),factory_handoff_available:nativeGalleryPrivateFactoryHandoffEnabled(env)});
       }
 
       // Preview original gallery/source metadata only. This is deliberately
@@ -3199,6 +3200,53 @@ export default {
           },
         });
         return respond(request,env,packet);
+      }
+
+      // Exact creative-accepted native image revision -> held PRIVATE Factory
+      // review inbox. Only the dedicated Airtable Job ledger changes; the
+      // publishing hold, quarantined assets and output are NEVER released.
+      const galleryPrivateFactoryHandoffMatch=new RegExp(
+        "^/api/factory/outputs/(rec[A-Za-z0-9]{14})/gallery/jobs/"+
+        "([A-Za-z0-9_-]{8,120})/factory-handoff$"
+      ).exec(url.pathname);
+      if(galleryPrivateFactoryHandoffMatch){
+        if(request.method!=="POST")throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        assertWriteRequest(request,env);
+        if(!nativeGalleryPrivateFactoryHandoffEnabled(env))
+          throw new HttpError(405,"Private native Factory handoff disabled");
+        const profiles=await reviewAuthorizedProfiles(env,authorization);
+        const [,outputId,jobId]=galleryPrivateFactoryHandoffMatch;
+        const readJob=async id=>{
+          const rows=await reviewListRecords(env,NATIVE_GALLERY_JOBS_TABLE,{
+            limit:2,filterFormula:'{Job_ID}="'+id+'"',
+            fields:["Job_ID","Output_Record_ID","Content_Item_Record_ID",
+              "Profile_Record_ID","Job_State","Row_Version",
+              "Hold_ID","Hold_Owner","Plan_SHA256","Plan_JSON",
+              "Original_Manifest_SHA256","Original_Manifest_JSON",
+              "Revised_Manifest_SHA256","Revised_Manifest_JSON",
+              "Creative_Decision","Creative_Decision_Actor",
+              "Progress_Stage","Event_History_JSON"],
+          });
+          return Array.isArray(rows)&&rows.length===1?rows[0]:null;
+        };
+        const receipt=await handoffNativeGalleryToPrivateFactory({
+          request,env,output_id:outputId,job_id:jobId,
+          authorization:{...authorization,
+            authorized_profile_ids:profiles.map(p=>p.id)},
+          assertWriteRequest,
+          operations:{
+            withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+            readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+            readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+            readJob,
+            patchJob:(id,fields)=>airtableFetch(env,NATIVE_GALLERY_JOBS_TABLE,id,{
+              method:"PATCH",body:JSON.stringify({fields,typecast:false}),
+            }),
+            verifyDrive:args=>verifyNativeGalleryRevisionDrive({env,...args}),
+          },
+        });
+        return respond(request,env,receipt);
       }
 
       // Exact per-slide gallery correction proposal; no generation, approval,
