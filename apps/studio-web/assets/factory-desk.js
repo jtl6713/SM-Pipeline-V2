@@ -979,7 +979,7 @@
   }
 
   async function refreshFactoryBatchActivity(force = false) {
-    if (state.batchActivityLoading || state.submittingBatch) return state.batch;
+    if (state.batchActivityLoading || (state.submittingBatch && !force)) return state.batch;
     const now = Date.now();
     const minInterval = Number(state.batch?.totals?.active || 0) ? 5000 : 30000;
     if (!force && state.batch && now - state.lastBatchFetchMs < minInterval) return state.batch;
