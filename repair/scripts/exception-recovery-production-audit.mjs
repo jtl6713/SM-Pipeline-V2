@@ -222,7 +222,7 @@ try {
      if(assessment.status==='fresh'){fresh=assessment;break;}
      if(assessment.status==='failed'||assessment.status==='cooling_down')
        throw new Error('home_refresh_'+assessment.status+'_'+String(assessment.reason||''));
-     if(assessment.status==='needs_refresh' && started)
+     if(assessment.status==='needs_refresh' && started && attempt>=3)
        throw new Error('home_refresh_returned_incomplete_or_stale_generation');
      await new Promise(resolve=>setTimeout(resolve,1500));
    }
