@@ -452,7 +452,7 @@ test("Factory errors count the current attempted outputs only, not saved cross-c
 test("Factory recovery is automatic with no recovery button", () => {
   assert.doesNotMatch(html, /id="factoryBatchRecoverPending"/);
   assert.doesNotMatch(js, /Recover saved submission first/);
-  assert.match(js, /state.loading = true;\s*reconcilePersistedFactoryPending\(true\)/);
+  assert.match(js, /state.loading = true;[\s\S]*?reconcilePersistedFactoryPending\(true\)/);
 });
 
 
@@ -486,6 +486,7 @@ function automaticRecoveryHarness(saved, response) {
     let factoryPendingReconcileAt=0, factoryPendingReconcileRunning=false;
     const setBatchSubmissionError=()=>{},setStatus=()=>{},updateFactoryBatchToolbar=()=>{},
       saveFactorySelection=()=>{},renderDesk=()=>{},rememberFactoryAccepted=()=>{};
+    const refreshFactoryApprovalPolicy=async()=>{};
     const readyFactoryOutputs=()=>[...state.selectedOutputs].map(id=>({id,profile_id:'recChicago'}));
     ${functions}\n${asyncFunctions}
     return {archiveFactoryPending,factoryRecoveryEntries,reconcilePersistedFactoryPending,submitFactoryBatchApprovals};

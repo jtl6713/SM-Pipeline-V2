@@ -23,6 +23,7 @@ const server=createServer(async(req,res)=>{
   if(url.pathname.startsWith('/assets/')) {const file=path.resolve(root,'.'+url.pathname);if(!file.startsWith(root+path.sep)){res.writeHead(403);res.end();return;}try{res.writeHead(200,{'content-type':'text/javascript'});res.end(readFileSync(file));}catch{res.writeHead(404);res.end();}return;}
   if(url.pathname==='/api/factory/desk'){send(res,desk);return;}
   if(url.pathname==='/api/factory/approval-batches' && req.method==='GET'){
+    if(scenario==='slow_activity' && url.searchParams.get('view')==='active') return; // Production scan exceeded 35 seconds.
     const rid=url.searchParams.get('request_id');
     send(res,{ok:true,scope:'all',exact_request_id:rid||undefined,batches:job?[job]:[],
       totals:{active:job?1:0,pending:job?6:0,approved:0,failed:0},approvals_enabled:true,
@@ -45,7 +46,7 @@ await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const origin='http://127.0.0.1:'+server.address().port;
 const browser=await chromium.launch({headless:true});
 try{
- for(const mode of ['busy','lost','blocked']){
+ for(const mode of ['busy','lost','blocked','slow_activity']){
   scenario=mode;posts=[];job=null;
   const context=await browser.newContext({viewport:{width:1024,height:768},isMobile:true,hasTouch:true});
   const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
@@ -74,5 +75,5 @@ try{
   await context.close();
  }
  assert.deepEqual(errors,[]);
- console.log('FACTORY_SIX_OUTPUT_BROWSER=PASS busy_retry_same_id=true reload_resume=true lost_response_no_duplicate=true validation_error_persistent=true');
+ console.log('FACTORY_SIX_OUTPUT_BROWSER=PASS busy_retry_same_id=true reload_resume=true lost_response_no_duplicate=true validation_error_persistent=true slow_activity_does_not_change_submit_route=true');
 }finally{await browser.close();await new Promise(r=>server.close(r));}
