@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import { compareIndependentQaCensus } from '../../apps/studio-api/exception-recovery-qa-parity.mjs';
 import { summarizeStage3ExceptionDispositions } from './exception-recovery-disposition.mjs';
+import { stage3ProductionAcceptance } from './exception-recovery-audit-gate.mjs';
 const account=process.env.CLOUDFLARE_ACCOUNT_ID;
 const api='https://api.cloudflare.com/client/v4/accounts/'+account;
 const target='chicagoshining-studio-api';
@@ -51,7 +52,7 @@ try {
  // The bridge exposes only exact read-only routes behind a random, short-lived path.
  const source=`export default {async fetch(request,env){
    const url=new URL(request.url);
-   if(request.method!=='GET' && !(request.method==='POST' && url.pathname==='/${token}/conversation'))return new Response('Method not allowed',{status:405});
+   if(request.method!=='GET' && !(request.method==='POST' && (url.pathname==='/${token}/conversation' || url.pathname==='/${token}/overview-refresh')))return new Response('Method not allowed',{status:405});
    const routes={
     '/${token}/health':'/api/health',
     '/${token}/receipt':'/api/admin/exception-recovery/${rollout.canary_record_id}/receipt?authenticated=1',
@@ -62,7 +63,9 @@ try {
     '/${token}/conversation-denied':'/api/admin/exception-recovery/${instagramCanaryRecord}/conversation',
     '/${token}/preflight':'/api/admin/exception-recovery/${instagramCanaryRecord}/preflight',
     '/${token}/counts':'/api/admin/exception-recovery/counts?fresh=1',
-    '/${token}/quality':'/api/admin/exception-recovery',
+    '/${token}/quality':'/api/admin/exception-recovery?fresh=1',
+    '/${token}/overview-refresh':'/api/profiles/overview/refresh',
+    '/${token}/overview-status':'/api/profiles/overview/refresh-status',
     '/${token}/yt3374':'/api/admin/exception-recovery/rec9uw6xfRJGXpqz1/receipt?authenticated=1',
     '/${token}/yt3241':'/api/admin/exception-recovery/recJOW1OsfNeNhRW4/receipt?authenticated=1',
     '/${token}/yt9308':'/api/admin/exception-recovery/rec4R88s8mlZLE6UO/receipt?authenticated=1'
@@ -193,37 +196,98 @@ try {
    blocked_reason:body.verification?.blocked_reason||body.evidence||body.error||null,
   });
  }
- // Explicit expensive full-source census requested by the administrator.
- // Count parity requires a pinned, stable, fresh Home generation; report honestly.
- let census;
- try{census=await probe('counts');}catch(error){report.counts={status:'unavailable',reason:String(error?.message||error).slice(0,130)};}
- const c=census?.body||{};
- if(census)report.counts={http_status:census.status,status:c.status||null,source_rows:c.source_row_count??null,
-  totals:c.totals||null,quality_agent_disagreements:c.comparisons||null,
-  home_snapshot_comparison:c.home_snapshot_comparison||null,cache_status:c.census_cache_status||null,
-  scanned_at:c.scan_completed_at||null};
- if(census&&(census.status!==200||c.status!=='complete_census'))report.counts.warning='authoritative_complete_census_not_proven';
- // Separate, authenticated, GET-only Quality Agent formula scan. Never force
- // this independent scan inside the 8k-record census: doing so caused 500s.
- // Full source exception-ID coverage, snapshot skew and QA scope must all pass.
- let qualitySnapshot=null;
- try{
-  const quality=await probe('quality');
-  if(quality.status===200) qualitySnapshot=quality.body;
-  report.quality_agent_parity=quality.status===200
-    ?compareIndependentQaCensus(c,quality.body)
-    :{status:'unavailable',reason:'quality_agent_http_'+quality.status};
-  report.quality_agent_parity.http_status=quality.status;
- }catch(error){
-  report.quality_agent_parity={status:'unavailable',
-    reason:String(error?.message||error).slice(0,160)};
+ // The existing operator Home refresh commits a fenced R2 snapshot only.
+ // This is NOT an output or provider write and never changes scheduling authority.
+ // Avoid triggering a costly refresh if the current complete generation is recent.
+ async function ensureFreshHomeGeneration() {
+   const current=await probe('overview-status');
+   if(current.status!==200 || current.body?.ok!==true)
+     throw new Error('home_refresh_status_unavailable');
+   const previous=current.body.refresh||{};
+   const previousAt=Number(previous.current_snapshot_at||0);
+   if(previousAt>0 && Date.now()-previousAt>=0 && Date.now()-previousAt<25000
+       && previous.current_snapshot_generation) {
+     return {status:'already_recent',generation:previous.current_snapshot_generation,
+       snapshot_at:previousAt,requested_mutation:false};
+   }
+   const started=await probe('overview-refresh',{body:{}});
+   if(![200,202].includes(started.status)||started.body?.ok!==true)
+     throw new Error('home_refresh_guarded_request_rejected_'+started.status);
+   if(started.body?.accepted!==true && !['refreshing','cooling_down'].includes(started.body?.status))
+     throw new Error('home_refresh_not_accepted_'+String(started.body?.status||'unknown'));
+   let last=null;
+   for(let count=0;count<65;count++) {
+     const response=await probe('overview-status');
+     if(response.status!==200||response.body?.ok!==true)
+       throw new Error('home_refresh_poll_unavailable');
+     last=response.body.refresh||{};
+     const nextAt=Number(last.current_snapshot_at||0);
+     if(last.status==='completed' && nextAt>0
+         && nextAt>=previousAt
+         && Date.now()-nextAt<90000
+         && last.current_snapshot_generation
+         && (last.current_snapshot_generation!==previous.current_snapshot_generation
+             || previousAt>0 && Date.now()-previousAt<45000)) {
+       return {status:'refreshed',generation:last.current_snapshot_generation,
+         snapshot_at:nextAt,requested_mutation:started.body?.accepted===true};
+     }
+     if(last.status==='failed' || last.stale_operation===true)
+       throw new Error('home_refresh_failed_'+String(last.error||'unknown').slice(0,80));
+     await new Promise(resolve=>setTimeout(resolve,2000));
+   }
+   throw new Error('home_refresh_not_completed_in_bounded_poll_'+String(last?.status||'unknown'));
  }
- // This is a read-only disposition manifest, not provider or Airtable recovery.
- // Fail closed when the canonical census is truncated or a case is unclassified.
- report.exception_disposition=summarizeStage3ExceptionDispositions(c,qualitySnapshot);
- if(report.exception_disposition.status!=='classified_read_only')
-   throw new Error('complete_exception_disposition_unavailable_'+report.exception_disposition.reason);
-
+ report.audit_attempts=[];
+ // Publish, close-out and manual TikTok actions can legitimately change
+ // Airtable between two paginated independent scans. One bounded re-scan,
+ // with a fresh QA request, distinguishes an observed transition from drift.
+ for(let attempt=1;attempt<=2;attempt++){
+   try{
+     report.home_refresh_proof=await ensureFreshHomeGeneration();
+   }catch(error){
+     report.home_refresh_proof={status:'unavailable',reason:String(error?.message||error).slice(0,130)};
+   }
+   let census;
+   try{census=await probe('counts');}catch(error){
+     report.counts={status:'unavailable',reason:String(error?.message||error).slice(0,130)};
+   }
+   const c=census?.body||{};
+   if(census)report.counts={http_status:census.status,status:c.status||null,source_rows:c.source_row_count??null,
+     totals:c.totals||null,quality_agent_disagreements:c.comparisons||null,
+     home_snapshot_comparison:c.home_snapshot_comparison||null,cache_status:c.census_cache_status||null,
+     scanned_at:c.scan_completed_at||null};
+   if(!census||census.status!==200||c.status!=='complete_census')
+     report.counts.warning='authoritative_complete_census_not_proven';
+   // Independent GET-only QA scan. The fresh=1 Admin route bypasses a
+   // 60-second cache, so a second attempt cannot silently reuse stale IDs.
+   let qualitySnapshot=null;
+   try{
+     const quality=await probe('quality');
+     if(quality.status===200)qualitySnapshot=quality.body;
+     report.quality_agent_parity=quality.status===200
+       ?compareIndependentQaCensus(c,quality.body)
+       :{status:'unavailable',reason:'quality_agent_http_'+quality.status};
+     report.quality_agent_parity.http_status=quality.status;
+   }catch(error){
+     report.quality_agent_parity={status:'unavailable',
+       reason:String(error?.message||error).slice(0,160)};
+   }
+   report.exception_disposition=summarizeStage3ExceptionDispositions(c,qualitySnapshot);
+   report.stage3_acceptance=stage3ProductionAcceptance(
+     {...c,...(report.counts?.home_snapshot_comparison
+       ?{home_snapshot_comparison:report.counts.home_snapshot_comparison}:{})},
+     report.quality_agent_parity,report.exception_disposition);
+   if(report.home_refresh_proof?.status==='unavailable')
+     report.stage3_acceptance={status:'unverified',reason:'home_refresh_not_proven'};
+   report.audit_attempts.push({attempt,source_scan_at:c.scan_completed_at||null,
+     qa_scan_at:report.quality_agent_parity?.quality_agent_scan_at||null,
+     home_status:report.counts?.home_snapshot_comparison?.status||'unavailable',
+     failed_status:report.quality_agent_parity?.failed?.status||'unavailable',
+     past_due_status:report.quality_agent_parity?.approved_past_due?.status||'unavailable',
+     acceptance:report.stage3_acceptance.status,
+     reason:report.stage3_acceptance.reason||null});
+   if(report.stage3_acceptance.status==='verified')break;
+ }
  const ig=await probe('instagram');
  const post=ig.body||{};
  report.instagram_canary={
@@ -247,7 +311,8 @@ try {
  }
  report.instagram_canary_status='verified_account_owned_publication';
  if(conversationError)throw new Error('conversation_persistence_unverified_'+conversationError);
- if(!census||census.status!==200||c.status!=='complete_census')throw new Error('authoritative_census_unverified');
+ if(report.stage3_acceptance?.status!=='verified')
+   throw new Error('stage3_home_qa_parity_unverified_'+String(report.stage3_acceptance?.reason||'unknown'));
 } catch(error) {
  report.canary_status='unavailable';report.error=String(error.message).slice(0,160);process.exitCode=1;
 } finally {
