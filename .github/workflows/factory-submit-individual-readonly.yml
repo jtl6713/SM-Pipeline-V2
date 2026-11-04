@@ -47,11 +47,12 @@ jobs:
             async fetch(request,env) {
               const path=new URL(request.url).pathname;
               if (request.method !== "GET" ||
-                  !["/health","/original","/desk","/claims","/active","/completed"].includes(path)) return new Response("Not found",{status:404});
+                  !["/health","/original","/desk","/claims","/active","/completed","/policy"].includes(path)) return new Response("Not found",{status:404});
               if (request.headers.get("Authorization") !== "Bearer " + env.AUDIT_TOKEN) {
                 return new Response("Unauthorized",{status:401});
               }
               const routes = path === "/health" ? {health:"/api/health"} : {
+                policy:"/api/factory/approval-batches?scope=all&status_only=1",
                 claims:"/api/factory/approval-batches?claims_diagnostic=1",
                 active:"/api/factory/approval-batches?scope=all&view=active",
                 completed:"/api/factory/approval-batches?scope=all&view=completed",
@@ -71,6 +72,7 @@ jobs:
                   id:x.id,output_id:x.output_id,profile_id:x.profile_id,kind:x.kind,title:x.title,
                   studio_state:x.studio_state,output_status:x.output_status,review_status:x.review_status
                 }))};
+                else if(name==="policy") report[name]={http:answer.status,ok:body.ok,approvals_enabled:body.approvals_enabled,global_enabled:body.global_rollout?.enabled};
                 else if(name==="claims") report[name]={http:answer.status,...body};
                 else report[name]={http:answer.status,error:body.error,exact_request_id:body.exact_request_id,totals:body.totals,
                   batches:(body.batches||[]).map(x=>({request_id:x.request_id,job_id:x.job_id,status:x.status,
@@ -104,7 +106,7 @@ jobs:
           LIVE="false"
           for attempt in $(seq 1 35); do
             STATUS="$(curl -sS --max-time 20 -o /tmp/factory-api-health.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BASE/health" || true)"
-            if [[ "$STATUS" == "200" ]] && jq -e '.version|startswith("0.10.")' /tmp/factory-api-health.json >/dev/null 2>&1; then
+            if [[ "$STATUS" == "200" ]] && jq -e '.version=="0.10.747-factory-history-concurrency"' /tmp/factory-api-health.json >/dev/null 2>&1; then
               LIVE="true"
               break
             fi
@@ -115,7 +117,8 @@ jobs:
             exit 1
           fi
           echo "factory_live_worker_health=verified"
-          for ENDPOINT in original active completed desk claims; do
+          jq -c '{version}' /tmp/factory-api-health.json
+          for ENDPOINT in policy original active completed desk claims; do
             STARTED=$(date +%s)
             HTTP="$(curl -sS --max-time 70 -o /tmp/factory-$ENDPOINT.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BASE/$ENDPOINT" || true)"
             echo "FACTORY_ENDPOINT=$ENDPOINT HTTP=$HTTP ELAPSED_SECONDS=$(($(date +%s)-STARTED))"
