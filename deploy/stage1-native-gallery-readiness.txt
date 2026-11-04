@@ -1,0 +1,8 @@
+2026-11-04 Stage 1 Native Gallery C5/C6 private readiness audit only.
+New restricted Google Drive staging folder: 1VdULNl85JDoL_EaurRKMPm0tRi8xOawH
+Parent: existing private ChicagoShining folder 1qfQ4SQ88adlgvoGIg0D7xXMtLD9AMoyB.
+Google Drive files.get readback: mimeType application/vnd.google-apps.folder, shared=false, exactly user-owner permission, initially empty.
+Do NOT assume Runner credentials can access this folder until authenticated live Windows Runner read-only probe verifies the exact folder.
+Do NOT enable C5/C6 generation, queue claim, auto-execute, browser opt-ins or publishing based on this sentinel.
+Do NOT insert NATIVE_GALLERY_RIGHTS_REVIEWED=true or an unreviewed provider/model/basis.
+Run one protected live read-only Ops probe after merge; redact all credentials and never claim jobs.
