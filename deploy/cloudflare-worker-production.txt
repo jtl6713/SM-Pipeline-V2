@@ -895,3 +895,5 @@ Deploy Worker 0.10.738-vibe-preflight-error-boundary (2026-11-03). Await Idea/Pr
 2026-11-03: Stage 3 preventative QA freshness deploy. Independent authenticated exact-ID parity audits now request fresh Airtable QA candidates, bypassing 60-second Center cache only for explicit fresh=1; ordinary polling remains coalesced. Existing fail-closed acceptance, Home R2-only refresh, production canaries, Airtable write authority, Supabase read guards, and LA atomic schedules unchanged. No output, hold, scheduling, or provider mutations.
 
 2026-11-04 Factory bounded concurrent parent-history reads; prevent 54-second activity scan.
+
+2026-11-04 Stage 1 non-Vibe protected private gallery Factory review preflight (#1614). Read-only accepted V2 packet; reverify held output/profile/immutable plan/selected-only slides and quarantined private Drive rights after creative approval. Zero Factory mutation, hold release, schedule/public provider calls or Supabase write promotion. ALL C5/C6/gallery and Factory mutation feature flags remain OFF; preserve production Worker bindings, DO/R2 and Stage 3.
