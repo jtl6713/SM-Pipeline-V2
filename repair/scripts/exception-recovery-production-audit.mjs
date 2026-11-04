@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import { compareIndependentQaCensus } from '../../apps/studio-api/exception-recovery-qa-parity.mjs';
 import { summarizeStage3ExceptionDispositions } from './exception-recovery-disposition.mjs';
+import { assessHomeRefresh, verifyHomeOverviewGeneration } from './exception-recovery-home-freshness.mjs';
 const account=process.env.CLOUDFLARE_ACCOUNT_ID;
 const api='https://api.cloudflare.com/client/v4/accounts/'+account;
 const target='chicagoshining-studio-api';
@@ -48,10 +49,11 @@ try {
  }
  report.rollout_stage=rollout.stage;
  // Reuses the production deployment's service-binding verification pattern.
- // The bridge exposes only exact read-only routes behind a random, short-lived path.
+ // The bridge exposes only exact diagnostic routes behind a random, short-lived path.
+ // The only new POST is a bounded Home cache rebuild; never output/provider writes.
  const source=`export default {async fetch(request,env){
    const url=new URL(request.url);
-   if(request.method!=='GET' && !(request.method==='POST' && url.pathname==='/${token}/conversation'))return new Response('Method not allowed',{status:405});
+   if(request.method!=='GET' && !(request.method==='POST' && (url.pathname==='/${token}/conversation' || url.pathname==='/${token}/home-refresh')))return new Response('Method not allowed',{status:405});
    const routes={
     '/${token}/health':'/api/health',
     '/${token}/receipt':'/api/admin/exception-recovery/${rollout.canary_record_id}/receipt?authenticated=1',
@@ -63,6 +65,9 @@ try {
     '/${token}/preflight':'/api/admin/exception-recovery/${instagramCanaryRecord}/preflight',
     '/${token}/counts':'/api/admin/exception-recovery/counts?fresh=1',
     '/${token}/quality':'/api/admin/exception-recovery',
+    '/${token}/home-refresh':'/api/profiles/overview/refresh',
+    '/${token}/home-refresh-status':'/api/profiles/overview/refresh-status',
+    '/${token}/home-overview':'/api/profiles/overview',
     '/${token}/yt3374':'/api/admin/exception-recovery/rec9uw6xfRJGXpqz1/receipt?authenticated=1',
     '/${token}/yt3241':'/api/admin/exception-recovery/recJOW1OsfNeNhRW4/receipt?authenticated=1',
     '/${token}/yt9308':'/api/admin/exception-recovery/rec4R88s8mlZLE6UO/receipt?authenticated=1'
@@ -193,6 +198,44 @@ try {
    blocked_reason:body.verification?.blocked_reason||body.evidence||body.error||null,
   });
  }
+ // Home must be rebuilt BEFORE the canonical census, not several minutes
+ // earlier at deployment time. Respect refresh cooldown and component-budget
+ // gates; this POST updates only an existing Home cache, never output records.
+ try {
+   const before=await probe('home-refresh-status');
+   if(before.status!==200)throw new Error('home_refresh_status_http_'+before.status);
+   const initial=assessHomeRefresh(before.body,Date.now());
+   let started=false;
+   if(initial.status!=='fresh' && initial.status!=='building'){
+     if(initial.status==='cooling_down')throw new Error('home_refresh_cooling_down');
+     const trigger=await probe('home-refresh',{body:{}});
+     const code=String(trigger.body?.refresh?.status||trigger.body?.status||'');
+     if(![200,202].includes(trigger.status) || !['refreshing','completed'].includes(code))
+       throw new Error('home_refresh_not_accepted_http_'+trigger.status+'_state_'+code);
+     started=true;
+   }
+   let fresh=null;
+   for(let attempt=0;attempt<90;attempt++) {
+     const status=await probe('home-refresh-status');
+     if(status.status!==200)throw new Error('home_refresh_poll_http_'+status.status);
+     const assessment=assessHomeRefresh(status.body,Date.now());
+     if(assessment.status==='fresh'){fresh=assessment;break;}
+     if(assessment.status==='failed'||assessment.status==='cooling_down')
+       throw new Error('home_refresh_'+assessment.status+'_'+String(assessment.reason||''));
+     if(assessment.status==='needs_refresh' && started)
+       throw new Error('home_refresh_returned_incomplete_or_stale_generation');
+     await new Promise(resolve=>setTimeout(resolve,1500));
+   }
+   if(!fresh)throw new Error('home_refresh_timeout');
+   const snapshot=await probe('home-overview');
+   if(snapshot.status!==200 || !verifyHomeOverviewGeneration(snapshot.body,fresh))
+     throw new Error('home_refresh_generation_readback_mismatch');
+   report.home_refresh={status:'fresh_complete_generation',triggered:started,
+     generation:fresh.generation,snapshot_at:fresh.snapshot_at,
+     age_ms_at_readback:Date.now()-fresh.snapshot_at,profiles:snapshot.body.records.length};
+ }catch(error){
+   report.home_refresh={status:'unavailable',reason:String(error?.message||error).slice(0,160)};
+ }
  // Explicit expensive full-source census requested by the administrator.
  // Count parity requires a pinned, stable, fresh Home generation; report honestly.
  let census;
@@ -248,6 +291,22 @@ try {
  report.instagram_canary_status='verified_account_owned_publication';
  if(conversationError)throw new Error('conversation_persistence_unverified_'+conversationError);
  if(!census||census.status!==200||c.status!=='complete_census')throw new Error('authoritative_census_unverified');
+ const failures=[];
+ if(report.home_refresh?.status!=='fresh_complete_generation')failures.push('home_refresh_unverified');
+ if(c.home_snapshot_comparison?.status!=='counts_match_stable_generation')failures.push('home_counts_not_fresh_and_equal');
+ if(report.quality_agent_parity?.status!=='complete'
+     || report.quality_agent_parity?.failed?.status!=='matched'
+     || report.quality_agent_parity?.approved_past_due?.status!=='matched')
+   failures.push('quality_agent_exact_id_parity_not_verified');
+ if(report.exception_disposition?.status!=='classified_read_only')
+   failures.push('exception_disposition_unavailable');
+ report.stage3_quality_home_acceptance={
+   status:failures.length?'blocked':'passed',
+   reasons:failures,source_rows:c.source_row_count??null,
+   scan_skew_ms:report.quality_agent_parity?.scan_skew_ms??null,
+   note:'Strict independent source/QA exact-ID and fresh Home generation; no count fudging during active publication.'
+ };
+ if(failures.length)process.exitCode=1;
 } catch(error) {
  report.canary_status='unavailable';report.error=String(error.message).slice(0,160);process.exitCode=1;
 } finally {
