@@ -105,6 +105,40 @@ class ReviewPublicationTests(unittest.TestCase):
         self.assertEqual(verify_before_reel_creation(
             Client(original), "outputs", original["id"], original), "publication_lock_already_owned")
 
+
+    def test_airtable_utc_serialization_does_not_falsely_change_current_lock(self):
+        # Regression: live Airtable returns .000Z for Python's Z timestamp.
+        original = self.record(
+            Platform_Media_ID="", Publish_Locked_By="AP1-IG",
+            Publish_Locked_At="2026-11-04T10:36:13Z",
+            Publish_Started_At="2026-11-04T10:36:13Z",
+            Publish_Status="Publishing",
+        )
+        returned = copy.deepcopy(original)
+        returned["fields"].update({
+            "Publish_Locked_At": "2026-11-04T10:36:13.000Z",
+            "Publish_Started_At": "2026-11-04T04:36:13-06:00",
+        })
+        self.assertIsNone(verify_before_reel_creation(
+            Client(returned), "outputs", original["id"], original, require_lock=True))
+
+        # No rounding, missing/naive timestamps, changed owners or status accepted.
+        for patch in (
+            {"Publish_Locked_At": "2026-11-04T10:36:13.001Z"},
+            {"Publish_Started_At": "2026-11-04T10:36:14.000Z"},
+            {"Publish_Locked_At": "2026-11-04T10:36:13"},
+            {"Publish_Started_At": ""},
+            {"Publish_Locked_By": "another-runner"},
+            {"Publish_Status": "Ready to Publish"},
+        ):
+            with self.subTest(patch=patch):
+                changed = copy.deepcopy(returned)
+                changed["fields"].update(patch)
+                self.assertEqual(verify_before_reel_creation(
+                    Client(changed), "outputs", original["id"], original,
+                    require_lock=True), "publication_lock_changed")
+
+
 class ProcessorBoundaryTests(unittest.TestCase):
     def exercise(self, after_poll, *, before_create=None, new_container=False,
                  after_lock=None, before_lock=None, location_failure=False,
