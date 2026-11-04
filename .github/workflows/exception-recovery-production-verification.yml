@@ -54,7 +54,7 @@ jobs:
           for(const forbidden of ["'/api/outputs/publish'","'/api/admin/exception-recovery/'+", 'method:"PATCH"', 'method:"DELETE"']) {
             if(src.includes(forbidden))throw Error('unsafe verification mutation: '+forbidden);
           }
-          console.log('scope=conversation-only-write provider=GET output_mutations=none');
+          console.log('scope=administrator_conversation_and_guarded_R2_Home_refresh provider=GET output_mutations=none');
           NODE
   live:
     name: Authenticated deployed conversation, provider and counts audit
