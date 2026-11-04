@@ -32,6 +32,8 @@ export async function readGalleryRevisionStatus({
  const activeHold=f.Studio_Render_Review_Hold_Active===true&&
    TOKEN.test(text(f.Studio_Render_Review_Hold_ID))&&
    TOKEN.test(text(f.Studio_Render_Review_Hold_Owner))&&
+   text(f.Studio_Render_Review_Session_ID)===
+     text(f.Studio_Render_Review_Hold_Owner)&&
    f.Do_Not_Publish===true;
  const rows=await listRecords(NATIVE_GALLERY_JOBS_TABLE,{
    limit:31,filterFormula:'{Output_Record_ID}="'+output_id+'"',
@@ -55,15 +57,21 @@ export async function readGalleryRevisionStatus({
      fail("GALLERY_JOB_IDENTITY_CONFLICT",503);
    seen.add(id);
    if(job_id&&id!==job_id)continue;
+   // Airtable stores progress counts, not independently verified Drive media.
+   // Reject corrupt or impossible counts rather than displaying false success.
+   const completed=j.Completed_Slides,total=j.Total_Slides;
+   if(!Number.isSafeInteger(total)||total<1||total>20||
+      !Number.isSafeInteger(completed)||completed<0||completed>total)
+     fail("GALLERY_PROGRESS_LEDGER_INVALID",503);
    const holdMatches=activeHold&&
      text(j.Hold_ID)===text(f.Studio_Render_Review_Hold_ID)&&
      text(j.Hold_Owner)===text(f.Studio_Render_Review_Hold_Owner);
    jobs.push({job_id:id,status:choice(j.Job_State)||"unknown",
      stage:text(j.Progress_Stage)||null,
-     completed_slides:Number.isSafeInteger(j.Completed_Slides)?
-       j.Completed_Slides:0,
-     total_slides:Number.isSafeInteger(j.Total_Slides)?
-       j.Total_Slides:0,
+     completed_slides:completed,total_slides:total,
+     progress_label:`${completed} of ${total} slide slots recorded`,
+     progress_percent:Math.floor(completed*100/total),
+     progress_source:"airtable_ledger_unverified",
      lease_claimed:Boolean(text(j.Lease_Owner))&&
        Number.isSafeInteger(j.Lease_Fence)&&j.Lease_Fence>0,
      created_at:text(j.Created_At_UTC)||null,
