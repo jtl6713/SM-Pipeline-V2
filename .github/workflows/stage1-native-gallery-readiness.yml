@@ -1,0 +1,120 @@
+name: Stage 1 C5-C6 Private Readiness (Read Only)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/stage1-native-gallery-readiness.yml'
+      - 'deploy/stage1-native-gallery-readiness.txt'
+      - 'tools/stage1/native_gallery_readiness.py'
+      - 'tools/stage1/test_native_gallery_readiness.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Assert inspection is non-mutating and fail closed
+        run: python -m unittest discover -s tools/stage1 -p 'test_native_gallery_readiness.py' -v
+
+      - name: Inspect LIVE Windows Runner and candidate PRIVATE Drive staging without generation
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=$(sed -n 's/^PIPELINE_RUNNER_CODE_VERSION = "\([^"]*\)"/\1/p' services/pipeline-runner/config.py)
+          test -n "$expected"
+          # The Drive folder was created privately under ChicagoShining, with
+          # owner-only permissions independently read back on 2026-11-04.
+          candidate="1VdULNl85JDoL_EaurRKMPm0tRi8xOawH"
+          python - "$expected" "$candidate" <<'PY'
+          import base64,json,sys
+          from pathlib import Path
+          expected,folder=sys.argv[1:]
+          code=base64.b64encode(Path("tools/stage1/native_gallery_readiness.py").read_bytes()).decode("ascii")
+          ps="""$ErrorActionPreference = "Stop"
+          $service = Join-Path (Get-Location) "Services\\pipeline-runner\\service"
+          if (!(Test-Path (Join-Path $service "config.py"))) {
+            Write-Output 'STAGE1_READINESS_JSON={"ok":false,"mode":"read_only_no_generation","blockers":["LIVE_RUNNER_SOURCE_NOT_PRESENT"]}'
+            exit 0
+          }
+          $python = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("@PYCODE@"))
+          $env:PYTHONPATH = $service
+          Push-Location $service
+          try {
+            $rows = & python -c $python --expected-version "@EXPECTED@" --candidate-folder "@FOLDER@" 2>$null
+            if ($LASTEXITCODE -ne 0) {
+              Write-Output 'STAGE1_READINESS_JSON={"ok":false,"mode":"read_only_no_generation","blockers":["LIVE_RUNNER_INSPECTION_FAILED"]}'
+            } else {
+              @($rows) | ForEach-Object {
+                if ([string]$_ -like "STAGE1_READINESS_JSON=*") {Write-Output $_}
+              }
+            }
+          } catch {
+            Write-Output 'STAGE1_READINESS_JSON={"ok":false,"mode":"read_only_no_generation","blockers":["LIVE_RUNNER_INSPECTION_FAILED"]}'
+          } finally { Pop-Location }
+          """
+          ps=ps.replace("@PYCODE@",code).replace("@EXPECTED@",expected).replace("@FOLDER@",folder)
+          Path("/tmp/stage1-readiness-shell.json").write_text(json.dumps({"command":ps,"confirm":True}))
+          PY
+          base='https://ops.chicagoshining.com'
+          selected=''
+          for candidate_token in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            if [ -z "$candidate_token" ]; then continue; fi
+            code=$(curl -sS --max-time 20 -o /tmp/stage1-ops-catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate_token" "$base/api/catalog" || true)
+            if [ "$code" = 200 ] && jq -e '.ok==true' /tmp/stage1-ops-catalog.json >/dev/null 2>&1; then
+              selected="$candidate_token"
+              break
+            fi
+          done
+          test -n "$selected"
+          code=$(curl -sS --max-time 25 -o /tmp/stage1-shell-start.json -w '%{http_code}' \
+            -X POST "$base/api/shell" -H "Authorization: Bearer $selected" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/stage1-readiness-shell.json || true)
+          if [ "$code" != 202 ] && [ "$code" != 200 ]; then
+            echo "stage1_ops_probe_submission_failed_http=$code"; exit 1
+          fi
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/stage1-shell-start.json)
+          test -n "$job"
+          for i in $(seq 1 50); do
+            code=$(curl -sS --max-time 20 -o /tmp/stage1-shell-job.json -w '%{http_code}' \
+              -H "Authorization: Bearer $selected" "$base/api/jobs/$job" || true)
+            if [ "$code" != 200 ]; then sleep 4; continue; fi
+            state=$(jq -r '.job.status // empty' /tmp/stage1-shell-job.json)
+            if [ "$state" = ok ]; then
+              jq -r '.job.log // ""' /tmp/stage1-shell-job.json |
+                grep '^STAGE1_READINESS_JSON=' | tail -1 |
+                sed 's/^STAGE1_READINESS_JSON=//' > /tmp/stage1-report.json
+              python - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path("/tmp/stage1-report.json").read_text())
+          assert data["mode"] == "read_only_no_generation"
+          assert isinstance(data.get("blockers"),list)
+          print("stage1_live_audit=" + json.dumps(data,separators=(",",":")))
+          if data.get("ok") is not True:
+              raise SystemExit("stage1_live_runner_audit_unavailable")
+          PY
+              exit 0
+            fi
+            if [ "$state" = failed ]; then
+              echo 'stage1_ops_probe_failed_without_any_generation'
+              exit 1
+            fi
+            sleep 4
+          done
+          echo 'stage1_ops_probe_timed_out'
+          exit 1
