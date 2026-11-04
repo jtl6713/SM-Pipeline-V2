@@ -23,6 +23,8 @@ const server=createServer(async(req,res)=>{
   if(url.pathname.startsWith('/assets/')) {const file=path.resolve(root,'.'+url.pathname);if(!file.startsWith(root+path.sep)){res.writeHead(403);res.end();return;}try{res.writeHead(200,{'content-type':'text/javascript'});res.end(readFileSync(file));}catch{res.writeHead(404);res.end();}return;}
   if(url.pathname==='/api/factory/desk'){send(res,desk);return;}
   if(url.pathname==='/api/factory/approval-batches' && req.method==='GET'){
+    if(['slow_activity','legacy_recovery'].includes(scenario) && url.searchParams.get('view')==='active') return; // Production scan exceeded 35 seconds.
+    if(url.searchParams.has('profile')) {send(res,{ok:true,batch:true,status:'idle',job_id:null,items:[]});return;}
     const rid=url.searchParams.get('request_id');
     send(res,{ok:true,scope:'all',exact_request_id:rid||undefined,batches:job?[job]:[],
       totals:{active:job?1:0,pending:job?6:0,approved:0,failed:0},approvals_enabled:true,
@@ -45,15 +47,28 @@ await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const origin='http://127.0.0.1:'+server.address().port;
 const browser=await chromium.launch({headless:true});
 try{
- for(const mode of ['busy','lost','blocked']){
+ for(const mode of ['busy','lost','blocked','slow_activity','legacy_recovery']){
   scenario=mode;posts=[];job=null;
   const context=await browser.newContext({viewport:{width:1024,height:768},isMobile:true,hasTouch:true});
+  if(mode==='legacy_recovery') await context.addInitScript(({ids,profile})=>{
+    if(localStorage.getItem('fixture-seeded'))return;
+    localStorage.setItem('fixture-seeded','true');
+    localStorage.setItem('studio.factory.batch-selection.v1',JSON.stringify(ids));
+    localStorage.setItem('studio.factory.waiting-selection.v1',JSON.stringify(ids));
+    localStorage.setItem('studio.factory.pending-approval-request.v1',JSON.stringify({
+      profile_id:profile,request_id:'legacy_saved_submission_001',ids,saved_ms:Date.now()-120000,
+    }));
+  },{ids:cards.map(x=>x.id),profile});
   const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
   async function load(){await page.goto(origin);await page.waitForFunction(()=>window.StudioFactoryDesk?.load);await page.evaluate(()=>{document.querySelector('#page-factory').classList.add('active');return window.StudioFactoryDesk.load(true);});}
   await load();
+  if(mode!=='legacy_recovery'){
   await page.locator('[data-factory-select-content]').first().check();
   assert.match(await page.locator('#factoryBatchSelectionCount').innerText(),/6 outputs selected/);
   await page.locator('#factoryBatchSubmit').click();
+  }else{
+    await page.waitForFunction(()=>Object.keys(JSON.parse(localStorage.getItem('studio.factory.accepted-output-ids.v1')||'{}')).length===6);
+  }
   await page.waitForFunction(()=>Object.keys(localStorage).some(k=>k.startsWith('studio.factory.recovery.v2.')) || Object.keys(JSON.parse(localStorage.getItem('studio.factory.accepted-output-ids.v1')||'{}')).length===6);
   assert.equal(posts.length,1);
   if(mode==='blocked'){
@@ -74,5 +89,5 @@ try{
   await context.close();
  }
  assert.deepEqual(errors,[]);
- console.log('FACTORY_SIX_OUTPUT_BROWSER=PASS busy_retry_same_id=true reload_resume=true lost_response_no_duplicate=true validation_error_persistent=true');
+ console.log('FACTORY_SIX_OUTPUT_BROWSER=PASS busy_retry_same_id=true reload_resume=true lost_response_no_duplicate=true validation_error_persistent=true slow_activity_does_not_change_submit_route=true old_saved_selection_continues_without_click=true');
 }finally{await browser.close();await new Promise(r=>server.close(r));}

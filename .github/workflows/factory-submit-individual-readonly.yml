@@ -1,7 +1,7 @@
 name: Factory Individual Submission Reads (Read Only)
 on:
   push:
-    branches: [fix/factory-submit-reliability-20261104]
+    branches: [fix/factory-server-timeouts-20261104]
     paths:
       - .github/workflows/factory-submit-individual-readonly.yml
   workflow_dispatch:
@@ -19,7 +19,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       TARGET_WORKER: chicagoshining-studio-api
-      AUDIT_WORKER: studio-factory-individual-readonly-20261104
+      AUDIT_WORKER: studio-factory-timeout-audit-20261104
     steps:
       - name: Run temporary service-binding-only Worker and clean up
         shell: bash
@@ -47,7 +47,7 @@ jobs:
             async fetch(request,env) {
               const path=new URL(request.url).pathname;
               if (request.method !== "GET" ||
-                  !["/health","/original","/desk","/claims"].includes(path)) return new Response("Not found",{status:404});
+                  !["/health","/original","/desk","/claims","/active","/completed"].includes(path)) return new Response("Not found",{status:404});
               if (request.headers.get("Authorization") !== "Bearer " + env.AUDIT_TOKEN) {
                 return new Response("Unauthorized",{status:401});
               }
@@ -115,9 +115,10 @@ jobs:
             exit 1
           fi
           echo "factory_live_worker_health=verified"
-          for ENDPOINT in original desk claims; do
+          for ENDPOINT in original active completed desk claims; do
+            STARTED=$(date +%s)
             HTTP="$(curl -sS --max-time 70 -o /tmp/factory-$ENDPOINT.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BASE/$ENDPOINT" || true)"
-            echo "FACTORY_ENDPOINT=$ENDPOINT HTTP=$HTTP"
+            echo "FACTORY_ENDPOINT=$ENDPOINT HTTP=$HTTP ELAPSED_SECONDS=$(($(date +%s)-STARTED))"
             if [[ "$HTTP" == "200" ]]; then jq -c . /tmp/factory-$ENDPOINT.json; fi
           done
       - name: Attach sanitized audit report
@@ -129,5 +130,7 @@ jobs:
             /tmp/factory-original.json
             /tmp/factory-desk.json
             /tmp/factory-claims.json
+            /tmp/factory-active.json
+            /tmp/factory-completed.json
           if-no-files-found: ignore
           retention-days: 10

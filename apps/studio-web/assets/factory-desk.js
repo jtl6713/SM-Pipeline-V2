@@ -978,6 +978,28 @@
     return { resolved: true, count: committed.length, message };
   }
 
+  let factoryPolicyRequest = null;
+  let factoryPolicyLoadedAt = 0;
+  async function refreshFactoryApprovalPolicy() {
+    if (factoryPolicyLoadedAt && Date.now() - factoryPolicyLoadedAt < 30000) return;
+    if (factoryPolicyRequest) return factoryPolicyRequest;
+    factoryPolicyRequest = (async () => {
+      // Submission routing must never depend on scanning historical batches.
+      const policy = await fetchJson("/api/factory/approval-batches?scope=all&status_only=1", { cache: "no-store" });
+      if (policy.ok !== true || typeof policy.approvals_enabled !== "boolean") {
+        throw new Error("Factory approval configuration is unavailable; your selection is saved.");
+      }
+      state.batchApprovalsEnabled = policy.approvals_enabled;
+      state.batchRollout = policy.rollout || null;
+      state.batchGlobal = policy.global_rollout || null;
+      factoryPolicyLoadedAt = Date.now();
+      if (state.desk) renderDesk(state.desk);
+      updateFactoryBatchToolbar();
+    })();
+    try { return await factoryPolicyRequest; }
+    finally { factoryPolicyRequest = null; }
+  }
+
   async function refreshFactoryBatchActivity(force = false) {
     if (state.batchActivityLoading || (state.submittingBatch && !force)) return state.batch;
     const now = Date.now();
@@ -1156,6 +1178,17 @@
   async function submitFactoryBatchApprovals(requestedIds = null) {
     if (state.submittingBatch) return;
     archiveFactoryPending();
+    // Preserve the click while the independent lightweight policy read runs.
+    const submitIntent = new Set(waitingFactorySelection());
+    for (const id of requestedIds || state.selectedOutputs) submitIntent.add(id);
+    localStorage.setItem(FACTORY_WAITING_SELECTION_KEY, JSON.stringify([...submitIntent]));
+    try { await refreshFactoryApprovalPolicy(); }
+    catch (error) {
+      setBatchSubmissionError("Submission saved; approval configuration will be checked automatically. " + (error.message || error));
+      setStatus(state.batchSubmissionError, true);
+      return;
+    }
+    if (state.submittingBatch) return;
     if (state.batchApprovalsEnabled === false) { setStatus("Batch approvals are not enabled yet; individual approvals still work.", true); return; }
     const selected = readyFactoryOutputs(true).filter(card => state.selectedOutputs.has(card.id)
       && (!requestedIds || requestedIds.includes(card.id)));
@@ -2758,6 +2791,7 @@
     // One authoritative Desk snapshot at a time, including forced refreshes.
     if (state.loading) return state.desk;
     state.loading = true;
+    refreshFactoryApprovalPolicy().catch(() => {});
     reconcilePersistedFactoryPending(true).catch(() => {});
     setStatus("Loading Factory Desk…");
     try {

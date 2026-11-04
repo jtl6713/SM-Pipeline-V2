@@ -261,3 +261,27 @@ test("global Factory group closes only after its failed child is verified in exc
   assert.equal((await factoryApprovalGroupList(bucket,{mode:"active"})).groups.length,0);
   assert.equal((await factoryApprovalGroupList(bucket,{mode:"completed"})).groups.length,1);
 });
+
+
+test("active history scans hundreds of terminal groups with bounded parallel reads and finds the final live group", async () => {
+  const bucket = new FakeR2();
+  for (let i = 0; i < 180; i++) {
+    const requestId = "history_latency_" + String(i).padStart(4, "0");
+    const group = await factoryApprovalGroupEnqueue(bucket, { requestId, records: [outputs[0]] });
+    if (i < 179) for (const child of group.children) await factoryBatchDrain(bucket, {
+      profileId: child.profile_id, requestId: child.request_id, approve: async () => {},
+    });
+  }
+  const originalGet = bucket.get.bind(bucket);
+  let current = 0, peak = 0, gets = 0;
+  bucket.get = async key => {
+    current++; gets++; peak = Math.max(peak, current);
+    await new Promise(resolve => setImmediate(resolve));
+    try { return await originalGet(key); } finally { current--; }
+  };
+  const live = await factoryApprovalGroupList(bucket, { mode: "active", maxScan: 1000 });
+  assert.deepEqual(live.groups.map(row => row.request_id), ["history_latency_0179"]);
+  assert.equal(live.scanned, 180);
+  assert.equal(gets, 360);
+  assert.equal(peak, 6, "history work overlaps but never starts unbounded storage calls");
+});
