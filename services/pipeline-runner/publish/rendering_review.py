@@ -4,6 +4,28 @@ This is an initial deny gate, not the shared dispatch lease. Admissions remain
 disabled until shared ownership and exact-attempt scheduling are integrated.
 """
 
+from datetime import datetime, timezone
+
+
+def _same_utc_lock_instant(actual, expected):
+    """Accept harmless Airtable ISO timestamp reformatting, never lock drift.
+
+    Airtable serializes an exact UTC second as .000Z; Python writes Z.
+    Both must be aware ISO timestamps for this to grant a Graph create.
+    """
+    if not isinstance(actual, str) or not isinstance(expected, str):
+        return False
+    try:
+        actual_at = datetime.fromisoformat(actual.replace("Z", "+00:00"))
+        expected_at = datetime.fromisoformat(expected.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if (actual_at.tzinfo is None or expected_at.tzinfo is None
+            or actual_at.utcoffset() is None or expected_at.utcoffset() is None):
+        return False
+    return actual_at.astimezone(timezone.utc) == expected_at.astimezone(timezone.utc)
+
+
 REVIEW_MARKERS = (
     "Studio_Render_Review_Hold_Active",
     "Studio_Render_Review_Hold_ID",
@@ -69,8 +91,10 @@ def verify_before_reel_creation(client, table, output_id, expected_output, *, re
         if fields.get(key) != expected.get(key):
             return "publication_artifact_changed"
     if require_lock:
-        for key in ("Publish_Locked_By", "Publish_Locked_At", "Publish_Started_At"):
-            if not expected.get(key) or fields.get(key) != expected.get(key):
+        if not expected.get("Publish_Locked_By") or fields.get("Publish_Locked_By") != expected.get("Publish_Locked_By"):
+            return "publication_lock_changed"
+        for key in ("Publish_Locked_At", "Publish_Started_At"):
+            if not _same_utc_lock_instant(fields.get(key), expected.get(key)):
                 return "publication_lock_changed"
         if fields.get("Publish_Status") != expected.get("Publish_Status"):
             return "publication_lock_changed"
