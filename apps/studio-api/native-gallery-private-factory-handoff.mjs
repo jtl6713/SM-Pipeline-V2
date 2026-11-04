@@ -134,6 +134,13 @@ export async function handoffNativeGalleryToPrivateFactory({
    }
    if(j.Row_Version!==5||j.Progress_Stage!== "creative_accepted"||existing.length)
      fail("GALLERY_FACTORY_HANDOFF_VERSION_CONFLICT");
+   // Snapshot the primitive identity, not an object reference that might
+   // change while remote verification is in progress.
+   const pinned={record_id:job.id,profile_id:j.Profile_Record_ID,
+     content_id:j.Content_Item_Record_ID,hold_id:j.Hold_ID,
+     hold_owner:j.Hold_Owner,hash:j.Revised_Manifest_SHA256,
+     history_json:j.Event_History_JSON};
+   // Values pinned BEFORE the remote Drive check, not after it.
    // Mandatory independent source/rights/watermark/selected-only Drive proof
    // and Airtable readback while the shared Output approval lock is held.
    const verified=await preflight({
@@ -154,12 +161,6 @@ export async function handoffNativeGalleryToPrivateFactory({
       verified.publication_authorized!==false||
       verified.requires_separate_factory_approval!==true)
      fail("GALLERY_FACTORY_HANDOFF_PREFLIGHT_NOT_VERIFIED",503);
-   // Snapshot the primitive identity, not an object reference that might
-   // change while remote verification is in progress.
-   const pinned={record_id:job.id,profile_id:j.Profile_Record_ID,
-     content_id:j.Content_Item_Record_ID,hold_id:j.Hold_ID,
-     hold_owner:j.Hold_Owner,hash:j.Revised_Manifest_SHA256,
-     history_json:j.Event_History_JSON};
    const fresh=await ops.readJob(job_id);
    if(fresh?.id!==pinned.record_id||fresh.fields?.Row_Version!==5||
       fresh.fields?.Progress_Stage!=="creative_accepted"||
