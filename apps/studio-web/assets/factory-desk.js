@@ -168,6 +168,31 @@
     if (state.batchSubmissionError) setStatus(state.batchSubmissionError, true);
   }
 
+  // Already-approved / permanently ineligible outputs must not keep a browser
+  // recovery fence that re-paints "Submission not accepted yet" forever.
+  function factoryTerminalEligibilityError(message) {
+    return /\bpast_review\b|no longer ready for approval|already belong to a Factory approval|Approved for Publishing|already past review/i
+      .test(String(message || ""));
+  }
+
+  function dropFactoryRecoveryEntry(recoveryKey, saved, reason) {
+    try { localStorage.removeItem(recoveryKey); } catch {}
+    for (const id of saved?.ids || []) state.selectedOutputs.delete(id);
+    try {
+      const waiting = waitingFactorySelection().filter((id) => state.selectedOutputs.has(id));
+      localStorage.setItem(FACTORY_WAITING_SELECTION_KEY, JSON.stringify(waiting));
+    } catch {}
+    saveFactorySelection();
+    if (!factoryRecoveryEntries().some(({ saved: row }) =>
+      (row.ids || []).some((id) => state.selectedOutputs.has(id)))) {
+      setBatchSubmissionError(null);
+    }
+    return {
+      resolved: true, count: 0, dropped: true,
+      message: reason || "Removed an already-finished Factory approval from the browser queue.",
+    };
+  }
+
   async function fetchJson(path, options = {}) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), Number(options.timeoutMs || 35000));
@@ -867,12 +892,27 @@
         let result;
         try { result = await reconcileFactorySubmissionFence(saved, key); }
         catch (error) { result = {resolved:false,message:String(error.message || error)}; }
-        if (!result?.resolved && result?.message &&
-            (saved.ids || []).some(id => state.selectedOutputs.has(id))) {
+        if (result?.dropped) {
+          if (result.message) setStatus(result.message);
+          continue;
+        }
+        const touchesSelection = (saved.ids || []).some(id => state.selectedOutputs.has(id));
+        if (!result?.resolved && result?.message && factoryTerminalEligibilityError(result.message)) {
+          dropFactoryRecoveryEntry(key, saved,
+            "Output already left Ready for Review (" + result.message
+            + "). Removed from the browser approval queue so other selections can submit.");
+          continue;
+        }
+        if (!result?.resolved && result?.message && touchesSelection) {
           const message = "Submission not accepted yet: " + result.message;
           setBatchSubmissionError(message);
           setStatus(message, true);
         }
+      }
+      // A past failed recovery must not keep painting after the operator moves on.
+      if (state.batchSubmissionError && !factoryRecoveryEntries().some(({ saved }) =>
+        (saved.ids || []).some((id) => state.selectedOutputs.has(id)))) {
+        setBatchSubmissionError(null);
       }
     } finally {
       factoryPendingReconcileRunning = false;
@@ -919,6 +959,9 @@
       saved.last_error = String(error.message || error);
       saved.retry_blocked = [400, 401, 403, 409, 422].includes(Number(error.status));
       saved.next_retry_ms = Math.max(saved.next_retry_ms, Date.now() + Number(error.retryAfterSeconds || 0) * 1000);
+      if (factoryTerminalEligibilityError(saved.last_error)) {
+        saved.terminal_eligibility = true;
+      }
       localStorage.setItem(recoveryKey, JSON.stringify(saved));
       return null;
     }
@@ -990,9 +1033,22 @@
         }
         if (factorySavedPayloadMatchesPlan(saved, plan)) {
           const accepted = await retrySavedFactoryPlan(saved, recoveryKey, plan);
-          if (!accepted) return { resolved: false, message: saved.last_error || "Submission is saved and will retry automatically." };
+          if (!accepted) {
+            const failure = saved.last_error || "Submission is saved and will retry automatically.";
+            if (saved.terminal_eligibility || factoryTerminalEligibilityError(failure)) {
+              return dropFactoryRecoveryEntry(recoveryKey, saved,
+                "Output already left Ready for Review (" + failure
+                + "). Removed from the browser approval queue so other selections can submit.");
+            }
+            return { resolved: false, message: failure };
+          }
           committed.push(...plan.ids);
           continue;
+        }
+        if (saved.terminal_eligibility || factoryTerminalEligibilityError(saved.last_error)) {
+          return dropFactoryRecoveryEntry(recoveryKey, saved,
+            "Output already left Ready for Review (" + (saved.last_error || "past_review")
+            + "). Removed from the browser approval queue so other selections can submit.");
         }
         if (!graceExpired) {
           return { resolved: false, message: "Saved approval " + requestId
