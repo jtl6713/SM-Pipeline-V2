@@ -188,10 +188,12 @@ test("mutations during remote private preflight fail closed without a write",asy
 });
 test("lost Airtable write acknowledgement is only reconciled by readback/replay",async()=>{
  const f=fixture();
+ const originalPatch=f.ops.patchJob;
  f.ops.patchJob=async()=>{}; // ambiguous/no-op PATCH
  await assert.rejects(run(f),/GALLERY_FACTORY_HANDOFF_READBACK_UNVERIFIED/);
+ f.ops.patchJob=originalPatch;
  const retry=await run(f);
- assert.equal(retry.replay,false); // safe retry only because no state was changed
+ assert.equal(retry.replay,false); // safe only because authoritative readback is unchanged
  const g=fixture();
  await run(g);
  const copied=JSON.parse(g.job.fields.Event_History_JSON);
