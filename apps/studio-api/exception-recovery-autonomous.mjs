@@ -216,8 +216,14 @@ export async function reconcilePublication({
   // A fresh private delivery remains complete in the current cooldown. Later
   // release verification must not be permanently suppressed by that handoff.
   if(complete(row) && !prior?.pending &&
-      (!privateCatchup || Number(prior?.next_at)>now()))
+      (!privateCatchup || Number(prior?.next_at)>now())) {
+    // A private public-release probe is still awaiting evidence, not a newly
+    // completed publication. Preserve cooldown and do not contact provider.
+    if(privateCatchup && prior?.last?.reason === "public_release_not_yet_verified")
+      return {outcome:"Awaiting Verification",record_id:recordId,
+        reason:"public_release_verification_cooldown",skipped:true};
     return {outcome:"Already Reconciled",record_id:recordId,duplicate:true};
+  }
   // Reopen only legacy terminal configuration failures. Once reprobed, a still
   // missing setting becomes a nonterminal, cooldown-limited verification item.
   // All identity mismatches, holds, exhausted attempts and uncertain writes
