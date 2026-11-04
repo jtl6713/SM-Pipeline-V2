@@ -13,6 +13,7 @@ import {commitNativeGalleryManifest, nativeGalleryManifestCommitEnabled} from ".
 import {verifyNativeGalleryRevisionDrive} from "./native-gallery-revision-readback.mjs";
 import {serveNativeGalleryPreview} from "./native-gallery-preview.mjs";
 import {decideNativeGalleryCreative,nativeGalleryCreativeReviewEnabled} from "./native-gallery-creative-decision.mjs";
+import {inspectNativeGalleryFactoryPreflight,nativeGalleryFactoryPreflightEnabled} from "./native-gallery-factory-preflight.mjs";
 import { NATIVE_GALLERY_JOBS_TABLE } from "./native-gallery-job-airtable.mjs";
 import { readNativeGalleryPrivateManifest } from "./native-gallery-private-manifest.mjs";
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
@@ -2965,7 +2966,7 @@ export default {
           readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
           listRecords:(table,params)=>reviewListRecords(env,table,params),
         });
-        return respond(request,env,{...status,private_preview_available:env.NATIVE_GALLERY_PRIVATE_PREVIEW_ENABLED==="true",creative_review_available:nativeGalleryCreativeReviewEnabled(env)});
+        return respond(request,env,{...status,private_preview_available:env.NATIVE_GALLERY_PRIVATE_PREVIEW_ENABLED==="true",creative_review_available:nativeGalleryCreativeReviewEnabled(env),factory_preflight_available:nativeGalleryFactoryPreflightEnabled(env)});
       }
 
       // Preview original gallery/source metadata only. This is deliberately
@@ -3160,6 +3161,44 @@ export default {
           },
         });
         return respond(request,env,decision);
+      }
+
+      // Read-only private Factory review packet for a human-accepted V2.
+      // This independently checks the actual Drive bytes/rights, and makes
+      // no Factory, schedule, approval, original slide or publishing write.
+      const galleryFactoryPreflightMatch=new RegExp(
+        "^/api/factory/outputs/(rec[A-Za-z0-9]{14})/gallery/jobs/"+
+        "([A-Za-z0-9_-]{8,120})/factory-preflight$"
+      ).exec(url.pathname);
+      if(galleryFactoryPreflightMatch){
+        if(request.method!=="GET")throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        const profiles=await reviewAuthorizedProfiles(env,authorization);
+        const [,outputId,jobId]=galleryFactoryPreflightMatch;
+        const readJob=async id=>{
+          const rows=await reviewListRecords(env,NATIVE_GALLERY_JOBS_TABLE,{
+            limit:2,filterFormula:'{Job_ID}="'+id+'"',
+            fields:["Job_ID","Output_Record_ID","Content_Item_Record_ID",
+              "Profile_Record_ID","Actor_Record_ID","Job_State","Row_Version",
+              "Hold_ID","Hold_Owner","Plan_SHA256","Plan_JSON",
+              "Original_Manifest_SHA256","Original_Manifest_JSON",
+              "Revised_Manifest_SHA256","Revised_Manifest_JSON",
+              "Creative_Decision","Creative_Decision_Actor"],
+          });
+          return Array.isArray(rows)&&rows.length===1?rows[0]:null;
+        };
+        const packet=await inspectNativeGalleryFactoryPreflight({
+          request,env,output_id:outputId,job_id:jobId,
+          authorization:{...authorization,
+            authorized_profile_ids:profiles.map(p=>p.id)},
+          operations:{
+            readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+            readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+            readJob,
+            verifyDrive:args=>verifyNativeGalleryRevisionDrive({env,...args}),
+          },
+        });
+        return respond(request,env,packet);
       }
 
       // Exact per-slide gallery correction proposal; no generation, approval,

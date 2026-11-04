@@ -1851,6 +1851,44 @@
                 }
                 item.appendChild(pair);rows.appendChild(item);
               }
+              if(job.status==="creative_accepted"&&
+                 revision.factory_preflight_available===true){
+                const verifyRow=document.createElement("li");
+                const verifyFactory=document.createElement("button");
+                verifyFactory.type="button";
+                verifyFactory.textContent="Verify private Factory review packet";
+                verifyRow.appendChild(verifyFactory);rows.appendChild(verifyRow);
+                verifyFactory.addEventListener("click",async()=>{
+                  if(!current())return;
+                  verifyFactory.disabled=true;
+                  status.textContent="Rechecking exact V2 Drive bytes, rights, ownership and active review hold…";
+                  try{
+                    const packet=await fetchJson("/api/factory/outputs/"+
+                      encodeURIComponent(id)+"/gallery/jobs/"+
+                      encodeURIComponent(job.job_id)+"/factory-preflight");
+                    if(!current())return;
+                    if(packet?.ok!==true||packet.output_id!==id||
+                       packet.job_id!==job.job_id||
+                       packet.revised_manifest_sha256!==job.revision_manifest_sha256||
+                       packet.ready_for_factory_review!==true||
+                       packet.drive_rights_and_pixels_verified!==true||
+                       packet.hold_active!==true||
+                       packet.creative_approved!==true||
+                       packet.factory_approved!==false||
+                       packet.handoff_performed!==false||
+                       packet.can_publish!==false||
+                       packet.publication_authorized!==false||
+                       packet.requires_separate_factory_approval!==true)
+                      throw new Error("Private Factory verification did not return an exact held receipt");
+                    status.textContent="Private revised gallery independently verified for Factory review ("+
+                      packet.selected_slide_count+" of "+packet.total_slide_count+
+                      " slides replaced). Actual handoff and separate Factory approval are not enabled.";
+                  }catch(error){
+                    if(current())status.textContent="Factory preflight blocked: "+
+                      String(error?.message||error);
+                  }finally{if(current())verifyFactory.disabled=false;}
+                });
+              }
               if(revision.creative_review_available===true&&
                  job.status==="ready_for_review"&&
                  /^[a-f0-9]{64}$/.test(String(job.revision_manifest_sha256||""))){
