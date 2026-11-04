@@ -39,17 +39,22 @@ jobs:
           # owner-only permissions independently read back on 2026-11-04.
           candidate="1VdULNl85JDoL_EaurRKMPm0tRi8xOawH"
           python - "$expected" "$candidate" <<'PY'
-          import base64,json,sys
+          import base64,gzip,json,sys
           from pathlib import Path
           expected,folder=sys.argv[1:]
-          code=base64.b64encode(Path("tools/stage1/native_gallery_readiness.py").read_bytes()).decode("ascii")
+          code=base64.b64encode(gzip.compress(Path("tools/stage1/native_gallery_readiness.py").read_bytes(),compresslevel=9)).decode("ascii")
           ps="""$ErrorActionPreference = "Stop"
           $service = Join-Path (Get-Location) "Services\\pipeline-runner\\service"
           if (!(Test-Path (Join-Path $service "config.py"))) {
             Write-Output 'STAGE1_READINESS_JSON={"ok":false,"mode":"read_only_no_generation","blockers":["LIVE_RUNNER_SOURCE_NOT_PRESENT"]}'
             exit 0
           }
-          $python = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("@PYCODE@"))
+          $compressed = [Convert]::FromBase64String("@PYCODE@")
+          $bytes = [System.IO.MemoryStream]::new([byte[]]$compressed)
+          $unzip = [System.IO.Compression.GZipStream]::new($bytes,[System.IO.Compression.CompressionMode]::Decompress)
+          $reader = [System.IO.StreamReader]::new($unzip)
+          $python = $reader.ReadToEnd()
+          $reader.Dispose(); $unzip.Dispose(); $bytes.Dispose()
           $env:PYTHONPATH = $service
           Push-Location $service
           try {
@@ -66,6 +71,11 @@ jobs:
           } finally { Pop-Location }
           """
           ps=ps.replace("@PYCODE@",code).replace("@EXPECTED@",expected).replace("@FOLDER@",folder)
+          # Ops Dashboard enforces <=8,000 UTF-16 code units for /api/shell.
+          # Compress the harmless read-only Python probe so the limit is met
+          # without loosening its command safety filter.
+          if len(ps)>7800:
+              raise SystemExit("read_only_ops_command_exceeds_7800_chars")
           Path("/tmp/stage1-readiness-shell.json").write_text(json.dumps({"command":ps,"confirm":True}))
           PY
           base='https://ops.chicagoshining.com'
