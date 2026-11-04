@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
+import {isNativeGalleryControlledPostPath} from "./native-gallery-route-gate.mjs";
 
 // Execute the actual routing predicate extracted from the Worker, not a copied
 // approximation of its allowlist. The handler still performs authentication,
@@ -9,8 +10,10 @@ const worker=readFileSync(new URL("./worker.js",import.meta.url),"utf8");
 const start=worker.indexOf("const isChicagoReviewPost =");
 const end=worker.indexOf("const allowedMethod =",start);
 assert.ok(start>=0&&end>start,"Global Phase-2A selector must exist");
-const isAllowed=Function("request","url",worker.slice(start,end)+"\nreturn isChicagoReviewPost;");
-const allow=(path,method="POST")=>isAllowed({method},{pathname:path});
+const isAllowed=Function("request","url","isNativeGalleryControlledPostPath",
+  worker.slice(start,end)+"\nreturn isChicagoReviewPost;");
+const allow=(path,method="POST")=>
+  isAllowed({method},{pathname:path},isNativeGalleryControlledPostPath);
 const record="rec0uVrVeiUM6shp9";
 test("exact protected handoff variants may reach authenticated handler",()=>{
   assert.equal(allow("/api/internal/rendering-review/factory-handoff"),true);
