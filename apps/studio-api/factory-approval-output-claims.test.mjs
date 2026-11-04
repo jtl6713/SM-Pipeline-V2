@@ -141,9 +141,9 @@ test("global and profile-local routes share the same canonical output-ID fence",
   const ui = readFileSync(new URL("../studio-web/assets/factory-desk.js", import.meta.url), "utf8");
   assert.match(ui, /rememberFactoryAccepted\(plan\.ids\)/);
   assert.match(ui, /reconcilePersistedFactoryPending/);
-  assert.match(ui, /Recover saved submission first/);
-  assert.match(ui, /approvalBusy \|\| Boolean\(pending\)/,
-    "Pending exact-ID recovery must block all new batch submissions");
-  assert.match(ui, /if \(unresolved\) \{/,
-    "Submission guards must reject unreconciled saved requests");
+  assert.doesNotMatch(ui, /Recover saved submission first/);
+  assert.match(ui, /const ready = selected\.filter\(card => !recovering\.has\(card\.id\)\)/,
+    "Only outputs owned by an unresolved request must wait; unrelated selections proceed");
+  assert.match(ui, /FACTORY_WAITING_SELECTION_KEY/,
+    "Explicit overlapping submission intent must survive recovery without a second click");
 });
