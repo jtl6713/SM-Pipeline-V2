@@ -142,7 +142,9 @@ test("accelerated bounded manifest retains five-per-sweep cap and never enables 
 test("Stage 3: #9277 added after durable priority cursor 9 without replaying prior IDs",async()=>{
  const store=bucket(),clock=Date.parse("2026-11-04T06:00:00Z");
  const ids=PRIORITY_VERIFIED_EXISTING_POSTS;
- assert.equal(ids.at(-1),"recI3x5A6Cz9vIQIs");
+ assert.deepEqual(ids.slice(-3),[
+   "recI3x5A6Cz9vIQIs","rece57RpkWLMOpZ47","reccenlA9uIF2MtSd"
+ ]);
  await writeRecoveryState(store,"studio/state/publication-reconciliation/v1/control.json",{
    priority_cursor:9,next_at:0,processing_cursor:null
  });
