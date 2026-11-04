@@ -71,7 +71,7 @@ try{
     await page.waitForFunction(()=>Object.keys(JSON.parse(localStorage.getItem('studio.factory.accepted-output-ids.v1')||'{}')).length===6);
   }
   if(mode==='quota'){
-    await page.waitForFunction(()=>document.getElementById('factoryDeskStatus').textContent.includes('Accepted 6 of 6'));
+    await page.waitForFunction(()=>document.getElementById('factoryDeskStatus').textContent.includes('All 6 outputs accepted'));
     assert.equal(posts.length,1);assert.equal(job.total,6);await context.close();continue;
   }
   await page.waitForFunction(()=>Object.keys(localStorage).some(k=>k.startsWith('studio.factory.recovery.v2.')) || Object.keys(JSON.parse(localStorage.getItem('studio.factory.accepted-output-ids.v1')||'{}')).length===6);
