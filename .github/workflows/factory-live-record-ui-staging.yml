@@ -31,6 +31,8 @@ jobs:
           npm install --no-save playwright@1.58.2
           # These tests launch headless Chromium only; avoid installing the unused full browser.
           npx playwright install --with-deps --only-shell chromium
+      - name: Verify storage quota and AI preference races
+        run: node --test apps/studio-web/storage-provider-behavior.test.mjs
       - name: Validate all canonical Factory Quality Agent signals in operator UI
         run: node --test apps/studio-web/factory-batch-quality-agent.test.mjs
       - name: Verify six-output submission survives 503, lost receipts and reload without another click

@@ -23,7 +23,7 @@ const server=createServer(async(req,res)=>{
   if(url.pathname.startsWith('/assets/')) {const file=path.resolve(root,'.'+url.pathname);if(!file.startsWith(root+path.sep)){res.writeHead(403);res.end();return;}try{res.writeHead(200,{'content-type':'text/javascript'});res.end(readFileSync(file));}catch{res.writeHead(404);res.end();}return;}
   if(url.pathname==='/api/factory/desk'){send(res,desk);return;}
   if(url.pathname==='/api/factory/approval-batches' && req.method==='GET'){
-    if(['slow_activity','legacy_recovery'].includes(scenario) && url.searchParams.get('view')==='active') return; // Production scan exceeded 35 seconds.
+    if(['slow_activity','legacy_recovery','quota'].includes(scenario) && url.searchParams.get('view')==='active') return; // Production scan exceeded 35 seconds.
     if(url.searchParams.has('profile')) {send(res,{ok:true,batch:true,status:'idle',job_id:null,items:[]});return;}
     const rid=url.searchParams.get('request_id');
     send(res,{ok:true,scope:'all',exact_request_id:rid||undefined,batches:job?[job]:[],
@@ -47,9 +47,10 @@ await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const origin='http://127.0.0.1:'+server.address().port;
 const browser=await chromium.launch({headless:true});
 try{
- for(const mode of ['busy','lost','blocked','slow_activity','legacy_recovery']){
+ for(const mode of ['busy','lost','blocked','slow_activity','legacy_recovery','quota']){
   scenario=mode;posts=[];job=null;
   const context=await browser.newContext({viewport:{width:1024,height:768},isMobile:true,hasTouch:true});
+  if(mode==='quota') await context.addInitScript(()=>{Storage.prototype.setItem=function(){throw new DOMException('The quota has been exceeded.','QuotaExceededError');};});
   if(mode==='legacy_recovery') await context.addInitScript(({ids,profile})=>{
     if(localStorage.getItem('fixture-seeded'))return;
     localStorage.setItem('fixture-seeded','true');
@@ -68,6 +69,10 @@ try{
   await page.locator('#factoryBatchSubmit').click();
   }else{
     await page.waitForFunction(()=>Object.keys(JSON.parse(localStorage.getItem('studio.factory.accepted-output-ids.v1')||'{}')).length===6);
+  }
+  if(mode==='quota'){
+    await page.waitForFunction(()=>document.getElementById('factoryDeskStatus').textContent.includes('All 6 outputs accepted'));
+    assert.equal(posts.length,1);assert.equal(job.total,6);await context.close();continue;
   }
   await page.waitForFunction(()=>Object.keys(localStorage).some(k=>k.startsWith('studio.factory.recovery.v2.')) || Object.keys(JSON.parse(localStorage.getItem('studio.factory.accepted-output-ids.v1')||'{}')).length===6);
   assert.equal(posts.length,1);
@@ -89,5 +94,5 @@ try{
   await context.close();
  }
  assert.deepEqual(errors,[]);
- console.log('FACTORY_SIX_OUTPUT_BROWSER=PASS busy_retry_same_id=true reload_resume=true lost_response_no_duplicate=true validation_error_persistent=true slow_activity_does_not_change_submit_route=true old_saved_selection_continues_without_click=true');
+ console.log('FACTORY_SIX_OUTPUT_BROWSER=PASS busy_retry_same_id=true reload_resume=true lost_response_no_duplicate=true validation_error_persistent=true slow_activity_does_not_change_submit_route=true old_saved_selection_continues_without_click=true full_storage_does_not_block_post=true');
 }finally{await browser.close();await new Promise(r=>server.close(r));}

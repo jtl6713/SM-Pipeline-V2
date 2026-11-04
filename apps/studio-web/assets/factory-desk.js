@@ -1,4 +1,30 @@
 (() => {
+  // Disposable caches must never prevent an approval request reaching the server.
+  const localStorage = factoryStorage();
+  function factoryStorage() {
+    const memory = new Map();
+    let disk; try { disk = window.localStorage; } catch {}
+    const keys = () => {
+      const found = new Set(memory.keys());
+      try { for(let i=0;i<disk.length;i++) found.add(disk.key(i)); } catch {}
+      return [...found];
+    };
+    return {
+      get length() { return keys().length; }, key(i) { return keys()[i] ?? null; },
+      getItem(key) { if(memory.has(key)) return memory.get(key); try{return disk.getItem(key);}catch{return null;} },
+      setItem(key,value) {
+        value=String(value);
+        try { disk.setItem(key,value); memory.delete(key); return; } catch {}
+        // Pipeline row snapshots can fill Safari's entire origin quota. They are
+        // reloadable data, unlike the exact request IDs used for deduplication.
+        try { for(const k of keys()) if(k?.startsWith('studio.pipelineOutputs.')) disk.removeItem(k); } catch {}
+        try { disk.setItem(key,value); memory.delete(key); }
+        catch { memory.set(key,value); } // Same-page retry remains available with storage disabled.
+      },
+      removeItem(key) { memory.delete(key); try{disk.removeItem(key);}catch{} },
+    };
+  }
+
   const $ = (id) => document.getElementById(id);
   const state = {
     loading: false,
