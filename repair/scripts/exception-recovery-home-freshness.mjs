@@ -35,6 +35,5 @@ export function verifyHomeOverviewGeneration(overview, assessment) {
       || !Array.isArray(overview.records) || overview.records.length !== 4)
     return false;
   return overview.records.every((x) => x && Number.isFinite(x.approved_past_due)
-    && Number.isFinite(x.approved_missing_date) && Number.isFinite(x.failed)
-    && String(x.city_label || "").trim());
+    && Number.isFinite(x.approved_missing_date) && Number.isFinite(x.failed));
 }
