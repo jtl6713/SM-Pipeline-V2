@@ -265,12 +265,21 @@ function factoryPendingRecoveryHarness(saved, fetchJson) {
   const rowsFn = extractNamedFunction(js, "factoryActivityRows");
   const matchesFn = extractNamedFunction(js, "factoryActivityMatchesPlan");
   const missingFn = extractNamedFunction(js, "factoryActivityProvesPlanMissing");
+  const terminalFn = extractNamedFunction(js, "factoryTerminalEligibilityError");
+  const dropFn = extractNamedFunction(js, "dropFactoryRecoveryEntry");
   // The generic extractor starts at "function" and omits the async modifier.
   const recoveryFn = "async " + extractNamedFunction(js, "reconcileFactorySubmissionFence");
   const rows = new Function(rowsFn + "; return factoryActivityRows;")();
   const matches = new Function("factoryActivityRows",
     matchesFn + "; return factoryActivityMatchesPlan;")(rows);
   const missing = new Function(missingFn + "; return factoryActivityProvesPlanMissing;")();
+  const factoryTerminalEligibilityError = new Function(
+    terminalFn + "; return factoryTerminalEligibilityError;")();
+  const dropFactoryRecoveryEntry = new Function(
+    "localStorage", "FACTORY_WAITING_SELECTION_KEY", "waitingFactorySelection",
+    "state", "saveFactorySelection", "factoryRecoveryEntries", "setBatchSubmissionError",
+    dropFn + "; return dropFactoryRecoveryEntry;",
+  )(localStorage, "waiting", () => [], state, () => {}, () => [], () => {});
   const reconcile = new Function(
     "pendingFactoryApproval", "FACTORY_PENDING_MISSING_GRACE_MS",
     "fetchJson", "localStorage", "FACTORY_PENDING_REQUEST_KEY",
@@ -278,6 +287,7 @@ function factoryPendingRecoveryHarness(saved, fetchJson) {
     "rememberFactoryAccepted", "state", "saveFactorySelection",
     "setBatchSubmissionError", "renderDesk", "updateFactoryBatchToolbar", "setStatus",
     "factorySavedPayloadMatchesPlan", "retrySavedFactoryPlan", "factoryRecoveryEntries",
+    "factoryTerminalEligibilityError", "dropFactoryRecoveryEntry",
     recoveryFn + "; return reconcileFactorySubmissionFence;",
   )(
     () => stored ? JSON.parse(stored) : null, 90_000,
@@ -285,6 +295,7 @@ function factoryPendingRecoveryHarness(saved, fetchJson) {
     localStorage, "pending", matches, missing,
     ids => accepted.push(...ids), state, () => {},
     () => {}, () => {}, () => {}, message => messages.push(message), () => false, async () => null, () => [],
+    factoryTerminalEligibilityError, dropFactoryRecoveryEntry,
   );
   return { reconcile, state, calls, accepted, messages, pending: () => stored ? JSON.parse(stored) : null };
 }
@@ -477,14 +488,16 @@ function automaticRecoveryHarness(saved, response) {
   const submitted=[],messages=[];
   const functions = ['pendingFactoryApproval','factoryRecoveryEntries','archiveFactoryPending',
     'factoryRecoveringIds','waitingFactorySelection','factoryActivityRows','factoryActivityMatchesPlan',
-    'factoryActivityProvesPlanMissing','factorySavedPayloadMatchesPlan'].map(n=>extractNamedFunction(js,n)).join('\n');
+    'factoryActivityProvesPlanMissing','factorySavedPayloadMatchesPlan','factoryTerminalEligibilityError',
+    'dropFactoryRecoveryEntry'].map(n=>extractNamedFunction(js,n)).join('\n');
   const asyncFunctions=['retrySavedFactoryPlan','reconcileFactorySubmissionFence','reconcilePersistedFactoryPending',
     'submitFactoryBatchApprovals'].map(n=>'async '+extractNamedFunction(js,n)).join('\n');
   const compile=new Function('localStorage','state','fetchJson','submitFactoryGlobalApprovalBatches','messages',`
     const FACTORY_PENDING_REQUEST_KEY='pending', FACTORY_RECOVERY_PREFIX='recovery.',
       FACTORY_WAITING_SELECTION_KEY='waiting', FACTORY_PENDING_MISSING_GRACE_MS=90000;
     let factoryPendingReconcileAt=0, factoryPendingReconcileRunning=false;
-    const setBatchSubmissionError=message=>messages.push(message),setStatus=()=>{},updateFactoryBatchToolbar=()=>{},
+    const setBatchSubmissionError=message=>messages.push(message),setStatus=message=>messages.push(message),
+      updateFactoryBatchToolbar=()=>{},
       saveFactorySelection=()=>{},renderDesk=()=>{},rememberFactoryAccepted=()=>{};
     const refreshFactoryApprovalPolicy=async()=>{};
     const readyFactoryOutputs=()=>[...state.selectedOutputs].map(id=>({id,profile_id:'recChicago'}));
@@ -591,4 +604,22 @@ test('validation errors stay visible and do not become silent automatic POST loo
   assert.equal(posts,1);assert.equal(row.saved.retry_blocked,true);
   assert.equal(row.saved.last_error,'Output is held');
   assert.ok(h.messages.some(message=>message?.includes('Output is held')), 'actual blocker must be displayed, not swallowed');
+});
+test('past_review recovery is dropped so a new Ready-for-Review selection can submit',async()=>{
+  const saved=savedGlobalEnvelope();let posts=0;
+  const h=automaticRecoveryHarness(saved,async(url,options)=>{
+    if(options.method==='POST'){
+      posts++;
+      throw Object.assign(Error('Output #9693: past_review. No new batch was accepted.'),{status:409});
+    }
+    return {ok:true,exact_request_id:saved.batches[0].request_id,batches:[]};
+  });
+  await h.reconcilePersistedFactoryPending(true);
+  assert.equal(posts,1);
+  assert.equal(h.factoryRecoveryEntries().length,0);
+  assert.equal(h.state.selectedOutputs.has('recExistingA'),false);
+  assert.ok(h.messages.some(message=>/already left Ready for Review|past_review/i.test(String(message||''))));
+  h.state.selectedOutputs.add('recNewChicago');
+  await h.submitFactoryBatchApprovals();
+  assert.deepEqual(h.submitted,[['recNewChicago']]);
 });
