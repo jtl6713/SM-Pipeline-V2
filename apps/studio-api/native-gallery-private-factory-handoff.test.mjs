@@ -132,6 +132,9 @@ test("unauthorized profile, lost hold, issued schedule, published output or reje
    f=>f.output.fields.Studio_Render_Review_Hold_Active=false,
    f=>f.output.fields.Studio_Render_Review_Hold_Owner="other",
    f=>f.output.fields.Studio_Scheduled_At="2026-11-05T15:00:00Z",
+   f=>f.output.fields.YouTube_Scheduled_Publish_At="2026-11-05T15:00:00Z",
+   f=>f.output.fields.Publish_Asset_URL="https://media.example.invalid/published.png",
+   f=>f.output.fields.Publish_Status="Publishing",
    f=>f.output.fields.Published_At="2026-11-04T13:00:00Z",
    f=>f.output.fields.Platform_Media_ID="platform_media_exists",
    f=>f.content.fields.Content_Profile=["rec99999999999999"],
@@ -201,4 +204,8 @@ test("lost Airtable write acknowledgement is only reconciled by readback/replay"
  g.job.fields.Event_History_JSON=JSON.stringify(copied);
  await assert.rejects(run(g),/GALLERY_FACTORY_HANDOFF_REPLAY_CONFLICT/);
  assert.equal(g.calls.patches,1);
+ const h=fixture();await run(h);
+ h.output.fields.YouTube_Scheduled_Publish_At="2026-11-05T15:00:00Z";
+ await assert.rejects(run(h),/GALLERY_FACTORY_HANDOFF_AUTHORITY_CHANGED/);
+ assert.equal(h.calls.patches,1);
 });
