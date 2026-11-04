@@ -21,6 +21,11 @@ export const PRIORITY_VERIFIED_EXISTING_POSTS = Object.freeze([
   "recha3rExqOvKwFy1", // YouTube #1885
   "recqLmTDQRqyB9ytE", // YouTube #3344
   "recxkZ1hBhREpsJgj", // YouTube #8098
+  "recI3x5A6Cz9vIQIs", // YouTube #9277: verified publicly released, private Studio handoff stale
+  // These two are approved/due with pre-existing IDs, NOT yet provider-verified.
+  // Authenticated exact-channel GET and status-only preflight remain compulsory.
+  "rece57RpkWLMOpZ47", // YouTube #5327 Miami, wuPzjhhUFLs
+  "reccenlA9uIF2MtSd", // YouTube #4146 Chicago, Qokdf8u-shY
 ]);
 export const recoveryStateKey=id=>PREFIX+"outputs/"+id+".json";
 export async function readRecoveryState(bucket,key) {
@@ -36,12 +41,16 @@ export async function writeRecoveryState(bucket,key,value) {
 export function publicationDiscoveryFormula(nowMs=Date.now()) {
   // Only approved YouTube uploads or Instagram posts with existing published
   // media IDs. Do not scan unpublished IG containers/Stories or retry posting.
-  // Completed Studio handoffs are terminal even before public release.
+  // Private Studio handoffs are eligible for GET-only public status catch-up
+  // only after their scheduled release; never trigger an upload or visibility write.
   return 'AND({Test_Run_ID}=BLANK(),{Review_Status}="Approved",{Do_Not_Publish}=0,'
     +'OR(AND({Platform}="YouTube",OR({YouTube_Video_ID}!="",{Platform_Post_ID}!="")),'
     +'AND({Platform}="Instagram",OR({Platform_Post_ID}!="",{IG_Carousel_Published_Media_ID}!=""))),'
     +'OR({Output_Status}!="Published",{Publish_Status}!="Published"),'
-    +'{Output_Status}!="Awaiting Public Release",{Publish_Status}!="Published Privately",'
+    +'OR(AND({Output_Status}!="Awaiting Public Release",{Publish_Status}!="Published Privately"),'
+    +'AND({Platform}="YouTube",{Output_Status}="Awaiting Public Release",{Publish_Status}="Published Privately",'
+    +'{YouTube_Scheduled_Publish_At}!=BLANK(),IS_BEFORE({YouTube_Scheduled_Publish_At},"'
+    +new Date(nowMs+1).toISOString()+'"))),'
     +'OR({Output_Status}="Failed",{Publish_Status}="Failed",{Published_At}!=BLANK(),'
     +'AND({Scheduled_Post_Date}!=BLANK(),IS_BEFORE({Scheduled_Post_Date},"'
     +new Date(nowMs-15*60000).toISOString()+'"))))';

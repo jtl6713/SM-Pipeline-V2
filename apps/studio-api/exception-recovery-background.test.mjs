@@ -72,6 +72,9 @@ test("discovery only scans approved YouTube outputs with an existing remote iden
  assert.match(formula,/\{YouTube_Video_ID\}!=""|\{Platform_Post_ID\}!=""/);
  assert.match(formula,/\{Publish_Status\}!="Published Privately"/);
  assert.match(formula,/\{Output_Status\}!="Awaiting Public Release"/);
+ assert.match(formula,/\{YouTube_Scheduled_Publish_At\}!=BLANK\(\)/);
+ assert.match(formula,/\{Publish_Status\}="Published Privately"/);
+ assert.match(formula,/2026-10-24T12:00:00\.001Z/);
 });
 
 test("approved single-canary deployment never scans or processes unrelated backlog",async()=>{
@@ -90,7 +93,7 @@ test("approved single-canary deployment never scans or processes unrelated backl
  assert.equal(result.corrected,0);
 });
 
-test("bounded recovery visits nine prioritized remote-ID candidates once before ordinary queue",async()=>{
+test("bounded recovery visits twelve prioritized remote-ID candidates once before ordinary queue",async()=>{
  const store=bucket();let now=Date.parse("2026-10-25T03:30:00Z");
  const env={STUDIO_MEDIA:store,PUBLICATION_RECONCILIATION_SCAN_ENABLED:"true",
    PUBLICATION_RECONCILIATION_ENABLED:"true",PUBLICATION_RECONCILIATION_BOUNDED_ENABLED:"true",
@@ -114,7 +117,7 @@ test("bounded recovery visits nine prioritized remote-ID candidates once before 
  assert.equal(control.priority_cursor,PRIORITY_VERIFIED_EXISTING_POSTS.length);
 });
 test("read-only and exact-canary stages never select priority records",async()=>{
- assert.equal(PRIORITY_VERIFIED_EXISTING_POSTS.length,9);
+ assert.equal(PRIORITY_VERIFIED_EXISTING_POSTS.length,12);
  for(const id of PRIORITY_VERIFIED_EXISTING_POSTS) assert.match(id,/^rec[A-Za-z0-9]{14}$/);
  const store=bucket(),env={STUDIO_MEDIA:store,
    PUBLICATION_RECONCILIATION_SCAN_ENABLED:"true",
@@ -134,4 +137,28 @@ test("accelerated bounded manifest retains five-per-sweep cap and never enables 
  assert.equal(manifest.batch_size,5);
  assert.ok(manifest.batch_size<=5);
  assert.ok(manifest.scan_interval_minutes>=5);
+});
+
+test("Stage 3: #9277 added after durable priority cursor 9 without replaying prior IDs",async()=>{
+ const store=bucket(),clock=Date.parse("2026-11-04T06:00:00Z");
+ const ids=PRIORITY_VERIFIED_EXISTING_POSTS;
+ assert.deepEqual(ids.slice(-3),[
+   "recI3x5A6Cz9vIQIs","rece57RpkWLMOpZ47","reccenlA9uIF2MtSd"
+ ]);
+ await writeRecoveryState(store,"studio/state/publication-reconciliation/v1/control.json",{
+   priority_cursor:9,next_at:0,processing_cursor:null
+ });
+ const visited=[];
+ const env={STUDIO_MEDIA:store,PUBLICATION_RECONCILIATION_SCAN_ENABLED:"true",
+   PUBLICATION_RECONCILIATION_ENABLED:"true",PUBLICATION_RECONCILIATION_BOUNDED_ENABLED:"true",
+   PUBLICATION_RECONCILIATION_BATCH_SIZE:"5"};
+ await runPublicationRecovery(env,{now:()=>clock,
+   discover:async()=>({records:[]}),
+   readOutput:async id=>{visited.push(id);return {id,fields:{
+     Platform:"TikTok",Review_Status:"Approved",Content_Profile:["recBBBBBBBBBBBBBB"]
+   }};},
+   appendAudit:async()=>{},verifyRemote:async()=>{throw Error("should not call unsupported provider");}});
+ assert.deepEqual(visited,["recI3x5A6Cz9vIQIs","rece57RpkWLMOpZ47","reccenlA9uIF2MtSd"]);
+ const control=await readRecoveryState(store,"studio/state/publication-reconciliation/v1/control.json");
+ assert.equal(control.priority_cursor,12);
 });
