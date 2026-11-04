@@ -143,7 +143,8 @@ class ProcessorBoundaryTests(unittest.TestCase):
     def exercise(self, after_poll, *, before_create=None, new_container=False,
                  after_lock=None, before_lock=None, location_failure=False,
                  after_location_failure=None, fail_at_read=None,
-                 shared_claim=False, shared_claim_error=None):
+                 shared_claim=False, shared_claim_error=None,
+                 airtable_serialization=False):
         # Execute the real processor function with fixture transports. No
         # provider, Airtable, mirror, media, or scheduling service is contacted.
         source = Path(__file__).parents[1] / "ap1_ig" / "processor.py"
@@ -164,7 +165,13 @@ class ProcessorBoundaryTests(unittest.TestCase):
                     current["fields"].update(before_create)
                 if (counters["reads"] > 2 and after_poll == "unavailable") or counters["reads"] == fail_at_read:
                     raise RuntimeError("Airtable unavailable")
-                return copy.deepcopy(current)
+                returned = copy.deepcopy(current)
+                if airtable_serialization and counters["reads"] >= 3:
+                    for key in ("Publish_Locked_At", "Publish_Started_At"):
+                        value = returned["fields"].get(key)
+                        if isinstance(value, str) and value.endswith("Z"):
+                            returned["fields"][key] = value[:-1] + ".000Z"
+                return returned
             def update_record(self, table, output_id, fields, **kw):
                 counters["writes"] += 1
                 current["fields"].update(fields)
@@ -220,7 +227,7 @@ class ProcessorBoundaryTests(unittest.TestCase):
                 **({"location_id": "bad-place"} if location_failure else {}),
             },
             "parse_int": lambda v, default: int(v or default),
-            "stamp_minutes": lambda: "fixture", "iso_utc": lambda: "fixture",
+            "stamp_minutes": lambda: "fixture", "iso_utc": lambda *_a, **_k: "2026-11-04T10:36:13Z",
             "verify_before_reel_publication": verify_before_reel_publication,
             "verify_before_reel_creation": verify_before_reel_creation,
             "MAKE_SCENARIO_ID": 0, "MAKE_SCENARIO_NAME": "fixture",
@@ -329,6 +336,14 @@ class ProcessorBoundaryTests(unittest.TestCase):
         self.assertTrue(result["processed"])
         self.assertEqual(calls["create"], 1)
         self.assertEqual(calls["publish"], 1)
+
+    def test_real_processor_accepts_airtable_millisecond_readback(self):
+        result, calls, current = self.exercise(
+            None, new_container=True, airtable_serialization=True)
+        self.assertTrue(result["processed"])
+        self.assertEqual(calls["create"], 1)
+        self.assertEqual(calls["publish"], 1)
+        self.assertEqual(current["fields"]["Publish_Status"], "Published")
 
     def test_unselected_matching_video_uses_existing_publish_flow(self):
         result, calls, _ = self.exercise(None)
