@@ -193,6 +193,7 @@ test("Global Factory group submit authorizes Airtable before claiming output IDs
     "authoritative preflight then CAS output claims then durable enqueue");
   assert.doesNotMatch(group.slice(0, claimsIdx), /factoryGroupRecordsFromClientHints\(ids, payload, policy\)/);
   assert.match(group, /factoryOutputClaimInspect/);
+  assert.match(group, /factoryOutputClaimReclaimIfSafe/);
   assert.match(group, /duplicate_prevented: true/);
   assert.match(group, /accept_mode: "authoritative_preflight"/);
   assert.match(functions04, /async function factoryGroupRecordsFromAirtablePreflight/);
