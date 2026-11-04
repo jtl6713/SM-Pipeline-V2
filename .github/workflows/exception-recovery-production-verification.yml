@@ -43,7 +43,7 @@ jobs:
           const fs=require('node:fs');
           const src=fs.readFileSync('repair/scripts/exception-recovery-production-audit.mjs','utf8');
           if(!src.includes("const message='Please verify the existing Instagram receipt"))throw Error('persistence-only conversation scope missing');
-          if(!src.includes("request.method==='POST' && url.pathname==="))throw Error('one exact conversation POST guard missing');
+          if(!src.includes("request.method==='POST' && (url.pathname==='/${token}/conversation' || url.pathname==='/${token}/home-refresh')"))throw Error('exact conversation/Home refresh POST allowlist missing');
           if(!src.includes("url.pathname==='/${token}/home-refresh'"))throw Error('only bounded Home-cache refresh POST addition expected');
           if(!src.includes("const failures=[];"))throw Error('stage3 acceptance fail-closed gate missing');
           if(!src.includes("report.counts="))throw Error('counts audit missing');
