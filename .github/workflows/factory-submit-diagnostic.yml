@@ -116,8 +116,8 @@ jobs:
           echo "factory_live_worker_health=verified"
           URL="$BASE/report"
           HTTP="000"
-          for attempt in $(seq 1 12); do
-            HTTP="$(curl -sS --max-time 45 -o /tmp/factory-claims-report.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$URL" || true)"
+          for attempt in $(seq 1 2); do
+            HTTP="$(curl -sS --max-time 180 -o /tmp/factory-claims-report.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$URL" || true)"
             if [[ "$HTTP" == "200" ]]; then break; fi
             sleep 3
           done
