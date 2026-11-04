@@ -10,6 +10,7 @@ const admitted=[
  factory+"/gallery-enroll",
  factory+"/gallery-generate",
  factory+"/gallery/jobs/"+job+"/creative-decision",
+ factory+"/gallery/jobs/"+job+"/factory-handoff",
  "/internal/native-gallery/claim-job",
  "/api/internal/native-gallery/claim-job",
  "/internal/native-gallery/reserve-launch",
