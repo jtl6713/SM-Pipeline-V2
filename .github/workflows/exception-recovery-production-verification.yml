@@ -32,6 +32,8 @@ jobs:
       - run: node --check repair/scripts/exception-recovery-production-audit.mjs
       - run: node --check repair/scripts/exception-recovery-disposition.mjs
       - run: node --test repair/scripts/exception-recovery-disposition.test.mjs
+      - run: node --check repair/scripts/exception-recovery-home-freshness.mjs
+      - run: node --test repair/scripts/exception-recovery-home-freshness.test.mjs
       - run: node --test apps/studio-api/exception-recovery-conversation.test.mjs apps/studio-api/exception-recovery-home-parity.test.mjs apps/studio-api/exception-recovery-autonomous.test.mjs apps/studio-api/exception-recovery-qa-parity.test.mjs
       - name: Refuse any provider writes or broad output mutations in verification script
         shell: bash
@@ -41,7 +43,9 @@ jobs:
           const fs=require('node:fs');
           const src=fs.readFileSync('repair/scripts/exception-recovery-production-audit.mjs','utf8');
           if(!src.includes("const message='Please verify the existing Instagram receipt"))throw Error('persistence-only conversation scope missing');
-          if(!src.includes("request.method==='POST' && url.pathname==="))throw Error('one exact conversation POST guard missing');
+          if(!src.includes("request.method==='POST' && (url.pathname==='/${token}/conversation' || url.pathname==='/${token}/home-refresh')"))throw Error('exact conversation/Home refresh POST allowlist missing');
+          if(!src.includes("url.pathname==='/${token}/home-refresh'"))throw Error('only bounded Home-cache refresh POST addition expected');
+          if(!src.includes("const failures=[];"))throw Error('stage3 acceptance fail-closed gate missing');
           if(!src.includes("report.counts="))throw Error('counts audit missing');
           for(const forbidden of ["'/api/outputs/publish'","'/api/admin/exception-recovery/'+", 'method:"PATCH"', 'method:"DELETE"']) {
             if(src.includes(forbidden))throw Error('unsafe verification mutation: '+forbidden);
