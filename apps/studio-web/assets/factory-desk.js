@@ -849,19 +849,38 @@
   let factoryPendingReconcileAt = 0;
   let factoryPendingReconcileRunning = false;
   async function reconcilePersistedFactoryPending(force = false) {
-    if (state.submittingBatch || factoryPendingReconcileRunning) return;
+    if (state.submittingBatch) return;
+    if (factoryPendingReconcileRunning) {
+      if (force) state.factoryRecoveryRequested = true;
+      return;
+    }
     if (!force && Date.now() - factoryPendingReconcileAt < 15000) return;
     factoryPendingReconcileAt = Date.now();
     factoryPendingReconcileRunning = true;
     try {
       archiveFactoryPending();
       // Independent of Desk/Activity success; one failed request cannot starve others.
-      for (const { key, saved } of factoryRecoveryEntries()) {
-        try { await reconcileFactorySubmissionFence(saved, key); } catch {}
+      const entries = factoryRecoveryEntries().sort((a,b) =>
+        Number((b.saved.ids || []).some(id => state.selectedOutputs.has(id))) -
+        Number((a.saved.ids || []).some(id => state.selectedOutputs.has(id))));
+      for (const { key, saved } of entries) {
+        let result;
+        try { result = await reconcileFactorySubmissionFence(saved, key); }
+        catch (error) { result = {resolved:false,message:String(error.message || error)}; }
+        if (!result?.resolved && result?.message &&
+            (saved.ids || []).some(id => state.selectedOutputs.has(id))) {
+          const message = "Submission not accepted yet: " + result.message;
+          setBatchSubmissionError(message);
+          setStatus(message, true);
+        }
       }
     } finally {
       factoryPendingReconcileRunning = false;
       updateFactoryBatchToolbar();
+    }
+    if (state.factoryRecoveryRequested) {
+      state.factoryRecoveryRequested = false;
+      return reconcilePersistedFactoryPending(true);
     }
     const waiting = waitingFactorySelection().filter(id => state.selectedOutputs.has(id));
     localStorage.setItem(FACTORY_WAITING_SELECTION_KEY, JSON.stringify(waiting));
@@ -1235,7 +1254,7 @@
     if (!ready.length) {
       updateFactoryBatchToolbar();
       setStatus(selected.length ? "Your submission is saved. Previously submitted outputs are being checked automatically; any not yet accepted will continue automatically." : "Select one or more review-ready outputs.");
-      reconcilePersistedFactoryPending(true).catch(() => {});
+      await reconcilePersistedFactoryPending(true);
       return;
     }
     // Remove only the IDs this attempt owns; pending overlaps remain queued.
