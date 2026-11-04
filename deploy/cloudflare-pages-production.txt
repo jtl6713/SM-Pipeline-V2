@@ -680,3 +680,5 @@ Deploy Studio UI 0.6.869: fix hidden Factory recovery control and clear stale 50
 2026-11-04: Deploy UI 0.6.873-factory-durable-submit. Persist exact authorized request envelopes before submission, retry transient failures with the original ID after reload, require complete receipts, retain validation errors, bound network timeouts, and serialize Activity polling. Six-output browser regression covers busy/lost-response/reload cases.
 
 2026-11-04 UI 0.6.874: load approval policy independently; never choose legacy route from missing activity response.
+
+2026-11-04 UI 0.6.875: nonblocking Factory storage and reliable AI preference feedback.

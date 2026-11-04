@@ -1,0 +1,130 @@
+name: Set requested OpenAI preference and verify canonical readback
+on:
+  push:
+    branches: [fix/storage-ai-preference-20261104]
+    paths:
+      - .github/workflows/verify-openai-preference.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: factory-submit-individual-readonly
+  cancel-in-progress: false
+jobs:
+  audit:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      AUDIT_WORKER: studio-ai-preference-verify-20261104
+    steps:
+      - name: Run temporary service-binding-only Worker and clean up
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          CODE="$(curl -sS --max-time 20 -o /tmp/factory-existing.json -w '%{http_code}' -H "$AUTH" "$API/workers/scripts/$AUDIT_WORKER/settings")"
+          if [[ "$CODE" != "404" ]]; then
+            echo "::error::Refusing to overwrite existing audit Worker, HTTP $CODE"
+            exit 1
+          fi
+          OWNED=0
+          cleanup() {
+            if [[ "$OWNED" == "1" ]]; then
+              curl -fsS --max-time 20 -X DELETE -H "$AUTH" "$API/workers/scripts/$AUDIT_WORKER" >/dev/null ||
+                echo "::warning::Temporary audit Worker requires cleanup; no production Studio Worker was changed"
+            fi
+          }
+          trap cleanup EXIT
+          TOKEN="$(openssl rand -hex 32)"
+          cat > /tmp/factory-audit-worker.mjs <<'JS'
+          export default {
+            async fetch(request,env) {
+              const path=new URL(request.url).pathname;
+              if (request.method !== "GET" ||
+                  !["/health","/original","/desk","/claims","/active","/completed"].includes(path)) return new Response("Not found",{status:404});
+              if (request.headers.get("Authorization") !== "Bearer " + env.AUDIT_TOKEN) {
+                return new Response("Unauthorized",{status:401});
+              }
+              const routes = path === "/health" ? {health:"/api/health"} : {
+                claims:"/api/factory/approval-batches?claims_diagnostic=1",
+                active:"/api/factory/approval-batches?scope=all&view=active",
+                completed:"/api/factory/approval-batches?scope=all&view=completed",
+                original:"/api/ai-api",
+                desk:"/api/ai-api"
+              };
+              const report = {};
+              for (const [name,route] of Object.entries(routes)) {
+                if (path !== "/"+name) continue;
+                const answer = await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com"+route,{
+                  ...(name==="original"?{method:"PATCH",body:JSON.stringify({preferred_provider:"OpenAI"})}:{}),headers:{"Content-Type":"application/json",
+                  "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com",
+                  "Origin":"https://studio.chicagoshining.com","Accept":"application/json"
+                }}));
+                const body=await answer.json().catch(()=>({error:"Non-JSON response"}));
+                if(name==="health") return Response.json(body,{status:answer.status});
+                report[name]={http:answer.status,preferred_provider:body.preferred_provider,settings_cached:body.settings_cached,error:body.error};
+              }
+              return Response.json(report);
+
+            }
+          };
+          JS
+          # Only the explicitly requested OpenAI preference is changed through the normal authenticated endpoint.
+          cat >/tmp/factory-audit-metadata.json <<EOF
+          {"main_module":"worker.mjs","compatibility_date":"2026-10-01","bindings":[{"type":"service","name":"STUDIO_API","service":"$TARGET_WORKER"},{"type":"plain_text","name":"AUDIT_TOKEN","text":"$TOKEN"}]}
+          EOF
+          PUT="$(curl -sS --max-time 30 -o /tmp/factory-audit-put.json -w '%{http_code}' -X PUT "$API/workers/scripts/$AUDIT_WORKER/content" -H "$AUTH" -F 'metadata=@/tmp/factory-audit-metadata.json;type=application/json' -F 'worker.mjs=@/tmp/factory-audit-worker.mjs;type=application/javascript+module;filename=worker.mjs')"
+          if ! [[ "$PUT" =~ ^2[0-9][0-9]$ ]] ||
+              ! jq -e '.success==true' /tmp/factory-audit-put.json >/dev/null; then
+            echo "::error::Temporary service-binding Worker could not be created (HTTP $PUT)"
+            jq -c '{success,errors:[.errors[]?|{code}]}' /tmp/factory-audit-put.json || true
+            exit 1
+          fi
+          OWNED=1
+          curl -fsS --max-time 20 -X POST -H "$AUTH" -H 'Content-Type: application/json' "$API/workers/scripts/$AUDIT_WORKER/subdomain" --data '{"enabled":true,"previews_enabled":false}' >/tmp/factory-audit-sub.json
+          jq -e '.success==true' /tmp/factory-audit-sub.json >/dev/null
+          SUBDOMAIN="$(curl -fsS --max-time 20 -H "$AUTH" "$API/workers/subdomain" | jq -er '.result.subdomain')"
+          BASE="https://$AUDIT_WORKER.$SUBDOMAIN.workers.dev"
+          # Push triggers Worker deploy and this audit concurrently. Read the
+          # actual live Worker version first, rather than probing old code.
+          LIVE="false"
+          for attempt in $(seq 1 35); do
+            STATUS="$(curl -sS --max-time 20 -o /tmp/factory-api-health.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BASE/health" || true)"
+            if [[ "$STATUS" == "200" ]] && jq -e '.version|startswith("0.10.")' /tmp/factory-api-health.json >/dev/null 2>&1; then
+              LIVE="true"
+              break
+            fi
+            sleep 5
+          done
+          if [[ "$LIVE" != "true" ]]; then
+            echo "::error::Current Worker health not verified; audit refused"
+            exit 1
+          fi
+          echo "factory_live_worker_health=verified"
+          for ENDPOINT in original desk; do
+            STARTED=$(date +%s)
+            HTTP="$(curl -sS --max-time 70 -o /tmp/factory-$ENDPOINT.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BASE/$ENDPOINT" || true)"
+            echo "FACTORY_ENDPOINT=$ENDPOINT HTTP=$HTTP ELAPSED_SECONDS=$(($(date +%s)-STARTED))"
+            test "$HTTP" = "200"
+            jq -c . /tmp/factory-$ENDPOINT.json
+            jq -e --arg name "$ENDPOINT" '.[$name].http==200 and .[$name].preferred_provider=="OpenAI" and (.[$name].settings_cached!=true)' /tmp/factory-$ENDPOINT.json >/dev/null
+          done
+      - name: Attach sanitized audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: factory-production-claims-readonly-${{ github.run_id }}
+          path: |
+            /tmp/factory-original.json
+            /tmp/factory-desk.json
+            /tmp/factory-claims.json
+            /tmp/factory-active.json
+            /tmp/factory-completed.json
+          if-no-files-found: ignore
+          retention-days: 10

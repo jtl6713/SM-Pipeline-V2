@@ -3,6 +3,8 @@
   const CACHE_KEY = "studio.ai_api_status_v1";
   let current = "OpenAI";
   let lastPayload = null;
+  let revision = 0;
+  let switching = false;
 
   function readCache() {
     try {
@@ -61,7 +63,8 @@
 
   async function load() {
     const host = document.getElementById("aiApiFooter");
-    if (!host) return;
+    if (!host || switching) return;
+    const startedRevision = revision;
     try {
       const response = await fetch(endpoint, {
         credentials: "same-origin",
@@ -70,9 +73,12 @@
       });
       if (!response.ok) throw new Error("AI API status unavailable");
       const payload = await response.json();
+      if (startedRevision !== revision || switching) return;
+      if(payload.settings_cached && lastPayload) { render(lastPayload, { stale: true }); return; }
       writeCache(payload);
       render(payload);
     } catch {
+      if (startedRevision !== revision || switching) return;
       const cached = lastPayload || readCache();
       if (cached) {
         render(cached, { stale: true });
@@ -84,8 +90,14 @@
   }
 
   async function toggle(event) {
-    const button = event?.currentTarget;
+    if(switching) return;
+    const previous = lastPayload || { preferred_provider: current };
+    switching = true;
+    revision++;
+    let button = event?.currentTarget;
     const next = current === "OpenAI" ? "Azure" : "OpenAI";
+    render({ ...previous, preferred_provider: next });
+    button = document.getElementById("aiApiToggle");
     if (button) {
       button.disabled = true;
       button.textContent = "Switching…";
@@ -100,15 +112,17 @@
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload?.error || payload?.message || "Could not switch AI API");
-      writeCache(payload);
-      render(payload);
-      window.setTimeout(load, 1200);
+      if(payload.preferred_provider !== next) throw new Error("Server did not confirm the requested AI provider");
+      switching = false;
+      writeCache({ ...previous, ...payload });
+      render({ ...previous, ...payload });
     } catch (error) {
-      if (button) {
-        button.disabled = false;
-        button.textContent = "Make " + next + " Preferred";
-        button.title = error?.message || "Could not switch AI API";
-      }
+      switching = false;
+      render(previous);
+      const message = document.createElement("span");
+      message.setAttribute("role", "alert");
+      message.textContent = "AI preference was not confirmed: " + (error?.message || "Could not switch AI API") + ". Please try again.";
+      document.getElementById("aiApiFooter")?.append(message);
     }
   }
 

@@ -295,7 +295,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.874-factory-policy-isolation";
+  const BUILD_ID = "item4-0.6.875-storage-provider";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -23238,8 +23238,8 @@ function timedScriptAssetLabel(asset, index) {
   function writePipelineOutputCache(records) {
     if (!Array.isArray(records) || !records.length) return;
     const payload = JSON.stringify({ records, at: Date.now() });
-    try { localStorage.setItem(pipelineOutputCacheKey(), payload); } catch { /* ignore quota */ }
-    try { sessionStorage.setItem(pipelineOutputCacheKey(), payload); } catch { /* ignore quota */ }
+    try { localStorage.removeItem(pipelineOutputCacheKey()); } catch {} // Row snapshots are disposable session data.
+    if(payload.length < 500000) try { sessionStorage.setItem(pipelineOutputCacheKey(), payload); } catch { /* ignore quota */ }
   }
 
   function mergePipelineFreshOutputs(baseRows, freshRows) {
