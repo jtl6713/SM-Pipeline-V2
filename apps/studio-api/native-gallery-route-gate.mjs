@@ -12,6 +12,7 @@ const NATIVE_FACTORY_POST=[
   new RegExp("^/api/factory/outputs/"+OUTPUT+"/gallery-enroll$"),
   new RegExp("^/api/factory/outputs/"+OUTPUT+"/gallery-generate$"),
   new RegExp("^/api/factory/outputs/"+OUTPUT+"/gallery/jobs/"+JOB+"/creative-decision$"),
+  new RegExp("^/api/factory/outputs/"+OUTPUT+"/gallery/jobs/"+JOB+"/factory-handoff$"),
 ];
 const NATIVE_INTERNAL_POST=new Set([
   "claim-job", "reserve-launch", "commit-manifest",

@@ -686,3 +686,5 @@ Deploy Studio UI 0.6.869: fix hidden Factory recovery control and clear stale 50
 2026-11-04 UI 0.6.876-gallery-factory: guarded Factory private image review packet verification action for an explicitly creatively accepted native gallery job. New matching BUILD_ID and every asset cache key. No Factory approve/publish operation or feature-flag activation; release only through protected Pages validation.
 
 2026-11-04 UI 0.6.877: reveal actual automatic recovery failures; prioritize selected submission.
+
+2026-11-04 UI build 0.6.880-stage1-held-inbox. A second explicit user confirmation after verified private V2 previews may request the protected default-OFF Airtable-only Factory inbox receipt. This NEVER releases hold or authorizes normal Factory/public publication. Item4 BUILD_ID and all JS/CSS cache keys strictly aligned.

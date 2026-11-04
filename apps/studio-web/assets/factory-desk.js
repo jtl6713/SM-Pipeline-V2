@@ -1901,7 +1901,64 @@
                       throw new Error("Private Factory verification did not return an exact held receipt");
                     status.textContent="Private revised gallery independently verified for Factory review ("+
                       packet.selected_slide_count+" of "+packet.total_slide_count+
-                      " slides replaced). Actual handoff and separate Factory approval are not enabled.";
+                      " slides replaced). The output stays held; Factory approval and publication remain separate.";
+                    if(revision.factory_handoff_available===true&&
+                       job.stage!=="factory_review_pending"){
+                      // A SECOND deliberate human action records a private,
+                      // held inbox receipt. The preflight alone never writes.
+                      const consent=document.createElement("label");
+                      const checkbox=document.createElement("input");
+                      checkbox.type="checkbox";
+                      checkbox.style.marginRight="8px";
+                      consent.appendChild(checkbox);
+                      consent.appendChild(document.createTextNode(
+                        "Send this exact creatively accepted revision to private Factory review only. Do not publish."));
+                      const send=document.createElement("button");
+                      send.type="button";
+                      send.textContent="Send to private Factory review";
+                      send.disabled=true;
+                      checkbox.addEventListener("change",()=>{send.disabled=!checkbox.checked;});
+                      verifyRow.appendChild(consent);verifyRow.appendChild(send);
+                      send.addEventListener("click",async()=>{
+                        if(!current()||!checkbox.checked||send.disabled)return;
+                        send.disabled=true;checkbox.disabled=true;
+                        status.textContent="Recording protected private Factory handoff in Airtable…";
+                        try{
+                          const moved=await fetchJson("/api/factory/outputs/"+
+                            encodeURIComponent(id)+"/gallery/jobs/"+
+                            encodeURIComponent(job.job_id)+"/factory-handoff",{
+                            method:"POST",body:JSON.stringify({
+                              manifest_sha256:packet.revised_manifest_sha256,
+                              confirm_private_factory_handoff:true,
+                            }),
+                          });
+                          if(!current())return;
+                          if(moved?.ok!==true||moved.output_id!==id||
+                             moved.job_id!==job.job_id||
+                             moved.revised_manifest_sha256!==packet.revised_manifest_sha256||
+                             moved.private_factory_review_handoff!==true||
+                             moved.stage!=="factory_review_pending"||
+                             moved.hold_active!==true||
+                             moved.hold_released!==false||
+                             moved.factory_approved!==false||
+                             moved.publication_authorized!==false||
+                             moved.can_publish!==false||
+                             moved.media_quarantined!==true||
+                             moved.requires_separate_factory_approval!==true)
+                            throw new Error("Airtable private Factory handoff receipt was not verified");
+                          consent.remove();send.remove();
+                          status.textContent="Revision transferred to private Factory review inbox. "+
+                            "Original output remains on publication hold; separate Factory approval is still required.";
+                        }catch(error){
+                          if(current()){
+                            checkbox.disabled=false;
+                            send.disabled=!checkbox.checked;
+                            status.textContent="Private Factory handoff blocked: "+
+                              String(error?.message||error);
+                          }
+                        }
+                      });
+                    }
                   }catch(error){
                     if(current())status.textContent="Factory preflight blocked: "+
                       String(error?.message||error);
