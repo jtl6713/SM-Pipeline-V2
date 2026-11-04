@@ -11,6 +11,7 @@
  */
 import {inspectNativeGalleryFactoryPreflight,
   nativeGalleryFactoryPreflightEnabled} from "./native-gallery-factory-preflight.mjs";
+import {nativeGalleryHasScheduledOccupancy} from "./native-gallery-publisher-gate.mjs";
 const REC=/^rec[A-Za-z0-9]{14}$/,ID=/^[A-Za-z0-9_-]{8,120}$/,SHA=/^[a-f0-9]{64}$/;
 const fail=(code,status=409)=>{throw Object.assign(new Error(code),{code,status});};
 const stage="factory_review_pending";
@@ -41,10 +42,12 @@ function held(output,job){
    f.Studio_Render_Review_Session_ID===j.Hold_Owner&&
    Array.isArray(f.Content_Item)&&f.Content_Item.length===1&&
    f.Content_Item[0]===j.Content_Item_Record_ID&&
-   f.Auto_Publish_Enabled!==true&&!f.Publish_Started_At&&!f.Published_At&&
+   f.Auto_Publish_Enabled!==true&&!f.Publish_Asset_URL&&
+   !f.Publish_Started_At&&!f.Published_At&&
    !f.Publish_Locked_At&&!f.Publish_Locked_By&&
-   !f.Platform_Post_ID&&!f.Platform_Media_ID&&
-   !f.Studio_Scheduled_At&&!f.Scheduled_Post_Date;
+   !f.Platform_Post_ID&&!f.Platform_Post_URL&&!f.Platform_Media_ID&&
+   !/^(published|publishing|dispatched)$/i.test(state(f.Publish_Status))&&
+   !nativeGalleryHasScheduledOccupancy(f);
 }
 function receipt(job,outputId,jobId,actor,hash){
  const f=job?.fields||{};
