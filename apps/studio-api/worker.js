@@ -3,6 +3,7 @@ import { readFactoryClaimsDiagnostic } from "./factory-timing-r2-inspector.mjs";
 import { readAuthoritativeGalleryInventory } from "./rendering-review-gallery-inventory-http.mjs";
 import { previewNativeGalleryCorrection } from "./rendering-review-gallery-selection-preview.mjs";
 import { readGalleryRevisionStatus } from "./rendering-review-gallery-status-http.mjs";
+import { isNativeGalleryControlledPostPath } from "./native-gallery-route-gate.mjs";
 import { verifyGallerySourceBytes, gallerySourceBytePreflightEnabled } from "./rendering-review-gallery-byte-preflight.mjs";
 import { handleNativeGalleryGenerate } from "./native-gallery-generation-http.mjs";
 import { enrollNativeGalleryHold } from "./native-gallery-hold-enrollment.mjs";
@@ -1166,13 +1167,13 @@ export default {
         (/^\/api\/rendering-review\/outputs\/rec[A-Za-z0-9]{14}\/(?:producer-conversation|producer-proposal|commit-attempt|messages|next-revision-feedback|review-feedback|approve|factory-handoff|request-redo)$/.test(url.pathname) ||
          /^\/api\/rendering-review\/factory\/outputs\/rec[A-Za-z0-9]{14}\/request-changes$/.test(url.pathname) ||
          /^\/(?:api\/)?internal\/rendering-review\/(?:claim-render-job|launch-ledger|complete-attempt|qa-audio-rebind|ig-dispatch-claim|factory-handoff)$/.test(url.pathname));
-      const isNativeGalleryGeneratePost = request.method === "POST" &&
-        /^\/api\/factory\/outputs\/rec[A-Za-z0-9]{14}\/gallery-generate$/.test(url.pathname);
-      const isNativeGalleryServicePost = request.method === "POST" &&
-        /^\/(?:api\/)?internal\/native-gallery\/claim-job$/.test(url.pathname);
+      // The historical Phase-2A gate must not preempt separately protected
+      // gallery selection, hold, one-shot C5/C6 or human creative handlers.
+      // This predicate grants method admission ONLY; all flags/auth stay off.
+      const isNativeGalleryControlledPost =
+        isNativeGalleryControlledPostPath(url.pathname,request.method);
       const allowedMethod =
-        isNativeGalleryServicePost ||
-        isNativeGalleryGeneratePost ||
+        isNativeGalleryControlledPost ||
         isChicagoReviewPost ||
         isInternalIgPublishLeasePost ||
         request.method === "GET" ||
