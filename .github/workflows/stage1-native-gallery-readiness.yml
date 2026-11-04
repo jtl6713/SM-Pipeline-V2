@@ -55,10 +55,15 @@ jobs:
           $reader = [System.IO.StreamReader]::new($unzip)
           $python = $reader.ReadToEnd()
           $reader.Dispose(); $unzip.Dispose(); $bytes.Dispose()
+          $pythonExe = Join-Path $service ".venv\\Scripts\\python.exe"
+          if (!(Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            Write-Output 'STAGE1_READINESS_JSON={"ok":false,"mode":"read_only_no_generation","blockers":["RUNNER_SERVICE_VENV_NOT_FOUND"]}'
+            exit 0
+          }
           $env:PYTHONPATH = $service
           Push-Location $service
           try {
-            $rows = & python -c $python --expected-version "@EXPECTED@" --candidate-folder "@FOLDER@" 2>$null
+            $rows = & $pythonExe -c $python --expected-version "@EXPECTED@" --candidate-folder "@FOLDER@" 2>$null
             if ($LASTEXITCODE -ne 0) {
               Write-Output 'STAGE1_READINESS_JSON={"ok":false,"mode":"read_only_no_generation","blockers":["LIVE_RUNNER_INSPECTION_FAILED"]}'
             } else {
