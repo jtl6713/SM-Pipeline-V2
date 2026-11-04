@@ -87,7 +87,9 @@ import {
 } from "./ready-production-queue.mjs";
 import { factoryGlobalPolicy, factoryGlobalAcceptsOutput } from "./factory-batch-global-policy.mjs";
 import { readFactoryGlobalRolloutHealth } from "./factory-global-rollout-health.mjs";
-import { factoryOutputClaimInspect, factoryOutputClaimReserve } from "./factory-approval-output-claims.mjs";
+import {
+  factoryOutputClaimInspect, factoryOutputClaimReserve, factoryOutputClaimReclaimIfSafe,
+} from "./factory-approval-output-claims.mjs";
 import {
   factoryApprovalGroupPlan, factoryApprovalGroupEnqueue, factoryApprovalGroupRead,
   factoryApprovalGroupResume, factoryApprovalGroupStatus, factoryApprovalGroupRetryFailures,
@@ -17450,8 +17452,18 @@ export async function factoryBatchSubmitRoute(request, env, authorization, ctx =
   // The legacy single-profile route must participate in the same CAS registry
   // as global groups; otherwise a second device could bypass the global fence.
   try {
+    const outputIds = records.map(row => row.id);
+    const reclaim = await factoryOutputClaimReclaimIfSafe(env.STUDIO_MEDIA, {
+      profileId: profile.id, requestId, ids: outputIds,
+    });
+    if (!reclaim.ok) {
+      const owners = (reclaim.owners || []).slice(0, 3).join(", ") || "unknown";
+      throw new HttpError(409,
+        "One or more outputs already belong to a Factory approval (" + owners
+        + "). Check Activity; no duplicate was created.");
+    }
     const claim = await factoryOutputClaimReserve(env.STUDIO_MEDIA, {
-      profileId: profile.id, requestId, ids: records.map(row => row.id),
+      profileId: profile.id, requestId, ids: outputIds,
     });
     if (!claim.ok) throw new HttpError(409,
       "One or more outputs already belong to a Factory approval. Check Activity; no duplicate was created.");
@@ -17704,7 +17716,7 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
   } catch (error) {
     throw new HttpError(503, error?.message || "Factory claim history unavailable; no batch created");
   }
-  const conflicting = inspections.flatMap(row => row.conflicts);
+  let conflicting = inspections.flatMap(row => row.conflicts);
   if (conflicting.length) {
     // Exact duplicate selection on another device: return the original
     // receipt. Partial overlap is a true 409, never silently resubmitted.
@@ -17721,8 +17733,38 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
         });
       }
     }
-    throw new HttpError(409,
-      "Selected outputs overlap another Factory approval. No new batch was created; check Activity.");
+    // Stranded reservations (claim without ledger) and terminal failed-only
+    // ownership must not permanently block a Ready-for-Review resubmit when
+    // Activity shows nothing active. Active/approved ownership stays closed.
+    try {
+      for (const [profileId, outputIds] of [...byProfile].sort(([a], [b]) => a.localeCompare(b))) {
+        const reclaim = await factoryOutputClaimReclaimIfSafe(env.STUDIO_MEDIA, {
+          profileId, requestId, ids: outputIds,
+        });
+        if (!reclaim.ok) {
+          const blockedOwners = (reclaim.owners || []).slice(0, 3).join(", ") || owners.slice(0, 3).join(", ");
+          throw new HttpError(409,
+            "Selected outputs overlap another Factory approval (" + blockedOwners
+            + "). No new batch was created; check Activity.");
+        }
+      }
+      const refreshed = [];
+      for (const [profileId, outputIds] of [...byProfile].sort(([a], [b]) => a.localeCompare(b))) {
+        refreshed.push(await factoryOutputClaimInspect(env.STUDIO_MEDIA, {
+          profileId, requestId, ids: outputIds,
+        }));
+      }
+      conflicting = refreshed.flatMap(row => row.conflicts);
+    } catch (error) {
+      if (error instanceof HttpError) throw error;
+      throw new HttpError(503, error?.message || "Factory claim reclaim unavailable; no batch created");
+    }
+    if (conflicting.length) {
+      const blockedOwners = [...new Set(conflicting.map(row => row.request_id))].slice(0, 3).join(", ");
+      throw new HttpError(409,
+        "Selected outputs overlap another Factory approval (" + blockedOwners
+        + "). No new batch was created; check Activity.");
+    }
   }
   try {
     for (const [profileId, outputIds] of [...byProfile].sort(([a], [b]) => a.localeCompare(b))) {
