@@ -53,7 +53,7 @@ jobs:
           node --test apps/studio-web/factory-quality-recovery-progress.test.mjs
           node --test apps/studio-web/factory-batch-quality-agent.test.mjs apps/studio-web/ui-release-contract.test.mjs
           node --test apps/studio-api/schedule-occupancy-90-day.test.mjs
-          node --test apps/studio-api/factory-approval-output-claims.test.mjs
+          node --test apps/studio-api/factory-approval-output-claims.test.mjs apps/studio-api/factory-submit-http-boundary.test.mjs
           node --test apps/studio-api/approve-all-batch.test.mjs apps/studio-api/factory-approve.test.mjs apps/studio-api/factory-batch-approval.test.mjs apps/studio-api/factory-approval-queue.test.mjs apps/studio-api/factory-approval-groups.test.mjs apps/studio-api/factory-batch-global-policy.test.mjs apps/studio-api/factory-real-record-publish-route.staging.test.mjs apps/studio-api/output-approval-lease.test.mjs apps/studio-web/factory-desk.test.mjs apps/studio-web/factory-batch-approval.test.mjs apps/studio-web/factory-review-selection-eligibility.test.mjs
       - name: Validate signed Factory global deployment contract and reject drift
         shell: bash
