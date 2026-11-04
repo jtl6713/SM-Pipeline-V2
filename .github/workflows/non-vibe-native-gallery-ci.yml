@@ -12,6 +12,7 @@ on:
       - 'apps/studio-api/native-gallery-manifest-commit*'
       - 'apps/studio-api/native-gallery-revision-readback*'
       - 'apps/studio-api/native-gallery-preview*'
+      - 'apps/studio-api/native-gallery-route-gate*'
       - 'apps/studio-api/native-gallery-creative-decision*'
       - 'apps/studio-api/native-gallery-private-manifest*'
       - 'apps/studio-api/native-gallery-release-gate*'
@@ -81,6 +82,7 @@ jobs:
           node --check apps/studio-api/native-gallery-manifest-commit.mjs
           node --check apps/studio-api/native-gallery-revision-readback.mjs
           node --check apps/studio-api/native-gallery-preview.mjs
+          node --check apps/studio-api/native-gallery-route-gate.mjs
           node --check apps/studio-api/native-gallery-creative-decision.mjs
           node --check apps/studio-api/native-gallery-private-manifest.mjs
           node --check apps/studio-api/native-gallery-release-gate.mjs
@@ -93,6 +95,7 @@ jobs:
           node --check apps/studio-api/rendering-review-gallery-lifecycle.mjs
           node --check apps/studio-api/rendering-review-gallery-status-http.mjs
           node --check apps/studio-api/factory-correction-branding-preflight.mjs
+          node --test apps/studio-api/native-gallery-route-gate.test.mjs
           node --test apps/studio-api/native-gallery-job-airtable.test.mjs apps/studio-api/native-gallery-generation-http.test.mjs apps/studio-api/native-gallery-job-claim.test.mjs apps/studio-api/native-gallery-launch-ledger.test.mjs apps/studio-api/native-gallery-hold-enrollment.test.mjs apps/studio-api/native-gallery-manifest-commit.test.mjs apps/studio-api/native-gallery-revision-readback.test.mjs apps/studio-api/native-gallery-preview.test.mjs apps/studio-api/native-gallery-creative-decision.test.mjs apps/studio-api/native-gallery-private-manifest.test.mjs apps/studio-api/native-gallery-release-gate.test.mjs
           node --test apps/studio-api/rendering-review-gallery-artifacts.test.mjs apps/studio-api/rendering-review-gallery-source.test.mjs apps/studio-api/rendering-review-gallery-inventory.test.mjs apps/studio-api/rendering-review-gallery-inventory-http.test.mjs apps/studio-api/rendering-review-gallery-selection-preview.test.mjs apps/studio-api/rendering-review-gallery-lifecycle.test.mjs apps/studio-api/rendering-review-gallery-status-http.test.mjs apps/studio-api/rendering-review-gallery-byte-preflight.test.mjs apps/studio-api/factory-correction-branding-preflight.test.mjs
 
