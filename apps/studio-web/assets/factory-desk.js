@@ -143,7 +143,11 @@
   }
 
   async function fetchJson(path, options = {}) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), Number(options.timeoutMs || 35000));
+    try {
     const response = await fetch(path, {
+      signal: controller.signal,
       credentials: "same-origin",
       headers: {
         Accept: "application/json",
@@ -167,18 +171,14 @@
       throw error;
     }
     return body || {};
-  }
-
-  function factorySubmitRetryDelayMs(error) {
-    const status = Number(error?.status || 0);
-    // A plain 500 can be a lost/timeout response after the group was committed.
-    // The caller first verifies the exact durable request ID, then permits only
-    // one bounded retry of that SAME idempotency key; never generate another ID.
-    if (![429, 500, 502, 503, 504].includes(status)) return 0;
-    const message = String(error?.message || "");
-    const secondsInMessage = Number(message.match(/(?:busy|cooling down)\s*\((\d+)s\)/i)?.[1] || 0);
-    const seconds = Math.max(Number(error?.retryAfterSeconds || 0), secondsInMessage);
-    return Math.min(35_000, Math.max(2_000, (seconds ? seconds * 1000 + 750 : 3_000)));
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        const timeoutError = new Error("Factory request timed out; the saved submission will be checked automatically.");
+        timeoutError.status = 504;
+        throw timeoutError;
+      }
+      throw error;
+    } finally { clearTimeout(timeout); }
   }
 
   function cardLabel(card) {
@@ -511,7 +511,10 @@
     const pendingNotice = $("factoryBatchPendingNotice");
     if (pendingNotice) {
       pendingNotice.hidden = !recovering.size;
-      pendingNotice.textContent = `Automatically checking ${recovering.size} previously submitted output${recovering.size === 1 ? "" : "s"}. You can submit other selections while this continues.`;
+      const entries = factoryRecoveryEntries();
+      const problems = entries.map(({ saved }) => saved.last_error).filter(Boolean);
+      const blocked = entries.some(({ saved }) => saved.retry_blocked);
+      pendingNotice.textContent = `${recovering.size} output${recovering.size === 1 ? "" : "s"} awaiting server acceptance. ${blocked ? "Approval needs attention: " : "Saved; automatic retry is active. "}${problems.join(" ")} You can submit other selections.`;
     }
     const submit = $("factoryBatchSubmit");
     if (submit) {
@@ -839,6 +842,40 @@
     if (available.length && !state.submittingBatch) await submitFactoryBatchApprovals(available);
   }
 
+  function factorySavedPayloadMatchesPlan(saved, plan) {
+    const payload = plan?.payload;
+    return saved.auto_retry === true && payload?.action === "start_group"
+      && payload.request_id === plan.request_id
+      && Array.isArray(payload.record_ids) && Array.isArray(plan.ids)
+      && JSON.stringify([...payload.record_ids].sort()) === JSON.stringify([...plan.ids].sort());
+  }
+  async function retrySavedFactoryPlan(saved, recoveryKey, plan) {
+    if (!factorySavedPayloadMatchesPlan(saved, plan)) return null;
+    if (saved.retry_blocked || Number(saved.next_retry_ms || 0) > Date.now()) return null;
+    // Persist retry timing before the POST. Never discard or replace the original
+    // idempotency key merely because its parent ledger was not created yet.
+    saved.attempts = Number(saved.attempts || 0) + 1;
+    saved.next_retry_ms = Date.now() + Math.min(60000, 15000 * saved.attempts);
+    localStorage.setItem(recoveryKey, JSON.stringify(saved));
+    try {
+      const result = await fetchJson("/api/factory/approval-batches", {
+        method: "POST", body: JSON.stringify(plan.payload),
+      });
+      const actual = (result.items || []).map(item => String(item.id)).sort();
+      const expected = plan.ids.map(String).sort();
+      if (result.accepted !== true || JSON.stringify(actual) !== JSON.stringify(expected)) {
+        throw new Error("Factory has not returned a complete receipt for this saved selection.");
+      }
+      return result;
+    } catch (error) {
+      saved.last_error = String(error.message || error);
+      saved.retry_blocked = [400, 401, 403, 409, 422].includes(Number(error.status));
+      saved.next_retry_ms = Math.max(saved.next_retry_ms, Date.now() + Number(error.retryAfterSeconds || 0) * 1000);
+      localStorage.setItem(recoveryKey, JSON.stringify(saved));
+      return null;
+    }
+  }
+
   // Exact-ID recovery for interrupted global *and* legacy profile-local approvals.
   // Never infer durable absence from an empty Active Activity list.
   async function reconcileFactorySubmissionFence(saved = pendingFactoryApproval(), recoveryKey = FACTORY_PENDING_REQUEST_KEY) {
@@ -903,6 +940,12 @@
           return { resolved: false, message: "Saved approval " + requestId
             + " cannot yet be reconciled. Automatic verification will retry." };
         }
+        if (factorySavedPayloadMatchesPlan(saved, plan)) {
+          const accepted = await retrySavedFactoryPlan(saved, recoveryKey, plan);
+          if (!accepted) return { resolved: false, message: saved.last_error || "Submission is saved and will retry automatically." };
+          committed.push(...plan.ids);
+          continue;
+        }
         if (!graceExpired) {
           return { resolved: false, message: "Saved approval " + requestId
             + " is within its 90-second commit window. Automatic verification will retry shortly." };
@@ -922,7 +965,7 @@
       committed.forEach(id => state.selectedOutputs.delete(id));
       saveFactorySelection();
     }
-    setBatchSubmissionError(null);
+    if (!factoryRecoveryEntries().length) setBatchSubmissionError(null);
     if (state.desk) renderDesk(state.desk);
     updateFactoryBatchToolbar();
     const message = committed.length
@@ -932,29 +975,15 @@
     return { resolved: true, count: committed.length, message };
   }
 
-  async function recoverSubmittedFactoryPlan(plan, originalError) {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt) await new Promise((resolve) => setTimeout(resolve, 350 * attempt));
-      // Exact-id read avoids querying historical completed batches when a
-      // POST response was lost and the job finished before our next poll.
-      const activity = await fetchJson("/api/factory/approval-batches?scope=all&request_id=" +
-        encodeURIComponent(plan.request_id), { cache: "no-store" });
-      const found = factoryActivityMatchesPlan(activity, plan);
-      if (found) {
-        refreshFactoryBatchActivity(true).catch(() => {});
-        return { ...found, accepted: true, recovered_after_error: true };
-      }
-    }
-    throw originalError;
-  }
-
   async function refreshFactoryBatchActivity(force = false) {
+    if (state.batchActivityLoading || state.submittingBatch) return state.batch;
     const now = Date.now();
     const minInterval = Number(state.batch?.totals?.active || 0) ? 5000 : 30000;
     if (!force && state.batch && now - state.lastBatchFetchMs < minInterval) return state.batch;
     const params = new URLSearchParams({ scope: "all" });
     params.set("view", "active");
     if (factoryProfileId()) params.set("factory_profile", factoryProfileId());
+    state.batchActivityLoading = true;
     try {
       const previousActive = (state.batch?.batches || []).filter(row => row?.job_id);
       const fetched = await fetchJson(`/api/factory/approval-batches?${params.toString()}`, { cache: "no-store" });
@@ -995,6 +1024,8 @@
       const summary = $("factoryBatchSummary");
       if (summary) summary.textContent = `Batch status temporarily unavailable: ${error.message || error}. Retry status refresh; do not resubmit blindly.`;
       return null;
+    } finally {
+      state.batchActivityLoading = false;
     }
   }
 
@@ -1025,9 +1056,18 @@
     const maxTotal = Math.max(1, Number(state.batchGlobal?.max_total || 20));
     const maxPerProfile = Math.max(1, Number(state.batchGlobal?.max_per_profile || 10));
     let selectionIds = ready.map(card => card.id);
-    const planned = planFactoryApprovalBatches(ready, maxTotal, maxPerProfile).map((batch) => ({
-      ids: batch.map((card) => card.id), request_id: newFactoryRequestId(),
-    }));
+    const planned = planFactoryApprovalBatches(ready, maxTotal, maxPerProfile).map((batch) => {
+      const request_id = newFactoryRequestId();
+      const ids = batch.map(card => card.id);
+      return { ids, request_id, payload: {
+        action: "start_group", request_id, record_ids: ids,
+        notes: "Studio Factory Batch Approval",
+        items: batch.map(card => ({ id: card.id, output_id: card.output_id || null,
+          title: card.title || null, content_id: card.content_id || null,
+          profile_id: card.profile_id || null, platform: card.platform || null,
+          format: card.studio_output_type || null })),
+      }};
+    });
     const byId = new Map(ready.map((card) => [card.id, card]));
     const persistRemaining = (rows) => {
       if (!rows.length) {
@@ -1035,60 +1075,32 @@
         return;
       }
       const ids = rows.flatMap((row) => row.ids);
-      try { localStorage.setItem(FACTORY_PENDING_REQUEST_KEY, JSON.stringify({
-        profile_id: "global", ids, batches: rows, saved_ms: Date.now(),
-      })); } catch {}
+      localStorage.setItem(FACTORY_PENDING_REQUEST_KEY, JSON.stringify({
+        profile_id: "global", ids, batches: rows, saved_ms: Date.now(), auto_retry: true,
+      }));
     };
     persistRemaining(planned);
     setBatchSubmissionError(null);
     state.submittingBatch = true;
     state.submittingOutputIds = new Set(selectionIds);
-    if (state.desk) renderDesk(state.desk);
-    updateFactoryBatchToolbar();
     let acceptedOutputs = 0;
     let acceptedBatches = 0;
     try {
+      setStatus(`Submitting ${ready.length} outputs…`);
+      updateFactoryBatchToolbar();
+      if (state.desk) renderDesk(state.desk);
       for (let index = 0; index < planned.length; index++) {
         const plan = planned[index];
         const chunk = plan.ids.map((id) => byId.get(id)).filter(Boolean);
         if (chunk.length !== plan.ids.length) throw new Error("Factory selection changed before all batches were submitted.");
         const profiles = [...new Set(chunk.map((card) => String(card.profile_id || "").trim()))];
-        const requestBody = JSON.stringify({
-          action: "start_group",
-          request_id: plan.request_id,
-          notes: "Studio Factory Batch Approval",
-          record_ids: chunk.map((card) => card.id),
-          items: chunk.map((card) => ({
-            id: card.id, output_id: card.output_id || null,
-            title: card.title || null, content_id: card.content_id || null,
-            profile_id: card.profile_id || null,
-            platform: card.platform || null, format: card.studio_output_type || null,
-          })),
-        });
+        const requestBody = JSON.stringify(plan.payload);
         const submitPlan = () => fetchJson("/api/factory/approval-batches", {
           method: "POST", body: requestBody,
         });
-        let batch;
-        try {
-          batch = await submitPlan();
-        } catch (error) {
-          // The POST may have committed even if iOS/networking lost the response.
-          // Prove the exact request ID + output set exists in authoritative Activity
-          // before treating it as accepted and continuing to the next chunk.
-          try {
-            batch = await recoverSubmittedFactoryPlan(plan, error);
-          } catch (unconfirmedError) {
-            const retryMs = factorySubmitRetryDelayMs(unconfirmedError);
-            if (!retryMs) throw unconfirmedError;
-            setStatus(`Airtable is temporarily busy. Keeping the same request ID and retrying safely in ${Math.ceil(retryMs / 1000)} seconds — do not click Submit again.`);
-            await new Promise((resolve) => setTimeout(resolve, retryMs));
-            try {
-              batch = await submitPlan();
-            } catch (retryError) {
-              batch = await recoverSubmittedFactoryPlan(plan, retryError);
-            }
-          }
-        }
+        // One bounded foreground POST. A timeout or busy response moves the
+        // saved envelope to background recovery, keeping other selections usable.
+        const batch = await submitPlan();
         if (!batch.accepted) throw new Error("Approval queue did not acknowledge the batch.");
         acceptedOutputs += chunk.length;
         acceptedBatches++;
@@ -1119,6 +1131,13 @@
       // Never report the global saved-selection size as the current batch's remaining count.
       // The selection can legitimately contain other profiles and hidden outputs.
       const remaining = ready.filter(card => state.selectedOutputs.has(card.id)).length;
+      const saved = pendingFactoryApproval();
+      if (saved) {
+        saved.last_error = String(error.message || error);
+        saved.retry_blocked = [400, 401, 403, 409, 422].includes(Number(error.status));
+        saved.next_retry_ms = Date.now() + Math.max(15000, Number(error.retryAfterSeconds || 0) * 1000);
+        localStorage.setItem(FACTORY_PENDING_REQUEST_KEY, JSON.stringify(saved));
+      }
       setBatchSubmissionError(`Confirmed ${acceptedOutputs} of ${ready.length} outputs accepted; ${remaining} from this attempt are unconfirmed. ${error.message || error} Unconfirmed outputs are checked automatically in the background.`);
       await refreshFactoryBatchActivity();
     } finally {
@@ -1138,6 +1157,15 @@
     const selected = readyFactoryOutputs(true).filter(card => state.selectedOutputs.has(card.id)
       && (!requestedIds || requestedIds.includes(card.id)));
     const recovering = factoryRecoveringIds();
+    if (!requestedIds) {
+      for (const { key, saved } of factoryRecoveryEntries()) {
+        if (saved.retry_blocked && selected.some(card => (saved.ids || []).includes(card.id))) {
+          saved.retry_blocked = false;
+          saved.next_retry_ms = 0;
+          localStorage.setItem(key, JSON.stringify(saved));
+        }
+      }
+    }
     const waiting = new Set(waitingFactorySelection());
     for (const card of selected) if (recovering.has(card.id)) waiting.add(card.id);
     localStorage.setItem(FACTORY_WAITING_SELECTION_KEY, JSON.stringify([...waiting]));

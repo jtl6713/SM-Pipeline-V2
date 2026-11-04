@@ -145,7 +145,7 @@ test("Ambiguous global POST responses reconcile only an exact durable Activity m
   assert.equal(factoryActivityMatchesPlan({batches:[{
     request_id:"different_request",items:[{id:"recOne"},{id:"recTwo"}],
   }]},plan),null);
-  assert.match(js,/recoverSubmittedFactoryPlan\(plan, error\)/);
+  assert.match(js,/retrySavedFactoryPlan\(saved, recoveryKey, plan\)/);
   assert.match(js,/reconcilePendingGlobalSelection\(batch\)/);
   assert.match(js,/Recovered a confirmed server submission after a connection error/);
 });
@@ -159,12 +159,11 @@ test("A rejected submission stays visible across the automatic Desk refresh", ()
   assert.match(js, /submitFactoryBatchApprovals\(\)\.catch\(\(error\) => setBatchSubmissionError/);
 });
 
-test("Retryable Factory submit failures reuse the exact request ID once", () => {
-  assert.match(js, /function factorySubmitRetryDelayMs\(error\)/);
-  assert.match(js, /\[429, 500, 502, 503, 504\]\.includes\(status\)/);
-  assert.match(js, /const submitPlan = \(\) => fetchJson/);
-  assert.match(js, /Keeping the same request ID and retrying safely/);
-  assert.match(js, /batch = await submitPlan\(\);[\s\S]{0,500}recoverSubmittedFactoryPlan\(plan, retryError\)/);
+test("Retryable Factory failures retain an exact payload for bounded background retry", () => {
+  assert.match(js, /JSON.stringify\(plan.payload\)/);
+  assert.match(js, /auto_retry: true/);
+  assert.match(js, /Math.min\(60000, 15000 \* saved.attempts\)/);
+  assert.match(js, /saved.next_retry_ms/);
 });
 
 test("Expired browser-only submissions clear only after an authoritative exact-ID miss", () => {
@@ -278,13 +277,14 @@ function factoryPendingRecoveryHarness(saved, fetchJson) {
     "factoryActivityMatchesPlan", "factoryActivityProvesPlanMissing",
     "rememberFactoryAccepted", "state", "saveFactorySelection",
     "setBatchSubmissionError", "renderDesk", "updateFactoryBatchToolbar", "setStatus",
+    "factorySavedPayloadMatchesPlan", "retrySavedFactoryPlan", "factoryRecoveryEntries",
     recoveryFn + "; return reconcileFactorySubmissionFence;",
   )(
     () => stored ? JSON.parse(stored) : null, 90_000,
     (url, options) => { calls.push({url, options}); return fetchJson(url); },
     localStorage, "pending", matches, missing,
     ids => accepted.push(...ids), state, () => {},
-    () => {}, () => {}, () => {}, message => messages.push(message),
+    () => {}, () => {}, () => {}, message => messages.push(message), () => false, async () => null, () => [],
   );
   return { reconcile, state, calls, accepted, messages, pending: () => stored ? JSON.parse(stored) : null };
 }
@@ -379,19 +379,12 @@ test("Factory partly committed global groups preserve unsubmitted selection", as
   assert.ok(h.state.selectedOutputs.has("recNewChicago"));
 });
 
-test("Factory retries one HTTP 500 only under the saved exact request ID after reconciliation", () => {
-  const fn=extractNamedFunction(js,"factorySubmitRetryDelayMs");
-  const delay=new Function(fn+"; return factorySubmitRetryDelayMs;")();
-  assert.ok(delay(Object.assign(new Error("Factory desk timed out or failed (500)"),{status:500}))>=2000,
-    "ambiguous 500 should have a bounded same-ID retry path");
-  assert.equal(delay(Object.assign(new Error("Validation failed"),{status:409})),0,
-    "authorization and validation conflicts are never retried");
-  assert.equal(delay(Object.assign(new Error("Bad selection"),{status:400})),0);
-  assert.match(js,/batch = await recoverSubmittedFactoryPlan\(plan, error\)/,
-    "the exact original id must be checked before another POST");
-  assert.match(js,/const submitPlan = \(\) => fetchJson\("\/api\/factory\/approval-batches"/);
-  assert.match(js,/batch = await submitPlan\(\);[\s\S]*?batch = await recoverSubmittedFactoryPlan\(plan, retryError\)/,
-    "retry must reuse the same request body and perform one more exact-ID recovery");
+test("Foreground submission has one POST and background retry preserves request identity", () => {
+  const retry=extractNamedFunction(js,"retrySavedFactoryPlan");
+  assert.match(retry,/JSON.stringify\(plan.payload\)/);
+  assert.doesNotMatch(retry,/newFactoryRequestId/);
+  assert.match(retry,/\[400, 401, 403, 409, 422\]/);
+  assert.match(js,/const batch = await submitPlan\(\)/);
 });
 
 
@@ -422,10 +415,10 @@ test("Factory recovery never disables Submit or Clear", () => {
       {id:"recSelectedB",profile_id:"recChicago"}];
     const compile = new Function("$","readyFactoryOutputs","state",
       "planFactoryApprovalBatches","pendingFactoryApproval",
-      "factoryRecoveringIds",
+      "factoryRecoveringIds", "factoryRecoveryEntries",
       fn+"; return updateFactoryBatchToolbar;");
     const call = compile(el,()=>available,state,(cards)=>[cards],()=>saved,
-      () => new Set(saved?.ids || []));
+      () => new Set(saved?.ids || []), () => saved ? [{saved}] : []);
     call();
     return {get:el,state};
   };
@@ -436,7 +429,7 @@ test("Factory recovery never disables Submit or Clear", () => {
   assert.match(pending.get("factoryBatchSelectionCount").textContent,/^2 outputs selected/);
   assert.equal(pending.get("factoryBatchSubmit").disabled,false);
   assert.equal(pending.get("factoryBatchClear").disabled,false);
-  assert.match(pending.get("factoryBatchPendingNotice").textContent,/Automatically checking 2/);
+  assert.match(pending.get("factoryBatchPendingNotice").textContent,/2 outputs awaiting server acceptance/);
   const recovering=make(saved,true);
   assert.equal(recovering.get("factoryBatchSubmit").disabled,false);
   assert.equal(recovering.get("factoryBatchClear").disabled,false);
@@ -484,8 +477,8 @@ function automaticRecoveryHarness(saved, response) {
   const submitted=[];
   const functions = ['pendingFactoryApproval','factoryRecoveryEntries','archiveFactoryPending',
     'factoryRecoveringIds','waitingFactorySelection','factoryActivityRows','factoryActivityMatchesPlan',
-    'factoryActivityProvesPlanMissing'].map(n=>extractNamedFunction(js,n)).join('\n');
-  const asyncFunctions=['reconcileFactorySubmissionFence','reconcilePersistedFactoryPending',
+    'factoryActivityProvesPlanMissing','factorySavedPayloadMatchesPlan'].map(n=>extractNamedFunction(js,n)).join('\n');
+  const asyncFunctions=['retrySavedFactoryPlan','reconcileFactorySubmissionFence','reconcilePersistedFactoryPending',
     'submitFactoryBatchApprovals'].map(n=>'async '+extractNamedFunction(js,n)).join('\n');
   const compile=new Function('localStorage','state','fetchJson','submitFactoryGlobalApprovalBatches',`
     const FACTORY_PENDING_REQUEST_KEY='pending', FACTORY_RECOVERY_PREFIX='recovery.',
@@ -541,4 +534,59 @@ test('one unresolved recovery cannot overwrite or starve another saved request',
   await h.reconcilePersistedFactoryPending(true);
   assert.equal(h.factoryRecoveryEntries().length,1);
   assert.equal(h.factoryRecoveryEntries()[0].saved.request_id,'saved_request_20261104');
+});
+
+function savedGlobalEnvelope() {
+  const ids=['recExistingA'];
+  const request_id='durable_factory_request_20261104';
+  return {profile_id:'global',ids,saved_ms:Date.now()-120000,auto_retry:true,
+    batches:[{request_id,ids,payload:{action:'start_group',request_id,record_ids:ids,
+      items:[{id:ids[0],profile_id:'recChicago',platform:'Instagram',format:'Reel'}]}}]};
+}
+test('transient POST failure retains the full original submission and automatically retries the same ID',async()=>{
+  const saved=savedGlobalEnvelope(), posts=[];
+  let fail=true;
+  const h=automaticRecoveryHarness(saved,async(url,options)=>{
+    if(options.method==='POST'){
+      const body=JSON.parse(options.body);posts.push(body);
+      if(fail)throw Object.assign(Error('Airtable busy'),{status:503,retryAfterSeconds:2});
+      return {accepted:true,items:body.record_ids.map(id=>({id}))};
+    }
+    return {ok:true,exact_request_id:saved.batches[0].request_id,batches:[]};
+  });
+  await h.reconcilePersistedFactoryPending(true);
+  assert.equal(posts.length,1);
+  let row=h.factoryRecoveryEntries()[0];
+  assert.ok(row.saved.batches[0].payload,'absence must never erase original submit intent');
+  assert.equal(row.saved.last_error,'Airtable busy');
+  fail=false;row.saved.next_retry_ms=0;h.store.set(row.key,JSON.stringify(row.saved));
+  await h.reconcilePersistedFactoryPending(true);
+  assert.equal(posts.length,2);
+  assert.deepEqual(posts[0],posts[1]);
+  assert.equal(h.factoryRecoveryEntries().length,0);
+  assert.equal(h.state.selectedOutputs.has('recExistingA'),false);
+});
+test('lost acceptance response is reconciled without another POST or new request ID',async()=>{
+  const saved=savedGlobalEnvelope();let posts=0;
+  const h=automaticRecoveryHarness(saved,async(url,options)=>{
+    if(options.method==='POST'){posts++;throw Object.assign(Error('Connection lost'),{status:504});}
+    return {ok:true,exact_request_id:saved.batches[0].request_id,batches:posts ? [{
+      request_id:saved.batches[0].request_id,job_id:'fg_'+saved.batches[0].request_id,
+      items:saved.ids.map(id=>({id})),status:'queued'}] : []};
+  });
+  await h.reconcilePersistedFactoryPending(true);
+  await h.reconcilePersistedFactoryPending(true);
+  assert.equal(posts,1);assert.equal(h.factoryRecoveryEntries().length,0);
+});
+test('validation errors stay visible and do not become silent automatic POST loops',async()=>{
+  const saved=savedGlobalEnvelope();let posts=0;
+  const h=automaticRecoveryHarness(saved,async(url,options)=>{
+    if(options.method==='POST'){posts++;throw Object.assign(Error('Output is held'),{status:409});}
+    return {ok:true,exact_request_id:saved.batches[0].request_id,batches:[]};
+  });
+  await h.reconcilePersistedFactoryPending(true);
+  await h.reconcilePersistedFactoryPending(true);
+  const row=h.factoryRecoveryEntries()[0];
+  assert.equal(posts,1);assert.equal(row.saved.retry_blocked,true);
+  assert.equal(row.saved.last_error,'Output is held');
 });
