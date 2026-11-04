@@ -135,35 +135,56 @@ export async function inspectNativeGalleryFactoryPreflight({
  if(changed!==selected.size||
     plan.selected.some(x=>original[x.order-1]?.slot_id!==x.slide_id))
    deny("GALLERY_FACTORY_SELECTION_INCOMPLETE",503);
- const verified=await ops.verifyDrive({
-   output_id,job_id,profile_id:j.Profile_Record_ID,
+ // Capture primitive authority values BEFORE remote verification: Airtable
+ // adapters may return mutable or cached objects, so comparing two object
+ // references can miss a real concurrent state or manifest mutation.
+ const before={
+   record_id:job.id,profile_id:j.Profile_Record_ID,
    content_item_id:j.Content_Item_Record_ID,
+   row_version:j.Row_Version,plan_sha256:j.Plan_SHA256,
+   original_sha256:j.Original_Manifest_SHA256,
+   revised_sha256:j.Revised_Manifest_SHA256,
+   original_json:j.Original_Manifest_JSON,
+   revised_json:j.Revised_Manifest_JSON,
+   plan_json:j.Plan_JSON,actor:j.Creative_Decision_Actor,
+   hold_id:j.Hold_ID,hold_owner:j.Hold_Owner,
+ };
+ const verified=await ops.verifyDrive({
+   output_id,job_id,profile_id:before.profile_id,
+   content_item_id:before.content_item_id,
    original_artifacts:original,revision_artifacts:revised,
    selected_slide_ids:[...selected],
  });
  if(verified!==true)deny("GALLERY_FACTORY_DRIVE_REVERIFICATION_FAILED",503);
- // Re-read canonical state after remote byte/rights verification. If a review,
- // hold, schedule or artifact changes during the remote check, fail closed.
+ // Reload canonical state after the remote byte/rights check, comparing it to
+ // the immutable snapshot, not a potentially mutated object alias.
  const [latestOutput,latestJob,latestContent]=await Promise.all([
    ops.readOutput(output_id),ops.readJob(job_id),
-   ops.readContent(j.Content_Item_Record_ID),
+   ops.readContent(before.content_item_id),
  ]);
+ const l=latestJob?.fields||{};
  if(!accepted(latestJob,output_id,job_id)||
     !held(latestOutput,latestJob,output_id)||
-    latestJob.id!==job.id||
-    latestJob.fields.Revised_Manifest_SHA256!==j.Revised_Manifest_SHA256||
-    latestJob.fields.Revised_Manifest_JSON!==j.Revised_Manifest_JSON||
-    latestJob.fields.Original_Manifest_JSON!==j.Original_Manifest_JSON||
-    latestJob.fields.Plan_JSON!==j.Plan_JSON||
-    latestJob.fields.Creative_Decision_Actor!==j.Creative_Decision_Actor||
-    latestContent?.id!==content.id||
+    latestJob.id!==before.record_id||
+    l.Profile_Record_ID!==before.profile_id||
+    l.Content_Item_Record_ID!==before.content_item_id||
+    l.Row_Version!==before.row_version||
+    l.Plan_SHA256!==before.plan_sha256||
+    l.Original_Manifest_SHA256!==before.original_sha256||
+    l.Revised_Manifest_SHA256!==before.revised_sha256||
+    l.Revised_Manifest_JSON!==before.revised_json||
+    l.Original_Manifest_JSON!==before.original_json||
+    l.Plan_JSON!==before.plan_json||
+    l.Creative_Decision_Actor!==before.actor||
+    l.Hold_ID!==before.hold_id||l.Hold_Owner!==before.hold_owner||
+    latestContent?.id!==before.content_item_id||
     latestContent.fields?.Content_Profile?.length!==1||
-    latestContent.fields.Content_Profile[0]!==j.Profile_Record_ID)
+    latestContent.fields.Content_Profile[0]!==before.profile_id)
    deny("GALLERY_FACTORY_REVIEW_CHANGED_DURING_VERIFICATION",409);
  const base="/api/factory/outputs/"+encodeURIComponent(output_id)+
    "/gallery/jobs/"+encodeURIComponent(job_id)+"/slides/";
- return {ok:true,output_id,job_id,profile_id:j.Profile_Record_ID,
-   revised_manifest_sha256:j.Revised_Manifest_SHA256,
+ return {ok:true,output_id,job_id,profile_id:before.profile_id,
+   revised_manifest_sha256:before.revised_sha256,
    selected_slide_count:changed,total_slide_count:original.length,
    slides:original.map((x,i)=>({
      slide_id:x.slot_id,order:x.order,changed:selected.has(x.slot_id),
