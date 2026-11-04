@@ -21,7 +21,7 @@ test("private handoff receipt does not masquerade as Factory approval or publica
   "packet.publication_authorized!==false",
   "packet.requires_separate_factory_approval!==true",
  ])assert.ok(factory.includes(required),required);
- assert.match(factory,/Actual handoff and separate Factory approval are not enabled/);
+ assert.match(factory,/The output stays held; Factory approval and publication remain separate/);
  assert.match(worker,/inspectNativeGalleryFactoryPreflight\(/);
 });
 
