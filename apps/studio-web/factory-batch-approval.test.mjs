@@ -208,7 +208,7 @@ test("Expired browser-only submissions clear only after an authoritative exact-I
   assert.equal(stored, null, "An expired exact-ID miss must release the stale browser lock");
   assert.equal(clearedErrors, 1, "Reconciled request must also clear its stale failure banner");
   assert.match(js, /FACTORY_PENDING_MISSING_GRACE_MS = 90 \* 1000/);
-  assert.match(js, /clearAuthoritativelyMissingGlobalPlans\(authoritativelyMissing\)/);
+  assert.match(js, /await reconcileFactorySubmissionFence\(saved, key\)/);
   assert.match(js, /Factory confirmed was never created/);
 });
 
@@ -357,10 +357,8 @@ test("Factory preserves original fence when status unavailable or identity confl
     assert.ok(h.pending(),"unverified job identity must not be discarded");
     assert.equal(h.accepted.length,0);
   }
-  assert.match(js,/await reconcileFactorySubmissionFence\(\)/);
-  assert.match(js,/ready = readyFactoryOutputs\(true\)\.filter\(card => state\.selectedOutputs\.has\(card\.id\)\)/);
-  assert.match(html,/id="factoryBatchRecoverPending"/);
-  assert.match(js,/factoryBatchRecoverPending"\)\?\.addEventListener/);
+  assert.match(js,/await reconcileFactorySubmissionFence\(saved, key\)/);
+  assert.doesNotMatch(html,/id="factoryBatchRecoverPending"/);
   assert.match(html,/UI build \d+\.\d+\.\d+/);
 });
 
@@ -397,7 +395,7 @@ test("Factory retries one HTTP 500 only under the saved exact request ID after r
 });
 
 
-test("Factory pending approval makes Submit, Clear and Recovery mutually exclusive", () => {
+test("Factory recovery never disables Submit or Clear", () => {
   const fn = extractNamedFunction(js, "updateFactoryBatchToolbar");
   const make = (saved, busy = false) => {
     const nodes = new Map();
@@ -424,10 +422,10 @@ test("Factory pending approval makes Submit, Clear and Recovery mutually exclusi
       {id:"recSelectedB",profile_id:"recChicago"}];
     const compile = new Function("$","readyFactoryOutputs","state",
       "planFactoryApprovalBatches","pendingFactoryApproval",
-      "factoryPendingRecoveryRunning","factoryPendingReconcileRunning",
+      "factoryRecoveringIds",
       fn+"; return updateFactoryBatchToolbar;");
     const call = compile(el,()=>available,state,(cards)=>[cards],()=>saved,
-      busy,false);
+      () => new Set(saved?.ids || []));
     call();
     return {get:el,state};
   };
@@ -436,43 +434,34 @@ test("Factory pending approval makes Submit, Clear and Recovery mutually exclusi
     saved_ms:Date.now()-300_000};
   const pending=make(saved);
   assert.match(pending.get("factoryBatchSelectionCount").textContent,/^2 outputs selected/);
-  assert.equal(pending.get("factoryBatchRecoverPending").hidden,false);
-  assert.equal(pending.get("factoryBatchRecoverPending").disabled,false);
-  assert.equal(pending.get("factoryBatchSubmit").disabled,true);
-  assert.equal(pending.get("factoryBatchClear").disabled,true);
-  assert.match(pending.get("factoryBatchPendingNotice").textContent,/saved_global_20261102/);
-  assert.match(pending.get("factoryBatchSubmit").textContent,/Recover saved submission first/);
+  assert.equal(pending.get("factoryBatchSubmit").disabled,false);
+  assert.equal(pending.get("factoryBatchClear").disabled,false);
+  assert.match(pending.get("factoryBatchPendingNotice").textContent,/Automatically checking 2/);
   const recovering=make(saved,true);
-  assert.equal(recovering.get("factoryBatchRecoverPending").disabled,true);
-  assert.equal(recovering.get("factoryBatchSubmit").disabled,true);
-  assert.equal(recovering.get("factoryBatchClear").disabled,true);
-  assert.match(recovering.get("factoryBatchPendingNotice").textContent,/No new submission is permitted/);
+  assert.equal(recovering.get("factoryBatchSubmit").disabled,false);
+  assert.equal(recovering.get("factoryBatchClear").disabled,false);
   const absent=make(null);
-  assert.equal(absent.get("factoryBatchRecoverPending").hidden,true);
+  assert.equal(absent.get("factoryBatchPendingNotice").hidden,true);
   assert.equal(absent.get("factoryBatchSubmit").disabled,false);
-  assert.equal(absent.get("factoryBatchClear").disabled,false);
+
 });
 
 test("Factory errors count the current attempted outputs only, not saved cross-city selection", () => {
   assert.match(js,/const remaining = ready\.filter\(card => state\.selectedOutputs\.has\(card\.id\)\)\.length/);
   assert.doesNotMatch(js,/const remaining = state\.selectedOutputs\.size/);
-  assert.match(js,/Use Recover saved submission before another attempt/);
-  assert.match(js,/if \(unresolved\) \{\s*setBatchSubmissionError\("A previous approval request still needs exact-ID verification/);
-  assert.match(js,/if \(pending\) \{\s*setBatchSubmissionError\("Saved Factory approval is unresolved/);
-  assert.match(js,/if \(pendingFactoryApproval\(\) \|\| state\.submittingBatch/);
+  assert.match(js,/Unconfirmed outputs are checked automatically in the background/);
+  assert.doesNotMatch(js,/Use Recover saved submission/);
   assert.match(html,/id="factoryBatchPendingNotice"/);
   assert.match(html,/UI build \d+\.\d+\.\d+/);
 });
 
 
-test("Factory recovery button stays visually hidden when no saved request exists", () => {
-  assert.match(css, /#page-factory #factoryBatchRecoverPending\[hidden\][\s\S]{0,120}display:none!important/,
-    "Explicit author-level hidden rule is needed because shared secondary-button forces inline-flex");
-  assert.match(css, /#page-factory #factoryBatchPendingNotice\[hidden\]/,
-    "The pending notice must also be suppressed when no request is unresolved");
-  assert.match(js, /recover\.hidden = !pending/);
-  assert.match(js, /submit\.disabled = !selectable[\s\S]{0,200}Boolean\(pending\)/);
+test("Factory recovery is automatic with no recovery button", () => {
+  assert.doesNotMatch(html, /id="factoryBatchRecoverPending"/);
+  assert.doesNotMatch(js, /Recover saved submission first/);
+  assert.match(js, /state.loading = true;\s*reconcilePersistedFactoryPending\(true\)/);
 });
+
 
 test("Factory does not restore a stale HTTP 500 banner after request is reconciled", () => {
   assert.match(js, /if \(!pendingFactoryApproval\(\)\) \{\s*sessionStorage\.removeItem\(FACTORY_SUBMISSION_ERROR_KEY\);/,
@@ -483,4 +472,73 @@ test("Factory does not restore a stale HTTP 500 banner after request is reconcil
     "Confirmed-committed automatic reconciliation must clear the saved error");
   assert.match(js, /if \(savedError\?\.message && Date\.now\(\) - Number\(savedError\.saved_ms \|\| 0\) < 30 \* 60 \* 1000\)/,
     "A real pending submission should retain its last error within the normal time window");
+});
+
+function automaticRecoveryHarness(saved, response) {
+  const store = new Map();
+  if (saved) store.set('pending', JSON.stringify(saved));
+  const localStorage = { get length(){return store.size;}, key(i){return [...store.keys()][i];},
+    getItem(k){return store.get(k) ?? null;}, setItem(k,v){store.set(k,v);}, removeItem(k){store.delete(k);} };
+  const state = {submittingBatch:false, selectedOutputs:new Set(['recExistingA','recNewChicago']),
+    batchApprovalsEnabled:true,batchGlobal:{enabled:true,max_total:20},desk:null};
+  const submitted=[];
+  const functions = ['pendingFactoryApproval','factoryRecoveryEntries','archiveFactoryPending',
+    'factoryRecoveringIds','waitingFactorySelection','factoryActivityRows','factoryActivityMatchesPlan',
+    'factoryActivityProvesPlanMissing'].map(n=>extractNamedFunction(js,n)).join('\n');
+  const asyncFunctions=['reconcileFactorySubmissionFence','reconcilePersistedFactoryPending',
+    'submitFactoryBatchApprovals'].map(n=>'async '+extractNamedFunction(js,n)).join('\n');
+  const compile=new Function('localStorage','state','fetchJson','submitFactoryGlobalApprovalBatches',`
+    const FACTORY_PENDING_REQUEST_KEY='pending', FACTORY_RECOVERY_PREFIX='recovery.',
+      FACTORY_WAITING_SELECTION_KEY='waiting', FACTORY_PENDING_MISSING_GRACE_MS=90000;
+    let factoryPendingReconcileAt=0, factoryPendingReconcileRunning=false;
+    const setBatchSubmissionError=()=>{},setStatus=()=>{},updateFactoryBatchToolbar=()=>{},
+      saveFactorySelection=()=>{},renderDesk=()=>{},rememberFactoryAccepted=()=>{};
+    const readyFactoryOutputs=()=>[...state.selectedOutputs].map(id=>({id,profile_id:'recChicago'}));
+    ${functions}\n${asyncFunctions}
+    return {archiveFactoryPending,factoryRecoveryEntries,reconcilePersistedFactoryPending,submitFactoryBatchApprovals};
+  `);
+  const api=compile(localStorage,state,response,async rows=>{submitted.push(rows.map(x=>x.id));});
+  return {...api,store,state,submitted};
+}
+const interrupted = () => ({profile_id:'recChicago', request_id:'saved_request_20261104',
+  ids:['recExistingA'],saved_ms:Date.now()-120000});
+
+test('503 recovery does not block a new selection and preserves both intents', async()=>{
+  const h=automaticRecoveryHarness(interrupted(),async()=>{throw Error('503');});
+  await h.reconcilePersistedFactoryPending(true);
+  await h.submitFactoryBatchApprovals();
+  assert.deepEqual(h.submitted,[['recNewChicago']]);
+  assert.deepEqual(JSON.parse(h.store.get('waiting')),['recExistingA']);
+  assert.equal(h.factoryRecoveryEntries()[0].saved.request_id,'saved_request_20261104');
+  assert.equal(h.store.has('pending'),false);
+});
+test('queued overlapping selection proceeds automatically after authoritative absence',async()=>{
+  const h=automaticRecoveryHarness(interrupted(),async()=>({ok:true,batch:true,status:'idle',job_id:null}));
+  h.archiveFactoryPending();
+  h.store.set('waiting',JSON.stringify(['recExistingA']));
+  await h.reconcilePersistedFactoryPending(true);
+  assert.deepEqual(h.submitted,[['recExistingA']]);
+  assert.equal(h.factoryRecoveryEntries().length,0);
+});
+test('confirmed prior submission is never submitted again',async()=>{
+  const saved=interrupted();
+  const h=automaticRecoveryHarness(saved,async()=>({ok:true,job_id:'fb_'+saved.request_id,
+    request_id:saved.request_id,profile_id:saved.profile_id,items:[{id:'recExistingA'}]}));
+  h.archiveFactoryPending();h.store.set('waiting',JSON.stringify(saved.ids));
+  await h.reconcilePersistedFactoryPending(true);
+  assert.deepEqual(h.submitted,[]);
+  assert.equal(h.state.selectedOutputs.has('recExistingA'),false);
+});
+test('one unresolved recovery cannot overwrite or starve another saved request',async()=>{
+  const h=automaticRecoveryHarness(interrupted(),async url=>{
+    if(url.includes('saved_request_20261104'))throw Error('503');
+    return {ok:true,batch:true,status:'idle',job_id:null};
+  });
+  h.archiveFactoryPending();
+  h.store.set('pending',JSON.stringify({...interrupted(),request_id:'second_request_20261104',ids:['recNewChicago']}));
+  h.archiveFactoryPending();
+  assert.equal(h.factoryRecoveryEntries().length,2);
+  await h.reconcilePersistedFactoryPending(true);
+  assert.equal(h.factoryRecoveryEntries().length,1);
+  assert.equal(h.factoryRecoveryEntries()[0].saved.request_id,'saved_request_20261104');
 });

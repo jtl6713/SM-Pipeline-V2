@@ -67,6 +67,35 @@
     try { return JSON.parse(localStorage.getItem(FACTORY_PENDING_REQUEST_KEY) || "null"); }
     catch { return null; }
   }
+  // Each interrupted request owns a separate durable entry. It must never be
+  // overwritten by a newer selection or become a page-wide submission lock.
+  const FACTORY_RECOVERY_PREFIX = "studio.factory.recovery.v2.";
+  function factoryRecoveryEntries() {
+    const rows = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith(FACTORY_RECOVERY_PREFIX)) continue;
+      try { const saved = JSON.parse(localStorage.getItem(key)); if (saved) rows.push({ key, saved }); } catch {}
+    }
+    return rows;
+  }
+  function archiveFactoryPending() {
+    if (state.submittingBatch) return;
+    const saved = pendingFactoryApproval();
+    if (!saved) return;
+    const identity = saved.request_id || saved.batches?.[0]?.request_id || "legacy";
+    const key = FACTORY_RECOVERY_PREFIX + identity;
+    // Write before removing the legacy slot: a storage failure loses no identity.
+    localStorage.setItem(key, JSON.stringify(saved));
+    localStorage.removeItem(FACTORY_PENDING_REQUEST_KEY);
+  }
+  function factoryRecoveringIds() {
+    return new Set(factoryRecoveryEntries().flatMap(({ saved }) => saved.ids || []));
+  }
+  const FACTORY_WAITING_SELECTION_KEY = "studio.factory.waiting-selection.v1";
+  function waitingFactorySelection() {
+    try { return JSON.parse(localStorage.getItem(FACTORY_WAITING_SELECTION_KEY) || "[]"); } catch { return []; }
+  }
   try {
     const saved = JSON.parse(localStorage.getItem(FACTORY_SELECTION_KEY) || "[]");
     state.selectedOutputs = new Set(Array.isArray(saved)
@@ -477,52 +506,26 @@
       ? planFactoryApprovalBatches(selectedCards, limit, perProfile).length : (selectable ? 1 : 0);
     const count = $("factoryBatchSelectionCount");
     if (count) count.textContent = `${selectable} output${selectable === 1 ? "" : "s"} selected${planned > 1 ? ` · will submit as ${planned} batches` : ""}`;
-    const pending = pendingFactoryApproval();
-    const reconciling = factoryPendingRecoveryRunning || factoryPendingReconcileRunning;
-    const approvalBusy = state.submittingBatch || reconciling;
-    const recover = $("factoryBatchRecoverPending");
-    if (recover) {
-      recover.hidden = !pending;
-      recover.disabled = approvalBusy;
-      recover.textContent = reconciling ? "Checking saved request…" : "Recover saved submission";
-    }
+    const recovering = factoryRecoveringIds();
+    const approvalBusy = state.submittingBatch;
     const pendingNotice = $("factoryBatchPendingNotice");
     if (pendingNotice) {
-      pendingNotice.hidden = !pending;
-      if (pending) {
-        const expected = Array.isArray(pending.ids) ? pending.ids.length : 0;
-        const requestId = pending.profile_id === "global" && Array.isArray(pending.batches)
-          ? pending.batches.map(plan => String(plan.request_id || "")).filter(Boolean).join(", ")
-          : String(pending.request_id || "");
-        pendingNotice.textContent = approvalBusy
-          ? `Checking the original approval request (${expected} output${expected === 1 ? "" : "s"}). No new submission is permitted.`
-          : `An earlier approval request (${expected} output${expected === 1 ? "" : "s"}) must be verified before another submission. Use Recover saved submission. Request: ${requestId || "unavailable"}.`;
-      }
+      pendingNotice.hidden = !recovering.size;
+      pendingNotice.textContent = `Automatically checking ${recovering.size} previously submitted output${recovering.size === 1 ? "" : "s"}. You can submit other selections while this continues.`;
     }
     const submit = $("factoryBatchSubmit");
     if (submit) {
-      const pendingIds = pending?.profile_id === "global" && Array.isArray(pending.ids)
-        ? pending.ids : null;
-      const pendingMismatch = pendingIds && (pendingIds.length !== selectable ||
-        pendingIds.some(id => !selectedCards.some(card => card.id === id)));
       submit.disabled = !selectable || (!global && selectable > limit) ||
-        approvalBusy || Boolean(pending) || state.batchApprovalsEnabled === false || Boolean(pendingMismatch);
+        approvalBusy || state.batchApprovalsEnabled === false;
       submit.title = state.batchApprovalsEnabled === false
-        ? "Batch approval rollout is disabled for this profile; individual approvals remain available."
-        : global && planned > 1
-          ? `This selection will be submitted as ${planned} durable batches, each within the ${limit}-total / ${perProfile}-per-profile safety limits.`
-          : selectable > limit ? `Select at most ${limit} output${limit === 1 ? "" : "s"} for this rollout.` : "";
-      submit.textContent = state.submittingBatch ? "Submitting…"
-        : reconciling ? "Checking saved request…"
-        : pending ? "Recover saved submission first"
-        : `Submit Approvals${selectable ? ` (${selectable})` : ""}`;
-      if (pending) submit.title = "The saved approval must be reconciled by exact request ID before a new submission. Use Recover saved submission.";
+        ? "Batch approvals are disabled for this profile; individual approvals remain available."
+        : "Previously submitted outputs are checked automatically to prevent duplicates.";
+      submit.textContent = approvalBusy ? "Submitting…" : `Submit Approvals${selectable ? ` (${selectable})` : ""}`;
     }
     const clear = $("factoryBatchClear");
     if (clear) {
-      clear.disabled = !state.selectedOutputs.size || approvalBusy || Boolean(pending);
-      if (pending) clear.title = "Selection is preserved until the original approval request is verified.";
-      else clear.removeAttribute("title");
+      clear.disabled = !state.selectedOutputs.size || approvalBusy;
+      clear.removeAttribute("title");
     }
     const rolloutNotice = $("factoryBatchRolloutNotice");
     if (rolloutNotice) {
@@ -814,39 +817,31 @@
   let factoryPendingReconcileAt = 0;
   let factoryPendingReconcileRunning = false;
   async function reconcilePersistedFactoryPending(force = false) {
-    const pending = pendingFactoryApproval();
-    if (state.submittingBatch || factoryPendingReconcileRunning ||
-        pending?.profile_id !== "global" || !Array.isArray(pending.batches) ||
-        !pending.batches.length) return;
+    if (state.submittingBatch || factoryPendingReconcileRunning) return;
     if (!force && Date.now() - factoryPendingReconcileAt < 15000) return;
     factoryPendingReconcileAt = Date.now();
     factoryPendingReconcileRunning = true;
     try {
-      const authoritativelyMissing = new Set();
-      // Active Activity intentionally excludes completed batches. Read each
-      // pending request by exact ID, including after reload or mobile timeout.
-      for (const plan of pending.batches) {
-        try {
-          const activity = await fetchJson("/api/factory/approval-batches?scope=all&request_id=" +
-            encodeURIComponent(plan.request_id), { cache: "no-store" });
-          const confirmed = factoryActivityMatchesPlan(activity, plan);
-          if (confirmed) reconcilePendingGlobalSelection({ batches: [confirmed] });
-          else if (factoryActivityProvesPlanMissing(activity, plan)) {
-            authoritativelyMissing.add(String(plan.request_id));
-          }
-        } catch { /* Preserve unresolved request identity; never create a new one. */ }
+      archiveFactoryPending();
+      // Independent of Desk/Activity success; one failed request cannot starve others.
+      for (const { key, saved } of factoryRecoveryEntries()) {
+        try { await reconcileFactorySubmissionFence(saved, key); } catch {}
       }
-      clearAuthoritativelyMissingGlobalPlans(authoritativelyMissing);
     } finally {
       factoryPendingReconcileRunning = false;
       updateFactoryBatchToolbar();
     }
+    const waiting = waitingFactorySelection().filter(id => state.selectedOutputs.has(id));
+    localStorage.setItem(FACTORY_WAITING_SELECTION_KEY, JSON.stringify(waiting));
+    const recovering = factoryRecoveringIds();
+    const eligible = new Set(readyFactoryOutputs(true).map(card => card.id));
+    const available = waiting.filter(id => !recovering.has(id) && eligible.has(id) && state.selectedOutputs.has(id));
+    if (available.length && !state.submittingBatch) await submitFactoryBatchApprovals(available);
   }
 
   // Exact-ID recovery for interrupted global *and* legacy profile-local approvals.
   // Never infer durable absence from an empty Active Activity list.
-  async function reconcileFactorySubmissionFence() {
-    const saved = pendingFactoryApproval();
+  async function reconcileFactorySubmissionFence(saved = pendingFactoryApproval(), recoveryKey = FACTORY_PENDING_REQUEST_KEY) {
     if (!saved) {
       setBatchSubmissionError(null);
       setStatus("No saved approval request remains. Review the current selection before submitting.");
@@ -877,7 +872,7 @@
       try { status = await fetchJson(url, { cache: "no-store" }); }
       catch (error) {
         return { resolved: false, message: "Saved approval " + requestId
-          + " could not be verified (" + (error?.message || error) + "). Retry Recovery; do not create a new request." };
+          + " could not be verified (" + (error?.message || error) + "). Automatic verification will retry." };
       }
       if (status?.ok !== true) {
         return { resolved: false, message: "Authoritative status for saved approval " + requestId
@@ -906,19 +901,19 @@
             && status.job_id == null;
         if (!verifiedMissing) {
           return { resolved: false, message: "Saved approval " + requestId
-            + " cannot yet be reconciled. Keep the original request ID and retry Recovery." };
+            + " cannot yet be reconciled. Automatic verification will retry." };
         }
         if (!graceExpired) {
           return { resolved: false, message: "Saved approval " + requestId
-            + " is within its 90-second commit window. Retry Recovery shortly." };
+            + " is within its 90-second commit window. Automatic verification will retry shortly." };
         }
       }
     }
     // Do not erase a request changed by another tab while exact-ID reads ran.
-    if (JSON.stringify(saved) !== JSON.stringify(pendingFactoryApproval())) {
+    if (JSON.stringify(saved) !== localStorage.getItem(recoveryKey)) {
       return { resolved: false, message: "Saved submission changed during recovery. Refresh Activity first." };
     }
-    try { localStorage.removeItem(FACTORY_PENDING_REQUEST_KEY); }
+    try { localStorage.removeItem(recoveryKey); }
     catch {
       return { resolved: false, message: "The previous request was verified, but its browser lock could not be released." };
     }
@@ -937,7 +932,6 @@
     return { resolved: true, count: committed.length, message };
   }
 
-  let factoryPendingRecoveryRunning = false;
   async function recoverSubmittedFactoryPlan(plan, originalError) {
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt) await new Promise((resolve) => setTimeout(resolve, 350 * attempt));
@@ -1031,36 +1025,9 @@
     const maxTotal = Math.max(1, Number(state.batchGlobal?.max_total || 20));
     const maxPerProfile = Math.max(1, Number(state.batchGlobal?.max_per_profile || 10));
     let selectionIds = ready.map(card => card.id);
-    let pending = pendingFactoryApproval();
-    // A saved request must go through read-only exact-ID reconciliation first.
-    // The Submit action never resumes or replaces one, even if its IDs match.
-    if (pending) {
-      setBatchSubmissionError("Saved Factory approval is unresolved. Use Recover saved submission before submitting.");
-      return;
-    }
-    let reusable = pending?.profile_id === "global"
-      && Array.isArray(pending?.ids)
-      && JSON.stringify(pending.ids) === JSON.stringify(selectionIds)
-      && Array.isArray(pending?.batches)
-      && pending.batches.every(row => Array.isArray(row?.ids) && row?.request_id);
-    if (pending && !reusable) {
-      const recovery = await reconcileFactorySubmissionFence();
-      if (!recovery.resolved) throw new Error(recovery.message);
-      // Successful exact-ID recovery may remove already submitted selections.
-      ready = readyFactoryOutputs(true).filter(card => state.selectedOutputs.has(card.id));
-      if (!ready.length) {
-        setStatus("All selected outputs belong to a previously submitted batch. Review Completed Batches.");
-        return;
-      }
-      selectionIds = ready.map(card => card.id);
-      pending = pendingFactoryApproval();
-      reusable = false;
-    }
-    const planned = reusable
-      ? pending.batches
-      : planFactoryApprovalBatches(ready, maxTotal, maxPerProfile).map((batch) => ({
-          ids: batch.map((card) => card.id), request_id: newFactoryRequestId(),
-        }));
+    const planned = planFactoryApprovalBatches(ready, maxTotal, maxPerProfile).map((batch) => ({
+      ids: batch.map((card) => card.id), request_id: newFactoryRequestId(),
+    }));
     const byId = new Map(ready.map((card) => [card.id, card]));
     const persistRemaining = (rows) => {
       if (!rows.length) {
@@ -1152,30 +1119,38 @@
       // Never report the global saved-selection size as the current batch's remaining count.
       // The selection can legitimately contain other profiles and hidden outputs.
       const remaining = ready.filter(card => state.selectedOutputs.has(card.id)).length;
-      setBatchSubmissionError(`Confirmed ${acceptedOutputs} of ${ready.length} outputs accepted; ${remaining} from this attempt are unconfirmed. ${error.message || error} Use Recover saved submission before another attempt.`);
+      setBatchSubmissionError(`Confirmed ${acceptedOutputs} of ${ready.length} outputs accepted; ${remaining} from this attempt are unconfirmed. ${error.message || error} Unconfirmed outputs are checked automatically in the background.`);
       await refreshFactoryBatchActivity();
     } finally {
       state.submittingOutputIds = null;
       state.submittingBatch = false;
+      archiveFactoryPending();
+      reconcilePersistedFactoryPending(true).catch(() => {});
       if (state.desk) renderDesk(state.desk);
       updateFactoryBatchToolbar();
     }
   }
 
-  async function submitFactoryBatchApprovals() {
-    if (state.submittingBatch || factoryPendingRecoveryRunning || factoryPendingReconcileRunning) {
-      setStatus("Factory is verifying the original saved approval. No new submission is permitted.", true);
-      return;
-    }
-    const unresolved = pendingFactoryApproval();
-    if (unresolved) {
-      setBatchSubmissionError("A previous approval request still needs exact-ID verification. Use Recover saved submission before submitting any other outputs.");
-      updateFactoryBatchToolbar();
-      return;
-    }
+  async function submitFactoryBatchApprovals(requestedIds = null) {
+    if (state.submittingBatch) return;
+    archiveFactoryPending();
     if (state.batchApprovalsEnabled === false) { setStatus("Batch approvals are not enabled yet; individual approvals still work.", true); return; }
-    const ready = readyFactoryOutputs(true).filter((card) => state.selectedOutputs.has(card.id));
-    if (!ready.length) { updateFactoryBatchToolbar(); setStatus("Select one or more review-ready outputs.", true); return; }
+    const selected = readyFactoryOutputs(true).filter(card => state.selectedOutputs.has(card.id)
+      && (!requestedIds || requestedIds.includes(card.id)));
+    const recovering = factoryRecoveringIds();
+    const waiting = new Set(waitingFactorySelection());
+    for (const card of selected) if (recovering.has(card.id)) waiting.add(card.id);
+    localStorage.setItem(FACTORY_WAITING_SELECTION_KEY, JSON.stringify([...waiting]));
+    const ready = selected.filter(card => !recovering.has(card.id));
+    if (!ready.length) {
+      updateFactoryBatchToolbar();
+      setStatus(selected.length ? "Your submission is saved. Previously submitted outputs are being checked automatically; any not yet accepted will continue automatically." : "Select one or more review-ready outputs.");
+      reconcilePersistedFactoryPending(true).catch(() => {});
+      return;
+    }
+    // Remove only the IDs this attempt owns; pending overlaps remain queued.
+    ready.forEach(card => waiting.delete(card.id));
+    localStorage.setItem(FACTORY_WAITING_SELECTION_KEY, JSON.stringify([...waiting]));
     const profiles = [...new Set(ready.map((card) => String(card.profile_id || "").trim()))];
     const global = state.batchGlobal?.enabled === true;
     const limit = Math.max(1, Number(global ? state.batchGlobal.max_total : (state.batchRollout?.max_items || 100)));
@@ -1245,6 +1220,8 @@
     } finally {
       state.submittingOutputIds = null;
       state.submittingBatch = false;
+      archiveFactoryPending();
+      reconcilePersistedFactoryPending(true).catch(() => {});
       if (state.desk) renderDesk(state.desk);
       updateFactoryBatchToolbar();
     }
@@ -2750,12 +2727,16 @@
     // One authoritative Desk snapshot at a time, including forced refreshes.
     if (state.loading) return state.desk;
     state.loading = true;
+    reconcilePersistedFactoryPending(true).catch(() => {});
     setStatus("Loading Factory Desk…");
     try {
       // Fetch independently of the expensive Factory queue; activity remains visible during a slow desk refresh.
       refreshFactoryBatchActivity().catch(() => {});
       if (!state.batchTimer) state.batchTimer = setInterval(() => {
-        if (!document.hidden && $("page-factory")?.classList.contains("active")) refreshFactoryBatchActivity(true).catch(() => {});
+        if (!document.hidden && $("page-factory")?.classList.contains("active")) {
+          reconcilePersistedFactoryPending().catch(() => {});
+          refreshFactoryBatchActivity(true).catch(() => {});
+        }
       }, 5000);
       const desk = await fetchJson("/api/factory/desk", { cache: "no-store" });
       renderDesk(desk);
@@ -2791,29 +2772,9 @@
   $("factoryBatchSubmit")?.addEventListener("click", () => {
     submitFactoryBatchApprovals().catch((error) => setBatchSubmissionError(error.message || String(error)));
   });
-  $("factoryBatchRecoverPending")?.addEventListener("click", async () => {
-    if (state.submittingBatch || factoryPendingRecoveryRunning || factoryPendingReconcileRunning) return;
-    factoryPendingRecoveryRunning = true;
-    setStatus("Checking the original approval by its exact request ID. No approvals are being resubmitted.");
-    updateFactoryBatchToolbar();
-    try {
-      const result = await reconcileFactorySubmissionFence();
-      if (!result.resolved) setBatchSubmissionError(result.message);
-      await refreshFactoryBatchActivity(true);
-    } catch (error) {
-      setBatchSubmissionError("Saved approval status could not be verified: " +
-        (error?.message || error) + ". No new submission was made.");
-    } finally {
-      factoryPendingRecoveryRunning = false;
-      updateFactoryBatchToolbar();
-    }
-  });
   $("factoryBatchClear")?.addEventListener("click", () => {
-    if (pendingFactoryApproval() || state.submittingBatch || factoryPendingRecoveryRunning ||
-        factoryPendingReconcileRunning) {
-      setStatus("Cannot clear an approval selection while its original request is unverified.", true);
-      return;
-    }
+    if (state.submittingBatch) return;
+    localStorage.removeItem(FACTORY_WAITING_SELECTION_KEY);
     state.selectedOutputs.clear();
     setBatchSubmissionError(null);
     setStatus("Selection cleared.");
