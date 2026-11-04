@@ -93,7 +93,7 @@ test("approved single-canary deployment never scans or processes unrelated backl
  assert.equal(result.corrected,0);
 });
 
-test("bounded recovery visits ten prioritized remote-ID candidates once before ordinary queue",async()=>{
+test("bounded recovery visits twelve prioritized remote-ID candidates once before ordinary queue",async()=>{
  const store=bucket();let now=Date.parse("2026-10-25T03:30:00Z");
  const env={STUDIO_MEDIA:store,PUBLICATION_RECONCILIATION_SCAN_ENABLED:"true",
    PUBLICATION_RECONCILIATION_ENABLED:"true",PUBLICATION_RECONCILIATION_BOUNDED_ENABLED:"true",
@@ -117,7 +117,7 @@ test("bounded recovery visits ten prioritized remote-ID candidates once before o
  assert.equal(control.priority_cursor,PRIORITY_VERIFIED_EXISTING_POSTS.length);
 });
 test("read-only and exact-canary stages never select priority records",async()=>{
- assert.equal(PRIORITY_VERIFIED_EXISTING_POSTS.length,10);
+ assert.equal(PRIORITY_VERIFIED_EXISTING_POSTS.length,12);
  for(const id of PRIORITY_VERIFIED_EXISTING_POSTS) assert.match(id,/^rec[A-Za-z0-9]{14}$/);
  const store=bucket(),env={STUDIO_MEDIA:store,
    PUBLICATION_RECONCILIATION_SCAN_ENABLED:"true",
@@ -156,7 +156,7 @@ test("Stage 3: #9277 added after durable priority cursor 9 without replaying pri
      Platform:"TikTok",Review_Status:"Approved",Content_Profile:["recBBBBBBBBBBBBBB"]
    }};},
    appendAudit:async()=>{},verifyRemote:async()=>{throw Error("should not call unsupported provider");}});
- assert.deepEqual(visited,["recI3x5A6Cz9vIQIs"]);
+ assert.deepEqual(visited,["recI3x5A6Cz9vIQIs","rece57RpkWLMOpZ47","reccenlA9uIF2MtSd"]);
  const control=await readRecoveryState(store,"studio/state/publication-reconciliation/v1/control.json");
- assert.equal(control.priority_cursor,10);
+ assert.equal(control.priority_cursor,12);
 });
