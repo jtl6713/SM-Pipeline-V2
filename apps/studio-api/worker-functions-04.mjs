@@ -10146,8 +10146,12 @@ export async function gatherStudioDeskInventory(env) {
  */
 export async function getStudioExceptionRecoveryCenter(request, env) {
   try {
-    const snapshot = await loadStudioFailedOutputSnapshot(env);
     const url = new URL(request.url);
+    // The authenticated production parity rerun must not reuse a previous
+    // 60-second coalesced Quality Agent scan after a publication transition.
+    const snapshot = await loadStudioFailedOutputSnapshot(env, {
+      fresh: url.searchParams.get("fresh") === "1",
+    });
     const view = buildExceptionRecoveryCenter(snapshot, {
       profile_id: url.searchParams.get("profile_id"),
       platform: url.searchParams.get("platform"),
