@@ -1,0 +1,132 @@
+name: Recover exact Drifter draft with correctly sized watermarks
+on:
+  push:
+    branches: [repair/drifter-watermark-v2]
+    paths: ['.github/workflows/drifter-watermark-v2-recovery.yml']
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Regenerate and verify only Drifter 6, 5, 3 in existing draft
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          command=r'''$ErrorActionPreference='Stop'
+          $service=Join-Path (Get-Location) 'Services\pipeline-runner\service'
+          if(-not (Test-Path -LiteralPath $service)){throw 'runner_source_not_found'}
+          $py=Join-Path $service '.venv\Scripts\python.exe'
+          if(-not (Test-Path -LiteralPath $py)){
+            $p=Get-Command python -ErrorAction SilentlyContinue
+            if(-not $p){throw 'python_interpreter_unavailable'}
+            $py=$p.Source
+          }
+          $temp=Join-Path $env:TEMP 'drifter-watermark-v2-recovery.py'
+          $source=@'
+          from dotenv import load_dotenv
+          load_dotenv('.env')
+          import os,json,subprocess,tempfile,re,requests
+          from pathlib import Path
+          os.environ['PORT']='3350'
+          from config import load_settings
+          from airtable.client import AirtableClient
+          from integrations.google_drive import GoogleDriveClient
+          client=AirtableClient(); drive=GoogleDriveClient()
+          version='2026-11-05-video-watermark-scale-v2'
+          assert requests.get('https://pipeline.chicagoshining.com/health',timeout=20).json()['version']==version
+          items=[(6,'recTeu9UggkFLHVzs','1zNESzLCJEC12CCKnNlbM0-okPrD891UO','1AbjQHaHY08o-SsTLv82sQ0yuPYdA5q9Q'),(5,'reculpYoVgfVRrZKW','1PXsZn8TSjXKlvHLrUUZyiyPIv-FjswOc','1jN8HkhZN3gC1jiOnXq6LG0oD0FliSJuX'),(3,'recjv0Cs133avPo2Y','1WGUdVHS0PD_cXGkjRgK7QEgcrXXqle2p','1hhHv_OCC5O6sT6ckhRN0yCGR9g_43G10')]
+          request_table='tbl75nxNi6PMUjBQE'; request_id='rec1ECH73s1AOO0P9'
+          initial=client.get_record(request_table,request_id)['fields']
+          assert initial.get('Request_Status')=='Draft' and initial.get('Studio_Item4_State')=='Assets Ready', 'draft_changed'
+          assert len(json.loads(initial['Studio_Master_Assets_JSON']))==3
+          results={}
+          for number,record,source,prior in items:
+              f=client.get_record('tblSITCujCsJTNcDe',record)['fields']
+              assert 'recT2rbKX3MF7cVFU' in f.get('Content_Profile',[])
+              receipt=Path(f'data/studio-watermark-recovery/drifter-v2-{number}.json');receipt.parent.mkdir(parents=True,exist_ok=True)
+              if receipt.exists():
+                  result=json.loads(receipt.read_text())
+              else:
+                  assert f['Google Drive File ID']==prior, 'asset_changed'
+                  r=requests.post('https://pipeline.chicagoshining.com/jobs/studio-asset-watermark',headers={'X-Pipeline-Secret':load_settings()['pipeline_runner_shared_secret']},json={'google_drive_file_id':source,'filename':f['Asset Name'],'mime_type':'video/quicktime','profile_name':'ChicagoShining - Chicago'},timeout=180)
+                  r.raise_for_status();result=r.json()
+                  assert result['watermarked'] is True and result['source_google_drive_file_id']==source
+                  receipt.write_text(json.dumps(result))
+              assert result['watermarked'] is True and result['source_google_drive_file_id']==source
+              assert result['watermark_profile']=='ChicagoShining - Chicago'
+              output=result['google_drive_file_id']
+              assert f['Google Drive File ID'] in (prior,output), 'source_changed'
+              meta=drive.get_file(output)
+              assert not meta.get('trashed') and meta['mimeType']=='video/mp4' and int(meta['size'])==result['file_size_bytes']
+              content,mime=drive.download_file(output)
+              with tempfile.TemporaryDirectory(prefix='drifter-verify-') as temp:
+                  path=Path(temp)/'clip.mp4';path.write_bytes(content)
+                  proof=json.loads(subprocess.run(['ffprobe','-v','error','-show_entries','stream=codec_type,codec_name,width,height:format=duration','-of','json',str(path)],capture_output=True,text=True,check=True,timeout=60).stdout)
+                  assert float(proof['format']['duration'])>0
+                  assert any(x.get('codec_type')=='video' and x.get('codec_name')=='h264' and x.get('width')==2160 and x.get('height')==3840 for x in proof['streams'])
+              description=str(f.get('Asset_Description','')).strip()
+              description=re.sub(r'\[watermarked:[^\]]+\] Source master Drive ID: [A-Za-z0-9_-]+','',description).strip()
+              fields={'Google Drive File ID':output,'Google Drive URL':result['google_drive_url'],'MIME_Type':'video/mp4','File_Extension':'mp4','File_Size_Bytes':result['file_size_bytes'],'Asset_Description':description+'\n[watermarked:ChicagoShining - Chicago;video-scale-v2] Source master Drive ID: '+source}
+              client.update_record('tblSITCujCsJTNcDe',record,fields,typecast=True)
+              check=client.get_record('tblSITCujCsJTNcDe',record)['fields']
+              assert check['Google Drive File ID']==output and source in check['Asset_Description']
+              results[record]=result
+              print('watermark_diagnostic='+json.dumps({'state':'catalog_verified','asset':number,'record':record,'output':output,'media':proof}),flush=True)
+          current=client.get_record(request_table,request_id)['fields']
+          assert current.get('Request_Status')=='Draft' and current.get('Studio_Item4_State')=='Assets Ready'
+          assert current['Studio_Master_Assets_JSON']==initial['Studio_Master_Assets_JSON'], 'manifest_changed'
+          manifest=json.loads(current['Studio_Master_Assets_JSON'])
+          assert [x['media_asset_record_id'] for x in manifest]==[x[1] for x in items]
+          for asset,(_,record,source,prior) in zip(manifest,items):
+              result=results[record]
+              assert asset['google_drive_file_id'] in (prior,result['google_drive_file_id'])
+              assert asset['source_google_drive_file_id']==source
+              asset.update(google_drive_file_id=result['google_drive_file_id'],google_drive_url=result['google_drive_url'],url=result['google_drive_url'],size_bytes=result['file_size_bytes'],mime_type='video/mp4')
+          client.update_record(request_table,request_id,{'Studio_Master_Assets_JSON':json.dumps(manifest)})
+          check=client.get_record(request_table,request_id)['fields']
+          assert json.loads(check['Studio_Master_Assets_JSON'])==manifest
+          print('watermark_diagnostic='+json.dumps({'state':'draft_verified','request':request_id,'count':len(manifest),'status':check.get('Studio_Item4_State'),'request_status':check.get('Request_Status'),'outputs':[x['google_drive_file_id'] for x in manifest]}),flush=True)
+          '@
+          [System.IO.File]::WriteAllText($temp,$source,[System.Text.UTF8Encoding]::new($false))
+          Push-Location $service
+          try{
+            $env:PYTHONPATH=$service
+            & $py $temp
+            if($LASTEXITCODE -ne 0){throw 'read_only_python_process_failed'}
+          }finally{
+            Pop-Location
+            Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+          }
+          '''
+          Path('/tmp/chicago-readonly-preflight.json').write_text(json.dumps({'command':command,'confirm':True}),encoding='utf-8')
+          PY
+          code=$(curl -sS --max-time 20 -o /tmp/ops-preflight.json -w '%{http_code}' \
+            -X POST -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/chicago-readonly-preflight.json https://ops.chicagoshining.com/api/shell)
+          [[ "$code" == "200" || "$code" == "202" ]]
+          id=$(jq -r '.job.id // .jobId // empty' /tmp/ops-preflight.json); test -n "$id"
+          for i in $(seq 1 450); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$id" -o /tmp/preflight-result.json
+            state=$(jq -r '.job.status // empty' /tmp/preflight-result.json)
+            if [[ "$state" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/preflight-result.json | grep -E '^watermark_diagnostic=' || true
+              exit 0
+            fi
+            if [[ "$state" == "failed" ]]; then
+              echo 'protected_readonly_preflight_failed=true'
+              jq -r '.job.log // ""' /tmp/preflight-result.json | grep -E '^watermark_diagnostic=' || true
+              exit 1
+            fi
+            sleep 3
+          done
+          echo 'protected_readonly_preflight_timeout=true'
+          exit 1
