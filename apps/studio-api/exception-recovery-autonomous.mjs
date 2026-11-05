@@ -138,8 +138,19 @@ export function receiptBlock(row, receipt, nowMs) {
   if(receipt.verified_public) {
     const published=Date.parse(receipt.published_at);
     if(!Number.isFinite(published) || published > nowMs) return "provider_publication_time_missing";
-    if(str(row,"Published_At") && Date.parse(str(row,"Published_At")) !== published)
-      return "conflicting_publication_timestamp";
+    if(str(row,"Published_At")) {
+      const savedAt=Date.parse(str(row,"Published_At"));
+      if(!Number.isFinite(savedAt)) return "conflicting_publication_timestamp";
+      // Meta reports when its post became public. The Python publisher then
+      // records the successful Graph response in Airtable a few seconds later.
+      // This is not an identity conflict. Allow only bounded positive
+      // completion latency for authenticated, account-owned Instagram posts.
+      // Never relax YouTube's exact publication-time contract.
+      const completionLagMs=savedAt-published;
+      if(instagram ? completionLagMs<0 || completionLagMs>120000
+        : completionLagMs!==0)
+        return "conflicting_publication_timestamp";
+    }
   }
   return null;
 }

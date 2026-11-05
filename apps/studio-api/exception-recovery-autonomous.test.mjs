@@ -396,6 +396,52 @@ test("exact account-owned Instagram carousel recovers without any remote publish
   assert.equal(f.writes,1);
   assert.equal((await reconcilePublication(f.deps)).outcome,"Already Reconciled");
 });
+test("Instagram account-owned published receipt allows bounded Airtable completion latency only",()=>{
+  const nowMs=Date.parse("2026-11-05T01:00:00Z");
+  const post="18168690085479740";
+  const publishedAt="2026-10-24T12:42:20.000Z";
+  const basePublished=Date.parse(publishedAt);
+  const permalink="https://www.instagram.com/reel/De4KD9XDWRQ/";
+  const fields={
+    Platform:"Instagram",Platform_Output_Type:"Instagram Reel",
+    Content_Profile:["recBBBBBBBBBBBBBB"],Platform_Post_ID:post,
+    Platform_Post_URL:permalink,
+  };
+  const receipt={
+    platform:"Instagram",remote_id:post,permalink,
+    profile_id:"recBBBBBBBBBBBBBB",verified_public:true,
+    ownership_verified:true,verified_delivery:true,
+    checked_at:new Date(nowMs-1000).toISOString(),published_at:publishedAt,
+  };
+  for(const lag of [0,8000,120000]) {
+    const row={fields:{...fields,Published_At:new Date(basePublished+lag).toISOString()}};
+    assert.equal(receiptBlock(row,receipt,nowMs),null, "bounded lag "+lag);
+  }
+  for(const lag of [-1000,120001,600000]) {
+    const row={fields:{...fields,Published_At:new Date(basePublished+lag).toISOString()}};
+    assert.equal(receiptBlock(row,receipt,nowMs),"conflicting_publication_timestamp");
+  }
+  assert.equal(receiptBlock({fields:{...fields,Published_At:"not-a-date"}},receipt,nowMs),
+    "conflicting_publication_timestamp");
+  assert.notEqual(receiptBlock({fields:{...fields,Published_At:new Date(basePublished+8000).toISOString()}},
+    {...receipt,ownership_verified:false},nowMs),null);
+  assert.notEqual(receiptBlock({fields:{...fields,Published_At:new Date(basePublished+8000).toISOString(),
+    Platform_Post_ID:"18168690085479741"}},receipt,nowMs),null);
+});
+test("YouTube saved publication timestamps remain exact despite Instagram latency allowance",()=>{
+  const nowMs=Date.parse("2026-11-05T01:00:00Z");
+  const id="hc1heQnfn6k",publishedAt="2026-10-24T12:42:20Z";
+  const receipt={platform:"YouTube",profile_id:"recBBBBBBBBBBBBBB",remote_id:id,
+    verified_delivery:true,verified_public:true,ownership_verified:true,
+    permalink:"https://www.youtube.com/watch?v="+id,
+    published_at:publishedAt,checked_at:new Date(nowMs-1000).toISOString()};
+  const fields={Platform:"YouTube",Content_Profile:["recBBBBBBBBBBBBBB"],
+    YouTube_Video_ID:id,Platform_Post_URL:"https://www.youtube.com/watch?v="+id};
+  assert.equal(receiptBlock({fields:{...fields,Published_At:publishedAt}},receipt,nowMs),null);
+  assert.equal(receiptBlock({fields:{...fields,Published_At:"2026-10-24T12:42:28Z"}},receipt,nowMs),
+    "conflicting_publication_timestamp");
+});
+
 test("Instagram containers, stories and mismatched published IDs never authorize a correction",async()=>{
   for(const mutation of [
     f=>{f.row.fields.Platform_Post_ID="";f.row.fields.IG_Carousel_Published_Media_ID="";},
