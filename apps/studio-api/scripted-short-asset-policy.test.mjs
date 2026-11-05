@@ -145,3 +145,74 @@ test("original Battery Park fixture remains NYC-only after fixing profile routin
   assert.equal(libraryAssetSatisfiesPolicy(chicago, policy, "recgtK8Z7eNADNtVy"), false);
   assert.equal(libraryAssetSatisfiesPolicy(newYork, policy, "recT2rbKX3MF7cVFU"), false);
 });
+
+
+const drifterBrief = `Please note that the below request will rely on the recently uploaded files in asset manager that are all drifter speakeasy clips.
+----
+Here’s a strong, ready-to-use TikTok package for your Drifter clips and stills.
+Video Prompt (for CapCut, editing, or AI assist)
+Create a 20–30 second cinematic, moody TikTok video using my clips and stills from The Drifter speakeasy in Chicago. Style: dark, intimate, vintage Prohibition-era atmosphere with warm amber and deep blue lighting, soft film grain, subtle slow zooms and pans.
+
+Sequence:
+Quick exterior shot of the Green Door Tavern / River North street at night
+Descending the stairs and discovering the hidden entrance (bookshelf/door moment)
+Door opens into the dim, velvet-and-flag-filled room
+Close-ups of the bar, hanging American flag, vintage posters, and candlelight
+Tarot cards being drawn or fanned out on the bar
+Beautiful cocktail being poured or presented with its tarot card
+Brief, atmospheric glimpse of the stage/performance energy (burlesque or live act if available)
+Guests laughing and sipping in the intimate space
+Slow push-in on a finished cocktail + tarot card
+End on a lingering shot of the room with soft text overlay
+
+Music: sultry, slightly mysterious jazz or modern lo-fi with a 1920s undertone. Keep the energy mysterious and inviting rather than party-hype.
+Voiceover Script (≈22–25 seconds)
+“Not all who wander are lost…
+Especially when the path leads under the floorboards of an old Chicago tavern.
+This is The Drifter.
+A real Prohibition speakeasy.
+Hidden for a reason.
+Every night the menu is decided by tarot.
+You never know what you’ll get…
+but it’s always worth the secret.
+Come as you are.
+Leave the way you want to be.”
+
+(Speak in a low, smooth, slightly conspiratorial tone. Pause after “Hidden for a reason” and after the tarot line for the visuals to land.)
+Caption
+Chicago’s last real speakeasy is hiding right under your feet 🃏🥃
+The Drifter — River North’s secret basement bar where the drinks are chosen by tarot cards and the night never plays the same way twice.
+Worth finding.
+#TheDrifter #ChicagoSpeakeasy #HiddenGemsChicago #RiverNorth 
+This version leans into the actual magic of the place (authentic history + tarot menu + intimate vibe) while staying very “you” in the ChicagoShining style. It should perform well with the atmospheric footage you already have.`;
+
+test("Drifter production brief resolves the venue rather than ready-to-use package prose", () => {
+  const parsed = parseScriptedShortAssetPolicy(drifterBrief);
+  assert.equal(parsed.location, "drifter speakeasy");
+  assert.equal(parsed.required, true);
+  for (let n = 1; n <= 6; n++) {
+    const asset = {id: "recDrifter" + n, name: "The Drifter Speakeasy " + n,
+      location: "The Drifter, Chicago", profile_id: chi};
+    assert.equal(libraryAssetSatisfiesPolicy(asset, parsed, chi), true);
+    assert.equal(libraryAssetSatisfiesPolicy(asset, parsed, nyc), false);
+  }
+  assert.equal(libraryAssetSatisfiesPolicy(northPond, parsed, chi), false);
+});
+
+test("ready-to-use is not an asset selection command", () => {
+  assert.equal(parseScriptedShortAssetPolicy(
+    "Here is a ready-to-use TikTok package for your Drifter clips and stills."
+  ).location, null);
+});
+
+test("coordinated media and city qualifiers preserve named venue constraints", () => {
+  for (const media of ["clips and stills", "photos & videos", "clips, photos and stills", "footage"]) {
+    const parsed = parseScriptedShortAssetPolicy(
+      "Create a short using my " + media + " from The Drifter speakeasy in Chicago."
+    );
+    assert.equal(parsed.location, "drifter speakeasy", media);
+  }
+  const parsed = parseScriptedShortAssetPolicy("Use clips and stills from Battery Park.");
+  assert.equal(parsed.location, "battery park");
+  assert.equal(libraryAssetSatisfiesPolicy(northPond, parsed, chi), false);
+});
