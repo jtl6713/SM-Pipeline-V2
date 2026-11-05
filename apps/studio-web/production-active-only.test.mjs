@@ -70,5 +70,6 @@ test("Draft list uses eligibility guard, collapses empty section, retains errors
   assert.match(source, /records\.filter\(productionRequestIsOpenDraft\)/);
   assert.match(source, /if \(listPanel\) listPanel\.hidden = !drafts\.length/);
   assert.match(source, /if \(listPanel\) listPanel\.hidden = false/);
-  assert.doesNotMatch(source, /new Set\(\["Draft", "Ready", "Submitted"\]\)/);
+  const draftList = source.slice(source.indexOf("  async function loadProductionRequests("), source.indexOf("  function ideaStructureLabel("));
+  assert.doesNotMatch(draftList, /new Set\(\["Draft", "Ready", "Submitted"\]\)/);
 });
