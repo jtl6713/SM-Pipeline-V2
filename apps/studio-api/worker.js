@@ -6,7 +6,7 @@ import { readGalleryRevisionStatus } from "./rendering-review-gallery-status-htt
 import { isNativeGalleryControlledPostPath } from "./native-gallery-route-gate.mjs";
 import { verifyGallerySourceBytes, gallerySourceBytePreflightEnabled } from "./rendering-review-gallery-byte-preflight.mjs";
 import { handleNativeGalleryGenerate } from "./native-gallery-generation-http.mjs";
-import { enrollNativeGalleryHold } from "./native-gallery-hold-enrollment.mjs";
+import { enrollNativeGalleryHold, nativeGalleryEnrollmentEnabled } from "./native-gallery-hold-enrollment.mjs";
 import { claimNativeGalleryJob, galleryClaimEnabled } from "./native-gallery-job-claim.mjs";
 import { reserveNativeGalleryLaunch, nativeGalleryLaunchIntentEnabled } from "./native-gallery-launch-ledger.mjs";
 import {commitNativeGalleryManifest, nativeGalleryManifestCommitEnabled} from "./native-gallery-manifest-commit.mjs";
@@ -15,7 +15,7 @@ import {serveNativeGalleryPreview} from "./native-gallery-preview.mjs";
 import {decideNativeGalleryCreative,nativeGalleryCreativeReviewEnabled} from "./native-gallery-creative-decision.mjs";
 import {inspectNativeGalleryFactoryPreflight,nativeGalleryFactoryPreflightEnabled} from "./native-gallery-factory-preflight.mjs";
 import {handoffNativeGalleryToPrivateFactory,nativeGalleryPrivateFactoryHandoffEnabled} from "./native-gallery-private-factory-handoff.mjs";
-import { NATIVE_GALLERY_JOBS_TABLE } from "./native-gallery-job-airtable.mjs";
+import { NATIVE_GALLERY_JOBS_TABLE, nativeGalleryJobsEnabled } from "./native-gallery-job-airtable.mjs";
 import { readNativeGalleryPrivateManifest } from "./native-gallery-private-manifest.mjs";
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
 import { serveReviewAttemptVideo, fetchTrustedRunnerReviewMedia } from "./rendering-review-attempt-video.mjs";
@@ -2967,7 +2967,7 @@ export default {
           readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
           listRecords:(table,params)=>reviewListRecords(env,table,params),
         });
-        return respond(request,env,{...status,private_preview_available:env.NATIVE_GALLERY_PRIVATE_PREVIEW_ENABLED==="true",creative_review_available:nativeGalleryCreativeReviewEnabled(env),factory_preflight_available:nativeGalleryFactoryPreflightEnabled(env),factory_handoff_available:nativeGalleryPrivateFactoryHandoffEnabled(env)});
+        return respond(request,env,{...status,private_preview_available:env.NATIVE_GALLERY_PRIVATE_PREVIEW_ENABLED==="true",creative_review_available:nativeGalleryCreativeReviewEnabled(env),factory_preflight_available:nativeGalleryFactoryPreflightEnabled(env),factory_handoff_available:nativeGalleryPrivateFactoryHandoffEnabled(env),hold_enrollment_request_enabled:nativeGalleryEnrollmentEnabled(env),generation_request_enabled:nativeGalleryJobsEnabled(env)});
       }
 
       // Preview original gallery/source metadata only. This is deliberately
