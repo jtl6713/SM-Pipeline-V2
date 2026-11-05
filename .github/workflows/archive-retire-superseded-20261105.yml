@@ -103,14 +103,17 @@ jobs:
               active = [(r["id"], r["status"]) for r in runs if r["status"] != "completed"]
               if active:
                   raise RuntimeError("Refuse: active workflows for " + name + " " + repr(active))
-          def verify_branch_heads(rows):
-              expected = {"main"} | set(KEEP) | set(CANDIDATES)
+          def verify_branch_heads(rows, retired=None):
+              retired = set(retired or [])
+              expected = {"main"} | set(KEEP) | (set(CANDIDATES) - retired)
               allowed = expected | {SELF}
-              if not expected.issubset(rows) or set(rows) - allowed:
+              if set(rows) - allowed or not expected.issubset(rows) or set(rows) & retired:
                   raise RuntimeError("Refuse: branch inventory changed: " + repr(sorted(rows)))
               if rows["main"].get("protected") is not True:
                   raise RuntimeError("Refuse: main protection unexpectedly changed")
               for name, sha in {**KEEP, **CANDIDATES}.items():
+                  if name in retired:
+                      continue
                   row = rows[name]
                   if row.get("protected") or row["commit"]["sha"] != sha:
                       raise RuntimeError("Refuse: moved or protected branch " + name)
@@ -145,8 +148,9 @@ jobs:
                   raise RuntimeError("Refuse: archive tag was not verified " + tag)
               print("TAG_VERIFIED " + name + " -> " + tag + " @ " + sha, flush=True)
           print("ALL_HEADS_TAGGED_BEFORE_DELETE", flush=True)
+          retired = set()
           for name, sha in CANDIDATES.items():
-              verify_branch_heads(inventory())
+              verify_branch_heads(inventory(), retired)
               ensure_no_running_jobs(name)
               tag = "archive/branch-cleanup-20261105/" + name.replace("/", "--")
               if api("git/ref/tags/" + branch_path(tag))["object"]["sha"] != sha:
@@ -158,6 +162,7 @@ jobs:
               ], check=True, timeout=80)
               if name in inventory():
                   raise RuntimeError("Refuse: branch deletion not confirmed " + name)
+              retired.add(name)
               print("LEASE_DELETED " + name, flush=True)
           remaining = inventory()
           if set(remaining) - ({"main"} | set(KEEP) | {SELF}) or (
