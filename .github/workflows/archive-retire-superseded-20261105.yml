@@ -27,7 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json, os, subprocess, urllib.error, urllib.parse, urllib.request
+          import json, os, subprocess, time, urllib.error, urllib.parse, urllib.request
           REPO = "jtl6713/SM-Pipeline-V2"
           SELF = "chore/archive-retire-superseded-20261105"
           # The two open draft PRs, an intentionally retained R4 diagnostic, and
@@ -143,8 +143,17 @@ jobs:
                   if error.code != 404:
                       raise
                   api("git/refs", "POST", {"ref": "refs/tags/" + tag, "sha": sha})
-              verified = api(ref_path)
-              if verified["object"]["sha"] != sha:
+              for attempt in range(12):
+                  try:
+                      verified = api(ref_path)
+                      if verified["object"]["sha"] != sha:
+                          raise RuntimeError("Refuse: archive tag SHA mismatch " + tag)
+                      break
+                  except urllib.error.HTTPError as error:
+                      if error.code != 404:
+                          raise
+                      time.sleep(1)
+              else:
                   raise RuntimeError("Refuse: archive tag was not verified " + tag)
               print("TAG_VERIFIED " + name + " -> " + tag + " @ " + sha, flush=True)
           print("ALL_HEADS_TAGGED_BEFORE_DELETE", flush=True)
@@ -160,7 +169,11 @@ jobs:
                   "git", "push", "--force-with-lease=" + ref + ":" + sha,
                   "origin", ":" + ref,
               ], check=True, timeout=80)
-              if name in inventory():
+              for attempt in range(10):
+                  if name not in inventory():
+                      break
+                  time.sleep(1)
+              else:
                   raise RuntimeError("Refuse: branch deletion not confirmed " + name)
               retired.add(name)
               print("LEASE_DELETED " + name, flush=True)
