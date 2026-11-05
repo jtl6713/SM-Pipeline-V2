@@ -10,6 +10,13 @@ const igRecoveryTargets=[
  {route:'ig9098',record:'recxIx0ZiWkR1n0ZW',output_id:9098,post_id:'18168690085479740'},
  {route:'ig5246',record:'rec6Th7faYoS9tJtN',output_id:5246,post_id:'17877174054635991'},
 ];
+// Only existing canonical YouTube uploads, no provider mutation. Their inclusion
+// is for live channel-owned GET-only verification, not proof they are public.
+const ytRecoveryTargets=[
+ {route:'yt5321',record:'recLzqmtWJGQvLNTZ',output_id:5321,video_id:'ekWGUhmlnaQ'},
+ {route:'yt4140',record:'recT2eb5eOeioD0nY',output_id:4140,video_id:'PGNXR-WNI3g'},
+ {route:'yt4050',record:'rec0259hg7cjoKl3j',output_id:4050,video_id:'gm9Mxa8ScnM'},
+];
 const rollout=JSON.parse(await fs.readFile(new URL('../../deploy/publication-reconciliation-production-rollout.json',import.meta.url),'utf8'));
 if(!/^rec[A-Za-z0-9]{14}$/.test(String(rollout.canary_record_id)) ||
    !/^[A-Za-z0-9_-]{11}$/.test(String(rollout.canary_video_id)) ||
@@ -61,6 +68,9 @@ try {
     '/${token}/instagram':'/api/admin/exception-recovery/${instagramCanaryRecord}/receipt?authenticated=1',
     '/${token}/ig9098':'/api/admin/exception-recovery/recxIx0ZiWkR1n0ZW/receipt?authenticated=1',
     '/${token}/ig5246':'/api/admin/exception-recovery/rec6Th7faYoS9tJtN/receipt?authenticated=1',
+    '/${token}/yt5321':'/api/admin/exception-recovery/recLzqmtWJGQvLNTZ/receipt?authenticated=1',
+    '/${token}/yt4140':'/api/admin/exception-recovery/recT2eb5eOeioD0nY/receipt?authenticated=1',
+    '/${token}/yt4050':'/api/admin/exception-recovery/rec0259hg7cjoKl3j/receipt?authenticated=1',
     '/${token}/history':'/api/admin/exception-recovery/history',
     '/${token}/denied':'/api/admin/exception-recovery/history'
    };
@@ -118,6 +128,33 @@ try {
     no_output_write:post.verification?.no_output_write===true,
     evidence:String(post.evidence||post.error||'unverified').slice(0,120),
     blocked_reason:post.verification?.blocked_reason||null,
+  });
+ }
+ // Bounded provider GET of three unchanged source-backed YouTube video IDs.
+ // Do not set Published or imply successful posting on an absent/private GET.
+ report.youtube_recovery_probe=[];
+ for(const candidate of ytRecoveryTargets){
+  const response=await probe(candidate.route);
+  const evidence=response.body||{};
+  const valid=response.status===200
+    && Number(evidence.output_id)===candidate.output_id
+    && evidence.platform==='YouTube'
+    && evidence.remote_id===candidate.video_id
+    && evidence.read_only===true
+    && evidence.verification?.no_output_write===true
+    && evidence.verification?.authoritative_state_unchanged===true;
+  report.youtube_recovery_probe.push({
+    output_id:candidate.output_id,record_id:candidate.record,
+    http_status:response.status,shape_verified:valid,
+    remote_id:valid?candidate.video_id:null,
+    account_ownership_verified:valid&&evidence.ownership_verified===true,
+    verified_public:valid&&evidence.verified_public===true,
+    verified_delivery:valid&&evidence.verified_delivery===true,
+    eligible_status_only:valid&&evidence.verification?.eligible===true,
+    blocked_reason:evidence.verification?.blocked_reason||null,
+    published_at:valid&&evidence.verified_public===true?evidence.published_at||null:null,
+    no_output_write:evidence.verification?.no_output_write===true,
+    evidence:String(evidence.evidence||evidence.error||'unverified').slice(0,120),
   });
  }
  const receipt=await probe('receipt');report.inspected=1;report.receipt=receipt.body;
