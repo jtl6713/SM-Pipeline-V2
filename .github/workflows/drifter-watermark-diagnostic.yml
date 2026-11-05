@@ -1,0 +1,104 @@
+name: Drifter watermark diagnostic and derivative receipt
+on:
+  push:
+    branches: [fix/drifter-watermark]
+    paths: ['.github/workflows/drifter-watermark-diagnostic.yml']
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Measure one existing Drifter clip watermark and retain derivative receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          command=r'''$ErrorActionPreference='Stop'
+          $service=Join-Path (Get-Location) 'Services\pipeline-runner\service'
+          if(-not (Test-Path -LiteralPath $service)){throw 'runner_source_not_found'}
+          $py=Join-Path $service '.venv\Scripts\python.exe'
+          if(-not (Test-Path -LiteralPath $py)){
+            $p=Get-Command python -ErrorAction SilentlyContinue
+            if(-not $p){throw 'python_interpreter_unavailable'}
+            $py=$p.Source
+          }
+          $temp=Join-Path $env:TEMP 'drifter-watermark-diagnostic.py'
+          $source=@'
+          from dotenv import load_dotenv
+          load_dotenv('.env')
+          import os, json, time, hashlib
+          from pathlib import Path
+          os.environ['PORT']='3350'
+          from airtable.client import AirtableClient
+          from studio_library import processor as p
+          client=AirtableClient()
+          row=client.get_record('tblSITCujCsJTNcDe','recTeu9UggkFLHVzs')
+          f=row['fields']
+          assert 'recT2rbKX3MF7cVFU' in f.get('Profiles',f.get('Profile',[])), 'profile_mismatch'
+          source='1zNESzLCJEC12CCKnNNlbM0-okPrD891UO'.replace('KnNN','KnN')
+          assert f.get('Google Drive File ID') == source, 'source_changed'
+          receipt=Path('data/studio-watermark-recovery/drifter-6.json')
+          receipt.parent.mkdir(parents=True,exist_ok=True)
+          for name in ('screen_asset','_watermark_payload'):
+              original=getattr(p,name)
+              def wrap(*args,_name=name,_fn=original,**kwargs):
+                  start=time.monotonic()
+                  print('watermark_diagnostic='+json.dumps({'stage':_name,'state':'start'}),flush=True)
+                  try:return _fn(*args,**kwargs)
+                  finally:print('watermark_diagnostic='+json.dumps({'stage':_name,'seconds':round(time.monotonic()-start,2)}),flush=True)
+              setattr(p,name,wrap)
+          start=time.monotonic()
+          try:
+              if receipt.exists():
+                  result=json.loads(receipt.read_text())
+                  assert result['source_google_drive_file_id']==source
+              else:
+                  result=p.watermark_existing_drive_asset(file_id=source,filename=f.get('Asset Name','Drifter 6.mov'),mime_type=f.get('MIME_Type','video/quicktime'),profile_name='ChicagoShining - Chicago')
+                  receipt.write_text(json.dumps(result))
+              print('watermark_diagnostic='+json.dumps({'state':'complete','seconds':round(time.monotonic()-start,2),'result':result}),flush=True)
+          except Exception as exc:
+              print('watermark_diagnostic='+json.dumps({'state':'failed','seconds':round(time.monotonic()-start,2),'type':type(exc).__name__,'detail':str(exc)[-1500:]}),flush=True)
+              raise SystemExit(1)
+          '@
+          [System.IO.File]::WriteAllText($temp,$source,[System.Text.UTF8Encoding]::new($false))
+          Push-Location $service
+          try{
+            $env:PYTHONPATH=$service
+            & $py $temp
+            if($LASTEXITCODE -ne 0){throw 'read_only_python_process_failed'}
+          }finally{
+            Pop-Location
+            Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+          }
+          '''
+          Path('/tmp/chicago-readonly-preflight.json').write_text(json.dumps({'command':command,'confirm':True}),encoding='utf-8')
+          PY
+          code=$(curl -sS --max-time 20 -o /tmp/ops-preflight.json -w '%{http_code}' \
+            -X POST -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/chicago-readonly-preflight.json https://ops.chicagoshining.com/api/shell)
+          [[ "$code" == "200" || "$code" == "202" ]]
+          id=$(jq -r '.job.id // .jobId // empty' /tmp/ops-preflight.json); test -n "$id"
+          for i in $(seq 1 450); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$id" -o /tmp/preflight-result.json
+            state=$(jq -r '.job.status // empty' /tmp/preflight-result.json)
+            if [[ "$state" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/preflight-result.json | grep -E '^watermark_diagnostic=' || true
+              exit 0
+            fi
+            if [[ "$state" == "failed" ]]; then
+              echo 'protected_readonly_preflight_failed=true'
+              jq -r '.job.log // ""' /tmp/preflight-result.json | grep -E '^watermark_diagnostic=' || true
+              exit 1
+            fi
+            sleep 3
+          done
+          echo 'protected_readonly_preflight_timeout=true'
+          exit 1
