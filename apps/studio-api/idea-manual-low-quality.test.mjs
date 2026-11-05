@@ -75,7 +75,7 @@ test("strict quality-only exception cannot bypass unrelated exclusions or unusab
     assert.equal(eligible(asset, { allowLowQuality: true }), false, JSON.stringify(fields));
     assert.notEqual(reject(asset, { allowLowQuality: true }), null, JSON.stringify(fields));
   }
-  assert.equal(eligible(lurie({ Exclusion_Reasons: [{ name: "Low Quality" }] }), false);
+  assert.equal(eligible(lurie({ Exclusion_Reasons: [{ name: "Low Quality" }] })), false);
   assert.equal(eligible(lurie({ Exclusion_Reasons: [{ name: "Low Quality" }] }), { allowLowQuality: true }), true);
   assert.equal(eligible(lurie({ Exclusion_Reasons: [] })), true, "ordinary eligible images remain eligible");
 });
