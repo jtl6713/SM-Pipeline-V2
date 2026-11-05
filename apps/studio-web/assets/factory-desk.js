@@ -1853,6 +1853,9 @@
     };
     const canSaveWithoutAutoRender = pending?.payload?.action !== "request_changes_content";
     const readGallery=async()=>{
+      // The server advertises independent protected request gates. Neither
+      // this metadata inventory nor a preview authorizes a render or publish.
+      let galleryActions=null;
       try{
         const inventory=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
           "/gallery-inventory");
@@ -1872,6 +1875,12 @@
              revision.can_generate!==false||revision.can_publish!==false||
              !Array.isArray(revision.jobs))
             throw new Error("Gallery history authority mismatch");
+          galleryActions={
+            holdEnrollment:revision.hold_enrollment_request_enabled===true,
+            generationRequest:revision.generation_request_enabled===true,
+            holdActive:revision.hold_active===true,
+            jobCount:revision.jobs.length,
+          };
           const history=document.createElement("li");
           history.textContent=revision.jobs.length?
             "Gallery job history: "+revision.jobs.slice(0,10)
@@ -1880,6 +1889,29 @@
               ". Revised artifacts are not verified for acceptance.":
             "Gallery job history: no native-gallery revision jobs recorded.";
           rows.appendChild(history);
+          // This is the authoritative Airtable LEDGER count only, not a
+          // verified media-byte or generation completion percentage.
+          for(const job of revision.jobs.slice(0,10)){
+            const total=job.total_slides,completed=job.completed_slides;
+            if(job.progress_source!=="airtable_ledger_unverified"||
+               !Number.isSafeInteger(total)||total<1||total>20||
+               !Number.isSafeInteger(completed)||completed<0||completed>total)
+              continue;
+            const line=document.createElement("li");
+            const title=document.createElement("div");
+            title.textContent="Private correction · "+String(job.status||"unknown")+
+              (job.stage?" · "+String(job.stage):"")+
+              " · "+completed+" of "+total+" slide slots recorded";
+            const meter=document.createElement("progress");
+            meter.min=0;meter.max=total;meter.value=completed;
+            meter.setAttribute("aria-label","Airtable slide-slot ledger progress");
+            meter.style.display="block";
+            meter.style.maxWidth="260px";
+            const qualifier=document.createElement("small");
+            qualifier.textContent="Airtable ledger only — generated Drive media not independently verified by this count.";
+            line.append(title,meter,qualifier);
+            rows.appendChild(line);
+          }
           // Side-by-side V1/V2 images are fetched through authenticated
           // Studio, never public Drive links. The Runner rechecks original
           // and revised private Drive bytes on EVERY image request.
@@ -2209,6 +2241,107 @@
             }finally{button.disabled=false;}
           });
         }
+        if(canSaveWithoutAutoRender&&galleryActions?.holdEnrollment===true&&
+           galleryActions.holdActive===false&&galleryActions.jobCount===0&&selectable.length){
+          const li=document.createElement("li");
+          const confirmation=document.createElement("label");
+          const confirm=document.createElement("input");
+          confirm.type="checkbox";
+          confirmation.append(confirm,document.createTextNode(
+            " Prepare an exact, unpublished, unscheduled gallery correction hold. No image will be generated."));
+          const hold=document.createElement("button");
+          hold.type="button";hold.textContent="Prepare private correction hold";
+          hold.disabled=true;
+          confirm.addEventListener("change",()=>{hold.disabled=!confirm.checked;});
+          li.append(confirmation,hold);rows.appendChild(li);
+          hold.addEventListener("click",async()=>{
+            if(!current()||!confirm.checked||hold.disabled)return;
+            hold.disabled=true;confirm.disabled=true;
+            status.textContent="Recording the exact private gallery publication hold in Airtable…";
+            const client_request_id="gallery_hold_"+Date.now().toString(36)+
+              "_"+Math.random().toString(36).slice(2,12);
+            try{
+              const receipt=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
+                "/gallery-enroll",{method:"POST",body:JSON.stringify({client_request_id})});
+              if(!current())return;
+              if(receipt?.ok!==true||receipt.output_id!==id||
+                 receipt.profile_id!==inventory.profile_id||
+                 receipt.hold_verified!==true||receipt.generation_queued!==false||
+                 receipt.publication_authorized!==false)
+                throw new Error("Airtable hold receipt was not verified");
+              status.textContent="Private gallery hold saved; loading current job eligibility. No image generated.";
+              void loadFactoryCorrectionReadOnlyPreview(pending);
+            }catch(error){
+              if(current())status.textContent="Hold could not be independently confirmed: "+
+                String(error?.message||error)+". Refresh gallery history before another request; do not retry blindly.";
+            }
+          });
+        }
+        if(canSaveWithoutAutoRender&&galleryActions?.generationRequest===true&&
+           galleryActions.holdActive===true&&galleryActions.jobCount===0&&selectable.length){
+          const li=document.createElement("li");
+          const confirmation=document.createElement("label");
+          const confirm=document.createElement("input");
+          confirm.type="checkbox";
+          confirmation.append(confirm,document.createTextNode(
+            " Generate only the selected images into PRIVATE staging. Keep original media, schedule, Factory approval and publishing unchanged."));
+          const generate=document.createElement("button");
+          generate.type="button";generate.textContent="Generate private image corrections";
+          generate.disabled=true;
+          confirm.addEventListener("change",()=>{generate.disabled=!confirm.checked;});
+          li.append(confirmation,generate);rows.appendChild(li);
+          generate.addEventListener("click",async()=>{
+            if(!current()||!confirm.checked||generate.disabled)return;
+            const selected=selectable.filter(x=>x.checkbox.checked).map(x=>({
+              slide_id:x.slide.slide_id,instruction:x.instruction.value.trim(),
+            }));
+            if(!selected.length||selected.length>20||
+               selected.some(x=>x.instruction.length<8||x.instruction.length>3000)){
+              status.textContent="Select 1–20 eligible slides and enter 8–3000 characters of correction instructions for each.";
+              return;
+            }
+            generate.disabled=true;confirm.disabled=true;
+            // Exactly one request ID per human click, used in both the
+            // nonmutating verification and durable one-shot job submission.
+            const client_request_id="gallery_generate_"+Date.now().toString(36)+
+              "_"+Math.random().toString(36).slice(2,12);
+            status.textContent="Revalidating selected images against authoritative Airtable before creating ONE private job…";
+            try{
+              const proposal=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
+                "/gallery-selection-preview",{method:"POST",body:JSON.stringify({
+                  client_request_id,selected_slides:selected,
+                })});
+              if(!current())return;
+              if(proposal?.ok!==true||proposal.output_id!==id||
+                 proposal.profile_id!==inventory.profile_id||
+                 proposal.client_request_id!==client_request_id||
+                 proposal.can_generate!==false||proposal.publication_authorized!==false||
+                 !Array.isArray(proposal.selected)||proposal.selected.length!==selected.length||
+                 selected.some(x=>!proposal.selected.some(y=>
+                   y.slide_id===x.slide_id&&y.instruction===x.instruction&&
+                   Array.isArray(y.blockers)&&y.blockers.length===0)))
+                throw new Error("Exact private slide selection could not be verified");
+              const receipt=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
+                "/gallery-generate",{method:"POST",body:JSON.stringify({
+                  client_request_id,selected_slides:selected,
+                })});
+              if(!current())return;
+              if(receipt?.ok!==true||receipt.output_id!==id||
+                 !/^[A-Za-z0-9_-]{8,120}$/.test(String(receipt.job_id||""))||
+                 receipt.state!=="held_queued"||
+                 receipt.publication_authorized!==false||
+                 receipt.creative_approved!==false||receipt.factory_approved!==false)
+                throw new Error("Private gallery job receipt could not be independently verified");
+              status.textContent="One private image correction job queued: "+receipt.job_id+
+                ". Not yet rendered, approved or published; reloading Airtable status.";
+              void loadFactoryCorrectionReadOnlyPreview(pending);
+            }catch(error){
+              if(current())status.textContent="Private generation request could not be confirmed: "+
+                String(error?.message||error)+
+                ". Check authoritative Gallery job history before another request. No automatic retry will occur.";
+            }
+          });
+        }
         if(!canSaveWithoutAutoRender) {
           for(const entry of selectable)entry.checkbox.disabled=true;
           return "Original image inventory: "+inventory.slide_count+
@@ -2216,8 +2349,10 @@
             "selection is disabled until an explicit non-rendering review path is available.";
         }
         return "Original image inventory: "+inventory.slide_count+
-          " slide(s). Select slides for a guarded, unsaved correction preview; "+
-          "Drive rights/branding verification and rendering are still unavailable.";
+          " slide(s). Select slides for an exact correction preview. "+
+          (galleryActions?.generationRequest===true?
+            "Private Generate requests are available only after an independently verified hold, source rights and Runner checks.":
+            "Private generation remains disabled until release and rights gates pass.");
       }catch(error){
         // The source is often video or an unpublished/non-gallery output;
         // this cannot block sending normal Factory review comments.
