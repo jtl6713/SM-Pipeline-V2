@@ -20,9 +20,7 @@ export function classifyStaleInstagramReel(row, {
     || str(row, "Platform") !== "Instagram"
     || str(row, "Platform_Output_Type") !== "Instagram Reel"
     || str(row, "Publish_Status") !== "Publishing"
-    || str(row, "Publish_Locked_By") !== "AP1-IG"
     || str(row, "Review_Status") !== "Approved"
-    || str(row, "Output_Status") !== "Approved for Publishing"
     || row.fields?.Auto_Publish_Enabled !== true
     || str(row, "Publish_Method") !== "Automated"
     || row.fields?.Do_Not_Publish === true
@@ -36,22 +34,45 @@ export function classifyStaleInstagramReel(row, {
     || str(row, "Studio_Review_Hold_Owner")
     || row.fields?.Studio_Render_Review_Hold_Active === true)
     return null;
-  const lockMs = at(row.fields?.Publish_Locked_At);
-  const attemptMs = at(row.fields?.Last_Publish_Attempt_At);
-  if (!Number.isFinite(lockMs) || !Number.isFinite(attemptMs)
-    || nowMs - Math.max(lockMs, attemptMs) < Math.max(thresholdMs, 60000))
-    return null;
-  const retryMs = at(row.fields?.Publish_Next_Retry_At);
-  if (Number.isFinite(retryMs) && retryMs > nowMs) return null;
+
   const postId = str(row, "Platform_Post_ID");
   const containerId = str(row, "Platform_Media_ID");
+  // A post receipt with Output_Status=Published but Publish_Status=Publishing
+  // is a status mismatch to verify, not evidence of completed publication.
+  const outputStatus = str(row, "Output_Status");
+  if (outputStatus !== "Approved for Publishing"
+    && !(outputStatus === "Published" && postId)) return null;
+
+  const owner = str(row, "Publish_Locked_By");
+  const held = owner === "AP1-IG";
+  const exactGuardRefusal = str(row, "Output_Notes").includes(
+    "QA-IG-STALE-UPLOAD: AP1-IG review guard refused continuation");
+  // The previously released false-lock attempts are invisible to the old
+  // lock-only scanner. A blank owner is NOT safe-to-retry evidence.
+  const releasedLegacy = !owner
+    && !str(row, "Publish_Locked_At")
+    && !str(row, "Publish_Started_At")
+    && (exactGuardRefusal || postId || containerId);
+  if (!held && !releasedLegacy) return null;
+
+  const attemptMs = at(row.fields?.Last_Publish_Attempt_At);
+  const lockMs = held ? at(row.fields?.Publish_Locked_At) : NaN;
+  if (!Number.isFinite(attemptMs) || (held && !Number.isFinite(lockMs))
+    || nowMs - (held ? Math.max(lockMs, attemptMs) : attemptMs)
+       < Math.max(thresholdMs, 60000)) return null;
+
+  const retryMs = at(row.fields?.Publish_Next_Retry_At);
+  if (Number.isFinite(retryMs) && retryMs > nowMs) return null;
   return {
     signature: QA_IG_STALE_UPLOAD_SIGNATURE,
     record_id: row.id, output_id: Number(row.fields?.Output_ID || 0),
     profile_id: Array.isArray(row.fields?.Content_Profile) && row.fields.Content_Profile.length === 1
       ? row.fields.Content_Profile[0] : null,
-    age_seconds: Math.floor((nowMs - Math.max(lockMs, attemptMs)) / 1000),
-    lock_at: row.fields.Publish_Locked_At,
+    age_seconds: Math.floor((nowMs - (held ? Math.max(lockMs, attemptMs) : attemptMs)) / 1000),
+    lock_state: held ? "ap1_ig_held" : "released_legacy",
+    exact_guard_refusal_recorded: exactGuardRefusal,
+    output_status: outputStatus,
+    lock_at: held ? row.fields.Publish_Locked_At : null,
     last_attempt_at: row.fields.Last_Publish_Attempt_At,
     post_id_saved: Boolean(postId),
     container_id_saved: Boolean(containerId),
@@ -62,7 +83,6 @@ export function classifyStaleInstagramReel(row, {
     creates: 0,
   };
 }
-
 
 /** Authenticated, read-only GET of the exact saved Instagram container. */
 export async function verifySavedInstagramContainer(row, {
@@ -97,12 +117,19 @@ export async function verifySavedInstagramContainer(row, {
 }
 
 export function staleInstagramReelFormula(nowMs = Date.now(), thresholdMs = QA_IG_STALE_UPLOAD_THRESHOLD_MS) {
-  // Formula-side limit avoids repeated large-table full scans on maintenance cron.
+  // Keep the Airtable-side filter bounded. Released historical attempts are
+  // searchable only with an exact refusal marker or existing remote identity.
   const cutoff = new Date(nowMs - Math.max(thresholdMs, 60000)).toISOString();
   return 'AND({Platform}="Instagram",{Platform_Output_Type}="Instagram Reel",'
-    + '{Publish_Status}="Publishing",{Publish_Locked_By}="AP1-IG",'
-    + '{Publish_Locked_At}!=BLANK(),'
-    + 'IS_BEFORE({Publish_Locked_At},"' + cutoff + '"))';
+    + '{Publish_Status}="Publishing",'
+    + 'OR(AND({Publish_Locked_By}="AP1-IG",{Publish_Locked_At}!=BLANK(),'
+    + 'IS_BEFORE({Publish_Locked_At},"' + cutoff + '")),'
+    + 'AND({Publish_Locked_By}=BLANK(),{Publish_Locked_At}=BLANK(),'
+    + '{Publish_Started_At}=BLANK(),{Last_Publish_Attempt_At}!=BLANK(),'
+    + 'IS_BEFORE({Last_Publish_Attempt_At},"' + cutoff + '"),'
+    + 'OR(FIND("QA-IG-STALE-UPLOAD: AP1-IG review guard refused continuation",'
+    + '{Output_Notes}&"")>0,{Platform_Post_ID}!=BLANK(),'
+    + '{Platform_Media_ID}!=BLANK()))))';
 }
 
 export async function auditStaleInstagramReels(env, {
@@ -114,7 +141,7 @@ export async function auditStaleInstagramReels(env, {
   let queryNowMs = nowMs;
   // Rotate through the full stale set: without an R2 cursor the first eight
   // old incidents would hide every later lock indefinitely.
-  const cursorKey = "studio/state/qa-ig-stale-upload/v1/cursor.json";
+  const cursorKey = "studio/state/qa-ig-stale-upload/v2/cursor.json";
   let cursor = "";
   if (env.STUDIO_MEDIA?.get) {
     try {
@@ -155,6 +182,8 @@ export async function auditStaleInstagramReels(env, {
     if (!recheck || current?.id !== observed.id
       || recheck.lock_at !== decision.lock_at
       || recheck.last_attempt_at !== decision.last_attempt_at
+      || recheck.lock_state !== decision.lock_state
+      || recheck.output_status !== decision.output_status
       || recheck.action !== decision.action) continue;
     let provider = { verified_public: false, ownership_verified: false,
       evidence: "provider_read_not_applicable_without_saved_post_id" };
@@ -186,7 +215,8 @@ export async function auditStaleInstagramReels(env, {
     // An old Airtable lock is NOT proof of death. The cross-runtime R2
     // heartbeat and irreversible-intent flag are the only positive proof.
     const heartbeatMs = Date.parse(String(liveLease?.heartbeat_at || ""));
-    const leaseSafePreGraph = !recheck.post_id_saved && !recheck.container_id_saved
+    const leaseSafePreGraph = recheck.lock_state === "ap1_ig_held"
+      && !recheck.post_id_saved && !recheck.container_id_saved
       && ["pre_remote","fenced"].includes(liveLease?.phase)
       && liveLease.irreversible_possible === false
       && Number.isFinite(heartbeatMs)
@@ -207,6 +237,7 @@ export async function auditStaleInstagramReels(env, {
         ? "saved_container_verified_pending_fenced_resume"
       : leaseSafePreGraph ? (liveLease?.phase==="fenced" ? "fenced_pregraph_mae_retry_candidate" : "expired_pregraph_lease_recovery_candidate")
       : liveLease?.phase === "remote_intent" ? "graph_intent_ambiguous_needs_eyes"
+      : recheck.lock_state === "released_legacy" ? "released_legacy_needs_eyes"
       : "stale_lock_needs_eyes";
     const evidence = {
       ...recheck, outcome,
@@ -229,7 +260,9 @@ export async function auditStaleInstagramReels(env, {
         : containerConfirmed && resumableContainer
           ? "fence_previous_runner_then_resume_saved_container_only"
         : leaseSafePreGraph ? "CAS_fence_then_atomic_MAE_reschedule"
-        : "needs_eyes_ambiguous_remote_or_unverified_lease",
+        : recheck.lock_state === "released_legacy"
+          ? "needs_eyes_released_legacy_no_retroactive_graph_proof"
+          : "needs_eyes_ambiguous_remote_or_unverified_lease",
       release_lock: false, schedule_changed: false, graph_create_authorized: false,
     };
     const eventKey = "QA-IG-STALE-UPLOAD:" + observed.id + ":" + bucket;
@@ -316,7 +349,7 @@ export async function auditStaleInstagramReels(env, {
   }
   if (env.STUDIO_MEDIA?.put) {
     await env.STUDIO_MEDIA.put(cursorKey, JSON.stringify({
-      schema: "qa.ig-stale-upload-cursor.1",
+      schema: "qa.ig-stale-upload-cursor.2",
       offset: typeof found.offset === "string" && found.offset.length <= 1024
         ? found.offset : null,
       cutoff_ms: typeof found.offset === "string" ? queryNowMs : null,
