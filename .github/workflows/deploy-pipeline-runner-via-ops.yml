@@ -70,7 +70,10 @@ jobs:
             services/pipeline-runner/tests/test_studio_compress.py \
             services/pipeline-runner/tests/test_a1s_eligibility.py \
             services/pipeline-runner/tests/test_a1_local_compressor.py \
-            services/pipeline-runner/tests/test_internal_media_guard.py
+            services/pipeline-runner/tests/test_internal_media_guard.py \
+            services/pipeline-runner/tests/test_native_gallery_staging_settings.py \
+            services/pipeline-runner/tests/test_native_gallery_auto_execute.py \
+            services/pipeline-runner/tests/test_native_gallery_execute_http.py
 
       - name: Deploy Pipeline Runner through allowlisted Ops action
         shell: bash
