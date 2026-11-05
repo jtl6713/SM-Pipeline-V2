@@ -151,7 +151,7 @@ test("Stage 3: #9277 added after durable priority cursor 9 without replaying pri
  const visited=[];
  const env={STUDIO_MEDIA:store,PUBLICATION_RECONCILIATION_SCAN_ENABLED:"true",
    PUBLICATION_RECONCILIATION_ENABLED:"true",PUBLICATION_RECONCILIATION_BOUNDED_ENABLED:"true",
-   PUBLICATION_RECONCILIATION_BATCH_SIZE:"5"};
+   PUBLICATION_RECONCILIATION_BATCH_SIZE:"3"};
  await runPublicationRecovery(env,{now:()=>clock,
    discover:async()=>({records:[]}),
    readOutput:async id=>{visited.push(id);return {id,fields:{
