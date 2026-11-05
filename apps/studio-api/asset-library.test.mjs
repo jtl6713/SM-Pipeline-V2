@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   allocateLibraryBatchNames,
+  allocateLibraryUploadNames,
   collectJsonDriveIds,
   coerceLibraryDurationSeconds,
   libraryBatchNameFilterFormula,
@@ -258,6 +259,30 @@ test("library batch numbering continues from highest number no matter the file e
     ["Navy Pier 5"]
   );
   assert.match(libraryBatchNameFilterFormula("Navy Pier"), /\[\.\]/);
+});
+
+test("explicitly numbered upload names preserve the supplied suffix, without double numbering", () => {
+  assert.deepEqual(allocateLibraryUploadNames("Lurie 5", 1), ["Lurie 5"]);
+  assert.deepEqual(allocateLibraryUploadNames("Lurie 5.jpg", 1), ["Lurie 5"]);
+  assert.deepEqual(allocateLibraryUploadNames("Lurie 5", 3), ["Lurie 5", "Lurie 6", "Lurie 7"]);
+  assert.deepEqual(
+    allocateLibraryUploadNames("Lurie 5", 2, ["Lurie 5.jpg", "Lurie 6.mp4"]),
+    ["Lurie 7", "Lurie 8"],
+  );
+  assert.deepEqual(allocateLibraryUploadNames("Lurie 005", 3), ["Lurie 005", "Lurie 006", "Lurie 007"]);
+  assert.deepEqual(allocateLibraryUploadNames("Route66", 2, ["Route67.mp4"]), ["Route66", "Route68"]);
+  assert.deepEqual(allocateLibraryUploadNames("2026", 2), ["2026", "2027"]);
+});
+
+test("unnumbered upload names still continue the highest existing catalog sequence", () => {
+  assert.deepEqual(
+    allocateLibraryUploadNames("Space Museum", 2, ["Space Museum 9.jpg", "Space Museum 12.mp4"]),
+    ["Space Museum 13", "Space Museum 14"],
+  );
+  assert.deepEqual(allocateLibraryUploadNames("Space Museum", 1, []), ["Space Museum 1"]);
+  assert.deepEqual(normalizeLibraryBatchBase("Route66"), { ok: true, name: "Route" });
+  assert.deepEqual(normalizeLibraryBatchBase("2026"), { ok: true, name: "2026" });
+  assert.match(libraryBatchNameFilterFormula("Route"), /route\\?\[0-9\]/i);
 });
 
 test("library upload profile prefers the form field and refuses a silent default", () => {
