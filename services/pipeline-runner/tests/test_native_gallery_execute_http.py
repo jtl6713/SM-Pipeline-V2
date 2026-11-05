@@ -7,11 +7,19 @@ from rendering_review.native_gallery_execute_http import (
     create_native_gallery_execute_blueprint,
 )
 from rendering_review.native_gallery_rights_policy import NativeGalleryRightsPolicyDenied
+from rendering_review.native_gallery_staging_settings import NativeGalleryStagingDenied
 
 SECRET = "runner-native-gallery-secret-123456789"
 
 
 class ExecuteHttpTests(unittest.TestCase):
+    def setUp(self):
+        mock = patch(
+            "rendering_review.native_gallery_execute_http.resolve_private_native_gallery_staging_folder",
+            return_value="1VdULNl85JDoL_EaurRKMPm0tRi8xOawH")
+        mock.start()
+        self.addCleanup(mock.stop)
+
     def make_client(self, *, executed=None, policy=None):
         app = Flask(__name__)
         app.register_blueprint(create_native_gallery_execute_blueprint(
@@ -51,6 +59,18 @@ class ExecuteHttpTests(unittest.TestCase):
             result = client.post("/jobs/native-gallery/execute-next",
                                  headers={"X-Pipeline-Secret": SECRET})
             self.assertEqual(result.status_code, 503)
+        self.assertEqual(invoked, [])
+
+    def test_missing_staging_denies_before_executor_claim(self):
+        invoked = []
+        with patch.dict(os.environ, {"NATIVE_GALLERY_RUNNER_EXECUTE_ENABLED": "true"}), patch(
+            "rendering_review.native_gallery_execute_http.resolve_private_native_gallery_staging_folder",
+            side_effect=NativeGalleryStagingDenied("inactive")):
+            client = self.make_client(executed=lambda **_: invoked.append(True))
+            res = client.post("/jobs/native-gallery/execute-next",
+                              headers={"X-Pipeline-Secret": SECRET})
+        self.assertEqual(res.status_code, 503)
+        self.assertEqual(res.json["error"], "native_gallery_staging_not_ready")
         self.assertEqual(invoked, [])
 
     def test_only_non_publishing_receipt_returns_success(self):

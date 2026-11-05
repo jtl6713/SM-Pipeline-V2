@@ -17,6 +17,7 @@ from carousel.image_gen import generate_carousel_png
 from integrations.google_drive import GoogleDriveClient
 from rendering_review.native_gallery_c5c6_executor import execute_one_native_gallery
 from rendering_review.native_gallery_rights_policy import build_approved_native_gallery_clearance
+from rendering_review.native_gallery_staging_settings import resolve_private_native_gallery_staging_folder
 
 _LOG = logging.getLogger("pipeline-runner.native-gallery-dispatch")
 _LOCK = threading.Lock()
@@ -55,13 +56,15 @@ def sweep_once(settings, *, client=None, drive=None, executor=execute_one_native
         return generate_carousel_png(
             prompt, ratio=ratio, preferred_account=account,
             settings_override=dict(settings))
+    live_client = client if client is not None else AirtableClient(settings)
+    live_drive = drive if drive is not None else GoogleDriveClient()
+    folder = resolve_private_native_gallery_staging_folder(live_client, live_drive)
     result = executor(
-        client=client if client is not None else AirtableClient(settings),
-        drive=drive if drive is not None else GoogleDriveClient(),
+        client=live_client, drive=live_drive,
         worker_base=os.environ.get("NATIVE_GALLERY_WORKER_BASE_URL", ""),
         shared_secret=os.environ.get("NATIVE_GALLERY_JOB_SHARED_SECRET", ""),
         consumer_identity=os.environ.get("NATIVE_GALLERY_RUNNER_CONSUMER_ID", ""),
-        staging_folder_id=os.environ.get("NATIVE_GALLERY_STAGING_FOLDER_ID", ""),
+        staging_folder_id=folder,
         rights_clearance=rights, generator=pinned)
     if not isinstance(result, dict) or result.get("ok") is not True or (
         result.get("publication_authorized") is not False
@@ -103,9 +106,11 @@ def start_consumer(settings):
         raise RuntimeError("native_gallery_auto_rights_provider_unverified")
     if any(not os.environ.get(k, "").strip() for k in (
         "NATIVE_GALLERY_WORKER_BASE_URL", "NATIVE_GALLERY_JOB_SHARED_SECRET",
-        "NATIVE_GALLERY_RUNNER_CONSUMER_ID", "NATIVE_GALLERY_STAGING_FOLDER_ID"
+        "NATIVE_GALLERY_RUNNER_CONSUMER_ID"
     )):
         raise RuntimeError("native_gallery_auto_configuration_missing")
+    # Independent Airtable and private Drive check before starting any consumer.
+    resolve_private_native_gallery_staging_folder(AirtableClient(settings), GoogleDriveClient())
     with _LOCK:
         if _STARTED or _BLOCKED:
             return
