@@ -79,6 +79,7 @@ import {
 } from "./desk-inventory.mjs";
 import {
   allocateLibraryBatchNames,
+  allocateLibraryUploadNames,
   combineAirtableFormulas,
   firstLinkedRecordId,
   LIBRARY_ADDED_AT_FIELD,
@@ -5635,7 +5636,14 @@ export async function generateItem4PreProductionAiMaster(request, env, url, auth
   const manifestNames = assets
     .map((asset) => String(asset?.library_asset_name || asset?.name || "").trim())
     .filter(Boolean);
-  const allocatedNames = allocateLibraryBatchNames(assetBase, 1, [...catalogNames, ...manifestNames]);
+  // Preserve the operator's trailing number (e.g. "Field Museum 9") on the
+  // first AI image. Subsequent AI images advance that number, without adding
+  // a second suffix; unnumbered bases retain catalog sequence allocation.
+  const allocatedNames = allocateLibraryUploadNames(
+    requestedAssetBase || context.title || "Studio AI",
+    1,
+    [...catalogNames, ...manifestNames],
+  );
   const assetName = allocatedNames[0];
   if (!assetName) throw new HttpError(500, "Could not allocate the next Asset Manager name for this AI image");
 
