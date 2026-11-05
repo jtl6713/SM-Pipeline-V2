@@ -33,26 +33,36 @@ jobs:
           $source=@'
           from dotenv import load_dotenv
           load_dotenv('.env')
-          import os,json,time,requests
+          import os,json,subprocess,tempfile
           from pathlib import Path
           os.environ['PORT']='3350'
-          from config import load_settings
           from airtable.client import AirtableClient
-          f=AirtableClient().get_record('tblSITCujCsJTNcDe','reculpYoVgfVRrZKW')['fields']
-          assert 'recT2rbKX3MF7cVFU' in f.get('Content_Profile',[])
-          source='1PXsZn8TSjXKlvHLrUUZyiyPIv-FjswOc'
-          assert f['Google Drive File ID']==source
-          receipt=Path('data/studio-watermark-recovery/drifter-5.json')
-          receipt.parent.mkdir(parents=True,exist_ok=True)
-          start=time.monotonic()
-          if receipt.exists():
-              print('watermark_diagnostic='+json.dumps({'state':'receipt_exists','result':json.loads(receipt.read_text())}),flush=True)
-          else:
-              r=requests.post('https://pipeline.chicagoshining.com/jobs/studio-asset-watermark',headers={'X-Pipeline-Secret':load_settings()['pipeline_runner_shared_secret']},json={'google_drive_file_id':source,'filename':f['Asset Name'],'mime_type':f['MIME_Type'],'profile_name':'ChicagoShining - Chicago'},timeout=180)
-              try: result=r.json()
-              except ValueError: result={'non_json':True,'body_excerpt':r.text[:250]}
-              print('watermark_diagnostic='+json.dumps({'status':r.status_code,'seconds':round(time.monotonic()-start,2),'result':result}),flush=True)
-              if r.ok and result.get('watermarked'):receipt.write_text(json.dumps(result))
+          from integrations.google_drive import GoogleDriveClient
+          client=AirtableClient(); drive=GoogleDriveClient()
+          for number,record,source in [(6,'recTeu9UggkFLHVzs','1zNESzLCJEC12CCKnNlbM0-okPrD891UO'),(5,'reculpYoVgfVRrZKW','1PXsZn8TSjXKlvHLrUUZyiyPIv-FjswOc')]:
+              result=json.loads(Path(f'data/studio-watermark-recovery/drifter-{number}.json').read_text())
+              assert result['watermarked'] is True and result['source_google_drive_file_id']==source
+              assert result['watermark_profile']=='ChicagoShining - Chicago'
+              output=result['google_drive_file_id']
+              f=client.get_record('tblSITCujCsJTNcDe',record)['fields']
+              assert 'recT2rbKX3MF7cVFU' in f.get('Content_Profile',[])
+              assert f['Google Drive File ID'] in (source,output), 'source_changed'
+              meta=drive.get_file(output)
+              assert not meta.get('trashed') and meta['mimeType']=='video/mp4' and int(meta['size'])==result['file_size_bytes']
+              content,mime=drive.download_file(output)
+              with tempfile.TemporaryDirectory(prefix='drifter-verify-') as temp:
+                  path=Path(temp)/'clip.mp4';path.write_bytes(content)
+                  probe=subprocess.run(['ffprobe','-v','error','-show_entries','stream=codec_type,codec_name,width,height:format=duration','-of','json',str(path)],capture_output=True,text=True,check=True,timeout=60)
+                  proof=json.loads(probe.stdout)
+                  assert float(proof['format']['duration'])>0
+                  assert any(x.get('codec_type')=='video' and x.get('codec_name')=='h264' for x in proof['streams'])
+              if f['Google Drive File ID']==source:
+                  description=str(f.get('Asset_Description','')).strip()
+                  fields={'Google Drive File ID':output,'Google Drive URL':result['google_drive_url'],'MIME_Type':'video/mp4','File_Extension':'mp4','File_Size_Bytes':result['file_size_bytes'],'Asset_Description':description+'\n[watermarked:ChicagoShining - Chicago] Source master Drive ID: '+source}
+                  client.update_record('tblSITCujCsJTNcDe',record,fields,typecast=True)
+              check=client.get_record('tblSITCujCsJTNcDe',record)['fields']
+              assert check['Google Drive File ID']==output and source in check['Asset_Description']
+              print('watermark_diagnostic='+json.dumps({'state':'catalog_verified','asset':number,'record':record,'output':output,'media':proof}),flush=True)
           '@
           [System.IO.File]::WriteAllText($temp,$source,[System.Text.UTF8Encoding]::new($false))
           Push-Location $service
