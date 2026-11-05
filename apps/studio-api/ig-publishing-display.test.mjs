@@ -47,7 +47,7 @@ test("remote IDs, published receipts, non-IG rows, and holds are not masked",()=
     {Publish_Status:"Published"},{Output_Status:"Published"},
     {Review_Status:"Changes Requested"},{Do_Not_Publish:true},
     {Studio_Render_Review_Hold_Active:true},{Studio_Render_Review_Hold_ID:"h1"},
-    {Studio_Review_Hold_ID:"h2"},{Test_Run_ID:"test1"},
+    {Studio_Render_Review_Hold_Owner:"h2"},{Test_Run_ID:"test1"},
     {Replace_Transaction_ID:"rep1"},
   ];
   for(const patch of cases) assert.equal(staleInstagramPublishingDisplay(record(patch),{nowMs}),null,JSON.stringify(patch));
