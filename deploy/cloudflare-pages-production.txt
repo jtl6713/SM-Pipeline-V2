@@ -690,3 +690,5 @@ Deploy Studio UI 0.6.869: fix hidden Factory recovery control and clear stale 50
 2026-11-04 UI build 0.6.880-stage1-held-inbox. A second explicit user confirmation after verified private V2 previews may request the protected default-OFF Airtable-only Factory inbox receipt. This NEVER releases hold or authorizes normal Factory/public publication. Item4 BUILD_ID and all JS/CSS cache keys strictly aligned.
 
 2026-11-04: Studio Pages UI 0.6.881 drop Factory past_review browser recovery fence so already-approved outputs cannot keep blocking new Ready-for-Review submits.
+
+2026-11-04: Deploy Studio UI 0.6.882-stage1-private-corrections. Gated exact-output private gallery hold/Generate controls, explicit human confirmation, truthful Airtable slot progress. All default OFF; no social publishing, no automatic generation. CI exact head and custom-domain version verification required.
