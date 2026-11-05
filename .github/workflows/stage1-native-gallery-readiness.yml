@@ -8,6 +8,7 @@ on:
       - 'deploy/stage1-native-gallery-readiness.txt'
       - 'tools/stage1/native_gallery_readiness.py'
       - 'tools/stage1/test_native_gallery_readiness.py'
+      - 'services/pipeline-runner/rendering_review/native_gallery_staging_settings.py'
   workflow_dispatch:
 
 permissions:
@@ -50,6 +51,7 @@ jobs:
           $policyOk=$false
           $driveOk=$false
           $venvOk=$false
+          $folderPinned=$false
           $config=@{}
           if(Test-Path (Join-Path $service 'config.py')){
             try{
@@ -86,9 +88,12 @@ jobs:
               $v=& $py -c 'from integrations.google_drive import GoogleDriveClient; d=GoogleDriveClient(); m=d.get_file("@FOLDER@"); p=d.list_file_permissions("@FOLDER@"); print("private" if isinstance(m,dict) and m.get("id")=="@FOLDER@" and m.get("mimeType")=="application/vnd.google-apps.folder" and m.get("trashed") is not True and isinstance(p,list) and len(p)>0 and all(isinstance(x,dict) and x.get("type") in ("user","group") for x in p) else "blocked")' 2>$null
               $driveOk=($LASTEXITCODE -eq 0 -and [string]$v -eq 'private')
             }catch{}
+            try{
+              $v=& $py -c 'from airtable.client import AirtableClient; from integrations.google_drive import GoogleDriveClient; from rendering_review.native_gallery_staging_settings import resolve_private_native_gallery_staging_folder; f=resolve_private_native_gallery_staging_folder(AirtableClient(), GoogleDriveClient()); print("verified" if f=="@FOLDER@" else "blocked")' 2>$null
+              $folderPinned=($LASTEXITCODE -eq 0 -and [string]$v -eq 'verified')
+            }catch{}
             Pop-Location
           }
-          $folderPinned=((cfg 'NATIVE_GALLERY_STAGING_FOLDER_ID') -eq $folder)
           $origin=(cfg 'NATIVE_GALLERY_WORKER_BASE_URL')
           $originOk=$origin.StartsWith('https://') -and !$origin.Contains('@')
           $sharedOk=(cfg 'NATIVE_GALLERY_JOB_SHARED_SECRET').Length -ge 24
