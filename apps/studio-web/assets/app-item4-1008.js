@@ -4,6 +4,11 @@
   const apiBase = configuredBase || window.location.origin;
   const $ = (id) => document.getElementById(id);
   let activeIdea = null;
+  // Read-only Manage gallery: keep Production draft snapshots scoped to the opened idea.
+  let ideaAssignedMediaMetadata = new Map();
+  let ideaAssignedDraftAssets = [];
+  let ideaAssignedAssetLoadSequence = 0;
+  let ideaAssignedMediaLoading = false;
   let ideaTimedScriptPreview = null;
   let ideasCache = [];
   let ideaPhotoManagePauseTimer = null;
@@ -295,7 +300,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.883-factory-approval-count-clarity";
+  const BUILD_ID = "item4-0.6.890-idea-assigned-assets-on-manage";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -3430,11 +3435,37 @@
   function ideaLibraryIdsFromIdea(idea) {
     const fromField = Array.isArray(idea?.library_asset_ids) ? idea.library_asset_ids : [];
     const fromLinks = Array.isArray(idea?.matched_media_asset_links) ? idea.matched_media_asset_links : [];
+    const fromSelected = Array.isArray(idea?.photo_match?.selected)
+      ? idea.photo_match.selected.map((row) => typeof row === "string" ? row : row?.id)
+      : [];
     const fromNotes = String(idea?.production_notes || "").match(/media_asset_ids=([^\n]+)/i);
     const noted = fromNotes
       ? fromNotes[1].split(/[,\s]+/).map((value) => String(value || "").trim())
       : [];
-    return [...new Set([...fromField, ...fromLinks, ...noted].map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+    return [...new Set([...fromField, ...fromLinks, ...fromSelected, ...noted].map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+  }
+
+  function ideaAssignedAssetRows(idea) {
+    const rows = new Map();
+    for (const id of ideaLibraryIdsFromIdea(idea)) {
+      rows.set(id, { id, preview_path: `/api/media-assets/${encodeURIComponent(id)}/preview` });
+    }
+    for (const selected of Array.isArray(idea?.photo_match?.selected) ? idea.photo_match.selected : []) {
+      if (!selected || typeof selected !== "object") continue;
+      const id = String(selected.id || "").trim();
+      if (rows.has(id)) rows.set(id, { ...rows.get(id), ...selected, id });
+    }
+    for (const [id, detail] of ideaAssignedMediaMetadata) {
+      if (rows.has(id)) rows.set(id, { ...rows.get(id), ...detail, id });
+    }
+    for (const asset of ideaAssignedDraftAssets) {
+      const id = String(asset?.media_asset_record_id || asset?.id || "").trim();
+      if (!id) continue;
+      const existing = rows.get(id) || {};
+      rows.set(id, { ...existing, ...asset, id,
+        preview_path: asset.preview_url || asset.preview_path || asset.poster_url || asset.thumbnail_url || existing.preview_path || "" });
+    }
+    return [...rows.values()];
   }
 
   function renderIdeaMatchedPhotos(idea) {
@@ -3443,39 +3474,75 @@
     const heading = $("ideaMatchedPhotosHeading");
     const hint = $("ideaMatchedPhotosHint");
     if (!wrap || !grid) return;
-
-    const ready = String(idea?.photo_wait_status || "").trim() === "Ready";
-    const ids = ready
-      ? [...new Set([
-          ...(Array.isArray(idea?.matched_media_asset_links) ? idea.matched_media_asset_links : []),
-          ...(Array.isArray(idea?.photo_match?.selected) ? idea.photo_match.selected.map((row) => row?.id) : []),
-        ].map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))]
-      : [];
-
-    wrap.hidden = ids.length < 1;
-    if (!ids.length) {
-      grid.innerHTML = "";
-      if (heading) heading.textContent = "Selected photos";
-      return;
-    }
-
-    if (heading) heading.textContent = `Selected photos (${ids.length})`;
-    if (hint) hint.textContent = "These photos were selected automatically and are already attached to the Production draft. Open Production to add, remove, or reorder them before approval.";
-
-    const items = ids.map((id, index) => ({
-      id,
-      name: `Selected photo ${index + 1}`,
-      media_kind: "photo",
-      preview_path: `/api/media-assets/${encodeURIComponent(id)}/preview`,
-    }));
+    const items = ideaAssignedAssetRows(idea);
+    // The gallery is a first-class, always-visible part of Manage (not photo-wait-only).
+    wrap.hidden = false;
+    if (heading) heading.textContent = `Assigned assets (${items.length})`;
+    if (hint) hint.textContent = items.length
+      ? "These photos and clips are already linked to this idea or its Production draft. Open Production to add, remove, or reorder them before approval."
+      : (ideaAssignedMediaLoading
+          ? "Checking assigned assets in the linked Production draft…"
+          : "No assets are currently assigned. Use Add new media or Use existing to attach photos and clips.");
     grid.innerHTML = items.map((item, index) => {
+      const name = String(item.name || item.filename || item.file_name || `Asset ${index + 1}`).trim();
+      const video = String(item.media_kind || item.kind || "").toLowerCase() === "video"
+        || String(item.mime_type || "").toLowerCase().startsWith("video/")
+        || /\.(mp4|mov|m4v|webm)$/i.test(name);
       const preview = ideaLibraryPreviewUrl(item);
+      const media = video
+        ? (item4ClipPlayerHtml({
+            previewUrl: preview,
+            streamUrl: item4ClipStreamUrl(item),
+            name,
+            durationSeconds: item.duration_seconds,
+            asset: item,
+          }) || `<span class="idea-library-card-fallback">Clip preview unavailable</span>`)
+        : (preview
+            ? `<img src="${escapeHtml(preview)}" alt="${escapeHtml(name)}" loading="eager" decoding="async">`
+            : `<span class="idea-library-card-fallback">Photo preview unavailable</span>`);
       return `<div class="idea-library-card" data-library-id="${escapeHtml(item.id)}" data-selected="true">
-        <img src="${escapeHtml(preview)}" alt="Selected photo ${index + 1}" loading="lazy">
-        <span>Photo ${index + 1}</span>
+        ${media}
+        ${video ? '<em class="idea-library-card-tag">Clip</em>' : ""}
+        <span>${escapeHtml(name)}</span>
       </div>`;
     }).join("");
     bindLibraryPickerPreviews(grid, items);
+    item4BindClipPlayers(grid);
+  }
+
+  async function hydrateIdeaAssignedAssets(idea) {
+    const ideaId = String(idea?.id || "").trim();
+    if (!ideaId) return;
+    const sequence = ++ideaAssignedAssetLoadSequence;
+    const assignedIds = ideaLibraryIdsFromIdea(idea);
+    const requestId = String(idea?.production_request_id || "").trim();
+    if (!assignedIds.length && !requestId) return;
+    ideaAssignedMediaLoading = true;
+    renderIdeaMatchedPhotos(idea);
+    // Fetch metadata only for actual existing links. Suggestions are NOT assignments.
+    const [suggestions, browsed, draft] = await Promise.allSettled([
+      assignedIds.length ? fetchIdeaLibrarySuggested(ideaId) : Promise.resolve({ suggested: [], matches: [] }),
+      assignedIds.length ? fetchLibraryBrowse("", ideaId) : Promise.resolve([]),
+      requestId ? api(`/api/production-requests/${encodeURIComponent(requestId)}/item4?snapshot=1`, {
+        timeoutMs: 20000, retries: 0,
+      }) : Promise.resolve({ assets: [] }),
+    ]);
+    if (sequence !== ideaAssignedAssetLoadSequence || activeIdea?.id !== ideaId
+        || !$("ideaManageDrawer")?.classList.contains("open")) return;
+    const linked = new Set(ideaLibraryIdsFromIdea(activeIdea));
+    const suggestionData = suggestions.status === "fulfilled" ? suggestions.value : {};
+    const candidates = [
+      ...(Array.isArray(suggestionData?.suggested) ? suggestionData.suggested : []),
+      ...(Array.isArray(suggestionData?.matches) ? suggestionData.matches : []),
+      ...(browsed.status === "fulfilled" && Array.isArray(browsed.value) ? browsed.value : []),
+    ];
+    ideaAssignedMediaMetadata = new Map(candidates
+      .filter((item) => linked.has(String(item?.id || "")))
+      .map((item) => [String(item.id), item]));
+    const snapshot = draft.status === "fulfilled" ? draft.value : null;
+    ideaAssignedDraftAssets = Array.isArray(snapshot?.assets) ? snapshot.assets : [];
+    ideaAssignedMediaLoading = false;
+    renderIdeaMatchedPhotos(activeIdea);
   }
 
   function updateIdeaDrawer(idea) {
@@ -3487,6 +3554,13 @@
     const preservedSuggested = pickerWasOpen ? new Set(ideaLibrarySuggestedIds) : null;
     const preservedSeeded = pickerWasOpen ? ideaLibrarySeeded : false;
     const preservedSearch = pickerWasOpen ? String($("ideaLibrarySearch")?.value || "") : "";
+    if (!sameIdea) {
+      // Never let an earlier idea's late metadata replace this one's assigned gallery.
+      ideaAssignedAssetLoadSequence += 1;
+      ideaAssignedMediaMetadata = new Map();
+      ideaAssignedDraftAssets = [];
+      ideaAssignedMediaLoading = false;
+    }
     activeIdea = idea;
     $("ideaDrawerHeading").textContent = idea?.title || "Manage idea";
     $("ideaDetailStatus").innerHTML = badge(ideaStatusLabel(idea));
@@ -3766,6 +3840,14 @@
     $("ideaManageDrawer").classList.add("open");
     $("ideaManageDrawer").setAttribute("aria-hidden", "false");
     document.body.classList.add("drawer-open");
+    // Paint persisted asset IDs immediately; enrich labels/clip thumbnails without blocking Manage.
+    hydrateIdeaAssignedAssets(idea).catch((error) => {
+      console.warn("Manage Idea assigned media hydration failed", error);
+      if (activeIdea?.id === idea.id) {
+        ideaAssignedMediaLoading = false;
+        renderIdeaMatchedPhotos(activeIdea);
+      }
+    });
     productionDecorateTooltips($("ideaManageDrawer"));
     syncPromoteTimingHint();
     setTimeout(() => {

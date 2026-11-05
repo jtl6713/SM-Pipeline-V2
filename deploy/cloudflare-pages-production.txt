@@ -694,3 +694,5 @@ Deploy Studio UI 0.6.869: fix hidden Factory recovery control and clear stale 50
 2026-11-04: Deploy Studio UI 0.6.882-stage1-private-corrections. Gated exact-output private gallery hold/Generate controls, explicit human confirmation, truthful Airtable slot progress. All default OFF; no social publishing, no automatic generation. CI exact head and custom-domain version verification required.
 
 2026-11-05: Studio Pages UI 0.6.883-factory-approval-count-clarity. Clarify Factory Needs eyes vs overview Awaiting Approval (package-ready Approve gate vs status census).
+
+2026-11-05: Deploy Studio UI 0.6.890-idea-assigned-assets-on-manage. Ideas Manage drawer displays existing linked photos/clips and Production draft assets at the top on open; read-only metadata hydration, no additions/removals/approval/publishing. Protected Pages custom-domain release checks required.
