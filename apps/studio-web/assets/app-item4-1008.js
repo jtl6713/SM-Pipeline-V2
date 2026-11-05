@@ -15265,6 +15265,8 @@ function timedScriptAssetLabel(asset, index) {
       .filter((item) => item?.id).map((item) => [item.id, item]));
     const outcome = { attached: 0, succeeded: [], failed: [], record: null };
     for (let index = 0; index < ids.length; index += 1) {
+      // Keep repeat Airtable mutations below the base's burst limit.
+      if (index) await sleepMs(350);
       const id = ids[index];
       const name = String(known.get(id)?.name || id);
       onProgress?.({ index: index + 1, total: ids.length, id, name });
