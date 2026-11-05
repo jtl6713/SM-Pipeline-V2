@@ -300,7 +300,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.891-idea-low-quality-manual";
+  const BUILD_ID = "item4-0.6.892-library-attach-resume";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -15250,14 +15250,63 @@ function timedScriptAssetLabel(asset, index) {
     }
   }
 
+  // A single six-image Worker request used to watermark several masters before
+  // writing the production manifest. If any later watermark failed, all previous
+  // work became invisible in Production. Each explicit operator choice is now
+  // a separately committed, idempotent request. Failures never stop later items.
+  async function attachSelectedLibraryAssetsOneByOne(requestId, mediaAssetIds, {
+    originKind = "photos-and-clips",
+    onProgress = null,
+  } = {}) {
+    const ids = [...new Set((mediaAssetIds || [])
+      .map((id) => String(id || "").trim())
+      .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+    const known = new Map([...ideaLibraryPickerItems, ...item4LibraryItems]
+      .filter((item) => item?.id).map((item) => [item.id, item]));
+    const outcome = { attached: 0, succeeded: [], failed: [], record: null };
+    for (let index = 0; index < ids.length; index += 1) {
+      // Keep repeat Airtable mutations below the base's burst limit.
+      if (index) await sleepMs(350);
+      const id = ids[index];
+      const name = String(known.get(id)?.name || id);
+      onProgress?.({ index: index + 1, total: ids.length, id, name });
+      try {
+        const response = await api(`/api/production-requests/${encodeURIComponent(requestId)}/assets/library`, {
+          method: "POST",
+          body: JSON.stringify({
+            media_asset_ids: [id],
+            allow_video: true,
+            allow_low_quality: true, // Manual operator selection, never automatic matching.
+            origin_kind: originKind,
+          }),
+          timeoutMs: 45000,
+          // POST can complete server-side even when its response is lost.
+          // Never auto-replay a timed-out or 5xx attachment request.
+          retries: 1,
+        });
+        outcome.attached += Math.max(0, Number(response?.attached || 0));
+        outcome.succeeded.push(id);
+        if (response?.record) outcome.record = response.record;
+      } catch (error) {
+        outcome.failed.push({
+          id,
+          name,
+          status: Number(error?.status || 0) || null,
+          message: String(error?.message || "Attachment failed").slice(0, 240),
+        });
+      }
+    }
+    return outcome;
+  }
+
   async function openProductionRequestWithLibrary(idea, mediaAssetIds) {
     if (!idea?.id) return;
     const continueButton = $("ideaLibraryContinueButton");
     if (continueButton) {
       continueButton.disabled = true;
-      continueButton.textContent = "Attaching…";
+      continueButton.textContent = "Opening Production…";
     }
-    setManageMessage("Attaching library photos and clips and opening Production…", "");
+    setManageMessage("Opening Production for the selected library photos and clips…", "");
     try {
       await Promise.all([ensureProductionRequestMusic(), loadEzAudioOptions()]);
       const result = await api(`/api/ideas/${encodeURIComponent(idea.id)}/production-request`, {
@@ -15266,34 +15315,44 @@ function timedScriptAssetLabel(asset, index) {
       });
       const requestId = result?.record?.id;
       if (!requestId) throw new Error("Production Request was not created.");
-      await api(`/api/production-requests/${encodeURIComponent(requestId)}/assets/library`, {
-        method: "POST",
-        body: JSON.stringify({
-          media_asset_ids: mediaAssetIds,
-          allow_video: true,
-          allow_low_quality: true, // Explicit selection from Manage Idea only.
-          origin_kind: "photos-and-clips",
-        }),
-        timeoutMs: 45000,
+      const outcome = await attachSelectedLibraryAssetsOneByOne(requestId, mediaAssetIds, {
+        onProgress: ({ index, total, name }) => {
+          if (continueButton) continueButton.textContent = `Attaching ${index} of ${total}…`;
+          setManageMessage(`Attaching ${index} of ${total}: ${name}`, "");
+        },
       });
       await closeIdeaDrawer({ save: false });
       activeIdea = idea;
       ezEntryPath = "configure";
       switchToPage("content");
-      populateProductionRequestForm(result.record);
+      populateProductionRequestForm(outcome.record || result.record);
       showProductionRequestWorkspace();
-      await loadProductionRequestOutputs(result.record);
-      await loadItem4Workspace(result.record);
+      await loadProductionRequestOutputs(outcome.record || result.record);
+      await loadItem4Workspace(outcome.record || result.record);
+      const attached = new Set((item4Workspace?.assets || [])
+        .map((asset) => String(asset?.media_asset_record_id || "").trim()).filter(Boolean));
+      const selected = [...new Set(mediaAssetIds)];
+      const missing = selected.filter((id) => !attached.has(id));
       const assetCount = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets.length : 0;
       selectPrMediaKind(assetCount > 1 ? "multiple-photos" : "single-photo", { quiet: true });
       await loadProductionRequests();
       setEzAdvancedOpen(false);
-      setRequestMessage(
-        `${assetCount} library still${assetCount === 1 ? "" : "s"} attached. Add more or change platforms, then approve.`,
-        "success"
-      );
+      if (missing.length) {
+        const failedNames = missing.map((id) =>
+          outcome.failed.find((row) => row.id === id)?.name
+          || ideaLibraryPickerItems.find((item) => item.id === id)?.name || id);
+        setRequestMessage(
+          `Attached ${selected.length - missing.length} of ${selected.length} selected items. Still missing: ${failedNames.join(", ")}. Open Use existing and retry the remaining items. No automatic publishing occurred.`,
+          "error-text"
+        );
+      } else {
+        setRequestMessage(
+          `${assetCount} library item${assetCount === 1 ? "" : "s"} attached. Add more or change platforms, then approve.`,
+          "success"
+        );
+      }
     } catch (e) {
-      setManageMessage(e.message, "error-text");
+      setManageMessage(e.message || "Could not open Production.", "error-text");
     } finally {
       if (continueButton) {
         continueButton.textContent = "Continue to Production";
@@ -15534,6 +15593,7 @@ function timedScriptAssetLabel(asset, index) {
     if (!activeProductionRequest?.id) return;
     item4WorkspaceRevision += 1;
     await item4RemoveDrain;
+    const requestId = activeProductionRequest.id;
     const { toAdd, toRemove } = item4LibraryDiff();
     if (!toAdd.length && !toRemove.length) return;
     const button = $("item4LibraryAddButton");
@@ -15542,28 +15602,53 @@ function timedScriptAssetLabel(asset, index) {
         button.disabled = true;
         button.textContent = "Applying…";
       }
+      const before = item4AttachedMediaIds();
+      const outcome = await attachSelectedLibraryAssetsOneByOne(requestId, toAdd, {
+        originKind: ezIntakeKind || "photos-and-clips",
+        onProgress: ({ index, total, name }) => {
+          if (button) button.textContent = `Adding ${index} of ${total}…`;
+          setRequestMessage(`Attaching ${index} of ${total}: ${name}`, "");
+        },
+      });
+      if (outcome.record) {
+        activeProductionRequest = outcome.record;
+        populateProductionRequestForm(outcome.record);
+      }
+      // Server readback owns the truth even if one response was lost after
+      // committing. Keep the operator's unchecked removals untouched until
+      // *every* requested addition is verified in Airtable.
+      await loadItem4Workspace(activeProductionRequest, { allowAssetChanges: true });
+      const now = item4AttachedMediaIds();
+      const missing = toAdd.filter((id) => !now.has(id));
+      if (missing.length) {
+        const problems = missing.map((id) => {
+          const error = outcome.failed.find((row) => row.id === id);
+          const name = error?.name || item4LibraryItems.find((row) => row.id === id)?.name || id;
+          return `${name}: ${error?.message || "not confirmed in Production"}`;
+        });
+        renderItem4LibraryPicker();
+        setRequestMessage(
+          `Added ${toAdd.filter((id) => !before.has(id) && now.has(id)).length} of ${toAdd.length}. Not attached: ${problems.join("; ")}. Retry Apply selection for the remaining images. No existing assets were removed.`,
+          "error-text"
+        );
+        return;
+      }
+      // Only process removals after all additions are confirmed. A failed
+      // watermark must never remove the user's existing production media.
       for (const mediaId of toRemove) {
-        const asset = (item4Workspace?.assets || []).find((row) => String(row.media_asset_record_id || "").trim() === mediaId);
+        const asset = (item4Workspace?.assets || []).find((row) =>
+          String(row.media_asset_record_id || "").trim() === mediaId);
         if (!asset?.id) continue;
-        await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets/${encodeURIComponent(asset.id)}`, {
+        await api(`/api/production-requests/${encodeURIComponent(requestId)}/assets/${encodeURIComponent(asset.id)}`, {
           method: "DELETE",
           body: JSON.stringify({}),
+          retries: 1,
         });
       }
-      let result = null;
-      if (toAdd.length) {
-        result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets/library`, {
-          method: "POST",
-          body: JSON.stringify({ media_asset_ids: toAdd, allow_video: true, allow_low_quality: true, origin_kind: ezIntakeKind || "photos-and-clips" }),
-          timeoutMs: 45000,
-        });
-        if (result?.record) {
-          activeProductionRequest = result.record;
-          populateProductionRequestForm(result.record);
-        }
+      if (toRemove.length) {
+        await loadItem4Workspace(activeProductionRequest, { allowAssetChanges: true });
       }
-      await loadItem4Workspace(activeProductionRequest, { allowAssetChanges: true });
-      const added = Number(result?.attached || toAdd.length);
+      const added = toAdd.filter((id) => !before.has(id) && item4AttachedMediaIds().has(id)).length;
       setRequestMessage(
         `Updated library stills: added ${added}, removed ${toRemove.length}.`,
         "success"
@@ -15571,7 +15656,9 @@ function timedScriptAssetLabel(asset, index) {
       const picker = $("item4LibraryPicker");
       if (picker) picker.hidden = true;
     } catch (error) {
-      setRequestMessage(error.message || "Could not update library stills.", "error-text");
+      // Keep the picker and selections for retry. Never claim that a 500
+      // means the server did not commit; the next Apply re-reads manifest.
+      setRequestMessage(error.message || "Could not verify library selection. Reopen the picker to retry.", "error-text");
     } finally {
       if (button) button.textContent = "Apply selection";
       syncItem4LibraryAdd();

@@ -114,7 +114,8 @@ test("only an explicit manual POST opts into low-quality attachment, with valida
     workerFunctions.indexOf("/*__STUDIO_WORKER_END:attachItem4LibraryAssetIds__*/"),
   );
   assert.doesNotMatch(internal, /allow_low_quality/);
-  assert.match(ui, /media_asset_ids: mediaAssetIds,[\s\S]{0,120}allow_low_quality: true/);
-  assert.match(ui, /media_asset_ids: toAdd, allow_video: true, allow_low_quality: true/);
+  assert.match(ui, /media_asset_ids: \[id\],[\s\S]{0,125}allow_low_quality: true/);
+  assert.match(ui, /await attachSelectedLibraryAssetsOneByOne\(requestId, mediaAssetIds/);
+  assert.match(ui, /await attachSelectedLibraryAssetsOneByOne\(requestId, toAdd/);
   assert.match(ui, /Low quality · manual choice/);
 });

@@ -142,5 +142,7 @@ test("Manage Idea attaches both library photos and clips", () => {
   assert.match(html, /Search library photos and clips/);
   assert.match(app, /params\.set\("include", "video"\)/);
   assert.match(app, /allow_video: true/);
-  assert.match(app, /origin_kind: "photos-and-clips"/);
+  assert.match(app, /originKind = "photos-and-clips"/);
+  assert.match(app, /origin_kind: originKind/);
+  assert.match(app, /await attachSelectedLibraryAssetsOneByOne\(requestId, mediaAssetIds/);
 });
