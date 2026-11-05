@@ -1309,7 +1309,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.753-ig-stalled-publish-display",
+          version: "0.10.754-ig-stalled-publish-evidence",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -6793,6 +6793,18 @@ const OUTPUT_LIST_FIELDS = [
   "Render_Status",
   "Review_Status",
   "Publish_Status",
+  // Small scalar evidence fields for stale IG Reel publishing display. Never
+  // infer remote completion or turn this list into publication authorization.
+  "Publish_Locked_By",
+  "Publish_Locked_At",
+  "Publish_Started_At",
+  "Last_Publish_Attempt_At",
+  "Platform_Media_ID",
+  "Studio_Render_Review_Hold_Active",
+  "Studio_Render_Review_Hold_ID",
+  "Studio_Render_Review_Hold_Owner",
+  "Test_Run_ID",
+  "Replace_Transaction_ID",
   "Publish_Method",
   "Auto_Publish_Enabled",
   "Do_Not_Publish",

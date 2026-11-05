@@ -20,7 +20,7 @@ export function staleInstagramPublishingDisplay(record, {
   if (s("Platform_Post_ID") || s("Platform_Media_ID") || s("Platform_Post_URL")
     || s("Manual_Published_URL") || s("Published_At")) return null;
   if (f.Do_Not_Publish === true || f.Studio_Render_Review_Hold_Active === true
-    || s("Studio_Render_Review_Hold_ID") || s("Studio_Review_Hold_ID")
+    || s("Studio_Render_Review_Hold_ID") || s("Studio_Render_Review_Hold_Owner")
     || s("Test_Run_ID") || s("Replace_Transaction_ID")) return null;
   const attempted = Date.parse(s("Last_Publish_Attempt_At"));
   if (!Number.isFinite(attempted) || !Number.isFinite(nowMs)

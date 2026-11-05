@@ -47,7 +47,7 @@ test("remote IDs, published receipts, non-IG rows, and holds are not masked",()=
     {Publish_Status:"Published"},{Output_Status:"Published"},
     {Review_Status:"Changes Requested"},{Do_Not_Publish:true},
     {Studio_Render_Review_Hold_Active:true},{Studio_Render_Review_Hold_ID:"h1"},
-    {Studio_Review_Hold_ID:"h2"},{Test_Run_ID:"test1"},
+    {Studio_Render_Review_Hold_Owner:"h2"},{Test_Run_ID:"test1"},
     {Replace_Transaction_ID:"rep1"},
   ];
   for(const patch of cases) assert.equal(staleInstagramPublishingDisplay(record(patch),{nowMs}),null,JSON.stringify(patch));
@@ -63,4 +63,21 @@ test("Worker mapping is presentation-only and preserves canonical Airtable publi
   assert.match(src,/publish_status: f\(record, "Publish_Status"\)/);
   assert.match(src,/studio_progress_percent: stalePublishDisplay \? null : outputProgressPercent\(/);
   assert.match(src,/platform_publish_status: stalePublishDisplay\?\.label \|\| platformPublishStatus\(record\)/);
+});
+
+test("lean Pipeline output fields include every scalar required to distinguish stale lock from active Meta work",()=>{
+  const source=fs.readFileSync(new URL("./worker.js",import.meta.url),"utf8");
+  const list=source.match(/const OUTPUT_LIST_FIELDS = \[[\s\S]*?\n\];/)?.[0];
+  assert.ok(list,"canonical Pipeline scalar list is present");
+  for(const key of [
+    "Publish_Locked_By","Publish_Locked_At","Publish_Started_At",
+    "Last_Publish_Attempt_At","Platform_Media_ID",
+    "Studio_Render_Review_Hold_Active","Studio_Render_Review_Hold_ID",
+    "Studio_Render_Review_Hold_Owner","Test_Run_ID","Replace_Transaction_ID",
+  ]) assert.ok(list.includes('"' + key + '"'),key+" must be read from Airtable");
+});
+test("remaining owner-only rendering hold excludes an otherwise stale Reel",()=>{
+  assert.equal(staleInstagramPublishingDisplay(record({
+    Studio_Render_Review_Hold_Owner:"held-review-owner",
+  }),{nowMs}),null);
 });
