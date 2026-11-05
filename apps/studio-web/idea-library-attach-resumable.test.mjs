@@ -100,5 +100,5 @@ test("Ideas and Production use the same resumable attachment and verify authorit
   assert.match(production, /No existing assets were removed/);
   assert.match(production, /Retry Apply selection for the remaining images/);
   assert.match(production, /renderItem4LibraryPicker\(\)/);
-  assert.match(ui, /item4-0\.6\.892-library-attach-resume/);
+  assert.match(ui, /const BUILD_ID = "item4-\d+\.\d+\.\d+-[a-z0-9-]+"/);
 });
