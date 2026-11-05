@@ -81,8 +81,17 @@ test("saved post on released output with mismatched Published output state is re
   assert.equal(result.output_status,"Published");
   assert.equal(result.action,"verify_existing_post");
   assert.equal(result.graph_create_authorized,undefined);
-  assert.equal(classifyStaleInstagramReel(row({
+  // Real NYC #9098 has Published_At and Output_Status Published, but a
+  // stranded Publishing status. This must remain GET-only until provider proof.
+  const savedPublication = classifyStaleInstagramReel(row({
     ...candidate.fields,Published_At:"2026-11-02T17:30:00Z",
+  }),{nowMs:NOW});
+  assert.equal(savedPublication.action,"verify_existing_post");
+  assert.equal(savedPublication.lock_state,"released_legacy");
+  assert.equal(savedPublication.auto_repair_authorized,false);
+  assert.equal(classifyStaleInstagramReel(row({
+    ...candidate.fields,Output_Status:"Approved for Publishing",
+    Published_At:"2026-11-02T17:30:00Z",
   }),{nowMs:NOW}),null);
 });
 test("released legacy cannot CAS fence or MAE reschedule even if a pre_remote R2 lease appears",async()=>{
