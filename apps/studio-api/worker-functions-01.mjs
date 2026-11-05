@@ -1,4 +1,5 @@
 import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
+import { staleInstagramPublishingDisplay } from "./ig-publishing-display.mjs";
 import { facebookPreapprovalRecoveryReason, facebookPreapprovalRecoveryFields, FACEBOOK_PREAPPROVAL_FORMULA } from "./facebook-preapproval-recovery.mjs";
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
 import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
@@ -2435,6 +2436,11 @@ export function mapOutput(record, job = null, queueMeta = null, contentRecord = 
   } else if (studioState === "Waiting in Render Queue") {
     studioState = queueMeta?.label || "Waiting in render queue";
   }
+  // Presentation only: never infer 85% remote upload from an old Airtable
+  // Publishing state without a provider receipt or a current AP1-IG attempt.
+  const stalePublishDisplay = studioState === "Uploading"
+    ? staleInstagramPublishingDisplay(record) : null;
+  if (stalePublishDisplay) studioState = stalePublishDisplay.label;
   const studioJob = job && typeof job === "object" ? job : null;
   return {
     id: record.id,
@@ -2455,8 +2461,11 @@ export function mapOutput(record, job = null, queueMeta = null, contentRecord = 
     render_queue_label: queueMeta?.label || null,
     review_status: f(record, "Review_Status"),
     publish_status: f(record, "Publish_Status"),
-    platform_publish_status: platformPublishStatus(record),
-    studio_progress_percent: outputProgressPercent(record, studioState, studioJob),
+    platform_publish_status: stalePublishDisplay?.label || platformPublishStatus(record),
+    studio_progress_percent: stalePublishDisplay ? null : outputProgressPercent(record, studioState, studioJob),
+    publish_verification_required: Boolean(stalePublishDisplay),
+    publish_verification_reason: stalePublishDisplay?.reason || null,
+    publish_remote_progress_verified: stalePublishDisplay ? false : null,
     studio_production_job: studioJob,
     studio_job_label: studioProductionJobLabel(studioJob),
     studio_job_error: studioJob?.error || null,
