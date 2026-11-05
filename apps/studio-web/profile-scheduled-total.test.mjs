@@ -150,7 +150,8 @@ test("every All Profiles heading has an explanatory hover tooltip", async () => 
   }
   assert.match(headings, /<th class="all-profiles-scheduled-col" title="\$\{p\}:/);
   assert.match(headings, /title="Estimated additional ideas: round up \(500 minus Pipeline Total\) divided by 5/);
-  assert.match(headings, /title="Fully rendered platform outputs awaiting final human approval/);
+  assert.match(headings, /title="Fully rendered platform outputs with Ready for Review \/ Awaiting Approval status/);
+  assert.match(headings, /May be higher than Factory Needs eyes/);
   const html = await readFile(path.join(here, "index.html"), "utf8");
   assert.match(html, /all-profiles-overview-1007\.js\?v=[^"]+&tooltips=all-columns-v1/);
 });

@@ -33,6 +33,8 @@ test("Factory Desk is a separate page beside Operations", async () => {
   assert.match(html, /data-factory-band-toggle/);
   assert.match(html, /id="factoryCountAutoHigh"/);
   assert.match(html, /id="factoryCountNeedsEyes"/);
+  assert.match(html, /Approve-ready outputs only/);
+  assert.match(html, /Studio overview Awaiting Approval can read higher/);
   assert.match(html, /id="factoryCountNeedsAssets"/);
   assert.match(html, /id="factoryCountManual"/);
   assert.match(html, /id="factoryPreviewBackdrop"/);

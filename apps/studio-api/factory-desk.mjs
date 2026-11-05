@@ -269,12 +269,18 @@ function isAutoHigh(row) {
 
 /**
  * Classify a queue/idea row into one Factory lane (or null to omit).
- * Priority: manual → needs_eyes → needs_assets → auto_high.
+ * Priority: needs_eyes (package-ready) → manual → needs_assets → auto_high.
+ *
+ * Package-ready Ready for Review is Joseph's Approve gate. It must win over an
+ * inherited parent produce stuck_kind so complete siblings stay in Needs eyes
+ * while Studio overview still counts them as Awaiting Approval. Incomplete
+ * packages keep review_package_ready=false, fail isReadyForReview, and land in
+ * Manual via stuck_kind=review_package_incomplete.
  */
 export function classifyFactoryLane(row) {
   if (!row?.id) return null;
-  if (isManualLane(row)) return "manual";
   if (isReadyForReview(row)) return "needs_eyes";
+  if (isManualLane(row)) return "manual";
   if (isNeedsAssetsCandidate(row)) return "needs_assets";
   if (isAutoHigh(row)) return "auto_high";
   return null;
