@@ -300,7 +300,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.892-library-attach-resume";
+  const BUILD_ID = "item4-0.6.893-production-drafts-only";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -15934,7 +15934,8 @@ function timedScriptAssetLabel(asset, index) {
       setPageContentSimple(false);
       hideEzFrontDoor();
     }
-    const list = $("productionRequestListPanel") || $("promotedContentPanel");
+    const draftPanel = $("productionRequestListPanel");
+    const list = draftPanel && !draftPanel.hidden ? draftPanel : $("promotedContentPanel");
     requestAnimationFrame(() => list?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
@@ -16576,19 +16577,29 @@ function timedScriptAssetLabel(asset, index) {
     setProductionRequestControlState(activeProductionRequest);
   });
 
+  // Submitted requests are no longer drafts, even if status propagation lags.
+  function productionRequestIsOpenDraft(record) {
+    if (!record || record.active === false) return false;
+    const status = String(record.status || "").trim().toLowerCase();
+    if (status !== "draft" && status !== "ready") return false;
+    if (String(record.submitted_at || "").trim()) return false;
+    if (Array.isArray(record.promoted_content_item_links) && record.promoted_content_item_links.length > 0) return false;
+    const stage = String(record.studio_item4_state || "").trim().toLowerCase();
+    return !new Set(["production", "review", "approved", "publishing", "complete"]).has(stage);
+  }
+
   async function loadProductionRequests({ silent = false } = {}) {
     const target = $("productionRequestList");
+    const listPanel = $("productionRequestListPanel");
     if (!target) return;
     if (silent && item4Uploading) return;
     if (!silent) target.innerHTML = '<div class="empty production-empty"><strong>Loading drafts…</strong></div>';
     try {
       const { records = [] } = await api("/api/production-requests?limit=100");
-      // Drafts = still editable (or mid-promote). Promoted requests live under
-      // In production / Platform pipeline — not as Continue cards.
-      const draftStatuses = new Set(["Draft", "Ready", "Submitted"]);
-      const drafts = records.filter((record) => draftStatuses.has(String(record?.status || "").trim()));
+      const drafts = records.filter(productionRequestIsOpenDraft);
+      if (listPanel) listPanel.hidden = !drafts.length;
       if (!drafts.length) {
-        target.innerHTML = '<div class="empty production-empty">No open drafts. Start from Home, or open Platform pipeline for work already promoted.</div>';
+        target.innerHTML = "";
         return;
       }
       await ensureIdeasCache();
@@ -16679,6 +16690,7 @@ function timedScriptAssetLabel(asset, index) {
       });
       productionDecorateTooltips(target);
     } catch (e) {
+      if (listPanel) listPanel.hidden = false;
       target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
     }
   }
