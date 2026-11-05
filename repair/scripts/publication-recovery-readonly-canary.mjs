@@ -5,6 +5,11 @@ const api='https://api.cloudflare.com/client/v4/accounts/'+account;
 const target='chicagoshining-studio-api';
 // Exact known already-published IG canary; no bulk scanning or Graph mutations.
 const instagramCanaryRecord='recfTqaYB0h5FCUVi';
+// Exact already-saved IDs; this diagnostic can only GET provider receipts.
+const igRecoveryTargets=[
+ {route:'ig9098',record:'recxIx0ZiWkR1n0ZW',output_id:9098,post_id:'18168690085479740'},
+ {route:'ig5246',record:'rec6Th7faYoS9tJtN',output_id:5246,post_id:'17877174054635991'},
+];
 const rollout=JSON.parse(await fs.readFile(new URL('../../deploy/publication-reconciliation-production-rollout.json',import.meta.url),'utf8'));
 if(!/^rec[A-Za-z0-9]{14}$/.test(String(rollout.canary_record_id)) ||
    !/^[A-Za-z0-9_-]{11}$/.test(String(rollout.canary_video_id)) ||
@@ -54,6 +59,8 @@ try {
     '/${token}/health':'/api/health',
     '/${token}/receipt':'/api/admin/exception-recovery/${rollout.canary_record_id}/receipt?authenticated=1',
     '/${token}/instagram':'/api/admin/exception-recovery/${instagramCanaryRecord}/receipt?authenticated=1',
+    '/${token}/ig9098':'/api/admin/exception-recovery/recxIx0ZiWkR1n0ZW/receipt?authenticated=1',
+    '/${token}/ig5246':'/api/admin/exception-recovery/rec6Th7faYoS9tJtN/receipt?authenticated=1',
     '/${token}/history':'/api/admin/exception-recovery/history',
     '/${token}/denied':'/api/admin/exception-recovery/history'
    };
@@ -86,6 +93,33 @@ try {
  if(![401,403].includes(denied.status))throw new Error('history_admin_boundary_failed');
  const history=await probe('history');report.history={status:history.status,source:history.body.source,events:history.body.items?.length};
  if(history.status!==200||history.body.source!=='airtable_exception_recovery_audit')throw new Error('durable_history_unavailable');
+ // Exactly two historical/recent NYC Reels, no attempts, publishes, or
+ // Airtable mutations. Report safe categories, never claim posting on a
+ // missing ID or failed provider/account verification.
+ report.instagram_recovery_probe=[];
+ for(const target of igRecoveryTargets){
+  const result=await probe(target.route);
+  const post=result.body||{};
+  const approvedShape=result.status===200
+    && Number(post.output_id)===target.output_id && post.platform==='Instagram'
+    && post.read_only===true
+    && post.verification?.no_output_write===true
+    && post.verification?.authoritative_state_unchanged===true;
+  const exactProvider=approvedShape
+    && post.remote_id===target.post_id
+    && post.verified_public===true && post.ownership_verified===true;
+  report.instagram_recovery_probe.push({
+    output_id:target.output_id,record_id:target.record,http_status:result.status,
+    shape_verified:approvedShape,provider_exact_public_verified:exactProvider,
+    remote_id:approvedShape?post.remote_id||null:null,
+    permalink:exactProvider?post.permalink||null:null,
+    published_at:exactProvider?post.published_at||null:null,
+    read_only:post.read_only===true,
+    no_output_write:post.verification?.no_output_write===true,
+    evidence:String(post.evidence||post.error||'unverified').slice(0,120),
+    blocked_reason:post.verification?.blocked_reason||null,
+  });
+ }
  const receipt=await probe('receipt');report.inspected=1;report.receipt=receipt.body;
  const data=receipt.body;
  if(receipt.status!==200||Number(data.output_id)!==rollout.canary_output_id||data.remote_id!==rollout.canary_video_id||data.channel_id!==rollout.canary_channel_id)throw new Error('canary_exact_identity_not_verified');
