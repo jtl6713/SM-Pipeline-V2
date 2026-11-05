@@ -6,7 +6,7 @@ import { readGalleryRevisionStatus } from "./rendering-review-gallery-status-htt
 import { isNativeGalleryControlledPostPath } from "./native-gallery-route-gate.mjs";
 import { verifyGallerySourceBytes, gallerySourceBytePreflightEnabled } from "./rendering-review-gallery-byte-preflight.mjs";
 import { handleNativeGalleryGenerate } from "./native-gallery-generation-http.mjs";
-import { enrollNativeGalleryHold } from "./native-gallery-hold-enrollment.mjs";
+import { enrollNativeGalleryHold, nativeGalleryEnrollmentEnabled } from "./native-gallery-hold-enrollment.mjs";
 import { claimNativeGalleryJob, galleryClaimEnabled } from "./native-gallery-job-claim.mjs";
 import { reserveNativeGalleryLaunch, nativeGalleryLaunchIntentEnabled } from "./native-gallery-launch-ledger.mjs";
 import {commitNativeGalleryManifest, nativeGalleryManifestCommitEnabled} from "./native-gallery-manifest-commit.mjs";
@@ -15,7 +15,7 @@ import {serveNativeGalleryPreview} from "./native-gallery-preview.mjs";
 import {decideNativeGalleryCreative,nativeGalleryCreativeReviewEnabled} from "./native-gallery-creative-decision.mjs";
 import {inspectNativeGalleryFactoryPreflight,nativeGalleryFactoryPreflightEnabled} from "./native-gallery-factory-preflight.mjs";
 import {handoffNativeGalleryToPrivateFactory,nativeGalleryPrivateFactoryHandoffEnabled} from "./native-gallery-private-factory-handoff.mjs";
-import { NATIVE_GALLERY_JOBS_TABLE } from "./native-gallery-job-airtable.mjs";
+import { NATIVE_GALLERY_JOBS_TABLE, nativeGalleryJobsEnabled } from "./native-gallery-job-airtable.mjs";
 import { readNativeGalleryPrivateManifest } from "./native-gallery-private-manifest.mjs";
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
 import { serveReviewAttemptVideo, fetchTrustedRunnerReviewMedia } from "./rendering-review-attempt-video.mjs";
@@ -1309,7 +1309,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.751-ig-receipt-completion-lag",
+          version: "0.10.752-stage1-private-correction-request",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -2967,7 +2967,7 @@ export default {
           readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
           listRecords:(table,params)=>reviewListRecords(env,table,params),
         });
-        return respond(request,env,{...status,private_preview_available:env.NATIVE_GALLERY_PRIVATE_PREVIEW_ENABLED==="true",creative_review_available:nativeGalleryCreativeReviewEnabled(env),factory_preflight_available:nativeGalleryFactoryPreflightEnabled(env),factory_handoff_available:nativeGalleryPrivateFactoryHandoffEnabled(env)});
+        return respond(request,env,{...status,private_preview_available:env.NATIVE_GALLERY_PRIVATE_PREVIEW_ENABLED==="true",creative_review_available:nativeGalleryCreativeReviewEnabled(env),factory_preflight_available:nativeGalleryFactoryPreflightEnabled(env),factory_handoff_available:nativeGalleryPrivateFactoryHandoffEnabled(env),hold_enrollment_request_enabled:nativeGalleryEnrollmentEnabled(env),generation_request_enabled:nativeGalleryJobsEnabled(env)});
       }
 
       // Preview original gallery/source metadata only. This is deliberately

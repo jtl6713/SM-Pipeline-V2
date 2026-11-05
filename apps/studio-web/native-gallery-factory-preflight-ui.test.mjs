@@ -39,3 +39,13 @@ test("private Factory transfer requires a second affirmative human action and ex
  assert.match(worker,/handoffNativeGalleryToPrivateFactory\(/);
  assert.match(worker,/nativeGalleryPrivateFactoryHandoffEnabled\(env\)/);
 });
+
+test("private correction request capabilities are server-authorized and never release a publication hold",()=>{
+ assert.match(worker,/hold_enrollment_request_enabled:nativeGalleryEnrollmentEnabled\(env\)/);
+ assert.match(worker,/generation_request_enabled:nativeGalleryJobsEnabled\(env\)/);
+ assert.match(factory,/revision\.can_generate!==false\|\|revision\.can_publish!==false/);
+ assert.match(factory,/revision\.generation_request_enabled===true/);
+ assert.match(factory,/revision\.hold_enrollment_request_enabled===true/);
+ assert.match(factory,/receipt\.publication_authorized!==false/);
+ assert.match(factory,/galleryActions\.jobCount===0/);
+});
