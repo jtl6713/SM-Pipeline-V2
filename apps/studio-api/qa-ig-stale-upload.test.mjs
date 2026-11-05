@@ -42,6 +42,93 @@ test("ignores active, held, test, cooldown, replaced or published outputs", () =
     {Studio_Render_Review_Session_ID: "review-session"},
   ]) assert.equal(classifyStaleInstagramReel(row(patch), {nowMs:NOW}), null);
 });
+test("released legacy guard refusals are audited but never treated as safe retries", () => {
+  const unlocked = row({
+    Publish_Locked_By: "", Publish_Locked_At: "",
+    Publish_Started_At: "",
+    Output_Notes: "QA-IG-STALE-UPLOAD: AP1-IG review guard refused continuation (publication_lock_changed)",
+  });
+  const evidence = classifyStaleInstagramReel(unlocked, { nowMs: NOW });
+  assert.equal(evidence.lock_state, "released_legacy");
+  assert.equal(evidence.exact_guard_refusal_recorded, true);
+  assert.equal(evidence.action, "indeterminate_create_receipt");
+  assert.equal(evidence.auto_repair_authorized, false);
+  assert.equal(evidence.creates, 0);
+  const formula=staleInstagramReelFormula(NOW);
+  assert.match(formula,/Publish_Started_At/);
+  assert.match(formula,/Last_Publish_Attempt_At/);
+  assert.match(formula,/review guard refused continuation/);
+  assert.match(formula,/Platform_Post_ID/);
+});
+test("unowned legacy must carry exact refusal or saved remote identity", () => {
+  const blank = {
+    Publish_Locked_By:"", Publish_Locked_At:"", Publish_Started_At:"",
+    Output_Notes:"unrelated old publication",
+  };
+  assert.equal(classifyStaleInstagramReel(row(blank), {nowMs:NOW}), null);
+  assert.equal(classifyStaleInstagramReel(
+    row({...blank, Publish_Locked_By:"another-publisher", Platform_Post_ID:"18168690085479740"}), {nowMs:NOW}), null);
+  assert.equal(classifyStaleInstagramReel(
+    row({...blank, Publish_Started_At:"2026-11-02T17:01:00Z"}), {nowMs:NOW}), null);
+});
+test("saved post on released output with mismatched Published output state is read-only candidate",()=>{
+  const candidate=row({
+    Publish_Locked_By:"",Publish_Locked_At:"",Publish_Started_At:"",
+    Output_Status:"Published", Platform_Post_ID:"18168690085479740",
+  });
+  const result=classifyStaleInstagramReel(candidate,{nowMs:NOW});
+  assert.equal(result.lock_state,"released_legacy");
+  assert.equal(result.output_status,"Published");
+  assert.equal(result.action,"verify_existing_post");
+  assert.equal(result.graph_create_authorized,undefined);
+  // Real NYC #9098 has Published_At and Output_Status Published, but a
+  // stranded Publishing status. This must remain GET-only until provider proof.
+  const savedPublication = classifyStaleInstagramReel(row({
+    ...candidate.fields,Published_At:"2026-11-02T17:30:00Z",
+  }),{nowMs:NOW});
+  assert.equal(savedPublication.action,"verify_existing_post");
+  assert.equal(savedPublication.lock_state,"released_legacy");
+  assert.equal(savedPublication.auto_repair_authorized,false);
+  assert.equal(classifyStaleInstagramReel(row({
+    ...candidate.fields,Output_Status:"Approved for Publishing",
+    Published_At:"2026-11-02T17:30:00Z",
+  }),{nowMs:NOW}),null);
+});
+test("released legacy cannot CAS fence or MAE reschedule even if a pre_remote R2 lease appears",async()=>{
+  const candidate=row({
+    Publish_Locked_By:"",Publish_Locked_At:"",Publish_Started_At:"",
+    Output_Notes:"QA-IG-STALE-UPLOAD: AP1-IG review guard refused continuation (publication_lock_changed)",
+  });
+  let saved, recoverCalls=0;
+  const entries=await auditStaleInstagramReels({},{
+    nowMs:NOW, inspectLease:async()=>({available:true,state:{
+      phase:"pre_remote", irreversible_possible:false,
+      heartbeat_at:"2026-11-02T17:00:00Z",
+      expires_ms:NOW-20000,generation:7,attempt_id:"token_legacy"
+    }}),
+    recoverSafe:async()=>{recoverCalls++;throw new Error("never recover legacy");},
+    airtableFetch:async(_env,table,path,options)=>{
+      if(table==="Quality Agent Recovery Ledger"){
+        if(options?.method==="PATCH"){
+          saved=JSON.parse(options.body).records[0].fields;
+          return {records:[{id:"rec12345678901239"}]};
+        }
+        return {id:path,fields:saved};
+      }
+      return String(path).startsWith("?")?{records:[candidate]}:candidate;
+    }
+  });
+  assert.equal(entries.length,1);
+  assert.equal(entries[0].outcome,"released_legacy_needs_eyes");
+  assert.equal(entries[0].pregraph_proof,false);
+  assert.equal(entries[0].graph_create_authorized,false);
+  assert.equal(entries[0].release_lock,false);
+  assert.equal(entries[0].schedule_changed,false);
+  assert.equal(entries[0].next_action,"needs_eyes_released_legacy_no_retroactive_graph_proof");
+  assert.equal(recoverCalls,0);
+  assert.equal(saved.Outcome,"released_legacy_needs_eyes");
+});
+
 test("saved media identity changes the action, not the permission", () => {
   assert.equal(classifyStaleInstagramReel(row({Platform_Media_ID:"18127559140783117"}), {nowMs:NOW}).action,
     "poll_saved_container_and_verify_post");
