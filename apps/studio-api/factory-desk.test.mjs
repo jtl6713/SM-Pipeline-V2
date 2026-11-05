@@ -166,9 +166,34 @@ test("Factory cannot count or approve an incomplete native-photo review package"
   assert.equal(factoryCardFromRow(valid).review_package_ready, true);
 });
 
-test("classifyFactoryLane priority: manual > needs_eyes > needs_assets > auto_high", () => {
+test("classifyFactoryLane priority: package-ready needs_eyes > manual > needs_assets > auto_high", () => {
   assert.equal(classifyFactoryLane({ id: "rec1", lane: "stuck", stuck_kind: "produce_clip_mismatch" }), "manual");
   assert.equal(classifyFactoryLane({ id: "rec2", kind: "output", studio_state: "Ready for Review", output_status: "Ready for Review", lane: "review" }), "needs_eyes");
+  // Inherited parent stuck must not hide a complete Ready for Review sibling.
+  assert.equal(classifyFactoryLane({
+    id: "recParentStuckRfr",
+    kind: "output",
+    studio_state: "Ready for Review",
+    output_status: "Ready for Review",
+    review_status: "Review Sent",
+    render_status: "Rendered",
+    review_package_ready: true,
+    stuck_kind: "produce_clip_mismatch",
+    stuck_class: "code_bug",
+    lane: "stuck",
+  }), "needs_eyes");
+  // Incomplete packages stay in Repair — overview may still count them as awaiting.
+  assert.equal(classifyFactoryLane({
+    id: "recIncompleteRfr",
+    kind: "output",
+    studio_state: "Ready for Review",
+    output_status: "Ready for Review",
+    review_status: "Review Sent",
+    review_package_ready: false,
+    stuck_kind: "review_package_incomplete",
+    stuck_class: "code_bug",
+    lane: "stuck",
+  }), "manual");
   assert.equal(classifyFactoryLane({
     id: "rec3",
     kind: "idea",

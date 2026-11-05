@@ -11348,6 +11348,16 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       record, readiness, studioState, outputCreativeAvailable(record),
     );
     const readinessException = reviewVisibility.incomplete;
+    // Package-ready Ready for Review is the Approve gate. Do not inherit a parent
+    // produce stuck_kind onto those siblings — that used to dump complete outputs
+    // into Repair while overview Awaiting Approval still counted them.
+    const inheritedParentStuck = (!reviewVisibility.visible && parentRequest?.stuck_kind)
+      ? {
+        kind: parentRequest.stuck_kind,
+        class: parentRequest.stuck_class || null,
+        error: parentRequest.produce_error || null,
+      }
+      : null;
     const outputRow = {
       kind: "output",
       id: record.id,
@@ -11387,14 +11397,16 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       produce_percent: parentRequest?.produce_percent || null,
       produce_paused: producePaused,
       render_paused: renderPaused,
-      stuck_kind: stuck?.kind || (readinessException ? "review_package_incomplete" : null) || parentRequest?.stuck_kind || null,
-      stuck_class: stuck?.class || (readinessException ? "code_bug" : null) || parentRequest?.stuck_class || null,
+      stuck_kind: stuck?.kind || (readinessException ? "review_package_incomplete" : null) || inheritedParentStuck?.kind || null,
+      stuck_class: stuck?.class || (readinessException ? "code_bug" : null) || inheritedParentStuck?.class || null,
       produce_error: stuck?.error || (readinessException ? readiness.missing_requirements.join(", ") || readiness.reason : null)
-        || parentRequest?.produce_error || mapped.remotion_error_message || null,
+        || inheritedParentStuck?.error || mapped.remotion_error_message || null,
       lane: queueLaneForStudioState(studioState, {
         producePaused,
         renderPaused,
-        stuck: stuck || (parentRequest?.stuck_kind ? { kind: parentRequest.stuck_kind } : null),
+        stuck: stuck
+          || (readinessException ? { kind: "review_package_incomplete" } : null)
+          || inheritedParentStuck,
       }),
       idea_id: parentRequest?.idea_id || null,
       platforms: parentRequest?.platforms || (mapped.platform ? [mapped.platform] : []),
