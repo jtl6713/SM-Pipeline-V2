@@ -27,8 +27,11 @@ function extractPlace(value) {
 export function parseScriptedShortAssetPolicy(prompt) {
   const source = String(prompt || "").replace(/\s+/g, " ").trim();
   const commands = [
-    /\b(?:use|utilize|feature|select|include|using|draw from)\s+(?:(?:only|exclusively|the|my|our|those|these|existing|uploaded|available|library|all)\s+)*([a-z0-9][a-z0-9 '’&.,/-]{1,90}?)\s+(?:images?|photographs?|photos?|pictures?|assets?|videos?|footage|clips?|stills?)\b/i,
-    /\b(?:use|utilize|feature|select|include|using)\s+(?:(?:only|exclusively|the|my|our|uploaded|library)\s+)*(?:images?|photos?|assets?|videos?|footage|clips?|stills?)\s+(?:of|from|showing|depicting)\s+([a-z0-9][a-z0-9 '’&/-]{1,80}?)(?=[.,;]|$|\s+(?:that|which|already|uploaded|in the library))/i,
+    // Parse coordinated media nouns before the named-place form. Otherwise
+    // "clips and stills from ..." can be mistaken for a place called "clips and".
+    /(?<![\w-])(?:use|utilize|feature|select|include|using|draw from)\s+(?:(?:only|exclusively|the|my|our|those|these|existing|uploaded|available|library|all)\s+)*(?:images?|photographs?|photos?|pictures?|assets?|videos?|footage|clips?|stills?)(?:\s*(?:,|and|&)\s*(?:images?|photographs?|photos?|pictures?|assets?|videos?|footage|clips?|stills?))*\s+(?:of|from|showing|depicting)\s+([a-z0-9][a-z0-9 '’&/-]{1,80}?)(?=[.,;!?]|$|\s+(?:in|that|which|already|uploaded)\b)/i,
+    /(?<![\w-])(?:use|utilize|feature|select|include|using|draw from)\s+(?:(?:only|exclusively|the|my|our|those|these|existing|uploaded|available|library|all)\s+)*([a-z0-9][a-z0-9 '’&.,/-]{1,90}?)\s+(?:images?|photographs?|photos?|pictures?|assets?|videos?|footage|clips?|stills?)\b/i,
+    /(?<![\w-])(?:use|utilize|feature|select|include|using)\s+(?:(?:only|exclusively|the|my|our|uploaded|library)\s+)*(?:images?|photos?|assets?|videos?|footage|clips?|stills?)\s+(?:of|from|showing|depicting)\s+([a-z0-9][a-z0-9 '’&/-]{1,80}?)(?=[.,;]|$|\s+(?:that|which|already|uploaded|in the library))/i,
   ];
   let location = "";
   for (const expression of commands) {
