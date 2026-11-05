@@ -123,3 +123,33 @@ def test_remotion_sequence_has_persistent_required_watermark_overlay():
     assert 'width: "12%"' in source
     assert "top: 30" in source
     assert "left: 30" in source
+
+
+def test_video_watermark_scales_to_video_width_and_preserves_logo_shape(tmp_path):
+    """Exercise FFmpeg pixels: main_w incorrectly scales against the logo itself."""
+    import shutil
+    import subprocess
+    from io import BytesIO
+    import pytest
+    from PIL import Image
+    if not shutil.which("ffmpeg"):
+        pytest.skip("FFmpeg is required for pixel verification")
+    source = tmp_path / "source.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                    "color=c=black:s=400x600:r=2:d=1", "-c:v", "libx264",
+                    "-pix_fmt", "yuv420p", str(source)], check=True, timeout=30)
+    logo = BytesIO()
+    Image.new("RGB", (100, 50), "white").save(logo, format="PNG")
+    result = watermark_video_bytes(source.read_bytes(), logo.getvalue(), scale=0.25, margin=20)
+    output = tmp_path / "branded.mp4"
+    output.write_bytes(result)
+    frame = subprocess.run(["ffmpeg", "-v", "error", "-i", str(output), "-frames:v", "1",
+                            "-f", "image2pipe", "-vcodec", "png", "-"],
+                           capture_output=True, check=True, timeout=30).stdout
+    pixels = Image.open(BytesIO(frame)).convert("L")
+    bounds = pixels.point(lambda x: 255 if x > 200 else 0).getbbox()
+    assert bounds is not None
+    left, top, right, bottom = bounds
+    assert abs(left - 20) <= 1 and abs(top - 20) <= 1
+    assert abs((right - left) - 100) <= 2
+    assert abs((bottom - top) - 50) <= 2
