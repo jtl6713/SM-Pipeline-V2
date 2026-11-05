@@ -300,7 +300,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.890-idea-assigned-assets-on-manage";
+  const BUILD_ID = "item4-0.6.891-idea-low-quality-manual";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -3503,6 +3503,7 @@
       return `<div class="idea-library-card" data-library-id="${escapeHtml(item.id)}" data-selected="true">
         ${media}
         ${video ? '<em class="idea-library-card-tag">Clip</em>' : ""}
+        ${item.quality_warning === "Low Quality" ? '<em class="idea-library-card-tag">Low quality · manual choice</em>' : ""}
         <span>${escapeHtml(name)}</span>
       </div>`;
     }).join("");
@@ -15102,6 +15103,9 @@ function timedScriptAssetLabel(asset, index) {
       const tags = [];
       if (suggestedIds.has(item.id)) tags.push(`<em class="idea-library-card-tag">Suggested</em>`);
       if (video) tags.push(`<em class="idea-library-card-tag">Clip</em>`);
+      if (item.quality_warning === "Low Quality") {
+        tags.push('<em class="idea-library-card-tag" title="Lower quality may reduce final image clarity. You can still select it manually.">Low quality · manual choice</em>');
+      }
       const tag = tags.join("");
       // Eager load: these grids sit in overflow:auto dialogs where WebKit often never
       // starts loading="lazy" images (blank white tiles on iPhone swap-still / library pickers).
@@ -15267,6 +15271,7 @@ function timedScriptAssetLabel(asset, index) {
         body: JSON.stringify({
           media_asset_ids: mediaAssetIds,
           allow_video: true,
+          allow_low_quality: true, // Explicit selection from Manage Idea only.
           origin_kind: "photos-and-clips",
         }),
         timeoutMs: 45000,
@@ -15549,7 +15554,7 @@ function timedScriptAssetLabel(asset, index) {
       if (toAdd.length) {
         result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets/library`, {
           method: "POST",
-          body: JSON.stringify({ media_asset_ids: toAdd, allow_video: true, origin_kind: ezIntakeKind || "photos-and-clips" }),
+          body: JSON.stringify({ media_asset_ids: toAdd, allow_video: true, allow_low_quality: true, origin_kind: ezIntakeKind || "photos-and-clips" }),
           timeoutMs: 45000,
         });
         if (result?.record) {

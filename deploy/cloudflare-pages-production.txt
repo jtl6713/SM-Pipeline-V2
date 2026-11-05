@@ -696,3 +696,5 @@ Deploy Studio UI 0.6.869: fix hidden Factory recovery control and clear stale 50
 2026-11-05: Studio Pages UI 0.6.883-factory-approval-count-clarity. Clarify Factory Needs eyes vs overview Awaiting Approval (package-ready Approve gate vs status census).
 
 2026-11-05: Deploy Studio UI 0.6.890-idea-assigned-assets-on-manage. Ideas Manage drawer displays existing linked photos/clips and Production draft assets at the top on open; read-only metadata hydration, no additions/removals/approval/publishing. Protected Pages custom-domain release checks required.
+
+2026-11-05: Deploy Studio UI 0.6.891-idea-low-quality-manual. Ideas Manage and Production Use existing library lists display manually selectable Low Quality warnings; explicit user-chosen attachments only. Lurie Idea #2087 regression covered; automatic selection unchanged. Require protected Pages UI release contract and custom-domain verification.

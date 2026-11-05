@@ -6730,7 +6730,7 @@ export function ideaLibraryIsEligibleVideo(record) {
 }
 /*__STUDIO_WORKER_END:ideaLibraryIsEligibleVideo__*/
 
-export function ideaLibraryIsEligibleImage(record) {
+export function ideaLibraryIsEligibleImage(record, { allowLowQuality = false } = {}) {
   const mediaClass = String(f(record, "Media_Class") || "").trim().toLowerCase();
   const mime = String(f(record, "MIME_Type") || "").trim().toLowerCase();
   const classification = String(f(record, "Classification_Status") || "").trim().toLowerCase();
@@ -6745,10 +6745,15 @@ export function ideaLibraryIsEligibleImage(record) {
   if (f(record, "Active") === false) return false;
   if (eligibility === "ineligible") return false;
   if (status && status !== "available") return false;
-  // Asset Manager exclusions are authoritative, including Wrong Subject and
-  // Watermarked/Branded. Never rank a flagged still then attempt watermarking it.
+  // All exclusion reasons remain authoritative for automation. The ONLY
+  // operator-selectable exception is "Low Quality" by itself: never bypass
+  // Do Not Use, Wrong Subject, Watermarked/Branded, or overlay review.
   const exclusions = f(record, "Exclusion_Reasons");
-  if (Array.isArray(exclusions) ? exclusions.length > 0 : Boolean(String(exclusions || "").trim())) return false;
+  const reasons = (Array.isArray(exclusions) ? exclusions : [exclusions])
+    .flatMap((value) => String((value && typeof value === "object" ? value.name : value) || "").split(","))
+    .map((value) => value.trim().toLowerCase()).filter(Boolean);
+  if (reasons.some((reason) => reason !== "low quality")) return false;
+  if (reasons.length && !allowLowQuality) return false;
   const reviewNote = String(f(record, "Potential_Match_Notes") || "");
   if (/QA-ASSET-THIRD-PARTY-OVERLAY:\s*(?:REVIEW|Review required)/i.test(reviewNote)) return false;
   return Boolean(googleDriveFileId(record));
@@ -6832,6 +6837,12 @@ export function mapIdeaLibraryAsset(record, row = {}) {
     preselected: Boolean(row.preselected),
     intake_date: ideaLibraryIntakeDate(record) || null,
     intake_batch_id: row.intake_batch_id || String(f(record, "Intake_Batch_ID") || "").trim() || null,
+    // A warning for operator choice, not an automatic-quality endorsement.
+    quality_warning: (Array.isArray(f(record, "Exclusion_Reasons"))
+      ? f(record, "Exclusion_Reasons")
+      : [f(record, "Exclusion_Reasons")])
+      .some((reason) => String((reason && typeof reason === "object" ? reason.name : reason) || "")
+        .trim().toLowerCase() === "low quality") ? "Low Quality" : null,
   };
 }
 /*__STUDIO_WORKER_END:mapIdeaLibraryAsset__*/
@@ -6859,7 +6870,7 @@ export async function getMediaLibraryStills(request, env, url, authorization) {
   });
   const items = [];
   for (const record of records) {
-    const eligible = ideaLibraryIsEligibleImage(record) || (includeVideo && ideaLibraryIsEligibleVideo(record));
+    const eligible = ideaLibraryIsEligibleImage(record, { allowLowQuality: true }) || (includeVideo && ideaLibraryIsEligibleVideo(record));
     if (!eligible) continue;
     const name = f(record, "Asset Name");
     if (phrase) {
@@ -6933,7 +6944,7 @@ export async function getIdeaLibrarySuggestions(request, env, url, authorization
   });
   const ranked = [];
   for (const record of records) {
-    const eligible = ideaLibraryIsEligibleImage(record)
+    const eligible = ideaLibraryIsEligibleImage(record, { allowLowQuality: true })
       || (includeVideo && ideaLibraryIsEligibleVideo(record));
     if (!eligible) continue;
     if (phrase) {
@@ -6970,7 +6981,11 @@ export async function getIdeaLibrarySuggestions(request, env, url, authorization
       queryTokens,
       today,
     });
-    if (row) ranked.push(row);
+    if (row) ranked.push({
+      ...row,
+      // Low-quality media can be chosen, but never automatically checked.
+      preselected: row.preselected && ideaLibraryIsEligibleImage(record),
+    });
   }
   ranked.sort((a, b) => {
     if (operatorSearch || phrase) {
@@ -7007,7 +7022,7 @@ export async function getIdeaLibrarySuggestions(request, env, url, authorization
 }
 /*__STUDIO_WORKER_END:getIdeaLibrarySuggestions__*/
 
-export function ideaLibraryRejectReason(record, { allowVideo = false } = {}) {
+export function ideaLibraryRejectReason(record, { allowVideo = false, allowLowQuality = false } = {}) {
   const mediaClass = String(f(record, "Media_Class") || "").trim().toLowerCase();
   const mime = String(f(record, "MIME_Type") || "").trim().toLowerCase();
   const name = String(f(record, "Asset Name") || record.id);
@@ -7015,7 +7030,7 @@ export function ideaLibraryRejectReason(record, { allowVideo = false } = {}) {
   if (Boolean(f(record, "Do_Not_Use"))) return `${name} is marked Do Not Use`;
   if (isVideo && !allowVideo) return `${name} is a video; this picker attaches stills only`;
   if (isVideo && allowVideo && !ideaLibraryIsEligibleVideo(record)) return `${name} is not eligible Raw Footage`;
-  if (!isVideo && !ideaLibraryIsEligibleImage(record)) return `${name} is not a classified eligible library image`;
+  if (!isVideo && !ideaLibraryIsEligibleImage(record, { allowLowQuality })) return `${name} is not a classified eligible library image`;
   if (!isVideo && ideaLibraryFileBytes(record) > ITEM4_MAX_FILE_BYTES) return `${name} exceeds the 25 MB per-image limit`;
   if (isVideo && ideaLibraryFileBytes(record) > ITEM4_MAX_CLIP_FILE_BYTES) return `${name} exceeds the 200 MB clip limit`;
   return null;
@@ -7166,6 +7181,9 @@ export async function attachItem4LibraryAssets(request, env, url, authorization)
     || item4IsClipInputKind(item4ParseEzOrigin(record).inputKind)
     || item4HasVideoMasters(existing)
     || item4IsClipInputKind(payload?.origin_kind);
+  // Only an explicit operator request can waive the Low Quality warning.
+  // Internal autonomous attachments never send this flag.
+  const allowLowQuality = payload?.allow_low_quality === true;
   const already = new Set(existing.map((asset) => String(asset?.media_asset_record_id || "").trim()).filter(Boolean));
   const incoming = ids.filter((id) => !already.has(id));
   if (!incoming.length) {
@@ -7182,8 +7200,11 @@ export async function attachItem4LibraryAssets(request, env, url, authorization)
   const appended = [];
   for (const mediaId of incoming) {
     let media = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, mediaId);
+    // Reject every other exclusion BEFORE invoking the watermark runner.
+    const preflight = ideaLibraryRejectReason(media, { allowVideo, allowLowQuality });
+    if (preflight) throw new HttpError(409, preflight);
     media = await ensureChicagoWatermarkedLibraryAsset(env, media, record);
-    const reject = ideaLibraryRejectReason(media, { allowVideo });
+    const reject = ideaLibraryRejectReason(media, { allowVideo, allowLowQuality });
     if (reject) throw new HttpError(409, reject);
     const driveId = googleDriveFileId(media);
     const driveUrl = String(f(media, "Google Drive URL") || "").trim()
