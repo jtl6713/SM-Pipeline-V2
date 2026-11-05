@@ -18,7 +18,7 @@ test("Factory feedback exposes accurate non-publishing gallery and compatible-ou
  assert.match(source,/if\(!current\(\)\)return/);
  assert.match(css,/#factoryReadOnlyInventory\[hidden\]\{display:none!important\}/);
 });
-test("UI uses read-only exact server endpoints, never selects siblings or enables generation",()=>{
+test("UI uses exact source validation and never selects sibling outputs",()=>{
  const begin=source.indexOf("async function loadFactoryCorrectionReadOnlyPreview(");
  const end=source.indexOf("  // Review feedback is entered before any",begin);
  assert.ok(begin>0&&end>begin);
@@ -40,7 +40,35 @@ test("UI uses read-only exact server endpoints, never selects siblings or enable
  assert.match(body,/factory-gallery-slide-instruction/);
  assert.match(body,/Validate selected photo changes \(no render\)/);
 });
-test("Factory module and styles are cache-busted without changing the release build",()=>{
+test("private Generate UI is server-gated, explicitly confirmed and never claims a render pass",()=>{
+ const begin=source.indexOf("async function loadFactoryCorrectionReadOnlyPreview(");
+ const end=source.indexOf("  // Review feedback is entered before any",begin);
+ const body=source.slice(begin,end);
+ assert.match(body,/generationRequest:revision\.generation_request_enabled===true/);
+ assert.match(body,/holdEnrollment:revision\.hold_enrollment_request_enabled===true/);
+ assert.match(body,/galleryActions\?\.generationRequest===true/);
+ assert.match(body,/galleryActions\.holdActive===true/);
+ assert.match(body,/galleryActions\.jobCount===0/);
+ assert.match(body,/canSaveWithoutAutoRender&&galleryActions/);
+ assert.match(body,/Generate private image corrections/);
+ assert.match(body,/confirmation\.append\(confirm/);
+ assert.match(body,/confirm\.addEventListener\("change"/);
+ assert.match(body,/\/gallery-enroll/);
+ assert.match(body,/\/gallery-generate/);
+ assert.match(body,/client_request_id,selected_slides:selected/);
+ assert.match(body,/receipt\.publication_authorized!==false/);
+ assert.match(body,/receipt\.creative_approved!==false/);
+ assert.match(body,/receipt\.factory_approved!==false/);
+ assert.match(body,/receipt\.state!=="held_queued"/);
+ assert.match(body,/No automatic retry will occur/);
+ assert.doesNotMatch(body,/\/publish-now|auto_approve:true|allow_public_publish:true/);
+});
+test("gallery progress is clearly Airtable ledger data, never falsely verified media",()=>{
+ assert.match(source,/progress_source!=="airtable_ledger_unverified"/);
+ assert.match(source,/slide slots recorded/);
+ assert.match(source,/generated Drive media not independently verified by this count/);
+});
+test("Factory module and styles are cache-busted with a versioned release",()=>{
  assert.match(html,/factory-desk\.js\?v=0\.6\.\d+-[^"\s]*gallery_inventory=read_only_v1/);
  assert.match(html,/factory-layout-0680\.css\?v=0\.6\.\d+-[^"\s]*gallery_inventory=read_only_v1/);
 });
