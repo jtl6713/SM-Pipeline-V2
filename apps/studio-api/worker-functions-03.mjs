@@ -74,6 +74,7 @@ import {
 } from "./desk-inventory.mjs";
 import {
   allocateLibraryBatchNames,
+  allocateLibraryUploadNames,
   combineAirtableFormulas,
   firstLinkedRecordId,
   LIBRARY_ADDED_AT_FIELD,
@@ -3086,7 +3087,10 @@ export async function uploadAssetLibraryItems(request, env, authorization, ctx) 
       profileName: f(uploadProfile, "Profile_Name") || "",
     });
     const existingNames = await listLibraryBatchExistingNames(env, batchBase, scopeFormula);
-    batchNames = allocateLibraryBatchNames(batchBase, files.length, existingNames);
+    // A name such as "Lurie 5" starts at 5; do not strip it and append a second number.
+    // Large batches are sent as single-file requests, so Airtable's existing
+    // names also let later requests advance 5, 6, 7 without duplicate titles.
+    batchNames = allocateLibraryUploadNames(rawBatchName, files.length, existingNames);
     if (batchNames.length !== files.length) {
       throw new HttpError(500, "Could not allocate sequential asset names");
     }
