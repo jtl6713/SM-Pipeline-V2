@@ -93,7 +93,7 @@ test("approved single-canary deployment never scans or processes unrelated backl
  assert.equal(result.corrected,0);
 });
 
-test("bounded recovery visits twelve prioritized remote-ID candidates once before ordinary queue",async()=>{
+test("bounded recovery visits fifteen prioritized remote-ID candidates once before ordinary queue",async()=>{
  const store=bucket();let now=Date.parse("2026-10-25T03:30:00Z");
  const env={STUDIO_MEDIA:store,PUBLICATION_RECONCILIATION_SCAN_ENABLED:"true",
    PUBLICATION_RECONCILIATION_ENABLED:"true",PUBLICATION_RECONCILIATION_BOUNDED_ENABLED:"true",
@@ -117,7 +117,7 @@ test("bounded recovery visits twelve prioritized remote-ID candidates once befor
  assert.equal(control.priority_cursor,PRIORITY_VERIFIED_EXISTING_POSTS.length);
 });
 test("read-only and exact-canary stages never select priority records",async()=>{
- assert.equal(PRIORITY_VERIFIED_EXISTING_POSTS.length,12);
+ assert.equal(PRIORITY_VERIFIED_EXISTING_POSTS.length,15);
  for(const id of PRIORITY_VERIFIED_EXISTING_POSTS) assert.match(id,/^rec[A-Za-z0-9]{14}$/);
  const store=bucket(),env={STUDIO_MEDIA:store,
    PUBLICATION_RECONCILIATION_SCAN_ENABLED:"true",
@@ -142,7 +142,7 @@ test("accelerated bounded manifest retains five-per-sweep cap and never enables 
 test("Stage 3: #9277 added after durable priority cursor 9 without replaying prior IDs",async()=>{
  const store=bucket(),clock=Date.parse("2026-11-04T06:00:00Z");
  const ids=PRIORITY_VERIFIED_EXISTING_POSTS;
- assert.deepEqual(ids.slice(-3),[
+ assert.deepEqual(ids.slice(9,12),[
    "recI3x5A6Cz9vIQIs","rece57RpkWLMOpZ47","reccenlA9uIF2MtSd"
  ]);
  await writeRecoveryState(store,"studio/state/publication-reconciliation/v1/control.json",{
@@ -151,7 +151,7 @@ test("Stage 3: #9277 added after durable priority cursor 9 without replaying pri
  const visited=[];
  const env={STUDIO_MEDIA:store,PUBLICATION_RECONCILIATION_SCAN_ENABLED:"true",
    PUBLICATION_RECONCILIATION_ENABLED:"true",PUBLICATION_RECONCILIATION_BOUNDED_ENABLED:"true",
-   PUBLICATION_RECONCILIATION_BATCH_SIZE:"5"};
+   PUBLICATION_RECONCILIATION_BATCH_SIZE:"3"};
  await runPublicationRecovery(env,{now:()=>clock,
    discover:async()=>({records:[]}),
    readOutput:async id=>{visited.push(id);return {id,fields:{
@@ -161,4 +161,11 @@ test("Stage 3: #9277 added after durable priority cursor 9 without replaying pri
  assert.deepEqual(visited,["recI3x5A6Cz9vIQIs","rece57RpkWLMOpZ47","reccenlA9uIF2MtSd"]);
  const control=await readRecoveryState(store,"studio/state/publication-reconciliation/v1/control.json");
  assert.equal(control.priority_cursor,12);
+});
+
+
+test("Stage 3 latest three candidates are exact existing YouTube identities and do not duplicate earlier priorities",()=>{
+  const latest=["recLzqmtWJGQvLNTZ","recT2eb5eOeioD0nY","rec0259hg7cjoKl3j"];
+  assert.deepEqual(PRIORITY_VERIFIED_EXISTING_POSTS.slice(12),latest);
+  assert.equal(new Set(PRIORITY_VERIFIED_EXISTING_POSTS).size,PRIORITY_VERIFIED_EXISTING_POSTS.length);
 });

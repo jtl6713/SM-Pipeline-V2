@@ -26,6 +26,13 @@ export const PRIORITY_VERIFIED_EXISTING_POSTS = Object.freeze([
   // Authenticated exact-channel GET and status-only preflight remain compulsory.
   "rece57RpkWLMOpZ47", // YouTube #5327 Miami, wuPzjhhUFLs
   "reccenlA9uIF2MtSd", // YouTube #4146 Chicago, Qokdf8u-shY
+  // Stage 3: canonical Airtable readback still has saved pre-existing YouTube
+  // video IDs for these now-overdue outputs. GET ONLY; inclusion does not
+  // claim they are public. This bounded manifest only prioritizes authenticated
+  // verification and the existing lock/audit/readback status-only reconciler.
+  "recLzqmtWJGQvLNTZ", // YouTube #5321 Miami, ekWGUhmlnaQ
+  "recT2eb5eOeioD0nY", // YouTube #4140 Chicago, PGNXR-WNI3g
+  "rec0259hg7cjoKl3j", // YouTube #4050 Los Angeles, gm9Mxa8ScnM
 ]);
 export const recoveryStateKey=id=>PREFIX+"outputs/"+id+".json";
 export async function readRecoveryState(bucket,key) {
