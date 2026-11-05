@@ -33,16 +33,29 @@ jobs:
           $source=@'
           from dotenv import load_dotenv
           load_dotenv('.env')
-          import os,json
+          import os,json,requests,subprocess,tempfile
+          from pathlib import Path
           os.environ['PORT']='3350'
+          from config import load_settings
           from airtable.client import AirtableClient
-          client=AirtableClient()
-          f=client.get_record('tbl75nxNi6PMUjBQE','rec1ECH73s1AOO0P9')['fields']
-          keys=['Request_Status','Studio_Item4_State','Studio_Master_Asset_Count','Promoted_Content_Item','Content_Item','Studio_Output_Plan_Status','Studio_Variant_Status','Studio_Produce_Status','Studio_Master_Assets_JSON','Studio_Output_Plan_JSON']
-          print('watermark_diagnostic='+json.dumps({'state':'current_request','fields':{k:f.get(k) for k in keys}}),flush=True)
-          for record in f.get('Promoted_Content_Item',[]):
-              item=client.get_record('tblwzN9AXWvmKVKPs',record)['fields']
-              print('watermark_diagnostic='+json.dumps({'state':'content','record':record,'fields':{k:v for k,v in item.items() if any(x in k.lower() for x in ['status','stage','output','render','title','production','master'])}}),flush=True)
+          from integrations.google_drive import GoogleDriveClient
+          client=AirtableClient();drive=GoogleDriveClient()
+          assert requests.get('https://pipeline.chicagoshining.com/health',timeout=20).json()['version']=='2026-11-05-video-watermark-scale-v2'
+          receipt=Path('data/studio-watermark-recovery/drifter-v2-6.json');receipt.parent.mkdir(parents=True,exist_ok=True)
+          if receipt.exists():result=json.loads(receipt.read_text())
+          else:
+              r=requests.post('https://pipeline.chicagoshining.com/jobs/studio-asset-watermark',headers={'X-Pipeline-Secret':load_settings()['pipeline_runner_shared_secret']},json={'google_drive_file_id':'1zNESzLCJEC12CCKnNlbM0-okPrD891UO','filename':'The Drifter Speakeasy 6.mov','mime_type':'video/quicktime','profile_name':'ChicagoShining - Chicago'},timeout=180)
+              r.raise_for_status();result=r.json()
+              assert result['watermarked'] is True
+              receipt.write_text(json.dumps(result))
+          content,mime=drive.download_file(result['google_drive_file_id'])
+          with tempfile.TemporaryDirectory(prefix='drifter-v2-verify-') as folder:
+              path=Path(folder)/'clip.mp4';path.write_bytes(content)
+              proof=json.loads(subprocess.run(['ffprobe','-v','error','-show_entries','stream=codec_type,codec_name,width,height:format=duration','-of','json',str(path)],capture_output=True,text=True,check=True,timeout=60).stdout)
+              assert any(s.get('codec_name')=='h264' and s.get('width')==2160 and s.get('height')==3840 for s in proof['streams'])
+          print('watermark_diagnostic='+json.dumps({'state':'scale_v2_canary_verified','result':result,'media':proof}),flush=True)
+          output=client.get_record('tblrlPeboBthkplH0','recFkfeRCVziLqH2z')['fields']
+          print('watermark_diagnostic='+json.dumps({'state':'production_output','record':'recFkfeRCVziLqH2z','fields':{k:v for k,v in output.items() if k in ['Output_ID','Platform','Output_Type','Status','Render_Status','Publish_Status','Approval_Status','Remotion_Job_ID','Final_File_URL','Error_Message','Last_Error','Pipeline_Stage']}}),flush=True)
           '@
           [System.IO.File]::WriteAllText($temp,$source,[System.Text.UTF8Encoding]::new($false))
           Push-Location $service
