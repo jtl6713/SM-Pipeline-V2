@@ -41,8 +41,8 @@ jobs:
           client=AirtableClient()
           row=client.get_record('tblSITCujCsJTNcDe','recTeu9UggkFLHVzs')
           f=row['fields']
-          assert 'recT2rbKX3MF7cVFU' in f.get('Profiles',f.get('Profile',[])), 'profile_mismatch'
-          source='1zNESzLCJEC12CCKnNNlbM0-okPrD891UO'.replace('KnNN','KnN')
+          assert 'recT2rbKX3MF7cVFU' in f.get('Content_Profile',[]), 'profile_mismatch'
+          source='1zNESzLCJEC12CCKnNlbM0-okPrD891UO'
           assert f.get('Google Drive File ID') == source, 'source_changed'
           receipt=Path('data/studio-watermark-recovery/drifter-6.json')
           receipt.parent.mkdir(parents=True,exist_ok=True)
