@@ -23,6 +23,9 @@ from rendering_review.gallery_authoritative import GalleryPreflightDenied
 from rendering_review.native_gallery_rights_policy import (
     NativeGalleryRightsPolicyDenied, build_approved_native_gallery_clearance,
 )
+from rendering_review.native_gallery_staging_settings import (
+    NativeGalleryStagingDenied, resolve_private_native_gallery_staging_folder,
+)
 
 
 def _client():
@@ -54,7 +57,6 @@ def create_native_gallery_execute_blueprint(
         # and no query strings, even from a nominally authenticated service.
         if request.query_string or request.stream.read(1):
             return jsonify(ok=False, error="native_gallery_executor_input_forbidden"), 400
-        folder = os.environ.get("NATIVE_GALLERY_STAGING_FOLDER_ID", "")
         try:
             # Reject bad licensing configuration BEFORE claiming a job.
             rights = rights_policy_factory(settings)
@@ -63,8 +65,10 @@ def create_native_gallery_execute_blueprint(
                 return generate_carousel_png(
                     prompt, ratio=ratio, preferred_account=account,
                     settings_override=dict(settings))
+            client, drive = client_factory(), drive_factory()
+            folder = resolve_private_native_gallery_staging_folder(client, drive)
             result = executor(
-                client=client_factory(), drive=drive_factory(),
+                client=client, drive=drive,
                 worker_base=os.environ.get("NATIVE_GALLERY_WORKER_BASE_URL", ""),
                 shared_secret=os.environ.get("NATIVE_GALLERY_JOB_SHARED_SECRET", ""),
                 consumer_identity=os.environ.get("NATIVE_GALLERY_RUNNER_CONSUMER_ID", ""),
@@ -73,6 +77,8 @@ def create_native_gallery_execute_blueprint(
             )
         except NativeGalleryRightsPolicyDenied:
             return jsonify(ok=False, error="native_gallery_rights_policy_not_approved"), 503
+        except NativeGalleryStagingDenied:
+            return jsonify(ok=False, error="native_gallery_staging_not_ready"), 503
         except (NativeGalleryExecutionDenied, NativeGalleryClaimDenied,
                 NativeGalleryLaunchDenied, NativeGalleryRightsDenied,
                 GalleryMediaDenied, GalleryPreflightDenied):
