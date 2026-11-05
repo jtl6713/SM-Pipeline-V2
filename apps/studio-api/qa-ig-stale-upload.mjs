@@ -26,7 +26,6 @@ export function classifyStaleInstagramReel(row, {
     || row.fields?.Do_Not_Publish === true
     || str(row, "Test_Run_ID")
     || str(row, "Replace_Transaction_ID")
-    || str(row, "Published_At")
     || str(row, "Studio_Render_Review_Session_ID")
     || str(row, "Studio_Render_Review_Hold_ID")
     || str(row, "Studio_Render_Review_Hold_Owner")
@@ -40,8 +39,11 @@ export function classifyStaleInstagramReel(row, {
   // A post receipt with Output_Status=Published but Publish_Status=Publishing
   // is a status mismatch to verify, not evidence of completed publication.
   const outputStatus = str(row, "Output_Status");
-  if (outputStatus !== "Approved for Publishing"
-    && !(outputStatus === "Published" && postId)) return null;
+  const statusOnlyDrift = outputStatus === "Published" && Boolean(postId);
+  if (outputStatus !== "Approved for Publishing" && !statusOnlyDrift) return null;
+  // A historical Published_At is not proof of Instagram ownership; allow
+  // GET-only investigation solely for mismatched Published output/post receipts.
+  if (str(row, "Published_At") && !statusOnlyDrift) return null;
 
   const owner = str(row, "Publish_Locked_By");
   const held = owner === "AP1-IG";
