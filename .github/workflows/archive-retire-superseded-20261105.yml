@@ -1,0 +1,173 @@
+name: Archive and retire reviewed superseded branches (2026-11-05)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/archive-retire-superseded-20261105.yml'
+permissions:
+  contents: write
+  pull-requests: read
+  actions: read
+concurrency:
+  group: archive-retire-superseded-20261105
+  cancel-in-progress: false
+jobs:
+  archive-and-retire:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Exact-head preflight, archive tags, lease-guarded cleanup
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, subprocess, urllib.error, urllib.parse, urllib.request
+          REPO = "jtl6713/SM-Pipeline-V2"
+          SELF = "chore/archive-retire-superseded-20261105"
+          # The two open draft PRs, an intentionally retained R4 diagnostic, and
+          # ongoing Drifter watermark recovery are not cleanup candidates.
+          KEEP = {
+              "feat/qa-test-center-foundation-20261031": "4bee5545303e7b40e9d266eec558bebc4f0d3057",
+              "feat/vibe-cut-isolated-contracts-20261101": "e8de331811402d983a55fdbc883d53e8c65dd8bf",
+              "diag/r4-last-launch-receipt-20261103": "e3447c1b8d904341c4dcbd7714422ada6487635f",
+              "repair/drifter-watermark-v2": "ce7c2bbf22b4741bd8e41416cd380aa3cbdd24f3",
+          }
+          # Archive first: these four heads contain unique commits even where
+          # their old PRs were superseded or a subsequent diagnostic was added.
+          CANDIDATES = {
+              "deploy/worker-ig-legacy-qa-20261104": "8f21043966549aeb5664ad1628f20264c729cdcb",
+              "fix/factory-server-timeouts-20261104": "3af6934db2f00cb4b9cc6c54b02aa9cbdd547950",
+              "fix/stage3-failclosed-live-audit-20261103": "776261ef9b02cc19fbe09bcbbe6e5fa70fe0a67a",
+              "fix/stage3-ig-stalled-progress-truth-20261104": "4dfea71b160eaf3fb26c3e3c79445ea85bc0b474",
+          }
+          # Closed, superseded PR; successor was merged. Factory #1608 itself
+          # merged, but its branch has one later read-only diagnostic commit.
+          PR_EVIDENCE = {
+              "deploy/worker-ig-legacy-qa-20261104": (1628, False, 1629),
+              "fix/factory-server-timeouts-20261104": (1608, True, 1608),
+              "fix/stage3-failclosed-live-audit-20261103": (1603, False, 1605),
+              "fix/stage3-ig-stalled-progress-truth-20261104": (1633, False, 1635),
+          }
+          EXPECTED_OPEN = {
+              1429: "feat/qa-test-center-foundation-20261031",
+              1465: "feat/vibe-cut-isolated-contracts-20261101",
+          }
+          assert os.environ.get("GITHUB_REPOSITORY") == REPO
+          assert os.environ.get("GITHUB_REF") == "refs/heads/main"
+          headers = {
+              "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+              "Accept": "application/vnd.github+json",
+              "Content-Type": "application/json",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+          def api(path, method="GET", body=None):
+              req = urllib.request.Request(
+                  "https://api.github.com/repos/" + REPO + "/" + path,
+                  headers=headers, method=method,
+                  data=None if body is None else json.dumps(body).encode(),
+              )
+              with urllib.request.urlopen(req, timeout=45) as resp:
+                  data = resp.read().decode("utf-8")
+                  return json.loads(data) if data else None
+          def inventory():
+              rows = api("branches?per_page=100")
+              if len(rows) >= 100:
+                  raise RuntimeError("Refuse: branch listing may be truncated")
+              return {row["name"]: row for row in rows}
+          def open_prs():
+              rows = api("pulls?state=open&per_page=100")
+              if len(rows) >= 100:
+                  raise RuntimeError("Refuse: PR listing may be truncated")
+              actual = {
+                  p["number"]: p["head"]["ref"]
+                  for p in rows
+                  if (p["head"].get("repo") or {}).get("full_name") == REPO
+              }
+              if actual != EXPECTED_OPEN or any(not p.get("draft") for p in rows):
+                  raise RuntimeError("Refuse: open PR inventory or draft states changed: " + repr(actual))
+              return actual
+          def branch_path(name):
+              return urllib.parse.quote(name, safe="/")
+          def ensure_no_running_jobs(name):
+              path = "actions/runs?per_page=100&branch=" + urllib.parse.quote(name, safe="")
+              response = api(path)
+              runs = response.get("workflow_runs", [])
+              if len(runs) >= 100:
+                  raise RuntimeError("Refuse: workflow history may be truncated for " + name)
+              active = [(r["id"], r["status"]) for r in runs if r["status"] != "completed"]
+              if active:
+                  raise RuntimeError("Refuse: active workflows for " + name + " " + repr(active))
+          def verify_branch_heads(rows):
+              expected = {"main"} | set(KEEP) | set(CANDIDATES)
+              allowed = expected | {SELF}
+              if not expected.issubset(rows) or set(rows) - allowed:
+                  raise RuntimeError("Refuse: branch inventory changed: " + repr(sorted(rows)))
+              if rows["main"].get("protected") is not True:
+                  raise RuntimeError("Refuse: main protection unexpectedly changed")
+              for name, sha in {**KEEP, **CANDIDATES}.items():
+                  row = rows[name]
+                  if row.get("protected") or row["commit"]["sha"] != sha:
+                      raise RuntimeError("Refuse: moved or protected branch " + name)
+              open_prs()
+          rows = inventory()
+          verify_branch_heads(rows)
+          for name, (old_pr, was_merged, successor) in PR_EVIDENCE.items():
+              prior = api("pulls/" + str(old_pr))
+              later = api("pulls/" + str(successor))
+              if (prior["state"] != "closed"
+                  or bool(prior.get("merged_at")) != was_merged
+                  or prior["head"]["ref"] != name
+                  or later["state"] != "closed" or not later.get("merged_at")):
+                  raise RuntimeError("Refuse: changed supersession evidence " + name)
+              ensure_no_running_jobs(name)
+          # These are archival snapshots, not merges. Do not silently reactivate
+          # older Worker/Pages deployment markers or superseded Stage 3 code.
+          print("PREFLIGHT_OK candidates=" + str(len(CANDIDATES)), flush=True)
+          for name, sha in CANDIDATES.items():
+              tag = "archive/branch-cleanup-20261105/" + name.replace("/", "--")
+              ref_path = "git/ref/tags/" + branch_path(tag)
+              try:
+                  old = api(ref_path)
+                  if old["object"]["sha"] != sha:
+                      raise RuntimeError("Refuse: archive tag collision " + tag)
+              except urllib.error.HTTPError as error:
+                  if error.code != 404:
+                      raise
+                  api("git/refs", "POST", {"ref": "refs/tags/" + tag, "sha": sha})
+              verified = api(ref_path)
+              if verified["object"]["sha"] != sha:
+                  raise RuntimeError("Refuse: archive tag was not verified " + tag)
+              print("TAG_VERIFIED " + name + " -> " + tag + " @ " + sha, flush=True)
+          print("ALL_HEADS_TAGGED_BEFORE_DELETE", flush=True)
+          for name, sha in CANDIDATES.items():
+              verify_branch_heads(inventory())
+              ensure_no_running_jobs(name)
+              tag = "archive/branch-cleanup-20261105/" + name.replace("/", "--")
+              if api("git/ref/tags/" + branch_path(tag))["object"]["sha"] != sha:
+                  raise RuntimeError("Refuse: archived SHA changed " + name)
+              ref = "refs/heads/" + name
+              subprocess.run([
+                  "git", "push", "--force-with-lease=" + ref + ":" + sha,
+                  "origin", ":" + ref,
+              ], check=True, timeout=80)
+              if name in inventory():
+                  raise RuntimeError("Refuse: branch deletion not confirmed " + name)
+              print("LEASE_DELETED " + name, flush=True)
+          remaining = inventory()
+          if set(remaining) - ({"main"} | set(KEEP) | {SELF}) or (
+              {"main"} | set(KEEP)
+          ) - set(remaining):
+              raise RuntimeError("Unexpected final branch inventory: " + repr(sorted(remaining)))
+          for name, sha in KEEP.items():
+              if remaining[name]["commit"]["sha"] != sha:
+                  raise RuntimeError("Protected retained head moved " + name)
+          open_prs()
+          print("CLEANUP_COMPLETE active_branches=" + repr(sorted(remaining))
+                + " archived=" + str(len(CANDIDATES)), flush=True)
+          PY
