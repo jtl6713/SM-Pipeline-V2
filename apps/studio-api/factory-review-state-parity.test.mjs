@@ -118,6 +118,7 @@ test("held or returned review does not appear as Pipeline Ready for Review; held
     assert.equal(visible.visible, true, "held review should still be visible for release or creative QA");
   }
   assert.equal(normalize(video({ Review_Status: "Changes Requested" })), "Changes Requested");
+  assert.equal(normalize(video({ Review_Status: "Changes Requested", Output_Status: "Changes Requested" })), "Changes Requested");
 });
 test("already approved or published outputs are never relabeled as review-ready", () => {
   assert.notEqual(normalize(video({ Review_Status: "Approved", Output_Status: "Approved for Publishing" })), "Ready for Review");
