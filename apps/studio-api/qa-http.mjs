@@ -1,7 +1,8 @@
 // Admin-only QA Test Center HTTP service. All mutation methods append to Airtable.
 // This module has no production-output mutation, scheduling or publishing imports.
 import {QA_CATALOG} from "./qa-catalog.mjs";
-import {validateManualResult,evaluateAssertion,SAFE_ASSERTIONS} from "./qa-test-core.mjs";
+import {validateManualResult,SAFE_ASSERTIONS} from "./qa-test-core.mjs";
+import {executeQaAssertion} from "./qa-registry.mjs";
 import {withQaIdempotencyLock} from "./qa-idempotency-lock.mjs";
 
 export const QA_RUNS_TABLE="tblYwzehVtmyUMzj5";
@@ -171,7 +172,7 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
   }
   if(pathname===apiPrefix+"catalog"&&request.method==="GET"){
     return send({ok:true,catalogVersion:QA_CATALOG.catalogVersion,tests:catalog,
-      safeAutomations:["QA-DIAG-001"],writeAuthority:"Airtable"});
+      safeAutomations:["QA-DIAG-001","QA-CAT-001","QA-AT-001"],writeAuthority:"Airtable"});
   }
   if(pathname===apiPrefix+"runs"){
     if(request.method==="GET"){
@@ -233,7 +234,8 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
       notes:result.notes,evidence:result.evidence,catalogVersion:QA_CATALOG.catalogVersion};
   }else if(operation.startsWith("execute/")){
     testId=testToExecute;exactTest(testId);
-    if(testId!=="QA-DIAG-001"||!SAFE_ASSERTIONS[testId])throw error(405,"Safe automation not enabled for this test");
+    const enabled=new Set(["QA-DIAG-001","QA-CAT-001","QA-AT-001"]);
+    if(!enabled.has(testId)||!SAFE_ASSERTIONS[testId])throw error(405,"Safe automation not enabled for this test");
     kind="AutomatedObservation";
     const existing=await list(QA_EVENTS_TABLE,"Idempotency Key",kind+":"+key,2);
     if(existing.length>1)throw error(409,"Duplicate QA assertion identity");
@@ -243,19 +245,39 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
         throw error(409,"Conflicting QA assertion identity");
       return send({ok:true,reused:true,event:old});
     }
-    const target=new URL("/api/health",url.origin);
-    let evaluated;
-    try{
-      const response=await fetchHealth(target.toString(),{method:"GET",redirect:"error",
-        headers:{Accept:"application/json"},signal:AbortSignal.timeout(5000)});
-      const health=await response.json();
-      evaluated=evaluateAssertion(testId,{httpStatus:response.status,
-        workerVersion:typeof health?.version==="string"?health.version:null});
-    }catch{evaluated={status:"Error",reason:"Bounded Worker health observation unavailable",evidence:null};}
+    const observers={
+      workerHealth:async({signal})=>{
+        const target=new URL("/api/health",url.origin);
+        const response=await fetchHealth(target.toString(),{method:"GET",redirect:"error",
+          headers:{Accept:"application/json"},signal});
+        const health=await response.json();
+        return {httpStatus:response.status,
+          workerVersion:typeof health?.version==="string"?health.version:null};
+      },
+      catalogIntegrity:async()=>{
+        const ids=new Set();let invalidCount=0;
+        for(const t of catalog){
+          if(!t.id||!t.title||!t.severity||!t.prerequisites?.length||
+             !t.steps?.length||!t.expectedResults?.length||ids.has(t.id))invalidCount++;
+          ids.add(t.id);
+        }
+        return {source:"versioned-catalog",catalogVersion:QA_CATALOG.catalogVersion,
+          totalTests:catalog.length,uniqueIds:ids.size,invalidCount};
+      },
+      canonicalRun:async()=>{
+        const result=await list(QA_RUNS_TABLE,"Run ID",runId,2);
+        const record=result.length===1?result[0]:null;
+        return {source:"Airtable",recordId:record?.id||null,
+          expectedRunId:runId,runId:fields(record)["Run ID"]||null,
+          createdAtUtc:fields(record)["Created At UTC"]||null};
+      },
+    };
+    const evaluated=await executeQaAssertion({testId,scope:{},observers,now:clock});
     payload={executionId:"qaex-"+crypto.randomUUID(),status:evaluated.status,
       source:"automated",reason:evaluated.reason,
-      evidence:evaluated.evidence? [evaluated.evidence]:[],
-      catalogVersion:QA_CATALOG.catalogVersion,assertionVersion:"worker-health-v1",
+      evidence:evaluated.evidence?[evaluated.evidence]:[],
+      startedAtUtc:evaluated.startedAtUtc,finishedAtUtc:evaluated.finishedAtUtc,
+      catalogVersion:QA_CATALOG.catalogVersion,assertionVersion:"qa-registry-v2",
       requiresHumanApproval:true};
   }else if(operation==="approvals"){
     testId=required(body.testId,"testId",80);exactTest(testId);
