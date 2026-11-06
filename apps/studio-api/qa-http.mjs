@@ -227,11 +227,18 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
     }
     throw error(405,"QA method not allowed");
   }
-  const match=/^\/api\/admin\/qa\/runs\/(qa-[0-9a-f-]{36})(?:\/(results|approvals|waivers|gate|regressions|execute\/(QA-[A-Z0-9-]+)))?$/i.exec(pathname);
+  const match=/^\/api\/admin\/qa\/runs\/(qa-[0-9a-f-]{36})(?:\/(results|approvals|waivers|finalize|gate|regressions|execute\/(QA-[A-Z0-9-]+)))?$/i.exec(pathname);
   if(!match)throw error(404,"Unknown QA endpoint");
   const runId=checkRunId(match[1]),operation=match[2]||"",testToExecute=match[3];
   const run=exposeRun(await runRow(runId));
-  if(!operation&&request.method==="GET")return send({ok:true,run,events:await history(runId)});
+  if(!operation&&request.method==="GET"){
+    const events=await history(runId);
+    const finished=events.filter(x=>x.kind==="RunFinalized");
+    if(finished.length>1)throw error(409,"Conflicting QA finalization events");
+    return send({ok:true,run:{...run,status:finished.length?"Finalized":"Open",
+      finalizedAtUtc:finished[0]?.atUtc||null,
+      releaseDecision:finished[0]?.payload?.decision||null},events});
+  }
   if(operation==="regressions"&&request.method==="GET"){
     const baselineId=checkRunId(url.searchParams.get("baseline")||"");
     if(baselineId===runId)throw error(400,"Select a different baseline run");
@@ -253,16 +260,37 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
        event.payload?.catalogVersion!==run.catalogRevision))
       blockers.push("QA history contains an observation with a mismatched catalog revision");
     if(run.deployment?.runner==="unverified")blockers.push("Runner deployment is not attested");
+    const finished=events.filter(x=>x.kind==="RunFinalized");
+    if(finished.length>1)blockers.push("Multiple finalization records require reconciliation");
+    if(finished.length===1&&finished[0].payload?.decision!=="Approved")
+      blockers.push("Run was finalized without release approval");
     if(blockers.length){gate.ready=false;gate.decision="Incomplete";}
     return send({ok:true,run,gate:{...gate,deploymentBlockers:blockers}});
   }
-  if(request.method!=="POST"||!["results","approvals","waivers"].includes(operation)&&!operation.startsWith("execute/"))
+  if(request.method!=="POST"||!["results","approvals","waivers","finalize"].includes(operation)&&!operation.startsWith("execute/"))
     throw error(405,"QA method not allowed");
   // Historical runs remain readable, but new execution under a different
   // catalog would create a false green result from an obsolete procedure.
   if(run.catalogRevision!==QA_CATALOG.catalogVersion)
     throw error(409,"QA catalog revision changed; start a new run before recording results");
+  // Every mutation of one run uses the same conditional lease. This serializes
+  // finalization against late result/approval requests across Worker isolates.
+  return withQaIdempotencyLock(env.STUDIO_MEDIA,"run-write:"+runId,async()=>{
   const body=await jsonBody(request),key=requestKey(body);
+  const existingEvents=await history(runId);
+  const completed=existingEvents.filter(e=>e.kind==="RunFinalized");
+  if(completed.length>1)throw error(409,"Conflicting QA finalization events");
+  if(completed.length){
+    if(operation!=="finalize")throw error(409,"This QA run is finalized; start another run");
+    const replay=await list(QA_EVENTS_TABLE,"Idempotency Key","RunFinalized:"+key,2);
+    if(replay.length!==1||replay[0].id!==completed[0].record_id)
+      throw error(409,"Run already finalized; no new finalization is permitted");
+    const original=exposeEvent(replay[0]);
+    if(body.decision!==original.payload.decision||
+       String(body.notes||"").trim()!==String(original.payload.notes||"").trim())
+      throw error(409,"Finalization request does not match the immutable event");
+    return send({ok:true,reused:true,event:original});
+  }
   let testId,kind,payload;
   if(operation==="results"){
     let result;
@@ -317,6 +345,23 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
       startedAtUtc:evaluated.startedAtUtc,finishedAtUtc:evaluated.finishedAtUtc,
       catalogVersion:QA_CATALOG.catalogVersion,assertionVersion:"qa-registry-v2",
       requiresHumanApproval:true};
+  }else if(operation==="finalize"){
+    const decision=required(body.decision,"release decision",20);
+    if(!["Approved","Rejected","Incomplete"].includes(decision))
+      throw error(400,"Invalid QA finalization decision");
+    const notes=typeof body.notes==="string"?body.notes.trim():"";
+    if(notes.length>2000)throw error(400,"Finalization notes too long");
+    if(decision!=="Approved"&&!notes)
+      throw error(400,"Rejected or incomplete runs require an explanation");
+    if(decision==="Approved"){
+      const gate=computeQaGate(catalog,existingEvents);
+      if(!gate.ready||run.deployment?.runner==="unverified"||
+         existingEvents.some(event=>["ManualResult","AutomatedObservation"].includes(event.kind)&&
+           event.payload?.catalogVersion!==run.catalogRevision))
+        throw error(409,"Cannot approve QA release while evidence or deployment is incomplete");
+    }
+    kind="RunFinalized";testId="QA-RUN";
+    payload={decision,notes,catalogVersion:run.catalogRevision};
   }else if(operation==="approvals"){
     testId=required(body.testId,"testId",80);exactTest(testId);
     const executionId=required(body.executionId,"executionId",100);
@@ -346,4 +391,5 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
     "Recorded At UTC":clock().toISOString(),"Payload JSON":JSON.stringify(payload)
   }));
   return send({ok:true,reused:result.reused,event:exposeEvent(result.record)},result.reused?200:201);
+  });
 }
