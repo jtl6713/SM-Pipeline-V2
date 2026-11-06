@@ -703,4 +703,4 @@ Deploy Studio UI 0.6.869: fix hidden Factory recovery control and clear stale 50
 
 2026-11-05: Deploy Studio UI 0.6.893-production-drafts-only. Remove Submitted and previously promoted Production Requests from Drafts; hide empty Drafts panel, preserve in-flight render/review and Pipeline history. Read-only UI filter, no Airtable mutation or publication. Enforce Pages build/cache-key parity and custom-domain verification.
 
-2026-11-05: Deploy Studio Pages UI 0.6.894-review-variant-count after merged PR #1658. Factory Needs Eyes list and count follow current server lane; stale browser acceptance hints may disable duplicate submit but never hide authoritative Ready for Review. Unified UI build/cache version and mobile lazy-script cache update. No approval or publication side effects.
+2026-11-05: Deploy Studio Pages UI 0.6.894-review-variant-count after PR #1658. Needs Eyes list and counter follow server lane, not stale browser-side accepted hints. Full unified UI build/cache version and mobile factory bundle; no approval or publishing side effects.
