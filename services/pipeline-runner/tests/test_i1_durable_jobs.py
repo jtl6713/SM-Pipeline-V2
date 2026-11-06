@@ -120,7 +120,7 @@ def test_verified_nine_of_ten_shortfall_refilled_with_only_missing(monkeypatch):
     assert len(set(client.batch["Idea Candidates"])) == 10
 
 
-def test_bounded_shortfall_stops_after_seven_confirmed_passes(monkeypatch):
+def test_bounded_shortfall_stops_after_five_confirmed_passes(monkeypatch):
     client = FakeClient(initial=0)
     client.batch["Requested_Count"] = 10
     monkeypatch.setattr(q, "AirtableClient", lambda: client)
@@ -133,11 +133,11 @@ def test_bounded_shortfall_stops_after_seven_confirmed_passes(monkeypatch):
         return {"created_count": 1}
 
     monkeypatch.setattr(q, "process_request", produce)
-    with pytest.raises(RuntimeError, match="Only 7 of 10 linked ideas verified"):
+    with pytest.raises(RuntimeError, match="Only 5 of 10 linked ideas verified"):
         q._work({**_job(), "requested_count": 10})
-    assert requests == [10, 9, 8, 7, 6, 5, 4]
+    assert requests == [10, 9, 8, 7, 6]
     assert client.batch["Status"] == "Failed"
-    assert client.batch["Generated_Count"] == 7
+    assert client.batch["Generated_Count"] == 5
 
 
 
