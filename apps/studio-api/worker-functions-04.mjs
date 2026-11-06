@@ -1,6 +1,6 @@
 import { matchNewlyCreatedIdeaPhotos } from "./worker-functions-03.mjs";
 import { readIgPublishLease, markIgLeaseRecovered, igPublishLeaseEnabled } from "./qa-ig-publish-lease.mjs";
-import { evaluateReviewPackage, verifyReviewImages, factoryReviewVisibility } from "./review-package-readiness.mjs";
+import { evaluateReviewPackage, verifyReviewImages, factoryReviewVisibility, factoryApprovalHoldReleaseEligibility } from "./review-package-readiness.mjs";
 import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 import { autonomousPlanOutputSpilloverRepair } from "./autonomous-plan-output-recovery.mjs";
 import { vibeAutoReviewVerifiedSource } from "./vibe-auto-review.mjs";
@@ -12474,6 +12474,47 @@ export async function factoryDeleteDeskItem(env, id, kind, actor, note) {
 }
 /*__STUDIO_WORKER_END:factoryDeleteDeskItem__*/
 
+/**
+ * Explicit operator release of an old Do_Not_Publish flag for formal review.
+ * This is NOT an approval, schedule request or publishing dispatch. The same
+ * per-output lease as Factory Approve protects the canonical status recheck.
+ */
+async function factoryReleaseOutputForApproval(env, id, actor) {
+  return withOutputApprovalLock(env.STUDIO_MEDIA, id, async () => {
+    const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+    const readiness = evaluateReviewPackage(current);
+    const eligibility = factoryApprovalHoldReleaseEligibility(current, readiness);
+    if (!eligibility.eligible) throw new HttpError(409, eligibility.reason);
+    const verified = await verifyReviewImages(readiness);
+    if (verified.readiness !== "READY") {
+      throw new HttpError(409, "Cannot release for formal review: "
+        + ((verified.missing_requirements || []).join(", ") || verified.reason));
+    }
+    const stamp = new Date().toISOString();
+    const existingNotes = String(f(current, "Review_Notes") || "").trim();
+    const audit = `Factory formal-review release by ${actor || "operator"} at ${stamp}. No approval, scheduling or publication granted.`;
+    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: {
+        Do_Not_Publish: false,
+        Auto_Publish_Enabled: false,
+        Review_Notes: [existingNotes, audit].filter(Boolean).join("\\n\\n"),
+      }, typecast: false }),
+    });
+    const check = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+    if (f(check, "Do_Not_Publish") === true ||
+        f(check, "Auto_Publish_Enabled") === true ||
+        String(f(check, "Output_Status") || "") !== "Ready for Review" ||
+        !["", "Review Sent", "Pending Review"].includes(String(f(check, "Review_Status") || ""))) {
+      throw new HttpError(409, "Formal review release could not be verified in Airtable; refresh and inspect status");
+    }
+    return {
+      id, released: true, auto_publish_enabled: false,
+      message: "Publishing hold released for formal review. Preview again, then separately Approve or Request Changes. Nothing was scheduled or published.",
+    };
+  });
+}
+
 export async function mutateFactoryDesk(request, env, authorization, ctx = null) {
   let payload;
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
@@ -12489,7 +12530,7 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
     next = result.controls;
   } else if (action === "unpin_needs_assets") {
     next = unpinFactoryNeedsAssets(controls, payload?.id || payload?.item?.id).controls;
-  } else if (action === "approve" || action === "send_back" || action === "send_back_content" || action === "request_changes_content" || action === "delete") {
+  } else if (action === "approve" || action === "release_for_approval" || action === "send_back" || action === "send_back_content" || action === "request_changes_content" || action === "delete") {
     const id = String(payload?.id || payload?.item?.id || "").trim();
     const kind = String(payload?.kind || payload?.item?.kind || "output").trim().toLowerCase();
     const note = String(payload?.note || payload?.notes || "").trim().slice(0, 3000);
@@ -12498,6 +12539,11 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
       if (kind !== "output") throw new HttpError(400, "Approve is only for Ready for Review outputs");
       requirePermission(authorization, "outputs_review");
       resultExtra = await factoryApproveOutput(env, id, actor, note, ctx);
+    } else if (action === "release_for_approval") {
+      if (kind !== "output") throw new HttpError(400, "Formal review release is only for platform outputs");
+      requirePermission(authorization, "outputs_review");
+      requireAnyPermission(authorization, ["publishing_control", "tenant_admin"]);
+      resultExtra = await factoryReleaseOutputForApproval(env, id, actor);
     } else if (action === "send_back") {
       if (kind !== "output") throw new HttpError(400, "Send back is only for outputs");
       requirePermission(authorization, "outputs_review");
@@ -12533,7 +12579,7 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
       next = unpinFactoryNeedsAssets(next, id).controls;
     }
   } else {
-    throw new HttpError(400, "action must be pin_needs_assets, unpin_needs_assets, approve, send_back, send_back_content, request_changes_content, or delete");
+    throw new HttpError(400, "action must be pin_needs_assets, unpin_needs_assets, approve, release_for_approval, send_back, send_back_content, request_changes_content, or delete");
   }
 
   const saved = (
@@ -12543,6 +12589,11 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
   )
     ? await writeFactoryDeskControls(env, next, actor)
     : next;
+  if (action === "release_for_approval") {
+    // Do not turn a committed canonical hold release into a 500 while reloading the Desk.
+    return respond(request, env, { ok: true, page: "factory-desk", action,
+      result: resultExtra, message: resultExtra.message, refresh_required: true });
+  }
   if (action === "approve") {
     // The Airtable write above is the authoritative approval transaction.
     // A later queue/idea fetch may fail or exceed request limits; do not turn
