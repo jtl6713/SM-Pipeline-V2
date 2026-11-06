@@ -12508,6 +12508,10 @@ async function factoryReleaseOutputForApproval(env, id, actor) {
         !["", "Review Sent", "Pending Review"].includes(String(f(check, "Review_Status") || ""))) {
       throw new HttpError(409, "Formal review release could not be verified in Airtable; refresh and inspect status");
     }
+    // Airtable is authoritative. Mirror only the verified record, fail soft on
+    // downstream Supabase errors and never retry this operator decision there.
+    await studioSupabaseWriteThroughOutput(env, check, "factory-formal-review-release")
+      .catch(error => console.warn("Factory release mirror deferred", id, String(error?.message || error).slice(0, 180)));
     return {
       id, released: true, auto_publish_enabled: false,
       message: "Publishing hold released for formal review. Preview again, then separately Approve or Request Changes. Nothing was scheduled or published.",
