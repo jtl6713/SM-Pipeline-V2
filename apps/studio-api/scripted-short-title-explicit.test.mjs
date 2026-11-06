@@ -31,3 +31,33 @@ test("other exact-title instructions preserve surrounding typography", () => {
   assert.equal(scriptedShortExplicitTitle('Please use the exact title: "LA Bridge After Dark"'), "LA Bridge After Dark");
   assert.equal(scriptedShortExplicitTitle("Set this exact title to: Sixth Street Viaduct — “Blue Hour”"), "Sixth Street Viaduct — “Blue Hour”");
 });
+
+test("Drifter structured exact-title brief wins over stale Chicago waterfront defaults", () => {
+  const exact = "How to Find The Drifter | Chicago’s Hidden Speakeasy";
+  const brief = [
+    "ChicagoShining — New Short Video Production",
+    "",
+    "REQUIRED EXACT TITLE",
+    "",
+    exact,
+    "",
+    "Use this exact title for the Content Item, every platform output, the video title, and the thumbnail.",
+    "Do not rewrite, shorten, or substitute another title.",
+    "",
+    "Creative direction",
+    "Create a short about The Drifter speakeasy beneath Green Door Tavern.",
+    "",
+    "Exact voiceover script",
+    "Chicago has a secret hiding beneath an old tavern.",
+  ].join("\n");
+  const waterfront = { segments: [{ voiceover_text: "Chicago's waterfront tells a long history." }] };
+  assert.equal(scriptedShortExplicitTitle(brief), exact);
+  assert.equal(scriptedShortPublishableTitle(brief, waterfront, "Chicago"), exact);
+  assert.notEqual(scriptedShortExplicitTitle("Use this exact title for every platform output."), "for every platform output.");
+});
+
+test("supports Markdown heading and bold required title", () => {
+  const exact = "How to Find The Drifter | Chicago’s Hidden Speakeasy";
+  const brief = `## REQUIRED EXACT TITLE\n\n**${exact}**\n\nUse this exact title for every platform.\n`;
+  assert.equal(scriptedShortExplicitTitle(brief), exact);
+});
