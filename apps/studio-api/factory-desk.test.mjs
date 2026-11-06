@@ -509,7 +509,7 @@ test("Michigan V2 held review is visible in Needs Eyes but cannot be Factory-app
   assert.equal(desk.lanes.needs_eyes[1].review_hold_active,false);
   const queue=await readFile(path.join(here,"ops-queue.mjs"),"utf8");
   assert.ok(queue.includes("OPS_QUEUE_REVIEW_FORMULA"));
-  assert.ok(queue.includes("AND({Do_Not_Publish},{Studio_Render_Review_Hold_Active}"));
+  assert.ok(queue.includes('AND({Do_Not_Publish},{Output_Status}="Ready for Review",{Review_Status}="Review Sent")'));
   const js=await readFile(path.join(here,"../studio-web/assets/factory-desk.js"),"utf8");
   const html=await readFile(path.join(here,"../studio-web/index.html"),"utf8");
   assert.ok(js.includes("card.review_hold_active === true || card.do_not_publish === true"));
