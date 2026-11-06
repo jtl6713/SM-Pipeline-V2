@@ -55,7 +55,7 @@ function harness(){
 test("catalog exposes 88 versioned cases and read-only safe-check allowlist",async()=>{
   const h=harness(),r=await h.call("GET","catalog");const j=await r.json();
   assert.equal(r.status,200);assert.equal(j.tests.length,88);
-  assert.deepEqual(j.safeAutomations,["QA-DIAG-001"]);
+  assert.deepEqual(j.safeAutomations,["QA-DIAG-001","QA-CAT-001","QA-AT-001"]);
   assert.equal(j.writeAuthority,"Airtable");
 });
 test("run creation is server-stamped and repeated request IDs reuse canonical Airtable rows",async()=>{
@@ -161,4 +161,23 @@ test("same-catalog historical runs have bounded read-only regression endpoint",a
  assert.equal(body.regressions.length,1);
  assert.equal(body.regressions[0].to,"Not run");
  assert.equal(h.rows.get(QA_EVENTS_TABLE).length,1);
+});
+
+test("catalog-integrity auto assertion records observed schema, not guessed Pass",async()=>{
+  const h=harness(),created=await (await h.call("POST","runs",{client_request_id:"ui-run-cat-0001"})).json();
+  const result=await (await h.call("POST","runs/"+created.run.runId+"/execute/QA-CAT-001",
+    {client_request_id:"ui-check-catalog01"})).json();
+  assert.equal(result.event.payload.status,"Pass");
+  assert.equal(result.event.payload.evidence[0].totalTests,88);
+  assert.equal(result.event.payload.evidence[0].invalidCount,0);
+  assert.equal(result.event.payload.requiresHumanApproval,true);
+});
+test("Airtable canonical QA run assertion only passes on observed canonical row",async()=>{
+  const h=harness(),created=await (await h.call("POST","runs",{client_request_id:"ui-run-at-00001"})).json();
+  const found=await (await h.call("POST","runs/"+created.run.runId+"/execute/QA-AT-001",
+    {client_request_id:"ui-check-at-00001"})).json();
+  assert.equal(found.event.payload.status,"Pass");
+  assert.equal(found.event.payload.evidence[0].runId,created.run.runId);
+  assert.equal(found.event.payload.evidence[0].source,"Airtable");
+  assert.ok(found.event.payload.evidence[0].recordId);
 });
