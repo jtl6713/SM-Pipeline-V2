@@ -27,6 +27,7 @@ export function validateManualResult(value) {
     if(!isObject(entry)) throw new TypeError("invalid evidence");
     return {kind:requiredString(entry.kind,"evidence.kind",30), reference:requiredString(entry.reference,"evidence.reference",1000)};
   });
+  if(status==="Pass"&&!notes&&!evidence.length) throw new TypeError("Pass requires observed notes or evidence");
   return Object.freeze({testId,status,notes,evidence});
 }
 export function createExecutionRecord({runId,definition,submitted,identity,clock=()=>new Date(),id}) {
