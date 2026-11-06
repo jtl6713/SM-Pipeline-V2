@@ -1,4 +1,5 @@
 import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
+import { evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { staleInstagramPublishingDisplay } from "./ig-publishing-display.mjs";
 import { facebookPreapprovalRecoveryReason, facebookPreapprovalRecoveryFields, FACEBOOK_PREAPPROVAL_FORMULA } from "./facebook-preapproval-recovery.mjs";
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
@@ -1913,6 +1914,24 @@ export function normalizedOutputState(record) {
   const readyForReviewIntent = has("Output_Status", "ready for review")
     || has("Review_Status", "pending")
     || has("Review_Status", "review sent");
+  // This is the same canonical package predicate used by Factory. A raw Airtable
+  // Ready for Review label alone is never proof that media or a human decision
+  // can be approved. In particular, skipped/returned/approved work must not
+  // reappear as review-ready because a finished preview file still exists.
+  const reviewStatusLc = text("Review_Status").toLowerCase();
+  const closedReviewDecision = ["approved", "skipped", "rejected", "changes requested"].includes(reviewStatusLc);
+  const explicitReviewCandidate = outputStatusLc === "ready for review"
+    || reviewStatusLc === "review sent" || reviewStatusLc === "ready for review";
+  const reviewReadiness = explicitReviewCandidate
+    ? evaluateReviewPackage(record) : null;
+  const heldV2Review = outputStatusLc === "ready for review"
+    && reviewStatusLc === "review sent"
+    && fields.Studio_Render_Review_Hold_Active === true
+    && fields.Do_Not_Publish === true
+    && studioOutputHasReviewableDeliverable(record);
+  const genuinelyReadyForReview = !closedReviewDecision
+    && explicitReviewCandidate
+    && (reviewReadiness?.readiness === "READY" || heldV2Review);
   const inProductionEarly = has("Output_Status", "in production");
   const hasFinishedFileEarly = Boolean(String(f(record, "Final_File_URL") || "").trim());
   // Final_File_URL means Remotion/Drive already finished even when Render_Status
@@ -1936,6 +1955,7 @@ export function normalizedOutputState(record) {
     || has("TikTok_Draft_Status", "draft delivered");
   if (
     readyForReviewIntent
+    && genuinelyReadyForReview
     && !approvedOrScheduledEarly
     && studioOutputHasReviewableDeliverable(record)
     && !outputDeadEarly
@@ -1956,6 +1976,11 @@ export function normalizedOutputState(record) {
   // leave All Profiles Manual and the Pipeline attention filter together.
   const livePostUrl = String(text("Platform_Post_URL") || text("Manual_Published_URL") || "").trim();
   if (/^https?:\/\//i.test(livePostUrl)) return "Published";
+
+  // Review decision wins over an old Output_Status=Ready for Review.
+  // A historical preview is not permission to re-approve a returned output.
+  if (reviewStatusLc === "skipped" || reviewStatusLc === "rejected") return "Skipped";
+  if (reviewStatusLc === "changes requested") return "Changes Requested";
 
   // Factory delete sets Output_Status=Skipped and leaves Render_Status=Rendered
   // plus a finished file. The later Ready-for-Review check used to win, so the
@@ -2026,9 +2051,17 @@ export function normalizedOutputState(record) {
   const inProduction = has("Output_Status", "in production");
   const hasFinishedFile = Boolean(String(f(record, "Final_File_URL") || "").trim());
   const remotionFinished = has("Render_Status", "rendered") && (hasFinishedFile || Boolean(String(f(record, "Studio_Preview_URL") || "").trim()));
-  if (!inProduction || remotionFinished || studioOutputIsNativePhoto(record)) {
-    if ((has("Review_Status", "pending") || has("Review_Status", "review sent") || has("Output_Status", "ready for review")) && studioOutputHasReviewableDeliverable(record)) return "Ready for Review";
-    if (has("Render_Status", "rendered") && studioOutputHasReviewableDeliverable(record)) return "Ready for Review";
+  if (!inProduction && genuinelyReadyForReview && studioOutputHasReviewableDeliverable(record)) {
+    return "Ready for Review";
+  }
+  // Keep honest Pipeline labels: a missing caption, cover, native-photo
+  // preview, or manifest is Preparing Assets, not an approvable package.
+  // Factory uses the very same evaluateReviewPackage check and shows this
+  // item in repair until the real data is corrected.
+  if (outputStatusLc === "ready for review" && !genuinelyReadyForReview
+      && !closedReviewDecision
+      && !/^(waiting in render queue|ready for render|ready to render|rendering)$/i.test(text("Render_Status"))) {
+    return "Preparing Assets";
   }
   if (has("Render_Status", "waiting in render queue")) return "Waiting in Render Queue";
   if (isActiveRemotionHold(record, f) || has("FB_Slideshow_Status", "rendering") || has("FB_Slideshow_Status", "starting render")) {
