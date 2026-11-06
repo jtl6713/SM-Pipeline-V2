@@ -26,7 +26,7 @@ _QUALITIES = {"Highest Quality", "Balanced", "Quantity"}
 _LEASE_SECONDS = 120
 # Model originality/365-day title dedupe can leave 8-9 of 10 after a pass.
 # Bounded verified shortfall-only refill; never replays an uncertain Airtable POST.
-_MAX_CONFIRMED_SHORTFALL_PASSES = 7
+_MAX_CONFIRMED_SHORTFALL_PASSES = 5
 _MAX_ZERO_WRITE_PASSES = 3
 _WAKE = threading.Event()
 _LOCK = threading.Lock()
