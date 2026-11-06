@@ -3,7 +3,7 @@
   const $=id=>document.getElementById(id);
   const nav=$("navQaTestCenter"),root=$("page-qa-test-center");
   if(!nav||!root)return;
-  const state={tests:[],runs:[],run:null,events:[],gate:null,loading:false};
+  const state={tests:[],runs:[],run:null,events:[],gate:null,loading:false,pendingRunId:null};
   const MAX_NOTES=4000;
   const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined&&text!==null)n.textContent=String(text);if(cls)n.className=cls;return n;};
   const status=$("qaStatus"),runs=$("qaRunSelect"),cases=$("qaCases"),gate=$("qaGate"),history=$("qaHistory");
@@ -45,6 +45,7 @@
       g.pendingHuman.length+" awaiting independent approval"));
     if(g.failed.length)gate.append(el("p","Failing: "+g.failed.join(", "),"qa-alert"));
     if(g.pendingHuman.length)gate.append(el("p","Human signoff needed: "+g.pendingHuman.join(", "),"qa-alert"));
+    if(g.deploymentBlockers?.length)gate.append(el("p","Deployment verification required: "+g.deploymentBlockers.join("; "),"qa-alert"));
     if(g.waivers?.length)gate.append(el("p",g.waivers.length+" risk waivers recorded. They do not silently clear release gates."));
   }
   function renderHistory(){
@@ -167,9 +168,9 @@
     try{
       const env=$("qaEnvironment").value;
       const data=await call("runs",{method:"POST",body:JSON.stringify({
-        environment:env,client_request_id:freshId()
+        environment:env,client_request_id:state.pendingRunId||(state.pendingRunId=freshId())
       })});
-      state.run=data.run;state.events=[];await refreshRuns();await loadRun(data.run.runId);
+      state.pendingRunId=null;state.run=data.run;state.events=[];await refreshRuns();await loadRun(data.run.runId);
     }catch(e){message(e.message,"error");}finally{button.disabled=false;}
   }
   async function initialize(){
