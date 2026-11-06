@@ -178,6 +178,81 @@ def test_terminal_shortfall_requires_manual_review(monkeypatch):
     assert client.batch["Status"] == "Failed"
 
 
+def test_verified_nine_of_ten_retries_only_unwritten_duplicate_and_preserves_ids(monkeypatch):
+    client = FakeClient(initial=9)
+    client.batch["Requested_Count"] = 10
+    initial_ids = list(client.batch["Idea Candidates"])
+    monkeypatch.setattr(q, "AirtableClient", lambda: client)
+    calls = []
+
+    def produce(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return {
+                "created_count": 0,
+                "processed": False,
+                "reason": "no_unique_candidates_after_regeneration",
+                "skipped_duplicate_titles": ["NYC Hidden Subway Entrance"],
+            }
+        assert kwargs["requested_count"] == 1
+        assert kwargs["excluded_titles"] == ("NYC Hidden Subway Entrance",)
+        client.batch["Idea Candidates"].append("rec" + str(9).zfill(14))
+        return {"processed": True, "created_count": 1,
+                "created_record_ids": ["rec" + str(9).zfill(14)]}
+
+    monkeypatch.setattr(q, "process_request", produce)
+    q._work({**_job(), "requested_count": 10})
+    assert len(calls) == 2
+    assert [x["requested_count"] for x in calls] == [1, 1]
+    assert client.batch["Idea Candidates"][:9] == initial_ids
+    assert len(set(client.batch["Idea Candidates"])) == 10
+    assert client.batch["Status"] == "Complete"
+    assert client.batch["Generated_Count"] == 10
+
+
+def test_acknowledged_but_unlinked_idea_is_never_recreated(monkeypatch):
+    client = FakeClient(initial=9)
+    client.batch["Requested_Count"] = 10
+    monkeypatch.setattr(q, "AirtableClient", lambda: client)
+    calls = []
+
+    def produce(**kwargs):
+        calls.append(kwargs)
+        # Accepted Airtable response, but reciprocal links not visible yet.
+        return {"processed": True, "created_count": 1,
+                "created_record_ids": ["rec" + str(9).zfill(14)]}
+
+    monkeypatch.setattr(q, "process_request", produce)
+    with pytest.raises(RuntimeError, match="acknowledged candidate IDs not yet linked"):
+        q._work({**_job(), "requested_count": 10})
+    assert len(calls) == 1
+    assert len(client.batch["Idea Candidates"]) == 9
+    assert client.batch["Status"] == "Failed"
+
+
+def test_repeated_verified_no_write_is_bounded_and_never_makes_11(monkeypatch):
+    client = FakeClient(initial=9)
+    client.batch["Requested_Count"] = 10
+    monkeypatch.setattr(q, "AirtableClient", lambda: client)
+    calls = []
+
+    def produce(**kwargs):
+        calls.append(kwargs)
+        return {"processed": False, "created_count": 0,
+                "reason": "no_unique_candidates_after_regeneration",
+                "skipped_duplicate_titles": ["Old Idea %s" % len(calls)]}
+
+    monkeypatch.setattr(q, "process_request", produce)
+    with pytest.raises(RuntimeError, match="Only 9 of 10 linked ideas verified"):
+        q._work({**_job(), "requested_count": 10})
+    assert len(calls) == q._MAX_ZERO_WRITE_PASSES
+    assert calls[0]["requested_count"] == 1
+    assert calls[1]["excluded_titles"] == ("Old Idea 1",)
+    assert len(client.batch["Idea Candidates"]) == 9
+    assert client.batch["Generated_Count"] == 9
+    assert client.batch["Status"] == "Failed"
+
+
 def test_absolute_persistent_db_path_required(monkeypatch):
     monkeypatch.setenv("I1_JOB_DB_PATH", ":memory:")
     with pytest.raises(RuntimeError, match="persistent"):

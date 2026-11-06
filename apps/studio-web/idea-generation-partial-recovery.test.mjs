@@ -44,5 +44,10 @@ test("durable Runner uses bounded readback-controlled missing-count refill", () 
   assert.match(runner, /missing = max\(0, expected - existing\)/);
   assert.match(runner, /requested_count=missing/);
   assert.match(runner, /if result\.get\("partial_failure"\) or result\.get\("retry_requires_reconciliation"\)/);
-  assert.match(runner, /if actual <= existing:/);
+  assert.match(runner, /if actual < existing:/);
+  assert.match(runner, /if actual == existing:/);
+  assert.match(runner, /if result\.get\("created_count"\) or result\.get\("created_record_ids"\):/);
+  assert.match(runner, /_MAX_ZERO_WRITE_PASSES = 3/);
+  assert.match(runner, /excluded_titles=tuple\(rejected_titles\[-24:\]\)/);
+  assert.match(runner, /zero_write_passes >= _MAX_ZERO_WRITE_PASSES/);
 });
