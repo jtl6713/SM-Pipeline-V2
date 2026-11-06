@@ -26,7 +26,8 @@ _QUALITIES = {"Highest Quality", "Balanced", "Quantity"}
 _LEASE_SECONDS = 120
 # Model originality/365-day title dedupe can leave 8-9 of 10 after a pass.
 # Bounded verified shortfall-only refill; never replays an uncertain Airtable POST.
-_MAX_CONFIRMED_SHORTFALL_PASSES = 5
+_MAX_CONFIRMED_SHORTFALL_PASSES = 7
+_MAX_ZERO_WRITE_PASSES = 3
 _WAKE = threading.Event()
 _LOCK = threading.Lock()
 _STARTED = False
@@ -186,6 +187,8 @@ def _work(job: dict) -> None:
     batch_id, profile_id = job["batch_id"], job["profile_id"]
     expected = job["requested_count"]
     last_error = None
+    rejected_titles: list[str] = []
+    zero_write_passes = 0
     try:
         batch = client.get_record(IDEA_BATCHES_TABLE, batch_id)
         fields = batch.get("fields") or {}
@@ -219,12 +222,12 @@ def _work(job: dict) -> None:
             if not missing:
                 break
             # Each attempt requests ONLY the freshly verified shortfall.
-            # Duplicate/invalid model titles may reduce this pass below missing;
-            # attempt another bounded pass only after an acknowledged write.
-            # An ambiguous write always exits for human reconciliation.
+            # A verified zero-write response can also be retried with explicit
+            # rejected-title exclusions. Never retry an ambiguous Airtable POST.
             result = process_request(
                 profile_record_id=profile_id, batch_record_id=batch_id,
                 requested_count=missing, quality=job["quality"], trigger_i2=False,
+                excluded_titles=tuple(rejected_titles[-24:]),
             )
             if result.get("partial_failure") or result.get("retry_requires_reconciliation"):
                 raise RuntimeError("I1 partial/uncertain write; reconcile batch before retry: "
@@ -234,9 +237,31 @@ def _work(job: dict) -> None:
             client.update_record(IDEA_BATCHES_TABLE, batch_id, {"Generated_Count": actual})
             if actual >= expected:
                 break
-            if actual <= existing:
+            if actual < existing:
+                raise RuntimeError("I1 linked idea count decreased during refill; manual reconciliation required")
+            if actual == existing:
+                # Even a 2xx candidate create can be missing from Airtable's
+                # inverse batch link temporarily. It is NOT safe to generate
+                # another candidate until the acknowledged write is resolved.
+                if result.get("created_count") or result.get("created_record_ids"):
+                    raise RuntimeError(
+                        "I1 acknowledged candidate IDs not yet linked to batch; "
+                        "manual reconciliation required before another write"
+                    )
                 last_error = str(result.get("reason") or "no new unique candidates")
-                break
+                if last_error not in (
+                    "no_unique_candidates_after_regeneration",
+                    "empty_or_invalid_ai_ideas_after_regeneration",
+                ):
+                    break
+                for title in result.get("skipped_duplicate_titles") or []:
+                    if isinstance(title, str) and title.strip() and title not in rejected_titles:
+                        rejected_titles.append(title[:100])
+                zero_write_passes += 1
+                if zero_write_passes >= _MAX_ZERO_WRITE_PASSES:
+                    break
+                continue
+            zero_write_passes = 0
         batch = client.get_record(IDEA_BATCHES_TABLE, batch_id)
         actual = _linked_idea_count(batch)
         if actual != expected:
