@@ -178,3 +178,123 @@ export function validateScriptedShortProductionConstraints({ plan, timeline, ass
   }
   return { ok: errors.length === 0, signature: SCRIPTED_SHORT_PLAN_SIGNATURE, errors };
 }
+
+
+/**
+ * Strict, human-authored Script a Short requirements. The AI writer is never
+ * permitted to silently reduce a named all-clips list, discard exact VO, or
+ * shorten an explicitly bounded duration.
+ */
+export function scriptedShortBriefRequirements(brief) {
+  const source = normalizeScriptedShortBrief(brief);
+  const footage = source.match(/(?:^|\n)\s*mandatory footage instructions\s*([\s\S]*?)(?=\n\s*exact voiceover script\b|\n\s*video editing instructions\b|$)/i)?.[1] || "";
+  const allNamed = /\b(?:use|include|show)\s+(?:all|every)\b/i.test(footage);
+  const names = [];
+  if (allNamed) {
+    for (const line of footage.split("\n")) {
+      const match = /^\s*[-*•]\s+(?:\*\*)?([^\n*]+?\s+\d+)(?:\*\*)?\s*$/.exec(line);
+      if (!match) continue;
+      const name = match[1].trim();
+      if (!names.some((previous) => previous.toLowerCase() === name.toLowerCase())) names.push(name);
+    }
+  }
+  const match = source.match(/\b(?:duration\s*:\s*(?:target\s*)?|(?:create|make)\s+(?:a|an)\s+(?:captivating\s+)?)(\d{1,3})\s*[-–—]\s*(\d{1,3})\s*(?:-second|seconds?)\b/i);
+  const min = match ? Number(match[1]) : null;
+  const max = match ? Number(match[2]) : null;
+  const duration = min !== null && min >= 5 && max >= min && max <= 180 ? { min, max } : null;
+  const scriptMatch = source.match(/(?:^|\n)\s*(?:exact|verbatim)\s+(?:voiceover|narration)\s+script\s*\n([\s\S]*?)(?=\n\s*(?:video editing instructions|required on-screen text|thumbnail instructions|required caption|production validation)\b|$)/i);
+  const exactScript = scriptMatch
+    ? scriptMatch[1].trim().replace(/^["“]\s*/, "").replace(/\s*["”]$/, "").replace(/\s+/g, " ").trim()
+    : "";
+  return { required_clips: names, duration, exact_script: exactScript };
+}
+
+const briefWords = (value) => String(value || "").trim().split(/\s+/).filter(Boolean).length;
+const compactBrief = (value) => String(value || "").replace(/\s+/g, " ").trim();
+const mediaLabel = (row) => String(row?.name || row?.asset_name || row?.filename || "").trim();
+const mediaId = (row) => String(row?.id || row?.media_asset_record_id || "").trim();
+
+/** Return exact, correctly ordered scenes; never synthesize or authorize assets. */
+export function scriptedShortExactScenes(brief, catalog) {
+  const requirements = scriptedShortBriefRequirements(brief);
+  if (!requirements.required_clips.length || !requirements.exact_script) return null;
+  const rows = Array.isArray(catalog) ? catalog : [];
+  const assets = requirements.required_clips.map((name) =>
+    rows.find((row) => mediaLabel(row).toLowerCase() === name.toLowerCase() && mediaId(row)));
+  const missing = requirements.required_clips.filter((_, index) => !assets[index]);
+  if (missing.length) throw new Error("Required uploaded clips missing from eligible profile library: " + missing.join(", "));
+  let chunks = String(brief)
+    .match(/(?:^|\n)\s*(?:exact|verbatim)\s+(?:voiceover|narration)\s+script\s*\n([\s\S]*?)(?=\n\s*(?:video editing instructions|required on-screen text|thumbnail instructions|required caption|production validation)\b|$)/i)?.[1]
+    ?.trim().replace(/^["“]\s*/, "").replace(/\s*["”]$/, "")
+    .split(/\n\s*\n/).map(compactBrief).filter(Boolean) || [];
+  if (chunks.length < assets.length) {
+    chunks = requirements.exact_script.split(/(?<=[.!?])\s+/).map(compactBrief).filter(Boolean);
+  }
+  if (chunks.length < assets.length) throw new Error("Exact voiceover cannot be allocated across every required clip without rewriting the script.");
+  // Merge the shortest adjacent beats until each named source has one scene.
+  while (chunks.length > assets.length) {
+    let best = 0, least = Infinity;
+    for (let i = 0; i < chunks.length - 1; i++) {
+      const weight = briefWords(chunks[i]) + briefWords(chunks[i + 1]);
+      if (weight < least) { best = i; least = weight; }
+    }
+    chunks.splice(best, 2, chunks[best] + " " + chunks[best + 1]);
+  }
+  return assets.map((asset, index) => ({
+    voiceover_text: chunks[index],
+    suggested_visual: mediaLabel(asset),
+    media_asset_id: mediaId(asset),
+    asset_id: mediaId(asset),
+    shot_status: "owned",
+    media_type: asset.media_type || asset.mime_type || "video/mp4",
+    source_duration_seconds: Number(asset.duration_seconds || asset.source_duration_seconds || 0) || null,
+  }));
+}
+
+/** Retiming preserves all narration and assigned sources; it cannot invent media. */
+export function scriptedShortHonorDuration(timeline, brief) {
+  const requirement = scriptedShortBriefRequirements(brief).duration;
+  if (!requirement) return timeline;
+  const rows = Array.isArray(timeline?.segments) ? timeline.segments : [];
+  if (!rows.length) return timeline;
+  const total = Number(timeline?.duration_seconds) || rows.reduce((n, row) => n + Number(row.duration_seconds || 0), 0);
+  if (total >= requirement.min && total <= requirement.max) return timeline;
+  const target = Math.round((requirement.min + requirement.max) / 2);
+  const durationSum = rows.reduce((n, row) => n + Math.max(0.5, Number(row.duration_seconds) || 0), 0);
+  let cursor = 0;
+  const segments = rows.map((row, index) => {
+    const duration = index === rows.length - 1
+      ? Math.round((target - cursor) * 1000) / 1000
+      : Math.round((Math.max(0.5, Number(row.duration_seconds) || 0) / durationSum * target) * 1000) / 1000;
+    const start = Math.round(cursor * 1000) / 1000;
+    const end = Math.round((cursor + duration) * 1000) / 1000;
+    cursor = end;
+    return { ...row, index: index + 1, start_seconds: start, end_seconds: end, duration_seconds: duration };
+  });
+  return { ...timeline, segments, duration_seconds: target };
+}
+
+/** Accept must reject stale or browser-edited proposals before any Airtable writes. */
+export function scriptedShortCheckBriefRequirements(brief, timeline, catalog) {
+  const req = scriptedShortBriefRequirements(brief);
+  const errors = [];
+  const scenes = Array.isArray(timeline?.segments) ? timeline.segments : [];
+  if (req.required_clips.length) {
+    const byId = new Map((catalog || []).map((row) => [mediaId(row), mediaLabel(row).toLowerCase()]));
+    const picked = scenes.map((scene) => byId.get(String(scene.asset_id || scene.media_asset_id || "")) || "");
+    const expected = req.required_clips.map((name) => name.toLowerCase());
+    if (picked.length !== expected.length || picked.some((name, i) => name !== expected[i])) {
+      errors.push("The proposal does not contain every required uploaded clip in order.");
+    }
+  }
+  if (req.exact_script && compactBrief(scenes.map((row) => row.voiceover_text || "").join(" ")) !== compactBrief(req.exact_script)) {
+    errors.push("The proposal truncated or changed the exact voiceover.");
+  }
+  if (req.duration) {
+    const seconds = Number(timeline?.duration_seconds);
+    if (!(seconds >= req.duration.min && seconds <= req.duration.max)) {
+      errors.push("The proposal duration violates the requested " + req.duration.min + "–" + req.duration.max + "-second range.");
+    }
+  }
+  return { ok: !errors.length, errors, requirements: req };
+}

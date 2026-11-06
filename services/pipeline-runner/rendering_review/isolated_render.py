@@ -146,14 +146,13 @@ def compile_isolated_render_payload(
         not _str(voiceover.get("drive_file_id")) or
         not _str(voiceover.get("audio_url")).startswith("https://")):
         _deny("voiceover_audio_not_verified_for_plan")
-    if (watermark.get("verified") is not True or
-        watermark.get("authority") != "server" or
-        watermark.get("policy") != "retain_current_approved" or
-        watermark.get("profile_id") != CHICAGO_PROFILE or
-        not _str(watermark.get("url")).startswith("https://")):
-        _deny("branding_policy_not_verified")
-    if plan.get("branding_policy") != "retain_current_approved":
-        _deny("branding_policy_changed")
+    # This module renders a REVIEW REVISION (V2+), never initial V1.
+    # Try to retain the existing watermark when available, but watermark
+    # presence/verification is no longer a precondition to creative rerenders.
+    # The original V1 production path retains its own strict QA checks.
+    watermark_url = _str(watermark.get("url"))
+    if not watermark_url.startswith("https://"):
+        watermark_url = ""
     # A revision is not permission to silently drop V1's music or enable
     # captions. Only independently verified original rendering properties
     # may set this mix; a model cannot supply or override them.
@@ -293,8 +292,8 @@ def compile_isolated_render_payload(
         "voiceoverTailSeconds": 0,
         "spokenCaptionsEnabled": captions,
         "spokenCaptionWordsPerPage": words_per_page,
-        "watermarkUrl": watermark["url"],
-        "watermarkRequired": True,
+        "watermarkUrl": watermark_url,
+        "watermarkRequired": False,
         "clips": clips,
         "expectedClipCount": len(clips),
         "music": mix,

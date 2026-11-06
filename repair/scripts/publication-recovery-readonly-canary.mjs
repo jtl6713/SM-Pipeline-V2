@@ -5,6 +5,18 @@ const api='https://api.cloudflare.com/client/v4/accounts/'+account;
 const target='chicagoshining-studio-api';
 // Exact known already-published IG canary; no bulk scanning or Graph mutations.
 const instagramCanaryRecord='recfTqaYB0h5FCUVi';
+// Exact already-saved IDs; this diagnostic can only GET provider receipts.
+const igRecoveryTargets=[
+ {route:'ig9098',record:'recxIx0ZiWkR1n0ZW',output_id:9098,post_id:'18168690085479740'},
+ {route:'ig5246',record:'rec6Th7faYoS9tJtN',output_id:5246,post_id:'17877174054635991'},
+];
+// Only existing canonical YouTube uploads, no provider mutation. Their inclusion
+// is for live channel-owned GET-only verification, not proof they are public.
+const ytRecoveryTargets=[
+ {route:'yt5321',record:'recLzqmtWJGQvLNTZ',output_id:5321,video_id:'ekWGUhmlnaQ'},
+ {route:'yt4140',record:'recT2eb5eOeioD0nY',output_id:4140,video_id:'PGNXR-WNI3g'},
+ {route:'yt4050',record:'rec0259hg7cjoKl3j',output_id:4050,video_id:'gm9Mxa8ScnM'},
+];
 const rollout=JSON.parse(await fs.readFile(new URL('../../deploy/publication-reconciliation-production-rollout.json',import.meta.url),'utf8'));
 if(!/^rec[A-Za-z0-9]{14}$/.test(String(rollout.canary_record_id)) ||
    !/^[A-Za-z0-9_-]{11}$/.test(String(rollout.canary_video_id)) ||
@@ -54,6 +66,11 @@ try {
     '/${token}/health':'/api/health',
     '/${token}/receipt':'/api/admin/exception-recovery/${rollout.canary_record_id}/receipt?authenticated=1',
     '/${token}/instagram':'/api/admin/exception-recovery/${instagramCanaryRecord}/receipt?authenticated=1',
+    '/${token}/ig9098':'/api/admin/exception-recovery/recxIx0ZiWkR1n0ZW/receipt?authenticated=1',
+    '/${token}/ig5246':'/api/admin/exception-recovery/rec6Th7faYoS9tJtN/receipt?authenticated=1',
+    '/${token}/yt5321':'/api/admin/exception-recovery/recLzqmtWJGQvLNTZ/receipt?authenticated=1',
+    '/${token}/yt4140':'/api/admin/exception-recovery/recT2eb5eOeioD0nY/receipt?authenticated=1',
+    '/${token}/yt4050':'/api/admin/exception-recovery/rec0259hg7cjoKl3j/receipt?authenticated=1',
     '/${token}/history':'/api/admin/exception-recovery/history',
     '/${token}/denied':'/api/admin/exception-recovery/history'
    };
@@ -80,11 +97,66 @@ try {
   throw new Error('verification_bridge_routing_unavailable');
  }
  const health=await probe('health');report.worker_health=health.body.version;
- if(health.status!==200||!String(health.body.version).includes('publication-recovery'))throw new Error('new_recovery_worker_not_deployed');
+ // Validate the actual protected recovery endpoints below, not a mutable release-name substring.
+ if(health.status!==200 || typeof health.body?.version !== 'string')throw new Error('deployed_worker_health_unavailable');
  const denied=await probe('denied');report.unauthenticated_history_status=denied.status;
  if(![401,403].includes(denied.status))throw new Error('history_admin_boundary_failed');
  const history=await probe('history');report.history={status:history.status,source:history.body.source,events:history.body.items?.length};
  if(history.status!==200||history.body.source!=='airtable_exception_recovery_audit')throw new Error('durable_history_unavailable');
+ // Exactly two historical/recent NYC Reels, no attempts, publishes, or
+ // Airtable mutations. Report safe categories, never claim posting on a
+ // missing ID or failed provider/account verification.
+ report.instagram_recovery_probe=[];
+ for(const target of igRecoveryTargets){
+  const result=await probe(target.route);
+  const post=result.body||{};
+  const approvedShape=result.status===200
+    && Number(post.output_id)===target.output_id && post.platform==='Instagram'
+    && post.read_only===true
+    && post.verification?.no_output_write===true
+    && post.verification?.authoritative_state_unchanged===true;
+  const exactProvider=approvedShape
+    && post.remote_id===target.post_id
+    && post.verified_public===true && post.ownership_verified===true;
+  report.instagram_recovery_probe.push({
+    output_id:target.output_id,record_id:target.record,http_status:result.status,
+    shape_verified:approvedShape,provider_exact_public_verified:exactProvider,
+    remote_id:approvedShape?post.remote_id||null:null,
+    permalink:exactProvider?post.permalink||null:null,
+    published_at:exactProvider?post.published_at||null:null,
+    read_only:post.read_only===true,
+    no_output_write:post.verification?.no_output_write===true,
+    evidence:String(post.evidence||post.error||'unverified').slice(0,120),
+    blocked_reason:post.verification?.blocked_reason||null,
+  });
+ }
+ // Bounded provider GET of three unchanged source-backed YouTube video IDs.
+ // Do not set Published or imply successful posting on an absent/private GET.
+ report.youtube_recovery_probe=[];
+ for(const candidate of ytRecoveryTargets){
+  const response=await probe(candidate.route);
+  const evidence=response.body||{};
+  const valid=response.status===200
+    && Number(evidence.output_id)===candidate.output_id
+    && evidence.platform==='YouTube'
+    && evidence.remote_id===candidate.video_id
+    && evidence.read_only===true
+    && evidence.verification?.no_output_write===true
+    && evidence.verification?.authoritative_state_unchanged===true;
+  report.youtube_recovery_probe.push({
+    output_id:candidate.output_id,record_id:candidate.record,
+    http_status:response.status,shape_verified:valid,
+    remote_id:valid?candidate.video_id:null,
+    account_ownership_verified:valid&&evidence.ownership_verified===true,
+    verified_public:valid&&evidence.verified_public===true,
+    verified_delivery:valid&&evidence.verified_delivery===true,
+    eligible_status_only:valid&&evidence.verification?.eligible===true,
+    blocked_reason:evidence.verification?.blocked_reason||null,
+    published_at:valid&&evidence.verified_public===true?evidence.published_at||null:null,
+    no_output_write:evidence.verification?.no_output_write===true,
+    evidence:String(evidence.evidence||evidence.error||'unverified').slice(0,120),
+  });
+ }
  const receipt=await probe('receipt');report.inspected=1;report.receipt=receipt.body;
  const data=receipt.body;
  if(receipt.status!==200||Number(data.output_id)!==rollout.canary_output_id||data.remote_id!==rollout.canary_video_id||data.channel_id!==rollout.canary_channel_id)throw new Error('canary_exact_identity_not_verified');

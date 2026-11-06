@@ -1,0 +1,146 @@
+name: Stage 3 LA MAE DO export preservation audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/stage3-la-mae-reservation-preflight.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stage3-la-mae-reservation-preflight
+  cancel-in-progress: false
+
+jobs:
+  la-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: stage3-la-mae-reservation-readonly
+      LANE: recF7UAn0LkMZZrWZ::instagram
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect active production reservation bindings, no mutations
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl --fail-with-body -sS -H "$AUTH" "$API/chicagoshining-studio-api/deployments" -o /tmp/stage3-deploy.json
+          ACTIVE="$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/stage3-deploy.json)"
+          curl --fail-with-body -sS -H "$AUTH" "$API/chicagoshining-studio-api/versions/$ACTIVE" -o /tmp/stage3-active.json
+          jq -e '.success==true' /tmp/stage3-active.json >/dev/null
+          jq -e '[.result.resources.bindings[]? | select(.name=="STUDIO_SCHEDULE_RESERVATIONS" and .type=="durable_object_namespace")] | length==1' /tmp/stage3-active.json >/dev/null
+          curl --fail-with-body -sS -H "$AUTH" "$API/chicagoshining-studio-api/settings" -o /tmp/stage3-live-settings.json
+          jq -e '.success==true' /tmp/stage3-live-settings.json >/dev/null
+          jq -nc --slurpfile v /tmp/stage3-active.json --slurpfile s /tmp/stage3-live-settings.json '
+            {version_exports:($v[0].result.resources.exports // $v[0].result.script_runtime.exports // null),
+             current_settings_exports:($s[0].result.exports // null),
+             current_settings_export_keys:($s[0].result.exports // {} | keys),
+             active_binding_count:($v[0].result.resources.bindings|length),
+             settings_binding_count:($s[0].result.bindings|length)}' | tee /tmp/stage3-exports-readonly.json
+          jq -nc --arg active "$ACTIVE" --arg lane "$LANE" --slurpfile doc /tmp/stage3-active.json '
+            ($doc[0].result.resources.bindings // []) as $bindings |
+            {active_worker_version:$active, lane:$lane,
+             authority_enabled:([ $bindings[] | select(.name=="STUDIO_SCHEDULE_RESERVATION_AUTHORITY_ENABLED") | .text ][0] // "absent"),
+             allowlist:([ $bindings[] | select(.name=="STUDIO_SCHEDULE_RESERVATION_LANE_ALLOWLIST") | .text ][0] // "absent"),
+             durable_object_binding_present:true}' | tee /tmp/stage3-preflight.json
+          CODE="$(curl -sS -o /tmp/stage3-preexisting.json -w '%{http_code}' -H "$AUTH" "$API/$WORKER_NAME/settings")"
+          test "$CODE" = "404" || { echo "existing_temporary_worker_refusing_to_overwrite=$CODE"; exit 1; }
+
+      - name: Read exact LA Durable Object status through isolated ephemeral Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save wrangler@4.123.0 >/dev/null 2>&1
+          ROOT="$PWD"
+          mkdir -p /tmp/stage3-la-mae
+          cd /tmp/stage3-la-mae
+          cat >worker.mjs <<'WORKER'
+          const LANE = "recF7UAn0LkMZZrWZ::instagram";
+          const IDS = ["rec6viJf8fDV0nxgo","recwCLxBKTQfEDSZU","recfUFn4lTzZ4yrEX"];
+          const EMAIL = "joseph.t.logan@gmail.com";
+          export default {
+            async fetch(request,env) {
+              if (request.method!=="GET" || new URL(request.url).pathname!=="/read" ||
+                  request.headers.get("Authorization")!=="Bearer "+env.READ_TOKEN) {
+                return new Response("Not found",{status:404});
+              }
+              try {
+              const ns=env.STUDIO_SCHEDULE_RESERVATIONS;
+              if (!ns?.get||!ns?.idFromName) return Response.json({ok:false,error:"namespace_missing"},{status:503});
+              const reply=await ns.get(ns.idFromName(LANE)).fetch(new Request("https://schedule-reservation/status"));
+              const raw=await reply.json();
+              const headers = {Accept:"application/json",Origin:"https://studio.chicagoshining.com","Cf-Access-Authenticated-User-Email":EMAIL};
+              const records = [];
+              for (const id of IDS) {
+                const response = await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/outputs/"+id,{headers}));
+                const payload = await response.json().catch(()=>({}));
+                const r=payload.record||{};
+                records.push({id,http:response.status,ok:payload.ok===true,
+                  output_id:r.output_id,platform:r.platform,studio_output_type:r.studio_output_type,
+                  output_status:r.output_status,review_status:r.review_status,publish_status:r.publish_status,
+                  scheduled_post_date:r.scheduled_post_date,scheduled_at:r.scheduled_at,
+                  do_not_publish:r.do_not_publish,published_at:r.published_at});
+              }
+              return Response.json({ok:reply.ok, status:reply.status, lane:LANE, data:raw, records},
+                {status:reply.ok?200:502,headers:{"cache-control":"no-store"}});
+              } catch (error) {
+                return Response.json({ok:false,stage:"bridge_inspection",error_name:String(error?.name||"unknown"),error:String(error?.message||error).slice(0,180)}, {status:502});
+              }
+            }
+          };
+          WORKER
+          cat >wrangler.jsonc <<'CONFIG'
+          {
+            "name":"stage3-la-mae-reservation-readonly",
+            "main":"worker.mjs",
+            "compatibility_date":"2026-10-01",
+            "workers_dev":true,
+            "services":[{"binding":"STUDIO_API","service":"chicagoshining-studio-api"}],
+            "durable_objects":{"bindings":[{
+              "name":"STUDIO_SCHEDULE_RESERVATIONS",
+              "class_name":"ScheduleReservationLane",
+              "script_name":"chicagoshining-studio-api"
+            }]}
+          }
+          CONFIG
+          TOKEN="$(openssl rand -hex 32)"
+          cleanup() {
+            cd "$ROOT"
+            "$ROOT/node_modules/.bin/wrangler" delete --config /tmp/stage3-la-mae/wrangler.jsonc --name "$WORKER_NAME" --force >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          "$ROOT/node_modules/.bin/wrangler" deploy --config wrangler.jsonc --name "$WORKER_NAME" >/tmp/stage3-la-deploy.log 2>&1
+          printf '%s' "$TOKEN" | "$ROOT/node_modules/.bin/wrangler" secret put READ_TOKEN --config wrangler.jsonc --name "$WORKER_NAME" >/dev/null
+          SUB="$(curl --fail-with-body -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" | jq -er '.result.subdomain')"
+          success=false
+          for i in $(seq 1 12); do
+            CODE="$(curl -sS --max-time 30 -o /tmp/stage3-la-status.json -w '%{http_code}' "https://$WORKER_NAME.$SUB.workers.dev/read" -H "Authorization: Bearer $TOKEN")"
+            if [ "$CODE" = "200" ] && jq -e '.ok==true and .data.ok==true' /tmp/stage3-la-status.json >/dev/null 2>&1; then
+              success=true
+              break
+            fi
+            if [[ "$CODE" =~ ^(401|403|404|502|503|504)$ ]] && [ "$i" -lt 12 ]; then sleep 3; continue; fi
+            echo "read_failed_http=$CODE"; jq -c '{ok,stage,error_name,error,records:[.records[]? | {id,http,ok}]}' /tmp/stage3-la-status.json 2>/dev/null || true; exit 1
+          done
+          test "$success" = true
+          jq '{ok,status,lane,data,records}' /tmp/stage3-la-status.json
+          jq -e '.records|length==3 and all(.[];.http==200 and .ok==true)' /tmp/stage3-la-status.json >/dev/null
+          echo "### Stage 3 LA DO status" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '"- Lane: "+.lane, "- Durable Object read: "+(.ok|tostring), "- Quarantine: "+(.data.quarantine // null|tostring), "- Recent committed reservations: "+((.data.recent_reservations // .data.committed_reservations // [])|length|tostring)' /tmp/stage3-la-status.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Confirm ephemeral Worker removed
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/settings"
+          CODE="$(curl -sS -o /tmp/stage3-worker-final.json -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API")"
+          test "$CODE" = "404" || { echo "temporary_worker_not_cleaned_up=$CODE"; exit 1; }
+          echo "temporary_worker_deleted=PASS"

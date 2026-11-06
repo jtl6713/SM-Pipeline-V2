@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'apps/studio-api/vibe-cut.mjs'
+      - 'apps/studio-api/vibe-auto-review.mjs'
+      - 'apps/studio-api/vibe-auto-review.test.mjs'
       - 'apps/studio-api/worker-functions-*.mjs'
       - 'apps/studio-api/vibe-cut-idea-contract.test.mjs'
       - 'apps/studio-web/assets/ez-plan.js'
@@ -30,6 +32,8 @@ jobs:
       - name: Syntax checks
         run: |
           node --check apps/studio-api/vibe-cut.mjs
+          node --check apps/studio-api/vibe-auto-review.mjs
+          node --check apps/studio-api/worker-functions-04.mjs
           node --check apps/studio-api/worker-functions-01.mjs
           node --check apps/studio-api/worker-functions-02.mjs
           node --check apps/studio-web/assets/ez-plan.js
@@ -39,6 +43,9 @@ jobs:
           node --test \
             apps/studio-api/vibe-cut-idea-contract.test.mjs \
             apps/studio-api/vibe-cut.test.mjs \
+            apps/studio-api/vibe-auto-review.test.mjs \
+            apps/studio-web/vibe-auto-review.test.mjs \
+            apps/studio-api/ready-production-queue.test.mjs \
             apps/studio-api/vibe-cut-source-regression.test.mjs \
             apps/studio-api/video-carousel-count-guard.test.mjs \
             apps/studio-api/idea-photo-wait.test.mjs \

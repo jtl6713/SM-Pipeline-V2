@@ -5,9 +5,11 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/deploy-pipeline-runner-via-ops.yml'
+      - 'deploy/i1-durable-runner-release.txt'
 
 permissions:
   contents: read
+  statuses: write
 
 jobs:
   deploy:
@@ -31,11 +33,13 @@ jobs:
             services/pipeline-runner/tests/test_a2b_existing_lookup.py \
             services/pipeline-runner/tests/test_i1_title_uniqueness.py \
             services/pipeline-runner/tests/test_i1_partial_creation.py \
+            services/pipeline-runner/tests/test_i1_durable_jobs.py \
             services/pipeline-runner/tests/test_idea_chain.py \
             services/pipeline-runner/tests/test_airtable_atomic_upsert.py \
             services/pipeline-runner/tests/test_airtable_egress_monitor.py \
             services/pipeline-runner/tests/test_airtable_durable_egress.py \
             services/pipeline-runner/tests/test_r2_studio_exact_source.py \
+            services/pipeline-runner/tests/test_r4_render_request.py \
             services/pipeline-runner/tests/test_profile_music_policy.py \
             services/pipeline-runner/tests/test_item4_variant_batch.py \
             services/pipeline-runner/tests/test_fbs2_storage_retry.py \
@@ -57,11 +61,19 @@ jobs:
             services/pipeline-runner/tests/test_rendering_review_http_transport.py \
             services/pipeline-runner/tests/test_rendering_review_audio_qa.py \
             services/pipeline-runner/tests/test_rendering_review_media_http.py \
+            services/pipeline-runner/tests/test_rendering_review_isolated_render.py \
+            services/pipeline-runner/tests/test_rendering_review_isolated_launch.py \
+            services/pipeline-runner/tests/test_rendering_review_catalog_render_sources.py \
+            services/pipeline-runner/tests/test_rendering_review_graphic_fit.py \
+            services/pipeline-runner/tests/test_rendering_review_original_audio.py \
             services/pipeline-runner/tests/test_ame_encoder.py \
             services/pipeline-runner/tests/test_studio_compress.py \
             services/pipeline-runner/tests/test_a1s_eligibility.py \
             services/pipeline-runner/tests/test_a1_local_compressor.py \
-            services/pipeline-runner/tests/test_internal_media_guard.py
+            services/pipeline-runner/tests/test_internal_media_guard.py \
+            services/pipeline-runner/tests/test_native_gallery_staging_settings.py \
+            services/pipeline-runner/tests/test_native_gallery_auto_execute.py \
+            services/pipeline-runner/tests/test_native_gallery_execute_http.py
 
       - name: Deploy Pipeline Runner through allowlisted Ops action
         shell: bash
@@ -258,6 +270,23 @@ jobs:
             sleep 3
           done
           echo "exact_chicago_ame_shell_timeout"; exit 3
+
+
+      - name: Report verified Pipeline Runner version to GitHub commit
+        if: success()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          EXPECTED=$(grep '^PIPELINE_RUNNER_CODE_VERSION = ' services/pipeline-runner/config.py | cut -d '"' -f 2)
+          test -n "$EXPECTED"
+          # The earlier live version verification must have succeeded.
+          jq -e --arg expected "$EXPECTED" '.ok==true and .version==$expected' /tmp/health.json >/dev/null
+          payload=$(jq -nc --arg version "$EXPECTED"             '{state:"success",context:"production/pipeline-runner",description:("Live /health version " + $version + " verified")}')
+          curl --fail-with-body --silent --show-error --max-time 20             -X POST             -H "Authorization: Bearer $GH_TOKEN"             -H "Accept: application/vnd.github+json"             -H "X-GitHub-Api-Version: 2022-11-28"             -H "Content-Type: application/json"             --data "$payload"             "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" > /tmp/pipeline-runner-deploy-commit-status.json
+          jq -e '.state=="success" and .context=="production/pipeline-runner"' /tmp/pipeline-runner-deploy-commit-status.json >/dev/null
+          echo "production/pipeline-runner=success"
 
 # Trigger: deploy TikTok handoff MIME fix f9d3326
 

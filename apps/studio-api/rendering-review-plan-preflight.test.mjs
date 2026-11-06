@@ -167,3 +167,35 @@ test("gapped or multi-asset timelines fail before committing immutable jobs",asy
     ()=>inspectReviewPlan({...args(),session:session(multiple)}),
     e=>e.code==="TIMELINE_INVALID");
 });
+
+test("frozen plan only reuses authenticated source audio when narration and Drive URL match",async()=>{
+  const original={
+    ...clone(source),
+    original_voiceover_text:candidate.narration,
+    original_voiceover_url:"https://drive.google.com/uc?export=download&id=1NptYQLFLWhLdzUWI8t7-SKH_SiWCJAj2",
+  };
+  const a=await inspectReviewPlan({...args(),source:original});
+  assert.equal(a.ready_to_commit,true);
+  assert.equal(a.plan.creative.preserve_original_audio,true);
+  const legacy=await inspectReviewPlan({...args(),source:{...original,
+    original_voiceover_url:"https://drive.google.com/uc?id=1NptYQLFLWhLdzUWI8t7-SKH_SiWCJAj2&export=download"}});
+  assert.equal(legacy.plan.creative.preserve_original_audio,true);
+  assert.equal(legacy.ready_to_commit,true);
+  assert.notEqual(a.plan_hash,(await inspectReviewPlan(args())).plan_hash);
+  for(const changed of [
+    {original_voiceover_text:"Different voiceover"},
+    {original_voiceover_url:"https://example.org/audio.mp3"},
+    {original_voiceover_url:"https://drive.google.com/uc?export=download&id=123&extra=1"},
+    {original_voiceover_url:""},
+  ]){
+    const b=await inspectReviewPlan({...args(),source:{...original,...changed}});
+    assert.equal(b.plan.creative.preserve_original_audio,false);
+    assert.equal(b.ready_to_commit,true);
+  }
+  const newScript=clone(candidate);
+  newScript.narration="New words must use new text-to-speech";
+  const changed=await inspectReviewPlan({
+    ...args(),source:original,session:session(newScript),
+  });
+  assert.equal(changed.plan.creative.preserve_original_audio,false);
+});

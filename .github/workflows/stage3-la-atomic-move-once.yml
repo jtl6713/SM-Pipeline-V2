@@ -1,0 +1,55 @@
+name: Stage 3 LA MAE atomic collision repair (preserved DO exports)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/stage3-la-atomic-move-once.yml'
+permissions:
+  contents: read
+concurrency:
+  group: stage3-la-atomic-mae-exact-output-2566
+  cancel-in-progress: false
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Assert exact one-time protected scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check repair/scripts/stage3-la-atomic-move-once.mjs
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const s=fs.readFileSync('repair/scripts/stage3-la-atomic-move-once.mjs','utf8');
+          for(const id of ['rec6viJf8fDV0nxgo','recwCLxBKTQfEDSZU','recfUFn4lTzZ4yrEX','recF7UAn0LkMZZrWZ::instagram','2027-01-02T22:00:00.000Z'])
+            if(!s.includes(id))throw Error('missing_fixed_target_'+id);
+          for(const forbidden of ['graph.facebook.com','/publish-now','publish_now:true','Do_Not_Publish:false'])
+            if(s.includes(forbidden))throw Error('forbidden_provider_or_hold_mutation');
+          NODE
+  execute:
+    needs: contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Install pinned Wrangler for validated Cloudflare service binding
+        run: npm install --no-save wrangler@4.123.0
+      - name: Run one scoped protected LA atomic reservation move
+        run: node repair/scripts/stage3-la-atomic-move-once.mjs
+      - name: Save safe readback evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage3-la-atomic-receipt-${{ github.run_id }}
+          path: /tmp/stage3-la-mae-result.json
+          if-no-files-found: ignore
+          retention-days: 30

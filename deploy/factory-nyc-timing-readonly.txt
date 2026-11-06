@@ -2,3 +2,4 @@
 No Airtable writes or publishing; ephemeral worker is deleted after inspection.
 2026-10-20 P0 #981 acceptance: read-only existing authenticated Cloudflare R2 inspector reports global active group backlog (approved/pending/failed) after Worker rollout; no Airtable mutations, no approvals, no publishing.
 2026-10-20 rerun read-only Factory backlog audit with bounded deploy diagnostics, no production writes.
+2026-11-03 P0 Factory approval HTTP 500: run bounded read-only claim registry and stranded owner audit for Chicago, NYC, LA, Miami; no approvals or publishing.

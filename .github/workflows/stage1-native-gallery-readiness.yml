@@ -1,0 +1,186 @@
+name: Stage 1 C5-C6 Private Readiness (Read Only)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/stage1-native-gallery-readiness.yml'
+      - 'deploy/stage1-native-gallery-readiness.txt'
+      - 'tools/stage1/native_gallery_readiness.py'
+      - 'tools/stage1/test_native_gallery_readiness.py'
+      - 'services/pipeline-runner/rendering_review/native_gallery_staging_settings.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Assert inspection cannot mutate native gallery or publish
+        run: python -m unittest discover -s tools/stage1 -p 'test_native_gallery_readiness.py' -v
+
+      - name: Inspect LIVE Windows Runner config, exact rights policy and candidate private Drive folder
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=$(sed -n 's/^PIPELINE_RUNNER_CODE_VERSION = "\([^"]*\)"/\1/p' services/pipeline-runner/config.py)
+          test -n "$expected"
+          candidate="1VdULNl85JDoL_EaurRKMPm0tRi8xOawH"
+          python - "$expected" "$candidate" <<'PY'
+          import json,sys
+          from pathlib import Path
+          expected,folder=sys.argv[1:]
+          ps=r'''$ErrorActionPreference="Continue"
+          $service=Join-Path (Get-Location) 'Services\pipeline-runner\service'
+          $expected='@EXPECTED@'
+          $folder='@FOLDER@'
+          $healthOk=$false
+          $healthVersion=''
+          $codeVersion=''
+          $policyOk=$false
+          $driveOk=$false
+          $venvOk=$false
+          $folderPinned=$false
+          $config=@{}
+          if(Test-Path (Join-Path $service 'config.py')){
+            try{
+              $line=Select-String -LiteralPath (Join-Path $service 'config.py') -Pattern 'PIPELINE_RUNNER_CODE_VERSION\s*=\s*"([^"]+)"' | Select-Object -First 1
+              if($line){$codeVersion=[string]$line.Matches[0].Groups[1].Value}
+            }catch{}
+          }
+          try{
+            $h=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/health' -TimeoutSec 12
+            $healthOk=($h.ok -eq $true)
+            $healthVersion=[string]$h.version
+          }catch{}
+          $envfile=Join-Path $service '.env'
+          if(Test-Path $envfile){
+            try{
+              foreach($line in Get-Content -LiteralPath $envfile){
+                if($line -match '^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*)$'){
+                  $config[$Matches[1]]=$Matches[2].Trim().Trim('"',"'")
+                }
+              }
+            }catch{}
+          }
+          function cfg([string]$key){return [string]($config[$key])}
+          $py=Join-Path $service '.venv\Scripts\python.exe'
+          $venvOk=Test-Path -LiteralPath $py -PathType Leaf
+          if($venvOk){
+            Push-Location $service
+            $env:PYTHONPATH=$service
+            try{
+              $p=& $py -c 'from config import load_settings; from rendering_review.native_gallery_rights_policy import build_approved_native_gallery_clearance; c=build_approved_native_gallery_clearance(load_settings()); print("reviewed" if callable(c) else "blocked")' 2>$null
+              $policyOk=($LASTEXITCODE -eq 0 -and [string]$p -eq 'reviewed')
+            }catch{}
+            try{
+              $v=& $py -c 'from integrations.google_drive import GoogleDriveClient; d=GoogleDriveClient(); m=d.get_file("@FOLDER@"); p=d.list_file_permissions("@FOLDER@"); print("private" if isinstance(m,dict) and m.get("id")=="@FOLDER@" and m.get("mimeType")=="application/vnd.google-apps.folder" and m.get("trashed") is not True and isinstance(p,list) and len(p)>0 and all(isinstance(x,dict) and x.get("type") in ("user","group") for x in p) else "blocked")' 2>$null
+              $driveOk=($LASTEXITCODE -eq 0 -and [string]$v -eq 'private')
+            }catch{}
+            try{
+              $v=& $py -c 'from airtable.client import AirtableClient; from integrations.google_drive import GoogleDriveClient; from rendering_review.native_gallery_staging_settings import resolve_private_native_gallery_staging_folder; f=resolve_private_native_gallery_staging_folder(AirtableClient(), GoogleDriveClient()); print("verified" if f=="@FOLDER@" else "blocked")' 2>$null
+              $folderPinned=($LASTEXITCODE -eq 0 -and [string]$v -eq 'verified')
+            }catch{}
+            Pop-Location
+          }
+          $origin=(cfg 'NATIVE_GALLERY_WORKER_BASE_URL')
+          $originOk=$origin.StartsWith('https://') -and !$origin.Contains('@')
+          $sharedOk=(cfg 'NATIVE_GALLERY_JOB_SHARED_SECRET').Length -ge 24
+          $consumer=(cfg 'NATIVE_GALLERY_RUNNER_CONSUMER_ID')
+          $consumerOk=($consumer -match '^[A-Za-z0-9_-]{8,120}$')
+          $autoOff=(cfg 'NATIVE_GALLERY_AUTO_EXECUTE_ENABLED') -ne 'true'
+          $oneShotOff=(cfg 'NATIVE_GALLERY_RUNNER_EXECUTE_ENABLED') -ne 'true' -and (cfg 'NATIVE_GALLERY_RUNNER_CLAIM_ENABLED') -ne 'true' -and (cfg 'NATIVE_GALLERY_RUNNER_LAUNCH_ENABLED') -ne 'true'
+          $blockers=New-Object 'System.Collections.Generic.List[string]'
+          if(!$venvOk){$blockers.Add('RUNNER_SERVICE_VENV_NOT_FOUND')}
+          if(!$healthOk){$blockers.Add('RUNNER_HEALTH_NOT_OK')}
+          if($codeVersion -ne $expected -or $healthVersion -ne $expected){$blockers.Add('RUNNER_VERSION_MISMATCH')}
+          if(!$policyOk){$blockers.Add('EXACT_PROVIDER_MODEL_RIGHTS_CONFIG_NOT_MATCHED')}
+          if(!$driveOk){$blockers.Add('RUNNER_CANNOT_VERIFY_PRIVATE_DRIVE_STAGING')}
+          if(!$folderPinned){$blockers.Add('STAGING_FOLDER_NOT_PINNED')}
+          if(!$originOk){$blockers.Add('WORKER_URL_NOT_CONFIGURED')}
+          if(!$sharedOk){$blockers.Add('JOB_SHARED_SECRET_NOT_CONFIGURED')}
+          if(!$consumerOk){$blockers.Add('CONSUMER_ID_NOT_CONFIGURED')}
+          if(!$autoOff){$blockers.Add('AUTO_EXECUTION_MUST_REMAIN_OFF')}
+          if(!$oneShotOff){$blockers.Add('EXISTING_EXECUTION_FLAGS_REQUIRE_REVIEW')}
+          $report=[ordered]@{
+            ok=$true; mode='read_only_no_generation'
+            runner_health_ok=[bool]$healthOk
+            runner_source_and_health_version_match=[bool]($codeVersion -eq $expected -and $healthVersion -eq $expected)
+            provider_model_policy_matches_config=[bool]$policyOk
+            runner_can_access_private_staging=[bool]$driveOk
+            staging_folder_pinned=[bool]$folderPinned
+            auto_execution_disabled=[bool]$autoOff
+            one_shot_flags_disabled=[bool]$oneShotOff
+            configuration_prerequisites_verified=($blockers.Count -eq 0)
+            blockers=@($blockers)
+            source_note='No job claimed, no generation, no Drive writes, no legal approval inferred.'
+          }
+          Write-Output ('STAGE1_READINESS_JSON='+($report | ConvertTo-Json -Depth 4 -Compress))
+          '''
+          ps=ps.replace('@EXPECTED@',expected).replace('@FOLDER@',folder)
+          if len(ps)>7800:
+              raise SystemExit('stage1_ops_command_exceeds_dashboard_safe_limit')
+          Path('/tmp/stage1-readiness-shell.json').write_text(json.dumps({"command":ps,"confirm":True}))
+          PY
+          base='https://ops.chicagoshining.com'
+          selected=''
+          for candidate_token in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            if [ -z "$candidate_token" ]; then continue; fi
+            code=$(curl -sS --max-time 20 -o /tmp/stage1-ops-catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate_token" "$base/api/catalog" || true)
+            if [ "$code" = 200 ] && jq -e '.ok==true' /tmp/stage1-ops-catalog.json >/dev/null 2>&1; then
+              selected="$candidate_token"; break
+            fi
+          done
+          test -n "$selected"
+          code=$(curl -sS --max-time 25 -o /tmp/stage1-shell-start.json -w '%{http_code}' \
+            -X POST "$base/api/shell" -H "Authorization: Bearer $selected" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/stage1-readiness-shell.json || true)
+          if [ "$code" != 202 ] && [ "$code" != 200 ]; then
+            echo "stage1_ops_probe_submission_failed_http=$code"
+            jq -r '.error // "unknown"' /tmp/stage1-shell-start.json | head -c 180
+            exit 1
+          fi
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/stage1-shell-start.json)
+          test -n "$job"
+          for i in $(seq 1 55); do
+            code=$(curl -sS --max-time 20 -o /tmp/stage1-shell-job.json -w '%{http_code}' \
+              -H "Authorization: Bearer $selected" "$base/api/jobs/$job" || true)
+            if [ "$code" != 200 ]; then sleep 4; continue; fi
+            state=$(jq -r '.job.status // empty' /tmp/stage1-shell-job.json)
+            if [ "$state" = ok ]; then
+              jq -r '.job.log // ""' /tmp/stage1-shell-job.json |
+                grep '^STAGE1_READINESS_JSON=' | tail -1 |
+                sed 's/^STAGE1_READINESS_JSON=//' > /tmp/stage1-report.json
+              python - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path('/tmp/stage1-report.json').read_text())
+          assert data['mode']=='read_only_no_generation'
+          assert isinstance(data['blockers'],list)
+          print('stage1_live_audit='+json.dumps(data,separators=(',',':')))
+          if data['ok'] is not True:
+              raise SystemExit('stage1_probe_unavailable')
+          PY
+              exit 0
+            fi
+            if [ "$state" = failed ]; then
+              echo 'stage1_ops_probe_failed_without_generation'
+              exit 1
+            fi
+            sleep 4
+          done
+          echo 'stage1_ops_probe_timed_out'
+          exit 1

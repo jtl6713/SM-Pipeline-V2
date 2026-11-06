@@ -35,11 +35,34 @@ export const recoverySnapshot = row => Object.fromEntries(
 // Delivery completion is distinct from provider public release. Airtable's
 // existing "Awaiting Public Release" / "Published Privately" pair closes the
 // Studio handoff without fabricating a public publication or timestamp.
+const privateStudioHandoff = row =>
+  str(row,"Platform")==="YouTube" &&
+  str(row,"Output_Status")==="Awaiting Public Release" &&
+  str(row,"Publish_Status")==="Published Privately";
 const complete = row =>
   (str(row,"Output_Status")==="Published" && str(row,"Publish_Status")==="Published") ||
-  (str(row,"Platform")==="YouTube" &&
-   str(row,"Output_Status")==="Awaiting Public Release" &&
-   str(row,"Publish_Status")==="Published Privately");
+  privateStudioHandoff(row);
+
+/**
+ * A completed private Studio upload is not a completed PUBLIC publication.
+ * Only after the exact scheduled release is due may we re-GET the EXISTING
+ * channel-owned YouTube video. This predicate never authorizes a provider
+ * write, resets a retry, or converts a private video into a public post.
+ */
+export function publicReleaseCatchupCandidate(row, atMs = Date.now()) {
+  if (!privateStudioHandoff(row) || !Number.isFinite(atMs) ||
+      str(row,"Review_Status")!=="Approved" || row?.fields?.Do_Not_Publish === true ||
+      str(row,"Test_Run_ID") || !str(row,"YouTube_Video_ID") ||
+      str(row,"Published_At")) return false;
+  const scheduled = Date.parse(str(row,"YouTube_Scheduled_Publish_At") ||
+    str(row,"Scheduled_Post_Date"));
+  const separateScheduled = Date.parse(str(row,"Scheduled_Post_Date"));
+  if (!Number.isFinite(scheduled) || atMs < scheduled) return false;
+  // Conflicting Studio and YouTube release clocks require investigation.
+  if (Number.isFinite(separateScheduled) && Math.abs(separateScheduled-scheduled)>1000)
+    return false;
+  return true;
+}
 export function autonomousRecoveryPolicy(env = {}) {
   const number = (key, fallback, max) => {
     const n = Number(env[key]);
@@ -115,8 +138,19 @@ export function receiptBlock(row, receipt, nowMs) {
   if(receipt.verified_public) {
     const published=Date.parse(receipt.published_at);
     if(!Number.isFinite(published) || published > nowMs) return "provider_publication_time_missing";
-    if(str(row,"Published_At") && Date.parse(str(row,"Published_At")) !== published)
-      return "conflicting_publication_timestamp";
+    if(str(row,"Published_At")) {
+      const savedAt=Date.parse(str(row,"Published_At"));
+      if(!Number.isFinite(savedAt)) return "conflicting_publication_timestamp";
+      // Meta reports when its post became public. The Python publisher then
+      // records the successful Graph response in Airtable a few seconds later.
+      // This is not an identity conflict. Allow only bounded positive
+      // completion latency for authenticated, account-owned Instagram posts.
+      // Never relax YouTube's exact publication-time contract.
+      const completionLagMs=savedAt-published;
+      if(instagram ? completionLagMs<0 || completionLagMs>120000
+        : completionLagMs!==0)
+        return "conflicting_publication_timestamp";
+    }
   }
   return null;
 }
@@ -189,7 +223,18 @@ export async function reconcilePublication({
       }
     }
   }
-  if(complete(row) && !prior?.pending) return {outcome:"Already Reconciled",record_id:recordId,duplicate:true};
+  const privateCatchup = publicReleaseCatchupCandidate(row,now());
+  // A fresh private delivery remains complete in the current cooldown. Later
+  // release verification must not be permanently suppressed by that handoff.
+  if(complete(row) && !prior?.pending &&
+      (!privateCatchup || Number(prior?.next_at)>now())) {
+    // A private public-release probe is still awaiting evidence, not a newly
+    // completed publication. Preserve cooldown and do not contact provider.
+    if(privateCatchup && prior?.last?.reason === "public_release_not_yet_verified")
+      return {outcome:"Awaiting Verification",record_id:recordId,
+        reason:"public_release_verification_cooldown",skipped:true};
+    return {outcome:"Already Reconciled",record_id:recordId,duplicate:true};
+  }
   // Reopen only legacy terminal configuration failures. Once reprobed, a still
   // missing setting becomes a nonterminal, cooldown-limited verification item.
   // All identity mismatches, holds, exhausted attempts and uncertain writes
@@ -200,7 +245,14 @@ export async function reconcilePublication({
     RETRYABLE_PROVIDER_PROCESSING.has(prior?.last?.reason) &&
     (prior?.attempts||0)<policy.maxAttempts &&
     !(Number(prior?.next_at)>now());
-  if(!prior?.pending && ((prior?.terminal && !oldConfigFailure && !processingPending) ||
+  // The ONE terminal state that can be re-probed is a verified previous
+  // private Studio delivery: it has never proven the eventual public release.
+  // Identity conflicts, Needs Decision, uncertain writes and other terminal
+  // outcomes cannot be reopened by the public-status catch-up.
+  const completedPrivateHandoff = privateCatchup && prior?.terminal &&
+    prior?.last?.outcome === "Corrected" &&
+    prior?.last?.completion_kind === "studio_delivery_completed";
+  if(!prior?.pending && ((prior?.terminal && !oldConfigFailure && !processingPending && !completedPrivateHandoff) ||
       (Number(prior?.next_at)>now() && !oldConfigFailure)))
     return {outcome:prior?.last?.outcome || "Awaiting Verification",record_id:recordId,skipped:true};
   const attempt=uuid();
@@ -232,6 +284,8 @@ export async function reconcilePublication({
     RETRYABLE_PROVIDER_PROCESSING.has(denied) ||
     /unavailable|inaccessible|private|scheduled|stale/.test(denied)
     ?"Awaiting Verification":"Needs Decision",denied);
+  if(privateCatchup && receipt.verified_public!==true)
+    return finish("Awaiting Verification","public_release_not_yet_verified");
   if(!policy.mutate || (!policy.broad && policy.canaryRecord!==recordId))
     return finish("Awaiting Verification","verified_publication_mutation_not_authorized");
   // No cached state may authorize a write after provider latency.
@@ -247,8 +301,12 @@ export async function reconcilePublication({
     ? {Output_Status:"Published",Publish_Status:"Published"}
     : {Output_Status:"Awaiting Public Release",
        Publish_Status:"Published Privately",YouTube_Stage:"Complete"};
-  fields.Publish_Retry_Eligible=false;
-  fields.Publish_Next_Retry_At=null;
+  // A release catch-up only corrects public status and source-backed receipt.
+  // Do not modify publisher retry or cooldown controls on this path.
+  if(!privateCatchup) {
+    fields.Publish_Retry_Eligible=false;
+    fields.Publish_Next_Retry_At=null;
+  }
   if(receipt.verified_public && !str(current,"Published_At")) fields.Published_At=receipt.published_at;
   if(receipt.verified_public && !str(current,"Platform_Post_URL"))
     fields.Platform_Post_URL=receipt.permalink;

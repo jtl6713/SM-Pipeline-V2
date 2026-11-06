@@ -1,4 +1,5 @@
 import { serveMichiganV2CachedPreview } from "./michigan-review-preview-cache.mjs";
+import { evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
 import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 import { readyProductionEnqueue } from "./ready-production-queue.mjs";
@@ -73,6 +74,7 @@ import {
 } from "./desk-inventory.mjs";
 import {
   allocateLibraryBatchNames,
+  allocateLibraryUploadNames,
   combineAirtableFormulas,
   firstLinkedRecordId,
   LIBRARY_ADDED_AT_FIELD,
@@ -2934,27 +2936,40 @@ export async function listAssetLibrary(request, env, url, authorization) {
   const addedTo = parseLibraryDateParam(url.searchParams.get("added_to"));
   const sort = resolveLibraryListSort(url.searchParams.get("sort"), { published: false });
   const crossScope = await resolveLibraryCrossScope(env, url, { useSetting: false });
+  // A single resolved profile drives both server-side Airtable scoping and the
+  // response's profile filter. Previously each path independently reloaded
+  // profiles, amplifying Airtable 429s whenever Library refreshed.
+  const scopeProfile = requestedIds.length || needsProfile
+    ? null : await resolveLibraryScopeProfile(env, authorization, url);
   const scopedProfileId = requestedIds.length || needsProfile || crossScope
-    ? ""
-    : await resolveLibraryScopeProfileId(env, authorization, url);
+    ? "" : (scopeProfile?.id || "");
   const scopeFormula = requestedIds.length || needsProfile
-    ? null
-    : await libraryProfileScopeFormula(env, authorization, url, { includeUnscoped: false, crossScope });
+    ? null : mediaAssetProfileScopeFormula(scopeProfile?.id || "", {
+      includeUnscoped: false,
+      crossScope,
+      profileName: f(scopeProfile, "Profile_Name") || "",
+    });
+  const pageOptions = {
+    limit: requestedIds.length ? Math.min(ASSET_LIBRARY_MAX_PAGE_SIZE, Math.max(requestedIds.length, 1)) : limit,
+    offset,
+    sortField: requestedIds.length ? undefined : sort.sortField,
+    sortDirection: requestedIds.length ? undefined : sort.sortDirection,
+    filterFormula: requestedIds.length
+      ? libraryRecordIdsFilterFormula(requestedIds)
+      : combineAirtableFormulas(
+        assetLibraryFilterFormula(query, needsProfile ? "" : kind, needsProfile),
+        libraryAddedDateFilterFormula(addedFrom, addedTo, "Added_At"),
+        scopeFormula,
+      ),
+  };
+  // Coalesce duplicate Library refreshes only when their authoritative
+  // Airtable filter, offset and sort are identical. Cache read results,
+  // never response headers or user permissions. Relevant writes invalidate.
   const [page, profiles] = await Promise.all([
-    listRecordsPage(env, env.AIRTABLE_MEDIA_TABLE_ID, {
-      limit: requestedIds.length ? Math.min(ASSET_LIBRARY_MAX_PAGE_SIZE, Math.max(requestedIds.length, 1)) : limit,
-      offset,
-      sortField: requestedIds.length ? undefined : sort.sortField,
-      sortDirection: requestedIds.length ? undefined : sort.sortDirection,
-      filterFormula: requestedIds.length
-        ? libraryRecordIdsFilterFormula(requestedIds)
-        : combineAirtableFormulas(
-          assetLibraryFilterFormula(query, needsProfile ? "" : kind, needsProfile),
-          libraryAddedDateFilterFormula(addedFrom, addedTo, "Added_At"),
-          scopeFormula,
-        ),
-    }),
-    listContentProfileRecords(env).catch(() => []),
+    studioReadCoalesce("library:page:" + JSON.stringify(pageOptions), 8000,
+      () => listRecordsPage(env, env.AIRTABLE_MEDIA_TABLE_ID, pageOptions)),
+    studioReadCoalesce("library:profiles", 15000,
+      () => listContentProfileRecords(env)).catch(() => []),
   ]);
   const profilesById = Object.fromEntries((profiles || []).map((row) => [row.id, row]));
   const mapped = page.records
@@ -3072,7 +3087,10 @@ export async function uploadAssetLibraryItems(request, env, authorization, ctx) 
       profileName: f(uploadProfile, "Profile_Name") || "",
     });
     const existingNames = await listLibraryBatchExistingNames(env, batchBase, scopeFormula);
-    batchNames = allocateLibraryBatchNames(batchBase, files.length, existingNames);
+    // A name such as "Lurie 5" starts at 5; do not strip it and append a second number.
+    // Large batches are sent as single-file requests, so Airtable's existing
+    // names also let later requests advance 5, 6, 7 without duplicate titles.
+    batchNames = allocateLibraryUploadNames(rawBatchName, files.length, existingNames);
     if (batchNames.length !== files.length) {
       throw new HttpError(500, "Could not allocate sequential asset names");
     }
@@ -8511,10 +8529,16 @@ export function phase6PreviewFulfillsCurrentReview(record) {
 /*__STUDIO_WORKER_END:phase6PreviewFulfillsCurrentReview__*/
 
 export async function phase6RestoreProductionReviewReady(env, record) {
-  if (Boolean(f(record, "Do_Not_Publish"))) return record;
+  if (Boolean(f(record, "Do_Not_Publish")) ||
+      Boolean(f(record, "Studio_Render_Review_Hold_Active")) ||
+      Boolean(f(record, "Test_Run_ID"))) return record;
   const outputStatus = String(f(record, "Output_Status") || "").trim();
   const reviewStatus = String(f(record, "Review_Status") || "").trim();
   const publishStatus = String(f(record, "Publish_Status") || "").trim();
+  // An old Rendered preview does not override a terminal review decision.
+  if (["Skipped", "Rejected", "Cancelled", "Published"].includes(outputStatus) ||
+      ["Skipped", "Rejected"].includes(reviewStatus) ||
+      f(record, "Published_At") || f(record, "Platform_Post_ID") || f(record, "Platform_Post_URL")) return record;
   if (
     reviewStatus === "Approved"
     || outputStatus === "Approved for Publishing"
@@ -10802,6 +10826,11 @@ export function studioOutputReadyForPublishApproval(record) {
   if (["Approved"].includes(reviewStatus) || outputStatus === "Approved for Publishing") return false;
   if (["Published", "Publishing"].includes(publishStatus)) return false;
   if (Boolean(f(record, "Do_Not_Publish"))) return false;
+  // Factory must validate the actual review package, never just Ready for Review text.
+  // Native photo proposals require their selected slides/preview and cover; video
+  // proposals require a finished file and any required review cover.
+  if (!studioOutputHasReviewableDeliverable(record)) return false;
+  if (evaluateReviewPackage(record).readiness !== "READY") return false;
   if (outputStatus === "In Production" || ["Ready for Render", "Rendering"].includes(String(f(record, "Render_Status") || "").trim())) return false;
   const rendered = String(f(record, "Render_Status") || "").trim() === "Rendered" && Boolean(String(f(record, "Final_File_URL") || "").trim());
   const finished = studioIsFinishedPassthrough(record);

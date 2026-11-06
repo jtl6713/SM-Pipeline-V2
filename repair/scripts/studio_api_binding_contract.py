@@ -91,6 +91,10 @@ OPTIONAL_BINDINGS = {
     "RENDERING_REVIEW_RENDER_OUTBOX_VERIFIED": "secret_text",
     "RENDERING_REVIEW_SCHEDULER_VACATE_VERIFIED": "secret_text",
     "ELEVENLABS_API_KEY": "secret_text",
+    # Guarded durable I1 activation is a separate release; preserve its
+    # secret binding on every ordinary Worker deployment without changing
+    # the live value or treating an arbitrary new binding as authorized.
+    "STUDIO_I1_DURABLE_JOBS": "secret_text",
     "PIPELINE_RUNNER_SHARED_SECRET": "secret_text",
     "PIPELINE_RUNNER_URL": "plain_text",
     "STAGE_BACKEND_SMV1": "plain_text",

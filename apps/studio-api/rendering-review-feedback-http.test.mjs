@@ -8,6 +8,12 @@ const output_id="recA1B2C3D4E5F6G7";
 const flags={RENDERING_REVIEW_FEEDBACK_WRITES_ENABLED:"true",
   RENDERING_REVIEW_MANUAL_ADMISSION_ENABLED:"true",
   RENDERING_REVIEW_INTEGRATION_VERIFIED:"true"};
+const producerFlags={RENDERING_REVIEW_PRODUCER_WRITES_ENABLED:"true",
+  RENDERING_REVIEW_PRODUCER_BRIDGE_ENABLED:"true",
+  RENDERING_REVIEW_MANUAL_ADMISSION_ENABLED:"true",
+  RENDERING_REVIEW_INTEGRATION_VERIFIED:"true",
+  RENDERING_REVIEW_DISPATCH_FENCE_VERIFIED:"true",
+  RENDERING_REVIEW_SCHEDULER_VACATE_VERIFIED:"true"};
 const auth={authenticated:true,authorized:true,user:{record_id:"recU1S2E3R4I5D6A7"},
   permissions:{outputs_review:true}};
 const data={content:"Please give a worked subway route example.",
@@ -41,9 +47,11 @@ function fixture(){
       body:typeof body==="string"?body:JSON.stringify(body),
     });
     return handle({request,env:opts.env||flags,authorization:opts.authorization||auth,
-      output_id,assertWriteRequest:()=>{writeAuthCalls++;},operations});
+      output_id,assertWriteRequest:()=>{writeAuthCalls++;},operations,
+      in_flight_only:opts.in_flight_only===true,
+      review_note_only:opts.review_note_only===true});
   };
-  return {send,writes,get state(){return state;},get writeAuthCalls(){return writeAuthCalls;}};
+  return {send,writes,setState:fn=>{fn(state);},get state(){return state;},get writeAuthCalls(){return writeAuthCalls;}};
 }
 test("all three rollout gates are required; missing one never authorizes a write",async()=>{
   const f=fixture();
@@ -95,5 +103,77 @@ test("stale session rejects but does not mutate or release the review hold",asyn
   const f=fixture();
   await assert.rejects(()=>f.send({...data,expected_version:3}),e=>e.code==="STALE_SESSION");
   assert.equal(f.state.review_hold.active,true);
+  assert.deepEqual(f.writes,[]);
+});
+
+test("in-flight notes save on a held queued render without changing the job or plan",async()=>{
+  const f=fixture();
+  f.setState(state=>{
+    state.state="queued";
+    state.version=5;
+    state.active_job={id:"rrjob-queued-123",attempt_id:"attempt-queued-123",
+      plan_hash:"rrplan-queued-123"};
+    state.plan={version:2,hash:"rrplan-queued-123",frozen:true,missing_assets:[]};
+    state.current_attempt_id="attempt-queued-123";
+    state.attempts.push({id:"attempt-queued-123",number:2,status:"queued",
+      plan_version:2,job_id:"rrjob-queued-123",artifact_id:null});
+  });
+  const before=clone(f.state);
+  const res=await f.send({...data,expected_version:5,content:
+    "For V3, use scene 3 planet exhibit instead of the existing image."},{
+      env:producerFlags,in_flight_only:true});
+  assert.equal(res.ok,true);
+  assert.equal(res.session_version,6);
+  assert.equal(f.state.messages.at(-1).role,"user");
+  assert.equal(f.state.state,"queued");
+  assert.deepEqual(f.state.active_job,before.active_job);
+  assert.deepEqual(f.state.plan,before.plan);
+  assert.deepEqual(f.state.attempts,before.attempts);
+  assert.equal(f.state.review_hold.active,true);
+  assert.equal(f.state.version,6);
+});
+
+test("in-flight comments reject completed, unlocked, or stale sessions without writing",async()=>{
+  const f=fixture();
+  await assert.rejects(()=>f.send(data,{env:producerFlags,in_flight_only:true}),
+    e=>e.code==="IN_FLIGHT_FEEDBACK_NOT_ALLOWED");
+  assert.deepEqual(f.writes,[]);
+  f.setState(s=>{s.state="queued";s.active_job={id:"rrjob-queued-123"};
+    s.review_hold.active=false;});
+  await assert.rejects(()=>f.send(data,{env:producerFlags,in_flight_only:true}),
+    e=>e.code==="IN_FLIGHT_FEEDBACK_NOT_ALLOWED");
+  assert.deepEqual(f.writes,[]);
+  f.setState(s=>{s.state="queued";s.review_hold.active=true;});
+  await assert.rejects(()=>f.send({...data,expected_version:99},{
+    env:producerFlags,in_flight_only:true}),e=>e.code==="STALE_SESSION");
+  assert.deepEqual(f.writes,[]);
+  const disabled={...producerFlags};delete disabled.RENDERING_REVIEW_DISPATCH_FENCE_VERIFIED;
+  await assert.rejects(()=>f.send(data,{env:disabled,in_flight_only:true}),e=>e.status===405);
+  assert.deepEqual(f.writes,[]);
+});
+
+test("save-only review comments remain a separate choice from Producer planning and rendering",async()=>{
+  const f=fixture();
+  const before=clone(f.state);
+  const response=await f.send({...data,content:"Use the original frame two photo."},{
+    env:producerFlags,review_note_only:true});
+  assert.equal(response.ok,true);
+  assert.equal(before.state,"ready_for_review");
+  assert.equal(f.state.state,"discussing","saved feedback makes V1 discussable, without applying edits");
+  assert.equal(f.state.messages.at(-1).role,"user");
+  assert.equal(f.state.messages.at(-1).content,"Use the original frame two photo.");
+  assert.deepEqual(f.state.attempts,before.attempts);
+  assert.deepEqual(f.state.active_job,before.active_job);
+  assert.equal(f.state.review_hold.active,true);
+  assert.equal(f.state.producer_candidate,undefined);
+  assert.equal(f.state.plan,null);
+});
+test("save-only review comments require an active hold and Producer rollout flags",async()=>{
+  const f=fixture();
+  f.setState(x=>x.review_hold.active=false);
+  await assert.rejects(()=>f.send(data,{env:producerFlags,review_note_only:true}),
+    e=>e.code==="REVIEW_NOTE_NOT_ALLOWED");
+  const disabled={...producerFlags};delete disabled.RENDERING_REVIEW_PRODUCER_WRITES_ENABLED;
+  await assert.rejects(()=>f.send(data,{env:disabled,review_note_only:true}),e=>e.status===405);
   assert.deepEqual(f.writes,[]);
 });

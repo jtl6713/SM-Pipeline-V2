@@ -6,6 +6,7 @@ import { producerConversationWritesEnabled } from './rendering-review-producer-p
 import { renderAttemptCommitEnabled } from './rendering-review-attempt-outbox.mjs';
 import {reviewStillStoryboard} from './rendering-review-storyboard.mjs';
 import {projectCreativeMasterGroup,CREATIVE_MASTER_SIBLING_READ_FIELDS} from './creative-master-registry.mjs';
+import {classifyApprovedFactoryHandoff} from './rendering-review-factory-gate.mjs';
 
 const text=x=>String(x??'').trim();
 const rec=x=>/^rec[A-Za-z0-9]{14}$/.test(text(x));
@@ -53,7 +54,7 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
       limit:40,offset:cursor||null,
       filterFormula:'AND({Platform_Output_Type}="Instagram Reel",OR({Final_File_ID}!="",{Final_File_URL}!=""),OR({Studio_Render_Review_Hold_Active}=TRUE(),{Studio_Render_Review_Hold_ID}!="",{Studio_Render_Review_Session_ID}!=""))',
       fields:['Content_Item','Platform','Platform_Output_Type','Render_Status',
-        'Final_File_ID','Final_File_URL','Output_Title','Output_ID','Output_Status',
+        'Final_File_ID','Final_File_URL','Thumbnail_URL','Output_Title','Output_ID','Output_Status',
         'Publish_Status','Published_At','Platform_Post_ID','Platform_Post_URL',
         'Platform_Media_ID','Publish_Started_At',
         'Publish_Locked_At','Publish_Locked_By','Do_Not_Publish',
@@ -114,6 +115,7 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
         output_number:f.Output_ID||null,title:text(f.Output_Title)||('Output '+(f.Output_ID||row.id)),
         render_status:text(f.Render_Status),final_file_id:text(f.Final_File_ID)||null,
         final_file_url:text(f.Final_File_URL)||null,
+        thumbnail_url:text(f.Thumbnail_URL)||null,
         review_held:held,dispatch_started:Boolean(f.Publish_Started_At||f.Publish_Locked_At||f.Publish_Locked_By),
         manual_admission_enabled:false,
       });
@@ -215,8 +217,56 @@ export async function readRenderingReviewWorkspace({env,url,authorization,operat
       }
     }
   }
+  // The separately persisted Job is authoritative for dispatch progress.
+  // A queued session alone cannot prove that any Runner ever received work.
+  // Read only its exact saved job ID and bind it to this held session/output.
+  let render_job=null;
+  const activeJobId=text(session.active_job?.id);
+  if(session.state==='queued'&&held&&/^[A-Za-z0-9_-]{8,120}$/.test(activeJobId)){
+    try{
+      const jobs=await operations.listRecords(env,RENDER_REVIEW_TABLES.jobs,{
+        limit:2,filterFormula:'{Job_ID}="'+activeJobId+'"',
+        fields:['Job_ID','Session_ID','Output_Record_ID','Attempt_ID','Job_State',
+          'Progress_Stage','Progress_Percent','Retry_Count','Lease_Fence','Lease_Owner'],
+      });
+      const job=jobs.length===1?jobs[0]:null;
+      const jf=job?.fields||{};
+      if(jf.Job_ID===activeJobId&&jf.Session_ID===session.id&&
+         jf.Output_Record_ID===outputId&&
+         jf.Attempt_ID===session.current_attempt_id){
+        render_job={
+          verified:true,job_id:activeJobId,state:text(jf.Job_State),
+          stage:text(jf.Progress_Stage),progress_percent:Number(jf.Progress_Percent||0),
+          dispatch_attempts:Number(jf.Retry_Count||0),
+          lease_claimed:Boolean(text(jf.Lease_Owner)||Number(jf.Lease_Fence||0)>0),
+          created_at:text(job.createdTime)||null,
+        };
+      }else render_job={verified:false};
+    }catch{
+      render_job={verified:false};
+    }
+  }
+  // Authoritative, read-only explanation for an accepted V2 which has not
+  // reached Factory. The existing guarded POST rechecks everything itself.
+  let factory_handoff_gate=null;
+  if(session.state==='approved'){
+    let attemptRecords=[];
+    const approvedId=text(session.approved_attempt_id);
+    if(held&&/^[A-Za-z0-9_-]{8,120}$/.test(approvedId)){
+      try{
+        attemptRecords=await operations.listRecords(env,RENDER_REVIEW_TABLES.attempts,{
+          limit:2,filterFormula:'{Attempt_ID}="'+approvedId+'"',
+          fields:['Attempt_ID','Session_ID','Output_Record_ID','Attempt_Number',
+            'Attempt_Status','Artifact_File_ID','Artifact_URL','Validation_Evidence_JSON'],
+        });
+      }catch{attemptRecords=null;}
+    }
+    factory_handoff_gate=classifyApprovedFactoryHandoff({
+      session,held,attemptRecords,
+    });
+  }
   return {ok:true,...summary(row),session,storyboard,
-    creative_group,creative_group_error,
+    render_job,factory_handoff_gate,creative_group,creative_group_error,
     publication_hold_verified:held,
     integrity_error:session.review_hold.active&&!held?'HOLD_NOT_VERIFIED':null,
     preview:{file_id:f.Final_File_ID||null,url:f.Final_File_URL||null,

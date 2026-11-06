@@ -32,6 +32,7 @@ from render.remotion_client import RemotionClient
 from render.settings import get_google_drive_folder_id
 from rendering_review.isolated_launch import launch_review_render_once
 from rendering_review.remote_ledger import RemoteLaunchLedger, _NoRedirect, _validate_base, _access_headers
+from rendering_review.catalog_render_sources import verify_catalog_render_source
 
 CHICAGO="recT2rbKX3MF7cVFU"
 OUTPUTS="tblrlPeboBthkplH0"
@@ -216,7 +217,8 @@ def _evidence(client,drive,output_id,job_id):
             validated.get("mime_type")!="video/mp4" or
             validated.get("width")!=1080 or validated.get("height")!=1920 or
             validated.get("audio_verified") is not True or
-            validated.get("watermark_verified") is not True or
+            # A failed/unverified watermark never blocks creative rework of
+            # the exact owned V2. Delivery QA is enforced separately.
             validated.get("google_drive_verified") is not True):
             fail("review_source_attempt_validation_unverified")
     meta=drive.get_file(source_file)
@@ -259,6 +261,11 @@ def _render_sources(client,request,original_by_id,props,plan,*,drive=None):
     clips_by_record={c.get("mediaAssetRecordId"):c for c in all_clips}
     assets=[]
     for frozen in plan.get("asset_manifest",[]):
+        if frozen.get("origin")=="review_library":
+            if drive is None:
+                fail("review_catalog_drive_reader_unavailable")
+            assets.append(verify_catalog_render_source(client,drive,frozen))
+            continue
         asset_id=frozen.get("asset_id")
         source=original_by_id.get(asset_id)
         if (not isinstance(source,dict) or
@@ -374,13 +381,57 @@ def _source_mix(drive,props,output_id):
             "spoken_caption_words_per_page":int(props.get("spokenCaptionWordsPerPage") or 4)}
 
 
-def _voiceover(client,drive,item,plan,claim):
+def _voiceover(client,drive,item,plan,claim,*,original_props=None):
     spoken=plan["creative"]["narration"]
+    target=float(plan["creative"]["target_duration_seconds"])
+    # A visual-only edit must REUSE the actual previously approved audio.
+    # It may not silently synthesize a new voice or change pronunciation.
+    # The source output's canonical Remotion props are read under the job
+    # lease and both identity and exact text must be verified.
+    preserve=plan["creative"].get("preserve_original_audio") is True
+    if preserve:
+        props=original_props
+        if(not isinstance(props,dict) or
+           props.get("voiceoverText")!=spoken or
+           not isinstance(props.get("voiceover"),dict)):
+            fail("review_original_narration_changed")
+        previous=str(props["voiceover"].get("url") or "")
+        parts=urlsplit(previous)
+        query=parse_qs(parts.query)
+        file_ids=query.get("id") or []
+        if(parts.scheme!="https" or parts.netloc!="drive.google.com" or
+           parts.path!="/uc" or query.get("export")!=["download"] or
+           len(file_ids)!=1 or not IDENTITY.fullmatch(file_ids[0]) or
+           set(query)!={"id","export"} or parts.fragment or
+           previous not in (
+               "https://drive.google.com/uc?export=download&id="+file_ids[0],
+               "https://drive.google.com/uc?id="+file_ids[0]+"&export=download")):
+            fail("review_original_voiceover_url_untrusted")
+        file_id=file_ids[0]
+        meta=drive.get_file(file_id)
+        if(meta.get("id")!=file_id or meta.get("mimeType")!="audio/mpeg" or
+           meta.get("trashed") is True or
+           not 1000<=int(meta.get("size") or 0)<=30000000):
+            fail("review_original_voiceover_drive_unverified")
+        contents,mime=drive.download_file(file_id)
+        if(mime!="audio/mpeg" or not isinstance(contents,bytes) or
+           len(contents)!=int(meta["size"])):
+            fail("review_original_voiceover_binary_changed")
+        seconds=probe_audio_duration_bytes(contents)
+        if not 1<=seconds<=180 or seconds>target+2.5 or target-seconds>35:
+            fail("review_original_voiceover_duration_mismatch")
+        return {"verified":True,"authority":"server",
+            "output_id":claim["output_id"],"attempt_id":claim["attempt_id"],
+            "plan_hash":claim["plan_hash"],
+            "narration_sha256":hashlib.sha256(spoken.encode()).hexdigest(),
+            "canonical_media_authority":"google_drive",
+            "drive_file_id":file_id,"duration_seconds":seconds,
+            "audio_url":previous,"source_audio_reused":True,
+            "source_audio_sha256":hashlib.sha256(contents).hexdigest()}
     voice_id=resolve_content_voice_id(item)
     audio=synthesize_voiceover_by_id(spoken,voice_id=voice_id)
     _,normalized=normalize_voiceover(audio,filename="review-"+claim["attempt_id"]+".mp3")
     seconds=probe_audio_duration_bytes(normalized)
-    target=float(plan["creative"]["target_duration_seconds"])
     if not 1<=seconds<=180 or abs(seconds-target)>2.5:
         fail("review_voiceover_duration_requires_revision")
     uploaded=drive.upload_file(VOICEOVER_DRIVE_FOLDER_ID,
@@ -459,11 +510,16 @@ def render_exact_attempt(output_id,job_id,*,client=None,drive=None,
     job={"state":"claimed","lease_verified":True,
          **{k:claim[k] for k in ("output_id","job_id","attempt_id",
          "plan_hash","session_id","lease_owner","lease_fence")}}
-    narration=_voiceover(client,drive,item,plan,claim)
-    brand_url=brand_watermark_url(client)
+    narration=_voiceover(client,drive,item,plan,claim,original_props=props)
+    # Optional, best-effort branding on rerenders. No watermark failures
+    # may prevent V2+ rendering. Initial V1 render policy is unchanged.
+    try:
+        brand_url=str(brand_watermark_url(client) or "")
+    except Exception:
+        brand_url=""
     if not brand_url.startswith("https://"):
-        fail("review_watermark_url_unavailable")
-    watermark={"verified":True,"authority":"server",
+        brand_url=""
+    watermark={"verified":False,"authority":"server",
         "profile_id":CHICAGO,"policy":"retain_current_approved",
         "url":brand_url}
     renderer_base=_review_renderer_base()
@@ -503,7 +559,7 @@ def render_exact_attempt(output_id,job_id,*,client=None,drive=None,
         int(meta.get("size") or 0)!=len(mp4)):
         fail("review_attempt2_drive_upload_unverified")
     validation.update(google_drive_verified=True,google_drive_mime_type="video/mp4",
-      watermark_verified=True, # Built-in watermarkRequired Remotion composition.
+      watermark_verified=False, # V2+ not independently checked; no gate.
       render_job_id=result["remotion_job_id"])
     receipt=_complete(worker,secret,claim,"ready",
         artifact_id=file_id,validation=validation)

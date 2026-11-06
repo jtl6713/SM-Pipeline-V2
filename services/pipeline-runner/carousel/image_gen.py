@@ -35,8 +35,12 @@ def build_c5_prompt(
     )
 
 
-def generate_carousel_png(prompt: str, *, ratio: str) -> bytes:
-    settings = load_settings()
+def generate_carousel_png(prompt: str, *, ratio: str,
+                          preferred_account: str | None = None,
+                          settings_override: dict | None = None) -> bytes:
+    # Optional immutable per-job routing for protected native gallery C5.
+    # Existing C2/C5 callers keep normal preference behavior when omitted.
+    settings = settings_override if settings_override is not None else load_settings()
     size = image_size_for_ratio(ratio)
     response = post_image_generation(
         settings,
@@ -52,6 +56,8 @@ def generate_carousel_png(prompt: str, *, ratio: str) -> bytes:
         },
         timeout=300,
         stage="carousel",
+        **({"preferred_account": preferred_account}
+           if preferred_account is not None else {}),
     )
     if not response.ok:
         detail = (response.text or "").strip()[:400]

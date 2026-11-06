@@ -157,6 +157,19 @@ export async function inspectReviewPlan({
       ...(a.render_variant_drive_file_id&&a.render_url?{
         render_variant_drive_file_id:str(a.render_variant_drive_file_id),
         render_url:str(a.render_url),
+      }:{}),
+      // A library media receipt must be reverified by the independent Runner
+      // against the transfer queue and the two canonical Drive files.
+      ...(a.origin==="review_library"?{
+        origin:"review_library",
+        source_media_record_id:str(a.source_media_record_id),
+        source_media_class:str(a.source_media_class),
+        variant_transfer_record_id:str(a.variant_transfer_record_id),
+        variant_media_record_id:str(a.variant_media_record_id),
+        source_asset_id:str(a.source_asset_id),
+        source_request_id:str(a.source_request_id),
+        source_size_bytes:a.source_size_bytes,
+        crop_recipe:str(a.crop_recipe),
       }:{})});
   }
   for(const [i,r] of c.requirements.entries()){
@@ -183,6 +196,14 @@ export async function inspectReviewPlan({
     err("DURATION_INCOMPATIBLE","The Instagram Reel plan must end within 180 seconds");
   const unresolvedResearch=blockers.some(x=>x.kind!=="asset");
   const frozen=!unresolvedResearch;
+  // A same-text visual-only revision can use V1's ORIGINAL recorded audio.
+  // The source fields are supplied only by the authoritative Airtable loader;
+  // missing or changed narration stays on the separate synthesis path.
+  const preserveOriginalAudio=
+    typeof source.original_voiceover_text==="string"&&
+    source.original_voiceover_text===c.narration&&
+    /^https:\/\/drive\.google\.com\/uc\?(?:export=download&id=[A-Za-z0-9_-]{8,120}|id=[A-Za-z0-9_-]{8,120}&export=download)$/
+      .test(String(source.original_voiceover_url||""));
   const plan={
     plan_version:Number(session.latest_plan_version||0)+1,
     source_attempt_id:attempt.id,source_artifact_id:attempt.artifact_id,
@@ -193,6 +214,7 @@ export async function inspectReviewPlan({
       narration:c.narration,changes:c.changes,preserve:c.preserve,
       timeline,acceptance_checks:c.acceptance_checks,
       target_duration_seconds:duration,
+      preserve_original_audio:preserveOriginalAudio,
     },
     asset_manifest:resolved,preservation_manifest:preservation,
     factual_receipt_count:factReceipts.filter(r=>r?.verified===true&&

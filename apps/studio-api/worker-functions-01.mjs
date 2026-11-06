@@ -1,8 +1,10 @@
+import { formalFactoryApprovalReady, evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
+import { staleInstagramPublishingDisplay } from "./ig-publishing-display.mjs";
 import { facebookPreapprovalRecoveryReason, facebookPreapprovalRecoveryFields, FACEBOOK_PREAPPROVAL_FORMULA } from "./facebook-preapproval-recovery.mjs";
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
 import { persistVerifiedRecoveryInAirtable } from "./qa-recovery-ledger.mjs";
-import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
+import { studioIdeaTitleKey, studioFindRecentDuplicateTitle, studioRequiresUniqueIdeaTitleForCreate } from "./idea-title-uniqueness.mjs";
 import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
 import { isQueuedForPlatformDispatch } from "./overview-dispatch-counts.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
@@ -281,6 +283,7 @@ import {
   isRealRemotionRetryFailure,
   isRenderQueueCandidateStatus,
   isRenderQueueWaitingStatus,
+  completedRenderRecoveryFields,
   remotionHealthLooksBusy,
   sortRenderQueueCandidates,
 } from "./render-queue.mjs";
@@ -509,6 +512,7 @@ import {
   STUDIO_RENDER_QUEUE_CANDIDATE_FORMULA,
   STUDIO_RFR_MISSING_COVER_FORMULA,
   STUDIO_IDEA_PROFILE_TABLE_ID,
+  STUDIO_PIPELINE_SETTINGS_TABLE_ID,
 } from "./worker.js";
 import {
   item4PulsePipelineStage,
@@ -1056,6 +1060,19 @@ export function studioInvalidateHotReads(env, tableId, method) {
   const verb = String(method || "GET").toUpperCase();
   if (verb === "GET" || verb === "HEAD") return;
   const id = String(tableId || "");
+  // Operations reads profile settings, output queues and media intake.
+  // Never serve a pre-write snapshot after an authoritative Airtable mutation.
+  if ([env?.AIRTABLE_OUTPUT_TABLE_ID, env?.AIRTABLE_MEDIA_TABLE_ID,
+       STUDIO_IDEA_PROFILE_TABLE_ID, STUDIO_PIPELINE_SETTINGS_TABLE_ID,
+       "Production Requests"].includes(id)) {
+    studioReadCacheDropPrefix("operations:");
+  }
+  // Media uploads, profile assignments, and profile changes must invalidate
+  // both the cached Library page and the profile-label lookup immediately.
+  if (id === String(env?.AIRTABLE_MEDIA_TABLE_ID || "") ||
+      id === String(STUDIO_IDEA_PROFILE_TABLE_ID)) {
+    studioReadCacheDropPrefix("library:");
+  }
   if (env?.AIRTABLE_OUTPUT_TABLE_ID && id === env.AIRTABLE_OUTPUT_TABLE_ID) {
     studioMarkMappedListDirty();
     studioReadCacheDropPrefix("outputs:");
@@ -1889,6 +1906,12 @@ export function normalizedOutputState(record) {
 
   const outputStatusLc = text("Output_Status").toLowerCase();
   const publishStatusLc = text("Publish_Status").toLowerCase();
+  // A finished render alone is not permission to advertise a formal review.
+  // Factory and Pipeline share the exact same record-level readiness gate.
+  // This is computed only for explicitly review-staged outputs, preserving the
+  // lean pipeline read and avoiding heavy validation for older terminal rows.
+  const formalReviewReady = outputStatusLc === "ready for review"
+    && formalFactoryApprovalReady(record);
   const outputDeadEarly = outputStatusLc.includes("failed")
     || outputStatusLc.includes("terminal error")
     || outputStatusLc.includes("skipped");
@@ -1920,6 +1943,7 @@ export function normalizedOutputState(record) {
     || has("TikTok_Draft_Status", "draft delivered");
   if (
     readyForReviewIntent
+    && formalReviewReady
     && !approvedOrScheduledEarly
     && studioOutputHasReviewableDeliverable(record)
     && !outputDeadEarly
@@ -1946,6 +1970,11 @@ export function normalizedOutputState(record) {
   // package stayed on Awaiting Approval. A live URL above still means Published.
   if (outputStatusLc === "skipped" || outputStatusLc === "cancelled" || outputStatusLc === "rejected") {
     return "Skipped";
+  }
+  // A returned revision must stay explicitly returned even when its old
+  // rendered MP4 still exists; it is not a new formal review candidate.
+  if (outputStatusLc === "changes requested" || text("Review_Status").toLowerCase() === "changes requested") {
+    return "Changes Requested";
   }
 
   // Live Short + daily quota is an automatic midnight retry. Do not paint
@@ -2010,11 +2039,27 @@ export function normalizedOutputState(record) {
   const inProduction = has("Output_Status", "in production");
   const hasFinishedFile = Boolean(String(f(record, "Final_File_URL") || "").trim());
   const remotionFinished = has("Render_Status", "rendered") && (hasFinishedFile || Boolean(String(f(record, "Studio_Preview_URL") || "").trim()));
-  if (!inProduction || remotionFinished || studioOutputIsNativePhoto(record)) {
-    if ((has("Review_Status", "pending") || has("Review_Status", "review sent") || has("Output_Status", "ready for review")) && studioOutputHasReviewableDeliverable(record)) return "Ready for Review";
-    if (has("Render_Status", "rendered") && studioOutputHasReviewableDeliverable(record)) return "Ready for Review";
+  if (formalReviewReady && studioOutputHasReviewableDeliverable(record)) {
+    return "Ready for Review";
+  }
+  // Do not let Rendered, a stale Review Sent, or a held output silently become
+  // Ready for Review in Pipeline while Factory refuses formal approval.
+  if (outputStatusLc === "ready for review") {
+    const reviewDecision = text("Review_Status").toLowerCase();
+    if (reviewDecision === "changes requested") return "Changes Requested";
+    if (Boolean(fields.Do_Not_Publish) || Boolean(fields.Studio_Render_Review_Hold_Active)) {
+      return "Review Held";
+    }
+    if (has("Render_Status", "waiting in render queue") || has("Render_Status", "ready for render")) {
+      return "Waiting in Render Queue";
+    }
+    if (has("Render_Status", "rendering")) return "Rendering";
+    return "Preparing Assets";
   }
   if (has("Render_Status", "waiting in render queue")) return "Waiting in Render Queue";
+  if (has("Render_Status", "rendered") && studioOutputHasReviewableDeliverable(record)) {
+    return "Rendered";
+  }
   if (isActiveRemotionHold(record, f) || has("FB_Slideshow_Status", "rendering") || has("FB_Slideshow_Status", "starting render")) {
     return "Rendering";
   }
@@ -2407,11 +2452,23 @@ export function mapOutput(record, job = null, queueMeta = null, contentRecord = 
   let studioState = normalizedOutputState(record);
   const renderStatus = String(f(record, "Render_Status") || "").trim();
   const hasJob = Boolean(String(f(record, "Remotion_Job_ID") || "").trim());
-  if (queueMeta?.label && isRenderQueueCandidateStatus(renderStatus) && !hasJob) {
+  const hasFinal = Boolean(String(f(record, "Final_File_URL") || "").trim());
+  // Historical R5 status regressions must never masquerade as a free R4
+  // admission. Preserve the raw Airtable Render_Status for diagnostics while
+  // showing a reconciliation state instead of a fake waiting position.
+  if (isRenderQueueCandidateStatus(renderStatus) && hasFinal) {
+    studioState = "Finished media recorded — status reconciliation";
+  } else if (isRenderQueueCandidateStatus(renderStatus) && hasJob) {
+    studioState = "Remotion job recorded — status reconciliation";
+  } else if (queueMeta?.label && isRenderQueueCandidateStatus(renderStatus)) {
     studioState = queueMeta.label;
   } else if (studioState === "Waiting in Render Queue") {
     studioState = queueMeta?.label || "Waiting in render queue";
   }
+  // Display-only legacy IG diagnosis. No provider identity proves no upload.
+  const stalePublishDisplay = studioState === "Uploading"
+    ? staleInstagramPublishingDisplay(record) : null;
+  if (stalePublishDisplay) studioState = stalePublishDisplay.label;
   const studioJob = job && typeof job === "object" ? job : null;
   return {
     id: record.id,
@@ -2432,8 +2489,11 @@ export function mapOutput(record, job = null, queueMeta = null, contentRecord = 
     render_queue_label: queueMeta?.label || null,
     review_status: f(record, "Review_Status"),
     publish_status: f(record, "Publish_Status"),
-    platform_publish_status: platformPublishStatus(record),
-    studio_progress_percent: outputProgressPercent(record, studioState, studioJob),
+    platform_publish_status: stalePublishDisplay?.label || platformPublishStatus(record),
+    studio_progress_percent: stalePublishDisplay ? null : outputProgressPercent(record, studioState, studioJob),
+    publish_verification_required: Boolean(stalePublishDisplay),
+    publish_verification_reason: stalePublishDisplay?.reason || null,
+    publish_remote_progress_verified: stalePublishDisplay ? false : null,
     studio_production_job: studioJob,
     studio_job_label: studioProductionJobLabel(studioJob),
     studio_job_error: studioJob?.error || null,
@@ -3693,13 +3753,18 @@ export async function createIdea(request, env, authorization, ctx = null) {
     throw new HttpError(400, "Vibe Cut source aspect must be vertical or horizontal");
   }
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
-  const duplicateTitle = await studioFindRecentDuplicateTitle(input.title, (kind, formula, field) => {
-    const table = kind === "idea" ? env.AIRTABLE_IDEA_TABLE_ID : env.AIRTABLE_CONTENT_TABLE_ID;
-    if (!table) throw new HttpError(503, "Title history unavailable: creation blocked");
-    return listRecords(env, table, { filterFormula: formula, fields: [field], limit: 1001 });
-  });
-  if (duplicateTitle) throw new HttpError(409,
-    `This title is already used within 365 days (${duplicateTitle.source}). Choose a genuinely different subject.`);
+  // A Vibe Cut records a new uploaded source, not a proposed new editorial
+  // subject. Reusing an existing title (including retries of the same video)
+  // must never block source upload. Keep the 365-day guard for all other Ideas.
+  if (studioRequiresUniqueIdeaTitleForCreate(payload?.input_kind)) {
+    const duplicateTitle = await studioFindRecentDuplicateTitle(input.title, (kind, formula, field) => {
+      const table = kind === "idea" ? env.AIRTABLE_IDEA_TABLE_ID : env.AIRTABLE_CONTENT_TABLE_ID;
+      if (!table) throw new HttpError(503, "Title history unavailable: creation blocked");
+      return listRecords(env, table, { filterFormula: formula, fields: [field], limit: 1001 });
+    });
+    if (duplicateTitle) throw new HttpError(409,
+      `This title is already used within 365 days (${duplicateTitle.source}). Choose a genuinely different subject.`);
+  }
   const fields = {
     Candidate_Title: input.title,
     Candidate_Status: "Generated",
@@ -5867,7 +5932,17 @@ export async function completeItem4LargeVideoUploadSession(request, env, url, au
   if (!parts.length) throw new HttpError(400, "parts are required");
   const assets = item4AssetManifest(record);
   const draft = item4FindLargeUploadDraft(assets, assetId);
-  if (!draft) throw new HttpError(404, "Upload session not found");
+  if (!draft) {
+    const saved = assets.find(row => String(row?.id || "") === assetId && row?.upload_status === "complete");
+    if (!saved) throw new HttpError(404, "Upload session not found");
+    // The completion response may have been lost after the canonical write.
+    // Return existing state without duplicating queue work or replacing media.
+    return respond(request, env, {
+      ok: true, uploaded: 1, assets, record: mapProductionRequest(record),
+      authority_status: String(f(record, "Studio_Master_Asset_Status") || "Uploading"),
+      compression_pending: item4AssetCompressionPending(saved),
+    });
+  }
   const multipart = env.STUDIO_MEDIA.resumeMultipartUpload(draft.r2_key, draft.multipart_upload_id);
   const normalizedParts = parts
     .map((row) => ({
@@ -5876,10 +5951,21 @@ export async function completeItem4LargeVideoUploadSession(request, env, url, au
     }))
     .filter((row) => row.partNumber > 0 && row.etag)
     .sort((a, b) => a.partNumber - b.partNumber);
-  if (!normalizedParts.length) throw new HttpError(400, "No valid upload parts were provided");
-  await multipart.complete(normalizedParts);
-  const object = await env.STUDIO_MEDIA.head(draft.r2_key).catch(() => null);
-  const sizeBytes = Number(object?.size || draft.size_bytes || 0);
+  if (!normalizedParts.length || normalizedParts.length !== parts.length
+    || normalizedParts.some((part, index) => !Number.isInteger(part.partNumber) || part.partNumber !== index + 1)) {
+    throw new HttpError(400, "Upload parts must be complete, unique, and consecutive");
+  }
+  // Recover a lost response between R2 completion and the Airtable write.
+  // Never infer success from the declared size when the stored object is absent.
+  let object = await env.STUDIO_MEDIA.head(draft.r2_key);
+  if (!object) {
+    await multipart.complete(normalizedParts);
+    object = await env.STUDIO_MEDIA.head(draft.r2_key);
+  }
+  if (!object || Number(object.size) !== Number(draft.size_bytes)) {
+    throw new HttpError(409, "Stored video size does not match the selected file. Source preserved for recovery.");
+  }
+  const sizeBytes = Number(object.size);
   const durationSeconds = Number(body?.duration_seconds || body?.durationSeconds || 0);
   const width = Number(body?.width || 0) || null;
   const height = Number(body?.height || 0) || null;
@@ -6673,7 +6759,7 @@ export function ideaLibraryIsEligibleVideo(record) {
 }
 /*__STUDIO_WORKER_END:ideaLibraryIsEligibleVideo__*/
 
-export function ideaLibraryIsEligibleImage(record) {
+export function ideaLibraryIsEligibleImage(record, { allowLowQuality = false } = {}) {
   const mediaClass = String(f(record, "Media_Class") || "").trim().toLowerCase();
   const mime = String(f(record, "MIME_Type") || "").trim().toLowerCase();
   const classification = String(f(record, "Classification_Status") || "").trim().toLowerCase();
@@ -6688,10 +6774,15 @@ export function ideaLibraryIsEligibleImage(record) {
   if (f(record, "Active") === false) return false;
   if (eligibility === "ineligible") return false;
   if (status && status !== "available") return false;
-  // Asset Manager exclusions are authoritative, including Wrong Subject and
-  // Watermarked/Branded. Never rank a flagged still then attempt watermarking it.
+  // All exclusion reasons remain authoritative for automation. The ONLY
+  // operator-selectable exception is "Low Quality" by itself: never bypass
+  // Do Not Use, Wrong Subject, Watermarked/Branded, or overlay review.
   const exclusions = f(record, "Exclusion_Reasons");
-  if (Array.isArray(exclusions) ? exclusions.length > 0 : Boolean(String(exclusions || "").trim())) return false;
+  const reasons = (Array.isArray(exclusions) ? exclusions : [exclusions])
+    .flatMap((value) => String((value && typeof value === "object" ? value.name : value) || "").split(","))
+    .map((value) => value.trim().toLowerCase()).filter(Boolean);
+  if (reasons.some((reason) => reason !== "low quality")) return false;
+  if (reasons.length && !allowLowQuality) return false;
   const reviewNote = String(f(record, "Potential_Match_Notes") || "");
   if (/QA-ASSET-THIRD-PARTY-OVERLAY:\s*(?:REVIEW|Review required)/i.test(reviewNote)) return false;
   return Boolean(googleDriveFileId(record));
@@ -6775,6 +6866,12 @@ export function mapIdeaLibraryAsset(record, row = {}) {
     preselected: Boolean(row.preselected),
     intake_date: ideaLibraryIntakeDate(record) || null,
     intake_batch_id: row.intake_batch_id || String(f(record, "Intake_Batch_ID") || "").trim() || null,
+    // A warning for operator choice, not an automatic-quality endorsement.
+    quality_warning: (Array.isArray(f(record, "Exclusion_Reasons"))
+      ? f(record, "Exclusion_Reasons")
+      : [f(record, "Exclusion_Reasons")])
+      .some((reason) => String((reason && typeof reason === "object" ? reason.name : reason) || "")
+        .trim().toLowerCase() === "low quality") ? "Low Quality" : null,
   };
 }
 /*__STUDIO_WORKER_END:mapIdeaLibraryAsset__*/
@@ -6802,7 +6899,7 @@ export async function getMediaLibraryStills(request, env, url, authorization) {
   });
   const items = [];
   for (const record of records) {
-    const eligible = ideaLibraryIsEligibleImage(record) || (includeVideo && ideaLibraryIsEligibleVideo(record));
+    const eligible = ideaLibraryIsEligibleImage(record, { allowLowQuality: true }) || (includeVideo && ideaLibraryIsEligibleVideo(record));
     if (!eligible) continue;
     const name = f(record, "Asset Name");
     if (phrase) {
@@ -6876,7 +6973,7 @@ export async function getIdeaLibrarySuggestions(request, env, url, authorization
   });
   const ranked = [];
   for (const record of records) {
-    const eligible = ideaLibraryIsEligibleImage(record)
+    const eligible = ideaLibraryIsEligibleImage(record, { allowLowQuality: true })
       || (includeVideo && ideaLibraryIsEligibleVideo(record));
     if (!eligible) continue;
     if (phrase) {
@@ -6913,7 +7010,11 @@ export async function getIdeaLibrarySuggestions(request, env, url, authorization
       queryTokens,
       today,
     });
-    if (row) ranked.push(row);
+    if (row) ranked.push({
+      ...row,
+      // Low-quality media can be chosen, but never automatically checked.
+      preselected: row.preselected && ideaLibraryIsEligibleImage(record),
+    });
   }
   ranked.sort((a, b) => {
     if (operatorSearch || phrase) {
@@ -6950,7 +7051,7 @@ export async function getIdeaLibrarySuggestions(request, env, url, authorization
 }
 /*__STUDIO_WORKER_END:getIdeaLibrarySuggestions__*/
 
-export function ideaLibraryRejectReason(record, { allowVideo = false } = {}) {
+export function ideaLibraryRejectReason(record, { allowVideo = false, allowLowQuality = false } = {}) {
   const mediaClass = String(f(record, "Media_Class") || "").trim().toLowerCase();
   const mime = String(f(record, "MIME_Type") || "").trim().toLowerCase();
   const name = String(f(record, "Asset Name") || record.id);
@@ -6958,7 +7059,7 @@ export function ideaLibraryRejectReason(record, { allowVideo = false } = {}) {
   if (Boolean(f(record, "Do_Not_Use"))) return `${name} is marked Do Not Use`;
   if (isVideo && !allowVideo) return `${name} is a video; this picker attaches stills only`;
   if (isVideo && allowVideo && !ideaLibraryIsEligibleVideo(record)) return `${name} is not eligible Raw Footage`;
-  if (!isVideo && !ideaLibraryIsEligibleImage(record)) return `${name} is not a classified eligible library image`;
+  if (!isVideo && !ideaLibraryIsEligibleImage(record, { allowLowQuality })) return `${name} is not a classified eligible library image`;
   if (!isVideo && ideaLibraryFileBytes(record) > ITEM4_MAX_FILE_BYTES) return `${name} exceeds the 25 MB per-image limit`;
   if (isVideo && ideaLibraryFileBytes(record) > ITEM4_MAX_CLIP_FILE_BYTES) return `${name} exceeds the 200 MB clip limit`;
   return null;
@@ -7109,6 +7210,9 @@ export async function attachItem4LibraryAssets(request, env, url, authorization)
     || item4IsClipInputKind(item4ParseEzOrigin(record).inputKind)
     || item4HasVideoMasters(existing)
     || item4IsClipInputKind(payload?.origin_kind);
+  // Only an explicit operator request can waive the Low Quality warning.
+  // Internal autonomous attachments never send this flag.
+  const allowLowQuality = payload?.allow_low_quality === true;
   const already = new Set(existing.map((asset) => String(asset?.media_asset_record_id || "").trim()).filter(Boolean));
   const incoming = ids.filter((id) => !already.has(id));
   if (!incoming.length) {
@@ -7125,8 +7229,11 @@ export async function attachItem4LibraryAssets(request, env, url, authorization)
   const appended = [];
   for (const mediaId of incoming) {
     let media = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, mediaId);
+    // Reject every other exclusion BEFORE invoking the watermark runner.
+    const preflight = ideaLibraryRejectReason(media, { allowVideo, allowLowQuality });
+    if (preflight) throw new HttpError(409, preflight);
     media = await ensureChicagoWatermarkedLibraryAsset(env, media, record);
-    const reject = ideaLibraryRejectReason(media, { allowVideo });
+    const reject = ideaLibraryRejectReason(media, { allowVideo, allowLowQuality });
     if (reject) throw new HttpError(409, reject);
     const driveId = googleDriveFileId(media);
     const driveUrl = String(f(media, "Google Drive URL") || "").trim()
@@ -7886,6 +7993,19 @@ export async function studioStampParentAiCoverOnOutput(env, po, parent) {
   const currentCaption = String(f(po, "Output_Caption") || "").trim();
   const needsCaption = Boolean(caption && !currentCaption);
   if (!po?.id) return false;
+  // AI-cover hydration is not a review transition. A skipped, returned,
+  // approved, published, test or explicitly held output must never be
+  // resurrected into Ready for Review when a parent cover is restamped.
+  const status = String(f(po, "Output_Status") || "").trim().toLowerCase();
+  const review = String(f(po, "Review_Status") || "").trim().toLowerCase();
+  const publish = String(f(po, "Publish_Status") || "").trim().toLowerCase();
+  if (Boolean(f(po, "Do_Not_Publish")) ||
+      Boolean(f(po, "Studio_Render_Review_Hold_Active")) ||
+      Boolean(f(po, "Test_Run_ID")) ||
+      ["skipped", "cancelled", "rejected", "changes requested", "approved", "approved for publishing", "published"].includes(status) ||
+      ["skipped", "rejected", "changes requested", "approved"].includes(review) ||
+      ["ready to schedule", "scheduled", "publishing", "published"].includes(publish) ||
+      f(po, "Published_At") || f(po, "Platform_Post_ID") || f(po, "Platform_Post_URL")) return false;
   const current = String(f(po, "Thumbnail_URL") || "").trim();
   const currentDesigned = studioAiThumbnailUrl(current);
   if (ai && currentDesigned === ai) {
@@ -7913,7 +8033,15 @@ export async function studioStampParentAiCoverOnOutput(env, po, parent) {
   }
   if (needsCaption) fields.Output_Caption = caption;
   if (native && !isStory && !/^ready for review$/i.test(String(f(po, "Output_Status") || ""))) {
-    fields.Output_Status = "Ready for Review";
+    // Writing a cover/caption is not itself completion of a native-photo
+    // package. Promote only when the resulting full Airtable record would
+    // pass the same exact completeness gate used by Factory Approve.
+    const proposal = { ...po, fields: {
+      ...(po.fields || {}), ...fields, Output_Status: "Ready for Review",
+    } };
+    if (evaluateReviewPackage(proposal).readiness === "READY") {
+      fields.Output_Status = "Ready for Review";
+    }
   }
   if (!Object.keys(fields).length) return false;
   await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, po.id, {
@@ -9537,7 +9665,7 @@ export function studioIsVibeCut(recordOrNotes) {
 /*__STUDIO_WORKER_END:studioIsVibeCut__*/
 
 export function skipsProductionApprove(text) {
-  return String(text || "").includes("origin=autonomous") || /origin=az-finished-video/i.test(String(text || ""));
+  return /origin=(?:autonomous|az-finished-video|prepare-to-review)/i.test(String(text || ""));
 }
 /*__STUDIO_WORKER_END:skipsProductionApprove__*/
 
@@ -11304,6 +11432,16 @@ export function studioStreamMediaAssetId(value) {
 /*__STUDIO_WORKER_END:studioStreamMediaAssetId__*/
 
 export async function studioRepairUnfetchableRenderSources(env, row) {
+  // Do not overwrite a job/final from a late R4/R5 write. The returned
+  // manifest must come from the current authoritative record, not a scan.
+  const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
+  if (!["Ready for Render", "Failed"].includes(String(f(current, "Render_Status") || "").trim()) ||
+      String(f(current, "Remotion_Job_ID") || "").trim() ||
+      String(f(current, "Final_File_URL") || "").trim() ||
+      String(f(current, "Test_Run_ID") || "").trim()) {
+    return { repaired: 0, unresolved: [] };
+  }
+  row = current;
   const raw = String(f(row, "Render_Clip_List_JSON") || "").trim();
   if (!raw || !raw.includes("/api/media-assets/")) return { repaired: 0, unresolved: [] };
   let clips;
@@ -11348,6 +11486,16 @@ export async function studioRepairUnfetchableRenderSources(env, row) {
   }
 
   if (!repaired || unresolved.length) return { repaired, unresolved };
+  // Remote media lookups can outlive the original preflight; check again
+  // immediately before replacing any render artifacts or manifest.
+  const latest = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
+  if (!["Ready for Render", "Failed"].includes(String(f(latest, "Render_Status") || "").trim()) ||
+      String(f(latest, "Remotion_Job_ID") || "").trim() ||
+      String(f(latest, "Final_File_URL") || "").trim() ||
+      String(f(latest, "Test_Run_ID") || "").trim() ||
+      String(f(latest, "Render_Clip_List_JSON") || "").trim() !== raw) {
+    return { repaired: 0, unresolved: [] };
+  }
   await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
     method: "PATCH",
     body: JSON.stringify({
@@ -11375,11 +11523,11 @@ export async function studioRepairUnfetchableRenderSources(env, row) {
 export function studioPrivateDriveWatermarkSignature(row) {
   const props = String(f(row, "Remotion_Props_JSON") || "");
   const err = String(f(row, "Remotion_Error_Message") || f(row, "Final_File_Error_Message") || "");
-  const propsMatch = /"watermarkUrl"\s*:\s*"https?:\/\/(?:drive|docs)\.google\.com/i.test(props);
   const errorMatch = /PRIVATE_DRIVE_WATERMARK/i.test(err)
     || (/watermark/i.test(err)
       && /drive\.google\.com|ERR_BLOCKED_BY_ORB|HTTP status code:\s*403|Error loading image with src/i.test(err));
-  return propsMatch || errorMatch;
+  // A Drive-backed watermark is normal; only a reported failure authorizes recovery.
+  return errorMatch;
 }
 /*__STUDIO_WORKER_END:studioPrivateDriveWatermarkSignature__*/
 
@@ -11550,7 +11698,7 @@ export async function studioHealVoiceoverExceedsRender(env, options = {}) {
 }
 /*__STUDIO_WORKER_END:studioHealVoiceoverExceedsRender__*/
 
-export async function healStuckStudioRenders(env) {
+export async function healStuckStudioRenders(env, { skipR4Admission = false } = {}) {
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const pulses = [];
   const voCache = { parents: new Map(), requests: new Map() };
@@ -11575,11 +11723,14 @@ export async function healStuckStudioRenders(env) {
     limit: 12,
     sortField: "Output_ID",
     sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),OR(FIND("drive.google.com",{Remotion_Props_JSON}&"")>0,FIND("PRIVATE_DRIVE_WATERMARK",{Remotion_Error_Message}&"")>0),OR({Render_Status}="Blocked",{Render_Status}="Failed",{Render_Status}="Rendering",{Render_Status}="Ready for Render"))',
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),OR(FIND("drive.google.com",{Remotion_Props_JSON}&"")>0,FIND("PRIVATE_DRIVE_WATERMARK",{Remotion_Error_Message}&"")>0),OR({Render_Status}="Blocked",{Render_Status}="Failed"),{Remotion_Job_ID}="",{Final_File_URL}="")',
   }).catch(() => []);
   let privateDriveRequeues = 0;
   for (const row of privateDriveWatermarkRows || []) {
     if (!studioPrivateDriveWatermarkSignature(row)) continue;
+    if (!["Blocked", "Failed"].includes(String(f(row, "Render_Status") || "").trim()) ||
+        String(f(row, "Remotion_Job_ID") || "").trim() ||
+        String(f(row, "Final_File_URL") || "").trim()) continue;
     if (!rendererSupportsPrivateDrive) {
       pulses.push({ key: "R4_PRIVATE_DRIVE_WATERMARK", id: row.id, skipped: "renderer_not_updated" });
       continue;
@@ -11589,7 +11740,17 @@ export async function healStuckStudioRenders(env) {
       continue;
     }
     try {
-      await studioResetPrivateDriveWatermarkRender(env, row);
+      // Fail closed on a stale scan. An R5 completion or new Remotion job
+      // since enumeration must never be cleared for watermark recovery.
+      const current = await airtableFetch(env, outputTable, row.id);
+      if (!["Blocked", "Failed"].includes(String(f(current, "Render_Status") || "").trim()) ||
+          String(f(current, "Remotion_Job_ID") || "").trim() ||
+          String(f(current, "Final_File_URL") || "").trim() ||
+          !studioPrivateDriveWatermarkSignature(current)) {
+        pulses.push({ key: "R4_PRIVATE_DRIVE_WATERMARK", id: row.id, skipped: "no_longer_failed" });
+        continue;
+      }
+      await studioResetPrivateDriveWatermarkRender(env, current);
       const payload = await item4PulseR4Python(env, { outputRecordId: row.id });
       privateDriveRequeues += 1;
       pulses.push({ key: "R4_PRIVATE_DRIVE_WATERMARK", id: row.id, payload, repaired: true });
@@ -11601,7 +11762,7 @@ export async function healStuckStudioRenders(env) {
     limit: 12,
     sortField: "Output_ID",
     sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),FIND("/api/media-assets/",{Render_Clip_List_JSON}&"")>0,OR({Render_Status}="Ready for Render",{Render_Status}="Rendering",{Render_Status}="Failed"))',
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),FIND("/api/media-assets/",{Render_Clip_List_JSON}&"")>0,OR({Render_Status}="Ready for Render",{Render_Status}="Failed"),{Remotion_Job_ID}="",{Final_File_URL}="")',
   }).catch(() => []);
   for (const row of invalidSourceRows || []) {
     try {
@@ -11696,32 +11857,33 @@ export async function healStuckStudioRenders(env) {
       continue;
     }
   }
-  try {
-    const admitted = await studioAdmitRenderQueue(env, { limit: 80 });
-    pulses.push({ key: "R4_QUEUE_ADMIT", ...admitted });
-  } catch (error) {
-    pulses.push({ key: "R4_QUEUE_ADMIT", error: error instanceof Error ? error.message : String(error) });
+  if (!skipR4Admission) {
+    try {
+      const admitted = await studioAdmitRenderQueue(env, { limit: 80 });
+      pulses.push({ key: "R4_QUEUE_ADMIT", ...admitted });
+    } catch (error) {
+      pulses.push({ key: "R4_QUEUE_ADMIT", error: error instanceof Error ? error.message : String(error) });
+    }
   }
-  // Completed MP4 left on Render_Status=Rendering / Output_Status=In Production
-  // (Output 1807 YouTube Short). longRendering below requires a Remotion job and
-  // blank Final_File_URL, so it never heals this. Promote to Ready for Review.
+  // R5 may finish upload while an earlier R4 snapshot/legacy healer writes
+  // Ready/Waiting back over Rendered (observed #9639 and #9642). Reconcile
+  // only when a saved Remotion job AND an uploaded final MP4 already exist.
+  // Keep the same file/job, do not touch approval, scheduling or Review_Status;
+  // the RR1 workflow remains responsible for sending actual review mail.
   const staleRenderingDone = await listRecords(env, outputTable, {
     limit: 12,
     sortField: "Output_ID",
-    sortDirection: "desc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,{Render_Status}="Rendering",{Final_File_URL}!="",OR({Output_Status}="In Production",{Output_Status}="Rendering",AND({Review_Status}="Review Sent",{Output_Status}!="Ready for Review",{Output_Status}!="Approved for Publishing",{Output_Status}!="Published")))',
+    sortDirection: "asc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),{Do_Not_Publish}=0,OR({Render_Status}="Rendering",{Render_Status}="Ready for Render",{Render_Status}="Ready to Render",{Render_Status}="Waiting in Render Queue"),{Remotion_Job_ID}!="",{Final_File_URL}!="",{Final_File_Storage_Status}="Uploaded",OR({Output_Status}="In Production",{Output_Status}="Rendering"))',
   }).catch(() => []);
   for (const row of staleRenderingDone || []) {
     try {
-      const review = String(f(row, "Review_Status") || "").trim();
-      const fields = {
-        Render_Status: "Rendered",
-        Output_Status: "Ready for Review",
-        Remotion_Error_Message: "",
-        Final_File_Error_Message: "",
-      };
-      if (!review || review === "Pending" || review === "Ready for Review") {
-        fields.Review_Status = "Review Sent";
+      // A stale query cannot overwrite a human decision or newer render state.
+      const current = await airtableFetch(env, outputTable, row.id);
+      const fields = completedRenderRecoveryFields(current, f);
+      if (!fields) {
+        pulses.push({ key: "R5_STALE_RENDERING_FINALIZED", id: row.id, skipped: "no_longer_eligible" });
+        continue;
       }
       await airtableFetch(env, outputTable, row.id, {
         method: "PATCH",
@@ -11749,7 +11911,7 @@ export async function healStuckStudioRenders(env) {
   }
   const failedRenders = await scanOutstandingFailedOutputs(
     (options) => listRecordsPage(env, outputTable, options),
-    { filterFormula: 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Failed")' });
+    { filterFormula: 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Failed",{Remotion_Job_ID}="",{Final_File_URL}="")' });
   let failedRenderRetries = 0;
   for (const row of failedRenders) {
     if (failedRenderRetries >= 6) break;
@@ -11770,19 +11932,33 @@ export async function healStuckStudioRenders(env) {
       last_modified: f(row, "Last_Modified") || f(row, "Updated_At") || f(row, "Last_Render_Attempt_At"),
     })) continue;
     try {
-      failedRenderRetries += 1;
+      // Failed rows can receive a late R5 job/final after enumeration. Never
+      // erase either receipt or auto-launch an ambiguous remote job.
+      const current = await airtableFetch(env, outputTable, row.id);
+      if (String(f(current, "Render_Status") || "").trim() !== "Failed" ||
+          String(f(current, "Remotion_Job_ID") || "").trim() ||
+          String(f(current, "Final_File_URL") || "").trim() ||
+          String(f(current, "Test_Run_ID") || "").trim() ||
+          String(f(current, "Published_At") || "").trim() ||
+          Boolean(f(current, "Do_Not_Publish")) ||
+          failedOutputRetryGate(current) ||
+          studioPrivateDriveWatermarkSignature(current) ||
+          isDriveMusic404Error(String(f(current, "Remotion_Error_Message") || f(current, "Final_File_Error_Message") || ""))) {
+        pulses.push({ key: "R4_FAILED_REQUEUE", id: row.id, skipped: "ambiguous_or_changed_render" });
+        continue;
+      }
       await airtableFetch(env, outputTable, row.id, {
         method: "PATCH",
         body: JSON.stringify({
           fields: {
             Render_Status: "Ready for Render",
-            Remotion_Job_ID: "",
             Remotion_Error_Message: "",
             Final_File_Error_Message: "",
           },
           typecast: true,
         }),
       });
+      failedRenderRetries += 1;
       const payload = await item4PulseR4Python(env, { outputRecordId: row.id });
       pulses.push({ key: "R4_FAILED_REQUEUE", id: row.id, payload });
     } catch (error) {
@@ -11792,7 +11968,18 @@ export async function healStuckStudioRenders(env) {
   if (pulses.length) {
     console.log("Studio stuck-render heal", JSON.stringify({
       count: pulses.length,
-      pulses: pulses.map((row) => ({ key: row.key, id: row.id, error: row.error || null })),
+      pulses: pulses.map((row) => ({
+        key: row.key, id: row.id, error: row.error || null,
+        ...(row.key === "R4_QUEUE_ADMIT" ? {
+          admitted: row.admitted === true,
+          reason: row.reason || null,
+          head: row.head || null,
+          runner_status: row.started?.status || null,
+          runner_reason: row.started?.details?.run?.reason || row.started?.details?.reason || null,
+          runner_message: String(row.started?.message || "").slice(0, 220),
+          skipped: (row.skipped || []).map(x => ({ id: x.id, reason: x.reason })),
+        } : {}),
+      })),
     }));
   }
   return pulses;

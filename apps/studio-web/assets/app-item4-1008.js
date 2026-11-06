@@ -4,6 +4,11 @@
   const apiBase = configuredBase || window.location.origin;
   const $ = (id) => document.getElementById(id);
   let activeIdea = null;
+  // Read-only Manage gallery: keep Production draft snapshots scoped to the opened idea.
+  let ideaAssignedMediaMetadata = new Map();
+  let ideaAssignedDraftAssets = [];
+  let ideaAssignedAssetLoadSequence = 0;
+  let ideaAssignedMediaLoading = false;
   let ideaTimedScriptPreview = null;
   let ideasCache = [];
   let ideaPhotoManagePauseTimer = null;
@@ -64,6 +69,8 @@
   let ideaGenerationPollTimer = null;
   let ideaGenerationInFlight = false;
   let scriptedShortProposal = null;
+  let scriptedShortProposalVersions = [];
+  let scriptedShortFeedbackBusy = false;
   let activeProductionRequest = null;
   let productionRequestMusic = [];
   let productionRequestOutputs = [];
@@ -189,6 +196,10 @@
   let vibeUploadAbortController = null;
   let vibeUploadRetryRequested = false;
   let vibeUploadRetryInFlight = false;
+  const vibeAutoReviewAttempted = new Set();
+  const vibeAutoReviewInFlight = new Set();
+  const vibeAutoReviewQueued = new Set();
+  const vibeAutoReviewErrors = new Map();
   let item4PreparingVariants = false;
   let item4PrepareError = "";
   let item4PrepareClockTimer = 0;
@@ -289,7 +300,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.801-dynamic-creative-masters";
+  const BUILD_ID = "item4-0.6.896-formal-review-parity";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -2633,6 +2644,16 @@
       meta.textContent = `${proposal.scene_count || proposal.timeline.segments.length} scenes · about ${seconds.toFixed(0)} seconds estimated · ${suggestions} shot${suggestions === 1 ? "" : "s"} still to create. The recorded voiceover sets the real length.`;
     }
     renderScriptedShortProducerPlan(proposal.producer_plan || null);
+    const version = $("scriptedShortRevisionCount");
+    if (version) version.textContent = `Proposal version ${Math.max(1, scriptedShortProposalVersions.length)}`;
+    const undo = $("scriptedShortUndo");
+    if (undo) undo.disabled = scriptedShortFeedbackBusy || scriptedShortProposalVersions.length <= 1;
+    const changes = $("scriptedShortFeedbackHistory");
+    if (changes) {
+      const edits = scriptedShortProposalVersions.slice(1).map((entry, index) => `<li><strong>Revision ${index + 1}:</strong> ${escapeHtml(entry.feedback || "")}</li>`);
+      changes.innerHTML = edits.join("");
+      changes.hidden = !edits.length;
+    }
     host.innerHTML = proposal.timeline.segments.map((segment, index) => {
       const owned = Boolean(String(segment.asset_id || "").trim()) && segment.shot_status !== "suggestion";
       const clock = window.StudioTimedScript
@@ -2647,6 +2668,11 @@
 
   function clearScriptedShortProposal() {
     scriptedShortProposal = null;
+    scriptedShortProposalVersions = [];
+    const feedback = $("scriptedShortFeedback");
+    if (feedback) feedback.value = "";
+    const status = $("scriptedShortFeedbackStatus");
+    if (status) status.textContent = "";
     renderScriptedShortProposal(null);
   }
 
@@ -2750,6 +2776,7 @@
         timeoutMs: 150000,
       });
       scriptedShortProposal = result;
+      scriptedShortProposalVersions = [{ proposal: result, feedback: null }];
       renderScriptedShortProposal(result);
       setScriptedShortMessage(result.message || "Proposal ready. Accept keeps it. Decline throws it away.", "success");
     } catch (error) {
@@ -2761,6 +2788,181 @@
         button.textContent = "Propose";
       }
     }
+  });
+
+  function scriptedShortFallbackDirective(feedback) {
+    const raw = String(feedback || "").trim();
+    const references = [...raw.matchAll(/\b(?:slide|scene)\s*#?\s*(\d{1,2})\b/gi)];
+    if (references.length !== 1) throw new Error("Name exactly one slide, such as slide 4.");
+    const scene = Number(references[0][1]);
+    if (!/\b(?:replace|swap|substitute)\b/i.test(raw)) {
+      if (/\b(?:remove|delete|drop)\b/i.test(raw)) return { scene, action: "remove" };
+      throw new Error("Request a specific slide removal or replacement.");
+    }
+    const bullet = raw.match(/(?:^|\n)\s*[-•]\s*([^\r\n]{3,150})\s*$/m)
+      || raw.match(/\b(?:uploaded|named|called|titled)\s*[.:]\s*[-–—]\s*([^\r\n]{3,150})\s*$/i);
+    const afterWith = raw.match(/\b(?:replace|swap|substitute)\b[\s\S]*?\bwith\s+([\s\S]+)$/i);
+    const name = String(bullet?.[1] || afterWith?.[1] || "")
+      .replace(/^(?:the\s+)?(?:following\s+)?(?:clip|video|asset|footage)\b\s*/i, "")
+      .replace(/^(?:which\s+)?(?:i\s+)?(?:just\s+)?uploaded\b\s*[.:,-]*\s*/i, "")
+      .replace(/^(?:named|called|titled)\s+/i, "")
+      .replace(/^[-–—:"'“”]+|[-–—:"'“”.]+$/g, "").trim();
+    if (!name || name.length > 150 || /\b(?:which|i just uploaded)\b/i.test(name)) {
+      throw new Error("Specify the uploaded video's exact name after 'with' or on a separate bullet line.");
+    }
+    return { scene, action: "replace", asset_name: name };
+  }
+
+  function scriptedShortFallbackName(value) {
+    return String(value || "").trim().toLowerCase()
+      .replace(/\.(?:mp4|mov|m4v|webm|avi)$/i, "").replace(/[_–—-]+/g, " ")
+      .replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+  }
+
+  function scriptedShortFallbackApply(base, directive, clip = null) {
+    const original = base?.timeline?.segments;
+    if (!Array.isArray(original) || !original.length) throw new Error("A proposal is required.");
+    if (!Number.isInteger(directive.scene) || directive.scene < 1 || directive.scene > original.length) {
+      throw new Error("Slide " + directive.scene + " does not exist in this proposal.");
+    }
+    const segments = original.map(item => ({ ...item }));
+    if (directive.action === "remove") {
+      if (segments.length <= 5) throw new Error("At least five scenes are required. Replace this slide instead.");
+      segments.splice(directive.scene - 1, 1);
+    } else {
+      if (!clip?.id || clip.media_kind !== "video") throw new Error("A verified library video is required.");
+      segments[directive.scene - 1] = {
+        ...segments[directive.scene - 1],
+        asset_id: clip.id,
+        media_asset_id: clip.id,
+        suggested_visual: clip.name,
+        shot_status: "owned",
+        media_type: clip.mime_type || "video",
+        source_duration_seconds: Number(clip.duration_seconds) || null,
+      };
+    }
+    let cursor = 0;
+    const updatedSegments = segments.map((scene, index) => {
+      const duration = Math.max(0, Number(scene.duration_seconds) || 0);
+      const start = Math.round(cursor * 1000) / 1000;
+      cursor += duration;
+      return { ...scene, index: index + 1, start_seconds: start,
+        end_seconds: Math.round(cursor * 1000) / 1000 };
+    });
+    const count = updatedSegments.filter(scene => !String(scene.asset_id || "").trim()).length;
+    return { ...base, source: "existing-library-api", timeline: {
+      ...base.timeline, segments: updatedSegments,
+      duration_seconds: Math.round(cursor * 1000) / 1000,
+    }, scene_count: updatedSegments.length, duration_seconds: cursor,
+    suggestion_count: count, owned_count: updatedSegments.length - count,
+    // A locally revised proposal cannot claim to have passed the server Quality Agent.
+    producer_plan: null, asset_validation: null, revision: {
+      action: directive.action, scene: directive.scene, asset_name: clip?.name || null,
+    }, message: "Revised proposal ready. Accept will perform authoritative Quality Agent checks before saving." };
+  }
+
+  async function scriptedShortLegacyApiRevision(base, feedback, profile) {
+    const directive = scriptedShortFallbackDirective(feedback);
+    if (directive.action === "remove") return scriptedShortFallbackApply(base, directive);
+    let offset = "";
+    const all = [];
+    for (let page = 0; page < 3; page += 1) {
+      const query = new URLSearchParams({
+        q: '"' + directive.asset_name + '"', kind: "video",
+        limit: "100", content_profile_id: profile,
+      });
+      if (offset) query.set("offset", offset);
+      const payload = await api("/api/library?" + query.toString(), { timeoutMs: 35000 });
+      if (payload.content_profile_id && String(payload.content_profile_id) !== String(profile)) {
+        throw new Error("The library returned another profile's media. Revision was not applied.");
+      }
+      all.push(...(Array.isArray(payload.records) ? payload.records : []));
+      offset = String(payload.offset || "");
+      if (!offset) break;
+    }
+    if (offset) throw new Error("Too many similar library clips. Rename the upload uniquely.");
+    const key = scriptedShortFallbackName(directive.asset_name);
+    const candidates = all.filter(row => scriptedShortFallbackName(row.name) === key
+      && String(row.content_profile_id || "") === String(profile));
+    if (!candidates.length) throw new Error("Clip '" + directive.asset_name + "' was not found in this profile's library.");
+    if (candidates.length !== 1) throw new Error("Multiple uploaded clips have that name. Rename one uniquely.");
+    const clip = candidates[0];
+    if (clip.do_not_use || clip.media_kind !== "video" || !clip.google_drive_file_id) {
+      throw new Error("That upload is unavailable, not video, or incomplete in Google Drive.");
+    }
+    return scriptedShortFallbackApply(base, directive, clip);
+  }
+
+  $("scriptedShortRevise")?.addEventListener("click", async () => {
+    const base = scriptedShortProposal;
+    const feedbackInput = $("scriptedShortFeedback");
+    const feedback = String(feedbackInput?.value || "").trim();
+    const status = $("scriptedShortFeedbackStatus");
+    if (!base?.timeline) {
+      if (status) status.textContent = "Create a proposal before requesting changes.";
+      return;
+    }
+    if (!feedback || feedback.length > 3000) {
+      if (status) status.textContent = "Describe your changes in 1–3,000 characters.";
+      return;
+    }
+    if (scriptedShortFeedbackBusy) return;
+    scriptedShortFeedbackBusy = true;
+    const profile = selectedProfileId;
+    const button = $("scriptedShortRevise");
+    const accept = $("scriptedShortAccept");
+    if (button) { button.disabled = true; button.textContent = "Revising…"; }
+    if (accept) accept.disabled = true;
+    if (status) status.textContent = "Checking the named clip and updating the proposal…";
+    try {
+      let result;
+      try {
+        result = await api("/api/scripted-short/revise", {
+          method: "POST",
+          body: JSON.stringify({
+            prompt: base.prompt,
+            creative_brief: base.creative_brief || base.prompt,
+            content_profile_id: profile,
+            timeline: base.timeline,
+            feedback,
+          }),
+          timeoutMs: 150000,
+          retries: 1,
+        });
+      } catch (error) {
+        // A phased Worker rollout may lag behind Pages. Never fallback on a
+        // Quality Agent rejection, permission failure or infrastructure error.
+        if (error?.status !== 404 && error?.status !== 405) throw error;
+        result = await scriptedShortLegacyApiRevision(base, feedback, profile);
+      }
+      if (scriptedShortProposal !== base || selectedProfileId !== profile) {
+        if (status) status.textContent = "The proposal or profile changed. That revision was not applied.";
+        return;
+      }
+      scriptedShortProposal = result;
+      scriptedShortProposalVersions.push({ proposal: result, feedback });
+      renderScriptedShortProposal(result);
+      if (feedbackInput) feedbackInput.value = "";
+      if (status) status.textContent = result.message || "Revised proposal ready. Review it before accepting.";
+      setScriptedShortMessage("The revised proposal is ready for your review.", "success");
+    } catch (error) {
+      if (status) status.textContent = error.message || "Could not revise the proposal. Your earlier proposal is unchanged.";
+    } finally {
+      scriptedShortFeedbackBusy = false;
+      if (button) { button.disabled = false; button.textContent = "Revise proposal"; }
+      if (accept) accept.disabled = false;
+      const undo = $("scriptedShortUndo");
+      if (undo) undo.disabled = scriptedShortProposalVersions.length <= 1;
+    }
+  });
+
+  $("scriptedShortUndo")?.addEventListener("click", () => {
+    if (scriptedShortFeedbackBusy || scriptedShortProposalVersions.length <= 1) return;
+    scriptedShortProposalVersions.pop();
+    scriptedShortProposal = scriptedShortProposalVersions.at(-1).proposal;
+    renderScriptedShortProposal(scriptedShortProposal);
+    const status = $("scriptedShortFeedbackStatus");
+    if (status) status.textContent = "Restored the previous proposal version. Nothing was saved or published.";
   });
 
   $("scriptedShortDecline")?.addEventListener("click", () => {
@@ -2787,6 +2989,7 @@
           creative_brief: scriptedShortProposal.creative_brief || scriptedShortProposal.prompt || $("scriptedShortPrompt")?.value || "",
           content_profile_id: selectedProfileId,
           timeline: scriptedShortProposal.timeline,
+          proposal_feedback: scriptedShortProposalVersions.slice(1).map(entry => entry.feedback),
         }),
         timeoutMs: 150000,
       });
@@ -3232,11 +3435,37 @@
   function ideaLibraryIdsFromIdea(idea) {
     const fromField = Array.isArray(idea?.library_asset_ids) ? idea.library_asset_ids : [];
     const fromLinks = Array.isArray(idea?.matched_media_asset_links) ? idea.matched_media_asset_links : [];
+    const fromSelected = Array.isArray(idea?.photo_match?.selected)
+      ? idea.photo_match.selected.map((row) => typeof row === "string" ? row : row?.id)
+      : [];
     const fromNotes = String(idea?.production_notes || "").match(/media_asset_ids=([^\n]+)/i);
     const noted = fromNotes
       ? fromNotes[1].split(/[,\s]+/).map((value) => String(value || "").trim())
       : [];
-    return [...new Set([...fromField, ...fromLinks, ...noted].map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+    return [...new Set([...fromField, ...fromLinks, ...fromSelected, ...noted].map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+  }
+
+  function ideaAssignedAssetRows(idea) {
+    const rows = new Map();
+    for (const id of ideaLibraryIdsFromIdea(idea)) {
+      rows.set(id, { id, preview_path: `/api/media-assets/${encodeURIComponent(id)}/preview` });
+    }
+    for (const selected of Array.isArray(idea?.photo_match?.selected) ? idea.photo_match.selected : []) {
+      if (!selected || typeof selected !== "object") continue;
+      const id = String(selected.id || "").trim();
+      if (rows.has(id)) rows.set(id, { ...rows.get(id), ...selected, id });
+    }
+    for (const [id, detail] of ideaAssignedMediaMetadata) {
+      if (rows.has(id)) rows.set(id, { ...rows.get(id), ...detail, id });
+    }
+    for (const asset of ideaAssignedDraftAssets) {
+      const id = String(asset?.media_asset_record_id || asset?.id || "").trim();
+      if (!id) continue;
+      const existing = rows.get(id) || {};
+      rows.set(id, { ...existing, ...asset, id,
+        preview_path: asset.preview_url || asset.preview_path || asset.poster_url || asset.thumbnail_url || existing.preview_path || "" });
+    }
+    return [...rows.values()];
   }
 
   function renderIdeaMatchedPhotos(idea) {
@@ -3245,39 +3474,76 @@
     const heading = $("ideaMatchedPhotosHeading");
     const hint = $("ideaMatchedPhotosHint");
     if (!wrap || !grid) return;
-
-    const ready = String(idea?.photo_wait_status || "").trim() === "Ready";
-    const ids = ready
-      ? [...new Set([
-          ...(Array.isArray(idea?.matched_media_asset_links) ? idea.matched_media_asset_links : []),
-          ...(Array.isArray(idea?.photo_match?.selected) ? idea.photo_match.selected.map((row) => row?.id) : []),
-        ].map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))]
-      : [];
-
-    wrap.hidden = ids.length < 1;
-    if (!ids.length) {
-      grid.innerHTML = "";
-      if (heading) heading.textContent = "Selected photos";
-      return;
-    }
-
-    if (heading) heading.textContent = `Selected photos (${ids.length})`;
-    if (hint) hint.textContent = "These photos were selected automatically and are already attached to the Production draft. Open Production to add, remove, or reorder them before approval.";
-
-    const items = ids.map((id, index) => ({
-      id,
-      name: `Selected photo ${index + 1}`,
-      media_kind: "photo",
-      preview_path: `/api/media-assets/${encodeURIComponent(id)}/preview`,
-    }));
+    const items = ideaAssignedAssetRows(idea);
+    // The gallery is a first-class, always-visible part of Manage (not photo-wait-only).
+    wrap.hidden = false;
+    if (heading) heading.textContent = `Assigned assets (${items.length})`;
+    if (hint) hint.textContent = items.length
+      ? "These photos and clips are already linked to this idea or its Production draft. Open Production to add, remove, or reorder them before approval."
+      : (ideaAssignedMediaLoading
+          ? "Checking assigned assets in the linked Production draft…"
+          : "No assets are currently assigned. Use Add new media or Use existing to attach photos and clips.");
     grid.innerHTML = items.map((item, index) => {
+      const name = String(item.name || item.filename || item.file_name || `Asset ${index + 1}`).trim();
+      const video = String(item.media_kind || item.kind || "").toLowerCase() === "video"
+        || String(item.mime_type || "").toLowerCase().startsWith("video/")
+        || /\.(mp4|mov|m4v|webm)$/i.test(name);
       const preview = ideaLibraryPreviewUrl(item);
+      const media = video
+        ? (item4ClipPlayerHtml({
+            previewUrl: preview,
+            streamUrl: item4ClipStreamUrl(item),
+            name,
+            durationSeconds: item.duration_seconds,
+            asset: item,
+          }) || `<span class="idea-library-card-fallback">Clip preview unavailable</span>`)
+        : (preview
+            ? `<img src="${escapeHtml(preview)}" alt="${escapeHtml(name)}" loading="eager" decoding="async">`
+            : `<span class="idea-library-card-fallback">Photo preview unavailable</span>`);
       return `<div class="idea-library-card" data-library-id="${escapeHtml(item.id)}" data-selected="true">
-        <img src="${escapeHtml(preview)}" alt="Selected photo ${index + 1}" loading="lazy">
-        <span>Photo ${index + 1}</span>
+        ${media}
+        ${video ? '<em class="idea-library-card-tag">Clip</em>' : ""}
+        ${item.quality_warning === "Low Quality" ? '<em class="idea-library-card-tag">Low quality · manual choice</em>' : ""}
+        <span>${escapeHtml(name)}</span>
       </div>`;
     }).join("");
     bindLibraryPickerPreviews(grid, items);
+    item4BindClipPlayers(grid);
+  }
+
+  async function hydrateIdeaAssignedAssets(idea) {
+    const ideaId = String(idea?.id || "").trim();
+    if (!ideaId) return;
+    const sequence = ++ideaAssignedAssetLoadSequence;
+    const assignedIds = ideaLibraryIdsFromIdea(idea);
+    const requestId = String(idea?.production_request_id || "").trim();
+    if (!assignedIds.length && !requestId) return;
+    ideaAssignedMediaLoading = true;
+    renderIdeaMatchedPhotos(idea);
+    // Fetch metadata only for actual existing links. Suggestions are NOT assignments.
+    const [suggestions, browsed, draft] = await Promise.allSettled([
+      assignedIds.length ? fetchIdeaLibrarySuggested(ideaId) : Promise.resolve({ suggested: [], matches: [] }),
+      assignedIds.length ? fetchLibraryBrowse("", ideaId) : Promise.resolve([]),
+      requestId ? api(`/api/production-requests/${encodeURIComponent(requestId)}/item4?snapshot=1`, {
+        timeoutMs: 20000, retries: 0,
+      }) : Promise.resolve({ assets: [] }),
+    ]);
+    if (sequence !== ideaAssignedAssetLoadSequence || activeIdea?.id !== ideaId
+        || !$("ideaManageDrawer")?.classList.contains("open")) return;
+    const linked = new Set(ideaLibraryIdsFromIdea(activeIdea));
+    const suggestionData = suggestions.status === "fulfilled" ? suggestions.value : {};
+    const candidates = [
+      ...(Array.isArray(suggestionData?.suggested) ? suggestionData.suggested : []),
+      ...(Array.isArray(suggestionData?.matches) ? suggestionData.matches : []),
+      ...(browsed.status === "fulfilled" && Array.isArray(browsed.value) ? browsed.value : []),
+    ];
+    ideaAssignedMediaMetadata = new Map(candidates
+      .filter((item) => linked.has(String(item?.id || "")))
+      .map((item) => [String(item.id), item]));
+    const snapshot = draft.status === "fulfilled" ? draft.value : null;
+    ideaAssignedDraftAssets = Array.isArray(snapshot?.assets) ? snapshot.assets : [];
+    ideaAssignedMediaLoading = false;
+    renderIdeaMatchedPhotos(activeIdea);
   }
 
   function updateIdeaDrawer(idea) {
@@ -3289,6 +3555,13 @@
     const preservedSuggested = pickerWasOpen ? new Set(ideaLibrarySuggestedIds) : null;
     const preservedSeeded = pickerWasOpen ? ideaLibrarySeeded : false;
     const preservedSearch = pickerWasOpen ? String($("ideaLibrarySearch")?.value || "") : "";
+    if (!sameIdea) {
+      // Never let an earlier idea's late metadata replace this one's assigned gallery.
+      ideaAssignedAssetLoadSequence += 1;
+      ideaAssignedMediaMetadata = new Map();
+      ideaAssignedDraftAssets = [];
+      ideaAssignedMediaLoading = false;
+    }
     activeIdea = idea;
     $("ideaDrawerHeading").textContent = idea?.title || "Manage idea";
     $("ideaDetailStatus").innerHTML = badge(ideaStatusLabel(idea));
@@ -3568,6 +3841,14 @@
     $("ideaManageDrawer").classList.add("open");
     $("ideaManageDrawer").setAttribute("aria-hidden", "false");
     document.body.classList.add("drawer-open");
+    // Paint persisted asset IDs immediately; enrich labels/clip thumbnails without blocking Manage.
+    hydrateIdeaAssignedAssets(idea).catch((error) => {
+      console.warn("Manage Idea assigned media hydration failed", error);
+      if (activeIdea?.id === idea.id) {
+        ideaAssignedMediaLoading = false;
+        renderIdeaMatchedPhotos(activeIdea);
+      }
+    });
     productionDecorateTooltips($("ideaManageDrawer"));
     syncPromoteTimingHint();
     setTimeout(() => {
@@ -4838,21 +5119,26 @@
       return ["pending", "queued", "compressing", "downloading"].includes(state) || row?.compression_needed === true;
     });
     const name = asset?.name || "video";
+    const uploadState = String(asset?.upload_status || "").trim().toLowerCase();
+    const vibeUploadVerified = ezIsVibeCut() && !item4Uploading && Boolean(asset)
+      && !["multipart_pending", "uploading", "pending", "failed"].includes(uploadState)
+      && (["complete", "completed", "uploaded", "ready"].includes(uploadState) || asset.uploaded_at);
+    const canLeave = ezIsAzFinishedPath() || vibeUploadVerified;
     const pct = Number(asset?.compression_progress);
     if (Number.isFinite(pct) && pct > 0) {
       const finishing = pct >= 95;
       const suffix = finishing
         ? "Finishing Drive copy and preview…"
-        : (ezIsAzFinishedPath()
+        : (canLeave
           ? "You can close this tab."
           : "Keep this tab open.");
       return finishing
         ? `Compressing ${name} · ${Math.round(pct)}%. ${suffix}`
-        : (ezIsAzFinishedPath()
+        : (canLeave
           ? `Compressing ${name} · ${Math.round(pct)}%. You can close this tab.`
           : `Compressing ${name} · ${Math.round(pct)}%. Keep this tab open.`);
     }
-    return ezIsAzFinishedPath()
+    return canLeave
       ? `Studio is compressing ${name}. You can close this tab.`
       : `Studio is compressing ${name}. Keep this tab open.`;
   }
@@ -6433,17 +6719,58 @@ function timedScriptAssetLabel(asset, index) {
     const ready = vibeCutReadySource(status);
     const source = vibeCutPersistedSource(status);
     const fileName = String(ready?.name || source?.name || vibeUploadUi.fileName || "source video");
+    const uploadState = String(source?.upload_status || "").trim().toLowerCase();
+    // A persisted draft or a completed browser transfer is not proof that all bytes reached the server.
+    const uploadConfirmed = Boolean(source && !item4Uploading
+      && !["multipart_pending", "uploading", "pending", "failed"].includes(uploadState)
+      && (["complete", "completed", "uploaded", "ready"].includes(uploadState) || source.uploaded_at));
+    const returnTo = "While Studio prepares the source, reopen it under Production > Drafts. After rendering, find the result in Approval Factory > Needs Eyes or Pipeline > Awaiting Approval.";
     if (ready) {
       return {
         heal: "ready",
-        title: `${fileName} is ready.`,
-        body: "The server confirmed the persisted video is fully processed. Continue is now available.",
-        count: "1 of 1 ready.",
+        title: `Video ready: ${fileName}`,
+        body: vibeAutoReviewErrors.get(String(activeProductionRequest?.id || ""))
+          ? `Video verified, but the review handoff needs attention: ${vibeAutoReviewErrors.get(String(activeProductionRequest?.id || ""))}. Use Retry advance to approval; do not reupload.`
+          : vibeAutoReviewQueued.has(String(activeProductionRequest?.id || ""))
+            ? "Video verified and the production-to-review handoff is confirmed. Nothing publishes automatically."
+            : "The uploaded video is saved and verified. Studio automatically completes production, renders the Vibe Cut and routes it to your approval. No Save click is required; nothing publishes automatically.",
+        count: "1 of 1 uploaded · 1 of 1 ready.",
+        guidance: {
+          steps: [
+            { state: "done", label: "Upload verified and stored" },
+            { state: "done", label: "Video preparation complete" },
+            { state: "done", label: "Source ready for automatic Vibe Cut production" },
+            { state: "pending", label: "Rendering and quality checks before your approval" },
+          ],
+          leave: "Yes. Studio continues production in the background after you leave.",
+          returnTo,
+        },
       };
     }
     const phase = String(vibeUploadUi.phase || "idle");
     if (phase === "idle" && !source) return null;
     if (phase === "failed") {
+      const processingFailed = uploadConfirmed && (
+        String(source?.compression_status || "").trim().toLowerCase() === "failed"
+        || String(status?.assets_status || "") === "Error"
+      );
+      if (processingFailed) {
+        return {
+          heal: "error",
+          title: `Video uploaded; preparation needs attention: ${fileName}`,
+          body: `${vibeUploadUi.detail || "The server could not prepare this video."} Your original upload remains saved. This is not a transfer failure; Studio has not confirmed it is Ready.`,
+          count: "1 of 1 uploaded · 0 of 1 ready.",
+          guidance: {
+            steps: [
+              { state: "done", label: "Original upload verified and saved" },
+              { state: "active", label: "Server-side video processing needs attention" },
+              { state: "pending", label: "Verification and Continue are still blocked" },
+            ],
+            leave: "Yes, your original upload is saved. Leaving will not restart failed processing.",
+            returnTo,
+          },
+        };
+      }
       return {
         heal: "error",
         title: `${fileName} failed to upload.`,
@@ -6455,8 +6782,8 @@ function timedScriptAssetLabel(asset, index) {
       return {
         heal: "error",
         title: "This upload may be stalled.",
-        body: vibeUploadUi.detail || "No upload or processing progress was confirmed for one minute. Retry the same video.",
-        count: source ? "1 uploaded · 0 ready." : "1 selected · 0 ready.",
+        body: vibeUploadUi.detail || "No recent transfer progress was confirmed. Keep this tab open while Studio checks the transfer.",
+        count: uploadConfirmed ? "1 uploaded · 0 ready." : "Upload not verified · 0 ready.",
       };
     }
     if (phase === "selected") {
@@ -6472,7 +6799,7 @@ function timedScriptAssetLabel(asset, index) {
       return {
         heal: "uploading",
         title: `Getting ${fileName} ready to upload.`,
-        body: vibeUploadUi.detail || "Creating the Production draft and checking the video metadata. Keep this tab open.",
+        body: vibeUploadUi.detail || "Registering the source. Upload has not started yet.",
         count: "1 selected · 0 ready.",
       };
     }
@@ -6486,20 +6813,55 @@ function timedScriptAssetLabel(asset, index) {
         count: "1 uploading · 0 ready.",
       };
     }
-    if (phase === "saving") {
+    if (phase === "saving" && !uploadConfirmed) {
       return {
         heal: "uploading",
-        title: `Upload complete. Saving ${fileName}.`,
-        body: vibeUploadUi.detail || "The server received every part and is finalizing the persisted video.",
-        count: "1 uploaded · 0 ready.",
+        title: `Upload transfer finished. Confirming ${fileName}.`,
+        body: "Studio is checking that the server received and permanently saved every segment.",
+        count: "Upload confirmation pending · 0 ready.",
+        guidance: {
+          steps: [
+            { state: "active", label: "Confirming every segment is saved" },
+            { state: "pending", label: "Preparing video for editing" },
+            { state: "pending", label: "Automatic handoff to rendering and human approval" },
+          ],
+          leave: "Not yet. Keep this screen open until Studio verifies the full upload.",
+          returnTo,
+        },
       };
     }
     if (phase === "processing" || source) {
+      const compressionState = String(source?.compression_status || "").trim().toLowerCase();
+      const numericProgress = Number(source?.compression_progress);
+      const progress = source?.compression_progress !== null && source?.compression_progress !== undefined
+        && source?.compression_progress !== "" && Number.isFinite(numericProgress) && numericProgress > 0
+        ? ` · ${Math.min(100, Math.round(numericProgress))}%` : "";
+      const stage = compressionState === "compressing"
+        ? `Creating a video optimized for editing${progress}`
+        : compressionState === "downloading"
+          ? "Retrieving the saved source for processing"
+          : ["pending", "queued"].includes(compressionState)
+            ? "Waiting for server-side video processing"
+            : "Checking the prepared video, Drive copy, and preview";
       return {
         heal: "uploading",
-        title: `Processing ${fileName}.`,
-        body: vibeUploadUi.detail || item4CompressionProgressLabel(status),
-        count: "1 uploaded · 0 ready.",
+        title: uploadConfirmed ? `Upload complete: ${fileName}` : `Checking uploaded video: ${fileName}`,
+        body: uploadConfirmed
+          ? "Your original video is verified and saved. Studio is preparing it for editing, then automatically rendering outputs for your approval."
+          : "Studio has a video record but has not verified that the full upload is safely stored.",
+        count: uploadConfirmed ? "1 of 1 uploaded · 0 of 1 ready." : "Upload confirmation pending · 0 ready.",
+        guidance: {
+          steps: [
+            { state: uploadConfirmed ? "done" : "active", label: uploadConfirmed ? "Original upload verified and saved" : "Confirming original upload is complete" },
+            { state: uploadConfirmed ? "active" : "pending", label: stage },
+            { state: "pending", label: "Verifying saved media and preview" },
+            { state: "pending", label: "Automatic handoff to rendering and human approval" },
+          ],
+          leave: uploadConfirmed
+            ? "Yes. You can close this screen; server-side preparation continues without this tab."
+            : "Not yet. Keep this screen open until Studio verifies the complete upload.",
+          returnTo,
+        },
       };
     }
     return null;
@@ -6511,7 +6873,7 @@ function timedScriptAssetLabel(asset, index) {
     const needsRetry = ezIsVibeCut() && ["stalled", "failed"].includes(String(vibeUploadUi.phase || ""));
     if (retryActions) retryActions.hidden = !needsRetry;
     if (retry) {
-      retry.disabled = vibeUploadRetryInFlight;
+      retry.disabled = vibeUploadRetryInFlight || item4Uploading || ezStarting;
       retry.textContent = vibeUploadRetryInFlight ? "Preparing retry…" : "Retry video upload";
     }
     const wizard = $("ezContinue");
@@ -6543,18 +6905,18 @@ function timedScriptAssetLabel(asset, index) {
     if (changed || ["idle", "failed", "ready"].includes(vibeUploadUi.phase)) {
       clearVibeUploadStallTimer();
     }
-    if (changed && ["creating", "uploading", "saving", "processing"].includes(vibeUploadUi.phase)) {
+    if (changed && ["creating", "uploading", "saving"].includes(vibeUploadUi.phase)) {
       const expectedKey = nextKey;
       vibeUploadStallTimer = window.setTimeout(() => {
         if (vibeCutReadySource() || vibeUploadUi.activityKey !== expectedKey) return;
         vibeUploadUi = {
           ...vibeUploadUi,
           phase: "stalled",
-          detail: "No upload or processing progress was confirmed for one minute. Retry the same video.",
+          detail: phase === "creating" ? "Production draft creation has not completed. No segments have uploaded. Retry will check for an existing saved draft first." : "No segment progress was confirmed. Select the same video to resume safely.",
         };
         renderVibeUploadUi(item4Workspace);
         updateItem4MasterProgress(item4Workspace || {});
-      }, VIBE_UPLOAD_STALL_MS);
+      }, phase === "saving" ? 300000 : phase === "creating" ? 120000 : VIBE_UPLOAD_STALL_MS);
     }
     if (changed || phase === "failed" || phase === "ready") {
       renderVibeUploadUi(item4Workspace);
@@ -6568,11 +6930,63 @@ function timedScriptAssetLabel(asset, index) {
     setVibeUploadUi("selected", { file, activityKey: `selected:${file.name}:${file.size}` });
   }
 
+  async function maybeAutoAdvanceVibeCutToReview(status = item4Workspace, { manual = false } = {}) {
+    if (!ezIsVibeCut() || !vibeCutReadySource(status) || item4Uploading || ezStarting) return null;
+    const id = String(activeProductionRequest?.id || "");
+    if (!/^rec[A-Za-z0-9]+$/.test(id) || activeProductionRequest?.revision_open === true) return null;
+    const currentState = String(activeProductionRequest?.status || "Draft");
+    if (!["Draft", "Ready", "Promoted"].includes(currentState) || (currentState === "Promoted" && !manual)) return null;
+    if (vibeAutoReviewInFlight.has(id) || (!manual && vibeAutoReviewAttempted.has(id))) return null;
+    if (/origin=prepare-to-review/i.test(String(activeProductionRequest?.production_notes || ""))) {
+      vibeAutoReviewQueued.add(id);
+      return { queued: true, already_started: true };
+    }
+    vibeAutoReviewAttempted.add(id);
+    vibeAutoReviewInFlight.add(id);
+    vibeAutoReviewErrors.delete(id);
+    try {
+      const result = await api(`/api/production-requests/${encodeURIComponent(id)}/vibe-to-review`, {
+        method: "POST", body: "{}", timeoutMs: 30000, retries: 0,
+      });
+      if (result?.queued !== true) throw new Error("Server did not confirm the review handoff");
+      vibeAutoReviewQueued.add(id);
+      if (activeProductionRequest?.id === id) {
+        setRequestMessage("The original video is verified. Its production job is in the durable review queue, with final human approval required. You can leave; nothing publishes automatically.", "success");
+      }
+      return result;
+    } catch (error) {
+      // A request may time out after Airtable accepted it; read before considering a retry.
+      let record = null;
+      try {
+        const saved = await api(`/api/production-requests/${encodeURIComponent(id)}`, { retries: 0 });
+        record = saved?.record || saved?.production_request || null;
+      } catch {}
+      if (/origin=prepare-to-review/i.test(String(record?.production_notes || ""))
+          || ["Submitted", "Promoted"].includes(String(record?.status || ""))) {
+        vibeAutoReviewQueued.add(id);
+        if (activeProductionRequest?.id === id) activeProductionRequest = { ...activeProductionRequest, ...record };
+        return { queued: true, already_started: true };
+      }
+      vibeAutoReviewErrors.set(id, String(error?.message || "The handoff could not be confirmed"));
+      if (activeProductionRequest?.id === id) {
+        setRequestMessage("Automatic review needs attention. Your video is saved. Tap Retry advance to approval; do not upload it again.", "error-text");
+      }
+      return null;
+    } finally {
+      vibeAutoReviewInFlight.delete(id);
+      if (activeProductionRequest?.id === id) {
+        updateItem4MasterProgress(item4Workspace || {});
+        renderVibeCutCommitAction(item4Workspace);
+      }
+    }
+  }
+
   function syncVibeUploadUiFromWorkspace(status = item4Workspace) {
     if (!ezIsVibeCut()) return;
     const source = vibeCutPersistedSource(status);
     if (vibeCutReadySource(status)) {
       setVibeUploadUi("ready", { detail: "The persisted source video is fully processed.", activityKey: `ready:${source?.id || "video"}` });
+      void maybeAutoAdvanceVibeCutToReview(status);
       return;
     }
     if (item4WorkspaceCompressionFailed(status) || String(status?.assets_status || "") === "Error") {
@@ -6588,6 +7002,13 @@ function timedScriptAssetLabel(asset, index) {
         pct: progress,
         detail: item4CompressionProgressLabel(status),
         activityKey: `processing:${source?.id || "video"}:${Number.isFinite(progress) ? Math.round(progress) : 0}`,
+      });
+      return;
+    }
+    if (source?.upload_status === "multipart_pending" && !item4Uploading) {
+      setVibeUploadUi("failed", {
+        detail: "This transfer is incomplete. Select the same video to resume; the original upload session is preserved.",
+        activityKey: `incomplete:${source.id}`,
       });
       return;
     }
@@ -6613,15 +7034,20 @@ function timedScriptAssetLabel(asset, index) {
     const save = $("item4VibeSaveContinue");
     const retry = $("item4VibeRetryVideo");
     if (message) message.textContent = !editable
-      ? "This request is already in production. Start a new Vibe Cut if the original video failed."
+      ? "This Vibe Cut has advanced beyond its draft. Find the results in Approval Factory or Pipeline."
       : source
-      ? "Original video verified and saved. Continue to choose the Vibe Cut outputs."
+      ? "Original video verified and saved. Studio automatically advances to rendering and human approval. View Production only if you want to inspect settings."
       : staged
       ? "Video upload received, but processing is not Ready. Wait for completion or replace the source video."
       : "No usable source video is attached. The photo timeline cannot be saved as a Vibe Cut. Upload your MOV/MP4 again.";
     if (save) {
       save.disabled = !editable || !source || item4Uploading || ezStarting;
-      save.textContent = source ? "Save Vibe Cut & Continue" : "Waiting for source video";
+      const id = String(activeProductionRequest?.id || "");
+      save.disabled = save.disabled || vibeAutoReviewInFlight.has(id) || vibeAutoReviewQueued.has(id);
+      save.textContent = !source ? "Waiting for source video" : vibeAutoReviewInFlight.has(id)
+        ? "Starting review handoff…" : vibeAutoReviewQueued.has(id)
+          ? "Continuing automatically" : vibeAutoReviewErrors.has(id)
+            ? "Retry advance to approval" : "Advance to Approval";
     }
     if (retry) {
       retry.hidden = !editable || Boolean(source);
@@ -6629,7 +7055,7 @@ function timedScriptAssetLabel(asset, index) {
     }
     const wizard = $("ezContinue");
     if (wizard && vibe) {
-      wizard.textContent = "Save Video & Continue to Production";
+      wizard.textContent = "View Production (optional)";
       wizard.hidden = !source || !editable;
       wizard.disabled = !source || !editable || item4Uploading || ezStarting;
     }
@@ -6793,7 +7219,7 @@ function timedScriptAssetLabel(asset, index) {
       const heic = item4IsHeicAsset(file || asset);
       const streamUrl = isVideo ? item4PlayableClipSrc(asset) : "";
       const visual = isVideo
-        ? (item4ClipPlayerHtml({ previewUrl, streamUrl, name, durationSeconds: asset.duration_seconds, asset, preload: Boolean(streamUrl) }) || item4AssetPlaceholder(file || asset, "Clip saved"))
+        ? (item4ClipPlayerHtml({ previewUrl, streamUrl, name, durationSeconds: asset.duration_seconds, asset, preload: Boolean(streamUrl) }) || item4AssetPlaceholder(file || asset, asset.upload_status === "multipart_pending" || !asset.uploaded_at ? "Upload not confirmed" : "Uploaded · processing"))
         : previewUrl
           ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(name)}" draggable="false">`
           : item4AssetPlaceholder(file || asset, heic ? "HEIC original" : "Preview");
@@ -8247,6 +8673,16 @@ function timedScriptAssetLabel(asset, index) {
     ezWizardLogAdd("user", label);
     if (ezWizardStep === "start") ezWizardAnswers = {};
     Object.assign(ezWizardAnswers, patch);
+    // Vibe scheduling is reserved by MAE at final human publishing approval.
+    // Do not force a provisional date-confirmation screen before source upload.
+    // Keep the existing confirmation step for other Studio intake paths.
+    if (nextStep === "confirm"
+      && (ezWizardAnswers.inputKind === "vibe-cut" || ezWizardAnswers.start === "vibe-cut")) {
+      delete ezWizardAnswers.schedules;
+      ezWizardLogAdd("bot", "Publish dates will be assigned when you give final approval.");
+      void finishEzWizard();
+      return;
+    }
     ezWizardGo(nextStep);
   }
 
@@ -8858,11 +9294,11 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function retryVibeUpload(inputId = "ezMediaInput") {
-    if (!ezIsVibeCut() || vibeUploadRetryInFlight) return;
+    if (!ezIsVibeCut() || vibeUploadRetryInFlight || item4Uploading || ezStarting) return;
     vibeUploadRetryRequested = true;
     if (vibeUploadAbortController) vibeUploadAbortController.abort();
     setVibeUploadUi("stalled", {
-      detail: "Choose the same video again. Studio will clear the incomplete attempt before restarting.",
+      detail: "Choose the same video again. Studio will check the saved source before resuming.",
       activityKey: `retry:${Date.now()}`,
     });
     item4ApplyMediaInputAccept("vibe-cut");
@@ -8870,32 +9306,32 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   async function replaceIncompleteVibeSourceAndUpload(files) {
-    if (vibeUploadRetryInFlight) return;
+    if (vibeUploadRetryInFlight || item4Uploading || ezStarting) return;
     vibeUploadRetryInFlight = true;
     renderVibeUploadUi(item4Workspace);
     try {
-      const source = vibeCutPersistedSource();
-      if (source && !vibeCutReadySource() && activeProductionRequest?.id) {
-        const result = await api(
-          `/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets/${encodeURIComponent(source.id)}`,
-          { method: "DELETE", body: JSON.stringify({}), timeoutMs: 45000, retries: 0 },
-        );
-        if (result?.production_request) activeProductionRequest = result.production_request;
-        item4ApplyAssetsLocally(Array.isArray(result?.assets) ? result.assets : [], { assetsStatus: "None" });
+      const requestId = activeProductionRequest?.id;
+      if (!requestId) throw new Error("Open the original production request before resuming.");
+      const status = await api(`/api/production-requests/${encodeURIComponent(requestId)}/item4?snapshot=1`, { retries: 2 });
+      item4ApplyAssetsLocally(status.assets || [], { assetsStatus: status.assets_status });
+      const source = vibeCutPersistedSource(status);
+      if (source && source.upload_status !== "multipart_pending") {
+        syncVibeUploadUiFromWorkspace(status);
+        setEzMessage("The original video is already uploaded. Studio will keep checking its processing status.", "success");
+        await loadItem4Workspace(activeProductionRequest, { allowAssetChanges: true });
+        return;
       }
+      vibeUploadRetryRequested = false;
+      await uploadItem4Files(files, { preserveOversizedNotice: true });
+    } catch (error) {
+      setVibeUploadUi("failed", {
+        file: files?.[0], detail: error?.message || "Could not check the saved upload. Nothing was removed.",
+        activityKey: `retry-failed:${Date.now()}`,
+      });
+    } finally {
       vibeUploadRetryRequested = false;
       vibeUploadRetryInFlight = false;
       renderVibeUploadUi(item4Workspace);
-      await uploadItem4Files(files, { preserveOversizedNotice: true });
-    } catch (error) {
-      vibeUploadRetryRequested = false;
-      vibeUploadRetryInFlight = false;
-      setVibeUploadUi("failed", {
-        file: files?.[0],
-        detail: error?.message || "Studio could not clear the incomplete upload. Try again.",
-        activityKey: `retry-failed:${Date.now()}`,
-      });
-      setEzMessage(error?.message || "Studio could not clear the incomplete upload. Try again.", "error-text");
     }
   }
 
@@ -9032,7 +9468,7 @@ function timedScriptAssetLabel(asset, index) {
     if (ezIsVibeCut() && nextFiles[0]) {
       setVibeUploadUi("creating", {
         file: nextFiles[0],
-        detail: "Creating the Production draft and checking the video metadata. Keep this tab open.",
+        detail: "Creating the Production draft. Video transfer has not started yet.",
         activityKey: `creating:${nextFiles[0].name}:${nextFiles[0].size}`,
       });
     }
@@ -9042,7 +9478,7 @@ function timedScriptAssetLabel(asset, index) {
     }
     try {
       let aspectBundle = null;
-      if (nextFiles.length && (ezIntakeKind === "finished-video" || ezIntakeKind === "vibe-cut" || ezIsAzFinishedPath())) {
+      if (nextFiles.length && !ezIsVibeCut() && pending?.inputKind !== "vibe-cut" && (ezIntakeKind === "finished-video" || ezIsAzFinishedPath())) {
         aspectBundle = await aspectPlanFromVideoFiles(nextFiles, {
           inputKind: pending?.inputKind || ezIntakeKind,
         });
@@ -9135,7 +9571,8 @@ function timedScriptAssetLabel(asset, index) {
         requestPayload.carousel_slide_count_mode = "Exact";
         requestPayload.carousel_slide_count_exact = photoCount;
       }
-      await ensureProductionRequestMusic();
+      if (!ezIsVibeCut() && pending?.inputKind !== "vibe-cut") await ensureProductionRequestMusic();
+      if (ezIsVibeCut()) setVibeUploadUi("creating", { file: nextFiles[0], detail: "Saving the Production draft. Segment upload starts immediately after it is saved.", activityKey: `draft:save:${activeIdea.id}` });
       const created = await createEzProductionRequest(activeIdea.id, requestPayload);
       if (ezIsVibeCut() || pending?.inputKind === "vibe-cut") {
         setVibeUploadUi("creating", {
@@ -9155,6 +9592,35 @@ function timedScriptAssetLabel(asset, index) {
         }
         renderEzPhotoStrip();
         startAzFinishedProgressPolling();
+        return true;
+      }
+      // Vibe uploads are the priority operation: never queue optional output
+      // matrix, workspace or request-list reads ahead of the 580 MB transfer.
+      // The upload session itself performs the authoritative snapshot check.
+      if (ezIsVibeCut() || pending?.inputKind === "vibe-cut") {
+        const uploadResult = await uploadItem4Files(nextFiles, { preserveOversizedNotice: true });
+        renderEzPhotoStrip();
+        if (!uploadResult?.ok || !vibeCutPersistedSource()) {
+          throw new Error(uploadResult?.error || "The source video is not yet verified. Select the same file to resume.");
+        }
+        // These reads are UI enrichment, not upload prerequisites. Never turn a
+        // successfully stored video back into a failed upload because one times out.
+        try {
+          await loadProductionRequestOutputs(created.record);
+          applyEzExtraOutputs(extras);
+          if (extras.length) await saveProductionRequestOutputs(created.record);
+          await loadItem4Workspace(activeProductionRequest);
+          await loadProductionRequests();
+        } catch (postUploadError) {
+          console.warn("Vibe post-upload workspace refresh deferred", postUploadError);
+          setEzMessage("Video received. Workspace refresh is delayed; your saved source is preserved.", "success");
+        }
+        const action = $("ezContinue");
+        if (action) {
+          action.textContent = "View Production (optional)";
+          action.hidden = !vibeCutReadySource();
+          action.disabled = !vibeCutReadySource();
+        }
         return true;
       }
       await loadProductionRequestOutputs(created.record);
@@ -9188,11 +9654,11 @@ function timedScriptAssetLabel(asset, index) {
           applyEzToAdvanced({ force: true });
           const action = $("ezContinue");
           if (action) {
-            action.textContent = "Save Video & Continue to Production";
+            action.textContent = "View Production (optional)";
             action.hidden = !vibeCutReadySource();
             action.disabled = !vibeCutReadySource();
           }
-          setEzMessage(vibeCutReadySource() ? "Source video saved and verified. Select Save Video & Continue." : "Video received. Processing must finish before you can continue; Studio will not substitute photos.", "success");
+          setEzMessage(vibeCutReadySource() ? "Source video saved. Studio advances to human Approval automatically; viewing Production is optional." : "Video received. Processing must finish before you can continue; Studio will not substitute photos.", "success");
           setRequestMessage("Vibe Cut source video saved and attached to this Production request.", "success");
         }
       }
@@ -9208,6 +9674,17 @@ function timedScriptAssetLabel(asset, index) {
         : error.message;
       setEzMessage(message, "error-text");
       setRequestMessage(error.message, "error-text");
+      // A failed Idea or Production draft request must not leave the Vibe
+      // banner waiting forever as though an upload is still underway.
+      // Do not replace a more specific multipart error or touch saved media.
+      if ((ezIsVibeCut() || pending?.inputKind === "vibe-cut")
+        && ["creating", "selected", "stalled"].includes(String(vibeUploadUi.phase || ""))) {
+        setVibeUploadUi("failed", {
+          file: nextFiles[0],
+          detail: `No upload segments were confirmed. Studio could not complete setup: ${error.message}. Select the same video to retry.`,
+          activityKey: `setup-failed:${nextFiles[0]?.name || "video"}:${Date.now()}`,
+        });
+      }
       if (ezIsAzFinishedPath()) {
         setAzFinishedMessage(error.message || "Could not start publish.", "error-text");
         $("azFinishedDrop")?.classList.remove("is-busy");
@@ -9216,6 +9693,10 @@ function timedScriptAssetLabel(asset, index) {
     } finally {
       ezStarting = false;
       if (continueBtn) continueBtn.disabled = ezIsVibeCut() ? !vibeCutReadySource() : false;
+      // Retry availability must be recomputed after ezStarting clears.
+      // Otherwise the button stays disabled even after setup has failed.
+      renderVibeUploadUi(item4Workspace || {});
+      if (ezIsVibeCut() && vibeCutReadySource()) void maybeAutoAdvanceVibeCutToReview(item4Workspace);
       drainPendingMasterUploads();
     }
   }
@@ -9566,8 +10047,8 @@ function timedScriptAssetLabel(asset, index) {
         ezAutoPlanAfterUpload = true;
         switchToPage("content");
         showProductionRequestWorkspace();
-        setRequestMessage("Source video saved. Review the source clip and output settings before rendering.", "success");
-        Promise.resolve().then(() => maybeAutoEzPlan());
+        setRequestMessage("Video saved. Studio is automatically continuing through production toward approval.", "success");
+        void maybeAutoAdvanceVibeCutToReview(item4Workspace || {});
         return;
       }
       if (activeProductionRequest?.id && ezPersistedAssetCount()) return;
@@ -10284,7 +10765,9 @@ function timedScriptAssetLabel(asset, index) {
     const format = ext || (isVideo ? "CLIP" : (item4IsHeicAsset(asset) ? "HEIC" : "IMAGE"));
     const seconds = item4KnownClipDuration(asset);
     const clipLabel = isVideo
-      ? (seconds > 0 ? `${formatLibraryClipDuration(seconds)} clip saved` : "Clip saved")
+      ? ((label && label !== "Preview unavailable" && label !== "Clip saved")
+        ? label
+        : ((asset?.upload_status === "complete" || asset?.uploaded_at) ? "Uploaded · processing" : "Upload not confirmed"))
       : label;
     return `<div class="item4-heic-placeholder item4-image-placeholder${isVideo ? " item4-clip-placeholder" : ""}">${isVideo ? `<span class="item4-clip-play" aria-hidden="true"></span>` : ""}<strong>${escapeHtml(format)}</strong><span>${escapeHtml(isVideo ? clipLabel : label)}</span></div>`;
   }
@@ -11316,8 +11799,18 @@ function timedScriptAssetLabel(asset, index) {
       const countHtml = markup.count
         ? ` <em class="item4-upload-progress-count">${escapeHtml(markup.count)}</em>`
         : "";
-      progress.innerHTML = `<strong>${escapeHtml(markup.title)}</strong><span>${escapeHtml(markup.body)}${countHtml}</span>`;
-      const tip = `${markup.title} ${markup.body}`.trim();
+      const guide = markup.guidance;
+      const guidanceHtml = guide
+        ? `<div class="vibe-upload-guidance">
+            <div class="vibe-upload-guidance-title">What Studio is doing</div>
+            <ul class="vibe-upload-guidance-steps">${guide.steps.map((step) =>
+              `<li data-state="${escapeHtml(step.state)}">${escapeHtml(step.label)}</li>`
+            ).join("")}</ul>
+            <p><strong>Can I leave?</strong> ${escapeHtml(guide.leave)}</p>
+            <p><strong>Where will I find it?</strong> ${escapeHtml(guide.returnTo)}</p>
+          </div>` : "";
+      progress.innerHTML = `<strong>${escapeHtml(markup.title)}</strong><span>${escapeHtml(markup.body)}${countHtml}</span>${guidanceHtml}`;
+      const tip = `${markup.title} ${markup.body} ${guide ? `${guide.leave} ${guide.returnTo}` : ""}`.trim();
       progress.dataset.phase6Tooltip = tip;
       if (typeof window.studioLockTooltip === "function") window.studioLockTooltip(progress, tip);
     });
@@ -11388,8 +11881,16 @@ function timedScriptAssetLabel(asset, index) {
         return;
       }
       if (item4WorkspaceNeedsCompression(item4Workspace)) {
-        setRequestMessage(item4CompressionProgressLabel(item4Workspace), "success");
-        setEzMessage(item4CompressionProgressLabel(item4Workspace), "success");
+        // Vibe Cut has one authoritative, detailed progress card. Do not display
+        // a second banner claiming "keep this tab open" after the server
+        // already verified the completed transfer.
+        if (ezIsVibeCut()) {
+          setRequestMessage("");
+          setEzMessage("");
+        } else {
+          setRequestMessage(item4CompressionProgressLabel(item4Workspace), "success");
+          setEzMessage(item4CompressionProgressLabel(item4Workspace), "success");
+        }
         if (ezIsAzFinishedPath()) {
           setAzFinishedProgress("compressing");
           setAzFinishedMessage(item4CompressionProgressLabel(item4Workspace), "success");
@@ -12235,22 +12736,28 @@ function timedScriptAssetLabel(asset, index) {
           const probed = await new Promise((resolve) => {
             const url = URL.createObjectURL(file);
             const video = document.createElement("video");
+            let settled = false;
+            let timer = null;
+            const finish = (value = { duration_seconds: null, width: null, height: null }) => {
+              if (settled) return;
+              settled = true;
+              window.clearTimeout(timer);
+              video.onloadedmetadata = video.onerror = null;
+              video.removeAttribute("src");
+              try { video.load(); } catch {}
+              URL.revokeObjectURL(url);
+              resolve(value);
+            };
+            // iOS MOV/HEVC metadata events can never arrive. The runner probes
+            // the original after upload; browser metadata must not block bytes.
+            timer = window.setTimeout(() => finish(), 8000);
             video.preload = "metadata";
-            video.onloadedmetadata = () => {
-              const value = Number(video.duration);
-              const w = Number(video.videoWidth) || null;
-              const h = Number(video.videoHeight) || null;
-              URL.revokeObjectURL(url);
-              resolve({
-                duration_seconds: Number.isFinite(value) && value > 0 ? value : null,
-                width: w,
-                height: h,
-              });
-            };
-            video.onerror = () => {
-              URL.revokeObjectURL(url);
-              resolve({ duration_seconds: null, width: null, height: null });
-            };
+            video.onloadedmetadata = () => finish({
+              duration_seconds: Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null,
+              width: Number(video.videoWidth) || null,
+              height: Number(video.videoHeight) || null,
+            });
+            video.onerror = () => finish();
             video.src = url;
           });
           duration_seconds = probed.duration_seconds;
@@ -12312,6 +12819,76 @@ function timedScriptAssetLabel(asset, index) {
     }
   }
 
+  const item4UploadCheckpoints = new Map();
+
+  function item4UploadCheckpoint(requestId, value) {
+    const key = `studio:multipart:${requestId}`;
+    if (value !== undefined) {
+      item4UploadCheckpoints.set(key, value);
+      try {
+        if (value === null) localStorage.removeItem(key);
+        else localStorage.setItem(key, JSON.stringify(value));
+      } catch {}
+      return value;
+    }
+    if (item4UploadCheckpoints.has(key)) return item4UploadCheckpoints.get(key);
+    try { return JSON.parse(localStorage.getItem(key) || "null"); } catch { return null; }
+  }
+
+  function item4UploadPartWithProgress(path, chunk, { signal, onBytes } = {}) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      let idleTimer;
+      let settled = false;
+      const finish = (error, result) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(idleTimer);
+        signal?.removeEventListener("abort", abort);
+        if (error) reject(error);
+        else resolve(result);
+      };
+      const failure = (message, status = 0) => Object.assign(new Error(message), { status });
+      const abort = () => {
+        finish(Object.assign(new Error("Upload paused. Select the same file to resume."), { name: "AbortError" }));
+        xhr.abort();
+      };
+      const armIdle = () => {
+        window.clearTimeout(idleTimer);
+        idleTimer = window.setTimeout(() => {
+          finish(failure("The upload connection stopped responding. Retrying this part."));
+          xhr.abort();
+        }, 45000);
+      };
+      if (signal?.aborted) { abort(); return; }
+      xhr.open("PUT", `${apiBase}${withStudioProfile(path)}`);
+      xhr.timeout = 300000;
+      xhr.setRequestHeader("Content-Type", "application/octet-stream");
+      xhr.upload.onprogress = event => {
+        if (event.loaded > 0) {
+          armIdle();
+          onBytes?.(Math.min(chunk.size, event.loaded));
+        }
+      };
+      xhr.onload = () => {
+        let result;
+        try { result = JSON.parse(xhr.responseText || "{}"); }
+        catch { finish(failure("The upload server returned an unreadable response.", xhr.status)); return; }
+        if (xhr.status < 200 || xhr.status >= 300 || result.ok === false || !result.etag) {
+          finish(failure(result.error || result.message || "The server did not confirm this upload part.", xhr.status));
+          return;
+        }
+        finish(null, result);
+      };
+      xhr.onerror = () => finish(failure("Upload connection interrupted."));
+      xhr.ontimeout = () => finish(failure("Upload part timed out."));
+      xhr.onabort = () => finish(Object.assign(new Error("Upload paused."), { name: "AbortError" }));
+      signal?.addEventListener("abort", abort, { once: true });
+      armIdle();
+      xhr.send(chunk);
+    });
+  }
+
   async function postItem4LargeFinishedVideo(file, { onProgress } = {}) {
     const requestId = activeProductionRequest?.id;
     if (!requestId) throw new Error("No Production Request is open");
@@ -12321,88 +12898,116 @@ function timedScriptAssetLabel(asset, index) {
       throw new Error(`Videos must be ${Math.round(ITEM4_FINISHED_VIDEO_HARD_MAX_BYTES / (1024 * 1024))} MB or smaller`);
     }
     const originKind = ezIsVibeCut() ? "vibe-cut" : "finished-video";
-    const metadata = (await imageMetadataForFiles([file]))[0] || {};
-    const session = await api(`/api/production-requests/${encodeURIComponent(requestId)}/assets/upload-session`, {
-      method: "POST",
-      body: JSON.stringify({
-        filename: file.name || (originKind === "vibe-cut" ? "vibe-cut-source.mp4" : "finished-video.mp4"),
-        size_bytes: sizeBytes,
-        mime_type: file.type || "video/mp4",
-        origin_kind: originKind,
-      }),
-      timeoutMs: 60000,
-      retries: 0,
-    });
-    const assetId = String(session?.asset_id || "").trim();
-    const partSize = Math.max(5 * 1024 * 1024, Number(session?.part_size || ITEM4_DIRECT_UPLOAD_MAX_BYTES) || (16 * 1024 * 1024));
-    if (!assetId) throw new Error("Upload session did not return an asset id");
-    if (session?.record) activeProductionRequest = session.record;
-    const uploadController = originKind === "vibe-cut" ? new AbortController() : null;
-    if (uploadController) {
-      vibeUploadAbortController = uploadController;
-      if (vibeUploadRetryRequested) uploadController.abort();
+    // Do not decode a 580 MB iPhone MOV twice before sending its first byte.
+    // The server-side media pipeline probes Vibe sources after persistence.
+    const metadata = originKind === "vibe-cut" ? {} : (await imageMetadataForFiles([file]))[0] || {};
+    let checkpoint = item4UploadCheckpoint(requestId);
+    if (checkpoint && (checkpoint.name !== file.name || checkpoint.size !== sizeBytes)) {
+      throw new Error("A different video has an unfinished upload. Re-select the original file to recover it, or explicitly remove that source before replacing it.");
     }
-    const parts = [];
-    const totalParts = Math.max(1, Math.ceil(sizeBytes / partSize));
-    const report = (doneParts) => {
-      if (typeof onProgress !== "function") return;
-      onProgress({
-        doneParts,
-        totalParts,
-        pct: Math.min(99, Math.round((doneParts / totalParts) * 100)),
+    const snapshot = await api(`/api/production-requests/${encodeURIComponent(requestId)}/item4?snapshot=1`, { retries: 2 });
+    const existing = (snapshot?.assets || []).find(item4AssetLooksLikeVideo);
+    if (existing && existing.upload_status !== "multipart_pending") {
+      // Do not turn a lost completion response into a second upload or deletion.
+      item4UploadCheckpoint(requestId, null);
+      return {
+        ok: true, assets: snapshot.assets, authority_status: snapshot.assets_status,
+        compression_pending: item4WorkspaceNeedsCompression(snapshot),
+      };
+    }
+    if (checkpoint && (!existing || existing.id !== checkpoint.assetId)) {
+      item4UploadCheckpoint(requestId, null);
+      checkpoint = null;
+    }
+    if (!checkpoint) {
+      if (existing) {
+        if (existing.name !== file.name || Number(existing.size_bytes) !== sizeBytes) {
+          throw new Error("Re-select the original video for this interrupted upload. The existing source has been preserved.");
+        }
+        // Older clients did not retain etags. Re-send every part into the same
+        // session; never mix unknown old parts into the completed file.
+        checkpoint = { assetId: existing.id, name: file.name, size: sizeBytes, partSize: 16 * 1024 * 1024, parts: [] };
+        item4UploadCheckpoint(requestId, checkpoint);
+      }
+    }
+    if (!checkpoint) {
+      const session = await api(`/api/production-requests/${encodeURIComponent(requestId)}/assets/upload-session`, {
+        method: "POST",
+        body: JSON.stringify({
+          filename: file.name || (originKind === "vibe-cut" ? "vibe-cut-source.mp4" : "finished-video.mp4"),
+          size_bytes: sizeBytes, mime_type: file.type || "video/mp4", origin_kind: originKind,
+        }),
+        timeoutMs: 60000, retries: 0,
       });
+      if (!session?.asset_id) throw new Error("Upload session did not return an asset id");
+      if (session?.record) activeProductionRequest = session.record;
+      checkpoint = {
+        assetId: session.asset_id, name: file.name, size: sizeBytes,
+        partSize: Math.max(5 * 1024 * 1024, Number(session.part_size) || 16 * 1024 * 1024), parts: [],
+      };
+      item4UploadCheckpoint(requestId, checkpoint);
+    }
+    const assetId = checkpoint.assetId;
+    const partSize = checkpoint.partSize;
+    const totalParts = Math.ceil(sizeBytes / partSize);
+    const uploadController = new AbortController();
+    if (originKind === "vibe-cut") vibeUploadAbortController = uploadController;
+    const report = (doneParts, sentBytes = Math.min(sizeBytes, doneParts * partSize)) => {
+      onProgress?.({ doneParts, totalParts, sentBytes, pct: Math.min(99, Math.floor(sentBytes / sizeBytes * 100)) });
     };
     report(0);
     try {
       for (let partNumber = 1; partNumber <= totalParts; partNumber += 1) {
         const start = (partNumber - 1) * partSize;
         const chunk = file.slice(start, Math.min(sizeBytes, start + partSize));
-        const uploaded = await api(
-          `/api/production-requests/${encodeURIComponent(requestId)}/assets/upload-session/${encodeURIComponent(assetId)}/parts/${partNumber}`,
-          {
-            method: "PUT",
-            body: chunk,
-            headers: { "Content-Type": "application/octet-stream" },
-            timeoutMs: 300000,
-            retries: 0,
-            ...(uploadController ? { signal: uploadController.signal } : {}),
-          },
-        );
-        const etag = String(uploaded?.etag || "").trim();
-        if (!etag) throw new Error(`Part ${partNumber} upload did not return an etag`);
-        parts.push({ part_number: partNumber, etag });
-        report(partNumber);
-        if (ezIsAzFinishedPath()) {
-          setAzFinishedMessage(`Uploading part ${partNumber} of ${totalParts} (${Math.round((partNumber / totalParts) * 100)}%)…`);
+        // Verify every retained part against the re-selected file. Name and size
+        // alone are not sufficient to safely join bytes from two different videos.
+        const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", await chunk.arrayBuffer())))
+          .map(byte => byte.toString(16).padStart(2, "0")).join("");
+        const prior = checkpoint.parts.find(part => part.part_number === partNumber);
+        if (prior && prior.digest !== digest) throw new Error("This is not the same video as the interrupted upload. The original source has been preserved.");
+        if (prior) { report(partNumber); continue; }
+        let uploaded;
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          if (uploadController.signal.aborted) throw Object.assign(new Error("Upload paused."), { name: "AbortError" });
+          try {
+            uploaded = await item4UploadPartWithProgress(
+              `/api/production-requests/${encodeURIComponent(requestId)}/assets/upload-session/${encodeURIComponent(assetId)}/parts/${partNumber}`,
+              chunk, {
+                signal: uploadController.signal,
+                onBytes: bytes => report(partNumber - 1, start + bytes),
+              },
+            );
+            break;
+          } catch (error) {
+            if (error.name === "AbortError" || (error.status >= 400 && error.status < 500 && ![408, 429].includes(error.status)) || attempt === 3) throw error;
+            await sleepMs(Math.min(8000, 1000 * (2 ** attempt)));
+          }
         }
+        checkpoint.parts.push({ part_number: partNumber, etag: uploaded.etag, digest });
+        item4UploadCheckpoint(requestId, checkpoint);
+        report(partNumber);
+        if (ezIsAzFinishedPath()) setAzFinishedMessage(`Uploading part ${partNumber} of ${totalParts}…`);
       }
-      if (typeof onProgress === "function") {
-        onProgress({ doneParts: totalParts, totalParts, pct: 100, stage: "saving" });
-      }
+      onProgress?.({ doneParts: totalParts, totalParts, sentBytes: sizeBytes, pct: 100, stage: "saving" });
       const complete = await api(
         `/api/production-requests/${encodeURIComponent(requestId)}/assets/upload-session/${encodeURIComponent(assetId)}/complete`,
         {
           method: "POST",
           body: JSON.stringify({
-            parts,
+            parts: checkpoint.parts.map(({ part_number, etag }) => ({ part_number, etag })),
             duration_seconds: metadata.duration_seconds || null,
-            width: metadata.width || null,
-            height: metadata.height || null,
+            width: metadata.width || null, height: metadata.height || null,
           }),
-          timeoutMs: 300000,
-          retries: 0,
-          ...(uploadController ? { signal: uploadController.signal } : {}),
+          timeoutMs: 300000, retries: 0,
         },
       );
       if (complete?.record) activeProductionRequest = complete.record;
+      item4UploadCheckpoint(requestId, null);
       return complete;
     } catch (error) {
-      try {
-        await api(
-          `/api/production-requests/${encodeURIComponent(requestId)}/assets/upload-session/${encodeURIComponent(assetId)}`,
-          { method: "DELETE", body: JSON.stringify({}), timeoutMs: 30000, retries: 0 },
-        );
-      } catch {}
+      // A timeout does not prove failure. Keep acknowledged parts and the original;
+      // Retry checks authoritative status before resuming this exact session.
       throw error;
     } finally {
       if (vibeUploadAbortController === uploadController) vibeUploadAbortController = null;
@@ -12489,7 +13094,7 @@ function timedScriptAssetLabel(asset, index) {
     files = files.slice().sort((a, b) => Number(item4FileLooksLikeVideo(a)) - Number(item4FileLooksLikeVideo(b)));
     const existingCount = ezPersistedAssetCount();
     if (ezIntakeKind === "finished-video" || ezIntakeKind === "vibe-cut") {
-      if (existingCount >= 1) {
+      if (existingCount >= 1 && !(ezIsVibeCut() && vibeCutPersistedSource()?.upload_status === "multipart_pending")) {
         setRequestMessage("This piece already has a video. Remove it first to replace it.", "error-text");
         return;
       }
@@ -12522,7 +13127,7 @@ function timedScriptAssetLabel(asset, index) {
       setVibeUploadUi("uploading", {
         file: files[0],
         pct: 0,
-        detail: "Secure upload started. Keep this tab open until every part reaches the server.",
+        detail: `0 of ${Math.ceil(files[0].size / (16 * 1024 * 1024))} segments uploaded. Creating a secure upload session…`,
         activityKey: `upload:${files[0].name}:0`,
       });
     }
@@ -12548,7 +13153,7 @@ function timedScriptAssetLabel(asset, index) {
         setEzMessage(accepted, "success");
         updateItem4MasterProgress(item4Workspace || {});
         let poster = null;
-        if (item4FileLooksLikeVideo(file)) {
+        if (item4FileLooksLikeVideo(file) && !ezIsVibeCut()) {
           poster = await Promise.race([
             item4ClipPosterFromFile(file).then((blob) => {
               if (blob) item4ApplyLocalClipPoster(file.name, blob);
@@ -12560,7 +13165,7 @@ function timedScriptAssetLabel(asset, index) {
         posterBlobs[index] = poster;
         try {
           const result = await postItem4MasterFile(file, poster, {
-            onProgress: ({ doneParts, totalParts, pct, stage }) => {
+            onProgress: ({ doneParts, totalParts, pct, stage, sentBytes = 0 }) => {
               const safePct = Math.max(0, Math.min(99, Number(pct) || 0));
               if (ezIsVibeCut()) {
                 if (stage === "saving") {
@@ -12574,10 +13179,8 @@ function timedScriptAssetLabel(asset, index) {
                   setVibeUploadUi("uploading", {
                     file,
                     pct: safePct,
-                    detail: totalParts > 1
-                      ? `Part ${Math.min(doneParts + 1, totalParts)} of ${totalParts}. Keep this tab open.`
-                      : "Keep this tab open until the upload finishes.",
-                    activityKey: `upload:${file.name}:${doneParts}`,
+                    detail: `${doneParts} of ${totalParts} segments uploaded · ${Math.round(sentBytes / (1024 * 1024))} of ${Math.round(file.size / (1024 * 1024))} MB transferred. ${doneParts === totalParts ? "Finalizing source…" : `Uploading segment ${Math.min(doneParts + 1, totalParts)}.`}`,
+                    activityKey: `upload:${file.name}:${doneParts}:${sentBytes}`,
                   });
                 }
               }
@@ -12731,6 +13334,7 @@ function timedScriptAssetLabel(asset, index) {
       item4UploadBatchTotal = 0;
       item4UploadBatchDone = 0;
       if (button) button.disabled = !(item4Workspace?.assets?.length);
+      if (ezIsVibeCut() && !ezStarting && vibeCutReadySource()) void maybeAutoAdvanceVibeCutToReview(item4Workspace);
       drainPendingMasterUploads();
     }
   }
@@ -14499,6 +15103,9 @@ function timedScriptAssetLabel(asset, index) {
       const tags = [];
       if (suggestedIds.has(item.id)) tags.push(`<em class="idea-library-card-tag">Suggested</em>`);
       if (video) tags.push(`<em class="idea-library-card-tag">Clip</em>`);
+      if (item.quality_warning === "Low Quality") {
+        tags.push('<em class="idea-library-card-tag" title="Lower quality may reduce final image clarity. You can still select it manually.">Low quality · manual choice</em>');
+      }
       const tag = tags.join("");
       // Eager load: these grids sit in overflow:auto dialogs where WebKit often never
       // starts loading="lazy" images (blank white tiles on iPhone swap-still / library pickers).
@@ -14643,14 +15250,63 @@ function timedScriptAssetLabel(asset, index) {
     }
   }
 
+  // A single six-image Worker request used to watermark several masters before
+  // writing the production manifest. If any later watermark failed, all previous
+  // work became invisible in Production. Each explicit operator choice is now
+  // a separately committed, idempotent request. Failures never stop later items.
+  async function attachSelectedLibraryAssetsOneByOne(requestId, mediaAssetIds, {
+    originKind = "photos-and-clips",
+    onProgress = null,
+  } = {}) {
+    const ids = [...new Set((mediaAssetIds || [])
+      .map((id) => String(id || "").trim())
+      .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+    const known = new Map([...ideaLibraryPickerItems, ...item4LibraryItems]
+      .filter((item) => item?.id).map((item) => [item.id, item]));
+    const outcome = { attached: 0, succeeded: [], failed: [], record: null };
+    for (let index = 0; index < ids.length; index += 1) {
+      // Keep repeat Airtable mutations below the base's burst limit.
+      if (index) await sleepMs(350);
+      const id = ids[index];
+      const name = String(known.get(id)?.name || id);
+      onProgress?.({ index: index + 1, total: ids.length, id, name });
+      try {
+        const response = await api(`/api/production-requests/${encodeURIComponent(requestId)}/assets/library`, {
+          method: "POST",
+          body: JSON.stringify({
+            media_asset_ids: [id],
+            allow_video: true,
+            allow_low_quality: true, // Manual operator selection, never automatic matching.
+            origin_kind: originKind,
+          }),
+          timeoutMs: 45000,
+          // POST can complete server-side even when its response is lost.
+          // Never auto-replay a timed-out or 5xx attachment request.
+          retries: 1,
+        });
+        outcome.attached += Math.max(0, Number(response?.attached || 0));
+        outcome.succeeded.push(id);
+        if (response?.record) outcome.record = response.record;
+      } catch (error) {
+        outcome.failed.push({
+          id,
+          name,
+          status: Number(error?.status || 0) || null,
+          message: String(error?.message || "Attachment failed").slice(0, 240),
+        });
+      }
+    }
+    return outcome;
+  }
+
   async function openProductionRequestWithLibrary(idea, mediaAssetIds) {
     if (!idea?.id) return;
     const continueButton = $("ideaLibraryContinueButton");
     if (continueButton) {
       continueButton.disabled = true;
-      continueButton.textContent = "Attaching…";
+      continueButton.textContent = "Opening Production…";
     }
-    setManageMessage("Attaching library photos and clips and opening Production…", "");
+    setManageMessage("Opening Production for the selected library photos and clips…", "");
     try {
       await Promise.all([ensureProductionRequestMusic(), loadEzAudioOptions()]);
       const result = await api(`/api/ideas/${encodeURIComponent(idea.id)}/production-request`, {
@@ -14659,33 +15315,44 @@ function timedScriptAssetLabel(asset, index) {
       });
       const requestId = result?.record?.id;
       if (!requestId) throw new Error("Production Request was not created.");
-      await api(`/api/production-requests/${encodeURIComponent(requestId)}/assets/library`, {
-        method: "POST",
-        body: JSON.stringify({
-          media_asset_ids: mediaAssetIds,
-          allow_video: true,
-          origin_kind: "photos-and-clips",
-        }),
-        timeoutMs: 45000,
+      const outcome = await attachSelectedLibraryAssetsOneByOne(requestId, mediaAssetIds, {
+        onProgress: ({ index, total, name }) => {
+          if (continueButton) continueButton.textContent = `Attaching ${index} of ${total}…`;
+          setManageMessage(`Attaching ${index} of ${total}: ${name}`, "");
+        },
       });
       await closeIdeaDrawer({ save: false });
       activeIdea = idea;
       ezEntryPath = "configure";
       switchToPage("content");
-      populateProductionRequestForm(result.record);
+      populateProductionRequestForm(outcome.record || result.record);
       showProductionRequestWorkspace();
-      await loadProductionRequestOutputs(result.record);
-      await loadItem4Workspace(result.record);
+      await loadProductionRequestOutputs(outcome.record || result.record);
+      await loadItem4Workspace(outcome.record || result.record);
+      const attached = new Set((item4Workspace?.assets || [])
+        .map((asset) => String(asset?.media_asset_record_id || "").trim()).filter(Boolean));
+      const selected = [...new Set(mediaAssetIds)];
+      const missing = selected.filter((id) => !attached.has(id));
       const assetCount = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets.length : 0;
       selectPrMediaKind(assetCount > 1 ? "multiple-photos" : "single-photo", { quiet: true });
       await loadProductionRequests();
       setEzAdvancedOpen(false);
-      setRequestMessage(
-        `${assetCount} library still${assetCount === 1 ? "" : "s"} attached. Add more or change platforms, then approve.`,
-        "success"
-      );
+      if (missing.length) {
+        const failedNames = missing.map((id) =>
+          outcome.failed.find((row) => row.id === id)?.name
+          || ideaLibraryPickerItems.find((item) => item.id === id)?.name || id);
+        setRequestMessage(
+          `Attached ${selected.length - missing.length} of ${selected.length} selected items. Still missing: ${failedNames.join(", ")}. Open Use existing and retry the remaining items. No automatic publishing occurred.`,
+          "error-text"
+        );
+      } else {
+        setRequestMessage(
+          `${assetCount} library item${assetCount === 1 ? "" : "s"} attached. Add more or change platforms, then approve.`,
+          "success"
+        );
+      }
     } catch (e) {
-      setManageMessage(e.message, "error-text");
+      setManageMessage(e.message || "Could not open Production.", "error-text");
     } finally {
       if (continueButton) {
         continueButton.textContent = "Continue to Production";
@@ -14704,24 +15371,12 @@ function timedScriptAssetLabel(asset, index) {
   });
   $("item4VibeSaveContinue")?.addEventListener("click", async (event) => {
     event.preventDefault();
-    const source = vibeCutReadySource();
-    if (!source || !["Draft", "Ready"].includes(String(activeProductionRequest?.status || "Draft"))) {
-      setRequestMessage("A saved and fully processed source MOV/MP4 is required. Studio will not use the asset-library photo timeline.", "error-text");
-      setProductionWorkspaceTab("media");
+    if (!vibeCutReadySource()) {
+      setRequestMessage("Source processing is not yet Ready. Do not upload it again.", "error-text");
       return;
     }
-    const button = $("item4VibeSaveContinue");
-    button.disabled = true;
-    try {
-      await saveActiveProductionRequest({ quiet: false });
-      if (item4Workspace?.plan_status !== "Ready") await buildItem4Plan();
-      setProductionWorkspaceTab("formats");
-      setRequestMessage("Vibe Cut source and draft saved. Review platform outputs, then Approve when ready.", "success");
-    } catch (error) {
-      setRequestMessage(error?.message || "Could not save Vibe Cut.", "error-text");
-    } finally {
-      renderVibeCutCommitAction(item4Workspace);
-    }
+    const result = await maybeAutoAdvanceVibeCutToReview(item4Workspace, { manual: true });
+    if (result?.queued) setRequestMessage("Vibe Cut is heading through production to Awaiting Approval. Nothing publishes automatically.", "success");
   });
   $("item4ChooseMedia")?.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -14938,6 +15593,7 @@ function timedScriptAssetLabel(asset, index) {
     if (!activeProductionRequest?.id) return;
     item4WorkspaceRevision += 1;
     await item4RemoveDrain;
+    const requestId = activeProductionRequest.id;
     const { toAdd, toRemove } = item4LibraryDiff();
     if (!toAdd.length && !toRemove.length) return;
     const button = $("item4LibraryAddButton");
@@ -14946,28 +15602,53 @@ function timedScriptAssetLabel(asset, index) {
         button.disabled = true;
         button.textContent = "Applying…";
       }
+      const before = item4AttachedMediaIds();
+      const outcome = await attachSelectedLibraryAssetsOneByOne(requestId, toAdd, {
+        originKind: ezIntakeKind || "photos-and-clips",
+        onProgress: ({ index, total, name }) => {
+          if (button) button.textContent = `Adding ${index} of ${total}…`;
+          setRequestMessage(`Attaching ${index} of ${total}: ${name}`, "");
+        },
+      });
+      if (outcome.record) {
+        activeProductionRequest = outcome.record;
+        populateProductionRequestForm(outcome.record);
+      }
+      // Server readback owns the truth even if one response was lost after
+      // committing. Keep the operator's unchecked removals untouched until
+      // *every* requested addition is verified in Airtable.
+      await loadItem4Workspace(activeProductionRequest, { allowAssetChanges: true });
+      const now = item4AttachedMediaIds();
+      const missing = toAdd.filter((id) => !now.has(id));
+      if (missing.length) {
+        const problems = missing.map((id) => {
+          const error = outcome.failed.find((row) => row.id === id);
+          const name = error?.name || item4LibraryItems.find((row) => row.id === id)?.name || id;
+          return `${name}: ${error?.message || "not confirmed in Production"}`;
+        });
+        renderItem4LibraryPicker();
+        setRequestMessage(
+          `Added ${toAdd.filter((id) => !before.has(id) && now.has(id)).length} of ${toAdd.length}. Not attached: ${problems.join("; ")}. Retry Apply selection for the remaining images. No existing assets were removed.`,
+          "error-text"
+        );
+        return;
+      }
+      // Only process removals after all additions are confirmed. A failed
+      // watermark must never remove the user's existing production media.
       for (const mediaId of toRemove) {
-        const asset = (item4Workspace?.assets || []).find((row) => String(row.media_asset_record_id || "").trim() === mediaId);
+        const asset = (item4Workspace?.assets || []).find((row) =>
+          String(row.media_asset_record_id || "").trim() === mediaId);
         if (!asset?.id) continue;
-        await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets/${encodeURIComponent(asset.id)}`, {
+        await api(`/api/production-requests/${encodeURIComponent(requestId)}/assets/${encodeURIComponent(asset.id)}`, {
           method: "DELETE",
           body: JSON.stringify({}),
+          retries: 1,
         });
       }
-      let result = null;
-      if (toAdd.length) {
-        result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets/library`, {
-          method: "POST",
-          body: JSON.stringify({ media_asset_ids: toAdd, allow_video: true, origin_kind: ezIntakeKind || "photos-and-clips" }),
-          timeoutMs: 45000,
-        });
-        if (result?.record) {
-          activeProductionRequest = result.record;
-          populateProductionRequestForm(result.record);
-        }
+      if (toRemove.length) {
+        await loadItem4Workspace(activeProductionRequest, { allowAssetChanges: true });
       }
-      await loadItem4Workspace(activeProductionRequest, { allowAssetChanges: true });
-      const added = Number(result?.attached || toAdd.length);
+      const added = toAdd.filter((id) => !before.has(id) && item4AttachedMediaIds().has(id)).length;
       setRequestMessage(
         `Updated library stills: added ${added}, removed ${toRemove.length}.`,
         "success"
@@ -14975,7 +15656,9 @@ function timedScriptAssetLabel(asset, index) {
       const picker = $("item4LibraryPicker");
       if (picker) picker.hidden = true;
     } catch (error) {
-      setRequestMessage(error.message || "Could not update library stills.", "error-text");
+      // Keep the picker and selections for retry. Never claim that a 500
+      // means the server did not commit; the next Apply re-reads manifest.
+      setRequestMessage(error.message || "Could not verify library selection. Reopen the picker to retry.", "error-text");
     } finally {
       if (button) button.textContent = "Apply selection";
       syncItem4LibraryAdd();
@@ -15251,7 +15934,8 @@ function timedScriptAssetLabel(asset, index) {
       setPageContentSimple(false);
       hideEzFrontDoor();
     }
-    const list = $("productionRequestListPanel") || $("promotedContentPanel");
+    const draftPanel = $("productionRequestListPanel");
+    const list = draftPanel && !draftPanel.hidden ? draftPanel : $("promotedContentPanel");
     requestAnimationFrame(() => list?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
@@ -15893,19 +16577,29 @@ function timedScriptAssetLabel(asset, index) {
     setProductionRequestControlState(activeProductionRequest);
   });
 
+  // Submitted requests are no longer drafts, even if status propagation lags.
+  function productionRequestIsOpenDraft(record) {
+    if (!record || record.active === false) return false;
+    const status = String(record.status || "").trim().toLowerCase();
+    if (status !== "draft" && status !== "ready") return false;
+    if (String(record.submitted_at || "").trim()) return false;
+    if (Array.isArray(record.promoted_content_item_links) && record.promoted_content_item_links.length > 0) return false;
+    const stage = String(record.studio_item4_state || "").trim().toLowerCase();
+    return !new Set(["production", "review", "approved", "publishing", "complete"]).has(stage);
+  }
+
   async function loadProductionRequests({ silent = false } = {}) {
     const target = $("productionRequestList");
+    const listPanel = $("productionRequestListPanel");
     if (!target) return;
     if (silent && item4Uploading) return;
     if (!silent) target.innerHTML = '<div class="empty production-empty"><strong>Loading drafts…</strong></div>';
     try {
       const { records = [] } = await api("/api/production-requests?limit=100");
-      // Drafts = still editable (or mid-promote). Promoted requests live under
-      // In production / Platform pipeline — not as Continue cards.
-      const draftStatuses = new Set(["Draft", "Ready", "Submitted"]);
-      const drafts = records.filter((record) => draftStatuses.has(String(record?.status || "").trim()));
+      const drafts = records.filter(productionRequestIsOpenDraft);
+      if (listPanel) listPanel.hidden = !drafts.length;
       if (!drafts.length) {
-        target.innerHTML = '<div class="empty production-empty">No open drafts. Start from Home, or open Platform pipeline for work already promoted.</div>';
+        target.innerHTML = "";
         return;
       }
       await ensureIdeasCache();
@@ -15996,6 +16690,7 @@ function timedScriptAssetLabel(asset, index) {
       });
       productionDecorateTooltips(target);
     } catch (e) {
+      if (listPanel) listPanel.hidden = false;
       target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
     }
   }
@@ -22729,8 +23424,8 @@ function timedScriptAssetLabel(asset, index) {
   function writePipelineOutputCache(records) {
     if (!Array.isArray(records) || !records.length) return;
     const payload = JSON.stringify({ records, at: Date.now() });
-    try { localStorage.setItem(pipelineOutputCacheKey(), payload); } catch { /* ignore quota */ }
-    try { sessionStorage.setItem(pipelineOutputCacheKey(), payload); } catch { /* ignore quota */ }
+    try { localStorage.removeItem(pipelineOutputCacheKey()); } catch {} // Row snapshots are disposable session data.
+    if(payload.length < 500000) try { sessionStorage.setItem(pipelineOutputCacheKey(), payload); } catch { /* ignore quota */ }
   }
 
   function mergePipelineFreshOutputs(baseRows, freshRows) {
@@ -23997,8 +24692,74 @@ function timedScriptAssetLabel(asset, index) {
     }
   }
 
+  // Asset Manager uploads one file per request; only the response confirms persistence.
+  function renderLibraryUploadProgress({phase="uploading",file=null,fileIndex=1,fileCount=1,uploaded=0,loadedBytes=0,message=""}={}){
+   const panel=$("libraryUploadProgress"); if(!panel)return;
+   const total=Math.max(1,Number(fileCount)||1);
+   const confirmed=Math.min(total,Math.max(0,Math.floor(Number(uploaded)||0)));
+   const savedLabel=`${confirmed} of ${total} assets saved`;
+   const index=Math.min(total,Math.max(1,Number(fileIndex)||1));
+   const bytes=Math.max(0,Number(file?.size)||0);
+   const loaded=Math.max(0,Math.min(bytes,Number(loadedBytes)||0));
+   const percent=phase==="saved"||phase==="complete"||phase==="verifying"?100:Math.min(99,Math.floor((bytes>0?loaded/bytes:0)*100));
+   // A sent request is 100% transferred, not 99% saved. Server confirmation is a distinct stage.
+   const percentLabel=phase==="verifying"?"100% sent":`${percent}%`;
+   const byteUnit=bytes>0&&bytes<1024?"B":bytes<1024*1024/10?"KB":"MB";
+   const byteDivisor=byteUnit==="B"?1:byteUnit==="KB"?1024:1024*1024;
+   const formatBytes=value=>byteUnit==="B"?String(Math.round(value)):(value/byteDivisor).toFixed(1);
+   const transferLabel=bytes>0?`${formatBytes(loaded)} of ${formatBytes(bytes)} ${byteUnit} transferred`:(file&&Number(file.size)===0?"Empty file (0 B)":"Transfer size unavailable");
+   const fileName=String(file?.name||(phase==="complete"||phase==="partial"?"Upload batch":"Current asset"));
+   const heading=phase==="complete"?"Asset Manager upload complete":phase==="partial"?"Some assets need attention":phase==="failed"?"Asset upload not confirmed":phase==="saved"?"Asset saved":phase==="verifying"?`Confirming asset ${index} of ${total}`:`Uploading asset ${index} of ${total}`;
+   const status=phase==="complete"?`${uploaded} of ${total} assets confirmed saved.`:phase==="partial"?`${uploaded} of ${total} assets confirmed saved; ${total-uploaded} unconfirmed.`:phase==="saved"?`Saved ${uploaded} of ${total} assets.`:phase==="verifying"?"File transfer complete. Awaiting Google Drive storage and Airtable registration confirmation.":phase==="failed"?"The server did not confirm this asset. Check the library before retrying.":`File ${index} of ${total} · ${uploaded} assets confirmed saved.`;
+   panel.hidden=false;panel.dataset.state=phase;
+   const update=(id,value)=>{const element=$(id);if(element)element.textContent=value;};
+   update("libraryUploadProgressTitle",heading);
+   update("libraryUploadProgressFile",fileName);
+   update("libraryUploadProgressPercent",percentLabel);
+   update("libraryUploadProgressFiles",savedLabel);
+   const savedMeter=$("libraryUploadSavedMeter");
+   if(savedMeter){
+    savedMeter.max=total;
+    savedMeter.value=confirmed;
+    savedMeter.textContent=savedLabel;
+    savedMeter.setAttribute("aria-valuetext",savedLabel);
+   }
+   update("libraryUploadProgressBytes",transferLabel);
+   update("libraryUploadProgressStage",message||status);
+   const meter=$("libraryUploadMeter");
+   if(meter){meter.max=100;meter.value=percent;meter.setAttribute("aria-label",`${fileName}: ${percent}% transferred${phase==="verifying"?"; confirmation pending":""}`);}
+  }
+
+  function uploadLibraryFileWithProgress(form,{profileId,file,onTransfer}={}){
+   return new Promise((resolve,reject)=>{
+    const xhr=new XMLHttpRequest();let settled=false,lastStage="";
+    const finish=(error,result)=>{if(settled)return;settled=true;if(error)reject(error);else resolve(result);};
+    const fail=(message,status=0)=>Object.assign(new Error(message),{status});
+    const notify=(stage,loadedBytes)=>{if(settled)return;if(stage==="verifying"&&lastStage==="verifying")return;lastStage=stage;onTransfer?.({stage,loadedBytes:Math.max(0,Math.min(Number(file?.size)||0,Number(loadedBytes)||0))});};
+    // Keep request scope stable even if the header Content Profile changes mid-batch.
+    xhr.open("POST",`${apiBase}/api/library?profile=${encodeURIComponent(String(profileId||""))}`);
+    xhr.timeout=180000;
+    // Do not set Content-Type: XHR supplies the multipart FormData boundary.
+    xhr.upload.onprogress=event=>{if(!event.lengthComputable||!event.total)return;const loaded=Math.round((event.loaded/event.total)*(Number(file?.size)||0));notify(event.loaded>=event.total?"verifying":"uploading",loaded);};
+    xhr.upload.onload=()=>notify("verifying",Number(file?.size)||0);
+    xhr.onload=()=>{
+     let result={};try{result=JSON.parse(xhr.responseText||"{}");}
+     catch{finish(fail("The upload finished but the server confirmation was unreadable.",xhr.status));return;}
+     if(xhr.status<200||xhr.status>=300||result?.ok===false){finish(fail(result?.error||result?.message||`Request failed (${xhr.status})`,xhr.status));return;}
+     const confirmed=Number(result?.uploaded ?? (Array.isArray(result?.records)?result.records.length:(result?.id?1:0)));
+     if(!Number.isFinite(confirmed)||confirmed<1){finish(fail("The server did not confirm a saved asset.",xhr.status));return;}
+     finish(null,result);
+    };
+    xhr.onerror=()=>finish(fail("Connection interrupted. The upload result is unconfirmed."));
+    xhr.ontimeout=()=>finish(fail("Upload confirmation timed out. Check the asset list before retrying."));
+    xhr.onabort=()=>finish(fail("Upload interrupted. The server did not confirm this asset."));
+    xhr.send(form);
+   });
+  }
+
   async function uploadLibraryFiles(fileList) {
     libraryDisarmPicker();
+    if (libraryUploadMessageBusy()) return;
     let files = Array.from(fileList || []).filter((file) => {
       const name = String(file.name || "");
       const type = String(file.type || "");
@@ -24034,6 +24795,7 @@ function timedScriptAssetLabel(asset, index) {
     const uploadedClassifyIds = [];
     let uploaded = 0;
     let completedFiles = 0;
+    renderLibraryUploadProgress({ phase: "uploading", file: files[0], fileCount: files.length, fileIndex: 1 });
     try {
       for (let start = 0; start < files.length; start += chunkSize) {
         const chunk = files.slice(start, start + chunkSize);
@@ -24045,6 +24807,9 @@ function timedScriptAssetLabel(asset, index) {
             ? `Adding ${chunk[0].name}…`
             : `Adding ${completedFiles + 1} of ${files.length}: ${chunk[0].name}…`);
         setLibraryUploadMessage(progressLabel, "");
+        const currentFile = chunk[0];
+        const fileIndex = completedFiles + 1;
+        renderLibraryUploadProgress({ phase: "uploading", file: currentFile, fileIndex, fileCount: files.length, uploaded, loadedBytes: 0, message: "Starting transfer. Waiting for the first bytes…" });
         const form = new FormData();
         for (const file of chunk) form.append("files", file, file.name);
         if (location) form.append("location", location);
@@ -24061,10 +24826,13 @@ function timedScriptAssetLabel(asset, index) {
           } catch {}
         }
         try {
-          const result = await api("/api/library", { method: "POST", body: form, timeoutMs: 180000, retries: 0 });
-          const count = Number(result?.uploaded || chunk.length) || chunk.length;
+          const result = await uploadLibraryFileWithProgress(form, { profileId, file: currentFile,
+            onTransfer: ({ stage, loadedBytes }) => renderLibraryUploadProgress({ phase: stage, file: currentFile, fileIndex, fileCount: files.length, uploaded, loadedBytes }),
+          });
+          const count = Math.min(chunk.length, Number(result?.uploaded ?? (Array.isArray(result?.records) ? result.records.length : result?.id ? 1 : 0)));
           uploaded += count;
           completedFiles += chunk.length;
+          renderLibraryUploadProgress({ phase: "saved", file: currentFile, fileIndex, fileCount: files.length, uploaded, loadedBytes: Number(currentFile?.size) || 0, message: `Server confirmed ${currentFile.name} saved (${uploaded} of ${files.length} assets).` });
           const assigned = Array.isArray(result?.batch_names) ? result.batch_names.filter(Boolean) : [];
           if (assigned.length) namedUploads.push(...assigned);
           else if (Array.isArray(result?.records)) {
@@ -24081,9 +24849,11 @@ function timedScriptAssetLabel(asset, index) {
             : "";
           const label = chunk[0]?.name || "file";
           errors.push(`${label}: ${raw}${hint}`);
+          renderLibraryUploadProgress({ phase: "failed", file: currentFile, fileIndex, fileCount: files.length, uploaded, message: `${label}: ${raw}. Check the asset list before retrying to avoid duplicates.` });
         }
       }
       inputs.forEach((input) => { input.value = ""; });
+      renderLibraryUploadProgress({ phase: errors.length ? "partial" : "complete", file: files[files.length - 1], fileIndex: files.length, fileCount: files.length, uploaded, loadedBytes: Number(files[files.length - 1]?.size) || 0 });
       if (zone) delete zone.dataset.busy;
       if (uploaded) await startLibraryBrowse();
       const namedSummary = namedUploads.length === 1

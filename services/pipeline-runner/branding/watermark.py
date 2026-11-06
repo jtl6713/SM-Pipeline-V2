@@ -74,7 +74,7 @@ def watermark_video_bytes(
         source.write_bytes(video_bytes)
         mark.write_bytes(watermark_bytes)
         filter_graph = (
-            f"[1:v][0:v]scale2ref=w=main_w*{float(scale or DEFAULT_SCALE)}:h=-1[wm][base];"
+            f"[1:v][0:v]scale2ref=w=iw*{float(scale or DEFAULT_SCALE)}:h=ow/mdar[wm][base];"
             f"[base][wm]overlay={overlay_xy}:format=auto[outv]"
         )
         def command(*, include_audio: bool) -> list[str]:

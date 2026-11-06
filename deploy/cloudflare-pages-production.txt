@@ -618,3 +618,93 @@ Deploy UI 0.6.797-vibe-cut-video-ideas. P1 Vibe Cut video-first creation and Ide
 2026-10-31: Retry protected Studio Pages deployment UI 0.6.799-approval-factory-nav after updating Factory Desk navigation regression to expect its new label; no runtime asset or authorization/publishing change.
 2026-10-31: Deploy Studio UI 0.6.800-verified-review-import. Registered verified external V2 review attempt supersedes stale Producer V2 NOT STARTED message; preserve authenticated V2 playback, original V1, hold, approval and publish gates.
 2026-10-31: Deploy Studio 0.6.801-dynamic-creative-masters. Content-owned approved creative master keyed by Format and Aspect_Ratio; any matching platform outputs inherit master binding without changing independent publish/schedule records. Showing group under Rendering Review. Controlled Worker/Pages validation and production deployment.
+2026-10-31: Deploy Studio UI 0.6.802-factory-review-find from PR #1432. Adds always-visible Needs Eyes title/Content #/Output # search with automatic band expansion, cross-profile review lookup, current held-V2 preview-only display and suppression of unsafe Factory group approvals. UI release and versioned assets align. Worker backend release uses authoritative Airtable and protected canary; no publishing or data mutations.
+2026-11-01: Deploy Studio UI 0.6.803-factory-review-selection-9593 from PR #1451. Approval Factory shows a checkbox on every Needs Eyes output, enables it only for authorized ready outputs and explains blocks (including Output #9593); guard stale individual Approve and ignore disabled rows in group selection. Preserve server rollout, Airtable authority and no unattended publishing. Require protected Pages tests, custom-domain UI/BUILD_ID/asset verification.
+2026-11-01: Deploy Studio UI 0.6.804-factory-hold-message-top. Output #9593 holds must show an accessible and readable status inline beneath the title, before preview/approval/delete actions, rather than being clipped below mobile actions and the footer. No Airtable, Worker or approval policy changes. Protected Pages release verifies the release contract and Factory mobile regression.
+2026-11-01: Deploy Studio UI 0.6.805-factory-output-preview-ownership. Approval Factory visually binds each thumbnail to its exact Platform Output row (Output #9593), with the preview image, output title and hold reason in the same header. Explicitly label shared Content Item cover images instead of representing them as frames from the final output. Preserve exact output preview link, selection permissions and Rendering Review holds. Verify via Factory PR regressions and protected Pages release.
+2026-11-01: Deploy Studio UI 0.6.806-scripted-proposal-feedback (PR #1456). Adds natural-language feedback after the Script a Short proposal appears, revised storyboard, proposal version history and Undo before Accept. Keeps Studio 0.6.806 BUILD_ID and shared cache key in sync. Pages deploy gated by PR regression, version newness, custom-domain validation and Worker API availability.
+2026-11-01: Deploy Studio UI 0.6.807-scripted-proposal-compat. A separate Worker deploy was safely rolled back on an unrelated held Michigan Avenue Factory review asset. For pre-Accept Script a Short slide changes only, use the existing read-only, profile-scoped Library GET when the new revision endpoint returns 404/405. Require exact named uploaded video, Airtable-backed media, and existing Accept-time Quality Agent validation. Do not bypass a permission, media-policy or QA rejection. Preserve all Factory review holds. Protected Pages rollout and standard UI regression gates required.
+2026-11-01: Deploy Studio UI 0.6.808-thumbnails-nav from PR #1455. Show actual output thumbnails or global NEEDS ASSET placeholder, keep Factory selection toolbar behind navigation, collapse menu on selection. Preserve Script a Short 0.6.807 compatibility, Airtable source of truth and all gates. Protected custom-domain identity verification mandatory.
+2026-11-01: Deploy Studio UI 0.6.809-scripted-multi-scene. Allow multiple precise pre-Accept storyboard requests with undo/history; use dedicated Worker revision endpoint as primary, retain conservative fallback only when legacy API 404/405. Align BUILD_ID, HTML label and cache versions; require authenticated Worker route, full browser and custom-domain verification.
+2026-11-01: Deploy Studio UI 0.6.810-factory-profile-scope. Active Factory profile filter indicator beside Needs eyes, search-scope disclosure and one-click Show all profiles.
+2026-11-01: Deploy Studio UI 0.6.820-producer-progress from PR #1463. Persist Producer change request receipt and staged progress across Factory refresh; authenticated read-only Worker status polling; manual/QA/error distinction and no fabricated percentage. Preserve Airtable authority, publication holds, and all standard Pages/Worker checks.
+2026-11-01: Deploy UI 0.6.822-factory-review-readiness. Preserve Producer progress 0.6.820; validate Factory native photo approval readiness and missing asset explanations.
+2026-11-01: Deploy Studio UI 0.6.823-post-production-edits from PR #1466. Left navigation item, page heading, accessible label and Factory guidance display Post Production Edits. Preserve rendering-review route, DOM identities, permissions, QA, and publishing holds. Verify protected custom-domain UI build.
+2026-11-01: Deploy Studio UI 0.6.824-live-post-production-progress from PR #1468. Show authenticated held Producer and V2 revision status on Post Production Edits, poll verified read-only session while active, retain last known status during API interruptions, and distinguish queued, running, validated and creative-approved states. Preserve Airtable write authority, held publication and explicit renderer/approval gates. Require green release/Review regression and verified production custom-domain BUILD_ID and asset caches.
+Deploy Studio UI 0.6.825: approved held V2 can request another revision independent of watermark QA, with explicit Factory/QA status. 2026-11-01.
+2026-11-01: Deploy Studio UI 0.6.826-review-attention-inflight-notes. Red Requires your attention state only for enabled reviewer actions; show authenticated photo-scene feedback box during queued/running/validating V2, saving comments for the NEXT attempt while preserving the immutable current job. Verify live Worker 0.10.718 path before using comments, custom-domain UI/BUILD_ID/caches, Airtable hold and zero publishing side effects.
+
+2026-11-01: Studio 0.6.827 non-Vibe read-only Factory Request Changes source/compatible-output panel. Preserve 0.6.826 held V2 comments and attention stages. No new generation/approval/publishing controls. Verify Worker 0.10.719, Pages BUILD_ID, asset cache consistency and custom domain after protected production deployment.
+2026-11-01 Pages 0.6.828: Factory held V2 creative acceptance, Request Changes resumes saved Producer session, truthful V2 progress.
+
+2026-11-01 UI 0.6.829: Vibe upload metadata deadline, byte progress, safe multipart recovery; preserve uploaded originals.
+
+2026-11-01 UI 0.6.830: Vibe transfer begins before optional workspace reads; 0-of-N segment progress and mobile layout; do not pre-decode MOV or mislabel unconfirmed clips.
+
+2026-11-01 UI 0.6.831: Vibe setup errors now stop the preparation spinner, show the actual failure, and unlock safe retry without deleting saved media.
+
+2026-11-01 UI 0.6.832: Asset Manager shows per-file transfer bytes/percent, current asset, confirmed-file counts, server confirmation and failed queue summaries; uses one-request XHR without publishing or storage changes.
+
+2026-11-01 UI 0.6.833: Asset Manager HTTP 200 without an authoritative saved count no longer claims success or increments file totals; retain previous release functionality.
+
+2026-11-01 UI 0.6.834: Explain Vibe source upload confirmation, queued/transcoding/verify statuses, safe exit and Drafts resume; distinguish saved-video processing failure from transfer failure.
+2026-11-01: Deploy UI 0.6.835 Vibe verified upload automatically transitions to render/human Approval; optional Production inspection, no publishing. Backend merged #1484; UI PR pending.
+2026-11-01: Studio UI 0.6.836 and Worker Vibe Cut verified-source handoff; auto-save output plan, prepare variants, promote into rendering and stop for human Approval. No automatic publish.
+Deploy Studio UI 0.6.837-pipeline-total-first: Home overview Pipeline Total is first metric column and has neutral platform styling; preserve city/profile totals. Trigger Pages production verification.
+Deploy Studio UI 0.6.838: Factory held V2 acceptance button gets full-width third action row and immediate saved receipt confirmation, with publishing hold unchanged. 2026-11-01.
+
+2026-11-01: Release Studio UI 0.6.850-render-queue-recovery. Warn on stalled unclaimed/claimed V2 jobs and preserve explicit human render intent.
+2026-11-01: Deploy Studio UI 0.6.851-explicit-producer-feedback. Keep one persistent Producer comment box after suggested photos in all active held review stages, preserve typed drafts on polling, save comments without planning/renders, show explicit Make edits based on latest feedback button only after saved feedback, and preserve separate authorized render button. Require UI/regression and custom-domain BUILD_ID verification.
+
+2026-11-01: Studio UI 0.6.852-adler-review-progress. For completed V2 under a publishing hold, show separate pending V3 feedback/Producer/asset validation/non-authorized render status; do not mark V3 completed or permit render from status UI. Pages deploy only after protected PR checks and branch merge; verify custom-domain UI BUILD_ID.
+Deploy Studio UI 0.6.853 asset transfer clarity: show 100% sent pending Drive/Airtable confirmation and display small photos in KB. 2026-11-01.
+Deploy Studio UI 0.6.855 confirmed-save meter: add a distinct filled batch-progress bar showing N of M assets saved; advance only after server confirmation, maintain current-file transfer meter and saved counts through failures. 2026-11-01.
+
+2026-11-01: Protected Studio UI 0.6.860-non-vibe-gallery-selection (#1500). Add selected native-image correction notes, explicit identity-only validation, preserve concurrent 0.6.855 Asset Manager saved-meter and Adler UI. No render or publishing authority. Verify Pages deployment and custom-domain BUILD_ID.
+
+2026-11-02: Deploy Studio UI 0.6.862 (#1526). Rename Post Production Edits left heading to Reviewer Edit Requests. Verify production custom-domain footer, BUILD_ID and heading; preserve review holds and publishing restrictions.
+2026-11-02: Deploy Studio UI 0.6.863-factory-stale-resume-reset. Clear expired browser-only Factory submissions after an authoritative exact-ID miss so current selections can be submitted; preserve real in-flight locks.
+2026-11-02: Deploy Studio UI 0.6.864-factory-submit-error-visible. Keep a failed Submit Approvals reason visible across automatic Desk refreshes so operators know nothing was accepted and when it is safe to retry.
+2026-11-02: Deploy Studio UI 0.6.865-factory-submit-safe-retry. Reuse the exact Factory request ID for one bounded Airtable-busy retry and preserve every final submission error across Desk refreshes.
+Deploy Studio UI 0.6.866: recover exact-ID legacy/global Factory pending approval fences (PR #1534, issue #1533).
+Deploy Studio UI 0.6.867: retry ambiguous Factory HTTP 500 once using exact saved request ID after read-only verification.
+Deploy Studio UI 0.6.868: reconcile pending Factory approval before enabling any new submit; fix 2-of-12 stale counts.
+Deploy Studio UI 0.6.869: fix hidden Factory recovery control and clear stale 500 banner after authoritative saved-request reconciliation.
+
+2026-11-03 UI 0.6.870 Michigan Avenue #9593 protected accepted-V2 Factory handoff action; gated existing POST, no approval or publication side effects. Regression and release check before deployment.
+
+2026-11-03: Deploy Studio Pages UI 0.6.871-vibe-mae-final-approval. Remove provisional publishing-date confirmation from Vibe Cut upload after version selection; immediately open video intake, leave schedule assignment to MAE on final human approval, retain manual scheduling and confirmation for non-Vibe flows. No Worker, approval, publishing, or Airtable changes.
+
+2026-11-04: Deploy Studio UI 0.6.872-factory-auto-recovery. Remove manual recovery and page-wide submission lock; reconcile saved request identities independently, submit unrelated selections immediately, and automatically continue explicitly submitted overlaps after authoritative verification. Preserve exact-output duplicate protection and approval authorization.
+
+2026-11-04: Deploy UI 0.6.873-factory-durable-submit. Persist exact authorized request envelopes before submission, retry transient failures with the original ID after reload, require complete receipts, retain validation errors, bound network timeouts, and serialize Activity polling. Six-output browser regression covers busy/lost-response/reload cases.
+
+2026-11-04 UI 0.6.874: load approval policy independently; never choose legacy route from missing activity response.
+
+2026-11-04 UI 0.6.875: nonblocking Factory storage and reliable AI preference feedback.
+
+2026-11-04 UI 0.6.876-gallery-factory: guarded Factory private image review packet verification action for an explicitly creatively accepted native gallery job. New matching BUILD_ID and every asset cache key. No Factory approve/publish operation or feature-flag activation; release only through protected Pages validation.
+
+2026-11-04 UI 0.6.877: reveal actual automatic recovery failures; prioritize selected submission.
+
+2026-11-04 UI build 0.6.880-stage1-held-inbox. A second explicit user confirmation after verified private V2 previews may request the protected default-OFF Airtable-only Factory inbox receipt. This NEVER releases hold or authorizes normal Factory/public publication. Item4 BUILD_ID and all JS/CSS cache keys strictly aligned.
+
+2026-11-04: Studio Pages UI 0.6.881 drop Factory past_review browser recovery fence so already-approved outputs cannot keep blocking new Ready-for-Review submits.
+
+2026-11-04: Deploy Studio UI 0.6.882-stage1-private-corrections. Gated exact-output private gallery hold/Generate controls, explicit human confirmation, truthful Airtable slot progress. All default OFF; no social publishing, no automatic generation. CI exact head and custom-domain version verification required.
+
+2026-11-05: Studio Pages UI 0.6.883-factory-approval-count-clarity. Clarify Factory Needs eyes vs overview Awaiting Approval (package-ready Approve gate vs status census).
+
+2026-11-05: Deploy Studio UI 0.6.890-idea-assigned-assets-on-manage. Ideas Manage drawer displays existing linked photos/clips and Production draft assets at the top on open; read-only metadata hydration, no additions/removals/approval/publishing. Protected Pages custom-domain release checks required.
+
+2026-11-05: Deploy Studio UI 0.6.891-idea-low-quality-manual. Ideas Manage and Production Use existing library lists display manually selectable Low Quality warnings; explicit user-chosen attachments only. Lurie Idea #2087 regression covered; automatic selection unchanged. Require protected Pages UI release contract and custom-domain verification.
+
+2026-11-05: Deploy Studio UI 0.6.892-library-attach-resume. Fix Lurie Idea #2087 / Production PR attachment 500 caused by six-image all-or-nothing watermark batch: manual Ideas and Production library selections commit per image with individual progress, strict one-shot POST, authoritative Airtable readback, failure-by-name, safe retry, and no removals on failed adds. Preserve existing Low Quality manual override and all automatic quality / watermark / publish / MAE gates. Protected Pages custom-domain exact UI/build verification required.
+
+2026-11-05: Deploy Studio UI 0.6.893-production-drafts-only. Remove Submitted and previously promoted Production Requests from Drafts; hide empty Drafts panel, preserve in-flight render/review and Pipeline history. Read-only UI filter, no Airtable mutation or publication. Enforce Pages build/cache-key parity and custom-domain verification.
+
+2026-11-05: Deploy Studio Pages UI 0.6.894-review-variant-count after merged PR #1658. Factory Needs Eyes count/list use current server lane instead of stale browser acceptance hints; retain unified UI build/cache version and strict custom-domain release verification. No approval or publication writes.
+
+2026-11-05: Deploy Studio UI 0.6.895-factory-release after merged PR #1663. Provide operator-confirmed Release for Approval alongside Preview and Request Changes for complete review-ready outputs held by Do_Not_Publish, preserving separate QA/V2 holds and never auto-approving. Keep UI label, BUILD_ID and every asset cache key identical, verify production custom-domain Pages release and Factory interactions.
+
+2026-11-05: Deploy Studio UI 0.6.896-formal-review-parity after PR #1665. Current authoritative Ready for Review overrides stale 48-hour browser acceptance hints so every valid Factory item retains an enabled individual Approve and eligible batch selection, guarded by canonical server locks. Preserve all actual publishing holds and QA barriers. Unified UI build/cache and exact custom-domain verification required.

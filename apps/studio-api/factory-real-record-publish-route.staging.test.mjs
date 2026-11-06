@@ -7,6 +7,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readStudioWorkerSource } from "./worker-source-reader.mjs";
+import { evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { maeScheduleNextSlot, maeIsBlackoutLocalTime, maeScheduleConflicts } from "./mae-schedule.mjs";
 import { factoryBatchEnqueue, factoryBatchDrain, factoryBatchSummary } from "./factory-approval-queue.mjs";
 
@@ -44,8 +45,11 @@ const lookup=(record,key)=>record.fields[key];
 class HttpError extends Error { constructor(status,message){super(message);this.status=status} }
 const eligibleSource=extract("function studioOutputReadyForPublishApproval(", "async function studioPipelineSettingsProfileRecord(");
 const eligible=new Function("f","studioIsFinishedPassthrough","studioFinishedOriginKind","studioOutputIsNativePhoto",
+ "studioOutputHasReviewableDeliverable","evaluateReviewPackage",
  eligibleSource+"\nreturn studioOutputReadyForPublishApproval")(
  lookup,()=>false,()=>"",()=>false,
+ record => Boolean(record.fields.Final_File_URL && record.fields.Thumbnail_URL),
+ evaluateReviewPackage,
 );
 const approvalSource=extract("async function factoryApproveOutput(", "function factoryFeedbackBlock(");
 class MemoryR2{
@@ -68,6 +72,8 @@ test("20 actual LA record identities pass canonical Factory approval route again
   Output_Status:"Ready for Review",Review_Status:"Review Sent",
   Render_Status:"Rendered",Publish_Status:"Not Ready",
   Final_File_URL:"https://staging.invalid/non-publishing-output.mp4",
+  Thumbnail_URL:"https://media.chicagoshining.com/studio/previews/thumbnails/stage.jpg",
+  Output_Caption:"Staged review copy only",
   Do_Not_Publish:false,Content_Profile:[PROFILE],
  }}]));
  const occupancy={};let stagedWrites=0,stagedDispatchCalls=0;
@@ -93,12 +99,14 @@ test("20 actual LA record identities pass canonical Factory approval route again
   "studioOutputReadyForPublishApproval","approveOutputRecordForPublishing",
   "studioPublishCanDispatchNow","studioDispatchApprovedPublishAndSchedule",
   "studioScheduleMs","reconcileCreativeMasterAtFactoryApproval",
+  "evaluateReviewPackage","verifyReviewImages",
   approvalSource+"\nreturn factoryApproveOutput")(
    async(_env,_table,id)=>rows.get(id),
    lookup,HttpError,eligible,wouldApprove,()=>false,
    async()=>{stagedDispatchCalls++;return{skipped:"test-only"}},
    studioScheduleMs,
-   async()=>({status:"no_master"})
+   async()=>({status:"no_master"}),
+   evaluateReviewPackage, async readiness => readiness,
  );
  const bucket=new MemoryR2();
  const profileId=PROFILE,requestId="factory_live_record_stage_20";
@@ -135,10 +143,12 @@ test("canonical Factory approval rejections prevent unsafe published/blocked/rer
     "studioOutputReadyForPublishApproval","approveOutputRecordForPublishing",
     "studioPublishCanDispatchNow","studioDispatchApprovedPublishAndSchedule",
     "studioScheduleMs",
+    "evaluateReviewPackage", "verifyReviewImages",
     approvalSource+"\nreturn factoryApproveOutput")(
       async()=>({id:"recFactoryGuardedExample",fields}),
       lookup,HttpError,eligible,async()=>{writes++;return{}},()=>false,async()=>{},
-      (value)=>{const ms=Date.parse(String(value||""));return Number.isFinite(ms)?ms:null;}
+      (value)=>{const ms=Date.parse(String(value||""));return Number.isFinite(ms)?ms:null;},
+      evaluateReviewPackage, async readiness => readiness,
     );
   if(kind==="already_approved"||kind==="already_published"){
     const r=await factory({AIRTABLE_OUTPUT_TABLE_ID:"stage"},"recFactoryGuardedExample","stage","",null);

@@ -103,6 +103,23 @@ class StudioApiBindingContractTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             assert_live_contract(got, "unapproved pilot binding")
 
+    def test_durable_i1_activation_secret_is_preserved_with_exact_type(self):
+        got = self.legacy_core()
+        got.update(RESERVATION_BINDINGS)
+        self.assertTrue(assert_live_contract(got, "durable I1 absent")["ok"])
+        got["STUDIO_I1_DURABLE_JOBS"] = "secret_text"
+        result = assert_live_contract(got, "durable I1 enabled")
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["optional_present"]["STUDIO_I1_DURABLE_JOBS"])
+
+        got["STUDIO_I1_DURABLE_JOBS"] = "plain_text"
+        with self.assertRaises(SystemExit):
+            assert_live_contract(got, "durable I1 must remain secret")
+        del got["STUDIO_I1_DURABLE_JOBS"]
+        got["STUDIO_I1_DURABLE_JOBS_UNSAFE"] = "secret_text"
+        with self.assertRaises(SystemExit):
+            assert_live_contract(got, "unexpected I1 binding")
+
     def test_unknown_scheduling_binding_is_still_rejected(self):
         got = self.legacy_core()
         got.update(RESERVATION_BINDINGS)

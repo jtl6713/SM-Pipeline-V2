@@ -15,6 +15,7 @@ const pastDue = (id, extra = {}) => ({
 const snap = (extra = {}) => ({
   status: "ok", scanned_at: "2026-10-23T20:00:00Z",
   items: [failed("recAAAAAAAAAAAAAA")],
+  canonical_failed: {status: "ok", items: [failed("recAAAAAAAAAAAAAA")]},
   rows: [{ id: "recAAAAAAAAAAAAAA", fields: {Do_Not_Publish: true}}],
   approved_past_due: {status: "ok", items: [pastDue("recAAAAAAAAAAAAAA")]},
   verification_recovery: {status: "ok", counts: {recovered_automatically: 2}, items: [
@@ -25,7 +26,7 @@ const snap = (extra = {}) => ({
 test("overlapping QA detections produce one actionable identity, never a duplicate", () => {
   const result = buildExceptionRecoveryCenter(snap());
   assert.equal(result.items.length, 1);
-  assert.deepEqual(result.items[0].categories, ["failed","approved_past_due","held_deferred"]);
+  assert.deepEqual(result.items[0].categories, ["failed","approved_past_due","quality_diagnostic","held_deferred"]);
   assert.equal(result.items[0].held, true);
   assert.equal(result.items[0].actions_enabled, false);
   assert.match(result.items[0].recommendation, /Do not automatically/);
@@ -81,6 +82,10 @@ test("profile, platform and category filters affect rows, not unverified global 
       failed("recAAAAAAAAAAAAAA", {profile_id: "recChicagoProfile", platform: "YouTube"}),
       failed("recCCCCCCCCCCCCCC", {profile_id: "recMiamiProfile", platform: "Instagram"}),
     ],
+    canonical_failed: {status:"ok",items:[
+      failed("recAAAAAAAAAAAAAA",{profile_id:"recChicagoProfile",platform:"YouTube"}),
+      failed("recCCCCCCCCCCCCCC",{profile_id:"recMiamiProfile",platform:"Instagram"}),
+    ]},
     approved_past_due: {status: "ok", items: [
       pastDue("recAAAAAAAAAAAAAA", {profile_id: "recChicagoProfile"}),
     ]},
@@ -121,4 +126,26 @@ test("overdue title from Quality Agent appears on the list and detail item",()=>
  }));
  assert.equal(result.items[0].title,"Crandon Park Nature Frames");
  assert.equal(result.items[0].output_id,"3374");
+});
+
+
+test("diagnostic-only rows remain visible without inflating Home Failed",()=>{
+ const result=buildExceptionRecoveryCenter(snap({
+  items:[failed("recCCCCCCCCCCCCCC",{signature:"QA-IG-AP3C-AMBIGUOUS-PARENT"})],
+  canonical_failed:{status:"ok",items:[]},
+  approved_past_due:{status:"ok",items:[]},
+ }));
+ assert.equal(result.metrics.failed.observed,0);
+ assert.equal(result.metrics.quality_diagnostics.observed,1);
+ assert.deepEqual(result.items[0].categories,["quality_diagnostic"]);
+ assert.equal(result.items[0].signature,"QA-IG-AP3C-AMBIGUOUS-PARENT");
+});
+
+test("canonical failure scan unavailability is unknown, not a false zero or parity pass",()=>{
+ const result=buildExceptionRecoveryCenter(snap({canonical_failed:{status:"unavailable"}}));
+ assert.equal(result.status,"partial");
+ assert.equal(result.metrics.failed.observed,null);
+ assert.equal(result.metrics.failed.count,null);
+ assert.equal(result.completeness.failed,"unavailable");
+ assert.equal(result.metrics.quality_diagnostics.observed,1);
 });

@@ -99,6 +99,40 @@ class EvidenceTests(unittest.TestCase):
         e = load_evidence(client, OUTPUT, SESSION, 3)
         self.assertEqual(e["library_candidates"], [])
 
+    def test_adler_asset_manager_photos_discovered_but_not_silently_linked(self):
+        client, rows = self.fixture()
+        seven = [3, 5, 12, 13, 14, 17, 18]
+        session = json.loads(rows[SESSIONS][0]["fields"]["Session_JSON"])
+        session["messages"] = [{"role": "user",
+            "content": "Use Adler Planetarium 3, 5, 12, 13, 14, 17, 18. Keep the skyline opener."}]
+        rows[SESSIONS][0]["fields"]["Session_JSON"] = json.dumps(session)
+
+        def photo(number, profile=CHICAGO_PROFILE_ID, rights="Owned"):
+            return {"id": "rec" + str(number).zfill(14), "fields": {
+                "Asset Name": "Adler Planetarium " + str(number),
+                "Media_Class": "Graphic" if number == 5 else "Image",
+                "Asset_Status": "Available",
+                "Rights_Status": rights, "Active": True, "Do_Not_Use": False,
+                "Content_Profile": [profile],
+                "Google Drive File ID": "1ABCDEFGHIJKLMNOPQRSTUV",
+                "Time_Of_Day": "Afternoon",
+                "Asset_Description": "Existing catalog photo"}}
+
+        rows["library_media"] = [photo(n) for n in seven] + [
+            photo(4, profile="rec11111111111111"),
+            photo(7, rights="Unknown")]
+        result = load_evidence(client, OUTPUT, SESSION, 3)
+        self.assertEqual({x["name"] for x in result["library_candidates"]},
+            {"Adler Planetarium " + str(n) for n in seven})
+        self.assertEqual([(x["name"], x["media_class"], x["reason"])
+            for x in result["library_ineligible"]],
+            [("Adler Planetarium 5", "Graphic", "graphic_requires_visual_review")])
+        # Discovery must not silently mutate the original owned renderer list.
+        self.assertEqual([x["id"] for x in result["assets"]], ["asset-1"])
+        self.assertTrue(all(x["frames_inspected"] is False
+            for x in result["library_candidates"]))
+        self.assertNotIn("Google Drive File ID", result["library_candidates"][0])
+
     def test_stale_version_denies_before_model(self):
         client, _ = self.fixture()
         with self.assertRaisesRegex(ValueError, "Stale"): load_evidence(client, OUTPUT, SESSION, 2)
@@ -134,5 +168,35 @@ class EvidenceTests(unittest.TestCase):
         rows[OUTPUTS]["fields"]["Publish_Status"] = "Published"
         with self.assertRaisesRegex(ValueError, "publication"):
             load_evidence(client, OUTPUT, SESSION, 3)
+
+
+    def test_newest_human_photo_list_overrides_superseded_assets(self):
+        from rendering_review.library_discovery import requested_library_names
+        latest = ("Then use these seven exterior photos:\n"
+                  "- Adler Planetarium 3\n"
+                  "- Adler Planetarium 13\n"
+                  "- Adler Planetarium 14\n"
+                  "- Adler Planetarium 17\n"
+                  "- Adler Planetarium 18\n"
+                  "Please validate Adler Planetarium 5 from previous discussion.")
+        old = ("Then use these seven photos:\n"
+               "- Adler Planetarium 3\n- Adler Planetarium 5\n"
+               "- Adler Planetarium 12\n- Adler Planetarium 13\n"
+               "- Adler Planetarium 14\n- Adler Planetarium 17\n"
+               "- Adler Planetarium 18")
+        messages = [{"role": "user", "content": old},
+                    {"role": "producer", "content": old},
+                    {"role": "user", "content": latest}]
+        self.assertEqual(requested_library_names(messages), [
+            "Adler Planetarium 3", "Adler Planetarium 13",
+            "Adler Planetarium 14", "Adler Planetarium 17",
+            "Adler Planetarium 18"])
+        self.assertEqual(requested_library_names(messages + [
+            {"role": "user", "content": "Proceed with the latest photos"}]),
+            requested_library_names(messages))
+        self.assertEqual(requested_library_names([
+            {"role": "user", "content": "Use Adler Planetarium 3, 13, 14"}]),
+            ["Adler Planetarium 3", "Adler Planetarium 13", "Adler Planetarium 14"])
+
 
 if __name__ == '__main__': unittest.main()

@@ -306,11 +306,13 @@ export function sanitizeLibraryAssetName(raw) {
   return { ok: true, name };
 }
 
-/** Strip a trailing " 12" so "Space Museum 15" is treated as base "Space Museum". */
+/** Strip an existing numeric suffix only for catalog sequence lookup. */
 export function normalizeLibraryBatchBase(raw) {
   const sanitized = sanitizeLibraryAssetName(raw);
   if (!sanitized.ok) return sanitized;
-  const stripped = sanitized.name.replace(/\s+\d+$/, "").trim();
+  // This is a lookup base only; never use it as the actual uploaded name.
+  // Both "Lurie 5" and "Route66" must find the pre-existing numbered series.
+  const stripped = sanitized.name.replace(/\d+$/, "").trim() || sanitized.name;
   if (!stripped) return { ok: false, error: "Name is required" };
   if (stripped.length > LIBRARY_ASSET_NAME_MAX) {
     return { ok: true, name: stripped.slice(0, LIBRARY_ASSET_NAME_MAX).trim() };
@@ -379,6 +381,40 @@ export function allocateLibraryBatchNames(baseName, count, existingNames = []) {
 }
 
 /**
+ * Use the exact number an operator typed as the first candidate, rather than
+ * discarding it and appending a second number. The numbered suffix advances
+ * only when another file in the batch needs a name or that name already exists.
+ * Unnumbered inputs retain the catalog's existing next-number behavior.
+ */
+export function allocateLibraryUploadNames(rawName, count, existingNames = []) {
+  const sanitized = sanitizeLibraryAssetName(rawName);
+  if (!sanitized.ok) return [];
+  const total = Math.max(0, Math.trunc(Number(count) || 0));
+  if (!total) return [];
+  const numbered = sanitized.name.match(/^(.*?)(\d+)$/);
+  if (!numbered) return allocateLibraryBatchNames(sanitized.name, total, existingNames);
+
+  const prefix = numbered[1];
+  const digits = numbered[2];
+  const used = new Set((existingNames || [])
+    .map((name) => stripLibraryAssetExtension(name).toLowerCase())
+    .filter(Boolean));
+  const names = [];
+  let next = BigInt(digits);
+  while (names.length < total) {
+    const suffix = next.toString().padStart(digits.length, "0");
+    const allowedPrefixLength = Math.max(0, LIBRARY_ASSET_NAME_MAX - suffix.length);
+    const name = `${prefix.slice(0, allowedPrefixLength)}${suffix}`;
+    if (!used.has(name.toLowerCase())) {
+      names.push(name);
+      used.add(name.toLowerCase());
+    }
+    next += 1n;
+  }
+  return names;
+}
+
+/**
  * Airtable formula: exact base or "base N" Asset Name matches (case-insensitive).
  * Optional trailing file extension is allowed so older Drive-style names still count.
  */
@@ -387,7 +423,7 @@ export function libraryBatchNameFilterFormula(baseName) {
   if (!base) return null;
   const regexEscaped = escapeRegExp(base.toLowerCase()).replace(/"/g, '\\"');
   const ext = "([.][a-z0-9]{1,8})?";
-  return `OR(REGEX_MATCH(LOWER({Asset Name}&""),"^${regexEscaped}${ext}$"),REGEX_MATCH(LOWER({Asset Name}&""),"^${regexEscaped} [0-9]+${ext}$"))`;
+  return `OR(REGEX_MATCH(LOWER({Asset Name}&""),"^${regexEscaped}${ext}$"),REGEX_MATCH(LOWER({Asset Name}&""),"^${regexEscaped} [0-9]+${ext}$"),REGEX_MATCH(LOWER({Asset Name}&""),"^${regexEscaped}[0-9]+${ext}$"))`;
 }
 
 export function libraryDriveFilename(stem, extension) {

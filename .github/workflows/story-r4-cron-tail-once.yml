@@ -1,0 +1,80 @@
+name: One-time Story R4 Cron Tail Read Only
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/story-r4-cron-tail-once.yml'
+permissions:
+  contents: read
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Tail production cron and log sanitized R4 decision signatures
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/story-tail
+          npm install --prefix /tmp/story-tail --no-save --silent wrangler@4.123.0
+          set +e
+          timeout -s INT 265s /tmp/story-tail/node_modules/.bin/wrangler tail chicagoshining-studio-api --format json >/tmp/story-tail.jsonl 2>/tmp/story-tail.err
+          RC=$?
+          set -e
+          echo "tail_exit=$RC"
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          data=Path('/tmp/story-tail.jsonl').read_text(errors='replace')
+          lines=data.splitlines()
+          matches=[]
+          tokens=('R4_QUEUE_ADMIT','studio stuck-render','Studio output watchdog',
+                  'cron skipped: Airtable cooling','R4 queue','r4_launch_not_confirmed',
+                  'no_render_started','r4_start_failed','remotion_slot_busy','R4')
+          decoder=json.JSONDecoder()
+          pos=0
+          decoded=0
+          log_messages=0
+          cron_events=0
+          while pos < len(data):
+              while pos < len(data) and data[pos].isspace():
+                  pos+=1
+              if pos >= len(data): break
+              try:
+                  event,end=decoder.raw_decode(data,pos)
+              except json.JSONDecodeError:
+                  newline=data.find('\n',pos)
+                  if newline<0: break
+                  pos=newline+1
+                  continue
+              pos=end
+              if not isinstance(event,dict): continue
+              decoded+=1
+              event_meta=event.get('event') or {}
+              if not isinstance(event_meta,dict): event_meta={}
+              cron=bool(event_meta.get('cron') or event_meta.get('scheduledTime'))
+              if cron: cron_events+=1
+              logs=event.get('logs') or []
+              if not isinstance(logs,list): logs=[logs]
+              for log in logs:
+                  log_messages+=1
+                  if isinstance(log,dict):
+                      value=log.get('message','')
+                      msg=' '.join(str(v) for v in value) if isinstance(value,list) else str(value)
+                  else: msg=str(log)
+                  if any(t.lower() in msg.lower() for t in tokens):
+                      msg=re.sub(r'https?://\S+','[URL]',msg)
+                      msg=re.sub(r'[\w.+-]+@[\w.-]+','[EMAIL]',msg)
+                      matches.append({'cron':cron,'message':msg[:450]})
+          print('decoded_events=',decoded,'cron_events=',cron_events,'log_messages=',log_messages)
+          print('tail_json_events=',len(lines),'matched_r4_logs=',len(matches))
+          for match in matches[:28]:
+              print(json.dumps(match,ensure_ascii=True))
+          PY
+          if grep -Eiq 'authentication|permission|unauthorized|forbidden' /tmp/story-tail.err; then
+            echo "tail_permission_unavailable=true"
+          fi
+          echo "read_only=true no_render_requests=true no_airtable_mutations=true"

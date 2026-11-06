@@ -1,6 +1,9 @@
 import { matchNewlyCreatedIdeaPhotos } from "./worker-functions-03.mjs";
+import { readIgPublishLease, markIgLeaseRecovered, igPublishLeaseEnabled } from "./qa-ig-publish-lease.mjs";
+import { evaluateReviewPackage, verifyReviewImages, factoryReviewVisibility, factoryApprovalHoldReleaseEligibility } from "./review-package-readiness.mjs";
 import { renderingReviewHoldPresent } from "./rendering-review-publication-hold.mjs";
 import { autonomousPlanOutputSpilloverRepair } from "./autonomous-plan-output-recovery.mjs";
+import { vibeAutoReviewVerifiedSource } from "./vibe-auto-review.mjs";
 import { verifyFactoryRenderedMedia } from "./factory-producer-render-evidence.mjs";
 import { appendVerifiedLibraryAssets } from "./factory-producer-library-append.mjs";
 import { applyGroundedMediaEdits } from "./factory-producer-media-edits.mjs";
@@ -19,6 +22,7 @@ import { assessRecoveryPreflight } from "./exception-recovery-preflight.mjs";
 import { withExceptionConversationLock } from "./exception-recovery-lock.mjs";
 import { verifyExistingProviderReceipt } from "./exception-recovery-receipt.mjs";
 import { reconcileExceptionCensus } from "./exception-recovery-counts.mjs";
+import { QA_HOME_FAILED_CANDIDATE_FORMULA, qaHomePastDueCandidateFormula, classifyQualityAgentHomeBuckets } from "./quality-agent-home-parity.mjs";
 import { compareHomeSnapshotToExceptionCensus } from "./exception-recovery-home-parity.mjs";
 import { readExceptionRecoveryCensusCache, persistExceptionRecoveryCensusCache } from "./exception-recovery-census-cache.mjs";
 import { FB3_ACTION, RECEIPT_REPAIR_ACTION, executeFb3AdminRecovery, executeApprovedReceiptRepair } from "./exception-recovery-actions.mjs";
@@ -83,7 +87,9 @@ import {
 } from "./ready-production-queue.mjs";
 import { factoryGlobalPolicy, factoryGlobalAcceptsOutput } from "./factory-batch-global-policy.mjs";
 import { readFactoryGlobalRolloutHealth } from "./factory-global-rollout-health.mjs";
-import { factoryOutputClaimInspect, factoryOutputClaimReserve } from "./factory-approval-output-claims.mjs";
+import {
+  factoryOutputClaimInspect, factoryOutputClaimReserve, factoryOutputClaimReclaimIfSafe,
+} from "./factory-approval-output-claims.mjs";
 import {
   factoryApprovalGroupPlan, factoryApprovalGroupEnqueue, factoryApprovalGroupRead,
   factoryApprovalGroupResume, factoryApprovalGroupStatus, factoryApprovalGroupRetryFailures,
@@ -369,6 +375,7 @@ import {
   isActiveRemotionHold,
   isRealRemotionRetryFailure,
   isRenderQueueCandidateStatus,
+  isOpsRenderQueueCandidate,
   isRenderQueueWaitingStatus,
   remotionHealthLooksBusy,
   sortRenderQueueCandidates,
@@ -512,6 +519,7 @@ import {
   selectsFromSceneTimestamps,
   vibeCutProductionDefaults,
   vibeCutRenderSettings,
+  validateVibeCutSourceAssets,
 } from "./vibe-cut.mjs";
 import {
   capabilityMatrixResponse,
@@ -716,6 +724,7 @@ import {
   studioReadSimilarWatchlist,
   finalizeProductionRequestPromotion,
   promoteProductionRequestViaI3I4,
+  loadAuthorizedProductionRequest,
   promotionCompleted,
   waitForPromotionResult,
   ideaPhotoWatchRange,
@@ -4184,22 +4193,33 @@ export async function getApproveAllJobStatus(request, env, authorization) {
 }
 /*__STUDIO_WORKER_END:getApproveAllJobStatus__*/
 
-export async function studioFetchApproveAllRecordsByIds(env, ids = []) {
+export async function studioFetchApproveAllRecordsByIds(env, ids = [], options = {}) {
   const unique = [...new Set((ids || []).map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
   if (!unique.length) return new Map();
+  const allowIndividualFallback = options.allowIndividualFallback !== false;
   const byId = new Map();
   for (let i = 0; i < unique.length; i += 10) {
     const chunk = unique.slice(i, i + 10);
     const formula = chunk.length === 1
       ? `RECORD_ID()="${chunk[0]}"`
       : `OR(${chunk.map((id) => `RECORD_ID()="${id}"`).join(",")})`;
-    const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit: chunk.length,
-      filterFormula: formula,
-    }).catch(() => []);
+    let rows;
+    try {
+      rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+        limit: chunk.length,
+        filterFormula: formula,
+      });
+    } catch (error) {
+      // Interactive Factory submit must fail fast as one authoritative read.
+      // Turning one batch failure into ten serial GETs recreates the timeout
+      // that leaves the browser unsure whether anything was accepted.
+      if (!allowIndividualFallback) throw error;
+      rows = [];
+    }
     for (const row of rows || []) {
       if (row?.id) byId.set(row.id, row);
     }
+    if (!allowIndividualFallback) continue;
     for (const id of chunk) {
       if (byId.has(id)) continue;
       try {
@@ -8655,8 +8675,10 @@ export async function studioIdeaManualBatchStillRunning(env, batchId) {
   if (!["Pending", "Running"].includes(status)) return false;
   const requestedAt = Date.parse(String(f(batch, "Requested_At") || batch.createdTime || ""));
   const ageMs = Number.isFinite(requestedAt) ? Date.now() - requestedAt : Infinity;
-  // Abandoned waitUntil / crashed clears left Pending forever; only a fresh
-  // batch should block Generate.
+  // Durable jobs may legitimately exceed the legacy 20-minute lock window.
+  // Do not allow a second manual batch while the runner is still the owner.
+  if (["1", "true"].includes(String(env.STUDIO_I1_DURABLE_JOBS || "").toLowerCase())) return true;
+  // Legacy waitUntil jobs retain their bounded stale-lock recovery.
   return ageMs <= 20 * 60 * 1000;
 }
 /*__STUDIO_WORKER_END:studioIdeaManualBatchStillRunning__*/
@@ -8995,11 +9017,82 @@ export async function startStudioIdeaGeneration(request, env, authorization, ctx
     throw new HttpError(400, "Quality must be Highest Quality, Balanced, or Quantity");
   }
 
+  // Reject missing durable prerequisites BEFORE creating an Airtable batch
+  // or acquiring a Manual_Idea_Batch profile lock.
+  const useDurableI1 = ["1", "true"].includes(String(env.STUDIO_I1_DURABLE_JOBS || "").toLowerCase());
+  if (useDurableI1) {
+    const { runnerUrl } = pipelineStageBackend(env, "I1");
+    if (!runnerUrl || !String(env.PIPELINE_RUNNER_SHARED_SECRET || "")) {
+      throw new HttpError(503, "Durable I1 runner URL and authentication must be configured before admission");
+    }
+  }
   const profileId = requestedProfileId(null, payload);
   // Blocks a second Generate while Manual_Idea_Batch is still linked.
   const profile = await studioIdeaEnabledProfile(env, authorization, profileId);
   const batch = await studioIdeaCreateBatch(env, profile, count, quality, authorization);
   await studioIdeaSetProfileOverrides(env, profile.id, batch.id, count, quality);
+
+  // Opt-in durable I1: the runner persists a job receipt before this request
+  // responds. The 300-second model call never runs under Worker waitUntil.
+  const durableI1 = ["1", "true"].includes(String(env.STUDIO_I1_DURABLE_JOBS || "").toLowerCase());
+  if (durableI1) {
+    const { runnerUrl } = pipelineStageBackend(env, "I1");
+    if (!runnerUrl) throw new HttpError(503, "Durable I1 requires a configured pipeline runner");
+    const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+    if (!secret) throw new HttpError(503, "Durable I1 requires runner authentication");
+    let response;
+    let receipt;
+    try {
+      response = await fetch(runnerUrl + "/jobs/i1-durable", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Pipeline-Secret": secret,
+        },
+        body: JSON.stringify({
+          batch_record_id: batch.id,
+          profile_record_id: profile.id,
+          requested_count: count,
+          quality,
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+      receipt = await response.json().catch(() => ({}));
+    } catch (error) {
+      // Network uncertainty is not a failed job: the runner may have queued it.
+      console.error("I1 durable dispatch unconfirmed", batch.id, error);
+      return respond(request, env, {
+        ok: true, accepted: true, completed: false,
+        status: "Pending", dispatch_unconfirmed: true,
+        batch_record_id: batch.id, profile_record_id: profile.id,
+        requested_count: count, backend: "durable-runner",
+        message: "Batch saved but runner acknowledgment was interrupted. Check this batch before retrying.",
+      }, 202);
+    }
+    if (response.status === 202 && !receipt?.accepted) {
+      return respond(request, env, {
+        ok: true, accepted: true, completed: false, status: "Pending",
+        dispatch_unconfirmed: true, batch_record_id: batch.id,
+        message: "Runner response was ambiguous; check the existing batch before retrying.",
+      }, 202);
+    }
+    if (response.status !== 202) {
+      const message = String(receipt?.error || receipt?.message || "Runner rejected durable I1 admission").slice(0, 700);
+      await studioIdeaUpdateBatch(env, batch.id, {
+        Status: "Failed", Completed_At: new Date().toISOString(), Error: message,
+      }).catch(() => {});
+      await studioIdeaClearProfileOverrides(env, profile.id).catch(() => {});
+      throw new HttpError(502, message);
+    }
+    return respond(request, env, {
+      ok: true, accepted: true, completed: false, status: "Pending",
+      batch_record_id: batch.id,
+      batch_id: String(f(batch, "Batch_ID") || ""),
+      requested_count: count, quality, profile_record_id: profile.id,
+      backend: "durable-runner",
+      message: "Queued " + count + " idea(s) in the durable runner.",
+    }, 202);
+  }
 
   // Mobile Safari aborts long sync Generate posts ("Fetch is aborted") while I1
   // + photo listening still run. Accept the batch immediately and finish in
@@ -9075,7 +9168,8 @@ export async function studioIdeaGenerationStatus(request, env, url) {
     updates.Status = "Complete";
     updates.Completed_At = new Date().toISOString();
     updates.Error = null;
-  } else if (["Pending", "Running"].includes(view.status) && ageMs > 15 * 60 * 1000) {
+  } else if (!["1", "true"].includes(String(env.STUDIO_I1_DURABLE_JOBS || "").toLowerCase())
+    && ["Pending", "Running"].includes(view.status) && ageMs > 15 * 60 * 1000) {
     updates.Status = "Failed";
     updates.Completed_At = new Date().toISOString();
     updates.Error = `Generation stopped after creating ${view.generated_count} of ${view.requested_count} requested ideas.`;
@@ -9398,9 +9492,11 @@ async function loadStudioFailedOutputSnapshot(env, { fresh = false } = {}) {
   // Ordinary polling still uses a 60-second coalesced Airtable read.
   return studioReadCoalesce(fresh ? "quality-agent-census-fresh:" + Date.now()
     : "quality-agent-failed-output-census", fresh ? 0 : 60000, async () => {
+    const scanAtMs = Date.now();
     const [rows, profiles, recoveredScan, overdueScan] = await Promise.all([
       scanOutstandingFailedOutputs((options) =>
-        listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options)),
+        listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options),
+        { filterFormula: QA_HOME_FAILED_CANDIDATE_FORMULA, requireUnique: true }),
       listContentProfileRecords(env).catch(() => []),
       // Independent, persistent events survive overwritten dispatch notes.
       // Full pagination; never report an unavailable ledger as zero recovered.
@@ -9409,8 +9505,9 @@ async function loadStudioFailedOutputSnapshot(env, { fresh = false } = {}) {
       { filterFormula: 'AND({Outcome}="reconciled_published",{Reconciled_At}!="")' })
         .then((records) => ({ status: "ok", records }))
         .catch((error) => ({ status: "unavailable", records: [], error: String(error?.message || error) })),
-      scanApprovedPastDueOutputs((options) =>
-        listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options))
+      scanOutstandingFailedOutputs((options) =>
+        listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, options),
+        { filterFormula: qaHomePastDueCandidateFormula(scanAtMs), requireUnique: true })
         .then((records) => ({ status: "ok", records }))
         .catch((error) => ({ status: "unavailable", records: [],
           error: "Past-due reconciliation scan unavailable; count unknown.",
@@ -9420,6 +9517,9 @@ async function loadStudioFailedOutputSnapshot(env, { fresh = false } = {}) {
       profile.id,
       String(f(profile, "Market_Name") || f(profile, "Profile_Name") || profile.id).trim(),
     ]));
+    // QA diagnostic candidates are intentionally broad. Only mapped Home
+    // predicates produce comparable Failed and Past Due category identities.
+    const canonical = classifyQualityAgentHomeBuckets(rows, overdueScan.records, mapOutput, scanAtMs);
     const items = rows.map((record) => {
       const item = describeFailedOutput(record);
       return { ...item, profile_name: profileNames.get(item.profile_id) || item.profile_id };
@@ -9427,14 +9527,19 @@ async function loadStudioFailedOutputSnapshot(env, { fresh = false } = {}) {
     return {
       status: "ok", scanned_at: new Date().toISOString(),
       count: rows.length, rows, items,
+      canonical_failed: { status: "ok", count: canonical.failed.length,
+        items: canonical.failed.map((record) => {
+          const item = describeFailedOutput(record, scanAtMs);
+          return { ...item, profile_name: profileNames.get(item.profile_id) || item.profile_id };
+        }) },
       verification_recovery: summarizeAutonomousVerification(rows, recoveredScan.records, {
         ledgerScanStatus: recoveredScan.status,
       }),
       approved_past_due: overdueScan.status === "ok" ? {
         status: "ok", scanned_at: new Date().toISOString(),
-        count: overdueScan.records.length,
-        items: overdueScan.records.map((record) => {
-          const item = classifyApprovedPastDue(record);
+        count: canonical.approved_past_due.length,
+        items: canonical.approved_past_due.map((record) => {
+          const item = classifyApprovedPastDue(record, scanAtMs);
           return { ...item, profile_name: profileNames.get(item.profile_id) || item.profile_id };
         }),
       } : { status: "unavailable", error: overdueScan.error },
@@ -10043,8 +10148,12 @@ export async function gatherStudioDeskInventory(env) {
  */
 export async function getStudioExceptionRecoveryCenter(request, env) {
   try {
-    const snapshot = await loadStudioFailedOutputSnapshot(env);
     const url = new URL(request.url);
+    // Production Stage 3 ID parity must bypass the normal 60-second QA cache.
+    // Ordinary Center polling remains coalesced and read-only.
+    const snapshot = await loadStudioFailedOutputSnapshot(env, {
+      fresh: url.searchParams.get("fresh") === "1",
+    });
     const view = buildExceptionRecoveryCenter(snapshot, {
       profile_id: url.searchParams.get("profile_id"),
       platform: url.searchParams.get("platform"),
@@ -11083,7 +11192,9 @@ export async function getStudioOperationsQueue(request, env, authorization) {
   const mergedOutputs = mergeOpsQueueOutputRecords(outputs, renderLaneOutputs, activeHolds, reviewOutputs);
   const profileMap = new Map((profiles || []).map((row) => [row.id, row]));
   const queueCandidates = sortRenderQueueCandidates(
-    mergedOutputs.filter((row) => isRenderQueueCandidateStatus(f(row, "Render_Status"))),
+    // Ops positions must match the true launch fence: a saved Remotion job or
+    // final URL is never waiting for a new R4 admission.
+    mergedOutputs.filter((row) => isOpsRenderQueueCandidate(row, f)),
     f,
     controls,
   );
@@ -11232,6 +11343,21 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       f(record, "Content_Profile") || (content ? f(content, "Content_Profile") : null),
     );
     const contentNumber = content ? f(content, "Content_ID") : null;
+    const readiness = evaluateReviewPackage(record);
+    const reviewVisibility = factoryReviewVisibility(
+      record, readiness, studioState, outputCreativeAvailable(record),
+    );
+    const readinessException = reviewVisibility.incomplete;
+    // Package-ready Ready for Review is the Approve gate. Do not inherit a parent
+    // produce stuck_kind onto those siblings — that used to dump complete outputs
+    // into Repair while overview Awaiting Approval still counted them.
+    const inheritedParentStuck = (!reviewVisibility.visible && parentRequest?.stuck_kind)
+      ? {
+        kind: parentRequest.stuck_kind,
+        class: parentRequest.stuck_class || null,
+        error: parentRequest.produce_error || null,
+      }
+      : null;
     const outputRow = {
       kind: "output",
       id: record.id,
@@ -11257,6 +11383,8 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       remotion_job_id: mapped.remotion_job_id || null,
       review_status: mapped.review_status,
       publish_status: mapped.publish_status,
+      review_hold_active: f(record, "Studio_Render_Review_Hold_Active") === true,
+      do_not_publish: f(record, "Do_Not_Publish") === true,
       thumbnail_url: mapped.thumbnail_url || null,
       final_file_url: mapped.final_file_url || null,
       render_queue_position: mapped.render_queue_position,
@@ -11269,18 +11397,28 @@ export async function getStudioOperationsQueue(request, env, authorization) {
       produce_percent: parentRequest?.produce_percent || null,
       produce_paused: producePaused,
       render_paused: renderPaused,
-      stuck_kind: stuck?.kind || parentRequest?.stuck_kind || null,
-      stuck_class: stuck?.class || parentRequest?.stuck_class || null,
-      produce_error: stuck?.error || parentRequest?.produce_error || mapped.remotion_error_message || null,
+      stuck_kind: stuck?.kind || (readinessException ? "review_package_incomplete" : null) || inheritedParentStuck?.kind || null,
+      stuck_class: stuck?.class || (readinessException ? "code_bug" : null) || inheritedParentStuck?.class || null,
+      produce_error: stuck?.error || (readinessException ? readiness.missing_requirements.join(", ") || readiness.reason : null)
+        || inheritedParentStuck?.error || mapped.remotion_error_message || null,
       lane: queueLaneForStudioState(studioState, {
         producePaused,
         renderPaused,
-        stuck: stuck || (parentRequest?.stuck_kind ? { kind: parentRequest.stuck_kind } : null),
+        stuck: stuck
+          || (readinessException ? { kind: "review_package_incomplete" } : null)
+          || inheritedParentStuck,
       }),
       idea_id: parentRequest?.idea_id || null,
       platforms: parentRequest?.platforms || (mapped.platform ? [mapped.platform] : []),
       scheduled_at: mapped.scheduled_at || mapped.scheduled_post_date || null,
       creative_available: outputCreativeAvailable(record),
+      // One shared review-package validator governs Factory counts/eligibility.
+      // This is metadata validation; the approval route probes actual CDN bytes.
+      review_package_ready: reviewVisibility.visible,
+      review_package_held_preview_only: reviewVisibility.held_preview_only,
+      review_package_readiness: readiness.readiness,
+      review_package_missing: readiness.missing_requirements,
+      review_package_reason: readiness.reason,
       updated_at: outputUpdatedAt,
     };
     outputRow.e2e = buildOpsE2eStages({
@@ -11420,7 +11558,12 @@ export async function factoryApproveOutput(env, id, actor, note, ctx = null, sch
     throw new HttpError(409, `Cannot approve yet: rendering is incomplete (${renderStatus}). The output will return to Needs Eyes after rendering finishes.`);
   }
   if (!studioOutputReadyForPublishApproval(existing)) {
-    throw new HttpError(409, "Cannot approve this output yet: a finished render and Ready for Review are required.");
+    const readiness = evaluateReviewPackage(existing);
+    throw new HttpError(409, "Cannot approve: " + (readiness.missing_requirements.join(", ") || readiness.reason || "review package incomplete"));
+  }
+  const verifiedReview = await verifyReviewImages(evaluateReviewPackage(existing));
+  if (verifiedReview.readiness !== "READY") {
+    throw new HttpError(409, "Cannot approve: " + (verifiedReview.missing_requirements.join(", ") || verifiedReview.reason));
   }
   // A future/newly-added sibling may have rendered AFTER the shared creative
   // master was approved. Catch it up under the canonical output approval lock,
@@ -12331,6 +12474,51 @@ export async function factoryDeleteDeskItem(env, id, kind, actor, note) {
 }
 /*__STUDIO_WORKER_END:factoryDeleteDeskItem__*/
 
+/**
+ * Explicit operator release of an old Do_Not_Publish flag for formal review.
+ * This is NOT an approval, schedule request or publishing dispatch. The same
+ * per-output lease as Factory Approve protects the canonical status recheck.
+ */
+async function factoryReleaseOutputForApproval(env, id, actor) {
+  return withOutputApprovalLock(env.STUDIO_MEDIA, id, async () => {
+    const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+    const readiness = evaluateReviewPackage(current);
+    const eligibility = factoryApprovalHoldReleaseEligibility(current, readiness);
+    if (!eligibility.eligible) throw new HttpError(409, eligibility.reason);
+    const verified = await verifyReviewImages(readiness);
+    if (verified.readiness !== "READY") {
+      throw new HttpError(409, "Cannot release for formal review: "
+        + ((verified.missing_requirements || []).join(", ") || verified.reason));
+    }
+    const stamp = new Date().toISOString();
+    const existingNotes = String(f(current, "Review_Notes") || "").trim();
+    const audit = `Factory formal-review release by ${actor || "operator"} at ${stamp}. No approval, scheduling or publication granted.`;
+    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: {
+        Do_Not_Publish: false,
+        Auto_Publish_Enabled: false,
+        Review_Notes: [existingNotes, audit].filter(Boolean).join("\n\n"),
+      }, typecast: false }),
+    });
+    const check = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+    if (f(check, "Do_Not_Publish") === true ||
+        f(check, "Auto_Publish_Enabled") === true ||
+        String(f(check, "Output_Status") || "") !== "Ready for Review" ||
+        !["", "Review Sent", "Pending Review"].includes(String(f(check, "Review_Status") || ""))) {
+      throw new HttpError(409, "Formal review release could not be verified in Airtable; refresh and inspect status");
+    }
+    // Airtable is authoritative. Mirror only the verified record, fail soft on
+    // downstream Supabase errors and never retry this operator decision there.
+    await studioSupabaseWriteThroughOutput(env, check, "factory-formal-review-release")
+      .catch(error => console.warn("Factory release mirror deferred", id, String(error?.message || error).slice(0, 180)));
+    return {
+      id, released: true, auto_publish_enabled: false,
+      message: "Publishing hold released for formal review. Preview again, then separately Approve or Request Changes. Nothing was scheduled or published.",
+    };
+  });
+}
+
 export async function mutateFactoryDesk(request, env, authorization, ctx = null) {
   let payload;
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
@@ -12346,7 +12534,7 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
     next = result.controls;
   } else if (action === "unpin_needs_assets") {
     next = unpinFactoryNeedsAssets(controls, payload?.id || payload?.item?.id).controls;
-  } else if (action === "approve" || action === "send_back" || action === "send_back_content" || action === "request_changes_content" || action === "delete") {
+  } else if (action === "approve" || action === "release_for_approval" || action === "send_back" || action === "send_back_content" || action === "request_changes_content" || action === "delete") {
     const id = String(payload?.id || payload?.item?.id || "").trim();
     const kind = String(payload?.kind || payload?.item?.kind || "output").trim().toLowerCase();
     const note = String(payload?.note || payload?.notes || "").trim().slice(0, 3000);
@@ -12355,6 +12543,11 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
       if (kind !== "output") throw new HttpError(400, "Approve is only for Ready for Review outputs");
       requirePermission(authorization, "outputs_review");
       resultExtra = await factoryApproveOutput(env, id, actor, note, ctx);
+    } else if (action === "release_for_approval") {
+      if (kind !== "output") throw new HttpError(400, "Formal review release is only for platform outputs");
+      requirePermission(authorization, "outputs_review");
+      requireAnyPermission(authorization, ["publishing_control", "tenant_admin"]);
+      resultExtra = await factoryReleaseOutputForApproval(env, id, actor);
     } else if (action === "send_back") {
       if (kind !== "output") throw new HttpError(400, "Send back is only for outputs");
       requirePermission(authorization, "outputs_review");
@@ -12390,7 +12583,7 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
       next = unpinFactoryNeedsAssets(next, id).controls;
     }
   } else {
-    throw new HttpError(400, "action must be pin_needs_assets, unpin_needs_assets, approve, send_back, send_back_content, request_changes_content, or delete");
+    throw new HttpError(400, "action must be pin_needs_assets, unpin_needs_assets, approve, release_for_approval, send_back, send_back_content, request_changes_content, or delete");
   }
 
   const saved = (
@@ -12400,6 +12593,11 @@ export async function mutateFactoryDesk(request, env, authorization, ctx = null)
   )
     ? await writeFactoryDeskControls(env, next, actor)
     : next;
+  if (action === "release_for_approval") {
+    // Do not turn a committed canonical hold release into a 500 while reloading the Desk.
+    return respond(request, env, { ok: true, page: "factory-desk", action,
+      result: resultExtra, message: resultExtra.message, refresh_required: true });
+  }
   if (action === "approve") {
     // The Airtable write above is the authoritative approval transaction.
     // A later queue/idea fetch may fail or exceed request limits; do not turn
@@ -12657,8 +12855,114 @@ export async function prepareIdeaToReview(request, env, url, authorization, ctx 
 }
 /*__STUDIO_WORKER_END:prepareIdeaToReview__*/
 
+/**
+ * Exactly one verified Vibe Cut request may opt into the existing durable
+ * prepare-to-review queue. Never treat a partial multipart transfer as Ready,
+ * replace the source video, approve publishing, or reopen Factory revisions.
+ */
+export async function advanceVibeCutToReview(request, env, url, authorization, ctx = null) {
+  const match = /^\/api\/production-requests\/(rec[A-Za-z0-9]+)\/vibe-to-review$/.exec(url.pathname);
+  if (!match) throw new HttpError(400, "Invalid Vibe Cut advancement route");
+  const requestId = match[1];
+  let record = await loadAuthorizedProductionRequest(env, requestId, authorization);
+  const notes = String(f(record, "Production_Notes") || "");
+  if (!isVibeCutNotes(notes)) throw new HttpError(409, "Only a Vibe Cut can advance automatically to review");
+  if (productionNotesRevisionOpen(notes)) throw new HttpError(409, "Factory revisions require explicit human approval");
+  const state = String(f(record, "Request_Status") || "").trim();
+  if (state === "Promoted" || state === "Submitted") {
+    return respond(request, env, {
+      ok: true, queued: true, already_started: true, stage: state === "Promoted" ? "rendering_for_review" : "promotion_processing",
+      production_request_id: requestId, publishing: false,
+    }, 202);
+  }
+  if (!["Draft", "Ready"].includes(state)) {
+    throw new HttpError(409, `This Vibe Cut is ${state || "not ready"} and cannot auto-advance`);
+  }
+  if (String(f(record, "Studio_Master_Asset_Status") || "") !== "Ready") {
+    throw new HttpError(409, "Original video is still being prepared. Auto-advance can start after Ready.");
+  }
+  const media = item4AssetManifest(record);
+  const validation = validateVibeCutSourceAssets(media);
+  if (!validation.ok) throw new HttpError(409, validation.reason);
+  if (!vibeAutoReviewVerifiedSource({
+    notes, assets: media, masterStatus: f(record, "Studio_Master_Asset_Status"),
+    masterCount: f(record, "Studio_Master_Asset_Count"),
+  })) {
+    throw new HttpError(409, "The original video must be completely uploaded and saved to Drive before review starts.");
+  }
+  const ideaIds = Array.isArray(f(record, "Idea_Candidate")) ? f(record, "Idea_Candidate") : [];
+  if (ideaIds.length !== 1) throw new HttpError(409, "Vibe Cut must have exactly one linked Idea Candidate");
+  const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaIds[0]);
+  if (!idea?.id || String(f(idea, "Candidate_Status") || "") === "On Hold") {
+    throw new HttpError(409, "Linked idea is unavailable or On Hold");
+  }
+  // Only the first accepted request starts a background run. Subsequent
+  // requests are read-only and the periodic ready-to-produce queue resumes it.
+  if (/(?:^|\n)origin=prepare-to-review(?:\n|$)/i.test(notes)) {
+    return respond(request, env, {
+      ok: true, queued: true, already_started: true, stage: "preparing_for_review",
+      production_request_id: requestId, publishing: false,
+    }, 202);
+  }
+  const platforms = autonomousItem4Platforms(canonicalProductionPlatforms(
+    Array.isArray(f(record, "Target_Platforms")) ? f(record, "Target_Platforms") : []
+  ), { fallback: false });
+  if (!platforms.length) throw new HttpError(409, "Select at least one platform before Vibe Cut auto-advance");
+  // Airtable is the sole write authority. The durable marker permits a fresh
+  // Worker invocation to resume after the browser or request closes.
+  record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: { Production_Notes: stampPrepareToReviewNotes(notes) },
+      typecast: true,
+    }),
+  });
+  const continueReview = async () => {
+    let current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+    if (!autonomousHasUsableItem4Plan(current)) {
+      const planCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/plan`, {
+        platforms, overrides: autonomousPlanOverrides(String(
+          f(current, "Master_Content_Type") || f(idea, "Production_Content_Type") || "Vertical Short Video"
+        )),
+        extras: [], package: "video", skip_fbs1_guard: true,
+      });
+      await buildItem4OutputPlan(planCall.request, env, planCall.url, authorization);
+      current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+    }
+    // Pass no incoming library IDs: the uploaded video is already authoritative.
+    // The existing production continuation handles variants, promotion,
+    // rendering, and the final human review gate without publishing.
+    return finishAutonomousProductionRequest(env, authorization, ctx, idea, current,
+      { media_asset_ids: [], content_type: "" }, { awaitFinish: true, scheduled: true });
+  };
+  if (ctx?.waitUntil) {
+    ctx.waitUntil(continueReview().catch((error) => {
+      console.warn("Vibe Cut auto-to-review deferred to durable resume", requestId,
+        String(error?.message || error).slice(0, 240));
+    }));
+  } else {
+    await continueReview();
+  }
+  return respond(request, env, {
+    ok: true, queued: true, stage: "preparing_for_review",
+    production_request_id: requestId, publishing: false,
+    message: "Vibe Cut is automatically preparing outputs for human approval.",
+  }, 202);
+}
+/*__STUDIO_WORKER_END:advanceVibeCutToReview__*/
+
+
 const READY_PRODUCTION_IDEA_FORMULA =
   "AND({Test_Run_ID}=BLANK(),{Studio_Photo_Wait_Status}='Ready',{Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK(),{Candidate_Status}!='On Hold',{Candidate_Status}!='Rejected',{Candidate_Status}!='Promoted')";
+
+function readyProductionVerifiedVibeDraft(requestRecord) {
+  return vibeAutoReviewVerifiedSource({
+    notes: f(requestRecord, "Production_Notes"),
+    assets: item4AssetManifest(requestRecord),
+    masterStatus: f(requestRecord, "Studio_Master_Asset_Status"),
+    masterCount: f(requestRecord, "Studio_Master_Asset_Count"),
+  });
+}
 
 function readyProductionExistingDraftEligible(idea, requestRecord) {
   // Some hourly autonomous Ideas deliberately disable photo-wait. Their
@@ -12672,6 +12976,10 @@ function readyProductionExistingDraftEligible(idea, requestRecord) {
   if (!(Number(f(requestRecord, "Studio_Master_Asset_Count") || 0) > 0)) return false;
   const notes = String(f(requestRecord, "Production_Notes") || "");
   if (productionNotesRevisionOpen(notes)) return false;
+  // Vibe Cut upload is an explicit user request to create an edit. Once its
+  // one original is saved and verified, proceed to Factory review without
+  // requiring the newly generated Idea to be Approved first.
+  if (readyProductionVerifiedVibeDraft(requestRecord)) return true;
   if (/(?:^|\s)origin=(?:autonomous|prepare-to-review)(?:\s|$)/i.test(notes)) return true;
   // Approved, ready-master requests also qualify even when an older
   // timed-script/manual proposal omitted the autonomous origin stamp.
@@ -12743,6 +13051,20 @@ async function discoverAssetReadyProductionDrafts(env, { limit = 120 } = {}) {
       "Created_At",
       "Active",
     ],
+  });
+}
+
+async function discoverReadyVibeProductionDrafts(env, { limit = 25 } = {}) {
+  // Prioritize newly verified uploads without displacing the oldest first
+  // autonomous/photo-ready backfill. A reciprocal Idea + verified original
+  // still gates every claim before any write or work is started.
+  return listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    limit: Math.max(1, Math.min(25, Number(limit) || 25)),
+    sortField: "Updated_At",
+    sortDirection: "desc",
+    filterFormula: "AND({Test_Run_ID}=BLANK(),{Active}=1,OR({Request_Status}='Draft',{Request_Status}='Ready',{Request_Status}='Submitted'),{Studio_Master_Asset_Status}='Ready',{Studio_Master_Asset_Count}=1,FIND('ez-input=vibe-cut',{Production_Notes})>0)",
+    fields: ["Idea_Candidate", "Request_Status", "Studio_Master_Asset_Status",
+      "Studio_Master_Asset_Count", "Production_Notes", "Created_At", "Active"],
   });
 }
 
@@ -12929,7 +13251,8 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
   // Existing manual Approved candidates need the same autonomous profile gate
   // as ordinary generated ideas. Never reactivate operator-disabled profiles.
   const requestNotesForGate = String(f(requestRecord, "Production_Notes") || "");
-  if (requestRecord
+  const verifiedVibeDraft = Boolean(requestRecord && readyProductionVerifiedVibeDraft(requestRecord));
+  if (requestRecord && !verifiedVibeDraft
       && String(f(idea, "Studio_Photo_Wait_Status") || "").trim() !== "Ready"
       && !/(?:^|\s)origin=(?:autonomous|prepare-to-review)(?:\s|$)/i.test(requestNotesForGate)) {
     const profileId = firstLinkedRecordId(f(idea, "Content_Profile"));
@@ -12946,7 +13269,7 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
   }
 
   const plan = readyProductionIdeaPlan(idea, requestRecord);
-  const manualAssetSelection = Boolean(requestRecord
+  const manualAssetSelection = verifiedVibeDraft || Boolean(requestRecord
     && String(f(idea, "Candidate_Status") || "").trim() === "Approved"
     && productionPhotoWaitAutoOff(f(requestRecord, "Production_Notes")));
   const selectedMasterIds = requestRecord
@@ -12987,7 +13310,7 @@ async function processReadyProductionClaim(env, authorization, ctx, lease, { def
   }
   requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
   const notes = String(f(requestRecord, "Production_Notes") || "");
-  if (!/origin=(prepare-to-review|autonomous|az-finished-video)/i.test(notes)) {
+  if (!verifiedVibeDraft && !/origin=(prepare-to-review|autonomous|az-finished-video)/i.test(notes)) {
     requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id, {
       method: "PATCH",
       body: JSON.stringify({
@@ -13108,8 +13431,15 @@ async function studioReadyProductionCronResume(env, ctx = null, options = {}) {
   stage = "draft_backfill";
   const known = new Map(jobs.map((job) => [job.idea_id, job]));
   let backfilled = 0;
-  const existingDrafts = await discoverAssetReadyProductionDrafts(env, {
-    limit: options.draftDiscoveryLimit || 120,
+  const [recentVibes, ordinaryDrafts] = await Promise.all([
+    discoverReadyVibeProductionDrafts(env, { limit: options.vibeDiscoveryLimit || 25 }),
+    discoverAssetReadyProductionDrafts(env, { limit: options.draftDiscoveryLimit || 120 }),
+  ]);
+  const scannedDrafts = new Set();
+  const existingDrafts = [...recentVibes, ...ordinaryDrafts].filter((draft) => {
+    if (!draft?.id || scannedDrafts.has(draft.id)) return false;
+    scannedDrafts.add(draft.id);
+    return true;
   });
   for (const draft of existingDrafts) {
     if (backfilled >= Math.min(8, Math.max(1, Number(options.maxBackfillPerTick) || 8))) break;
@@ -13245,43 +13575,53 @@ export async function getStudioReadyProductionDiagnostic(request, env, url) {
 /*__STUDIO_WORKER_END:getStudioReadyProductionDiagnostic__*/
 
 export async function getStudioOperations(request, env, authorization) {
-  const chicago = chicagoNowParts();
-  const lastDaily = await studioSettingsByName(env, STUDIO_I1_LAST_DAILY_SETTING);
-  const lastAutonomous = await studioSettingsByName(env, STUDIO_AUTONOMOUS_LAST_SETTING);
-  const libraryCrossScopeRow = await studioSettingsByName(env, LIBRARY_CROSS_SCOPE_SETTING).catch(() => null);
-  const [profiles, readyToSchedule, readyToPublish, published, oversized, needingClassification, compressionJobs] = await Promise.all([
-    listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 }),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 50, view: STUDIO_PUB1_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 50, view: STUDIO_PUB2_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 25, view: STUDIO_PUB3_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
-    listOversizedMedia(env).catch(() => []),
-    listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, { limit: 25, view: STUDIO_A3_CLASSIFY_VIEW_ID }).catch(() => []),
-    listActiveA1CompressionJobs(env).catch(() => []),
-  ]);
-  const libraryIntake = mapLibraryIntakeSnapshot(needingClassification, oversized);
-  // Read-only watchlist for Ops; do not block Profiles on ensure/upsert side effects.
-  const similarAccounts = await studioReadSimilarWatchlist(env).catch(() => []);
+  // This dashboard fans out across settings, profile, output and media tables.
+  // Coalesce repeat poll/refresh calls *per organization* before they reach
+  // Airtable's shared per-base rate limit. Authorization-sensitive flags are
+  // computed outside the cached payload and never shared between callers.
+  const orgId = String(authorization?.organization?.record_id || "global");
+  const data = await studioReadCoalesce(`operations:overview:${orgId}`, 15000, async () => {
+    const chicago = chicagoNowParts();
+    const lastDaily = await studioSettingsByName(env, STUDIO_I1_LAST_DAILY_SETTING);
+    const lastAutonomous = await studioSettingsByName(env, STUDIO_AUTONOMOUS_LAST_SETTING);
+    const libraryCrossScopeRow = await studioSettingsByName(env, LIBRARY_CROSS_SCOPE_SETTING).catch(() => null);
+    const [profiles, readyToSchedule, readyToPublish, published, oversized, needingClassification, compressionJobs] = await Promise.all([
+      listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 }),
+      listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 50, view: STUDIO_PUB1_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
+      listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 50, view: STUDIO_PUB2_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
+      listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 25, view: STUDIO_PUB3_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
+      listOversizedMedia(env).catch(() => []),
+      listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, { limit: 25, view: STUDIO_A3_CLASSIFY_VIEW_ID }).catch(() => []),
+      listActiveA1CompressionJobs(env).catch(() => []),
+    ]);
+    const libraryIntake = mapLibraryIntakeSnapshot(needingClassification, oversized);
+    // Read-only watchlist for Ops; do not block Profiles on ensure/upsert side effects.
+    const similarAccounts = await studioReadSimilarWatchlist(env).catch(() => []);
+    return {
+      timezone: "America/Chicago",
+      chicago_date: chicago.date,
+      chicago_hour: chicago.hour,
+      last_daily_idea_date: f(lastDaily, "Setting_Value") || null,
+      last_autonomous_run: parseAutonomousLastRun(f(lastAutonomous, "Setting_Value")),
+      profiles: profiles.map(mapOperationsProfile),
+      ready_to_schedule: readyToSchedule.map(mapOperationsOutput),
+      ready_to_publish: readyToPublish.map(mapOperationsOutput),
+      recently_published: published.map(mapOperationsOutput),
+      oversized_media: attachCompressionJobs(oversized, compressionJobs),
+      compression_jobs: compressionJobs,
+      compression_headline: compressionJobs[0]?.headline || null,
+      a1s_oversize_bytes: STUDIO_A1S_OVERSIZE_BYTES,
+      library_intake: libraryIntake,
+      similar_accounts: similarAccounts,
+      library_include_cross_scope: libraryCrossScopeEnabled(f(libraryCrossScopeRow, "Setting_Value")),
+    };
+  });
   return respond(request, env, {
     ok: true,
     page: "operations",
-    timezone: "America/Chicago",
-    chicago_date: chicago.date,
-    chicago_hour: chicago.hour,
-    last_daily_idea_date: f(lastDaily, "Setting_Value") || null,
-    last_autonomous_run: parseAutonomousLastRun(f(lastAutonomous, "Setting_Value")),
+    ...data,
     can_edit_profiles: Boolean(authorization?.permissions?.tenant_admin),
     can_publish_queue: Boolean(authorization?.permissions?.publishing_control),
-    profiles: profiles.map(mapOperationsProfile),
-    ready_to_schedule: readyToSchedule.map(mapOperationsOutput),
-    ready_to_publish: readyToPublish.map(mapOperationsOutput),
-    recently_published: published.map(mapOperationsOutput),
-    oversized_media: attachCompressionJobs(oversized, compressionJobs),
-    compression_jobs: compressionJobs,
-    compression_headline: compressionJobs[0]?.headline || null,
-    a1s_oversize_bytes: STUDIO_A1S_OVERSIZE_BYTES,
-    library_intake: libraryIntake,
-    similar_accounts: similarAccounts,
-    library_include_cross_scope: libraryCrossScopeEnabled(f(libraryCrossScopeRow, "Setting_Value")),
   });
 }
 /*__STUDIO_WORKER_END:getStudioOperations__*/
@@ -13845,7 +14185,13 @@ export async function finishAutonomousProductionRequest(env, authorization, ctx,
     item4ParseJson(f(current, "Studio_Master_Assets_JSON"), []),
     pick.media_asset_ids
   );
-  if (incoming.length) {
+  // Vibe Cut must never acquire additional library stills or a second source.
+  if (incoming.length && !vibeAutoReviewVerifiedSource({
+    notes: f(current, "Production_Notes"),
+    assets: item4AssetManifest(current),
+    masterStatus: f(current, "Studio_Master_Asset_Status"),
+    masterCount: f(current, "Studio_Master_Asset_Count"),
+  })) {
     await attachItem4LibraryAssetIds(env, requestId, incoming, authorization);
     current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
   }
@@ -17119,7 +17465,7 @@ export async function factoryBatchSubmitRoute(request, env, authorization, ctx =
   let payload;
   try { payload = await request.json(); } catch { throw new HttpError(400, "Invalid JSON"); }
   const action = String(payload?.action || "start").toLowerCase();
-  if (action==="start_group"||action==="retry_group") {
+  if (action==="start_group"||action==="retry_group"||action==="validate_group") {
     return factoryBatchGroupSubmitRoute(request,env,authorization,payload,ctx);
   }
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
@@ -17173,8 +17519,18 @@ export async function factoryBatchSubmitRoute(request, env, authorization, ctx =
   // The legacy single-profile route must participate in the same CAS registry
   // as global groups; otherwise a second device could bypass the global fence.
   try {
+    const outputIds = records.map(row => row.id);
+    const reclaim = await factoryOutputClaimReclaimIfSafe(env.STUDIO_MEDIA, {
+      profileId: profile.id, requestId, ids: outputIds,
+    });
+    if (!reclaim.ok) {
+      const owners = (reclaim.owners || []).slice(0, 3).join(", ") || "unknown";
+      throw new HttpError(409,
+        "One or more outputs already belong to a Factory approval (" + owners
+        + "). Check Activity; no duplicate was created.");
+    }
     const claim = await factoryOutputClaimReserve(env.STUDIO_MEDIA, {
-      profileId: profile.id, requestId, ids: records.map(row => row.id),
+      profileId: profile.id, requestId, ids: outputIds,
     });
     if (!claim.ok) throw new HttpError(409,
       "One or more outputs already belong to a Factory approval. Check Activity; no duplicate was created.");
@@ -17207,8 +17563,9 @@ export async function factoryBatchSubmitRoute(request, env, authorization, ctx =
  * batch those hops (OR of 10) so a 10-output NYC/Miami chunk cannot hang the
  * HTTP accept path long enough for Cloudflare to return an empty 500.
  */
-async function factoryResolveGroupOwnershipIds(env, recordsById, ids) {
+async function factoryResolveGroupOwnershipIds(env, recordsById, ids, options = {}) {
   const ownership = new Map();
+  const allowIndividualFallback = options.allowIndividualFallback !== false;
   const needContent = [];
   for (const id of ids) {
     const record = recordsById.get(id);
@@ -17229,13 +17586,20 @@ async function factoryResolveGroupOwnershipIds(env, recordsById, ids) {
     const formula = chunk.length === 1
       ? `RECORD_ID()="${chunk[0]}"`
       : `OR(${chunk.map((id) => `RECORD_ID()="${id}"`).join(",")})`;
-    const rows = await listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
-      limit: chunk.length,
-      filterFormula: formula,
-    }).catch(() => []);
+    let rows;
+    try {
+      rows = await listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
+        limit: chunk.length,
+        filterFormula: formula,
+      });
+    } catch (error) {
+      if (!allowIndividualFallback) throw error;
+      rows = [];
+    }
     for (const row of rows || []) {
       if (row?.id) contentById.set(row.id, row);
     }
+    if (!allowIndividualFallback) continue;
     for (const contentId of chunk) {
       if (contentById.has(contentId)) continue;
       try {
@@ -17323,7 +17687,8 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
     }
     return respond(request,env,{...updated,accepted:true});
   }
-  if (action!=="start_group") throw new HttpError(400,"Invalid group action");
+  const validateOnly = action === "validate_group";
+  if (action!=="start_group" && !validateOnly) throw new HttpError(400,"Invalid group action");
   const rawIds=payload?.record_ids;
   if (!Array.isArray(rawIds)||!rawIds.length||rawIds.length>policy.max_total) {
     throw new HttpError(400,"Select 1–20 distinct outputs for global Factory batch");
@@ -17332,7 +17697,7 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
   if (ids.length>policy.max_total||ids.some(id=>!/^rec[A-Za-z0-9]+$/.test(id))) {
     throw new HttpError(400,"Invalid Factory output selection");
   }
-  const existing=await factoryApprovalGroupRead(env.STUDIO_MEDIA,requestId);
+  const existing=validateOnly ? null : await factoryApprovalGroupRead(env.STUDIO_MEDIA,requestId);
   if (existing) {
     if (existing.records.length!==ids.length||
         existing.records.some(row=>!ids.includes(row.id))) {
@@ -17352,11 +17717,9 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
     return respond(request,env,{...resumed,accepted:true,already_submitted:true});
   }
 
-  // Accept-first: desk cards already proved Ready-for-Review + platform/format.
-  // Do NOT call studioFetchApproveAllRecordsByIds / ownership hops on this path —
-  // hung Airtable GETs were returning Cloudflare's empty HTML 500 with
-  // Submitted 0 of N even after the 18s Promise.race budget. Drain re-verifies
-  // each row authoritatively before factoryApproveOutput.
+  // Fail closed before claims: browser desk cards are not proof of current
+  // readiness, ownership, or Do_Not_Publish state. The authoritative preflight
+  // below uses bounded batch reads and never falls back to serial per-row GETs.
   const coolMs = airtableCooldownWaitMs();
   if (coolMs > AIRTABLE_SLOT_FAIL_FAST_MS) {
     throw new HttpError(503,
@@ -17392,6 +17755,14 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
     throw new HttpError(400, error.message || "Invalid global Factory group");
   }
 
+  // Authenticated preflight diagnostics execute the identical canonical reads
+  // and profile checks, then stop BEFORE any R2 access, claim or approval.
+  if (validateOnly) return respond(request, env, {
+    accepted: false, read_only: true, preflight_valid: true,
+    request_id: requestId, records: records.map(({id, output_id, profile_id}) =>
+      ({id, output_id, profile_id})),
+  });
+
   // First inspect *every* profile before mutating any claim registry. This
   // avoids reservations for ordinary partial-overlap errors. The subsequent
   // per-profile CAS reserves still close concurrent multi-device races.
@@ -17412,7 +17783,7 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
   } catch (error) {
     throw new HttpError(503, error?.message || "Factory claim history unavailable; no batch created");
   }
-  const conflicting = inspections.flatMap(row => row.conflicts);
+  let conflicting = inspections.flatMap(row => row.conflicts);
   if (conflicting.length) {
     // Exact duplicate selection on another device: return the original
     // receipt. Partial overlap is a true 409, never silently resubmitted.
@@ -17429,8 +17800,38 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
         });
       }
     }
-    throw new HttpError(409,
-      "Selected outputs overlap another Factory approval. No new batch was created; check Activity.");
+    // Stranded reservations (claim without ledger) and terminal failed-only
+    // ownership must not permanently block a Ready-for-Review resubmit when
+    // Activity shows nothing active. Active/approved ownership stays closed.
+    try {
+      for (const [profileId, outputIds] of [...byProfile].sort(([a], [b]) => a.localeCompare(b))) {
+        const reclaim = await factoryOutputClaimReclaimIfSafe(env.STUDIO_MEDIA, {
+          profileId, requestId, ids: outputIds,
+        });
+        if (!reclaim.ok) {
+          const blockedOwners = (reclaim.owners || []).slice(0, 3).join(", ") || owners.slice(0, 3).join(", ");
+          throw new HttpError(409,
+            "Selected outputs overlap another Factory approval (" + blockedOwners
+            + "). No new batch was created; check Activity.");
+        }
+      }
+      const refreshed = [];
+      for (const [profileId, outputIds] of [...byProfile].sort(([a], [b]) => a.localeCompare(b))) {
+        refreshed.push(await factoryOutputClaimInspect(env.STUDIO_MEDIA, {
+          profileId, requestId, ids: outputIds,
+        }));
+      }
+      conflicting = refreshed.flatMap(row => row.conflicts);
+    } catch (error) {
+      if (error instanceof HttpError) throw error;
+      throw new HttpError(503, error?.message || "Factory claim reclaim unavailable; no batch created");
+    }
+    if (conflicting.length) {
+      const blockedOwners = [...new Set(conflicting.map(row => row.request_id))].slice(0, 3).join(", ");
+      throw new HttpError(409,
+        "Selected outputs overlap another Factory approval (" + blockedOwners
+        + "). No new batch was created; check Activity.");
+    }
   }
   try {
     for (const [profileId, outputIds] of [...byProfile].sort(([a], [b]) => a.localeCompare(b))) {
@@ -17474,7 +17875,10 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
  * a hung Airtable hop cannot surface as Cloudflare's empty HTML 500.
  */
 async function factoryGroupRecordsFromAirtablePreflight(env, authorization, ids, payload, policy) {
-  const SUBMIT_BUDGET_MS = 12000;
+  // Strict mode performs only two batch reads (outputs, then ownership). Give
+  // those reads room to wait through the normal shared Airtable slot without
+  // restoring the old serial per-record fallback that caused ambiguous 500s.
+  const SUBMIT_BUDGET_MS = 25000;
   const started = Date.now();
   const deadline = () => {
     if (Date.now() - started > SUBMIT_BUDGET_MS) {
@@ -17488,7 +17892,9 @@ async function factoryGroupRecordsFromAirtablePreflight(env, authorization, ids,
   deadline();
   let byId;
   try {
-    byId = await studioFetchApproveAllRecordsByIds(env, ids);
+    byId = await studioFetchApproveAllRecordsByIds(env, ids, {
+      allowIndividualFallback: false,
+    });
   } catch (error) {
     throw factoryMapSubmitAirtableError(error);
   }
@@ -17504,7 +17910,9 @@ async function factoryGroupRecordsFromAirtablePreflight(env, authorization, ids,
   }
   let ownershipCache;
   try {
-    ownershipCache = await factoryResolveGroupOwnershipIds(env, byId, ids);
+    ownershipCache = await factoryResolveGroupOwnershipIds(env, byId, ids, {
+      allowIndividualFallback: false,
+    });
   } catch (error) {
     throw factoryMapSubmitAirtableError(error);
   }
@@ -17517,7 +17925,14 @@ async function factoryGroupRecordsFromAirtablePreflight(env, authorization, ids,
     const profileId = ownershipCache.get(id) || null;
     if (!profileId || !factoryGlobalAcceptsOutput(policy, record) ||
         Boolean(f(record, "Do_Not_Publish")) || !studioOutputReadyForPublishApproval(record)) {
-      throw new HttpError(409, "At least one selected output is not ready or eligible for global batch approval");
+      const readiness = evaluateReviewPackage(record);
+      const reason = !profileId ? "Content Profile ownership could not be verified"
+        : Boolean(f(record, "Do_Not_Publish")) ? "publishing hold is active"
+        : !factoryGlobalAcceptsOutput(policy, record) ? "platform/output type is not eligible"
+        : readiness.readiness !== "READY"
+          ? [readiness.reason, ...(readiness.missing_requirements || [])].join(": ")
+          : "output is no longer ready for approval";
+      throw new HttpError(409, `Output #${f(record, "Output_ID") || id}: ${reason}. No new batch was accepted.`);
     }
     const info = clientInfo.get(id) || {};
     records.push({
@@ -17803,3 +18218,136 @@ export async function factoryBatchCronResume(env, ctx = null) {
 /*__STUDIO_WORKER_END:factoryBatchCronResume__*/
 
 
+
+
+/**
+ * Fenced QA-IG pre-remote recovery. Invoked only after Quality Agent persisted
+ * a finding and CAS-fenced the old publishing attempt. The atomic MAE lane
+ * owns occupancy, Airtable write verification and mirror propagation.
+ */
+export async function studioRecoverFencedIgStaleUpload(env, options = {}) {
+  const {outputId,fence,nowMs=Date.now()}=options;
+  if (!igPublishLeaseEnabled(env) ||
+      env.STUDIO_IG_STALE_UPLOAD_AUTO_RECOVERY_ENABLED !== "true" ||
+      !scheduleReservationAuthorityEnabled(env) ||
+      env.STUDIO_IG_PUBLISH_LEASE_EXCLUSIVE_VERIFIED !== "true")
+    throw new Error("ig_stale_unattended_recovery_disabled");
+  if (!/^rec[A-Za-z0-9]{14}$/.test(String(outputId||"")) ||
+      !fence?.safe || !fence?.fenced ||
+      fence.output_id!==outputId || !Number.isSafeInteger(fence.generation))
+    throw new Error("ig_recovery_exact_fence_missing");
+  const readOutput = id => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+  const existing = await readOutput(outputId);
+  const profile = await item4ProductionProfileRecord(env,existing);
+  if (!profile?.id || !scheduleReservationLaneEnabled(env,profile.id,"Instagram"))
+    throw new Error("ig_recovery_atomic_lane_unavailable");
+  const check = async row => {
+    const a=row?.fields||{};
+    const lease=await readIgPublishLease(env,outputId);
+    if (!lease.available || lease.state?.phase!=="fenced" ||
+        lease.state?.generation!==fence.generation ||
+        lease.state?.irreversible_possible!==false ||
+        row?.id!==outputId || a.Publish_Status!=="Publishing" ||
+        a.Publish_Locked_By!=="AP1-IG" ||
+        a.Publish_Locked_At!==fence.lock_at ||
+        a.Output_Status!=="Approved for Publishing" ||
+        a.Review_Status!=="Approved" ||
+        a.Auto_Publish_Enabled!==true || a.Publish_Method!=="Automated" ||
+        a.Platform!=="Instagram" || a.Platform_Output_Type!=="Instagram Reel" ||
+        a.Do_Not_Publish || a.Test_Run_ID || a.Replace_Transaction_ID ||
+        a.Platform_Post_ID || a.Platform_Media_ID || a.Platform_Post_URL ||
+        a.Published_At || renderingReviewHoldPresent(field=>a[field]))
+      throw new Error("ig_recovery_authority_or_fence_changed");
+    const lockAge=nowMs-Date.parse(String(a.Publish_Locked_At||""));
+    if (!Number.isFinite(lockAge) || lockAge<30*60_000)
+      throw new Error("ig_recovery_lock_not_stale");
+    return a;
+  };
+  await check(existing);
+  const transaction = await runAtomicScheduleTransaction(env,{
+    content_profile_id:profile.id,platform:"Instagram",
+    output_type:"Instagram Reel",platform_output_record_id:outputId,
+    content_item_id: Array.isArray(existing.fields?.Content_Item)
+      ? existing.fields.Content_Item[0] : null,
+    operation_id:"quality-ig-stale:"+outputId+":"+fence.generation,
+  },{
+    legacy:async()=>{throw new Error("ig_recovery_legacy_scheduling_forbidden");},
+    plan:async ({occupied_reservations=[]})=>{
+      const current=await readOutput(outputId);
+      const a=await check(current);
+      studioInvalidateOccupiedScheduleCache();
+      const occupied=await studioOccupiedSchedulesOrEmpty(env,{
+        excludeIds:[outputId],profile,platform:"Instagram",requireComplete:true,
+      });
+      const slots=studioOccupiedForPlatform(occupied,"Instagram").slice();
+      for(const reservation of occupied_reservations){
+        const ms=Date.parse(String(reservation?.scheduled_iso||""));
+        if(Number.isFinite(ms))slots.push(ms);
+      }
+      const zone=await studioScheduleTimeZoneForRecord(env,current,{});
+      const uniqueOccupied=[...new Set(slots.filter(Number.isFinite))];
+      const picked=maeScheduleNextSlot({
+        now:new Date(nowMs+60_000),timeZone:zone,
+        horizonDays:await studioScheduleHorizonDays(env),
+        occupiedMs:uniqueOccupied,platformOccupiedMs:uniqueOccupied,
+        gapMs:90*60_000,
+      });
+      if (!picked?.ok || !picked.iso)
+        throw new Error("ig_recovery_mae_capacity_unavailable");
+      const fields=studioPublishScheduleFields({
+        scheduled_post_date:picked.iso,timezone:zone,
+      },current,{occupiedMs:uniqueOccupied,forceWrite:true,
+        exactOverride:true,timeZone:zone});
+      const scheduleIso=String(fields.Scheduled_Post_Date||"").trim();
+      if (!Number.isFinite(Date.parse(scheduleIso)) ||
+          Date.parse(scheduleIso)<=nowMs)
+        throw new Error("ig_recovery_future_mae_slot_missing");
+      Object.assign(fields,{
+        Publish_Status:"Ready to Schedule",Publish_Locked_By:"",
+        Publish_Locked_At:null,Publish_Started_At:null,
+        Publish_Next_Retry_At:null,Publish_Retry_Eligible:true,
+        Publish_Error_Message:"",Studio_Scheduled_At:null,
+        Output_Status:"Approved for Publishing",
+        Output_Notes:String(a.Output_Notes||"")+
+          "\\nQA-IG-STALE-UPLOAD fenced pre-Graph runner lease generation "+
+          fence.generation+"; atomic future MAE slot "+scheduleIso+
+          "; no new provider create performed.",
+      });
+      const previousIso=String(a.Scheduled_Post_Date||"");
+      return {action:Date.parse(previousIso)?"move":"reserve",previousIso,
+        selectedIso:new Date(scheduleIso).toISOString(),fields};
+    },
+    write:async(plan,{signal})=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,outputId,{
+      method:"PATCH",signal,skipSupabaseWriteThrough:true,
+      body:JSON.stringify({fields:plan.fields,typecast:true}),
+    }),
+    verify:async(written,plan)=>{
+      const row=await readOutput(outputId),a=row?.fields||{};
+      if(row?.id!==outputId || Date.parse(a.Scheduled_Post_Date)!==Date.parse(plan.selectedIso)
+        || a.Publish_Status!=="Ready to Schedule" ||
+        a.Publish_Locked_By || a.Publish_Locked_At ||
+        a.Publish_Started_At || a.Platform_Media_ID ||
+        a.Platform_Post_ID || a.Publish_Retry_Eligible!==true)
+        throw new Error("ig_recovery_authoritative_schedule_readback_failed");
+      written.__ig_verified_record=row;
+      return new Date(Date.parse(a.Scheduled_Post_Date)).toISOString();
+    },
+    afterCommit:async written=>{
+      studioInvalidateOccupiedScheduleCache();
+      // The non-authoritative Supabase mirror cannot invalidate a committed
+      // Airtable schedule or strand the runner's fenced lease transition.
+      await studioSupabaseWriteThroughOutput(env,
+        written.__ig_verified_record||written,"quality_ig_stale_recovery")
+        .catch(error=>console.warn("ig stale schedule Supabase mirror pending",error));
+    },
+  });
+  const finalRow=await readOutput(outputId);
+  if(finalRow?.fields?.Publish_Status!=="Ready to Schedule")
+    throw new Error("ig_recovery_schedule_not_verified_after_commit");
+  await markIgLeaseRecovered(env,outputId,fence.generation,{readOutput});
+  return {committed:true,output_id:outputId,generation:fence.generation,
+    reservation_id:transaction?.reservation?.reservation_id||null,
+    scheduled_at:finalRow.fields.Scheduled_Post_Date,
+    phase:"recovered",graph_creates:0};
+}
+/*__STUDIO_WORKER_END:studioRecoverFencedIgStaleUpload__*/

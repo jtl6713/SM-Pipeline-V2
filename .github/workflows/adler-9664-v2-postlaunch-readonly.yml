@@ -1,0 +1,84 @@
+name: Verify Adler 9664 V2 ready for review without publishing
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/adler-9664-v2-postlaunch-readonly.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Read authoritative Output Job and Attempt after held V2
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          cat >/tmp/adler-after.ps1 <<'PS1'
+          $ErrorActionPreference='Stop'
+          $envFile=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+          if(-not (Test-Path $envFile)){throw 'runner_env_missing'}
+          $vars=@{}
+          foreach($line in Get-Content $envFile){if($line -match '^\s*([A-Z0-9_]+)\s*=\s*(.*)$'){$vars[$matches[1]]=$matches[2].Trim().Trim('"').Trim([char]39)}}
+          $pat=[string]$vars['AIRTABLE_PAT'];$base=[string]$vars['AIRTABLE_BASE_ID']
+          if(-not $base){$base='appe33zkZn35yirTL'}
+          if($pat.Length -lt 20){throw 'airtable_auth_unavailable'}
+          $headers=@{'Authorization'=('Bearer '+$pat)}
+          function ReadOne([string]$table,[string]$record){
+            return Invoke-RestMethod -Method GET -Headers $headers -TimeoutSec 25 -Uri ('https://api.airtable.com/v0/'+$base+'/'+$table+'/'+$record)
+          }
+          function ReadBy([string]$table,[string]$field,[string]$value){
+            $q='{'+$field+'}="'+$value+'"'
+            $url='https://api.airtable.com/v0/'+$base+'/'+$table+'?maxRecords=2&filterByFormula='+[uri]::EscapeDataString($q)
+            $rows=@((Invoke-RestMethod -Method GET -Headers $headers -Uri $url -TimeoutSec 25).records)
+            if($rows.Count -ne 1){throw ('not_exactly_one_'+$table)}
+            return $rows[0]
+          }
+          $output='rec4tZQSOVESkrSLc'
+          $job='rrjob_cb18c41001cc21c8d4c823f65d556936fe12e562b2599883'
+          $o=ReadOne 'tblrlPeboBthkplH0' $output
+          $j=ReadBy 'tblUkZB6SMtf9Ib6I' 'Job_ID' $job
+          if($o.id -ne $output -or $o.fields.Output_ID -ne 9664 -or $j.fields.Output_Record_ID -ne $output){throw 'adler_exact_identity_changed'}
+          Write-Output ('adler_v2_job_state='+[string]$j.fields.Job_State)
+          Write-Output ('adler_v2_job_progress='+[string]$j.fields.Progress_Percent)
+          Write-Output ('adler_v2_job_stage='+[string]$j.fields.Progress_Stage)
+          Write-Output ('adler_v2_attempt_id='+[string]$j.fields.Attempt_ID)
+          $a=ReadBy 'tbl7wPOAE26o2coMU' 'Attempt_ID' ([string]$j.fields.Attempt_ID)
+          Write-Output ('adler_v2_attempt_status='+[string]$a.fields.Attempt_Status)
+          Write-Output ('adler_v2_artifact_present='+[bool]$a.fields.Artifact_File_ID)
+          Write-Output ('adler_v2_validation_present='+[bool]$a.fields.Validation_Evidence_JSON)
+          Write-Output ('adler_publication_hold='+[bool]$o.fields.Studio_Render_Review_Hold_Active)
+          Write-Output ('adler_do_not_publish='+[bool]$o.fields.Do_Not_Publish)
+          Write-Output ('adler_published='+[bool]($o.fields.Published_At -or $o.fields.Platform_Post_ID -or $o.fields.Platform_Media_ID))
+          if($o.fields.Studio_Render_Review_Hold_Active -ne $true -or $o.fields.Do_Not_Publish -ne $true -or
+             $o.fields.Published_At -or $o.fields.Platform_Post_ID -or $o.fields.Platform_Media_ID){
+            throw 'adler_publication_hold_violated'
+          }
+          if(-not $a.fields.Artifact_File_ID){throw 'adler_v2_artifact_missing'}
+          Write-Output 'adler_after_independent_hold_and_artifact_verified=true'
+          PS1
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/adler-after.json').write_text(json.dumps({'command':Path('/tmp/adler-after.ps1').read_text(),'confirm':True}))
+          PY
+          code=$(curl -sS --max-time 20 -o /tmp/ops-verify-start.json -w '%{http_code}' -X POST \
+            'https://ops.chicagoshining.com/api/shell' -H "Authorization: Bearer $OPS_TOKEN" \
+            -H 'Content-Type: application/json' --data-binary @/tmp/adler-after.json || true)
+          [[ "$code" == '200' || "$code" == '202' ]]
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/ops-verify-start.json);test -n "$job"
+          for i in $(seq 1 45);do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/ops-verify-result.json
+            state=$(jq -r '.job.status // empty' /tmp/ops-verify-result.json)
+            if [[ "$state" == 'ok' || "$state" == 'failed' ]]; then
+              jq -r '.job.log // ""' /tmp/ops-verify-result.json | grep '^adler_' || true
+              [[ "$state" == 'ok' ]] && exit 0 || exit 1
+            fi
+            sleep 3
+          done
+          echo 'ops_verification_unverified';exit 1

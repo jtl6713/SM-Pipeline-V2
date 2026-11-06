@@ -1,0 +1,199 @@
+name: Story R4 Slot Read-Only Diagnostic 1542
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/story-r4-slot-readonly-1542.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check live Python R4 Runner health and release (read only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          STATUS=$(curl -sS --max-time 20 -o /tmp/r4-runner-health.json -w '%{http_code}' \
+            -H 'Accept: application/json' 'https://pipeline.chicagoshining.com/health' || true)
+          echo "r4_python_runner_health_http=$STATUS"
+          if [[ "$STATUS" == "200" ]]; then
+            jq -c '{ok,version,service,status}' /tmp/r4-runner-health.json
+          else
+            jq -c '{ok,error}' /tmp/r4-runner-health.json 2>/dev/null || true
+          fi
+          test "$STATUS" = 200
+
+      - name: Read public Remotion health; no job creation or mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=$(curl --retry 1 --max-time 15 -sS -o /tmp/health.json -w '%{http_code}' \
+            -H 'Accept: application/json' \
+            'https://render.chicagoshining.com/health' || true)
+          echo "render_health_http=$status"
+          if [ "$status" != 200 ]; then
+            echo "render_health_unavailable=true"
+            exit 1
+          fi
+          jq -e 'type == "object"' /tmp/health.json >/dev/null
+          jq -c '{
+            active: (.remotionActiveRenders // null),
+            in_flight: (.remotionInFlightJobs // null),
+            max_concurrent: (.remotionMaxConcurrent // null),
+            queued: (.remotionQueuedRenders // null),
+            privateDriveImageLocalization: (.privateDriveImageLocalization // null),
+            watermarkLocalization: (.watermarkLocalization // null),
+            status: (.status // null)
+          }' /tmp/health.json
+          echo "read_only=true, render_requests=0, approval_changes=0, publish_changes=0"
+
+      - name: Read authenticated live R4 queue via temporary service-only Worker; no mutations
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TARGET_WORKER: chicagoshining-studio-api
+          AUDIT_WORKER: studio-story-r4-queue-readonly-20261103
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUDIT_WORKER="studio-story-r4-audit-${GITHUB_RUN_ID}"
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          CODE="$(curl -sS --max-time 20 -o /tmp/factory-existing.json -w '%{http_code}' -H "$AUTH" "$API/workers/scripts/$AUDIT_WORKER/settings")"
+          if [[ "$CODE" != "404" ]]; then
+            echo "::error::Refusing to overwrite existing audit Worker, HTTP $CODE"
+            exit 1
+          fi
+          OWNED=0
+          cleanup() {
+            if [[ "$OWNED" == "1" ]]; then
+              curl -fsS --max-time 20 -X DELETE -H "$AUTH" "$API/workers/scripts/$AUDIT_WORKER" >/dev/null ||
+                echo "::warning::Temporary audit Worker requires cleanup; no production Studio Worker was changed"
+            fi
+          }
+          trap cleanup EXIT
+          TOKEN="$(openssl rand -hex 32)"
+          cat > /tmp/factory-audit-worker.mjs <<'JS'
+          export default {
+            async fetch(request,env) {
+              const path=new URL(request.url).pathname;
+              if (request.method !== "GET" ||
+                  !["/health","/report"].includes(path)) return new Response("Not found",{status:404});
+              if (request.headers.get("Authorization") !== "Bearer " + env.AUDIT_TOKEN) {
+                return new Response("Unauthorized",{status:401});
+              }
+              const internal = new Request(
+                path === "/health"
+                  ? "https://studio.chicagoshining.com/api/health"
+                  : "https://studio.chicagoshining.com/api/operations/queue",
+                {headers:{
+                  "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com",
+                  "Origin":"https://studio.chicagoshining.com",
+                  "Accept":"application/json"
+                }}
+              );
+              const answer=await env.STUDIO_API.fetch(internal);
+              return new Response(await answer.text(),{
+                status:answer.status,
+                headers:{"Content-Type":"application/json","Cache-Control":"no-store"}
+              });
+            }
+          };
+          JS
+          # Service binding only. No production R2 binding, Airtable secret,
+          # workflow approval mutation, or scheduling credentials in this Worker.
+          cat >/tmp/factory-audit-metadata.json <<EOF
+          {"main_module":"worker.mjs","compatibility_date":"2026-10-01","bindings":[{"type":"service","name":"STUDIO_API","service":"$TARGET_WORKER"},{"type":"plain_text","name":"AUDIT_TOKEN","text":"$TOKEN"}]}
+          EOF
+          PUT="$(curl -sS --max-time 30 -o /tmp/factory-audit-put.json -w '%{http_code}' -X PUT "$API/workers/scripts/$AUDIT_WORKER/content" -H "$AUTH" -F 'metadata=@/tmp/factory-audit-metadata.json;type=application/json' -F 'worker.mjs=@/tmp/factory-audit-worker.mjs;type=application/javascript+module;filename=worker.mjs')"
+          if ! [[ "$PUT" =~ ^2[0-9][0-9]$ ]] ||
+              ! jq -e '.success==true' /tmp/factory-audit-put.json >/dev/null; then
+            echo "::error::Temporary service-binding Worker could not be created (HTTP $PUT)"
+            jq -c '{success,errors:[.errors[]?|{code}]}' /tmp/factory-audit-put.json || true
+            exit 1
+          fi
+          OWNED=1
+          curl -fsS --max-time 20 -X POST -H "$AUTH" -H 'Content-Type: application/json' "$API/workers/scripts/$AUDIT_WORKER/subdomain" --data '{"enabled":true,"previews_enabled":false}' >/tmp/factory-audit-sub.json
+          jq -e '.success==true' /tmp/factory-audit-sub.json >/dev/null
+          SUBDOMAIN="$(curl -fsS --max-time 20 -H "$AUTH" "$API/workers/subdomain" | jq -er '.result.subdomain')"
+          BASE="https://$AUDIT_WORKER.$SUBDOMAIN.workers.dev"
+          # Push triggers Worker deploy and this audit concurrently. Read the
+          # actual live Worker version first, rather than probing old code.
+          LIVE="false"
+          for attempt in $(seq 1 5); do
+            STATUS="$(curl -sS --max-time 20 -o /tmp/factory-api-health.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BASE/health" || true)"
+            if [[ "$STATUS" == "200" ]] && jq -e '(.version | type)=="string"' /tmp/factory-api-health.json >/dev/null 2>&1; then
+              LIVE="true"
+              break
+            fi
+            sleep 5
+          done
+          if [[ "$LIVE" != "true" ]]; then
+            echo "::error::Live Worker health unavailable; read-only queue audit refused (HTTP $STATUS)"
+            jq -c '{ok,version,error:(.error//null)}' /tmp/factory-api-health.json 2>/dev/null || true
+            exit 1
+          fi
+          echo "story_r4_live_worker_version=$(jq -r '.version // "unknown"' /tmp/factory-api-health.json)"
+          URL="$BASE/report"
+          HTTP="000"
+          for attempt in $(seq 1 12); do
+            HTTP="$(curl -sS --max-time 45 -o /tmp/factory-claims-report.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$URL" || true)"
+            if [[ "$HTTP" == "200" ]]; then break; fi
+            sleep 3
+          done
+          if [[ "$HTTP" != "200" ]]; then
+            echo "::error::Read-only claims health unavailable; HTTP $HTTP"
+            jq -c '{error:(.error//null)}' /tmp/factory-claims-report.json 2>/dev/null || true
+            exit 1
+          fi
+          jq -e '.ok==true and (.rows|type)=="array"' /tmp/factory-claims-report.json >/dev/null
+          echo "STORY_R4_PRODUCTION_QUEUE_READONLY=PASS"
+          jq -c '{read_source,render_queue_total,fetch_error_count:(.fetch_errors|length),render_priority:(.controls.render_priority//[]),render_paused_ids:((.controls.render_paused//{})|keys),render_head:[.rows[]|select(.kind=="output" and (.render_queue_position!=null))|{output_id,render_status,render_queue_position,render_paused,stuck_kind,remotion_job_id}]|sort_by(.render_queue_position)|.[0:15],targets:[.rows[]|select((.output_id|tonumber? // 0) as $n | [9715,9716,9720,9721,9726,9727]|index($n))|{output_id,render_status,render_queue_position,render_paused,stuck_kind,remotion_job_id}],rendering_count:(.queues.rendering|length)}' /tmp/factory-claims-report.json | tee /tmp/story-r4-sanitized.json
+          rm -f /tmp/factory-claims-report.json
+      - name: Attach sanitized render queue evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: story-r4-queue-${{ github.run_id }}
+          path: /tmp/story-r4-sanitized.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+
+      - name: Read live R2 Story queue priority and skip cursor (no writes)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api"
+          curl -fsS --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API/deployments" -o /tmp/story-live-deploys.json
+          VERSION=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/story-live-deploys.json)
+          curl -fsS --max-time 25 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API/versions/$VERSION" -o /tmp/story-live-version.json
+          BUCKET=$(jq -er '.result.resources.bindings[] | select(.name=="STUDIO_MEDIA") | (.bucket_name // .bucket // empty)' /tmp/story-live-version.json)
+          test -n "$BUCKET"
+          mkdir -p /tmp/story-r2-audit
+          npm install --prefix /tmp/story-r2-audit --no-save --silent wrangler@4.123.0
+          W=/tmp/story-r2-audit/node_modules/.bin/wrangler
+          echo "live_r2_bucket_binding_present=true"
+          if "$W" r2 object get "$BUCKET/studio/state/ops-queue-controls.json" --file /tmp/story-queue-controls.json --remote >/tmp/story-r2-controls.log 2>&1; then
+            jq -c '{render_priority:(.render_priority//[]),render_paused_ids:((.render_paused//{})|keys),updated_at:(.updated_at//null),schema:(.schema//null)}' /tmp/story-queue-controls.json
+          else
+            echo "r2_queue_controls_read=unavailable"
+            tail -5 /tmp/story-r2-controls.log | sed -E 's/(token|key|secret)=[^ ]+/\1=[REDACTED]/Ig'
+          fi
+          if "$W" r2 object get "$BUCKET/ops/r4-skip-cursor-v1" --file /tmp/story-queue-cursor.txt --remote >/tmp/story-r2-cursor.log 2>&1; then
+            CURSOR=$(tr -cd '[:alnum:]' < /tmp/story-queue-cursor.txt)
+            echo "r4_cursor_record_id=$CURSOR"
+          else
+            echo "r4_cursor_read=unavailable"
+          fi
+          echo "read_only=true no_render=true no_airtable_write=true no_publish=true"

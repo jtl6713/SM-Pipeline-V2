@@ -1,4 +1,4 @@
-/* Chicago Rendering Review: authenticated, exact-output media and review.
+/* Chicago Post Production Edits: authenticated, exact-output media and review.
  * Preview never claims a hold or bypasses publication safeguards.
  */
 (() => {
@@ -8,8 +8,10 @@
   const nav = $('navRenderingReview');
   if (!root || !nav) return;
   const chicago = 'recT2rbKX3MF7cVFU';
-  const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map(),pollTimer:null,activeEntry:null,lastReplyNotice:null,lastReplyNoticeNode:null,viewingVersion:null,approvalButton:null,approvalVersion:null,approvalLocks:new Set(),approvalKeys:new Map()};
+  const NEEDS_ASSET_THUMB = '/assets/needs-asset.svg';
+  const state = {busy:false,actionBusy:false,flags:{admission_enabled:false,producer_conversation_enabled:false,attempt_commit_enabled:false},records:[],cursor:null,selected:'',lastLoad:0,request:0,commitKeys:new Map(),pollTimer:null,activeEntry:null,nextRevisionDrafts:new Map(),nextRevisionKeys:new Map(),producerApplyKeys:new Map(),progressCheckNode:null,lastVerifiedSummary:null,lastReplyNotice:null,lastReplyNoticeNode:null,viewingVersion:null,approvalButton:null,approvalVersion:null,approvalLocks:new Set(),approvalKeys:new Map()};
   const list = $('rrQueueList'), detail = $('rrDetail'), status = $('rrStatus');
+  const topProgress = $('rrProgressSummary');
 
   const chicagoTime = value => {
     if(typeof value!=='string'||!value.trim())return 'Timestamp unavailable';
@@ -39,7 +41,7 @@
     });
     const body = await response.json().catch(()=>({}));
     if(!response.ok || body.ok!==true){
-      const error = new Error(body.error||body.message||'Rendering Review request failed ('+response.status+')');
+      const error = new Error(body.error||body.message||'Post Production Edits request failed ('+response.status+')');
       error.status=response.status;throw error;
     }
     return body;
@@ -58,7 +60,7 @@
     if(!response.ok||result.ok!==true){
       const detail=typeof result.error==='string'&&result.error.trim()?result.error:
         typeof result.message==='string'&&result.message.trim()?result.message:
-        'Rendering Review request failed ('+response.status+')';
+        'Post Production Edits request failed ('+response.status+')';
       const error=new Error(detail);
       error.status=response.status;throw error;
     }
@@ -192,11 +194,24 @@
       const button=elem('button',null,'rr-entry');
       button.type='button';button.dataset.outputId=entry.output_id;
       button.setAttribute('aria-pressed',String(entry.output_id===state.selected));
-      button.append(elem('strong',entry.title||'Untitled Reel'),
+      const thumb = elem('span',null,'rr-entry-thumb');
+      const cover = elem('img');
+      const coverUrl = safeUrl(entry.thumbnail_url);
+      cover.loading='lazy';cover.decoding='async';
+      cover.alt=coverUrl?'':'NEEDS ASSET';
+      cover.src=coverUrl||NEEDS_ASSET_THUMB;
+      cover.addEventListener('error',()=>{
+        if(cover.getAttribute('src')===NEEDS_ASSET_THUMB)return;
+        cover.src=NEEDS_ASSET_THUMB;cover.alt='NEEDS ASSET';
+      });
+      thumb.append(cover);
+      const copy=elem('span',null,'rr-entry-body');
+      copy.append(elem('strong',entry.title||'Untitled Reel'),
         elem('span','Instagram Reel'+(entry.output_number?' · #'+entry.output_number:''),
           'rr-entry-meta'),
         elem('span',entry.review_held?'Review hold present':entry.dispatch_started?
           'Dispatch already started':'Completed render · review not started','rr-entry-meta'));
+      button.append(thumb,copy);
       button.addEventListener('click',()=>open(entry));
       list.append(button);
     }
@@ -210,9 +225,30 @@
       window.clearTimeout(state.pollTimer);
     state.pollTimer=null;
   }
-  // The exact held review session is polled for completion, never the renderer.
-  // Do not replace the playing preview while a render is still in progress.
-  function watchAttempt(entry,seenState,requestSequence){
+  // Observe only the held review session. This is an authoritative saved-state
+  // check, NOT a claim that Producer chat automatically queued an isolated render.
+  function reviewSignature(session,renderJob) {
+    const messages=Array.isArray(session?.messages)?session.messages:[];
+    const last=messages[messages.length-1];
+    const history=Array.isArray(session?.history)?session.history:[];
+    return JSON.stringify([
+      session?.version,session?.state,session?.current_attempt_id,
+      session?.latest_attempt_number,session?.plan?.version,session?.plan?.hash,
+      session?.plan?.frozen,session?.producer_candidate?.stale,
+      session?.attempts?.length,last?.at,last?.content,
+      history[history.length-1]?.at,
+      renderJob?.verified===true?renderJob.state:null,
+      renderJob?.verified===true?renderJob.stage:null,
+      renderJob?.verified===true?renderJob.progress_percent:null,
+      renderJob?.verified===true?renderJob.dispatch_attempts:null,
+      renderJob?.verified===true&&renderJob.created_at&&
+        Date.now()-Date.parse(renderJob.created_at)>=240000&&renderJob.state==='queued'?'queued_stalled':null,
+      renderJob?.verified===true&&renderJob.created_at&&
+        Date.now()-Date.parse(renderJob.created_at)>=900000&&renderJob.state==='claimed'&&
+        Number(renderJob.progress_percent||0)===0?'claimed_stalled':null,
+    ]);
+  }
+  function watchReview(entry,seenSignature,requestSequence) {
     if(typeof window.setTimeout!=='function')return;
     cancelAttemptPoll();
     state.pollTimer=window.setTimeout(async()=>{
@@ -221,29 +257,185 @@
          state.request!==requestSequence)return;
       try{
         const latest=await get('/api/rendering-review/outputs/'+encodeURIComponent(entry.output_id));
-        if(state.selected!==entry.output_id||state.request!==requestSequence)return;
+        if(!root.classList.contains('active')||state.selected!==entry.output_id||
+           state.request!==requestSequence)return;
         if(latest.publication_hold_verified!==true){
+          if(state.progressCheckNode)state.progressCheckNode.textContent=
+            'Status checks paused: the publication hold could not be verified.';
           say('Review hold could not be verified; automatic status checks paused.',true);
           return;
         }
-        const nextState=latest.session?.state;
-        if(nextState===seenState){
-          watchAttempt(entry,seenState,requestSequence);
+        if(reviewSignature(latest.session,latest.render_job)!==seenSignature){
+          // Never interrupt a playing V1/V2 video just to update a status card.
+          if($('rrVideo')?.paused===false){
+            if(state.progressCheckNode)state.progressCheckNode.textContent=
+              'New saved activity detected. Pause the video and select Check latest status to see it.';
+            watchReview(entry,seenSignature,requestSequence);
+          }else await open(entry);
         }else{
-          await open(entry);
-          if(nextState==='ready_for_review')
-            say('Revised Reel delivered — select V2 or compare with V1.');
-          else if(nextState==='revision_failed')
-            say('Revision needs attention; original Reel is preserved.',true);
+          if(state.progressCheckNode)state.progressCheckNode.textContent=
+            'Last verified: '+chicagoTime(new Date().toISOString())+
+            ' · automatic check every 20 seconds while this page is open.';
+          watchReview(entry,seenSignature,requestSequence);
         }
       }catch(error){
-        say('Could not refresh the render status. Select the Reel to try again.',true);
+        if(state.progressCheckNode)state.progressCheckNode.textContent=
+          'Automatic status check unavailable. Last verified state is retained. Use Check latest status to retry.';
+        watchReview(entry,seenSignature,requestSequence);
       }
-    },12000);
+    },20000);
+  }
+  function appendRevisionProgress(activity,session,messages,producer,planReady,completedAttempt,entry,saved) {
+    const attempts=Array.isArray(session?.attempts)?session.attempts:[];
+    const approvedV2=session?.state==='approved'&&attempts.some(a=>
+      a?.id===session.approved_attempt_id&&Number(a?.number)>1);
+    const readyV2=!!completedAttempt||approvedV2;
+    const rendering=['queued','rendering','validating'].includes(session?.state);
+    const failed=session?.state==='revision_failed';
+    const job=saved?.render_job;
+    const jobAgeMs=job?.created_at?Date.now()-Date.parse(job.created_at):NaN;
+    const stalledQueued=session?.state==='queued'&&job?.verified===true&&
+      job?.state==='queued'&&Number.isFinite(jobAgeMs)&&jobAgeMs>=240000;
+    const stalledClaimed=session?.state==='queued'&&job?.verified===true&&
+      job?.state==='claimed'&&Number(job.progress_percent||0)===0&&
+      Number.isFinite(jobAgeMs)&&jobAgeMs>=900000;
+    const stage=readyV2?5:session?.state==='validating'?4:
+      rendering||failed?3:planReady?2:producer?1:0;
+
+    // Red means a verified operator action is possible, NOT that a background
+    // job is still processing. Gated/unavailable actions are never invented.
+    const canReply=!!producer&&saved?.flags?.producer_conversation_enabled===true&&
+      ['discussing','awaiting_assets'].includes(session?.state);
+    const producerIndex=messages.map(m=>m.role).lastIndexOf('producer');
+    const hasSavedFeedback=messages.slice(producerIndex+1).some(m=>m.role==='user');
+    const canRequestEdits=hasSavedFeedback&&
+      saved?.flags?.producer_conversation_enabled===true&&
+      saved?.publication_hold_verified===true&&session?.review_hold?.active===true&&
+      ['ready_for_review','discussing','awaiting_assets','plan_ready','revision_failed']
+        .includes(session?.state);
+    const canRender=planReady&&!!session?.plan?.immutable_manifest&&
+      session?.review_hold?.active===true&&saved?.publication_hold_verified===true&&
+      saved?.flags?.attempt_commit_enabled===true&&
+      session?.producer_candidate?.stale!==true;
+    const current=attempts.find(a=>a?.id===session?.current_attempt_id);
+    const canApprove=readyV2&&session?.state==='ready_for_review'&&
+      saved?.flags?.creative_approval_enabled===true&&
+      saved?.publication_hold_verified===true&&
+      current?.status==='ready_for_review'&&!!attemptMedia(current,entry);
+    const requiresInput=canRequestEdits||(stage===1&&canReply)||
+      (stage===2&&canRender)||(stage===5&&canApprove)||stalledQueued||stalledClaimed;
+    const steps=['Feedback received','Producer review','Plan ready',
+      'Rendering','Quality check','Ready for review'];
+    const rail=elem('ol',null,'rr-progress-stages');
+    rail.setAttribute('aria-label','Verified post-production stages');
+    for(let i=0;i<steps.length;i++){
+      const phase=(readyV2&&session?.state==='approved')||i<stage?'complete':i===stage?
+        requiresInput||failed?'attention':'current':'pending';
+      const item=elem('li',null,'rr-progress-stage rr-progress-stage--'+phase);
+      item.append(elem('span',steps[i],'rr-progress-stage-name'));
+      item.append(elem('span',phase==='complete'?'Completed':
+        phase==='attention'?(requiresInput?'Requires your attention':'Needs attention'):
+        phase==='current'?(session?.state==='queued'&&i===3?'Queued — not started':
+          session?.state==='rendering'&&i===3?'In progress':
+          i===0&&!messages.length?'Not started':'Current'):'Not started','rr-progress-stage-state'));
+      rail.append(item);
+    }
+    if(requiresInput)activity.classList.add('rr-activity--attention');
+    const heading=elem('h3','Post-production progress','rr-progress-heading');
+    const summary=session?.state==='approved'&&approvedV2?
+      (session.factory_review?.status==='accepted_pending_qa'?
+        'Factory has accepted the V2 creative cut. Watermark QA is still pending; publication and scheduling remain held.':
+        'V2 creative approval is saved. Factory can accept the creative cut under a QA hold without scheduling or publishing.'):
+      readyV2?(canApprove?
+        'Requires your attention: V2 is ready for review. Select V2 and approve only if satisfied. Publication remains held.':
+        'Revised V2 is ready for review. Publication remains held until approval.'):
+      session?.state==='validating'?
+        'V2 render completed its rendering stage; media validation is in progress.':
+      session?.state==='rendering'?
+        'V2 render is running. Quality validation and review are not complete.':
+      session?.state==='queued'?(stalledQueued?
+        'Requires your attention: V2 has been queued for over four minutes without a verified Runner claim. Automatic recovery has not completed. Check latest status; do not start another render.':
+        stalledClaimed?
+        'Requires your attention: The Runner claimed this V2 job but no progress was verified after fifteen minutes. Reconciliation is required; do not start another render.':
+        job?.verified===true&&job?.state==='claimed'?
+        'The Runner has claimed this exact V2 job. Waiting for rendering progress; publication remains held.':
+        'V2 render job is queued. Automatic dispatch starts any unclaimed job after two minutes; rendering has not been confirmed started.'):
+      failed?'The revised render needs attention; V1 remains preserved.':
+      planReady?(canRender?
+        'Requires your attention: V2 plan is saved. Select Make the revised video to authorize rendering. No render has started.':
+        'V2 plan is saved. No render has started. Render authorization is a separate action when enabled.'):
+      producer?(canReply?
+        'Requires your attention: Producer replied, but V2 has NOT started. Review the proposed changes and reply with your direction. No render-ready plan or V2 job exists.':
+        'Producer replied, but V2 has NOT started. No verified render-ready plan or V2 render job exists. Continue the conversation to resolve remaining requirements.'):
+      messages.length?(canRequestEdits?
+        'Requires your attention: Your feedback is saved. Select Make edits based on the latest feedback to ask Producer to prepare changes. No render has started.':
+        'Feedback was saved. No verified Producer reply or V2 job yet.'):
+      'Review is held. No Producer activity or V2 render job is verified.';
+    activity.append(heading,elem('p',summary,'rr-progress-summary'),rail);
+
+    // A completed V2 remains ready to review while new feedback is being
+    // discussed. Do not paint V3's *unstarted* steps green because V2 finished.
+    // These records are attached to the current completed attempt by the
+    // authoritative session writer; earlier V1 feedback cannot fake a V3.
+    const sourceId=completedAttempt?.id;
+    const pendingFeedback=sourceId?messages.filter(m=>
+      m?.role==='user'&&m?.attempt_id===sourceId):[];
+    if(sourceId&&pendingFeedback.length&&session.review_hold?.active===true){
+      const nextVersion=Math.max(1,...attempts.map(a=>Number(a?.number)||1))+1;
+      const candidate=session?.producer_candidate;
+      const freshCandidate=candidate?.source_attempt_id===sourceId&&
+        candidate?.stale!==true&&candidate?.candidate;
+      const freshPlan=planReady&&session.plan?.source_attempt_id===sourceId&&
+        session.plan?.frozen===true&&session.plan?.immutable_manifest;
+      const pending=elem('section',null,'rr-pending-revision');
+      pending.setAttribute('aria-label','Pending V'+nextVersion+' editing activity');
+      pending.append(elem('strong','V'+nextVersion+' · Proposed changes — not rendered',
+        'rr-pending-revision-heading'));
+      const requirements=Array.isArray(freshCandidate?.requirements)?
+        freshCandidate.requirements.filter(x=>x?.description):[];
+      const message=freshPlan?
+        'Verified revision plan is ready. A separate human render authorization is required. V'+
+          completedAttempt.number+' remains unchanged.':
+        freshCandidate?(requirements.length?
+          'Producer proposed changes, but '+requirements.length+
+          ' checks or assets remain unresolved. Editing and rendering have not started.':
+          'Producer replied. The revised media and timeline still require independent verification before rendering.'):
+        'Your comments are saved. Select Make edits based on the latest feedback to request a Producer plan. No edits or rendering have started.';
+      pending.append(elem('p',message,'rr-pending-revision-summary'));
+      const verification= freshPlan?'Verified plan ready':
+        freshCandidate?'Requires verification':'Not started';
+      const nextSteps=elem('ol',null,'rr-pending-revision-steps');
+      for(const [name,status] of [
+        ['Feedback received','Completed'],
+        ['Producer proposal',freshCandidate?'Received':'Not started'],
+        ['Asset and plan validation',verification],
+        ['V'+nextVersion+' rendering','Not authorized / not started']
+      ]){
+        const line=elem('li',null,'rr-pending-revision-step');
+        line.append(elem('strong',name),elem('span',status));
+        nextSteps.append(line);
+      }
+      pending.append(nextSteps);
+      activity.append(pending);
+    }
+    const checked=elem('p','Verified from the saved review session · '+chicagoTime(new Date().toISOString())+
+      ' · auto-check every 20 seconds while this page is open.','rr-progress-checked');
+    state.progressCheckNode=checked;
+    activity.append(checked,actionButton('Check latest status',async()=>{await open(entry);}));
+    state.lastVerifiedSummary={outputId:entry.output_id,summary};
+    if(topProgress){
+      topProgress.hidden=false;
+      topProgress.classList.toggle('rr-progress-top--attention',requiresInput);
+      topProgress.textContent=(entry.output_number?'#'+entry.output_number+' · ':'')+summary;
+    }
   }
   async function open(entry) {
     cancelAttemptPoll();
+    const changedOutput=state.selected!==entry.output_id;
     state.selected=entry.output_id;state.activeEntry=entry;
+    state.progressCheckNode=null;
+    if(topProgress&&changedOutput){topProgress.hidden=true;
+      topProgress.classList.remove('rr-progress-top--attention');}
     state.approvalButton=null;state.approvalVersion=null;
     renderList();clearMedia();
     detail.replaceChildren();
@@ -263,6 +455,7 @@
     appendLine(detail,'Review:',entry.review_held?'Existing hold detected — do not clear automatically':
       entry.dispatch_started?'Already being dispatched — not eligible to claim':'Not enrolled');
     if(!entry.review_held){
+      if(topProgress){topProgress.hidden=true;topProgress.classList.remove('rr-progress-top--attention');}
       detail.append(elem('p','To request changes, open this output in Factory, select Request Changes, and enter comments before submitting.','rr-notice'));
       return;
     }
@@ -275,6 +468,8 @@
       if(seq!==state.request||state.selected!==entry.output_id)return;
       if(saved.integrity_error)detail.append(elem('p','Hold integrity issue: '+saved.integrity_error,'rr-notice'));
       if(!saved.publication_hold_verified){
+        if(topProgress){topProgress.hidden=false;topProgress.classList.remove('rr-progress-top--attention');
+          topProgress.textContent='Status paused: authoritative publication hold could not be verified.';}
         detail.append(elem('p','Authoritative publication hold could not be verified. Discussion actions are disabled.','rr-notice'));
         return;
       }
@@ -304,8 +499,11 @@
         section.append(linked);
         detail.append(section);
       }else if(saved.creative_group_error){
-        detail.append(elem('p',saved.creative_group_error+
-          '. No automatic sibling changes were made.','rr-notice'));
+        const qaPending=session?.state==='approved'&&
+          saved.factory_handoff_gate?.code==='WATERMARK_QA_REQUIRED';
+        detail.append(elem('p',qaPending?
+          'Sibling creative-master propagation is deferred while watermark QA is pending. V2 is still creatively approved and can receive a Factory creative decision or another revision. No sibling media or publishing was changed.':
+          saved.creative_group_error+'. No automatic sibling changes were made.','rr-notice'));
       }
       const messages=Array.isArray(session?.messages)?session.messages:[];
       const last=messages.length?messages[messages.length-1]:null;
@@ -320,7 +518,11 @@
           typeof a?.artifact_id==='string'&&a.artifact_id.length>0):null;
       const activity=elem('section',null,'rr-activity');
       activity.setAttribute('aria-label','Producer and render status');
-      const title=completedAttempt&&session.state==='ready_for_review'?
+      const title=completedAttempt&&session.state==='approved'?
+        'V'+completedAttempt.number+(session.factory_review?.status==='accepted_pending_qa'?
+          ' · Factory creative review accepted — QA pending':
+          ' · Creatively approved — Factory review available'):
+        completedAttempt&&session.state==='ready_for_review'?
         'V'+completedAttempt.number+' · Ready for review'+
         (completedAttempt.provenance?.kind==='manual_verified_review_import'?
           ' (verified imported edit)':''):
@@ -344,6 +546,7 @@
           prompt.append(list);activity.append(prompt);
         }
       }
+      appendRevisionProgress(activity,session,messages,producer,planReady,completedAttempt,entry,saved);
       detail.append(activity);
       if(messages.length){
         const history=elem('section',null,'rr-conversation-live');
@@ -420,65 +623,6 @@
       const reviewNightOffer=entry.output_id==='rec0uVrVeiUM6shp9'&&
         nightRows.length===2&&unresolvedNight.length>0&&
         saved.publication_hold_verified===true;
-      const reviewCanTalk=saved.flags?.producer_conversation_enabled===true&&
-        ['ready_for_review','discussing','awaiting_assets','plan_ready','revision_failed'].includes(session?.state);
-      if(!reviewNightOffer&&state.flags.producer_conversation_enabled===true &&
-         ['ready_for_review','discussing','awaiting_assets','plan_ready','revision_failed'].includes(session.state)){
-        const form=elem('div',null,'rr-chat-form rr-producer-chat-primary');
-        const composer=elem('textarea');
-        composer.placeholder='Tell me what you would like changed. Use your own words.';
-        composer.rows=4;composer.maxLength=3000;
-        composer.setAttribute('aria-label','Creative direction for Producer');
-        form.append(elem('strong','Talk to your Producer','rr-producer-label'));
-        form.append(elem('p','Want a different change? Just tell me what feels wrong.','rr-muted'));
-        form.append(composer);
-        const feedbackStatus=elem('p','','rr-feedback-status');
-        feedbackStatus.hidden=true;
-        feedbackStatus.setAttribute('role','status');
-        feedbackStatus.setAttribute('aria-live','polite');
-        let pendingKey='',pendingDirection='';
-        const sendDirection=async content=>{
-          content=String(content||'').trim();
-          if(!content)throw new Error('Enter creative direction before sending');
-          // Keep an idempotency key for a retry of the same direction. A lost
-          // response must never create duplicate producer messages.
-          if(content!==pendingDirection){
-            pendingKey=safeRequestId();pendingDirection=content;
-          }
-          feedbackStatus.textContent='Checking the saved Reel and preparing a Producer response…';
-          say('Your Producer is considering your changes…');
-          const created=await post('/api/rendering-review/outputs/'+
-            encodeURIComponent(entry.output_id)+'/producer-conversation',{
-            direction:content,expected_version:session.version,
-            client_request_id:pendingKey,
-          });
-          if(created.persisted!==true||created.render_queued!==false)
-            throw new Error('Producer response was not confirmed saved. Your text is preserved for retry.');
-          if(created.plan_ready===true&&created.plan_persisted===true){
-            feedbackStatus.textContent='Your changes are ready. You can make the new video whenever you like.';
-          }else if(Array.isArray(created.plan_blockers)&&created.plan_blockers.length){
-            feedbackStatus.textContent='I need to check one more thing before making the video: '+
-              created.plan_blockers.slice(0,3).map(x=>x.description).join(' / ');
-          }else{
-            feedbackStatus.textContent='Producer reply saved. You can continue refining it.';
-          }
-          feedbackStatus.classList.toggle('error-text',false);
-          feedbackStatus.dataset.state='success';
-          state.lastReplyNotice={outputId:entry.output_id,message:
-            'Your message was saved. Review the Producer’s response and any proposed edits below.'};
-          say('Producer response saved.');
-          pendingDirection='';pendingKey='';
-          await open(entry);
-          if(typeof state.lastReplyNoticeNode?.scrollIntoView==='function')
-            state.lastReplyNoticeNode.scrollIntoView({block:'nearest'});
-        };
-        form.append(feedbackStatus);
-        form.append(actionButton('Send to Producer',async()=>{
-          if(typeof composer.blur==='function')composer.blur();
-          return sendDirection(composer.value);
-        },feedbackStatus));
-        detail.append(form);
-      }
       if(reviewNightOffer){
         const offer=elem('section',null,'rr-night-fix');
         offer.append(elem('strong','Your Producer','rr-producer-label'));
@@ -491,48 +635,6 @@
           'Tell me if you would prefer a different photo for either shot.':
           'I can see two nighttime shots. I haven\'t found a suitable verified daytime replacement yet. '+
           'Tell me which existing photo you would like me to try.'));
-        if(reviewCanTalk){
-          const conversation=elem('div',null,'rr-chat-form');
-          const reply=elem('textarea');
-          reply.rows=3;reply.maxLength=3000;
-          reply.placeholder='For example: Yes, those look good. Or: Try a different photo for the first shot.';
-          reply.setAttribute('aria-label','Reply to your Producer');
-          conversation.append(reply);
-          const feedback=elem('p','','rr-feedback-status');
-          feedback.hidden=true;
-          feedback.setAttribute('role','status');
-          feedback.setAttribute('aria-live','polite');
-          let pendingKey='',pendingReply='';
-          conversation.append(feedback);
-          conversation.append(actionButton('Reply to Producer',async()=>{
-            // Dismiss the iPhone keyboard so both progress and the Producer
-            // action remain visible while the request is processing.
-            if(typeof reply.blur==='function')reply.blur();
-            const direction=String(reply.value||'').trim();
-            if(!direction)throw new Error('Tell your Producer what you think of these photos.');
-            if(direction!==pendingReply){
-              pendingReply=direction;pendingKey=safeRequestId();
-            }
-            const created=await post('/api/rendering-review/outputs/'+
-              encodeURIComponent(entry.output_id)+'/producer-conversation',{
-              direction,expected_version:session.version,client_request_id:pendingKey,
-            });
-            if(created.persisted!==true||created.render_queued!==false)
-              throw new Error('I couldn\'t save your reply. Your words are still here so you can retry.');
-            feedback.dataset.state='success';
-            feedback.textContent='Your feedback is saved.';
-            state.lastReplyNotice={outputId:entry.output_id,message:
-              created.plan_ready&&created.plan_persisted?
-                'Your photo choices were saved. Choose “Make the revised video” when the render button is available.':
-                'Your message was saved. Review the Producer’s response below.'};
-            pendingReply='';pendingKey='';
-            say('Your Producer has your feedback.');
-            await open(entry);
-            if(typeof state.lastReplyNoticeNode?.scrollIntoView==='function')
-              state.lastReplyNoticeNode.scrollIntoView({block:'nearest'});
-          },feedback));
-          offer.append(conversation);
-        }
         detail.append(offer);
       }
       if(storyboard.length){
@@ -545,6 +647,11 @@
         if(toShow.length){
           const section=elem('section',null,'rr-proposal-storyboard');
           section.append(elem('h3','Take a look at these photos'));
+          if(rendering)section.append(elem('p',
+            'These photos are previews of the plan already queued for V'+
+            (Number(session.latest_attempt_number)||2)+
+            '. New image suggestions can be saved below for a later version, but cannot change this in-flight job.',
+            'rr-review-progress'));
           for(const frame of toShow){
             const item=elem('div',null,'rr-storyboard-row');
             const time=Number(frame.start_seconds).toFixed(2)+'–'+Number(frame.end_seconds).toFixed(2)+'s';
@@ -585,6 +692,195 @@
           detail.append(section);
         }
       }
+      // All comments stay conversational, including comments on suggested photos.
+      // No Producer planning, committed render, or publishing side effect occurs
+      // merely because the reviewer saves a note. Applying feedback is a
+      // separate, explicit human click and still does NOT start rendering.
+      const canComment=saved.flags?.producer_conversation_enabled===true&&
+        session?.review_hold?.active===true&&
+        ['discussing','awaiting_assets','plan_ready','ready_for_review',
+         'queued','rendering','validating','revision_failed'].includes(session?.state);
+      if(canComment){
+        const form=elem('section',null,'rr-chat-form rr-producer-chat-primary');
+        form.setAttribute('aria-label','Review comments and explicit editing authorization');
+        form.append(elem('h3','Talk to your Producer','rr-producer-label'));
+        form.append(elem('p',rendering?
+          'V'+(Number(session.latest_attempt_number)||2)+
+          ' is already processing. Add comments for the next version; the current render remains unchanged.':
+          'Review the narration and suggested photos above. You can save comments and keep discussing before asking the Producer to make edits. Nothing renders automatically.',
+          'rr-muted'));
+        const composer=elem('textarea');
+        composer.rows=4;composer.maxLength=3000;
+        composer.placeholder='For example: In frame 3, use the original exhibit photo instead. Keep frame 2. Revise the narration to match.';
+        composer.setAttribute('aria-label','Creative direction for Producer');
+        composer.value=state.nextRevisionDrafts.get(entry.output_id)||'';
+        composer.addEventListener('input',()=>state.nextRevisionDrafts.set(entry.output_id,composer.value));
+        form.append(composer);
+        const feedback=elem('p','','rr-feedback-status');
+        feedback.hidden=true;feedback.setAttribute('role','status');
+        feedback.setAttribute('aria-live','polite');
+        const save=elem('button','Save comment (no edits yet)','secondary-button');
+        save.type='button';
+        save.addEventListener('click',async()=>{
+          if(state.actionBusy)return;
+          const content=String(composer.value||'').trim();
+          if(!content){feedback.hidden=false;feedback.dataset.state='error';
+            feedback.textContent='Enter a comment before saving.';return;}
+          const identity=entry.output_id+':'+content;
+          if(!state.nextRevisionKeys.has(identity))state.nextRevisionKeys.set(identity,safeRequestId());
+          state.actionBusy=true;save.disabled=true;
+          feedback.hidden=false;feedback.dataset.state='working';
+          feedback.textContent='Saving your comment. No Producer edits or rendering will start.';
+          try{
+            const receipt=await post('/api/rendering-review/outputs/'+
+              encodeURIComponent(entry.output_id)+'/review-feedback',{
+              content,expected_version:session.version,
+              client_request_id:state.nextRevisionKeys.get(identity),
+            });
+            if(receipt.ok!==true||receipt.review_hold_active!==true||
+              !Number.isSafeInteger(receipt.session_version)||receipt.message_count<1)
+              throw new Error('The saved comment could not be verified.');
+            state.nextRevisionDrafts.delete(entry.output_id);
+            state.nextRevisionKeys.delete(identity);
+            state.lastReplyNotice={outputId:entry.output_id,message:
+              'Your comment was saved. No edits or rendering were started. '+
+              (rendering?'It will be considered after the current render finishes.':
+              'Use Make edits based on the latest feedback when you are ready.')};
+            say('Review comment saved; awaiting your explicit editing instruction.');
+            await open(entry);
+          }catch(error){
+            state.nextRevisionDrafts.set(entry.output_id,content);
+            feedback.dataset.state='error';
+            feedback.textContent='Comment save not verified: '+(error?.message||'Unavailable')+
+              '. The draft is preserved. Check latest status before retrying.';
+            say('Comment save could not be verified.',true);
+          }finally{state.actionBusy=false;save.disabled=false;}
+        });
+        form.append(save);
+        const lastProducerIndex=messages.map(m=>m.role).lastIndexOf('producer');
+        const unprocessed=messages.slice(lastProducerIndex+1).filter(m=>m.role==='user');
+        const latestHuman=messages.filter(m=>m.role==='user'&&
+          m.attempt_id===session?.current_attempt_id).at(-1);
+        // Re-evaluate a blocked proposal after library crops finish, using
+        // SAVED user direction. No duplicate comment or render authorization.
+        const needRefreshedPlan=!!latestHuman&&
+          session?.producer_candidate?.source_attempt_id===session?.current_attempt_id&&
+          session?.producer_candidate?.stale!==true&&
+          !session?.producer_candidate?.candidate?.timeline?.length;
+        const canApply=!rendering&&
+          (unprocessed.length>0||needRefreshedPlan)&&
+          ['discussing','awaiting_assets','plan_ready','ready_for_review','revision_failed']
+          .includes(session?.state);
+        const apply=elem('button','Make edits based on the latest feedback','secondary-button rr-primary-render');
+        apply.type='button';apply.disabled=!canApply;
+        const applyMessage=elem('p',rendering?
+          'Editing request unavailable while V'+(Number(session.latest_attempt_number)||2)+
+          ' is in flight. Save more comments now; review the completed video before starting another version.':
+          canApply?
+          'This instructs the Producer to prepare an updated plan from your saved feedback. It does not start a render. You will explicitly authorize rendering afterward.':
+          'Save a new comment to enable the editing request. No edits have been requested.',
+          'rr-muted');
+        apply.addEventListener('click',async()=>{
+          if(state.actionBusy||!canApply)return;
+          if(String(composer.value||'').trim()){
+            feedback.hidden=false;feedback.dataset.state='error';
+            feedback.textContent='Save the comment in the box first, then select Make edits based on the latest feedback.';
+            return;
+          }
+          const direction=(unprocessed.length?unprocessed:[latestHuman])
+            .map(m=>String(m?.content||'').trim())
+            .filter(Boolean).join('\n\n').slice(-3000);
+          if(!direction)return;
+          const identity=entry.output_id+':'+session.version+':'+direction;
+          if(!state.producerApplyKeys.has(identity))state.producerApplyKeys.set(identity,safeRequestId());
+          state.actionBusy=true;apply.disabled=true;save.disabled=true;
+          apply.setAttribute('aria-busy','true');
+          feedback.hidden=false;feedback.dataset.state='working';
+          feedback.textContent='Producer is preparing edits from your saved feedback. This does not queue rendering.';
+          try{
+            const receipt=await post('/api/rendering-review/outputs/'+
+              encodeURIComponent(entry.output_id)+'/producer-conversation',{
+              direction,expected_version:session.version,
+              client_request_id:state.producerApplyKeys.get(identity),
+            });
+            if(receipt.persisted!==true||receipt.render_queued!==false)
+              throw new Error('Producer edit request was not verified.');
+            state.producerApplyKeys.delete(identity);
+            const planSaved=receipt.plan_ready===true&&receipt.plan_persisted===true;
+            const blockers=Array.isArray(receipt.plan_blockers)?
+              receipt.plan_blockers.filter(x=>x&&typeof x.description==='string')
+                .slice(0,3).map(x=>x.description.slice(0,220)).join('; '):'';
+            state.lastReplyNotice={outputId:entry.output_id,message:planSaved?
+              'Verified revision plan saved. Review its changes; Make revised video is a separate action. No render started.':
+              'Producer proposal saved, but the revision plan is NOT ready for rendering. '+
+                (blockers?'Unresolved checks: '+blockers+'. ':
+                  'Review the proposed changes and required verification. ')+
+                'No render was started.'};
+            say(planSaved?'Verified plan saved; no render authorized.':
+              'Proposal saved, but render plan is not ready. No render started.',!planSaved);
+            await open(entry);
+          }catch(error){
+            feedback.dataset.state='error';
+            feedback.textContent='Producer request not verified: '+(error?.message||'Unavailable')+
+              '. Check saved status before retrying. Nothing has been authorized to render.';
+            say('Producer editing request could not be verified.',true);
+          }finally{
+            state.actionBusy=false;apply.disabled=!canApply;save.disabled=false;
+            apply.removeAttribute('aria-busy');
+          }
+        });
+        form.append(apply,applyMessage);
+        // This is a separate user-initiated preparation step. It creates
+        // missing 9:16 crop requests from existing owned library files only.
+        // In particular, it must never dispatch a new V3 render.
+        if(!rendering&&session?.review_hold?.active===true&&
+           saved?.flags?.producer_conversation_enabled===true){
+          const prepare=elem('button','Prepare selected photos from Asset Manager (no render)',
+            'secondary-button');
+          prepare.type='button';
+          const label=elem('p',
+            'Uses the exact photos already named in your saved feedback. Existing successful crops are reused. Graphic images remain labeled Graphic and require visual review.',
+            'rr-muted');
+          prepare.addEventListener('click',async()=>{
+            if(state.actionBusy)return;
+            if(String(composer.value||'').trim()){
+              feedback.hidden=false;feedback.dataset.state='error';
+              feedback.textContent='Save your comment first; photo preparation never uses an unsaved draft.';
+              return;
+            }
+            state.actionBusy=true;prepare.disabled=true;save.disabled=true;
+            apply.disabled=true;
+            feedback.hidden=false;feedback.dataset.state='working';
+            feedback.textContent='Resolving existing owned images and requesting only missing 9:16 crops. No render will start.';
+            try{
+              const receipt=await post('/api/rendering-review/outputs/'+
+                encodeURIComponent(entry.output_id)+'/prepare-library-stills',{
+                intent:'prepare_selected_photos_no_render',
+                expected_version:session.version,client_request_id:safeRequestId(),
+              });
+              if(receipt.render_queued!==false||receipt.published!==false)
+                throw new Error('No-render preparation receipt could not be verified');
+              const states=(receipt.assets||[]).map(x=>x.name+' — '+x.state+
+                (x.kind==='Graphic'?' (Graphic, not a photo)':'')).join('; ');
+              state.lastReplyNotice={outputId:entry.output_id,message:
+                'Library preparation: '+receipt.created+' new crop requests, '+
+                receipt.reused+' existing/ongoing, '+
+                (receipt.blocked?.length||0)+' blocked. '+states+
+                '. V2 unchanged; no render authorized.'};
+              say('Photo preparation received. No render was started.');
+              await open(entry);
+            }catch(err){
+              feedback.dataset.state='error';
+              feedback.textContent='Photo preparation not verified: '+(err?.message||'unavailable')+
+                '. Check latest status before retrying.';
+            }finally{state.actionBusy=false;prepare.disabled=false;
+              save.disabled=false;apply.disabled=!canApply;}
+          });
+          form.append(prepare,label);
+        }
+        form.append(feedback);
+        detail.append(form);
+      }
       if(attempts.length>1){
         const heading=elem('h3','Video versions');detail.append(heading);
         const picker=elem('div',null,'rr-attempts');
@@ -608,12 +904,116 @@
       }
       if(session?.state==='approved'){
         const approved=attempts.find(a=>a.id===session.approved_attempt_id);
-        const transferred=session.factory_handoff?.attempt_id===session.approved_attempt_id &&
+        const version='V'+(approved?.number||session.latest_attempt_number||2);
+        const gate=saved.factory_handoff_gate;
+        const transferred=gate?.status==='transferred'&&
+          session.factory_handoff?.attempt_id===session.approved_attempt_id &&
           session.review_hold?.active===false;
-        detail.append(elem('p','V'+(approved?.number||session.latest_attempt_number||2)+
-          (transferred?' approved and moved to Factory. Continue with normal Factory approval or scheduling.':
-            ' creatively approved; Factory handoff is being verified.')+
-          ' No Instagram publication has been authorized.','rr-notice'));
+        const notice=transferred?
+          version+' creatively approved and transferred to Factory. Normal approval is still required.':
+          version+' creatively approved. Factory transfer is '+(
+            gate?.status==='blocked'?'blocked by media QA.':
+            gate?.status==='unavailable'?'awaiting a reliable QA record.':
+            gate?.status==='ready'?'ready to complete.':'not yet verified.');
+        detail.append(elem('p',notice+' No Instagram publication has been authorized.','rr-notice'));
+        if(!transferred){
+          if(gate?.message){
+            const reason=elem('p',gate.message,'rr-feedback-receipt');
+            reason.setAttribute('role','status');
+            detail.append(reason);
+          }
+          if(gate?.status==='ready'){
+            // This resumes only the saved creative acceptance. It does not
+            // submit another approval, authorize a render, or publish.
+            const transfer=elem('button','Complete Factory transfer (no publishing)','secondary-button');
+            transfer.type='button';
+            const feedback=elem('p','','rr-feedback-status');
+            feedback.hidden=true;
+            feedback.setAttribute('role','status');
+            feedback.setAttribute('aria-live','polite');
+            transfer.addEventListener('click',async()=>{
+              if(state.actionBusy)return;
+              state.actionBusy=true;
+              transfer.disabled=true;
+              transfer.setAttribute('aria-busy','true');
+              feedback.hidden=false;feedback.dataset.state='working';
+              feedback.textContent='Verifying V2 and completing the protected Factory handoff…';
+              try{
+                const result=await post('/api/rendering-review/outputs/'+
+                  encodeURIComponent(entry.output_id)+'/factory-handoff',{});
+                if(result.factory_ready!==true||result.review_hold_active!==false||
+                   result.approved_for_publishing!==false)
+                  throw new Error('Factory handoff readback was not verified');
+                feedback.dataset.state='success';
+                feedback.textContent='V2 transferred. Factory approval is still required; nothing was published.';
+                say('V2 is back in Factory for approval.');
+                await open(entry);
+              }catch(error){
+                feedback.dataset.state='error';
+                feedback.textContent='Factory transfer did not complete: '+
+                  (error?.message||'Status unavailable')+
+                  '. Your creative approval remains saved; check status before retrying.';
+                say('Factory handoff needs attention; creative approval remains saved.',true);
+              }finally{
+                state.actionBusy=false;
+                transfer.removeAttribute('aria-busy');
+                transfer.disabled=false;
+              }
+            });
+            detail.append(transfer,feedback);
+          }
+          // QA is a delivery check, not a prerequisite to asking Producer for
+          // another creative pass. Keep the original held output unpublished.
+          if(session.review_hold?.active===true&&saved.publication_hold_verified===true){
+            const redo=elem('section',null,'rr-chat-form rr-producer-chat-primary');
+            redo.append(elem('strong','Need another version?','rr-producer-label'));
+            redo.append(elem('p','You can request another creative redo even while watermark verification is pending. This does not publish or start a render.','rr-muted'));
+            const direction=elem('textarea');
+            direction.rows=3;direction.maxLength=3000;
+            direction.setAttribute('aria-label','Instructions for another creative revision');
+            direction.value='Redo this version while keeping the approved creative changes.';
+            redo.append(direction);
+            const notice=elem('p','','rr-feedback-status');
+            notice.hidden=true;notice.setAttribute('role','status');
+            notice.setAttribute('aria-live','polite');
+            let pendingKey='',pendingNote='';
+            const send=elem('button','Request another revision','secondary-button');
+            send.type='button';
+            send.addEventListener('click',async()=>{
+              if(state.actionBusy)return;
+              const note=String(direction.value||'').trim();
+              if(!note){notice.hidden=false;notice.dataset.state='error';notice.textContent='Enter your requested revision.';return;}
+              if(note!==pendingNote){pendingNote=note;pendingKey=safeRequestId();}
+              state.actionBusy=true;send.disabled=true;
+              send.setAttribute('aria-busy','true');
+              notice.hidden=false;notice.dataset.state='working';
+              notice.textContent='Saving your revision request under the existing publication hold…';
+              try{
+                const result=await post('/api/rendering-review/outputs/'+
+                  encodeURIComponent(entry.output_id)+'/request-redo',{
+                  expected_version:session.version,client_request_id:pendingKey,note,
+                });
+                if(result.redo_requested!==true||result.review_hold_active!==true||
+                   result.render_queued!==false||result.public_post_created!==false)
+                  throw new Error('The held creative revision receipt was not verified');
+                notice.dataset.state='success';
+                notice.textContent='Redo requested. Continue with Producer; no render or publication started.';
+                pendingKey='';pendingNote='';
+                say('Redo direction saved under the existing hold.');
+                await open(entry);
+              }catch(error){
+                notice.dataset.state='error';
+                notice.textContent='Redo request status: '+(error?.message||'Not verified')+
+                  '. Check the saved conversation before retrying.';
+              }finally{
+                state.actionBusy=false;send.disabled=false;send.removeAttribute('aria-busy');
+              }
+            });
+            redo.append(send,notice);
+            detail.append(redo);
+          }
+          detail.append(actionButton('Recheck QA / Factory status',async()=>{await open(entry);}));
+        }
       }
       if(session?.state==='ready_for_review'&&
          saved.flags?.creative_approval_enabled===true&&
@@ -657,12 +1057,23 @@
               expected_version:session.version,attempt_id:current.id,
               client_request_id:state.approvalKeys.get(approvalKey),
             });
-            if(result.accepted!==true||result.factory_ready!==true||
-               result.factory_handoff?.factory_ready!==true||
-               result.review_hold_active!==false||
+            if(result.accepted!==true||
                result.publication_changed!==false||
                result.instagram_upload_created!==false)
-              throw new Error('Creative approval receipt not verified');
+              throw new Error('Creative acceptance receipt not verified');
+            if(result.factory_ready!==true){
+              approval.textContent='V'+versionNumber+' creatively approved';
+              approvalStatus.dataset.state='success';
+              approvalStatus.textContent='V'+versionNumber+
+                ' creatively approved and preserved. Final Factory transfer still needs verification. '+ 
+                'You can request another creative revision regardless of watermark status. Nothing was published.';
+              say('Creative approval saved; Factory delivery QA is still pending.');
+              await open(entry);
+              return;
+            }
+            if(result.factory_handoff?.factory_ready!==true||
+               result.review_hold_active!==false)
+              throw new Error('Factory handoff readback not verified');
             approval.textContent='V'+versionNumber+' approved — in Factory';
             approvalStatus.dataset.state='success';
             approvalStatus.textContent='V'+versionNumber+
@@ -692,7 +1103,6 @@
           ({queued:'Queued for isolated renderer',rendering:'Rendering',validating:'Validating media'}[session.state])+
           '. No Instagram publication has been authorized.','rr-notice'));
         detail.append(actionButton('Check render status',async()=>{await open(entry);}));
-        watchAttempt(entry,session.state,seq);
       }
       if(plan){
         const technical=elem('details',null,'rr-plan-details');
@@ -724,10 +1134,18 @@
         if(candidate.stale)draft.append(elem('p','An additional comment was added. Ask the Producer to refresh this plan.','rr-notice'));
         detail.append(draft);
       }
+      watchReview(entry,reviewSignature(session,saved.render_job),seq);
 
     }catch(err){
-      if(seq===state.request && err.status!==404)
-        detail.append(elem('p','Saved review detail could not be verified: '+err.message,'rr-notice'));
+      if(seq===state.request && state.selected===entry.output_id){
+        if(topProgress){
+          const prior=state.lastVerifiedSummary?.outputId===entry.output_id?
+            ' Last verified: '+state.lastVerifiedSummary.summary:'';
+          topProgress.textContent='Latest status unavailable; no change can be confirmed.'+prior;
+          topProgress.hidden=false;
+        }
+        if(err.status!==404)detail.append(elem('p','Saved review detail could not be verified: '+err.message,'rr-notice'));
+      }
     }
   }
   async function load(next=false){
@@ -744,7 +1162,7 @@
       if(data.flags?.automatic_sampling_percent!==0 ||
          typeof data.flags?.admission_enabled!=='boolean' ||
          typeof data.flags?.producer_conversation_enabled!=='boolean')
-        throw new Error('Unsafe Rendering Review feature configuration; rendering queue withheld');
+        throw new Error('Unsafe Post Production Edits feature configuration; rendering queue withheld');
       state.flags=data.flags;
       if(!next)state.records=[];
       const previousIds=new Set(state.records.map(v=>v.output_id));
@@ -759,7 +1177,7 @@
       renderList();
       if(!state.selected && state.records.length)open(state.records[0]);
     }catch(error){
-      say(error.message||'Rendering Review is unavailable',true);
+      say(error.message||'Post Production Edits is unavailable',true);
       if(!next){state.records=[];state.cursor=null;clearMedia();renderList();}
     }finally{
       state.busy=false;refresh.disabled=false;more.disabled=!state.cursor;
@@ -770,7 +1188,7 @@
   nav.addEventListener('click',()=>{ /* Core Studio navigation activates the page; observer loads it. */ });
   const observer = new MutationObserver(()=>{
     if(root.classList.contains('active'))load(false);
-    else {cancelAttemptPoll();clearMedia();state.lastLoad=0;}
+    else {cancelAttemptPoll();clearMedia();state.lastLoad=0;if(topProgress)topProgress.hidden=true;}
   });
   observer.observe(root,{attributes:true,attributeFilter:['class']});
   async function reveal(){
@@ -793,7 +1211,7 @@
     if(root.classList.contains('active'))await load(false);
     const entry=state.records.find(v=>v.output_id===outputId);
     if(entry)await open(entry);
-    else say("Rendering Review opened. Refresh to find the saved revision.",true);
+    else say("Post Production Edits opened. Refresh to find the saved revision.",true);
   }
   window.StudioRenderingReview={load,openOutputById};
 })();

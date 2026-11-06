@@ -1,12 +1,40 @@
 (() => {
+  // Disposable caches must never prevent an approval request reaching the server.
+  const localStorage = factoryStorage();
+  function factoryStorage() {
+    const memory = new Map();
+    let disk; try { disk = window.localStorage; } catch {}
+    const keys = () => {
+      const found = new Set(memory.keys());
+      try { for(let i=0;i<disk.length;i++) found.add(disk.key(i)); } catch {}
+      return [...found];
+    };
+    return {
+      get length() { return keys().length; }, key(i) { return keys()[i] ?? null; },
+      getItem(key) { if(memory.has(key)) return memory.get(key); try{return disk.getItem(key);}catch{return null;} },
+      setItem(key,value) {
+        value=String(value);
+        try { disk.setItem(key,value); memory.delete(key); return; } catch {}
+        // Pipeline row snapshots can fill Safari's entire origin quota. They are
+        // reloadable data, unlike the exact request IDs used for deduplication.
+        try { for(const k of keys()) if(k?.startsWith('studio.pipelineOutputs.')) disk.removeItem(k); } catch {}
+        try { disk.setItem(key,value); memory.delete(key); }
+        catch { memory.set(key,value); } // Same-page retry remains available with storage disabled.
+      },
+      removeItem(key) { memory.delete(key); try{disk.removeItem(key);}catch{} },
+    };
+  }
+
   const $ = (id) => document.getElementById(id);
   const state = {
     loading: false,
     desk: null,
     expandedReviewGroup: null,
     needsEyesPage: 0,
+    needsEyesSearch: "",
     pendingFactoryFeedback: null,
     selectedOutputs: new Set(),
+    heldCreativeAccepted: new Set(),
     submittingBatch: false,
     batch: null,
     completedBatch: null,
@@ -21,6 +49,7 @@
     batchApprovalsEnabled: null,
     batchRollout: null,
     batchGlobal: null,
+    batchSubmissionError: null,
     reconciledBatchDeskKey: "",
     reconcilingBatchDesk: false,
     batchDeskReconcileNextAttempt: 0,
@@ -30,6 +59,21 @@
   const FACTORY_LAST_BATCH_KEY = "studio.factory.last-batch.v1";
   const FACTORY_PENDING_REQUEST_KEY = "studio.factory.pending-approval-request.v1";
   const FACTORY_ACCEPTED_OUTPUTS_KEY = "studio.factory.accepted-output-ids.v1";
+  const FACTORY_SUBMISSION_ERROR_KEY = "studio.factory.submission-error.v1";
+  const FACTORY_PENDING_MISSING_GRACE_MS = 90 * 1000;
+  // Reuse the one global missing-asset image; do not borrow another profile's media.
+  const NEEDS_ASSET_THUMB = "/assets/needs-asset.svg";
+  document.addEventListener("error", (event) => {
+    const image = event.target;
+    if (!(image instanceof HTMLImageElement) ||
+        !image.matches("#page-factory .factory-line-thumb img") ||
+        image.getAttribute("src") === NEEDS_ASSET_THUMB) return;
+    image.src = NEEDS_ASSET_THUMB;
+    image.alt = "NEEDS ASSET";
+    const label = image.closest(".factory-output-visual")?.querySelector(".factory-output-visual-label");
+    if (label) label.textContent = "Needs asset";
+  }, true);
+
   // A successful accept must remain visible even if the Desk still has an old
   // Ready-for-Review snapshot. This is a UX fence; R2 claims are authoritative.
   function recentFactoryAccepted() {
@@ -49,6 +93,35 @@
     try { return JSON.parse(localStorage.getItem(FACTORY_PENDING_REQUEST_KEY) || "null"); }
     catch { return null; }
   }
+  // Each interrupted request owns a separate durable entry. It must never be
+  // overwritten by a newer selection or become a page-wide submission lock.
+  const FACTORY_RECOVERY_PREFIX = "studio.factory.recovery.v2.";
+  function factoryRecoveryEntries() {
+    const rows = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith(FACTORY_RECOVERY_PREFIX)) continue;
+      try { const saved = JSON.parse(localStorage.getItem(key)); if (saved) rows.push({ key, saved }); } catch {}
+    }
+    return rows;
+  }
+  function archiveFactoryPending() {
+    if (state.submittingBatch) return;
+    const saved = pendingFactoryApproval();
+    if (!saved) return;
+    const identity = saved.request_id || saved.batches?.[0]?.request_id || "legacy";
+    const key = FACTORY_RECOVERY_PREFIX + identity;
+    // Write before removing the legacy slot: a storage failure loses no identity.
+    localStorage.setItem(key, JSON.stringify(saved));
+    localStorage.removeItem(FACTORY_PENDING_REQUEST_KEY);
+  }
+  function factoryRecoveringIds() {
+    return new Set(factoryRecoveryEntries().flatMap(({ saved }) => saved.ids || []));
+  }
+  const FACTORY_WAITING_SELECTION_KEY = "studio.factory.waiting-selection.v1";
+  function waitingFactorySelection() {
+    try { return JSON.parse(localStorage.getItem(FACTORY_WAITING_SELECTION_KEY) || "[]"); } catch { return []; }
+  }
   try {
     const saved = JSON.parse(localStorage.getItem(FACTORY_SELECTION_KEY) || "[]");
     state.selectedOutputs = new Set(Array.isArray(saved)
@@ -56,6 +129,16 @@
       : []);
     const latest = JSON.parse(localStorage.getItem(FACTORY_LAST_BATCH_KEY) || "{}");
     state.lastBatchProfile = String(latest.profile_id || "");
+    const savedError = JSON.parse(sessionStorage.getItem(FACTORY_SUBMISSION_ERROR_KEY) || "null");
+    // A failure from an earlier UI session is not evidence of a current failed
+    // request. Keep the error only while its exact-ID pending fence is present.
+    // Once reconciliation has cleared that fence, historical HTTP 500 copy
+    // must not survive a reload as though a fresh submit failed.
+    if (!pendingFactoryApproval()) {
+      sessionStorage.removeItem(FACTORY_SUBMISSION_ERROR_KEY);
+    } else if (savedError?.message && Date.now() - Number(savedError.saved_ms || 0) < 30 * 60 * 1000) {
+      state.batchSubmissionError = String(savedError.message);
+    }
   } catch { /* storage disabled: selection still persists while page is open */ }
 
   function esc(value) {
@@ -74,8 +157,48 @@
     node.classList.toggle("error-text", Boolean(isError));
   }
 
+  function setBatchSubmissionError(message) {
+    state.batchSubmissionError = message ? String(message) : null;
+    try {
+      if (state.batchSubmissionError) sessionStorage.setItem(FACTORY_SUBMISSION_ERROR_KEY, JSON.stringify({
+        message: state.batchSubmissionError, saved_ms: Date.now(),
+      }));
+      else sessionStorage.removeItem(FACTORY_SUBMISSION_ERROR_KEY);
+    } catch {}
+    if (state.batchSubmissionError) setStatus(state.batchSubmissionError, true);
+  }
+
+  // Already-approved / permanently ineligible outputs must not keep a browser
+  // recovery fence that re-paints "Submission not accepted yet" forever.
+  function factoryTerminalEligibilityError(message) {
+    return /\bpast_review\b|no longer ready for approval|already belong to a Factory approval|Approved for Publishing|already past review/i
+      .test(String(message || ""));
+  }
+
+  function dropFactoryRecoveryEntry(recoveryKey, saved, reason) {
+    try { localStorage.removeItem(recoveryKey); } catch {}
+    for (const id of saved?.ids || []) state.selectedOutputs.delete(id);
+    try {
+      const waiting = waitingFactorySelection().filter((id) => state.selectedOutputs.has(id));
+      localStorage.setItem(FACTORY_WAITING_SELECTION_KEY, JSON.stringify(waiting));
+    } catch {}
+    saveFactorySelection();
+    if (!factoryRecoveryEntries().some(({ saved: row }) =>
+      (row.ids || []).some((id) => state.selectedOutputs.has(id)))) {
+      setBatchSubmissionError(null);
+    }
+    return {
+      resolved: true, count: 0, dropped: true,
+      message: reason || "Removed an already-finished Factory approval from the browser queue.",
+    };
+  }
+
   async function fetchJson(path, options = {}) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), Number(options.timeoutMs || 35000));
+    try {
     const response = await fetch(path, {
+      signal: controller.signal,
       credentials: "same-origin",
       headers: {
         Accept: "application/json",
@@ -88,16 +211,25 @@
     try { body = await response.json(); } catch { body = null; }
     if (!response.ok) {
       const detail = body?.error || body?.message || "";
-      if (detail) throw new Error(detail);
-      if (response.status === 503) {
-        throw new Error("Factory desk is busy (503). Wait a moment, check Activity, then retry.");
-      }
-      if (response.status >= 500) {
-        throw new Error(`Factory desk timed out or failed (${response.status}). Check Activity before retrying — the batch may not have been stored.`);
-      }
-      throw new Error(`Factory desk failed (${response.status})`);
+      const message = detail || (response.status === 503
+        ? "Factory desk is busy (503). Wait a moment, check Activity, then retry."
+        : response.status >= 500
+          ? `Factory desk timed out or failed (${response.status}). Check Activity before retrying — the batch may not have been stored.`
+          : `Factory desk failed (${response.status})`);
+      const error = new Error(message);
+      error.status = response.status;
+      error.retryAfterSeconds = Number(response.headers.get("Retry-After") || 0) || 0;
+      throw error;
     }
     return body || {};
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        const timeoutError = new Error("Factory request timed out; the saved submission will be checked automatically.");
+        timeoutError.status = 504;
+        throw timeoutError;
+      }
+      throw error;
+    } finally { clearTimeout(timeout); }
   }
 
   function cardLabel(card) {
@@ -152,8 +284,17 @@
   }
 
   function canReviewActions(card, { pile = false, candidate = false } = {}) {
-    if (pile || candidate || state.submittingOutputIds?.has(card?.id) || recentFactoryAccepted()[String(card?.id || "")]) return false;
+    if (pile || candidate || state.submittingOutputIds?.has(card?.id)) return false;
+    // A 48-hour local acceptance hint is not a saved approval. If the server
+    // still reports Ready for Review, allow a fresh explicit operator action;
+    // the canonical per-output lease prevents duplicate committed approvals.
+    if (recentFactoryAccepted()[String(card?.id || "")] &&
+        String(card?.output_status || "").trim().toLowerCase() !== "ready for review") return false;
     if (card?.kind !== "output") return false;
+    if (card.review_package_ready === false) return false;
+    // Held revisions must be discoverable and previewable, never approvable
+    // from Factory until their separate review and QA handoff completes.
+    if (card.review_hold_active === true || card.do_not_publish === true) return false;
     // studio_state can paint Ready for Review while Output_Status is still
     // In Production. Approve all must only claim Airtable-ready rows.
     const output = String(card.output_status || "").trim().toLowerCase();
@@ -289,7 +430,8 @@
   }
 
   function canSelectBatchOutput(card) {
-    if (recentFactoryAccepted()[String(card?.id || "")]) return false;
+    if (recentFactoryAccepted()[String(card?.id || "")] &&
+        String(card?.output_status || "").trim().toLowerCase() !== "ready for review") return false;
     if (state.batchApprovalsEnabled === false) return false;
     if (state.batchGlobal?.enabled) {
       const platform = String(card?.platform || "").trim();
@@ -327,6 +469,25 @@
     const option = [...($("factoryProfileFilter")?.options || [])].find(row => row.value === id);
     return option?.textContent?.trim() || "City profile";
   }
+  // Make the Factory-specific scope visible beside the review queue.
+  // Explicit Needs eyes search currently spans all city profiles.
+  function renderFactoryProfileFilterNotice() {
+    const notice = $("factoryActiveProfileFilter");
+    if (!notice) return;
+    const id = factoryProfileId();
+    notice.hidden = !id;
+    if (!id) return;
+    const label = factoryProfileLabel(id);
+    const searchingAll = Boolean(String(state.needsEyesSearch || "").trim());
+    const scope = $("factoryActiveProfileScope");
+    if (scope) scope.textContent = searchingAll
+      ? `Searching all profiles (Factory filter: ${label})`
+      : `Showing ${label} only`;
+    const context = $("factoryActiveProfileContext");
+    if (context) context.textContent = searchingAll
+      ? "Search temporarily includes all profiles; clearing search restores this profile filter."
+      : "Other profiles are hidden from Factory queues.";
+  }
   function syncFactoryFilterOptions() {
     const select = $("factoryProfileFilter");
     if (!select) return;
@@ -345,6 +506,7 @@
       [...profiles.entries()].sort((a, b) => a[1].localeCompare(b[1]))
         .map(([id, name]) => `<option value="${esc(id)}">${esc(name)}</option>`).join("");
     select.value = profiles.has(prior) ? prior : "";
+    renderFactoryProfileFilterNotice();
   }
   function factoryMatchesProfile(card) {
     return !factoryProfileId() || String(card?.profile_id || "") === factoryProfileId();
@@ -401,27 +563,30 @@
       ? planFactoryApprovalBatches(selectedCards, limit, perProfile).length : (selectable ? 1 : 0);
     const count = $("factoryBatchSelectionCount");
     if (count) count.textContent = `${selectable} output${selectable === 1 ? "" : "s"} selected${planned > 1 ? ` · will submit as ${planned} batches` : ""}`;
+    const recovering = factoryRecoveringIds();
+    const approvalBusy = state.submittingBatch;
+    const pendingNotice = $("factoryBatchPendingNotice");
+    if (pendingNotice) {
+      pendingNotice.hidden = !recovering.size;
+      const entries = factoryRecoveryEntries();
+      const problems = entries.map(({ saved }) => saved.last_error).filter(Boolean);
+      const blocked = entries.some(({ saved }) => saved.retry_blocked);
+      pendingNotice.textContent = `${recovering.size} output${recovering.size === 1 ? "" : "s"} awaiting server acceptance. ${blocked ? "Approval needs attention: " : "Saved; automatic retry is active. "}${problems.join(" ")} You can submit other selections.`;
+    }
     const submit = $("factoryBatchSubmit");
     if (submit) {
-      const pending = pendingFactoryApproval();
-      const pendingIds = pending?.profile_id === "global" && Array.isArray(pending.ids)
-        ? pending.ids : null;
-      const pendingMismatch = pendingIds && (pendingIds.length !== selectable ||
-        pendingIds.some(id => !selectedCards.some(card => card.id === id)));
       submit.disabled = !selectable || (!global && selectable > limit) ||
-        state.submittingBatch || state.batchApprovalsEnabled === false || Boolean(pendingMismatch);
+        approvalBusy || state.batchApprovalsEnabled === false;
       submit.title = state.batchApprovalsEnabled === false
-        ? "Batch approval rollout is disabled for this profile; individual approvals remain available."
-        : global && planned > 1
-          ? `This selection will be submitted as ${planned} durable batches, each within the ${limit}-total / ${perProfile}-per-profile safety limits.`
-          : selectable > limit ? `Select at most ${limit} output${limit === 1 ? "" : "s"} for this rollout.` : "";
-      submit.textContent = state.submittingBatch ? "Submitting…"
-        : pendingIds ? "Resume previous submission (same request)"
-        : `Submit Approvals${selectable ? ` (${selectable})` : ""}`;
-      if (pendingMismatch) submit.title = "An earlier submission is still unresolved. Refresh Activity; a different request is blocked until reconciliation.";
+        ? "Batch approvals are disabled for this profile; individual approvals remain available."
+        : "Previously submitted outputs are checked automatically to prevent duplicates.";
+      submit.textContent = approvalBusy ? "Submitting…" : `Submit Approvals${selectable ? ` (${selectable})` : ""}`;
     }
     const clear = $("factoryBatchClear");
-    if (clear) clear.disabled = !state.selectedOutputs.size || state.submittingBatch;
+    if (clear) {
+      clear.disabled = !state.selectedOutputs.size || approvalBusy;
+      clear.removeAttribute("title");
+    }
     const rolloutNotice = $("factoryBatchRolloutNotice");
     if (rolloutNotice) {
       const rollout = state.batchRollout;
@@ -636,7 +801,42 @@
     return null;
   }
 
+  function factoryActivityProvesPlanMissing(activity, plan) {
+    return activity?.ok === true
+      && String(activity.exact_request_id || "") === String(plan?.request_id || "")
+      && Array.isArray(activity.batches)
+      && activity.batches.length === 0;
+  }
+
+  function clearAuthoritativelyMissingGlobalPlans(requestIds, now = Date.now()) {
+    const pending = pendingFactoryApproval();
+    const savedAt = Number(pending?.saved_ms || 0);
+    if (pending?.profile_id !== "global" || !Array.isArray(pending.batches)
+        || !requestIds?.size || !Number.isFinite(savedAt)
+        || now - savedAt < FACTORY_PENDING_MISSING_GRACE_MS) return 0;
+    const remaining = pending.batches.filter((plan) => !requestIds.has(String(plan?.request_id || "")));
+    const removed = pending.batches.length - remaining.length;
+    if (!removed) return 0;
+    try {
+      if (remaining.length) {
+        localStorage.setItem(FACTORY_PENDING_REQUEST_KEY, JSON.stringify({
+          ...pending,
+          profile_id: "global",
+          ids: remaining.flatMap((row) => row.ids || []),
+          batches: remaining,
+          saved_ms: savedAt,
+        }));
+      } else {
+        localStorage.removeItem(FACTORY_PENDING_REQUEST_KEY);
+      }
+    } catch { return 0; }
+    if (!pendingFactoryApproval()) setBatchSubmissionError(null);
+    setStatus("Cleared an expired submission that Factory confirmed was never created. Your current selection is ready to submit.");
+    return removed;
+  }
+
   function reconcilePendingGlobalSelection(activity) {
+    if (state.submittingBatch) return 0;
     let pending = null;
     try { pending = JSON.parse(localStorage.getItem(FACTORY_PENDING_REQUEST_KEY) || "null"); } catch {}
     if (pending?.profile_id !== "global" || !Array.isArray(pending?.batches) || !pending.batches.length) return 0;
@@ -658,6 +858,7 @@
     try {
       if (remaining.length) {
         localStorage.setItem(FACTORY_PENDING_REQUEST_KEY, JSON.stringify({
+          ...pending,
           profile_id: "global",
           ids: remaining.flatMap((row) => row.ids || []),
           batches: remaining,
@@ -667,6 +868,10 @@
         localStorage.removeItem(FACTORY_PENDING_REQUEST_KEY);
       }
     } catch {}
+    if (!pendingFactoryApproval()) {
+      setBatchSubmissionError(null);
+      setStatus("Previous Factory request verified in batch history. No duplicate approval was submitted.");
+    }
     if (state.desk) renderDesk(state.desk);
     updateFactoryBatchToolbar();
     return recovered;
@@ -675,53 +880,242 @@
   let factoryPendingReconcileAt = 0;
   let factoryPendingReconcileRunning = false;
   async function reconcilePersistedFactoryPending(force = false) {
-    const pending = pendingFactoryApproval();
-    if (state.submittingBatch || factoryPendingReconcileRunning ||
-        pending?.profile_id !== "global" || !Array.isArray(pending.batches) ||
-        !pending.batches.length) return;
+    if (state.submittingBatch) return;
+    if (factoryPendingReconcileRunning) {
+      if (force) state.factoryRecoveryRequested = true;
+      return;
+    }
     if (!force && Date.now() - factoryPendingReconcileAt < 15000) return;
     factoryPendingReconcileAt = Date.now();
     factoryPendingReconcileRunning = true;
     try {
-      // Active Activity intentionally excludes completed batches. Read each
-      // pending request by exact ID, including after reload or mobile timeout.
-      for (const plan of pending.batches) {
-        try {
-          const activity = await fetchJson("/api/factory/approval-batches?scope=all&request_id=" +
-            encodeURIComponent(plan.request_id), { cache: "no-store" });
-          const confirmed = factoryActivityMatchesPlan(activity, plan);
-          if (confirmed) reconcilePendingGlobalSelection({ batches: [confirmed] });
-        } catch { /* Preserve unresolved request identity; never create a new one. */ }
+      archiveFactoryPending();
+      // Independent of Desk/Activity success; one failed request cannot starve others.
+      const entries = factoryRecoveryEntries().sort((a,b) =>
+        Number((b.saved.ids || []).some(id => state.selectedOutputs.has(id))) -
+        Number((a.saved.ids || []).some(id => state.selectedOutputs.has(id))));
+      for (const { key, saved } of entries) {
+        let result;
+        try { result = await reconcileFactorySubmissionFence(saved, key); }
+        catch (error) { result = {resolved:false,message:String(error.message || error)}; }
+        if (result?.dropped) {
+          if (result.message) setStatus(result.message);
+          continue;
+        }
+        const touchesSelection = (saved.ids || []).some(id => state.selectedOutputs.has(id));
+        if (!result?.resolved && result?.message && factoryTerminalEligibilityError(result.message)) {
+          dropFactoryRecoveryEntry(key, saved,
+            "Output already left Ready for Review (" + result.message
+            + "). Removed from the browser approval queue so other selections can submit.");
+          continue;
+        }
+        if (!result?.resolved && result?.message && touchesSelection) {
+          const message = "Submission not accepted yet: " + result.message;
+          setBatchSubmissionError(message);
+          setStatus(message, true);
+        }
+      }
+      // A past failed recovery must not keep painting after the operator moves on.
+      if (state.batchSubmissionError && !factoryRecoveryEntries().some(({ saved }) =>
+        (saved.ids || []).some((id) => state.selectedOutputs.has(id)))) {
+        setBatchSubmissionError(null);
       }
     } finally {
       factoryPendingReconcileRunning = false;
       updateFactoryBatchToolbar();
     }
+    if (state.factoryRecoveryRequested) {
+      state.factoryRecoveryRequested = false;
+      return reconcilePersistedFactoryPending(true);
+    }
+    const waiting = waitingFactorySelection().filter(id => state.selectedOutputs.has(id));
+    localStorage.setItem(FACTORY_WAITING_SELECTION_KEY, JSON.stringify(waiting));
+    const recovering = factoryRecoveringIds();
+    const eligible = new Set(readyFactoryOutputs(true).map(card => card.id));
+    const available = waiting.filter(id => !recovering.has(id) && eligible.has(id) && state.selectedOutputs.has(id));
+    if (available.length && !state.submittingBatch) await submitFactoryBatchApprovals(available);
   }
 
-  async function recoverSubmittedFactoryPlan(plan, originalError) {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt) await new Promise((resolve) => setTimeout(resolve, 350 * attempt));
-      // Exact-id read avoids querying historical completed batches when a
-      // POST response was lost and the job finished before our next poll.
-      const activity = await fetchJson("/api/factory/approval-batches?scope=all&request_id=" +
-        encodeURIComponent(plan.request_id), { cache: "no-store" });
-      const found = factoryActivityMatchesPlan(activity, plan);
-      if (found) {
-        refreshFactoryBatchActivity(true).catch(() => {});
-        return { ...found, accepted: true, recovered_after_error: true };
+  function factorySavedPayloadMatchesPlan(saved, plan) {
+    const payload = plan?.payload;
+    return saved.auto_retry === true && payload?.action === "start_group"
+      && payload.request_id === plan.request_id
+      && Array.isArray(payload.record_ids) && Array.isArray(plan.ids)
+      && JSON.stringify([...payload.record_ids].sort()) === JSON.stringify([...plan.ids].sort());
+  }
+  async function retrySavedFactoryPlan(saved, recoveryKey, plan) {
+    if (!factorySavedPayloadMatchesPlan(saved, plan)) return null;
+    if (saved.retry_blocked || Number(saved.next_retry_ms || 0) > Date.now()) return null;
+    // Persist retry timing before the POST. Never discard or replace the original
+    // idempotency key merely because its parent ledger was not created yet.
+    saved.attempts = Number(saved.attempts || 0) + 1;
+    saved.next_retry_ms = Date.now() + Math.min(60000, 15000 * saved.attempts);
+    localStorage.setItem(recoveryKey, JSON.stringify(saved));
+    try {
+      const result = await fetchJson("/api/factory/approval-batches", {
+        method: "POST", body: JSON.stringify(plan.payload),
+      });
+      const actual = (result.items || []).map(item => String(item.id)).sort();
+      const expected = plan.ids.map(String).sort();
+      if (result.accepted !== true || JSON.stringify(actual) !== JSON.stringify(expected)) {
+        throw new Error("Factory has not returned a complete receipt for this saved selection.");
+      }
+      return result;
+    } catch (error) {
+      saved.last_error = String(error.message || error);
+      saved.retry_blocked = [400, 401, 403, 409, 422].includes(Number(error.status));
+      saved.next_retry_ms = Math.max(saved.next_retry_ms, Date.now() + Number(error.retryAfterSeconds || 0) * 1000);
+      if (factoryTerminalEligibilityError(saved.last_error)) {
+        saved.terminal_eligibility = true;
+      }
+      localStorage.setItem(recoveryKey, JSON.stringify(saved));
+      return null;
+    }
+  }
+
+  // Exact-ID recovery for interrupted global *and* legacy profile-local approvals.
+  // Never infer durable absence from an empty Active Activity list.
+  async function reconcileFactorySubmissionFence(saved = pendingFactoryApproval(), recoveryKey = FACTORY_PENDING_REQUEST_KEY) {
+    if (!saved) {
+      setBatchSubmissionError(null);
+      setStatus("No saved approval request remains. Review the current selection before submitting.");
+      updateFactoryBatchToolbar();
+      return { resolved: true, count: 0 };
+    }
+    const isGlobal = saved.profile_id === "global";
+    const isLocal = /^rec[A-Za-z0-9]+$/.test(String(saved.profile_id || ""));
+    const plans = isGlobal && Array.isArray(saved.batches) ? saved.batches
+      : isLocal ? [{ request_id: saved.request_id, ids: saved.ids }] : [];
+    if (!plans.length || plans.some(plan =>
+        !/^[A-Za-z0-9_-]{12,128}$/.test(String(plan?.request_id || ""))
+        || !Array.isArray(plan.ids) || !plan.ids.length
+        || plan.ids.some(id => !/^rec[A-Za-z0-9]+$/.test(String(id))))) {
+      return { resolved: false, message: "Saved Factory approval identity is incomplete. Do not clear browser data or retry blindly." };
+    }
+    const ageMs = Date.now() - Number(saved.saved_ms || 0);
+    const graceExpired = Number(saved.saved_ms) > 0
+      && ageMs >= FACTORY_PENDING_MISSING_GRACE_MS;
+    const committed = [];
+    for (const plan of plans) {
+      const requestId = String(plan.request_id);
+      const url = isGlobal
+        ? "/api/factory/approval-batches?scope=all&request_id=" + encodeURIComponent(requestId)
+        : "/api/factory/approval-batches?profile=" + encodeURIComponent(saved.profile_id)
+          + "&request_id=" + encodeURIComponent(requestId);
+      let status;
+      try { status = await fetchJson(url, { cache: "no-store" }); }
+      catch (error) {
+        return { resolved: false, message: "Saved approval " + requestId
+          + " could not be verified (" + (error?.message || error) + "). Automatic verification will retry." };
+      }
+      if (status?.ok !== true) {
+        return { resolved: false, message: "Authoritative status for saved approval " + requestId
+          + " is unavailable. Existing request ID is preserved." };
+      }
+      const row = isGlobal ? factoryActivityMatchesPlan(status, plan)
+        : (status.job_id ? status : null);
+      if (row) {
+        const actual = (Array.isArray(row.items) ? row.items : []).map(item => String(item.id)).sort();
+        const expected = plan.ids.map(String).sort();
+        const identityOk = isGlobal
+          ? status.exact_request_id === requestId
+          : String(row.request_id || "") === requestId
+            && String(row.profile_id || "") === String(saved.profile_id)
+            && String(row.job_id || "") === "fb_" + requestId;
+        if (!identityOk || actual.length !== expected.length
+            || !actual.every((id, index) => id === expected[index])) {
+          return { resolved: false, message: "Saved approval " + requestId
+            + " has a different profile or output set on the server. No replacement request was submitted." };
+        }
+        committed.push(...plan.ids);
+      } else {
+        const verifiedMissing = isGlobal
+          ? factoryActivityProvesPlanMissing(status, plan)
+          : status.batch === true && status.status === "idle"
+            && status.job_id == null;
+        if (!verifiedMissing) {
+          return { resolved: false, message: "Saved approval " + requestId
+            + " cannot yet be reconciled. Automatic verification will retry." };
+        }
+        if (factorySavedPayloadMatchesPlan(saved, plan)) {
+          const accepted = await retrySavedFactoryPlan(saved, recoveryKey, plan);
+          if (!accepted) {
+            const failure = saved.last_error || "Submission is saved and will retry automatically.";
+            if (saved.terminal_eligibility || factoryTerminalEligibilityError(failure)) {
+              return dropFactoryRecoveryEntry(recoveryKey, saved,
+                "Output already left Ready for Review (" + failure
+                + "). Removed from the browser approval queue so other selections can submit.");
+            }
+            return { resolved: false, message: failure };
+          }
+          committed.push(...plan.ids);
+          continue;
+        }
+        if (saved.terminal_eligibility || factoryTerminalEligibilityError(saved.last_error)) {
+          return dropFactoryRecoveryEntry(recoveryKey, saved,
+            "Output already left Ready for Review (" + (saved.last_error || "past_review")
+            + "). Removed from the browser approval queue so other selections can submit.");
+        }
+        if (!graceExpired) {
+          return { resolved: false, message: "Saved approval " + requestId
+            + " is within its 90-second commit window. Automatic verification will retry shortly." };
+        }
       }
     }
-    throw originalError;
+    // Do not erase a request changed by another tab while exact-ID reads ran.
+    if (JSON.stringify(saved) !== localStorage.getItem(recoveryKey)) {
+      return { resolved: false, message: "Saved submission changed during recovery. Refresh Activity first." };
+    }
+    try { localStorage.removeItem(recoveryKey); }
+    catch {
+      return { resolved: false, message: "The previous request was verified, but its browser lock could not be released." };
+    }
+    if (committed.length) {
+      rememberFactoryAccepted(committed);
+      committed.forEach(id => state.selectedOutputs.delete(id));
+      saveFactorySelection();
+    }
+    if (!factoryRecoveryEntries().length) setBatchSubmissionError(null);
+    if (state.desk) renderDesk(state.desk);
+    updateFactoryBatchToolbar();
+    const message = committed.length
+      ? "Verified " + committed.length + " previously submitted outputs. Their original batches remain in history."
+      : "Verified saved approval was never created; submission is unblocked.";
+    setStatus(message);
+    return { resolved: true, count: committed.length, message };
+  }
+
+  let factoryPolicyRequest = null;
+  let factoryPolicyLoadedAt = 0;
+  async function refreshFactoryApprovalPolicy() {
+    if (factoryPolicyLoadedAt && Date.now() - factoryPolicyLoadedAt < 30000) return;
+    if (factoryPolicyRequest) return factoryPolicyRequest;
+    factoryPolicyRequest = (async () => {
+      // Submission routing must never depend on scanning historical batches.
+      const policy = await fetchJson("/api/factory/approval-batches?scope=all&status_only=1", { cache: "no-store" });
+      if (policy.ok !== true || typeof policy.approvals_enabled !== "boolean") {
+        throw new Error("Factory approval configuration is unavailable; your selection is saved.");
+      }
+      state.batchApprovalsEnabled = policy.approvals_enabled;
+      state.batchRollout = policy.rollout || null;
+      state.batchGlobal = policy.global_rollout || null;
+      factoryPolicyLoadedAt = Date.now();
+      if (state.desk) renderDesk(state.desk);
+      updateFactoryBatchToolbar();
+    })();
+    try { return await factoryPolicyRequest; }
+    finally { factoryPolicyRequest = null; }
   }
 
   async function refreshFactoryBatchActivity(force = false) {
+    if (state.batchActivityLoading || (state.submittingBatch && !force)) return state.batch;
     const now = Date.now();
     const minInterval = Number(state.batch?.totals?.active || 0) ? 5000 : 30000;
     if (!force && state.batch && now - state.lastBatchFetchMs < minInterval) return state.batch;
     const params = new URLSearchParams({ scope: "all" });
     params.set("view", "active");
     if (factoryProfileId()) params.set("factory_profile", factoryProfileId());
+    state.batchActivityLoading = true;
     try {
       const previousActive = (state.batch?.batches || []).filter(row => row?.job_id);
       const fetched = await fetchJson(`/api/factory/approval-batches?${params.toString()}`, { cache: "no-store" });
@@ -762,6 +1156,8 @@
       const summary = $("factoryBatchSummary");
       if (summary) summary.textContent = `Batch status temporarily unavailable: ${error.message || error}. Retry status refresh; do not resubmit blindly.`;
       return null;
+    } finally {
+      state.batchActivityLoading = false;
     }
   }
 
@@ -791,22 +1187,19 @@
   async function submitFactoryGlobalApprovalBatches(ready) {
     const maxTotal = Math.max(1, Number(state.batchGlobal?.max_total || 20));
     const maxPerProfile = Math.max(1, Number(state.batchGlobal?.max_per_profile || 10));
-    const selectionIds = ready.map((card) => card.id);
-    let pending = null;
-    try { pending = JSON.parse(localStorage.getItem(FACTORY_PENDING_REQUEST_KEY) || "null"); } catch {}
-    const reusable = pending?.profile_id === "global"
-      && Array.isArray(pending?.ids)
-      && JSON.stringify(pending.ids) === JSON.stringify(selectionIds)
-      && Array.isArray(pending?.batches)
-      && pending.batches.every((row) => Array.isArray(row?.ids) && row?.request_id);
-    if (pending && !reusable) {
-      throw new Error("A previous approval remains unresolved. Refresh Activity before starting any different submission.");
-    }
-    const planned = reusable
-      ? pending.batches
-      : planFactoryApprovalBatches(ready, maxTotal, maxPerProfile).map((batch) => ({
-          ids: batch.map((card) => card.id), request_id: newFactoryRequestId(),
-        }));
+    let selectionIds = ready.map(card => card.id);
+    const planned = planFactoryApprovalBatches(ready, maxTotal, maxPerProfile).map((batch) => {
+      const request_id = newFactoryRequestId();
+      const ids = batch.map(card => card.id);
+      return { ids, request_id, payload: {
+        action: "start_group", request_id, record_ids: ids,
+        notes: "Studio Factory Batch Approval",
+        items: batch.map(card => ({ id: card.id, output_id: card.output_id || null,
+          title: card.title || null, content_id: card.content_id || null,
+          profile_id: card.profile_id || null, platform: card.platform || null,
+          format: card.studio_output_type || null })),
+      }};
+    });
     const byId = new Map(ready.map((card) => [card.id, card]));
     const persistRemaining = (rows) => {
       if (!rows.length) {
@@ -814,46 +1207,32 @@
         return;
       }
       const ids = rows.flatMap((row) => row.ids);
-      try { localStorage.setItem(FACTORY_PENDING_REQUEST_KEY, JSON.stringify({
-        profile_id: "global", ids, batches: rows, saved_ms: Date.now(),
-      })); } catch {}
+      localStorage.setItem(FACTORY_PENDING_REQUEST_KEY, JSON.stringify({
+        profile_id: "global", ids, batches: rows, saved_ms: Date.now(), auto_retry: true,
+      }));
     };
     persistRemaining(planned);
+    setBatchSubmissionError(null);
     state.submittingBatch = true;
     state.submittingOutputIds = new Set(selectionIds);
-    if (state.desk) renderDesk(state.desk);
-    updateFactoryBatchToolbar();
     let acceptedOutputs = 0;
     let acceptedBatches = 0;
     try {
+      setStatus(`Submitting ${ready.length} outputs…`);
+      updateFactoryBatchToolbar();
+      if (state.desk) renderDesk(state.desk);
       for (let index = 0; index < planned.length; index++) {
         const plan = planned[index];
         const chunk = plan.ids.map((id) => byId.get(id)).filter(Boolean);
         if (chunk.length !== plan.ids.length) throw new Error("Factory selection changed before all batches were submitted.");
         const profiles = [...new Set(chunk.map((card) => String(card.profile_id || "").trim()))];
-        let batch;
-        try {
-          batch = await fetchJson("/api/factory/approval-batches", {
-            method: "POST",
-            body: JSON.stringify({
-              action: "start_group",
-              request_id: plan.request_id,
-              notes: "Studio Factory Batch Approval",
-              record_ids: chunk.map((card) => card.id),
-              items: chunk.map((card) => ({
-                id: card.id, output_id: card.output_id || null,
-                title: card.title || null, content_id: card.content_id || null,
-                profile_id: card.profile_id || null,
-                platform: card.platform || null, format: card.studio_output_type || null,
-              })),
-            }),
-          });
-        } catch (error) {
-          // The POST may have committed even if iOS/networking lost the response.
-          // Prove the exact request ID + output set exists in authoritative Activity
-          // before treating it as accepted and continuing to the next chunk.
-          batch = await recoverSubmittedFactoryPlan(plan, error);
-        }
+        const requestBody = JSON.stringify(plan.payload);
+        const submitPlan = () => fetchJson("/api/factory/approval-batches", {
+          method: "POST", body: requestBody,
+        });
+        // One bounded foreground POST. A timeout or busy response moves the
+        // saved envelope to background recovery, keeping other selections usable.
+        const batch = await submitPlan();
         if (!batch.accepted) throw new Error("Approval queue did not acknowledge the batch.");
         acceptedOutputs += chunk.length;
         acceptedBatches++;
@@ -876,30 +1255,73 @@
       }
       if (state.desk) renderDesk(state.desk);
       closeFactoryPreview();
+      setBatchSubmissionError(null);
       setStatus(`All ${ready.length} outputs accepted as ${acceptedBatches} durable approval batch${acceptedBatches === 1 ? "" : "es"}. Server processing continues after leaving Factory.`);
       refreshFactoryBatchActivity(true).catch(() => {});
       // Never wait for all approvals in the click handler.
     } catch (error) {
-      const remaining = state.selectedOutputs.size;
-      setStatus(`Submitted ${acceptedOutputs} of ${ready.length} outputs. ${remaining} remain selected. ${error.message || error} Check Activity before retrying.`, true);
+      // Never report the global saved-selection size as the current batch's remaining count.
+      // The selection can legitimately contain other profiles and hidden outputs.
+      const remaining = ready.filter(card => state.selectedOutputs.has(card.id)).length;
+      const saved = pendingFactoryApproval();
+      if (saved) {
+        saved.last_error = String(error.message || error);
+        saved.retry_blocked = [400, 401, 403, 409, 422].includes(Number(error.status));
+        saved.next_retry_ms = Date.now() + Math.max(15000, Number(error.retryAfterSeconds || 0) * 1000);
+        localStorage.setItem(FACTORY_PENDING_REQUEST_KEY, JSON.stringify(saved));
+      }
+      setBatchSubmissionError(`Confirmed ${acceptedOutputs} of ${ready.length} outputs accepted; ${remaining} from this attempt are unconfirmed. ${error.message || error} Unconfirmed outputs are checked automatically in the background.`);
       await refreshFactoryBatchActivity();
     } finally {
       state.submittingOutputIds = null;
       state.submittingBatch = false;
+      archiveFactoryPending();
+      reconcilePersistedFactoryPending(true).catch(() => {});
       if (state.desk) renderDesk(state.desk);
       updateFactoryBatchToolbar();
     }
   }
 
-  async function submitFactoryBatchApprovals() {
+  async function submitFactoryBatchApprovals(requestedIds = null) {
     if (state.submittingBatch) return;
-    const unresolved = pendingFactoryApproval();
-    if (unresolved?.profile_id === "global") {
-      setStatus("Resuming the saved Factory submission using its original request ID; no new request will be created.");
+    archiveFactoryPending();
+    // Preserve the click while the independent lightweight policy read runs.
+    const submitIntent = new Set(waitingFactorySelection());
+    for (const id of requestedIds || state.selectedOutputs) submitIntent.add(id);
+    localStorage.setItem(FACTORY_WAITING_SELECTION_KEY, JSON.stringify([...submitIntent]));
+    try { await refreshFactoryApprovalPolicy(); }
+    catch (error) {
+      setBatchSubmissionError("Submission saved; approval configuration will be checked automatically. " + (error.message || error));
+      setStatus(state.batchSubmissionError, true);
+      return;
     }
+    if (state.submittingBatch) return;
     if (state.batchApprovalsEnabled === false) { setStatus("Batch approvals are not enabled yet; individual approvals still work.", true); return; }
-    const ready = readyFactoryOutputs(true).filter((card) => state.selectedOutputs.has(card.id));
-    if (!ready.length) { updateFactoryBatchToolbar(); setStatus("Select one or more review-ready outputs.", true); return; }
+    const selected = readyFactoryOutputs(true).filter(card => state.selectedOutputs.has(card.id)
+      && (!requestedIds || requestedIds.includes(card.id)));
+    const recovering = factoryRecoveringIds();
+    if (!requestedIds) {
+      for (const { key, saved } of factoryRecoveryEntries()) {
+        if (saved.retry_blocked && selected.some(card => (saved.ids || []).includes(card.id))) {
+          saved.retry_blocked = false;
+          saved.next_retry_ms = 0;
+          localStorage.setItem(key, JSON.stringify(saved));
+        }
+      }
+    }
+    const waiting = new Set(waitingFactorySelection());
+    for (const card of selected) if (recovering.has(card.id)) waiting.add(card.id);
+    localStorage.setItem(FACTORY_WAITING_SELECTION_KEY, JSON.stringify([...waiting]));
+    const ready = selected.filter(card => !recovering.has(card.id));
+    if (!ready.length) {
+      updateFactoryBatchToolbar();
+      setStatus(selected.length ? "Your submission is saved. Previously submitted outputs are being checked automatically; any not yet accepted will continue automatically." : "Select one or more review-ready outputs.");
+      await reconcilePersistedFactoryPending(true);
+      return;
+    }
+    // Remove only the IDs this attempt owns; pending overlaps remain queued.
+    ready.forEach(card => waiting.delete(card.id));
+    localStorage.setItem(FACTORY_WAITING_SELECTION_KEY, JSON.stringify([...waiting]));
     const profiles = [...new Set(ready.map((card) => String(card.profile_id || "").trim()))];
     const global = state.batchGlobal?.enabled === true;
     const limit = Math.max(1, Number(global ? state.batchGlobal.max_total : (state.batchRollout?.max_items || 100)));
@@ -969,6 +1391,8 @@
     } finally {
       state.submittingOutputIds = null;
       state.submittingBatch = false;
+      archiveFactoryPending();
+      reconcilePersistedFactoryPending(true).catch(() => {});
       if (state.desk) renderDesk(state.desk);
       updateFactoryBatchToolbar();
     }
@@ -1008,6 +1432,55 @@
     }
   }
 
+  // A Needs Eyes card is not necessarily authorized for batch approval.
+  // Always show the selection control and explain the policy/readiness outcome
+  // instead of silently omitting the checkbox while leaving Approve active.
+  function factoryBatchSelectionReason(card) {
+    if (card?.kind !== "output") return "Only platform outputs can be batch approved.";
+    if (card.review_package_ready === false) {
+      return "Review package incomplete: " + ((card.review_package_missing || []).join(", ") || card.review_package_reason || "required assets not verified");
+    }
+    if (recentFactoryAccepted()[String(card?.id || "")] &&
+        String(card?.output_status || "").trim().toLowerCase() !== "ready for review") {
+      return "Already accepted for approval. Refresh Activity to verify the result.";
+    }
+    if (state.submittingOutputIds?.has(card?.id)) return "Approval is already being submitted. Check Activity.";
+    if (card?.review_hold_active === true) return "Publishing approval is held for media QA. You can accept V2 creatively or request another revision.";
+    if (card?.do_not_publish === true) return "Publishing hold is active for this output.";
+    const render = String(card?.render_status || "").trim().toLowerCase();
+    if (/^(failed|blocked)$/.test(render)) return `Render status is ${card.render_status}. Repair the render before approval.`;
+    if (/ready for render|waiting in render queue|^rendering$/.test(render)) return "Render is still queued or running; wait for completion.";
+    const output = String(card?.output_status || "").trim().toLowerCase();
+    if (["in production", "rendering", "ready for render", "failed", "blocked"].includes(output)) {
+      return `Airtable Output Status is ${card.output_status}; not yet approved for review.`;
+    }
+    if (!canReviewActions(card)) return "Not yet review-ready according to the authoritative output/review status.";
+    if (state.batchApprovalsEnabled === false) return "Batch approvals are disabled by the server; individual approval is available.";
+    if (canSelectBatchOutput(card)) return "";
+    if (state.batchGlobal?.enabled) {
+      const platform = String(card?.platform || "").trim();
+      const allowed = state.batchGlobal.allowed_platforms || [];
+      if (!allowed.includes(platform)) return `${platform || "This platform"} is not enabled for batch approval; use individual Approve.`;
+      return `${String(card?.studio_output_type || card?.format || "This output type").trim()} is outside the server-authorized ${platform} batch formats; use individual Approve.`;
+    }
+    return "This profile or output type is outside the current batch rollout; use individual Approve.";
+  }
+
+  function canReleaseForApproval(card) {
+    const output = String(card?.output_status || "").trim().toLowerCase();
+    const review = String(card?.review_status || "").trim().toLowerCase();
+    const render = String(card?.render_status || "").trim().toLowerCase();
+    const publish = String(card?.publish_status || "").trim().toLowerCase();
+    return card?.kind === "output"
+      && card.do_not_publish === true
+      && card.review_hold_active !== true
+      && card.review_package_ready !== false
+      && output === "ready for review"
+      && ["", "review sent", "pending review"].includes(review)
+      && ["rendered", "native photo route"].includes(render)
+      && !["scheduled", "publishing", "published", "uploading", "platform processing", "draft delivered"].includes(publish);
+  }
+
   function renderCard(card, { pile = false, candidate = false, lane = "" } = {}) {
     const actions = [];
     actions.push(`<button type="button" class="text-button" data-factory-open="${esc(card.id)}">Open</button>`);
@@ -1019,31 +1492,71 @@
     if (canPreview(card) && (lane === "needs_eyes" || canReviewActions(card, { pile, candidate }) || lane === "auto_high" || lane === "manual")) {
       actions.push(`<button type="button" class="secondary-button" data-factory-preview="${esc(card.id)}">Preview</button>`);
     }
-    if (card.kind === "output" && (canReviewActions(card, { pile, candidate }) || lane === "needs_eyes")) {
-      actions.push(`<button type="button" class="primary-button" data-factory-approve="${esc(card.id)}">Approve</button>`);
+    const reviewAllowed = canReviewActions(card, { pile, candidate });
+    const needsEyesOutput = lane === "needs_eyes" && card.kind === "output";
+    const batchReason = needsEyesOutput ? factoryBatchSelectionReason(card) : "";
+    const reasonId = batchReason ? `factory-batch-reason-${card.id}` : "";
+    if (card.kind === "output" && (reviewAllowed || needsEyesOutput)) {
+      // A stale review badge/held revision must never present a live Approve
+      // action merely because the server grouped the row under Needs Eyes.
+      actions.push(`<button type="button" class="primary-button" data-factory-approve="${esc(card.id)}" ${reviewAllowed ? "" : `disabled title="${esc(batchReason || "Not yet eligible for approval")}"`}>Approve</button>`);
+      if(needsEyesOutput && card.review_hold_active===true && card.do_not_publish===true) {
+        // This is a separate protected handoff of an already-approved revision,
+        // not a publishing approval. The server enforces the exact V2/session hold.
+        actions.push(`<button type="button" class="secondary-button factory-held-handoff-action" data-factory-handoff-held="${esc(card.id)}" title="Verify approved V2 and release only its original owned review hold. Does not approve, schedule or publish.">Complete V2 Factory handoff</button>`);
+        // Human review can be accepted without releasing the publishing hold.
+        // Server verifies the actual saved creative approval before accepting.
+        if(state.heldCreativeAccepted?.has(card.id)){
+          actions.push(`<button type="button" class="secondary-button factory-held-creative-action" disabled title="Factory creative acceptance confirmed; publishing remains on hold for QA.">V2 accepted · QA pending</button>`);
+        }else{
+          actions.push(`<button type="button" class="secondary-button factory-held-creative-action" data-factory-accept-held="${esc(card.id)}" title="Accept the selected V2 creatively. Keeps watermark QA, scheduling and publishing on hold.">Accept V2 (QA hold)</button>`);
+        }
+      }
+      if (needsEyesOutput && canReleaseForApproval(card)) {
+        actions.push(`<button type="button" class="secondary-button" data-factory-release-approval="${esc(card.id)}" title="Operator-controlled release only. Does not approve, schedule, or publish.">Release for Approval</button>`);
+      }
       actions.push(`<button type="button" class="secondary-button" data-factory-send-back="${esc(card.id)}">Request Changes</button>`);
     }
     if (canDelete(card, { candidate })) {
       actions.push(`<button type="button" class="secondary-button factory-delete" data-factory-delete="${esc(card.id)}">Delete</button>`);
     }
     const thumb = String(card.thumbnail_url || "").trim();
+    const hasSharedCover = Boolean(needsEyesOutput && card.content_item_id && thumb.includes(
+      "/studio/previews/thumbnails/" + String(card.content_item_id) + "/"));
+    const outputLabel = card.output_id ? "Output #" + card.output_id : "this output";
+    const thumbImage = thumb
+      ? `<img src="${esc(thumb)}" alt="" loading="lazy" decoding="async">`
+      : `<img src="/assets/needs-asset.svg" alt="NEEDS ASSET" loading="lazy">`;
     const media = canPreview(card)
-      ? `<button type="button" class="factory-line-thumb" data-factory-preview="${esc(card.id)}" aria-label="Preview ${esc(cardLabel(card))}">
-          ${thumb ? `<img src="${esc(thumb)}" alt="" loading="lazy">` : `<span class="factory-line-play">▶</span>`}
+      ? `<button type="button" class="factory-line-thumb" data-factory-preview="${esc(card.id)}" aria-label="Preview ${esc(outputLabel)}: ${esc(cardLabel(card))}" title="Preview ${esc(outputLabel)}">
+          ${thumbImage}
         </button>`
-      : `<span class="factory-line-thumb factory-line-thumb-empty" aria-hidden="true"></span>`;
+      : `<span class="factory-line-thumb factory-line-thumb-empty" role="img" aria-label="NEEDS ASSET">${thumbImage}</span>`;
+    // The preview button opens the exact Platform Output. A cover sourced from
+    // the Content Item is not an output-specific video frame: label it honestly.
+    const outputVisual = needsEyesOutput
+      ? `<span class="factory-output-visual">${media}<small class="factory-output-visual-label">${hasSharedCover ? "Shared cover" : (thumb ? "Output image" : "Needs asset")}</small></span>`
+      : media;
     const alert = card.stuck_kind || card.produce_error || "";
-    const stateLabel = card.studio_state || (alert ? "Needs repair" : "—");
+    const stateLabel = card.review_package_ready === false
+      ? (card.review_package_readiness === "IN_PROGRESS" ? "Preparing Assets" : "Review blocked")
+      : (card.studio_state || (alert ? "Needs repair" : "—"));
+    const reviewReason = (card.review_package_missing || []).join(", ") || card.review_package_reason || "";
     const cell = (value) => `<span class="factory-line-cell">${esc(value || "—")}</span>`;
     return `<div class="factory-line" data-factory-id="${esc(card.id)}" data-factory-kind="${esc(card.kind || "")}" data-lane="${esc(lane)}" title="${esc(cardLabel(card))}">
-      ${lane === "needs_eyes" && card.kind === "output" && canReviewActions(card) && canSelectBatchOutput(card)
-        ? `<span class="factory-media-select"><input type="checkbox" data-factory-select-output="${esc(card.id)}" aria-label="Select ${esc(cardLabel(card))}" ${state.selectedOutputs.has(card.id) ? "checked" : ""}>${media}</span>`
+      ${needsEyesOutput
+        ? `<span class="factory-media-select"><label class="factory-output-select" title="${esc(batchReason || "Select for batch approval")}"><input type="checkbox" data-factory-select-output="${esc(card.id)}" aria-label="${esc(batchReason ? `Batch selection unavailable for ${cardLabel(card)}` : `Select ${cardLabel(card)}`)}" ${reasonId ? `aria-describedby="${esc(reasonId)}"` : ""} ${batchReason ? "disabled" : (state.selectedOutputs.has(card.id) ? "checked" : "")}></label></span>`
         : media}
-      <span class="factory-line-title">${esc(card.title || cardLabel(card))}${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}</span>
+      <span class="factory-line-title">
+        ${needsEyesOutput
+          ? `<span class="factory-output-heading">${outputVisual}<span class="factory-output-title-copy"><span class="factory-output-title-name">${esc(card.title || cardLabel(card))}</span>${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}</span></span>`
+          : `${esc(card.title || cardLabel(card))}${card.output_id ? `<small class="factory-output-number">Output #${esc(card.output_id)}</small>` : ""}`}
+        ${needsEyesOutput && batchReason ? `<span id="${esc(reasonId)}" class="factory-batch-unavailable" role="status"><strong>${card.review_hold_active===true ? "Publishing approval held:" : "Approval unavailable:"}</strong> ${esc(batchReason)}</span>` : ""}
+      </span>
       ${cell(card.profile_name)}
       ${cell(card.platform)}
       ${cell(card.studio_output_type)}
-      <span class="factory-line-cell factory-line-state"${alert ? ` title="${esc(alert)}"` : ""}>${esc(stateLabel)}</span>
+      <span class="factory-line-cell factory-line-state"${alert || reviewReason ? ` title="${esc([alert, reviewReason].filter(Boolean).join("; "))}"` : ""}>${esc(stateLabel)}</span>
       <div class="factory-line-actions">${actions.join("")}</div>
     </div>`;
   }
@@ -1074,6 +1587,17 @@
       index.get(key).cards.push(card);
     }
     return groups;
+  }
+
+  function reviewGroupMatchesSearch(group, raw) {
+    const terms = String(raw || "").toLowerCase().replace(/[#]/g,"").match(/[a-z0-9]+/g) || [];
+    const meaningful = terms.filter(word => !["content","output","items","review","video"].includes(word) && (word.length >= 5 || /^[0-9]{3,}$/.test(word)));
+    if (!meaningful.length) return !terms.length;
+    const haystack = (group.cards || []).map(card=> [
+      card.title,card.content_id,card.output_id,card.content_item_id,
+      card.platform,card.studio_output_type,
+    ].filter(Boolean).join(" ")).join(" ").toLowerCase();
+    return meaningful.every(term => haystack.includes(term));
   }
 
   function readyContentCards(group) {
@@ -1152,7 +1676,8 @@
   function renderContentBar(group, expanded) {
     const ready = readyContentCards(group);
     const pending = pendingSiblingOutputsForGroup(group);
-    const pendingLabel = pendingSiblingMeta(pending);
+    const heldRevisions = (group.cards || []).filter(card => card.review_hold_active === true);
+    const pendingLabel = heldRevisions.length ? "Review-held V2 — preview only" : pendingSiblingMeta(pending);
     const first = group.cards[0] || {};
     const contentId = String(first.content_id || "").trim();
     const title = first.title || "Untitled";
@@ -1162,8 +1687,8 @@
     if (pendingLabel) bits.push(pendingLabel);
     const meta = bits.join(" · ");
     const approveAll = ready.length > 1
-      ? (pending.length
-        ? `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}" disabled title="Wait until sibling Stories finish rendering, then Approve all together">${esc(`Approve all (${ready.length}) — wait for Stories`)}</button>`
+      ? (pending.length || heldRevisions.length
+        ? `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}" disabled title="${heldRevisions.length ? "Review-held V2 is not yet eligible for publishing" : "Wait until sibling Stories finish rendering, then Approve all together"}">${esc(`Approve all (${ready.length}) — ${heldRevisions.length ? "review held" : "wait for Stories"}`)}</button>`
         : `<button type="button" class="primary-button factory-content-approve" data-factory-approve-content="${esc(group.key)}">Approve all (${ready.length})</button>`)
       : "";
     const batchReady = ready.filter(canSelectBatchOutput);
@@ -1171,7 +1696,7 @@
     const selectContent = `<label class="factory-content-batch-select">
       <input type="checkbox" data-factory-select-content="${esc(group.key)}"
         aria-label="Select all review-ready outputs for ${esc(title)}"
-        ${contentSelected ? "checked" : ""} ${(!batchReady.length || pending.length) ? "disabled" : ""}>
+        ${contentSelected ? "checked" : ""} ${(!batchReady.length || pending.length || heldRevisions.length) ? "disabled" : ""}>
       Select eligible outputs</label>`;
     return `<div class="factory-content-bar" data-factory-content="${esc(group.key)}">
       ${selectContent}
@@ -1192,7 +1717,13 @@
       return;
     }
     if (options.groupContent) {
-      const groups = groupByContent(cards);
+      const allGroups = groupByContent(cards);
+      const search = String(state.needsEyesSearch || "").trim();
+      const groups = search ? allGroups.filter(group => reviewGroupMatchesSearch(group,search)) : allGroups;
+      if (!groups.length) {
+        node.innerHTML = '<p class="subtle factory-lane-empty">No matching review content. Try Michigan, 1869 or 9593.</p>';
+        return;
+      }
       const FACTORY_REVIEW_GROUPS_PER_PAGE = 12;
       // Bound the iPad DOM: rendering hundreds of off-screen accordions made
       // Safari show one row followed by a large apparently empty review list.
@@ -1205,7 +1736,7 @@
       if (state.expandedReviewGroup !== "" && !pageGroups.some((group) => group.key === state.expandedReviewGroup)) {
         state.expandedReviewGroup = pageGroups[0]?.key || null;
       }
-      const pageLabel = `Showing ${start + 1}–${start + pageGroups.length} of ${groups.length} content items · ${cards.length} outputs in queue`;
+      const pageLabel = `Showing ${start + 1}–${start + pageGroups.length} of ${groups.length} ${search ? "matching" : ""} content items · ${cards.length} outputs in queue`;
       const pager = `<nav class="factory-review-pagination" aria-label="Needs eyes queue pages">
         <span class="factory-review-page-count">${esc(pageLabel)}</span>
         <span class="factory-review-page-actions">
@@ -1259,6 +1790,25 @@
     setCount("factoryCountManual", String(Number(summary.manual) || 0));
   }
 
+  async function readHeldFactoryReview(card) {
+    if(card?.kind!=="output" || !/^rec[A-Za-z0-9]{14}$/.test(String(card.id||"")))
+      throw new Error("Exact Platform Output required for held review.");
+    const response=await fetch("/api/rendering-review/outputs/"+encodeURIComponent(card.id),{
+      credentials:"same-origin",cache:"no-store",headers:{Accept:"application/json"}
+    });
+    if(!response.ok)throw new Error("Could not verify saved V2 review ("+response.status+").");
+    const data=await response.json();
+    const session=data?.session;
+    if(data?.ok!==true||!session||
+       session.output_id!==card.id||session.state!=="approved"||
+       session.review_hold?.active!==true||data.publication_hold_verified!==true||
+       session.current_attempt_id!==session.approved_attempt_id)
+      throw new Error("This output is not a creatively approved, safely held V2.");
+    if(session.factory_review?.status==="accepted_pending_qa")
+      return {session,alreadyAccepted:true};
+    return {session,alreadyAccepted:false};
+  }
+
   async function reviewedFactoryRevision(card) {
     if(card?.kind!=="output" || !/^rec[A-Za-z0-9]{14}$/.test(String(card.id||"")))return false;
     let response;
@@ -1266,7 +1816,7 @@
       response=await fetch("/api/rendering-review/outputs/"+encodeURIComponent(card.id),{
         credentials:"same-origin",cache:"no-store",headers:{Accept:"application/json"}
       });
-    } catch(error) { throw new Error("Cannot verify Rendering Review handoff: "+error.message); }
+    } catch(error) { throw new Error("Cannot verify Post Production Edits handoff: "+error.message); }
     if(response.status===404)return false;
     if(!response.ok)throw new Error("Could not verify this revision's review session ("+response.status+")");
     const data=await response.json().catch(()=>null);
@@ -1286,6 +1836,561 @@
       (type==="instagram reel" || type==="reel");
   }
 
+  // Source/compatible-output discovery is strictly read-only. An inventory is
+  // never permission to generate, select an unrequested output or publish.
+  async function loadFactoryCorrectionReadOnlyPreview(pending) {
+    const panel=$("factoryReadOnlyInventory");
+    const status=$("factoryReadOnlyInventoryStatus");
+    const rows=$("factoryReadOnlyInventoryRows");
+    if(!panel||!status||!rows)return;
+    panel.hidden=true;
+    rows.replaceChildren();
+    const payload=pending?.payload||{};
+    const id=String(payload.id||"");
+    const requestId=String(payload.production_request_id||"");
+    if(payload.kind!=="output"||!/^rec[A-Za-z0-9]{14}$/.test(id))return;
+    panel.hidden=false;
+    status.textContent="Checking compatible outputs and original source media (read-only)…";
+    const current=()=>state.pendingFactoryFeedback===pending;
+    // Separate requests: unavailable/unmapped Factory match information
+    // must NEVER suppress a legitimate photo/carousel source inventory.
+    const readMatches=async()=>{
+      if(!/^rec[A-Za-z0-9]{14}$/.test(requestId))
+        return "Compatible-output matching requires an exact Production Request.";
+      try{
+        const match=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
+          "/correction-matches?production_request_id="+encodeURIComponent(requestId));
+        if(!current())return "";
+        if(match?.source_output_id!==id||match?.production_request_id!==requestId||
+           match?.batch_enabled!==false)
+          throw new Error("Correction matching identity or disabled write gate could not be verified");
+        const outputs=Array.isArray(match.matching_outputs)?match.matching_outputs:[];
+        for(const output of outputs.slice(0,40)){
+          const li=document.createElement("li");
+          li.textContent=[output.platform,output.output_type,
+            output.review_render_supported===true?"render capability detected":
+              "revision unavailable: "+(output.review_render_reason||"unsupported")]
+              .filter(Boolean).join(" · ");
+          rows.appendChild(li);
+        }
+        return outputs.length+" compatible review-ready output(s). Batch correction remains disabled.";
+      }catch(error){
+        return "Compatible-output preview unavailable: "+String(error?.message||error)+".";
+      }
+    };
+    const canSaveWithoutAutoRender = pending?.payload?.action !== "request_changes_content";
+    const readGallery=async()=>{
+      // The server advertises independent protected request gates. Neither
+      // this metadata inventory nor a preview authorizes a render or publish.
+      let galleryActions=null;
+      try{
+        const inventory=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
+          "/gallery-inventory");
+        if(!current())return "";
+        if(inventory?.output_id!==id||inventory?.can_generate!==false||
+           inventory?.publication_authorized!==false||
+           inventory?.source_kind!=="airtable_metadata_only")
+          throw new Error("Original gallery source verification contract is unavailable");
+        // Read only authoritative attempt history. A status is not proof
+        // of generated Drive media and cannot grant creative acceptance.
+        try{
+          const revision=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
+            "/gallery-revision-status");
+          if(!current())return "";
+          if(revision?.ok!==true||revision.output_id!==id||
+             revision.profile_id!==inventory.profile_id||
+             revision.can_generate!==false||revision.can_publish!==false||
+             !Array.isArray(revision.jobs))
+            throw new Error("Gallery history authority mismatch");
+          galleryActions={
+            holdEnrollment:revision.hold_enrollment_request_enabled===true,
+            generationRequest:revision.generation_request_enabled===true,
+            holdActive:revision.hold_active===true,
+            jobCount:revision.jobs.length,
+          };
+          const history=document.createElement("li");
+          history.textContent=revision.jobs.length?
+            "Gallery job history: "+revision.jobs.slice(0,10)
+              .map(item=>String(item.status||"unknown")+" ("+
+                String(item.job_id||"unknown")+")").join("; ")+
+              ". Revised artifacts are not verified for acceptance.":
+            "Gallery job history: no native-gallery revision jobs recorded.";
+          rows.appendChild(history);
+          // This is the authoritative Airtable LEDGER count only, not a
+          // verified media-byte or generation completion percentage.
+          for(const job of revision.jobs.slice(0,10)){
+            const total=job.total_slides,completed=job.completed_slides;
+            if(job.progress_source!=="airtable_ledger_unverified"||
+               !Number.isSafeInteger(total)||total<1||total>20||
+               !Number.isSafeInteger(completed)||completed<0||completed>total)
+              continue;
+            const line=document.createElement("li");
+            const title=document.createElement("div");
+            title.textContent="Private correction · "+String(job.status||"unknown")+
+              (job.stage?" · "+String(job.stage):"")+
+              " · "+completed+" of "+total+" slide slots recorded";
+            const meter=document.createElement("progress");
+            meter.min=0;meter.max=total;meter.value=completed;
+            meter.setAttribute("aria-label","Airtable slide-slot ledger progress");
+            meter.style.display="block";
+            meter.style.maxWidth="260px";
+            const qualifier=document.createElement("small");
+            qualifier.textContent="Airtable ledger only — generated Drive media not independently verified by this count.";
+            line.append(title,meter,qualifier);
+            rows.appendChild(line);
+          }
+          // Side-by-side V1/V2 images are fetched through authenticated
+          // Studio, never public Drive links. The Runner rechecks original
+          // and revised private Drive bytes on EVERY image request.
+          if(revision.private_preview_available===true){
+            const reviewable=revision.jobs.filter(job=>
+              ["ready_for_review","creative_accepted","rejected"].includes(
+                String(job.status||""))&&job.revised_manifest_stored===true);
+            for(const job of reviewable.slice(0,2)){
+              const title=document.createElement("li");
+              title.textContent="Private gallery comparison · "+job.job_id+
+                " · "+job.status+" (view only; Factory approval separate)";
+              rows.appendChild(title);
+              for(const slide of inventory.slides.slice(0,20)){
+                if(!/^rec[A-Za-z0-9]{14}$/.test(String(slide.slide_id||"")))continue;
+                const item=document.createElement("li");
+                const label=document.createElement("div");
+                label.textContent="Slide "+slide.order;
+                item.appendChild(label);
+                const pair=document.createElement("div");
+                pair.style.display="flex";
+                pair.style.flexWrap="wrap";
+                pair.style.gap="12px";
+                for(const version of ["original","revised"]){
+                  const picture=document.createElement("figure");
+                  picture.style.margin="0";
+                  picture.style.width="min(190px, 45%)";
+                  const note=document.createElement("figcaption");
+                  note.textContent=version==="original"?"Original V1":"Revised V2";
+                  const image=document.createElement("img");
+                  image.alt="Private "+version+" image for gallery slide "+slide.order;
+                  image.loading="lazy";
+                  image.style.width="100%";
+                  image.style.maxHeight="250px";
+                  image.style.objectFit="contain";
+                  image.src="/api/factory/outputs/"+encodeURIComponent(id)+
+                    "/gallery/jobs/"+encodeURIComponent(job.job_id)+
+                    "/slides/"+encodeURIComponent(slide.slide_id)+"/"+version;
+                  image.addEventListener("error",()=>{
+                    note.textContent=(version==="original"?"Original":"Revised")+
+                      " unavailable — verification or hold may have changed";
+                  });
+                  picture.appendChild(image);picture.appendChild(note);
+                  pair.appendChild(picture);
+                }
+                item.appendChild(pair);rows.appendChild(item);
+              }
+              if(job.status==="creative_accepted"&&
+                 revision.factory_preflight_available===true){
+                const verifyRow=document.createElement("li");
+                const verifyFactory=document.createElement("button");
+                verifyFactory.type="button";
+                verifyFactory.textContent="Verify private Factory review packet";
+                verifyRow.appendChild(verifyFactory);rows.appendChild(verifyRow);
+                verifyFactory.addEventListener("click",async()=>{
+                  if(!current())return;
+                  verifyFactory.disabled=true;
+                  status.textContent="Rechecking exact V2 Drive bytes, rights, ownership and active review hold…";
+                  try{
+                    const packet=await fetchJson("/api/factory/outputs/"+
+                      encodeURIComponent(id)+"/gallery/jobs/"+
+                      encodeURIComponent(job.job_id)+"/factory-preflight");
+                    if(!current())return;
+                    if(packet?.ok!==true||packet.output_id!==id||
+                       packet.job_id!==job.job_id||
+                       packet.revised_manifest_sha256!==job.revision_manifest_sha256||
+                       packet.ready_for_factory_review!==true||
+                       packet.drive_rights_and_pixels_verified!==true||
+                       packet.hold_active!==true||
+                       packet.creative_approved!==true||
+                       packet.factory_approved!==false||
+                       packet.handoff_performed!==false||
+                       packet.can_publish!==false||
+                       packet.publication_authorized!==false||
+                       packet.requires_separate_factory_approval!==true)
+                      throw new Error("Private Factory verification did not return an exact held receipt");
+                    status.textContent="Private revised gallery independently verified for Factory review ("+
+                      packet.selected_slide_count+" of "+packet.total_slide_count+
+                      " slides replaced). The output stays held; Factory approval and publication remain separate.";
+                    if(revision.factory_handoff_available===true&&
+                       job.stage!=="factory_review_pending"){
+                      // A SECOND deliberate human action records a private,
+                      // held inbox receipt. The preflight alone never writes.
+                      const consent=document.createElement("label");
+                      const checkbox=document.createElement("input");
+                      checkbox.type="checkbox";
+                      checkbox.style.marginRight="8px";
+                      consent.appendChild(checkbox);
+                      consent.appendChild(document.createTextNode(
+                        "Send this exact creatively accepted revision to private Factory review only. Do not publish."));
+                      const send=document.createElement("button");
+                      send.type="button";
+                      send.textContent="Send to private Factory review";
+                      send.disabled=true;
+                      checkbox.addEventListener("change",()=>{send.disabled=!checkbox.checked;});
+                      verifyRow.appendChild(consent);verifyRow.appendChild(send);
+                      send.addEventListener("click",async()=>{
+                        if(!current()||!checkbox.checked||send.disabled)return;
+                        send.disabled=true;checkbox.disabled=true;
+                        status.textContent="Recording protected private Factory handoff in Airtable…";
+                        try{
+                          const moved=await fetchJson("/api/factory/outputs/"+
+                            encodeURIComponent(id)+"/gallery/jobs/"+
+                            encodeURIComponent(job.job_id)+"/factory-handoff",{
+                            method:"POST",body:JSON.stringify({
+                              manifest_sha256:packet.revised_manifest_sha256,
+                              confirm_private_factory_handoff:true,
+                            }),
+                          });
+                          if(!current())return;
+                          if(moved?.ok!==true||moved.output_id!==id||
+                             moved.job_id!==job.job_id||
+                             moved.revised_manifest_sha256!==packet.revised_manifest_sha256||
+                             moved.private_factory_review_handoff!==true||
+                             moved.stage!=="factory_review_pending"||
+                             moved.hold_active!==true||
+                             moved.hold_released!==false||
+                             moved.factory_approved!==false||
+                             moved.publication_authorized!==false||
+                             moved.can_publish!==false||
+                             moved.media_quarantined!==true||
+                             moved.requires_separate_factory_approval!==true)
+                            throw new Error("Airtable private Factory handoff receipt was not verified");
+                          consent.remove();send.remove();
+                          status.textContent="Revision transferred to private Factory review inbox. "+
+                            "Original output remains on publication hold; separate Factory approval is still required.";
+                        }catch(error){
+                          if(current()){
+                            checkbox.disabled=false;
+                            send.disabled=!checkbox.checked;
+                            status.textContent="Private Factory handoff blocked: "+
+                              String(error?.message||error);
+                          }
+                        }
+                      });
+                    }
+                  }catch(error){
+                    if(current())status.textContent="Factory preflight blocked: "+
+                      String(error?.message||error);
+                  }finally{if(current())verifyFactory.disabled=false;}
+                });
+              }
+              if(revision.creative_review_available===true&&
+                 job.status==="ready_for_review"&&
+                 /^[a-f0-9]{64}$/.test(String(job.revision_manifest_sha256||""))){
+                const approval=document.createElement("li");
+                const confirmLabel=document.createElement("label");
+                const confirmBox=document.createElement("input");
+                confirmBox.type="checkbox";
+                confirmBox.style.marginRight="8px";
+                confirmLabel.appendChild(confirmBox);
+                confirmLabel.appendChild(document.createTextNode(
+                  "I have inspected the revised images and want to record a creative decision."));
+                approval.appendChild(confirmLabel);
+                const buttons=document.createElement("div");
+                buttons.style.display="flex";
+                buttons.style.flexWrap="wrap";
+                buttons.style.gap="8px";
+                buttons.style.marginTop="8px";
+                const accept=document.createElement("button");
+                accept.type="button";accept.textContent="Accept creative revision";
+                const reject=document.createElement("button");
+                reject.type="button";reject.textContent="Reject revision";
+                accept.disabled=true;reject.disabled=true;
+                confirmBox.addEventListener("change",()=>{
+                  accept.disabled=!confirmBox.checked;
+                  reject.disabled=!confirmBox.checked;
+                });
+                for(const [button,decision] of [[accept,"accept"],[reject,"reject"]]){
+                  button.addEventListener("click",async()=>{
+                    if(!current()||!confirmBox.checked)return;
+                    accept.disabled=true;reject.disabled=true;confirmBox.disabled=true;
+                    status.textContent="Checking the exact private Drive revision and recording "+
+                      decision+" in Airtable…";
+                    try{
+                      const result=await fetchJson("/api/factory/outputs/"+
+                        encodeURIComponent(id)+"/gallery/jobs/"+
+                        encodeURIComponent(job.job_id)+"/creative-decision",{
+                        method:"POST",body:JSON.stringify({
+                          decision,manifest_sha256:job.revision_manifest_sha256,
+                          confirm_reviewed:true,
+                        }),
+                      });
+                      if(!current())return;
+                      if(result?.ok!==true||result.decision!==decision||
+                         result.publication_authorized!==false||
+                         result.factory_approved!==false)
+                        throw new Error("The creative decision receipt was not independently verified");
+                      status.textContent="Gallery creative decision saved: "+decision+
+                        ". Factory approval and publication remain separate.";
+                    }catch(error){
+                      if(current()){
+                        confirmBox.disabled=false;
+                        accept.disabled=!confirmBox.checked;
+                        reject.disabled=!confirmBox.checked;
+                        status.textContent="Creative decision blocked: "+
+                          String(error?.message||error);
+                      }
+                    }
+                  });
+                  buttons.appendChild(button);
+                }
+                approval.appendChild(buttons);
+                rows.appendChild(approval);
+              }
+            }
+          }
+        }catch(error){
+          if(current()){
+            const history=document.createElement("li");
+            history.textContent="Gallery attempt history unavailable: "+
+              String(error?.message||error);
+            rows.appendChild(history);
+          }
+        }
+        if(inventory.source_byte_preflight_available===true){
+          const checkRow=document.createElement("li");
+          const verifyButton=document.createElement("button");
+          verifyButton.type="button";
+          verifyButton.textContent="Verify original image bytes and rights (private)";
+          verifyButton.className="factory-gallery-source-byte-check";
+          checkRow.appendChild(verifyButton);
+          rows.appendChild(checkRow);
+          verifyButton.addEventListener("click",async()=>{
+            if(!current())return;
+            verifyButton.disabled=true;
+            status.textContent="Independently reading Airtable source links and Google Drive image bytes…";
+            try{
+              const evidence=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
+                "/gallery-source-preflight");
+              if(!current())return;
+              if(evidence?.ok!==true||evidence.output_id!==id||
+                 evidence.profile_id!==inventory.profile_id||
+                 evidence.sources_byte_verified!==true||
+                 evidence.can_generate!==false||
+                 evidence.publication_authorized!==false)
+                throw new Error("The independent source verification receipt was not trusted");
+              status.textContent=evidence.slide_count+
+                " original slide(s): Drive bytes and source ownership verified. "+
+                (evidence.original_artifact_watermark_verified===true?
+                  "Official logo pixels also verified. ":
+                  "Original logo placement remains unverified. ")+
+                "The durable render hold and generation gates remain disabled. "+
+                "Generation and publishing remain unavailable.";
+            }catch(error){
+              if(current())status.textContent="Original source verification blocked: "+
+                String(error?.message||error)+". No render or media change occurred.";
+            }finally{verifyButton.disabled=false;}
+          });
+        }
+        // An exact slide-selection proposal is available without changing
+        // existing Factory feedback or enabling unverified media rendering.
+        // This preview never creates a job, modifies Airtable, or publishes.
+        const selectable=[];
+        for(const slide of (inventory.slides||[]).slice(0,80)){
+          const li=document.createElement("li");
+          const label=document.createElement("label");
+          const checkbox=document.createElement("input");
+          checkbox.type="checkbox";
+          checkbox.className="factory-gallery-select-slide";
+          checkbox.dataset.slideId=String(slide.slide_id||"");
+          checkbox.disabled=Boolean(slide.blockers?.length);
+          const name=document.createElement("span");
+          name.textContent="Slide "+slide.order+" · "+
+            (slide.blockers?.length?slide.blockers.join(", "):
+             "Source metadata present; Drive/branding still unverified");
+          label.append(checkbox," ",name);
+          li.appendChild(label);
+          const instruction=document.createElement("textarea");
+          instruction.className="factory-gallery-slide-instruction";
+          instruction.placeholder="Describe the change to this selected slide (preview only)";
+          instruction.setAttribute("aria-label","Correction instructions for slide "+slide.order);
+          instruction.maxLength=3000;
+          instruction.rows=2;
+          instruction.disabled=true;
+          instruction.hidden=true;
+          checkbox.addEventListener("change",()=>{
+            instruction.disabled=!checkbox.checked;
+            instruction.hidden=!checkbox.checked;
+            if(checkbox.checked)instruction.focus();
+          });
+          li.appendChild(instruction);
+          rows.appendChild(li);
+          if(!checkbox.disabled)selectable.push({slide,checkbox,instruction});
+        }
+        if(selectable.length && canSaveWithoutAutoRender){
+          const li=document.createElement("li");
+          const button=document.createElement("button");
+          button.type="button";
+          button.className="factory-gallery-preview-selection";
+          button.textContent="Validate selected photo changes (no render)";
+          li.appendChild(button);
+          rows.appendChild(li);
+          button.addEventListener("click",async()=>{
+            if(!current())return;
+            const selected=selectable.filter(x=>x.checkbox.checked).map(x=>({
+              slide_id:x.slide.slide_id,instruction:x.instruction.value.trim(),
+            }));
+            if(!selected.length){
+              status.textContent="Select at least one eligible slide to preview a proposed correction.";
+              return;
+            }
+            button.disabled=true;
+            status.textContent="Verifying selected slide identity against current Airtable records…";
+            try{
+              const proposal=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
+                "/gallery-selection-preview",{
+                  method:"POST",
+                  body:JSON.stringify({
+                    client_request_id:"gallery_preview_"+Date.now().toString(36)+
+                      "_"+Math.random().toString(36).slice(2,12),
+                    selected_slides:selected,
+                  }),
+                });
+              if(!current())return;
+              if(proposal?.ok!==true||proposal.output_id!==id||
+                 proposal.can_generate!==false||
+                 proposal.publication_authorized!==false)
+                throw new Error("Protected selection preview was not verified");
+              status.textContent="Selected slide(s): "+
+                proposal.selected.map(x=>x.order).join(", ")+
+                ". Unchanged: "+proposal.unchanged.map(x=>x.order).join(", ")+
+                ". Exact selection verified. To save these directions, use Send back with notes. "+
+                "No render is authorized; Drive, branding and release gates remain required.";
+            }catch(error){
+              if(current())status.textContent="Slide preview blocked: "+
+                String(error?.message||error)+". No changes were generated.";
+            }finally{button.disabled=false;}
+          });
+        }
+        if(canSaveWithoutAutoRender&&galleryActions?.holdEnrollment===true&&
+           galleryActions.holdActive===false&&galleryActions.jobCount===0&&selectable.length){
+          const li=document.createElement("li");
+          const confirmation=document.createElement("label");
+          const confirm=document.createElement("input");
+          confirm.type="checkbox";
+          confirmation.append(confirm,document.createTextNode(
+            " Prepare an exact, unpublished, unscheduled gallery correction hold. No image will be generated."));
+          const hold=document.createElement("button");
+          hold.type="button";hold.textContent="Prepare private correction hold";
+          hold.disabled=true;
+          confirm.addEventListener("change",()=>{hold.disabled=!confirm.checked;});
+          li.append(confirmation,hold);rows.appendChild(li);
+          hold.addEventListener("click",async()=>{
+            if(!current()||!confirm.checked||hold.disabled)return;
+            hold.disabled=true;confirm.disabled=true;
+            status.textContent="Recording the exact private gallery publication hold in Airtable…";
+            const client_request_id="gallery_hold_"+Date.now().toString(36)+
+              "_"+Math.random().toString(36).slice(2,12);
+            try{
+              const receipt=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
+                "/gallery-enroll",{method:"POST",body:JSON.stringify({client_request_id})});
+              if(!current())return;
+              if(receipt?.ok!==true||receipt.output_id!==id||
+                 receipt.profile_id!==inventory.profile_id||
+                 receipt.hold_verified!==true||receipt.generation_queued!==false||
+                 receipt.publication_authorized!==false)
+                throw new Error("Airtable hold receipt was not verified");
+              status.textContent="Private gallery hold saved; loading current job eligibility. No image generated.";
+              void loadFactoryCorrectionReadOnlyPreview(pending);
+            }catch(error){
+              if(current())status.textContent="Hold could not be independently confirmed: "+
+                String(error?.message||error)+". Refresh gallery history before another request; do not retry blindly.";
+            }
+          });
+        }
+        if(canSaveWithoutAutoRender&&galleryActions?.generationRequest===true&&
+           galleryActions.holdActive===true&&galleryActions.jobCount===0&&selectable.length){
+          const li=document.createElement("li");
+          const confirmation=document.createElement("label");
+          const confirm=document.createElement("input");
+          confirm.type="checkbox";
+          confirmation.append(confirm,document.createTextNode(
+            " Generate only the selected images into PRIVATE staging. Keep original media, schedule, Factory approval and publishing unchanged."));
+          const generate=document.createElement("button");
+          generate.type="button";generate.textContent="Generate private image corrections";
+          generate.disabled=true;
+          confirm.addEventListener("change",()=>{generate.disabled=!confirm.checked;});
+          li.append(confirmation,generate);rows.appendChild(li);
+          generate.addEventListener("click",async()=>{
+            if(!current()||!confirm.checked||generate.disabled)return;
+            const selected=selectable.filter(x=>x.checkbox.checked).map(x=>({
+              slide_id:x.slide.slide_id,instruction:x.instruction.value.trim(),
+            }));
+            if(!selected.length||selected.length>20||
+               selected.some(x=>x.instruction.length<8||x.instruction.length>3000)){
+              status.textContent="Select 1–20 eligible slides and enter 8–3000 characters of correction instructions for each.";
+              return;
+            }
+            generate.disabled=true;confirm.disabled=true;
+            // Exactly one request ID per human click, used in both the
+            // nonmutating verification and durable one-shot job submission.
+            const client_request_id="gallery_generate_"+Date.now().toString(36)+
+              "_"+Math.random().toString(36).slice(2,12);
+            status.textContent="Revalidating selected images against authoritative Airtable before creating ONE private job…";
+            try{
+              const proposal=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
+                "/gallery-selection-preview",{method:"POST",body:JSON.stringify({
+                  client_request_id,selected_slides:selected,
+                })});
+              if(!current())return;
+              if(proposal?.ok!==true||proposal.output_id!==id||
+                 proposal.profile_id!==inventory.profile_id||
+                 proposal.client_request_id!==client_request_id||
+                 proposal.can_generate!==false||proposal.publication_authorized!==false||
+                 !Array.isArray(proposal.selected)||proposal.selected.length!==selected.length||
+                 selected.some(x=>!proposal.selected.some(y=>
+                   y.slide_id===x.slide_id&&y.instruction===x.instruction&&
+                   Array.isArray(y.blockers)&&y.blockers.length===0)))
+                throw new Error("Exact private slide selection could not be verified");
+              const receipt=await fetchJson("/api/factory/outputs/"+encodeURIComponent(id)+
+                "/gallery-generate",{method:"POST",body:JSON.stringify({
+                  client_request_id,selected_slides:selected,
+                })});
+              if(!current())return;
+              if(receipt?.ok!==true||receipt.output_id!==id||
+                 !/^[A-Za-z0-9_-]{8,120}$/.test(String(receipt.job_id||""))||
+                 receipt.state!=="held_queued"||
+                 receipt.publication_authorized!==false||
+                 receipt.creative_approved!==false||receipt.factory_approved!==false)
+                throw new Error("Private gallery job receipt could not be independently verified");
+              status.textContent="One private image correction job queued: "+receipt.job_id+
+                ". Not yet rendered, approved or published; reloading Airtable status.";
+              void loadFactoryCorrectionReadOnlyPreview(pending);
+            }catch(error){
+              if(current())status.textContent="Private generation request could not be confirmed: "+
+                String(error?.message||error)+
+                ". Check authoritative Gallery job history before another request. No automatic retry will occur.";
+            }
+          });
+        }
+        if(!canSaveWithoutAutoRender) {
+          for(const entry of selectable)entry.checkbox.disabled=true;
+          return "Original image inventory: "+inventory.slide_count+
+            " slide(s). This Producer request may auto-start production; photo-by-photo "+
+            "selection is disabled until an explicit non-rendering review path is available.";
+        }
+        return "Original image inventory: "+inventory.slide_count+
+          " slide(s). Select slides for an exact correction preview. "+
+          (galleryActions?.generationRequest===true?
+            "Private Generate requests are available only after an independently verified hold, source rights and Runner checks.":
+            "Private generation remains disabled until release and rights gates pass.");
+      }catch(error){
+        // The source is often video or an unpublished/non-gallery output;
+        // this cannot block sending normal Factory review comments.
+        return "Native image inventory not ready for this output.";
+      }
+    };
+    const [matching,gallery]=await Promise.all([readMatches(),readGallery()]);
+    if(!current())return;
+    status.textContent=[matching,gallery].filter(Boolean).join(" ");
+  }
+
   // Review feedback is entered before any state-changing request is sent.
   function openFactoryFeedback({ title, scope, payload }) {
     const backdrop = $("factoryFeedbackBackdrop");
@@ -1294,26 +2399,27 @@
       setStatus("Review notes window is unavailable. Refresh Studio before sending back.", true);
       return;
     }
-    state.pendingFactoryFeedback = { payload, focusedElement: document.activeElement };
+    state.pendingFactoryFeedback = { payload, title: title || "Production change request", focusedElement: document.activeElement };
+    void loadFactoryCorrectionReadOnlyPreview(state.pendingFactoryFeedback);
     const heading = $("factoryFeedbackTarget");
     const detail = $("factoryFeedbackScope");
     const error = $("factoryFeedbackError");
     if (heading) heading.textContent = title || "Untitled content";
     if (detail) detail.textContent = scope || "Review changes";
-    const returnReview = payload?.action === "return_to_review" || payload?.action === "start_render_review";
+    const returnReview = ["return_to_review","return_to_review_held","start_render_review"].includes(payload?.action);
     const auto = payload?.action === "request_changes_content";
     const intro = $("factoryFeedbackIntro");
     const hints = document.querySelector("#factoryFeedbackHintsText");
     if (intro) intro.textContent = returnReview
       ? payload?.action === "start_render_review"
-        ? "Describe what you want changed. Your comments are required, and they will start a Rendering Review conversation with your Producer."
-        : "Tell your Producer what needs to change in everyday language. Your comments will be added to the existing Rendering Review conversation."
+        ? "Describe what you want changed. Your comments are required, and they will start a Post Production Edits conversation with your Producer."
+        : "Tell your Producer what needs to change in everyday language. Your comments will be added to the existing Post Production Edits conversation."
       : auto
       ? "Tell the Producer what to change in everyday language. Precise caption, narration, duration and uniquely identified photo/clip instructions can restart production automatically. Other creative requests are saved for guided editing."
       : "Describe exactly what needs to change. Studio saves these review notes with the linked Production Request.";
     if (hints) hints.textContent = returnReview
       ? payload?.action === "start_render_review"
-        ? "Your current render is preserved and publishing is held. After submitting, continue with your Producer in Rendering Review. No new render starts until you authorize it."
+        ? "Your current render is preserved and publishing is held. After submitting, continue with your Producer in Post Production Edits. No new render starts until you authorize it."
         : "Your selected V2 stays preserved and publishing is held while you continue with the Producer. No new render starts until you authorize it."
       : auto
       ? "Examples: Please make it 20 seconds. · Add the photo named Chicago River Night. · Replace narration with: Welcome to Chicago. Unresolved photos/clips stay on hold for selection."
@@ -1323,7 +2429,7 @@
     const count = $("factoryFeedbackCount");
     if (count) count.textContent = "0 / 3000";
     const submit = $("factoryFeedbackSubmit");
-    if (submit) { submit.disabled = false; submit.textContent = returnReview ? "Send to Rendering Review" : payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
+    if (submit) { submit.disabled = false; submit.textContent = returnReview ? "Send to Post Production Edits" : payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
     backdrop.hidden = false;
     const transcript = $("factoryProducerTranscript");
     if (transcript) transcript.hidden = !auto;
@@ -1338,6 +2444,8 @@
     if (backdrop) backdrop.hidden = true;
     const origin = state.pendingFactoryFeedback?.focusedElement;
     state.pendingFactoryFeedback = null;
+    const readOnly=$("factoryReadOnlyInventory");
+    if(readOnly)readOnly.hidden=true;
     if (origin?.isConnected) origin.focus?.();
   }
 
@@ -1345,25 +2453,67 @@
     event.preventDefault();
     const pending = state.pendingFactoryFeedback;
     if (!pending) return;
-    const notes = String($("factoryFeedbackNotes")?.value || "").trim();
+    const freeformNotes = String($("factoryFeedbackNotes")?.value || "").trim();
     const error = $("factoryFeedbackError");
+    const selectedGallerySlides = [...document.querySelectorAll(
+      "#factoryReadOnlyInventoryRows .factory-gallery-select-slide:checked"
+    )].map(input=>{
+      const li=input.closest("li");
+      const instruction=String(li?.querySelector(".factory-gallery-slide-instruction")?.value||"").trim();
+      const id=String(input.dataset.slideId||"");
+      const order=String(li?.querySelector("label span")?.textContent||"")
+        .match(/^Slide (\d+) /)?.[1]||"";
+      return {id,order,instruction};
+    });
+    if(selectedGallerySlides.length && pending.payload?.action==="request_changes_content") {
+      if(error){error.hidden=false;error.textContent=
+        "Photo-by-photo changes cannot auto-start production. Use manual review first.";}
+      return;
+    }
+    if(selectedGallerySlides.some(item=>
+      !/^rec[A-Za-z0-9]{14}$/.test(item.id)||
+      !/^\d{1,2}$/.test(item.order)||
+      item.instruction.length<8||item.instruction.length>3000)){
+      if(error){error.hidden=false;error.textContent=
+        "Each selected photo needs a correction description of 8–3000 characters.";}
+      return;
+    }
+    const photoNotes=selectedGallerySlides.length
+      ? "Selected photo corrections (slide-specific reviewer instructions; no render authorized):\n"+
+        selectedGallerySlides.map(x=>"- Slide "+x.order+" ["+x.id+"]: "+x.instruction).join("\n")
+      : "";
+    const notes=[freeformNotes,photoNotes].filter(Boolean).join("\n\n");
     if (!notes) {
       if (error) { error.hidden = false; error.textContent = "Describe the changes needed before sending back."; }
+      $("factoryFeedbackNotes")?.focus();
+      return;
+    }
+    if (notes.length > 3000) {
+      if (error) { error.hidden = false; error.textContent =
+        "Combined review notes are too long (3,000 characters maximum). Shorten the slide instructions."; }
       $("factoryFeedbackNotes")?.focus();
       return;
     }
     const submit = $("factoryFeedbackSubmit");
     if (submit) { submit.disabled = true; submit.textContent = "Sending back…"; }
     if (error) { error.hidden = true; error.textContent = ""; }
+    const tracked = pending.payload?.action === "request_changes_content";
+    const trackingRequestId = String(pending.payload?.production_request_id || "").trim();
+    if (tracked) window.StudioFactoryProducerProgress?.begin({
+      requestId: trackingRequestId, title: pending.title,
+    });
     try {
       closeFactoryPreview();
       const desk = await mutateDesk({ ...pending.payload, note: notes });
       const requestId = String(desk?.result?.production_request_id || pending.payload.production_request_id || "").trim();
+      if (tracked) window.StudioFactoryProducerProgress?.accept({
+        requestId, title: pending.title, result: desk?.result,
+      });
       closeFactoryFeedback();
-      if (pending.payload?.action === "return_to_review" || pending.payload?.action === "start_render_review") {
+      if (["return_to_review","return_to_review_held","start_render_review"].includes(pending.payload?.action)) {
         if (desk?.result?.review_notes_saved!==true || desk?.result?.review_hold_active!==true)
           throw new Error("Review notes or publication hold could not be verified.");
-        const notice = desk.result.message || "Request received. Continue the conversation with your Producer in Rendering Review.";
+        const notice = desk.result.message || "Request received. Continue the conversation with your Producer in Post Production Edits.";
         setStatus(notice);
         window.alert(notice);
         if (typeof window.StudioRenderingReview?.openOutputById === "function") {
@@ -1388,7 +2538,10 @@
         setStatus("Review notes saved. Open the returned item in Production for changes.");
       }
     } catch (err) {
-      if (submit) { submit.disabled = false; submit.textContent = ["return_to_review","start_render_review"].includes(pending.payload?.action) ? "Send to Rendering Review" : pending.payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
+      if (tracked) window.StudioFactoryProducerProgress?.uncertain({
+        requestId: trackingRequestId, title: pending.title, message: err?.message || String(err),
+      });
+      if (submit) { submit.disabled = false; submit.textContent = ["return_to_review","start_render_review"].includes(pending.payload?.action) ? "Send to Post Production Edits" : pending.payload?.action === "request_changes_content" ? "Submit to Producer" : "Send back with notes"; }
       if (error) { error.hidden = false; error.textContent = String(err?.message || err); }
       setStatus("Could not send back: " + (err?.message || err), true);
     }
@@ -1477,7 +2630,7 @@
               return;
             }
           }catch(error){
-            setStatus("Rendering Review lookup failed: "+(error.message||error),true);
+            setStatus("Post Production Edits lookup failed: "+(error.message||error),true);
             return;
           }
         }
@@ -1520,7 +2673,7 @@
         const group = checkbox.closest(".factory-content-rows")?.previousElementSibling;
         const groupBox = group?.querySelector("[data-factory-select-content]");
         if (groupBox) {
-          const ids = [...checkbox.closest(".factory-content-rows").querySelectorAll("[data-factory-select-output]")];
+          const ids = [...checkbox.closest(".factory-content-rows").querySelectorAll("[data-factory-select-output]:not(:disabled)")];
           groupBox.checked = ids.length > 0 && ids.every((input) => input.checked);
           groupBox.indeterminate = ids.some((input) => input.checked) && !groupBox.checked;
         }
@@ -1537,7 +2690,7 @@
         saveFactorySelection();
         updateFactoryBatchToolbar();
         const rows = checkbox.closest(".factory-content-bar")?.nextElementSibling;
-        rows?.querySelectorAll("[data-factory-select-output]").forEach((input) => { input.checked = checkbox.checked; });
+        rows?.querySelectorAll("[data-factory-select-output]:not(:disabled)").forEach((input) => { input.checked = checkbox.checked; });
         checkbox.indeterminate = false;
       });
     });
@@ -1550,6 +2703,105 @@
           setStatus(message, true);
           window.alert(`Factory Approve all failed:\n${message}`);
         });
+      });
+    });
+    root.querySelectorAll("[data-factory-handoff-held]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const id = button.getAttribute("data-factory-handoff-held");
+        const card = byId.get(id);
+        if (!card || card.review_hold_active !== true || card.do_not_publish !== true) {
+          setStatus("V2 review hold changed. Refresh Factory before proceeding.", true);
+          return;
+        }
+        if (!window.confirm("Complete the protected handoff of the already-approved V2?\\n\\nThis verifies the selected media and releases only its original review hold. It will NOT approve, schedule, or publish the output.")) return;
+        button.disabled = true;
+        const prior = button.textContent;
+        button.textContent = "Verifying protected V2 handoff…";
+        button.setAttribute("aria-busy", "true");
+        try {
+          const receipt = await fetchJson("/api/rendering-review/outputs/" + encodeURIComponent(id) + "/factory-handoff", {
+            method: "POST", body: JSON.stringify({ confirm: "PROMOTE-APPROVED-V2-TO-FACTORY" }),
+          });
+          if (receipt?.ok !== true || receipt?.factory_ready !== true ||
+              receipt?.output_id !== id || receipt?.review_hold_active !== false ||
+              receipt?.approved_for_publishing !== false ||
+              receipt?.scheduled !== false || receipt?.public_post_created !== false) {
+            throw new Error("Server did not verify the exact V2 handoff and hold release.");
+          }
+          state.selectedOutputs.delete(id);
+          saveFactorySelection();
+          setStatus("Approved V2 handoff verified. Refreshing Factory eligibility; no publishing approval was submitted.");
+          await loadFactoryDesk(true);
+        } catch (error) {
+          setStatus("Protected V2 handoff not completed: " + String(error?.message || error), true);
+        } finally {
+          button.removeAttribute("aria-busy");
+          button.textContent = prior;
+          button.disabled = false;
+        }
+      });
+    });
+    root.querySelectorAll("[data-factory-accept-held]").forEach((button) => {
+      button.addEventListener("click",async()=>{
+        const id=button.getAttribute("data-factory-accept-held");
+        const card=byId.get(id);
+        if(!card){setStatus("Held review output not found; refresh Factory.",true);return;}
+        button.disabled=true;
+        const originalLabel=button.textContent;
+        button.textContent="Verifying saved V2…";
+        button.setAttribute("aria-busy","true");
+        try{
+          const reviewed=await readHeldFactoryReview(card);
+          if(reviewed.alreadyAccepted){
+            state.heldCreativeAccepted.add(card.id);
+            if(state.desk)renderDesk(state.desk);
+            setStatus("Factory V2 creative acceptance is already saved. Publishing remains held for QA.");
+            return;
+          }
+          if(!window.confirm("Accept the selected V2 creatively in Factory?\\n\\nThis does NOT authorize publishing, release the watermark QA hold, schedule or upload anything."))return;
+          button.textContent="Saving creative acceptance…";
+          const receipt=await mutateDesk({
+            action:"accept_held_creative",kind:"output",id:card.id,
+            expected_version:reviewed.session.version,
+            client_request_id:"factorycreative_"+crypto.randomUUID().replace(/-/g,""),
+          });
+          const result=receipt?.result;
+          if(result?.factory_creative_accepted!==true||result.qa_pending!==true||
+             result.review_hold_active!==true||result.publishing_authorized!==false||
+             result.scheduled!==false||result.public_post_created!==false)
+            throw new Error("Factory creative acceptance was not verified.");
+          state.heldCreativeAccepted.add(card.id);
+          if(state.desk)renderDesk(state.desk);
+          setStatus("V2 accepted for Factory creative review. Watermark QA and publishing remain held.");
+        }catch(error){
+          const message=error?.message||String(error);
+          setStatus("Factory creative acceptance needs attention: "+message,true);
+          window.alert("Factory creative acceptance not confirmed:\\n"+message);
+        }finally{
+          button.removeAttribute("aria-busy");
+          button.textContent=originalLabel;
+          button.disabled=false;
+        }
+      });
+    });
+    root.querySelectorAll("[data-factory-release-approval]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const card = byId.get(button.getAttribute("data-factory-release-approval"));
+        if (!card || !canReleaseForApproval(card)) {
+          setStatus("This output is not eligible for a review-hold release. Refresh Factory.", true);
+          return;
+        }
+        if (!window.confirm(`Release the publishing hold on "${cardLabel(card)}" for formal review?\\n\\nThis does NOT approve, schedule, or publish the output. You must separately review the media and click Approve or Request Changes. Protected V2/QA holds cannot be released here.`)) return;
+        button.disabled = true;
+        try {
+          await mutateDesk({ action: "release_for_approval", id: card.id, kind: "output" });
+        } catch (error) {
+          const message = String(error?.message || error);
+          setStatus(message, true);
+          window.alert("Release for Approval failed:\\n" + message);
+        } finally {
+          button.disabled = false;
+        }
       });
     });
     root.querySelectorAll("[data-factory-approve]").forEach((button) => {
@@ -1580,6 +2832,17 @@
           return;
         }
         try {
+          if(card.review_hold_active===true&&card.do_not_publish===true){
+            const reviewed=await readHeldFactoryReview(card);
+            openFactoryFeedback({
+              title:card.title||cardLabel(card),
+              scope:[card.platform,card.studio_output_type,"Held V2 creative redo"].filter(Boolean).join(" · "),
+              payload:{action:"return_to_review_held",id:card.id,kind:"output",
+                expected_version:reviewed.session.version,
+                client_request_id:"factoryreview_"+crypto.randomUUID().replace(/-/g,"")},
+            });
+            return;
+          }
           if(await reviewedFactoryRevision(card)) {
             const clientKey = "factoryreview_" + crypto.randomUUID().replace(/-/g,"");
             openFactoryFeedback({
@@ -1590,7 +2853,7 @@
             return;
           }
         } catch(error) {
-          setStatus("Could not verify Rendering Review handoff: "+(error.message||error),true);
+          setStatus("Could not verify Post Production Edits handoff: "+(error.message||error),true);
           return;
         }
         if(isConversationalReviewCandidate(card)){
@@ -1659,10 +2922,15 @@
   function renderDesk(desk) {
     state.desk = desk;
     syncFactoryFilterOptions();
-    const hiddenApprovals = new Set([...Object.keys(recentFactoryAccepted()), ...(state.submittingOutputIds || [])]);
-    const filtered = (cards) => (cards || []).filter(card => factoryMatchesProfile(card) && !(card?.kind === "output" && hiddenApprovals.has(card.id)));
-    const visibleDesk = { ...desk, lanes: { ...desk.lanes,
-      needs_eyes: (desk.lanes?.needs_eyes || []).filter(card => !hiddenApprovals.has(card.id)) } };
+    const searching = Boolean(String(state.needsEyesSearch || "").trim());
+    // The server's current Needs Eyes lane owns both the count and visible rows.
+    // A 48-hour browser-side "recently accepted" hint is NOT a completed Airtable
+    // approval: uncertain/failed batches can leave the output Ready for Review.
+    // Keep such rows visible and counted. canReviewActions still prevents a
+    // duplicate submit while the saved approval is being reconciled.
+    const filtered = (cards) => (cards || []).filter(card =>
+      searching || factoryMatchesProfile(card));
+    const visibleDesk = desk;
     // Global counts come from the authoritative Desk summary. With a Factory
     // filter, only rows in the returned snapshot are counted and labelled.
     const summary = factoryProfileId() ? {
@@ -1755,6 +3023,10 @@
     }
     const cards = (state.desk?.lanes?.needs_eyes || []).filter((card) => contentGroupKey(card) === key);
     const ready = readyContentCards({ cards });
+    if (cards.some(card => card.review_hold_active === true)) {
+      setStatus("This content has a protected V2 review hold. Preview it first; Factory cannot approve this group.", true);
+      return;
+    }
     if (ready.length < 2) {
       setStatus("This content does not have multiple outputs waiting for approval.", true);
       return;
@@ -1830,9 +3102,26 @@
 
   async function mutateDesk(payload) {
     setStatus("Saving…");
+    if(payload?.action==="return_to_review_held"){
+      // A held, creatively accepted version has an EXISTING review session.
+      // Resume that conversation; never try to enroll a second session.
+      const receipt=await fetchJson("/api/rendering-review/outputs/"+
+        encodeURIComponent(payload.id)+"/request-redo",{
+        method:"POST",
+        body:JSON.stringify({note:payload.note,
+          client_request_id:payload.client_request_id,
+          expected_version:payload.expected_version}),
+      });
+      if(receipt?.redo_requested!==true||receipt.review_hold_active!==true||
+         receipt.render_queued!==false||receipt.public_post_created!==false)
+        throw new Error("Held revision request was not durably verified");
+      state.heldCreativeAccepted.delete(payload.id);
+      const message="Creative revision requested in the existing Producer conversation. V2 is preserved; nothing was rendered or published.";
+      return {ok:true,result:{...receipt,review_notes_saved:true,message},message};
+    }
     if(payload?.action==="start_render_review"){
       // The Factory dialog is the only new-session UI. Direct enrollment
-      // from Rendering Review is absent and the server requires the note.
+      // from Post Production Edits is absent and the server requires the note.
       const receipt=await fetchJson("/api/rendering-review/factory/outputs/"+
         encodeURIComponent(payload.id)+"/request-changes",{
         method:"POST",
@@ -1849,6 +3138,13 @@
     const savedMessage = desk.message || ACTION_STATUS[payload.action] || "Updated.";
     if (desk.lanes) {
       renderDesk(desk);
+    } else if (desk.ok && payload.action === "accept_held_creative") {
+      // The exact-version acceptance POST is already committed and includes
+      // a checked receipt. The click handler updates its row immediately.
+      // Do NOT start a second expensive Desk read that can mask success
+      // with an unrelated "Loading Factory Desk" status.
+      setStatus(savedMessage);
+      return desk;
     } else if (desk.ok && (payload.action === "request_changes_content" || payload.action === "return_to_review")) {
       // The Airtable write is already committed; do not block acceptance on
       // a slow Factory queue read or convert a successful POST into an error.
@@ -1867,19 +3163,28 @@
   }
 
   async function loadFactoryDesk(force = false) {
+    // Producer progress lives in its own durable panel, not the disposable
+    // Factory Desk status line. Refresh both independently.
+    window.StudioFactoryProducerProgress?.refresh(true).catch(() => {});
     // One authoritative Desk snapshot at a time, including forced refreshes.
     if (state.loading) return state.desk;
     state.loading = true;
+    refreshFactoryApprovalPolicy().catch(() => {});
+    reconcilePersistedFactoryPending(true).catch(() => {});
     setStatus("Loading Factory Desk…");
     try {
       // Fetch independently of the expensive Factory queue; activity remains visible during a slow desk refresh.
       refreshFactoryBatchActivity().catch(() => {});
       if (!state.batchTimer) state.batchTimer = setInterval(() => {
-        if (!document.hidden && $("page-factory")?.classList.contains("active")) refreshFactoryBatchActivity(true).catch(() => {});
+        if (!document.hidden && $("page-factory")?.classList.contains("active")) {
+          reconcilePersistedFactoryPending().catch(() => {});
+          refreshFactoryBatchActivity().catch(() => {});
+        }
       }, 5000);
       const desk = await fetchJson("/api/factory/desk", { cache: "no-store" });
       renderDesk(desk);
-      setStatus(desk.warning || "Factory Desk ready.");
+      if (state.batchSubmissionError) setStatus(state.batchSubmissionError, true);
+      else setStatus(desk.warning || "Factory Desk ready.");
       reconcilePersistedFactoryPending(true).catch(() => {});
       return desk;
     } catch (error) {
@@ -1907,9 +3212,15 @@
     }
   });
 
-  $("factoryBatchSubmit")?.addEventListener("click", () => { submitFactoryBatchApprovals().catch((error) => setStatus(error.message || String(error), true)); });
+  $("factoryBatchSubmit")?.addEventListener("click", () => {
+    submitFactoryBatchApprovals().catch((error) => setBatchSubmissionError(error.message || String(error)));
+  });
   $("factoryBatchClear")?.addEventListener("click", () => {
+    if (state.submittingBatch) return;
+    localStorage.removeItem(FACTORY_WAITING_SELECTION_KEY);
     state.selectedOutputs.clear();
+    setBatchSubmissionError(null);
+    setStatus("Selection cleared.");
     saveFactorySelection();
     if (state.desk) renderDesk(state.desk);
   });
@@ -1969,16 +3280,42 @@
       childList: true, subtree: true, characterData: true,
     });
   }
-  $("factoryProfileFilter")?.addEventListener("change", () => {
+  function applyFactoryProfileScopeChange() {
     state.completedOpen = false;
     state.completedBatch = null;
     state.completedOffset = 0;
     state.inspectedBatchKey = "";
     if (state.desk) renderDesk(state.desk);
+    else renderFactoryProfileFilterNotice();
     refreshFactoryBatchActivity(true).catch(() => {});
     window.StudioFactoryBatchQuality?.refresh?.(true);
+  }
+  $("factoryProfileFilter")?.addEventListener("change", () => {
+    applyFactoryProfileScopeChange();
+  });
+  $("factoryClearProfileFilter")?.addEventListener("click", () => {
+    const select = $("factoryProfileFilter");
+    if (!select || !select.value) return;
+    select.value = "";
+    applyFactoryProfileScopeChange();
+    select.focus?.();
   });
   // Studio profile changes must not alter global Factory monitoring.
+  $("factoryNeedsEyesSearch")?.addEventListener("input", (event) => {
+    state.needsEyesSearch = String(event.target.value || "").slice(0,120);
+    state.needsEyesPage = 0;
+    state.expandedReviewGroup = null;
+    if (state.needsEyesSearch.trim()) {
+      const body=$("factoryBandBodyNeedsEyes");
+      const band=body?.closest(".factory-band");
+      band?.classList.remove("is-collapsed");
+      band?.querySelector("[data-factory-band-toggle]")?.setAttribute("aria-expanded","true");
+      const chevron=band?.querySelector(".factory-band-chevron");
+      if(chevron) chevron.textContent="▾";
+    }
+    if (state.desk) renderDesk(state.desk);
+    else renderFactoryProfileFilterNotice();
+  });
   $("factoryDeskRefresh")?.addEventListener("click", () => {
     loadFactoryDesk(true).catch(() => {});
   });

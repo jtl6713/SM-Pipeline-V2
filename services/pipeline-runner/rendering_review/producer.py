@@ -24,9 +24,23 @@ Check the *existing* asset catalog BEFORE asking for any new upload or
 generated image. assets[] contains authoritative, already linked Reel images,
 including time_of_day, descriptive metadata and exact asset IDs.
 original_timeline[] contains the actual source scene order and durations.
-library_candidates[] contains other existing Chicago-owned photos, but these
-are search suggestions, not verified renderer assets. Names/time-of-day are
-metadata, not evidence that frames were visually inspected.
+library_candidates[] contains existing Chicago-owned photos with synthetic
+library_<MediaAssetRecordID> IDs. They are eligible for a proposed timeline but
+NOT render-verified until an independent 9:16 Drive crop and rights preflight
+passes. Do not claim they are already linked or usable; never fabricate an ID.
+Use the exact library ID when a named photo exists in this list. Missing crop
+validation must be described as pending verification, not missing upload.
+Names/time-of-day are metadata, not evidence that frames were visually inspected.
+library_ineligible[] flags named catalog records needing extra checks.
+A user-selected owned Graphic JPEG may appear in library_candidates[] with
+source_kind owned_catalog_graphic, media_class Graphic and a library_ token.
+It can be proposed as a graphic STILL (not mislabeled as a photograph), but
+requires the actual JPEG and a 9:16 derivative to decode and pass independent
+server verification and a reviewer visual preview before final rendering.
+Never reclassify an original Graphic as Image, substitute an asset, or claim its
+text and thumbnail have been visually inspected. The reviewer has already
+identified the exact names; missing crops need preparation, not reupload.
+For other non-raster types, describe them as FOUND BUT BLOCKED, not missing.
 Understand arbitrary conversational feedback: story arc, mismatched visuals,
 shot selection, sequence, rhythm, captions, narration, duration, mood, motion,
 music, accessibility and factual accuracy. Read prior messages to resolve
@@ -91,7 +105,7 @@ explanation: substantive string;
 narration: complete proposed narration string;
 preserve: array of strings;
 changes: array of strings;
-reuse_asset_ids: array of inventory IDs;
+reuse_asset_ids: array of original or offered library ID tokens;
 timeline: array of {start_seconds:number,end_seconds:number,direction:string,asset_ids:array};
 requirements: array of {description:string,kind:'asset'|'research'|'clarification',alternatives:array};
 claims: array of {claim:string,source_ids:array};
@@ -138,7 +152,8 @@ def conversational_candidate(model: dict, evidence: dict, direction: str) -> dic
             return []
         return [x for x in value[:80] if isinstance(x, str) and x.strip() and len(x) <= 2000]
 
-    inventory = {a["id"] for a in evidence.get("assets", [])
+    inventory = {a["id"] for a in [*evidence.get("assets", []),
+                                   *evidence.get("library_candidates", [])]
                  if isinstance(a, dict) and isinstance(a.get("id"), str)}
     sources = {a["id"] for a in evidence.get("sources", [])
                if isinstance(a, dict) and isinstance(a.get("id"), str)}
@@ -219,6 +234,116 @@ def conversational_candidate(model: dict, evidence: dict, direction: str) -> dic
         "claims": claims[:80], "acceptance_checks": acceptance[:80],
     }
 
+
+
+def _explicit_ordered_stills_candidate(model: dict, evidence: dict, direction: str) -> dict:
+    """Reconcile a precise human photo list with *already-owned* catalog identities.
+
+    This is an ordering/creative-scope correction, NOT a rights or crop receipt.
+    The Worker must still independently prove the source Drive ID, 9:16 variant,
+    review hold and current V2 attempt before it can freeze a plan. The
+    normalization is generic for any exact, ordered, exterior photo-only edit.
+    """
+    import re
+    from rendering_review.library_discovery import latest_explicit_photo_list
+
+    messages = evidence.get("messages") or []
+    last_user = next((m for m in reversed(messages)
+                      if isinstance(m, dict) and m.get("role") == "user"), None)
+    if not last_user:
+        return model
+    human = str(last_user.get("content") or "")[:3000]
+    selected = latest_explicit_photo_list([last_user])
+    if len(selected) < 2 or len(selected) > 16:
+        return model
+    # A quoted, exact opening shot and an explicitly ordered replacement list
+    # are required. Never extrapolate from loosely phrased conversational edits.
+    opener_match = re.search(
+        r'\b(?:keep|retain|preserve)\b.{0,120}?\bopener\b.{0,80}?["\u201c]([^"\u201d]+)["\u201d]',
+        human, re.I | re.S)
+    if not opener_match or not re.search(r"\b(?:preserve|keep|retain)\b.{0,32}\b(?:original\s+)?narration\b", human, re.I):
+        return model
+    # Human quoted shot labels often include a sentence-ending period *inside*
+    # the quotes (e.g. "Winter in Downtown Chicago 1."). The canonical Asset
+    # Manager title does not. Accept only that single punctuation difference;
+    # require exactly one authoritative matching asset, never a fuzzy lookup.
+    opener_name = opener_match.group(1).strip().casefold()
+    exact_names = {opener_name}
+    if opener_name.endswith("."):
+        exact_names.add(opener_name[:-1].rstrip())
+    original = [a for a in evidence.get("assets", [])
+                if isinstance(a, dict) and str(a.get("name") or "").strip().casefold() in exact_names
+                and isinstance(a.get("id"), str)]
+    if len(original) != 1:
+        return model
+    linked = [a for a in evidence.get("library_candidates", [])
+              if isinstance(a, dict) and isinstance(a.get("id"), str)]
+    excluded = {str(a.get("media_asset_record_id") or "")
+                for a in evidence.get("library_ineligible", [])
+                if isinstance(a, dict)}
+    resolved = []
+    for name in selected:
+        matches = [a for a in linked if str(a.get("name") or "").casefold() == name.casefold()
+                   and a.get("source_kind") == "owned_catalog_photo"
+                   and a.get("media_class") == "Image"
+                   and a.get("media_asset_record_id") not in excluded
+                   and "watermark" not in str(a.get("description") or "").casefold()]
+        if len(matches) != 1:
+            return model
+        resolved.append(matches[0])
+    if len({a["id"] for a in resolved}) != len(resolved):
+        return model
+    narration = evidence.get("narration")
+    if not isinstance(narration, str) or not narration.strip():
+        return model
+    try:
+        total = float(evidence.get("duration_seconds"))
+    except (ValueError, TypeError):
+        return model
+    if not 10 <= total <= 180 or total / (len(resolved) + 1) < 1:
+        return model
+    order = [original[0]["id"], *(a["id"] for a in resolved)]
+    timeline = []
+    previous = 0.0
+    for i, asset_id in enumerate(order):
+        end = round(total * (i + 1) / len(order), 3)
+        timeline.append({"start_seconds": previous, "end_seconds": end,
+                         "direction": "Retain the exact opener." if i == 0
+                         else "Use the selected existing still in its requested order.",
+                         "asset_ids": [asset_id]})
+        previous = end
+
+    # Unrequested model-generated research, re-linking, or crop requirements
+    # do not become human action items for this precisely specified visual edit.
+    # Independently verified eligibility and Runner/Worker preflight still gate
+    # plan freezing and rendering; this code must never mark rights as verified.
+    result = dict(model)
+    result.update({
+        "narration": narration,
+        "preserve": [],
+        "reuse_asset_ids": order,
+        "timeline": timeline,
+        "requirements": [],
+        "claims": [],
+        "changes": [
+            "Retain the original opener, narration and audio without modification.",
+            "Use only the explicitly selected existing exterior stills, in exact order.",
+            "Exclude all other visuals from the revision; keep V2 unchanged."
+        ],
+        "explanation": ("Prepared an ordered, photo-only revision proposal from the "
+                        "latest explicit selection. No new uploads or cropped imagery "
+                        "have been requested. The Worker must independently check "
+                        "each selected source and variant before a plan can be frozen. "
+                        "No video has been rendered or authorized."),
+        "acceptance_checks": [
+            "The full scene order matches the most recent human selection exactly.",
+            "The original narration and audio are preserved unchanged.",
+            "Every selected existing photo has independent source, rights and 9:16 crop verification.",
+            "The prior V2 artifact and all other outputs remain unchanged.",
+            "The review hold remains active; no render, approval or publication is authorized."
+        ],
+    })
+    return result
 
 
 def _source_only_timing_candidate(model: dict, evidence: dict, direction: str) -> dict:
@@ -324,7 +449,9 @@ def validate_candidate(candidate: dict, evidence: dict, *, allow_conversation_on
             raise ValueError("Producer response invalid " + key)
     if not candidate["changes"] or not candidate["acceptance_checks"] or (not candidate["timeline"] and not allow_conversation_only):
         raise ValueError("Producer must propose actionable changes and acceptance checks")
-    inventory = {a["id"] for a in evidence.get("assets", []) if isinstance(a, dict) and isinstance(a.get("id"), str)}
+    inventory = {a["id"] for a in [*evidence.get("assets", []),
+                                   *evidence.get("library_candidates", [])]
+                 if isinstance(a, dict) and isinstance(a.get("id"), str)}
     references = list(candidate["reuse_asset_ids"])
     previous_end = 0
     for scene in candidate["timeline"]:
@@ -407,6 +534,7 @@ def propose_revision(evidence: dict, direction: str, settings: dict, *, transpor
         raise ValueError("Producer returned invalid or excessive content")
     parsed = json.loads(raw)
     parsed = _source_only_timing_candidate(parsed, evidence, direction)
+    parsed = _explicit_ordered_stills_candidate(parsed, evidence, direction)
     try:
         result = validate_candidate(parsed, evidence)
     except ValueError:

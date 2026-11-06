@@ -100,3 +100,57 @@
 .rr-message-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap}
 .rr-message-time{font-size:.78rem;color:var(--muted,#768392);font-variant-numeric:tabular-nums}
 .rr-conversation-live .rr-thread{max-height:440px}
+
+/* Compact media previews: one globally shared NEEDS ASSET visual for missing or
+   inaccessible thumbnails; the video itself is still reviewed in the player. */
+.rr-entry{grid-template-columns:52px minmax(0,1fr);align-items:center;gap:10px}
+.rr-entry-thumb{display:block;width:52px;height:68px;min-width:0;overflow:hidden;
+  border:1px solid var(--line,#d6dce3);border-radius:7px;background:#122846}
+.rr-entry-thumb img{display:block;width:100%;height:100%;object-fit:cover}
+.rr-entry-body{display:grid;gap:5px;min-width:0;overflow-wrap:anywhere}
+@media(max-width:430px){
+  .rr-entry{grid-template-columns:46px minmax(0,1fr);gap:9px;padding:10px}
+  .rr-entry-thumb{width:46px;height:61px}
+}
+
+
+/* Source-of-truth review progress is visible even before a render job exists.
+   Stage labels describe confirmed milestones; no fictional percent complete. */
+.rr-progress-top{margin:10px 0 16px;padding:12px 14px;border:1px solid var(--line,#d6dce3);
+  border-left:4px solid var(--accent,#679cde);border-radius:10px;font-weight:600;line-height:1.5}
+.rr-progress-top[hidden]{display:none!important}
+.rr-progress-heading{font-size:1rem;margin:6px 0 0}
+.rr-progress-summary{line-height:1.5;margin:2px 0 8px;font-weight:600}
+.rr-progress-stages{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;
+  padding:0;list-style:none;margin:8px 0}
+.rr-progress-stage{display:flex;flex-direction:column;gap:4px;min-width:0;
+  border:1px solid var(--line,#d6dce3);border-radius:8px;padding:9px}
+.rr-progress-stage-name{font-weight:600;font-size:.85rem}
+.rr-progress-stage-state{font-size:.75rem;color:var(--muted,#768392)}
+.rr-progress-stage--complete{border-color:#3f8d60;background:rgba(63,141,96,.08)}
+.rr-progress-stage--complete .rr-progress-stage-state{color:inherit}
+.rr-progress-stage--current{border-color:var(--accent,#679cde);border-width:2px}
+.rr-progress-stage--attention{border-color:#b42318;border-width:2px;
+  background:rgba(220,38,38,.14);color:#8f1d18}
+.rr-progress-stage--attention .rr-progress-stage-state{color:#991b1b;font-weight:800}
+.rr-activity--attention{border-color:#c2413b!important;border-left:4px solid #b42318!important}
+.rr-progress-top--attention{border-left-color:#b42318!important;
+  background:rgba(220,38,38,.1);color:var(--text,#19243a)}
+.rr-progress-checked{color:var(--muted,#768392);font-size:.8rem;margin:4px 0}
+.rr-activity>button{justify-self:start}
+@media(max-width:760px){.rr-progress-stages{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .rr-progress-stage{padding:8px}.rr-activity>button{min-height:44px}}
+
+/* A finished V2 and an unstarted V3 are different verified timelines. */
+.rr-pending-revision{display:grid;gap:8px;min-width:0;padding:12px;
+  margin:10px 0 4px;border:1px solid var(--line,#d6dce3);
+  border-left:4px solid #b16b28;border-radius:9px;background:rgba(177,107,40,.055)}
+.rr-pending-revision-heading{font-size:.97rem}
+.rr-pending-revision-summary{margin:0;line-height:1.45}
+.rr-pending-revision-steps{padding:0;margin:2px 0;list-style:none;
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.rr-pending-revision-step{display:flex;flex-direction:column;gap:3px;
+  border:1px solid var(--line,#d6dce3);border-radius:7px;padding:8px;min-width:0}
+.rr-pending-revision-step strong{font-size:.83rem}
+.rr-pending-revision-step span{font-size:.78rem;overflow-wrap:anywhere}
+@media(max-width:500px){.rr-pending-revision-steps{grid-template-columns:minmax(0,1fr)}}

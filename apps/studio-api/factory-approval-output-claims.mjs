@@ -2,21 +2,29 @@
  * Factory submission deduplication independent of the browser's request_id.
  *
  * R2 conditional writes serialize each profile's output-ID claims. Claims are
- * deliberately sticky: a timed-out submit must not silently become available
- * for another device's newly generated request ID. A later approval of the
- * same Airtable output requires an explicit audited claim transition (e.g. a
- * genuinely new revision), not a second click.
+ * deliberately sticky while a submission may still be committing: a timed-out
+ * POST must not silently become available for another device's newly generated
+ * request ID during the grace window.
+ *
+ * After grace, claims with no parent group and no profile-local job are
+ * stranded reservations (crash between claim and enqueue, or a lost browser
+ * request ID). Those may be transferred by an audited reclaim. Terminal child
+ * ledgers whose conflicting items are only failed/skipped may likewise move.
+ * Active, enqueuing, or approved/already_satisfied ownership stays fail-closed.
  *
  * Legacy per-profile batch ledgers are indexed on first use. An incomplete
  * migration fails closed, never silently treating an old approved output as new.
  */
-import { FACTORY_BATCH_PREFIX } from "./factory-approval-queue.mjs";
+import { FACTORY_BATCH_PREFIX, factoryBatchRead } from "./factory-approval-queue.mjs";
+import { factoryApprovalGroupRead } from "./factory-approval-groups.mjs";
 
 export const FACTORY_OUTPUT_CLAIMS_PREFIX = FACTORY_BATCH_PREFIX + "/output-claims-v1";
+export const FACTORY_UNBACKED_CLAIM_GRACE_MS = 90 * 1000;
 const ID = /^rec[A-Za-z0-9]+$/;
 const RID = /^[A-Za-z0-9_-]{12,128}$/;
 const SCHEMA = "studio.factory-output-claims.1";
 const MAX_LEGACY_JOBS = 4000;
+const RECLAIMABLE_ITEM = new Set(["failed", "skipped_removed", "superseded_duplicate"]);
 
 function assertInput(bucket, profileId, requestId, ids) {
   if (!bucket?.get || !bucket?.put || !bucket?.list) throw Error("Durable R2 claims require read/write/list");
@@ -190,4 +198,134 @@ export async function factoryOutputClaimInspect(bucket, { profileId, requestId, 
     .map(id => ({ id, request_id: current.value.outputs[id].request_id }));
   return { ok: conflicts.length === 0, conflicts,
     owners: [...new Set(conflicts.map(row => row.request_id))] };
+}
+
+async function claimOwnerLedgerState(bucket, profileId, ownerRequestId, conflictIds) {
+  const group = await factoryApprovalGroupRead(bucket, ownerRequestId);
+  if (group?.schema === "studio.factory-approval-group.1" && Array.isArray(group.children)) {
+    const wanted = new Set(conflictIds);
+    const statuses = [];
+    for (const child of group.children) {
+      const job = await factoryBatchRead(bucket, child.profile_id, child.request_id);
+      if (!job) {
+        // Parent reserved but child never landed: treat as still committing when
+        // the parent itself is fresh enough; otherwise allow reclaim below.
+        return { kind: "group_incomplete", parent: group, statuses };
+      }
+      for (const item of job.items || []) {
+        if (wanted.has(item.id)) statuses.push(String(item.status || "pending"));
+      }
+    }
+    if (!statuses.length) return { kind: "group_incomplete", parent: group, statuses };
+    if (statuses.some((status) => !RECLAIMABLE_ITEM.has(status))) {
+      return { kind: "blocking", parent: group, statuses };
+    }
+    return { kind: "terminal_reclaimable", parent: group, statuses };
+  }
+  const job = await factoryBatchRead(bucket, profileId, ownerRequestId);
+  if (job?.schema === "studio.factory-batch.2" && Array.isArray(job.items)) {
+    const wanted = new Set(conflictIds);
+    const statuses = job.items
+      .filter((item) => wanted.has(item.id))
+      .map((item) => String(item.status || "pending"));
+    if (!statuses.length) return { kind: "blocking", job, statuses };
+    if (statuses.some((status) => !RECLAIMABLE_ITEM.has(status))) {
+      return { kind: "blocking", job, statuses };
+    }
+    return { kind: "terminal_reclaimable", job, statuses };
+  }
+  return { kind: "unbacked" };
+}
+
+/**
+ * Transfer safe conflicts onto requestId. Never steals active/approved ownership.
+ * Unbacked reservations require grace so an in-flight enqueue is not raced.
+ */
+export async function factoryOutputClaimReclaimIfSafe(bucket, {
+  profileId, requestId, ids,
+  nowMs = Date.now(),
+  graceMs = FACTORY_UNBACKED_CLAIM_GRACE_MS,
+}) {
+  const unique = [...new Set(ids)];
+  assertInput(bucket, profileId, requestId, unique);
+  const path = key(profileId);
+  for (let attempt = 0; attempt < 16; attempt++) {
+    const current = await ensureRegistry(bucket, profileId);
+    const outputs = current.value.outputs;
+    const hard = [];
+    const reclaim = [];
+    const ownerCache = new Map();
+    for (const id of unique) {
+      const claim = outputs[id];
+      if (!claim || claim.request_id === requestId) continue;
+      const owner = String(claim.request_id || "");
+      if (!RID.test(owner)) {
+        hard.push({ id, request_id: owner, reason: "invalid_owner" });
+        continue;
+      }
+      let state = ownerCache.get(owner);
+      if (!state) {
+        const ownedIds = unique.filter((rowId) => outputs[rowId]?.request_id === owner);
+        state = await claimOwnerLedgerState(bucket, profileId, owner, ownedIds);
+        ownerCache.set(owner, state);
+      }
+      if (state.kind === "terminal_reclaimable") {
+        reclaim.push({ id, request_id: owner, reason: "terminal_failed" });
+        continue;
+      }
+      if (state.kind === "unbacked") {
+        const atMs = Date.parse(claim.at || "");
+        const aged = Number.isFinite(atMs) && (nowMs - atMs) >= graceMs;
+        if (!aged) {
+          hard.push({ id, request_id: owner, reason: "unbacked_within_grace" });
+          continue;
+        }
+        reclaim.push({ id, request_id: owner, reason: "unbacked" });
+        continue;
+      }
+      if (state.kind === "group_incomplete") {
+        const createdMs = Date.parse(state.parent?.created_at || claim.at || "");
+        const aged = Number.isFinite(createdMs) && (nowMs - createdMs) >= graceMs;
+        if (!aged) {
+          hard.push({ id, request_id: owner, reason: "group_committing" });
+          continue;
+        }
+        reclaim.push({ id, request_id: owner, reason: "group_incomplete" });
+        continue;
+      }
+      hard.push({ id, request_id: owner, reason: "durable_active_or_approved" });
+    }
+    if (hard.length) {
+      return {
+        ok: false, reclaimed: [],
+        conflicts: hard,
+        owners: [...new Set(hard.map((row) => row.request_id))],
+      };
+    }
+    if (!reclaim.length) {
+      return { ok: true, reclaimed: [], already_owned: true };
+    }
+    const now = new Date(nowMs).toISOString();
+    const next = {
+      ...current.value, updated_at: now,
+      outputs: { ...outputs },
+    };
+    for (const row of reclaim) {
+      next.outputs[row.id] = {
+        request_id: requestId,
+        source: "safe_reclaim",
+        previous_request_id: row.request_id,
+        previous_reason: row.reason,
+        at: now,
+      };
+    }
+    if (await conditionalPut(bucket, path, next, current.etag)) {
+      return {
+        ok: true,
+        reclaimed: reclaim.map((row) => row.id),
+        previous_owners: [...new Set(reclaim.map((row) => row.request_id))],
+      };
+    }
+  }
+  throw Error("Concurrent Factory claim reclaim; retry with the same request ID");
 }

@@ -255,15 +255,20 @@ export async function factoryApprovalGroupList(bucket, {
   if (cursor) complete = false;
   objects.sort((a,b) => new Date(b.uploaded || 0) - new Date(a.uploaded || 0));
   const groups = [];
-  for (const object of objects) {
-    if (groups.length >= skip + take + 1) break;
-    const match = String(object.key).match(/\/groups\/([A-Za-z0-9_-]{12,128})[.]json$/);
-    if (!match) continue;
-    const status = await factoryApprovalGroupStatus(bucket, match[1]);
-    if (!status || (profileId && !status.profile_ids.includes(profileId))) continue;
-    if (mode === "active" && !factoryBatchNeedsAttention(status)) continue;
-    if (mode === "completed" && factoryBatchNeedsAttention(status)) continue;
-    groups.push(status);
+  // R2 history can contain hundreds of completed parents. Serial parent +
+  // child reads made an empty Active view slower than the browser deadline.
+  // Keep the authoritative child checks, but bound concurrent storage work.
+  for (let index = 0; index < objects.length && groups.length < skip + take + 1; index += 6) {
+    const statuses = await Promise.all(objects.slice(index, index + 6).map(async object => {
+      const match = String(object.key).match(/\/groups\/([A-Za-z0-9_-]{12,128})[.]json$/);
+      return match ? factoryApprovalGroupStatus(bucket, match[1]) : null;
+    }));
+    for (const status of statuses) {
+      if (!status || (profileId && !status.profile_ids.includes(profileId))) continue;
+      if (mode === "active" && !factoryBatchNeedsAttention(status)) continue;
+      if (mode === "completed" && factoryBatchNeedsAttention(status)) continue;
+      groups.push(status);
+    }
   }
   return { groups: groups.slice(skip, skip + take),
     has_more: groups.length > skip + take,

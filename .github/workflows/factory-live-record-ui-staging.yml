@@ -2,6 +2,7 @@ name: Factory Live-Record UI Staging (No Publishing)
 on:
   pull_request:
     paths:
+      - "apps/studio-web/factory-submit-recovery.browser.mjs"
       - "apps/studio-web/factory-real-record-ui.staging.mjs"
       - "apps/studio-web/factory-batch-canary-ui.staging.mjs"
       - "apps/studio-web/factory-batch-multi-reel-ui.staging.mjs"
@@ -30,8 +31,12 @@ jobs:
           npm install --no-save playwright@1.58.2
           # These tests launch headless Chromium only; avoid installing the unused full browser.
           npx playwright install --with-deps --only-shell chromium
+      - name: Verify storage quota and AI preference races
+        run: node --test apps/studio-web/storage-provider-behavior.test.mjs
       - name: Validate all canonical Factory Quality Agent signals in operator UI
         run: node --test apps/studio-web/factory-batch-quality-agent.test.mjs
+      - name: Verify six-output submission survives 503, lost receipts and reload without another click
+        run: node apps/studio-web/factory-submit-recovery.browser.mjs
       - name: Validate desktop mobile tablet selection, status, and Quality Agent with 20 audited output IDs
         run: node apps/studio-web/factory-real-record-ui.staging.mjs
       - name: Verify the Chicago Reel-only rollout UI and mobile state restoration

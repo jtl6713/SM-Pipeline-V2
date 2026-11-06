@@ -9,6 +9,7 @@
 import {inspectReviewPlan} from "./rendering-review-plan-preflight.mjs";
 import {mutateReviewSessionCommand} from "./rendering-review-coordinator.mjs";
 import {CHICAGO_PROFILE_ID} from "./rendering-review-policy.mjs";
+import {resolveReviewCatalogAssets,catalogRecordId} from "./rendering-review-catalog-assets.mjs";
 
 const rec = v => /^rec[A-Za-z0-9]{14}$/.test(String(v||""));
 const drive = v => /^[A-Za-z0-9_-]{16,}$/.test(String(v||""));
@@ -33,7 +34,7 @@ async function exact(readRecord,table,id){
     fail("REVIEW_SOURCE_UNAVAILABLE","Authoritative source record not readable",503);
   return row;
 }
-async function sourceReceipt({output,session,readField,output_id,loadCompletedAttempt}){
+async function sourceReceipt({output,session,readField,output_id,loadCompletedAttempt,originalProps}){
   const f=(row,key)=>readField(row,key);
   const attempt=(session.attempts||[]).find(x=>x.id===session.current_attempt_id);
   const originalFileId=str(f(output,"Final_File_ID"));
@@ -66,7 +67,8 @@ async function sourceReceipt({output,session,readField,output_id,loadCompletedAt
        !Number.isSafeInteger(proof?.byte_count)||proof.byte_count<100000||
        proof.mime_type!=="video/mp4"||
        proof.width!==1080||proof.height!==1920||
-       proof.audio_verified!==true||proof.watermark_verified!==true||
+       proof.audio_verified!==true||
+       // Creative redo may reuse a held V2 with pending watermark QA.
        proof.google_drive_verified!==true)
       fail("REVIEW_SOURCE_NOT_VERIFIED","Source revision differs from the validated Drive attempt");
     fileId=attempt.artifact_id;
@@ -74,7 +76,13 @@ async function sourceReceipt({output,session,readField,output_id,loadCompletedAt
   return {verified:true,authority:"server",output_id,
     profile_id:CHICAGO_PROFILE_ID,artifact_id:fileId,
     attempt_id:attempt.id,drive_file_id:fileId,
-    canonical_media_authority:"google_drive"};
+    canonical_media_authority:"google_drive",
+    // Not a client assertion. These came from the selected source Output's
+    // canonical Remotion_Props_JSON and only enable an exact-text audio reuse.
+    original_voiceover_text:typeof originalProps?.voiceoverText==="string"?
+      originalProps.voiceoverText:null,
+    original_voiceover_url:typeof originalProps?.voiceover?.url==="string"?
+      originalProps.voiceover.url:null};
 }
 /**
  * Reconcile the authoritative Production Request's owned master assets with
@@ -152,7 +160,7 @@ function rightsReceipt(row,entry,readField,variant){
  */
 export async function persistReadyReviewPlan({
   env,output_id,operations,readRecord,readField,
-  loadCompletedAttempt=null,now=()=>new Date(),
+  loadCompletedAttempt=null,readLibraryVariants=null,now=()=>new Date(),
 }={}){
   if(!rec(output_id)||!env?.AIRTABLE_OUTPUT_TABLE_ID||
      !env?.AIRTABLE_MEDIA_TABLE_ID||
@@ -226,9 +234,20 @@ export async function persistReadyReviewPlan({
     const receipt=rightsReceipt(row,entry,readField,variant);
     if(receipt)assets.push(receipt);
   }
+  const libraryTokens=ids.filter(id=>catalogRecordId(id));
+  if(libraryTokens.length){
+    if(typeof readLibraryVariants!=="function")
+      fail("REVIEW_CATALOG_NOT_CONFIGURED",
+        "Trusted review library crop resolver is unavailable",503);
+    const discovered=await resolveReviewCatalogAssets({
+      tokens:libraryTokens,readRecord,readField,readVariants:readLibraryVariants,
+      mediaTable:env.AIRTABLE_MEDIA_TABLE_ID,
+    });
+    assets.push(...discovered.receipts);
+  }
   const result=await inspectReviewPlan({
     session,source:await sourceReceipt({output,session,readField,output_id,
-      loadCompletedAttempt}),
+      loadCompletedAttempt,originalProps}),
     assets,visualReceipt:null,factReceipts:[],requirementReceipts:[],
   });
   if(!result.ready_to_commit){

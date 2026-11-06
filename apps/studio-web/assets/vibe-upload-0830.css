@@ -1,0 +1,86 @@
+/* Vibe Cut iPhone uploader: maintain legible text hierarchy and truthful progress. */
+#ezUploadZone > div:not(.item4-upload-icon) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  text-align: center;
+}
+#ezUploadZone #ezUploadTitle,
+#ezUploadZone #ezUploadHint {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.42;
+}
+#ezUploadZone #ezUploadHint { margin: 0; color: #526578; font-size: 0.9rem; }
+#ezUploadProgress, #item4UploadProgress { overflow-wrap: anywhere; min-width: 0; }
+#ezUploadProgress > strong,
+#ezUploadProgress > span,
+#ezUploadProgress .item4-upload-progress-count,
+#item4UploadProgress > strong,
+#item4UploadProgress > span,
+#item4UploadProgress .item4-upload-progress-count {
+  display: block;
+  max-width: 100%;
+  white-space: normal;
+  line-height: 1.42;
+}
+#ezUploadProgress > strong, #item4UploadProgress > strong { margin-bottom: 6px; }
+#ezUploadProgress .item4-upload-progress-count,
+#item4UploadProgress .item4-upload-progress-count { margin-top: 8px; font-style: normal; font-weight: 650; }
+#ezPhotoStrip .item4-heic-placeholder > span:last-child {
+  display: block;
+  opacity: 1;
+  color: #34455b;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 560px) {
+  #ezUploadZone > div:not(.item4-upload-icon) { gap: 10px; }
+  #ezUploadZone #ezUploadTitle { font-size: 1rem; }
+  #ezUploadZone #ezUploadHint { font-size: 0.86rem; }
+}
+
+/* Post-upload status is guidance, not a single ambiguous "processing" sentence. */
+#ezUploadProgress .vibe-upload-guidance,
+#item4UploadProgress .vibe-upload-guidance {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(91, 87, 28, 0.2);
+  text-align: left;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.vibe-upload-guidance-title {
+  font-weight: 750;
+  margin-bottom: 8px;
+}
+.vibe-upload-guidance-steps {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+.vibe-upload-guidance-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 5px 0;
+}
+.vibe-upload-guidance-steps li::before {
+  content: "○";
+  flex: 0 0 16px;
+  text-align: center;
+  color: #6d706e;
+  font-weight: 750;
+}
+.vibe-upload-guidance-steps li[data-state="done"]::before { content: "✓"; color: #207044; }
+.vibe-upload-guidance-steps li[data-state="active"]::before { content: "●"; color: #9b6c09; }
+.vibe-upload-guidance p { margin: 8px 0 0; }
+.vibe-upload-guidance p strong { display: inline; font-weight: 750; }

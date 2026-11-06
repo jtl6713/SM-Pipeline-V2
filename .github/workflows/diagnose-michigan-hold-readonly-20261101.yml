@@ -1,0 +1,84 @@
+name: Diagnose Michigan Factory hold mismatch read-only
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-michigan-hold-readonly-20261101.yml'
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Read direct Airtable authority and saved review session for the two Michigan outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          cat > /tmp/michigan-audit.ps1 <<'PS1'
+          $ErrorActionPreference='Stop'
+          $file=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+          if(-not (Test-Path $file)){throw 'runner_env_missing'}
+          $vars=@{}
+          foreach($line in Get-Content $file){
+            if($line -match '^\s*([A-Z0-9_]+)\s*=\s*(.*)$'){
+              $vars[$matches[1]]=$matches[2].Trim().Trim('"').Trim([char]39)
+            }
+          }
+          $pat=[string]$vars['AIRTABLE_PAT'];$base=[string]$vars['AIRTABLE_BASE_ID']
+          if(-not $base){$base='appe33zkZn35yirTL'}
+          if($pat.Length -lt 20){throw 'airtable_auth_missing'}
+          $headers=@{Authorization=('Bearer '+$pat)}
+          $root='https://api.airtable.com/v0/'+$base+'/'
+          foreach($outputId in @('recPnNYghmcJYivOA','recgJR5bTcYfCCwAL')){
+            $row=Invoke-RestMethod -Method GET -Uri ($root+'tblrlPeboBthkplH0/'+$outputId) -Headers $headers -TimeoutSec 20
+            if($row.id -ne $outputId){throw 'output_identity_mismatch'}
+            $f=$row.fields
+            Write-Output ('michigan_output='+$outputId)
+            Write-Output ('michigan_output_number='+[string]$f.Output_ID)
+            Write-Output ('michigan_output_status='+[string]$f.Output_Status)
+            Write-Output ('michigan_publish_status='+[string]$f.Publish_Status)
+            Write-Output ('michigan_review_hold='+[bool]$f.Studio_Render_Review_Hold_Active)
+            Write-Output ('michigan_do_not_publish='+[bool]$f.Do_Not_Publish)
+            Write-Output ('michigan_review_hold_id_present='+[bool]$f.Studio_Render_Review_Hold_ID)
+            Write-Output ('michigan_review_session_id_present='+[bool]$f.Studio_Render_Review_Session_ID)
+            Write-Output ('michigan_has_published_at='+[bool]$f.Published_At)
+            Write-Output ('michigan_has_platform_post_id='+[bool]$f.Platform_Post_ID)
+            $formula='{Output_Record_ID}="'+$outputId+'"'
+            $url=$root+'tblHX3UdoNszkoquG?maxRecords=2&filterByFormula='+[uri]::EscapeDataString($formula)
+            $sessions=@((Invoke-RestMethod -Method GET -Uri $url -Headers $headers -TimeoutSec 25).records)
+            Write-Output ('michigan_session_matches='+$sessions.Count)
+            if($sessions.Count -eq 1){
+              $j=$sessions[0].fields.Session_JSON|ConvertFrom-Json
+              Write-Output ('michigan_session_state='+[string]$j.state)
+              Write-Output ('michigan_session_hold='+[bool]$j.review_hold.active)
+              Write-Output ('michigan_session_attempts='+@($j.attempts).Count)
+              Write-Output ('michigan_session_has_active_job='+[bool]$j.active_job)
+            }
+          }
+          PS1
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/michigan-audit.json').write_text(json.dumps({'command':Path('/tmp/michigan-audit.ps1').read_text(),'confirm':True}))
+          PY
+          code=$(curl -sS --max-time 20 -o /tmp/michigan-start.json -w '%{http_code}' \
+            -X POST 'https://ops.chicagoshining.com/api/shell' \
+            -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/michigan-audit.json || true)
+          [[ "$code" == '200' || "$code" == '202' ]]
+          id=$(jq -r '.job.id // .jobId // empty' /tmp/michigan-start.json);test -n "$id"
+          for i in $(seq 1 45);do
+            curl -fsS --max-time 15 -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$id" -o /tmp/michigan-status.json
+            state=$(jq -r '.job.status // empty' /tmp/michigan-status.json)
+            if [[ "$state" == 'ok' || "$state" == 'failed' ]];then
+              jq -r '.job.log // ""' /tmp/michigan-status.json | grep '^michigan_' || true
+              [[ "$state" == 'ok' ]] && exit 0 || exit 1
+            fi
+            sleep 3
+          done
+          exit 1

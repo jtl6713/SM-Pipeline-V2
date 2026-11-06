@@ -86,3 +86,128 @@ def test_promoted_profile_drift_does_not_fire_when_chain_matches_assets():
         production_output_brand_ids=[nyc_brand],
         profile_to_brand={nyc_profile: nyc_brand},
     ) is None
+
+from quality_agent.signatures import IG_STALE_UPLOAD, detect_ig_stale_upload
+
+def _ig_row(**overrides):
+    fields = {
+        "Output_ID": 9289, "Platform": "Instagram",
+        "Platform_Output_Type": "Instagram Reel",
+        "Publish_Status": "Publishing", "Publish_Locked_By": "AP1-IG",
+        "Publish_Locked_At": "2026-11-02T15:00:00Z",
+        "Last_Publish_Attempt_At": "2026-11-02T15:01:00Z",
+        "Review_Status": "Approved", "Output_Status": "Approved for Publishing",
+        "Publish_Method": "Automated", "Auto_Publish_Enabled": True,
+    }
+    fields.update(overrides)
+    return {"id": "recDaOnGoHG9p819j", "fields": fields}
+
+_NOW = "2026-11-02T16:00:00Z"
+
+def test_ig_stale_detects_orphan_and_requires_provider_preflight():
+    hit = detect_ig_stale_upload(_ig_row(), now_utc=_NOW)
+    assert hit["id"] == IG_STALE_UPLOAD
+    assert hit["age_seconds"] == 3540
+    assert hit["auto_repair_safe"] is False
+    assert "MAE_atomic_reservation" in hit["requires"]
+
+def test_ig_stale_heartbeat_and_live_lease_prevent_recovery():
+    assert detect_ig_stale_upload(_ig_row(), now_utc=_NOW,
+        runner_heartbeat_utc="2026-11-02T15:59:00Z") is None
+    assert detect_ig_stale_upload(_ig_row(), now_utc=_NOW,
+        runner_lease_expires_utc="2026-11-02T16:10:00Z") is None
+
+def test_ig_stale_never_releases_hold_or_cooldown():
+    for field, value in [
+        ("Do_Not_Publish", True), ("Studio_Render_Review_Hold_ID", "hold"),
+        ("Test_Run_ID", "test"), ("Replace_Transaction_ID", "replacement"),
+        ("Published_At", "2026-11-02T15:30:00Z"),
+        ("Publish_Next_Retry_At", "2026-11-02T16:10:00Z")]:
+        assert detect_ig_stale_upload(_ig_row(**{field: value}), now_utc=_NOW) is None
+
+def test_ig_stale_requires_age_and_valid_timestamp():
+    assert detect_ig_stale_upload(_ig_row(), now_utc="2026-11-02T15:20:00Z") is None
+    assert detect_ig_stale_upload(_ig_row(Publish_Locked_At=None), now_utc=_NOW) is None
+
+def test_ig_saved_container_must_reconcile_not_recreate():
+    result = detect_ig_stale_upload(
+        _ig_row(Platform_Media_ID="18127559140783117"), now_utc=_NOW)
+    assert result["remote_identity_saved"] is True
+    assert result["action"] == "verify_existing_provider_post"
+    assert result["auto_repair_safe"] is False
+
+
+def test_ig_guarded_recovery_never_mutates_with_live_or_unknown_runner():
+    from quality_agent.signatures import reconcile_ig_stale_upload
+    events = []
+    mutation = []
+    row = _ig_row()
+    for probe in ({"verified": False}, {"verified": True, "active": True,
+                                        "owner_fenceable": True}):
+        result = reconcile_ig_stale_upload(
+            row, now_utc=_NOW, read_authoritative=lambda _: row,
+            inspect_runner=lambda _: probe,
+            inspect_provider=lambda _: (_ for _ in ()).throw(AssertionError("no provider")),
+            append_audit=events.append,
+            recover_under_fence=lambda *_a, **_k: mutation.append(1),
+        )
+        assert result["outcome"] == "blocked"
+    assert mutation == []
+
+
+def test_ig_guarded_recovery_requires_verified_provider_absence():
+    from quality_agent.signatures import reconcile_ig_stale_upload
+    row = _ig_row()
+    logs = []
+    results = []
+    runner = lambda _: {"verified": True, "active": False, "owner_fenceable": True}
+    for state in ("published", "processing", "ambiguous", "missing"):
+        event = reconcile_ig_stale_upload(
+            row, now_utc=_NOW, read_authoritative=lambda _: row,
+            inspect_runner=runner,
+            inspect_provider=lambda _, state=state: {"verified": True, "state": state},
+            append_audit=logs.append,
+            recover_under_fence=lambda *_a, **_k: results.append(1),
+        )
+        assert event["outcome"] == "blocked"
+    assert results == []
+
+
+def test_ig_guarded_recovery_audits_and_confirms_atomic_reservation():
+    from quality_agent.signatures import reconcile_ig_stale_upload
+    row = _ig_row()
+    events = []
+    calls = []
+    event = reconcile_ig_stale_upload(
+        row, now_utc=_NOW, read_authoritative=lambda _: row,
+        inspect_runner=lambda _: {"verified": True, "active": False,
+                                  "owner_fenceable": True},
+        inspect_provider=lambda _: {"verified": True,
+                                    "state": "conclusively_absent",
+                                    "identity_match": True},
+        append_audit=events.append,
+        recover_under_fence=lambda *_a, **kw: (
+            calls.append(kw) or {"committed": True, "reservation_id": "r1",
+                                 "scheduled_at": "2026-12-01T11:30:00Z"}),
+    )
+    assert event["outcome"] == "rescheduled"
+    assert [e["outcome"] for e in events] == ["authorized_intent", "rescheduled"]
+    assert calls[0]["audit_intent"]["duplicate_possible"] is True
+
+
+def test_ig_guarded_recovery_audit_failure_prevents_mutation():
+    from quality_agent.signatures import reconcile_ig_stale_upload
+    import pytest
+    row = _ig_row()
+    with pytest.raises(OSError):
+        reconcile_ig_stale_upload(
+            row, now_utc=_NOW, read_authoritative=lambda _: row,
+            inspect_runner=lambda _: {"verified": True, "active": False,
+                                      "owner_fenceable": True},
+            inspect_provider=lambda _: {"verified": True,
+                                        "state": "conclusively_absent",
+                                        "identity_match": True},
+            append_audit=lambda _: (_ for _ in ()).throw(OSError("audit unavailable")),
+            recover_under_fence=lambda *_a, **_k: (_ for _ in ()).throw(
+                AssertionError("should not mutate")),
+        )

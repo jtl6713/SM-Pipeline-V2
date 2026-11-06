@@ -193,9 +193,13 @@ test("Global Factory group submit authorizes Airtable before claiming output IDs
     "authoritative preflight then CAS output claims then durable enqueue");
   assert.doesNotMatch(group.slice(0, claimsIdx), /factoryGroupRecordsFromClientHints\(ids, payload, policy\)/);
   assert.match(group, /factoryOutputClaimInspect/);
+  assert.match(group, /factoryOutputClaimReclaimIfSafe/);
   assert.match(group, /duplicate_prevented: true/);
   assert.match(group, /accept_mode: "authoritative_preflight"/);
   assert.match(functions04, /async function factoryGroupRecordsFromAirtablePreflight/);
   assert.match(functions04, /SUBMIT_BUDGET_MS/);
+  assert.match(functions04, /SUBMIT_BUDGET_MS = 25000/);
+  assert.match(functions04, /studioFetchApproveAllRecordsByIds\(env, ids, \{\s*allowIndividualFallback: false/);
+  assert.match(functions04, /factoryResolveGroupOwnershipIds\(env, byId, ids, \{\s*allowIndividualFallback: false/);
   assert.match(functions04, /Factory submit timed out verifying outputs before accept/);
 });

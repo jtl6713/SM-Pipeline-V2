@@ -1,0 +1,61 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+const script=fs.readFileSync(new URL("./assets/factory-desk.js",import.meta.url),"utf8");
+const worker=fs.readFileSync(new URL("../studio-api/worker.js",import.meta.url),"utf8");
+const layout=fs.readFileSync(new URL("./assets/factory-layout-0680.css",import.meta.url),"utf8");
+
+test("Factory separates held creative acceptance from publishing Approve",()=>{
+  assert.match(script,/data-factory-accept-held/);
+  assert.match(script,/Accept V2 \(QA hold\)/);
+  assert.match(script,/data-factory-approve=/);
+  assert.match(script,/publishing approval is held|Publishing approval is held/i);
+  assert.match(script,/action:"accept_held_creative"/);
+  assert.match(script,/result\.publishing_authorized!==false/);
+  assert.match(script,/result\.review_hold_active!==true/);
+  assert.match(script,/result\.public_post_created!==false/);
+  assert.match(worker,/acceptFactoryHeldCreative/);
+  assert.match(worker,/requirePermission\(authorization,"outputs_review"\)/);
+  assert.doesNotMatch(worker,/if\s*\(input\?\.action === "accept_held_creative"\)[\s\S]{0,800}mutateFactoryDesk\(/);
+});
+test("held V2 Request Changes reopens existing Producer session, never enrolls again",()=>{
+  assert.match(script,/data-factory-send-back/);
+  assert.match(script,/action:"return_to_review_held"/);
+  assert.match(script,/\/request-redo/);
+  assert.match(script,/receipt\?\.redo_requested!==true/);
+  assert.match(script,/receipt\.review_hold_active!==true/);
+  assert.match(script,/receipt\.render_queued!==false/);
+  assert.match(script,/payload\?\.action==="return_to_review_held"/);
+});
+
+test("held V2 QA action occupies its own full-width row without text overlap",()=>{
+  // The factory grid has three columns. The extra action MUST NOT take one
+  // narrow column and overflow into adjacent metadata or action buttons.
+  assert.match(script,/class="secondary-button factory-held-creative-action" data-factory-accept-held=/);
+  assert.match(script,/class="secondary-button factory-held-creative-action" disabled/);
+  assert.match(layout,/\.factory-line-actions:has\(> \.factory-held-creative-action\)/);
+  assert.match(layout,/\.factory-line-actions > \.factory-held-creative-action\{[^}]*grid-column:1 \/ -1;[^}]*grid-row:3;[^}]*white-space:normal;[^}]*overflow-wrap:anywhere;/s);
+  assert.match(layout,/\.factory-line-actions:has\(> \.factory-held-creative-action\) > \[data-factory-send-back\]\{[^}]*grid-row:2;/s);
+  assert.match(layout,/\.factory-line-actions:has\(> \.factory-held-creative-action\) > \[data-factory-delete\]\{[^}]*grid-row:2;/s);
+});
+
+test("successful held V2 acceptance acknowledges POST without waiting for a full Factory desk reload",()=>{
+  assert.match(script,/desk\.ok && payload\.action === "accept_held_creative"/);
+  assert.match(script,/desk\.ok && payload\.action === "accept_held_creative"\)[\s\S]*?setStatus\(savedMessage\);\s*return desk;/);
+  assert.match(script,/button\.textContent="Verifying saved V2…"/);
+  assert.match(script,/button\.textContent="Saving creative acceptance…"/);
+  assert.match(script,/state\.heldCreativeAccepted\.add\(card\.id\)/);
+  assert.match(script,/setStatus\("V2 accepted for Factory creative review\. Watermark QA and publishing remain held\."\)/);
+});
+
+test("approved held V2 exposes only protected handoff without claiming publishing approval",()=>{
+  assert.match(script,/data-factory-handoff-held/);
+  assert.match(script,/\/api\/rendering-review\/outputs\//);
+  assert.match(script,/\/factory-handoff/);
+  assert.match(script,/receipt\?\.factory_ready !== true/);
+  assert.match(script,/receipt\?\.review_hold_active !== false/);
+  assert.match(script,/receipt\?\.approved_for_publishing !== false/);
+  assert.match(script,/receipt\?\.scheduled !== false/);
+  assert.match(script,/receipt\?\.public_post_created !== false/);
+  assert.match(script,/await loadFactoryDesk\(true\)/);
+});

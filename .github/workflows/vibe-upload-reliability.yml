@@ -1,0 +1,41 @@
+name: Vibe Upload Reliability
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-web/**'
+      - 'apps/studio-api/worker-functions-01.mjs'
+      - 'apps/studio-api/idea-title-uniqueness.mjs'
+      - 'apps/studio-api/idea-title-uniqueness.test.mjs'
+      - 'apps/studio-api/worker-functions-02.mjs'
+      - 'apps/studio-api/worker.js'
+      - 'apps/studio-api/vibe-preflight-500-boundary.test.mjs'
+      - 'apps/studio-api/large-video-upload-recovery.test.mjs'
+      - '.github/workflows/vibe-upload-reliability.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/studio-web/**'
+      - 'apps/studio-api/worker-functions-01.mjs'
+      - 'apps/studio-api/idea-title-uniqueness.mjs'
+      - 'apps/studio-api/idea-title-uniqueness.test.mjs'
+      - 'apps/studio-api/worker-functions-02.mjs'
+      - 'apps/studio-api/worker.js'
+      - 'apps/studio-api/vibe-preflight-500-boundary.test.mjs'
+      - 'apps/studio-api/large-video-upload-recovery.test.mjs'
+permissions:
+  contents: read
+jobs:
+  upload-reliability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: |
+          node --check apps/studio-web/assets/app-item4-1008.js
+          node --check apps/studio-api/worker-functions-01.mjs
+          node --check apps/studio-api/worker-functions-02.mjs
+          node --check apps/studio-api/worker.js
+          node --test apps/studio-web/vibe-upload-reliability.test.mjs apps/studio-web/vibe-upload-status.test.mjs apps/studio-web/vibe-upload-confirm.test.mjs apps/studio-web/vibe-cut-large-upload.test.mjs apps/studio-api/large-video-upload-recovery.test.mjs apps/studio-api/vibe-preflight-500-boundary.test.mjs apps/studio-api/idea-title-uniqueness.test.mjs

@@ -1,3 +1,22 @@
+import { loadAuthoritativeFactoryCorrection } from "./factory-correction-authority.mjs";
+import { readFactoryClaimsDiagnostic } from "./factory-timing-r2-inspector.mjs";
+import { readAuthoritativeGalleryInventory } from "./rendering-review-gallery-inventory-http.mjs";
+import { previewNativeGalleryCorrection } from "./rendering-review-gallery-selection-preview.mjs";
+import { readGalleryRevisionStatus } from "./rendering-review-gallery-status-http.mjs";
+import { isNativeGalleryControlledPostPath } from "./native-gallery-route-gate.mjs";
+import { verifyGallerySourceBytes, gallerySourceBytePreflightEnabled } from "./rendering-review-gallery-byte-preflight.mjs";
+import { handleNativeGalleryGenerate } from "./native-gallery-generation-http.mjs";
+import { enrollNativeGalleryHold, nativeGalleryEnrollmentEnabled } from "./native-gallery-hold-enrollment.mjs";
+import { claimNativeGalleryJob, galleryClaimEnabled } from "./native-gallery-job-claim.mjs";
+import { reserveNativeGalleryLaunch, nativeGalleryLaunchIntentEnabled } from "./native-gallery-launch-ledger.mjs";
+import {commitNativeGalleryManifest, nativeGalleryManifestCommitEnabled} from "./native-gallery-manifest-commit.mjs";
+import {verifyNativeGalleryRevisionDrive} from "./native-gallery-revision-readback.mjs";
+import {serveNativeGalleryPreview} from "./native-gallery-preview.mjs";
+import {decideNativeGalleryCreative,nativeGalleryCreativeReviewEnabled} from "./native-gallery-creative-decision.mjs";
+import {inspectNativeGalleryFactoryPreflight,nativeGalleryFactoryPreflightEnabled} from "./native-gallery-factory-preflight.mjs";
+import {handoffNativeGalleryToPrivateFactory,nativeGalleryPrivateFactoryHandoffEnabled} from "./native-gallery-private-factory-handoff.mjs";
+import { NATIVE_GALLERY_JOBS_TABLE, nativeGalleryJobsEnabled } from "./native-gallery-job-airtable.mjs";
+import { readNativeGalleryPrivateManifest } from "./native-gallery-private-manifest.mjs";
 import { readRenderingReviewWorkspace } from "./rendering-review-workspace.mjs";
 import { serveReviewAttemptVideo, fetchTrustedRunnerReviewMedia } from "./rendering-review-attempt-video.mjs";
 import { completeReviewAttempt } from "./rendering-review-completion-http.mjs";
@@ -9,20 +28,24 @@ import { handleRenderingReviewFeedbackRequest, reviewFeedbackWriteEnabled } from
 import { handleRenderingReviewEnrollRequest, reviewEnrollmentWriteEnabled } from "./rendering-review-enrollment-http.mjs";
 import { acceptReviewCreativeOnly } from "./rendering-review-approval-http.mjs";
 import { handoffApprovedReviewToFactory } from "./rendering-review-factory-handoff.mjs";
+import { requestApprovedHeldCreativeRedo } from "./rendering-review-held-redo.mjs";
 import { nextApprovedCreativeMaster, projectCreativeMasterGroup, MASTER_FIELD } from "./creative-master-registry.mjs";
 import { propagateApprovedCreativeMaster } from "./creative-master-propagation.mjs";
 import { returnFactoryRevisionToProducer } from "./rendering-review-factory-return.mjs";
+import { acceptFactoryHeldCreative } from "./rendering-review-factory-accept-held.mjs";
 import { serveFactorySelectedReviewVideo, factorySelectedReviewAttempt } from "./rendering-review-factory-preview.mjs";
 import { MICHIGAN_V2, ensureMichiganV2CachedPreview } from "./michigan-review-preview-cache.mjs";
 import { composeRenderingReviewEnrollmentOperations } from "./rendering-review-enrollment-wiring.mjs";
 import { handleReviewProducerProposal, reviewProducerBridgeEnabled } from "./rendering-review-producer-bridge.mjs";
 import { persistReviewProducerCandidate, producerConversationWritesEnabled } from "./rendering-review-producer-persist.mjs";
 import { persistReadyReviewPlan } from "./rendering-review-plan-persist.mjs";
+import { prepareReviewLibraryStills } from "./rendering-review-library-prepare.mjs";
 import { listRecords as reviewListRecords, listRecordsPage as reviewListRecordsPage, resolveAuthorizedContentProfiles as reviewAuthorizedProfiles, studioSupabaseWriteThroughOutput as reviewFactorySyncOutput } from "./worker-functions-01.mjs";
 import { studioIdeaTitleKey, studioFindRecentDuplicateTitle } from "./idea-title-uniqueness.mjs";
 import { readProducerThread, appendProducerThreadMessage, producerConversationHistory } from "./producer-conversation.mjs";
 import { scriptedShortProducerPlanFromNotes } from "./scripted-short-producer-plan.mjs";
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
+import { sweepPreFactoryReady, PRE_FACTORY_READY_FORMULA } from "./pre-factory-ready-recovery.mjs";
 import { claimChicagoInstagramDispatch, igDispatchClaimEnabled } from "./rendering-review-ig-dispatch-claim.mjs";
 import { claimReviewRenderJob, reviewRendererJobClaimEnabled } from "./rendering-review-job-claim.mjs";
 import { handleReviewLaunchLedger, reviewLaunchLedgerEnabled } from "./rendering-review-launch-ledger.mjs";
@@ -666,6 +689,7 @@ import {
   studioSupabaseWriteThroughAirtableMutation,
 } from "./worker-functions-01.mjs";
 import {
+  studioAdmitRenderQueue,
   studioHealEscalatedProduce,
   item4PulsePipelineStage,
   handleRr2ReviewDecision,
@@ -713,6 +737,7 @@ import {
   watchIdeaPhotosRoute,
   matchIdeaPhotosRoute,
   proposeScriptedShortRoute,
+  reviseScriptedShortRoute,
   acceptScriptedShortRoute,
   planVibeCutRoute,
   anotherVibeCutRoute,
@@ -781,6 +806,9 @@ import {
 } from "./worker-functions-03.mjs";
 import { auditReel368Holds } from "./facebook-reel-368-audit.mjs";
 import { qaInstagramCarouselMaintenance } from "./qa-instagram-carousel-maintenance.mjs";
+import { auditStaleInstagramReels, verifySavedInstagramContainer } from "./qa-ig-stale-upload.mjs";
+import { igPublishLeaseEnabled, mutateIgPublishLease, readIgPublishLease, fenceStaleIgPreRemoteLease, markIgLeaseRecovered, verifyIgLeaseRunnerHealth } from "./qa-ig-publish-lease.mjs";
+import { verifyAuthenticatedInstagramReceipt } from "./exception-recovery-authenticated-receipt.mjs";
 import { studioActivePipelineSettings } from "./worker-functions-03.mjs";
 import {
   healStaleManualFlagsOnPublishedRecord,
@@ -803,6 +831,7 @@ import {
   studioReconcileFacebookVideoCovers,
   studioReconcilePublishingInstagramStories,
   studioReconcilePublishingInstagramReels,
+  studioRecoverFencedIgStaleUpload,
   studioReconcileFacebookSlideshows,
   studioReconcileFacebookReels,
   startScheduleRegenJob,
@@ -856,6 +885,7 @@ import {
   pauseStudioOperationsQueueItem,
   reorderStudioOperationsRenderQueue,
   prepareIdeaToReview,
+  advanceVibeCutToReview,
   getStudioOperations,
   getStudioOperationsProfiles,
   patchStudioOperationsProfile,
@@ -920,11 +950,13 @@ export default {
       const isIdeaProductionRequestRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/production-request$/.test(url.pathname);
       const isIdeaGenerateRoute = url.pathname === "/api/ideas/generate";
       const isScriptedShortProposeRoute = url.pathname === "/api/scripted-short/propose";
+      const isScriptedShortReviseRoute = url.pathname === "/api/scripted-short/revise";
       const isScriptedShortAcceptRoute = url.pathname === "/api/scripted-short/accept";
       const isIdeaGenerateStatusRoute = /^\/api\/ideas\/generate\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isProductionRequestRecordRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isProducerConversationRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/producer-conversation$/.test(url.pathname);
       const isProductionRequestPromoteRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/promote$/.test(url.pathname);
+      const isVibeCutToReviewRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/vibe-to-review$/.test(url.pathname);
       const isProductionRequestBridgePreflightRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/bridge-preflight$/.test(url.pathname);
       const isProductionRequestSyncDirectivesRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/sync-directives$/.test(url.pathname);
       const isProductionRequestTimedScriptRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/timed-script$/.test(url.pathname);
@@ -1057,6 +1089,7 @@ export default {
       const isIdeaCreateRoute = url.pathname === "/api/ideas" && request.method === "POST";
       const isIdeaGenerateWrite = isIdeaGenerateRoute && request.method === "POST";
       const isScriptedShortProposeWrite = isScriptedShortProposeRoute && request.method === "POST";
+      const isScriptedShortReviseWrite = isScriptedShortReviseRoute && request.method === "POST";
       const isScriptedShortAcceptWrite = isScriptedShortAcceptRoute && request.method === "POST";
       const isIdeaEditRoute = isIdeaRecordRoute && request.method === "PATCH";
       const isIdeaDeleteRoute = isIdeaRecordRoute && request.method === "DELETE";
@@ -1076,6 +1109,7 @@ export default {
       const isProductionRequestEditWrite = isProductionRequestRecordRoute && request.method === "PATCH";
       const isProducerConversationWrite = isProducerConversationRoute && request.method === "POST";
       const isProductionRequestPromoteWrite = isProductionRequestPromoteRoute && request.method === "POST";
+      const isVibeCutToReviewWrite = isVibeCutToReviewRoute && request.method === "POST";
       const isProductionRequestSyncDirectivesWrite = isProductionRequestSyncDirectivesRoute && request.method === "POST";
       const isProductionRequestTimedScriptWrite = isProductionRequestTimedScriptRoute && request.method === "POST";
       const isProductionRequestOutputsSyncWrite = isProductionRequestOutputsRoute && request.method === "PUT";
@@ -1129,12 +1163,21 @@ export default {
       const isEngagementActionsWrite = isEngagementActionsRoute && request.method === "POST";
       // Exact Chicago review writes are authorized again by their protected handlers.
       // The old global Phase-2A allowlist must not reject them before inspection.
+      const isInternalIgPublishLeasePost = request.method === "POST" &&
+        /^\/(?:api\/)?internal\/quality\/ig-publish-lease$/.test(url.pathname);
       const isChicagoReviewPost = request.method === "POST" &&
-        (/^\/api\/rendering-review\/outputs\/rec[A-Za-z0-9]{14}\/(?:producer-conversation|producer-proposal|commit-attempt|messages|approve|factory-handoff)$/.test(url.pathname) ||
+        (/^\/api\/rendering-review\/outputs\/rec[A-Za-z0-9]{14}\/(?:producer-conversation|producer-proposal|commit-attempt|messages|next-revision-feedback|review-feedback|approve|factory-handoff|request-redo)$/.test(url.pathname) ||
          /^\/api\/rendering-review\/factory\/outputs\/rec[A-Za-z0-9]{14}\/request-changes$/.test(url.pathname) ||
          /^\/(?:api\/)?internal\/rendering-review\/(?:claim-render-job|launch-ledger|complete-attempt|qa-audio-rebind|ig-dispatch-claim|factory-handoff)$/.test(url.pathname));
+      // The historical Phase-2A gate must not preempt separately protected
+      // gallery selection, hold, one-shot C5/C6 or human creative handlers.
+      // This predicate grants method admission ONLY; all flags/auth stay off.
+      const isNativeGalleryControlledPost =
+        isNativeGalleryControlledPostPath(url.pathname,request.method);
       const allowedMethod =
+        isNativeGalleryControlledPost ||
         isChicagoReviewPost ||
+        isInternalIgPublishLeasePost ||
         request.method === "GET" ||
         (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isMediaAssetStreamRoute || isPublicBrandWatermarkRoute || isOutputPreviewRoute || isFactoryOutputPreviewRoute || isReviewAttemptPreviewRoute || isVoicePreviewRoute)) ||
         isProfilesOverviewRefreshWrite ||
@@ -1142,6 +1185,7 @@ export default {
         isIdeaCreateRoute ||
         isIdeaGenerateWrite ||
         isScriptedShortProposeWrite ||
+        isScriptedShortReviseWrite ||
         isScriptedShortAcceptWrite ||
         isIdeaEditRoute ||
         isIdeaDeleteRoute ||
@@ -1156,6 +1200,7 @@ export default {
         isProductionRequestEditWrite ||
         isProducerConversationWrite ||
         isProductionRequestPromoteWrite ||
+        isVibeCutToReviewWrite ||
         isProductionRequestSyncDirectivesWrite ||
         isProductionRequestTimedScriptWrite ||
         isProductionRequestOutputsSyncWrite ||
@@ -1264,9 +1309,12 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.708-vibe-cut-video-ideas" + "-home-v6-fast-cache" + "-home-summary-v6-shadow" + "-publication-recovery-v1" + "-render-review-guards-v1-review-reads-v1",
+          version: "0.10.764-formal-review-parity",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
+          qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
+          qa_ig_publish_lease_enabled: igPublishLeaseEnabled(env),
+          qa_ig_unattended_reschedule_enabled: igPublishLeaseEnabled(env) && env.STUDIO_IG_STALE_UPLOAD_AUTO_RECOVERY_ENABLED === "true",
           quality_autonomous_verification_recovery_v1: true,
           quality_durable_recovery_ledger_v1: true,
           quality_meta_story_readonly_verification_v1: true,
@@ -1276,6 +1324,8 @@ export default {
           studio_profile_summary_home_membership_v1: true,
           photo_match_error_json_v1: true,
           factory_batch_canary_revision: "chicago-ig-reel-v1",
+          factory_correction_matching_readonly_v1: true,
+          factory_gallery_inventory_readonly_v1: true,
           factory_batch_phase2a_post_gate_fix_v1: true,
           studio_supabase_pipeline_reads_v1: true,
           studio_supabase_sync_gate_v1: true,
@@ -1642,6 +1692,148 @@ export default {
         }, authorization.authenticated ? 200 : 401);
       }
 
+      // Native gallery claim has a dedicated table, exact R2 output lock,
+      // and a separate service credential. No Runner direct Airtable writes.
+      // All deployment flags are OFF by default; never grants publication.
+      if(url.pathname==="/internal/native-gallery/claim-job" ||
+         url.pathname==="/api/internal/native-gallery/claim-job"){
+        requireConfig(env);
+        if(!galleryClaimEnabled(env))
+          throw new HttpError(405,"Native gallery Runner claim disabled");
+        const readJob=async jobId=>{
+          if(!/^[A-Za-z0-9_-]{8,120}$/.test(String(jobId||"")))return null;
+          const rows=await reviewListRecords(env,NATIVE_GALLERY_JOBS_TABLE,{
+            limit:2,filterFormula:'{Job_ID}="'+jobId+'"',
+            fields:["Job_ID","Output_Record_ID","Content_Item_Record_ID",
+              "Profile_Record_ID","Actor_Record_ID","Client_Request_ID",
+              "Request_Fingerprint","Original_Manifest_SHA256",
+              "Plan_SHA256","Plan_JSON","Event_History_JSON",
+              "Hold_ID","Hold_Owner","Job_State","Row_Version",
+              "Lease_Owner","Lease_Fence"],
+          });
+          if(!Array.isArray(rows)||rows.length!==1)return null;
+          return rows[0];
+        };
+        const receipt=await claimNativeGalleryJob({
+          request,env,operations:{
+            withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+            readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+            readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+            readJob,
+            patchJob:(id,fields)=>airtableFetch(env,NATIVE_GALLERY_JOBS_TABLE,id,{
+              method:"PATCH",body:JSON.stringify({fields,typecast:false}),
+            }),
+          },
+        });
+        return respond(request,env,receipt);
+      }
+
+      // A native gallery Runner must reserve its exact generation intent
+      // durably before its first model call. No repeat or implicit replay.
+      // Source bytes/owned branding are refreshed under the output R2 lock.
+      if(url.pathname==="/internal/native-gallery/reserve-launch" ||
+         url.pathname==="/api/internal/native-gallery/reserve-launch"){
+        requireConfig(env);
+        if(!nativeGalleryLaunchIntentEnabled(env))
+          throw new HttpError(405,"Native gallery launch ledger disabled");
+        const readJob=async jobId=>{
+          if(!/^[A-Za-z0-9_-]{8,120}$/.test(String(jobId||"")))return null;
+          const rows=await reviewListRecords(env,NATIVE_GALLERY_JOBS_TABLE,{
+            limit:2,filterFormula:'{Job_ID}="'+jobId+'"',
+            fields:["Job_ID","Output_Record_ID","Content_Item_Record_ID",
+              "Profile_Record_ID","Actor_Record_ID","Request_Fingerprint",
+              "Original_Manifest_SHA256","Original_Manifest_JSON",
+              "Plan_SHA256","Plan_JSON","Event_History_JSON",
+              "Hold_ID","Hold_Owner","Job_State","Row_Version",
+              "Lease_Owner","Lease_Fence","Launch_Intent_SHA256",
+              "Launch_Receipt_JSON"],
+          });
+          if(!Array.isArray(rows)||rows.length!==1)return null;
+          return rows[0];
+        };
+        const result=await reserveNativeGalleryLaunch({
+          request,env,operations:{
+            withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+            readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+            readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+            readJob,
+            patchJob:(id,fields)=>airtableFetch(env,NATIVE_GALLERY_JOBS_TABLE,id,{
+              method:"PATCH",body:JSON.stringify({fields,typecast:false}),
+            }),
+            verifyOriginalSources:async({output_id,profile_id,
+                content_item_id,original_manifest_sha256,original_artifacts})=>{
+              const inventory=await readAuthoritativeGalleryInventory({
+                output_id,authorized_profile_ids:[profile_id],
+                readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+                readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+                readSlides:async ids=>reviewListRecords(env,"tblcnQDBvUngpjDED",{
+                  limit:ids.length,
+                  filterFormula:'OR('+ids.map(id=>'RECORD_ID()="'+id+'"').join(',')+')',
+                  fields:["Content Item","Platform Output","Platform","Slide Number",
+                    "Aspect Ratio","Deleted From Carousel","Approved For Final",
+                    "Review Status","Asset_4x5_File_ID","Asset_1x1_File_ID",
+                    "Asset_9x16_File_ID","Final Google Drive File ID"],
+                }),
+              });
+              if(inventory.content_item_id!==content_item_id||
+                 inventory.profile_id!==profile_id||
+                 inventory.slide_count!==original_artifacts.length)
+                return false;
+              const actual=await readNativeGalleryPrivateManifest({
+                env,output_id,profile_id,content_item_id,
+                aspect_ratio:inventory.aspect_ratio,
+              });
+              return actual.original_manifest_sha256===original_manifest_sha256&&
+                JSON.stringify(actual.original_artifacts)===
+                  JSON.stringify(original_artifacts)&&
+                actual.sources_byte_verified===true&&
+                actual.original_artifact_watermark_verified===true&&
+                actual.publication_authorized===false;
+            },
+          },
+        });
+        return respond(request,env,result);
+      }
+
+      // Exact held native-gallery V2 artifact commit, distinct from creative
+      // acceptance and independent of Factory/publishing. Service-only.
+      if(url.pathname==="/internal/native-gallery/commit-manifest"||
+         url.pathname==="/api/internal/native-gallery/commit-manifest"){
+        requireConfig(env);
+        if(!nativeGalleryManifestCommitEnabled(env))
+          throw new HttpError(405,"Native gallery revision commit disabled");
+        const readJob=async jobId=>{
+          if(!/^[A-Za-z0-9_-]{8,120}$/.test(String(jobId||"")))return null;
+          const rows=await reviewListRecords(env,NATIVE_GALLERY_JOBS_TABLE,{
+            limit:2,filterFormula:'{Job_ID}="'+jobId+'"',
+            fields:["Job_ID","Output_Record_ID","Content_Item_Record_ID",
+              "Profile_Record_ID","Request_Fingerprint","Original_Manifest_SHA256",
+              "Original_Manifest_JSON","Plan_SHA256","Plan_JSON",
+              "Event_History_JSON","Hold_ID","Hold_Owner","Job_State",
+              "Row_Version","Lease_Owner","Lease_Fence",
+              "Launch_Intent_SHA256","Revised_Manifest_SHA256",
+              "Revised_Manifest_JSON"],
+          });
+          if(!Array.isArray(rows)||rows.length!==1)return null;
+          return rows[0];
+        };
+        const result=await commitNativeGalleryManifest({
+          request,env,operations:{
+            withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+            readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+            readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+            readJob,
+            patchJob:(id,fields)=>airtableFetch(env,NATIVE_GALLERY_JOBS_TABLE,id,{
+              method:"PATCH",body:JSON.stringify({fields,typecast:false}),
+            }),
+            verifyRevisedDriveArtifacts:args=>verifyNativeGalleryRevisionDrive({
+              env,...args,
+            }),
+          },
+        });
+        return respond(request,env,result);
+      }
+
       // Internal render-worker claim, distinct from the public Studio API and
       // Instagram publisher. Independent server secret; all flags OFF by default.
       if (url.pathname === "/internal/rendering-review/claim-render-job" || url.pathname === "/api/internal/rendering-review/claim-render-job") {
@@ -1937,6 +2129,46 @@ export default {
         return respond(request,env,result);
       }
 
+      // Protected cross-runtime AP1-IG lease. Only the Python runner holding
+      // the shared server secret may claim/renew/record Graph intent. No
+      // browser/Studio user credential grants access to these actions.
+      if (url.pathname === "/internal/quality/ig-publish-lease" ||
+          url.pathname === "/api/internal/quality/ig-publish-lease") {
+        requireConfig(env);
+        if (!igPublishLeaseEnabled(env))
+          throw new HttpError(503, "IG publish lease not enabled");
+        if (request.method !== "POST") throw new HttpError(405,"POST required");
+        const expected=String(env.STUDIO_IG_PUBLISH_LEASE_SHARED_SECRET||"").trim();
+        const supplied=String(request.headers.get("X-Ig-Publish-Lease-Secret")||"").trim();
+        if (expected.length<24 || supplied.length!==expected.length)
+          throw new HttpError(403,"Publisher lease credential required");
+        const digest=async value=>new Uint8Array(await crypto.subtle.digest("SHA-256",
+          new TextEncoder().encode(value)));
+        const [a,b]=await Promise.all([digest(expected),digest(supplied)]);
+        let difference=0;
+        for(let i=0;i<a.length;i++) difference |= a[i]^b[i];
+        if (difference) throw new HttpError(403,"Publisher lease credential required");
+        if (!/^application\/json(?:\s*;|$)/i.test(String(request.headers.get("Content-Type")||"")))
+          throw new HttpError(415,"JSON required");
+        const raw=await request.text();
+        if(raw.length>1600)throw new HttpError(413,"Publisher lease request too large");
+        let data;
+        try {data=JSON.parse(raw);}catch {throw new HttpError(400,"Malformed publisher lease request");}
+        const allowed=["action","output_id","attempt_id","generation","lock_stamp"];
+        if(!data || typeof data!=="object" || Array.isArray(data) ||
+           Object.keys(data).some(key=>!allowed.includes(key)))
+          throw new HttpError(400,"Invalid publisher lease arguments");
+        const result=await mutateIgPublishLease(env,{
+          action:String(data.action||""),
+          outputId:String(data.output_id||""),
+          attemptId:data.attempt_id,
+          generation:data.generation,
+          lockStamp:data.lock_stamp,
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+        });
+        return respond(request,env,result);
+      }
+
       // Internal AP1-IG dispatch claim: never accepts browser authorization.
       // It uses a separate protected server secret and the SAME R2 output
       // lease as manual review enrollment and Factory/approval. Feature OFF.
@@ -1967,6 +2199,31 @@ export default {
       }
       if (!authorization.authorized) {
         throw new HttpError(403, authorization.authorization_error || "Studio membership required");
+      }
+
+      // An approved held revision can be reopened for creative redo without
+      // watermark QA. The original hold and publishing restrictions remain.
+      const heldRedoMatch=/^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/request-redo$/.exec(url.pathname);
+      if(heldRedoMatch&&request.method==="POST"){
+        requirePermission(authorization,"outputs_review");
+        if(!(await reviewAuthorizedProfiles(env,authorization)).some(p=>p.id===CHICAGO_PROFILE_ID))
+          throw new HttpError(403,"Chicago review membership required");
+        assertWriteRequest(request,env);
+        if(!/^application\/json(?:\s*;|$)/i.test(String(request.headers.get("Content-Type")||"")))
+          throw new HttpError(415,"JSON required");
+        const raw=await request.text();
+        if(raw.length>3800)throw new HttpError(413,"Redo request too large");
+        let body;try{body=JSON.parse(raw)}catch{throw new HttpError(400,"Invalid JSON")}
+        if(!body||typeof body!=="object"||Array.isArray(body)||
+           Object.keys(body).length!==3||
+           Object.keys(body).some(k=>!["note","client_request_id","expected_version"].includes(k)))
+          throw new HttpError(400,"Exact creative redo input required");
+        return respond(request,env,await requestApprovedHeldCreativeRedo({
+          output_id:heldRedoMatch[1],note:body.note,
+          client_request_id:body.client_request_id,expected_version:body.expected_version,
+          actor_id:authorization.user?.record_id,
+          operations:makeReviewFactoryHandoffOperations(env),
+        }));
       }
 
       // Factory promotion is a separate, authenticated retry for a review
@@ -2020,6 +2277,55 @@ export default {
         // genuine model replies, through the existing versioned session owner.
         // Explicit human commit of a verified frozen creative plan.
         // Completely OFF until the isolated renderer/outbox consumer exists.
+        // User explicitly requests source-library crop PREPARATION, not a
+        // Producer message, render, approval, schedule, or publication.
+        const prepareLibraryMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/prepare-library-stills$/.exec(url.pathname);
+        if(prepareLibraryMatch&&request.method==="POST"){
+          if(!producerConversationWritesEnabled(env))
+            throw new HttpError(405,"Review library preparation is not enabled");
+          assertWriteRequest(request,env);
+          if(!(await reviewAuthorizedProfiles(env,authorization)).some(p=>p.id===CHICAGO_PROFILE_ID))
+            throw new HttpError(403,"Chicago review membership required");
+          if(!/^application\/json(?:\s*;|$)/i.test(String(request.headers.get("Content-Type")||"")))
+            throw new HttpError(415,"JSON required");
+          const raw=await request.text();
+          if(raw.length>800)throw new HttpError(413,"Prepare request too large");
+          let body;try{body=JSON.parse(raw)}catch{throw new HttpError(400,"Invalid JSON")}
+          if(!body||Array.isArray(body)||typeof body!=="object"||
+             Object.keys(body).length!==3||
+             Object.keys(body).some(k=>!["intent","expected_version","client_request_id"].includes(k))||
+             body.intent!=="prepare_selected_photos_no_render"||
+             typeof body.client_request_id!=="string"||
+             !/^[A-Za-z0-9_-]{8,120}$/.test(body.client_request_id))
+            throw new HttpError(400,"Explicit photo preparation intent required");
+          let adapter;
+          const authorizeOutput=async outputId=>{
+            const view=await adapter.readOutput(outputId);
+            return view.profile_id===CHICAGO_PROFILE_ID&&
+              view.output_type==="Instagram Reel"&&view.platform==="Instagram";
+          };
+          adapter=makeRenderingReviewAirtableOperations({
+            env,airtableFetch,listRecords:reviewListRecords,readField:f,
+            withOutputApprovalLock,authorizeReview:authorizeOutput,
+            authorizeEvent:async()=>false,
+            revokeScheduleUnderHold:async()=>{throw new HttpError(405,"Schedule changes prohibited");},
+            mutationGate:false,
+          });
+          const result=await prepareReviewLibraryStills({
+            output_id:prepareLibraryMatch[1],
+            expected_version:body.expected_version,operations:adapter,
+            readRecord:(table,id)=>airtableFetch(env,table,id),readField:f,
+            listRecords:(table,params)=>reviewListRecords(env,table,params),
+            createQueue:async fields=>{
+              const result=await airtableFetch(env,"tblBZLXPd1p2NRWRK","",{
+                method:"POST",body:JSON.stringify({records:[{fields}],typecast:false}),
+              });
+              return result.records||[];
+            },
+            withLock:(outputId,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,outputId,fn),
+          });
+          return respond(request,env,result);
+        }
         const commitAttemptMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/commit-attempt$/.exec(url.pathname);
         if (commitAttemptMatch && request.method === "POST") {
           if (!renderAttemptCommitEnabled(env))
@@ -2140,6 +2446,26 @@ export default {
               env, output_id:conversationMatch[1], operations:adapter,
               readRecord:(table,id)=>airtableFetch(env,table,id),
               readField:f,
+              // Resolve library crops by immutable source Drive identities
+              // in the same authoritative Airtable scope as the review.
+              readLibraryVariants:async fileIds=>{
+                if(!Array.isArray(fileIds)||fileIds.length>16||
+                   fileIds.some(id=>!/^[A-Za-z0-9_-]{16,}$/.test(id)))
+                  throw new HttpError(400,"Invalid catalog source identities");
+                if(!fileIds.length)return [];
+                const formula='AND({Asset_Kind}="Platform Variant",'+
+                  'OR('+fileIds.map(id=>
+                    '{Source_Drive_File_ID}="'+id+'"').join(',')+'))';
+                return reviewListRecords(env,"tblBZLXPd1p2NRWRK",{
+                  limit:400,filterFormula:formula,
+                  fields:["Source_Media_Asset","Source_Drive_File_ID",
+                    "Source_Size_Bytes","Source_Asset_ID","Asset_Kind",
+                    "Aspect_Ratio","Variant_Style","Transfer_Status",
+                    "Preview_Status","Preview_URL","Drive_File_ID",
+                    "Generated_Media_Asset","Target_File_Name",
+                    "Production_Request_Record_ID","Completed_At"],
+                });
+              },
               // A later V3+ revision must independently verify the completed
               // V2 MP4 projection, never silently fall back to original V1.
               loadCompletedAttempt:async attemptId=>{
@@ -2220,17 +2546,28 @@ export default {
             request,env,authorization,output_id:acceptMatch[1],
             assertWriteRequest,operations:adapter,
           });
-          // Creative acceptance is already durable. Finish the Factory
-          // handoff automatically; a replay of the same accept request can
-          // resume a partial transfer without requiring another approval.
-          const transferred=await handoffApprovedReviewToFactory({
-            output_id:acceptMatch[1],env,
-            operations:makeReviewFactoryHandoffOperations(env),
-          });
-          return respond(request,env,{...accepted,
-            factory_handoff:transferred,factory_ready:transferred.factory_ready,
-            review_hold_active:false,
-          });
+          // Preserve durable creative acceptance when delivery QA is pending.
+          // Factory transfer is a separate step; an unverified watermark never
+          // prevents an approved held V2 from going back to Producer for redo.
+          try{
+            const transferred=await handoffApprovedReviewToFactory({
+              output_id:acceptMatch[1],env,
+              operations:makeReviewFactoryHandoffOperations(env),
+            });
+            return respond(request,env,{...accepted,
+              factory_handoff:transferred,factory_ready:transferred.factory_ready,
+              review_hold_active:false,
+            });
+          }catch(error){
+            console.warn("Approved V2 Factory handoff deferred",acceptMatch[1],
+              String(error?.code||error?.message||"UNKNOWN"));
+            return respond(request,env,{...accepted,
+              factory_ready:false,factory_handoff_pending:true,
+              factory_handoff_code:String(error?.code||"FACTORY_HANDOFF_UNVERIFIED"),
+              review_hold_active:null,
+              publication_changed:false,instagram_upload_created:false,
+            });
+          }
         }
         const enrollmentMatch = /^\/api\/rendering-review\/factory\/outputs\/(rec[A-Za-z0-9]{14})\/request-changes$/.exec(url.pathname);
         if (enrollmentMatch && request.method === "POST") {
@@ -2294,12 +2631,15 @@ export default {
           });
           return respond(request, env, result);
         }
-        const feedbackMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/messages$/.exec(url.pathname);
+        const feedbackMatch = /^\/api\/rendering-review\/outputs\/(rec[A-Za-z0-9]{14})\/(messages|next-revision-feedback|review-feedback)$/.exec(url.pathname);
         if (feedbackMatch && request.method === "POST") {
-          // Three protected release gates are OFF until the complete manual
-          // Chicago pilot is verified. Never accept HTTP body flags.
-          if (!reviewFeedbackWriteEnabled(env))
-            throw new HttpError(405, "Rendering Review mutations are not enabled");
+          const inFlightOnly=feedbackMatch[2]==="next-revision-feedback";
+          const reviewNoteOnly=feedbackMatch[2]==="review-feedback";
+          // This note-only route inherits the existing Producer rollout gates.
+          // Legacy /messages retains its independent deny-by-default flags.
+          if (inFlightOnly || reviewNoteOnly ? !producerConversationWritesEnabled(env) :
+              !reviewFeedbackWriteEnabled(env))
+            throw new HttpError(405, "Rendering Review feedback is not enabled");
           const permitted = (await reviewAuthorizedProfiles(env, authorization))
             .some(profile => profile.id === CHICAGO_PROFILE_ID);
           if (!permitted) throw new HttpError(403, "Chicago Rendering Review membership required");
@@ -2338,7 +2678,8 @@ export default {
           };
           const result = await handleRenderingReviewFeedbackRequest({
             request,env,authorization,output_id:feedbackMatch[1],
-            assertWriteRequest,operations,
+            assertWriteRequest,operations,in_flight_only:inFlightOnly,
+            review_note_only:reviewNoteOnly,
           });
           return respond(request,env,result);
         }
@@ -2402,11 +2743,11 @@ export default {
 
       if (isAiApiRoute) {
         requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
-        if (request.method === "GET") return getStudioAiApiStatus(request, env);
+        if (request.method === "GET") return await getStudioAiApiStatus(request, env);
         if (request.method === "PATCH") {
           requirePermission(authorization, "tenant_admin");
           assertWriteRequest(request, env);
-          return patchStudioAiApiPreference(request, env);
+          return await patchStudioAiApiPreference(request, env);
         }
         throw new HttpError(405, "Method not allowed");
       }
@@ -2493,7 +2834,7 @@ export default {
 
       if (isOperationsRoute) {
         requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
-        return getStudioOperations(request, env, authorization);
+        return await getStudioOperations(request, env, authorization);
       }
 
       if (isOperationsProfilesListRoute) {
@@ -2521,20 +2862,450 @@ export default {
 
       if (isFactoryBatchRoute) {
         requirePermission(authorization, "outputs_review");
-        if (request.method === "GET") return factoryBatchStatusRoute(request, env, authorization);
+        if (request.method === "GET") {
+          if (url.searchParams.get("claims_diagnostic") === "1") {
+            // Only an authenticated tenant admin may read bounded R2 claims.
+            // This is intentionally independent of the expensive active-batch
+            // R2 scan, and cannot mutate approval, Airtable, or publishing.
+            requirePermission(authorization, "tenant_admin");
+            return respond(request, env, await readFactoryClaimsDiagnostic(env.STUDIO_MEDIA));
+          }
+          return await factoryBatchStatusRoute(request, env, authorization);
+        }
         if (request.method === "POST") {
           assertWriteRequest(request, env);
-          return factoryBatchSubmitRoute(request, env, authorization, ctx);
+          return await factoryBatchSubmitRoute(request, env, authorization, ctx);
         }
         throw new HttpError(405, "Method not allowed");
       }
 
+      // Read-only, Airtable-authoritative Factory correction discovery.
+      // This endpoint cannot create holds, generate media, or publish. The
+      // native gallery Runner/Factory integration has not passed its release
+      // gate, so no client may treat this preview as an enabled POST batch.
+      const correctionMatchesRoute = /^\/api\/factory\/outputs\/(rec[A-Za-z0-9]{14})\/correction-matches$/.exec(url.pathname);
+      if (correctionMatchesRoute) {
+        if (request.method !== "GET") throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        const productionRequestId=String(url.searchParams.get("production_request_id")||"");
+        if(!/^rec[A-Za-z0-9]{14}$/.test(productionRequestId))
+          throw new HttpError(400,"Exact Production Request is required");
+        const authorized=await reviewAuthorizedProfiles(env,authorization);
+        const snapshot=await loadAuthoritativeFactoryCorrection({
+          outputId:correctionMatchesRoute[1],
+          productionRequestId,
+          authorizedProfileIds:authorized.map(row=>row.id),
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+          readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+          readMappings:async id=>{
+            const endpoint=new URL("/api/production-requests/"+id+"/outputs",url);
+            const result=await listProductionRequestOutputs(request,env,endpoint,authorization,ctx);
+            if(!result.ok)throw new HttpError(result.status,"Authoritative Factory mappings unavailable");
+            return result.json();
+          },
+          readWatermarkCatalog:()=>reviewListRecords(env,"tblSITCujCsJTNcDe",{
+            limit:200,
+            filterFormula:'AND({Asset_Role}="Watermark",{Asset_Status}="Available")',
+            fields:["Asset Name","Asset_Role","Asset_Status","Rights_Status",
+              "Active","Do_Not_Use","MIME_Type","Google Drive File ID","Content_Profile"],
+          }),
+          field:f,
+        });
+        return respond(request,env,{
+          ok:true,
+          source_output_id:correctionMatchesRoute[1],
+          production_request_id:productionRequestId,
+          batch_enabled:false,
+          render_format:snapshot.source?.render_format||null,
+          matching_outputs:snapshot.matches.map(row=>({
+            id:row.id,platform:row.platform,output_type:row.output_type,
+            review_render_supported:row.review_render_supported===true,
+            review_render_reason:row.review_render_reason||null,
+          })),
+        });
+      }
+
+      // Verified, read-only source inspection: actual Drive bytes and catalog
+      // rights via the protected Runner. No generation or publishing permission.
+      const galleryBytesMatch = new RegExp("^/api/factory/outputs/(rec[A-Za-z0-9]{14})/gallery-source-preflight$").exec(url.pathname);
+      if (galleryBytesMatch) {
+        if (request.method !== "GET") throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        const profiles=await reviewAuthorizedProfiles(env,authorization);
+        const inventory=await readAuthoritativeGalleryInventory({
+          output_id:galleryBytesMatch[1],
+          authorized_profile_ids:profiles.map(p=>p.id),
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+          readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+          readSlides:async ids=>reviewListRecords(env,"tblcnQDBvUngpjDED",{
+            limit:ids.length,
+            filterFormula:'OR('+ids.map(id=>'RECORD_ID()="'+id+'"').join(',')+')',
+            fields:["Content Item","Platform Output","Platform","Slide Number",
+              "Aspect Ratio","Deleted From Carousel","Approved For Final",
+              "Review Status","Asset_4x5_File_ID","Asset_1x1_File_ID",
+              "Asset_9x16_File_ID","Final Google Drive File ID"],
+          }),
+        });
+        const verification=await verifyGallerySourceBytes({
+          env,output_id:galleryBytesMatch[1],inventory,
+        });
+        return respond(request,env,verification);
+      }
+
+      // Read-only native gallery revision history: exact authenticated profile
+      // and Airtable attempt IDs. Metadata is never an approval receipt.
+      const galleryStatusMatch = new RegExp("^/api/factory/outputs/(rec[A-Za-z0-9]{14})/gallery-revision-status$").exec(url.pathname);
+      if (galleryStatusMatch) {
+        if (request.method !== "GET") throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        const authorized=await reviewAuthorizedProfiles(env,authorization);
+        const status=await readGalleryRevisionStatus({
+          output_id:galleryStatusMatch[1],
+          job_id:url.searchParams.get("job_id")||null,
+          authorized_profile_ids:authorized.map(p=>p.id),
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+          readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+          listRecords:(table,params)=>reviewListRecords(env,table,params),
+        });
+        return respond(request,env,{...status,private_preview_available:env.NATIVE_GALLERY_PRIVATE_PREVIEW_ENABLED==="true",creative_review_available:nativeGalleryCreativeReviewEnabled(env),factory_preflight_available:nativeGalleryFactoryPreflightEnabled(env),factory_handoff_available:nativeGalleryPrivateFactoryHandoffEnabled(env),hold_enrollment_request_enabled:nativeGalleryEnrollmentEnabled(env),generation_request_enabled:nativeGalleryJobsEnabled(env)});
+      }
+
+      // Preview original gallery/source metadata only. This is deliberately
+      // read-only and never substitutes Airtable links for a verified Drive,
+      // rights or profile-watermark receipt.
+      const galleryInventoryMatch = /^\/api\/factory\/outputs\/(rec[A-Za-z0-9]{14})\/gallery-inventory$/.exec(url.pathname);
+      if (galleryInventoryMatch) {
+        if (request.method !== "GET") throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        const profiles=await reviewAuthorizedProfiles(env,authorization);
+        const source=await readAuthoritativeGalleryInventory({
+          output_id:galleryInventoryMatch[1],
+          authorized_profile_ids:profiles.map(p=>p.id),
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+          readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+          readSlides:async ids=>reviewListRecords(env,"tblcnQDBvUngpjDED",{
+            limit:ids.length,
+            filterFormula:'OR('+ids.map(id=>'RECORD_ID()="'+id+'"').join(',')+')',
+            fields:["Content Item","Platform Output","Platform","Slide Number",
+              "Aspect Ratio","Deleted From Carousel","Approved For Final",
+              "Review Status","Asset_4x5_File_ID","Asset_1x1_File_ID",
+              "Asset_9x16_File_ID","Final Google Drive File ID"],
+          }),
+        });
+        return respond(request,env,{...source,source_byte_preflight_available:gallerySourceBytePreflightEnabled(env)});
+      }
+
+      // Exact unscheduled native gallery hold: no schedule vacate, no render,
+      // and no source/publisher mutation beyond persistent blocked output.
+      const galleryEnrollMatch=new RegExp(
+        "^/api/factory/outputs/(rec[A-Za-z0-9]{14})/gallery-enroll$"
+      ).exec(url.pathname);
+      if(galleryEnrollMatch){
+        if(request.method!=="POST")throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        assertWriteRequest(request,env);
+        const authorized=await reviewAuthorizedProfiles(env,authorization);
+        const result=await enrollNativeGalleryHold({
+          request,env,output_id:galleryEnrollMatch[1],
+          authorization,assertWriteRequest,
+          operations:{
+            withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+            readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+            readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+            authorizeProfile:id=>authorized.some(p=>p.id===id),
+            listJobs:(id)=>reviewListRecords(env,NATIVE_GALLERY_JOBS_TABLE,{
+              limit:2,filterFormula:'{Output_Record_ID}="'+id+'"',
+              fields:["Job_ID","Output_Record_ID"],
+            }),
+            patchOutput:(id,fields)=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id,{
+              method:"PATCH",body:JSON.stringify({fields,typecast:false}),
+            }),
+          },
+        });
+        return respond(request,env,result);
+      }
+
+      // Actual dedicated Airtable native-gallery generation intent, OFF by
+      // default. Do not reuse the Chicago Reel job table or allow public
+      // publishing. Trusted Runner preflight still lacks original watermark
+      // placement/hold proof, so it cannot authorize generation yet.
+      const galleryGenerateMatch = new RegExp(
+        "^/api/factory/outputs/(rec[A-Za-z0-9]{14})/gallery-generate$"
+      ).exec(url.pathname);
+      if(galleryGenerateMatch){
+        if(request.method!=="POST")throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        assertWriteRequest(request,env);
+        const output_id=galleryGenerateMatch[1];
+        const authorized=await reviewAuthorizedProfiles(env,authorization);
+        const inventoryReader=async()=>readAuthoritativeGalleryInventory({
+          output_id,authorized_profile_ids:authorized.map(p=>p.id),
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+          readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+          readSlides:async ids=>reviewListRecords(env,"tblcnQDBvUngpjDED",{
+            limit:ids.length,
+            filterFormula:'OR('+ids.map(id=>'RECORD_ID()="'+id+'"').join(',')+')',
+            fields:["Content Item","Platform Output","Platform","Slide Number",
+              "Aspect Ratio","Deleted From Carousel","Approved For Final",
+              "Review Status","Asset_4x5_File_ID","Asset_1x1_File_ID",
+              "Asset_9x16_File_ID","Final Google Drive File ID"],
+          }),
+        });
+        const result=await handleNativeGalleryGenerate({
+          request,env,output_id,authorization,
+          assertWriteRequest,
+          loadInventory:inventoryReader,
+          jobAdapter:{
+            airtableFetch,
+            listRecords:(env,table,params)=>reviewListRecords(env,table,params),
+            withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+            verifySource:async ({output_id:sourceOutput,
+              profile_id,content_item_id,selected,hold_id})=>{
+              // Executable original media must come from a protected, private
+              // Runner manifest, not the metadata-only browser preflight.
+              // This closure executes INSIDE the canonical output lock, after
+              // Airtable Output + Content Item + owned Hold re-verification.
+              const inventory=await inventoryReader();
+              if(inventory.output_id!==sourceOutput||
+                 inventory.profile_id!==profile_id||
+                 inventory.content_item_id!==content_item_id)
+                throw new HttpError(409,"Gallery source identity changed");
+              const receipt=await readNativeGalleryPrivateManifest({
+                env,output_id:sourceOutput,profile_id,content_item_id,
+                aspect_ratio:inventory.aspect_ratio,
+              });
+              const expected=new Map(inventory.slides.map(slide=>[
+                slide.slide_id,slide.order,
+              ]));
+              if(receipt.original_artifacts.length!==inventory.slide_count||
+                 receipt.original_artifacts.some(row=>
+                   expected.get(row.slot_id)!==row.order)||
+                 selected.some(row=>expected.get(row.slide_id)!==row.order))
+                throw new HttpError(409,"Gallery selected sources changed");
+              return {...receipt,hold_id,publication_hold_verified:true};
+            }
+          },
+        });
+        return respond(request,env,result);
+      }
+
+      // Private held native gallery side-by-side images (V1 / V2).
+      // Reviewer profile scope and per-job authority are rechecked, and
+      // Runner independently reads actual Google Drive media bytes.
+      const galleryPrivateMediaMatch = new RegExp(
+        "^/api/factory/outputs/(rec[A-Za-z0-9]{14})/gallery/jobs/"+
+        "([A-Za-z0-9_-]{8,120})/slides/(rec[A-Za-z0-9]{14})/(original|revised)$"
+      ).exec(url.pathname);
+      if(galleryPrivateMediaMatch){
+        requirePermission(authorization,"outputs_review");
+        const [,outputId,jobId,slideId,variant]=galleryPrivateMediaMatch;
+        const profiles=await reviewAuthorizedProfiles(env,authorization);
+        const readJob=async id=>{
+          const rows=await reviewListRecords(env,NATIVE_GALLERY_JOBS_TABLE,{
+            limit:2,filterFormula:'{Job_ID}="'+id+'"',
+            fields:["Job_ID","Output_Record_ID","Content_Item_Record_ID",
+              "Profile_Record_ID","Job_State","Hold_ID","Hold_Owner",
+              "Revised_Manifest_SHA256"],
+          });
+          return Array.isArray(rows)&&rows.length===1?rows[0]:null;
+        };
+        return serveNativeGalleryPreview({
+          request,env,authorization:{
+            ...authorization,authorized_profile_ids:profiles.map(p=>p.id),
+          },output_id:outputId,job_id:jobId,slide_id:slideId,variant,
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+          readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+          readJob,
+        });
+      }
+
+      // Human-only creative accept/reject for an exact revised gallery.
+      // This is NOT a Factory approval or publication state transition.
+      const galleryCreativeMatch = new RegExp(
+        "^/api/factory/outputs/(rec[A-Za-z0-9]{14})/gallery/jobs/"+
+        "([A-Za-z0-9_-]{8,120})/creative-decision$"
+      ).exec(url.pathname);
+      if(galleryCreativeMatch){
+        requirePermission(authorization,"outputs_review");
+        assertWriteRequest(request,env);
+        if(!nativeGalleryCreativeReviewEnabled(env))
+          throw new HttpError(405,"Native gallery creative review disabled");
+        const profiles=await reviewAuthorizedProfiles(env,authorization);
+        const [,outputId,jobId]=galleryCreativeMatch;
+        const readJob=async id=>{
+          const rows=await reviewListRecords(env,NATIVE_GALLERY_JOBS_TABLE,{
+            limit:2,filterFormula:'{Job_ID}="'+id+'"',
+            fields:["Job_ID","Output_Record_ID","Content_Item_Record_ID",
+              "Profile_Record_ID","Job_State","Row_Version","Hold_ID","Hold_Owner",
+              "Original_Manifest_SHA256","Original_Manifest_JSON",
+              "Revised_Manifest_SHA256","Revised_Manifest_JSON","Plan_JSON",
+              "Creative_Decision","Creative_Decision_Actor"],
+          });
+          return Array.isArray(rows)&&rows.length===1?rows[0]:null;
+        };
+        const decision=await decideNativeGalleryCreative({
+          request,env,output_id:outputId,job_id:jobId,
+          authorization:{...authorization,
+            authorized_profile_ids:profiles.map(p=>p.id)},
+          assertWriteRequest,
+          operations:{
+            withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+            readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+            readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+            readJob,
+            patchJob:(id,fields)=>airtableFetch(env,NATIVE_GALLERY_JOBS_TABLE,id,{
+              method:"PATCH",body:JSON.stringify({fields,typecast:false}),
+            }),
+            verifyRevisedDriveArtifacts:args=>verifyNativeGalleryRevisionDrive({
+              env,...args,
+            }),
+          },
+        });
+        return respond(request,env,decision);
+      }
+
+      // Read-only private Factory review packet for a human-accepted V2.
+      // This independently checks the actual Drive bytes/rights, and makes
+      // no Factory, schedule, approval, original slide or publishing write.
+      const galleryFactoryPreflightMatch=new RegExp(
+        "^/api/factory/outputs/(rec[A-Za-z0-9]{14})/gallery/jobs/"+
+        "([A-Za-z0-9_-]{8,120})/factory-preflight$"
+      ).exec(url.pathname);
+      if(galleryFactoryPreflightMatch){
+        if(request.method!=="GET")throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        const profiles=await reviewAuthorizedProfiles(env,authorization);
+        const [,outputId,jobId]=galleryFactoryPreflightMatch;
+        const readJob=async id=>{
+          const rows=await reviewListRecords(env,NATIVE_GALLERY_JOBS_TABLE,{
+            limit:2,filterFormula:'{Job_ID}="'+id+'"',
+            fields:["Job_ID","Output_Record_ID","Content_Item_Record_ID",
+              "Profile_Record_ID","Actor_Record_ID","Job_State","Row_Version",
+              "Hold_ID","Hold_Owner","Plan_SHA256","Plan_JSON",
+              "Original_Manifest_SHA256","Original_Manifest_JSON",
+              "Revised_Manifest_SHA256","Revised_Manifest_JSON",
+              "Creative_Decision","Creative_Decision_Actor"],
+          });
+          return Array.isArray(rows)&&rows.length===1?rows[0]:null;
+        };
+        const packet=await inspectNativeGalleryFactoryPreflight({
+          request,env,output_id:outputId,job_id:jobId,
+          authorization:{...authorization,
+            authorized_profile_ids:profiles.map(p=>p.id)},
+          operations:{
+            readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+            readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+            readJob,
+            verifyDrive:args=>verifyNativeGalleryRevisionDrive({env,...args}),
+          },
+        });
+        return respond(request,env,packet);
+      }
+
+      // Exact creative-accepted native image revision -> held PRIVATE Factory
+      // review inbox. Only the dedicated Airtable Job ledger changes; the
+      // publishing hold, quarantined assets and output are NEVER released.
+      const galleryPrivateFactoryHandoffMatch=new RegExp(
+        "^/api/factory/outputs/(rec[A-Za-z0-9]{14})/gallery/jobs/"+
+        "([A-Za-z0-9_-]{8,120})/factory-handoff$"
+      ).exec(url.pathname);
+      if(galleryPrivateFactoryHandoffMatch){
+        if(request.method!=="POST")throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        assertWriteRequest(request,env);
+        if(!nativeGalleryPrivateFactoryHandoffEnabled(env))
+          throw new HttpError(405,"Private native Factory handoff disabled");
+        const profiles=await reviewAuthorizedProfiles(env,authorization);
+        const [,outputId,jobId]=galleryPrivateFactoryHandoffMatch;
+        const readJob=async id=>{
+          const rows=await reviewListRecords(env,NATIVE_GALLERY_JOBS_TABLE,{
+            limit:2,filterFormula:'{Job_ID}="'+id+'"',
+            fields:["Job_ID","Output_Record_ID","Content_Item_Record_ID",
+              "Profile_Record_ID","Job_State","Row_Version",
+              "Hold_ID","Hold_Owner","Plan_SHA256","Plan_JSON",
+              "Original_Manifest_SHA256","Original_Manifest_JSON",
+              "Revised_Manifest_SHA256","Revised_Manifest_JSON",
+              "Creative_Decision","Creative_Decision_Actor",
+              "Progress_Stage","Event_History_JSON"],
+          });
+          return Array.isArray(rows)&&rows.length===1?rows[0]:null;
+        };
+        const receipt=await handoffNativeGalleryToPrivateFactory({
+          request,env,output_id:outputId,job_id:jobId,
+          authorization:{...authorization,
+            authorized_profile_ids:profiles.map(p=>p.id)},
+          assertWriteRequest,
+          operations:{
+            withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
+            readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+            readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+            readJob,
+            patchJob:(id,fields)=>airtableFetch(env,NATIVE_GALLERY_JOBS_TABLE,id,{
+              method:"PATCH",body:JSON.stringify({fields,typecast:false}),
+            }),
+            verifyDrive:args=>verifyNativeGalleryRevisionDrive({env,...args}),
+          },
+        });
+        return respond(request,env,receipt);
+      }
+
+      // Exact per-slide gallery correction proposal; no generation, approval,
+      // Drive upload, Airtable mutation, or publication. The POST body supplies
+      // only slide IDs and user instructions; the source is reloaded under the
+      // authenticated profile authority in this same request.
+      const gallerySelectionPreviewMatch = /^\/api\/factory\/outputs\/(rec[A-Za-z0-9]{14})\/gallery-selection-preview$/.exec(url.pathname);
+      if (gallerySelectionPreviewMatch) {
+        if (request.method !== "POST") throw new HttpError(405,"Method not allowed");
+        requirePermission(authorization,"outputs_review");
+        assertWriteRequest(request,env);
+        const supplied=await request.clone().json().catch(()=>null);
+        if(!supplied||Array.isArray(supplied)||typeof supplied!=="object")
+          throw new HttpError(400,"Exact slide selection required");
+        const authorized=await reviewAuthorizedProfiles(env,authorization);
+        const inventory=await readAuthoritativeGalleryInventory({
+          output_id:gallerySelectionPreviewMatch[1],
+          authorized_profile_ids:authorized.map(p=>p.id),
+          readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
+          readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+          readSlides:async ids=>reviewListRecords(env,"tblcnQDBvUngpjDED",{
+            limit:ids.length,
+            filterFormula:'OR('+ids.map(id=>'RECORD_ID()="'+id+'"').join(',')+')',
+            fields:["Content Item","Platform Output","Platform","Slide Number",
+              "Aspect Ratio","Deleted From Carousel","Approved For Final",
+              "Review Status","Asset_4x5_File_ID","Asset_1x1_File_ID",
+              "Asset_9x16_File_ID","Final Google Drive File ID"],
+          }),
+        });
+        const proposal=await previewNativeGalleryCorrection({
+          output_id:gallerySelectionPreviewMatch[1],
+          client_request_id:supplied.client_request_id,
+          selected_slides:supplied.selected_slides,
+          inventory,
+        });
+        return respond(request,env,proposal);
+      }
+
       if (isFactoryDeskRoute) {
         requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
-        if (request.method === "GET") return getFactoryDesk(request, env, authorization);
+        if (request.method === "GET") return await getFactoryDesk(request, env, authorization);
         if (request.method === "POST") {
           assertWriteRequest(request, env);
           const input = await request.clone().json().catch(() => null);
+          if (input?.action === "accept_held_creative") {
+            // Factory creative acceptance is distinct from publishing authority.
+            // Never modify output media, watermark evidence, hold or scheduler.
+            requirePermission(authorization,"outputs_review");
+            const result=await acceptFactoryHeldCreative({
+              output_id:input.id,actor_id:authorization.user?.record_id,
+              expected_version:input.expected_version,
+              client_request_id:input.client_request_id,
+              operations:makeReviewFactoryHandoffOperations(env),
+            });
+            return respond(request,env,{ok:true,action:"accept_held_creative",
+              result,message:result.message||
+                "Factory accepted creative review; publishing remains held.",
+              refresh_required:true});
+          }
           if (input?.action === "return_to_review") {
             requirePermission(authorization, "outputs_review");
             const result=await returnFactoryRevisionToProducer({
@@ -2545,7 +3316,7 @@ export default {
             return respond(request,env,{ok:true,action:"return_to_review",
               result,refresh_required:true});
           }
-          return mutateFactoryDesk(request, env, authorization, ctx);
+          return await mutateFactoryDesk(request, env, authorization, ctx);
         }
         throw new HttpError(405, "Method not allowed");
       }
@@ -2901,7 +3672,7 @@ export default {
         if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
         assertWriteRequest(request, env);
         requirePermission(authorization, "ideas_create");
-        return startStudioIdeaGeneration(request, env, authorization, ctx);
+        return await startStudioIdeaGeneration(request, env, authorization, ctx);
       }
 
       if (isScriptedShortProposeRoute) {
@@ -2909,6 +3680,13 @@ export default {
         assertWriteRequest(request, env);
         requirePermission(authorization, "ideas_create");
         return await proposeScriptedShortRoute(request, env, authorization, url);
+      }
+
+      if (isScriptedShortReviseRoute) {
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "ideas_create");
+        return await reviseScriptedShortRoute(request, env, authorization, url);
       }
 
       if (isScriptedShortAcceptRoute) {
@@ -2920,14 +3698,14 @@ export default {
       }
 
       if (isIdeaGenerateStatusRoute) {
-        return studioIdeaGenerationStatus(request, env, url, authorization);
+        return await studioIdeaGenerationStatus(request, env, url, authorization);
       }
 
       if (url.pathname === "/api/ideas") {
         if (request.method === "POST") {
           assertWriteRequest(request, env);
           requirePermission(authorization, "ideas_create");
-          return createIdea(request, env, authorization, ctx);
+          return await createIdea(request, env, authorization, ctx);
         }
         return listIdeas(request, env, url, authorization, ctx);
       }
@@ -2999,14 +3777,14 @@ export default {
       if (isIdeaProductionRequestRoute) {
         assertWriteRequest(request, env);
         requirePermission(authorization, "production_configure");
-        return getOrCreateProductionRequestForIdea(request, env, url, authorization, ctx);
+        return await getOrCreateProductionRequestForIdea(request, env, url, authorization, ctx);
       }
 
       if (isProductionRequestCollectionRoute) {
         if (request.method === "POST") {
           assertWriteRequest(request, env);
           requirePermission(authorization, "production_configure");
-          return createProductionRequestFromBody(request, env, authorization, url, ctx);
+          return await createProductionRequestFromBody(request, env, authorization, url, ctx);
         }
         // Item 4 opens by loading the Production Request collection before a
         // specific request/status route is necessarily selected. Trigger the Make
@@ -3143,6 +3921,13 @@ export default {
       if (isProductionRequestBridgePreflightRoute) {
         requirePermission(authorization, "production_configure");
         return productionRequestBridgePreflightRoute(request, env, url, authorization);
+      }
+
+      if (isVibeCutToReviewRoute) {
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "ideas_promote");
+        requirePermission(authorization, "production_configure");
+        return advanceVibeCutToReview(request, env, url, authorization, ctx);
       }
 
       if (isProductionRequestPromoteRoute) {
@@ -3475,9 +4260,9 @@ export default {
       if (url.pathname === "/api/library") {
         if (request.method === "POST") {
           assertUploadWriteRequest(request, env);
-          return uploadAssetLibraryItems(request, env, authorization, ctx);
+          return await uploadAssetLibraryItems(request, env, authorization, ctx);
         }
-        return listAssetLibrary(request, env, url, authorization);
+        return await listAssetLibrary(request, env, url, authorization);
       }
 
       return respond(request, env, { ok: false, error: "Not found" }, 404);
@@ -3557,6 +4342,26 @@ export default {
     const cronInstant = Number(event?.scheduledTime);
     const cadenceNow = Number.isFinite(cronInstant) && cronInstant > 1e12 ? new Date(cronInstant) : new Date();
     const cadence = studioCronAirtableCadence(cadenceNow, event?.cron || "");
+    // Render admission must not wait for the multi-minute Factory and publish
+    // maintenance chain. One bounded, independent admission on the five-minute
+    // cron; never approvals, scheduling, or public publishing.
+    if (airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS) {
+      ctx.waitUntil(studioAdmitRenderQueue(env, { limit: 80 })
+        .then((result) => console.info("R4_QUEUE_ADMIT_INDEPENDENT", JSON.stringify({
+          admitted: result?.admitted === true,
+          reason: result?.reason || null,
+          head: result?.head || null,
+          runner_status: result?.started?.status || null,
+          runner_reason: result?.started?.details?.run?.reason ||
+            result?.started?.details?.reason || null,
+          runner_message: String(result?.started?.message || "").slice(0, 220),
+          skipped: (result?.skipped || []).map(x => ({ id: x.id, reason: x.reason })),
+        })))
+        .catch(error => console.warn("R4_QUEUE_ADMIT_INDEPENDENT failure",
+          error instanceof Error ? error.message : String(error))));
+    } else {
+      console.warn("R4_QUEUE_ADMIT_INDEPENDENT airtable_cooldown");
+    }
     // Production approval recovery must not sit behind dozens of unrelated
     // awaited publish/Factory jobs. Schedule one independent bounded sweep,
     // before the main cron workload, or stalled Submitted requests never move.
@@ -3680,6 +4485,87 @@ export default {
         })))
         .catch((error) => console.warn("QA-1050 reel368 audit failed", String(error?.message || error))));
     }
+    // QA-IG-STALE-UPLOAD: live half-hour detection and durable finding audit.
+    // Intentionally read-only toward Meta/Airtable publish state. An expired
+    // Airtable timestamp cannot fence an active Python process or prove that a
+    // remote create never happened; missing provider IDs remain Needs Eyes.
+    if (cadence.heavy && airtableCooldownWaitMs() <= AIRTABLE_SLOT_FAIL_FAST_MS
+        && env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false") {
+      ctx.waitUntil(auditStaleInstagramReels(env, {
+        airtableFetch, limit: 8,
+        inspectLease: row => readIgPublishLease(env,row.id),
+        recoverSafe: async (row, proof) => {
+          if (env.STUDIO_IG_STALE_UPLOAD_AUTO_RECOVERY_ENABLED !== "true" ||
+              !igPublishLeaseEnabled(env))
+            return {committed:false,reason:"recovery_feature_not_enabled"};
+          const running=await verifyIgLeaseRunnerHealth(env);
+          if(!running.ready) return {committed:false,reason:running.reason};
+          // A failed previous MAE transaction can leave a safely fenced
+          // publisher. Reuse its exact generation rather than trying to
+          // fence the already-fenced lease a second time.
+          const readOutput=id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id);
+          const observed=await readIgPublishLease(env,row.id);
+          let fence;
+          if(observed.available && observed.state?.phase==="fenced" &&
+             observed.state?.generation===proof.lease_generation &&
+             observed.state?.irreversible_possible===false) {
+            fence={safe:true,fenced:true,output_id:row.id,
+              generation:observed.state.generation,
+              lock_at:row.fields?.Publish_Locked_At};
+          } else {
+            fence=await fenceStaleIgPreRemoteLease(env,row.id,{readOutput});
+          }
+          if (!fence.safe) return {committed:false,reason:fence.reason};
+          return studioRecoverFencedIgStaleUpload(env,{
+            outputId:row.id,fence,
+          });
+        },
+        verifyContainer: async (row) => {
+          const profiles = row?.fields?.Content_Profile;
+          if (!Array.isArray(profiles) || profiles.length !== 1)
+            return {verified: false, reason: "ambiguous_profile"};
+          const profile = await airtableFetch(env,
+            env.AIRTABLE_PROFILE_TABLE_ID || "Content Profiles", profiles[0]);
+          if (profile?.id !== profiles[0])
+            return {verified: false, reason: "profile_not_found"};
+          const settings = await studioActivePipelineSettings(env,
+            ["INSTAGRAM_BUSINESS_ACCOUNT_ID","META_GRAPH_API_ACCESS_TOKEN","META_GRAPH_API_VERSION"], profile);
+          const profileAccount = String(profile?.fields?.Instagram_Business_Account_ID || "").trim();
+          if (profileAccount && profileAccount !== String(settings.INSTAGRAM_BUSINESS_ACCOUNT_ID || "").trim())
+            return {verified: false, reason: "instagram_profile_account_setting_conflict"};
+          return verifySavedInstagramContainer(row, {
+            settings, expectedAccountId: settings.INSTAGRAM_BUSINESS_ACCOUNT_ID,
+          });
+        },
+        verifyProvider: async (row) => {
+          const profiles = row?.fields?.Content_Profile;
+          if (!Array.isArray(profiles) || profiles.length !== 1)
+            return { verified_public: false, evidence: "ambiguous_profile" };
+          const profile = await airtableFetch(env,
+            env.AIRTABLE_PROFILE_TABLE_ID || "Content Profiles", profiles[0]);
+          if (profile?.id !== profiles[0])
+            return { verified_public: false, evidence: "profile_not_found" };
+          const settings = await studioActivePipelineSettings(env,
+            ["INSTAGRAM_BUSINESS_ACCOUNT_ID","META_GRAPH_API_ACCESS_TOKEN","META_GRAPH_API_VERSION"], profile);
+          const profileAccount = String(profile?.fields?.Instagram_Business_Account_ID || "").trim();
+          if (profileAccount && profileAccount !== String(settings.INSTAGRAM_BUSINESS_ACCOUNT_ID || "").trim())
+            return { verified_public: false, evidence: "instagram_profile_account_setting_conflict" };
+          return verifyAuthenticatedInstagramReceipt(row, {
+            settings, expectedAccountId: settings.INSTAGRAM_BUSINESS_ACCOUNT_ID,
+          });
+        },
+      }).then(rows => {
+        if (rows.length) console.warn("QA-IG-STALE-UPLOAD", JSON.stringify({
+          findings: rows.length,
+          identities_verified: rows.filter(r => r.provider_public_verified).length,
+          pending_lease_and_provider_reconciliation: rows.filter(r => !r.provider_public_verified).length,
+          graph_creates: 0,
+          reschedules: rows.filter(r=>r.recovery_committed===true).length,
+          needs_eyes: rows.filter(r=>r.outcome==="graph_intent_ambiguous_needs_eyes").length,
+        }));
+      }).catch(error => console.warn("QA-IG-STALE-UPLOAD scan unavailable",
+        String(error?.message || error))));
+    }
     // Quality Agent runs on every half-hour maintenance tick, independently of
     // Factory and ordinary carousel dispatch. It ONLY re-arms existing child-ID
     // AP2C verification after exact slide checks; it never creates IG media.
@@ -3761,7 +4647,7 @@ export default {
         console.warn("publish reconcile cron failed", error);
       }
       try {
-        await healStuckStudioRenders(env);
+        await healStuckStudioRenders(env, { skipR4Admission: true });
       } catch (error) {
         console.warn("studio stuck-render heal failed", error);
       }
@@ -3771,6 +4657,32 @@ export default {
         await studioHealPhantomRerender(env, { limit: 8 });
       } catch (error) {
         console.warn("phantom rerender heal failed", error);
+      }
+      // On heavy ticks only, examine bounded canonical pre-Factory candidates.
+      // Do not regenerate assets or approve: this repairs a stale In Production
+      // status only after complete review deliverables and safe Airtable readback.
+      if (cadence.heavy) {
+        try {
+          const candidates = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+            limit: 24, sortField: "Output_ID", sortDirection: "desc",
+            filterFormula: PRE_FACTORY_READY_FORMULA,
+          });
+          const recovery = await sweepPreFactoryReady({
+            candidates,
+            read: id => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id),
+            patch: (id, fields) => airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
+              method: "PATCH", body: JSON.stringify({ fields, typecast: false }),
+            }),
+            lock: (id, task) => withOutputApprovalLock(env.STUDIO_MEDIA, id, task),
+            mirror: record => reviewFactorySyncOutput(env, record, "pre-factory-ready-reconcile"),
+            limit: 4,
+          });
+          if (recovery.reconciled || recovery.blocked || recovery.errors) {
+            console.info("Pre-Factory readiness reconcile", JSON.stringify(recovery));
+          }
+        } catch (error) {
+          console.warn("Pre-Factory readiness reconcile unavailable", error);
+        }
       }
       try {
         const scheduleQuality = await studioScheduleReservationQualitySweep(env, {
@@ -5850,6 +6762,7 @@ const STUDIO_TRISTATE = new Set(["Use Profile Default", "Yes", "No"]);
 /*__STUDIO_WORKER_EXTRACT:pulseIdeaTimedScriptWriter__*/
 /*__STUDIO_WORKER_EXTRACT:scriptedShortUnassignedMessage__*/
 /*__STUDIO_WORKER_EXTRACT:proposeScriptedShortRoute__*/
+/*__STUDIO_WORKER_EXTRACT:reviseScriptedShortRoute__*/
 /*__STUDIO_WORKER_EXTRACT:acceptScriptedShortRoute__*/
 /*__STUDIO_WORKER_EXTRACT:feedPostNotesWithoutTimeline__*/
 /*__STUDIO_WORKER_EXTRACT:acceptSingleImageFeedPost__*/
@@ -5880,6 +6793,18 @@ const OUTPUT_LIST_FIELDS = [
   "Render_Status",
   "Review_Status",
   "Publish_Status",
+  // Small scalar evidence fields for stale IG Reel publishing display. Never
+  // infer remote completion or turn this list into publication authorization.
+  "Publish_Locked_By",
+  "Publish_Locked_At",
+  "Publish_Started_At",
+  "Last_Publish_Attempt_At",
+  "Platform_Media_ID",
+  "Studio_Render_Review_Hold_Active",
+  "Studio_Render_Review_Hold_ID",
+  "Studio_Render_Review_Hold_Owner",
+  "Test_Run_ID",
+  "Replace_Transaction_ID",
   "Publish_Method",
   "Auto_Publish_Enabled",
   "Do_Not_Publish",
@@ -6323,8 +7248,8 @@ const STUDIO_R5_DONE_HOOK_TOKEN = "r5done_7kqp2nvm4w8x1c9h3z";
 const STUDIO_R2_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),{Content_Item}!=BLANK(),{Output_Status}="Ready for Review",OR({Asset_Need_Status}="Not Needed",{Asset_Need_Status}="Fulfilled"),{Asset_Selection_Status}=BLANK(),{Render_Status}=BLANK(),{Remotion_Job_ID}=BLANK(),{Final_File_URL}="")';
 const STUDIO_R3_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}="Selected",{Selected_Assets_JSON}!="",{Render_Status}=BLANK(),{Format}!="Story",{Studio_Output_Type}!="Story",OR({Format}="Vertical Short Video",{Format}="Longform Video",{Format}="Feed Post",{Format}="Reel",{Format}="Slideshow Reel",{Format}="Video Draft",{Format}="Short",{Format}="Standard Video",{Format}="Slideshow Video")))';
 const STUDIO_T1_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),OR({Render_Status}="Ready for Render",{Render_Status}="Waiting in Render Queue"),{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0,{Format}!="Story",{Studio_Output_Type}!="Story",OR({Timing_Status}=BLANK(),{Timing_Status}="Pending"),OR({Music_URL}!="",{Selected_Music_URL}!=""))';
-const STUDIO_R4_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0,{Format}!="Story",{Studio_Output_Type}!="Story"))';
-const STUDIO_RENDER_QUEUE_CANDIDATE_FORMULA = 'AND({Test_Run_ID}=BLANK(),OR({Render_Status}="Ready for Render",{Render_Status}="Waiting in Render Queue"),{Remotion_Job_ID}="",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0,{Format}!="Story",{Studio_Output_Type}!="Story")';
+const STUDIO_R4_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0,{Final_File_URL}=""))';
+const STUDIO_RENDER_QUEUE_CANDIDATE_FORMULA = 'AND({Test_Run_ID}=BLANK(),OR({Render_Status}="Ready for Render",{Render_Status}="Waiting in Render Queue"),{Remotion_Job_ID}="",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0,{Final_File_URL}="")';
 const STUDIO_RENDER_QUEUE_ACTIVE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Rendering",{Remotion_Job_ID}!="",{Final_File_URL}="")';
 const STUDIO_RR1_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Review_Email_Sent_At}=BLANK(),OR({Review_Status}=BLANK(),{Review_Status}=""),OR(AND({Render_Status}="Rendered",{Final_File_URL}!=""),AND({Render_Status}="Native Photo Route",OR({Studio_Preview_URL}!="",{Thumbnail_URL}!="",{Selected_Assets_JSON}!="")),AND({Platform}="TikTok",{Studio_Output_Type}="Multi-Photo",{Composition_ID}="",{Render_Clip_List_JSON}!=""),AND({Platform}="Instagram",{Studio_Output_Type}="Carousel",{Composition_ID}="",{Selected_Assets_JSON}!=""),AND({Platform}="Facebook",{Studio_Output_Type}="Multi-Image Post",{Composition_ID}="",{Selected_Assets_JSON}!="")))';
 const STUDIO_CONTINUATION_CANDIDATE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Production_Request_Output}!=BLANK(),{Published_At}=BLANK(),NOT({Output_Status}="Published"),NOT({Output_Status}="Approved for Publishing"))';
@@ -6786,6 +7711,7 @@ const STUDIO_OVERDUE_SCHEDULED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookVideoCovers__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcilePublishingInstagramStories__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcilePublishingInstagramReels__*/
+/*__STUDIO_WORKER_EXTRACT:studioRecoverFencedIgStaleUpload__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookSlideshows__*/
 /*__STUDIO_WORKER_EXTRACT:studioReconcileFacebookReels__*/
 /*__STUDIO_WORKER_EXTRACT:studioStoryCompanionPlatformBlockers__*/
@@ -7157,6 +8083,7 @@ let studioAiApiPreferenceCache = { preferred: "OpenAI", failoverEnabled: true, a
 /*__STUDIO_WORKER_EXTRACT:reorderStudioOperationsRenderQueue__*/
 /*__STUDIO_WORKER_EXTRACT:stampPrepareToReviewNotes__*/
 /*__STUDIO_WORKER_EXTRACT:prepareIdeaToReview__*/
+/*__STUDIO_WORKER_EXTRACT:advanceVibeCutToReview__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioReadyProductionDiagnostic__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioOperations__*/
 /** Lean Profiles tab payload — Content Profiles only (voice/music settings). */

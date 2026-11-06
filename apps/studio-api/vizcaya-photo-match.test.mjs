@@ -117,7 +117,10 @@ test("Chicago Winters assets with exclusions are screened before watermark, then
     worker.indexOf("/*__STUDIO_WORKER_END:ideaLibraryIsEligibleImage__*/"));
   assert.match(image, /Exclusion_Reasons/);
   assert.match(image, /Potential_Match_Notes/);
-  assert.match(image, /exclusions\.length > 0/);
+  // Automation still fails closed for every exclusion. Low Quality is the
+  // sole explicitly authorized *manual* exception; other reasons stay blocked.
+  assert.match(image, /reasons\.some\(\(reason\) => reason !== "low quality"\)/);
+  assert.match(image, /reasons\.length && !allowLowQuality/);
   const matching = worker.slice(worker.indexOf("async function evaluateAndMaybeAttachWaitingIdeaPhotos("),
     worker.indexOf("/*__STUDIO_WORKER_END:evaluateAndMaybeAttachWaitingIdeaPhotos__*/"));
   assert.match(matching, /const attachCandidates = usableMatches\.slice/);

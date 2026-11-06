@@ -41,3 +41,35 @@ test("legacy content without rollups follows production/review stage", () => {
   assert.equal(needsWork({ studio_stage: "Publishing" }), false);
   assert.equal(needsWork({ studio_stage: "Needs Attention" }), false);
 });
+
+const draftMatch = source.match(/  function productionRequestIsOpenDraft\(record\) \{[\s\S]*?\n  \}/);
+assert.ok(draftMatch, "Draft eligibility helper exists");
+const isOpenDraft = vm.runInNewContext("(" + draftMatch[0].trim() + ")");
+
+test("Production Drafts only shows active, unsubmitted Draft and Ready requests", () => {
+  assert.equal(isOpenDraft({ status: "Draft", active: true, studio_item4_state: "Draft" }), true);
+  assert.equal(isOpenDraft({ status: " Ready ", active: true, studio_item4_state: "Assets Ready" }), true);
+  assert.equal(isOpenDraft({ status: "Draft", studio_item4_state: "Plan Ready" }), true);
+});
+
+test("submitted, promoted, cancelled and inactive requests never appear in Drafts", () => {
+  for (const status of ["Submitted", "Promoted", "Cancelled", "Publishing"]) {
+    assert.equal(isOpenDraft({ status, active: true }), false, status);
+  }
+  assert.equal(isOpenDraft({ status: "Draft", active: false }), false);
+  assert.equal(isOpenDraft({ status: "Draft", submitted_at: "2026-11-04T04:48:25.078Z" }), false);
+  assert.equal(isOpenDraft({ status: "Ready", promoted_content_item_links: ["recPr6477vjSpwiWG"] }), false);
+  assert.equal(isOpenDraft({ status: "Draft", promoted_content_item_links: ["recPr6477vjSpwiWG"], submitted_at: "" }), false);
+  for (const stage of ["Production", "Review", "Approved", "Publishing", "Complete"]) {
+    assert.equal(isOpenDraft({ status: "Draft", studio_item4_state: stage }), false, stage);
+  }
+  assert.equal(isOpenDraft(null), false);
+});
+
+test("Draft list uses eligibility guard, collapses empty section, retains errors", () => {
+  assert.match(source, /records\.filter\(productionRequestIsOpenDraft\)/);
+  assert.match(source, /if \(listPanel\) listPanel\.hidden = !drafts\.length/);
+  assert.match(source, /if \(listPanel\) listPanel\.hidden = false/);
+  const draftList = source.slice(source.indexOf("  async function loadProductionRequests("), source.indexOf("  function ideaStructureLabel("));
+  assert.doesNotMatch(draftList, /new Set\(\["Draft", "Ready", "Submitted"\]\)/);
+});

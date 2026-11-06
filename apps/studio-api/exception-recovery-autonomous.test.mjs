@@ -396,6 +396,52 @@ test("exact account-owned Instagram carousel recovers without any remote publish
   assert.equal(f.writes,1);
   assert.equal((await reconcilePublication(f.deps)).outcome,"Already Reconciled");
 });
+test("Instagram account-owned published receipt allows bounded Airtable completion latency only",()=>{
+  const nowMs=Date.parse("2026-11-05T01:00:00Z");
+  const post="18168690085479740";
+  const publishedAt="2026-10-24T12:42:20.000Z";
+  const basePublished=Date.parse(publishedAt);
+  const permalink="https://www.instagram.com/reel/De4KD9XDWRQ/";
+  const fields={
+    Platform:"Instagram",Platform_Output_Type:"Instagram Reel",
+    Content_Profile:["recBBBBBBBBBBBBBB"],Platform_Post_ID:post,
+    Platform_Post_URL:permalink,
+  };
+  const receipt={
+    platform:"Instagram",remote_id:post,permalink,
+    profile_id:"recBBBBBBBBBBBBBB",verified_public:true,
+    ownership_verified:true,verified_delivery:true,
+    checked_at:new Date(nowMs-1000).toISOString(),published_at:publishedAt,
+  };
+  for(const lag of [0,8000,120000]) {
+    const row={fields:{...fields,Published_At:new Date(basePublished+lag).toISOString()}};
+    assert.equal(receiptBlock(row,receipt,nowMs),null, "bounded lag "+lag);
+  }
+  for(const lag of [-1000,120001,600000]) {
+    const row={fields:{...fields,Published_At:new Date(basePublished+lag).toISOString()}};
+    assert.equal(receiptBlock(row,receipt,nowMs),"conflicting_publication_timestamp");
+  }
+  assert.equal(receiptBlock({fields:{...fields,Published_At:"not-a-date"}},receipt,nowMs),
+    "conflicting_publication_timestamp");
+  assert.notEqual(receiptBlock({fields:{...fields,Published_At:new Date(basePublished+8000).toISOString()}},
+    {...receipt,ownership_verified:false},nowMs),null);
+  assert.notEqual(receiptBlock({fields:{...fields,Published_At:new Date(basePublished+8000).toISOString(),
+    Platform_Post_ID:"18168690085479741"}},receipt,nowMs),null);
+});
+test("YouTube saved publication timestamps remain exact despite Instagram latency allowance",()=>{
+  const nowMs=Date.parse("2026-11-05T01:00:00Z");
+  const id="hc1heQnfn6k",publishedAt="2026-10-24T12:42:20Z";
+  const receipt={platform:"YouTube",profile_id:"recBBBBBBBBBBBBBB",remote_id:id,
+    verified_delivery:true,verified_public:true,ownership_verified:true,
+    permalink:"https://www.youtube.com/watch?v="+id,
+    published_at:publishedAt,checked_at:new Date(nowMs-1000).toISOString()};
+  const fields={Platform:"YouTube",Content_Profile:["recBBBBBBBBBBBBBB"],
+    YouTube_Video_ID:id,Platform_Post_URL:"https://www.youtube.com/watch?v="+id};
+  assert.equal(receiptBlock({fields:{...fields,Published_At:publishedAt}},receipt,nowMs),null);
+  assert.equal(receiptBlock({fields:{...fields,Published_At:"2026-10-24T12:42:28Z"}},receipt,nowMs),
+    "conflicting_publication_timestamp");
+});
+
 test("Instagram containers, stories and mismatched published IDs never authorize a correction",async()=>{
   for(const mutation of [
     f=>{f.row.fields.Platform_Post_ID="";f.row.fields.IG_Carousel_Published_Media_ID="";},
@@ -521,4 +567,129 @@ test("processing reprobe respects attempts ceiling and never overrides identity 
    assert.equal((await reconcilePublication(f.deps)).skipped,true);
    assert.equal(f.writes,0);
   }
+});
+
+test("Stage 3: completed private YouTube handoff receives one provider-proven public status catch-up", async()=>{
+  const f=fixture(),captured=[];
+  Object.assign(f.row.fields,{
+    Output_ID:9277,Output_Status:"Awaiting Public Release",
+    Publish_Status:"Published Privately",YouTube_Scheduled_Publish_At:"2026-10-23T12:00:00Z",
+    YouTube_Stage:"Complete",Publish_Next_Retry_At:"2026-10-23T10:00:00Z",
+    Publish_Attempt_Count:3,Studio_Publish_Dispatch_Count:3,
+  });
+  delete f.row.fields.Platform_Post_URL;
+  let previous={terminal:true,attempts:1,next_at:instant-1,pending:null,last:{
+    outcome:"Corrected",completion_kind:"studio_delivery_completed"
+  }};
+  f.deps.readState=async()=>structuredClone(previous);
+  f.deps.saveState=async(_,value)=>{previous=structuredClone(value);};
+  const originalPatch=f.deps.patchStatus;
+  f.deps.patchStatus=async(row,fields)=>{captured.push({...fields});await originalPatch(row,fields);};
+  const result=await reconcilePublication(f.deps);
+  assert.equal(result.outcome,"Corrected");
+  assert.equal(result.completion_kind,"public_publication_verified");
+  assert.equal(f.writes,1);
+  assert.deepEqual(Object.keys(captured[0]).sort(),
+    ["Output_Status","Publish_Status","Published_At","Platform_Post_URL"].sort());
+  assert.equal(f.row.fields.Output_Status,"Published");
+  assert.equal(f.row.fields.Publish_Status,"Published");
+  assert.equal(f.row.fields.Published_At,f.receipt.published_at);
+  assert.equal(f.row.fields.Platform_Post_URL,f.receipt.permalink);
+  assert.equal(f.row.fields.Publish_Attempt_Count,3);
+  assert.equal(f.row.fields.Studio_Publish_Dispatch_Count,3);
+  assert.equal(f.row.fields.Publish_Next_Retry_At,"2026-10-23T10:00:00Z");
+  assert.equal(previous.last.outcome,"Corrected");
+  assert.equal(f.audits[0].phase,"intent");
+  assert.equal(f.audits[1].phase,"outcome");
+  assert.equal((await reconcilePublication(f.deps)).outcome,"Already Reconciled");
+  assert.equal(f.writes,1);
+});
+test("Stage 3: still-private provider stays Published Privately and backs off without patching",async()=>{
+  const f=fixture();
+  Object.assign(f.row.fields,{
+    Output_Status:"Awaiting Public Release",Publish_Status:"Published Privately",
+    YouTube_Scheduled_Publish_At:"2026-10-23T12:00:00Z",
+  });
+  delete f.row.fields.Platform_Post_URL;
+  Object.assign(f.receipt,{
+    verified_public:false,published_at:null,scheduled_at:"2026-10-23T12:00:00Z",
+    summary:{privacy_status:"private",upload_status:"processed"}
+  });
+  const result=await reconcilePublication(f.deps);
+  assert.equal(result.outcome,"Awaiting Verification");
+  assert.equal(result.reason,"public_release_not_yet_verified");
+  assert.equal(f.row.fields.Publish_Status,"Published Privately");
+  assert.equal(f.row.fields.Published_At,undefined);
+  assert.equal(f.writes,0);
+  assert.equal(f.state.terminal,false);
+  assert.equal((await reconcilePublication(f.deps)).skipped,true);
+});
+test("Stage 3: future private release remains completed Studio delivery and is not polled",async()=>{
+  const f=fixture();
+  Object.assign(f.row.fields,{
+    Output_Status:"Awaiting Public Release",Publish_Status:"Published Privately",
+    YouTube_Scheduled_Publish_At:"2026-10-25T12:00:00Z",
+    Scheduled_Post_Date:"2026-10-25T12:00:00Z"
+  });
+  f.deps.verifyRemote=async()=>{throw new Error("no provider call before scheduled release");};
+  assert.equal((await reconcilePublication(f.deps)).outcome,"Already Reconciled");
+  assert.equal(f.writes,0);
+});
+test("Stage 3: conflicting scheduled clocks or hold cannot reopen private handoff",async()=>{
+  for(const fields of [
+    {YouTube_Scheduled_Publish_At:"2026-10-23T13:00:00Z"},
+    {Do_Not_Publish:true}, {Review_Status:"Rejected"}, {Test_Run_ID:"synthetic"},
+  ]){
+    const f=fixture();
+    Object.assign(f.row.fields,{
+      Output_Status:"Awaiting Public Release",Publish_Status:"Published Privately",
+      YouTube_Scheduled_Publish_At:"2026-10-23T12:00:00Z",...fields
+    });
+    f.deps.verifyRemote=async()=>{throw new Error("not a public catch-up candidate");};
+    assert.equal((await reconcilePublication(f.deps)).outcome,"Already Reconciled");
+    assert.equal(f.writes,0);
+  }
+});
+test("Stage 3: terminal identity conflict, exhausted ceiling and stale provider evidence never bypass safety",async()=>{
+  for(const variant of ["terminal_identity_conflict","attempt_limit","stale_receipt","active_lock"]){
+    const f=fixture();
+    Object.assign(f.row.fields,{
+      Output_Status:"Awaiting Public Release",Publish_Status:"Published Privately",
+      YouTube_Scheduled_Publish_At:"2026-10-23T12:00:00Z"
+    });
+    delete f.row.fields.Platform_Post_URL;
+    if(variant==="terminal_identity_conflict"){
+      f.deps.readState=async()=>({terminal:true,attempts:1,next_at:instant-1,pending:null,
+        last:{outcome:"Needs Decision",reason:"remote_identity_mismatch"}});
+    }else if(variant==="attempt_limit"){
+      f.deps.readState=async()=>({terminal:true,attempts:5,next_at:instant-1,pending:null,
+        last:{outcome:"Corrected",completion_kind:"studio_delivery_completed"}});
+    }else if(variant==="stale_receipt"){
+      f.receipt.checked_at=new Date(instant-120000).toISOString();
+    }else {
+      f.row.fields.Publish_Locked_By="publisher";
+      f.row.fields.Publish_Locked_At=new Date(instant).toISOString();
+    }
+    const result=await reconcilePublication(f.deps);
+    assert.notEqual(result.outcome,"Corrected",variant);
+    assert.equal(f.writes,0,variant);
+  }
+});
+test("Stage 3: lost readback after private-to-public PATCH cannot cause second PATCH",async()=>{
+  const f=fixture(),read=f.deps.readOutput;
+  Object.assign(f.row.fields,{
+    Output_Status:"Awaiting Public Release",Publish_Status:"Published Privately",
+    YouTube_Scheduled_Publish_At:"2026-10-23T12:00:00Z"
+  });
+  delete f.row.fields.Platform_Post_URL;
+  let count=0;f.deps.readOutput=async()=>{if(++count===4)throw Error("readback lost");return read();};
+  const first=await reconcilePublication(f.deps);
+  assert.equal(first.reason,"status_write_or_audit_uncertain");
+  assert.equal(f.writes,1);
+  assert.ok(f.state.pending);
+  f.deps.readOutput=read;
+  const second=await reconcilePublication(f.deps);
+  assert.equal(second.reason,"authoritative_readback_after_uncertain_write");
+  assert.equal(second.outcome,"Corrected");
+  assert.equal(f.writes,1);
 });

@@ -113,8 +113,12 @@ try{
   await page.evaluate(()=>window.StudioFactoryDesk.load());
   await page.locator('[data-factory-band-toggle]').first().click();
   await page.getByText(/Limited production pilot: approve one Chicago Instagram Reel/i).waitFor();
-  assert.equal(await page.locator("[data-factory-select-output]").count(),1,
-    "Only Chicago Instagram Reel may expose a pilot batch checkbox");
+  assert.equal(await page.locator("[data-factory-select-output]").count(),4,
+    "Every review output explains its batch eligibility");
+  assert.equal(await page.locator("[data-factory-select-output]:not(:disabled)").count(),1,
+    "Only Chicago Instagram Reel may enable a pilot batch checkbox");
+  assert.equal(await page.locator("[data-factory-select-output]:disabled").count(),3);
+  assert.equal(await page.locator(".factory-batch-unavailable").count(),3);
   await page.locator("[data-factory-select-content]").first().check();
   assert.match(await page.locator("#factoryBatchSelectionCount").innerText(),/1 output selected/);
   assert.equal(await page.locator("#factoryBatchSubmit").isEnabled(),true);
@@ -142,7 +146,13 @@ try{
   assert.equal(await phone.locator("[data-factory-select-output]").count(),0);
   await phone.locator("#factoryProfileFilter").selectOption("");
   await phone.locator('[data-factory-band-toggle]').first().click();
-  assert.equal(await phone.locator("[data-factory-select-output]").count(),1);
+  // New browser context starts without the desktop's local acceptance cache.
+  // The synthetic Desk is intentionally stale, but Activity is restored
+  // without sending a second approval.
+  assert.equal(await phone.locator("[data-factory-select-output]").count(),4,
+    "All synthetic Needs Eyes outputs remain visible in a fresh phone context");
+  assert.equal(await phone.locator("[data-factory-select-output]:not(:disabled)").count(),1);
+  assert.equal(await phone.locator("[data-factory-select-output]:disabled").count(),3);
   assert.deepEqual(posts.map(x=>x.record_ids),[[cards[0].id]]);
   assert.deepEqual(jsErrors,[]);
   assert.deepEqual(errors,[]);

@@ -99,7 +99,8 @@ test("Production AI inherits the Production profile and reuses Asset Manager num
   assert.match(handler, /item4ProductionProfileRecord\(env, record, preferredProfileId\)/);
   assert.match(handler, /mediaAssetProfileScopeFormula\(productionProfile\.id/);
   assert.match(handler, /listLibraryBatchExistingNames\(env, assetBase, profileScope\)/);
-  assert.match(handler, /allocateLibraryBatchNames\(assetBase, 1/);
+  assert.match(handler, /allocateLibraryUploadNames\(/);
+  assert.match(handler, /requestedAssetBase \|\| context\.title/);
   assert.match(handler, /library_asset_name:\s*assetName/);
   assert.match(handler, /content_profile_id:\s*productionProfile\.id/);
 

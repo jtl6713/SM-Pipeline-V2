@@ -138,6 +138,17 @@ export function applyReviewEvent(session, event) {
   if (kind === "MESSAGE") {
     if (s.state === "cancelled" || s.state === "approved")
       fail("SESSION_CLOSED", "This review is no longer open");
+    // A separately authorized in-flight note is for the NEXT revision only.
+    // Never let a stale request alter a finished job or a new frozen plan.
+    if (event.in_flight_only === true &&
+        (!inProgress.has(s.state) || !s.review_hold.active || !s.active_job?.id))
+      fail("IN_FLIGHT_FEEDBACK_NOT_ALLOWED", "This render has advanced. Refresh before commenting",409);
+    if (event.review_note_only === true &&
+        (!s.review_hold.active || ![
+          "ready_for_review","discussing","awaiting_assets","plan_ready",
+          "queued","rendering","validating","revision_failed"
+        ].includes(s.state)))
+      fail("REVIEW_NOTE_NOT_ALLOWED","Only an active, held review can accept comments",409);
     if (!["user", "producer"].includes(event.role) ||
         !text(event.content) || text(event.content).length > 3000 ||
         !validId(event.message_id))
@@ -326,6 +337,47 @@ export function applyReviewEvent(session, event) {
     // orchestrator must retain the durable hold until a separate scheduler-authorized release.
     s.approved_attempt_id = s.current_attempt_id;
     s.state = "approved";
+  } else if (kind === "FACTORY_ACCEPT_HELD_CREATIVE") {
+    // Human Factory acceptance is NOT approval for publishing. An unverified
+    // watermark cannot prevent a reviewer from accepting the creative cut.
+    // Keep the owned publication hold, original delivery status, and media.
+    const attempt=current(s);
+    if(s.state!=="approved"||s.review_hold.active!==true||
+       s.current_attempt_id!==s.approved_attempt_id||
+       !attempt||attempt.number<2||attempt.status!=="ready_for_review"||
+       event.attempt_id!==attempt.id||event.artifact_id!==attempt.artifact_id||
+       event.hold_id!==s.review_hold.id||event.hold_owner!==s.id||
+       s.active_job||s.factory_review?.status==="accepted_pending_qa")
+      fail("FACTORY_HELD_CREATIVE_NOT_ELIGIBLE",
+        "Only the current creatively approved and publication-held V2 may receive a Factory creative decision");
+    s.factory_review={status:"accepted_pending_qa",
+      attempt_id:attempt.id,artifact_id:attempt.artifact_id,
+      at:text(event.at),publishing_authorized:false};
+  } else if (kind === "REOPEN_APPROVED_HELD_REDO") {
+    // Creative work is independent of delivery QA. In particular, a missing
+    // watermark must never prevent the reviewer from asking for another V2/V3.
+    // No output hold, publishing authority or render job changes here.
+    const attempt=current(s);
+    if(s.state!=="approved"||s.review_hold.active!==true||
+       s.current_attempt_id!==s.approved_attempt_id||
+       !attempt||Number(attempt.number)<2||attempt.status!=="ready_for_review"||
+       event.attempt_id!==attempt.id||event.artifact_id!==attempt.artifact_id||
+       event.hold_id!==s.review_hold.id||event.hold_owner!==s.id||
+       !validId(event.message_id)||!text(event.note)||
+       text(event.note).length>3000||
+       s.messages.some(m=>m.id===event.message_id)||s.active_job)
+      fail("APPROVED_REDO_NOT_ALLOWED",
+        "Only the exact approved, held and idle V2 can reopen for creative changes");
+    s.messages.push({id:event.message_id,role:"user",content:text(event.note),
+      at:text(event.at),attempt_id:attempt.id,timestamp_seconds:null});
+    s.approved_attempt_id=null;
+    s.factory_review=null;
+    s.producer_candidate=null;
+    s.plan=null;
+    s.pending_authorization=null;
+    s.state="discussing";
+    // The approved artifact stays in attempt history and remains the selected
+    // held review-only file until the reviewer separately starts a new render.
   } else if (kind === "FACTORY_REQUEST_CHANGES") {
     // The Factory writer has already re-established and read back the exact
     // output hold while holding the shared per-output approval lease.
@@ -345,6 +397,7 @@ export function applyReviewEvent(session, event) {
       at:text(event.at),attempt_id:attempt.id,timestamp_seconds:null});
     s.review_hold.active=true;
     s.approved_attempt_id=null;
+    s.factory_review=null;
     s.factory_handoff.status="returned_for_changes";
     s.factory_handoff.returned_at=text(event.at);
     s.producer_candidate=null;
@@ -374,6 +427,10 @@ export function applyReviewEvent(session, event) {
       original_artifact_id:original.artifact_id,at:text(event.at),
       status:"ready_for_factory_approval",
     };
+    if(s.factory_review?.status==="accepted_pending_qa"&&
+       s.factory_review.attempt_id===active.id)
+      s.factory_review={...s.factory_review,status:"handoff_verified",
+        qa_pending:false,verified_at:text(event.at)};
     // The authoritative output hold remains active until a separate verified
     // exact-owner Airtable release AFTER this session update is persisted.
     s.review_hold.active=false;

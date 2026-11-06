@@ -87,104 +87,80 @@ test('queue UI does not write, respects Chicago scope, and renders a safe origin
 });
 
 
-test('Rendering Review never enrolls; Factory-submitted sessions retain Producer conversation',async()=>{
+test('review notes are saved separately and only explicit Make edits asks Producer',async()=>{
   const ids=['page-rendering-review','navRenderingReview','rrQueueList','rrDetail',
     'rrStatus','rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile'];
   const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
-  const calls=[];
-  let observerCallback;
-  let enrolled=true; // Review was admitted by Factory with required comments.
-  let conversation=false;
-  let admissionActive=false; // Direct admission is disabled.
+  const calls=[];let notify,version=1,savedNote='',conversation=false;
   const output='recA1B2C3D4E5F6G7';
-  const queue=()=>({ok:true,
-    flags:{admission_enabled:admissionActive,producer_conversation_enabled:true,
-      automatic_sampling_percent:0},
-    queue:[{output_id:output,profile_id:'recT2rbKX3MF7cVFU',
-      output_type:'Instagram Reel',manual_admission_enabled:!enrolled,
-      output_number:54,title:'Chicago train pilot',render_status:'Rendered',
-      review_held:enrolled,final_file_url:'https://example.org/clip.mp4'}],
-    next_cursor:null});
-  const saved=()=>({ok:true,publication_hold_verified:true,session:{
-    id:'rrsession-12345678',version:conversation?2:1,
-    state:conversation?'discussing':'ready_for_review',
-    messages:conversation?[
-      {role:'user',content:'Explain step by step',at:'2026-10-30T20:39:18.045Z'},
-      {role:'producer',content:'I propose a clearer journey example.',at:'2026-10-30T20:42:39.164Z'}]:[],
-    producer_candidate:conversation?{candidate:{narration:'Revised script',
-      changes:['Add a worked example'],requirements:[]}}:null,
-  }});
-  const fetchStub=async(url,options)=>{
-    calls.push({url,method:options.method,body:options.body});
-    if(url==='/api/session')return {ok:true,json:async()=>({
-      ok:true,authenticated:true,authorized:true,permissions:{outputs_review:true}})};
-    if(url.startsWith('/api/rendering-review/queue?'))
-      return {ok:true,json:async()=>queue()};
-    if(url==='/api/rendering-review/outputs/'+output)
-      return {ok:true,json:async()=>saved()};
-    if(url.endsWith('/enroll')){
-      assert.equal(options.method,'POST');
-      assert.deepEqual(Object.keys(JSON.parse(options.body)),['client_request_id']);
-      enrolled=true;
-      return {ok:true,json:async()=>({ok:true,review_hold_active:true})};
+  const saved=()=>({ok:true,publication_hold_verified:true,
+    flags:{producer_conversation_enabled:true,attempt_commit_enabled:false},
+    session:{version,state:'discussing',review_hold:{active:true},
+      latest_attempt_number:1,
+      attempts:[{id:'attemptv1',number:1,status:'ready_for_review'}],
+      messages:[...(savedNote?[{role:'user',content:savedNote,at:'2026-11-01T17:00:00Z'}]:[]),
+        ...(conversation?[{role:'producer',content:'I will adjust the narration',at:'2026-11-01T17:01:00Z'}]:[])],
+      producer_candidate:conversation?{candidate:{narration:'Updated script',changes:[],requirements:[]}}:null}});
+  const fetchStub=async(url,opts)=>{
+    calls.push({url,method:opts.method,body:opts.body});
+    if(url==='/api/session')return {ok:true,json:async()=>({ok:true,authenticated:true,authorized:true,
+      permissions:{outputs_review:true}})};
+    if(url.startsWith('/api/rendering-review/queue?'))return {ok:true,json:async()=>({
+      ok:true,flags:{admission_enabled:false,producer_conversation_enabled:true,automatic_sampling_percent:0},
+      queue:[{output_id:output,profile_id:'recT2rbKX3MF7cVFU',output_type:'Instagram Reel',
+        output_number:54,title:'Review',review_held:true,final_file_url:'https://example.org/v1.mp4'}],
+      next_cursor:null})};
+    if(url==='/api/rendering-review/outputs/'+output)return {ok:true,json:async()=>saved()};
+    if(url.endsWith('/review-feedback')){
+      const body=JSON.parse(opts.body);assert.equal(body.expected_version,1);
+      savedNote=body.content;version=2;
+      return {ok:true,json:async()=>({ok:true,review_hold_active:true,
+        session_version:version,message_count:1})};
     }
     if(url.endsWith('/producer-conversation')){
-      assert.equal(options.method,'POST');
-      const body=JSON.parse(options.body);
+      const body=JSON.parse(opts.body);assert.equal(body.expected_version,2);
       assert.equal(body.direction,'Explain step by step');
-      assert.equal(body.expected_version,1);
-      assert.deepEqual(Object.keys(body),['direction','expected_version','client_request_id']);
-      conversation=true;
-      return {ok:true,json:async()=>({
-        ok:true,persisted:true,render_queued:false,session_version:2,
-      })};
+      conversation=true;version=3;
+      return {ok:true,json:async()=>({ok:true,persisted:true,render_queued:false})};
     }
-    throw new Error('Unexpected external action '+url);
+    throw Error('Unexpected '+url);
   };
   const sandbox={
     document:{getElementById:id=>nodes[id],createElement:tag=>new Node(tag)},
-    window:{location:{href:'https://studio.test/'},
-      CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''}},
-    MutationObserver:class {constructor(fn){observerCallback=fn;}observe(){}},
+    window:{location:{href:'https://studio.test/'},CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''}},
+    MutationObserver:class{constructor(fn){notify=fn;}observe(){}},
     fetch:fetchStub,URL,URLSearchParams,
     crypto:{randomUUID:()=> '12345678-1234-1234-1234-123456789012'},
   };
   vm.runInNewContext(script,sandbox,{filename:'rendering-review-queue.js'});
-  await tick();await tick();
-  nodes['page-rendering-review'].classList.add('active');
-  observerCallback();
+  for(let i=0;i<5;i++)await tick();
+  nodes['page-rendering-review'].classList.add('active');notify();
   for(let i=0;i<10;i++)await tick();
   const descendants=root=>[root,...root.children.flatMap(descendants)];
-  const initial=descendants(nodes.rrDetail);
-  const enroll=initial.find(n=>n.tag==='button'&&n.textContent==='Review with Producer');
-  assert.equal(enroll,undefined,'Rendering Review must not offer its own enrollment control');
-  // Changing feature flags cannot bypass Factory-origin enrollment.
-  admissionActive=false;
-  await nodes.rrRefresh.listeners.click();
-  for(let i=0;i<10;i++)await tick();
-  const held=descendants(nodes.rrDetail);
-  const textarea=held.find(n=>n.tag==='textarea');
-  const send=held.find(n=>n.tag==='button'&&n.textContent==='Send to Producer');
-  assert.ok(textarea&&send);
-  textarea.value='Explain step by step';
-  await send.listeners.click();
-  for(let i=0;i<10;i++)await tick();
+  let all=descendants(nodes.rrDetail);
+  const input=all.find(n=>n.tag==='textarea'&&n.attrs['aria-label']==='Creative direction for Producer');
+  const save=all.find(n=>n.tag==='button'&&n.textContent==='Save comment (no edits yet)');
+  const apply=all.find(n=>n.tag==='button'&&n.textContent==='Make edits based on the latest feedback');
+  assert.ok(input&&save&&apply);
+  assert.equal(calls.filter(x=>x.method==='POST').length,0,'read must be inert');
+  assert.equal(apply.disabled,true,'no saved feedback');
+  input.value='Explain step by step';input.listeners.input();
+  await save.listeners.click();
+  for(let i=0;i<8;i++)await tick();
+  assert.equal(conversation,false,'saving comments must not invoke Producer');
+  assert.equal(calls.filter(x=>x.method==='POST').length,1);
+  assert.ok(calls.some(x=>x.url.endsWith('/review-feedback')));
+  all=descendants(nodes.rrDetail);
+  const applyNow=all.find(n=>n.tag==='button'&&n.textContent==='Make edits based on the latest feedback');
+  assert.equal(applyNow.disabled,false);
+  await applyNow.listeners.click();
+  for(let i=0;i<8;i++)await tick();
   assert.equal(conversation,true);
-  const activity=descendants(nodes.rrDetail);
-  assert.ok(activity.some(n=>n.textContent==='I propose a clearer journey example.'));
-  assert.ok(activity.some(n=>n.className==='rr-activity-heading'&&/V2 NOT STARTED/.test(n.textContent)));
-  const times=activity.filter(n=>n.className==='rr-message-time');
-  assert.equal(times.length,2);
-  assert.ok(times.some(n=>/3:39/.test(n.textContent)&&/CDT/.test(n.textContent)));
-  assert.ok(times.some(n=>/3:42/.test(n.textContent)&&/CDT/.test(n.textContent)));
-  assert.ok(activity.some(n=>n.className==='rr-conversation-live'),'Conversation must not be hidden');
-  const writes=calls.filter(v=>v.method==='POST');
-  assert.equal(writes.length,1);
-  assert.ok(writes.every(v=>v.url.endsWith('/producer-conversation')));
-  assert.ok(!calls.some(v=>v.url.endsWith('/enroll')));
-  assert.ok(!writes.some(v=>/\/(?:publish|render|approve)(?:\/|$)/.test(v.url)));
+  assert.equal(calls.filter(x=>x.method==='POST').length,2);
+  assert.ok(calls.some(x=>x.url.endsWith('/producer-conversation')));
+  assert.ok(!calls.some(x=>/commit-attempt|publish|approve|\/enroll/.test(x.url)));
+  assert.ok(descendants(nodes.rrDetail).some(n=>/I will adjust the narration/.test(n.textContent)));
 });
-
 
 test('real Drive /view source uses the authenticated Studio MP4 stream, not a Google iframe',async()=>{
   const ids=['page-rendering-review','navRenderingReview','rrQueueList','rrDetail',
@@ -461,30 +437,352 @@ test('queued Chicago render automatically delivers verified V2 without interrupt
 });
 
 
-test('Producer failure is visible beside Send, preserves direction and reuses retry identity',async()=>{
+test('explicit Producer action failure preserves saved feedback and retry request identity',async()=>{
   const ids=['page-rendering-review','navRenderingReview','rrQueueList','rrDetail',
     'rrStatus','rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile'];
   const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
-  const output='recA1B2C3D4E5F6G7';
-  let activate,submissions=[];
+  let notify;const submissions=[],output='recA1B2C3D4E5F6G7';
   const fetchStub=async(url,options)=>{
     if(url==='/api/session')return {ok:true,json:async()=>({
       authenticated:true,authorized:true,permissions:{outputs_review:true}})};
     if(url.startsWith('/api/rendering-review/queue?'))return {ok:true,json:async()=>({
-      ok:true,flags:{admission_enabled:true,producer_conversation_enabled:true,
-        attempt_commit_enabled:false,automatic_sampling_percent:0},
+      ok:true,flags:{admission_enabled:false,producer_conversation_enabled:true,
+        automatic_sampling_percent:0},
       queue:[{output_id:output,profile_id:'recT2rbKX3MF7cVFU',
-        output_type:'Instagram Reel',output_number:8447,title:'Riverwalk Morning Reflections',
-        render_status:'Rendered',review_held:true,final_file_id:'source-1234567890'}],
-      next_cursor:null})};
+        output_type:'Instagram Reel',output_number:8447,title:'Riverwalk',
+        review_held:true,final_file_url:'https://example.org/v1.mp4'}],next_cursor:null})};
     if(url==='/api/rendering-review/outputs/'+output)return {ok:true,json:async()=>({
-      ok:true,publication_hold_verified:true,session:{
-        version:1,state:'ready_for_review',messages:[],attempts:[]}})};
+      ok:true,publication_hold_verified:true,flags:{producer_conversation_enabled:true},
+      session:{version:2,state:'discussing',review_hold:{active:true},
+        messages:[{role:'user',content:'Use more Riverwalk images',at:'2026-11-01T17:00:00Z'}],
+        attempts:[{number:1,status:'ready_for_review'}]}})};
     if(url.endsWith('/producer-conversation')){
       submissions.push(JSON.parse(options.body));
       return {ok:false,status:502,json:async()=>({
-        ok:false,error:'The Producer returned an invalid revision proposal. Your feedback was not saved; please retry.'})};
+        ok:false,error:'Producer response unavailable'})};
     }
+    throw Error('Unexpected '+url);
+  };
+  const sandbox={document:{getElementById:id=>nodes[id],createElement:tag=>new Node(tag)},
+    window:{location:{href:'https://studio.test/'},CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''}},
+    MutationObserver:class{constructor(fn){notify=fn;}observe(){}},
+    fetch:fetchStub,URL,URLSearchParams,
+    crypto:{randomUUID:()=> '12345678-1234-1234-1234-123456789012'}};
+  vm.runInNewContext(script,sandbox,{filename:'rendering-review-queue.js'});
+  for(let i=0;i<5;i++)await tick();
+  nodes['page-rendering-review'].classList.add('active');notify();
+  for(let i=0;i<8;i++)await tick();
+  const descendants=root=>[root,...root.children.flatMap(descendants)];
+  const all=descendants(nodes.rrDetail);
+  const apply=all.find(n=>n.tag==='button'&&n.textContent==='Make edits based on the latest feedback');
+  const comment=all.find(n=>n.tag==='textarea'&&n.attrs['aria-label']==='Creative direction for Producer');
+  assert.ok(apply&&comment);assert.equal(apply.disabled,false);
+  await apply.listeners.click();
+  const status=all.find(n=>n.className==='rr-feedback-status');
+  assert.match(status.textContent,/Producer request not verified/);
+  assert.equal(comment.value,'');
+  assert.equal(apply.disabled,false);
+  await apply.listeners.click();
+  assert.equal(submissions.length,2);
+  assert.equal(submissions[0].expected_version,2);
+  assert.equal(submissions[0].client_request_id,submissions[1].client_request_id);
+  assert.ok(!submissions.some(v=>v.render||v.publish));
+});
+
+test('photo suggestions keep comments available and never make edits until explicit click',async()=>{
+  const ids=['page-rendering-review','navRenderingReview','rrQueueList','rrDetail',
+    'rrStatus','rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile'];
+  const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
+  const output='rec0uVrVeiUM6shp9',calls=[];let notify,version=3,savedNote='',processed=false;
+  const original={name:'Riverwalk night',time_of_day:'Night',preview_url:'https://example.org/river.jpg'};
+  const replacement={name:'Morning Riverwalk',time_of_day:'Morning',preview_url:'https://example.org/day.jpg'};
+  const fetchStub=async(url,options)=>{
+    calls.push({url,method:options.method,body:options.body});
+    if(url==='/api/session')return {ok:true,json:async()=>({
+      ok:true,authenticated:true,authorized:true,permissions:{outputs_review:true}})};
+    if(url.startsWith('/api/rendering-review/queue?'))return {ok:true,json:async()=>({
+      ok:true,flags:{admission_enabled:false,producer_conversation_enabled:true,automatic_sampling_percent:0},
+      queue:[{output_id:output,profile_id:'recT2rbKX3MF7cVFU',output_type:'Instagram Reel',
+        output_number:8447,title:'Chicago Riverwalk',review_held:true,
+        final_file_url:'https://example.org/v1.mp4'}],next_cursor:null})};
+    if(url==='/api/rendering-review/outputs/'+output)return {ok:true,json:async()=>({
+      ok:true,publication_hold_verified:true,
+      flags:{producer_conversation_enabled:true,attempt_commit_enabled:false},
+      session:{version,state:'discussing',review_hold:{active:true},
+        messages:[...(savedNote?[{role:'user',content:savedNote,at:'2026-11-01T17:30:00Z'}]:[]),
+          ...(processed?[{role:'producer',content:'I can update the photos.',at:'2026-11-01T17:31:00Z'}]:[])],
+        attempts:[{id:'v1',number:1,status:'ready_for_review'}]},
+      storyboard:[{scene:3,start_seconds:9.7,end_seconds:15.03,
+        original,proposed:replacement,changed:true,proposed_ready:true}]})};
+    if(url.endsWith('/review-feedback')){
+      const body=JSON.parse(options.body);
+      assert.equal(body.expected_version,3);
+      savedNote=body.content;version=4;
+      return {ok:true,json:async()=>({ok:true,review_hold_active:true,
+        session_version:4,message_count:1})};
+    }
+    if(url.endsWith('/producer-conversation')){
+      const body=JSON.parse(options.body);
+      assert.equal(body.expected_version,4);
+      assert.equal(body.direction,'Use a different photo for frame 3');
+      processed=true;version=5;
+      return {ok:true,json:async()=>({ok:true,persisted:true,render_queued:false})};
+    }
+    throw Error('Unexpected '+url);
+  };
+  const sandbox={document:{getElementById:id=>nodes[id],createElement:tag=>new Node(tag)},
+    window:{location:{href:'https://studio.test/'},CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''}},
+    MutationObserver:class{constructor(fn){notify=fn;}observe(){}},
+    fetch:fetchStub,URL,URLSearchParams,
+    crypto:{randomUUID:()=> 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'}};
+  vm.runInNewContext(script,sandbox,{filename:'rendering-review-queue.js'});
+  for(let i=0;i<5;i++)await tick();
+  nodes['page-rendering-review'].classList.add('active');notify();
+  for(let i=0;i<8;i++)await tick();
+  const descendants=root=>[root,...root.children.flatMap(descendants)];
+  let all=descendants(nodes.rrDetail);
+  const photos=all.find(n=>n.className==='rr-proposal-storyboard');
+  assert.ok(photos);
+  assert.ok(descendants(photos).some(n=>n.textContent==='Suggested replacement'));
+  const form=all.find(n=>n.className.includes('rr-producer-chat-primary'));
+  const input=descendants(form).find(n=>n.tag==='textarea');
+  const save=descendants(form).find(n=>n.tag==='button'&&n.textContent==='Save comment (no edits yet)');
+  assert.ok(input&&save,'photo suggestions must retain the comment input');
+  assert.ok(all.indexOf(form)>all.indexOf(photos),'comment box follows proposed photos');
+  input.value='Use a different photo for frame 3';input.listeners.input();
+  await save.listeners.click();for(let i=0;i<5;i++)await tick();
+  assert.equal(processed,false);
+  assert.equal(calls.filter(x=>x.method==='POST').length,1);
+  all=descendants(nodes.rrDetail);
+  const apply=all.find(n=>n.tag==='button'&&n.textContent==='Make edits based on the latest feedback');
+  assert.ok(apply&&!apply.disabled);
+  await apply.listeners.click();for(let i=0;i<5;i++)await tick();
+  assert.equal(processed,true);
+  assert.equal(calls.filter(x=>x.method==='POST').length,2);
+  assert.ok(!calls.some(x=>/commit-attempt|publish|approve/.test(x.url)));
+});
+
+test('Rendering Review labels the playing video without unchanged-video explanations',()=>{
+  assert.match(script,/Version V/);
+  assert.match(script,/rrVersionBar/);
+  assert.match(html,/id="rrOriginalVersion"/);
+  assert.match(script,/Suggested changes/);
+  assert.match(script,/Do these look right/);
+  assert.match(script,/Make edits based on the latest feedback/);
+  assert.match(script,/Save comment \(no edits yet\)/);
+  assert.match(script,/Suggested morning photo/);
+  assert.match(script,/receipt\.persisted!==true\|\|receipt\.render_queued!==false/);
+  assert.doesNotMatch(script,/ORIGINAL V1 — unchanged/);
+  assert.doesNotMatch(script,/The video has not changed/);
+  assert.doesNotMatch(script,/I haven\\'t changed the video yet/);
+  assert.match(css,/rr-version-bar/);
+  assert.doesNotMatch(script,/showMedia\(.*candidate\.candidate\.timeline/);
+});
+
+
+test('held Producer reply shows V2 not started; saved plan and render progress refresh automatically',async()=>{
+  const output='recA1B2C3D4E5F6G7';
+  const ids=['page-rendering-review','navRenderingReview','rrQueueList','rrDetail','rrStatus',
+    'rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile','rrProgressSummary'];
+  const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
+  let notify,version=2,state='discussing',plan=null,attempts=[],timerId=0;
+  let currentAttemptId=null,approvedAttemptId=null,allowActions=true;
+  let reads=0,failNextRead=false;const timers=new Map();let savedNote='';let notePosts=0;
+  const saved=()=>({ok:true,publication_hold_verified:true,
+    flags:{producer_conversation_enabled:allowActions,attempt_commit_enabled:allowActions,
+      creative_approval_enabled:allowActions},
+    session:{
+    id:'review-session',version,state,review_hold:{active:true},
+    current_attempt_id:currentAttemptId,approved_attempt_id:approvedAttemptId,
+    active_job:['queued','rendering','validating'].includes(state)?{id:'rrjob-queued-123'}:null,
+    latest_attempt_number:attempts.length?2:1,
+    messages:[{role:'user',content:'Change narration only',at:'2026-11-01T16:00:00Z'},
+      {role:'producer',content:'I will keep the same eight photos',at:'2026-11-01T16:01:00Z'},
+      ...(savedNote?[{role:'user',content:savedNote,at:'2026-11-01T16:02:00Z'}]:[])],
+    producer_candidate:{stale:false,candidate:{narration:'New script',changes:[],requirements:[]}},
+    plan,attempts,
+  }});
+  const fetchStub=async(url,options)=>{
+    if(url==='/api/rendering-review/outputs/'+output+'/review-feedback'){
+      assert.equal(options.method,'POST');
+      const body=JSON.parse(options.body);
+      assert.match(body.content,/Replace scene 3/);
+      assert.equal(body.expected_version,version);
+      savedNote=body.content;notePosts++;version++;
+      return {ok:true,json:async()=>({ok:true,review_hold_active:true,
+        session_version:version,message_count:3})};
+    }
+    assert.equal(options.method,'GET','polling must never initiate a render or publish');
+    if(url==='/api/session')return {ok:true,json:async()=>({
+      ok:true,authenticated:true,authorized:true,permissions:{outputs_review:true}})};
+    if(url.startsWith('/api/rendering-review/queue?'))return {ok:true,json:async()=>({
+      ok:true,flags:{admission_enabled:false,producer_conversation_enabled:true,
+        automatic_sampling_percent:0},
+      queue:[{output_id:output,profile_id:'recT2rbKX3MF7cVFU',
+        output_type:'Instagram Reel',output_number:9664,title:'Adler View Photo Set',
+        render_status:'Rendered',review_held:true,final_file_url:'https://example.org/v1.mp4'}],
+      next_cursor:null})};
+    if(url==='/api/rendering-review/outputs/'+output){
+      reads++;
+      if(failNextRead){failNextRead=false;return {ok:false,status:503,
+        json:async()=>({ok:false,error:'Session temporarily unavailable'})};}
+      return {ok:true,json:async()=>saved()};
+    }
+    throw new Error('Unexpected request '+url);
+  };
+  const sandbox={
+    document:{getElementById:id=>nodes[id],createElement:tag=>new Node(tag)},
+    window:{location:{href:'https://studio.test/'},CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''},
+      setTimeout:(cb,ms)=>{assert.equal(ms,20000);const id=++timerId;timers.set(id,cb);return id;},
+      clearTimeout:id=>timers.delete(id)},
+    MutationObserver:class {constructor(fn){notify=fn;}observe(){}},
+    fetch:fetchStub,URL,URLSearchParams,
+    crypto:{randomUUID:()=> 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'},
+  };
+  vm.runInNewContext(script,sandbox,{filename:'rendering-review-queue.js'});
+  await tick();await tick();
+  nodes['page-rendering-review'].classList.add('active');notify();
+  for(let i=0;i<10;i++)await tick();
+  const descendants=root=>[root,...root.children.flatMap(descendants)];
+  const textAll=()=>descendants(nodes.rrDetail).map(n=>n.textContent).join(' ');
+  assert.equal(nodes.rrProgressSummary.hidden,false);
+  assert.match(nodes.rrProgressSummary.textContent,/V2 has NOT started/);
+  assert.match(textAll(),/Post-production progress/);
+  assert.match(textAll(),/Plan ready/);
+  assert.match(textAll(),/Not started/);
+  assert.match(textAll(),/Requires your attention/);
+  assert.ok(nodes.rrProgressSummary.classList.contains('rr-progress-top--attention'));
+  assert.ok(descendants(nodes.rrDetail).some(n=>n.className.includes('rr-progress-stage--attention')));
+  assert.ok(descendants(nodes.rrDetail).some(n=>n.tag==='button'&&n.textContent==='Check latest status'));
+  assert.equal(timers.size,1);
+  // Unchanged saved state: verify again without resetting the V1 playback.
+  const firstTimer=timers.values().next().value;timers.clear();await firstTimer();
+  assert.equal(reads,2);assert.equal(timers.size,1);
+  assert.match(textAll(),/Last verified/);
+  // A separately saved, frozen plan becomes visible without a manual refresh.
+  version=3;state='plan_ready';
+  plan={frozen:true,missing_assets:[],hash:'plan123',version:1,immutable_manifest:'manifest'};
+  const second=timers.values().next().value;timers.clear();await second();
+  for(let i=0;i<5;i++)await tick();
+  assert.match(nodes.rrProgressSummary.textContent,/plan is saved/);
+  assert.match(nodes.rrProgressSummary.textContent,/No render has started/);
+  assert.match(nodes.rrProgressSummary.textContent,/Requires your attention/);
+  assert.ok(descendants(nodes.rrDetail).some(n=>n.className.includes('rr-progress-stage--attention')));
+  assert.equal(timers.size,1);
+  // Only a server-confirmed queue changes the UI to rendering queued.
+  version=4;state='queued';attempts=[{id:'attempt2',number:2,status:'queued'}];
+  const third=timers.values().next().value;timers.clear();await third();
+  for(let i=0;i<5;i++)await tick();
+  assert.match(nodes.rrProgressSummary.textContent,/render job is queued/);
+  assert.match(textAll(),/Queued — not started/);
+  assert.ok(!nodes.rrProgressSummary.classList.contains('rr-progress-top--attention'),
+    'queued render is automatic work, not a user-action warning');
+  assert.ok(!descendants(nodes.rrDetail).some(n=>n.className.includes('rr-progress-stage--attention')));
+  assert.ok(!/V2 is ready for review/.test(nodes.rrProgressSummary.textContent));
+  const draft=descendants(nodes.rrDetail).find(n=>n.tag==='textarea'&&
+    n.attrs['aria-label']==='Creative direction for Producer');
+  const saveNote=descendants(nodes.rrDetail).find(n=>n.tag==='button'&&
+    n.textContent==='Save comment (no edits yet)');
+  assert.ok(draft&&saveNote,'queued render must still accept comments');
+  draft.value='Replace scene 3 with another planetarium photo';
+  draft.listeners.input();
+  await saveNote.listeners.click();
+  for(let i=0;i<5;i++)await tick();
+  assert.equal(notePosts,1);
+  assert.match(textAll(),/Replace scene 3/);
+  assert.ok(!/current render was changed/i.test(textAll()));
+  assert.ok(!nodes.rrProgressSummary.classList.contains('rr-progress-top--attention'));
+  // Transient manual check failures must not erase the previously verified stage.
+  failNextRead=true;
+  const check=descendants(nodes.rrDetail).find(n=>
+    n.tag==='button'&&n.textContent==='Check latest status');
+  assert.ok(check);
+  await check.listeners.click();
+  for(let i=0;i<4;i++)await tick();
+  assert.match(nodes.rrProgressSummary.textContent,/Latest status unavailable/);
+  assert.match(nodes.rrProgressSummary.textContent,/render job is queued/);
+  // Once a verified V2 exists, only enabled creative approval requires attention.
+  state='ready_for_review';version=5;currentAttemptId='attempt2abc';
+  attempts=[{id:currentAttemptId,number:2,status:'ready_for_review',artifact_id:'artifact123'}];
+  await nodes.rrQueueList.children[0].listeners.click();
+  for(let i=0;i<5;i++)await tick();
+  assert.match(nodes.rrProgressSummary.textContent,/Requires your attention/);
+  assert.match(nodes.rrProgressSummary.textContent,/ready for review/);
+  assert.ok(descendants(nodes.rrDetail).some(n=>n.className.includes('rr-progress-stage--attention')));
+  // A disabled approval gate must not invent an operator action.
+  allowActions=false;
+  await nodes.rrQueueList.children[0].listeners.click();
+  for(let i=0;i<5;i++)await tick();
+  assert.ok(!nodes.rrProgressSummary.classList.contains('rr-progress-top--attention'));
+  // Approved V2 is complete, never an outstanding user approval.
+  state='approved';approvedAttemptId=currentAttemptId;version=6;
+  await nodes.rrQueueList.children[0].listeners.click();
+  for(let i=0;i<5;i++)await tick();
+  assert.ok(!descendants(nodes.rrDetail).some(n=>n.className.includes('rr-progress-stage--attention')));
+  assert.ok(descendants(nodes.rrDetail).some(n=>n.className.includes('rr-progress-stage--complete')));
+  nodes['page-rendering-review'].classList.remove('active');notify();
+  assert.equal(timers.size,0,'polling cancels when the page is closed');
+});
+
+test('approved imported V2 never reverts its activity heading to V2 NOT STARTED',()=>{
+  const approved=script.indexOf("const title=completedAttempt&&session.state==='approved'?");
+  const ready=script.indexOf("completedAttempt&&session.state==='ready_for_review'?",approved);
+  const stale=script.indexOf("producer?'Producer replied · V2 NOT STARTED'",ready);
+  assert.ok(approved>0&&ready>approved&&stale>ready,
+    'approved V2 must take precedence over stale Producer messages');
+  assert.match(script,/Factory creative review accepted — QA pending/);
+  assert.match(script,/V2 creative approval is saved\. Factory can accept/);
+  assert.match(script,/Sibling creative-master propagation is deferred while watermark QA is pending/);
+});
+
+test('held review progress displays a recovery warning for an unclaimed stale V2, never a second render action', async()=>{
+  const fs=await import('node:fs');
+  const source=fs.readFileSync(new URL('./assets/rendering-review-queue.js',import.meta.url),'utf8');
+  assert.match(source,/const stalledQueued=session\?\.state==='queued'/);
+  assert.match(source,/jobAgeMs>=240000/);
+  assert.match(source,/const stalledClaimed=session\?\.state==='queued'/);
+  assert.match(source,/jobAgeMs>=900000/);
+  assert.match(source,/Requires your attention: V2 has been queued/);
+  assert.match(source,/do not start another render/);
+  assert.match(source,/reviewSignature\(latest\.session,latest\.render_job\)/);
+});
+
+test('completed V2 and pending V3 have separate, non-authorizing progress states',async()=>{
+  const ids=['page-rendering-review','navRenderingReview','rrQueueList','rrDetail',
+    'rrStatus','rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile','rrProgressSummary'];
+  const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
+  let activate;const calls=[];
+  const output='recA1B2C3D4E5F6G7';
+  const entry={output_id:output,profile_id:'recT2rbKX3MF7cVFU',
+    output_type:'Instagram Reel',output_number:9664,title:'Adler View Photo Set',
+    review_held:true,final_file_url:'https://example.org/v1.mp4'};
+  const producer={
+    source_attempt_id:'attempt-v2',stale:false,
+    candidate:{explanation:'Keep skyline and select seven exteriors',
+      requirements:[{kind:'asset',description:'Verify existing Adler photo 5'}]}};
+  const fetchStub=async(url,opts)=>{
+    calls.push({url,method:opts?.method||'GET'});
+    if(url==='/api/session')return {ok:true,json:async()=>({
+      ok:true,authenticated:true,authorized:true,permissions:{outputs_review:true}})};
+    if(url.startsWith('/api/rendering-review/queue?'))return {ok:true,json:async()=>({
+      ok:true,queue:[entry],next_cursor:null,
+      flags:{admission_enabled:false,producer_conversation_enabled:true,
+        automatic_sampling_percent:0}})};
+    if(url==='/api/rendering-review/outputs/'+output)return {ok:true,json:async()=>({
+      ok:true,publication_hold_verified:true,
+      flags:{producer_conversation_enabled:true,attempt_commit_enabled:false,
+        creative_approval_enabled:false},
+      session:{id:'session-12345678',version:6,state:'ready_for_review',
+        profile_id:'recT2rbKX3MF7cVFU',current_attempt_id:'attempt-v2',
+        latest_attempt_number:2,review_hold:{active:true,id:'held-1234'},
+        attempts:[{id:'attempt-v1',number:1,status:'ready_for_review',artifact_id:'originalfile123456789'},
+          {id:'attempt-v2',number:2,status:'ready_for_review',artifact_id:'renderedfile123456789'}],
+        messages:[
+          {role:'user',content:'Use Adler Planetarium 3, 5, 12, 13, 14, 17, 18',
+            attempt_id:'attempt-v2',at:'2026-11-02T01:20:00Z'},
+          {role:'producer',content:'Seven photos need linking',
+            attempt_id:'attempt-v2',at:'2026-11-02T01:21:00Z'}],
+        producer_candidate:producer,plan:null}})};
     throw Error('Unexpected '+url);
   };
   const sandbox={
@@ -499,149 +797,11 @@ test('Producer failure is visible beside Send, preserves direction and reuses re
   for(let i=0;i<5;i++)await tick();
   nodes['page-rendering-review'].classList.add('active');activate();
   for(let i=0;i<10;i++)await tick();
-  const descendants=node=>[node,...node.children.flatMap(descendants)];
-  const composer=descendants(nodes.rrDetail).find(n=>n.tag==='textarea');
-  const send=descendants(nodes.rrDetail).find(n=>n.textContent==='Send to Producer');
-  assert.ok(composer&&send);
-  composer.value='Keep the morning opening, but show three more Riverwalk photos.';
-  await send.listeners.click();
-  const statuses=descendants(nodes.rrDetail).filter(n=>n.className==='rr-feedback-status');
-  assert.equal(statuses.length,1);
-  assert.match(statuses[0].textContent,/Could not confirm your reply: The Producer returned an invalid revision proposal/);
-  assert.equal(composer.value,'Keep the morning opening, but show three more Riverwalk photos.');
-  assert.equal(send.disabled,false);
-  await send.listeners.click();
-  assert.equal(submissions.length,2);
-  assert.equal(submissions[0].client_request_id,submissions[1].client_request_id);
-  assert.equal(submissions[0].expected_version,1);
-  assert.ok(!submissions.some(x=>x.publish||x.render));
-});
-
-test('held #8447 surfaces a verified Morning alternative and saves correction only on reviewer click',async()=>{
-  const ids=['page-rendering-review','navRenderingReview','rrQueueList','rrDetail',
-    'rrStatus','rrRefresh','rrMore','rrCount','rrVideo','rrOpenFile'];
-  const nodes=Object.fromEntries(ids.map(id=>[id,new Node(id)]));
-  const output='rec0uVrVeiUM6shp9';
-  let notify, savedRevision=false,completeReply;
-  const slowTimers=[];
-  const calls=[];
-  const night={name:'Gibsons Italia 5',time_of_day:'Night',
-    preview_url:'https://media.chicagoshining.com/studio/previews/item4/night.jpg'};
-  const riverNight={name:'Chicago Riverwalk 10',time_of_day:'Night',
-    preview_url:'https://media.chicagoshining.com/studio/previews/item4/night-river.jpg'};
-  const morning={name:'Chicago Riverwalk 8',time_of_day:'Morning',
-    preview_url:'https://media.chicagoshining.com/studio/previews/item4/morning.jpg'};
-  const originals=[
-    {scene:1,start_seconds:0,end_seconds:3.567,original:night,
-      proposed:savedRevision?morning:night,changed:savedRevision,proposed_ready:true},
-    {scene:5,start_seconds:13.9,end_seconds:17.133,original:riverNight,
-      proposed:morning,changed:true,proposed_ready:true},
-    {scene:7,start_seconds:20.7,end_seconds:24.233,original:morning,
-      proposed:morning,changed:false,proposed_ready:true}];
-  const fetchStub=async (url,options)=>{
-    calls.push({url,method:options.method,body:options.body});
-    if(url==='/api/session')return {ok:true,json:async()=>({
-      ok:true,authenticated:true,authorized:true,permissions:{outputs_review:true}})};
-    if(url.startsWith('/api/rendering-review/queue?'))return {ok:true,json:async()=>({
-      ok:true,flags:{admission_enabled:false,producer_conversation_enabled:true,
-        automatic_sampling_percent:0},
-      queue:[{output_id:output,profile_id:'recT2rbKX3MF7cVFU',review_held:true,
-        output_type:'Instagram Reel',output_number:8447,render_status:'Rendered',
-        title:'Chicago held Reel',final_file_url:'https://example.org/old.mp4'}],next_cursor:null})};
-    if(url==='/api/rendering-review/outputs/'+output)
-      return {ok:true,json:async()=>({ok:true,publication_hold_verified:true,
-        flags:{producer_conversation_enabled:true,attempt_commit_enabled:false},
-        session:{version:savedRevision?4:3,state:'discussing',review_hold:{active:true},
-          attempts:[{number:1,status:'ready_for_review',artifact_id:'source1'}],messages:[]},
-        storyboard:savedRevision?originals.map(f=>f.scene===1?
-          {...f,proposed:morning,changed:true}:f):originals})};
-    if(url.endsWith('/producer-conversation')){
-      const body=JSON.parse(options.body);
-      assert.equal(body.expected_version,3);
-      assert.equal(body.direction,'Yes, those look good.');
-      return new Promise(resolve=>{completeReply=()=>{
-        savedRevision=true;
-        resolve({ok:true,json:async()=>({ok:true,persisted:true,
-          render_queued:false,plan_ready:true,plan_persisted:true})});
-      };});
-    }
-    throw new Error('Unexpected request '+url);
-  };
-  const sandbox={
-    document:{getElementById:id=>nodes[id],createElement:tag=>new Node(tag)},
-    window:{location:{href:'https://studio.test/'},CHICAGOSHINING_STUDIO_CONFIG:{apiBase:''},
-      setTimeout:fn=>{slowTimers.push(fn);return slowTimers.length;},
-      clearTimeout:()=>{}},
-    MutationObserver:class {constructor(fn){notify=fn;}observe(){}},
-    fetch:fetchStub,URL,URLSearchParams,
-    crypto:{randomUUID:()=> 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'},
-  };
-  vm.runInNewContext(script,sandbox,{filename:'rendering-review-queue.js'});
-  await tick();await tick();
-  nodes['page-rendering-review'].classList.add('active');
-  notify();
-  for(let i=0;i<12;i++)await tick();
-  const descendants=root=>[root,...root.children.flatMap(descendants)];
-  const before=descendants(nodes.rrDetail);
-  const reply=before.find(n=>n.tag==='textarea'&&
-    n.attributes?.['aria-label']==='Reply to your Producer')||
-    before.find(n=>n.tag==='textarea');
-  const send=before.find(n=>n.tag==='button'&&n.textContent==='Reply to Producer');
-  assert.ok(reply&&send,'Producer invites a natural-language reply next to verified photos');
-  assert.ok(before.some(n=>String(n.textContent).includes('Do these look right?')),
-    'Producer speaks naturally rather than showing an internal workflow warning');
-  assert.ok(before.some(n=>n.textContent==='Suggested morning photo'),
-    'the available Morning photo appears as a suggestion');
-  assert.ok(!before.some(n=>String(n.textContent).includes('Daytime correction not yet saved')),
-    'no technical system-status warning in the conversation');
-  assert.equal(calls.filter(x=>x.method==='POST').length,0,'read never changes the session');
-  reply.value='Yes, those look good.';
-  const conversation=before.find(n=>n.className==='rr-chat-form');
-  const progress=before.find(n=>n.className==='rr-feedback-status');
-  assert.ok(conversation&&progress);
-  assert.ok(conversation.children.indexOf(progress)<conversation.children.indexOf(send),
-    'progress status must be above the button so iPhone keyboard cannot hide it');
-  const response=send.listeners.click();
-  assert.equal(send.disabled,true);
-  assert.equal(send.textContent,'Producer is working…');
-  assert.equal(send.attrs['aria-busy'],'true');
-  assert.equal(progress.hidden,false);
-  assert.match(progress.textContent,/Sending your feedback/);
-  assert.equal(progress.dataset.state,'working');
-  assert.equal(slowTimers.length,1);
-  slowTimers[0]();
-  assert.match(progress.textContent,/Still waiting for the Producer/);
-  assert.equal(calls.filter(x=>x.method==='POST').length,1);
-  await send.listeners.click();
-  assert.equal(calls.filter(x=>x.method==='POST').length,1,'no duplicate while pending');
-  completeReply();
-  await response;
-  for(let i=0;i<12;i++)await tick();
-  assert.equal(send.disabled,false);
-  assert.equal(send.textContent,'Reply to Producer');
-  assert.equal(calls.filter(x=>x.method==='POST').length,1);
-  assert.equal(savedRevision,true);
-  assert.ok(!calls.some(x=>/commit-attempt|publish|approve/.test(x.url)));
-  const after=descendants(nodes.rrDetail);
-  assert.ok(after.some(n=>n.className==='rr-feedback-receipt'&&
-    /photo choices were saved/.test(n.textContent)),
-    'the acknowledgement survives the detail rerender');
-  assert.ok(!after.some(n=>n.textContent==='Reply to Producer'));
-  assert.ok(after.some(n=>n.textContent==='Suggested replacement'));
-});
-
-test('Rendering Review labels the playing video without unchanged-video explanations',()=>{
-  assert.match(script,/Version V/);
-  assert.match(script,/rrVersionBar/);
-  assert.match(html,/id="rrOriginalVersion"/);
-  assert.match(script,/Suggested changes/);
-  assert.match(script,/Do these look right/);
-  assert.match(script,/Reply to Producer/);
-  assert.match(script,/Suggested morning photo/);
-  assert.match(script,/created\.persisted!==true\|\|created\.render_queued!==false/);
-  assert.doesNotMatch(script,/ORIGINAL V1 — unchanged/);
-  assert.doesNotMatch(script,/The video has not changed/);
-  assert.doesNotMatch(script,/I haven\\'t changed the video yet/);
-  assert.match(css,/rr-version-bar/);
-  assert.doesNotMatch(script,/showMedia\(.*candidate\.candidate\.timeline/);
+  const descend=root=>[root,...root.children.flatMap(descend)];
+  const text=descend(nodes.rrDetail).map(n=>n.textContent).filter(Boolean).join('\n');
+  assert.match(text,/V2 · Ready for review/);
+  assert.match(text,/V3 · Proposed changes — not rendered/);
+  assert.match(text,/1 checks or assets remain unresolved/);
+  assert.match(text,/Not authorized \/ not started/);
+  assert.ok(calls.every(x=>x.method==='GET'),'page read cannot authorize any edits or render');
 });

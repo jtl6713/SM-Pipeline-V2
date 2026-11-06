@@ -36,17 +36,23 @@ def gather(worker, runner):
 
 
 def window(rows, start, end):
-    sources, classes = defaultdict(int), defaultdict(int)
+    sources, classes, rate_limited_by_source = defaultdict(int), defaultdict(int), defaultdict(int)
     observed_hours = set()
     for hour, source, method, status, count, provider in rows:
         if start <= hour < end:
             sources[source] += count
             classes[status] += count
+            if status == "429":
+                rate_limited_by_source[source] += count
             observed_hours.add((provider, hour))
     return {"start_utc": start.isoformat(), "end_utc": end.isoformat(),
             "attempts_observed": sum(sources.values()),
             "by_source": dict(sorted(sources.items())),
             "by_status_class": dict(sorted(classes.items())),
+            "known_429_attempts": sum(rate_limited_by_source.values()),
+            "known_429_by_source": dict(sorted(rate_limited_by_source.items())),
+            "ambiguous_legacy_4xx_attempts": classes.get("4xx", 0),
+            "429_coverage_note": "Known 429s are a lower bound; historical 4xx and missing writers cannot be assumed zero.",
             "worker_hours_with_events": len({h for p, h in observed_hours if p == "worker"}),
             "runner_hours_with_events": len({h for p, h in observed_hours if p == "runner"}),
             "note": "Hours with no events are ambiguous (zero activity or missing exporter)."}

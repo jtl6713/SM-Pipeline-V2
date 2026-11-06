@@ -268,3 +268,21 @@ test("TikTok missing IDs are discovered before analytics failure", () => {
   assert.match(sweep, /studioResolveTikTokOwnedVideoId/);
   assert.match(sweep, /Platform_Post_ID: postId/);
 });
+
+test("Post Insights distinguishes uploader service-key errors from Google consent", () => {
+  const marker = 'if (response.status === 401 || response.status === 403) {';
+  const block = workerSource.slice(workerSource.indexOf("async function getInsightsConnections"), workerSource.indexOf("async function getInsightsPosts"));
+  assert.ok(block.includes(marker));
+  assert.match(block, /YouTube uploader service authentication failed/);
+  assert.match(block, /shared secret matches the uploader service/);
+  assert.match(block, /do not reconnect Google OAuth/);
+});
+
+test("Post Insights requires missing TikTok scopes without implying worker 500 needs reauthorization", () => {
+  const classifier = workerSource.slice(workerSource.indexOf("function studioInsightsConnectionStateFromError"), workerSource.indexOf("function studioInsightsLatestSyncByPlatform"));
+  assert.match(classifier, /status >= 500 \? false/);
+  assert.match(classifier, /service failure/);
+  const connections = workerSource.slice(workerSource.indexOf("async function getInsightsConnections"), workerSource.indexOf("async function getInsightsPosts"));
+  assert.match(connections, /required permissions are missing/);
+  assert.match(connections, /including video\.list/);
+});

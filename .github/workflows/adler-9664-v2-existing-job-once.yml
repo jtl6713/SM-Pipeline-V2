@@ -1,0 +1,131 @@
+name: Dispatch only existing Adler 9664 V2 held job once
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/adler-9664-v2-existing-job-once.yml'
+permissions:
+  contents: read
+concurrency:
+  group: adler-9664-existing-v2-rrjob-cb18c41001cc21c8
+  cancel-in-progress: false
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Verify held output and original saved job, then launch it once via protected Runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          cat > /tmp/adler-v2-once.ps1 <<'PS1'
+          $ErrorActionPreference='Stop'
+          $output='rec4tZQSOVESkrSLc'
+          $job='rrjob_cb18c41001cc21c8d4c823f65d556936fe12e562b2599883'
+          $envFile=Join-Path (Get-Location) 'Services\pipeline-runner\service\.env'
+          if(-not (Test-Path -LiteralPath $envFile)){throw 'runner_env_missing'}
+          $vars=@{}
+          foreach($line in (Get-Content -LiteralPath $envFile)){
+            if($line -match '^\s*([A-Z0-9_]+)\s*=\s*(.*)$'){
+              $vars[$matches[1]]=$matches[2].Trim().Trim('"').Trim([char]39)
+            }
+          }
+          $pat=[string]$vars['AIRTABLE_PAT']
+          $base=[string]$vars['AIRTABLE_BASE_ID']
+          $secret=[string]$vars['PIPELINE_RUNNER_SHARED_SECRET']
+          if(-not $base){$base='appe33zkZn35yirTL'}
+          if($pat.Length -lt 20 -or $secret.Length -lt 24){throw 'required_auth_missing'}
+          $aHeaders=@{'Authorization'=('Bearer '+$pat)}
+          $outUri='https://api.airtable.com/v0/'+$base+'/tblrlPeboBthkplH0/'+$output
+          $out=Invoke-RestMethod -Uri $outUri -Method GET -Headers $aHeaders -TimeoutSec 25
+          $of=$out.fields
+          if($out.id -ne $output -or $of.Output_ID -ne 9664 -or
+             $of.Do_Not_Publish -ne $true -or $of.Studio_Render_Review_Hold_Active -ne $true -or
+             $of.Published_At -or $of.Platform_Post_ID -or $of.Platform_Media_ID -or
+             $of.Publish_Started_At -or $of.Publish_Locked_By){
+            throw 'held_output_9664_not_verified'
+          }
+          $jobUri='https://api.airtable.com/v0/'+$base+'/tblUkZB6SMtf9Ib6I?maxRecords=2&filterByFormula='+[uri]::EscapeDataString('{Job_ID}="'+$job+'"')
+          $rows=@((Invoke-RestMethod -Uri $jobUri -Headers $aHeaders -Method GET -TimeoutSec 25).records)
+          if($rows.Count -ne 1){throw 'exact_job_missing_or_duplicate'}
+          $jf=$rows[0].fields
+          if($jf.Job_ID -ne $job -or $jf.Output_Record_ID -ne $output -or
+             $jf.Job_State -ne 'queued' -or $jf.Progress_Stage -ne 'awaiting_isolated_renderer' -or
+             $jf.Progress_Percent -ne 0 -or $jf.Lease_Owner -or
+             ($jf.Lease_Fence -notin @(0,$null)) -or
+             ($jf.Event_History_JSON -and $jf.Event_History_JSON -ne '[]')){
+            throw 'existing_job_already_claimed_or_changed'
+          }
+          Write-Output 'adler_exact_authority_confirmed=true existing_job_only=true no_publish=true'
+          Add-Type -AssemblyName System.Net.Http
+          $http=[System.Net.Http.HttpClient]::new()
+          $http.Timeout=[TimeSpan]::FromSeconds(30)
+          try{
+            $url='http://127.0.0.1:3350/jobs/rendering-review/run-exact/'+$job
+            $before=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get,$url)
+            [void]$before.Headers.TryAddWithoutValidation('X-Pipeline-Secret',$secret)
+            $beforeRes=$http.SendAsync($before).GetAwaiter().GetResult()
+            $beforeData=($beforeRes.Content.ReadAsStringAsync().GetAwaiter().GetResult())|ConvertFrom-Json
+            Write-Output ('adler_runner_before_state='+[string]$beforeData.state)
+            if([int]$beforeRes.StatusCode -ne 200 -or $beforeData.ok -ne $true -or
+               $beforeData.state -ne 'unknown'){throw 'runner_already_knows_job_no_replay'}
+            $payload=@{output_id=$output;job_id=$job}|ConvertTo-Json -Compress
+            $request=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post,'http://127.0.0.1:3350/jobs/rendering-review/run-exact')
+            $request.Content=[System.Net.Http.StringContent]::new($payload,[System.Text.Encoding]::UTF8,'application/json')
+            [void]$request.Headers.TryAddWithoutValidation('X-Pipeline-Secret',$secret)
+            # Exactly one POST. Never retry on ambiguous transport or response.
+            $resp=$http.SendAsync($request).GetAwaiter().GetResult()
+            $data=($resp.Content.ReadAsStringAsync().GetAwaiter().GetResult())|ConvertFrom-Json
+            Write-Output ('adler_runner_launch_http='+[int]$resp.StatusCode+' accepted='+[bool]$data.accepted)
+            if([int]$resp.StatusCode -ne 202 -or $data.ok -ne $true -or
+               $data.accepted -ne $true -or $data.job_id -ne $job -or
+               $data.output_id -ne $output){throw 'exact_launch_not_accepted_no_retry'}
+            Write-Output 'adler_existing_job_dispatch_accepted=true no_new_v2=true publication_held=true'
+            for($i=0;$i -lt 58;$i++){
+              Start-Sleep -Seconds 3
+              $poll=[System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get,$url)
+              [void]$poll.Headers.TryAddWithoutValidation('X-Pipeline-Secret',$secret)
+              $pollRes=$http.SendAsync($poll).GetAwaiter().GetResult()
+              if([int]$pollRes.StatusCode -ne 200){throw 'runner_poll_unavailable_no_retry'}
+              $current=($pollRes.Content.ReadAsStringAsync().GetAwaiter().GetResult())|ConvertFrom-Json
+              if($current.state -eq 'ready_for_review'){
+                Write-Output ('adler_runner_final_state=ready_for_review artifact_present='+[bool]$current.drive_file_id)
+                if(-not $current.drive_file_id){throw 'reviewable_v2_artifact_missing'}
+                exit 0
+              }
+              if($current.state -eq 'needs_reconciliation'){
+                Write-Output ('adler_runner_final_state=needs_reconciliation reason_code='+[string]$current.reason_code)
+                throw 'exact_job_reconciliation_required_no_retry'
+              }
+            }
+            Write-Output ('adler_runner_last_observed_state='+[string]$current.state+' no_retry=true')
+          } finally { $http.Dispose() }
+          PS1
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/adler-v2-once.json').write_text(json.dumps({
+            'command':Path('/tmp/adler-v2-once.ps1').read_text(),'confirm':True
+          }))
+          PY
+          code=$(curl -sS --max-time 25 -o /tmp/adler-start.json -w '%{http_code}' \
+            -X POST 'https://ops.chicagoshining.com/api/shell' \
+            -H "Authorization: Bearer $OPS_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/adler-v2-once.json || true)
+          if [[ "$code" != '200' && "$code" != '202' ]]; then echo "ops_exact_launch_not_accepted_http=$code";exit 1;fi
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/adler-start.json)
+          test -n "$job"
+          for i in $(seq 1 58); do
+            curl -fsS --max-time 15 -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/adler-result.json
+            status=$(jq -r '.job.status // empty' /tmp/adler-result.json)
+            if [[ "$status" == 'ok' || "$status" == 'failed' ]]; then
+              jq -r '.job.log // ""' /tmp/adler-result.json | grep '^adler_' || true
+              [[ "$status" == 'ok' ]] && exit 0 || exit 1
+            fi
+            sleep 4
+          done
+          echo 'ops_exact_launch_status_unverified_no_retry=true'; exit 1

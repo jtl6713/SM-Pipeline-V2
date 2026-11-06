@@ -27,7 +27,7 @@ import {
   queueLaneForStudioState,
   summarizeOpsQueueRows,
 } from "./ops-queue.mjs";
-import { sortRenderQueueCandidates, assignRenderQueuePositions } from "./render-queue.mjs";
+import { sortRenderQueueCandidates, assignRenderQueuePositions, isOpsRenderQueueCandidate } from "./render-queue.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const worker = readStudioWorkerSource();
@@ -244,6 +244,12 @@ test("ops queue Airtable field lists avoid unknown column names", () => {
   assert.equal(OPS_QUEUE_REQUEST_FIELDS.includes("Idea_Title"), false);
   assert.equal(OPS_QUEUE_CONTENT_FIELDS.includes("Working_Title"), false);
   assert.ok(OPS_QUEUE_OUTPUT_FIELDS.includes("Studio_Preview_Updated_At"));
+  // Pilsen Murals outputs 9682-9684 have eight finished native stills, but the
+  // former Factory projection dropped these fields and painted Preparing Assets.
+  for (const field of ["Selected_Clip_Count", "Studio_Preview_URL", "Carousel Slides"]) {
+    assert.ok(OPS_QUEUE_OUTPUT_FIELDS.includes(field), `Factory native-photo evidence missing: ${field}`);
+  }
+  assert.ok(!OPS_QUEUE_OUTPUT_FIELDS.includes("Selected_Assets_JSON"), "no large manifest on hot path");
 });
 
 test("ops queue request formula excludes Cancelled and finished Promoted produce", () => {
@@ -373,4 +379,37 @@ test("continuation prioritizes waiting Story renders over review-ready siblings"
   assert.match(worker, /const stalledStories = await listRecords/);
   assert.match(worker, /\.\.\.newest, \.\.\.stalledStories/);
   assert.match(worker, /result\.action !== "reviewable" && result\.action !== "stop"/);
+});
+
+test("P0 #1542: Ops waiting positions never include jobs, finals or completed review states", () => {
+  const ready = { Render_Status: "Waiting in Render Queue", Output_Status: "In Production" };
+  const entries = [
+    row({ ...ready, Output_ID: 1 }, "recStillEligible"),
+    row({ ...ready, Output_ID: 2, Remotion_Job_ID: "job-closed" }, "recExistingJob"),
+    row({ ...ready, Output_ID: 3, Final_File_URL: "https://drive.google.com/file/d/finished/view" }, "recFinishedMedia"),
+    row({ ...ready, Output_ID: 4, Output_Status: "Ready for Review" }, "recReviewable"),
+    row({ ...ready, Output_ID: 5, Test_Run_ID: "qa-123" }, "recSynthetic"),
+  ];
+  const selected = entries.filter(r => isOpsRenderQueueCandidate(r, field));
+  assert.deepEqual(selected.map(r => r.id), ["recStillEligible"]);
+  const queue = assignRenderQueuePositions(selected, field);
+  assert.equal(queue.total, 1);
+  assert.ok(!queue.byId.has("recExistingJob"));
+  assert.equal(isOpsRenderQueueCandidate(row({ ...ready, Render_Status: "Rendered" }, "recRendered"), field), false);
+  assert.equal(isOpsRenderQueueCandidate(row({ ...ready, Render_Status: "Ready for Render" }, "recReady"), field), true);
+});
+
+test("P0 #1542: the authenticated Ops Queue applies the same no-job/no-final fence as R4", () => {
+  const functions = fs.readFileSync(path.join(here, "worker-functions-04.mjs"), "utf8");
+  const queue = functions.split("export async function getStudioOperationsQueue")[1]
+    ?.split("/*__STUDIO_WORKER_END:getStudioOperationsQueue__*/")[0] || "";
+  assert.match(queue, /mergedOutputs\.filter\(\(row\) => isOpsRenderQueueCandidate\(row, f\)\)/);
+  assert.match(queue, /assignRenderQueuePositions/);
+  const mapSource = fs.readFileSync(path.join(here, "worker-functions-01.mjs"), "utf8");
+  const map = mapSource.split("export function mapOutput")[1]
+    ?.split("/*__STUDIO_WORKER_END:mapOutput__*/")[0] || "";
+  assert.match(map, /isRenderQueueCandidateStatus\(renderStatus\) && hasFinal/);
+  assert.match(map, /isRenderQueueCandidateStatus\(renderStatus\) && hasJob/);
+  assert.match(map, /Finished media recorded/);
+  assert.match(map, /Remotion job recorded/);
 });

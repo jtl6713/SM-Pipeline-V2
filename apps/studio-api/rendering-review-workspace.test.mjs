@@ -72,6 +72,7 @@ test('Chicago completed render queue uses exactly two bounded paginated reads an
       id:outputId,fields:{
         Content_Item:[f.content.id],Platform:'Instagram',Platform_Output_Type:'Instagram Reel',
         Final_File_ID:'drive-file',Final_File_URL:'https://example.test/video',
+        Thumbnail_URL:'https://cdn.example.test/chicago-cover.jpg',
         Output_Title:'Chicago skyline',Output_ID:2507,Render_Status:'Rendered',
         Publish_Status:'Not Published',
         Studio_Render_Review_Hold_Active:true,
@@ -88,6 +89,8 @@ test('Chicago completed render queue uses exactly two bounded paginated reads an
   const result=await read(f.args);
   assert.equal(result.queue.length,1);
   assert.equal(result.queue[0].title,'Chicago skyline');
+  assert.equal(result.queue[0].thumbnail_url,'https://cdn.example.test/chicago-cover.jpg');
+  assert.ok(calls[0].options.fields.includes('Thumbnail_URL'));
   assert.equal(result.queue[0].profile_id,CHICAGO_PROFILE_ID);
   assert.equal(result.queue[0].manual_admission_enabled,false);
   assert.equal(result.next_cursor,'itrNextPage');
@@ -251,4 +254,32 @@ test('unflagged completed outputs never appear in conversational review queue',a
   const result=await read(f.args);
   assert.deepEqual(result.queue,[]);
   assert.equal(result.flags.admission_enabled,false);
+});
+
+
+test('held queued V2 exposes only the exact authoritative job for stall detection',async()=>{
+  const f=fixture();
+  const current=JSON.parse(f.row.fields.Session_JSON);
+  current.state='queued';current.active_job={id:'rrjob_abcdefghijklmnopqrstuvwxyz123456'};
+  f.row.fields.Session_JSON=JSON.stringify(current);
+  const job={id:'rec12345678901234',createdTime:'2026-11-01T20:00:00Z',
+    fields:{Job_ID:current.active_job.id,Session_ID:current.id,
+      Output_Record_ID:outputId,Attempt_ID:current.current_attempt_id,
+      Job_State:'queued',Progress_Stage:'awaiting_isolated_renderer',
+      Progress_Percent:0,Retry_Count:1,Lease_Fence:0}};
+  f.args.operations.listRecords=async(_env,table,opts)=>{
+    if(table==='tblUkZB6SMtf9Ib6I'){
+      assert.equal(opts.limit,2);
+      assert.match(opts.filterFormula,/rrjob_abcdefghijklmnopqrstuvwxyz123456/);
+      return [job];
+    }
+    return [f.row];
+  };
+  const ready=await read(f.args);
+  assert.equal(ready.render_job.verified,true);
+  assert.equal(ready.render_job.dispatch_attempts,1);
+  assert.equal(ready.render_job.state,'queued');
+  assert.equal(ready.render_job.created_at,'2026-11-01T20:00:00Z');
+  job.fields.Output_Record_ID='rec99999999999999';
+  assert.equal((await read(f.args)).render_job.verified,false);
 });

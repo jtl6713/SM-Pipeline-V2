@@ -1,0 +1,138 @@
+name: Story R4 P0 Priority One-Time (Guarded)
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/story-r4-p0-priority-once.yml']
+permissions:
+  contents: read
+concurrency:
+  group: studio-story-r4-p0-priority-once
+  cancel-in-progress: false
+jobs:
+  prioritize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Prioritize eligible Stories only via authenticated Studio control
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          WORKER="studio-r4-p0-guarded-$GITHUB_RUN_ID"
+          CODE=$(curl -sS --max-time 20 -o /tmp/p0-existing.json -w '%{http_code}' -H "$AUTH" "$ROOT/workers/scripts/$WORKER/settings" || true)
+          test "$CODE" = 404 || { echo "Refusing to overwrite an existing Worker"; exit 3; }
+          OWNED=0
+          cleanup() {
+            if [[ "$OWNED" == 1 ]]; then
+              curl -fsS --max-time 20 -X DELETE -H "$AUTH" "$ROOT/workers/scripts/$WORKER" >/dev/null || echo "::warning::Temporary Worker cleanup needs attention"
+            fi
+          }
+          trap cleanup EXIT
+          TOKEN="$(openssl rand -hex 32)"
+          cat >/tmp/p0-worker.mjs <<'JS'
+          const TARGETS = [
+            ["rec33ozAkJjgjJRxl",9715],["recrRDrbFv3RyitTc",9716],
+            ["recqfie0bJq6ntn1S",9720],["recbVpijdQk6QCLd5",9721],
+            ["rec6obfvupkA1ExLr",9726],["recK8J3kjKknyRRzm",9727]
+          ];
+          export default {
+            async fetch(request, env) {
+              if (request.method !== "POST" || new URL(request.url).pathname !== "/prioritize")
+                return new Response("Not found", {status:404});
+              if (request.headers.get("Authorization") !== "Bearer " + env.AUDIT_TOKEN)
+                return new Response("Unauthorized", {status:401});
+              const internal = async (method, path, body) => {
+                const res = await env.STUDIO_API.fetch(new Request(
+                  "https://studio.chicagoshining.com" + path,
+                  {method, headers:{
+                    "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com",
+                    "Origin":"https://studio.chicagoshining.com",
+                    "Accept":"application/json",
+                    ...(body ? {"Content-Type":"application/json"} : {})
+                  }, ...(body ? {body:JSON.stringify(body)} : {})}
+                ));
+                const parsed = await res.json().catch(() => ({}));
+                if (!res.ok || parsed?.ok !== true)
+                  throw new Error("studio_" + method.toLowerCase() + "_http_" + res.status + " " + String(parsed?.error || parsed?.message || "").slice(0,180));
+                return parsed;
+              };
+              try {
+                const live = await internal("GET","/api/operations/queue");
+                if (live.read_source !== "airtable" || !Array.isArray(live.rows))
+                  throw new Error("canonical_queue_read_unavailable");
+                const byId = new Map(live.rows.map(row => [String(row?.id || ""),row]));
+                const paused = live.controls?.render_paused || {};
+                const pending = [], existing = [], unknown = [];
+                for (const [id,outputId] of TARGETS) {
+                  const row = byId.get(id);
+                  if (!row || Number(row.output_id) !== outputId || row.kind !== "output")
+                    throw new Error("required_output_missing_from_canonical_queue_" + outputId);
+                  if (paused[id] || row.render_paused)
+                    throw new Error("render_paused_requires_operator_review_" + outputId);
+                  const status = String(row.render_status || "");
+                  const job = String(row.remotion_job_id || "");
+                  if ((status === "Waiting in Render Queue" || status === "Ready for Render") &&
+                      !job && row.render_queue_position != null) pending.push(id);
+                  else if (job || status === "Rendered" || row.output_status === "Ready for Review")
+                    existing.push(outputId);
+                  else unknown.push(outputId);
+                }
+                if (unknown.length) throw new Error("unsafe_target_status_" + unknown.join("_"));
+                const previous = Array.isArray(live.controls?.render_priority) ? live.controls.render_priority : [];
+                const order = [...new Set([...pending, ...previous])];
+                let saved = false;
+                if (pending.length && JSON.stringify(order) !== JSON.stringify(previous)) {
+                  const reply = await internal("POST","/api/operations/queue/reorder",{ordered_ids:order});
+                  if (JSON.stringify(reply.controls?.render_priority || []) !== JSON.stringify(order))
+                    throw new Error("priority_write_readback_mismatch");
+                  saved = true;
+                }
+                return Response.json({
+                  ok:true, read_source:"airtable", reordered:saved,
+                  pending:pending.map(id => TARGETS.find(t=>t[0]===id)[1]),
+                  existing, queued_before:live.render_queue_total,
+                  priority_targets:order.slice(0,6).map(id=>(TARGETS.find(t=>t[0]===id)||[])[1]||"other"),
+                  no_direct_render_or_publish:true
+                });
+              } catch (error) {
+                return Response.json({ok:false,error:String(error?.message || error).slice(0,240)},{status:409});
+              }
+            }
+          };
+          JS
+          cat >/tmp/p0-metadata.json <<EOF
+          {"main_module":"worker.mjs","compatibility_date":"2026-10-01","bindings":[{"type":"service","name":"STUDIO_API","service":"chicagoshining-studio-api"},{"type":"plain_text","name":"AUDIT_TOKEN","text":"$TOKEN"}]}
+          EOF
+          PUT=$(curl -sS --max-time 35 -o /tmp/p0-put.json -w '%{http_code}' -X PUT "$ROOT/workers/scripts/$WORKER/content" -H "$AUTH" -F 'metadata=@/tmp/p0-metadata.json;type=application/json' -F 'worker.mjs=@/tmp/p0-worker.mjs;type=application/javascript+module;filename=worker.mjs')
+          [[ "$PUT" =~ ^2[0-9][0-9]$ ]] && jq -e '.success==true' /tmp/p0-put.json >/dev/null || { echo "worker_creation_failed_$PUT"; exit 4; }
+          OWNED=1
+          curl -fsS --max-time 25 -X POST -H "$AUTH" -H 'Content-Type: application/json' "$ROOT/workers/scripts/$WORKER/subdomain" --data '{"enabled":true,"previews_enabled":false}' >/tmp/p0-sub.json
+          jq -e '.success==true' /tmp/p0-sub.json >/dev/null
+          SUBDOMAIN=$(curl -fsS --max-time 20 -H "$AUTH" "$ROOT/workers/subdomain" | jq -er '.result.subdomain')
+          HTTP=000
+          for attempt in $(seq 1 12); do
+            HTTP=$(curl -sS --max-time 60 -o /tmp/p0-result.json -w '%{http_code}' -X POST "https://$WORKER.$SUBDOMAIN.workers.dev/prioritize" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}' || true)
+            if [[ "$HTTP" == 200 ]] && jq -e '.ok==true' /tmp/p0-result.json >/dev/null 2>&1; then
+              break
+            fi
+            if [[ "$HTTP" == 409 ]]; then
+              jq -c '{ok,error}' /tmp/p0-result.json 2>/dev/null || echo "p0_guard_rejected_unparseable"
+              echo "::error::Production queue rejected guarded priority preflight; no retry"
+              exit 6
+            fi
+            echo "p0_temporary_proxy_not_ready attempt=$attempt http=$HTTP"
+            sleep 5
+          done
+          if [[ "$HTTP" != 200 ]] || ! jq -e '.ok==true' /tmp/p0-result.json >/dev/null 2>&1; then
+            echo "::error::No confirmed prioritized queue write (http=$HTTP)"
+            jq -c '{ok,error}' /tmp/p0-result.json 2>/dev/null || true
+            exit 7
+          fi
+          jq -c '{ok,reordered,pending,existing,queued_before,priority_targets,no_direct_render_or_publish}' /tmp/p0-result.json
+          echo "guarded_priority_control_completed=true"
+          echo "No direct Remotion launch, approval, schedule, or publication"

@@ -151,9 +151,49 @@ test("Content 841-style Story stays In Flight when studio_state is Ready but Out
   }), "needs_eyes");
 });
 
-test("classifyFactoryLane priority: manual > needs_eyes > needs_assets > auto_high", () => {
+test("Factory cannot count or approve an incomplete native-photo review package", () => {
+  const base = {
+    id: "recPilsen00000001", kind: "output", output_id: 9682,
+    studio_state: "Preparing Assets", output_status: "Ready for Review",
+    render_status: "Native Photo Route", review_package_ready: false,
+  };
+  const unresolved = partitionFactoryLanes([base]);
+  assert.equal(unresolved.summary.needs_eyes, 0);
+  assert.equal(unresolved.summary.auto_high, 1);
+  const valid = { ...base, studio_state: "Ready for Review", review_package_ready: true };
+  assert.equal(classifyFactoryLane(valid), "needs_eyes");
+  assert.equal(partitionFactoryLanes([valid]).summary.needs_eyes, 1);
+  assert.equal(factoryCardFromRow(valid).review_package_ready, true);
+});
+
+test("classifyFactoryLane priority: package-ready needs_eyes > manual > needs_assets > auto_high", () => {
   assert.equal(classifyFactoryLane({ id: "rec1", lane: "stuck", stuck_kind: "produce_clip_mismatch" }), "manual");
   assert.equal(classifyFactoryLane({ id: "rec2", kind: "output", studio_state: "Ready for Review", output_status: "Ready for Review", lane: "review" }), "needs_eyes");
+  // Inherited parent stuck must not hide a complete Ready for Review sibling.
+  assert.equal(classifyFactoryLane({
+    id: "recParentStuckRfr",
+    kind: "output",
+    studio_state: "Ready for Review",
+    output_status: "Ready for Review",
+    review_status: "Review Sent",
+    render_status: "Rendered",
+    review_package_ready: true,
+    stuck_kind: "produce_clip_mismatch",
+    stuck_class: "code_bug",
+    lane: "stuck",
+  }), "needs_eyes");
+  // Incomplete packages stay in Repair — overview may still count them as awaiting.
+  assert.equal(classifyFactoryLane({
+    id: "recIncompleteRfr",
+    kind: "output",
+    studio_state: "Ready for Review",
+    output_status: "Ready for Review",
+    review_status: "Review Sent",
+    review_package_ready: false,
+    stuck_kind: "review_package_incomplete",
+    stuck_class: "code_bug",
+    lane: "stuck",
+  }), "manual");
   assert.equal(classifyFactoryLane({
     id: "rec3",
     kind: "idea",
@@ -448,4 +488,58 @@ test("Worker allows schedule regeneration POST through Phase 2A gate", async () 
   assert.match(worker, /const isScheduleSettingsWrite = isScheduleSettingsRoute &&/);
   assert.match(worker, /isScheduleSettingsWrite \|/);
   assert.match(worker, /version: "0\.10\.\d+(?:-[\w.-]+)?"/);
+});
+
+test("Michigan V2 held review is visible in Needs Eyes but cannot be Factory-approved", async () => {
+  const held={id:"recPnNYghmcJYivOA",kind:"output",output_id:9593,
+    content_item_id:"recYhIjy4BW0U3WaW",content_id:1869,
+    title:"Michigan Avenue Stroll - Part 1",
+    output_status:"Ready for Review",review_status:"Review Sent",
+    render_status:"Rendered",publish_status:"Not Ready",
+    studio_state:"Ready for Review",review_hold_active:true,do_not_publish:true,
+    final_file_url:"https://drive.google.com/file/d/16osgGbNcyet_4WwDLiarSurkF3yXFOcq/view",
+  };
+  const sibling={...held,id:"recyYKgkfRksIZPun",output_id:9594,
+    review_hold_active:false,do_not_publish:false};
+  const desk=partitionFactoryLanes([held,sibling]);
+  assert.equal(desk.lanes.needs_eyes.length,2);
+  assert.equal(desk.lanes.needs_eyes[0].review_hold_active,true);
+  assert.equal(desk.lanes.needs_eyes[0].do_not_publish,true);
+  assert.equal(desk.lanes.needs_eyes[0].can_preview,true);
+  assert.equal(desk.lanes.needs_eyes[1].review_hold_active,false);
+  const queue=await readFile(path.join(here,"ops-queue.mjs"),"utf8");
+  assert.ok(queue.includes("OPS_QUEUE_REVIEW_FORMULA"));
+  assert.ok(queue.includes('AND({Do_Not_Publish},{Output_Status}="Ready for Review",OR({Review_Status}=BLANK(),{Review_Status}="Review Sent",{Review_Status}="Pending Review"))'));
+  const js=await readFile(path.join(here,"../studio-web/assets/factory-desk.js"),"utf8");
+  const html=await readFile(path.join(here,"../studio-web/index.html"),"utf8");
+  assert.ok(js.includes("card.review_hold_active === true || card.do_not_publish === true"));
+  assert.ok(js.includes("function reviewGroupMatchesSearch"));
+  assert.ok(js.includes("state.needsEyesSearch"));
+  assert.ok(js.includes("cards.some(card => card.review_hold_active === true)"));
+  assert.ok(html.includes('id="factoryNeedsEyesSearch"'));
+});
+
+test("held but unreviewed RFR media enters Needs Eyes with explicit release option, not an approval", async () => {
+  const row = {
+    id: "recStillHeldReady001", kind: "output", output_id: 7997,
+    title: "Roosevelt Island Tram Still", output_status: "Ready for Review",
+    review_status: "", studio_state: "Ready for Review",
+    render_status: "Native Photo Route", do_not_publish: true,
+    review_hold_active: false, review_package_ready: true,
+    publish_status: "Not Ready",
+    thumbnail_url: "https://media.chicagoshining.com/preview.png",
+  };
+  const desk = partitionFactoryLanes([row]);
+  assert.equal(desk.summary.needs_eyes, 1);
+  assert.equal(desk.lanes.needs_eyes[0].do_not_publish, true);
+  const ui = await readFile(path.join(here, "../studio-web/assets/factory-desk.js"), "utf8");
+  const server = await readFile(path.join(here, "worker-functions-04.mjs"), "utf8");
+  assert.match(ui, /function canReleaseForApproval/);
+  assert.match(ui, /data-factory-release-approval/);
+  assert.match(ui, /action: "release_for_approval"/);
+  assert.match(server, /withOutputApprovalLock\(env\.STUDIO_MEDIA, id, async \(\) =>/);
+  assert.match(server, /factoryApprovalHoldReleaseEligibility\(current, readiness\)/);
+  assert.match(server, /Auto_Publish_Enabled: false/);
+  assert.match(server, /requireAnyPermission\(authorization, \["publishing_control", "tenant_admin"\]\)/);
+  assert.match(server, /refresh_required: true/);
 });

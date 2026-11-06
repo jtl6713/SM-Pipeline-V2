@@ -369,4 +369,95 @@ class ProducerTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 400)
         self.assertNotIn("provider_internal_secret", str(raised.exception))
 
+
+    def test_latest_exact_photo_list_builds_six_shot_proposal_with_no_render_side_effects(self):
+        names = ["Adler Planetarium 3", "Adler Planetarium 13",
+                 "Adler Planetarium 14", "Adler Planetarium 17",
+                 "Adler Planetarium 18"]
+        from rendering_review.library_discovery import latest_explicit_photo_list
+        previous = "Then use these seven:\n" + "\n".join(
+            "- Adler Planetarium " + str(n) for n in (3, 5, 12, 13, 14, 17, 18))
+        # Exact saved live review wording, including a period *inside* the
+        # quoted opener name and contradictory boilerplate from the older list.
+        latest = ('Keep the original skyline opener, "Winter in Downtown Chicago 1."\n'
+                  '\nThen use these seven Adler Planetarium exterior photos:\n\n\n'
+                  + "\n".join("- " + name for name in names)
+                  + '\n\nRemove Adler Planetarium 4 and 7 and all interior imagery.\n'
+                    '\nPreserve the original narration and audio. '
+                    'The overall video duration may increase to accommodate the additional exterior photos.\n'
+                    '\nPlease resolve the existing Asset Manager references, '
+                    'validate all seven files (including the blank thumbnail for Adler Planetarium 5), '
+                    'and prepare the proposed sequence.\n'
+                    '\nThis message confirms my creative direction only. '
+                    'It is NOT authorization to render.\n'
+                    '\nWait for my explicit "Make edits based on latest feedback" authorization '
+                    'before producing V3. Preserve V2 unchanged.')
+        self.assertEqual(latest_explicit_photo_list([
+            {"role": "user", "content": previous},
+            {"role": "producer", "content": "Use all seven old Adler files"},
+            {"role": "user", "content": latest}]), names)
+        opener = {"id": "opener-12345", "name": "Winter in Downtown Chicago 1"}
+        library = [{"id": "library_rec" + str(i).zfill(14),
+                    "name": name,
+                    "source_kind": "owned_catalog_photo",
+                    "media_class": "Image",
+                    "media_asset_record_id": "rec" + str(i).zfill(14)}
+                   for i, name in enumerate(names, 1)]
+        evidence = {**EVIDENCE, "assets": [opener],
+                    "library_candidates": library, "library_ineligible": [],
+                    "narration": "Keep this exact existing narration.",
+                    "duration_seconds": 39.667,
+                    "messages": [{"role": "user", "content": previous},
+                                 {"role": "user", "content": latest}]}
+        p = copy.deepcopy(PROPOSAL)
+        p["requirements"] = [{"kind": "asset",
+            "description": "Reupload and crop all seven old images", "alternatives": []}]
+        p["claims"] = [{"claim": "Unrelated existing metadata", "source_ids": []}]
+        result, calls = self.invoke(p, evidence)
+        c = result["candidate"]
+        self.assertEqual([scene["asset_ids"][0] for scene in c["timeline"]],
+                         [opener["id"], *(item["id"] for item in library)])
+        self.assertEqual([scene["start_seconds"] for scene in c["timeline"][1:]],
+                         [scene["end_seconds"] for scene in c["timeline"][:-1]])
+        self.assertAlmostEqual(c["timeline"][-1]["end_seconds"], 39.667)
+        self.assertEqual(c["narration"], evidence["narration"])
+        self.assertEqual(c["preserve"], [])
+        self.assertEqual(c["requirements"], [])
+        self.assertEqual(c["claims"], [])
+        self.assertTrue(result["candidate_only"])
+        self.assertFalse(result["visual_inspection_performed"])
+        self.assertNotIn("render_queued", c)
+        self.assertEqual(len(calls), 1, "Producer still consults the creative model")
+
+    def test_exact_photo_path_does_not_overrule_graphic_or_ambiguous_catalog(self):
+        opener = {"id": "opener-12345", "name": "Winter in Downtown Chicago 1"}
+        selection = ('Keep the original skyline opener, "Winter in Downtown Chicago 1".\n'
+                     '- Adler Planetarium 3\n- Adler Planetarium 5\n'
+                     'Preserve the original narration and audio.')
+        e = {**EVIDENCE, "assets": [opener], "narration": "Original VO",
+             "duration_seconds": 35, "messages": [{"role": "user", "content": selection}],
+             "library_candidates": [
+                 {"id": "library_rec00000000000001", "name": "Adler Planetarium 3",
+                  "source_kind": "owned_catalog_photo", "media_class": "Image",
+                  "media_asset_record_id": "rec00000000000001"},
+                 {"id": "library_rec00000000000002", "name": "Adler Planetarium 5",
+                  "source_kind": "owned_catalog_graphic", "media_class": "Graphic",
+                  "media_asset_record_id": "rec00000000000002"}],
+             "library_ineligible": [{"media_asset_record_id": "rec00000000000002",
+                                     "reason": "graphic_requires_visual_review"}]}
+        candidate = copy.deepcopy(PROPOSAL)
+        candidate["reuse_asset_ids"] = [opener["id"]]
+        candidate["timeline"][0]["asset_ids"] = [opener["id"]]
+        c = self.invoke(candidate, e)[0]["candidate"]
+        self.assertEqual(len(c["timeline"]), 1)
+        self.assertEqual(len(c["requirements"]), 1,
+                         "Never silently clear graphic visual-review requirements")
+        # A named photo omitted from the catalog must also fail closed.
+        e["library_candidates"] = e["library_candidates"][:1]
+        e["library_ineligible"] = []
+        c = self.invoke(candidate, e)[0]["candidate"]
+        self.assertEqual(len(c["timeline"]), 1)
+        self.assertEqual(len(c["requirements"]), 1)
+
+
 if __name__ == '__main__': unittest.main()

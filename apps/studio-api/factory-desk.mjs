@@ -131,6 +131,7 @@ function isReadyForReview(row) {
   // Output 3431 / Content 654 had Output_Status=Ready for Review while Remotion
   // still reported Waiting in Render Queue, so Factory incorrectly offered Approve.
   if (row?.kind === "output" && isRenderQueueActive(row)) return false;
+  if (row?.kind === "output" && row.review_package_ready === false) return false;
   const state = String(row?.studio_state || "").trim().toLowerCase();
   const output = String(row?.output_status || "").trim().toLowerCase();
   const review = String(row?.review_status || "").trim().toLowerCase();
@@ -268,12 +269,18 @@ function isAutoHigh(row) {
 
 /**
  * Classify a queue/idea row into one Factory lane (or null to omit).
- * Priority: manual → needs_eyes → needs_assets → auto_high.
+ * Priority: needs_eyes (package-ready) → manual → needs_assets → auto_high.
+ *
+ * Package-ready Ready for Review is Joseph's Approve gate. It must win over an
+ * inherited parent produce stuck_kind so complete siblings stay in Needs eyes
+ * while Studio overview still counts them as Awaiting Approval. Incomplete
+ * packages keep review_package_ready=false, fail isReadyForReview, and land in
+ * Manual via stuck_kind=review_package_incomplete.
  */
 export function classifyFactoryLane(row) {
   if (!row?.id) return null;
-  if (isManualLane(row)) return "manual";
   if (isReadyForReview(row)) return "needs_eyes";
+  if (isManualLane(row)) return "manual";
   if (isNeedsAssetsCandidate(row)) return "needs_assets";
   if (isAutoHigh(row)) return "auto_high";
   return null;
@@ -296,7 +303,13 @@ export function factoryCardFromRow(row, { lane = null, inPile = false } = {}) {
     studio_state: row.studio_state || "",
     output_status: row.output_status || null,
     review_status: row.review_status || null,
+    review_package_ready: row.review_package_ready !== false,
+    review_package_readiness: row.review_package_readiness || null,
+    review_package_missing: row.review_package_missing || [],
+    review_package_reason: row.review_package_reason || null,
     render_status: row.render_status || null,
+    review_hold_active: row.review_hold_active === true,
+    do_not_publish: row.do_not_publish === true,
     platform: row.platform || null,
     studio_output_type: row.studio_output_type || row.format || null,
     content_id: row.content_id || null,

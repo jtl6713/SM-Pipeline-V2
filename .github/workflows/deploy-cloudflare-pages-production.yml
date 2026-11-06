@@ -53,6 +53,7 @@ jobs:
             apps/studio-web/production-record-identity.test.mjs \
             apps/studio-web/pipeline-rendering-terminal.test.mjs \
             apps/studio-web/vibe-cut-mode.test.mjs \
+            apps/studio-web/vibe-skip-upload-dates.test.mjs \
             apps/studio-web/vibe-upload-confirm.test.mjs \
             apps/studio-web/vibe-cut-passthrough-guard.test.mjs \
             apps/studio-web/pipeline-review-filter.test.mjs \
@@ -62,6 +63,10 @@ jobs:
             apps/studio-web/production-progress-timeline-truth.test.mjs \
             apps/studio-web/production-render-layout.test.mjs \
             apps/studio-web/factory-needs-eyes-layout.test.mjs \
+            apps/studio-web/factory-producer-progress.test.mjs \
+            apps/studio-web/collapsible-nav.test.mjs \
+            apps/studio-web/studio-nav-autoclose.test.mjs \
+            apps/studio-web/factory-review-selection-eligibility.test.mjs \
             apps/studio-web/factory-batch-approval.test.mjs \
             apps/studio-web/factory-batch-quality-agent.test.mjs \
             apps/studio-web/factory-review-feedback.test.mjs \
@@ -75,7 +80,7 @@ jobs:
             apps/studio-web/all-profiles-force-refresh.test.mjs \
             apps/studio-web/idea-numeric-id-display.test.mjs \
             apps/studio-web/idea-archive-freshness.test.mjs \
-            apps/studio-web/ui-release-contract.test.mjs \
+            apps/studio-web/asset-upload-progress.test.mjs apps/studio-web/ui-release-contract.test.mjs \
             apps/studio-web/pages-production-deploy-contract.test.mjs \
             apps/studio-web/exception-recovery-overdue-format.test.mjs
 

@@ -1,5 +1,7 @@
+import { r4StartConfirmed, rotateR4CandidatesAfterCursor } from "./r4-queue-admission.mjs";
+import { storySeedRenderStatus } from "./story-render-admission.mjs";
 import { ideaProducerDirection, mergeIdeaProducerDirection } from "./idea-producer-direction.mjs";
-import { scriptedShortPublishableTitle } from "./scripted-short-title.mjs";
+import { scriptedShortPublishableTitle, scriptedShortExplicitTitle } from "./scripted-short-title.mjs";
 import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
 import { parseScriptedShortAssetPolicy, libraryAssetSatisfiesPolicy, recoverScriptedShortAssets, validateScriptedShortAssets } from "./scripted-short-asset-policy.mjs";
 import {
@@ -9,7 +11,11 @@ import {
   serializeScriptedShortProducerPlan,
   scriptedShortProducerPlanFromNotes,
   validateScriptedShortProductionConstraints,
+  scriptedShortExactScenes,
+  scriptedShortHonorDuration,
+  scriptedShortCheckBriefRequirements,
 } from "./scripted-short-producer-plan.mjs";
+import { parseScriptedShortFeedback, chooseScriptedShortLibraryClip, applyScriptedShortFeedback } from "./scripted-short-feedback.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import { scheduleReservationAuthorityEnabled, scheduleReservationLaneEnabled } from "./schedule-reservation-authority.mjs";
 import { creativeSettingName, parseCreativeGuidance } from "./profile-creative-guidance.mjs";
@@ -76,6 +82,7 @@ import {
 } from "./desk-inventory.mjs";
 import {
   allocateLibraryBatchNames,
+  allocateLibraryUploadNames,
   combineAirtableFormulas,
   firstLinkedRecordId,
   LIBRARY_ADDED_AT_FIELD,
@@ -283,6 +290,7 @@ import {
   isRealRemotionRetryFailure,
   isRenderQueueCandidateStatus,
   isRenderQueueWaitingStatus,
+  isRenderQueueWaitingStampEligible,
   remotionHealthLooksBusy,
   sortRenderQueueCandidates,
 } from "./render-queue.mjs";
@@ -1046,6 +1054,10 @@ export async function studioRemotionRenderBusy(env) {
 export async function studioStampRenderQueueWaiting(env, rowOrId) {
   const id = typeof rowOrId === "string" ? rowOrId : rowOrId?.id;
   if (!id) return null;
+  // R5 may have completed since the queue candidate scan. Fail closed on a
+  // fresh authoritative read rather than overwriting Rendered/Ready for Review.
+  const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+  if (!isRenderQueueWaitingStampEligible(current, f)) return null;
   return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
     method: "PATCH",
     body: JSON.stringify({
@@ -1201,7 +1213,25 @@ export async function studioAdmitRenderQueue(env, options = {}) {
     limit: 16,
     filterFormula: STUDIO_RENDER_QUEUE_ACTIVE_FORMULA,
   }).catch(() => []);
-  const busy = await studioRemotionRenderBusy(env);
+  // A stale Airtable "Rendering" hold can block every Story indefinitely even
+  // when the real renderer has zero active jobs. First run the existing R5
+  // poll/reconciliation against saved job IDs, then re-check canonical holds.
+  // Never infer an idle renderer alone permits a second R4 start.
+  let busy = await studioRemotionRenderBusy(env);
+  let staleHoldRecovery = null;
+  if (busy.busy && busy.source === "airtable") {
+    try {
+      const recovered = await item4PulseR5Python(env, { maxRuns: 5 });
+      staleHoldRecovery = { attempted: true, status: recovered?.status || null };
+      busy = await studioRemotionRenderBusy(env);
+    } catch (error) {
+      staleHoldRecovery = {
+        attempted: true,
+        error: error instanceof Error ? error.message : String(error),
+      };
+      busy = { ...busy, busy: true };
+    }
+  }
   // One Remotion admission per shared 9:16 short group — siblings wait for produce
   // to copy Final_File_URL, they do not each claim a render slot.
   const { byId, total, admitCandidates } = assignRenderQueuePositions(candidates, f, {
@@ -1211,8 +1241,8 @@ export async function studioAdmitRenderQueue(env, options = {}) {
   let stampedWaiting = 0;
   for (const row of candidates) {
     if (!isRenderQueueWaitingStatus(f(row, "Render_Status"))) {
-      await studioStampRenderQueueWaiting(env, row).catch(() => null);
-      stampedWaiting += 1;
+      const stamped = await studioStampRenderQueueWaiting(env, row).catch(() => null);
+      if (stamped) stampedWaiting += 1;
     }
   }
   if (busy.busy) {
@@ -1222,13 +1252,17 @@ export async function studioAdmitRenderQueue(env, options = {}) {
       waiting: total,
       stamped_waiting: stampedWaiting,
       busy,
+      stale_hold_recovery: staleHoldRecovery,
       queue: [...byId.values()],
       shared_siblings_waiting: Math.max(0, candidates.length - total),
       controls,
     };
   }
-  const head = admitCandidates[0];
-  if (!head) {
+  const cursorKey = "ops/r4-skip-cursor-v1";
+  const cursorObject = await env.STUDIO_MEDIA.get(cursorKey).catch(() => null);
+  const cursor = cursorObject ? await cursorObject.text().catch(() => null) : null;
+  const queueOrder = rotateR4CandidatesAfterCursor(admitCandidates, cursor, controls);
+  if (!queueOrder.length) {
     return {
       admitted: false,
       reason: "shared_render_hold",
@@ -1240,37 +1274,112 @@ export async function studioAdmitRenderQueue(env, options = {}) {
       controls,
     };
   }
-  await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, head.id, {
-    method: "PATCH",
-    body: JSON.stringify({
-      fields: { Render_Status: RENDER_STATUS_READY },
-      typecast: true,
-    }),
-  }).catch(() => null);
-  let started = null;
-  try {
-    started = await item4PulseR4Python(env, {
-      outputRecordId: head.id,
-      forceSlot: true,
-      testRunId: options.testRunId,
-    });
-  } catch (error) {
+
+  // A skipped StageResult is HTTP 200 but does not hold the Remotion slot.
+  // Try a few distinct heads per tick, only for explicit no-launch reasons.
+  // Never start another render after an ambiguous result or a busy slot.
+  const safeSkippedReasons = new Set([
+    "no_eligible_platform_output",
+    "waiting_for_timing",
+    "waiting_for_voiceover",
+    "unfetchable_render_source",
+    "stale_render_package",
+    "studio_visual_integrity_blocked",
+    "voiceover_exceeds_video",
+    "private_drive_watermark_renderer_not_updated",
+  ]);
+  // Obsolete R2 priorities (#2777-#2786 are already rendered/published) are
+  // not operator priority for this queue. Otherwise an old pinned list
+  // keeps maxAttempts at one and suppresses the durable skip cursor forever.
+  const eligibleAdmitIds = new Set(queueOrder.map(row => String(row?.id || "")));
+  const manualPriority = Array.isArray(controls?.render_priority) &&
+    controls.render_priority.some(id => eligibleAdmitIds.has(String(id)));
+  const maxAttempts = manualPriority ? 1 : Math.min(4, queueOrder.length);
+  const skipped = [];
+  for (const head of queueOrder.slice(0, maxAttempts)) {
+    // Candidate enumeration can predate an R5 completion or parallel cron.
+    // Never turn a subsequently Rendered / reviewable output back to Ready.
+    let latest;
+    try {
+      latest = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, head.id);
+    } catch (error) {
+      return {
+        admitted: false, reason: "r4_preflight_read_failed", head: head.id,
+        waiting: total, skipped,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+    const currentRenderStatus = String(f(latest, "Render_Status") || "").trim();
+    const currentOutputStatus = String(f(latest, "Output_Status") || "").trim();
+    const expectedTestRun = String(options.testRunId || "").trim();
+    if (
+      !["Ready for Render", "Waiting in Render Queue"].includes(currentRenderStatus) ||
+      ["Rendered", "Ready for Review", "Approved", "Approved for Publishing", "Published"].includes(currentOutputStatus) ||
+      String(f(latest, "Test_Run_ID") || "").trim() !== expectedTestRun ||
+      Boolean(String(f(latest, "Remotion_Job_ID") || "").trim()) ||
+      Boolean(String(f(latest, "Final_File_URL") || "").trim())
+    ) {
+      skipped.push({ id: head.id, reason: "no_longer_eligible" });
+      await env.STUDIO_MEDIA.put(cursorKey, head.id).catch(() => null);
+      continue;
+    }
+    try {
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, head.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: { Render_Status: RENDER_STATUS_READY },
+          typecast: true,
+        }),
+      });
+    } catch (error) {
+      return {
+        admitted: false, reason: "r4_ready_patch_failed", head: head.id,
+        waiting: total, skipped,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+
+    let started;
+    try {
+      started = await item4PulseR4Python(env, {
+        outputRecordId: head.id,
+        forceSlot: true,
+        testRunId: options.testRunId,
+      });
+    } catch (error) {
+      return {
+        admitted: false, reason: "r4_start_failed", head: head.id,
+        waiting: total, skipped,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+
+    if (r4StartConfirmed(started)) {
+      await env.STUDIO_MEDIA.put(cursorKey, head.id).catch(() => null);
+      return {
+        admitted: true, reason: "started_head", head: head.id,
+        waiting: Math.max(0, total - 1), stamped_waiting: stampedWaiting,
+        started, skipped,
+        shared_siblings_waiting: Math.max(0, candidates.length - total),
+      };
+    }
+
+    const skipReason = String(started?.details?.run?.reason || started?.details?.reason || "").trim();
+    if (started?.status === "skipped" && safeSkippedReasons.has(skipReason)) {
+      skipped.push({ id: head.id, reason: skipReason });
+      await env.STUDIO_MEDIA.put(cursorKey, head.id).catch(() => null);
+      continue;
+    }
+
     return {
-      admitted: false,
-      reason: "r4_start_failed",
-      waiting: Math.max(0, total - 1),
-      head: head.id,
-      error: error instanceof Error ? error.message : String(error),
+      admitted: false, reason: "r4_launch_not_confirmed", head: head.id,
+      waiting: total, started, skipped,
     };
   }
   return {
-    admitted: Boolean(started?.processed || started?.details?.processed || started?.ok !== false),
-    reason: "started_head",
-    waiting: Math.max(0, total - 1),
+    admitted: false, reason: "no_render_started", waiting: total,
+    attempted: skipped.length, skipped,
     stamped_waiting: stampedWaiting,
-    head: head.id,
-    started,
-    shared_siblings_waiting: Math.max(0, candidates.length - total),
   };
 }
 /*__STUDIO_WORKER_END:studioAdmitRenderQueue__*/
@@ -3455,10 +3564,24 @@ export async function createProductionRequestFromBody(request, env, authorizatio
       sourceAspect: isHorizontalVibeCutAspect(input.production_notes) ? "horizontal" : "vertical",
       targetSeconds: parseVibeCutDirective(input.production_notes)?.target_seconds || input.video_duration_seconds || 15,
     });
-    idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
-      method: "PATCH",
-      body: JSON.stringify({ fields: target, typecast: true }),
+    // The Vibe Idea create route already writes these canonical fields. Do
+    // not spend a second Airtable write on every upload when they match;
+    // under base-wide 429 pressure that extra PATCH can stall the video before
+    // its first multipart segment. Still repair older/photo-classified Ideas.
+    const needsCorrection = Object.entries(target).some(([field, expected]) => {
+      const current = f(idea, field);
+      if (expected == null) return current != null && current !== "";
+      if (Array.isArray(expected) && expected.length === 0) {
+        return Array.isArray(current) ? current.length > 0 : Boolean(current);
+      }
+      return JSON.stringify(current) !== JSON.stringify(expected);
     });
+    if (needsCorrection) {
+      idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields: target, typecast: true }),
+      });
+    }
   }
   const created = await createDraftForIdea(env, idea, authorization, input, { preferredProfileId });
   return respond(request, env, {
@@ -3654,6 +3777,34 @@ export async function getProductionRequest(request, env, url, authorization, ctx
   void ctx;
   const recordId = productionRequestRecordIdFromPath(url);
   const record = await loadAuthorizedProductionRequest(env, recordId, authorization);
+  // Factory polls this small, tenant-authorized projection instead of a heavy
+  // Production Request document. Airtable remains the only progress authority.
+  if (String(url.searchParams.get("fields") || "").trim().toLowerCase() === "producer-progress") {
+    const notes = String(f(record, "Production_Notes") || "");
+    const marker = [...notes.matchAll(/\[factory-producer-revision id=(fpr-[a-f0-9]+) state=(pending|completed|needs_attention)\]/g)].at(-1);
+    const job = parseStudioProductionJob(record);
+    const safeJob = job && /^fpr-[a-f0-9]+$/.test(String(job.job_id || ""))
+      ? {
+          id: job.job_id,
+          step: String(job.step || "").slice(0, 60),
+          detail: String(job.detail || "").slice(0, 220),
+          error: String(job.error || "").slice(0, 220),
+          quality_passed: job.producer_quality?.passed === true ? true
+            : job.producer_quality?.passed === false ? false : null,
+          quality_errors: (Array.isArray(job.producer_quality?.errors)
+            ? job.producer_quality.errors : []).slice(0, 3).map(value => String(value).slice(0, 180)),
+        } : null;
+    return respond(request, env, {
+      ok: true,
+      record: {
+        id: record.id,
+        status: String(f(record, "Request_Status") || ""),
+        updated_at: f(record, "Updated_At") || null,
+        revision: marker ? {id: marker[1], state: marker[2]} : null,
+        job: safeJob,
+      },
+    });
+  }
   const ideaId = ideaRecordIdFromProductionRequest(record);
   const ideaTitles = await loadIdeaTitlesByRecordId(env, [ideaId]);
   const light = String(url.searchParams.get("fields") || "").trim().toLowerCase() === "light";
@@ -5488,7 +5639,14 @@ export async function generateItem4PreProductionAiMaster(request, env, url, auth
   const manifestNames = assets
     .map((asset) => String(asset?.library_asset_name || asset?.name || "").trim())
     .filter(Boolean);
-  const allocatedNames = allocateLibraryBatchNames(assetBase, 1, [...catalogNames, ...manifestNames]);
+  // Preserve the operator's trailing number (e.g. "Field Museum 9") on the
+  // first AI image. Subsequent AI images advance that number, without adding
+  // a second suffix; unnumbered bases retain catalog sequence allocation.
+  const allocatedNames = allocateLibraryUploadNames(
+    requestedAssetBase || context.title || "Studio AI",
+    1,
+    [...catalogNames, ...manifestNames],
+  );
   const assetName = allocatedNames[0];
   if (!assetName) throw new HttpError(500, "Could not allocate the next Asset Manager name for this AI image");
 
@@ -6655,7 +6813,10 @@ export function platformOutputSeedFields(parentContentItem, requestRecord, outpu
     Platform_Output_Type: String(planItem.mapping_type || route.proven_mapping || effective.output_type || "").trim(),
     Aspect_Ratio: String(planItem.aspect_ratio || sourcePackage?.ratio || "").trim(),
     Output_Status: nativeReady ? "Ready for Review" : "In Production",
-    Render_Status: nativeReady ? "Native Photo Route" : null,
+    // Stories with an authoritative, complete Remotion package must be visible to R4 immediately.
+    // Otherwise the Story can remain indefinitely unqueued while its video siblings finish.
+    // Keep non-Story outputs on their existing R2/R3 admission path.
+    Render_Status: storySeedRenderStatus({ nativeReady, outputType: effective.output_type, remotionReady }),
     Studio_Preview_URL: nativeReady ? (String(clips[0]?.url || "").trim() || null) : null,
     Thumbnail_URL: (function thumbnailUrl() {
       const parentThumb = studioAiThumbnailUrl(f(parentContentItem, "Thumbnail_URL"));
@@ -8356,7 +8517,9 @@ export async function studioInsightsMetaIdentity(id, token, version, fields) {
 export function studioInsightsConnectionStateFromError(error) {
   const status = Number(error?.status || 0);
   const message = sanitizeAnalyticsError(error);
-  const auth = status === 400 || status === 401 || status === 403
+  // A provider or auth-worker 5xx is a service failure, not proof that the
+  // account owner needs OAuth consent. Never recommend reconnecting on 5xx.
+  const auth = status >= 500 ? false : status === 400 || status === 401 || status === 403
     || /permission|oauth|token|authoriz|scope|credential/i.test(message);
   return {
     status: auth ? "needs_authorization" : "error",
@@ -8532,6 +8695,13 @@ export async function getInsightsConnections(request, env, url, authorization) {
           result.youtube.error = "YouTube uploader is reachable but is running an older build without /youtube/oauth/status. Sync and restart this profile's uploader service.";
           return;
         }
+        // A 401/403 at this protected *service* endpoint means the Studio
+        // service key is rejected. Google consent cannot repair that key.
+        if (response.status === 401 || response.status === 403) {
+          result.youtube.status = "error";
+          result.youtube.error = "YouTube uploader service authentication failed. Verify this profile's uploader shared secret matches the uploader service; do not reconnect Google OAuth until the service key is fixed.";
+          return;
+        }
         const body = await studioInsightsSafeJson(response);
         result.youtube.account_name = body?.channel_title || null;
         result.youtube.account_id = body?.channel_id || result.youtube.account_id;
@@ -8566,7 +8736,9 @@ export async function getInsightsConnections(request, env, url, authorization) {
         result.tiktok.status = body?.authorized && body?.required_scopes_granted ? "connected" : "needs_authorization";
         result.tiktok.error = result.tiktok.status === "connected"
           ? null
-          : "Reconnect TikTok to grant owned-video analytics access.";
+          : (body?.authorized
+            ? "TikTok OAuth is stored, but required permissions are missing. Reconnect this creator and grant all requested permissions, including video.list."
+            : "Reconnect TikTok to grant owned-video analytics access.");
       } catch (error) {
         Object.assign(result.tiktok, studioInsightsConnectionStateFromError(error));
       }
@@ -11751,26 +11923,42 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   ];
   let source = "fallback";
   let scenes = [];
+  // A named all-clips list plus exact voiceover is executable direction, not
+  // an AI suggestion. Preserve every clip and every word, even if the writer
+  // proposes a shorter story.
   try {
-    const writer = await pulseIdeaTimedScriptWriter(env, synthetic, pool);
-    source = writer.source && writer.source !== "fallback" ? writer.source : "fallback";
-    scenes = assignOwnedScenes((writer.scenes || []).map((scene) => ({
-      voiceover_text: scene.voiceover_text,
-      suggested_visual: scene.suggested_visual,
-    })), pool);
-    scenes = ensureRelevantVideoScene(scenes, pool);
+    const exact = scriptedShortExactScenes(creativeBrief, pool);
+    if (exact) {
+      source = "exact-brief";
+      scenes = exact;
+    }
   } catch (error) {
-    console.warn("scripted short writer failed", error);
+    throw new HttpError(409, error.message || "Required clips are unavailable.");
   }
-  if (!scriptedShortProposalReady(buildTimelineFromScenes(scenes))) {
-    source = "fallback";
-    scenes = assignOwnedScenes(fallbackProposalScenes(prompt, pool), pool);
-    scenes = ensureRelevantVideoScene(scenes, pool);
+  if (source !== "exact-brief") {
+    try {
+      const writer = await pulseIdeaTimedScriptWriter(env, synthetic, pool);
+      source = writer.source && writer.source !== "fallback" ? writer.source : "fallback";
+      scenes = assignOwnedScenes((writer.scenes || []).map((scene) => ({
+        voiceover_text: scene.voiceover_text,
+        suggested_visual: scene.suggested_visual,
+      })), pool);
+      scenes = ensureRelevantVideoScene(scenes, pool);
+    } catch (error) {
+      console.warn("scripted short writer failed", error);
+    }
+    if (!scriptedShortProposalReady(buildTimelineFromScenes(scenes))) {
+      source = "fallback";
+      scenes = assignOwnedScenes(fallbackProposalScenes(prompt, pool), pool);
+      scenes = ensureRelevantVideoScene(scenes, pool);
+    }
   }
   // Independent Quality Agent guard: repair only from the eligible catalog,
   // otherwise mark a scene as missing rather than reporting a false match.
   const recovery = recoverScriptedShortAssets(buildTimelineFromScenes(scenes), pool, assetPolicy, profile?.id);
-  const timeline = buildTimelineFromScenes(recovery.timeline.segments);
+  const timeline = scriptedShortHonorDuration(buildTimelineFromScenes(recovery.timeline.segments), creativeBrief);
+  const constraints = scriptedShortCheckBriefRequirements(creativeBrief, timeline, pool);
+  if (!constraints.ok) throw new HttpError(409, constraints.errors.join(" "));
   const assetValidation = validateScriptedShortAssets(timeline, pool, assetPolicy, profile?.id);
   if (!assetValidation.ok) {
     throw new HttpError(409, "Quality Agent blocked a mismatched library asset. No proposal was accepted.");
@@ -11797,7 +11985,7 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
     timeline,
     duration_seconds: timeline.duration_seconds,
     scene_count: timeline.segments.length,
-    suggested_title: scriptedShortPublishableTitle(prompt, timeline, profileMarket),
+    suggested_title: scriptedShortPublishableTitle(creativeBrief, timeline, profileMarket),
     owned_count: owned,
     suggestion_count: suggestions,
     asset_policy: assetPolicy,
@@ -11809,6 +11997,89 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   });
 }
 /*__STUDIO_WORKER_END:proposeScriptedShortRoute__*/
+
+export async function reviseScriptedShortRoute(request, env, authorization, url = null) {
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  let creativeBrief, directive;
+  try {
+    creativeBrief = normalizeScriptedShortBrief(payload?.creative_brief || payload?.prompt);
+    directive = parseScriptedShortFeedback(payload?.feedback, payload?.timeline);
+  } catch (error) {
+    throw new HttpError(400, error?.message || "Invalid proposal feedback");
+  }
+  if (creativeBrief.length < 3 || !scriptedShortProposalReady(payload?.timeline)) {
+    throw new HttpError(400, "Submit and review a complete Script a Short proposal before revising.");
+  }
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url, payload));
+  const policy = parseScriptedShortAssetPolicy(creativeBrief);
+  const profileMarket = String(f(profile, "Market_Name") || "").trim();
+  const operations = Array.isArray(directive.actions) ? directive.actions : [directive];
+  const uniqueClips = [...new Set(operations.filter(x=>x.action==="replace").map(x=>x.asset_name))];
+  if (uniqueClips.length > 12) throw new HttpError(400,"Replace at most twelve clips in one revision.");
+  const clips = new Map();
+  // Every title is resolved against authoritative Airtable, exactly and in the selected profile.
+  // Never accept file metadata or an identity asserted by the browser.
+  for (const name of uniqueClips) {
+    const formula = libraryAssetNameFindFormula(name);
+    const table = env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE;
+    let offset = "", all = [];
+    for (let page = 0; page < 3; page++) {
+      const params = new URLSearchParams({ filterByFormula: formula, pageSize: "100" });
+      if (offset) params.set("offset", offset);
+      const response = await airtableFetch(env, table, "?" + params.toString());
+      all.push(...(Array.isArray(response?.records) ? response.records : []));
+      offset = String(response?.offset || "");
+      if (!offset) break;
+    }
+    if (offset) throw new HttpError(409, "Too many matching library files. Rename the clip uniquely, then try again.");
+    try { clips.set(name, chooseScriptedShortLibraryClip(all, name, profile.id)); }
+    catch (error) { throw new HttpError(409, error.message); }
+  }
+  const authorized = operations.map(op=>op.action==="replace" ? {...op,clip:clips.get(op.asset_name)} : op);
+  let updated;
+  try { updated = applyScriptedShortFeedback(payload.timeline, {actions:authorized}); }
+  catch (error) { throw new HttpError(400, error.message); }
+  const timeline = buildTimelineFromScenes(updated.segments);
+  if (!scriptedShortProposalReady(timeline)) {
+    throw new HttpError(409, "This change would make an invalid storyboard. Keep at least five scenes.");
+  }
+  // Check ALL surviving scene media, not only the newly replaced clips.
+  const ids = [...new Set(timeline.segments.map(row=>String(row.asset_id||"").trim()).filter(Boolean))];
+  if (ids.some(id=>!/^rec[A-Za-z0-9]+$/.test(id))) {
+    throw new HttpError(409, "A scene references an invalid library record. Please propose again.");
+  }
+  const records = await Promise.all(ids.map(id=>airtableFetch(env,env.AIRTABLE_MEDIA_TABLE_ID||ITEM4_MEDIA_ASSET_TABLE,id)));
+  const catalog = records.map(ideaTimedScriptCatalogRow);
+  const validation = validateScriptedShortAssets(timeline,catalog,policy,profile.id);
+  if (!validation.ok) {
+    throw new HttpError(409, "Quality Agent blocked missing, wrong-profile or wrong-location media. No revisions were applied.");
+  }
+  const plan = buildScriptedShortProducerPlan({
+    brief:creativeBrief,timeline,catalog,assetPolicy:policy,
+    profileId:profile.id,profileName:profileMarket,
+  });
+  const summary = authorized.map(op=>{
+    if (op.action==="replace") return "Replaced slide "+op.scene+" with '"+op.clip.name+"'";
+    if (op.action==="remove") return "Removed slide "+op.scene;
+    if (op.action==="move") return "Moved slide "+op.scene+" "+op.position+" slide "+op.target_scene;
+    if (op.action==="narration") return "Updated narration on slide "+op.scene;
+    return "Adjusted duration on slide "+op.scene;
+  });
+  const publicOperations = authorized.map(({clip,...op})=>({
+    ...op,...(clip?{asset_id:clip.id,asset_name:clip.name}:{}),
+  }));
+  return respond(request,env,{
+    ok:true,source:"proposal-feedback",prompt:creativeBrief.replace(/\s+/g," "),
+    creative_brief:creativeBrief,timeline,markdown:formatTimedScriptMarkdown(timeline),
+    duration_seconds:timeline.duration_seconds,scene_count:timeline.segments.length,
+    owned_count:validation.verified,suggestion_count:validation.unassigned,
+    asset_policy:policy,asset_validation:validation,producer_plan:plan,
+    revision:{... (publicOperations.length===1?publicOperations[0]:{}),actions:publicOperations},
+    message:summary.join("; ")+". Review the updated proposal before Accept.",
+  });
+}
+/*__STUDIO_WORKER_END:reviseScriptedShortRoute__*/
 
 export async function acceptScriptedShortRoute(request, env, authorization, ctx = null, url = null) {
   let payload = {};
@@ -11822,7 +12093,7 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
   if (!scriptedShortProposalReady(incoming)) {
     throw new HttpError(400, "Accept needs the proposal timeline.");
   }
-  const timeline = buildTimelineFromScenes(incoming.segments);
+  const timeline = scriptedShortHonorDuration(buildTimelineFromScenes(incoming.segments), creativeBrief);
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url, payload));
   // Validate against authoritative Airtable media before any draft is created.
   // This prevents edited or stale proposals bypassing the Quality Agent.
@@ -11841,10 +12112,17 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
       return airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, id);
     }));
     authoritativeCatalog = mediaRows.map(ideaTimedScriptCatalogRow);
+    const constraints = scriptedShortCheckBriefRequirements(creativeBrief, timeline, authoritativeCatalog);
+    if (!constraints.ok) throw new HttpError(409, constraints.errors.join(" "));
     const qa = validateScriptedShortAssets(timeline, authoritativeCatalog, acceptPolicy, profile?.id);
     if (!qa.ok) {
       throw new HttpError(409, "Quality Agent blocked a missing, wrong-profile, or wrong-location library asset. Propose again to repair the assignments.");
     }
+  }
+  // Also block a zero-asset proposal whenever the brief specified footage or VO.
+  if (!selectedMediaIds.length) {
+    const constraints = scriptedShortCheckBriefRequirements(creativeBrief, timeline, []);
+    if (!constraints.ok) throw new HttpError(409, constraints.errors.join(" "));
   }
   // The prompt is creative direction. Persist a concise title based on the
   // actual narration; preserve the full instructions in Idea_Summary.
@@ -11857,7 +12135,8 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
     profileId: profile?.id,
     profileName: profileMarket,
   });
-  const title = scriptedShortPublishableTitle(prompt, timeline, profileMarket);
+  const title = scriptedShortPublishableTitle(creativeBrief, timeline, profileMarket);
+  const explicitTitle = scriptedShortExplicitTitle(creativeBrief);
   const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, "", {
     method: "POST",
     body: JSON.stringify({
@@ -11913,7 +12192,10 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
   }
   const script = exactVoiceoverText(timeline);
   const notes = withProductionPhotoWaitManual(mergeTimedScriptNotes("", timeline));
-  const stampedNotes = `${notes}\n${serializeScriptedShortProducerPlan(producerPlan)}\nidea-vo-timeline=1\nscripted-short=proposal`.trim();
+  const feedbackLines = (Array.isArray(payload?.proposal_feedback) ? payload.proposal_feedback : [])
+    .slice(-5).map(line => String(line || "").trim().slice(0, 220)).filter(Boolean);
+  const feedbackAudit = feedbackLines.length ? `\n[proposal-feedback]\n${feedbackLines.join("\n")}\n[/proposal-feedback]` : "";
+  const stampedNotes = `${notes}\n${serializeScriptedShortProducerPlan(producerPlan)}${feedbackAudit}\nidea-vo-timeline=1\nscripted-short=proposal`.trim();
   if (stampedNotes.length > 10000) {
     throw new HttpError(409, "The detailed Producer Plan is too large to save safely. Shorten the brief or scene count, then propose again.");
   }
@@ -11931,6 +12213,7 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
     Selected_Music_Asset: [scriptedMusicId],
     Script_Mode: "Force exact",
     Requested_Script: script,
+    Title_Mode: explicitTitle ? "Force exact" : "AI decides",
     Requested_Title: title,
     Video_Duration_Seconds: duration,
     Voiceover_Tail_Seconds: 0,
@@ -11941,6 +12224,15 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
     Request_Status: "Draft",
     Studio_Item4_State: "Draft",
   });
+  // A human-specified title has higher authority than generated settings.
+  // Verify Airtable retained the lock before allowing platform output fanout.
+  if (explicitTitle) {
+    requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
+    if (String(f(requestRecord, "Title_Mode") || "").trim() !== "Force exact" ||
+        String(f(requestRecord, "Requested_Title") || "").trim() !== explicitTitle) {
+      throw new HttpError(409, "Exact short title was not saved; production was stopped before output creation.");
+    }
+  }
   try {
     const planCall = studioInternalJsonRequest(`/api/production-requests/${requestRecord.id}/plan`, {
       platforms: producerPlan.target_platforms,
