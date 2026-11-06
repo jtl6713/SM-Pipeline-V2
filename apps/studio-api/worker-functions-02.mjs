@@ -12198,6 +12198,15 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
     Request_Status: "Draft",
     Studio_Item4_State: "Draft",
   });
+  // A human-specified title has higher authority than generated settings.
+  // Verify Airtable retained the lock before allowing platform output fanout.
+  if (explicitTitle) {
+    requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
+    if (String(f(requestRecord, "Title_Mode") || "").trim() !== "Force exact" ||
+        String(f(requestRecord, "Requested_Title") || "").trim() !== explicitTitle) {
+      throw new HttpError(409, "Exact short title was not saved; production was stopped before output creation.");
+    }
+  }
   try {
     const planCall = studioInternalJsonRequest(`/api/production-requests/${requestRecord.id}/plan`, {
       platforms: producerPlan.target_platforms,
