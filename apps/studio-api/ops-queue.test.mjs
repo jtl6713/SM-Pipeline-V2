@@ -1,4 +1,6 @@
 import { readStudioWorkerSource } from "./worker-source-reader.mjs";
+// Also execute the no-publish review discovery regression in Factory CI.
+import "./factory-review-held-discovery.test.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
