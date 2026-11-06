@@ -148,7 +148,7 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
       const body=await jsonBody(request),key=requestKey(body);
       const environment=body.environment===undefined?"production":required(body.environment,"environment",40);
       if(!["production","staging","development"].includes(environment))throw error(400,"Invalid QA environment");
-      const snapshot={worker:"0.10.764-formal-review-parity",ui:"0.6.896-formal-review-parity",
+      const snapshot={worker:"0.10.765-qa-center-v1",ui:"0.6.897-qa-center-pilot",
         runner:"unverified"}; // Do not accept claimed deployment versions from browser.
       const identity={actor,environment,catalogRevision:QA_CATALOG.catalogVersion};
       const payload={environment,catalogRevision:QA_CATALOG.catalogVersion};
@@ -168,14 +168,19 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
   if(!operation&&request.method==="GET")return send({ok:true,run,events:await history(runId)});
   if(operation==="gate"&&request.method==="GET"){
     const events=await history(runId);
-    return send({ok:true,run,gate:computeQaGate(catalog,events)});
+    const gate=computeQaGate(catalog,events);
+    const blockers=[];
+    if(run.deployment?.runner==="unverified")blockers.push("Runner deployment is not attested");
+    if(blockers.length){gate.ready=false;gate.decision="Incomplete";}
+    return send({ok:true,run,gate:{...gate,deploymentBlockers:blockers}});
   }
   if(request.method!=="POST"||!["results","approvals","waivers"].includes(operation)&&!operation.startsWith("execute/"))
     throw error(405,"QA method not allowed");
   const body=await jsonBody(request),key=requestKey(body);
   let testId,kind,payload;
   if(operation==="results"){
-    const result=validateManualResult(body);
+    let result;
+    try{result=validateManualResult(body);}catch(e){throw error(400,String(e?.message||"Invalid manual result"));}
     testId=result.testId;exactTest(testId);kind="ManualResult";
     payload={executionId:"qaex-"+crypto.randomUUID(),status:result.status,source:"manual",
       notes:result.notes,evidence:result.evidence,catalogVersion:QA_CATALOG.catalogVersion};
@@ -183,6 +188,14 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
     testId=testToExecute;exactTest(testId);
     if(testId!=="QA-DIAG-001"||!SAFE_ASSERTIONS[testId])throw error(405,"Safe automation not enabled for this test");
     kind="AutomatedObservation";
+    const existing=await list(QA_EVENTS_TABLE,"Idempotency Key",kind+":"+key,2);
+    if(existing.length>1)throw error(409,"Duplicate QA assertion identity");
+    if(existing.length===1){
+      const old=exposeEvent(existing[0]);
+      if(old.runId!==runId||old.testId!==testId||old.actorId!==actor)
+        throw error(409,"Conflicting QA assertion identity");
+      return send({ok:true,reused:true,event:old});
+    }
     const target=new URL("/api/health",url.origin);
     let evaluated;
     try{
