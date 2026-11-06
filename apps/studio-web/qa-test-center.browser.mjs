@@ -96,7 +96,7 @@ try{
   assert.equal(await page.locator("#qaFinalizeRun").isDisabled(),true);
   await page.locator("#qaSearch").fill("QA-AUTH-001");
   await page.locator("#qaStartRun").click();
-  await page.locator("#qaFinalizeRun").waitFor({state:"visible"});
+  await page.waitForFunction(() => { const control=document.getElementById("qaFinalizeRun");return Boolean(control)&&control.disabled===false; },null,{timeout:8000});
   assert.equal(await page.locator("#qaFinalizeRun").isEnabled(),true);
   await page.locator(".qa-case summary").click();
   await page.locator(".qa-case-actions button").filter({hasText:"Pass"}).click();
