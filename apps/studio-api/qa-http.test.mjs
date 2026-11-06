@@ -48,7 +48,7 @@ function harness(){
     return handleQaApi({request,url:new URL(request.url),env:{STUDIO_MEDIA:bucket},
       authorization:{user:{record_id:actor}},airtableFetch,clock:now,
       respond:(_request,_env,obj,status=200)=>new Response(JSON.stringify(obj),{status}),
-      fetchHealth:fetchHealth||async()=>new Response(JSON.stringify({version:"0.10.764"}),{status:200})});
+      fetchHealth:fetchHealth || (async()=>new Response(JSON.stringify({version:"0.10.764"}),{status:200}))});
   }
   return {call,rows};
 }
