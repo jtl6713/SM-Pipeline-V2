@@ -3,7 +3,7 @@
   const $=id=>document.getElementById(id);
   const nav=$("navQaTestCenter"),root=$("page-qa-test-center");
   if(!nav||!root)return;
-  const state={tests:[],safeAutomations:[],runs:[],run:null,events:[],gate:null,loading:false,pendingRunId:null,search:"",nextCursor:null};
+  const state={tests:[],safeAutomations:[],runs:[],run:null,events:[],gate:null,loading:false,pendingRunId:null,pendingFinalization:null,search:"",nextCursor:null};
   const MAX_NOTES=4000;
   const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined&&text!==null)n.textContent=String(text);if(cls)n.className=cls;return n;};
   const status=$("qaStatus"),runs=$("qaRunSelect"),cases=$("qaCases"),gate=$("qaGate"),history=$("qaHistory"),baseline=$("qaBaselineSelect"),regressions=$("qaRegressions");
@@ -78,6 +78,22 @@
     if(g.deploymentBlockers?.length)gate.append(el("p","Deployment verification required: "+g.deploymentBlockers.join("; "),"qa-alert"));
     if(g.waivers?.length)gate.append(el("p",g.waivers.length+" risk waivers recorded. They do not silently clear release gates."));
   }
+  function renderFinalizationState(){
+    const finalized=state.run?.status==="Finalized",control=$("qaFinalizeRun"),
+      decision=$("qaFinalDecision"),notes=$("qaFinalNotes"),help=$("qaFinalHelp");
+    if(control)control.disabled=!state.run||finalized;
+    if(decision){
+      decision.disabled=!state.run||finalized;
+      const approved=[...decision.options].find(option=>option.value==="Approved");
+      if(approved)approved.disabled=!state.gate?.ready||finalized;
+      if(decision.value==="Approved"&&!state.gate?.ready)decision.value="Incomplete";
+    }
+    if(notes)notes.disabled=!state.run||finalized;
+    if(help)help.textContent=finalized
+      ?"Finalized "+state.run.releaseDecision+" at "+state.run.finalizedAtUtc+
+        ". This run is immutable; create a new run for further testing."
+      :"Finalize after reviewing real test evidence and the release gate. An Approved decision is available only when all gates pass. Closing cannot be undone.";
+  }
   function renderHistory(){
     history.replaceChildren();
     if(!state.run)return;
@@ -95,10 +111,15 @@
   }
   async function loadRun(runId){
     const data=await call("runs/"+encodeURIComponent(runId));
+    if(state.run?.runId!==runId){
+      state.pendingFinalization=null;
+      if($("qaFinalNotes"))$("qaFinalNotes").value="";
+      if($("qaFinalDecision"))$("qaFinalDecision").value="Incomplete";
+    }
     state.run=data.run;state.events=data.events||[];
     runs.value=runId;
     const next=await call("runs/"+encodeURIComponent(runId)+"/gate");
-    state.gate=next.gate;renderGate();renderCases();renderHistory();
+    state.gate=next.gate;renderGate();renderCases();renderHistory();renderFinalizationState();
     if(baseline){
       const prior=baseline.value;
       baseline.replaceChildren(el("option","Select earlier QA run"));
@@ -110,7 +131,9 @@
       if([...baseline.options].some(option=>option.value===prior))baseline.value=prior;
     }
     regressions?.replaceChildren();
-    message("Saved QA run selected. All result submissions create new immutable records.");
+    message(state.run.status==="Finalized"
+      ?"This run was finalized as "+state.run.releaseDecision+"; history is read-only."
+      :"Saved QA run selected. All result submissions create new immutable records.");
   }
   async function submitManual(testId,statusValue,notes,evidence){
     if(!state.run)throw new Error("Start or select a QA run first");
@@ -174,7 +197,7 @@
         const actions=el("div",null,"qa-case-actions");
         for(const action of ["Pass","Fail","Blocked"]){
           const button=el("button",action,action==="Pass"?"qa-positive":"");
-          button.type="button";button.disabled=!state.run;
+          button.type="button";button.disabled=!state.run||state.run?.status==="Finalized";
           button.addEventListener("click",async()=>{
             button.disabled=true;
             try{await submitManual(t.id,action,notes.value,evidence.value)}
@@ -185,7 +208,7 @@
         if(state.safeAutomations.includes(t.id)){
           const label=t.id==="QA-DIAG-001"?"Check Worker health":t.id==="QA-CAT-001"?"Validate catalog integrity":t.id==="QA-AT-001"?"Verify Airtable run":"Run read-only diagnostic";
           const run=el("button",label);
-          run.type="button";run.disabled=!state.run;
+          run.type="button";run.disabled=!state.run||state.run?.status==="Finalized";
           run.addEventListener("click",async()=>{
             run.disabled=true;
             try{await runAutomated(t.id);}catch(err){message(err.message,"error");run.disabled=false;}
@@ -193,7 +216,7 @@
           actions.append(run);
           if(latest?.kind==="AutomatedObservation"&&latest.payload.status==="Pass"){
             const review=el("button","Independent approve");
-            review.type="button";review.disabled=!state.run;
+            review.type="button";review.disabled=!state.run||state.run?.status==="Finalized";
             review.addEventListener("click",async()=>{
               review.disabled=true;
               try{await approve(t.id,latest.payload.executionId,"Approved");}
@@ -218,6 +241,28 @@
     }
     message("Compared "+data.baselineTotal+" baseline events with "+data.currentTotal+" current events.");
   }
+  async function finalizeRun(){
+    if(!state.run||state.run.status==="Finalized")throw new Error("Select an open QA run");
+    const decision=$("qaFinalDecision")?.value,notes=String($("qaFinalNotes")?.value||"").trim();
+    if(decision==="Approved"&&!state.gate?.ready)
+      throw new Error("Release is blocked; review failed tests and incomplete deployment evidence");
+    if(decision!=="Approved"&&!notes)
+      throw new Error("Explain the reason for rejecting or closing incomplete testing");
+    if(!window.confirm("Finalize this run as "+decision+"? Its results will become read-only. This cannot be undone."))return;
+    const button=$("qaFinalizeRun");button.disabled=true;
+    const pending=state.pendingFinalization;
+    const key=pending?.runId===state.run.runId&&pending?.decision===decision&&pending?.notes===notes
+      ?pending.key:freshId();
+    state.pendingFinalization={runId:state.run.runId,decision,notes,key};
+    try{
+      const saved=await call("runs/"+encodeURIComponent(state.run.runId)+"/finalize",{
+        method:"POST",body:JSON.stringify({decision,notes,client_request_id:key})
+      });
+      await loadRun(state.run.runId);
+      state.pendingFinalization=null;
+      message("Finalized as "+saved.event.payload.decision+" at "+saved.event.atUtc+". Historical results are now immutable.");
+    }catch(e){message(e.message,"error");renderFinalizationState();}
+  }
   async function startRun(){
     const button=$("qaStartRun");button.disabled=true;
     try{
@@ -241,12 +286,15 @@
       if(state.tests.length===0)throw new Error("No QA definitions available");
       nav.hidden=false;
       message(state.tests.length+" versioned QA cases loaded. Start a run to record evidence.");
-      await refreshRuns();renderCases();renderGate();
+      await refreshRuns();renderCases();renderGate();renderFinalizationState();
     }catch(e){message(e.message,"error");}finally{state.loading=false;}
   }
   $("qaSearch")?.addEventListener("input",event=>{state.search=String(event.target.value||"").trim().toLowerCase();renderCases();});
   $("qaOlderRuns")?.addEventListener("click",loadOlderRuns);
   $("qaStartRun")?.addEventListener("click",startRun);
+  $("qaFinalizeRun")?.addEventListener("click",async()=>{
+    try{await finalizeRun();}catch(error){message(error.message,"error");}
+  });
   $("qaRefresh")?.addEventListener("click",()=>initialize());
   $("qaCompare")?.addEventListener("click",async()=>{
     try{await compareRuns();}catch(error){message(error.message,"error");}
