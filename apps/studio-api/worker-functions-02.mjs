@@ -1,7 +1,7 @@
 import { r4StartConfirmed, rotateR4CandidatesAfterCursor } from "./r4-queue-admission.mjs";
 import { storySeedRenderStatus } from "./story-render-admission.mjs";
 import { ideaProducerDirection, mergeIdeaProducerDirection } from "./idea-producer-direction.mjs";
-import { scriptedShortPublishableTitle } from "./scripted-short-title.mjs";
+import { scriptedShortPublishableTitle, scriptedShortExplicitTitle } from "./scripted-short-title.mjs";
 import { item4EffectivePlanStatus } from "./item4-plan-integrity.mjs";
 import { parseScriptedShortAssetPolicy, libraryAssetSatisfiesPolicy, recoverScriptedShortAssets, validateScriptedShortAssets } from "./scripted-short-asset-policy.mjs";
 import {
@@ -11966,7 +11966,7 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
     timeline,
     duration_seconds: timeline.duration_seconds,
     scene_count: timeline.segments.length,
-    suggested_title: scriptedShortPublishableTitle(prompt, timeline, profileMarket),
+    suggested_title: scriptedShortPublishableTitle(creativeBrief, timeline, profileMarket),
     owned_count: owned,
     suggestion_count: suggestions,
     asset_policy: assetPolicy,
@@ -12109,7 +12109,8 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
     profileId: profile?.id,
     profileName: profileMarket,
   });
-  const title = scriptedShortPublishableTitle(prompt, timeline, profileMarket);
+  const title = scriptedShortPublishableTitle(creativeBrief, timeline, profileMarket);
+  const explicitTitle = scriptedShortExplicitTitle(creativeBrief);
   const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, "", {
     method: "POST",
     body: JSON.stringify({
@@ -12186,6 +12187,7 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
     Selected_Music_Asset: [scriptedMusicId],
     Script_Mode: "Force exact",
     Requested_Script: script,
+    Title_Mode: explicitTitle ? "Force exact" : "AI decides",
     Requested_Title: title,
     Video_Duration_Seconds: duration,
     Voiceover_Tail_Seconds: 0,
