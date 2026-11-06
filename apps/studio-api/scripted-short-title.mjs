@@ -13,6 +13,27 @@ const readable = (value) => String(value || "").replace(/\s+/g, " ").replace(/[�
  */
 export function scriptedShortExplicitTitle(prompt) {
   const source = String(prompt || "").replace(/\r/g, "");
+  // User briefs often use a section heading followed by the required title on
+  // the next line (including Markdown headings/bold). Read the structured
+  // creative brief *before* flattening whitespace or guessing from narration.
+  const lines = source.split("\n");
+  for (let i = 0; i < lines.length - 1; i++) {
+    const heading = lines[i]
+      .replace(/^\s*#{1,6}\s*/, "")
+      .replace(/\*\*/g, "")
+      .trim().replace(/:\s*$/, "");
+    if (!/^(?:(?:required|mandatory)\s+)?(?:(?:exact|requested)\s+)?(?:(?:video|post|short|content)\s+)?(?:title|headline)$/i.test(heading)) continue;
+    const next = lines.slice(i + 1).find((line) => line.trim());
+    if (!next) continue;
+    const candidate = next.trim()
+      .replace(/^\*\*(.*?)\*\*$/, "$1")
+      .replace(/^["'“‘](.*?)["'”’]$/, "$1")
+      .trim();
+    if (candidate && candidate.length <= MAX_TITLE_LENGTH &&
+        !/^(?:use|set|keep|please|do not|create|title|headline)\b/i.test(candidate)) {
+      return candidate;
+    }
+  }
   const patterns = [
     // "Please use this exact title:" is the normal creative-brief syntax.
     // Accept "this" and "please" rather than silently falling back to AI.
@@ -37,6 +58,9 @@ export function scriptedShortExplicitTitle(prompt) {
     // In "Viaduct — “Architecture in the Light”" the closing quote is not
     // an outer wrapper and must never be stripped.
     title = title.replace(/\s+/g, " ").trim();
+    // "Use this exact title for every output" is a propagation instruction,
+    // not a title value. Do not mistake the words after "for" for a title.
+    if (/^(?:for|on|in|across|throughout|every)\b/i.test(title)) continue;
     if (title && title.length <= MAX_TITLE_LENGTH) return title;
   }
   return "";
