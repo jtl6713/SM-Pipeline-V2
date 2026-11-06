@@ -31,3 +31,30 @@ test("other exact-title instructions preserve surrounding typography", () => {
   assert.equal(scriptedShortExplicitTitle('Please use the exact title: "LA Bridge After Dark"'), "LA Bridge After Dark");
   assert.equal(scriptedShortExplicitTitle("Set this exact title to: Sixth Street Viaduct — “Blue Hour”"), "Sixth Street Viaduct — “Blue Hour”");
 });
+
+test("multi-line REQUIRED EXACT TITLE heading takes precedence over misleading follow-up wording", () => {
+  const expected = "How to Find The Drifter | Chicago’s Hidden Speakeasy";
+  const brief = [
+    "ChicagoShining — New Short Video Production",
+    "",
+    "REQUIRED EXACT TITLE",
+    "",
+    expected,
+    "",
+    "Use this exact title for the Content Item, every platform output, the video title, and the thumbnail. Do not rewrite, shorten, or substitute another title.",
+    "",
+    "Creative direction",
+    "Create a 35–40-second short about The Drifter under Green Door Tavern.",
+    "The six uploaded clips must all appear.",
+  ].join("\n");
+  assert.equal(scriptedShortExplicitTitle(brief), expected);
+  assert.equal(scriptedShortPublishableTitle(brief, timeline, "Chicago"), expected);
+  assert.equal(scriptedShortPublishableTitle(brief.replace(/\n/g, " "), timeline, "Chicago") !== expected, true, "Flat brief is unsupported; accept/propose must pass the preserved original brief");
+});
+
+test("markdown REQUIRED EXACT TITLE headings preserve punctuation and typography", () => {
+  const expected = "How to Find The Drifter | Chicago’s Hidden Speakeasy";
+  assert.equal(scriptedShortExplicitTitle("## **REQUIRED EXACT TITLE**\n**" + expected + "**"), expected);
+  assert.equal(scriptedShortExplicitTitle("Exact Title:\n“" + expected + "”"), expected);
+  assert.equal(scriptedShortExplicitTitle("Use this exact title for the video and thumbnail."), "");
+});
