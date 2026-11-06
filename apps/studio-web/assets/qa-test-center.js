@@ -3,7 +3,7 @@
   const $=id=>document.getElementById(id);
   const nav=$("navQaTestCenter"),root=$("page-qa-test-center");
   if(!nav||!root)return;
-  const state={tests:[],runs:[],run:null,events:[],gate:null,loading:false,pendingRunId:null,search:""};
+  const state={tests:[],safeAutomations:[],runs:[],run:null,events:[],gate:null,loading:false,pendingRunId:null,search:""};
   const MAX_NOTES=4000;
   const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined&&text!==null)n.textContent=String(text);if(cls)n.className=cls;return n;};
   const status=$("qaStatus"),runs=$("qaRunSelect"),cases=$("qaCases"),gate=$("qaGate"),history=$("qaHistory"),baseline=$("qaBaselineSelect"),regressions=$("qaRegressions");
@@ -161,7 +161,7 @@
           });
           actions.append(button);
         }
-        if(t.id==="QA-DIAG-001"){
+        if(state.safeAutomations.includes(t.id)){
           const run=el("button","Run safe health check");
           run.type="button";run.disabled=!state.run;
           run.addEventListener("click",async()=>{
@@ -211,6 +211,7 @@
     try{
       const catalogData=await call("catalog");
       state.tests=catalogData.tests||[];
+      state.safeAutomations=catalogData.safeAutomations||[];
       if(state.tests.length===0)throw new Error("No QA definitions available");
       nav.hidden=false;
       message(state.tests.length+" versioned QA cases loaded. Start a run to record evidence.");
@@ -230,6 +231,6 @@
   nav.addEventListener("click",()=>initialize());
   // Only expose the navigation after an authenticated admin catalog response.
   call("catalog").then(data=>{
-    if(Array.isArray(data.tests)){nav.hidden=false;state.tests=data.tests;}
+    if(Array.isArray(data.tests)){nav.hidden=false;state.tests=data.tests;state.safeAutomations=data.safeAutomations||[];}
   }).catch(()=>{nav.hidden=true;});
 })();
