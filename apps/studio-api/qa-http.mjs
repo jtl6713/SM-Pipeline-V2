@@ -113,14 +113,25 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
   const pathname=url.pathname;
   const apiPrefix="/api/admin/qa/";
   if(!pathname.startsWith(apiPrefix))throw error(404,"Unknown QA route");
-  async function list(table,field,value,limit=50){
+  async function listPage(table,field,value,limit=50,offset=null,sortField=null){
     if(!Number.isInteger(limit)||limit<1||limit>100)throw error(400,"Unbounded QA history request");
     const query=new URLSearchParams({maxRecords:String(limit),pageSize:String(Math.min(limit,100))});
     if(field)query.set("filterByFormula",filterFormula(field,value));
+    if(offset){
+      if(typeof offset!=="string"||offset.length>180||!/^[A-Za-z0-9/+=._-]+$/.test(offset))
+        throw error(400,"Invalid QA pagination cursor");
+      query.set("offset",offset);
+    }
+    if(sortField){
+      if(!["Created At UTC","Recorded At UTC"].includes(sortField))throw error(500,"QA sort field denied");
+      query.set("sort[0][field]",sortField);query.set("sort[0][direction]","desc");
+    }
     const response=await airtableFetch(env,table,"?"+query.toString());
     if(!Array.isArray(response.records))throw error(503,"QA canonical history unavailable");
-    return response.records;
+    return {records:response.records,offset:response.offset||null};
   }
+  const list=async(table,field,value,limit=50)=>(
+    await listPage(table,field,value,limit)).records;
   async function add(table,recordFields){
     const saved=await airtableFetch(env,table,"",{method:"POST",skipSupabaseWriteThrough:true,
       body:JSON.stringify({records:[{fields:recordFields}],typecast:false})});
@@ -148,9 +159,15 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
     return matches[0];
   }
   async function history(runId){
-    const all=await list(QA_EVENTS_TABLE,"Run ID",runId,100);
-    if(all.length>=100)throw error(409,"QA event history exceeds bounded window; pagination required");
-    return all.map(exposeEvent).sort((a,b)=>String(a.atUtc).localeCompare(String(b.atUtc)));
+    // Read all canonical event pages before calculating a gate. A partial view
+    // must never appear green. The scan is strictly capped at 1,000 events.
+    const all=[];let offset=null;
+    for(let page=0;page<10;page++){
+      const next=await listPage(QA_EVENTS_TABLE,"Run ID",runId,100,offset);
+      all.push(...next.records);offset=next.offset;
+      if(!offset)return all.map(exposeEvent).sort((a,b)=>String(a.atUtc).localeCompare(String(b.atUtc)));
+    }
+    throw error(409,"QA run history exceeds 1,000-event safe scan; release gate blocked");
   }
   if(pathname===apiPrefix+"catalog"&&request.method==="GET"){
     return send({ok:true,catalogVersion:QA_CATALOG.catalogVersion,tests:catalog,
@@ -159,9 +176,9 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
   if(pathname===apiPrefix+"runs"){
     if(request.method==="GET"){
       const limit=Math.min(Math.max(Number(url.searchParams.get("limit")||20)||20,1),50);
-      const rows=await list(QA_RUNS_TABLE,null,null,limit);
-      return send({ok:true,runs:rows.map(exposeRun).sort((a,b)=>
-        String(b.createdAtUtc).localeCompare(String(a.createdAtUtc))),limited_to:limit});
+      const page=await listPage(QA_RUNS_TABLE,null,null,limit,
+        url.searchParams.get("cursor")||null,"Created At UTC");
+      return send({ok:true,runs:page.records.map(exposeRun),next_cursor:page.offset,limited_to:limit});
     }
     if(request.method==="POST"){
       const body=await jsonBody(request),key=requestKey(body);
