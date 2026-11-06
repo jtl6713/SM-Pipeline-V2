@@ -164,6 +164,34 @@ export function safeReviewPromotion(record, readiness) {
 }
 
 /**
+ * A publishing hold is not an invisible-review state. Permit an explicit,
+ * authorized *release for formal review* only after a complete canonical
+ * package is present. This NEVER approves, schedules or publishes anything.
+ * Owned Rendering Review holds must use their separate V2/QA workflow.
+ */
+export function factoryApprovalHoldReleaseEligibility(record, readiness = evaluateReviewPackage(record)) {
+  const output = lower(read(record, "Output_Status"));
+  const review = lower(read(record, "Review_Status"));
+  const publish = lower(read(record, "Publish_Status"));
+  const render = lower(read(record, "Render_Status"));
+  if (!record?.id) return { eligible: false, reason: "Missing exact output identity" };
+  if (string(read(record, "Test_Run_ID"))) return { eligible: false, reason: "Test-mode output is not a production review" };
+  if (read(record, "Do_Not_Publish") !== true) return { eligible: false, reason: "Output has no publishing hold to release" };
+  if (read(record, "Studio_Render_Review_Hold_Active") === true)
+    return { eligible: false, reason: "Separate Rendering Review QA hold must be resolved through its original review session" };
+  if (output !== "ready for review" || !["", "review sent", "pending review"].includes(review))
+    return { eligible: false, reason: "Output is not awaiting a fresh formal review decision" };
+  if (["scheduled", "publishing", "published", "uploading", "platform processing", "draft delivered"].includes(publish)
+      || read(record, "Published_At") || read(record, "Platform_Post_ID") || read(record, "Platform_Post_URL"))
+    return { eligible: false, reason: "Publishing or an existing provider post already started" };
+  if (render !== "rendered" && render !== "native photo route")
+    return { eligible: false, reason: "Render or photo preparation has not finished" };
+  if (readiness?.readiness !== "READY")
+    return { eligible: false, reason: "Review package incomplete: " + (readiness?.missing_requirements || []).join(", ") };
+  return { eligible: true, reason: "Ready for operator-controlled release to formal review" };
+}
+
+/**
  * Held creative revisions belong in Needs Eyes for preview/send-back only.
  * They are NOT eligible for Approve: the separate Do_Not_Publish and review
  * hold checks continue to prohibit all approval and publishing routes.
