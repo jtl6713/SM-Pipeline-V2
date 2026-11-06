@@ -4,6 +4,7 @@ on:
     paths:
       - 'apps/studio-api/qa-*.mjs'
       - 'apps/studio-web/assets/qa-test-center.*'
+      - 'apps/studio-web/qa-test-center.*'
       - 'apps/studio-web/index.html'
       - 'apps/studio-api/worker.js'
       - 'docs/qa-test-center/**'
@@ -14,7 +15,7 @@ permissions:
 jobs:
   qa-contract:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,6 +31,7 @@ jobs:
           node --check apps/studio-api/qa-idempotency-lock.mjs
           node --check apps/studio-api/qa-catalog.mjs
           node --check apps/studio-web/assets/qa-test-center.js
+          node --check apps/studio-web/qa-test-center.browser.mjs
       - name: Execute QA governance and automation contract tests
         run: node --test apps/studio-api/qa-test-core.test.mjs apps/studio-api/qa-governance.test.mjs apps/studio-api/qa-registry.test.mjs apps/studio-api/qa-airtable-ledger.test.mjs apps/studio-api/qa-http.test.mjs
       - name: Validate catalog schema basics
@@ -51,3 +53,11 @@ jobs:
           node apps/studio-web/ui-release-contract.mjs
           node --test apps/studio-web/ui-release-contract.test.mjs apps/studio-web/pages-production-deploy-contract.test.mjs apps/studio-web/qa-test-center.test.mjs
           node --check apps/studio-api/worker.js
+
+      - name: Isolated browser execution of QA review and immutable closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save playwright@1.58.2 >/dev/null
+          npx playwright install --with-deps --only-shell chromium >/dev/null
+          node apps/studio-web/qa-test-center.browser.mjs
