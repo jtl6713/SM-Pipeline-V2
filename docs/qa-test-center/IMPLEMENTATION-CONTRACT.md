@@ -5,27 +5,28 @@
 ## Implemented draft capabilities
 
 - Admin-only navigation under **QA Test Center**, responsive catalog, search, exact procedural steps, prerequisites and expected outcomes.
-- 88 versioned functional/regression cases in \`docs/qa-test-center/catalog.v1.json\`; runtime snapshot in \`apps/studio-api/qa-catalog.mjs\`.
-- API authenticated by existing Studio membership and \`tenant_admin\` authorization; POST uses existing origin/write safeguards and bounded JSON. No public QA API.
-- Airtable canonical **QA Test Runs** (\`tblYwzehVtmyUMzj5\`) and **QA Executions** (\`tblsg5E1cq8nb240c\`) were provisioned in base \`appe33zkZn35yirTL\`. No historical QA runs or results were backfilled. Current event kinds include manual results, automated observations, human review and waiver. All events append; there are no PATCH/DELETE endpoints.
-- Manual Pass/Fail/Blocked with notes, evidence references, persisted UTC server timestamps and actor identity. Failure and blocked states require explanation.
-- Safe allowlisted, bounded automated observations with real evidence; unregistered test IDs/URLs/scripts never execute. An unavailable diagnostic returns Error/Blocked, never a fabricated Pass. Current safe actions in the HTTP layer: \`QA-DIAG-001\` Worker health, \`QA-CAT-001\` catalog integrity and \`QA-AT-001\` canonical QA run read. Other diagnostic recipes are deliberately not exposed as an arbitrary executor.
-- An independent administrator must approve an automated Pass (self approval prohibited). Saved event timeline, repeated request-id serialization via R2 lease and canonical Airtable readback, release gate and previous-run regression comparison.
+- 88 versioned functional/regression cases in `docs/qa-test-center/catalog.v1.json`; runtime snapshot in `apps/studio-api/qa-catalog.mjs`.
+- API authenticated by existing Studio membership and `tenant_admin` authorization; POST uses existing origin/write safeguards and bounded JSON. No public QA API.
+- Airtable canonical **QA Test Runs** (`tblYwzehVtmyUMzj5`) and **QA Executions** (`tblsg5E1cq8nb240c`) were provisioned in base `appe33zkZn35yirTL`. No historical QA runs or results were backfilled. Current event kinds include manual results, automated observations, human review and waiver. All events append; there are no PATCH/DELETE endpoints.
+- Manual Pass/Fail/Blocked with notes, evidence references, persisted UTC server timestamps and actor identity. **Manual Pass requires observed notes or evidence**; Fail and Blocked require explanatory notes.
+- Safe allowlisted, bounded automated observations with real evidence; unregistered test IDs/URLs/scripts never execute. An unavailable diagnostic returns Error/Blocked, never a fabricated Pass. Current safe actions in the HTTP layer: `QA-DIAG-001` Worker health, `QA-CAT-001` catalog integrity and `QA-AT-001` canonical QA run read. Other diagnostic recipes are deliberately not exposed as an arbitrary executor.
+- An independent administrator must approve an automated Pass (self approval prohibited). Saved event timeline, per-run serialized write lease, idempotent retry, canonical Airtable readback, release gate and previous-run regression comparison. A run can be explicitly finalized as Approved/Rejected/Incomplete with an immutable `RunFinalized` event; further writes are denied.
 - Release gate deliberately fails closed on missing evidence, failed/blocked cases, pending AI review, and unattested Runner deployment. Waivers remain visible but **cannot silently override a failed release gate**.
 
 ## API routes (all require authenticated tenant administrator)
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | \`/api/admin/qa/catalog\` | Catalog version, allowed automation IDs, instructions |
-| GET/POST | \`/api/admin/qa/runs\` | Bounded run listing / append run |
-| GET | \`/api/admin/qa/runs/:runId\` | Run and immutable event history |
-| POST | \`/api/admin/qa/runs/:runId/results\` | Append a manual observation |
-| POST | \`/api/admin/qa/runs/:runId/execute/:testId\` | Only allowlisted read-only registered checks |
-| POST | \`/api/admin/qa/runs/:runId/approvals\` | Independent human approval/rejection |
-| POST | \`/api/admin/qa/runs/:runId/waivers\` | Append bounded risk acknowledgment (no automatic gate bypass) |
-| GET | \`/api/admin/qa/runs/:runId/gate\` | Deterministic fail-closed release gate |
-| GET | \`/api/admin/qa/runs/:runId/regressions?baseline=:runId\` | Compare two same-revision runs |
+| GET | `/api/admin/qa/catalog` | Catalog version, allowed automation IDs, instructions |
+| GET/POST | `/api/admin/qa/runs` | Bounded run listing / append run |
+| GET | `/api/admin/qa/runs/:runId` | Run and immutable event history |
+| POST | `/api/admin/qa/runs/:runId/results` | Append a manual observation |
+| POST | `/api/admin/qa/runs/:runId/execute/:testId` | Only allowlisted read-only registered checks |
+| POST | `/api/admin/qa/runs/:runId/approvals` | Independent human approval/rejection |
+| POST | `/api/admin/qa/runs/:runId/waivers` | Append bounded risk acknowledgment (no automatic gate bypass) |
+| POST | `/api/admin/qa/runs/:runId/finalize` | Atomically finalize a run with append-only release decision; block further writes |
+| GET | `/api/admin/qa/runs/:runId/gate` | Deterministic fail-closed release gate |
+| GET | `/api/admin/qa/runs/:runId/regressions?baseline=:runId` | Compare two same-revision runs |
 
 ## Human test operator procedure
 
@@ -35,12 +36,13 @@
 4. For a test displaying **Run safe check**, click once. Inspect observed source/version/status and recorded evidence. A false observation must produce Fail or Blocked/Error. Another administrator must separately approve an automated Pass.
 5. Select the run's **Release gate** and **Immutable run history**. Reopen the run from saved history to prove persistence, inspect UTC timestamps, and compare it against a baseline for regressions.
 6. A failed Critical/High test, missing QA evidence, unattested deployment or human approval pending must block release. No QA action is permission to schedule, dispatch or publish a social post.
+7. Record a completion rationale and explicitly finalize the run as Incomplete or Rejected if any gate remains blocked. Only a fully ready gate may be finalized as Approved. Afterward, all results become read-only and additional testing requires a new run.
 
 ## Operational and security constraints
 
 - Airtable is the only QA write authority; Supabase remains a non-authoritative mirror and is not required for this pilot. No Supabase-first writes.
-- Protected GitHub deployment workflows must apply any Worker and Pages releases. Follow \`AGENTS.md\`: Studio UI release \`0.6.897\` and matching shared cache key \`0.6.897-qa-center-pilot\` must be strictly higher than actual production when merged. Worker draft reports \`0.10.765-qa-center-v1\`. If production moves ahead before merging, rebase and bump again.
-- R2 conditional lease protects idempotent append against concurrent duplicate submissions; callers should reuse \`client_request_id\` after uncertain responses. Airtable history is an audit ledger, not a mutable checklist.
+- Protected GitHub deployment workflows must apply any Worker and Pages releases. Follow `AGENTS.md`: Studio UI release `0.6.897` and matching shared cache key `0.6.897-qa-center-pilot` must be strictly higher than actual production when merged. Worker draft reports `0.10.765-qa-center-v1`. If production moves ahead before merging, rebase and bump again.
+- R2 conditional lease protects idempotent append against concurrent duplicate submissions; callers should reuse `client_request_id` after uncertain responses. Airtable history is an audit ledger, not a mutable checklist.
 - No generated code, arbitrary external URL, unattended publication, destructive record operation, unscoped Supabase query or production synthetic mutation is allowed.
 - **Outstanding before release:** pass complete CI at the final head SHA; run a live authenticated Admin/reader deny test; verify an actual Airtable round trip and UI walkthrough; attest real Worker/Pages/Runner identifiers; exercise a deliberately failing assertion; verify production safety and no publishing. Finish or explicitly defer remaining 88-case automation coverage with reviewed read-only observer implementations.
 - Do not mark draft PR #1429 complete/ready or deploy just because isolated tests pass.
