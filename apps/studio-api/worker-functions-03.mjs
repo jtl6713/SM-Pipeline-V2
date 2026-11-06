@@ -8529,10 +8529,16 @@ export function phase6PreviewFulfillsCurrentReview(record) {
 /*__STUDIO_WORKER_END:phase6PreviewFulfillsCurrentReview__*/
 
 export async function phase6RestoreProductionReviewReady(env, record) {
-  if (Boolean(f(record, "Do_Not_Publish"))) return record;
+  if (Boolean(f(record, "Do_Not_Publish")) ||
+      Boolean(f(record, "Studio_Render_Review_Hold_Active")) ||
+      Boolean(f(record, "Test_Run_ID"))) return record;
   const outputStatus = String(f(record, "Output_Status") || "").trim();
   const reviewStatus = String(f(record, "Review_Status") || "").trim();
   const publishStatus = String(f(record, "Publish_Status") || "").trim();
+  // An old Rendered preview does not override a terminal review decision.
+  if (["Skipped", "Rejected", "Cancelled", "Published"].includes(outputStatus) ||
+      ["Skipped", "Rejected"].includes(reviewStatus) ||
+      f(record, "Published_At") || f(record, "Platform_Post_ID") || f(record, "Platform_Post_URL")) return record;
   if (
     reviewStatus === "Approved"
     || outputStatus === "Approved for Publishing"

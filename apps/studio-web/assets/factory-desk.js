@@ -284,7 +284,12 @@
   }
 
   function canReviewActions(card, { pile = false, candidate = false } = {}) {
-    if (pile || candidate || state.submittingOutputIds?.has(card?.id) || recentFactoryAccepted()[String(card?.id || "")]) return false;
+    if (pile || candidate || state.submittingOutputIds?.has(card?.id)) return false;
+    // A 48-hour local acceptance hint is not a saved approval. If the server
+    // still reports Ready for Review, allow a fresh explicit operator action;
+    // the canonical per-output lease prevents duplicate committed approvals.
+    if (recentFactoryAccepted()[String(card?.id || "")] &&
+        String(card?.output_status || "").trim().toLowerCase() !== "ready for review") return false;
     if (card?.kind !== "output") return false;
     if (card.review_package_ready === false) return false;
     // Held revisions must be discoverable and previewable, never approvable
@@ -425,7 +430,8 @@
   }
 
   function canSelectBatchOutput(card) {
-    if (recentFactoryAccepted()[String(card?.id || "")]) return false;
+    if (recentFactoryAccepted()[String(card?.id || "")] &&
+        String(card?.output_status || "").trim().toLowerCase() !== "ready for review") return false;
     if (state.batchApprovalsEnabled === false) return false;
     if (state.batchGlobal?.enabled) {
       const platform = String(card?.platform || "").trim();
@@ -1434,7 +1440,10 @@
     if (card.review_package_ready === false) {
       return "Review package incomplete: " + ((card.review_package_missing || []).join(", ") || card.review_package_reason || "required assets not verified");
     }
-    if (recentFactoryAccepted()[String(card?.id || "")]) return "Already accepted for approval. Refresh Activity to verify the result.";
+    if (recentFactoryAccepted()[String(card?.id || "")] &&
+        String(card?.output_status || "").trim().toLowerCase() !== "ready for review") {
+      return "Already accepted for approval. Refresh Activity to verify the result.";
+    }
     if (state.submittingOutputIds?.has(card?.id)) return "Approval is already being submitted. Check Activity.";
     if (card?.review_hold_active === true) return "Publishing approval is held for media QA. You can accept V2 creatively or request another revision.";
     if (card?.do_not_publish === true) return "Publishing hold is active for this output.";

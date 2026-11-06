@@ -1,3 +1,4 @@
+import { formalFactoryApprovalReady, evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
 import { staleInstagramPublishingDisplay } from "./ig-publishing-display.mjs";
 import { facebookPreapprovalRecoveryReason, facebookPreapprovalRecoveryFields, FACEBOOK_PREAPPROVAL_FORMULA } from "./facebook-preapproval-recovery.mjs";
@@ -1905,6 +1906,12 @@ export function normalizedOutputState(record) {
 
   const outputStatusLc = text("Output_Status").toLowerCase();
   const publishStatusLc = text("Publish_Status").toLowerCase();
+  // A finished render alone is not permission to advertise a formal review.
+  // Factory and Pipeline share the exact same record-level readiness gate.
+  // This is computed only for explicitly review-staged outputs, preserving the
+  // lean pipeline read and avoiding heavy validation for older terminal rows.
+  const formalReviewReady = outputStatusLc === "ready for review"
+    && formalFactoryApprovalReady(record);
   const outputDeadEarly = outputStatusLc.includes("failed")
     || outputStatusLc.includes("terminal error")
     || outputStatusLc.includes("skipped");
@@ -1936,6 +1943,7 @@ export function normalizedOutputState(record) {
     || has("TikTok_Draft_Status", "draft delivered");
   if (
     readyForReviewIntent
+    && formalReviewReady
     && !approvedOrScheduledEarly
     && studioOutputHasReviewableDeliverable(record)
     && !outputDeadEarly
@@ -1962,6 +1970,11 @@ export function normalizedOutputState(record) {
   // package stayed on Awaiting Approval. A live URL above still means Published.
   if (outputStatusLc === "skipped" || outputStatusLc === "cancelled" || outputStatusLc === "rejected") {
     return "Skipped";
+  }
+  // A returned revision must stay explicitly returned even when its old
+  // rendered MP4 still exists; it is not a new formal review candidate.
+  if (outputStatusLc === "changes requested" || text("Review_Status").toLowerCase() === "changes requested") {
+    return "Changes Requested";
   }
 
   // Live Short + daily quota is an automatic midnight retry. Do not paint
@@ -2026,11 +2039,27 @@ export function normalizedOutputState(record) {
   const inProduction = has("Output_Status", "in production");
   const hasFinishedFile = Boolean(String(f(record, "Final_File_URL") || "").trim());
   const remotionFinished = has("Render_Status", "rendered") && (hasFinishedFile || Boolean(String(f(record, "Studio_Preview_URL") || "").trim()));
-  if (!inProduction || remotionFinished || studioOutputIsNativePhoto(record)) {
-    if ((has("Review_Status", "pending") || has("Review_Status", "review sent") || has("Output_Status", "ready for review")) && studioOutputHasReviewableDeliverable(record)) return "Ready for Review";
-    if (has("Render_Status", "rendered") && studioOutputHasReviewableDeliverable(record)) return "Ready for Review";
+  if (formalReviewReady && studioOutputHasReviewableDeliverable(record)) {
+    return "Ready for Review";
+  }
+  // Do not let Rendered, a stale Review Sent, or a held output silently become
+  // Ready for Review in Pipeline while Factory refuses formal approval.
+  if (outputStatusLc === "ready for review") {
+    const reviewDecision = text("Review_Status").toLowerCase();
+    if (reviewDecision === "changes requested") return "Changes Requested";
+    if (Boolean(fields.Do_Not_Publish) || Boolean(fields.Studio_Render_Review_Hold_Active)) {
+      return "Review Held";
+    }
+    if (has("Render_Status", "waiting in render queue") || has("Render_Status", "ready for render")) {
+      return "Waiting in Render Queue";
+    }
+    if (has("Render_Status", "rendering")) return "Rendering";
+    return "Preparing Assets";
   }
   if (has("Render_Status", "waiting in render queue")) return "Waiting in Render Queue";
+  if (has("Render_Status", "rendered") && studioOutputHasReviewableDeliverable(record)) {
+    return "Rendered";
+  }
   if (isActiveRemotionHold(record, f) || has("FB_Slideshow_Status", "rendering") || has("FB_Slideshow_Status", "starting render")) {
     return "Rendering";
   }
@@ -7964,6 +7993,19 @@ export async function studioStampParentAiCoverOnOutput(env, po, parent) {
   const currentCaption = String(f(po, "Output_Caption") || "").trim();
   const needsCaption = Boolean(caption && !currentCaption);
   if (!po?.id) return false;
+  // AI-cover hydration is not a review transition. A skipped, returned,
+  // approved, published, test or explicitly held output must never be
+  // resurrected into Ready for Review when a parent cover is restamped.
+  const status = String(f(po, "Output_Status") || "").trim().toLowerCase();
+  const review = String(f(po, "Review_Status") || "").trim().toLowerCase();
+  const publish = String(f(po, "Publish_Status") || "").trim().toLowerCase();
+  if (Boolean(f(po, "Do_Not_Publish")) ||
+      Boolean(f(po, "Studio_Render_Review_Hold_Active")) ||
+      Boolean(f(po, "Test_Run_ID")) ||
+      ["skipped", "cancelled", "rejected", "changes requested", "approved", "approved for publishing", "published"].includes(status) ||
+      ["skipped", "rejected", "changes requested", "approved"].includes(review) ||
+      ["ready to schedule", "scheduled", "publishing", "published"].includes(publish) ||
+      f(po, "Published_At") || f(po, "Platform_Post_ID") || f(po, "Platform_Post_URL")) return false;
   const current = String(f(po, "Thumbnail_URL") || "").trim();
   const currentDesigned = studioAiThumbnailUrl(current);
   if (ai && currentDesigned === ai) {
@@ -7991,7 +8033,15 @@ export async function studioStampParentAiCoverOnOutput(env, po, parent) {
   }
   if (needsCaption) fields.Output_Caption = caption;
   if (native && !isStory && !/^ready for review$/i.test(String(f(po, "Output_Status") || ""))) {
-    fields.Output_Status = "Ready for Review";
+    // Writing a cover/caption is not itself completion of a native-photo
+    // package. Promote only when the resulting full Airtable record would
+    // pass the same exact completeness gate used by Factory Approve.
+    const proposal = { ...po, fields: {
+      ...(po.fields || {}), ...fields, Output_Status: "Ready for Review",
+    } };
+    if (evaluateReviewPackage(proposal).readiness === "READY") {
+      fields.Output_Status = "Ready for Review";
+    }
   }
   if (!Object.keys(fields).length) return false;
   await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, po.id, {
