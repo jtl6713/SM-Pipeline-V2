@@ -51,10 +51,12 @@ test("Accept persists suggested headline, not truncated prompt; original instruc
   const source = await readFile(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
   const accept = source.split("export async function acceptScriptedShortRoute(")[1].split("/*__STUDIO_WORKER_END:acceptScriptedShortRoute__*/")[0];
   const propose = source.split("export async function proposeScriptedShortRoute(")[1].split("/*__STUDIO_WORKER_END:proposeScriptedShortRoute__*/")[0];
-  assert.match(accept, /const title = scriptedShortPublishableTitle\(prompt, timeline,/);
+  assert.match(accept, /const title = scriptedShortPublishableTitle\(creativeBrief, timeline,/);
   assert.doesNotMatch(accept, /const title = prompt\.slice\(0, 160\)/);
   assert.match(accept, /Candidate_Title: title/);
+  assert.match(accept, /Title_Mode: "Force exact"/);
   assert.match(accept, /Requested_Title: title/);
+  assert.match(accept, /Exact short title was not saved/);
   assert.match(accept, /Idea_Summary: creativeBrief/);
-  assert.match(propose, /suggested_title: scriptedShortPublishableTitle\(prompt, timeline,/);
+  assert.match(propose, /suggested_title: scriptedShortPublishableTitle\(creativeBrief, timeline,/);
 });
