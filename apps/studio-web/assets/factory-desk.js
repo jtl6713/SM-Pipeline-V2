@@ -2779,7 +2779,7 @@
       button.addEventListener("click", async () => {
         const card = byId.get(button.getAttribute("data-factory-release-approval"));
         if (!card || !canReleaseForApproval(card)) {
-          setStatus("This output is no longer eligible for a review-hold release. Refresh Factory.", true);
+          setStatus("This output is not eligible for a review-hold release. Refresh Factory.", true);
           return;
         }
         if (!window.confirm(`Release the publishing hold on "${cardLabel(card)}" for formal review?\\n\\nThis does NOT approve, schedule, or publish the output. You must separately review the media and click Approve or Request Changes. Protected V2/QA holds cannot be released here.`)) return;
