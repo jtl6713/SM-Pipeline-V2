@@ -5,6 +5,25 @@ import {validateManualResult,SAFE_ASSERTIONS} from "./qa-test-core.mjs";
 import {executeQaAssertion} from "./qa-registry.mjs";
 import {withQaIdempotencyLock} from "./qa-idempotency-lock.mjs";
 
+// The Runner release identity is read only from the trusted production origin.
+// A guessed/client-provided version must never make an incomplete gate green.
+async function verifiedRunnerVersion(env,requester){
+  const origin=String(env?.PIPELINE_RUNNER_URL||"").trim().replace(/\/$/,"");
+  if(origin!=="https://pipeline.chicagoshining.com")return "unverified";
+  try{
+    const response=await requester(origin+"/health",{
+      method:"GET",redirect:"error",headers:{Accept:"application/json"},
+      signal:AbortSignal.timeout(4500)
+    });
+    if(!response.ok)return "unverified";
+    const info=await response.json();
+    if(info?.ok!==true||info?.service!=="pipeline-runner"||
+      info?.studio_write_source!=="airtable"||
+      typeof info?.version!=="string"||info.version.length>120||!info.version.trim())
+      return "unverified";
+    return info.version.trim();
+  }catch{return "unverified";}
+}
 export const QA_RUNS_TABLE="tblYwzehVtmyUMzj5";
 export const QA_EVENTS_TABLE="tblsg5E1cq8nb240c";
 const catalog=QA_CATALOG.tests;
@@ -185,8 +204,9 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
       const body=await jsonBody(request),key=requestKey(body);
       const environment=body.environment===undefined?"production":required(body.environment,"environment",40);
       if(!["production","staging","development"].includes(environment))throw error(400,"Invalid QA environment");
+      const runner=await verifiedRunnerVersion(env,fetchHealth);
       const snapshot={worker:"0.10.765-qa-center-v1",ui:"0.6.897-qa-center-pilot",
-        runner:"unverified"}; // Do not accept claimed deployment versions from browser.
+        runner}; // Server-only observed Runner identity; never trust a browser claim.
       const identity={actor,environment,catalogRevision:QA_CATALOG.catalogVersion};
       const payload={environment,catalogRevision:QA_CATALOG.catalogVersion};
       const value=await writeOnce(QA_RUNS_TABLE,"run",key,identity,payload,()=>({
