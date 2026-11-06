@@ -139,6 +139,8 @@
     if(!state.run)throw new Error("Start or select a QA run first");
     if((statusValue==="Fail"||statusValue==="Blocked")&&!notes.trim())
       throw new Error("Failure and Blocked results require explanatory notes");
+    if(statusValue==="Pass"&&!notes.trim()&&!evidence.trim())
+      throw new Error("Record what you observed or attach evidence before marking Pass");
     const body={testId,status:statusValue,notes:notes.slice(0,MAX_NOTES),
       evidence:evidence.trim()?[{kind:"reference",reference:evidence.trim()}]:[],
       client_request_id:freshId()};
