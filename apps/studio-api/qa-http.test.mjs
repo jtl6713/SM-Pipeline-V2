@@ -337,3 +337,36 @@ test("HTTP release gate exposes missing canonical Pass evidence",async()=>{
  assert.equal(g.gate.ready,false);
  assert.ok(g.gate.deploymentBlockers.some(x=>x.includes("QA-AUTH-001")&&x.includes("notes or evidence")));
 });
+
+test("independent automated Pass requires review scoped to exact test and observer",()=>{
+ const observation={
+   testId:"QA-DIAG-001",kind:"AutomatedObservation",actorId:"u1",atUtc:"2026-11-06T12:00:00.000Z",
+   payload:{executionId:"qaex-11111111-1111-4111-8111-111111111111",status:"Pass"}
+ };
+ const approved={
+   testId:"QA-DIAG-001",kind:"HumanApproval",actorId:"u2",atUtc:"2026-11-06T12:01:00.000Z",
+   payload:{executionId:observation.payload.executionId,decision:"Approved",subjectActorId:"u1"}
+ };
+ const cases=[{id:"QA-DIAG-001"}];
+ assert.equal(computeQaGate(cases,[observation,approved]).ready,true);
+ const wrongTest={...approved,testId:"QA-CAT-001"};
+ assert.equal(computeQaGate(cases,[observation,wrongTest]).ready,false);
+ const wrongSubject={...approved,payload:{...approved.payload,subjectActorId:"u3"}};
+ assert.equal(computeQaGate(cases,[observation,wrongSubject]).ready,false);
+ const sameActor={...approved,actorId:"u1"};
+ assert.equal(computeQaGate(cases,[observation,sameActor]).ready,false);
+});
+test("replaying a finalized QA decision as a different admin is denied",async()=>{
+ const h=harness(),created=await (await h.call("POST","runs",{
+   client_request_id:"run-replay-owner-001"
+ })).json();
+ const body={decision:"Incomplete",notes:"Testing remains pending",
+   client_request_id:"finish-replay-owner-001"};
+ const first=await h.call("POST","runs/"+created.run.runId+"/finalize",body,"recADMIN00000001");
+ assert.equal(first.status,201);
+ await assert.rejects(()=>h.call("POST","runs/"+created.run.runId+"/finalize",body,
+   "recADMIN00000002"),/original administrator/);
+ const own=await h.call("POST","runs/"+created.run.runId+"/finalize",body,"recADMIN00000001");
+ assert.equal(own.status,200);
+ assert.equal(h.rows.get(QA_EVENTS_TABLE).length,1);
+});
