@@ -63,17 +63,3 @@ jobs:
           npx playwright install --with-deps --only-shell chromium >/dev/null
           node apps/studio-web/qa-test-center.browser.mjs
 
-  qa-browser:
-    runs-on: ubuntu-latest
-    timeout-minutes: 12
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Install isolated headless Chromium
-        run: |
-          npm install --no-save playwright@1.58.2
-          npx playwright install --with-deps --only-shell chromium
-      - name: Simulate Admin catalog, manual evidence, immutable run closure and no publishing
-        run: node apps/studio-web/qa-test-center.browser.mjs
