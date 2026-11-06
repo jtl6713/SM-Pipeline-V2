@@ -43,7 +43,7 @@ jobs:
           if($secret.Length -lt 24){throw 'Runner server auth unavailable'}
           $headers=@{'X-Pipeline-Secret'=$secret}
           $health=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/health' -TimeoutSec 12
-          if($health.version -ne '2026-11-06-i1-verified-shortfall-v2' -or $health.i1_durable_jobs -ne $true){
+          if($health.version -ne '2026-11-06-i1-verified-resume-v3' -or $health.i1_durable_jobs -ne $true){
             throw 'Exact I1 recovery Runner version or durable job backend not active'
           }
           $body=@{
