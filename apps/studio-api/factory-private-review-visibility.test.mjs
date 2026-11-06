@@ -23,8 +23,8 @@ function privateReviewRecord(id) {
   }};
 }
 
-test("review-only Airtable selector includes Do_Not_Publish + Ready for Review + Review Sent without an unrelated V2 hold", () => {
-  assert.match(OPS_QUEUE_REVIEW_FORMULA, /AND\(\{Do_Not_Publish\},\{Output_Status\}="Ready for Review",\{Review_Status\}="Review Sent"\)/);
+test("review-only Airtable selector includes eligible held Ready for Review without a completed review", () => {
+  assert.match(OPS_QUEUE_REVIEW_FORMULA, /AND\(\{Do_Not_Publish\},\{Output_Status\}="Ready for Review",OR\(\{Review_Status\}=BLANK\(\)/);
   assert.doesNotMatch(OPS_QUEUE_REVIEW_FORMULA, /Studio_Render_Review_Hold_Active/);
   assert.match(OPS_QUEUE_REVIEW_FORMULA, /\{Test_Run_ID\}=BLANK\(\)/);
 });
