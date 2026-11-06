@@ -2529,6 +2529,8 @@
         $("ideaGenerateSubmit").textContent = "Generate Ideas";
       }
       if ($("ideaGenerateComplete")) $("ideaGenerateComplete").hidden = true;
+      if ($("ideaGenerateMore")) $("ideaGenerateMore").hidden = false;
+      if ($("ideaGenerateView")) $("ideaGenerateView").textContent = "View Ideas";
       setIdeaGenerateMessage();
     }
   }
@@ -2555,11 +2557,29 @@
       if (batch.status === "Failed") {
         stopIdeaGenerationPoll();
         ideaGenerationInFlight = false;
+        const partial = requested > 0 && generated > 0 && generated < requested;
         if ($("ideaGenerateSubmit")) {
-          $("ideaGenerateSubmit").disabled = false;
-          $("ideaGenerateSubmit").textContent = "Retry";
+          // Retry used to create another full 10-idea batch even when 9
+          // new candidates were already saved. Require an intentional new
+          // batch from the main Ideas action; never present this as a retry.
+          $("ideaGenerateSubmit").disabled = partial;
+          $("ideaGenerateSubmit").textContent = partial ? "Review saved ideas" : "Generate Ideas";
         }
-        setIdeaGenerateMessage(batch.error || "Unable to generate ideas. Try again.", "error-text");
+        if ($("ideaGenerateComplete")) $("ideaGenerateComplete").hidden = !partial;
+        if ($("ideaGenerateMore")) $("ideaGenerateMore").hidden = partial;
+        if ($("ideaGenerateView")) {
+          $("ideaGenerateView").textContent = partial ? `View ${generated} saved ideas` : "View Ideas";
+        }
+        setIdeaGenerateMessage(
+          partial
+            ? `${generated} of ${requested} ideas were saved in this batch. ${requested - generated} could not be verified. The saved ideas are still usable. Review them before requesting another batch; no automatic generation retry will run.`
+            : (batch.error || "No new ideas were confirmed. Review Current ideas before requesting another batch."),
+          "error-text"
+        );
+        // Failed means only the BATCH was incomplete, never discard or hide
+        // the real, linked Airtable candidates that were already generated.
+        // loadIdeas uses the authoritative fresh=1 read.
+        await Promise.allSettled([loadIdeas(), loadDashboard(true)]);
         return;
       }
       setIdeaGenerateMessage(requested > 0 ? `${generated} of ${requested} complete` : "Generating ideas…");
@@ -3045,7 +3065,9 @@
         method: "POST",
         body: JSON.stringify({ count, quality }),
         timeoutMs: 45000,
-        retries: 1,
+        // POST admission can commit a batch before a mobile timeout; do not
+        // automatically repeat a non-idempotent create on uncertainty.
+        retries: 0,
       });
       if (result.completed || result.status === "Complete") {
         ideaGenerationInFlight = false;
@@ -3065,13 +3087,13 @@
       ideaGenerationPollTimer = setTimeout(pollIdeaGenerationBatch, 500);
     } catch (error) {
       ideaGenerationInFlight = false;
-      if (button) { button.disabled = false; button.textContent = "Retry"; }
+      if (button) { button.disabled = true; button.textContent = "Check Current ideas"; }
       const aborted = error?.name === "AbortError"
         || /aborted|timeout|timed out|signal timed out/i.test(String(error?.message || ""));
       setIdeaGenerateMessage(
         aborted
-          ? "Studio could not start idea generation before the connection dropped. Tap Retry — check Current ideas first in case some already appeared."
-          : (error.message || "Unable to start idea generation. Try again."),
+          ? "Generation acknowledgment was interrupted. The batch may still have been accepted. Check Current ideas before starting a new batch; this request will not be automatically retried."
+          : (error.message || "The request could not be confirmed. Check Current ideas before starting a new batch."),
         "error-text"
       );
       // A timed-out accept may still have created the batch / ideas.
