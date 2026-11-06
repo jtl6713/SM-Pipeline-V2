@@ -87,6 +87,25 @@ export function computeQaGate(tests,events){
       testId:x.testId,reason:x.payload?.reason,expiresAtUtc:x.payload?.expiresAtUtc,actorId:x.actorId
     }))};
 }
+export function compareQaRunResults(baselineEvents,currentEvents){
+  function latest(events){
+    const results=new Map();
+    for(const e of [...events].sort((a,b)=>String(a.atUtc).localeCompare(String(b.atUtc))))
+      if(["ManualResult","AutomatedObservation"].includes(e.kind)&&e.payload?.status)
+        results.set(e.testId,e);
+    return results;
+  }
+  const older=latest(baselineEvents),newer=latest(currentEvents),regressions=[];
+  for(const [testId,old] of older){
+    if(old.payload.status!=="Pass")continue;
+    const now=newer.get(testId);
+    if(now?.payload?.status!=="Pass")
+      regressions.push({testId,from:"Pass",to:now?.payload?.status||"Not run",
+        baselineExecutionId:old.payload.executionId,
+        currentExecutionId:now?.payload?.executionId||null});
+  }
+  return regressions;
+}
 export async function handleQaApi({request,url,env,authorization,airtableFetch,respond,
   clock=()=>new Date(),fetchHealth=fetch}){
   const actor=trustedActor(authorization);
@@ -161,11 +180,22 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
     }
     throw error(405,"QA method not allowed");
   }
-  const match=/^\/api\/admin\/qa\/runs\/(qa-[0-9a-f-]{36})(?:\/(results|approvals|waivers|gate|execute\/(QA-[A-Z0-9-]+)))?$/i.exec(pathname);
+  const match=/^\/api\/admin\/qa\/runs\/(qa-[0-9a-f-]{36})(?:\/(results|approvals|waivers|gate|regressions|execute\/(QA-[A-Z0-9-]+)))?$/i.exec(pathname);
   if(!match)throw error(404,"Unknown QA endpoint");
   const runId=checkRunId(match[1]),operation=match[2]||"",testToExecute=match[3];
   const run=exposeRun(await runRow(runId));
   if(!operation&&request.method==="GET")return send({ok:true,run,events:await history(runId)});
+  if(operation==="regressions"&&request.method==="GET"){
+    const baselineId=checkRunId(url.searchParams.get("baseline")||"");
+    if(baselineId===runId)throw error(400,"Select a different baseline run");
+    const baseline=exposeRun(await runRow(baselineId));
+    if(baseline.catalogRevision!==run.catalogRevision)
+      throw error(409,"Cannot compare different QA catalog revisions");
+    const [previous,current]=await Promise.all([history(baselineId),history(runId)]);
+    const regressions=compareQaRunResults(previous,current);
+    return send({ok:true,baselineRunId:baselineId,currentRunId:runId,
+      regressions,baselineTotal:previous.length,currentTotal:current.length});
+  }
   if(operation==="gate"&&request.method==="GET"){
     const events=await history(runId);
     const gate=computeQaGate(catalog,events);
