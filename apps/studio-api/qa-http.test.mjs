@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {handleQaApi,computeQaGate,compareQaRunResults,QA_RUNS_TABLE,QA_EVENTS_TABLE} from "./qa-http.mjs";
+import {handleQaApi,computeQaGate,compareQaRunResults,QA_RUNS_TABLE,QA_EVENTS_TABLE,verifiedRunnerVersion} from "./qa-http.mjs";
 
 function harness(){
   const rows=new Map([[QA_RUNS_TABLE,[]],[QA_EVENTS_TABLE,[]]]);
@@ -180,4 +180,25 @@ test("Airtable canonical QA run assertion only passes on observed canonical row"
   assert.equal(found.event.payload.evidence[0].runId,created.run.runId);
   assert.equal(found.event.payload.evidence[0].source,"Airtable");
   assert.ok(found.event.payload.evidence[0].recordId);
+});
+
+
+test("Runner attestation allows only the fixed health origin and Airtable source",async()=>{
+  let calls=0;
+  const healthy=async()=>{
+    calls++;
+    return new Response(JSON.stringify({ok:true,service:"pipeline-runner",
+      version:"2026-11-05-video-watermark-scale-v2",studio_write_source:"airtable"}),{status:200});
+  };
+  assert.equal(await verifiedRunnerVersion({PIPELINE_RUNNER_URL:"https://unknown.example.com"},healthy),"unverified");
+  assert.equal(calls,0);
+  assert.equal(await verifiedRunnerVersion({PIPELINE_RUNNER_URL:"https://pipeline.chicagoshining.com"},healthy),
+    "2026-11-05-video-watermark-scale-v2");
+  assert.equal(calls,1);
+  const invalid=async()=>new Response(JSON.stringify({ok:true,service:"pipeline-runner",
+    version:"v1",studio_write_source:"supabase"}),{status:200});
+  assert.equal(await verifiedRunnerVersion({PIPELINE_RUNNER_URL:"https://pipeline.chicagoshining.com"},invalid),
+    "unverified");
+  assert.equal(await verifiedRunnerVersion({PIPELINE_RUNNER_URL:"https://pipeline.chicagoshining.com"},
+    async()=>{throw new Error("offline");}),"unverified");
 });
