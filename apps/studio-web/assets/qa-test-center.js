@@ -101,7 +101,7 @@
     for(const e of [...state.events].reverse()){
       const row=el("div",null,"qa-event-row");
       const label=(e.kind==="HumanApproval"?"Human review":e.kind==="AutomatedObservation"?"Automated diagnostic":
-        e.kind==="ManualResult"?"Manual":"Waiver");
+        e.kind==="ManualResult"?"Manual":e.kind==="RunFinalized"?"Run finalized":"Waiver");
       row.append(el("strong",e.testId+" · "+label+" · "+(e.payload.status||e.payload.decision||"Recorded")),
         el("span",e.atUtc+" · "+e.actorId),
         el("p",e.payload.notes||e.payload.reason||""));
