@@ -63,7 +63,7 @@
     const table=el("div",null,"qa-event-list");
     for(const e of [...state.events].reverse()){
       const row=el("div",null,"qa-event-row");
-      const label=(e.kind==="HumanApproval"?"Human review":e.kind==="AutomatedObservation"?"AI check":
+      const label=(e.kind==="HumanApproval"?"Human review":e.kind==="AutomatedObservation"?"Automated diagnostic":
         e.kind==="ManualResult"?"Manual":"Waiver");
       row.append(el("strong",e.testId+" · "+label+" · "+(e.payload.status||e.payload.decision||"Recorded")),
         el("span",e.atUtc+" · "+e.actorId),
@@ -105,11 +105,11 @@
   }
   async function runAutomated(testId){
     if(!state.run)throw new Error("Start or select a QA run first");
-    message("Running bounded, read-only Worker health check…");
+    message("Running allowlisted, read-only diagnostic for "+testId+"…");
     const data=await call("runs/"+encodeURIComponent(state.run.runId)+"/execute/"+testId,
       {method:"POST",body:JSON.stringify({client_request_id:freshId()})});
     await loadRun(state.run.runId);
-    message("Check recorded: "+data.event.payload.status+". An independent human must approve AI Pass results.");
+    message("Diagnostic recorded: "+data.event.payload.status+". Independent human approval is required for automated Pass results.");
   }
   async function approve(testId,executionId,decision){
     if(!state.run)throw new Error("Select a run first");
@@ -162,7 +162,8 @@
           actions.append(button);
         }
         if(state.safeAutomations.includes(t.id)){
-          const run=el("button","Run safe health check");
+          const label=t.id==="QA-DIAG-001"?"Check Worker health":t.id==="QA-CAT-001"?"Validate catalog integrity":t.id==="QA-AT-001"?"Verify Airtable run":"Run read-only diagnostic";
+          const run=el("button",label);
           run.type="button";run.disabled=!state.run;
           run.addEventListener("click",async()=>{
             run.disabled=true;
