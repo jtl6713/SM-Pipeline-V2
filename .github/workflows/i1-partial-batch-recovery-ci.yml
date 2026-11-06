@@ -1,0 +1,34 @@
+name: I1 Partial Batch Recovery CI
+
+on:
+  pull_request:
+    paths:
+      - 'services/pipeline-runner/i1/durable_jobs.py'
+      - 'services/pipeline-runner/tests/test_i1_durable_jobs.py'
+      - 'apps/studio-web/assets/app-item4-1008.js'
+      - 'apps/studio-web/idea-generation-partial-recovery.test.mjs'
+      - '.github/workflows/i1-partial-batch-recovery-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  safe-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Runner test dependencies
+        run: python -m pip install --quiet -r services/pipeline-runner/requirements.txt pytest
+      - name: No-network durable shortfall, partial-write and lease tests
+        run: PYTHONPATH=services/pipeline-runner python -m pytest -q services/pipeline-runner/tests/test_i1_durable_jobs.py
+      - name: Client partial-failure refresh and no-duplicate admission contract
+        run: |
+          node --check apps/studio-web/assets/app-item4-1008.js
+          node --test apps/studio-web/idea-generation-partial-recovery.test.mjs
