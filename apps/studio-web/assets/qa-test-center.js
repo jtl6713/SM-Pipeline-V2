@@ -3,7 +3,7 @@
   const $=id=>document.getElementById(id);
   const nav=$("navQaTestCenter"),root=$("page-qa-test-center");
   if(!nav||!root)return;
-  const state={tests:[],runs:[],run:null,events:[],gate:null,loading:false,pendingRunId:null};
+  const state={tests:[],runs:[],run:null,events:[],gate:null,loading:false,pendingRunId:null,search:""};
   const MAX_NOTES=4000;
   const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined&&text!==null)n.textContent=String(text);if(cls)n.className=cls;return n;};
   const status=$("qaStatus"),runs=$("qaRunSelect"),cases=$("qaCases"),gate=$("qaGate"),history=$("qaHistory"),baseline=$("qaBaselineSelect"),regressions=$("qaRegressions");
@@ -125,6 +125,8 @@
     if(!state.tests.length)return;
     const byCategory=new Map();
     for(const t of state.tests){
+      const searchable=[t.id,t.title,t.category,t.severity,...(t.prerequisites||[]),...(t.expectedResults||[]),...(t.steps||[]).map(step=>step.instruction)].join(" ").toLowerCase();
+      if(state.search&&!searchable.includes(state.search))continue;
       if(!byCategory.has(t.category))byCategory.set(t.category,[]);
       byCategory.get(t.category).push(t);
     }
@@ -215,6 +217,7 @@
       await refreshRuns();renderCases();renderGate();
     }catch(e){message(e.message,"error");}finally{state.loading=false;}
   }
+  $("qaSearch")?.addEventListener("input",event=>{state.search=String(event.target.value||"").trim().toLowerCase();renderCases();});
   $("qaStartRun")?.addEventListener("click",startRun);
   $("qaRefresh")?.addEventListener("click",()=>initialize());
   $("qaCompare")?.addEventListener("click",async()=>{
