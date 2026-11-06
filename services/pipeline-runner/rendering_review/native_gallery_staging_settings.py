@@ -18,12 +18,11 @@ class NativeGalleryStagingDenied(RuntimeError):
     """Safe, non-secret staging configuration/readback denial."""
 
 
-def resolve_private_native_gallery_staging_folder(client, drive):
-    """Require one active Airtable value and an owner-only Google Drive folder.
+def read_native_gallery_staging_setting(client):
+    """Validate exactly one active Airtable folder ID, including optional env pin.
 
-    An Airtable outage, inactive/duplicated record, env conflict, inaccessible
-    Drive folder, or permission ambiguity aborts BEFORE a generation claim.
-    Nothing in this function creates a folder or writes to either system.
+    This read-only check deliberately needs no Google Drive access, so an
+    OAuth problem cannot masquerade as a missing Airtable setting.
     """
     try:
         rows = client.list_records(
@@ -48,6 +47,11 @@ def resolve_private_native_gallery_staging_folder(client, drive):
     legacy_pin = os.environ.get(SETTING_NAME, "").strip()
     if legacy_pin and legacy_pin != folder:
         raise NativeGalleryStagingDenied("native_gallery_staging_env_pin_conflict")
+    return folder
+
+
+def verify_native_gallery_staging_permissions(drive, folder):
+    """Check the same owner-only Drive gate used by live C5/C6 execution."""
     try:
         metadata = drive.get_file(folder, fields="id,mimeType,trashed,shared")
         permissions = drive.list_file_permissions(folder)
@@ -64,4 +68,14 @@ def resolve_private_native_gallery_staging_folder(client, drive):
             or permissions[0].get("type") != "user"
             or permissions[0].get("role") != "owner"):
         raise NativeGalleryStagingDenied("native_gallery_staging_not_owner_only")
+    return True
+
+
+def resolve_private_native_gallery_staging_folder(client, drive):
+    """Read both authoritative systems BEFORE any claimed job or C5 call.
+
+    No permission change, Airtable write, fallback folder, or token disclosure.
+    """
+    folder = read_native_gallery_staging_setting(client)
+    verify_native_gallery_staging_permissions(drive, folder)
     return folder
