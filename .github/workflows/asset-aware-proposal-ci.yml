@@ -6,6 +6,7 @@ on:
       - 'apps/studio-api/scripted-short-asset-policy.test.mjs'
       - 'apps/studio-api/scripted-short-title.mjs'
       - 'apps/studio-api/scripted-short-title.test.mjs'
+      - 'apps/studio-api/scripted-short-title-explicit.test.mjs'
       - 'apps/studio-api/worker-functions-02.mjs'
       - 'apps/studio-api/quality-checks.mjs'
       - 'apps/studio-api/quality-checks.test.mjs'
@@ -28,4 +29,4 @@ jobs:
           node --check apps/studio-api/scripted-short-title.mjs
           node --check apps/studio-api/scripted-short-asset-policy.mjs
           node --check apps/studio-api/worker-functions-02.mjs
-          node --test apps/studio-api/scripted-short-asset-policy.test.mjs apps/studio-api/quality-checks.test.mjs apps/studio-api/scripted-short-title.test.mjs
+          node --test apps/studio-api/scripted-short-asset-policy.test.mjs apps/studio-api/quality-checks.test.mjs apps/studio-api/scripted-short-title.test.mjs apps/studio-api/scripted-short-title-explicit.test.mjs

@@ -7,12 +7,44 @@ const MAX_TITLE_LENGTH = 90;
 const instructionWords = /\b(?:utilize|uploaded|you don't|please|don't have to|system|write|generate|create\s+(?:a|an)|make\s+(?:a|an)|caption|hashtags|voiceover|script|use\s+(?:the|my|our))\b/i;
 const readable = (value) => String(value || "").replace(/\s+/g, " ").replace(/[“”]/g, '"').replace(/[‘’]/g, "'").trim();
 
+
+/** Multi-line editorial briefs often specify a mandatory title as a section:
+ * REQUIRED EXACT TITLE
+ * How to Find ... | Chicago's Hidden ...
+ * Preserve that line before parsing prose such as "Use this exact title for
+ * the Content Item", which describes the scope, not the headline itself.
+ */
+function scriptedShortHeadingTitle(source) {
+  const lines = String(source || "").split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const heading = lines[i].trim()
+      .replace(/^#{1,6}\s*/, "")
+      .replace(/^\*\*|\*\*$/g, "")
+      .trim();
+    if (!/^(?:(?:required|mandatory)\s+)?exact\s+(?:(?:video|post|short|content)\s+)?title\s*:?\s*$/i.test(heading)) continue;
+    const following = lines.slice(i + 1, i + 4).find((line) => line.trim());
+    if (!following) continue;
+    let candidate = following.trim().replace(/^\*\*(.*?)\*\*$/, "$1").trim();
+    const wrapped = /^(["'“‘])(.+)(["'”’])$/.exec(candidate);
+    if (wrapped && ({ '"': '"', "'": "'", '“': '”', '‘': '’' })[wrapped[1]] === wrapped[3]) {
+      candidate = wrapped[2];
+    }
+    if (candidate && candidate.length <= MAX_TITLE_LENGTH
+      && !/^(?:use|set|keep|please|do not|don't|create|generate)\b/i.test(candidate)) {
+      return candidate;
+    }
+  }
+  return "";
+}
+
 /**
  * Explicit naming instructions are user-authored output data, not creative
  * direction to be overwritten by the automatic headline generator.
  */
 export function scriptedShortExplicitTitle(prompt) {
   const source = String(prompt || "").replace(/\r/g, "");
+  const headingTitle = scriptedShortHeadingTitle(source);
+  if (headingTitle) return headingTitle;
   const patterns = [
     // "Please use this exact title:" is the normal creative-brief syntax.
     // Accept "this" and "please" rather than silently falling back to AI.
@@ -37,6 +69,9 @@ export function scriptedShortExplicitTitle(prompt) {
     // In "Viaduct — “Architecture in the Light”" the closing quote is not
     // an outer wrapper and must never be stripped.
     title = title.replace(/\s+/g, " ").trim();
+    // A following 'Use this exact title for the Content Item...' sentence
+    // specifies scope, never a candidate title.
+    if (/^(?:for|in|on|to)\b/i.test(title)) continue;
     if (title && title.length <= MAX_TITLE_LENGTH) return title;
   }
   return "";
