@@ -49,5 +49,5 @@ jobs:
       - name: Enforce Studio UI release and QA page wiring
         run: |
           node apps/studio-web/ui-release-contract.mjs
-          node --test apps/studio-web/ui-release-contract.test.mjs apps/studio-web/pages-production-deploy-contract.test.mjs
+          node --test apps/studio-web/ui-release-contract.test.mjs apps/studio-web/pages-production-deploy-contract.test.mjs apps/studio-web/qa-test-center.test.mjs
           node --check apps/studio-api/worker.js
