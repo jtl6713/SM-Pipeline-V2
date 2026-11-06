@@ -68,7 +68,15 @@ export function evaluateReviewPackage(record, { validatedAt = new Date().toISOSt
     else { urls.push(preview); evidence.push("public_cdn_preview"); }
     if (!validCdn(cover)) missing.push("Thumbnail_URL");
     else { urls.push(cover); evidence.push("public_cdn_cover"); }
-    if (slideCount && count && slideCount !== count) missing.push("Carousel Slides count mismatch");
+    // Carousel Slides are preparation/ratio variants, not the canonical set
+    // of selected photos. A 4-photo carousel can legitimately have 8 (or 12)
+    // linked variant rows. Never reject an otherwise valid 4-clip manifest for
+    // having extra crop variants. Validate the selected source count/URLs below.
+    // Without the authoritative manifest, fewer linked slides than selected
+    // photos is still a safety failure (extra variants are harmless).
+    if (!clips && slideCount > 0 && count > 0 && slideCount < count) {
+      missing.push("Carousel Slides fewer than selected clips");
+    }
     if (manifest?.invalid_json) missing.push("Selected_Assets_JSON invalid JSON");
     if (clips) {
       if (clips.length !== count) missing.push("Selected_Assets_JSON count mismatch");
