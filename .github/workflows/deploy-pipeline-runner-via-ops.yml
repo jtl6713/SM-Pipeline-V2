@@ -72,6 +72,7 @@ jobs:
             services/pipeline-runner/tests/test_a1_local_compressor.py \
             services/pipeline-runner/tests/test_internal_media_guard.py \
             services/pipeline-runner/tests/test_native_gallery_staging_settings.py \
+            services/pipeline-runner/tests/test_native_gallery_readiness_http.py \
             services/pipeline-runner/tests/test_native_gallery_auto_execute.py \
             services/pipeline-runner/tests/test_native_gallery_execute_http.py
 

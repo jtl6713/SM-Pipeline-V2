@@ -16,8 +16,9 @@ def healthy():
     return dict(expected_version=VERSION,code_version=VERSION,
       reported_version=VERSION,health_ok=True,
       rights_policy_verified=True,candidate_folder_private=True,
+      canonical_folder_verified=True,
       env={"STAGE1_CANDIDATE_FOLDER_ID":FOLDER,
-           "NATIVE_GALLERY_STAGING_FOLDER_ID":FOLDER,
+           "NATIVE_GALLERY_STAGING_FOLDER_ID":"",
            "NATIVE_GALLERY_WORKER_BASE_URL":"https://studio.chicagoshining.com",
            "NATIVE_GALLERY_RUNNER_CONSUMER_ID":"stage1_held_probe_runner_12345",
            "NATIVE_GALLERY_JOB_SHARED_SECRET":"x"*28,
@@ -54,20 +55,22 @@ class NativeGalleryReadinessTests(unittest.TestCase):
             report=probe.assess(**inp)
             self.assertFalse(report["canary_prerequisites_verified"])
 
-    def test_private_folder_requires_exact_id_and_only_user_or_group_permissions(self):
+    def test_private_folder_requires_exact_id_and_exactly_owner_only(self):
         good={"id":FOLDER,"mimeType":"application/vnd.google-apps.folder",
               "trashed":False}
         self.assertTrue(probe.is_private_folder(good,[{"type":"user","role":"owner"}],FOLDER))
         for meta,perms in [
            (good,[]),(good,[{"type":"anyone","role":"reader"}]),
+           (good,[{"type":"user","role":"owner"},{"type":"user","role":"reader"}]),
+           ({"id":FOLDER,"mimeType":"application/vnd.google-apps.folder","shared":True},[{"type":"user","role":"owner"}]),
            (good,[{"type":"domain","role":"reader"}]),
-           ({"id":"wrong","mimeType":"application/vnd.google-apps.folder"},[{"type":"user"}]),
+           ({"id":"wrong","mimeType":"application/vnd.google-apps.folder"},[{"type":"user","role":"owner"}]),
            ({"id":FOLDER,"mimeType":"image/png"},[{"type":"user"}]),
            ({"id":FOLDER,"mimeType":"application/vnd.google-apps.folder","trashed":True},[{"type":"user"}])
         ]:
             self.assertFalse(probe.is_private_folder(meta,perms,FOLDER))
 
-    def test_folder_pin_secret_and_worker_origin_are_required(self):
+    def test_optional_env_pin_secret_and_worker_origin_are_checked(self):
         for key,bad in (
             ("NATIVE_GALLERY_STAGING_FOLDER_ID","wrong"),
             ("NATIVE_GALLERY_JOB_SHARED_SECRET","short"),
@@ -77,6 +80,15 @@ class NativeGalleryReadinessTests(unittest.TestCase):
             inp=healthy();inp["env"][key]=bad
             report=probe.assess(**inp)
             self.assertFalse(report["canary_prerequisites_verified"],key)
+
+    def test_canonical_airtable_folder_readback_is_required_without_local_pin(self):
+        inp=healthy()
+        report=probe.assess(**inp)
+        self.assertTrue(report["candidate_folder_pinned_in_runner"])
+        inp["canonical_folder_verified"]=False
+        report=probe.assess(**inp)
+        self.assertIn("AIRTABLE_STAGING_SETTING_NOT_VERIFIED",report["blockers"])
+        self.assertFalse(report["candidate_folder_pinned_in_runner"])
 
     def test_generating_or_auto_dispatch_must_remain_off_during_audit(self):
         for key in ("NATIVE_GALLERY_AUTO_EXECUTE_ENABLED",

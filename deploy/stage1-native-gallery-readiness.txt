@@ -6,3 +6,4 @@ Do NOT assume Runner credentials can access this folder until authenticated live
 Do NOT enable C5/C6 generation, queue claim, auto-execute, browser opt-ins or publishing based on this sentinel.
 Do NOT insert NATIVE_GALLERY_RIGHTS_REVIEWED=true or an unreviewed provider/model/basis.
 Run one protected live read-only Ops probe after merge; redact all credentials and never claim jobs.
+2026-11-06: Re-audit Stage 1 only after Runner 2026-11-06-stage1-private-readiness-v1 is deployed. Protected Ops shell reads authenticated localhost /jobs/native-gallery/readiness, returning sanitized booleans/root-cause codes. No C5/C6 claims, rights assertion, social publishing, Google Drive writes, secret echo or Airtable mutations. If audit races deployment, rerun after exact Runner health verification.
