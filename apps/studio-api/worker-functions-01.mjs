@@ -1971,6 +1971,11 @@ export function normalizedOutputState(record) {
   if (outputStatusLc === "skipped" || outputStatusLc === "cancelled" || outputStatusLc === "rejected") {
     return "Skipped";
   }
+  // A returned revision must stay explicitly returned even when its old
+  // rendered MP4 still exists; it is not a new formal review candidate.
+  if (outputStatusLc === "changes requested" || text("Review_Status").toLowerCase() === "changes requested") {
+    return "Changes Requested";
+  }
 
   // Live Short + daily quota is an automatic midnight retry. Do not paint
   // Manual Action Required even when YTS2 left Publish_Status=Manual Publish Required.
