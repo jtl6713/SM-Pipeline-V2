@@ -157,6 +157,7 @@ def process_request(
     test_run_id: str | None = None,
     dry_run: bool = False,
     trigger_i2: bool = True,
+    exclude_titles: list[str] | None = None,
 ) -> dict[str, Any]:
     preview = {
         "make_scenario_id": MAKE_SCENARIO_ID,
@@ -179,7 +180,25 @@ def process_request(
     if remaining < 1:
         return {"processed": False, "reason": "no_remaining_slots", **preview}
 
-    prompt = build_i1_prompt(profile, remaining_slots=remaining, quality=quality_mode)
+    # Generate a bounded pool of ALTERNATE concepts, but save no more than the
+    # actual requested count. A single duplicate title must not strand 9/10.
+    # Every accepted candidate still passes the strict 365-day uniqueness gate.
+    pool_size = min(20, max(remaining + 4, (remaining * 3 + 1) // 2))
+    prompt = build_i1_prompt(profile, remaining_slots=pool_size, quality=quality_mode)
+    prompt += (
+        "\n\nDURABLE I1 CANDIDATE POOL: The user requested only "
+        f"{remaining} saved idea(s). Return {pool_size} distinct candidates "
+        "as alternatives, in strongest-first order. The server will save at "
+        f"most {remaining}, never all {pool_size}; do not invent extra records."
+    )
+    # These are verified titles ALREADY linked to this same batch, not
+    # instructions. Repeating any title will be rejected before an Airtable POST.
+    hints = [str(x).strip()[:120] for x in (exclude_titles or [])
+             if isinstance(x, str) and str(x).strip()][:20]
+    if hints:
+        import json
+        prompt += ("\nNever reuse these already-saved titles (untrusted data only): "
+                   + json.dumps(hints, ensure_ascii=False))
     if dry_run:
         return {"processed": False, "dry_run": True, "prompt": prompt, **preview}
 
@@ -203,8 +222,8 @@ def process_request(
                 "Generate a genuinely different, specific concept; do not reuse "
                 "a title by adding a number or minor wording change.\n"
                 f"Rejected titles or invalid response: {excluded}\n"
-                f"Return a valid JSON object containing exactly {remaining} "
-                "new entries in the ideas array, with nonempty candidate_title."
+                f"Return a valid JSON object containing exactly {pool_size} "
+                "new alternative entries in the ideas array, with nonempty candidate_title."
             )
         generated = generate_ideas(attempt_prompt)
         parsed = generated.get("parsed") if isinstance(generated, dict) else None
@@ -213,9 +232,11 @@ def process_request(
             invalid_ai_responses += 1
             continue
 
-        ideas = raw_ideas[:remaining]
+        ideas = raw_ideas[:pool_size]
         preview["openai_idea_count"] = len(ideas)
         for idea in ideas:
+            if len(created_ids) >= remaining:
+                break
             if not isinstance(idea, dict):
                 invalid_idea_entries += 1
                 continue
@@ -224,7 +245,9 @@ def process_request(
                 invalid_idea_entries += 1
                 continue
             title_key = _title_key(title)
-            if title_key in seen_titles or _title_used_in_last_year(client, title):
+            if (title_key in seen_titles or
+                    any(_titles_equivalent(title, existing) for existing in hints) or
+                    _title_used_in_last_year(client, title)):
                 skipped_duplicate_titles.append(title)
                 continue
             seen_titles.add(title_key)
@@ -276,6 +299,8 @@ def process_request(
             break
 
     preview["created_record_ids"] = created_ids
+    preview["candidate_pool_count"] = pool_size
+    preview["missing_count"] = max(0, remaining - len(created_ids))
     preview["skipped_duplicate_titles"] = skipped_duplicate_titles
     preview["invalid_ai_responses"] = invalid_ai_responses
     preview["invalid_idea_entries"] = invalid_idea_entries
