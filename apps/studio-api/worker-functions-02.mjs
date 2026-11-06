@@ -11966,7 +11966,7 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
     timeline,
     duration_seconds: timeline.duration_seconds,
     scene_count: timeline.segments.length,
-    suggested_title: scriptedShortPublishableTitle(prompt, timeline, profileMarket),
+    suggested_title: scriptedShortPublishableTitle(creativeBrief, timeline, profileMarket),
     owned_count: owned,
     suggestion_count: suggestions,
     asset_policy: assetPolicy,
@@ -12109,7 +12109,7 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
     profileId: profile?.id,
     profileName: profileMarket,
   });
-  const title = scriptedShortPublishableTitle(prompt, timeline, profileMarket);
+  const title = scriptedShortPublishableTitle(creativeBrief, timeline, profileMarket);
   const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, "", {
     method: "POST",
     body: JSON.stringify({
@@ -12186,6 +12186,7 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
     Selected_Music_Asset: [scriptedMusicId],
     Script_Mode: "Force exact",
     Requested_Script: script,
+    Title_Mode: "Force exact",
     Requested_Title: title,
     Video_Duration_Seconds: duration,
     Voiceover_Tail_Seconds: 0,
@@ -12196,6 +12197,13 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
     Request_Status: "Draft",
     Studio_Item4_State: "Draft",
   });
+  // Fail closed before creating any platform outputs if the saved request
+  // lost the human-authored exact title or its Force exact authority.
+  requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
+  if (String(f(requestRecord, "Title_Mode") || "").trim() !== "Force exact" ||
+      String(f(requestRecord, "Requested_Title") || "").trim() !== title) {
+    throw new HttpError(409, "Exact short title was not saved; production was stopped before output creation.");
+  }
   try {
     const planCall = studioInternalJsonRequest(`/api/production-requests/${requestRecord.id}/plan`, {
       platforms: producerPlan.target_platforms,
