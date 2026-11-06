@@ -53,6 +53,8 @@ test("Accept persists suggested headline, not truncated prompt; original instruc
   const propose = source.split("export async function proposeScriptedShortRoute(")[1].split("/*__STUDIO_WORKER_END:proposeScriptedShortRoute__*/")[0];
   assert.match(accept, /const title = scriptedShortPublishableTitle\(creativeBrief, timeline,/);
   assert.match(accept, /Title_Mode: explicitTitle \? "Force exact" : "AI decides"/);
+  assert.match(accept, /if \(explicitTitle\) \{/);
+  assert.match(accept, /Exact short title was not saved/);
   assert.match(propose, /suggested_title: scriptedShortPublishableTitle\(creativeBrief, timeline,/);
   assert.doesNotMatch(accept, /const title = prompt\.slice\(0, 160\)/);
   assert.match(accept, /Candidate_Title: title/);
