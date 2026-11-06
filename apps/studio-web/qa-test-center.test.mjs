@@ -37,10 +37,12 @@ test("QA JavaScript cannot call unrelated publishing, scheduling, or arbitrary e
   assert.match(css,/#page-qa-test-center/);
 });
 
-test("Studio release contract points all QA assets to bumped cache key",()=>{
-  assert.match(html,/UI build 0\.6\.897/);
-  assert.match(html,/qa-test-center\.css\?v=0\.6\.897-qa-center-pilot/);
-  assert.match(html,/qa-test-center\.js\?v=0\.6\.897-qa-center-pilot/);
+test("Studio release contract points QA assets at the current cache key (not a stale hardcoded release)",()=>{
+  const label=html.match(/id="uiBuildLabel">UI build (0\\.6\\.\\d+)/)?.[1];
+  const cache=html.match(/app-item4-1008\\.js\\?v=([a-z0-9.\\-]+)/)?.[1];
+  assert.ok(label && cache?.startsWith(label+"-"));
+  assert.ok(html.includes("qa-test-center.css?v="+cache));
+  assert.ok(html.includes("qa-test-center.js?v="+cache));
 });
 
 
