@@ -101,7 +101,7 @@ jobs:
           node --check apps/studio-api/engagement-service.mjs
           node --check apps/studio-api/review-package-readiness.mjs
           node --check apps/studio-api/pre-factory-ready-recovery.mjs
-          node --test apps/studio-api/review-package-readiness.test.mjs apps/studio-api/pre-factory-ready-recovery.test.mjs apps/studio-api/factory-private-review-visibility.test.mjs
+          node --test apps/studio-api/review-package-readiness.test.mjs apps/studio-api/pre-factory-ready-recovery.test.mjs apps/studio-api/factory-private-review-visibility.test.mjs apps/studio-api/factory-review-state-parity.test.mjs
           node --check apps/studio-api/rendering-review-plan-persist.mjs
           node --check apps/studio-api/rendering-review-factory-handoff.mjs
           node --check apps/studio-api/rendering-review-factory-preview.mjs
