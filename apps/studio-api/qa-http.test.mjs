@@ -288,3 +288,20 @@ test("release Approved cannot finalize an incomplete or unattested run",async()=
   }),/Cannot approve QA release/);
   assert.equal(h.rows.get(QA_EVENTS_TABLE).length,0);
 });
+
+
+test("no manual Pass can silently clear a release gate without observed notes or evidence",async()=>{
+  const h=harness();
+  const created=(await (await h.call("POST","runs",{client_request_id:"run-pass-proof-001"})).json()).run;
+  await assert.rejects(()=>h.call("POST","runs/"+created.runId+"/results",{
+    client_request_id:"result-no-evidence-001",testId:"QA-AUTH-001",status:"Pass"
+  }),/Pass requires observed notes or evidence/);
+  assert.equal(h.rows.get(QA_EVENTS_TABLE).length,0);
+  const evidenceOnly=await h.call("POST","runs/"+created.runId+"/results",{
+    client_request_id:"result-evidence-only001",testId:"QA-AUTH-001",status:"Pass",
+    evidence:[{kind:"reference",reference:"CI run 12345, unauthorized access 403"}]
+  });
+  assert.equal(evidenceOnly.status,201);
+  const saved=await evidenceOnly.json();
+  assert.equal(saved.event.payload.evidence.length,1);
+});
