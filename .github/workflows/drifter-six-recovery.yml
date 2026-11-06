@@ -1,0 +1,88 @@
+name: One-time Chicago Drifter six-clip recovery (no publishing)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/drifter-six-recovery.txt'
+      - '.github/workflows/drifter-six-recovery.yml'
+permissions:
+  contents: read
+concurrency:
+  group: chicago-drifter-six-recovery
+  cancel-in-progress: false
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Submit exact production source repair to private Runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          phase=$(sed -n 's/^phase=//p' deploy/drifter-six-recovery.txt | tail -1)
+          case "$phase" in compress|resume) ;; *) echo "Bad phase"; exit 2;; esac
+          ops='https://ops.chicagoshining.com'
+          selected=''
+          for tok in "$OPS_TOKEN_A" "$OPS_TOKEN_B" "$OPS_TOKEN_C"; do
+            test -n "$tok" || continue
+            code=$(curl -sS --max-time 20 -o /tmp/ops.json -w '%{http_code}' -H "Authorization: Bearer $tok" "$ops/api/catalog" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/ops.json >/dev/null; then selected="$tok"; break; fi
+          done
+          test -n "$selected" || { echo "Ops authorization unavailable"; exit 3; }
+          cat > /tmp/drifter.ps1 <<'PS'
+          $ErrorActionPreference = "Stop"
+          $phase = "PHASE_PLACEHOLDER"
+          $record = "recmU6PIedtlKrVPR"
+          $health = Invoke-RestMethod -Uri "http://127.0.0.1:3350/health" -TimeoutSec 20
+          if ($health.ok -ne $true) { throw "runner_unhealthy" }
+          $envfile = Join-Path (Get-Location) "Services\pipeline-runner\service\.env"
+          if (-not (Test-Path $envfile)) { throw "runner_env_missing" }
+          $line = @(Get-Content $envfile | Where-Object {$_ -match '^\s*PIPELINE_RUNNER_SHARED_SECRET\s*='}) | Select-Object -Last 1
+          if (-not $line) { throw "runner_secret_missing" }
+          $secret = ([string]$line -split '=', 2)[1].Trim().Trim('"', "'")
+          if (-not $secret) { throw "runner_secret_empty" }
+          if ($phase -eq "compress") {
+            $route = "/jobs/studio-compress"
+          } elseif ($phase -eq "resume") {
+            $route = "/jobs/studio-produce/resume"
+          } else { throw "bad_phase" }
+          $body = @{production_request_record_id=$record} | ConvertTo-Json -Compress
+          $result = Invoke-RestMethod -Uri ("http://127.0.0.1:3350" + $route) -Method POST -Headers @{"X-Pipeline-Secret"=$secret} -Body $body -ContentType "application/json" -TimeoutSec 60
+          if ($result.ok -ne $true -or $result.accepted -ne $true -or $result.production_request_record_id -ne $record) { throw "exact_runner_not_accepted" }
+          Write-Output ("drifter_phase=" + $phase)
+          Write-Output "drifter_exact_request_accepted=true"
+          PS
+          sed -i "s/PHASE_PLACEHOLDER/$phase/g" /tmp/drifter.ps1
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/drifter.json').write_text(json.dumps({"command":Path('/tmp/drifter.ps1').read_text(),"confirm":True}))
+          PY
+          job=''
+          for attempt in $(seq 1 30); do
+            code=$(curl -sS --max-time 30 -o /tmp/launch.json -w '%{http_code}' -X POST "$ops/api/shell" -H "Authorization: Bearer $selected" -H 'Content-Type: application/json' --data-binary @/tmp/drifter.json || true)
+            if [[ "$code" == 202 || "$code" == 200 ]]; then
+              job=$(jq -r '.job.id // .jobId // empty' /tmp/launch.json)
+              test -n "$job" && break
+            fi
+            test "$code" == 409 || { echo "Ops denied action http=$code"; exit 4; }
+            sleep 5
+          done
+          test -n "$job" || { echo "Ops busy"; exit 5; }
+          for attempt in $(seq 1 90); do
+            curl -sS --max-time 20 -H "Authorization: Bearer $selected" "$ops/api/jobs/$job" -o /tmp/job.json
+            state=$(jq -r '.job.status // empty' /tmp/job.json)
+            if [[ "$state" == ok ]]; then
+              jq -r '.job.log // ""' /tmp/job.json | grep -E '^drifter_(phase|exact_request_accepted)='
+              jq -e '.job.log | contains("drifter_exact_request_accepted=true")' /tmp/job.json >/dev/null
+              exit 0
+            fi
+            if [[ "$state" == failed ]]; then echo "Runner operation failed"; exit 6; fi
+            sleep 3
+          done
+          echo "Ops job timeout"; exit 7
