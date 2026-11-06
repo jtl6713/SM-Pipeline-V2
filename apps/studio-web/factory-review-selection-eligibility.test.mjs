@@ -117,13 +117,18 @@ test("Server policy exclusion disables only batch selection, not legitimate indi
   assert.match(selectionTag(disabled), /\bdisabled\b/);
   assert.match(disabled, /Batch approvals are disabled by the server/);
 });
-test("Recently submitted output cannot be selected or approved again from search results", () => {
+test("Authoritative Ready for Review remains actionable even if stale browser acceptance hint exists", () => {
   const { accept, renderCard } = setup();
   accept(chicagoReel.id);
   const html = renderCard(chicagoReel,{lane:"needs_eyes"});
-  assert.match(selectionTag(html), /\bdisabled\b/);
-  assert.match(html, /Already accepted for approval/);
-  assert.match(html, /data-factory-approve="recMichigan9593" disabled/);
+  assert.doesNotMatch(selectionTag(html), /\bdisabled\b/);
+  assert.doesNotMatch(html, /Already accepted for approval/);
+  assert.match(html, /data-factory-approve="recMichigan9593"/);
+  assert.doesNotMatch(html, /data-factory-approve="recMichigan9593" disabled/);
+  // Browser memory still prevents an uncertain re-submit for a non-RFR row.
+  const stale = renderCard({ ...chicagoReel, output_status:"Rendered" }, {lane:"needs_eyes"});
+  assert.match(selectionTag(stale), /\bdisabled\b/);
+  assert.match(stale, /Already accepted for approval/);
 });
 test("Mobile styling keeps ineligible checkbox and explanation visible", () => {
   assert.match(css, /\.factory-media-select \.factory-output-select\{/);
