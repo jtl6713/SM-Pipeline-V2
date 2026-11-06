@@ -1,3 +1,4 @@
+import { formalFactoryApprovalReady } from "./review-package-readiness.mjs";
 import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
 import { staleInstagramPublishingDisplay } from "./ig-publishing-display.mjs";
 import { facebookPreapprovalRecoveryReason, facebookPreapprovalRecoveryFields, FACEBOOK_PREAPPROVAL_FORMULA } from "./facebook-preapproval-recovery.mjs";
@@ -1905,6 +1906,12 @@ export function normalizedOutputState(record) {
 
   const outputStatusLc = text("Output_Status").toLowerCase();
   const publishStatusLc = text("Publish_Status").toLowerCase();
+  // A finished render alone is not permission to advertise a formal review.
+  // Factory and Pipeline share the exact same record-level readiness gate.
+  // This is computed only for explicitly review-staged outputs, preserving the
+  // lean pipeline read and avoiding heavy validation for older terminal rows.
+  const formalReviewReady = outputStatusLc === "ready for review"
+    && formalFactoryApprovalReady(record);
   const outputDeadEarly = outputStatusLc.includes("failed")
     || outputStatusLc.includes("terminal error")
     || outputStatusLc.includes("skipped");
@@ -1936,6 +1943,7 @@ export function normalizedOutputState(record) {
     || has("TikTok_Draft_Status", "draft delivered");
   if (
     readyForReviewIntent
+    && formalReviewReady
     && !approvedOrScheduledEarly
     && studioOutputHasReviewableDeliverable(record)
     && !outputDeadEarly
@@ -2026,11 +2034,27 @@ export function normalizedOutputState(record) {
   const inProduction = has("Output_Status", "in production");
   const hasFinishedFile = Boolean(String(f(record, "Final_File_URL") || "").trim());
   const remotionFinished = has("Render_Status", "rendered") && (hasFinishedFile || Boolean(String(f(record, "Studio_Preview_URL") || "").trim()));
-  if (!inProduction || remotionFinished || studioOutputIsNativePhoto(record)) {
-    if ((has("Review_Status", "pending") || has("Review_Status", "review sent") || has("Output_Status", "ready for review")) && studioOutputHasReviewableDeliverable(record)) return "Ready for Review";
-    if (has("Render_Status", "rendered") && studioOutputHasReviewableDeliverable(record)) return "Ready for Review";
+  if (formalReviewReady && studioOutputHasReviewableDeliverable(record)) {
+    return "Ready for Review";
+  }
+  // Do not let Rendered, a stale Review Sent, or a held output silently become
+  // Ready for Review in Pipeline while Factory refuses formal approval.
+  if (outputStatusLc === "ready for review") {
+    const reviewDecision = text("Review_Status").toLowerCase();
+    if (reviewDecision === "changes requested") return "Changes Requested";
+    if (Boolean(fields.Do_Not_Publish) || Boolean(fields.Studio_Render_Review_Hold_Active)) {
+      return "Review Held";
+    }
+    if (has("Render_Status", "waiting in render queue") || has("Render_Status", "ready for render")) {
+      return "Waiting in Render Queue";
+    }
+    if (has("Render_Status", "rendering")) return "Rendering";
+    return "Preparing Assets";
   }
   if (has("Render_Status", "waiting in render queue")) return "Waiting in Render Queue";
+  if (has("Render_Status", "rendered") && studioOutputHasReviewableDeliverable(record)) {
+    return "Rendered";
+  }
   if (isActiveRemotionHold(record, f) || has("FB_Slideshow_Status", "rendering") || has("FB_Slideshow_Status", "starting render")) {
     return "Rendering";
   }
