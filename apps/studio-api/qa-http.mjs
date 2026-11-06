@@ -238,12 +238,21 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
     const events=await history(runId);
     const gate=computeQaGate(catalog,events);
     const blockers=[];
+    if(run.catalogRevision!==QA_CATALOG.catalogVersion)
+      blockers.push("QA catalog revision changed; create a new run before release");
+    if(events.some(event=>["ManualResult","AutomatedObservation"].includes(event.kind)&&
+       event.payload?.catalogVersion!==run.catalogRevision))
+      blockers.push("QA history contains an observation with a mismatched catalog revision");
     if(run.deployment?.runner==="unverified")blockers.push("Runner deployment is not attested");
     if(blockers.length){gate.ready=false;gate.decision="Incomplete";}
     return send({ok:true,run,gate:{...gate,deploymentBlockers:blockers}});
   }
   if(request.method!=="POST"||!["results","approvals","waivers"].includes(operation)&&!operation.startsWith("execute/"))
     throw error(405,"QA method not allowed");
+  // Historical runs remain readable, but new execution under a different
+  // catalog would create a false green result from an obsolete procedure.
+  if(run.catalogRevision!==QA_CATALOG.catalogVersion)
+    throw error(409,"QA catalog revision changed; start a new run before recording results");
   const body=await jsonBody(request),key=requestKey(body);
   let testId,kind,payload;
   if(operation==="results"){
