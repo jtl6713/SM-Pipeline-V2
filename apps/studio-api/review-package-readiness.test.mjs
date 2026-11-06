@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { evaluateReviewPackage, verifyReviewImages, safeReviewPromotion, factoryReviewVisibility } from "./review-package-readiness.mjs";
+import { evaluateReviewPackage, verifyReviewImages, safeReviewPromotion, factoryReviewVisibility, factoryApprovalHoldReleaseEligibility } from "./review-package-readiness.mjs";
 
 const cdn = "https://media.chicagoshining.com/";
 const asRecord = (fields, id = "recPilsenReady0001") => ({ id, fields });
@@ -154,5 +154,31 @@ test("selected source count and CDN safety still fail closed independently of ex
     });
     const readiness = evaluateReviewPackage(record);
     assert.equal(readiness.readiness, "BLOCKED", problem);
+  }
+});
+
+test("complete Do_Not_Publish review package can be released for separate formal approval without scheduling", () => {
+  const video = asRecord({
+    Output_Status: "Ready for Review", Review_Status: "Review Sent",
+    Render_Status: "Rendered", Publish_Status: "Not Ready",
+    Do_Not_Publish: true, Auto_Publish_Enabled: false,
+    Output_Caption: "Private rendered preview", Platform: "Instagram",
+    Studio_Output_Type: "Reel", Final_File_URL: "https://drive.google.com/file/d/ready/view",
+    Thumbnail_URL: cdn + "factory/ready-cover.png",
+  });
+  const ready = factoryApprovalHoldReleaseEligibility(video);
+  assert.equal(ready.eligible, true);
+  assert.equal(factoryApprovalHoldReleaseEligibility(asRecord({...video.fields, Review_Status: ""})).eligible, true);
+  for (const fields of [
+    { Review_Status: "Changes Requested" },
+    { Review_Status: "Approved" },
+    { Publish_Status: "Scheduled" },
+    { Render_Status: "Waiting in Render Queue" },
+    { Studio_Render_Review_Hold_Active: true },
+    { Output_Caption: "" },
+    { Test_Run_ID: "test-protected" },
+    { Do_Not_Publish: false },
+  ]) {
+    assert.equal(factoryApprovalHoldReleaseEligibility(asRecord({...video.fields, ...fields})).eligible, false, JSON.stringify(fields));
   }
 });
