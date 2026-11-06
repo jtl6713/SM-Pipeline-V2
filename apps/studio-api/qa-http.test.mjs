@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {handleQaApi,computeQaGate,QA_RUNS_TABLE,QA_EVENTS_TABLE} from "./qa-http.mjs";
+import {handleQaApi,computeQaGate,compareQaRunResults,QA_RUNS_TABLE,QA_EVENTS_TABLE} from "./qa-http.mjs";
 
 function harness(){
   const rows=new Map([[QA_RUNS_TABLE,[]],[QA_EVENTS_TABLE,[]]]);
@@ -128,4 +128,37 @@ test("gate rejects failures even if a human later reviewed an older pass",()=>{
  ];
  const gate=computeQaGate(cases,events);
  assert.equal(gate.ready,false);assert.deepEqual(gate.failed,["QA-DIAG-001"]);
+});
+
+test("regression comparator flags failing and missing cases without rewriting saved evidence",()=>{
+ const old=[
+  {testId:"QA-DIAG-001",kind:"ManualResult",atUtc:"2026-11-05T10:00:00Z",payload:{executionId:"qaex-1",status:"Pass"}},
+  {testId:"QA-AUTH-001",kind:"ManualResult",atUtc:"2026-11-05T10:01:00Z",payload:{executionId:"qaex-2",status:"Pass"}},
+  {testId:"QA-CAT-001",kind:"ManualResult",atUtc:"2026-11-05T10:02:00Z",payload:{executionId:"qaex-3",status:"Fail"}},
+ ];
+ const current=[
+  {testId:"QA-DIAG-001",kind:"ManualResult",atUtc:"2026-11-06T10:00:00Z",payload:{executionId:"qaex-4",status:"Fail"}},
+ ];
+ const r=compareQaRunResults(old,current);
+ assert.deepEqual(r.map(x=>({id:x.testId,to:x.to})),[
+   {id:"QA-DIAG-001",to:"Fail"},
+   {id:"QA-AUTH-001",to:"Not run"}
+ ]);
+ assert.equal(r[0].baselineExecutionId,"qaex-1");
+ assert.equal(old[0].payload.status,"Pass");
+});
+test("same-catalog historical runs have bounded read-only regression endpoint",async()=>{
+ const h=harness();
+ const previous=(await (await h.call("POST","runs",{client_request_id:"run-regression-prev01"})).json()).run;
+ const current=(await (await h.call("POST","runs",{client_request_id:"run-regression-now01"})).json()).run;
+ await h.call("POST","runs/"+previous.runId+"/results",{
+  client_request_id:"event-regression-prev01",testId:"QA-AUTH-001",status:"Pass",
+  notes:"Pass from older run"
+ });
+ const r=await h.call("GET","runs/"+current.runId+"/regressions?baseline="+previous.runId);
+ const body=await r.json();
+ assert.equal(r.status,200);
+ assert.equal(body.regressions.length,1);
+ assert.equal(body.regressions[0].to,"Not run");
+ assert.equal(h.rows.get(QA_EVENTS_TABLE).length,1);
 });
