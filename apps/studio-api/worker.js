@@ -1,3 +1,4 @@
+import { handleQaApi } from "./qa-http.mjs";
 import { loadAuthoritativeFactoryCorrection } from "./factory-correction-authority.mjs";
 import { readFactoryClaimsDiagnostic } from "./factory-timing-r2-inspector.mjs";
 import { readAuthoritativeGalleryInventory } from "./rendering-review-gallery-inventory-http.mjs";
@@ -1024,6 +1025,7 @@ export default {
       const isOpsAzNavyPierKickRoute = url.pathname === "/api/ops/az-navy-pier-kick";
       const isOpsMiamiTikTokSecretRoute = url.pathname === "/api/ops/tiktok/miami/pipeline-secret";
       const isOpsDeskInventoryRoute = url.pathname === "/api/ops/desk/inventory";
+      const isQaRoute = url.pathname.startsWith("/api/admin/qa/");
       const isAdminExceptionRecoveryRoute = url.pathname === "/api/admin/exception-recovery";
       const isAdminExceptionConversationRoute = /^\/api\/admin\/exception-recovery\/rec[A-Za-z0-9]{14}\/conversation$/.test(url.pathname);
       const isAdminExceptionPreflightRoute = /^\/api\/admin\/exception-recovery\/rec[A-Za-z0-9]{14}\/preflight$/.test(url.pathname);
@@ -1258,6 +1260,7 @@ export default {
         isOpsDeskModeWrite ||
         isAdminExceptionConversationWrite ||
         isAdminExceptionActionWrite ||
+        (isQaRoute && request.method === "POST") ||
         isOpsSupabaseSyncWrite ||
         isAiApiWrite ||
         isOperationsResetRenderUrlsWrite ||
@@ -1309,7 +1312,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.764-formal-review-parity",
+          version: "0.10.765-qa-center-v1",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -2199,6 +2202,13 @@ export default {
       }
       if (!authorization.authorized) {
         throw new HttpError(403, authorization.authorization_error || "Studio membership required");
+      }
+
+      // QA is tenant-admin-only and cannot mutate pipeline output or publish state.
+      if (isQaRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method === "POST") assertWriteRequest(request, env);
+        return await handleQaApi({request,url,env,authorization,airtableFetch,respond});
       }
 
       // An approved held revision can be reopened for creative redo without

@@ -1,0 +1,17 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {requireQaPermission,beginQaRun,appendQaEvent,qaReleaseGate,qaRegressions} from "./qa-governance.mjs";
+const actor={id:"admin1",permissions:["qa:write"]},run={runId:"r",status:"Open"},clock=()=>new Date("2026-10-31T12:00:00Z");
+test("authorization denies missing permission",()=>assert.throws(()=>requireQaPermission({id:"x",permissions:[]}),/denied/));
+test("run captures trusted UTC and deployments",()=>{let r=beginQaRun({actor,id:"r",catalogRevision:"1",deployment:{worker:"w",ui:"u",runner:"r"},environment:"qa",now:clock});assert.equal(r.createdAtUtc,"2026-10-31T12:00:00.000Z");});
+test("run rejects missing deployment",()=>assert.throws(()=>beginQaRun({actor,id:"r",catalogRevision:"1",deployment:{ui:"u"},environment:"qa"})));
+test("events declare Airtable write authority",()=>{let e=appendQaEvent({actor,run,testId:"t",operation:"ManualResult",key:"key-12345",now:clock});assert.equal(e.writeAuthority,"Airtable");assert.equal(e.appendOnly,true);});
+test("reject destructive operation",()=>assert.throws(()=>appendQaEvent({actor,run,testId:"t",operation:"Delete",key:"key-12345"}),/denied/));
+test("reject event on closed run",()=>assert.throws(()=>appendQaEvent({actor,run:{...run,status:"Closed"},testId:"t",operation:"ManualResult",key:"key-12345"}),/closed/));
+test("waiver needs additional permission",()=>assert.throws(()=>appendQaEvent({actor,run,testId:"t",operation:"Waiver",key:"key-12345"}),/denied/));
+test("reviewer cannot self approve",()=>assert.throws(()=>appendQaEvent({actor,run,testId:"t",operation:"HumanApproval",key:"key-12345",payload:{subjectActorId:"admin1"}}),/Self approval/));
+test("missing execution blocks release",()=>assert.equal(qaReleaseGate([{id:"t"}],[]).decision,"Incomplete"));
+test("real Fail rejects release",()=>assert.equal(qaReleaseGate([{id:"t"}],[{kind:"ManualResult",testId:"t",payload:{executionId:"e",status:"Fail"}}]).decision,"Reject"));
+test("AI requires human approval",()=>{const c=[{id:"t",requiresHumanApproval:true}],e=[{kind:"AutomatedObservation",testId:"t",payload:{executionId:"e",status:"Pass"}}];assert.equal(qaReleaseGate(c,e).ready,false);e.push({kind:"HumanApproval",payload:{executionId:"e",decision:"Approved"}});assert.equal(qaReleaseGate(c,e).ready,true);});
+test("waived release is never automatically ready",()=>assert.equal(qaReleaseGate([{id:"t"}],[],[{testId:"t",authorized:true,reason:"risk",expiresAtUtc:"2099-01-01T00:00:00Z"}]).ready,false));
+test("regression identified",()=>assert.equal(qaRegressions([{testId:"t",status:"Pass",executionId:"x"}],[{testId:"t",status:"Blocked",executionId:"y"}]).length,1));

@@ -1,0 +1,15 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {SAFE_ASSERTIONS,validateManualResult,createExecutionRecord,evaluateAssertion,releaseGate} from "./qa-test-core.mjs";
+test("fails closed on unregistered automated test",()=>assert.throws(()=>evaluateAssertion("QA-PUB-001",{}),/not registered/));
+test("missing evidence never becomes Pass",()=>assert.equal(evaluateAssertion("QA-DIAG-001",{}).status,"Blocked"));
+test("negative Worker health is Fail",()=>assert.equal(evaluateAssertion("QA-DIAG-001",{httpStatus:503,workerVersion:"v1"}).status,"Fail"));
+test("mirror mismatch is Fail",()=>assert.equal(evaluateAssertion("QA-SB-001",{comparisons:[{matches:true},{matches:false}]}).status,"Fail"));
+test("dry run cannot pass without mutation proof",()=>assert.equal(evaluateAssertion("QA-MAE-001",{dryRun:true,ruleViolations:0}).status,"Blocked"));
+test("dry run violation fails",()=>assert.equal(evaluateAssertion("QA-MAE-001",{dryRun:true,mutationCount:0,ruleViolations:2}).status,"Fail"));
+test("manual failure requires rationale",()=>assert.throws(()=>validateManualResult({testId:"QA-RUN-003",status:"Fail"}),/notes/));
+test("manual evidence has fixed budget",()=>assert.throws(()=>validateManualResult({testId:"X",status:"Pass",evidence:Array(11).fill({kind:"url",reference:"x"})}),/bounded/));
+test("UTC timestamp and identity derive from server",()=>{const e=createExecutionRecord({id:"exec1",runId:"run1",definition:{id:"T",severity:"High",version:1},submitted:{testId:"T",status:"Pass",notes:"Observed expected outcome"},identity:"admin",clock:()=>new Date("2026-10-31T21:00:00Z")});assert.equal(e.completedAtUtc,"2026-10-31T21:00:00.000Z");assert.equal(e.tester,"admin");});
+test("critical fail blocks release",()=>assert.deepEqual(releaseGate([{id:"T",severity:"Critical"}],[{testId:"T",status:"Fail"}]).failures,["T"]));
+test("human approval required for AI-reviewed test",()=>assert.equal(releaseGate([{id:"T",requiresHumanApproval:true}],[{testId:"T",executionId:"x",status:"Pass"}]).ready,false));
+test("no unbounded assertion definitions",()=>assert.ok(Object.values(SAFE_ASSERTIONS).every(x=>x.readOnly&&x.maxObservations<=30&&x.timeoutMs<=10000)));

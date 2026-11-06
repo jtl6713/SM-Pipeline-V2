@@ -1,0 +1,14 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {planQaAssertion,executeQaAssertion} from "./qa-registry.mjs";
+test("disallows arbitrary test executors",()=>assert.throws(()=>planQaAssertion("QA-PUB-001",{}),/not registered/));
+test("disallows publishing scope",()=>assert.throws(()=>planQaAssertion("QA-DIAG-001",{publish:true}),/Unsafe/));
+test("disallows production writes",()=>assert.throws(()=>planQaAssertion("QA-DIAG-001",{productionWrite:true}),/Unsafe/));
+test("MAE requires explicit dry-run",()=>assert.throws(()=>planQaAssertion("QA-MAE-001",{}),/dry-run/));
+test("mirror reconciliation requires explicit record allowlist",()=>assert.throws(()=>planQaAssertion("QA-SB-001",{recordIds:[]}),/allowlist/));
+test("mirror reconciliation rejects non-record selectors",()=>assert.throws(()=>planQaAssertion("QA-SB-001",{recordIds:["all"]}),/allowlist/));
+test("missing trusted observer blocks",async()=>assert.equal((await executeQaAssertion({testId:"QA-DIAG-001",scope:{},observers:{}})).status,"Blocked"));
+test("safe diagnostic with real observation passes",async()=>{const r=await executeQaAssertion({testId:"QA-DIAG-001",scope:{},observers:{workerHealth:async()=>({httpStatus:200,workerVersion:"0.10.1"})}});assert.equal(r.status,"Pass");assert.ok(r.startedAtUtc.endsWith("Z"));});
+test("unhealthy real response fails",async()=>assert.equal((await executeQaAssertion({testId:"QA-DIAG-001",scope:{},observers:{workerHealth:async()=>({httpStatus:503,workerVersion:"0.10.1"})}})).status,"Fail"));
+test("observer errors never become Pass",async()=>assert.equal((await executeQaAssertion({testId:"QA-DIAG-001",scope:{},observers:{workerHealth:async()=>{throw Error("offline")}}})).status,"Error"));
+test("mirror mismatch results in Fail",async()=>{const ids=["recABCDEFGHIJKLMN"];const r=await executeQaAssertion({testId:"QA-SB-001",scope:{recordIds:ids},observers:{mirrorParity:async()=>({comparisons:[{matches:false}]})}});assert.equal(r.status,"Fail");});

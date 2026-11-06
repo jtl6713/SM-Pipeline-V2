@@ -1,0 +1,65 @@
+name: QA Test Center Contract
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-api/qa-*.mjs'
+      - 'apps/studio-web/assets/qa-test-center.*'
+      - 'apps/studio-web/qa-test-center.*'
+      - 'apps/studio-web/index.html'
+      - 'apps/studio-web/qa-test-center.browser.mjs'
+      - 'apps/studio-api/worker.js'
+      - 'docs/qa-test-center/**'
+      - '.github/workflows/qa-test-center-contract.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  qa-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Static JavaScript syntax validation
+        run: |
+          node --check apps/studio-api/qa-test-core.mjs
+          node --check apps/studio-api/qa-governance.mjs
+          node --check apps/studio-api/qa-registry.mjs
+          node --check apps/studio-api/qa-airtable-ledger.mjs
+          node --check apps/studio-api/qa-http.mjs
+          node --check apps/studio-api/qa-idempotency-lock.mjs
+          node --check apps/studio-api/qa-catalog.mjs
+          node --check apps/studio-web/assets/qa-test-center.js
+          node --check apps/studio-web/qa-test-center.browser.mjs
+      - name: Execute QA governance and automation contract tests
+        run: node --test apps/studio-api/qa-test-core.test.mjs apps/studio-api/qa-governance.test.mjs apps/studio-api/qa-registry.test.mjs apps/studio-api/qa-airtable-ledger.test.mjs apps/studio-api/qa-http.test.mjs
+      - name: Validate catalog schema basics
+        run: |
+          node --input-type=module -e "
+          import fs from 'node:fs';
+          const c=JSON.parse(fs.readFileSync('docs/qa-test-center/catalog.v1.json','utf8'));
+          if(c.schemaVersion!==1||!Array.isArray(c.tests)||c.tests.length<25)process.exit(1);
+          const ids=new Set();
+          for(const t of c.tests){
+            if(ids.has(t.id)||!t.title||!t.severity||!t.prerequisites?.length||!t.steps?.length||!t.expectedResults?.length)process.exit(1);
+            ids.add(t.id);
+          }
+          console.log('Validated',ids.size,'unique catalog cases');
+          "
+
+      - name: Enforce Studio UI release and QA page wiring
+        run: |
+          node apps/studio-web/ui-release-contract.mjs
+          node --test apps/studio-web/ui-release-contract.test.mjs apps/studio-web/pages-production-deploy-contract.test.mjs apps/studio-web/qa-test-center.test.mjs
+          node --check apps/studio-api/worker.js
+
+      - name: Isolated browser execution of QA review and immutable closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save playwright@1.58.2 >/dev/null
+          npx playwright install --with-deps --only-shell chromium >/dev/null
+          node apps/studio-web/qa-test-center.browser.mjs
+

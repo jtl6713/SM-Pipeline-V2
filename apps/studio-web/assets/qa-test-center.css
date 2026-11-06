@@ -1,0 +1,30 @@
+/* QA Test Center isolated admin controls, mobile-first and zero publisher actions. */
+#page-qa-test-center{max-width:1100px;margin:0 auto;padding:20px 14px}
+.qa-panel{background:var(--card-bg,#fff);border:1px solid var(--border,#ced6e0);border-radius:14px;padding:16px;margin:14px 0;box-shadow:0 2px 9px #0c1a2b10}
+.qa-toolbar{display:flex;flex-wrap:wrap;align-items:end;gap:12px}
+.qa-toolbar label{display:flex;flex-direction:column;gap:4px;flex:1 1 180px;font-weight:600}
+.qa-toolbar select,.qa-toolbar textarea,.qa-toolbar input,.qa-case input,.qa-case textarea{width:100%;min-height:40px;padding:8px;border:1px solid #a8b6c6;border-radius:8px;background:var(--input-bg,#fff);color:inherit}
+.qa-toolbar button,.qa-case-actions button{min-height:40px;border:1px solid #8597ad;border-radius:8px;background:var(--card-bg,#fff);color:inherit;padding:8px 13px;cursor:pointer;font-weight:650}
+.qa-toolbar button:disabled,.qa-case-actions button:disabled{opacity:.45;cursor:default}
+.qa-case-actions button.qa-positive{background:#146e4b;color:white;border-color:#146e4b}
+.qa-case-group{margin:18px 0 26px}.qa-case-group h3{margin:12px 0}
+.qa-case{border:1px solid #c3ceda;border-radius:10px;background:var(--card-bg,#fff);margin:9px 0}
+.qa-case summary{cursor:pointer;font-size:.95rem;font-weight:700;padding:13px}
+.qa-case-body{padding:0 14px 15px}.qa-case-body ol{padding-left:20px}
+.qa-case-body li{margin:5px 0}.qa-case-body label{display:block;margin:12px 0;font-weight:600}
+.qa-case-body input,.qa-case-body textarea{display:block;margin-top:6px;font-weight:400}
+.qa-case-actions{display:flex;gap:8px;flex-wrap:wrap}
+#qaStatus{padding:10px 0;min-height:30px;overflow-wrap:anywhere}
+#qaStatus[data-kind="error"],.qa-alert{color:#b5262b}
+.qa-event-list{max-height:450px;overflow-y:auto}.qa-event-row{padding:10px 0;border-bottom:1px solid #d8e0e9}
+.qa-event-row strong,.qa-event-row span{display:block;overflow-wrap:anywhere}
+.qa-event-row span{font-size:.85rem;color:var(--muted,#68788a)}
+.qa-event-row p{margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:600px){#page-qa-test-center{padding:12px 8px}.qa-panel{padding:12px}.qa-toolbar button{width:100%}}
+
+#qaFinalPanel{border-top:3px solid #586c85}
+#qaFinalPanel .qa-toolbar{align-items:end}
+#qaFinalPanel #qaFinalHelp{line-height:1.45}
+#qaFinalPanel textarea{resize:vertical;min-height:78px}
+#qaFinalPanel select:disabled,#qaFinalPanel textarea:disabled{opacity:.55}
+#qaFinalPanel button{white-space:nowrap}

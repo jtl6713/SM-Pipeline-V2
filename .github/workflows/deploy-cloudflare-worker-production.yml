@@ -594,6 +594,9 @@ jobs:
               const url = new URL(request.url);
               const scriptedFeedbackProbe = url.pathname === "/$TOKEN/scripted-short-revise-probe";
               const scriptedMulti = scriptedFeedbackProbe && url.searchParams.get("mode") === "multi";
+              const qaCatalog = url.pathname === "/$TOKEN/qa-catalog";
+              const qaRuns = url.pathname === "/$TOKEN/qa-runs";
+              const qaUnauthenticated = url.pathname === "/$TOKEN/qa-unauthenticated";
               const reviewSessions = url.pathname === "/$TOKEN/rendering-review-sessions";
               const reviewQueue = url.pathname === "/$TOKEN/rendering-review-queue";
               const factoryStatus = url.pathname === "/$TOKEN/factory-status";
@@ -610,9 +613,11 @@ jobs:
               const readyProductionDiagnostic = url.pathname === "/$TOKEN/ready-production-diagnostic";
               const summary = url.pathname === "/$TOKEN/summary";
               const summaryReconcile = url.pathname === "/$TOKEN/summary-reconcile";
-              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !failedOutputCensus && !qualityFacebookPreview && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic && !summary && !summaryReconcile && !reviewSessions && !reviewQueue && !scriptedFeedbackProbe) return new Response("Not found", {status:404});
+              if (url.pathname !== "/$TOKEN" && !factoryStatus && !factoryDesk && !chicagoCanary && !globalCanary && !failedOutputCensus && !qualityFacebookPreview && !overview && !overviewRefresh && !overviewStatus && !readyProductionDiagnostic && !summary && !summaryReconcile && !reviewSessions && !reviewQueue && !scriptedFeedbackProbe && !qaCatalog && !qaRuns && !qaUnauthenticated) return new Response("Not found", {status:404});
               const generation = String(url.searchParams.get("generation") || "");
-              const path = scriptedFeedbackProbe ? "/api/scripted-short/revise"
+              const path = qaCatalog || qaUnauthenticated ? "/api/admin/qa/catalog"
+                : qaRuns ? "/api/admin/qa/runs?limit=1"
+                : scriptedFeedbackProbe ? "/api/scripted-short/revise"
                 : reviewSessions ? "/api/rendering-review/sessions?profile_id=recT2rbKX3MF7cVFU"
                 : reviewQueue ? "/api/rendering-review/queue?profile_id=recT2rbKX3MF7cVFU"
                 : qualityFacebookPreview ? "/api/operations/outputs/" + previewOutputId + "/schedule"
@@ -629,6 +634,7 @@ jobs:
                 : factoryStatus ? "/api/factory/approval-batches?profile=recF7UAn0LkMZZrWZ" : "/api/session";
               const method = (overviewRefresh || summaryReconcile || qualityFacebookPreview || scriptedFeedbackProbe) ? "POST" : "GET";
               const headers = {"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Accept":"application/json"};
+              if (qaUnauthenticated) delete headers["Cf-Access-Authenticated-User-Email"];
               if (overviewRefresh || summaryReconcile || qualityFacebookPreview || scriptedFeedbackProbe) headers["Content-Type"] = "application/json";
               const internal = new Request("https://studio.chicagoshining.com" + path, {
                 method,
@@ -707,6 +713,26 @@ jobs:
           test "$SESSION_CODE" = "200"
           jq -e '.ok==true and .authenticated==true and .authorized==true and .email=="joseph.t.logan@gmail.com"' /tmp/session.json >/dev/null
           echo "functional_session_check=PASS"
+
+      - name: Verify live QA catalog and bounded Airtable history through protected service binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
+          TOKEN=$(cat /tmp/verify-token.txt)
+          BASE="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN"
+          curl -fsS --retry 5 --retry-delay 2 --max-time 45 "$BASE/qa-catalog" -o /tmp/qa-live-catalog.json
+          jq -e '.ok==true and .writeAuthority=="Airtable" and (.tests|type)=="array" and (.tests|length)>=88 and (.safeAutomations|type)=="array"' /tmp/qa-live-catalog.json >/dev/null
+          curl -fsS --retry 5 --retry-delay 2 --max-time 45 "$BASE/qa-runs" -o /tmp/qa-live-runs.json
+          jq -e '.ok==true and (.runs|type)=="array" and (.limited_to==1)' /tmp/qa-live-runs.json >/dev/null
+          code=$(curl -sS --max-time 45 -o /tmp/qa-live-denied.json -w '%{http_code}' "$BASE/qa-unauthenticated")
+          if [[ "$code" != "401" && "$code" != "403" ]]; then
+            echo "QA authorization guard failed; unauthenticated request returned $code" >&2
+            exit 1
+          fi
+          echo "qa_admin_catalog_read=PASS"
+          echo "qa_canonical_run_list_read=PASS"
+          echo "qa_unauthenticated_denial=PASS"
 
       - name: Verify bounded Rendering Review workspace through service binding
         shell: bash
