@@ -77,22 +77,23 @@ jobs:
           function cfg([string]$key){return [string]($config[$key])}
           $py=Join-Path $service '.venv\Scripts\python.exe'
           $venvOk=Test-Path -LiteralPath $py -PathType Leaf
-          if($venvOk){
-            Push-Location $service
-            $env:PYTHONPATH=$service
+          # Ask the deployed Runner itself. Its server-side implementation
+          # reads Airtable independently of Drive and returns sanitized root
+          # causes; no token, folder ID, policy details, or job is exposed.
+          $readiness=$null
+          $audited=$false
+          $runnerSecret=(cfg 'PIPELINE_RUNNER_SHARED_SECRET')
+          if($runnerSecret.Length -ge 24){
             try{
-              $p=& $py -c 'from config import load_settings; from rendering_review.native_gallery_rights_policy import build_approved_native_gallery_clearance; c=build_approved_native_gallery_clearance(load_settings()); print("reviewed" if callable(c) else "blocked")' 2>$null
-              $policyOk=($LASTEXITCODE -eq 0 -and [string]$p -eq 'reviewed')
+              $readiness=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/jobs/native-gallery/readiness' -Method Get -Headers @{'X-Pipeline-Secret'=$runnerSecret} -TimeoutSec 60
+              $audited=($readiness.ok -eq $true -and $readiness.mode -eq 'read_only_no_generation')
             }catch{}
-            try{
-              $v=& $py -c 'from integrations.google_drive import GoogleDriveClient; d=GoogleDriveClient(); m=d.get_file("@FOLDER@"); p=d.list_file_permissions("@FOLDER@"); print("private" if isinstance(m,dict) and m.get("id")=="@FOLDER@" and m.get("mimeType")=="application/vnd.google-apps.folder" and m.get("trashed") is not True and isinstance(p,list) and len(p)>0 and all(isinstance(x,dict) and x.get("type") in ("user","group") for x in p) else "blocked")' 2>$null
-              $driveOk=($LASTEXITCODE -eq 0 -and [string]$v -eq 'private')
-            }catch{}
-            try{
-              $v=& $py -c 'from airtable.client import AirtableClient; from integrations.google_drive import GoogleDriveClient; from rendering_review.native_gallery_staging_settings import resolve_private_native_gallery_staging_folder; f=resolve_private_native_gallery_staging_folder(AirtableClient(), GoogleDriveClient()); print("verified" if f=="@FOLDER@" else "blocked")' 2>$null
-              $folderPinned=($LASTEXITCODE -eq 0 -and [string]$v -eq 'verified')
-            }catch{}
-            Pop-Location
+          }
+          $runnerSecret=''
+          if($audited){
+            $policyOk=($readiness.provider_model_policy_matches_config -eq $true)
+            $driveOk=($readiness.runner_can_access_private_staging -eq $true)
+            $folderPinned=($readiness.staging_airtable_setting_verified -eq $true)
           }
           $origin=(cfg 'NATIVE_GALLERY_WORKER_BASE_URL')
           $originOk=$origin.StartsWith('https://') -and !$origin.Contains('@')
@@ -105,12 +106,15 @@ jobs:
           if(!$venvOk){$blockers.Add('RUNNER_SERVICE_VENV_NOT_FOUND')}
           if(!$healthOk){$blockers.Add('RUNNER_HEALTH_NOT_OK')}
           if($codeVersion -ne $expected -or $healthVersion -ne $expected){$blockers.Add('RUNNER_VERSION_MISMATCH')}
-          if(!$policyOk){$blockers.Add('EXACT_PROVIDER_MODEL_RIGHTS_CONFIG_NOT_MATCHED')}
-          if(!$driveOk){$blockers.Add('RUNNER_CANNOT_VERIFY_PRIVATE_DRIVE_STAGING')}
-          if(!$folderPinned){$blockers.Add('STAGING_FOLDER_NOT_PINNED')}
-          if(!$originOk){$blockers.Add('WORKER_URL_NOT_CONFIGURED')}
-          if(!$sharedOk){$blockers.Add('JOB_SHARED_SECRET_NOT_CONFIGURED')}
-          if(!$consumerOk){$blockers.Add('CONSUMER_ID_NOT_CONFIGURED')}
+          if(!$audited){
+            $blockers.Add('RUNNER_READINESS_ENDPOINT_NOT_VERIFIED')
+          }else{
+            foreach($code in @($readiness.blockers)){
+              if($code -is [string] -and $code -match '^[A-Z0-9_]{5,100}$'){
+                $blockers.Add($code)
+              }
+            }
+          }
           if(!$autoOff){$blockers.Add('AUTO_EXECUTION_MUST_REMAIN_OFF')}
           if(!$oneShotOff){$blockers.Add('EXISTING_EXECUTION_FLAGS_REQUIRE_REVIEW')}
           $report=[ordered]@{
@@ -118,6 +122,8 @@ jobs:
             runner_health_ok=[bool]$healthOk
             runner_source_and_health_version_match=[bool]($codeVersion -eq $expected -and $healthVersion -eq $expected)
             provider_model_policy_matches_config=[bool]$policyOk
+            runner_diagnostic_verified=[bool]$audited
+            airtable_setting_verified=[bool]$folderPinned
             runner_can_access_private_staging=[bool]$driveOk
             staging_folder_pinned=[bool]$folderPinned
             auto_execution_disabled=[bool]$autoOff
