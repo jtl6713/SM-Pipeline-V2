@@ -211,10 +211,13 @@ test("Expired browser-only submissions clear only after an authoritative exact-I
   assert.match(js, /Factory confirmed was never created/);
 });
 
-test("Submit Approvals hides queued and accepted outputs even with a stale Desk snapshot", () => {
+test("Factory preserves server Needs Eyes counts and rows while pending/accepted hints disable duplicate clicks", () => {
   assert.match(js, /state\.submittingOutputIds = new Set\(selectionIds\)/);
   assert.match(js, /state\.submittingOutputIds = new Set\(ready\.map\(card => card\.id\)\)/);
-  assert.match(js, /hiddenApprovals\.has\(card\.id\)/);
+  assert.match(js, /const visibleDesk = desk;/);
+  assert.match(js, /needs_eyes: filtered\(desk\.lanes\?\.needs_eyes\)\.length/);
+  assert.match(js, /renderLane\("factoryLaneNeedsEyes", filtered\(desk\.lanes\?\.needs_eyes\)/);
+  assert.doesNotMatch(js.slice(js.indexOf("  function renderDesk(desk) {"), js.indexOf("  const ACTION_STATUS")), /hiddenApprovals|recentFactoryAccepted/);
   assert.match(js, /bindCardActions\(visibleDesk\)/);
   assert.match(js, /recentFactoryAccepted\(\)\[String\(card\?\.id \|\| ""\)\]/);
   assert.match(js, /if \(state\.desk\) renderDesk\(state\.desk\)/);
