@@ -4,6 +4,8 @@ import { evaluateAssertion, SAFE_ASSERTIONS } from "./qa-test-core.mjs";
 const allowed = new Set(Object.keys(SAFE_ASSERTIONS));
 const OBSERVER_NAMES = Object.freeze({
   "QA-DIAG-001":"workerHealth",
+  "QA-CAT-001":"catalogIntegrity",
+  "QA-AT-001":"canonicalRun",
   "QA-SB-001":"mirrorParity",
   "QA-MAE-001":"maeDryRun"
 });
