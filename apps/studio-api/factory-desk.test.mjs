@@ -509,7 +509,7 @@ test("Michigan V2 held review is visible in Needs Eyes but cannot be Factory-app
   assert.equal(desk.lanes.needs_eyes[1].review_hold_active,false);
   const queue=await readFile(path.join(here,"ops-queue.mjs"),"utf8");
   assert.ok(queue.includes("OPS_QUEUE_REVIEW_FORMULA"));
-  assert.ok(queue.includes('AND({Do_Not_Publish},{Output_Status}="Ready for Review",{Review_Status}="Review Sent")'));
+  assert.ok(queue.includes('AND({Do_Not_Publish},{Output_Status}="Ready for Review",OR({Review_Status}=BLANK(),{Review_Status}="Review Sent",{Review_Status}="Pending Review"))'));
   const js=await readFile(path.join(here,"../studio-web/assets/factory-desk.js"),"utf8");
   const html=await readFile(path.join(here,"../studio-web/index.html"),"utf8");
   assert.ok(js.includes("card.review_hold_active === true || card.do_not_publish === true"));
@@ -517,4 +517,29 @@ test("Michigan V2 held review is visible in Needs Eyes but cannot be Factory-app
   assert.ok(js.includes("state.needsEyesSearch"));
   assert.ok(js.includes("cards.some(card => card.review_hold_active === true)"));
   assert.ok(html.includes('id="factoryNeedsEyesSearch"'));
+});
+
+test("held but unreviewed RFR media enters Needs Eyes with explicit release option, not an approval", async () => {
+  const row = {
+    id: "recStillHeldReady001", kind: "output", output_id: 7997,
+    title: "Roosevelt Island Tram Still", output_status: "Ready for Review",
+    review_status: "", studio_state: "Ready for Review",
+    render_status: "Native Photo Route", do_not_publish: true,
+    review_hold_active: false, review_package_ready: true,
+    publish_status: "Not Ready",
+    thumbnail_url: "https://media.chicagoshining.com/preview.png",
+  };
+  const desk = partitionFactoryLanes([row]);
+  assert.equal(desk.summary.needs_eyes, 1);
+  assert.equal(desk.lanes.needs_eyes[0].do_not_publish, true);
+  const ui = await readFile(path.join(here, "../studio-web/assets/factory-desk.js"), "utf8");
+  const server = await readFile(path.join(here, "worker-functions-04.mjs"), "utf8");
+  assert.match(ui, /function canReleaseForApproval/);
+  assert.match(ui, /data-factory-release-approval/);
+  assert.match(ui, /action: "release_for_approval"/);
+  assert.match(server, /withOutputApprovalLock\(env\.STUDIO_MEDIA, id, async \(\) =>/);
+  assert.match(server, /factoryApprovalHoldReleaseEligibility\(current, readiness\)/);
+  assert.match(server, /Auto_Publish_Enabled: false/);
+  assert.match(server, /requireAnyPermission\(authorization, \["publishing_control", "tenant_admin"\]\)/);
+  assert.match(server, /refresh_required: true/);
 });
