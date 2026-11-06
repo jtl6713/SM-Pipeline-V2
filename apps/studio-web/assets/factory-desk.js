@@ -1457,6 +1457,21 @@
     return "This profile or output type is outside the current batch rollout; use individual Approve.";
   }
 
+  function canReleaseForApproval(card) {
+    const output = String(card?.output_status || "").trim().toLowerCase();
+    const review = String(card?.review_status || "").trim().toLowerCase();
+    const render = String(card?.render_status || "").trim().toLowerCase();
+    const publish = String(card?.publish_status || "").trim().toLowerCase();
+    return card?.kind === "output"
+      && card.do_not_publish === true
+      && card.review_hold_active !== true
+      && card.review_package_ready !== false
+      && output === "ready for review"
+      && ["", "review sent", "pending review"].includes(review)
+      && ["rendered", "native photo route"].includes(render)
+      && !["scheduled", "publishing", "published", "uploading", "platform processing", "draft delivered"].includes(publish);
+  }
+
   function renderCard(card, { pile = false, candidate = false, lane = "" } = {}) {
     const actions = [];
     actions.push(`<button type="button" class="text-button" data-factory-open="${esc(card.id)}">Open</button>`);
@@ -1487,6 +1502,9 @@
         }else{
           actions.push(`<button type="button" class="secondary-button factory-held-creative-action" data-factory-accept-held="${esc(card.id)}" title="Accept the selected V2 creatively. Keeps watermark QA, scheduling and publishing on hold.">Accept V2 (QA hold)</button>`);
         }
+      }
+      if (needsEyesOutput && canReleaseForApproval(card)) {
+        actions.push(`<button type="button" class="secondary-button" data-factory-release-approval="${esc(card.id)}" title="Operator-controlled release only. Does not approve, schedule, or publish.">Release for Approval</button>`);
       }
       actions.push(`<button type="button" class="secondary-button" data-factory-send-back="${esc(card.id)}">Request Changes</button>`);
     }
@@ -2754,6 +2772,26 @@
           button.removeAttribute("aria-busy");
           button.textContent=originalLabel;
           button.disabled=false;
+        }
+      });
+    });
+    root.querySelectorAll("[data-factory-release-approval]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const card = byId.get(button.getAttribute("data-factory-release-approval"));
+        if (!card || !canReleaseForApproval(card)) {
+          setStatus("This output is no longer eligible for a review-hold release. Refresh Factory.", true);
+          return;
+        }
+        if (!window.confirm(`Release the publishing hold on "${cardLabel(card)}" for formal review?\\n\\nThis does NOT approve, schedule, or publish the output. You must separately review the media and click Approve or Request Changes. Protected V2/QA holds cannot be released here.`)) return;
+        button.disabled = true;
+        try {
+          await mutateDesk({ action: "release_for_approval", id: card.id, kind: "output" });
+        } catch (error) {
+          const message = String(error?.message || error);
+          setStatus(message, true);
+          window.alert("Release for Approval failed:\\n" + message);
+        } finally {
+          button.disabled = false;
         }
       });
     });
