@@ -6,6 +6,7 @@ on:
       - 'apps/studio-web/assets/qa-test-center.*'
       - 'apps/studio-web/qa-test-center.*'
       - 'apps/studio-web/index.html'
+      - 'apps/studio-web/qa-test-center.browser.mjs'
       - 'apps/studio-api/worker.js'
       - 'docs/qa-test-center/**'
       - '.github/workflows/qa-test-center-contract.yml'
@@ -61,3 +62,18 @@ jobs:
           npm install --no-save playwright@1.58.2 >/dev/null
           npx playwright install --with-deps --only-shell chromium >/dev/null
           node apps/studio-web/qa-test-center.browser.mjs
+
+  qa-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated headless Chromium
+        run: |
+          npm install --no-save playwright@1.58.2
+          npx playwright install --with-deps --only-shell chromium
+      - name: Simulate Admin catalog, manual evidence, immutable run closure and no publishing
+        run: node apps/studio-web/qa-test-center.browser.mjs
