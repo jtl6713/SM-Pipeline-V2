@@ -2875,15 +2875,15 @@
   function renderDesk(desk) {
     state.desk = desk;
     syncFactoryFilterOptions();
-    const hiddenApprovals = new Set([...Object.keys(recentFactoryAccepted()), ...(state.submittingOutputIds || [])]);
     const searching = Boolean(String(state.needsEyesSearch || "").trim());
-    // An explicit search should find reviewable items across profiles and should
-    // not silently conceal records due to a stale browser-only acceptance fence.
+    // The server's current Needs Eyes lane owns both the count and visible rows.
+    // A 48-hour browser-side "recently accepted" hint is NOT a completed Airtable
+    // approval: uncertain/failed batches can leave the output Ready for Review.
+    // Keep such rows visible and counted. canReviewActions still prevents a
+    // duplicate submit while the saved approval is being reconciled.
     const filtered = (cards) => (cards || []).filter(card =>
-      (searching || factoryMatchesProfile(card)) &&
-      !(card?.kind === "output" && hiddenApprovals.has(card.id) && !searching));
-    const visibleDesk = { ...desk, lanes: { ...desk.lanes,
-      needs_eyes: (desk.lanes?.needs_eyes || []).filter(card => !hiddenApprovals.has(card.id)) } };
+      searching || factoryMatchesProfile(card));
+    const visibleDesk = desk;
     // Global counts come from the authoritative Desk summary. With a Factory
     // filter, only rows in the returned snapshot are counted and labelled.
     const summary = factoryProfileId() ? {
