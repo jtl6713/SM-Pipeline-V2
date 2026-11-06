@@ -105,3 +105,54 @@ test("missing deliverable is excluded from Needs Eyes and sent for repair", () =
   assert.equal(visibility.visible, false);
   assert.equal(visibility.incomplete, true);
 });
+
+test("Factory Needs Eyes counts valid multi-ratio carousel variants by selected photos, not linked slides", () => {
+  for (const [outputNumber, profile, selected, prepared, platform, outputType] of [
+    [9757, "Chicago", 4, 8, "Facebook", "Multi-Image Post"],
+    [9758, "Chicago", 4, 8, "TikTok", "Multi-Photo"],
+    [9765, "Miami", 4, 8, "Instagram", "Carousel"],
+    [9822, "New York", 8, 24, "Facebook", "Multi-Image Post"],
+    [9823, "New York", 8, 16, "TikTok", "Multi-Photo"],
+  ]) {
+    const selectedClips = Array.from({ length: selected }, (_, i) => ({
+      url: cdn + "studio/previews/lettered/output-" + outputNumber + "/" + i + ".jpg",
+    }));
+    const record = asRecord({
+      ...photo,
+      Platform: platform,
+      Studio_Output_Type: outputType,
+      Output_Caption: "Real, reviewed " + profile + " photo tour",
+      Selected_Clip_Count: selected,
+      "Carousel Slides": Array.from({ length: prepared }, (_, i) => ({ id: "recVariant" + i })),
+      Selected_Assets_JSON: JSON.stringify({ validation_status: "Valid", selected_clips: selectedClips }),
+    }, "recFactoryVariant" + outputNumber);
+    const readiness = evaluateReviewPackage(record);
+    assert.equal(readiness.readiness, "READY", "output " + outputNumber + " must not reject multi-ratio variants: " + readiness.missing_requirements);
+    assert.equal(factoryReviewVisibility(record, readiness, "Ready for Review", true).visible, true);
+    assert.equal(readiness.missing_requirements.length, 0);
+  }
+});
+
+test("selected source count and CDN safety still fail closed independently of extra crop variants", () => {
+  const good = JSON.parse(photo.Selected_Assets_JSON);
+  for (const [problem, changes] of [
+    ["selected clips too short", { Selected_Assets_JSON: JSON.stringify({
+      ...good, selected_clips: good.selected_clips.slice(0, 3),
+    }) }],
+    ["non-CDN media", { Selected_Assets_JSON: JSON.stringify({
+      ...good, selected_clips: good.selected_clips.map((row, i) => i === 0 ? { url: "https://example.com/bad.jpg" } : row),
+    }) }],
+    ["no caption", { Output_Caption: "" }],
+    ["insufficient linked canonical source evidence", {
+      Selected_Assets_JSON: "",
+      "Carousel Slides": [{ id: "recOnlyOneSlide" }],
+    }],
+  ]) {
+    const record = asRecord({
+      ...photo, Selected_Clip_Count: 8, "Carousel Slides": Array.from({ length: 24 }, (_, i) => ({ id: "recVariant" + i })),
+      ...changes,
+    });
+    const readiness = evaluateReviewPackage(record);
+    assert.equal(readiness.readiness, "BLOCKED", problem);
+  }
+});
