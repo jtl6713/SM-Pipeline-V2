@@ -202,3 +202,42 @@ test("Runner attestation allows only the fixed health origin and Airtable source
   assert.equal(await verifiedRunnerVersion({PIPELINE_RUNNER_URL:"https://pipeline.chicagoshining.com"},
     async()=>{throw new Error("offline");}),"unverified");
 });
+
+
+test("historical runs remain readable but a newer catalog refuses writes and release approval",async()=>{
+  const h=harness();
+  const created=(await (await h.call("POST","runs",{client_request_id:"run-catalog-drift-001"})).json()).run;
+  const canonical=h.rows.get(QA_RUNS_TABLE).find(x=>x.fields["Run ID"]===created.runId);
+  canonical.fields["Catalog Revision"]="2026-10-31.1";
+  const history=await (await h.call("GET","runs/"+created.runId)).json();
+  assert.equal(history.ok,true);
+  assert.equal(history.run.catalogRevision,"2026-10-31.1");
+  const gate=await (await h.call("GET","runs/"+created.runId+"/gate")).json();
+  assert.equal(gate.gate.ready,false);
+  assert.equal(gate.gate.decision,"Incomplete");
+  assert.ok(gate.gate.deploymentBlockers.some(x=>/catalog revision changed/i.test(x)));
+  await assert.rejects(()=>h.call("POST","runs/"+created.runId+"/results",{
+    testId:"QA-AUTH-001",status:"Pass",notes:"Legacy case",client_request_id:"result-old-catalog001"
+  }),/QA catalog revision changed/);
+  await assert.rejects(()=>h.call("POST","runs/"+created.runId+"/execute/QA-DIAG-001",{
+    client_request_id:"assert-old-catalog01"
+  }),/QA catalog revision changed/);
+  assert.equal(h.rows.get(QA_EVENTS_TABLE).length,0);
+});
+
+test("run gate detects an event whose catalog provenance no longer matches the run",async()=>{
+  const h=harness();
+  const created=(await (await h.call("POST","runs",{client_request_id:"run-event-version-001"})).json()).run;
+  const posted=await h.call("POST","runs/"+created.runId+"/results",{
+    client_request_id:"event-mismatched-001",testId:"QA-AUTH-001",status:"Pass",
+    notes:"Observed authorized and denied API responses."
+  });
+  assert.equal(posted.status,201);
+  const event=h.rows.get(QA_EVENTS_TABLE)[0];
+  const payload=JSON.parse(event.fields["Payload JSON"]);
+  payload.catalogVersion="obsolete-version";
+  event.fields["Payload JSON"]=JSON.stringify(payload);
+  const gate=await (await h.call("GET","runs/"+created.runId+"/gate")).json();
+  assert.equal(gate.gate.ready,false);
+  assert.ok(gate.gate.deploymentBlockers.some(x=>/mismatched catalog revision/i.test(x)));
+});
