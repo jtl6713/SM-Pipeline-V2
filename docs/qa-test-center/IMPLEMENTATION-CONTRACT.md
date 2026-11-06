@@ -1,6 +1,6 @@
 # QA Test Center — implementation and release contract
 
-**Status (November 6, 2026): working draft implementation on PR #1429, NOT merged, NOT deployed, NOT production-validated.** The former foundation-only description is obsolete. Do not claim that the user has a functioning production QA Test Center until GitHub deployments and live authenticated user testing are verified.
+**Status (November 6, 2026): merged PR #1429, production UI 0.6.897 and Worker 0.10.765 verified for authenticated read-only QA catalog/history and unauthenticated denial; full manual acceptance remains outstanding.** The former foundation-only description is obsolete. Do not claim that the user has a functioning production QA Test Center until GitHub deployments and live authenticated user testing are verified.
 
 ## Implemented draft capabilities
 
@@ -41,10 +41,10 @@
 ## Operational and security constraints
 
 - Airtable is the only QA write authority; Supabase remains a non-authoritative mirror and is not required for this pilot. No Supabase-first writes.
-- Protected GitHub deployment workflows must apply any Worker and Pages releases. Follow `AGENTS.md`: Studio UI release `0.6.897` and matching shared cache key `0.6.897-qa-center-pilot` must be strictly higher than actual production when merged. Worker draft reports `0.10.765-qa-center-v1`. If production moves ahead before merging, rebase and bump again.
+- Protected GitHub deployment workflows must apply any Worker and Pages releases. Follow `AGENTS.md`: Studio UI release `0.6.897` and matching shared cache key `0.6.897-qa-center-pilot` must be strictly higher than actual production when merged. Worker hardening release targets `0.10.766-qa-release-attestation` with fail-closed deployment provenance.
 - R2 conditional lease protects idempotent append against concurrent duplicate submissions; callers should reuse `client_request_id` after uncertain responses. Airtable history is an audit ledger, not a mutable checklist.
 - No generated code, arbitrary external URL, unattended publication, destructive record operation, unscoped Supabase query or production synthetic mutation is allowed.
-- **Outstanding before release:** pass complete CI at the final head SHA; run a live authenticated Admin/reader deny test; verify an actual Airtable round trip and UI walkthrough; attest real Worker/Pages/Runner identifiers; exercise a deliberately failing assertion; verify production safety and no publishing. Finish or explicitly defer remaining 88-case automation coverage with reviewed read-only observer implementations.
+- **Outstanding operational acceptance:** execute the 88-case manual suite, verify authenticated QA Worker POST/read/replay (the storage-only Airtable smoke and protected read-only API smoke have passed), exercise a deliberately failing diagnostic and independent human signoff, and confirm no publishing. Unimplemented observers remain disabled until reviewed.
 - Do not mark draft PR #1429 complete/ready or deploy just because isolated tests pass.
 
 ---

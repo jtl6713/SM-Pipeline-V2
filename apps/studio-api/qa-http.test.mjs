@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {handleQaApi,computeQaGate,compareQaRunResults,qaEvidenceIntegrityBlockers,QA_RUNS_TABLE,QA_EVENTS_TABLE,verifiedRunnerVersion} from "./qa-http.mjs";
+import {handleQaApi,computeQaGate,compareQaRunResults,qaEvidenceIntegrityBlockers,qaDeploymentBlockers,QA_WORKER_BUILD,QA_UI_BUILD,QA_RUNS_TABLE,QA_EVENTS_TABLE,verifiedRunnerVersion} from "./qa-http.mjs";
 
 function harness(){
   const rows=new Map([[QA_RUNS_TABLE,[]],[QA_EVENTS_TABLE,[]]]);
@@ -369,4 +369,38 @@ test("replaying a finalized QA decision as a different admin is denied",async()=
  const own=await h.call("POST","runs/"+created.run.runId+"/finalize",body,"recADMIN00000001");
  assert.equal(own.status,200);
  assert.equal(h.rows.get(QA_EVENTS_TABLE).length,1);
+});
+
+
+test("missing, wrong-environment or stale build metadata blocks QA release provenance",()=>{
+ const valid={environment:"production",deployment:{worker:QA_WORKER_BUILD,ui:QA_UI_BUILD,runner:"runner-attested-123"}};
+ assert.deepEqual(qaDeploymentBlockers(valid,"production"),[]);
+ for(const runner of [undefined,null,"","unverified","not-deployed"]){
+   const bad={...valid,deployment:{...valid.deployment,runner}};
+   assert.ok(qaDeploymentBlockers(bad,"production").includes("Runner deployment is not attested"));
+ }
+ assert.ok(qaDeploymentBlockers(valid,"staging").some(x=>/different execution environment/.test(x)));
+ assert.ok(qaDeploymentBlockers({...valid,deployment:{...valid.deployment,worker:"old-worker"}},"production")
+   .some(x=>/Worker deployment does not match/.test(x)));
+ assert.ok(qaDeploymentBlockers({...valid,deployment:{...valid.deployment,ui:"old-ui"}},"production")
+   .some(x=>/Studio UI deployment does not match/.test(x)));
+});
+test("foreign QA runs cannot accept results and stale-build runs remain readable but not writable",async()=>{
+ const h=harness();
+ const run=(await(await h.call("POST","runs",{client_request_id:"qa-provenance-run-001"})).json()).run;
+ const row=h.rows.get(QA_RUNS_TABLE)[0];
+ row.fields.Environment="staging";
+ await assert.rejects(()=>h.call("POST","runs/"+run.runId+"/results",{
+   client_request_id:"qa-provenance-result-1",testId:"QA-AUTH-001",status:"Pass",notes:"Observed 403"
+ }),/different execution environment/);
+ let gate=(await(await h.call("GET","runs/"+run.runId+"/gate")).json()).gate;
+ assert.ok(gate.deploymentBlockers.some(x=>/different execution environment/.test(x)));
+ row.fields.Environment="production";
+ row.fields["Deployment JSON"]=JSON.stringify({worker:"old-worker",ui:"old-ui",runner:"unverified"});
+ await assert.rejects(()=>h.call("POST","runs/"+run.runId+"/results",{
+   client_request_id:"qa-provenance-result-2",testId:"QA-AUTH-001",status:"Pass",notes:"Observed 403"
+ }),/QA run deployment has changed/);
+ gate=(await(await h.call("GET","runs/"+run.runId+"/gate")).json()).gate;
+ assert.ok(gate.deploymentBlockers.some(x=>/Worker deployment does not match/.test(x)));
+ assert.equal(h.rows.get(QA_EVENTS_TABLE).length,0);
 });
