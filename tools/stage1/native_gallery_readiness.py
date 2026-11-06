@@ -32,18 +32,19 @@ def is_private_folder(metadata, permissions, folder_id):
         and metadata.get("id") == folder_id
         and metadata.get("mimeType") == "application/vnd.google-apps.folder"
         and metadata.get("trashed") is not True
+        and metadata.get("shared") is not True
         and isinstance(permissions, list)
-        and len(permissions) > 0
-        and all(
-            isinstance(p, dict) and p.get("type") in {"user", "group"}
-            for p in permissions
-        )
+        and len(permissions) == 1
+        and isinstance(permissions[0], dict)
+        and permissions[0].get("type") == "user"
+        and permissions[0].get("role") == "owner"
     )
 
 
 def assess(
     *, expected_version, code_version, reported_version, health_ok,
     env, rights_policy_verified, candidate_folder_private,
+    canonical_folder_verified=False,
 ):
     """Pure, deterministic classification; never includes secret values."""
     flags = {k: env.get(k) == "true" for k in FEATURES}
@@ -64,8 +65,10 @@ def assess(
         issues.append("RUNNER_CREDENTIALS_CANNOT_VERIFY_PRIVATE_CANDIDATE_FOLDER")
     if not CANDIDATE_PATTERN.fullmatch(candidate):
         issues.append("CANDIDATE_FOLDER_ID_INVALID")
-    if configured_folder != candidate:
-        issues.append("RUNTIME_STAGING_FOLDER_NOT_PINNED_TO_PRIVATE_CANDIDATE")
+    if not canonical_folder_verified:
+        issues.append("AIRTABLE_STAGING_SETTING_NOT_VERIFIED")
+    if configured_folder and configured_folder != candidate:
+        issues.append("RUNTIME_STAGING_ENV_PIN_CONFLICT")
     if not origin.startswith("https://") or "@" in origin:
         issues.append("PROTECTED_WORKER_ORIGIN_NOT_CONFIGURED")
     if len(secret) < 24:
@@ -90,7 +93,7 @@ def assess(
         "health_ok": bool(health_ok),
         "rights_policy_config_matches_exact_model": bool(rights_policy_verified),
         "candidate_folder_accessible_and_private": bool(candidate_folder_private),
-        "candidate_folder_pinned_in_runner": configured_folder == candidate,
+        "candidate_folder_pinned_in_runner": bool(canonical_folder_verified),
         "auto_generation_disabled": flags_off,
         "production_execution_flags": {
             k: flags[k] for k in FEATURES if k != "NATIVE_GALLERY_RIGHTS_REVIEWED"
@@ -129,11 +132,24 @@ def live_audit(expected_version, candidate_folder_id):
     except Exception:
         pass
     candidate_private = False
+    canonical_folder_verified = False
     if CANDIDATE_PATTERN.fullmatch(candidate_folder_id):
+        try:
+            from airtable.client import AirtableClient
+            from rendering_review.native_gallery_staging_settings import (
+                read_native_gallery_staging_setting,
+            )
+            canonical_folder_verified = (
+                read_native_gallery_staging_setting(AirtableClient(settings))
+                == candidate_folder_id
+            )
+        except Exception:
+            pass
         try:
             from integrations.google_drive import GoogleDriveClient
             drive = GoogleDriveClient()
-            meta = drive.get_file(candidate_folder_id)
+            meta = drive.get_file(candidate_folder_id,
+                                  fields="id,mimeType,trashed,shared")
             perms = drive.list_file_permissions(candidate_folder_id)
             candidate_private = is_private_folder(meta, perms, candidate_folder_id)
         except Exception:
@@ -145,6 +161,7 @@ def live_audit(expected_version, candidate_folder_id):
         health_ok=health_ok, env=env,
         rights_policy_verified=rights_policy_verified,
         candidate_folder_private=candidate_private,
+        canonical_folder_verified=canonical_folder_verified,
     )
 
 
