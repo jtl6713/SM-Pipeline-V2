@@ -4,6 +4,8 @@ export const RESULT_STATUSES = Object.freeze(["Pass","Fail","Blocked","Error","N
 export const SEVERITIES = Object.freeze(["Critical","High","Medium","Low"]);
 export const SAFE_ASSERTIONS = Object.freeze({
   "QA-DIAG-001": { kind:"worker-health", readOnly:true, maxObservations:1, timeoutMs:5000 },
+  "QA-CAT-001": { kind:"catalog-integrity", readOnly:true, maxObservations:1, timeoutMs:2000 },
+  "QA-AT-001": { kind:"canonical-qa-run", readOnly:true, maxObservations:1, timeoutMs:5000 },
   "QA-SB-001": { kind:"mirror-parity", readOnly:true, maxObservations:25, timeoutMs:10000 },
   "QA-MAE-001": { kind:"mae-dry-run", readOnly:true, maxObservations:30, timeoutMs:5000 },
 });
@@ -45,6 +47,21 @@ export function evaluateAssertion(testId,observation) {
   if(definition.kind==="worker-health") {
     if(typeof observation.httpStatus!=="number"||!observation.workerVersion) return {status:"Blocked",reason:"Incomplete health observation",evidence:observation};
     return {status:observation.httpStatus===200?"Pass":"Fail",reason:"Observed Worker HTTP response and version",evidence:observation};
+  }
+  if(definition.kind==="catalog-integrity") {
+    if(observation.source!=="versioned-catalog" || observation.totalTests<50 ||
+       !Number.isInteger(observation.invalidCount) || !Number.isInteger(observation.uniqueIds) ||
+       typeof observation.catalogVersion!=="string")
+      return {status:"Blocked",reason:"Catalog integrity evidence is incomplete",evidence:observation};
+    return {status:observation.invalidCount===0 && observation.uniqueIds===observation.totalTests?"Pass":"Fail",
+      reason:"Validated versioned QA case schema and uniqueness",evidence:observation};
+  }
+  if(definition.kind==="canonical-qa-run") {
+    if(observation.source!=="Airtable" || !observation.expectedRunId || !observation.recordId ||
+       typeof observation.runId!=="string" || typeof observation.createdAtUtc!=="string")
+      return {status:"Blocked",reason:"Canonical QA run evidence missing",evidence:observation};
+    return {status:observation.runId===observation.expectedRunId?"Pass":"Fail",
+      reason:"Observed exact QA run in canonical Airtable",evidence:observation};
   }
   if(definition.kind==="mirror-parity") {
     if(!Array.isArray(observation.comparisons)||!observation.comparisons.length||observation.comparisons.length>definition.maxObservations) return {status:"Blocked",reason:"Missing or out-of-budget comparisons",evidence:observation};
