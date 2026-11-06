@@ -12498,7 +12498,7 @@ async function factoryReleaseOutputForApproval(env, id, actor) {
       body: JSON.stringify({ fields: {
         Do_Not_Publish: false,
         Auto_Publish_Enabled: false,
-        Review_Notes: [existingNotes, audit].filter(Boolean).join("\\n\\n"),
+        Review_Notes: [existingNotes, audit].filter(Boolean).join("\n\n"),
       }, typecast: false }),
     });
     const check = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
