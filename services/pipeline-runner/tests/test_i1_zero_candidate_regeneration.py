@@ -119,3 +119,49 @@ def test_empty_create_acknowledgement_requires_reconciliation_not_regeneration(m
     assert result["partial_failure"] is True
     assert result["retry_requires_reconciliation"] is True
     assert len(calls) == 1
+
+def test_excluded_failed_pass_title_cannot_be_recreated_even_when_history_empty(monkeypatch):
+    client = CandidateClient()
+    monkeypatch.setattr(processor, "AirtableClient", lambda: client)
+    monkeypatch.setattr(processor, "_title_used_in_last_year", lambda *args: False)
+    prompts = []
+
+    def generate(prompt):
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            return {"parsed": {"ideas": [{"candidate_title": "Hidden Subway Entrance (2)"}]}}
+        return {"parsed": {"ideas": [{"candidate_title": "NYC Ferry Fare Tips"}]}}
+
+    monkeypatch.setattr(processor, "generate_ideas", generate)
+    result = processor.process_request(
+        profile_record_id="rec" + "P"*14,
+        requested_count=1,
+        excluded_titles=("Hidden Subway Entrance",),
+    )
+    assert result["processed"] is True
+    assert result["created_count"] == 1
+    assert result["generation_attempts"] == 2
+    assert "Hidden Subway Entrance" in prompts[0]
+    assert len(client.creates) == 1
+    assert client.creates[0][1][0]["Candidate_Title"] == "NYC Ferry Fare Tips"
+
+
+def test_failed_refill_exclusions_only_guide_without_writing_duplicates(monkeypatch):
+    client = CandidateClient()
+    monkeypatch.setattr(processor, "AirtableClient", lambda: client)
+    monkeypatch.setattr(processor, "_title_used_in_last_year", lambda *args: False)
+    prompts = []
+    def generate(prompt):
+        prompts.append(prompt)
+        return {"parsed": {"ideas": [{"candidate_title": "NYC Waterfront Walk (3)"}]}}
+    monkeypatch.setattr(processor, "generate_ideas", generate)
+    result = processor.process_request(
+        profile_record_id="rec" + "P"*14,
+        requested_count=1,
+        excluded_titles=("NYC Waterfront Walk",),
+    )
+    assert result["processed"] is False
+    assert result["created_record_ids"] == []
+    assert result["reason"] == "no_unique_candidates_after_regeneration"
+    assert len(prompts) == 2
+    assert len(client.creates) == 0
