@@ -58,6 +58,12 @@ test("catalog exposes 88 versioned cases and read-only safe-check allowlist",asy
   assert.deepEqual(j.safeAutomations,["QA-DIAG-001","QA-CAT-001","QA-AT-001"]);
   assert.equal(j.writeAuthority,"Airtable");
 });
+test("QA environment selection cannot silently send staging tests to production",async()=>{
+  const h=harness();
+  await assert.rejects(h.call("POST","runs",{environment:"staging",client_request_id:"environment-12345678"}),
+    /not configured on this Worker/);
+  assert.equal(h.rows.get(QA_RUNS_TABLE).length,0);
+});
 test("run creation is server-stamped and repeated request IDs reuse canonical Airtable rows",async()=>{
   const h=harness(),input={environment:"production",client_request_id:"ui-run-12345678"};
   const first=await h.call("POST","runs",input);const p=await first.json();

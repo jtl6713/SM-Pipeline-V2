@@ -234,6 +234,10 @@
       const catalogData=await call("catalog");
       state.tests=catalogData.tests||[];
       state.safeAutomations=catalogData.safeAutomations||[];
+      const runtimeEnvironment=catalogData.executionEnvironment||"production";
+      const environmentSelect=$("qaEnvironment");
+      for(const option of environmentSelect?.options||[])option.disabled=option.value!==runtimeEnvironment;
+      if(environmentSelect)environmentSelect.value=runtimeEnvironment;
       if(state.tests.length===0)throw new Error("No QA definitions available");
       nav.hidden=false;
       message(state.tests.length+" versioned QA cases loaded. Start a run to record evidence.");

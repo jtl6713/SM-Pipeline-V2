@@ -24,6 +24,14 @@ export async function verifiedRunnerVersion(env,requester){
     return info.version.trim();
   }catch{return "unverified";}
 }
+function configuredQaEnvironment(env){
+  // A selected label is not a target. Only test the environment actually
+  // bound to this Worker, never silently route 'staging' to production.
+  const configured=String(env?.STUDIO_QA_EXECUTION_ENV||"production").trim().toLowerCase();
+  if(!["production","staging","development"].includes(configured))
+    throw error(503,"QA execution environment is not configured");
+  return configured;
+}
 export const QA_RUNS_TABLE="tblYwzehVtmyUMzj5";
 export const QA_EVENTS_TABLE="tblsg5E1cq8nb240c";
 const catalog=QA_CATALOG.tests;
@@ -191,7 +199,7 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
   }
   if(pathname===apiPrefix+"catalog"&&request.method==="GET"){
     return send({ok:true,catalogVersion:QA_CATALOG.catalogVersion,tests:catalog,
-      safeAutomations:["QA-DIAG-001","QA-CAT-001","QA-AT-001"],writeAuthority:"Airtable"});
+      safeAutomations:["QA-DIAG-001","QA-CAT-001","QA-AT-001"],executionEnvironment:configuredQaEnvironment(env),writeAuthority:"Airtable"});
   }
   if(pathname===apiPrefix+"runs"){
     if(request.method==="GET"){
@@ -202,8 +210,9 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
     }
     if(request.method==="POST"){
       const body=await jsonBody(request),key=requestKey(body);
-      const environment=body.environment===undefined?"production":required(body.environment,"environment",40);
-      if(!["production","staging","development"].includes(environment))throw error(400,"Invalid QA environment");
+      const boundEnvironment=configuredQaEnvironment(env);
+      const environment=body.environment===undefined?boundEnvironment:required(body.environment,"environment",40);
+      if(environment!==boundEnvironment)throw error(400,"Selected QA environment is not configured on this Worker; no cross-environment testing");
       const runner=await verifiedRunnerVersion(env,fetchHealth);
       const snapshot={worker:"0.10.765-qa-center-v1",ui:"0.6.897-qa-center-pilot",
         runner}; // Server-only observed Runner identity; never trust a browser claim.
