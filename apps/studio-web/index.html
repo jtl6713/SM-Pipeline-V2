@@ -2263,6 +2263,25 @@
   <p class="subtle">A new test result never overwrites previous evidence. The automated health check is read-only and is not an approval to publish.</p>
  </div>
  <div class="qa-panel" id="qaGate" aria-label="Release gate">Select a run to view its release gate.</div>
+
+ <div class="qa-panel" id="qaFinalPanel">
+  <h2>Finalize test run</h2>
+  <p id="qaFinalHelp">Finalize only after reviewing the saved evidence and release gate. A finalized run cannot be reopened or edited; follow-up testing requires a new run.</p>
+  <div class="qa-toolbar">
+   <label>Final decision
+    <select id="qaFinalDecision">
+     <option value="Incomplete">Incomplete — testing not finished</option>
+     <option value="Rejected">Rejected — release not accepted</option>
+     <option value="Approved">Approved — all release gates passed</option>
+    </select>
+   </label>
+   <label>Completion explanation
+    <textarea id="qaFinalNotes" maxlength="2000" rows="2" placeholder="Required for Incomplete or Rejected; include remaining gaps and responsible follow-ups"></textarea>
+   </label>
+   <button type="button" id="qaFinalizeRun" disabled>Finalize run</button>
+  </div>
+ </div>
+
  <div class="qa-panel"><h2>Test catalog and execution</h2>
   <div class="qa-toolbar"><label>Search test cases <input type="search" id="qaSearch" placeholder="Test ID, topic, or procedure" autocomplete="off"></label></div>
   <div id="qaCases"></div></div>
