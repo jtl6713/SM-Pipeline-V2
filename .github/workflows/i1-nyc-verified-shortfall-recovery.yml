@@ -1,0 +1,103 @@
+name: NYC I1 One-Time Verified Shortfall Recovery
+
+on:
+  push:
+    branches: [main]
+    paths:
+      # NOT present in the source-release PR. A separate deliberate,
+      # after-deployment sentinel is required to perform the one-time resume.
+      - 'deploy/i1-nyc-verified-shortfall-resume.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  verified-shortfall-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Queue only the exact existing 9-of-10 NYC batch through authenticated Windows Runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fxq 'RECOVER_NYC_I1_RECBATCH=recdiBEczQJp7Mors;VERIFIED=9/10;APPROVED_ONCE=true' deploy/i1-nyc-verified-shortfall-resume.txt
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          ps=r'''$ErrorActionPreference = "Stop"
+          $service=Join-Path (Get-Location) 'Services\pipeline-runner\service'
+          $envFile=Join-Path $service '.env'
+          if(!(Test-Path $envFile)){throw 'Runner .env unavailable'}
+          $cfg=@{}
+          foreach($line in Get-Content -LiteralPath $envFile){
+            if($line -match '^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*)$'){
+              $cfg[$Matches[1]]=$Matches[2].Trim().Trim('"',"'")
+            }
+          }
+          $secret=[string]$cfg['PIPELINE_RUNNER_SHARED_SECRET']
+          if($secret.Length -lt 24){throw 'Runner server auth unavailable'}
+          $headers=@{'X-Pipeline-Secret'=$secret}
+          $health=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/health' -TimeoutSec 12
+          if($health.version -ne '2026-11-06-i1-verified-shortfall-v2' -or $health.i1_durable_jobs -ne $true){
+            throw 'Exact I1 recovery Runner version or durable job backend not active'
+          }
+          $body=@{
+            batch_record_id='recdiBEczQJp7Mors'
+            profile_record_id='recgtK8Z7eNADNtVy'
+            requested_count=10
+            quality='Highest Quality'
+            confirm_verified_only=$true
+          } | ConvertTo-Json -Compress
+          $uri='http://127.0.0.1:3350/jobs/i1-durable/resume-verified-shortfall'
+          $reply=Invoke-WebRequest -Uri $uri -Method Post -Headers $headers -Body $body -ContentType 'application/json' -TimeoutSec 45 -UseBasicParsing
+          $receipt=$reply.Content | ConvertFrom-Json
+          if($reply.StatusCode -ne 202 -or $receipt.ok -ne $true -or
+             $receipt.accepted -ne $true -or $receipt.requeued_only -ne $true -or
+             $receipt.batch_record_id -ne 'recdiBEczQJp7Mors' -or
+             $receipt.existing_verified -ne 9 -or $receipt.missing -ne 1){
+             throw 'Exact one-time shortfall queue receipt was not confirmed'
+          }
+          $secret=''
+          Write-Output 'NYC_I1_VERIFIED_RESUME_QUEUED=9/10+1;NO_OTHER_BATCH=true'
+          '''
+          if len(ps)>6200: raise SystemExit('recovery_command_exceeds_safe_limit')
+          Path('/tmp/i1-nyc-shell.json').write_text(json.dumps({"command":ps,"confirm":True}))
+          PY
+          base='https://ops.chicagoshining.com'
+          selected=''
+          for token in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            [ -n "$token" ] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/i1-catalog.json -w '%{http_code}' -H "Authorization: Bearer $token" "$base/api/catalog" || true)
+            if [ "$code" = 200 ] && jq -e '.ok==true' /tmp/i1-catalog.json >/dev/null 2>&1; then
+              selected="$token"
+              break
+            fi
+          done
+          test -n "$selected"
+          code=$(curl -sS --max-time 25 -o /tmp/i1-start.json -w '%{http_code}' -X POST "$base/api/shell" -H "Authorization: Bearer $selected" -H 'Content-Type: application/json' --data-binary @/tmp/i1-nyc-shell.json || true)
+          test "$code" = 202 -o "$code" = 200
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/i1-start.json)
+          test -n "$job"
+          for i in $(seq 1 80); do
+            status_code=$(curl -sS --max-time 20 -o /tmp/i1-result.json -w '%{http_code}' -H "Authorization: Bearer $selected" "$base/api/jobs/$job" || true)
+            if [ "$status_code" = 200 ]; then
+              state=$(jq -r '.job.status // empty' /tmp/i1-result.json)
+              if [ "$state" = ok ]; then
+                jq -r '.job.log // ""' /tmp/i1-result.json | grep -Fq 'NYC_I1_VERIFIED_RESUME_QUEUED=9/10+1;NO_OTHER_BATCH=true'
+                echo 'nyc_i1_resume_job=queued_exact_9_of_10'
+                exit 0
+              fi
+              if [ "$state" = failed ]; then
+                echo 'nyc_i1_resume_job=blocked_no_write_claim'
+                exit 1
+              fi
+            fi
+            sleep 4
+          done
+          echo 'nyc_i1_resume_receipt_unconfirmed_no_retry'
+          exit 1
