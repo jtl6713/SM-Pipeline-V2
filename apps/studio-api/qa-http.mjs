@@ -7,7 +7,7 @@ import {withQaIdempotencyLock} from "./qa-idempotency-lock.mjs";
 
 // The Runner release identity is read only from the trusted production origin.
 // A guessed/client-provided version must never make an incomplete gate green.
-async function verifiedRunnerVersion(env,requester){
+export async function verifiedRunnerVersion(env,requester){
   const origin=String(env?.PIPELINE_RUNNER_URL||"").trim().replace(/\/$/,"");
   if(origin!=="https://pipeline.chicagoshining.com")return "unverified";
   try{
