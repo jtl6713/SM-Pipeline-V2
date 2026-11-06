@@ -24,6 +24,9 @@ _LOG = logging.getLogger("pipeline-runner.i1.durable")
 _RECORD = re.compile(r"^rec[A-Za-z0-9]{14}$")
 _QUALITIES = {"Highest Quality", "Balanced", "Quantity"}
 _LEASE_SECONDS = 120
+# Model originality/365-day title dedupe can leave 8-9 of 10 after a pass.
+# Bounded verified shortfall-only refill; never replays an uncertain Airtable POST.
+_MAX_CONFIRMED_SHORTFALL_PASSES = 5
 _WAKE = threading.Event()
 _LOCK = threading.Lock()
 _STARTED = False
@@ -209,12 +212,16 @@ def _work(job: dict) -> None:
             "Generated_Count": existing,
             "Error": None,
         }, typecast=True)
-        for _ in range(2):
+        for _ in range(_MAX_CONFIRMED_SHORTFALL_PASSES):
             batch = client.get_record(IDEA_BATCHES_TABLE, batch_id)
             existing = _linked_idea_count(batch)
             missing = max(0, expected - existing)
             if not missing:
                 break
+            # Each attempt requests ONLY the freshly verified shortfall.
+            # Duplicate/invalid model titles may reduce this pass below missing;
+            # attempt another bounded pass only after an acknowledged write.
+            # An ambiguous write always exits for human reconciliation.
             result = process_request(
                 profile_record_id=profile_id, batch_record_id=batch_id,
                 requested_count=missing, quality=job["quality"], trigger_i2=False,
