@@ -125,10 +125,16 @@ export function computeQaGate(tests,events){
     if(!e||!["Pass","Fail","Blocked","Error","Needs Review"].includes(e.payload?.status)){blocked.push(t.id);continue;}
     if(e.payload.status==="Fail"){failed.push(t.id);continue;}
     if(e.payload.status!=="Pass"){blocked.push(t.id);continue;}
-    if(e.kind==="AutomatedObservation"&&
-       (reviews.get(e.payload.executionId)?.payload?.decision!=="Approved" ||
-        reviews.get(e.payload.executionId)?.actorId===e.actorId)){
-      pendingHuman.push(t.id);continue;
+    if(e.kind==="AutomatedObservation"){
+      const review=reviews.get(e.payload.executionId);
+      // A human approval is evidence only for the *same* test and assertion.
+      // Reject forged/mistargeted approvals and incomplete older ledger entries.
+      if(!review || review.testId!==t.id ||
+         review.payload?.decision!=="Approved" ||
+         review.actorId===e.actorId ||
+         review.payload?.subjectActorId!==e.actorId){
+        pendingHuman.push(t.id);continue;
+      }
     }
     passed.push(t.id);
   }
@@ -311,6 +317,7 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
     if(replay.length!==1||replay[0].id!==completed[0].record_id)
       throw error(409,"Run already finalized; no new finalization is permitted");
     const original=exposeEvent(replay[0]);
+    if(original.actorId!==actor)throw error(403,"Finalization replay requires the original administrator");
     if(body.decision!==original.payload.decision||
        String(body.notes||"").trim()!==String(original.payload.notes||"").trim())
       throw error(409,"Finalization request does not match the immutable event");
