@@ -115,7 +115,7 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
   if(!pathname.startsWith(apiPrefix))throw error(404,"Unknown QA route");
   async function listPage(table,field,value,limit=50,offset=null,sortField=null){
     if(!Number.isInteger(limit)||limit<1||limit>100)throw error(400,"Unbounded QA history request");
-    const query=new URLSearchParams({maxRecords:String(limit),pageSize:String(Math.min(limit,100))});
+    const query=new URLSearchParams({pageSize:String(Math.min(limit,100))});
     if(field)query.set("filterByFormula",filterFormula(field,value));
     if(offset){
       if(typeof offset!=="string"||offset.length>180||!/^[A-Za-z0-9/+=._-]+$/.test(offset))
