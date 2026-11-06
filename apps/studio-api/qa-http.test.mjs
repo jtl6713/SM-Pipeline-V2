@@ -52,9 +52,9 @@ function harness(){
   }
   return {call,rows};
 }
-test("catalog exposes 29 versioned cases and read-only safe-check allowlist",async()=>{
+test("catalog exposes 88 versioned cases and read-only safe-check allowlist",async()=>{
   const h=harness(),r=await h.call("GET","catalog");const j=await r.json();
-  assert.equal(r.status,200);assert.equal(j.tests.length,29);
+  assert.equal(r.status,200);assert.equal(j.tests.length,88);
   assert.deepEqual(j.safeAutomations,["QA-DIAG-001"]);
   assert.equal(j.writeAuthority,"Airtable");
 });
@@ -86,7 +86,7 @@ test("manual Pass creates immutable event and gate still blocks unexecuted tests
   assert.equal(h.rows.get(QA_EVENTS_TABLE).length,1);
   const gate=await (await h.call("GET","runs/"+created.run.runId+"/gate")).json();
   assert.equal(gate.gate.ready,false);assert.equal(gate.gate.passed.length,1);
-  assert.equal(gate.gate.blocked.length,28);
+  assert.equal(gate.gate.blocked.length,87);
 });
 test("falsely healthy assertion never passes and automated Pass needs independent approval",async()=>{
   const h=harness(),created=await (await h.call("POST","runs",{client_request_id:"ui-run-auto001"})).json();
