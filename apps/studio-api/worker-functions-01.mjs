@@ -1,4 +1,4 @@
-import { formalFactoryApprovalReady } from "./review-package-readiness.mjs";
+import { formalFactoryApprovalReady, evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
 import { staleInstagramPublishingDisplay } from "./ig-publishing-display.mjs";
 import { facebookPreapprovalRecoveryReason, facebookPreapprovalRecoveryFields, FACEBOOK_PREAPPROVAL_FORMULA } from "./facebook-preapproval-recovery.mjs";
@@ -8033,7 +8033,15 @@ export async function studioStampParentAiCoverOnOutput(env, po, parent) {
   }
   if (needsCaption) fields.Output_Caption = caption;
   if (native && !isStory && !/^ready for review$/i.test(String(f(po, "Output_Status") || ""))) {
-    fields.Output_Status = "Ready for Review";
+    // Writing a cover/caption is not itself completion of a native-photo
+    // package. Promote only when the resulting full Airtable record would
+    // pass the same exact completeness gate used by Factory Approve.
+    const proposal = { ...po, fields: {
+      ...(po.fields || {}), ...fields, Output_Status: "Ready for Review",
+    } };
+    if (evaluateReviewPackage(proposal).readiness === "READY") {
+      fields.Output_Status = "Ready for Review";
+    }
   }
   if (!Object.keys(fields).length) return false;
   await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, po.id, {
