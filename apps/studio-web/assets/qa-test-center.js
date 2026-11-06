@@ -6,7 +6,7 @@
   const state={tests:[],runs:[],run:null,events:[],gate:null,loading:false,pendingRunId:null};
   const MAX_NOTES=4000;
   const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined&&text!==null)n.textContent=String(text);if(cls)n.className=cls;return n;};
-  const status=$("qaStatus"),runs=$("qaRunSelect"),cases=$("qaCases"),gate=$("qaGate"),history=$("qaHistory");
+  const status=$("qaStatus"),runs=$("qaRunSelect"),cases=$("qaCases"),gate=$("qaGate"),history=$("qaHistory"),baseline=$("qaBaselineSelect"),regressions=$("qaRegressions");
   function message(text,kind=""){status.textContent=text;status.dataset.kind=kind;}
   async function call(path,options={}){
     const response=await fetch("/api/admin/qa/"+path,{
@@ -29,6 +29,15 @@
       option.value=run.runId;runs.append(option);
     }
     if(state.run)runs.value=state.run.runId;
+    const previous=baseline?.value||"";
+    baseline?.replaceChildren(el("option","Select earlier QA run"));
+    if(baseline)baseline.firstChild.value="";
+    for(const run of state.runs){
+      if(run.runId===state.run?.runId)continue;
+      const option=el("option",(run.createdAtUtc||"Unknown time")+" — "+run.environment+" — "+run.runId.slice(0,13));
+      option.value=run.runId;baseline?.append(option);
+    }
+    if(baseline && [...baseline.options].some(option=>option.value===previous))baseline.value=previous;
   }
   function lastEvent(testId){
     return [...state.events].reverse().find(e=>e.testId===testId&&
@@ -69,6 +78,17 @@
     runs.value=runId;
     const next=await call("runs/"+encodeURIComponent(runId)+"/gate");
     state.gate=next.gate;renderGate();renderCases();renderHistory();
+    if(baseline){
+      const prior=baseline.value;
+      baseline.replaceChildren(el("option","Select earlier QA run"));
+      baseline.firstChild.value="";
+      for(const item of state.runs.filter(item=>item.runId!==runId)){
+        const option=el("option",(item.createdAtUtc||"Unknown time")+" — "+item.runId.slice(0,13));
+        option.value=item.runId;baseline.append(option);
+      }
+      if([...baseline.options].some(option=>option.value===prior))baseline.value=prior;
+    }
+    regressions?.replaceChildren();
     message("Saved QA run selected. All result submissions create new immutable records.");
   }
   async function submitManual(testId,statusValue,notes,evidence){
@@ -163,6 +183,17 @@
       cases.append(section);
     }
   }
+  async function compareRuns(){
+    if(!state.run||!baseline?.value)throw new Error("Select the current run and an earlier baseline.");
+    const data=await call("runs/"+encodeURIComponent(state.run.runId)+"/regressions?baseline="+encodeURIComponent(baseline.value));
+    regressions.replaceChildren();
+    if(!data.regressions?.length)regressions.append(el("p","No regressions found in the selected baseline comparison."));
+    for(const item of data.regressions||[]){
+      regressions.append(el("p",item.testId+": baseline Pass → "+item.to+
+        " ("+String(item.currentExecutionId||"not rerun")+")","qa-alert"));
+    }
+    message("Compared "+data.baselineTotal+" baseline events with "+data.currentTotal+" current events.");
+  }
   async function startRun(){
     const button=$("qaStartRun");button.disabled=true;
     try{
@@ -186,6 +217,9 @@
   }
   $("qaStartRun")?.addEventListener("click",startRun);
   $("qaRefresh")?.addEventListener("click",()=>initialize());
+  $("qaCompare")?.addEventListener("click",async()=>{
+    try{await compareRuns();}catch(error){message(error.message,"error");}
+  });
   runs?.addEventListener("change",async()=>{
     if(!runs.value)return;
     try{await loadRun(runs.value)}catch(e){message(e.message,"error");}
