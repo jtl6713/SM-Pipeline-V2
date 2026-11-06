@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {handleQaApi,computeQaGate,compareQaRunResults,QA_RUNS_TABLE,QA_EVENTS_TABLE,verifiedRunnerVersion} from "./qa-http.mjs";
+import {handleQaApi,computeQaGate,compareQaRunResults,qaEvidenceIntegrityBlockers,QA_RUNS_TABLE,QA_EVENTS_TABLE,verifiedRunnerVersion} from "./qa-http.mjs";
 
 function harness(){
   const rows=new Map([[QA_RUNS_TABLE,[]],[QA_EVENTS_TABLE,[]]]);
@@ -304,4 +304,36 @@ test("no manual Pass can silently clear a release gate without observed notes or
   assert.equal(evidenceOnly.status,201);
   const saved=await evidenceOnly.json();
   assert.equal(saved.event.payload.evidence.length,1);
+});
+
+test("release evidence audit blocks imported blank manual Pass and untrusted automated Pass",()=>{
+ const executionId="qaex-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+ const manual={testId:"QA-AUTH-001",kind:"ManualResult",actorId:"recADMIN00000001",
+ atUtc:"2026-11-06T11:00:00.000Z",payload:{executionId,status:"Pass",notes:"",evidence:[]}};
+ const automated={testId:"QA-DIAG-001",kind:"AutomatedObservation",actorId:"recADMIN00000001",
+ atUtc:"2026-11-06T11:01:00.000Z",payload:{executionId,status:"Pass",source:"automated",
+ requiresHumanApproval:true,evidence:[]}};
+ const blockers=qaEvidenceIntegrityBlockers([manual,automated]);
+ assert.ok(blockers.some(x=>x.includes("QA-AUTH-001")&&x.includes("notes or evidence")));
+ assert.ok(blockers.some(x=>x.includes("QA-DIAG-001")&&x.includes("trusted evidence")));
+ assert.deepEqual(qaEvidenceIntegrityBlockers([
+ {...manual,payload:{...manual.payload,notes:"Verified 401 from anonymous request"}},
+ {...automated,payload:{...automated.payload,evidence:[{httpStatus:200,workerVersion:"0.10.765"}]}},
+ ]),[]);
+});
+test("HTTP release gate exposes missing canonical Pass evidence",async()=>{
+ const h=harness(),created=await (await h.call("POST","runs",{client_request_id:"run-gate-audit-001"})).json();
+ const runId=created.run.runId;
+ h.rows.get(QA_EVENTS_TABLE).push({id:"recEXAMPLE0000001",fields:{
+ "Execution ID":"qaex-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","Run ID":runId,
+ "Test ID":"QA-AUTH-001","Event Kind":"ManualResult",
+ "Actor ID":"recADMIN00000001","Recorded At UTC":"2026-11-06T11:05:00.000Z",
+ "Payload JSON":JSON.stringify({
+ executionId:"qaex-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",status:"Pass",source:"manual",
+ notes:"",evidence:[],catalogVersion:created.run.catalogRevision,
+ }),
+ }});
+ const g=await (await h.call("GET","runs/"+runId+"/gate")).json();
+ assert.equal(g.gate.ready,false);
+ assert.ok(g.gate.deploymentBlockers.some(x=>x.includes("QA-AUTH-001")&&x.includes("notes or evidence")));
 });
