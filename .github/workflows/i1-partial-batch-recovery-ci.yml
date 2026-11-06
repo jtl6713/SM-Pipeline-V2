@@ -7,6 +7,10 @@ on:
       - 'services/pipeline-runner/i1/processor.py'
       - 'services/pipeline-runner/tests/test_i1_zero_candidate_regeneration.py'
       - 'services/pipeline-runner/tests/test_i1_durable_jobs.py'
+      - 'services/pipeline-runner/i1/processor.py'
+      - 'services/pipeline-runner/app.py'
+      - 'services/pipeline-runner/tests/test_i1_candidate_pool.py'
+      - 'services/pipeline-runner/tests/test_i1_verified_resume_http.py'
       - 'apps/studio-web/assets/app-item4-1008.js'
       - 'apps/studio-web/idea-generation-partial-recovery.test.mjs'
       - '.github/workflows/i1-partial-batch-recovery-ci.yml'
@@ -29,7 +33,7 @@ jobs:
       - name: Install Runner test dependencies
         run: python -m pip install --quiet -r services/pipeline-runner/requirements.txt pytest
       - name: No-network durable shortfall, partial-write and lease tests
-        run: PYTHONPATH=services/pipeline-runner python -m pytest -q services/pipeline-runner/tests/test_i1_durable_jobs.py services/pipeline-runner/tests/test_i1_zero_candidate_regeneration.py services/pipeline-runner/tests/test_i1_partial_creation.py
+        run: PYTHONPATH=services/pipeline-runner python -m pytest -q services/pipeline-runner/tests/test_i1_durable_jobs.py services/pipeline-runner/tests/test_i1_zero_candidate_regeneration.py services/pipeline-runner/tests/test_i1_partial_creation.py services/pipeline-runner/tests/test_i1_candidate_pool.py services/pipeline-runner/tests/test_i1_verified_resume_http.py services/pipeline-runner/tests/test_i1_title_uniqueness.py
       - name: Client partial-failure refresh and no-duplicate admission contract
         run: |
           node --check apps/studio-web/assets/app-item4-1008.js

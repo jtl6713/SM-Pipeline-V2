@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 
-from airtable.constants import CONTENT_PROFILES_TABLE, IDEA_BATCHES_TABLE
+from airtable.constants import CONTENT_PROFILES_TABLE, IDEA_BATCHES_TABLE, SOURCE_CANDIDATES_TABLE
 from i1 import durable_jobs as q
 
 BATCH = "rec" + "B" * 14
@@ -58,6 +58,11 @@ class FakeClient:
         self.writes = []
 
     def get_record(self, table, record_id):
+        if table == SOURCE_CANDIDATES_TABLE:
+            return {"id": record_id, "fields": {
+                "Candidate_Title": f"Previously verified idea {record_id}",
+                "Idea_Batch": [BATCH], "Content_Profile": [PROFILE],
+            }}
         assert record_id in (BATCH, PROFILE)
         return {"id": record_id, "fields": dict(self.batch if table == IDEA_BATCHES_TABLE else self.profile)}
 
@@ -251,6 +256,58 @@ def test_repeated_verified_no_write_is_bounded_and_never_makes_11(monkeypatch):
     assert len(client.batch["Idea Candidates"]) == 9
     assert client.batch["Generated_Count"] == 9
     assert client.batch["Status"] == "Failed"
+
+
+def test_one_time_verified_failed_shortfall_resumes_same_batch_only(monkeypatch):
+    client = FakeClient(initial=9, status="Failed")
+    client.batch.update({
+        "Requested_Count": 10, "Generated_Count": 9, "Quality": "Highest Quality",
+        "Error": "9/10 verified. RuntimeError: Only 9 of 10 linked ideas verified",
+    })
+    monkeypatch.setattr(q, "AirtableClient", lambda: client)
+    q.enqueue(BATCH, PROFILE, 10, "Highest Quality")
+    with q._db() as db:
+        db.execute(
+            "UPDATE jobs SET status='failed', error=? WHERE batch_id=?",
+            ("RuntimeError: Only 9 of 10 linked ideas verified", BATCH))
+    receipt = q.resume_confirmed_shortfall(BATCH, PROFILE, 10, "Highest Quality")
+    assert receipt["accepted"] is True
+    assert receipt["missing"] == 1
+    assert receipt["existing_verified"] == 9
+    assert receipt["requeued_only"] is True
+    with q._db() as db:
+        row = dict(db.execute("SELECT * FROM jobs WHERE batch_id=?", (BATCH,)).fetchone())
+    assert row["resume_count"] == 1 and row["status"] == "queued"
+    with pytest.raises(q.TerminalBatchMismatch):
+        q.resume_confirmed_shortfall(BATCH, PROFILE, 10, "Highest Quality")
+    calls = []
+    def generate(**kwargs):
+        calls.append(kwargs)
+        client.batch["Idea Candidates"].append("rec" + "9".zfill(14))
+        return {"created_count": 1}
+    monkeypatch.setattr(q, "process_request", generate)
+    q._work({**_job(), "requested_count": 10, "quality": "Highest Quality",
+             "resume_count": 1})
+    assert [x["requested_count"] for x in calls] == [1]
+    assert client.batch["Status"] == "Complete"
+    assert client.batch["Generated_Count"] == 10
+    assert len(set(client.batch["Idea Candidates"])) == 10
+
+
+def test_ambiguous_post_failed_batch_cannot_be_resumed(monkeypatch):
+    client = FakeClient(initial=9, status="Failed")
+    client.batch.update({
+        "Requested_Count": 10, "Generated_Count": 9, "Quality": "Highest Quality",
+        "Error": "9/10 verified. RuntimeError: I1 partial/uncertain write",
+    })
+    monkeypatch.setattr(q, "AirtableClient", lambda: client)
+    q.enqueue(BATCH, PROFILE, 10, "Highest Quality")
+    with q._db() as db:
+        db.execute("UPDATE jobs SET status='failed', error=? WHERE batch_id=?",
+                   ("RuntimeError: I1 partial/uncertain write", BATCH))
+    with pytest.raises(q.TerminalBatchMismatch, match="Not a safe"):
+        q.resume_confirmed_shortfall(BATCH, PROFILE, 10, "Highest Quality")
+    assert q.status(BATCH)["status"] == "failed"
 
 
 def test_absolute_persistent_db_path_required(monkeypatch):

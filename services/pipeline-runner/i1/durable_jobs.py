@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from airtable.client import AirtableClient
-from airtable.constants import CONTENT_PROFILES_TABLE, IDEA_BATCHES_TABLE
+from airtable.constants import CONTENT_PROFILES_TABLE, IDEA_BATCHES_TABLE, SOURCE_CANDIDATES_TABLE
 from i1.processor import process_request
 
 _LOG = logging.getLogger("pipeline-runner.i1.durable")
@@ -66,8 +66,13 @@ def _connect() -> sqlite3.Connection:
         created_at REAL NOT NULL,
         updated_at REAL NOT NULL,
         attempts INTEGER NOT NULL DEFAULT 0,
-        error TEXT
+        error TEXT,
+        resume_count INTEGER NOT NULL DEFAULT 0
     )""")
+    columns = {row[1] for row in db.execute("PRAGMA table_info(jobs)")}
+    if "resume_count" not in columns:
+        db.execute("ALTER TABLE jobs ADD COLUMN resume_count INTEGER NOT NULL DEFAULT 0")
+        db.commit()
     return db
 
 
@@ -171,6 +176,99 @@ def _linked_idea_count(batch: dict) -> int:
     return len({link for link in links if isinstance(link, str) and _RECORD.fullmatch(link)})
 
 
+def _is_confirmed_shortfall_error(message, actual: int, expected: int) -> bool:
+    """Distinguish verified uniqueness shortfall from ambiguous POST outcomes."""
+    if not isinstance(message, str):
+        return False
+    return bool(re.fullmatch(
+        rf"{actual}/{expected} verified\. RuntimeError: Only "
+        rf"{actual} of {expected} linked ideas verified(?:"
+        rf": no new unique candidates|: no_ideas_created|"
+        rf": no_unique_candidates_after_regeneration|"
+        rf": empty_or_invalid_ai_ideas_after_regeneration)?",
+        message.strip(),
+    ))
+
+
+def _verified_linked_titles(client: AirtableClient, batch_id: str,
+                            profile_id: str, linked: list[str]) -> list[str]:
+    """Require every prior idea to be linked to THIS batch and THIS profile."""
+    if not isinstance(linked, list) or len(set(linked)) != len(linked):
+        raise TerminalBatchMismatch("Existing idea links are not unique")
+    names = []
+    for idea_id in linked:
+        if not isinstance(idea_id, str) or not _RECORD.fullmatch(idea_id):
+            raise TerminalBatchMismatch("Existing idea identity invalid")
+        row = client.get_record(SOURCE_CANDIDATES_TABLE, idea_id)
+        fields = row.get("fields") if isinstance(row, dict) else None
+        if (not isinstance(fields, dict) or row.get("id") != idea_id or
+            fields.get("Idea_Batch") != [batch_id] or
+            fields.get("Content_Profile") != [profile_id] or
+            not isinstance(fields.get("Candidate_Title"), str) or
+            not fields["Candidate_Title"].strip()):
+            raise TerminalBatchMismatch("Existing idea batch/profile mismatch")
+        names.append(fields["Candidate_Title"].strip())
+    return names
+
+
+def resume_confirmed_shortfall(batch_id: str, profile_id: str, count: int,
+                               quality: str) -> dict:
+    """Operator-authorized one-time requeue of an exact verified Failed shortfall.
+
+    Only a batch that failed *solely* because unique concepts were exhausted
+    can resume. Never retry any ambiguous Airtable POST or an unrelated batch.
+    No model/provider call happens inside the request.
+    """
+    if not enabled():
+        raise RuntimeError("I1 durable queue disabled")
+    if not _RECORD.fullmatch(str(batch_id)) or not _RECORD.fullmatch(str(profile_id)):
+        raise ValueError("Invalid batch/profile identity")
+    if type(count) is not int or not 1 <= count <= 10 or quality not in _QUALITIES:
+        raise ValueError("Invalid shortfall resume parameters")
+    client = AirtableClient()
+    batch = client.get_record(IDEA_BATCHES_TABLE, batch_id)
+    fields = batch.get("fields") if isinstance(batch, dict) else None
+    if not isinstance(fields, dict) or batch.get("id") != batch_id:
+        raise TerminalBatchMismatch("Authoritative batch missing")
+    linked = fields.get("Idea Candidates") or []
+    actual = _linked_idea_count(batch)
+    if (fields.get("Status") != "Failed" or
+        fields.get("Content_Profile") != [profile_id] or
+        type(fields.get("Requested_Count")) is not int or
+        fields["Requested_Count"] != count or
+        fields.get("Quality") != quality or
+        type(fields.get("Generated_Count")) is not int or
+        fields["Generated_Count"] != actual or
+        not 0 < actual < count or
+        not _is_confirmed_shortfall_error(fields.get("Error"), actual, count)):
+        raise TerminalBatchMismatch("Not a safe, verified uniqueness shortfall")
+    _verified_linked_titles(client, batch_id, profile_id, linked)
+    # Startup readiness precedes acceptance; only DB state mutation here.
+    start_consumer()
+    with _db() as db:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT * FROM jobs WHERE batch_id=?", (batch_id,)).fetchone()
+        if (row is None or row["status"] != "failed" or
+            row["resume_count"] != 0 or
+            (row["profile_id"], row["requested_count"], row["quality"]) !=
+            (profile_id, count, quality) or
+            not str(row["error"] or "").startswith(
+                f"RuntimeError: Only {actual} of {count} linked ideas verified")):
+            raise TerminalBatchMismatch("Durable ledger already resumed or inconsistent")
+        updated = db.execute(
+            """UPDATE jobs SET status='queued', resume_count=1,
+               error=NULL, run_token=NULL, lease_until=0, updated_at=?
+               WHERE batch_id=? AND status='failed' AND resume_count=0""",
+            (time.time(), batch_id),
+        ).rowcount
+        if updated != 1:
+            raise TerminalBatchMismatch("Durable shortfall resume already consumed")
+    _WAKE.set()
+    return {"accepted": True, "batch_record_id": batch_id,
+            "status": "queued", "existing_verified": actual,
+            "missing": count - actual, "requeued_only": True}
+
+
 def _clear_own_override(client: AirtableClient, profile_id: str, batch_id: str) -> None:
     profile = client.get_record(CONTENT_PROFILES_TABLE, profile_id)
     linked = (profile.get("fields") or {}).get("Manual_Idea_Batch") or []
@@ -199,10 +297,15 @@ def _work(job: dict) -> None:
         # A completed batch is immutable; do not downgrade it to Failed even
         # if its linked-record count later changes or a stale lease is reclaimed.
         if str(fields.get("Status") or "") in {"Failed", "Complete"} and existing < expected:
-            raise TerminalBatchMismatch(
-                f"Terminal batch {fields.get('Status')} has {existing}/{expected} linked ideas; "
-                "manual reconciliation required"
-            )
+            # Only the authenticated one-time verified-shortfall recovery may
+            # resume a previously failed batch. All other terminal states hold.
+            if not (fields.get("Status") == "Failed" and
+                    job.get("resume_count") == 1 and
+                    _is_confirmed_shortfall_error(fields.get("Error"), existing, expected)):
+                raise TerminalBatchMismatch(
+                    f"Terminal batch {fields.get('Status')} has {existing}/{expected} linked ideas; "
+                    "manual reconciliation required"
+                )
         if existing >= expected:
             client.update_record(IDEA_BATCHES_TABLE, batch_id, {
                 "Status": "Complete", "Generated_Count": existing,
@@ -224,10 +327,16 @@ def _work(job: dict) -> None:
             # Each attempt requests ONLY the freshly verified shortfall.
             # A verified zero-write response can also be retried with explicit
             # rejected-title exclusions. Never retry an ambiguous Airtable POST.
+            # Re-read the actual saved titles, identity and link graph. Never
+            # regenerate one of the same batch's confirmed records.
+            linked_titles = _verified_linked_titles(
+                client, batch_id, profile_id,
+                (batch.get("fields") or {}).get("Idea Candidates") or [])
             result = process_request(
                 profile_record_id=profile_id, batch_record_id=batch_id,
                 requested_count=missing, quality=job["quality"], trigger_i2=False,
                 excluded_titles=tuple(rejected_titles[-24:]),
+                exclude_titles=linked_titles,
             )
             if result.get("partial_failure") or result.get("retry_requires_reconciliation"):
                 raise RuntimeError("I1 partial/uncertain write; reconcile batch before retry: "

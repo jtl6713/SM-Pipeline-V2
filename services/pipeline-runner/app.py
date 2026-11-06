@@ -13,7 +13,7 @@ from stages import a1p, c3b, i3, r2, rr2, smv1, ttd4
 from stages.registry import STAGE_NAMES, get_handler, is_implemented
 from audio.backfill import process_request as backfill_audio_leading_silence
 from i1.openai_ideas import generate_ideas
-from i1.durable_jobs import enqueue as enqueue_i1_durable, enabled as i1_durable_enabled, start_consumer as start_i1_consumer, status as i1_job_status
+from i1.durable_jobs import enqueue as enqueue_i1_durable, enabled as i1_durable_enabled, start_consumer as start_i1_consumer, status as i1_job_status, resume_confirmed_shortfall as resume_verified_i1_shortfall, TerminalBatchMismatch
 from carousel.image_gen import build_c2_prompt, generate_carousel_png
 from studio_music.processor import ingest_studio_music, trash_studio_music
 from airtable.egress_monitor import install_airtable_egress_monitor, read_airtable_egress
@@ -295,6 +295,39 @@ def submit_durable_i1():
         logger.exception("I1 queue admission failed")
         return jsonify({"error": str(exc)}), 503
     return jsonify({"ok": True, **result}), 202
+
+
+@app.post("/jobs/i1-durable/resume-verified-shortfall")
+def resume_durable_i1_verified_shortfall():
+    """One-time operator action: only an exact failed uniqueness shortfall."""
+    if not settings.get("pipeline_runner_shared_secret", "").strip():
+        return jsonify({"error": "runner authentication not configured"}), 503
+    denied, code = _verify_secret()
+    if denied is not None:
+        return denied, code
+    if not i1_durable_enabled():
+        return jsonify({"error": "I1 durable jobs not enabled on runner"}), 503
+    if request.query_string:
+        return jsonify({"error": "query parameters are forbidden"}), 400
+    body = request.get_json(silent=True)
+    allowed = {"batch_record_id", "profile_record_id", "requested_count",
+               "quality", "confirm_verified_only"}
+    if (not isinstance(body, dict) or set(body) != allowed or
+            body.get("confirm_verified_only") is not True):
+        return jsonify({"error": "explicit exact verified-shortfall request required"}), 400
+    try:
+        result = resume_verified_i1_shortfall(
+            body["batch_record_id"], body["profile_record_id"],
+            body["requested_count"], body["quality"])
+    except (ValueError, TerminalBatchMismatch):
+        # Do not reveal live linked ideas or internal credential details.
+        return jsonify({"error": "batch is not an eligible verified shortfall"}), 409
+    except (OSError, RuntimeError):
+        logger.exception("I1 verified shortfall recovery unavailable")
+        return jsonify({"error": "verified shortfall recovery unavailable"}), 503
+    response = jsonify({"ok": True, **result})
+    response.headers["Cache-Control"] = "no-store"
+    return response, 202
 
 
 @app.get("/jobs/i1-durable/<batch_id>")

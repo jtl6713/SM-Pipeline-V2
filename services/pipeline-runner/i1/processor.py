@@ -159,6 +159,7 @@ def process_request(
     dry_run: bool = False,
     trigger_i2: bool = True,
     excluded_titles: tuple[str, ...] = (),
+    exclude_titles: list[str] | None = None,
 ) -> dict[str, Any]:
     preview = {
         "make_scenario_id": MAKE_SCENARIO_ID,
@@ -181,14 +182,24 @@ def process_request(
     if remaining < 1:
         return {"processed": False, "reason": "no_remaining_slots", **preview}
 
-    prompt = build_i1_prompt(profile, remaining_slots=remaining, quality=quality_mode)
+    # A model response containing duplicate titles should not strand 9/10.
+    # Ask for bounded alternatives, but save at most the requested shortfall.
+    pool_size = min(20, max(remaining + 4, (remaining * 3 + 1) // 2))
+    prompt = build_i1_prompt(profile, remaining_slots=pool_size, quality=quality_mode)
+    prompt += (
+        "\n\nDURABLE I1 CANDIDATE POOL: The user requested only "
+        f"{remaining} saved idea(s). Return {pool_size} distinct candidates "
+        "as alternatives, strongest first. The server saves at most "
+        f"{remaining}, never all {pool_size}."
+    )
     # The durable consumer passes titles from earlier *verified no-write*
     # attempts. Treat these as bounded untrusted data, not instructions.
     # Do not weaken the canonical 365-day title-uniqueness Airtable check.
     if not isinstance(excluded_titles, (tuple, list)):
         raise ValueError("excluded_titles must be a sequence")
-    avoided = [str(title).strip()[:100] for title in excluded_titles
-               if isinstance(title, str) and title.strip()][:24]
+    prior = list(excluded_titles) + list(exclude_titles or [])
+    avoided = [str(title).strip()[:100] for title in prior
+               if isinstance(title, str) and title.strip()][:44]
     if avoided:
         prompt += (
             "\n\nVERIFIED SHORTFALL REFILL — TITLE EXCLUSIONS\n"
@@ -222,7 +233,7 @@ def process_request(
                 "Generate a genuinely different, specific concept; do not reuse "
                 "a title by adding a number or minor wording change.\n"
                 f"Rejected titles or invalid response: {excluded}\n"
-                f"Return a valid JSON object containing exactly {remaining} "
+                f"Return a valid JSON object containing exactly {pool_size} "
                 "new entries in the ideas array, with nonempty candidate_title."
             )
         generated = generate_ideas(attempt_prompt)
@@ -232,9 +243,11 @@ def process_request(
             invalid_ai_responses += 1
             continue
 
-        ideas = raw_ideas[:remaining]
+        ideas = raw_ideas[:pool_size]
         preview["openai_idea_count"] = len(ideas)
         for idea in ideas:
+            if len(created_ids) >= remaining:
+                break
             if not isinstance(idea, dict):
                 invalid_idea_entries += 1
                 continue
@@ -297,6 +310,8 @@ def process_request(
             break
 
     preview["created_record_ids"] = created_ids
+    preview["candidate_pool_count"] = pool_size
+    preview["missing_count"] = max(0, remaining - len(created_ids))
     preview["skipped_duplicate_titles"] = skipped_duplicate_titles
     preview["invalid_ai_responses"] = invalid_ai_responses
     preview["invalid_idea_entries"] = invalid_idea_entries
