@@ -247,3 +247,44 @@ test("run gate detects an event whose catalog provenance no longer matches the r
   assert.equal(gate.gate.ready,false);
   assert.ok(gate.gate.deploymentBlockers.some(x=>/mismatched catalog revision/i.test(x)));
 });
+
+
+test("a completed QA run is finalized by append-only event, never by rewriting the run row",async()=>{
+  const h=harness();
+  const created=(await (await h.call("POST","runs",{client_request_id:"qa-finish-run-001"})).json()).run;
+  const payload={decision:"Incomplete",notes:"Integration acceptance still pending",client_request_id:"qa-finish-event-001"};
+  const first=await h.call("POST","runs/"+created.runId+"/finalize",payload);
+  assert.equal(first.status,201);
+  const result=await first.json();
+  assert.equal(result.event.kind,"RunFinalized");
+  assert.equal(result.event.payload.decision,"Incomplete");
+  const saved=(await (await h.call("GET","runs/"+created.runId)).json());
+  assert.equal(saved.run.status,"Finalized");
+  assert.equal(saved.run.releaseDecision,"Incomplete");
+  assert.equal(saved.run.finalizedAtUtc,"2026-11-06T12:00:00.000Z");
+  const canonical=h.rows.get(QA_RUNS_TABLE)[0].fields;
+  assert.equal(canonical.Status,"Open","run row must stay immutable");
+  assert.equal(h.rows.get(QA_EVENTS_TABLE).length,1,"one append only final event");
+  const gate=(await (await h.call("GET","runs/"+created.runId+"/gate")).json()).gate;
+  assert.equal(gate.ready,false);
+  assert.ok(gate.deploymentBlockers.some(x=>/finalized without release approval/i.test(x)));
+  const replay=await h.call("POST","runs/"+created.runId+"/finalize",payload);
+  assert.equal(replay.status,200);assert.equal((await replay.json()).reused,true);
+  assert.equal(h.rows.get(QA_EVENTS_TABLE).length,1);
+  await assert.rejects(()=>h.call("POST","runs/"+created.runId+"/results",{
+    client_request_id:"qa-closed-result-001",testId:"QA-AUTH-001",
+    status:"Pass",notes:"Should not write"
+  }),/run is finalized/);
+  await assert.rejects(()=>h.call("POST","runs/"+created.runId+"/finalize",{
+    decision:"Rejected",notes:"Changed mind",client_request_id:"qa-finish-event-002"
+  }),/already finalized/);
+  assert.equal(h.rows.get(QA_EVENTS_TABLE).length,1);
+});
+test("release Approved cannot finalize an incomplete or unattested run",async()=>{
+  const h=harness();
+  const created=(await (await h.call("POST","runs",{client_request_id:"qa-reject-approval-001"})).json()).run;
+  await assert.rejects(()=>h.call("POST","runs/"+created.runId+"/finalize",{
+    decision:"Approved",notes:"",client_request_id:"qa-finalize-deny-001"
+  }),/Cannot approve QA release/);
+  assert.equal(h.rows.get(QA_EVENTS_TABLE).length,0);
+});
