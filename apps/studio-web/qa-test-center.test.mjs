@@ -16,7 +16,7 @@ test("QA Test Center appears as a separate admin page, hidden until authenticate
 
 test("all interactive QA controls have unique HTML IDs and actual handlers",()=>{
   const ids=["qaEnvironment","qaRunSelect","qaStartRun","qaRefresh","qaStatus",
-    "qaCases","qaGate","qaHistory","qaBaselineSelect","qaCompare","qaRegressions","qaSearch"];
+    "qaCases","qaGate","qaHistory","qaBaselineSelect","qaCompare","qaRegressions","qaSearch","qaOlderRuns"];
   for(const id of ids){
     assert.equal(html.split('id="'+id+'"').length-1,1,"duplicate or missing id: "+id);
     assert.ok(script.includes('$("'+id+'")')||script.includes('const '+id+'=$("'+id+'")')||
