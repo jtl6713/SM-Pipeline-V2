@@ -192,6 +192,28 @@ export function factoryApprovalHoldReleaseEligibility(record, readiness = evalua
 }
 
 /**
+ * Canonical formal-approval predicate shared by Pipeline's Ready for Review
+ * label and Factory's actionable Needs Eyes lane. Readiness means more than
+ * a completed file: the saved status must authorize a human review and the
+ * exact package must be complete. This never changes publishing permission.
+ */
+export function formalFactoryApprovalReady(record, readiness = evaluateReviewPackage(record)) {
+  const status = lower(read(record, "Output_Status"));
+  const review = lower(read(record, "Review_Status"));
+  const publish = lower(read(record, "Publish_Status"));
+  const render = lower(read(record, "Render_Status"));
+  if (status !== "ready for review") return false;
+  if (!["", "review sent", "pending", "pending review"].includes(review)) return false;
+  if (read(record, "Do_Not_Publish") === true ||
+      read(record, "Studio_Render_Review_Hold_Active") === true ||
+      string(read(record, "Test_Run_ID"))) return false;
+  if (read(record, "Published_At") || read(record, "Platform_Post_ID") || read(record, "Platform_Post_URL")) return false;
+  if (["scheduled", "publishing", "published", "uploading", "platform processing", "draft delivered"].includes(publish)) return false;
+  if (render !== "rendered" && render !== "native photo route") return false;
+  return readiness?.readiness === "READY";
+}
+
+/**
  * Held creative revisions belong in Needs Eyes for preview/send-back only.
  * They are NOT eligible for Approve: the separate Do_Not_Publish and review
  * hold checks continue to prohibit all approval and publishing routes.
@@ -202,9 +224,14 @@ export function factoryReviewVisibility(record, readiness, studioState, creative
     && lower(read(record, "Output_Status")) === "ready for review"
     && lower(read(record, "Review_Status")) === "review sent"
     && creativeAvailable === true;
+  // The same predicate powers Pipeline's visible Ready for Review badge.
+  // Held outputs remain discoverable for preview or explicit operator release,
+  // but never gain an Approve action until their independent hold is resolved.
+  const actionable = formalFactoryApprovalReady(record, readiness);
+  const canReleaseHold = factoryApprovalHoldReleaseEligibility(record, readiness).eligible;
   return {
-    visible: studioState === "Ready for Review"
-      && (readiness?.readiness === "READY" || heldVisible),
+    visible: (studioState === "Ready for Review" && actionable)
+      || heldVisible || canReleaseHold,
     incomplete: lower(read(record, "Output_Status")) === "ready for review"
       && readiness?.readiness !== "READY" && !heldVisible,
     held_preview_only: heldVisible,
