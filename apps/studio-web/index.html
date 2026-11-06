@@ -2263,7 +2263,12 @@
  </div>
  <div class="qa-panel" id="qaGate" aria-label="Release gate">Select a run to view its release gate.</div>
  <div class="qa-panel"><h2>Test catalog and execution</h2><div id="qaCases"></div></div>
- <div class="qa-panel"><h2>Immutable run history</h2><div id="qaHistory"></div></div>
+ <div class="qa-panel">
+ <h2>Regression comparison</h2><p>Compare the selected run to an earlier run on the same catalog revision. A previously passing test that fails or is not rerun is flagged.</p>
+ <div class="qa-toolbar"><label>Baseline run<select id="qaBaselineSelect"><option value="">Select earlier run</option></select></label><button type="button" id="qaCompare">Compare runs</button></div>
+ <div id="qaRegressions" aria-live="polite"></div>
+</div>
+<div class="qa-panel"><h2>Immutable run history</h2><div id="qaHistory"></div></div>
 </section>
 
 <section id="page-exception-recovery" class="page" aria-label="Administrator exception recovery">
