@@ -1,1 +1,1 @@
-phase=compress
+phase=resume
