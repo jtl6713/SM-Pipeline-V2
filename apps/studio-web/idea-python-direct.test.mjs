@@ -36,6 +36,8 @@ test("Studio UI polls idea batches and explains aborted Generate starts", async 
   assert.match(source, /created_count/);
   assert.match(source, /timeoutMs: 45000/);
   assert.match(source, /activeIdeaGenerationBatchId = result\.batch_record_id/);
-  assert.match(source, /connection dropped/);
+  assert.match(source, /Generation acknowledgment was interrupted/);
+  assert.match(source, /Check Current ideas before starting a new batch/);
+  assert.match(source, /retries: 0/);
   assert.match(source, /BUILD_ID = "item4-0\.6\.\d+-[a-z0-9-]+"/);
 });
