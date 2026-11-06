@@ -3,7 +3,7 @@
   const $=id=>document.getElementById(id);
   const nav=$("navQaTestCenter"),root=$("page-qa-test-center");
   if(!nav||!root)return;
-  const state={tests:[],safeAutomations:[],runs:[],run:null,events:[],gate:null,loading:false,pendingRunId:null,search:""};
+  const state={tests:[],safeAutomations:[],runs:[],run:null,events:[],gate:null,loading:false,pendingRunId:null,search:"",nextCursor:null};
   const MAX_NOTES=4000;
   const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined&&text!==null)n.textContent=String(text);if(cls)n.className=cls;return n;};
   const status=$("qaStatus"),runs=$("qaRunSelect"),cases=$("qaCases"),gate=$("qaGate"),history=$("qaHistory"),baseline=$("qaBaselineSelect"),regressions=$("qaRegressions");
@@ -19,25 +19,46 @@
     return data;
   }
   function freshId(){return crypto.randomUUID();}
-  async function refreshRuns(){
-    const data=await call("runs?limit=30");
-    state.runs=data.runs||[];
+  function renderRunSelectors(){
+    const selected=state.run?.runId||"",previous=baseline?.value||"";
     runs.replaceChildren(el("option","Select a saved test run"));
     runs.firstChild.value="";
     for(const run of state.runs){
       const option=el("option",(run.createdAtUtc||"Unknown time")+" — "+run.environment+" — "+run.runId.slice(0,13));
       option.value=run.runId;runs.append(option);
     }
-    if(state.run)runs.value=state.run.runId;
-    const previous=baseline?.value||"";
+    runs.value=selected;
     baseline?.replaceChildren(el("option","Select earlier QA run"));
     if(baseline)baseline.firstChild.value="";
     for(const run of state.runs){
-      if(run.runId===state.run?.runId)continue;
+      if(run.runId===selected)continue;
       const option=el("option",(run.createdAtUtc||"Unknown time")+" — "+run.environment+" — "+run.runId.slice(0,13));
       option.value=run.runId;baseline?.append(option);
     }
     if(baseline && [...baseline.options].some(option=>option.value===previous))baseline.value=previous;
+    const more=$("qaOlderRuns");if(more)more.hidden=!state.nextCursor;
+  }
+  async function refreshRuns(){
+    const data=await call("runs?limit=30");
+    state.runs=data.runs||[];
+    state.nextCursor=data.next_cursor||null;
+    renderRunSelectors();
+  }
+  async function loadOlderRuns(){
+    if(!state.nextCursor)return;
+    const cursor=state.nextCursor;
+    const control=$("qaOlderRuns");if(control)control.disabled=true;
+    try{
+      const data=await call("runs?limit=30&cursor="+encodeURIComponent(cursor));
+      const existing=new Set(state.runs.map(x=>x.runId));
+      for(const item of data.runs||[]){
+        if(!existing.has(item.runId)){state.runs.push(item);existing.add(item.runId);}
+      }
+      state.nextCursor=data.next_cursor||null;
+      renderRunSelectors();
+      message("Loaded "+state.runs.length+" saved runs from canonical QA history.");
+    }catch(error){message(error.message,"error");}
+    finally{if(control)control.disabled=false;}
   }
   function lastEvent(testId){
     return [...state.events].reverse().find(e=>e.testId===testId&&
@@ -220,6 +241,7 @@
     }catch(e){message(e.message,"error");}finally{state.loading=false;}
   }
   $("qaSearch")?.addEventListener("input",event=>{state.search=String(event.target.value||"").trim().toLowerCase();renderCases();});
+  $("qaOlderRuns")?.addEventListener("click",loadOlderRuns);
   $("qaStartRun")?.addEventListener("click",startRun);
   $("qaRefresh")?.addEventListener("click",()=>initialize());
   $("qaCompare")?.addEventListener("click",async()=>{
