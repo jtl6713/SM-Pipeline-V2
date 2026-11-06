@@ -3,6 +3,9 @@ on:
   pull_request:
     paths:
       - 'apps/studio-api/qa-*.mjs'
+      - 'apps/studio-web/assets/qa-test-center.*'
+      - 'apps/studio-web/index.html'
+      - 'apps/studio-api/worker.js'
       - 'docs/qa-test-center/**'
       - '.github/workflows/qa-test-center-contract.yml'
   workflow_dispatch:
@@ -23,8 +26,12 @@ jobs:
           node --check apps/studio-api/qa-governance.mjs
           node --check apps/studio-api/qa-registry.mjs
           node --check apps/studio-api/qa-airtable-ledger.mjs
+          node --check apps/studio-api/qa-http.mjs
+          node --check apps/studio-api/qa-idempotency-lock.mjs
+          node --check apps/studio-api/qa-catalog.mjs
+          node --check apps/studio-web/assets/qa-test-center.js
       - name: Execute QA governance and automation contract tests
-        run: node --test apps/studio-api/qa-test-core.test.mjs apps/studio-api/qa-governance.test.mjs apps/studio-api/qa-registry.test.mjs apps/studio-api/qa-airtable-ledger.test.mjs
+        run: node --test apps/studio-api/qa-test-core.test.mjs apps/studio-api/qa-governance.test.mjs apps/studio-api/qa-registry.test.mjs apps/studio-api/qa-airtable-ledger.test.mjs apps/studio-api/qa-http.test.mjs
       - name: Validate catalog schema basics
         run: |
           node --input-type=module -e "
@@ -38,3 +45,9 @@ jobs:
           }
           console.log('Validated',ids.size,'unique catalog cases');
           "
+
+      - name: Enforce Studio UI release and QA page wiring
+        run: |
+          node apps/studio-web/ui-release-contract.mjs
+          node --test apps/studio-web/ui-release-contract.test.mjs apps/studio-web/pages-production-deploy-contract.test.mjs
+          node --check apps/studio-api/worker.js
