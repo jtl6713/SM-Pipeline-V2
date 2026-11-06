@@ -7993,6 +7993,19 @@ export async function studioStampParentAiCoverOnOutput(env, po, parent) {
   const currentCaption = String(f(po, "Output_Caption") || "").trim();
   const needsCaption = Boolean(caption && !currentCaption);
   if (!po?.id) return false;
+  // AI-cover hydration is not a review transition. A skipped, returned,
+  // approved, published, test or explicitly held output must never be
+  // resurrected into Ready for Review when a parent cover is restamped.
+  const status = String(f(po, "Output_Status") || "").trim().toLowerCase();
+  const review = String(f(po, "Review_Status") || "").trim().toLowerCase();
+  const publish = String(f(po, "Publish_Status") || "").trim().toLowerCase();
+  if (Boolean(f(po, "Do_Not_Publish")) ||
+      Boolean(f(po, "Studio_Render_Review_Hold_Active")) ||
+      Boolean(f(po, "Test_Run_ID")) ||
+      ["skipped", "cancelled", "rejected", "changes requested", "approved", "approved for publishing", "published"].includes(status) ||
+      ["skipped", "rejected", "changes requested", "approved"].includes(review) ||
+      ["ready to schedule", "scheduled", "publishing", "published"].includes(publish) ||
+      f(po, "Published_At") || f(po, "Platform_Post_ID") || f(po, "Platform_Post_URL")) return false;
   const current = String(f(po, "Thumbnail_URL") || "").trim();
   const currentDesigned = studioAiThumbnailUrl(current);
   if (ai && currentDesigned === ai) {
