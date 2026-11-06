@@ -11,6 +11,9 @@ import {
   serializeScriptedShortProducerPlan,
   scriptedShortProducerPlanFromNotes,
   validateScriptedShortProductionConstraints,
+  scriptedShortExactScenes,
+  scriptedShortHonorDuration,
+  scriptedShortCheckBriefRequirements,
 } from "./scripted-short-producer-plan.mjs";
 import { parseScriptedShortFeedback, chooseScriptedShortLibraryClip, applyScriptedShortFeedback } from "./scripted-short-feedback.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
@@ -11920,26 +11923,42 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   ];
   let source = "fallback";
   let scenes = [];
+  // A named all-clips list plus exact voiceover is executable direction, not
+  // an AI suggestion. Preserve every clip and every word, even if the writer
+  // proposes a shorter story.
   try {
-    const writer = await pulseIdeaTimedScriptWriter(env, synthetic, pool);
-    source = writer.source && writer.source !== "fallback" ? writer.source : "fallback";
-    scenes = assignOwnedScenes((writer.scenes || []).map((scene) => ({
-      voiceover_text: scene.voiceover_text,
-      suggested_visual: scene.suggested_visual,
-    })), pool);
-    scenes = ensureRelevantVideoScene(scenes, pool);
+    const exact = scriptedShortExactScenes(creativeBrief, pool);
+    if (exact) {
+      source = "exact-brief";
+      scenes = exact;
+    }
   } catch (error) {
-    console.warn("scripted short writer failed", error);
+    throw new HttpError(409, error.message || "Required clips are unavailable.");
   }
-  if (!scriptedShortProposalReady(buildTimelineFromScenes(scenes))) {
-    source = "fallback";
-    scenes = assignOwnedScenes(fallbackProposalScenes(prompt, pool), pool);
-    scenes = ensureRelevantVideoScene(scenes, pool);
+  if (source !== "exact-brief") {
+    try {
+      const writer = await pulseIdeaTimedScriptWriter(env, synthetic, pool);
+      source = writer.source && writer.source !== "fallback" ? writer.source : "fallback";
+      scenes = assignOwnedScenes((writer.scenes || []).map((scene) => ({
+        voiceover_text: scene.voiceover_text,
+        suggested_visual: scene.suggested_visual,
+      })), pool);
+      scenes = ensureRelevantVideoScene(scenes, pool);
+    } catch (error) {
+      console.warn("scripted short writer failed", error);
+    }
+    if (!scriptedShortProposalReady(buildTimelineFromScenes(scenes))) {
+      source = "fallback";
+      scenes = assignOwnedScenes(fallbackProposalScenes(prompt, pool), pool);
+      scenes = ensureRelevantVideoScene(scenes, pool);
+    }
   }
   // Independent Quality Agent guard: repair only from the eligible catalog,
   // otherwise mark a scene as missing rather than reporting a false match.
   const recovery = recoverScriptedShortAssets(buildTimelineFromScenes(scenes), pool, assetPolicy, profile?.id);
-  const timeline = buildTimelineFromScenes(recovery.timeline.segments);
+  const timeline = scriptedShortHonorDuration(buildTimelineFromScenes(recovery.timeline.segments), creativeBrief);
+  const constraints = scriptedShortCheckBriefRequirements(creativeBrief, timeline, pool);
+  if (!constraints.ok) throw new HttpError(409, constraints.errors.join(" "));
   const assetValidation = validateScriptedShortAssets(timeline, pool, assetPolicy, profile?.id);
   if (!assetValidation.ok) {
     throw new HttpError(409, "Quality Agent blocked a mismatched library asset. No proposal was accepted.");
@@ -12074,7 +12093,7 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
   if (!scriptedShortProposalReady(incoming)) {
     throw new HttpError(400, "Accept needs the proposal timeline.");
   }
-  const timeline = buildTimelineFromScenes(incoming.segments);
+  const timeline = scriptedShortHonorDuration(buildTimelineFromScenes(incoming.segments), creativeBrief);
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url, payload));
   // Validate against authoritative Airtable media before any draft is created.
   // This prevents edited or stale proposals bypassing the Quality Agent.
@@ -12093,10 +12112,17 @@ export async function acceptScriptedShortRoute(request, env, authorization, ctx 
       return airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, id);
     }));
     authoritativeCatalog = mediaRows.map(ideaTimedScriptCatalogRow);
+    const constraints = scriptedShortCheckBriefRequirements(creativeBrief, timeline, authoritativeCatalog);
+    if (!constraints.ok) throw new HttpError(409, constraints.errors.join(" "));
     const qa = validateScriptedShortAssets(timeline, authoritativeCatalog, acceptPolicy, profile?.id);
     if (!qa.ok) {
       throw new HttpError(409, "Quality Agent blocked a missing, wrong-profile, or wrong-location library asset. Propose again to repair the assignments.");
     }
+  }
+  // Also block a zero-asset proposal whenever the brief specified footage or VO.
+  if (!selectedMediaIds.length) {
+    const constraints = scriptedShortCheckBriefRequirements(creativeBrief, timeline, []);
+    if (!constraints.ok) throw new HttpError(409, constraints.errors.join(" "));
   }
   // The prompt is creative direction. Persist a concise title based on the
   // actual narration; preserve the full instructions in Idea_Summary.

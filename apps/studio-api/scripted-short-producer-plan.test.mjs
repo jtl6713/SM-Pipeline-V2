@@ -13,6 +13,10 @@ import {
   serializeScriptedShortProducerPlan,
   scriptedShortProducerPlanFromNotes,
   validateScriptedShortProductionConstraints,
+  scriptedShortBriefRequirements,
+  scriptedShortExactScenes,
+  scriptedShortHonorDuration,
+  scriptedShortCheckBriefRequirements,
 } from "./scripted-short-producer-plan.mjs";
 
 const timeline = {
@@ -96,4 +100,84 @@ test("proposal, accept, bridge preflight and production approval all use the Pro
   assert.match(source, /Suggested_Platforms: producerPlan\.target_platforms/);
   assert.match(source, /scripted_short_producer_constraints/);
   assert.match(source, /Quality Agent blocked production/);
+});
+
+
+const drifterVoiceover = [
+  "Chicago has a secret hiding underneath an old tavern.",
+  "This is The Drifter, a real Prohibition-era speakeasy in River North.",
+  "Want to find it?",
+  "Head to 678 North Orleans Street and enter the Green Door Tavern.",
+  "Walk toward the back, go downstairs near the restrooms, and look for the hidden bookshelf door.",
+  "Inside, you’ll discover vintage charm, intimate live entertainment, and a cocktail menu revealed through tarot cards.",
+  "It’s one of Chicago’s most unusual nights out.",
+  "Save this hidden gem, and follow ChicagoShining for more!",
+];
+const drifterBrief = [
+  "ChicagoShining — New Short Video Production",
+  "REQUIRED EXACT TITLE",
+  "How to Find The Drifter | Chicago’s Hidden Speakeasy",
+  "Creative direction",
+  "Create a captivating 35–40-second vertical video about The Drifter.",
+  "Mandatory footage instructions",
+  "Use ALL SIX unique Drifter Speakeasy video clips that were uploaded:",
+  ...Array.from({length: 6}, (_, i) => "* The Drifter Speakeasy " + (i + 1)),
+  "All six clips must appear in the completed video.",
+  "Exact voiceover script",
+  "“" + drifterVoiceover.join("\n\n") + "”",
+  "Video editing instructions",
+  "* Duration: Target 35–40 seconds, with natural pacing.",
+].join("\n");
+const drifterAssets = Array.from({length: 6}, (_, i) => ({
+  id: "recDrifter" + (i + 1),
+  name: "The Drifter Speakeasy " + (i + 1),
+  media_kind: "video",
+  media_type: "video/mp4",
+  duration_seconds: [7, 1, 5, 4, 4, 6][i],
+}));
+
+test("the real Drifter brief requires all six numbered clips, 35–40 seconds and every exact VO word", () => {
+  const requirements = scriptedShortBriefRequirements(drifterBrief);
+  assert.deepEqual(requirements.required_clips, drifterAssets.map((a) => a.name));
+  assert.deepEqual(requirements.duration, { min: 35, max: 40 });
+  assert.equal(requirements.exact_script, drifterVoiceover.join(" "));
+  const scenes = scriptedShortExactScenes(drifterBrief, drifterAssets);
+  assert.equal(scenes.length, 6);
+  assert.deepEqual(scenes.map((s) => s.asset_id), drifterAssets.map((a) => a.id));
+  assert.equal(scenes.map((s) => s.voiceover_text).join(" "), requirements.exact_script);
+  const estimated = {
+    duration_seconds: 22,
+    segments: scenes.map((scene, index) => ({ ...scene, index: index+1, duration_seconds: 22 / 6 })),
+  };
+  const retimed = scriptedShortHonorDuration(estimated, drifterBrief);
+  assert.ok(retimed.duration_seconds >= 35 && retimed.duration_seconds <= 40);
+  assert.equal(retimed.segments.length, 6);
+  assert.equal(retimed.segments.at(-1).end_seconds, retimed.duration_seconds);
+  assert.equal(scriptedShortCheckBriefRequirements(drifterBrief, retimed, drifterAssets).ok, true);
+});
+
+test("rejects a three-clip, truncated 22-second proposal before any outputs exist", () => {
+  const broken = {
+    duration_seconds: 22,
+    segments: drifterAssets.slice(2, 5).map((a) => ({
+      asset_id: a.id,
+      voiceover_text: "Walk to the hidden bookshe",
+    })),
+  };
+  const result = scriptedShortCheckBriefRequirements(drifterBrief, broken, drifterAssets);
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.length, 3);
+  assert.throws(() => scriptedShortExactScenes(drifterBrief, drifterAssets.slice(2)), /Required uploaded clips missing/);
+});
+
+test("proposal and accept both validate named clips and duration before writing", async () => {
+  const source = await readFile(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
+  const proposal = source.split("export async function proposeScriptedShortRoute(")[1].split("/*__STUDIO_WORKER_END:proposeScriptedShortRoute__*/")[0];
+  const accept = source.split("export async function acceptScriptedShortRoute(")[1].split("/*__STUDIO_WORKER_END:acceptScriptedShortRoute__*/")[0];
+  assert.match(proposal, /scriptedShortExactScenes\(creativeBrief, pool\)/);
+  assert.match(proposal, /scriptedShortHonorDuration\(/);
+  assert.match(proposal, /scriptedShortCheckBriefRequirements\(/);
+  assert.match(accept, /scriptedShortHonorDuration\(/);
+  assert.match(accept, /scriptedShortCheckBriefRequirements\(/);
+  assert.ok(accept.indexOf("scriptedShortCheckBriefRequirements") < accept.indexOf("Candidate_Title: title"));
 });
