@@ -91,6 +91,56 @@ def test_resume_only_generates_missing_candidates(monkeypatch):
     assert client.profile["Manual_Idea_Batch"] == []
 
 
+
+
+def test_verified_nine_of_ten_shortfall_refilled_with_only_missing(monkeypatch):
+    client = FakeClient(initial=4)
+    monkeypatch.setattr(q, "AirtableClient", lambda: client)
+    requests = []
+
+    def produce(**kwargs):
+        missing = kwargs["requested_count"]
+        requests.append(missing)
+        # First verified pass generates 4 of 6; next produces just 1;
+        # final round creates the remaining 1. Never regenerates 10.
+        count = [4, 1, 1][len(requests) - 1]
+        for index in range(count):
+            next_id = len(client.batch["Idea Candidates"])
+            client.batch["Idea Candidates"].append("rec" + str(next_id).zfill(14))
+        return {"created_count": count}
+
+    # Match an actual 10-idea NYC request, including initial verified links.
+    client.batch["Requested_Count"] = 10
+    job = {**_job(), "requested_count": 10}
+    monkeypatch.setattr(q, "process_request", produce)
+    q._work(job)
+    assert requests == [6, 2, 1]
+    assert client.batch["Status"] == "Complete"
+    assert client.batch["Generated_Count"] == 10
+    assert len(set(client.batch["Idea Candidates"])) == 10
+
+
+def test_bounded_shortfall_stops_after_five_confirmed_passes(monkeypatch):
+    client = FakeClient(initial=0)
+    client.batch["Requested_Count"] = 10
+    monkeypatch.setattr(q, "AirtableClient", lambda: client)
+    requests = []
+
+    def produce(**kwargs):
+        requests.append(kwargs["requested_count"])
+        index = len(client.batch["Idea Candidates"])
+        client.batch["Idea Candidates"].append("rec" + str(index).zfill(14))
+        return {"created_count": 1}
+
+    monkeypatch.setattr(q, "process_request", produce)
+    with pytest.raises(RuntimeError, match="Only 5 of 10 linked ideas verified"):
+        q._work({**_job(), "requested_count": 10})
+    assert requests == [10, 9, 8, 7, 6]
+    assert client.batch["Status"] == "Failed"
+    assert client.batch["Generated_Count"] == 5
+
+
+
 def test_partial_failed_write_is_not_retried_and_count_is_preserved(monkeypatch):
     client = FakeClient(initial=2)
     monkeypatch.setattr(q, "AirtableClient", lambda: client)
