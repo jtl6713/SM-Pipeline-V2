@@ -32,6 +32,21 @@ function configuredQaEnvironment(env){
     throw error(503,"QA execution environment is not configured");
   return configured;
 }
+export const QA_WORKER_BUILD="0.10.766-qa-release-attestation";
+export const QA_UI_BUILD="0.6.897-qa-center-pilot";
+export function qaDeploymentBlockers(run,boundEnvironment){
+  const blockers=[];
+  if(run?.environment!==boundEnvironment)
+    blockers.push("QA run targets a different execution environment; use its original Worker");
+  if(run?.deployment?.worker!==QA_WORKER_BUILD)
+    blockers.push("Worker deployment does not match this QA run's captured version");
+  if(run?.deployment?.ui!==QA_UI_BUILD)
+    blockers.push("Studio UI deployment does not match this QA run's captured version");
+  const runner=run?.deployment?.runner;
+  if(typeof runner!=="string"||!runner.trim()||runner==="unverified"||runner==="not-deployed")
+    blockers.push("Runner deployment is not attested");
+  return blockers;
+}
 export const QA_RUNS_TABLE="tblYwzehVtmyUMzj5";
 export const QA_EVENTS_TABLE="tblsg5E1cq8nb240c";
 const catalog=QA_CATALOG.tests;
@@ -245,7 +260,7 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
       const environment=body.environment===undefined?boundEnvironment:required(body.environment,"environment",40);
       if(environment!==boundEnvironment)throw error(400,"Selected QA environment is not configured on this Worker; no cross-environment testing");
       const runner=await verifiedRunnerVersion(env,fetchHealth);
-      const snapshot={worker:"0.10.765-qa-center-v1",ui:"0.6.897-qa-center-pilot",
+      const snapshot={worker:QA_WORKER_BUILD,ui:QA_UI_BUILD,
         runner}; // Server-only observed Runner identity; never trust a browser claim.
       const identity={actor,environment,catalogRevision:QA_CATALOG.catalogVersion};
       const payload={environment,catalogRevision:QA_CATALOG.catalogVersion};
@@ -284,13 +299,18 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
   if(operation==="gate"&&request.method==="GET"){
     const events=await history(runId);
     const gate=computeQaGate(catalog,events);
-    const blockers=qaEvidenceIntegrityBlockers(events);
+    const blockers=[...qaEvidenceIntegrityBlockers(events),
+      ...qaDeploymentBlockers(run,configuredQaEnvironment(env))];
     if(run.catalogRevision!==QA_CATALOG.catalogVersion)
       blockers.push("QA catalog revision changed; create a new run before release");
     if(events.some(event=>["ManualResult","AutomatedObservation"].includes(event.kind)&&
        event.payload?.catalogVersion!==run.catalogRevision))
       blockers.push("QA history contains an observation with a mismatched catalog revision");
-    if(run.deployment?.runner==="unverified")blockers.push("Runner deployment is not attested");
+    if(!blockers.includes("Runner deployment is not attested")){
+      const liveRunner=await verifiedRunnerVersion(env,fetchHealth);
+      if(liveRunner!==run.deployment.runner)
+        blockers.push("Runner deployment no longer matches the saved QA run or is unavailable");
+    }
     const finished=events.filter(x=>x.kind==="RunFinalized");
     if(finished.length>1)blockers.push("Multiple finalization records require reconciliation");
     if(finished.length===1&&finished[0].payload?.decision!=="Approved")
@@ -304,6 +324,12 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
   // catalog would create a false green result from an obsolete procedure.
   if(run.catalogRevision!==QA_CATALOG.catalogVersion)
     throw error(409,"QA catalog revision changed; start a new run before recording results");
+  if(run.environment!==configuredQaEnvironment(env))
+    throw error(409,"QA run targets a different execution environment; use its original Worker");
+  // Historical runs may still close as Rejected/Incomplete, but no old-build test writes.
+  if(operation!=="finalize" &&
+      (run.deployment?.worker!==QA_WORKER_BUILD||run.deployment?.ui!==QA_UI_BUILD))
+    throw error(409,"QA run deployment has changed; start a new run");
   // Every mutation of one run uses the same conditional lease. This serializes
   // finalization against late result/approval requests across Worker isolates.
   return withQaIdempotencyLock(env.STUDIO_MEDIA,"run-write:"+runId,async()=>{
@@ -387,8 +413,10 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
       throw error(400,"Rejected or incomplete runs require an explanation");
     if(decision==="Approved"){
       const gate=computeQaGate(catalog,existingEvents);
+      const provenanceBlockers=qaDeploymentBlockers(run,configuredQaEnvironment(env));
+      const liveRunner=await verifiedRunnerVersion(env,fetchHealth);
       if(!gate.ready||qaEvidenceIntegrityBlockers(existingEvents).length||
-         run.deployment?.runner==="unverified"||
+         provenanceBlockers.length||liveRunner!==run.deployment.runner||
          existingEvents.some(event=>["ManualResult","AutomatedObservation"].includes(event.kind)&&
            event.payload?.catalogVersion!==run.catalogRevision))
         throw error(409,"Cannot approve QA release while evidence or deployment is incomplete");
