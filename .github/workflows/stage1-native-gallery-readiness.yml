@@ -9,6 +9,7 @@ on:
       - 'tools/stage1/native_gallery_readiness.py'
       - 'tools/stage1/test_native_gallery_readiness.py'
       - 'services/pipeline-runner/rendering_review/native_gallery_staging_settings.py'
+      - 'services/pipeline-runner/rendering_review/native_gallery_readiness_http.py'
   workflow_dispatch:
 
 permissions:
