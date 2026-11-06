@@ -85,6 +85,31 @@ function exposeEvent(record){
     testId:f["Test ID"],kind:f["Event Kind"],actorId:f["Actor ID"],
     atUtc:f["Recorded At UTC"],payload};
 }
+// Revalidate canonical Airtable observations at release time, not just at submission.
+// A malformed or directly imported legacy Pass must never become a green gate.
+export function qaEvidenceIntegrityBlockers(events){
+  const latest=new Map();
+  for(const event of [...events].sort((a,b)=>String(a.atUtc).localeCompare(String(b.atUtc))))
+    if(["ManualResult","AutomatedObservation"].includes(event.kind))
+      latest.set(event.testId,event);
+  const blockers=[];
+  for(const [testId,event] of latest){
+    if(event.payload?.status!=="Pass")continue;
+    const p=event.payload||{},hasNotes=typeof p.notes==="string"&&!!p.notes.trim();
+    const hasEvidence=Array.isArray(p.evidence)&&p.evidence.length>0 &&
+      p.evidence.every(v=>v&&typeof v==="object"&&Object.keys(v).length>0);
+    if(!event.actorId||typeof p.executionId!=="string"||!/^qaex-[0-9a-f-]{36}$/i.test(p.executionId)){
+      blockers.push(testId+": missing trusted tester or execution identity");
+      continue;
+    }
+    if(event.kind==="ManualResult"&&!hasNotes&&!hasEvidence)
+      blockers.push(testId+": manual Pass lacks notes or evidence");
+    if(event.kind==="AutomatedObservation"&&
+       (p.source!=="automated"||p.requiresHumanApproval!==true||!hasEvidence))
+      blockers.push(testId+": automated Pass lacks trusted evidence or review requirement");
+  }
+  return blockers;
+}
 export function computeQaGate(tests,events){
   const latest=new Map(),reviews=new Map(),waivers=[];
   for(const event of [...events].sort((a,b)=>String(a.atUtc).localeCompare(String(b.atUtc)))){
@@ -253,7 +278,7 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
   if(operation==="gate"&&request.method==="GET"){
     const events=await history(runId);
     const gate=computeQaGate(catalog,events);
-    const blockers=[];
+    const blockers=qaEvidenceIntegrityBlockers(events);
     if(run.catalogRevision!==QA_CATALOG.catalogVersion)
       blockers.push("QA catalog revision changed; create a new run before release");
     if(events.some(event=>["ManualResult","AutomatedObservation"].includes(event.kind)&&
@@ -355,7 +380,8 @@ export async function handleQaApi({request,url,env,authorization,airtableFetch,r
       throw error(400,"Rejected or incomplete runs require an explanation");
     if(decision==="Approved"){
       const gate=computeQaGate(catalog,existingEvents);
-      if(!gate.ready||run.deployment?.runner==="unverified"||
+      if(!gate.ready||qaEvidenceIntegrityBlockers(existingEvents).length||
+         run.deployment?.runner==="unverified"||
          existingEvents.some(event=>["ManualResult","AutomatedObservation"].includes(event.kind)&&
            event.payload?.catalogVersion!==run.catalogRevision))
         throw error(409,"Cannot approve QA release while evidence or deployment is incomplete");
