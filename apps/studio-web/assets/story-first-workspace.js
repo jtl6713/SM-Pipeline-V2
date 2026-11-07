@@ -4,6 +4,9 @@
   const $ = id => document.getElementById(id);
   const panel = $("storyFirstPanel");
   if (!panel) return;
+  // Reuse the single visible Script a Short entry; the storyboard lives inside it.
+  const producerPanel=$("scriptedShortPanel");
+  if(producerPanel && panel.parentElement!==producerPanel)producerPanel.appendChild(panel);
   const config = window.CHICAGOSHINING_STUDIO_CONFIG || {};
   const root = String(config.apiBase || window.location.origin).replace(/\/$/, "");
   const select = $("studioProfileSelect");
@@ -671,6 +674,13 @@
     panel.scrollIntoView({ behavior: "smooth", block: "start" });
     $("storyFirstBrief").focus();
   });
+  // Capture before the legacy asset-first short handler so no duplicate producer call occurs.
+  $("scriptedShortForm")?.addEventListener("submit",event=>{
+    event.preventDefault();event.stopImmediatePropagation();
+    $("storyFirstBrief").value=String($("scriptedShortPrompt")?.value||"").trim();
+    if($("scriptedShortResult"))$("scriptedShortResult").hidden=true;
+    propose(event).catch(error=>report(error.message,true));
+  },true);
   $("storyFirstNewForm").addEventListener("submit", e => propose(e).catch(err => report(err.message, true)));
   $("storyFirstSave").addEventListener("click", () => save().catch(err => report(err.message, true)));
   $("storyFirstRefresh").addEventListener("click", () => refresh().catch(err => report(err.message, true)));
