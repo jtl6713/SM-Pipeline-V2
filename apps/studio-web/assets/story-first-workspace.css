@@ -59,3 +59,370 @@
   .story-first-candidate-desc>button{width:100%}
   .story-first-shot-detail>button{width:100%}
 }
+
+
+/* -----------------------------------------------------------------------
+   Script a Short · scene cards v2
+   All selectors are rooted in #storyFirstPanel so other Idea generators,
+   Production, Asset Manager and platform workflows retain their styling.
+   ----------------------------------------------------------------------- */
+#storyFirstPanel {
+  --scene-ink: #112a4a;
+  --scene-muted: #51647d;
+  --scene-line: #dce6f2;
+  --scene-blue: #0755af;
+  --scene-blue-light: #e9f2ff;
+  --scene-green-light: #e7f8ed;
+  scroll-margin-top: 112px;
+  padding-bottom: max(28px, env(safe-area-inset-bottom, 0px));
+}
+#storyFirstPanel .story-first-shot-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 20px;
+  width: 100%;
+  min-width: 0;
+  margin-top: 16px;
+}
+#storyFirstPanel .story-first-shot {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+  padding: 16px;
+  color: var(--scene-ink);
+  background: #fff;
+  border: 1px solid #d4e0f0;
+  border-radius: 22px;
+  box-shadow: 0 7px 20px rgba(22, 52, 88, .10), 0 2px 6px rgba(22, 52, 88, .045);
+  isolation: isolate;
+}
+#storyFirstPanel .story-first-shot-hero {
+  display: grid;
+  grid-template-columns: minmax(118px, 35%) minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
+  padding: 14px;
+  min-width: 0;
+  min-height: 130px;
+  border-radius: 16px;
+  background: linear-gradient(120deg, #f2f7ff, #eaf3ff 62%, #dcecff);
+}
+#storyFirstPanel .story-first-shot-thumbnail {
+  position: relative;
+  min-width: 0;
+  height: 114px;
+  overflow: hidden;
+  border-radius: 13px;
+  background: linear-gradient(130deg, #173763, #427bb2 58%, #9ec6e5);
+}
+#storyFirstPanel .story-first-shot-thumbnail--empty {
+  background:
+    linear-gradient(150deg, rgba(4,26,59,.1), rgba(4,26,59,.15)),
+    linear-gradient(135deg, #214a80, #5984af 60%, #d3e5f5);
+}
+#storyFirstPanel .story-first-shot-thumbnail--empty::before {
+  content: "▧";
+  display: grid;
+  place-items: center;
+  position: absolute;
+  inset: 0 0 15px;
+  color: rgba(255,255,255,.72);
+  font-size: 38px;
+  line-height: 1;
+}
+#storyFirstPanel .story-first-shot-thumbnail-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+#storyFirstPanel .story-first-thumbnail-note {
+  position: absolute;
+  inset: auto 0 0;
+  padding: 16px 7px 6px;
+  color: #fff;
+  background: linear-gradient(transparent, rgba(1,20,45,.82));
+  font-size: .65rem;
+  font-weight: 650;
+  line-height: 1.2;
+  text-align: center;
+  letter-spacing: .01em;
+}
+#storyFirstPanel .story-first-shot-hero-copy {min-width: 0}
+#storyFirstPanel .story-first-shot-title-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+#storyFirstPanel .story-first-shot-title {
+  margin: 0;
+  color: #092448;
+  font-size: clamp(1.25rem, 1.55vw, 1.7rem);
+  font-weight: 800;
+  line-height: 1.15;
+}
+#storyFirstPanel .story-first-time-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 2px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+  color: #0d467c;
+  background: #c9e3ff;
+  font-size: .92rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+#storyFirstPanel .story-first-time-pill::before {
+  content: "◷";
+  margin-right: 7px;
+  font-size: 1.15rem;
+  line-height: 1;
+}
+#storyFirstPanel .story-first-status-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  gap: 7px;
+  min-height: 30px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  white-space: normal;
+  color: #294a70;
+  background: #e6edf6;
+  font-size: .83rem;
+  font-weight: 750;
+  line-height: 1.25;
+}
+#storyFirstPanel .story-first-status-chip::before {
+  content: "•";
+  font-size: 1.2em;
+}
+#storyFirstPanel .story-first-status-chip.is-candidates {
+  color: #17613a;
+  background: #dff5e8;
+}
+#storyFirstPanel .story-first-status-chip.is-ready {
+  color: #135a35;
+  background: #cbf2d8;
+}
+#storyFirstPanel .story-first-status-chip.is-ready::before {content: "✓"}
+#storyFirstPanel .story-first-status-chip.is-review,
+#storyFirstPanel .story-first-status-chip.is-uploading {
+  color: #755114;
+  background: #fff0cd;
+}
+/* The screenshot's label/textarea collisions came from inherited form rules.
+   Make direct scene fields three explicit grid tracks and refuse intrinsic
+   min-width growth, including on tablet portrait. */
+#storyFirstPanel .story-first-shot > .story-first-scene-field {
+  box-sizing: border-box;
+  display: grid !important;
+  grid-template-columns: 25px minmax(120px, .86fr) minmax(0, 1.35fr);
+  align-items: center;
+  column-gap: 13px;
+  row-gap: 8px;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  margin: 0;
+  padding: 14px 4px;
+  border-bottom: 1px solid var(--scene-line);
+  background: transparent;
+}
+#storyFirstPanel .story-first-shot > .story-first-scene-field:first-of-type {
+  margin-top: 6px;
+}
+#storyFirstPanel .story-first-scene-field > .story-first-field-icon {
+  display: block;
+  width: 23px;
+  height: 23px;
+  color: #164f8b;
+}
+#storyFirstPanel .story-first-shot .story-first-scene-field > span {
+  display: block;
+  margin: 0;
+  min-width: 0;
+  color: var(--scene-ink);
+  font-size: .94rem;
+  line-height: 1.32;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+#storyFirstPanel .story-first-scene-field .story-first-field-hint {
+  display: block;
+  margin-top: 4px;
+  color: var(--scene-muted);
+  font-size: .75rem;
+  line-height: 1.3;
+  font-weight: 450;
+}
+#storyFirstPanel .story-first-shot .story-first-field :is(input, select, textarea),
+#storyFirstPanel .story-first-shot > .story-first-scene-field > :is(input, select, textarea) {
+  display: block;
+  box-sizing: border-box;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  margin: 0;
+  padding: 10px 12px;
+  color: #142d4d;
+  background: #fbfdff;
+  border: 1px solid #b9cce3;
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(14,43,75,.05);
+  font: inherit;
+  font-size: .92rem;
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: normal;
+}
+#storyFirstPanel .story-first-shot > .story-first-scene-field > input,
+#storyFirstPanel .story-first-shot > .story-first-scene-field > select {
+  height: 45px;
+}
+#storyFirstPanel .story-first-shot > .story-first-scene-field > textarea {
+  min-height: 88px;
+  resize: vertical;
+  overflow-y: auto;
+}
+#storyFirstPanel .story-first-shot :is(input, select, textarea):focus-visible,
+#storyFirstPanel .story-first-shot button:focus-visible {
+  outline: 3px solid #5ca9f7;
+  outline-offset: 2px;
+  border-color: #216eb9;
+}
+#storyFirstPanel .story-first-selected {
+  margin: 12px 0 0;
+  padding: 12px;
+  background: #f0fbf4;
+  border-color: #b6e6c6;
+  border-radius: 12px;
+}
+#storyFirstPanel .story-first-shot-detail {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  margin-top: 14px;
+  padding: 0;
+  border: 0;
+}
+#storyFirstPanel .story-first-shot-detail > :not(button) {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+#storyFirstPanel .story-first-shot-detail > button,
+#storyFirstPanel .story-first-candidate-desc button {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 42px;
+  margin: 0;
+  padding: 9px 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  border-radius: 10px;
+  font-size: .84rem;
+  font-weight: 700;
+}
+#storyFirstPanel .story-first-shot-detail > button.primary-button {
+  background: #0756ac;
+  color: #fff;
+}
+#storyFirstPanel .story-first-library-results {
+  box-sizing: border-box;
+  display: grid;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  padding: 14px;
+  margin: 2px 0;
+  border: 1px solid #d5eee2;
+  border-radius: 14px;
+  background: linear-gradient(115deg,#f0faf4,#f6fcf8);
+}
+#storyFirstPanel .story-first-library-results .story-first-asset-heading {
+  margin: 0 0 2px;
+  color: #1a4a34;
+  font-size: .92rem;
+}
+#storyFirstPanel .story-first-shot .subtle {
+  color: #50647e;
+  overflow-wrap: anywhere;
+}
+#storyFirstPanel .story-first-candidate {
+  align-items: center;
+  grid-template-columns: minmax(90px, 115px) minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid #d7e3ee;
+  border-radius: 12px;
+  background: #fff;
+}
+#storyFirstPanel .story-first-candidate-img {
+  max-width: 100%;
+  height: 115px;
+  object-fit: cover;
+  border-radius: 9px;
+}
+#storyFirstPanel .story-first-candidate-desc {
+  color: #183455;
+  font-size: .85rem;
+}
+#storyFirstPanel .story-first-candidate-desc strong {
+  font-size: .93rem;
+  overflow-wrap: anywhere;
+}
+#storyFirstPanel .story-first-browse {padding-top: 10px}
+#storyFirstPanel .story-first-browse .story-first-field {width: 100%}
+#storyFirstPanel .story-first-generated-preview {
+  display: block;
+  width: min(100%, 260px);
+  max-width: 100%;
+  height: auto;
+  max-height: 390px;
+  object-fit: contain;
+  border-radius: 12px;
+  background: #e8f1fa;
+}
+@media (max-width: 1200px) {
+  #storyFirstPanel .story-first-shot-list {grid-template-columns: minmax(0,1fr)}
+}
+@media (max-width: 760px) {
+  #storyFirstPanel .story-first-shot-list {gap: 14px}
+  #storyFirstPanel .story-first-shot {padding: 11px;border-radius: 16px}
+  #storyFirstPanel .story-first-shot-hero {
+    grid-template-columns: minmax(90px, 34%) minmax(0, 1fr);
+    gap: 12px;
+    padding: 11px;
+    min-height: 104px;
+  }
+  #storyFirstPanel .story-first-shot-thumbnail {height: 102px}
+  #storyFirstPanel .story-first-shot-title {font-size: 1.27rem}
+  #storyFirstPanel .story-first-shot-title-line {gap: 6px;margin-bottom: 9px}
+  #storyFirstPanel .story-first-time-pill {min-height: 26px;font-size: .8rem}
+  #storyFirstPanel .story-first-status-chip {font-size: .76rem}
+  #storyFirstPanel .story-first-shot > .story-first-scene-field {
+    grid-template-columns: 24px minmax(0, 1fr);
+    gap: 8px 10px;
+    padding: 11px 5px;
+  }
+  #storyFirstPanel .story-first-shot > .story-first-scene-field > .story-first-field-icon {grid-column: 1;grid-row: 1}
+  #storyFirstPanel .story-first-shot > .story-first-scene-field > span {grid-column: 2;grid-row: 1}
+  #storyFirstPanel .story-first-shot > .story-first-scene-field > :is(input,textarea,select) {grid-column: 1 / -1;grid-row: 2}
+  #storyFirstPanel .story-first-shot-detail {grid-template-columns: minmax(0, 1fr)}
+  #storyFirstPanel .story-first-shot-detail > button {grid-column: 1}
+}
+@media (prefers-reduced-motion: reduce) {
+  #storyFirstPanel * {scroll-behavior: auto}
+}
