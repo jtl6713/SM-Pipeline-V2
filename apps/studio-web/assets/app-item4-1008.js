@@ -300,7 +300,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.903-inline-scene-icons";
+  const BUILD_ID = "item4-0.6.904-upload-error-details";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -23975,6 +23975,8 @@ function timedScriptAssetLabel(asset, index) {
 
   function syncLibraryClassifyStatusMessage(remaining) {
     if (libraryUploadMessageBusy()) return;
+    // Background classification must not erase an unresolved upload error.
+    if (["failed", "partial"].includes($("libraryUploadProgress")?.dataset?.state)) return;
     const left = Math.max(0, Number(remaining) || 0);
     const total = Math.max(libraryClassifyWatch.total || 0, left);
     if (left > 0) {
@@ -24801,9 +24803,9 @@ function timedScriptAssetLabel(asset, index) {
    const index=Math.min(total,Math.max(1,Number(fileIndex)||1));
    const bytes=Math.max(0,Number(file?.size)||0);
    const loaded=Math.max(0,Math.min(bytes,Number(loadedBytes)||0));
-   const percent=phase==="saved"||phase==="complete"||phase==="verifying"?100:Math.min(99,Math.floor((bytes>0?loaded/bytes:0)*100));
+   const percent=phase==="saved"||phase==="complete"||phase==="verifying"?100:Math.min(100,Math.floor((bytes>0?loaded/bytes:0)*100));
    // A sent request is 100% transferred, not 99% saved. Server confirmation is a distinct stage.
-   const percentLabel=phase==="verifying"?"100% sent":`${percent}%`;
+   const percentLabel=percent===100&&!["saved","complete"].includes(phase)?"100% sent":`${percent}%`;
    const byteUnit=bytes>0&&bytes<1024?"B":bytes<1024*1024/10?"KB":"MB";
    const byteDivisor=byteUnit==="B"?1:byteUnit==="KB"?1024:1024*1024;
    const formatBytes=value=>byteUnit==="B"?String(Math.round(value)):(value/byteDivisor).toFixed(1);
@@ -24895,6 +24897,7 @@ function timedScriptAssetLabel(asset, index) {
     const uploadedClassifyIds = [];
     let uploaded = 0;
     let completedFiles = 0;
+    let lastTransferredBytes = 0;
     renderLibraryUploadProgress({ phase: "uploading", file: files[0], fileCount: files.length, fileIndex: 1 });
     try {
       for (let start = 0; start < files.length; start += chunkSize) {
@@ -24908,6 +24911,7 @@ function timedScriptAssetLabel(asset, index) {
             : `Adding ${completedFiles + 1} of ${files.length}: ${chunk[0].name}…`);
         setLibraryUploadMessage(progressLabel, "");
         const currentFile = chunk[0];
+        lastTransferredBytes = 0;
         const fileIndex = completedFiles + 1;
         renderLibraryUploadProgress({ phase: "uploading", file: currentFile, fileIndex, fileCount: files.length, uploaded, loadedBytes: 0, message: "Starting transfer. Waiting for the first bytes…" });
         const form = new FormData();
@@ -24927,7 +24931,10 @@ function timedScriptAssetLabel(asset, index) {
         }
         try {
           const result = await uploadLibraryFileWithProgress(form, { profileId, file: currentFile,
-            onTransfer: ({ stage, loadedBytes }) => renderLibraryUploadProgress({ phase: stage, file: currentFile, fileIndex, fileCount: files.length, uploaded, loadedBytes }),
+            onTransfer: ({ stage, loadedBytes }) => {
+              lastTransferredBytes = loadedBytes;
+              renderLibraryUploadProgress({ phase: stage, file: currentFile, fileIndex, fileCount: files.length, uploaded, loadedBytes });
+            },
           });
           const count = Math.min(chunk.length, Number(result?.uploaded ?? (Array.isArray(result?.records) ? result.records.length : result?.id ? 1 : 0)));
           uploaded += count;
@@ -24945,15 +24952,15 @@ function timedScriptAssetLabel(asset, index) {
           completedFiles += chunk.length;
           const raw = String(error?.message || "upload failed");
           const hint = /Request failed \(50[023]\)|failed to fetch|networkerror|aborted|timeout/i.test(raw)
-            ? " Drive/pipeline may be slow or unreachable — try again one photo at a time."
+            ? " Drive/pipeline may be slow or unreachable. Check the asset list before retrying to avoid duplicates."
             : "";
           const label = chunk[0]?.name || "file";
           errors.push(`${label}: ${raw}${hint}`);
-          renderLibraryUploadProgress({ phase: "failed", file: currentFile, fileIndex, fileCount: files.length, uploaded, message: `${label}: ${raw}. Check the asset list before retrying to avoid duplicates.` });
+          renderLibraryUploadProgress({ phase: "failed", file: currentFile, fileIndex, fileCount: files.length, uploaded, loadedBytes: lastTransferredBytes, message: `${label}: ${raw}. Check the asset list before retrying to avoid duplicates.` });
         }
       }
       inputs.forEach((input) => { input.value = ""; });
-      renderLibraryUploadProgress({ phase: errors.length ? "partial" : "complete", file: files[files.length - 1], fileIndex: files.length, fileCount: files.length, uploaded, loadedBytes: Number(files[files.length - 1]?.size) || 0 });
+      renderLibraryUploadProgress({ phase: errors.length ? "partial" : "complete", file: files[files.length - 1], fileIndex: files.length, fileCount: files.length, uploaded, loadedBytes: lastTransferredBytes, message: errors.length ? `${uploaded} of ${files.length} assets confirmed saved. ${errors.join(" ")} Check the asset list before retrying to avoid duplicates.` : "" });
       if (zone) delete zone.dataset.busy;
       if (uploaded) await startLibraryBrowse();
       const namedSummary = namedUploads.length === 1

@@ -179,3 +179,30 @@ test("queue remains one asset at a time with real result counts and no implicit 
   const release = html.match(/UI build 0\.6\.(\d+)/);
   assert.ok(release && Number(release[1]) >= 833, "Asset Manager requires UI 0.6.833 or newer");
 });
+
+test("failed transfers retain measured bytes and the actionable server error", () => {
+  const {context,nodes}=contextFor();
+  const file={name:"screen.mov",size:1000};
+  context.renderLibraryUploadProgress({phase:"partial",file,loadedBytes:1000,message:"Asset held for review",uploaded:0});
+  assert.equal(nodes.get("libraryUploadProgressPercent").textContent,"100% sent");
+  assert.equal(nodes.get("libraryUploadProgressStage").textContent,"Asset held for review");
+  assert.equal(nodes.get("libraryUploadSavedMeter").value,0);
+  context.renderLibraryUploadProgress({phase:"partial",file,loadedBytes:400,message:"Connection interrupted",uploaded:0});
+  assert.equal(nodes.get("libraryUploadMeter").value,40);
+});
+
+test("classification polling cannot overwrite an unresolved upload failure", () => {
+  const start=source.indexOf("function syncLibraryClassifyStatusMessage(");
+  const end=source.indexOf("function libraryPreviewUrl(",start);
+  let message="Upload confirmation timed out";
+  const panel={dataset:{state:"partial"}};
+  const context=vm.createContext({$:()=>panel,libraryUploadMessageBusy:()=>false,
+    setLibraryUploadMessage:value=>{message=value;},libraryClassifyWatch:{total:1},
+    clearLibraryClassificationWatch:()=>{}});
+  vm.runInContext(source.slice(start,end),context);
+  context.syncLibraryClassifyStatusMessage(1);
+  assert.equal(message,"Upload confirmation timed out");
+  panel.dataset.state="complete";
+  context.syncLibraryClassifyStatusMessage(1);
+  assert.equal(message,"Classifying 1 of 1 remaining.");
+});
