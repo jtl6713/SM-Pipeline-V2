@@ -3542,20 +3542,30 @@ export async function ensureStoryFirstProductionMedia(env, requestRecord, valida
     throw new HttpError(409, "Selected storyboard media requires review (" +
       blockedScenes.join("; ") + "); Production draft was not updated");
   }
-  const attached = await applyLibraryAssetsToProductionRequest(env,requestRecord,ids,{
-    replaceWaitAssets:true,allowManagePaused:true,replaceAll:true,allowVideo:true,requireAll:true,approvedStoryboard:true
-  });
-  const expected = new Set(ids);
-  const actual = new Set((attached?.assets || []).map(asset =>
-    String(asset?.media_asset_record_id || "").trim()).filter(Boolean));
-  const missing = [...expected].filter(id => !actual.has(id));
-  if (!attached?.record || missing.length || actual.size !== expected.size) {
-    const missingScenes = story.scenes.map((scene, index) =>
-      missing.includes(scene.assigned_asset_id) ? index + 1 : null
-    ).filter(Boolean);
-    throw new HttpError(409, "Production draft did not confirm exact selected storyboard assets" +
-      (missingScenes.length ? " for scene(s) " + missingScenes.join(", ") : "") +
-      "; do not render until media is reconciled");
+  // Reconcile against Airtable itself, not the in-memory response. Retry a stale
+  // draft once, but never report success for a partial or reordered storyboard.
+  const matchesStoryboard = (record) => {
+    const actual = item4AssetManifest(record).map(asset =>
+      String(asset?.media_asset_record_id || "").trim());
+    return actual.length === ids.length && actual.every((id, index) => id === ids[index]);
+  };
+  let current = requestRecord;
+  let confirmed = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const attached = await applyLibraryAssetsToProductionRequest(env,current,ids,{
+      replaceWaitAssets:true,allowManagePaused:true,replaceAll:true,allowVideo:true,requireAll:true,approvedStoryboard:true
+    });
+    if (attached?.skipped || !attached?.record) {
+      throw new HttpError(409, "Storyboard media handoff rejected: " +
+        String(attached?.reason || "asset eligibility check failed") +
+        "; existing Production draft preserved");
+    }
+    current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
+    if (matchesStoryboard(current)) { confirmed = current; break; }
+  }
+  if (!confirmed) {
+    throw new HttpError(409, "Production draft did not persist all " + ids.length +
+      " storyboard assets in scene order; do not render or publish");
   }
   // Commit creative directives only after the exact selected asset set is confirmed.
   // A rejected handoff must not leave the draft with new storyboard notes but
