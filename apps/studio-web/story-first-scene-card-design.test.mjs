@@ -47,7 +47,7 @@ test("scene-specific responsive styles enforce full-width fields without disturb
   assert.match(scoped, /@media \(max-width:\s*1200px\)/);
   assert.ok(scoped.split("\n").filter(line => /^\s*\.(?:panel|form-field|card)\b/.test(line)).length === 0,
     "no broad global layout overrides");
-  const key=html.match(/app-item4-1008\\.js\\?v=([^"&]+)/)?.[1];
+  const key=html.match(/app-item4-1008\.js\?v=([^"&]+)/)?.[1];
   assert.ok(key,"Studio app release key must exist");
   assert.ok(html.includes("story-first-workspace.css?v="+key));
   assert.ok(html.includes("story-first-workspace.js?v="+key));
