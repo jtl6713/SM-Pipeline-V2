@@ -195,12 +195,16 @@
           // without repeating the mutation or risking duplicate side effects.
           let verified = null;
           try {
-            const read = await call("/api/ideas/" + encodeURIComponent(recordId) + "?profile=" + encodeURIComponent(id));
+            const read = await call("/api/ideas/" + encodeURIComponent(recordId) + "?profile=" + encodeURIComponent(id) + "&fresh=1");
             if (read.record?.id === recordId && savedIdeaMatches(read.record, body)) verified = read.record;
           } catch { /* read-back may be unavailable too */ }
-          if (!verified) throw new Error("Save was not confirmed (" +
-            (error?.message || "connection interrupted") +
-            "). Your changes are still on this screen. Check the saved Idea before retrying.");
+          if (!verified) {
+            const unresolved = new Error("Save was not confirmed (" +
+              (error?.message || "connection interrupted") +
+              "). Your changes are still on this screen. Reopen the saved Idea to verify before trying again.");
+            unresolved.saveUnconfirmed = true;
+            throw unresolved;
+          }
           result = { record: verified, verified_after_interruption: true };
         }
       } else {
@@ -210,8 +214,11 @@
           });
         } catch (error) {
           // Do not repeat an ambiguous create; it may already exist in Airtable.
-          throw new Error("New Idea save was not confirmed (" + (error?.message || "connection interrupted") +
+          const unresolved = new Error("New Idea may exist in Airtable even though its save response was not confirmed (" +
+            (error?.message || "connection interrupted") +
             "). Check Saved Ideas before trying again to avoid creating a duplicate.");
+          unresolved.saveUnconfirmed = true;
+          throw unresolved;
         }
       }
       if (!result.record?.id) throw new Error("Studio did not return the saved Idea ID.");
