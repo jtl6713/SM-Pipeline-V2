@@ -1,3 +1,4 @@
+import { parseStoryFirstNotes, normalizeStoryFirst, upsertStoryFirstNotes, storyFirstShotChecklist } from "./idea-first-storyboard.mjs";
 import { formalFactoryApprovalReady, evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
 import { staleInstagramPublishingDisplay } from "./ig-publishing-display.mjs";
@@ -2182,6 +2183,8 @@ export function mapIdea(record) {
     carousel_image_mode: f(record, "Production_Carousel_Image_Mode"),
     photo_wait_status: f(record, "Studio_Photo_Wait_Status") || null,
     photo_listening_paused: ideaManagePhotoPauseActive(f(record, "Production_Config_Notes")),
+    story_first: parseStoryFirstNotes(f(record, "Production_Config_Notes")),
+    suggested_visuals: String(f(record, "Suggested_Visuals") || ""),
     photo_match: parseIdeaPhotoMatchJson(f(record, "Studio_Photo_Match_JSON")),
     matched_media_asset_links: f(record, "Studio_Matched_Media_Assets") || [],
     library_asset_ids: [...new Set([
@@ -3753,6 +3756,8 @@ export async function createIdea(request, env, authorization, ctx = null) {
     throw new HttpError(400, "Vibe Cut source aspect must be vertical or horizontal");
   }
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
+  const storyFirst = String(payload?.input_kind || "").trim() === "story-first"
+    ? normalizeStoryFirst(payload?.storyboard, profile.id) : null;
   // A Vibe Cut records a new uploaded source, not a proposed new editorial
   // subject. Reusing an existing title (including retries of the same video)
   // must never block source upload. Keep the 365-day guard for all other Ideas.
@@ -3783,6 +3788,14 @@ export async function createIdea(request, env, authorization, ctx = null) {
     Production_Carousel_Slide_Count: 8,
     Studio_Photo_Wait_Status: "Waiting",
   };
+  if (storyFirst) Object.assign(fields, {
+    Production_Content_Type: "Vertical Short Video",
+    Production_Video_Duration: storyFirst.target_seconds,
+    Production_Video_Clip_Count: storyFirst.scenes.length,
+    Studio_Photo_Wait_Status: "Not Needed",
+    Suggested_Visuals: storyFirstShotChecklist(storyFirst),
+    Production_Config_Notes: upsertStoryFirstNotes("", storyFirst, profile.id),
+  });
   if (vibeCut) Object.assign(fields, vibeCutIdeaFields({
     sourceAspect, width: payload?.source_video_width, height: payload?.source_video_height,
     targetSeconds: payload?.vibe_target_seconds ?? payload?.video_duration ?? 15,
@@ -3804,7 +3817,7 @@ export async function createIdea(request, env, authorization, ctx = null) {
   });
   // Never convert a successful Idea create into a 500 merely because image
   // matching fails. Cron's Waiting scan owns bounded retries.
-  if (!vibeCut && ctx?.waitUntil) {
+  if (!vibeCut && !storyFirst && ctx?.waitUntil) {
     ctx.waitUntil(matchNewlyCreatedIdeaPhotos(env, created, authorization).catch((error) => {
       console.warn("New Idea immediate photo match failed", created.id, String(error?.message || error).slice(0, 180));
     }));
@@ -3901,6 +3914,9 @@ export async function updateIdea(request, env, url, authorization) {
   assertIdeaNotApproved(record, "Editing");
 
   const input = cleanIdeaUpdatePayload(payload);
+  const wantsStoryFirstUpdate = Object.prototype.hasOwnProperty.call(payload || {}, "storyboard");
+  const savedStoryFirst = parseStoryFirstNotes(f(record, "Production_Config_Notes"));
+  if (wantsStoryFirstUpdate && !savedStoryFirst) throw new HttpError(409, "This Idea does not have a story-first storyboard");
   if (studioIdeaTitleKey(input.title) !== studioIdeaTitleKey(f(record, "Candidate_Title"))) {
     const duplicateTitle = await studioFindRecentDuplicateTitle(input.title, (kind, formula, field) => {
       const table = kind === "idea" ? env.AIRTABLE_IDEA_TABLE_ID : env.AIRTABLE_CONTENT_TABLE_ID;
@@ -3942,6 +3958,19 @@ export async function updateIdea(request, env, url, authorization) {
       targetSeconds: payload?.video_duration ?? f(record, "Production_Video_Duration") ?? 15,
     }) : {}),
   };
+  if (wantsStoryFirstUpdate) {
+    const profileId = Array.isArray(f(record, "Content_Profile")) ? String(f(record, "Content_Profile")[0] || "") : "";
+    let storyFirst;
+    try { storyFirst = normalizeStoryFirst(payload.storyboard, profileId); }
+    catch (error) { throw new HttpError(400, error?.message || "Invalid storyboard"); }
+    fields.Production_Config_Notes = upsertStoryFirstNotes(
+      fields.Production_Config_Notes ?? String(f(record, "Production_Config_Notes") || ""), storyFirst, profileId);
+    fields.Suggested_Visuals = storyFirstShotChecklist(storyFirst);
+    fields.Production_Content_Type = "Vertical Short Video";
+    fields.Production_Video_Duration = storyFirst.target_seconds;
+    fields.Production_Video_Clip_Count = storyFirst.scenes.length;
+    fields.Studio_Photo_Wait_Status = "Not Needed";
+  }
   if (Object.prototype.hasOwnProperty.call(payload || {}, "primary_location")) {
     fields.Primary_Location = input.primary_location || null;
   } else if (!String(f(record, "Primary_Location") || "").trim()) {
