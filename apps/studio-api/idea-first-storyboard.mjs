@@ -10,9 +10,10 @@ const DECISIONS = new Set(["unassigned", "library", "ai", "capture"]);
 const MEDIA = new Set(["still", "clip", "still_or_clip"]);
 const trim = (value, max = 800) => String(value == null ? "" : value).replace(/[\u0000-\u001f]+/g, " ").trim().slice(0, max);
 
-function legacyDecision(choice, state) {
+function legacyDecision(choice, state, candidate) {
   if (state === "candidate_unverified" || choice === "review_or_replace" || choice === "review_or_capture") return "library";
   if (choice === "capture_preferred") return "capture";
+  if (/^rec[A-Za-z0-9]+$/.test(String(candidate || ""))) return "library";
   return "unassigned";
 }
 
@@ -45,7 +46,7 @@ export function normalizeStoryFirst(input, profileId = "") {
     const visual = trim(raw?.visual || raw?.suggested_visual, 340);
     if (visual.length < 5) throw new TypeError("Every scene needs a specific visual requirement");
     const explicit = trim(raw?.decision, 32);
-    const decision = DECISIONS.has(explicit) ? explicit : legacyDecision(trim(raw?.choice), trim(raw?.state));
+    const decision = DECISIONS.has(explicit) ? explicit : legacyDecision(trim(raw?.choice), trim(raw?.state), raw?.candidate_asset_id);
     const assigned = trim(raw?.assigned_asset_id, 64);
     const candidate = trim(raw?.candidate_asset_id, 64);
     if (assigned && !RECORD_ID.test(assigned)) throw new TypeError("Invalid selected scene asset");
