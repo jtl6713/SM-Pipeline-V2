@@ -167,26 +167,6 @@
         && JSON.stringify(scene.rejected_ai_ids || []) === JSON.stringify(wanted.rejected_ai_ids || []);
     });
   }
-  // Verify a read-back against every editorial field before treating an interrupted PATCH as saved.
-  // A timed-out response alone does not prove that Airtable accepted the write.
-  function savedIdeaMatches(record, body) {
-    const actual = storyNotesFromRecord(record), wanted = body.storyboard;
-    if (!actual || actual.profile_id !== body.content_profile_id ||
-        String(record.title || "").trim() !== body.title ||
-        String(record.summary || "").trim() !== body.summary ||
-        Number(actual.target_seconds) !== Number(wanted.target_seconds) ||
-        actual.scenes?.length !== wanted.scenes?.length) return false;
-    const clean = value => String(value == null ? "" : value).replace(/[\\u0000-\\u001f]+/g, " ").trim();
-    const strings = ["time","visual","voiceover","media","decision","candidate_asset_id",
-      "assigned_asset_id","ai_prompt","capture_note","generated_master_id","accepted_generated_master_id"];
-    const flags = ["selected_approved","media_override"];
-    return wanted.scenes.every((scene, i) => {
-      const saved = actual.scenes[i];
-      return strings.every(key => clean(saved[key]) === clean(scene[key])) &&
-        flags.every(key => Boolean(saved[key]) === Boolean(scene[key])) &&
-        JSON.stringify(saved.rejected_ai_ids || []) === JSON.stringify(scene.rejected_ai_ids || []);
-    });
-  }
   async function save() {
     if (current.busy) throw new Error("Another storyboard action is still running.");
     const story = readForm();
@@ -210,6 +190,7 @@
             method: "PATCH", body: JSON.stringify(body),
           });
         } catch (error) {
+          if (!interruptedSave(error)) throw error;
           // A lost PATCH response is ambiguous. Re-read the authoritative Idea
           // without repeating the mutation or risking duplicate side effects.
           let verified = null;
@@ -237,9 +218,9 @@
       current.record = result.record;
       current.story = JSON.parse(JSON.stringify(storyNotesFromRecord(result.record) || story));
       localStorage.setItem("studio.story_first_resume." + id, result.record.id);
-      // A list refresh is SECONDARY. Its abort must not turn a confirmed write into a save failure.
-      // Do not hold up other operations, such as opening Asset Manager.
-      void refresh(true).catch(error => console.warn("Saved Ideas list refresh failed after confirmed save", error));
+      // A successful Airtable write is already the receipt. Keep the saved-Ideas
+      // selector current locally; do not issue an abort-prone second network request.
+      rememberSavedIdea(result.record);
       report("Saved to Airtable · Idea " + (result.record.candidate_id || result.record.id) +
         (result.verified_after_interruption ? " · Verified after connection interruption." :
           ". You can leave and reopen it from Ideas."));
