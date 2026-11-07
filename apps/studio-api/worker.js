@@ -1183,7 +1183,7 @@ export default {
         isChicagoReviewPost ||
         isInternalIgPublishLeasePost ||
         request.method === "GET" ||
-        (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isMediaAssetStreamRoute || isPublicBrandWatermarkRoute || isOutputPreviewRoute || isFactoryOutputPreviewRoute || isReviewAttemptPreviewRoute || isVoicePreviewRoute)) ||
+        (request.method === "HEAD" && (isStoryFirstSceneMediaRoute || isMusicPreviewRoute || isMediaAssetPreviewRoute || isMediaAssetStreamRoute || isPublicBrandWatermarkRoute || isOutputPreviewRoute || isFactoryOutputPreviewRoute || isReviewAttemptPreviewRoute || isVoicePreviewRoute)) ||
         isProfilesOverviewRefreshWrite ||
         isProfilesOverviewSummaryReconcileWrite ||
         isIdeaCreateRoute ||
@@ -1191,6 +1191,7 @@ export default {
         isScriptedShortProposeWrite ||
         isScriptedShortReviseWrite ||
         isScriptedShortAcceptWrite ||
+        (isStoryFirstSceneMediaRoute && request.method === "POST") ||
         isIdeaEditRoute ||
         isIdeaDeleteRoute ||
         isIdeaHoldWrite ||
