@@ -39,7 +39,7 @@ export function normalizeStoryFirst(input, profileId = "") {
   if (!Array.isArray(input.scenes) || input.scenes.length < 1 || input.scenes.length > 12) {
     throw new TypeError("Storyboard needs between 1 and 12 scenes");
   }
-  const seconds = Number(input.target_seconds || 30);
+  const seconds = Math.round(Number(input.target_seconds || 30));
   if (!Number.isFinite(seconds) || seconds < 5 || seconds > 180) throw new TypeError("Short duration must be 5–180 seconds");
   let priorEnd = 0;
   const scenes = input.scenes.map((raw, index) => {
@@ -55,6 +55,8 @@ export function normalizeStoryFirst(input, profileId = "") {
       .filter(item => RECORD_ID.test(String(item?.id || ""))).slice(0, 3)
       .map(item => ({ id: trim(item.id, 64), reason: trim(item.reason, 120) }));
     const generatedMaster = trim(raw?.generated_master_id, 80);
+    const acceptedMaster = trim(raw?.accepted_generated_master_id, 80);
+    if (acceptedMaster && !/^aipre[A-Za-z0-9]+$/.test(acceptedMaster)) throw new TypeError("Invalid accepted generated master ID");
     if (generatedMaster && !/^aipre[A-Za-z0-9]+$/.test(generatedMaster)) throw new TypeError("Invalid generated master ID");
     const rejected = (Array.isArray(raw?.rejected_ai_ids) ? raw.rejected_ai_ids : [])
       .filter(id => /^aipre[A-Za-z0-9]+$/.test(String(id || ""))).slice(-10);
@@ -83,6 +85,8 @@ export function normalizeStoryFirst(input, profileId = "") {
       assigned_asset_id: assigned || null, selected_approved: approved,
       media_override: Boolean(raw?.media_override),
       generated_master_id: generatedMaster && !rejected.includes(generatedMaster) ? generatedMaster : null,
+      accepted_generated_master_id: acceptedMaster || null,
+      selected_origin: approved && raw?.selected_origin === "ai" ? "ai" : null,
       rejected_ai_ids: rejected,
       ai_prompt: trim(raw?.ai_prompt, 850) || visual,
       capture_note: trim(raw?.capture_note, 450),
@@ -120,6 +124,9 @@ export function validateStoryFirstSelectedMedia(story, assets) {
       || String(fields.Media_Class || "").toLowerCase() === "video";
     if (scene.media === "clip" && !isVideo && !scene.media_override) {
       problems.push("Scene " + (index + 1) + ": a video clip is required");
+    }
+    if (scene.media === "still" && isVideo && !scene.media_override) {
+      problems.push("Scene " + (index + 1) + ": a still image is required");
     }
   }
   return { ok: problems.length === 0, problems };
