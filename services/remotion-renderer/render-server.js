@@ -9,6 +9,9 @@ const { spawn } = require('child_process');
 const { registerRemotionCleanup } = require('./remotion-cleanup');
 const { authoritativeRenderPlan } = require('./authoritative-duration');
 const { verifyFirstFrame } = require('./first-frame-verify');
+const {selectedVibeWatermarkFileId} = require('./profile-watermark-policy');
+const {noVoiceoverForVibeReview} = require('./vibe-audio-policy');
+const {vibeReviewMusicFileId, vibeReviewAudioExtension, verifyVibeReviewMusicStreams} = require('./vibe-review-music-policy');
 
 const app = express();
 
@@ -894,58 +897,116 @@ async function rewriteClipAssets({ clips, jobId, jobAssetDir, job }) {
     return rewrittenClips;
 }
 
-async function rewriteMusicAsset({ music, jobAssetDir, job }) {
+async function probeVibeReviewMusicAudio(filePath) {
+    const evidence = await new Promise((resolve, reject) => {
+        const probe = spawn('ffprobe', [
+            '-v', 'error', '-show_entries',
+            'stream=codec_type,codec_name,duration:format=duration',
+            '-of', 'json', filePath,
+        ], {cwd: PROJECT_DIR, windowsHide: true});
+        let output = '';
+        let oversized = false;
+        const timeout = setTimeout(() => probe.kill(), 15000);
+        probe.stdout.on('data', (chunk) => {
+            output += chunk.toString();
+            if (output.length > 65536) {
+                oversized = true;
+                probe.kill();
+            }
+        });
+        probe.stderr.on('data', () => {}); // Never expose raw provider/file details.
+        probe.on('error', () => {
+            clearTimeout(timeout);
+            reject(new Error('vibe_review_music_ffprobe_unavailable'));
+        });
+        probe.on('close', (code, signal) => {
+            clearTimeout(timeout);
+            if (oversized || signal || code !== 0 || !output) {
+                reject(new Error('vibe_review_music_ffprobe_failed'));
+                return;
+            }
+            try {
+                resolve(JSON.parse(output));
+            } catch {
+                reject(new Error('vibe_review_music_probe_invalid'));
+            }
+        });
+    });
+    return verifyVibeReviewMusicStreams(evidence);
+}
+
+async function rewriteMusicAsset({ music, jobAssetDir, job, studioRevision }) {
+    // No direct public Drive retrieval is permitted for a protected Vibe review.
+    // Only a verified canonical Drive ID is accepted; fetch through the same
+    // private Runner media route used by source clips and profile watermarks.
+    const vibeMusicId = vibeReviewMusicFileId({ music, studioRevision });
     if (!music) {
         return undefined;
     }
 
     if (isHttpUrl(music.url)) {
-        const ext = getExtensionFromUrl(music.url, '.mp3');
-        const filename = `music${ext}`;
-        const destination = path.join(jobAssetDir, filename);
+        const sourceUrl = vibeMusicId
+            ? `${PIPELINE_RUNNER_INTERNAL_URL}/internal/drive-media/${encodeURIComponent(vibeMusicId)}`
+            : music.url;
+        const ext = vibeMusicId ? '.mp3' : getExtensionFromUrl(music.url, '.mp3');
+        let destination = path.join(jobAssetDir, `music${ext}`);
 
-        appendLog(job, `Downloading music from ${music.url}`);
-        await downloadUrlToFile(music.url, destination);
+        appendLog(job, vibeMusicId
+            ? 'Downloading licensed Vibe music from private Drive authority'
+            : `Downloading music from ${music.url}`);
+        // In protected review a redirect could expose an unapproved third-
+        // party source or Access HTML. Do not follow it or use a public fallback.
+        await downloadUrlToFile(sourceUrl, destination, vibeMusicId ? 0 : 5);
+        if (vibeMusicId) {
+            const size = fs.statSync(destination).size;
+            const file = fs.openSync(destination, 'r');
+            const header = Buffer.alloc(16);
+            try {
+                fs.readSync(file, header, 0, header.length, 0);
+            } finally {
+                fs.closeSync(file);
+            }
+            const audioExt = vibeReviewAudioExtension(header, size);
+            // Accepting the ftyp container header as m4a is not proof that
+            // its actual streams are music-only, nor that MP3 frames decode.
+            await probeVibeReviewMusicAudio(destination);
+            if (audioExt !== ext) {
+                const renamed = path.join(jobAssetDir, `music${audioExt}`);
+                fs.renameSync(destination, renamed);
+                destination = renamed;
+            }
+        }
         appendLog(job, `Downloaded music to ${toProjectRelative(destination)}`);
 
         const rewrittenMusic = {
             ...music,
             src: toPublicSrc(destination),
         };
-
         delete rewrittenMusic.url;
-
         return rewrittenMusic;
     }
 
     if (music.src) {
-        const rewrittenMusic = {
-            ...music,
-        };
-
+        const rewrittenMusic = {...music};
         delete rewrittenMusic.url;
-
         return rewrittenMusic;
     }
-
     if (music.url && !isHttpUrl(music.url)) {
-        const rewrittenMusic = {
-            ...music,
-            src: music.url,
-        };
-
+        const rewrittenMusic = {...music, src: music.url};
         delete rewrittenMusic.url;
-
         return rewrittenMusic;
     }
-
     return undefined;
 }
-
 
 function normalizeVoiceover(body) {
     if (!body || typeof body !== 'object') {
         return undefined;
+    }
+    // Vibe Cut is music-only: its {enabled:false} sentinel must NOT be
+    // downloaded as a synthesized voiceover. Reject any incidental narration.
+    if (body.studioRevision?.source === 'rendering_review_vibe_cut') {
+        return noVoiceoverForVibeReview(body);
     }
 
     if (body.voiceover && typeof body.voiceover === 'object') {
@@ -1017,16 +1078,25 @@ async function rewriteVoiceoverAsset({ voiceover, jobAssetDir, job }) {
     throw new Error('Voiceover must include either src or url.');
 }
 
-async function rewriteWatermarkAsset({ watermarkUrl, jobAssetDir, job }) {
+async function rewriteWatermarkAsset({ watermarkUrl, jobAssetDir, job, studioRevision }) {
     const raw = String(watermarkUrl || '').trim();
-    if (!raw) return '';
+    // The protected Vibe Cut Runner must bind the exact owned profile PNG;
+    // even a valid Drive URL is not authority without an operator-managed
+    // profile->file mapping. Never silently substitute Chicago's watermark.
+    const reviewFileId = selectedVibeWatermarkFileId({
+        watermarkUrl: raw,
+        studioRevision,
+        profileWatermarksJson: process.env.REMOTION_REVIEW_PROFILE_WATERMARKS_JSON,
+    });
+    if (!raw && !reviewFileId) return '';
 
-    // ChicagoShining brand watermark is a single known Drive PNG. Never trust an
-    // arbitrary Drive id from props — R4/catalog have sent VO/music/clip ids and
-    // Remotion then saved ID3/MP4 bytes as watermark.png (CI 239–243).
+    // Original production retains the hard-pinned Chicago asset. Only the
+    // separately verified review flow can select an allowlisted city logo.
     const extractedId = googleDriveFileIdFromUrl(raw);
-    const driveFileId = CHICAGO_WATERMARK_DRIVE_FILE_ID;
-    if (extractedId && extractedId !== driveFileId) {
+    const driveFileId = reviewFileId || CHICAGO_WATERMARK_DRIVE_FILE_ID;
+    if (reviewFileId) {
+        appendLog(job, 'Using configured profile-owned Vibe review watermark');
+    } else if (extractedId && extractedId !== driveFileId) {
         appendLog(
             job,
             `Ignoring non-brand watermark Drive id ${extractedId}; using authority ${driveFileId}`
@@ -1163,6 +1233,7 @@ async function buildRewrittenProps({ body, jobId, job }) {
 
     const rewrittenMusic = await rewriteMusicAsset({
         music: body.music,
+        studioRevision: body.studioRevision,
         jobAssetDir,
         job,
     });
@@ -1175,6 +1246,7 @@ async function buildRewrittenProps({ body, jobId, job }) {
 
     const rewrittenWatermarkUrl = await rewriteWatermarkAsset({
         watermarkUrl: body.watermarkUrl,
+        studioRevision: body.studioRevision,
         jobAssetDir,
         job,
     });
