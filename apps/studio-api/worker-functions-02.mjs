@@ -3555,7 +3555,8 @@ export async function getOrCreateProductionRequestForIdea(request, env, url, aut
 
   let preferredProfileId = null;
   try { preferredProfileId = requestedProfileId(url, await request.clone().json().catch(() => ({}))); } catch { preferredProfileId = requestedProfileId(url); }
-  const approvedStory = await verifiedStoryFirstProduction(env, idea);
+  const approvedStory = String(f(idea, "Production_Config_Notes") || "").includes("[story-first.1]")
+    ? await verifiedStoryFirstProduction(env, idea) : null;
   const existing = await existingDraftForIdea(env, ideaRecordId, authorization, idea);
   if (existing) {
     const validatedDraft = approvedStory ? await ensureStoryFirstProductionMedia(env, existing, approvedStory) : existing;
@@ -3585,7 +3586,8 @@ export async function createProductionRequestFromBody(request, env, authorizatio
   let idea = await loadAuthorizedIdea(env, ideaRecordId, authorization);
   if (promotionCompleted(idea)) throw new HttpError(409, "This idea has already been promoted");
   const preferredProfileId = requestedProfileId(url, payload);
-  const approvedStory = await verifiedStoryFirstProduction(env, idea);
+  const approvedStory = String(f(idea, "Production_Config_Notes") || "").includes("[story-first.1]")
+    ? await verifiedStoryFirstProduction(env, idea) : null;
   const existing = await existingDraftForIdea(env, ideaRecordId, authorization, idea);
   if (existing) {
     return respond(request, env, {
@@ -11253,7 +11255,8 @@ export async function promoteIdeaViaI3I4(request, env, url, authorization) {
     });
   }
 
-  const storyFirst = parseStoryFirstNotes(f(record, "Production_Config_Notes"));
+  const storyFirst = String(f(record, "Production_Config_Notes") || "").includes("[story-first.1]")
+    ? parseStoryFirstNotes(f(record, "Production_Config_Notes")) : null;
   if (storyFirst) {
     const approvedStory = await verifiedStoryFirstProduction(env, record);
     const draft = await existingDraftForIdea(env, recordId, authorization, record);
