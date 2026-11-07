@@ -20,18 +20,19 @@ test("story-first handoff requests atomic library attachment", () => {
 });
 
 test("scene handoff checks exact IDs rather than just asset count", () => {
-  assert.match(ensure, /const expected = new Set\(ids\)/);
-  assert.match(ensure, /const actual = new Set\(/);
-  assert.match(ensure, /const missing = \[\.\.\.expected\]\.filter\(id => !actual\.has\(id\)\)/);
-  assert.match(ensure, /missing\.length \|\| actual\.size !== expected\.size/);
-  assert.match(ensure, /missingScenes\.join\(", "\)/);
+  assert.match(ensure, /const matchesStoryboard = \(record\) =>/);
+  assert.match(ensure, /item4AssetManifest\(record\)/);
+  assert.match(ensure, /actual\.length === ids\.length/);
+  assert.match(ensure, /actual\.every\(\(id, index\) => id === ids\[index\]\)/);
+  assert.match(ensure, /await airtableFetch\(env, PRODUCTION_REQUEST_TABLE, requestRecord\.id\)/);
+  assert.match(ensure, /for \(let attempt = 0; attempt < 2; attempt\+\+\)/);
 });
 
 test("story-first preserves ordered scene voiceover, time and selected asset ID", () => {
   assert.match(ensure, /time:row\.time, voiceover:row\.voiceover, visual:row\.visual, media:row\.media/);
   assert.match(ensure, /asset_id:row\.assigned_asset_id/);
   assert.match(ensure, /Script_Mode: "Force exact", Requested_Script: script/);
-  assert.ok(ensure.indexOf("return await item4UpdateRequestState") > ensure.indexOf("const missing ="), "creative directives must be committed after asset validation");
+  assert.ok(ensure.indexOf("return await item4UpdateRequestState") > ensure.indexOf("if (!confirmed)"), "creative directives must be committed after asset validation");
 });
 
 test("explicitly approved storyboard media uses a guarded classification exception", () => {
