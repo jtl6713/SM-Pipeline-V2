@@ -3817,7 +3817,7 @@ export async function createIdea(request, env, authorization, ctx = null) {
   });
   // Never convert a successful Idea create into a 500 merely because image
   // matching fails. Cron's Waiting scan owns bounded retries.
-  if (!vibeCut && !storyFirst && ctx?.waitUntil) {
+  if (!vibeCut && ctx?.waitUntil && !storyFirst) {
     ctx.waitUntil(matchNewlyCreatedIdeaPhotos(env, created, authorization).catch((error) => {
       console.warn("New Idea immediate photo match failed", created.id, String(error?.message || error).slice(0, 180));
     }));
