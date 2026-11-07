@@ -1,0 +1,25 @@
+/* Story-first shot workspace: compact on desktop, comfortable on mobile. */
+.story-first-panel{margin-top:16px}
+.story-first-panel .story-first-intro{color:var(--text-muted,#a5a7b4);max-width:70ch}
+.story-first-create{display:grid;gap:12px}
+.story-first-saved-row{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin:14px 0}
+.story-first-saved-row label{flex:1 1 260px}
+.story-first-saved-row select{width:100%;max-width:580px}
+.story-first-saved-hint{margin:4px 0 8px}
+.story-first-workspace{margin-top:12px}
+.story-first-edit-header{display:grid;grid-template-columns:1fr 2fr;gap:10px;margin:12px 0}
+.story-first-field{display:flex;flex-direction:column;gap:5px;margin:9px 0;min-width:0}
+.story-first-field>span{font-size:.88rem;font-weight:600}
+.story-first-field textarea,.story-first-field input,.story-first-field select{width:100%;box-sizing:border-box;max-width:100%;border:1px solid var(--border-color,#77808b);border-radius:8px;background:var(--surface,#1e2329);color:var(--text-color,#eee);padding:9px 10px;font:inherit;line-height:1.4}
+.story-first-field textarea{resize:vertical}
+.story-first-progress{font-weight:650;margin:14px 0}
+.story-first-shot-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,330px),1fr));gap:12px}
+.story-first-shot{padding:12px;border:1px solid var(--border-color,#616674);border-radius:12px;min-width:0;background:var(--card-bg,transparent)}
+.story-first-shot-head{display:flex;justify-content:space-between;gap:10px;align-items:center}
+.story-first-shot-head span{font-variant-numeric:tabular-nums;font-size:.84rem;opacity:.8}
+.story-first-shot .story-first-shot-detail{border-top:1px solid var(--border-color,#777);margin-top:10px;padding-top:8px}
+.story-first-shot-detail>button{margin:7px 0 3px;white-space:normal;text-align:center}
+.story-first-preview{display:inline-block;margin:8px 0;color:inherit;text-decoration:underline}
+.story-first-generated-preview{display:block;max-width:230px;width:100%;aspect-ratio:9/16;object-fit:cover;margin:9px 0;border-radius:8px}
+.story-first-actions{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
+@media(max-width:640px){.story-first-edit-header{grid-template-columns:1fr}.story-first-shot-list{grid-template-columns:minmax(0,1fr)}.story-first-shot{padding:10px}.story-first-saved-row>button,.story-first-actions>button{width:100%}}
