@@ -7092,11 +7092,48 @@ export async function getIdeaLibrarySuggestions(request, env, url, authorization
 }
 /*__STUDIO_WORKER_END:getIdeaLibrarySuggestions__*/
 
-export function ideaLibraryRejectReason(record, { allowVideo = false, allowLowQuality = false } = {}) {
+export function ideaLibraryRejectReason(record, { allowVideo = false, allowLowQuality = false, approvedStoryboard = false } = {}) {
   const mediaClass = String(f(record, "Media_Class") || "").trim().toLowerCase();
   const mime = String(f(record, "MIME_Type") || "").trim().toLowerCase();
   const name = String(f(record, "Asset Name") || record.id);
   const isVideo = mediaClass === "video" || mime.startsWith("video/");
+  // A human-approved story-first selection can be used while classification is
+  // pending, but only after independently checking hard safety constraints.
+  // Automatic library matching retains the stricter classified-only policy.
+  if (approvedStoryboard) {
+    const rights = String(f(record, "Rights_Status") || "").trim().toLowerCase();
+    const status = String(f(record, "Asset_Status") || "").trim().toLowerCase();
+    const eligibility = String(f(record, "Raw_Source_Eligibility") || "").trim().toLowerCase();
+    const access = String(f(record, "Drive_Access_Status") || "").trim().toLowerCase();
+    const role = String(f(record, "Asset_Role") || "").trim().toLowerCase();
+    const exclusions = f(record, "Exclusion_Reasons");
+    const reasons = (Array.isArray(exclusions) ? exclusions : [exclusions])
+      .flatMap(value => String((value && typeof value === "object" ? value.name : value) || "").split(","))
+      .map(value => value.trim().toLowerCase()).filter(Boolean);
+    const review = String(f(record, "Potential_Match_Notes") || "");
+    if (Boolean(f(record, "Do_Not_Use")) || f(record, "Active") === false)
+      return `${name} is disabled or marked Do Not Use`;
+    if (!["owned", "licensed", "public domain", "cleared"].includes(rights))
+      return `${name} has uncleared rights`;
+    if (!["available", "ready"].includes(status)) return `${name} is not available`;
+    if (eligibility === "ineligible" || reasons.length)
+      return `${name} has exclusion or source eligibility restrictions`;
+    if (/QA-ASSET-THIRD-PARTY-OVERLAY:\\s*(?:REVIEW|Review required)/i.test(review))
+      return `${name} requires third-party overlay review`;
+    if (!googleDriveFileId(record)) return `${name} is missing its Drive master`;
+    if (isVideo && !allowVideo) return `${name} is a video; this picker attaches stills only`;
+    if (isVideo && role && role !== "raw footage") return `${name} is not Raw Footage`;
+    if (isVideo && access && access !== "public") return `${name} does not have permitted Drive access`;
+    if (!isVideo && mediaClass && !["image", "graphic"].includes(mediaClass))
+      return `${name} is not a supported still image`;
+    if (/__\\d+x\\d+__/i.test(name) || /fill-crop-v\\d+/i.test(name))
+      return `${name} is a derived asset, not an original master`;
+    if (!isVideo && ideaLibraryFileBytes(record) > ITEM4_MAX_FILE_BYTES)
+      return `${name} exceeds the 25 MB per-image limit`;
+    if (isVideo && ideaLibraryFileBytes(record) > ITEM4_MAX_CLIP_FILE_BYTES)
+      return `${name} exceeds the 200 MB clip limit`;
+    return null;
+  }
   if (Boolean(f(record, "Do_Not_Use"))) return `${name} is marked Do Not Use`;
   if (isVideo && !allowVideo) return `${name} is a video; this picker attaches stills only`;
   if (isVideo && allowVideo && !ideaLibraryIsEligibleVideo(record)) return `${name} is not eligible Raw Footage`;
