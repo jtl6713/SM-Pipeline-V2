@@ -761,6 +761,7 @@ import {
   uploadMusicLibraryTracks,
   listAssetLibrary,
   uploadAssetLibraryItems,
+  storyFirstSceneMediaRoute,
   assignLibraryAssetProfile,
   classifyAllLibraryAssets,
   renameAssetLibraryItem,
@@ -1073,6 +1074,7 @@ export default {
       const isMusicFavoriteWrite = isMusicFavoriteRoute && request.method === "PATCH";
       const isMusicRecordRoute = /^\/api\/music\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isMusicDeleteWrite = isMusicRecordRoute && request.method === "DELETE";
+      const isStoryFirstSceneMediaRoute = /^\/api\/story-first\/ideas\/rec[A-Za-z0-9]+\/scenes\/[1-9]\d*\/(generate|accept|decline|preview\/aipre[A-Za-z0-9]+)$/.test(url.pathname);
       const isAssetLibraryRoute = url.pathname === "/api/library";
       const isAssetLibraryUploadWrite = isAssetLibraryRoute && request.method === "POST";
       const isAssetLibraryRecordRoute = /^\/api\/library\/rec[A-Za-z0-9]+$/.test(url.pathname);
@@ -4265,6 +4267,12 @@ export default {
       if (isAssetLibraryDeleteWrite) {
         assertWriteRequest(request, env);
         return deleteAssetLibraryItem(request, env, url);
+      }
+
+      if (isStoryFirstSceneMediaRoute) {
+        requirePermission(authorization, "production_configure");
+        if (request.method !== "GET" && request.method !== "HEAD") assertWriteRequest(request, env);
+        return await storyFirstSceneMediaRoute(request, env, url, authorization);
       }
 
       if (url.pathname === "/api/library") {
