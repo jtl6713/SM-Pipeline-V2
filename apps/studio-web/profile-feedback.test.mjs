@@ -76,7 +76,9 @@ test("TikTok resend checks profile and output identity before success, error and
   const render = block("let creativeTiktokFeedbackKey", "function renderCreativeYoutubeComplete(");
   assert.match(render, /feedbackKey !== creativeTiktokFeedbackKey/);
   assert.match(render, /resendMessage.textContent = ""/);
-  assert.match(html, /app-item4-1008.js\?v=0.6.900-profile-feedback-rows/);
+  const release = app.match(/BUILD_ID = "item4-([^"]+)"/)?.[1];
+  assert.ok(release, "the app must declare a versioned BUILD_ID");
+  assert.ok(html.includes("app-item4-1008.js?v=" + release), "TikTok resend fixes must ship in the current cache-busted Studio release");
 });
 
 test("Pipeline resend feedback stays with the initiating profile and mounted row", () => {
