@@ -34,7 +34,7 @@ test("creative scene and editable script survive an Airtable Idea save and reope
   assert.match(notes,/ez-photo-wait=off/);
   assert.deepEqual(parseStoryFirstNotes(notes),normalized);
   assert.deepEqual(storyFirstReadiness(normalized).unresolved,[1,2,3]);
-  assert.match(storyFirstShotChecklist(normalized),/Review matching library media/);
+  assert.match(storyFirstShotChecklist(normalized),/Candidate only \(needs visual review\)/);
 });
 test("three initial recommendations maximum and none are approved by suggestion alone",()=>{
   const all={...idea,scenes:[scene("0-30","Sunrise over the Chicago Riverwalk",{
