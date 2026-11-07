@@ -3529,11 +3529,6 @@ export async function ensureStoryFirstProductionMedia(env, requestRecord, valida
       asset_id:row.assigned_asset_id, media_override:row.media_override===true
     }))};
   const script = story.scenes.map(row => String(row.voiceover || "").trim()).filter(Boolean).join(" ");
-  requestRecord = await item4UpdateRequestState(env, requestRecord.id, {
-    Production_Notes: [notes,marker + JSON.stringify(sceneDirectives)].filter(Boolean).join("\n"),
-    Script_Mode: "Force exact", Requested_Script: script,
-    Video_Clip_Count_Mode: "Exact", Video_Clip_Count_Exact: story.scenes.length,
-  });
   // An explicitly approved storyboard must never silently lose a scene during
   // library eligibility, watermark or provenance checks. Preflight eligibility
   // before replaceAll can mutate the existing draft's asset manifest.
@@ -3562,7 +3557,14 @@ export async function ensureStoryFirstProductionMedia(env, requestRecord, valida
       (missingScenes.length ? " for scene(s) " + missingScenes.join(", ") : "") +
       "; do not render until media is reconciled");
   }
-  return attached.record;
+  // Commit creative directives only after the exact selected asset set is confirmed.
+  // A rejected handoff must not leave the draft with new storyboard notes but
+  // a stale or incomplete media manifest.
+  return await item4UpdateRequestState(env, attached.record.id, {
+    Production_Notes: [notes,marker + JSON.stringify(sceneDirectives)].filter(Boolean).join("\n"),
+    Script_Mode: "Force exact", Requested_Script: script,
+    Video_Clip_Count_Mode: "Exact", Video_Clip_Count_Exact: story.scenes.length,
+  });
 }
 
 /*__STUDIO_WORKER_END:ensureStoryFirstProductionMedia__*/
