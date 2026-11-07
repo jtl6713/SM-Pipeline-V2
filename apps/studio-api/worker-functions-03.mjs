@@ -883,7 +883,7 @@ export async function unfinishedIntakeBatchIds(env, batchIds) {
 }
 /*__STUDIO_WORKER_END:unfinishedIntakeBatchIds__*/
 
-export async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaIds, { replaceWaitAssets = false, allowManagePaused = false, replaceAll = false, allowVideo = false, maxWaitAssets = null, minWaitAssets = 1 } = {}) {
+export async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaIds, { replaceWaitAssets = false, allowManagePaused = false, replaceAll = false, allowVideo = false, maxWaitAssets = null, minWaitAssets = 1, requireAll = false } = {}) {
   // Vibe Cut masters must come from the user's uploaded footage. Never
   // substitute photo-wait/library imagery (including replaceAll recovery).
   if (studioIsVibeCut(requestRecord)) {
@@ -960,6 +960,12 @@ export async function applyLibraryAssetsToProductionRequest(env, requestRecord, 
       source: "idea_photo_wait",
     });
     already.add(media.id);
+  }
+  // Story-first handoff is all-or-nothing: watermark/overlay policy may skip
+  // assets, but never commit a partial manifest over the operator's draft.
+  if (requireAll && (blockedAssetIds.length || appended.length !== [...new Set(mediaIds)].length)) {
+    return { record: requestRecord, assets: existingAll, appended: 0,
+      acceptedIds: [], blockedAssetIds, skipped: true, reason: "storyboard_assets_incomplete" };
   }
   // Never mark a partial (below-minimum) selection Ready or replace the
   // existing Production masters with an invalid set.
