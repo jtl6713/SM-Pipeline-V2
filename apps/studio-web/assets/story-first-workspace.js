@@ -297,7 +297,7 @@
           voiceover: String(r.voiceover_text || ""),
           media: "still_or_clip", state: "missing", decision: r.candidate_asset_id ? "library" : "unassigned",
           candidate_asset_id: r.candidate_asset_id || null, assigned_asset_id: null,
-          ai_prompt: "Vertical 9:16 realistic ChicagoShining editorial image: " + String(r.suggested_visual || "") + ". Authentic architecture and natural light; no text or logo.",
+          ai_prompt: "Vertical 9:16 realistic documentary city image: " + String(r.suggested_visual || "") + ". Authentic architecture and natural light; no text or logo.",
         })),
       };
       render();
