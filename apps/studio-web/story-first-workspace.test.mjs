@@ -25,7 +25,7 @@ test("Story is written with empty writer catalog and unverified candidates are n
 });
 test("Story-first revisions are in canonical Ideas with no photo auto-listen or publish mutation", () => {
   assert.match(helper, /normalizeStoryFirst\(payload\?\.storyboard, profile\.id\)/);
-  assert.match(helper, /!vibeCut && !storyFirst && ctx\?\.waitUntil/);
+  assert.match(helper, /!vibeCut && ctx\?\.waitUntil && !storyFirst/);
   assert.match(helper, /fields\.Production_Config_Notes = upsertStoryFirstNotes/);
   assert.match(helper, /story_first: parseStoryFirstNotes/);
   assert.doesNotMatch(app, /\/api\/outputs\/.*\/publish|\/api\/production-requests\/.*\/approve/);
