@@ -13453,12 +13453,10 @@ export async function storyFirstSceneMediaRoute(request, env, url, authorization
   }
   scene.assigned_asset_id = record.id;
   scene.selected_approved = true;
-  // The temporary preview is removed after acceptance; do not leave a dead pending preview ID.
-  scene.generated_master_id = null;
+  scene.accepted_generated_master_id = id;
   scene.selected_origin = "ai";
   scene.media_override = Boolean(payload?.media_override) && scene.media === "clip";
-  // Accepted masters are now Drive-backed; their temporary R2 preview is removed.
-  // Never reopen a deleted preview if the operator later changes this selection.
+  // Keep accepted provenance, not an invalid pending R2 preview after the Drive handoff.
   scene.generated_master_id = null;
   scene.decision = "ai";
   scene.state = "media_approved";
