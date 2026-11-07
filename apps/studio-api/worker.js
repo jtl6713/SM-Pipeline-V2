@@ -6197,6 +6197,8 @@ const OPEN_PRODUCTION_REQUEST_FORMULA = 'OR({Request_Status}="Draft",{Request_St
 /*__STUDIO_WORKER_EXTRACT:isUnsetOrKateDefaultVoice__*/
 /*__STUDIO_WORKER_EXTRACT:maybeHealDraftNarrationVoice__*/
 /*__STUDIO_WORKER_EXTRACT:createDraftForIdea__*/
+/*__STUDIO_WORKER_EXTRACT:verifiedStoryFirstProduction__*/
+/*__STUDIO_WORKER_EXTRACT:ensureStoryFirstProductionMedia__*/
 /*__STUDIO_WORKER_EXTRACT:getOrCreateProductionRequestForIdea__*/
 /*__STUDIO_WORKER_EXTRACT:createProductionRequestFromBody__*/
 /*__STUDIO_WORKER_EXTRACT:mapProductionRequestLight__*/
