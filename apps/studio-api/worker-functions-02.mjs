@@ -3534,11 +3534,33 @@ export async function ensureStoryFirstProductionMedia(env, requestRecord, valida
     Script_Mode: "Force exact", Requested_Script: script,
     Video_Clip_Count_Mode: "Exact", Video_Clip_Count_Exact: story.scenes.length,
   });
+  // An explicitly approved storyboard must never silently lose a scene during
+  // library eligibility, watermark or provenance checks. Preflight eligibility
+  // before replaceAll can mutate the existing draft's asset manifest.
+  const mediaRows = await Promise.all(ids.map(id => airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, id)));
+  const blocked = mediaRows.filter(row => ideaLibraryRejectReason(row, { allowVideo: true }));
+  if (blocked.length) {
+    const missingScenes = story.scenes.map((scene, index) =>
+      blocked.some(row => row.id === scene.assigned_asset_id) ? index + 1 : null
+    ).filter(Boolean);
+    throw new HttpError(409, "Selected storyboard media requires review for scene(s) " +
+      missingScenes.join(", ") + "; Production draft was not updated");
+  }
   const attached = await applyLibraryAssetsToProductionRequest(env,requestRecord,ids,{
     replaceWaitAssets:true,allowManagePaused:true,replaceAll:true,allowVideo:true
   });
-  if (!attached?.record || (attached.assets || []).length < ids.length)
-    throw new HttpError(409,"Production draft did not confirm every selected storyboard asset");
+  const expected = new Set(ids);
+  const actual = new Set((attached?.assets || []).map(asset =>
+    String(asset?.media_asset_record_id || "").trim()).filter(Boolean));
+  const missing = [...expected].filter(id => !actual.has(id));
+  if (!attached?.record || missing.length || actual.size !== expected.size) {
+    const missingScenes = story.scenes.map((scene, index) =>
+      missing.includes(scene.assigned_asset_id) ? index + 1 : null
+    ).filter(Boolean);
+    throw new HttpError(409, "Production draft did not confirm exact selected storyboard assets" +
+      (missingScenes.length ? " for scene(s) " + missingScenes.join(", ") : "") +
+      "; do not render until media is reconciled");
+  }
   return attached.record;
 }
 
