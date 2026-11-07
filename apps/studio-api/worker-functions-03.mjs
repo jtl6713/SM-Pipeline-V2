@@ -909,8 +909,17 @@ export async function applyLibraryAssetsToProductionRequest(env, requestRecord, 
       blockedAssetIds.push(mediaId);
       continue;
     }
+    // Story-first media has already passed the explicit storyboard selection and
+    // third-party overlay exclusion preflight above. Missing ChicagoShining
+    // branding is a Production warning, not an attachment-time dependency on
+    // the watermark runner. Preserve the source master; branding must be
+    // verified on the rendered deliverable before publication.
+    const storyboardBrandingPending = approvedStoryboard
+      && !/\\[watermarked:chicagoshining[^\\]]*\\]/i.test(String(f(media, "Asset_Description") || ""));
     try {
-      media = await ensureChicagoWatermarkedLibraryAsset(env, media, requestRecord);
+      if (!approvedStoryboard) {
+        media = await ensureChicagoWatermarkedLibraryAsset(env, media, requestRecord);
+      }
     } catch (error) {
       // An asset held for third-party overlay review is not an operational
       // error; skip it and consider the next ranked photo. Fail closed on
@@ -958,6 +967,12 @@ export async function applyLibraryAssetsToProductionRequest(env, requestRecord, 
       url: driveUrl || null,
       uploaded_at: new Date().toISOString(),
       source: "idea_photo_wait",
+      ...(approvedStoryboard ? {
+        branding_status: storyboardBrandingPending ? "chicagoshining_watermark_unverified" : "chicagoshining_watermark_recorded",
+        branding_warning: storyboardBrandingPending
+          ? "ChicagoShining watermark not verified on source; verify on rendered output before publishing."
+          : null,
+      } : {}),
     });
     already.add(media.id);
   }
