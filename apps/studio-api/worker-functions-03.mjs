@@ -1,3 +1,5 @@
+import { parseStoryFirstNotes, upsertStoryFirstNotes, storyFirstShotChecklist } from "./idea-first-storyboard.mjs";
+import { loadAuthorizedIdea, assertIdeaUnpromoted, assertIdeaNotApproved } from "./worker-functions-01.mjs";
 import { serveMichiganV2CachedPreview } from "./michigan-review-preview-cache.mjs";
 import { evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
@@ -13295,3 +13297,170 @@ export async function studioParkStaleYoutubeQuotaPolls(env, options = {}) {
 }
 
 /*__STUDIO_WORKER_END:studioParkStaleYoutubeQuotaPolls__*/
+
+
+/* Script a Short only. Pending AI imagery is temporary in R2; accepted originals
+ * are transferred by the existing Studio Runner into Drive + Media Assets.
+ * Creating a storyboard or generating a preview never makes a Production Request. */
+export async function storyFirstSceneMediaRoute(request, env, url, authorization) {
+  const path = /^\/api\/story-first\/ideas\/(rec[A-Za-z0-9]+)\/scenes\/([1-9]\d*)\/(generate|accept|decline|preview\/aipre[A-Za-z0-9]+)$/.exec(url.pathname);
+  if (!path) throw new HttpError(404, "Story scene was not found");
+  const [, ideaId, sceneNumber, action] = path;
+  const idea = await loadAuthorizedIdea(env, ideaId, authorization);
+  assertIdeaUnpromoted(idea, "Scene media editing");
+  assertIdeaNotApproved(idea, "Scene media editing");
+  const story = parseStoryFirstNotes(f(idea, "Production_Config_Notes"));
+  const index = Number(sceneNumber) - 1;
+  if (!story || story.scenes.length <= index || story.scenes[index]?.n !== index + 1) {
+    throw new HttpError(404, "Script a Short storyboard scene is missing");
+  }
+  const profileId = firstLinkedRecordId(f(idea, "Content_Profile"));
+  if (!profileId || story.profile_id !== profileId) throw new HttpError(403, "Storyboard profile mismatch");
+  const profile = await resolveWorkingContentProfile(env, authorization, profileId);
+  if (!profile?.id || profile.id !== profileId) throw new HttpError(403, "Profile not authorized");
+  const scene = story.scenes[index];
+  if (!env.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is unavailable");
+
+  const keyFor = id => "studio/story-first/pending/" + ideaId + "/" + id;
+  const saveStory = async () => {
+    const notes = upsertStoryFirstNotes(f(idea, "Production_Config_Notes"), story, profileId);
+    return airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId, {
+      method: "PATCH", body: JSON.stringify({ fields: {
+        Production_Config_Notes: notes,
+        Suggested_Visuals: storyFirstShotChecklist(story),
+      } }),
+    });
+  };
+
+  if (action.startsWith("preview/")) {
+    if (request.method !== "GET" && request.method !== "HEAD") throw new HttpError(405, "Method not allowed");
+    const id = action.slice("preview/".length);
+    if (scene.generated_master_id !== id || scene.rejected_ai_ids?.includes(id)) {
+      throw new HttpError(404, "This AI image is not pending review for that scene");
+    }
+    const object = await env.STUDIO_MEDIA.get(keyFor(id));
+    if (!object) throw new HttpError(404, "Generated image is no longer available");
+    return new Response(request.method === "HEAD" ? null : object.body, {
+      status: 200, headers: {
+        "Content-Type": object.httpMetadata?.contentType || "image/png",
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  }
+
+  if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+  const payload = await request.json().catch(() => ({}));
+  const requestedProfile = String(payload?.content_profile_id || url.searchParams.get("profile") || "").trim();
+  if (requestedProfile && requestedProfile !== profileId) throw new HttpError(403, "Wrong content profile");
+  if (action === "generate") {
+    if (scene.selected_approved || scene.assigned_asset_id) throw new HttpError(409, "Remove a selected image before replacing it");
+    if (scene.generated_master_id && !scene.rejected_ai_ids?.includes(scene.generated_master_id)) {
+      throw new HttpError(409, "Review or decline the existing image before generating another");
+    }
+    const prompt = String(payload?.prompt || "").trim();
+    if (prompt.length < 12 || prompt.length > 850) throw new HttpError(400, "Provide an editable image prompt (12–850 characters)");
+    const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
+    if (!runnerUrl) throw new HttpError(503, "Studio AI image runner is not configured");
+    const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "").trim();
+    const generated = await fetch(runnerUrl + "/jobs/studio-ai-image", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(secret ? { "X-Pipeline-Secret": secret } : {}) },
+      body: JSON.stringify({ prompt, ratio: "9:16", platform: "TikTok" }),
+    });
+    if (!generated.ok) throw new HttpError(502, "AI image service failed (" + generated.status + ")");
+    const bytes = await generated.arrayBuffer();
+    if (!bytes || bytes.byteLength < 100) throw new HttpError(502, "AI image service returned no image");
+    const mime = String(generated.headers.get("Content-Type") || "image/png").split(";")[0];
+    if (!["image/png", "image/jpeg", "image/webp"].includes(mime)) throw new HttpError(502, "AI returned an unsupported image format");
+    const id = "aipre" + crypto.randomUUID().replace(/-/g, "");
+    await env.STUDIO_MEDIA.put(keyFor(id), bytes, {
+      httpMetadata: { contentType: mime },
+      customMetadata: { source: "story_first_ai", ideaId, profileId, sceneNumber: String(sceneNumber), prompt: prompt.slice(0, 300) },
+    });
+    scene.decision = "ai";
+    scene.ai_prompt = prompt;
+    scene.generated_master_id = id;
+    scene.state = "awaiting_image_review";
+    try { await saveStory(); }
+    catch (error) { await env.STUDIO_MEDIA.delete(keyFor(id)).catch(() => {}); throw error; }
+    return respond(request, env, {
+      ok: true, generated_master_id: id,
+      preview_url: "/api/story-first/ideas/" + ideaId + "/scenes/" + sceneNumber + "/preview/" + id,
+      state: "awaiting_image_review",
+    });
+  }
+
+  const id = String(payload?.generated_master_id || "").trim();
+  if (!/^aipre[A-Za-z0-9]+$/.test(id) || scene.generated_master_id !== id || scene.rejected_ai_ids?.includes(id)) {
+    throw new HttpError(409, "That generated image is not awaiting review for this scene");
+  }
+  if (action === "decline") {
+    scene.rejected_ai_ids = [...new Set([...(scene.rejected_ai_ids || []), id])].slice(-10);
+    scene.generated_master_id = null;
+    scene.assigned_asset_id = null;
+    scene.selected_approved = false;
+    scene.state = "awaiting_operator_upload";
+    scene.decision = "capture";
+    await saveStory();
+    await env.STUDIO_MEDIA.delete(keyFor(id)).catch(() => {});
+    return respond(request, env, { ok: true, state: "awaiting_operator_upload", message: "Rejected image will not be selected" });
+  }
+  if (action !== "accept") throw new HttpError(404, "Unsupported scene action");
+  if (scene.selected_approved || scene.assigned_asset_id) throw new HttpError(409, "This scene already has selected media");
+  if (scene.media === "clip" && payload?.media_override !== true) {
+    throw new HttpError(409, "Scene requires footage. Explicitly accept a still-based alternative or supply a clip");
+  }
+  const pending = await env.STUDIO_MEDIA.get(keyFor(id));
+  if (!pending) throw new HttpError(410, "Generated image no longer available. Generate again");
+  const bytes = await pending.arrayBuffer();
+  const mime = pending.httpMetadata?.contentType || "image/png";
+  const base = String(f(idea, "Candidate_Title") || "Script a Short").replace(/[^a-zA-Z0-9 ]/g, "").slice(0, 65) + " Scene " + sceneNumber;
+  const extension = mime === "image/jpeg" ? "jpg" : mime === "image/webp" ? "webp" : "png";
+  const drive = await promoteStudioAssetToDrive(env, {
+    filename: base.trim().replace(/\s+/g, "-") + "-" + id.slice(-8) + "." + extension,
+    bytes, contentType: mime, profileName: String(f(profile, "Profile_Name") || ""),
+  });
+  if (drive?.provenance_screen?.decision !== "clean") throw new HttpError(503, "AI media provenance gate was not confirmed");
+  if (studioProfileRequiresChicagoWatermark(profile) && !drive?.watermarked) {
+    throw new HttpError(503, "ChicagoShining watermarking was not confirmed");
+  }
+  const created = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, "", {
+    method: "POST", body: JSON.stringify({ records: [{ fields: {
+      "Asset Name": base.trim() + " " + id.slice(-5),
+      Media_Class: "Image",
+      "Google Drive URL": drive.google_drive_url,
+      "Google Drive File ID": drive.google_drive_file_id,
+      MIME_Type: mime,
+      File_Extension: extension,
+      File_Size_Bytes: Number(drive.file_size_bytes || bytes.byteLength || 0) || null,
+      Intake_Status: "Created",
+      Intake_Date: new Date().toISOString(),
+      Drive_Access_Status: "Public",
+      Classification_Status: "Processing",
+      Asset_Status: "Available", Active: true, Do_Not_Use: false,
+      Capture_Source: "AI Generated", Rights_Status: "Owned", Asset_Role: "Other",
+      Raw_Source_Eligibility: "Not Applicable",
+      "Asset_Description": "Studio AI generated on explicit user request for Idea " + ideaId +
+        " scene " + sceneNumber + ". Prompt: " + String(scene.ai_prompt || "").slice(0, 800),
+      Studio_Transfer_ID: "LIB-" + id,
+      Content_Profile: [profileId],
+    } }], typecast: true }),
+  });
+  const record = created?.records?.[0];
+  if (!record?.id || firstLinkedRecordId(f(record, "Content_Profile")) !== profileId) {
+    throw new HttpError(502, "AI image reached Drive but the Media Asset profile registration failed");
+  }
+  scene.assigned_asset_id = record.id;
+  scene.selected_approved = true;
+  scene.media_override = Boolean(payload?.media_override) && scene.media === "clip";
+  scene.decision = "ai";
+  scene.state = "media_approved";
+  await saveStory();
+  await env.STUDIO_MEDIA.delete(keyFor(id)).catch(() => {});
+  return respond(request, env, {
+    ok: true, record_id: record.id,
+    asset: mapLibraryAsset(record), state: "media_approved",
+  });
+}
+/*__STUDIO_WORKER_END:storyFirstSceneMediaRoute__*/
