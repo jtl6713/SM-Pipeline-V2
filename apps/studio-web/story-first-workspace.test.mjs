@@ -14,7 +14,9 @@ test("Script a Short is the one visible story-first entry and can resume a saved
     "storyFirstSave","storyFirstRefresh","storyFirstProduction"]) {
     assert.ok(html.includes('id="' + id + '"'), id);
   }
-  assert.match(html, /id="scriptedShortPanel" hidden/);
+  assert.match(html, /id="scriptedShortPanel"/);
+  assert.doesNotMatch(html, /id="scriptedShortPanel" hidden/);
+  assert.match(app, /originalShortForm\.addEventListener\("submit"/);
   assert.match(html, /<h2>Script a Short<\/h2>/);
   assert.match(app, /studio\.story_first_resume\./);
   assert.match(app, /storyboard:/);
