@@ -119,3 +119,12 @@ test("real Worker validation errors remain visible and do not trigger read-back"
   assert.deepEqual(run.requests.map(req => req.method), ["PATCH"]);
   assert.equal(run.saveButton.disabled, false);
 });
+
+test("selected media names load by exact record IDs after reopening, without showing raw GUIDs", () => {
+  assert.match(source, /void loadSelectedAssetNames\(\)/);
+  assert.match(source, /&ids=/);
+  assert.match(source, /asset\.content_profile_id !== profile/);
+  assert.match(source, /current\.selectedAssetNames\[chosen\.id\]/);
+  assert.match(source, /selectedName \|\| "Selected asset"/);
+  assert.doesNotMatch(source, /"Selected Media Asset: "\+chosen\.id/);
+});
