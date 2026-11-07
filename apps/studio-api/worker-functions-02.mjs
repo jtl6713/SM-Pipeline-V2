@@ -3502,7 +3502,7 @@ export async function createDraftForIdea(env, idea, authorization, input = null,
 /*__STUDIO_WORKER_END:createDraftForIdea__*/
 
 /** Storyboard-only production preflight. Ordinary Ideas and Vibe Cuts are unchanged. */
-async function verifiedStoryFirstProduction(env, idea) {
+export async function verifiedStoryFirstProduction(env, idea) {
   const story = parseStoryFirstNotes(f(idea, "Production_Config_Notes"));
   if (!story) return null;
   const profileId = firstLinkedRecordId(f(idea, "Content_Profile"));
@@ -3516,7 +3516,8 @@ async function verifiedStoryFirstProduction(env, idea) {
   return { story, ids };
 }
 /** Keep exact visual order, scene timings and narration in the editable Production draft. */
-async function ensureStoryFirstProductionMedia(env, requestRecord, validated) {
+/*__STUDIO_WORKER_END:verifiedStoryFirstProduction__*/
+export async function ensureStoryFirstProductionMedia(env, requestRecord, validated) {
   if (!validated) return requestRecord;
   const { story, ids } = validated;
   const marker = "[story-first-production.1] ";
@@ -3541,6 +3542,7 @@ async function ensureStoryFirstProductionMedia(env, requestRecord, validated) {
   return attached.record;
 }
 
+/*__STUDIO_WORKER_END:ensureStoryFirstProductionMedia__*/
 export async function getOrCreateProductionRequestForIdea(request, env, url, authorization, ctx = null) {
   const ideaRecordId = ideaRecordIdFromPath(url);
   const idea = await loadAuthorizedIdea(env, ideaRecordId, authorization);
