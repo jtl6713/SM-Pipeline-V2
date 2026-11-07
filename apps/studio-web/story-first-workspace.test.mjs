@@ -15,8 +15,8 @@ test("Script a Short is the one visible story-first entry and can resume a saved
     assert.ok(html.includes('id="' + id + '"'), id);
   }
   assert.match(html, /id="scriptedShortPanel"/);
-  assert.doesNotMatch(html, /id="scriptedShortPanel" hidden/);
-  assert.match(app, /originalShortForm\.addEventListener\("submit"/);
+  assert.match(html, /id="scriptedShortPanel" hidden/);
+  assert.match(app, /storyFirstNewForm"\)\.addEventListener\("submit"/);\n  assert.doesNotMatch(app, /appendChild\(panel\)/);
   assert.match(html, /<h2>Script a Short<\/h2>/);
   assert.match(app, /studio\.story_first_resume\./);
   assert.match(app, /storyboard:/);
@@ -26,20 +26,20 @@ test("Idea is authored independently before no more than three verified-profile 
   assert.match(propose, /creativeFirst \? \[\] : pool/);
   assert.match(propose, /candidate_asset_id: match\?\.id \|\| null/);
   assert.match(propose, /asset_id: "", shot_status: "suggestion"/);
-  assert.match(app, /function rankCandidate/);
+  assert.match(app, /function credibleMatches/);
   assert.match(app, /slice\(0,3\)|slice\(0, 3\)/);
   assert.match(app, /content_profile_id === current\.profile/);
   assert.match(app, /rights_status/);
   assert.match(app, /google_drive_file_id/);
-  assert.match(app, /Preview video/);
-  assert.match(app, /Select This Asset/);
+  assert.match(app, /View preview/);
+  assert.match(app, /selectSceneAsset\(asset\._index,asset\)/);
 });
 test("On-demand AI generation has preview, accept, decline, no premature production", () => {
   assert.match(app, /Generate AI Image/);
   assert.match(app, /Accept Image/);
   assert.match(app, /Decline Image/);
   assert.match(app, /Generate Again/);
-  assert.match(app, /reviewImage/);
+  assert.match(app, /async function decideGenerated/);
   assert.match(api, /\/jobs\/studio-ai-image/);
   assert.match(api, /studio\/story-first\/pending/);
   assert.match(api, /promoteStudioAssetToDrive/);
