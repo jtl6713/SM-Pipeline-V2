@@ -14,7 +14,7 @@ const ensure = body(handoff, "export async function ensureStoryFirstProductionMe
 const attach = body(library, "export async function applyLibraryAssetsToProductionRequest(", "/*__STUDIO_WORKER_END:applyLibraryAssetsToProductionRequest__*/");
 
 test("story-first handoff requests atomic library attachment", () => {
-  assert.match(ensure, /replaceAll:true,allowVideo:true,requireAll:true/);
+  assert.match(ensure, /replaceAll:true,allowVideo:true,requireAll:true,approvedStoryboard:true/);
   assert.match(attach, /if \(requireAll && \(blockedAssetIds\.length \|\| appended\.length !== \[\.\.\.new Set\(mediaIds\)\]\.length\)\)/);
   assert.ok(attach.indexOf("if (requireAll &&") < attach.indexOf("const updated = await item4UpdateRequestState"), "partial manifest must be rejected before write");
 });
@@ -32,4 +32,15 @@ test("story-first preserves ordered scene voiceover, time and selected asset ID"
   assert.match(ensure, /asset_id:row\.assigned_asset_id/);
   assert.match(ensure, /Script_Mode: "Force exact", Requested_Script: script/);
   assert.ok(ensure.indexOf("return await item4UpdateRequestState") > ensure.indexOf("const missing ="), "creative directives must be committed after asset validation");
+});
+
+test("explicitly approved storyboard media uses a guarded classification exception", () => {
+  const policy = readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
+  assert.match(policy, /approvedStoryboard = false/);
+  assert.match(policy, /if \(approvedStoryboard\)/);
+  assert.match(policy, /has uncleared rights/);
+  assert.match(policy, /requires third-party overlay review/);
+  assert.match(policy, /is missing its Drive master/);
+  assert.match(ensure, /approvedStoryboard: true/);
+  assert.match(attach, /ideaLibraryRejectReason\(media, \{ allowVideo, approvedStoryboard \}\)/);
 });
