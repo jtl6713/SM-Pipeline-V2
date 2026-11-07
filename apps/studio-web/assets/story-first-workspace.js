@@ -213,6 +213,8 @@
             method: "POST", body: JSON.stringify({ ...body, input_kind: "story-first" }),
           });
         } catch (error) {
+          // Report real Worker validation errors; only transport aborts are ambiguous.
+          if (!interruptedSave(error)) throw error;
           // Do not repeat an ambiguous create; it may already exist in Airtable.
           const unresolved = new Error("New Idea may exist in Airtable even though its save response was not confirmed (" +
             (error?.message || "connection interrupted") +
