@@ -130,7 +130,8 @@ test("Chicago Winters assets with exclusions are screened before watermark, then
   assert.match(matching, /reason = "not_enough_safe_photos"/);
   const attach = worker.slice(worker.indexOf("async function applyLibraryAssetsToProductionRequest("),
     worker.indexOf("/*__STUDIO_WORKER_END:applyLibraryAssetsToProductionRequest__*/"));
-  assert.match(attach, /ideaLibraryRejectReason\(media, \{ allowVideo \}\)/);
+  assert.match(attach, /ideaLibraryRejectReason\(media, \{ allowVideo, approvedStoryboard \}\)/);
+  assert.match(attach, /approvedStoryboard = false/, "automatic matching must retain strict default classification policy");
   assert.match(attach, /photoMatchSkippableOverlayReview\(error\)/);
   assert.match(attach, /if \(appended\.length >= cap\) break/);
   assert.match(attach, /reason: "insufficient_safe_assets"/);
