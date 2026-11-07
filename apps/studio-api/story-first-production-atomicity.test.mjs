@@ -31,4 +31,5 @@ test("story-first preserves ordered scene voiceover, time and selected asset ID"
   assert.match(ensure, /time:row\.time, voiceover:row\.voiceover, visual:row\.visual, media:row\.media/);
   assert.match(ensure, /asset_id:row\.assigned_asset_id/);
   assert.match(ensure, /Script_Mode: "Force exact", Requested_Script: script/);
+  assert.ok(ensure.indexOf("return await item4UpdateRequestState") > ensure.indexOf("const missing ="), "creative directives must be committed after asset validation");
 });
