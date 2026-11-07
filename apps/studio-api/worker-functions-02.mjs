@@ -3547,7 +3547,7 @@ export async function ensureStoryFirstProductionMedia(env, requestRecord, valida
       missingScenes.join(", ") + "; Production draft was not updated");
   }
   const attached = await applyLibraryAssetsToProductionRequest(env,requestRecord,ids,{
-    replaceWaitAssets:true,allowManagePaused:true,replaceAll:true,allowVideo:true
+    replaceWaitAssets:true,allowManagePaused:true,replaceAll:true,allowVideo:true,requireAll:true
   });
   const expected = new Set(ids);
   const actual = new Set((attached?.assets || []).map(asset =>
