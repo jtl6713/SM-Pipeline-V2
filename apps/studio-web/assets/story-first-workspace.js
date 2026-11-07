@@ -674,13 +674,6 @@
     panel.scrollIntoView({ behavior: "smooth", block: "start" });
     $("storyFirstBrief").focus();
   });
-  // Capture before the legacy asset-first short handler so no duplicate producer call occurs.
-  $("scriptedShortForm")?.addEventListener("submit",event=>{
-    event.preventDefault();event.stopImmediatePropagation();
-    $("storyFirstBrief").value=String($("scriptedShortPrompt")?.value||"").trim();
-    if($("scriptedShortResult"))$("scriptedShortResult").hidden=true;
-    propose(event).catch(error=>report(error.message,true));
-  },true);
   $("storyFirstNewForm").addEventListener("submit", e => propose(e).catch(err => report(err.message, true)));
   $("storyFirstSave").addEventListener("click", () => save().catch(err => report(err.message, true)));
   $("storyFirstRefresh").addEventListener("click", () => refresh().catch(err => report(err.message, true)));
