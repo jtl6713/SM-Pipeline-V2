@@ -11,7 +11,7 @@
   const root = String(config.apiBase || window.location.origin).replace(/\/$/, "");
   const select = $("studioProfileSelect");
   const status = $("storyFirstStatus");
-  const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, ideaRecords: [], generatedAssets: {}, candidates: {}, attempted: new Set(), browsing: {}, pendingUpload: {}, libraryRows: [], wideResults: {}, uploadedAssets: {} };
+  const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, ideaRecords: [], generatedAssets: {}, candidates: {}, attempted: new Set(), browsing: {}, pendingUpload: {}, libraryRows: [], wideResults: {}, uploadedAssets: {}, selectedAssetNames: {} };
 
   const profileId = () => String(select?.value || localStorage.getItem("studio.content_profile_id") || "").trim();
   const isId = id => /^rec[A-Za-z0-9]+$/.test(String(id || ""));
@@ -116,6 +116,9 @@
     current.libraryRows = [];
     localStorage.setItem("studio.story_first_resume." + id, record.id);
     render();
+    // Rehydrate filenames for existing selections by exact record ID; do not rely
+    // on the scene keyword search or the latest-100 list after reopen.
+    void loadSelectedAssetNames();
     // Per-scene discovery is launched by render() after the complete story is loaded.
     $("storyFirstSaved").value = record.id;
     report("Reopened saved Idea " + (record.candidate_id || record.id) + ". All shot requirements and sourcing choices are preserved.");
@@ -164,6 +167,26 @@
         && JSON.stringify(scene.rejected_ai_ids || []) === JSON.stringify(wanted.rejected_ai_ids || []);
     });
   }
+  // Verify a read-back against every editorial field before treating an interrupted PATCH as saved.
+  // A timed-out response alone does not prove that Airtable accepted the write.
+  function savedIdeaMatches(record, body) {
+    const actual = storyNotesFromRecord(record), wanted = body.storyboard;
+    if (!actual || actual.profile_id !== body.content_profile_id ||
+        String(record.title || "").trim() !== body.title ||
+        String(record.summary || "").trim() !== body.summary ||
+        Number(actual.target_seconds) !== Number(wanted.target_seconds) ||
+        actual.scenes?.length !== wanted.scenes?.length) return false;
+    const clean = value => String(value == null ? "" : value).replace(/[\\u0000-\\u001f]+/g, " ").trim();
+    const strings = ["time","visual","voiceover","media","decision","candidate_asset_id",
+      "assigned_asset_id","ai_prompt","capture_note","generated_master_id","accepted_generated_master_id"];
+    const flags = ["selected_approved","media_override"];
+    return wanted.scenes.every((scene, i) => {
+      const saved = actual.scenes[i];
+      return strings.every(key => clean(saved[key]) === clean(scene[key])) &&
+        flags.every(key => Boolean(saved[key]) === Boolean(scene[key])) &&
+        JSON.stringify(saved.rejected_ai_ids || []) === JSON.stringify(scene.rejected_ai_ids || []);
+    });
+  }
   async function save() {
     if (current.busy) throw new Error("Another storyboard action is still running.");
     const story = readForm();
@@ -177,45 +200,49 @@
         title: current.title,
         summary: current.summary,
         content_profile_id: id,
-        storyboard: JSON.parse(JSON.stringify({ ...story, profile_id: id })),
+        storyboard: { ...story, profile_id: id },
       };
-      const existingId = current.record?.id;
       let result;
-      try {
-        if (existingId) {
-          result = await call("/api/ideas/" + encodeURIComponent(existingId) + "?profile=" + encodeURIComponent(id), {
+      if (current.record?.id) {
+        const recordId = current.record.id;
+        try {
+          result = await call("/api/ideas/" + encodeURIComponent(recordId) + "?profile=" + encodeURIComponent(id), {
             method: "PATCH", body: JSON.stringify(body),
           });
-        } else {
+        } catch (error) {
+          // A lost PATCH response is ambiguous. Re-read the authoritative Idea
+          // without repeating the mutation or risking duplicate side effects.
+          let verified = null;
+          try {
+            const read = await call("/api/ideas/" + encodeURIComponent(recordId) + "?profile=" + encodeURIComponent(id));
+            if (read.record?.id === recordId && savedIdeaMatches(read.record, body)) verified = read.record;
+          } catch { /* read-back may be unavailable too */ }
+          if (!verified) throw new Error("Save was not confirmed (" +
+            (error?.message || "connection interrupted") +
+            "). Your changes are still on this screen. Check the saved Idea before retrying.");
+          result = { record: verified, verified_after_interruption: true };
+        }
+      } else {
+        try {
           result = await call("/api/ideas?profile=" + encodeURIComponent(id), {
             method: "POST", body: JSON.stringify({ ...body, input_kind: "story-first" }),
           });
-        }
-      } catch (error) {
-        if (!interruptedSave(error)) throw error;
-        // Never repeat an ambiguous POST: it could create a second Idea.
-        if (existingId) {
-          try {
-            const checked = await call("/api/ideas/" + encodeURIComponent(existingId)
-              + "?profile=" + encodeURIComponent(id) + "&fresh=1");
-            if (savedIdeaMatches(checked.record, body)) result = checked;
-          } catch { /* network/read-back failure is not proof of a failed save */ }
-        }
-        if (!result) {
-          const uncertain = new Error(existingId
-            ? "Save response interrupted and Airtable could not confirm your changes. Reopen this Idea to verify before trying again."
-            : "Save response interrupted; the new Idea may exist. Refresh saved ideas before trying again to avoid a duplicate.");
-          uncertain.saveUnconfirmed = true;
-          throw uncertain;
+        } catch (error) {
+          // Do not repeat an ambiguous create; it may already exist in Airtable.
+          throw new Error("New Idea save was not confirmed (" + (error?.message || "connection interrupted") +
+            "). Check Saved Ideas before trying again to avoid creating a duplicate.");
         }
       }
       if (!result.record?.id) throw new Error("Studio did not return the saved Idea ID.");
       current.record = result.record;
       current.story = JSON.parse(JSON.stringify(storyNotesFromRecord(result.record) || story));
       localStorage.setItem("studio.story_first_resume." + id, result.record.id);
-      rememberSavedIdea(result.record);
-      report("Saved to Airtable · Idea " + (result.record.candidate_id || result.record.id)
-        + ". You can leave and reopen it from Ideas.");
+      // A list refresh is SECONDARY. Its abort must not turn a confirmed write into a save failure.
+      // Do not hold up other operations, such as opening Asset Manager.
+      void refresh(true).catch(error => console.warn("Saved Ideas list refresh failed after confirmed save", error));
+      report("Saved to Airtable · Idea " + (result.record.candidate_id || result.record.id) +
+        (result.verified_after_interruption ? " · Verified after connection interruption." :
+          ". You can leave and reopen it from Ideas."));
       return result.record;
     } finally {
       current.busy = false;
@@ -270,6 +297,29 @@
       if (hits.length) scene.candidate_asset_id = hits[0].row.id;
     });
     render();
+  }
+  async function loadSelectedAssetNames() {
+    const snapshot = current.story, profile = current.profile;
+    if (!snapshot || !isId(profile)) return;
+    const ids = [...new Set(snapshot.scenes.filter(scene => scene.selected_approved)
+      .map(scene => scene.assigned_asset_id).filter(isId))]
+      .filter(id => !current.selectedAssetNames[id]);
+    if (!ids.length) return;
+    try {
+      const result = await call("/api/library?profile=" + encodeURIComponent(profile) +
+        "&ids=" + encodeURIComponent(ids.join(",")));
+      if (current.story !== snapshot || current.profile !== profile) return;
+      let changed = false;
+      for (const asset of result.records || []) {
+        if (asset.content_profile_id !== profile || !ids.includes(asset.id)) continue;
+        const name = String(asset.name || asset.filename || asset.title || "").trim();
+        if (name) { current.selectedAssetNames[asset.id] = name; changed = true; }
+      }
+      if (changed) render();
+    } catch (error) {
+      // Cosmetic metadata failure must never overwrite the save confirmation.
+      console.warn("Selected media filename lookup unavailable", error);
+    }
   }
   function selectedCount() {
     return current.story.scenes.filter(scene => scene.selected_approved === true && isId(scene.assigned_asset_id)
@@ -503,6 +553,7 @@
       throw new Error("Media type, ownership, rights or Drive availability is not eligible.");
     const shot=current.story.scenes[index],prior=JSON.parse(JSON.stringify(shot));
     shot.assigned_asset_id=asset.id;shot.selected_approved=true;shot.decision="library";shot.media_override=false;
+    current.selectedAssetNames[asset.id] = String(asset.name || asset.filename || asset.title || "").trim();
     try {await save();render();report("Scene "+(index+1)+" selection verified and saved.");}
     catch(err){Object.assign(shot,prior);render();throw err;}
   }
@@ -698,7 +749,8 @@
         img.alt="Selected media for this scene";img.loading="lazy";
         const assetLists = [current.libraryRows, current.wideResults[index], current.candidates[index], [current.uploadedAssets[index]]];
         const selectedAsset = assetLists.flat().find(asset => asset && asset.id === chosen.id);
-        const selectedName = String(selectedAsset?.name || selectedAsset?.filename || selectedAsset?.title || shot.assigned_asset_name || "").trim();
+        const selectedName = String(selectedAsset?.name || selectedAsset?.filename || selectedAsset?.title ||
+          current.selectedAssetNames[chosen.id] || shot.assigned_asset_name || "").trim();
         put(selectedArea,img,node("p","subtle","Selected Media Asset: "+(selectedName || "Selected asset")));
         button("Change selected media","secondary-button",()=>{
           shot.selected_approved=false;shot.assigned_asset_id=null;shot.assigned_asset_name="";shot.media_override=false;
@@ -866,6 +918,7 @@
     current.profile = id;
     current.record = null;
     current.story = null;
+    current.selectedAssetNames = {};
     $("storyFirstWorkspace").hidden = true;
     $("storyFirstSaved").replaceChildren(new Option("Choose a saved storyboard…", ""));
     refresh().catch(e => report(e.message, true));
