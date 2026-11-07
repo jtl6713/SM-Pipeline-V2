@@ -1,0 +1,37 @@
+name: Story-first Studio regression
+on:
+  pull_request:
+    paths:
+      - 'apps/studio-api/idea-first-storyboard*'
+      - 'apps/studio-api/worker-functions-0*.mjs'
+      - 'apps/studio-web/story-first-workspace.test.mjs'
+      - 'apps/studio-web/assets/story-first-workspace.*'
+      - 'apps/studio-web/index.html'
+      - '.github/workflows/story-first-studio-regression.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate Worker and Studio script syntax
+        run: |
+          node --check apps/studio-api/idea-first-storyboard.mjs
+          node --check apps/studio-api/worker-functions-01.mjs
+          node --check apps/studio-api/worker-functions-02.mjs
+          node --check apps/studio-api/worker.js
+          node --check apps/studio-web/assets/story-first-workspace.js
+          node --check apps/studio-web/assets/app-item4-1008.js
+      - name: Verify exact Studio release contract
+        run: |
+          node apps/studio-web/ui-release-contract.mjs
+          node --test apps/studio-web/ui-release-contract.test.mjs apps/studio-web/pages-production-deploy-contract.test.mjs
+      - name: Story-first and existing scripted-short regressions
+        run: |
+          node --test             apps/studio-api/idea-first-storyboard.test.mjs             apps/studio-api/idea-timed-script.test.mjs             apps/studio-api/scripted-short-asset-policy.test.mjs             apps/studio-api/scripted-short-producer-plan.test.mjs             apps/studio-web/story-first-workspace.test.mjs             apps/studio-web/scripted-short-profile-routing.test.mjs             apps/studio-web/scripted-short-enhancement.test.mjs

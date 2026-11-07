@@ -938,3 +938,4 @@ Deploy Worker 0.10.738-vibe-preflight-error-boundary (2026-11-03). Await Idea/Pr
 Deploy Worker 0.10.765-qa-center-v1: tenant-admin-only QA catalog, immutable Airtable run/results, safe diagnostics and release gates; no production-output writes, auto approvals or publishing. PR #1429.
 
 2026-11-06: Deploy Worker 0.10.766-qa-release-attestation. Fail closed on missing and stale Worker/UI/Runner provenance, block cross-environment QA mutations, re-observe trusted Runner health before release approval. Preserve Airtable append-only history, Factory, MAE and publishing guards; PR #1429 follow-up.
+Deploy Worker 0.10.767-story-first 2026-11-07: Airtable-persistent per-scene creative storyboard and idea-first proposal; no publishing or autorender.

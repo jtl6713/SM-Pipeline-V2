@@ -761,6 +761,7 @@ import {
   uploadMusicLibraryTracks,
   listAssetLibrary,
   uploadAssetLibraryItems,
+  storyFirstSceneMediaRoute,
   assignLibraryAssetProfile,
   classifyAllLibraryAssets,
   renameAssetLibraryItem,
@@ -1073,6 +1074,7 @@ export default {
       const isMusicFavoriteWrite = isMusicFavoriteRoute && request.method === "PATCH";
       const isMusicRecordRoute = /^\/api\/music\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isMusicDeleteWrite = isMusicRecordRoute && request.method === "DELETE";
+      const isStoryFirstSceneMediaRoute = /^\/api\/story-first\/ideas\/rec[A-Za-z0-9]+\/scenes\/[1-9]\d*\/(generate|accept|decline|preview\/aipre[A-Za-z0-9]+)$/.test(url.pathname);
       const isAssetLibraryRoute = url.pathname === "/api/library";
       const isAssetLibraryUploadWrite = isAssetLibraryRoute && request.method === "POST";
       const isAssetLibraryRecordRoute = /^\/api\/library\/rec[A-Za-z0-9]+$/.test(url.pathname);
@@ -1181,7 +1183,7 @@ export default {
         isChicagoReviewPost ||
         isInternalIgPublishLeasePost ||
         request.method === "GET" ||
-        (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isMediaAssetStreamRoute || isPublicBrandWatermarkRoute || isOutputPreviewRoute || isFactoryOutputPreviewRoute || isReviewAttemptPreviewRoute || isVoicePreviewRoute)) ||
+        (request.method === "HEAD" && (isStoryFirstSceneMediaRoute || isMusicPreviewRoute || isMediaAssetPreviewRoute || isMediaAssetStreamRoute || isPublicBrandWatermarkRoute || isOutputPreviewRoute || isFactoryOutputPreviewRoute || isReviewAttemptPreviewRoute || isVoicePreviewRoute)) ||
         isProfilesOverviewRefreshWrite ||
         isProfilesOverviewSummaryReconcileWrite ||
         isIdeaCreateRoute ||
@@ -1189,6 +1191,7 @@ export default {
         isScriptedShortProposeWrite ||
         isScriptedShortReviseWrite ||
         isScriptedShortAcceptWrite ||
+        (isStoryFirstSceneMediaRoute && request.method === "POST") ||
         isIdeaEditRoute ||
         isIdeaDeleteRoute ||
         isIdeaHoldWrite ||
@@ -1312,7 +1315,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.766-qa-release-attestation",
+          version: "0.10.767-story-first",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -4267,6 +4270,12 @@ export default {
         return deleteAssetLibraryItem(request, env, url);
       }
 
+      if (isStoryFirstSceneMediaRoute) {
+        requirePermission(authorization, "production_configure");
+        if (request.method !== "GET" && request.method !== "HEAD") assertWriteRequest(request, env);
+        return await storyFirstSceneMediaRoute(request, env, url, authorization);
+      }
+
       if (url.pathname === "/api/library") {
         if (request.method === "POST") {
           assertUploadWriteRequest(request, env);
@@ -6188,6 +6197,8 @@ const OPEN_PRODUCTION_REQUEST_FORMULA = 'OR({Request_Status}="Draft",{Request_St
 /*__STUDIO_WORKER_EXTRACT:isUnsetOrKateDefaultVoice__*/
 /*__STUDIO_WORKER_EXTRACT:maybeHealDraftNarrationVoice__*/
 /*__STUDIO_WORKER_EXTRACT:createDraftForIdea__*/
+/*__STUDIO_WORKER_EXTRACT:verifiedStoryFirstProduction__*/
+/*__STUDIO_WORKER_EXTRACT:ensureStoryFirstProductionMedia__*/
 /*__STUDIO_WORKER_EXTRACT:getOrCreateProductionRequestForIdea__*/
 /*__STUDIO_WORKER_EXTRACT:createProductionRequestFromBody__*/
 /*__STUDIO_WORKER_EXTRACT:mapProductionRequestLight__*/
@@ -8213,6 +8224,7 @@ const YOUTUBE_COMPLETE_ERRORS = {
 /*__STUDIO_WORKER_EXTRACT:factoryBatchProcess__*/
 /*__STUDIO_WORKER_EXTRACT:factoryBatchSubmitRoute__*/
 /*__STUDIO_WORKER_EXTRACT:factoryBatchCronResume__*/
+/*__STUDIO_WORKER_EXTRACT:storyFirstSceneMediaRoute__*/
 // Shared bindings for the extracted function modules (live ESM references).
 export {
   airtableFetch,

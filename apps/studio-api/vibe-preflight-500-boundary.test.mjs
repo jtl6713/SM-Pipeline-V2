@@ -30,6 +30,8 @@ function draftHarness({ target, fields, existing = null, failOnRead = false } = 
       return original;
     },
     promotionCompleted: () => false,
+    // Vibe has no story-first directive; the extracted handler must leave it untouched.
+    verifiedStoryFirstProduction: async () => null,
     requestedProfileId: () => "recProfile",
     existingDraftForIdea: async () => existing,
     respond: (_req, _env, obj, status = 200) => ({ ...obj, status }),

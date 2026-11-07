@@ -1,3 +1,4 @@
+import { parseStoryFirstNotes, storyFirstReadiness, validateStoryFirstSelectedMedia } from "./idea-first-storyboard.mjs";
 import { r4StartConfirmed, rotateR4CandidatesAfterCursor } from "./r4-queue-admission.mjs";
 import { storySeedRenderStatus } from "./story-render-admission.mjs";
 import { ideaProducerDirection, mergeIdeaProducerDirection } from "./idea-producer-direction.mjs";
@@ -3500,6 +3501,48 @@ export async function createDraftForIdea(env, idea, authorization, input = null,
 }
 /*__STUDIO_WORKER_END:createDraftForIdea__*/
 
+/** Storyboard-only production preflight. Ordinary Ideas and Vibe Cuts are unchanged. */
+export async function verifiedStoryFirstProduction(env, idea) {
+  const story = parseStoryFirstNotes(f(idea, "Production_Config_Notes"));
+  if (!story) return null;
+  const profileId = firstLinkedRecordId(f(idea, "Content_Profile"));
+  if (!profileId || story.profile_id !== profileId) throw new HttpError(403, "Story-first Content Profile mismatch");
+  const ready = storyFirstReadiness(story);
+  if (!ready.ready) throw new HttpError(409, "Finish selecting acceptable media for scenes " + ready.unresolved.join(", ") + " before Production");
+  const ids = [...new Set(story.scenes.map(scene => scene.assigned_asset_id))];
+  const rows = await Promise.all(ids.map(id => airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, id)));
+  const checked = validateStoryFirstSelectedMedia(story, new Map(rows.map(row => [row.id,row])));
+  if (!checked.ok) throw new HttpError(409, checked.problems.join("; "));
+  return { story, ids };
+}
+/** Keep exact visual order, scene timings and narration in the editable Production draft. */
+/*__STUDIO_WORKER_END:verifiedStoryFirstProduction__*/
+export async function ensureStoryFirstProductionMedia(env, requestRecord, validated) {
+  if (!validated) return requestRecord;
+  const { story, ids } = validated;
+  const marker = "[story-first-production.1] ";
+  const notes = String(f(requestRecord, "Production_Notes") || "").split(/\r?\n/)
+    .filter(line => !line.startsWith(marker)).join("\n");
+  const sceneDirectives = { schema:"story-first-production.1", profile_id:story.profile_id,
+    target_seconds:story.target_seconds, scenes:story.scenes.map(row => ({
+      time:row.time, voiceover:row.voiceover, visual:row.visual, media:row.media,
+      asset_id:row.assigned_asset_id, media_override:row.media_override===true
+    }))};
+  const script = story.scenes.map(row => String(row.voiceover || "").trim()).filter(Boolean).join(" ");
+  requestRecord = await item4UpdateRequestState(env, requestRecord.id, {
+    Production_Notes: [notes,marker + JSON.stringify(sceneDirectives)].filter(Boolean).join("\n"),
+    Script_Mode: "Force exact", Requested_Script: script,
+    Video_Clip_Count_Mode: "Exact", Video_Clip_Count_Exact: story.scenes.length,
+  });
+  const attached = await applyLibraryAssetsToProductionRequest(env,requestRecord,ids,{
+    replaceWaitAssets:true,allowManagePaused:true,replaceAll:true,allowVideo:true
+  });
+  if (!attached?.record || (attached.assets || []).length < ids.length)
+    throw new HttpError(409,"Production draft did not confirm every selected storyboard asset");
+  return attached.record;
+}
+
+/*__STUDIO_WORKER_END:ensureStoryFirstProductionMedia__*/
 export async function getOrCreateProductionRequestForIdea(request, env, url, authorization, ctx = null) {
   const ideaRecordId = ideaRecordIdFromPath(url);
   const idea = await loadAuthorizedIdea(env, ideaRecordId, authorization);
@@ -3512,20 +3555,24 @@ export async function getOrCreateProductionRequestForIdea(request, env, url, aut
 
   let preferredProfileId = null;
   try { preferredProfileId = requestedProfileId(url, await request.clone().json().catch(() => ({}))); } catch { preferredProfileId = requestedProfileId(url); }
+  const approvedStory = String(f(idea, "Production_Config_Notes") || "").includes("[story-first.1]")
+    ? await verifiedStoryFirstProduction(env, idea) : null;
   const existing = await existingDraftForIdea(env, ideaRecordId, authorization, idea);
   if (existing) {
+    const validatedDraft = approvedStory ? await ensureStoryFirstProductionMedia(env, existing, approvedStory) : existing;
     return respond(request, env, {
       ok: true,
       created: false,
-      record: mapProductionRequestLight(existing),
+      record: mapProductionRequestLight(validatedDraft),
     });
   }
 
   const created = await createDraftForIdea(env, idea, authorization, null, { preferredProfileId });
+  const validatedCreated = approvedStory ? await ensureStoryFirstProductionMedia(env, created, approvedStory) : created;
   return respond(request, env, {
     ok: true,
     created: true,
-    record: mapProductionRequestLight(created),
+    record: mapProductionRequestLight(validatedCreated),
   }, 201);
 }
 /*__STUDIO_WORKER_END:getOrCreateProductionRequestForIdea__*/
@@ -3539,12 +3586,14 @@ export async function createProductionRequestFromBody(request, env, authorizatio
   let idea = await loadAuthorizedIdea(env, ideaRecordId, authorization);
   if (promotionCompleted(idea)) throw new HttpError(409, "This idea has already been promoted");
   const preferredProfileId = requestedProfileId(url, payload);
+  const approvedStory = String(f(idea, "Production_Config_Notes") || "").includes("[story-first.1]")
+    ? await verifiedStoryFirstProduction(env, idea) : null;
   const existing = await existingDraftForIdea(env, ideaRecordId, authorization, idea);
   if (existing) {
     return respond(request, env, {
       ok: true,
       created: false,
-      record: mapProductionRequestLight(existing),
+      record: mapProductionRequestLight(approvedStory ? await ensureStoryFirstProductionMedia(env, existing, approvedStory) : existing),
     });
   }
 
@@ -3584,10 +3633,11 @@ export async function createProductionRequestFromBody(request, env, authorizatio
     }
   }
   const created = await createDraftForIdea(env, idea, authorization, input, { preferredProfileId });
+  const validatedCreated = approvedStory ? await ensureStoryFirstProductionMedia(env, created, approvedStory) : created;
   return respond(request, env, {
     ok: true,
     created: true,
-    record: mapProductionRequestLight(created),
+    record: mapProductionRequestLight(validatedCreated),
   }, 201);
 }
 
@@ -11205,6 +11255,14 @@ export async function promoteIdeaViaI3I4(request, env, url, authorization) {
     });
   }
 
+  const storyFirst = String(f(record, "Production_Config_Notes") || "").includes("[story-first.1]")
+    ? parseStoryFirstNotes(f(record, "Production_Config_Notes")) : null;
+  if (storyFirst) {
+    const approvedStory = await verifiedStoryFirstProduction(env, record);
+    const draft = await existingDraftForIdea(env, recordId, authorization, record);
+    if (!draft) throw new HttpError(409, "Complete Script a Short and explicitly open its Production draft before promoting.");
+    await ensureStoryFirstProductionMedia(env, draft, approvedStory);
+  }
   const status = String(f(record, "Candidate_Status") || "").trim();
   if (status === "On Hold") throw new HttpError(409, "Restore this idea before approving and promoting it");
   if (status === "Promoted") throw new HttpError(409, "Idea is marked Promoted but its Content Item link is missing; reconcile the Airtable record before retrying");
@@ -11878,6 +11936,7 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   const prompt = creativeBrief.replace(/\s+/g, " ").trim();
   if (prompt.length < 3) throw new HttpError(400, "Describe the short in a sentence.");
   const assetPolicy = parseScriptedShortAssetPolicy(prompt);
+  const creativeFirst = payload?.creative_first === true;
   const synthetic = {
     id: "scripted-short-proposal",
     fields: {
@@ -11891,16 +11950,17 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   // The active Studio profile must also drive the writer market, never default to Chicago.
   const profileMarket = String(f(profile, "Market_Name") || "").trim();
   if (profileMarket) synthetic.fields.Market_Name = profileMarket;
+  // Only the legacy proposal path queries inventory before writing. Story-first
+  // authors creative scenes against an EMPTY catalog; the browser searches each
+  // finished scene afterward without changing required visuals or narration.
   let catalog = [];
-  try {
-    catalog.push(...(await rankStillsForIdeaPhotoWait(env, synthetic)).map(ideaTimedScriptCatalogRow));
-  } catch (error) {
-    console.warn("scripted short library rank failed", error);
-  }
-  try {
-    catalog.push(...(await rankVideosForScriptedShortProposal(env, synthetic)).map(ideaTimedScriptCatalogRow));
-  } catch (error) {
-    console.warn("scripted short video discovery failed", error);
+  if (!creativeFirst) {
+    try {
+      catalog.push(...(await rankStillsForIdeaPhotoWait(env, synthetic)).map(ideaTimedScriptCatalogRow));
+    } catch (error) { console.warn("scripted short library rank failed", error); }
+    try {
+      catalog.push(...(await rankVideosForScriptedShortProposal(env, synthetic)).map(ideaTimedScriptCatalogRow));
+    } catch (error) { console.warn("scripted short video discovery failed", error); }
   }
   const seen = new Set();
   catalog = catalog.filter((row) => {
@@ -11911,7 +11971,7 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   // Required uploaded-location instructions are hard constraints. A file ID
   // alone is not a valid scene match; unscoped assets need place evidence.
   catalog = catalog.filter((row) => libraryAssetSatisfiesPolicy(row, assetPolicy, profile?.id));
-  if (assetPolicy.required && !catalog.length) {
+  if (!creativeFirst && assetPolicy.required && !catalog.length) {
     throw new HttpError(409, "No verified " + assetPolicy.location +
       " assets were found in this profile's library. Check asset names, location tags and profile assignments. Unrelated assets will not be substituted.");
   }
@@ -11927,7 +11987,7 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   // an AI suggestion. Preserve every clip and every word, even if the writer
   // proposes a shorter story.
   try {
-    const exact = scriptedShortExactScenes(creativeBrief, pool);
+    const exact = creativeFirst ? null : scriptedShortExactScenes(creativeBrief, pool);
     if (exact) {
       source = "exact-brief";
       scenes = exact;
@@ -11937,28 +11997,47 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   }
   if (source !== "exact-brief") {
     try {
-      const writer = await pulseIdeaTimedScriptWriter(env, synthetic, pool);
+      // Story is authored against an empty inventory. Matching is a SECOND step.
+      const writer = await pulseIdeaTimedScriptWriter(env, synthetic, creativeFirst ? [] : pool);
       source = writer.source && writer.source !== "fallback" ? writer.source : "fallback";
-      scenes = assignOwnedScenes((writer.scenes || []).map((scene) => ({
+      const authoredScenes = (writer.scenes || []).map((scene) => ({
         voiceover_text: scene.voiceover_text,
         suggested_visual: scene.suggested_visual,
-      })), pool);
-      scenes = ensureRelevantVideoScene(scenes, pool);
+      }));
+      scenes = creativeFirst ? authoredScenes : assignOwnedScenes(authoredScenes, pool);
+      if (!creativeFirst) scenes = ensureRelevantVideoScene(scenes, pool);
     } catch (error) {
       console.warn("scripted short writer failed", error);
     }
     if (!scriptedShortProposalReady(buildTimelineFromScenes(scenes))) {
       source = "fallback";
-      scenes = assignOwnedScenes(fallbackProposalScenes(prompt, pool), pool);
-      scenes = ensureRelevantVideoScene(scenes, pool);
+      scenes = creativeFirst ? fallbackProposalScenes(prompt, []) : assignOwnedScenes(fallbackProposalScenes(prompt, pool), pool);
+      if (!creativeFirst) scenes = ensureRelevantVideoScene(scenes, pool);
     }
   }
   // Independent Quality Agent guard: repair only from the eligible catalog,
   // otherwise mark a scene as missing rather than reporting a false match.
   const recovery = recoverScriptedShortAssets(buildTimelineFromScenes(scenes), pool, assetPolicy, profile?.id);
   const timeline = scriptedShortHonorDuration(buildTimelineFromScenes(recovery.timeline.segments), creativeBrief);
+  if (creativeFirst) {
+    // A library candidate is NOT a confirmed match. Preserve the author-required visual.
+    const candidatePool = pool.filter(row => row.confidence === "high" || row.confidence === "medium");
+    const usedCandidateIds = new Set();
+    timeline.segments = timeline.segments.map((segment) => {
+      const tokens = new Set(String(segment.suggested_visual || "").toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 5));
+      const match = candidatePool.find(row => !usedCandidateIds.has(row.id) &&
+        String(row.name || "").toLowerCase().split(/[^a-z0-9]+/).some(t => tokens.has(t) && t.length >= 5));
+      if (match) usedCandidateIds.add(match.id);
+      return { ...segment, asset_id: "", shot_status: "suggestion", candidate_asset_id: match?.id || null };
+    });
+  }
   const constraints = scriptedShortCheckBriefRequirements(creativeBrief, timeline, pool);
-  if (!constraints.ok) throw new HttpError(409, constraints.errors.join(" "));
+  // A named uploaded clip cannot be demanded from an empty library at creative
+  // authoring time; exact narration and duration requirements still apply.
+  const blockingConstraints = creativeFirst
+    ? constraints.errors.filter(error => !/required uploaded clip/i.test(error))
+    : constraints.errors;
+  if (blockingConstraints.length) throw new HttpError(409, blockingConstraints.join(" "));
   const assetValidation = validateScriptedShortAssets(timeline, pool, assetPolicy, profile?.id);
   if (!assetValidation.ok) {
     throw new HttpError(409, "Quality Agent blocked a mismatched library asset. No proposal was accepted.");
@@ -11979,6 +12058,7 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   return respond(request, env, {
     ok: true,
     source,
+    creative_first: creativeFirst,
     prompt,
     creative_brief: creativeBrief,
     markdown: formatTimedScriptMarkdown(timeline),
@@ -11991,7 +12071,9 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
     asset_policy: assetPolicy,
     asset_validation: { ...assetValidation, recovered_count: recovery.recovered, unresolved_count: recovery.unresolved },
     producer_plan: producerPlan,
-    message: suggestions
+    message: creativeFirst
+      ? `${timeline.segments.length} story-first scenes. Library candidates are only suggestions; choose AI, capture or confirm a valid match before rendering. Save the idea to keep it across sessions.`
+      : suggestions
       ? `${timeline.segments.length} scenes. ${owned} verified library matches. ${suggestions} still need an appropriate photo. ${assetPolicy.required ? "Only " + assetPolicy.location + " images are allowed. " : ""}Estimated times are hints. The recorded voiceover sets the real length.`
       : `${timeline.segments.length} scenes, all verified against ${assetPolicy.required ? assetPolicy.location : "the selected profile"} and matched to library files. Estimated times are hints. The recorded voiceover sets the real length.`,
   });
@@ -12523,6 +12605,9 @@ export async function anotherVibeCutRoute(request, env, authorization) {
 export async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx = null) {
   const recordId = ideaRecordIdFromPath(url);
   let idea = await loadAuthorizedIdea(env, recordId, authorization);
+  if (parseStoryFirstNotes(f(idea, "Production_Config_Notes"))) {
+    throw new HttpError(409, "Script a Short uses its own timed storyboard and verified scene selection. Return to Script a Short to continue.");
+  }
   let body = {};
   try { body = await request.json(); } catch { body = {}; }
   if (!body || typeof body !== "object" || Array.isArray(body)) body = {};

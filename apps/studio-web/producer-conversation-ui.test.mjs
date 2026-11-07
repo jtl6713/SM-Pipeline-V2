@@ -33,7 +33,7 @@ test("Talk to Your Producer is discoverable from Script a short and saved Produc
  const ui=read("./assets/producer-conversation-ui.js");
  assert.ok(html.includes("<h2>Talk to Your Producer</h2>"));
  assert.ok(html.indexOf('id="scriptedShortPanel"') < html.indexOf("<h2>Talk to Your Producer</h2>"));
- assert.match(html,/Accept saves a Draft, then opens Production/);
+ assert.match(html,/Production begins only when you explicitly hand off/);
  assert.match(html,/id="productionProducerChatButton"[^>]*aria-controls="studioProducerChatPanel"/);
  assert.match(ui,/jump\.hidden = false/);
  assert.match(ui,/panel\.scrollIntoView/);
