@@ -8,7 +8,7 @@
   const root = String(config.apiBase || window.location.origin).replace(/\/$/, "");
   const select = $("studioProfileSelect");
   const status = $("storyFirstStatus");
-  const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, ideaRecords: [], generatedAssets: {} };
+  const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, ideaRecords: [], generatedAssets: {}, libraryRows: [], wideResults: {}, uploadedAssets: {} };
 
   const profileId = () => String(select?.value || localStorage.getItem("studio.content_profile_id") || "").trim();
   const isId = id => /^rec[A-Za-z0-9]+$/.test(String(id || ""));
@@ -105,7 +105,10 @@
     current.profile = id;
     current.title = String(record.title || "");
     current.summary = String(record.summary || "");
+    current.libraryRows = [];
+    localStorage.setItem("studio.story_first_resume." + id, record.id);
     render();
+    discoverLibrary().catch(error => report("Story reopened; library discovery failed: " + error.message, true));
     $("storyFirstSaved").value = record.id;
     report("Reopened saved Idea " + (record.candidate_id || record.id) + ". All shot requirements and sourcing choices are preserved.");
   }
@@ -137,6 +140,7 @@
       if (!result.record?.id) throw new Error("Studio did not return the saved Idea ID.");
       current.record = result.record;
       current.story = JSON.parse(JSON.stringify(storyNotesFromRecord(result.record) || story));
+      localStorage.setItem("studio.story_first_resume." + id, result.record.id);
       await refresh(true);
       report("Saved to Airtable · Idea " + (result.record.candidate_id || result.record.id) + ". You can leave and reopen it from Ideas.");
       return result.record;
