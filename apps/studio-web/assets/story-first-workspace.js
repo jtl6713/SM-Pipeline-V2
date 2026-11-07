@@ -97,7 +97,11 @@
     const story = storyNotesFromRecord(record);
     if (!story?.scenes?.length || story.profile_id !== id) throw new Error("This Idea has no valid story-first storyboard for the selected city.");
     current.record = record;
-    current.story = structuredClone(story);
+    current.story = JSON.parse(JSON.stringify(story));
+    const voiceovers = String(record.summary || "").split(/\r?\n/).filter(line => /^\s*[1-9]\d*\.\s+/.test(line) && !/\s\u2014\s/.test(line)).map(line => line.replace(/^\s*\d+\.\s+/, "").trim());
+    if (voiceovers.length === current.story.scenes.length && current.story.scenes.every(row => !row.voiceover)) {
+      current.story.scenes.forEach((row, i) => { row.voiceover = voiceovers[i]; });
+    }
     current.profile = id;
     current.title = String(record.title || "");
     current.summary = String(record.summary || "");
@@ -117,7 +121,6 @@
       const body = {
         title: current.title,
         summary: current.summary,
-        primary_location: "Chicago" === $("studioProfileSelect")?.selectedOptions?.[0]?.textContent?.trim() ? "Chicago" : "",
         content_profile_id: id,
         storyboard: { ...story, profile_id: id },
       };
@@ -133,7 +136,7 @@
       }
       if (!result.record?.id) throw new Error("Studio did not return the saved Idea ID.");
       current.record = result.record;
-      current.story = structuredClone(storyNotesFromRecord(result.record) || story);
+      current.story = JSON.parse(JSON.stringify(storyNotesFromRecord(result.record) || story));
       await refresh(true);
       report("Saved to Airtable · Idea " + (result.record.candidate_id || result.record.id) + ". You can leave and reopen it from Ideas.");
       return result.record;
@@ -301,6 +304,12 @@
       report("Story written. Review every shot, choose AI / library / capture, then Save idea. Nothing has been published.");
     } finally { $("storyFirstPropose").disabled = false; }
   }
+  $("scriptedShortStoryFirstJump")?.addEventListener("click", () => {
+    const entry = $("scriptedShortPrompt");
+    if (String(entry?.value || "").trim()) $("storyFirstBrief").value = entry.value;
+    panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    $("storyFirstBrief").focus();
+  });
   $("storyFirstNewForm").addEventListener("submit", e => propose(e).catch(err => report(err.message, true)));
   $("storyFirstSave").addEventListener("click", () => save().catch(err => report(err.message, true)));
   $("storyFirstRefresh").addEventListener("click", () => refresh().catch(err => report(err.message, true)));
