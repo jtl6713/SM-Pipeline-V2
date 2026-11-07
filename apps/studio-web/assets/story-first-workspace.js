@@ -499,28 +499,107 @@
       button("Select","secondary-button",()=>selectSceneAsset(asset._index,asset).catch(e=>report(e.message,true)),desc);
       put(wrap,img,desc);parent.appendChild(wrap);
     }
+    // All editorial controls remain the same inputs and save to the same Airtable storyboard.
+    // Only their presentation changes: a compact icon/label column with a full-width editor.
+    function sceneIcon(kind) {
+      const ns="http://www.w3.org/2000/svg";
+      const svg=document.createElementNS(ns,"svg");
+      svg.setAttribute("viewBox","0 0 24 24");
+      svg.setAttribute("fill","none");
+      svg.setAttribute("stroke","currentColor");
+      svg.setAttribute("stroke-width","1.8");
+      svg.setAttribute("stroke-linecap","round");
+      svg.setAttribute("stroke-linejoin","round");
+      svg.setAttribute("aria-hidden","true");
+      svg.classList.add("story-first-field-icon");
+      const shapes={
+        timing:[["circle",{cx:"12",cy:"12",r:"9"}],["path",{d:"M12 7v5l3 2"}]],
+        visual:[["rect",{x:"3",y:"3",width:"18",height:"18",rx:"2"}],["circle",{cx:"8.5",cy:"8.5",r:"1.5"}],["path",{d:"m21 15-5-5L5 21"}]],
+        voice:[["rect",{x:"9",y:"2",width:"6",height:"12",rx:"3"}],["path",{d:"M5 10a7 7 0 0 0 14 0M12 17v5m-4 0h8"}]],
+        media:[["path",{d:"m12 2 9 5-9 5-9-5 9-5M3 12l9 5 9-5M3 17l9 5 9-5"}]],
+        sourcing:[["rect",{x:"3",y:"4",width:"18",height:"16",rx:"2"}],["path",{d:"M3 10h18m-12 0v10"}]],
+      };
+      (shapes[kind]||shapes.visual).forEach(([tag,attributes])=>{
+        const item=document.createElementNS(ns,tag);
+        Object.entries(attributes).forEach(([key,value])=>item.setAttribute(key,value));
+        svg.appendChild(item);
+      });
+      return svg;
+    }
+    function sceneField(parent,kind,title,value,type="textarea") {
+      const field=label(parent,title,value,type);
+      const row=field.parentElement;
+      row.classList.add("story-first-scene-field","story-first-scene-field--"+kind);
+      row.prepend(sceneIcon(kind));
+      if(kind==="visual") {
+        const heading=row.querySelector("span");
+        heading.textContent="Required visual";
+        heading.appendChild(node("small","story-first-field-hint","Do not change just to fit library media"));
+      }
+      if(field.tagName==="TEXTAREA") {
+        field.rows=3;
+        const grow=()=>{
+          field.style.height="auto";
+          field.style.height=Math.min(Math.max(field.scrollHeight,88),260)+"px";
+        };
+        field.addEventListener("input",grow);
+      }
+      return field;
+    }
     scenes.forEach((shot,index)=>{
       const card=node("article","story-first-shot");
-      const head=node("div","story-first-shot-head");
-      put(head,node("strong","","Scene "+(index+1)),node("span","",clock(shot.time)));
-      card.appendChild(head);
       const statusText=shot.selected_approved&&isId(shot.assigned_asset_id)?"Media Selected":
-        shot.generated_master_id?"Awaiting Image Review":
         current.pendingUpload[index]?"Uploading Media":
+        shot.generated_master_id?"Awaiting Image Review":
         shot.decision==="capture"?"Awaiting Your Media":
         current.candidates[index]?.length?"Candidates Available":
         shot.decision==="ai"?"Awaiting AI Generation":"Missing Media";
-      card.appendChild(node("p","story-first-status","Status: "+statusText));
-      const time=label(card,"Scene timing (start-end seconds)",shot.time,"input");
+      const statusClass=shot.selected_approved&&isId(shot.assigned_asset_id)?"is-ready":
+        current.pendingUpload[index]?"is-uploading":
+        shot.generated_master_id?"is-review":
+        current.candidates[index]?.length?"is-candidates":"is-pending";
+      const hero=node("div","story-first-shot-hero");
+      const thumb=node("div","story-first-shot-thumbnail");
+      let previewUrl="",previewNote="Visual not selected";
+      if(shot.selected_approved&&isId(shot.assigned_asset_id)) {
+        previewUrl=root+"/api/media-assets/"+encodeURIComponent(shot.assigned_asset_id)+"/preview";
+        previewNote="Selected scene media";
+      }else if(shot.generated_master_id&&!shot.rejected_ai_ids?.includes(shot.generated_master_id)){
+        previewUrl=root+sceneUrl(index,"preview/"+encodeURIComponent(shot.generated_master_id));
+        previewNote="AI image · awaiting review";
+      }else if(current.candidates[index]?.[0]?.id) {
+        previewUrl=root+"/api/media-assets/"+encodeURIComponent(current.candidates[index][0].id)+"/preview";
+        previewNote="Library suggestion · not selected";
+      }
+      if(previewUrl){
+        const preview=node("img","story-first-shot-thumbnail-image");
+        preview.src=previewUrl;preview.loading="lazy";preview.alt=previewNote;
+        preview.onerror=()=>{preview.remove();thumb.classList.add("story-first-shot-thumbnail--empty");};
+        thumb.appendChild(preview);
+      }else{
+        thumb.classList.add("story-first-shot-thumbnail--empty");
+      }
+      thumb.appendChild(node("span","story-first-thumbnail-note",previewNote));
+      const heroCopy=node("div","story-first-shot-hero-copy");
+      const topLine=node("div","story-first-shot-title-line");
+      const title=node("h3","story-first-shot-title","Scene "+(index+1));
+      const timeBadge=node("span","story-first-time-pill",clock(shot.time));
+      put(topLine,title,timeBadge);
+      const statusBadge=node("span","story-first-status-chip "+statusClass,statusText);
+      statusBadge.setAttribute("role","status");
+      put(heroCopy,topLine,statusBadge);
+      put(hero,thumb,heroCopy);
+      card.appendChild(hero);
+      const time=sceneField(card,"timing","Scene timing (start-end seconds)",shot.time,"input");
       time.maxLength=24;
       time.oninput=()=>{shot.time=time.value;markEditing();};
-      const visual=label(card,"Required visual — do not change just to fit library media",shot.visual);
+      const visual=sceneField(card,"visual","Required visual — do not change just to fit library media",shot.visual);
       visual.maxLength=340;
       visual.oninput=()=>{shot.visual=visual.value;current.attempted.delete(index);delete current.candidates[index];markEditing();};
-      const voice=label(card,"Voiceover / narration",shot.voiceover||"");
+      const voice=sceneField(card,"voice","Voiceover / narration",shot.voiceover||"");
       voice.maxLength=380;
       voice.oninput=()=>{shot.voiceover=voice.value;markEditing();};
-      const media=label(card,"Preferred media","", "select");
+      const media=sceneField(card,"media","Preferred media","", "select");
       [["still","Still image"],["clip","Real video clip"],["still_or_clip","Still or clip"]]
         .forEach(([key,text])=>media.add(new Option(text,key)));
       media.value=shot.media==="video"?"clip":shot.media||"still_or_clip";
@@ -539,7 +618,7 @@
         },selectedArea);
         card.appendChild(selectedArea);
       }
-      const mode=label(card,"Media sourcing","", "select");
+      const mode=sceneField(card,"sourcing","Media sourcing","", "select");
       [["unassigned","Choose a source"],["library","Choose library asset"],
        ["ai","Generate AI Image"],["capture","I'll Supply the Media"]]
         .forEach(([key,text])=>mode.add(new Option(text,key)));
