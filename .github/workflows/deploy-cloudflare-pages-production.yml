@@ -48,6 +48,7 @@ jobs:
             apps/studio-web/rendering-review-ui.test.mjs \
             apps/studio-web/rendering-review-queue.test.mjs \
             apps/studio-web/profile-selector-startup.test.mjs \
+            apps/studio-web/profile-feedback.test.mjs \
             apps/studio-web/factory-open-navigation.test.mjs \
             apps/studio-web/factory-revision-approval.test.mjs \
             apps/studio-web/production-record-identity.test.mjs \
