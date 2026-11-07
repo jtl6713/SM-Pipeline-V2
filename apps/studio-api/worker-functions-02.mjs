@@ -3558,7 +3558,7 @@ export async function getOrCreateProductionRequestForIdea(request, env, url, aut
   const approvedStory = await verifiedStoryFirstProduction(env, idea);
   const existing = await existingDraftForIdea(env, ideaRecordId, authorization, idea);
   if (existing) {
-    const validatedDraft = await ensureStoryFirstProductionMedia(env, existing, approvedStory);
+    const validatedDraft = approvedStory ? await ensureStoryFirstProductionMedia(env, existing, approvedStory) : existing;
     return respond(request, env, {
       ok: true,
       created: false,
@@ -3567,7 +3567,7 @@ export async function getOrCreateProductionRequestForIdea(request, env, url, aut
   }
 
   const created = await createDraftForIdea(env, idea, authorization, null, { preferredProfileId });
-  const validatedCreated = await ensureStoryFirstProductionMedia(env, created, approvedStory);
+  const validatedCreated = approvedStory ? await ensureStoryFirstProductionMedia(env, created, approvedStory) : created;
   return respond(request, env, {
     ok: true,
     created: true,
@@ -3591,7 +3591,7 @@ export async function createProductionRequestFromBody(request, env, authorizatio
     return respond(request, env, {
       ok: true,
       created: false,
-      record: mapProductionRequestLight(await ensureStoryFirstProductionMedia(env, existing, approvedStory)),
+      record: mapProductionRequestLight(approvedStory ? await ensureStoryFirstProductionMedia(env, existing, approvedStory) : existing),
     });
   }
 
@@ -3631,7 +3631,7 @@ export async function createProductionRequestFromBody(request, env, authorizatio
     }
   }
   const created = await createDraftForIdea(env, idea, authorization, input, { preferredProfileId });
-  const validatedCreated = await ensureStoryFirstProductionMedia(env, created, approvedStory);
+  const validatedCreated = approvedStory ? await ensureStoryFirstProductionMedia(env, created, approvedStory) : created;
   return respond(request, env, {
     ok: true,
     created: true,
