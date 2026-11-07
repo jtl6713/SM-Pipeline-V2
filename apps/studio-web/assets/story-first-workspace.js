@@ -722,6 +722,22 @@
       document.querySelector('[data-page="production"]')?.click();
     } catch (error) { report(error.message, true); }
   });
+  // Script a Short is the only user-facing idea-first entry point.
+  // Capture before the legacy submit handler to keep all other Ideas flows unchanged.
+  const originalShortForm = $("scriptedShortForm");
+  if (originalShortForm) originalShortForm.addEventListener("submit", event => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    $("storyFirstBrief").value = String($("scriptedShortPrompt")?.value || "").trim();
+    if ($("scriptedShortResult")) $("scriptedShortResult").hidden = true;
+    propose().catch(error => report(error.message, true));
+  }, true);
+  const originalShortPanel = $("scriptedShortPanel");
+  if (originalShortPanel && panel.parentElement !== originalShortPanel)
+    originalShortPanel.appendChild(panel);
+  $("storyFirstNewForm").hidden = true;
+  if ($("scriptedShortStoryFirstJump")) $("scriptedShortStoryFirstJump").hidden = true;
+  if ($("scriptedShortPropose")) $("scriptedShortPropose").textContent = "Generate Script & Storyboard";
   setInterval(switchProfile, 2500);
   switchProfile();
 })();
