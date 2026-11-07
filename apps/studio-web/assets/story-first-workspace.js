@@ -120,6 +120,50 @@
     $("storyFirstSaved").value = record.id;
     report("Reopened saved Idea " + (record.candidate_id || record.id) + ". All shot requirements and sourcing choices are preserved.");
   }
+  // A confirmed Airtable response is the save receipt. Updating the local picker
+  // must not require another network request (especially on mobile Safari).
+  function rememberSavedIdea(record) {
+    const index = current.ideaRecords.findIndex(row => row.id === record.id);
+    if (index >= 0) current.ideaRecords[index] = record;
+    else current.ideaRecords.unshift(record);
+    const picker = $("storyFirstSaved");
+    if (picker) {
+      let option = Array.from(picker.options).find(row => row.value === record.id);
+      if (!option) {
+        option = new Option("", record.id);
+        picker.add(option);
+      }
+      option.textContent = record.title + " · Idea " + (record.candidate_id || record.id);
+      picker.value = record.id;
+    }
+    $("storyFirstSavedHint").textContent = "Saved Idea is available to reopen here. Use Refresh saved ideas to check for other changes.";
+  }
+  function interruptedSave(error) {
+    return error?.name === "AbortError" || error?.name === "TypeError"
+      || /fetch is aborted|aborted|failed to fetch|network|load failed|timed out|timeout/i.test(String(error?.message || ""));
+  }
+  // A request may finish its Airtable PATCH after the phone loses its response.
+  // Only call it saved if a fresh, authorized GET actually matches this payload.
+  function savedIdeaMatches(record, submitted) {
+    const saved = storyNotesFromRecord(record), expected = submitted.storyboard;
+    if (!record?.id || String(record.title || "") !== submitted.title
+      || String(record.summary || "") !== submitted.summary
+      || saved?.schema !== "story-first.1"
+      || saved.profile_id !== submitted.content_profile_id
+      || Number(saved.target_seconds) !== Number(expected.target_seconds)
+      || !Array.isArray(saved.scenes) || saved.scenes.length !== expected.scenes.length) return false;
+    const textKeys = ["time","visual","voiceover","media","decision","candidate_asset_id",
+      "assigned_asset_id","generated_master_id","accepted_generated_master_id","selected_origin",
+      "ai_prompt","capture_note"];
+    const boolKeys = ["selected_approved","media_override"];
+    return saved.scenes.every((scene, index) => {
+      const wanted = expected.scenes[index];
+      return textKeys.every(key => String(scene[key] ?? "") === String(wanted[key] ?? ""))
+        && boolKeys.every(key => Boolean(scene[key]) === Boolean(wanted[key]))
+        && JSON.stringify(scene.candidate_assets || []) === JSON.stringify(wanted.candidate_assets || [])
+        && JSON.stringify(scene.rejected_ai_ids || []) === JSON.stringify(wanted.rejected_ai_ids || []);
+    });
+  }
   async function save() {
     if (current.busy) throw new Error("Another storyboard action is still running.");
     const story = readForm();
@@ -133,24 +177,45 @@
         title: current.title,
         summary: current.summary,
         content_profile_id: id,
-        storyboard: { ...story, profile_id: id },
+        storyboard: JSON.parse(JSON.stringify({ ...story, profile_id: id })),
       };
+      const existingId = current.record?.id;
       let result;
-      if (current.record?.id) {
-        result = await call("/api/ideas/" + encodeURIComponent(current.record.id) + "?profile=" + encodeURIComponent(id), {
-          method: "PATCH", body: JSON.stringify(body),
-        });
-      } else {
-        result = await call("/api/ideas?profile=" + encodeURIComponent(id), {
-          method: "POST", body: JSON.stringify({ ...body, input_kind: "story-first" }),
-        });
+      try {
+        if (existingId) {
+          result = await call("/api/ideas/" + encodeURIComponent(existingId) + "?profile=" + encodeURIComponent(id), {
+            method: "PATCH", body: JSON.stringify(body),
+          });
+        } else {
+          result = await call("/api/ideas?profile=" + encodeURIComponent(id), {
+            method: "POST", body: JSON.stringify({ ...body, input_kind: "story-first" }),
+          });
+        }
+      } catch (error) {
+        if (!interruptedSave(error)) throw error;
+        // Never repeat an ambiguous POST: it could create a second Idea.
+        if (existingId) {
+          try {
+            const checked = await call("/api/ideas/" + encodeURIComponent(existingId)
+              + "?profile=" + encodeURIComponent(id) + "&fresh=1");
+            if (savedIdeaMatches(checked.record, body)) result = checked;
+          } catch { /* network/read-back failure is not proof of a failed save */ }
+        }
+        if (!result) {
+          const uncertain = new Error(existingId
+            ? "Save response interrupted and Airtable could not confirm your changes. Reopen this Idea to verify before trying again."
+            : "Save response interrupted; the new Idea may exist. Refresh saved ideas before trying again to avoid a duplicate.");
+          uncertain.saveUnconfirmed = true;
+          throw uncertain;
+        }
       }
       if (!result.record?.id) throw new Error("Studio did not return the saved Idea ID.");
       current.record = result.record;
       current.story = JSON.parse(JSON.stringify(storyNotesFromRecord(result.record) || story));
       localStorage.setItem("studio.story_first_resume." + id, result.record.id);
-      await refresh(true);
-      report("Saved to Airtable · Idea " + (result.record.candidate_id || result.record.id) + ". You can leave and reopen it from Ideas.");
+      rememberSavedIdea(result.record);
+      report("Saved to Airtable · Idea " + (result.record.candidate_id || result.record.id)
+        + ". You can leave and reopen it from Ideas.");
       return result.record;
     } finally {
       current.busy = false;
@@ -237,8 +302,11 @@
     scene.assigned_asset_name = String(asset.name || asset.filename || asset.title || "").trim();
     scene.selected_approved = true;
     scene.state = "media_approved";
-    try { await save(); await reopenLatest(); }
-    catch (error) { Object.assign(scene, old); render(); throw error; }
+    try { await save(); render(); }
+    catch (error) {
+      if (!error.saveUnconfirmed) Object.assign(scene, old);
+      render(); throw error;
+    }
   }
   async function browseAssets(index, query = "") {
     const id = assertProfile();
