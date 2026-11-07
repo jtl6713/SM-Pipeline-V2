@@ -492,13 +492,16 @@
           time: Math.round(Number(r.start_seconds || 0)) + "-" + Math.round(Number(r.end_seconds || 0)),
           visual: String(r.suggested_visual || ""),
           voiceover: String(r.voiceover_text || ""),
-          media: "still_or_clip", state: "missing", decision: r.candidate_asset_id ? "library" : "unassigned",
+          media: /video|footage|moving|train|drone|timelapse/i.test(String(r.suggested_visual || "")) ? "clip" : "still_or_clip",
+          state: "missing", decision: "unassigned", candidate_assets: [],
           candidate_asset_id: r.candidate_asset_id || null, assigned_asset_id: null,
+          selected_approved: false, rejected_ai_ids: [],
           ai_prompt: "Vertical 9:16 realistic documentary city image: " + String(r.suggested_visual || "") + ". Authentic architecture and natural light; no text or logo.",
         })),
       };
       render();
-      report("Story written. Review every shot, choose AI / library / capture, then Save idea. Nothing has been published.");
+      await discoverLibrary().catch(error => report("Story authored; library discovery unavailable: " + error.message, true));
+      report("Story and timed visuals written first. Review up to three recommendations per scene, or generate/supply your own. Save partial progress anytime.");
     } finally { $("storyFirstPropose").disabled = false; }
   }
   $("scriptedShortStoryFirstJump")?.addEventListener("click", () => {
@@ -537,6 +540,27 @@
     refresh().catch(e => report(e.message, true));
   };
   select?.addEventListener("change", switchProfile);
+  document.querySelector('[data-page="ideas"]')?.addEventListener("click", () => {
+    refresh().then(() => {
+      const resume = localStorage.getItem("studio.story_first_resume." + profileId());
+      const record = current.ideaRecords.find(row => row.id === resume);
+      if (record && current.record?.id !== record.id) openRecord(record);
+    }).catch(error => report(error.message, true));
+  });
+  $("storyFirstProduction")?.addEventListener("click", async () => {
+    try {
+      const record = await save();
+      if (selectedCount() !== current.story.scenes.length) throw new Error("All scenes need selected media before Production.");
+      if (!confirm("Create an editable Production Request for this completed storyboard? Rendering and publishing remain under normal review controls.")) return;
+      const result = await call("/api/ideas/" + encodeURIComponent(record.id) + "/production-request?profile=" +
+        encodeURIComponent(assertProfile()), {
+        method: "POST", body: JSON.stringify({ content_profile_id: assertProfile(), input_kind: "story-first" }),
+      });
+      if (!result.record?.id && !result.production_request?.id) throw new Error("Production Request was not confirmed.");
+      report("Editable Production draft created. No rendering or publishing was initiated.");
+      document.querySelector('[data-page="production"]')?.click();
+    } catch (error) { report(error.message, true); }
+  });
   setInterval(switchProfile, 2500);
   switchProfile();
 })();
