@@ -51,7 +51,11 @@
     return id;
   }
   function label(parent, title, value = "", type = "textarea") {
-    const wrap = put(parent, node("label", "story-first-field"));
+    // put() returns its PARENT, not the appended element. Keep each SVG,
+    // caption and editor within the label; otherwise prepended scene icons
+    // escape to the card itself and stack above the scene header.
+    const wrap = node("label", "story-first-field");
+    parent.appendChild(wrap);
     put(wrap, node("span", "", title));
     const input = node(type === "select" ? "select" : type === "input" ? "input" : "textarea");
     input.value = value || "";
@@ -512,6 +516,18 @@
       svg.setAttribute("stroke-linejoin","round");
       svg.setAttribute("aria-hidden","true");
       svg.classList.add("story-first-field-icon");
+      // Desktop mouse hover has a native SVG tooltip; on touch, the
+      // adjacent visible field label provides the same meaning.
+      const help={
+        timing:"Scene timing: the start and end of this shot, in seconds.",
+        visual:"Required visual: the shot this story needs, independent of the media library.",
+        voice:"Voiceover: the narration spoken during this shot.",
+        media:"Preferred media: choose a still image or a real video clip.",
+        sourcing:"Media sourcing: choose library media, AI imagery, or your own upload."
+      };
+      const title=document.createElementNS(ns,"title");
+      title.textContent=help[kind]||"Scene field";
+      svg.appendChild(title);
       const shapes={
         timing:[["circle",{cx:"12",cy:"12",r:"9"}],["path",{d:"M12 7v5l3 2"}]],
         visual:[["rect",{x:"3",y:"3",width:"18",height:"18",rx:"2"}],["circle",{cx:"8.5",cy:"8.5",r:"1.5"}],["path",{d:"m21 15-5-5L5 21"}]],
