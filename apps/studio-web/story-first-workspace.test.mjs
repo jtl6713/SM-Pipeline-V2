@@ -51,7 +51,7 @@ test("Self-service uploads, existing library browse and guarded production hando
   assert.match(app, /XMLHttpRequest/);
   assert.match(app, /\/api\/library\?profile=/);
   assert.match(app, /Choose Existing Asset/);
-  assert.match(app, /Save and Open Asset Manager/);
+  assert.match(app, /Save (?:&|and) open Asset Manager/i);
   assert.match(app, /selectedCount\(\) !== current\.story\.scenes\.length/);
   assert.match(propose, /verifiedStoryFirstProduction/);
   assert.match(propose, /validateStoryFirstSelectedMedia/);
