@@ -203,7 +203,7 @@
  <div class="heading-actions"><button class="secondary-button" data-refresh="ideas">Refresh</button><button class="secondary-button" id="ideasRunAutonomous">Use unused photos</button><button class="secondary-button" id="ideasCreateTimelineButton">Create VO timeline</button><button class="secondary-button" id="generateIdeasButton">Generate AI ideas</button><button class="primary-button" id="newIdeaButton">+ New idea</button></div>
  </div>
  <div class="form-message ideas-autonomous-message" id="ideasAutonomousMessage" aria-live="polite"></div>
- <section class="panel" id="scriptedShortPanel">
+ <section class="panel" id="scriptedShortPanel" hidden aria-hidden="true">
  <div class="panel-heading"><div><h2>Talk to Your Producer</h2><p class="studio-producer-entry-mode"><strong>Script a short</strong> · Start with your creative brief</p><p>Type or dictate the short you want. Propose creates a scene plan for review. Request revisions directly on that plan. Accept saves a Draft, then opens Production where you can continue the conversation. Nothing publishes automatically.</p></div></div>
  <form id="scriptedShortForm" class="idea-form">
  <label class="form-field"><span>Tell the Producer what to make</span><textarea id="scriptedShortPrompt" maxlength="5000" rows="7" placeholder="Create a 30-second vertical short about a landmark in the selected city. Open with a striking view, use relevant photos and clips from my uploaded library, keep the narration friendly, exclude stock media, and produce it for Instagram, Facebook, TikTok, and YouTube." required></textarea></label>
@@ -228,8 +228,8 @@
  </div>
  </section>
  <section class="panel story-first-panel" id="storyFirstPanel">
-  <div class="panel-heading"><div><h2>Story-first Short · Shot Workspace</h2>
-   <p class="story-first-intro">Start with the story, not the available photos. Studio proposes every required scene, then suggests library candidates without changing your story. Save a draft, leave to capture or upload media, and reopen it here later. No automatic render, scheduling, or publishing.</p></div></div>
+  <div class="panel-heading"><div><h2>Script a Short</h2>
+   <p class="story-first-intro">Enter the creative idea first. Studio writes the complete timed story, then searches for up to three credible media matches per scene. Accept or decline AI images, upload your own media, and save unfinished scenes to resume later. Nothing automatically renders or publishes.</p></div></div>
   <form class="story-first-create" id="storyFirstNewForm">
    <label class="form-field"><span>Creative concept to turn into a shot list</span>
    <textarea id="storyFirstBrief" rows="3" maxlength="5000" placeholder="Create a 30-second 9:16 short about Chicago before the city wakes: an empty riverwalk, the first CTA train, sunrise light on architecture, a bridge reveal, and a golden skyline finish. Write the story and required shots first; match assets only after the storyboard is written."></textarea></label>
@@ -249,8 +249,8 @@
    </div>
    <p class="story-first-progress" id="storyFirstProgress" aria-live="polite"></p>
    <div class="story-first-shot-list" id="storyFirstShots"></div>
-   <div class="story-first-actions"><button type="button" class="primary-button" id="storyFirstSave">Save idea</button></div>
-   <p class="subtle">AI images are generated only when you explicitly choose Generate for a scene. An AI result or library candidate must still be reviewed. Rendering and publishing are not authorized from this workspace.</p>
+   <div class="story-first-actions"><button type="button" class="primary-button" id="storyFirstSave">Save Idea</button><button type="button" class="secondary-button" id="storyFirstProduction" hidden>Send Complete Storyboard to Production</button></div>
+   <p class="subtle">Generated AI images are reviewed inline before being registered in the Drive-backed Asset Manager. Unverified suggestions and rejected imagery do not count as completed scenes. Production requires a separate explicit action and all normal approval controls remain.</p>
   </div>
  </section>
  <section class="panel idea-generate-panel" id="ideaGeneratePanel" hidden>
