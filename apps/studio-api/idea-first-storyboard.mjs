@@ -46,11 +46,13 @@ export function normalizeStoryFirst(input, profileId = "") {
     const decision = DECISIONS.has(explicit) ? explicit : legacyDecision(trim(raw?.choice), trim(raw?.state));
     const candidate = trim(raw?.candidate_asset_id, 64);
     const assigned = trim(raw?.assigned_asset_id, 64);
+    const generatedMaster = trim(raw?.generated_master_id, 80);
     if (candidate && !RECORD_ID.test(candidate)) throw new TypeError("Invalid scene candidate asset");
     if (assigned && !RECORD_ID.test(assigned)) throw new TypeError("Invalid selected scene asset");
+    if (generatedMaster && !/^aipre[A-Za-z0-9]+$/.test(generatedMaster)) throw new TypeError("Invalid generated master ID");
     const defaultFrom = Math.round(index * seconds / input.scenes.length);
     const defaultTo = Math.round((index + 1) * seconds / input.scenes.length);
-    const state = assigned ? "needs_media_review"
+    const state = (assigned || (decision === "ai" && generatedMaster)) ? "needs_media_review"
       : decision === "ai" ? "awaiting_ai_generation"
       : decision === "capture" ? "awaiting_operator_upload"
       : candidate ? "candidate_unverified" : "missing";
@@ -64,6 +66,7 @@ export function normalizeStoryFirst(input, profileId = "") {
       state,
       candidate_asset_id: candidate || null,
       assigned_asset_id: assigned || null,
+      generated_master_id: decision === "ai" ? generatedMaster || null : null,
       ai_prompt: trim(raw?.ai_prompt, 850) || visual,
       capture_note: trim(raw?.capture_note, 450),
     };
