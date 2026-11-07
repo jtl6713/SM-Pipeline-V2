@@ -44,3 +44,13 @@ test("explicitly approved storyboard media uses a guarded classification excepti
   assert.match(ensure, /approvedStoryboard: true/);
   assert.match(attach, /ideaLibraryRejectReason\(media, \{ allowVideo, approvedStoryboard \}\)/);
 });
+
+test("approved storyboard bypasses first-party watermark runner but retains third-party policy", () => {
+  assert.match(attach, /const storyboardBrandingPending = approvedStoryboard/);
+  assert.match(attach, /if \(!approvedStoryboard\) \{\s*media = await ensureChicagoWatermarkedLibraryAsset/);
+  assert.match(attach, /branding_status: storyboardBrandingPending/);
+  assert.match(attach, /branding_warning: storyboardBrandingPending/);
+  assert.ok(attach.indexOf("ideaLibraryRejectReason(media, { allowVideo, approvedStoryboard })") <
+    attach.indexOf("const storyboardBrandingPending"), "third-party overlay preflight must precede watermark warning");
+  assert.match(attach, /if \(requireAll &&/);
+});
