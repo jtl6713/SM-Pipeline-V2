@@ -95,3 +95,29 @@ test("repeated partial saves replace the story directive instead of duplicating 
   assert.equal(twice.match(/\[story-first\.1\]/g)?.length,1);
   assert.equal(parseStoryFirstNotes(twice).scenes.length,3);
 });
+
+test("accepted AI provenance survives save, while consumed preview never reappears", () => {
+  const accepted=normalizeStoryFirst({...idea,scenes:[scene("0-30","First warm light on downtown Chicago",{
+    decision:"ai",assigned_asset_id:ASSET1,selected_approved:true,
+    accepted_generated_master_id:"aipreAccepted123",selected_origin:"ai",generated_master_id:null,
+  })]},CHICAGO);
+  assert.equal(accepted.scenes[0].accepted_generated_master_id,"aipreAccepted123");
+  assert.equal(accepted.scenes[0].generated_master_id,null);
+  assert.equal(accepted.scenes[0].selected_origin,"ai");
+  assert.equal(storyFirstReadiness(accepted).ready,true);
+  const saved=upsertStoryFirstNotes("",accepted,CHICAGO);
+  assert.equal(parseStoryFirstNotes(saved).scenes[0].accepted_generated_master_id,"aipreAccepted123");
+  const removed=normalizeStoryFirst({...accepted,scenes:[{
+    ...accepted.scenes[0],assigned_asset_id:null,selected_approved:false,
+  }]},CHICAGO);
+  assert.notEqual(removed.scenes[0].state,"awaiting_image_review");
+  assert.equal(removed.scenes[0].generated_master_id,null);
+});
+test("integer scene timings round fractional writer duration and enforce still media",()=>{
+  const st=normalizeStoryFirst({...idea,target_seconds:29.8,scenes:[
+    scene("0-30","Chicago skyline before sunrise",{assigned_asset_id:ASSET1,selected_approved:true})
+  ]},CHICAGO);
+  assert.equal(st.target_seconds,30);
+  const wrong=new Map([[ASSET1,asset(ASSET1,CHICAGO,{Media_Class:"Video",MIME_Type:"video/mp4"})]]);
+  assert.match(validateStoryFirstSelectedMedia(st,wrong).problems.join(" " ),/still image/i);
+});
