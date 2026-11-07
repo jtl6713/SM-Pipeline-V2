@@ -76,5 +76,29 @@ test("TikTok resend checks profile and output identity before success, error and
   const render = block("let creativeTiktokFeedbackKey", "function renderCreativeYoutubeComplete(");
   assert.match(render, /feedbackKey !== creativeTiktokFeedbackKey/);
   assert.match(render, /resendMessage.textContent = ""/);
-  assert.match(html, /app-item4-1008.js\?v=0.6.899-profile-feedback/);
+  assert.match(html, /app-item4-1008.js\?v=0.6.900-profile-feedback-rows/);
+});
+
+test("Pipeline resend feedback stays with the initiating profile and mounted row", () => {
+  const inline = block('function bindPipelineTiktokComplete(root)', 'function bindPipelineYoutubeComplete(');
+  assert.match(inline, /const actionProfileId = selectedProfileId;/);
+  assert.match(inline, /const actionRevision = profileFeedbackRevision;/);
+  assert.match(inline, /const isCurrentRow = \(\) => profileActionIsCurrent\(actionProfileId, actionRevision\)/);
+  assert.match(inline, /wrap\.isConnected/);
+  assert.match(inline, /await submitTiktokDraftResend\(id\);\s*if \(!isCurrentRow\(\)\) return;/);
+  assert.match(inline, /catch \(error\) \{\s*if \(!isCurrentRow\(\)\) return;/);
+  assert.match(inline, /finally \{\s*if \(isCurrentRow\(\)\) button\.disabled = false;/);
+});
+
+test("Profile switch clears old Pipeline rows and does not display stale output loads", () => {
+  const apply = block("function applyStudioProfile(", "function persistStudioProfilesCache(");
+  assert.match(apply, /clearProfileScopedFeedback\(\);\s*pipelineOutputs = \[\];/);
+  assert.match(apply, /activeCreativeOutputId = null;/);
+  const clear = block("function clearProfileScopedFeedback(", "function profileActionIsCurrent(");
+  assert.match(clear, /outputList\.innerHTML = ""/);
+  const refresh = block("async function refreshPipelineOutputs(", "async function loadOutputs(");
+  assert.match(refresh, /catch \(e\) \{\s*if \(profileAtRequest !== selectedProfileId\) return;/);
+  const open = block("async function openCreativeEditor(", "function collectCreativePayload(");
+  assert.match(open, /await api\(.*?\/creative\x60\);\s*if \(!profileActionIsCurrent\(profileAtRequest, revisionAtRequest, recordId\)\) return;/s);
+  assert.match(open, /catch \(e\) \{\s*if \(!profileActionIsCurrent\(profileAtRequest, revisionAtRequest, recordId\)\) return;/);
 });
