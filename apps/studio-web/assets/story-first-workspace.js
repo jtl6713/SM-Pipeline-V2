@@ -627,7 +627,10 @@
         const img=node("img","story-first-candidate-img");
         img.src=root+"/api/media-assets/"+encodeURIComponent(chosen.id)+"/preview";
         img.alt="Selected media for this scene";img.loading="lazy";
-        put(selectedArea,img,node("p","subtle","Selected Media Asset: "+chosen.id));
+        const assetLists = [current.libraryRows, current.wideResults[index], current.candidates[index], [current.uploadedAssets[index]]];
+        const selectedAsset = assetLists.flat().find(asset => asset && asset.id === chosen.id);
+        const selectedName = String(selectedAsset?.name || selectedAsset?.filename || selectedAsset?.title || "").trim();
+        put(selectedArea,img,node("p","subtle","Selected Media Asset: "+(selectedName || "Selected asset")));
         button("Change selected media","secondary-button",()=>{
           shot.selected_approved=false;shot.assigned_asset_id=null;shot.media_override=false;
           render();markEditing();
