@@ -4,8 +4,6 @@
   const $ = id => document.getElementById(id);
   const panel = $("storyFirstPanel");
   if (!panel) return;
-  // Integrate storyboard under the existing Script a Short entry, not a second Idea Generator.
-  $("scriptedShortPanel")?.appendChild(panel);
   const config = window.CHICAGOSHINING_STUDIO_CONFIG || {};
   const root = String(config.apiBase || window.location.origin).replace(/\/$/, "");
   const select = $("studioProfileSelect");
@@ -477,9 +475,9 @@
     const selected=scenes.filter(row=>row.selected_approved===true && isId(row.assigned_asset_id)).length;
     $("storyFirstProgress").textContent=selected+" of "+scenes.length+
       " scenes have selected media — "+(scenes.length-selected)+" still need attention.";
-    const handoff=$("storyFirstHandoff");
-    if(handoff){handoff.disabled=selected!==scenes.length;handoff.title=handoff.disabled?
-      "Select and verify media for every scene first":"Explicitly hand off this complete storyboard";}
+    const handoff=$("storyFirstProduction");
+    if(handoff){handoff.hidden=selected!==scenes.length;handoff.disabled=selected!==scenes.length;
+      handoff.title=handoff.disabled?"Select verified media for every scene":"Create editable Production draft";}
     const list=$("storyFirstShots");
     list.replaceChildren();
     function previewAsset(parent, asset, text) {
@@ -673,31 +671,8 @@
     panel.scrollIntoView({ behavior: "smooth", block: "start" });
     $("storyFirstBrief").focus();
   });
-  $("scriptedShortForm")?.addEventListener("submit", event => {
-    event.preventDefault(); event.stopImmediatePropagation();
-    $("storyFirstBrief").value=String($("scriptedShortPrompt")?.value||"").trim();
-    if ($("scriptedShortResult")) $("scriptedShortResult").hidden=true;
-    propose(event).catch(err=>report(err.message,true));
-  },true);
   $("storyFirstNewForm").addEventListener("submit", e => propose(e).catch(err => report(err.message, true)));
   $("storyFirstSave").addEventListener("click", () => save().catch(err => report(err.message, true)));
-  $("storyFirstHandoff")?.addEventListener("click",async()=>{
-    if(current.busy)return;
-    const scenes=current.story?.scenes||[];
-    if(!scenes.length||scenes.some(row=>!row.selected_approved||!isId(row.assigned_asset_id))){
-      report("Every scene must have selected, verified media before Production.",true);return;
-    }
-    if(!confirm("Create a Production draft from this media-complete storyboard? No rendering, scheduling or publishing."))return;
-    try{
-      const record=await save();
-      const result=await call("/api/ideas/"+record.id+"/production-request?profile="+encodeURIComponent(assertProfile()),{
-        method:"POST",body:JSON.stringify({content_profile_id:assertProfile(),story_first_handoff:true})
-      });
-      if(!result.record?.id)throw new Error("Production Request did not return a draft.");
-      report("Production draft "+result.record.id+" opened. Nothing was published.");
-      document.querySelector('[data-page="production"]')?.click();
-    }catch(e){report("Production handoff blocked: "+e.message,true);}
-  });
   $("storyFirstRefresh").addEventListener("click", () => refresh().catch(err => report(err.message, true)));
   $("storyFirstOpenId").addEventListener("click", async () => {
     const recordId = String($("storyFirstRecordId").value || "").trim();
@@ -747,22 +722,6 @@
       document.querySelector('[data-page="production"]')?.click();
     } catch (error) { report(error.message, true); }
   });
-  // Upgrade the EXISTING Script a Short form rather than adding a second Idea Generator.
-  // Capture submit before the legacy asset-first Script a Short handler runs.
-  const originalShortForm = $("scriptedShortForm");
-  if (originalShortForm) originalShortForm.addEventListener("submit", event => {
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    $("storyFirstBrief").value = String($("scriptedShortPrompt")?.value || "").trim();
-    $("scriptedShortResult").hidden = true;
-    propose().catch(error => report(error.message, true));
-  }, true);
-  const originalShortPanel = $("scriptedShortPanel");
-  if (originalShortPanel && panel.parentElement !== originalShortPanel) originalShortPanel.appendChild(panel);
-  $("storyFirstNewForm").hidden = true;
-  const jump = $("scriptedShortStoryFirstJump");
-  if (jump) jump.hidden = true;
-  if ($("scriptedShortPropose")) $("scriptedShortPropose").textContent = "Generate Script & Storyboard";
   setInterval(switchProfile, 2500);
   switchProfile();
 })();
