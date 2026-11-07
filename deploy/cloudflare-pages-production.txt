@@ -712,3 +712,4 @@ Deploy Studio UI 0.6.897-qa-center-pilot: Admin QA Test Center, 88 test instruct
 2026-11-06: Release Studio UI 0.6.898-i1-partial-recovery. Failed NYC Idea batches immediately reveal saved linked candidates from fresh Airtable; display 8/10 or 9/10 honestly; no confusing Retry full-batch duplicates or automatic non-idempotent POST replay. No auto production/publishing.
 
 2026-11-07: Release Studio UI 0.6.899-profile-feedback. Clear transient action success/error messages on profile changes, clear TikTok resend feedback on output changes, and ignore late resend responses from prior profile/output. No worker or publishing changes; maintain Airtable write authority. Verify exact Cloudflare Pages custom-domain build.
+2026-11-07: Deploy Studio UI 0.6.900-profile-feedback-rows; isolate Pipeline TikTok resend feedback, clear prior-profile outputs, and guard stale async creative reads. No Worker/publish changes.
