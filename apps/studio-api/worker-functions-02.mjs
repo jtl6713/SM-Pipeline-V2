@@ -11878,6 +11878,7 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   const prompt = creativeBrief.replace(/\s+/g, " ").trim();
   if (prompt.length < 3) throw new HttpError(400, "Describe the short in a sentence.");
   const assetPolicy = parseScriptedShortAssetPolicy(prompt);
+  const creativeFirst = payload?.creative_first === true;
   const synthetic = {
     id: "scripted-short-proposal",
     fields: {
@@ -11911,7 +11912,7 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   // Required uploaded-location instructions are hard constraints. A file ID
   // alone is not a valid scene match; unscoped assets need place evidence.
   catalog = catalog.filter((row) => libraryAssetSatisfiesPolicy(row, assetPolicy, profile?.id));
-  if (assetPolicy.required && !catalog.length) {
+  if (!creativeFirst && assetPolicy.required && !catalog.length) {
     throw new HttpError(409, "No verified " + assetPolicy.location +
       " assets were found in this profile's library. Check asset names, location tags and profile assignments. Unrelated assets will not be substituted.");
   }
@@ -11927,7 +11928,7 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   // an AI suggestion. Preserve every clip and every word, even if the writer
   // proposes a shorter story.
   try {
-    const exact = scriptedShortExactScenes(creativeBrief, pool);
+    const exact = creativeFirst ? null : scriptedShortExactScenes(creativeBrief, pool);
     if (exact) {
       source = "exact-brief";
       scenes = exact;
@@ -11937,26 +11938,40 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   }
   if (source !== "exact-brief") {
     try {
-      const writer = await pulseIdeaTimedScriptWriter(env, synthetic, pool);
+      // Story is authored against an empty inventory. Matching is a SECOND step.
+      const writer = await pulseIdeaTimedScriptWriter(env, synthetic, creativeFirst ? [] : pool);
       source = writer.source && writer.source !== "fallback" ? writer.source : "fallback";
-      scenes = assignOwnedScenes((writer.scenes || []).map((scene) => ({
+      const authoredScenes = (writer.scenes || []).map((scene) => ({
         voiceover_text: scene.voiceover_text,
         suggested_visual: scene.suggested_visual,
-      })), pool);
-      scenes = ensureRelevantVideoScene(scenes, pool);
+      }));
+      scenes = creativeFirst ? authoredScenes : assignOwnedScenes(authoredScenes, pool);
+      if (!creativeFirst) scenes = ensureRelevantVideoScene(scenes, pool);
     } catch (error) {
       console.warn("scripted short writer failed", error);
     }
     if (!scriptedShortProposalReady(buildTimelineFromScenes(scenes))) {
       source = "fallback";
-      scenes = assignOwnedScenes(fallbackProposalScenes(prompt, pool), pool);
-      scenes = ensureRelevantVideoScene(scenes, pool);
+      scenes = creativeFirst ? fallbackProposalScenes(prompt, []) : assignOwnedScenes(fallbackProposalScenes(prompt, pool), pool);
+      if (!creativeFirst) scenes = ensureRelevantVideoScene(scenes, pool);
     }
   }
   // Independent Quality Agent guard: repair only from the eligible catalog,
   // otherwise mark a scene as missing rather than reporting a false match.
   const recovery = recoverScriptedShortAssets(buildTimelineFromScenes(scenes), pool, assetPolicy, profile?.id);
   const timeline = scriptedShortHonorDuration(buildTimelineFromScenes(recovery.timeline.segments), creativeBrief);
+  if (creativeFirst) {
+    // A library candidate is NOT a confirmed match. Preserve the author-required visual.
+    const candidatePool = pool.filter(row => row.confidence === "high" || row.confidence === "medium");
+    const usedCandidateIds = new Set();
+    timeline.segments = timeline.segments.map((segment) => {
+      const tokens = new Set(String(segment.suggested_visual || "").toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 5));
+      const match = candidatePool.find(row => !usedCandidateIds.has(row.id) &&
+        String(row.name || "").toLowerCase().split(/[^a-z0-9]+/).some(t => tokens.has(t) && t.length >= 5));
+      if (match) usedCandidateIds.add(match.id);
+      return { ...segment, asset_id: "", shot_status: "suggestion", candidate_asset_id: match?.id || null };
+    });
+  }
   const constraints = scriptedShortCheckBriefRequirements(creativeBrief, timeline, pool);
   if (!constraints.ok) throw new HttpError(409, constraints.errors.join(" "));
   const assetValidation = validateScriptedShortAssets(timeline, pool, assetPolicy, profile?.id);
@@ -11979,6 +11994,7 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   return respond(request, env, {
     ok: true,
     source,
+    creative_first: creativeFirst,
     prompt,
     creative_brief: creativeBrief,
     markdown: formatTimedScriptMarkdown(timeline),
@@ -11991,7 +12007,9 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
     asset_policy: assetPolicy,
     asset_validation: { ...assetValidation, recovered_count: recovery.recovered, unresolved_count: recovery.unresolved },
     producer_plan: producerPlan,
-    message: suggestions
+    message: creativeFirst
+      ? `${timeline.segments.length} story-first scenes. Library candidates are only suggestions; choose AI, capture or confirm a valid match before rendering. Save the idea to keep it across sessions.`
+      : suggestions
       ? `${timeline.segments.length} scenes. ${owned} verified library matches. ${suggestions} still need an appropriate photo. ${assetPolicy.required ? "Only " + assetPolicy.location + " images are allowed. " : ""}Estimated times are hints. The recorded voiceover sets the real length.`
       : `${timeline.segments.length} scenes, all verified against ${assetPolicy.required ? assetPolicy.location : "the selected profile"} and matched to library files. Estimated times are hints. The recorded voiceover sets the real length.`,
   });
