@@ -66,7 +66,7 @@ export function normalizeStoryFirst(input, profileId = "") {
     }
     priorEnd = +match[2];
     const mediaRaw = trim(raw?.media, 32).toLowerCase();
-    const media = mediaRaw === "video" ? "clip" : MEDIA.has(mediaRaw) ? mediaRaw : "still_or_clip";
+    const media = ["video", "clip_preferred", "video_preferred"].includes(mediaRaw) ? "clip" : MEDIA.has(mediaRaw) ? mediaRaw : "still_or_clip";
     const approved = Boolean(assigned && raw?.selected_approved === true);
     const state = approved ? "media_approved"
       : assigned ? "needs_media_review"
