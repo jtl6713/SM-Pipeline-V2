@@ -311,44 +311,24 @@
   }
 
   async function generateSceneImage(index) {
-    const story = readForm();
-    const scene = story.scenes[index];
-    if (scene?.decision !== "ai") throw new Error("Choose AI image for this shot first.");
-    if (!String(scene.ai_prompt || "").trim()) throw new Error("Add a prompt for this shot.");
-    if (!confirm("Generate one AI image for scene " + (index + 1) + "? It will be added to an editable Production draft, not rendered or published.")) return;
+    const scene = readForm().scenes[index];
+    if (scene.assigned_asset_id) throw new Error("Remove approved media before generating another image.");
+    if (scene.generated_master_id) throw new Error("Accept or decline the existing generated image first.");
+    if (!String(scene.ai_prompt || "").trim()) throw new Error("Write an AI prompt for this scene.");
+    if (!confirm("Generate one AI still for scene " + (index + 1) + "? This may use paid AI credits. It will not create a Production Request.")) return;
     const record = await save();
     current.busy = true;
-    report("Preparing the saved Idea and generating one image for scene " + (index + 1) + "…");
+    report("Generating one image for scene " + (index + 1) + "…");
     try {
-      const id = assertProfile();
-      const draft = await call("/api/ideas/" + encodeURIComponent(record.id) + "/production-request?profile=" + encodeURIComponent(id), {
-        method: "POST", body: JSON.stringify({ content_profile_id: id }),
-      });
-      const requestId = String(draft.record?.id || record.production_request_id || "");
-      if (!isId(requestId)) throw new Error("No editable Production draft was returned. No image was requested.");
-      const generated = await call("/api/production-requests/" + encodeURIComponent(requestId) + "/generate-ai-masters?profile=" + encodeURIComponent(id), {
+      const result = await call("/api/story-first/ideas/" + record.id + "/scenes/" + (index + 1) + "/generate?profile=" +
+        encodeURIComponent(assertProfile()), {
         method: "POST",
-        body: JSON.stringify({
-          add_ai_count: 1, content_profile_id: id,
-          prompt_guidance: String(scene.ai_prompt).slice(0, 1800),
-          asset_name_base: (current.title.slice(0, 90) + " Scene " + (index + 1)).trim(),
-        }),
+        body: JSON.stringify({ prompt: scene.ai_prompt, content_profile_id: assertProfile() }),
       });
-      const aiAsset = (generated.assets || []).filter(a => String(a?.source || "").startsWith("studio_ai")).slice(-1)[0];
-      if (!aiAsset?.id) throw new Error("Image generation returned no identifiable master. Check the Production draft before retrying.");
-      scene.generated_master_id = aiAsset.id;
-      current.generatedAssets[aiAsset.id] = aiAsset;
-      current.record.production_request_id = requestId;
-      render();
-      await saveAfterGeneration(scene);
-      report("AI image created for scene " + (index + 1) + " and saved in the Production draft. Review it before approving this shot.");
+      if (!result.generated_master_id) throw new Error("No generated image was returned for this scene.");
+      await reopenLatest();
+      report("AI image ready to preview. Accept or Decline before using it.");
     } finally { current.busy = false; }
-  }
-  async function saveAfterGeneration(scene) {
-    // save() is separate from the AI generation busy lease.
-    current.busy = false;
-    try { await save(); }
-    catch (error) { report("Image created, but storyboard linking needs attention: " + error.message, true); throw error; }
   }
   function render() {
     const workspace = $("storyFirstWorkspace");
