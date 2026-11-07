@@ -651,6 +651,10 @@
     // The previous profile may still have a resend request in flight.
     const resend = $("creativeTiktokResend");
     if (resend) resend.disabled = false;
+    // Pipeline row acknowledgements are ephemeral too; never leave the old
+    // city's output table (or its "Sent" text) visible during profile loading.
+    const outputList = $("outputsList");
+    if (outputList) outputList.innerHTML = "";
   }
 
   function profileActionIsCurrent(profileId, revision, outputId = "") {
@@ -664,6 +668,22 @@
     if (selectedProfileId !== profile.id) {
       profileFeedbackRevision += 1;
       clearProfileScopedFeedback();
+      pipelineOutputs = [];
+      pipelineContentRecords = [];
+      pipelineScheduleGridRecords = [];
+      pipelineListExceptionScope = false;
+      pipelineListUnverified = true;
+      pipelineTiktokUrlDrafts.clear();
+      pipelineYoutubeUrlDrafts.clear();
+      // An open creative editor belongs to its original output/profile.
+      creativeHandoffPollToken += 1;
+      activeCreativeOutputId = null;
+      activeCreativeOutput = null;
+      creativeSlides = [];
+      creativeEditorDirty = false;
+      creativeSavedFingerprint = "";
+      const creativePanel = $("creativeEditorPanel");
+      if (creativePanel) creativePanel.hidden = true;
     }
     // The top-left watermark is intentionally global ChicagoShining branding.
     // Never swap or hide it when the operator switches to LA, Miami, or NYC.
@@ -19735,6 +19755,8 @@ function timedScriptAssetLabel(asset, index) {
 
   async function openCreativeEditor(recordId) {
     if (activeCreativeOutputId && activeCreativeOutputId !== recordId && !phase6ConfirmDiscardUnsaved("open another output")) return;
+    const profileAtRequest = selectedProfileId;
+    const revisionAtRequest = profileFeedbackRevision;
     if (activeCreativeOutputId !== recordId) {
       creativeSlideCollapsed.clear();
       creativeVisualScript = null;
@@ -19748,6 +19770,7 @@ function timedScriptAssetLabel(asset, index) {
     setCreativeBusy(true);
     try {
       const data = await api(`/api/outputs/${encodeURIComponent(recordId)}/creative`);
+      if (!profileActionIsCurrent(profileAtRequest, revisionAtRequest, recordId)) return;
       populateCreativeEditor(data);
       const still = creativeSimpleVideoKind(data?.output) === "still";
       const handoff = still ? data?.handoff : (data?.handoff || await refreshCreativeChangeProgress());
@@ -19761,6 +19784,7 @@ function timedScriptAssetLabel(asset, index) {
         else phase6Message("");
       }
     } catch (e) {
+      if (!profileActionIsCurrent(profileAtRequest, revisionAtRequest, recordId)) return;
       phase6Message(e.message, "error-text");
       setCreativeBusy(false);
     }
@@ -20183,6 +20207,10 @@ function timedScriptAssetLabel(asset, index) {
       button?.addEventListener("click", async (event) => {
         event.preventDefault();
         event.stopPropagation();
+        const actionProfileId = selectedProfileId;
+        const actionRevision = profileFeedbackRevision;
+        const isCurrentRow = () => profileActionIsCurrent(actionProfileId, actionRevision)
+          && wrap.isConnected;
         const id = wrap.dataset.tiktokResend;
         const record = (pipelineOutputs || []).find((row) => row.id === id);
         if (!id || !button) return;
@@ -20194,16 +20222,18 @@ function timedScriptAssetLabel(asset, index) {
         }
         try {
           const result = await submitTiktokDraftResend(id);
+          if (!isCurrentRow()) return;
           const held = tiktokResendWasHeld(result);
           if (message) message.textContent = held ? "Held until the scheduled time" : "Sent — check TikTok inbox";
           await refreshPipelineOutputs({ silent: true });
         } catch (error) {
+          if (!isCurrentRow()) return;
           if (message) {
             message.textContent = error.message || "Could not resend draft.";
             message.classList.add("error-text");
           }
         } finally {
-          button.disabled = false;
+          if (isCurrentRow()) button.disabled = false;
         }
       });
     });
@@ -23638,6 +23668,7 @@ function timedScriptAssetLabel(asset, index) {
     } catch (e) {
       // A short Airtable pause must not blank the list. Keep the last verified
       // Pipeline on screen and hold Approve All until the next successful fetch.
+      if (profileAtRequest !== selectedProfileId) return;
       const message = String(e?.message || "Refresh failed");
       const keep = (pipelineOutputs.length > 0 && target.querySelector("table"))
         ? pipelineOutputs
@@ -28136,6 +28167,11 @@ function timedScriptAssetLabel(asset, index) {
   checkHealth().finally(() => loadDashboard());
   $("studioProfileSelect")?.addEventListener("change", (event) => {
     const profile = studioProfiles.find((item) => item.id === event.target.value);
+    if (profile && profile.id !== selectedProfileId && creativeEditorDirty
+        && !phase6ConfirmDiscardUnsaved("switch profiles")) {
+      event.target.value = selectedProfileId;
+      return;
+    }
     if (profile) applyStudioProfile(profile, { reload: true });
   });
 
