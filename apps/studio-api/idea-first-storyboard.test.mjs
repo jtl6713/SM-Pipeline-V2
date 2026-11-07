@@ -40,7 +40,7 @@ test("adding an AI-generated master is review required, not a verified media mat
 test("other profiles, invalid media IDs, missing scenes, and malformed notes fail closed", () => {
   assert.throws(() => normalizeStoryFirst(idea, MIAMI), /profile/i);
   assert.throws(() => normalizeStoryFirst({...idea, scenes:[]}, CHICAGO), /scene/i);
-  assert.throws(() => normalizeStoryFirst({...idea, scenes:[{visual:"short"}]}, CHICAGO), /specific visual/i);
+  assert.throws(() => normalizeStoryFirst({...idea, scenes:[{visual:"tiny"}]}, CHICAGO), /specific visual/i);
   assert.throws(() => normalizeStoryFirst({...idea, scenes:[{visual:"valid visual here", assigned_asset_id:"random.png"}]}, CHICAGO), /asset/i);
   assert.equal(parseStoryFirstNotes("[story-first.1] {broken"), null);
 });
