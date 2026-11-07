@@ -287,6 +287,7 @@
   const audioUserTouched = new Set();
   let activeCreativeOutputId = null;
   let activeCreativeOutput = null;
+  let creativeTiktokResendScope = "";
   let creativeSlides = [];
   let creativeOptions = {};
   let creativeHandoffPollToken = 0;
@@ -300,7 +301,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.898-i1-partial-recovery";
+  const BUILD_ID = "item4-0.6.899-profile-feedback";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -350,6 +351,8 @@
   const PROFILE_LIST_CACHE_KEY = "studio.content_profiles_cache_v1";
   const PROFILE_LIST_RETRY_MS = 15000;
   let selectedProfileId = "";
+  // Invalidates async action feedback when switching working profiles.
+  let profileSwitchGeneration = 0;
   let studioProfiles = [];
   let studioProfilesLoadInFlight = null;
   let studioProfileListRetryTimer = null;
@@ -625,8 +628,66 @@
     watermark.setAttribute("title", "ChicagoShining");
   }
 
+  function actionScopeCurrent(profileId, generation, outputId = null) {
+    return profileId === selectedProfileId
+      && generation === profileSwitchGeneration
+      && (outputId === null || activeCreativeOutputId === outputId);
+  }
+
+  function resetProfileScopedTransientState() {
+    profileSwitchGeneration += 1;
+    // Action feedback is ephemeral, never proof of an action in another city.
+    document.querySelectorAll(
+      ".form-message, .pipeline-tiktok-complete-msg, #creativeTiktokResendMessage, #engagementStatus, #insightsStatus"
+    ).forEach((node) => {
+      node.textContent = "";
+      node.classList.remove("error-text", "is-error");
+    });
+    creativeTiktokResendScope = "";
+    const panel = $("creativeEditorPanel");
+    if (panel) {
+      panel.hidden = true;
+      panel.classList.remove("story-teaser-mode", "simple-video-review", "no-voiceover-review", "native-still-review");
+    }
+    creativeHandoffPollToken += 1;
+    activeCreativeOutputId = null;
+    activeCreativeOutput = null;
+    creativeSlides = [];
+    creativeOptions = {};
+    creativeHandoffStatus = null;
+    creativeVisualTimeline = null;
+    creativeVisualScript = null;
+    creativeFeatures = {};
+    creativeEditorDirty = false;
+    creativeSavedFingerprint = "";
+    creativeSlideCollapsed.clear();
+    if (creativeDirtyTimer) clearTimeout(creativeDirtyTimer);
+    creativeDirtyTimer = null;
+    const video = $("creativeRenderPreview");
+    video?.pause();
+    video?.removeAttribute("src");
+    $("creativeRenderPreviewDrive")?.removeAttribute("src");
+    if ($("creativeTiktokResend")) $("creativeTiktokResend").disabled = false;
+
+    // Do not briefly render another profile's rows or unsaved action drafts
+    // while the newly selected profile is loading.
+    pipelineOutputs = [];
+    pipelineContentRecords = [];
+    pipelineListExceptionScope = false;
+    pipelineListUnverified = false;
+    pipelineScheduleGridRecords = [];
+    pipelineScheduleDrafts.clear();
+    pipelineScheduleDirty.clear();
+    pipelineTiktokUrlDrafts.clear();
+    pipelineYoutubeUrlDrafts.clear();
+    pipelineGroupOpen.clear();
+    const list = $("outputsList");
+    if (list) list.innerHTML = "";
+  }
+
   function applyStudioProfile(profile, { reload = false } = {}) {
     if (!profile) return;
+    if (selectedProfileId && selectedProfileId !== profile.id) resetProfileScopedTransientState();
     // The top-left watermark is intentionally global ChicagoShining branding.
     // Never swap or hide it when the operator switches to LA, Miami, or NYC.
     ensureGlobalStudioWatermark();
@@ -18715,6 +18776,15 @@ function timedScriptAssetLabel(asset, index) {
     const resendMessage = $("creativeTiktokResendMessage");
     const copy = $("creativeTiktokCompleteCopy");
     if (!card || !form || !live || !input) return;
+    // The same editor DOM is reused for multiple outputs and profiles.
+    const resendScope = selectedProfileId + ":" + String(output?.id || activeCreativeOutputId || "");
+    if (creativeTiktokResendScope !== resendScope) {
+      creativeTiktokResendScope = resendScope;
+      if (resendMessage) {
+        resendMessage.textContent = "";
+        resendMessage.classList.remove("error-text");
+      }
+    }
     const tiktok = String(output?.platform || "").trim().toLowerCase() === "tiktok";
     const awaiting = tiktok && tiktokNeedsUrlEntry(output);
     const canResend = tiktok && tiktokNeedsDraftResend(output);
@@ -19692,7 +19762,17 @@ function timedScriptAssetLabel(asset, index) {
       creativeSlideCollapsed.clear();
       creativeVisualScript = null;
     }
+    if (activeCreativeOutputId !== recordId) {
+      creativeTiktokResendScope = "";
+      const previousFeedback = $("creativeTiktokResendMessage");
+      if (previousFeedback) {
+        previousFeedback.textContent = "";
+        previousFeedback.classList.remove("error-text");
+      }
+    }
     activeCreativeOutputId = recordId;
+    const openedProfileId = selectedProfileId;
+    const openedGeneration = profileSwitchGeneration;
     $("creativeEditorPanel").hidden = false;
     window.scrollTo(0, 0);
     $("creativeEditorTitle").textContent = "Loading creative review…";
@@ -19701,9 +19781,11 @@ function timedScriptAssetLabel(asset, index) {
     setCreativeBusy(true);
     try {
       const data = await api(`/api/outputs/${encodeURIComponent(recordId)}/creative`);
+      if (!actionScopeCurrent(openedProfileId, openedGeneration, recordId)) return;
       populateCreativeEditor(data);
       const still = creativeSimpleVideoKind(data?.output) === "still";
       const handoff = still ? data?.handoff : (data?.handoff || await refreshCreativeChangeProgress());
+      if (!actionScopeCurrent(openedProfileId, openedGeneration, recordId)) return;
       const resumable = !still && (Boolean(handoff?.active && !handoff?.completed && handoff?.overall_status !== "error")
         || creativeMixInProgress(handoff, data?.output));
       if (resumable) {
@@ -19714,6 +19796,7 @@ function timedScriptAssetLabel(asset, index) {
         else phase6Message("");
       }
     } catch (e) {
+      if (!actionScopeCurrent(openedProfileId, openedGeneration, recordId)) return;
       phase6Message(e.message, "error-text");
       setCreativeBusy(false);
     }
@@ -20137,6 +20220,8 @@ function timedScriptAssetLabel(asset, index) {
         event.preventDefault();
         event.stopPropagation();
         const id = wrap.dataset.tiktokResend;
+        const requestProfileId = selectedProfileId;
+        const requestGeneration = profileSwitchGeneration;
         const record = (pipelineOutputs || []).find((row) => row.id === id);
         if (!id || !button) return;
         if (!window.confirm(tiktokResendConfirm(record))) return;
@@ -20147,11 +20232,12 @@ function timedScriptAssetLabel(asset, index) {
         }
         try {
           const result = await submitTiktokDraftResend(id);
+          if (!actionScopeCurrent(requestProfileId, requestGeneration)) return;
           const held = tiktokResendWasHeld(result);
           if (message) message.textContent = held ? "Held until the scheduled time" : "Sent — check TikTok inbox";
           await refreshPipelineOutputs({ silent: true });
         } catch (error) {
-          if (message) {
+          if (actionScopeCurrent(requestProfileId, requestGeneration) && message) {
             message.textContent = error.message || "Could not resend draft.";
             message.classList.add("error-text");
           }
@@ -27913,6 +27999,8 @@ function timedScriptAssetLabel(asset, index) {
   $("creativeTiktokResend")?.addEventListener("click", async () => {
     const record = activeCreativeOutput;
     const id = activeCreativeOutputId || record?.id;
+    const requestProfileId = selectedProfileId;
+    const requestGeneration = profileSwitchGeneration;
     const button = $("creativeTiktokResend");
     const message = $("creativeTiktokResendMessage");
     if (!id || !record || !tiktokNeedsDraftResend(record) || !button) return;
@@ -27924,6 +28012,7 @@ function timedScriptAssetLabel(asset, index) {
     }
     try {
       const result = await submitTiktokDraftResend(id);
+      if (!actionScopeCurrent(requestProfileId, requestGeneration, id)) return;
       const held = tiktokResendWasHeld(result);
       if (result?.record) {
         activeCreativeOutput = { ...record, ...result.record };
@@ -27936,13 +28025,14 @@ function timedScriptAssetLabel(asset, index) {
         : "TikTok draft resent. Check the TikTok inbox.");
       refreshPipelineOutputs({ silent: true }).catch(() => {});
     } catch (error) {
+      if (!actionScopeCurrent(requestProfileId, requestGeneration, id)) return;
       if (message) {
         message.textContent = error.message || "Could not resend draft.";
         message.classList.add("error-text");
       }
       phase6Message(error.message || "Could not resend the TikTok draft.", "error-text");
     } finally {
-      button.disabled = false;
+      if (actionScopeCurrent(requestProfileId, requestGeneration, id)) button.disabled = false;
     }
   });
   $("creativeTiktokCompleteForm")?.addEventListener("submit", async (event) => {
@@ -28085,6 +28175,10 @@ function timedScriptAssetLabel(asset, index) {
   checkHealth().finally(() => loadDashboard());
   $("studioProfileSelect")?.addEventListener("change", (event) => {
     const profile = studioProfiles.find((item) => item.id === event.target.value);
+    if (profile && profile.id !== selectedProfileId && !phase6ConfirmDiscardUnsaved("switch profiles")) {
+      event.target.value = selectedProfileId;
+      return;
+    }
     if (profile) applyStudioProfile(profile, { reload: true });
   });
 
