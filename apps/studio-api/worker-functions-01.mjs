@@ -1,4 +1,4 @@
-import { parseStoryFirstNotes, normalizeStoryFirst, upsertStoryFirstNotes, storyFirstShotChecklist } from "./idea-first-storyboard.mjs";
+import { parseStoryFirstNotes, normalizeStoryFirst, upsertStoryFirstNotes, storyFirstShotChecklist, validateStoryFirstSelectedMedia } from "./idea-first-storyboard.mjs";
 import { formalFactoryApprovalReady, evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
 import { staleInstagramPublishingDisplay } from "./ig-publishing-display.mjs";
@@ -3758,6 +3758,9 @@ export async function createIdea(request, env, authorization, ctx = null) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
   const storyFirst = String(payload?.input_kind || "").trim() === "story-first"
     ? normalizeStoryFirst(payload?.storyboard, profile.id) : null;
+  if (storyFirst?.scenes.some(scene => scene.assigned_asset_id)) {
+    throw new HttpError(409, "New Script a Short ideas cannot contain unverified media selections. Save first, then select media.");
+  }
   // A Vibe Cut records a new uploaded source, not a proposed new editorial
   // subject. Reusing an existing title (including retries of the same video)
   // must never block source upload. Keep the 365-day guard for all other Ideas.
@@ -3963,6 +3966,15 @@ export async function updateIdea(request, env, url, authorization) {
     let storyFirst;
     try { storyFirst = normalizeStoryFirst(payload.storyboard, profileId); }
     catch (error) { throw new HttpError(400, error?.message || "Invalid storyboard"); }
+    // Verify every selected file against authoritative Airtable. An ID or an
+    // approved flag sent by a browser is not proof of access, rights or storage.
+    const assigned = [...new Set(storyFirst.scenes.map(scene => scene.assigned_asset_id).filter(Boolean))];
+    const selectedRows = await Promise.all(assigned.map(async id => {
+      try { return await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, id); }
+      catch { throw new HttpError(409, "Selected storyboard media is missing or unavailable"); }
+    }));
+    const selectionCheck = validateStoryFirstSelectedMedia(storyFirst, new Map(selectedRows.map(row => [row.id, row])));
+    if (!selectionCheck.ok) throw new HttpError(409, selectionCheck.problems.join("; "));
     fields.Production_Config_Notes = upsertStoryFirstNotes(
       fields.Production_Config_Notes ?? String(f(record, "Production_Config_Notes") || ""), storyFirst, profileId);
     fields.Suggested_Visuals = storyFirstShotChecklist(storyFirst);
