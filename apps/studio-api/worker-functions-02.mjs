@@ -11945,16 +11945,17 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   // The active Studio profile must also drive the writer market, never default to Chicago.
   const profileMarket = String(f(profile, "Market_Name") || "").trim();
   if (profileMarket) synthetic.fields.Market_Name = profileMarket;
+  // Only the legacy proposal path queries inventory before writing. Story-first
+  // authors creative scenes against an EMPTY catalog; the browser searches each
+  // finished scene afterward without changing required visuals or narration.
   let catalog = [];
-  try {
-    catalog.push(...(await rankStillsForIdeaPhotoWait(env, synthetic)).map(ideaTimedScriptCatalogRow));
-  } catch (error) {
-    console.warn("scripted short library rank failed", error);
-  }
-  try {
-    catalog.push(...(await rankVideosForScriptedShortProposal(env, synthetic)).map(ideaTimedScriptCatalogRow));
-  } catch (error) {
-    console.warn("scripted short video discovery failed", error);
+  if (!creativeFirst) {
+    try {
+      catalog.push(...(await rankStillsForIdeaPhotoWait(env, synthetic)).map(ideaTimedScriptCatalogRow));
+    } catch (error) { console.warn("scripted short library rank failed", error); }
+    try {
+      catalog.push(...(await rankVideosForScriptedShortProposal(env, synthetic)).map(ideaTimedScriptCatalogRow));
+    } catch (error) { console.warn("scripted short video discovery failed", error); }
   }
   const seen = new Set();
   catalog = catalog.filter((row) => {
@@ -12026,7 +12027,12 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
     });
   }
   const constraints = scriptedShortCheckBriefRequirements(creativeBrief, timeline, pool);
-  if (!constraints.ok) throw new HttpError(409, constraints.errors.join(" "));
+  // A named uploaded clip cannot be demanded from an empty library at creative
+  // authoring time; exact narration and duration requirements still apply.
+  const blockingConstraints = creativeFirst
+    ? constraints.errors.filter(error => !/required uploaded clip/i.test(error))
+    : constraints.errors;
+  if (blockingConstraints.length) throw new HttpError(409, blockingConstraints.join(" "));
   const assetValidation = validateScriptedShortAssets(timeline, pool, assetPolicy, profile?.id);
   if (!assetValidation.ok) {
     throw new HttpError(409, "Quality Agent blocked a mismatched library asset. No proposal was accepted.");
