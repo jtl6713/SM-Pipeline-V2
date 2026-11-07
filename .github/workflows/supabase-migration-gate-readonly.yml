@@ -1,0 +1,284 @@
+# Read-only Workstream A probe for Airtable → Supabase cutover.
+# Does not flip STUDIO_READ_SOURCE / STUDIO_WRITE_SOURCE. No mutations.
+name: Supabase Migration Gate Read-Only
+on:
+  workflow_dispatch:
+  schedule:
+    # Catch half-hour cron shortly after :00 / :30 UTC
+    - cron: "5,35 * * * *"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/supabase-migration-gate-readonly.yml"
+permissions:
+  contents: read
+  actions: write
+concurrency:
+  group: supabase-migration-gate-readonly
+  cancel-in-progress: false
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      STUDIO_ACCESS_EMAIL: joseph.t.logan@gmail.com
+    steps:
+      - name: Probe Worker health, sync status, and runner health
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CF_ACCESS_CLIENT_ID:-}"
+          test -n "${CF_ACCESS_CLIENT_SECRET:-}"
+
+          ACCESS=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+                  -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+                  -H "Cf-Access-Authenticated-User-Email: $STUDIO_ACCESS_EMAIL" \
+                  -H "Origin: https://studio.chicagoshining.com" \
+                  -H "Accept: application/json")
+
+          curl -fsS --max-time 30 "${ACCESS[@]}" \
+            "https://studio.chicagoshining.com/api/health" \
+            -o /tmp/studio-health.json
+          curl -fsS --max-time 30 "${ACCESS[@]}" \
+            "https://studio.chicagoshining.com/api/ops/supabase/sync" \
+            -o /tmp/studio-sync.json
+          curl -fsS --max-time 20 \
+            "https://pipeline.chicagoshining.com/health" \
+            -o /tmp/runner-health.json
+
+          python3 - <<'PY'
+          import json, os, sys, time
+          from pathlib import Path
+
+          health = json.loads(Path("/tmp/studio-health.json").read_text())
+          sync = json.loads(Path("/tmp/studio-sync.json").read_text())
+          runner = json.loads(Path("/tmp/runner-health.json").read_text())
+          now = time.time()
+
+          print("=== /api/health (selected) ===")
+          for key in (
+              "ok",
+              "version",
+              "studio_read_source",
+              "studio_supabase_configured",
+              "studio_supabase_phase5_writes_v1",
+              "studio_supabase_last_sync_at",
+              "studio_supabase_last_sync_ok",
+          ):
+              print(f"{key}={health.get(key)!r}")
+
+          print("=== /api/ops/supabase/sync (selected) ===")
+          last = sync.get("last_sync") or {}
+          print(f"configured={sync.get('configured')!r}")
+          print(f"read_source={sync.get('read_source')!r}")
+          print(f"phase5_writes={sync.get('phase5_writes')!r}")
+          print(f"phase5_write_tables={sync.get('phase5_write_tables')!r}")
+          print(f"last_sync.status={last.get('status')!r}")
+          print(f"last_sync.ok={last.get('ok')!r}")
+          print(f"last_sync.at={last.get('at')!r}")
+          print(f"last_sync.finished_at={last.get('finished_at')!r}")
+          print(f"last_sync.duration_ms={last.get('duration_ms')!r}")
+          print(f"last_sync.error={last.get('error')!r}")
+          circuit = last.get("circuit") or {}
+          print(f"circuit.open={circuit.get('open')!r}")
+          print(f"circuit.failures={circuit.get('failures')!r}")
+          print(f"circuit.lastError={circuit.get('lastError')!r}")
+
+          print("=== runner /health (selected) ===")
+          for key in ("ok", "version", "studio_write_source", "supabase_pipeline_writes"):
+              print(f"{key}={runner.get(key)!r}")
+
+          checks = []
+
+          def check(name, ok, detail=""):
+              checks.append((name, bool(ok), detail))
+              mark = "PASS" if ok else "FAIL"
+              print(f"GATE[{mark}] {name}" + (f" — {detail}" if detail else ""))
+
+          check("health.ok", health.get("ok") is True)
+          check(
+              "studio_read_source=airtable",
+              health.get("studio_read_source") == "airtable",
+              f"got {health.get('studio_read_source')!r}",
+          )
+          check(
+              "studio_supabase_phase5_writes_v1",
+              health.get("studio_supabase_phase5_writes_v1") is True,
+          )
+          check(
+              "studio_supabase_configured",
+              health.get("studio_supabase_configured") is True,
+          )
+          check(
+              "phase5_writes=airtable_sor_write_through",
+              sync.get("phase5_writes") == "airtable_sor_write_through",
+              f"got {sync.get('phase5_writes')!r}",
+          )
+          check(
+              "last_sync completed+ok",
+              last.get("status") == "completed" and last.get("ok") is True,
+              f"status={last.get('status')!r} ok={last.get('ok')!r} error={last.get('error')!r}",
+          )
+
+          # Half-hour cron should leave a stamp within ~40 minutes when healthy.
+          at_ms = last.get("at")
+          age_min = None
+          if isinstance(at_ms, (int, float)) and at_ms > 0:
+              age_min = (now * 1000 - float(at_ms)) / 60000.0
+              check(
+                  "last_sync age < 40 min",
+                  age_min < 40,
+                  f"age_min={age_min:.1f}",
+              )
+          else:
+              check("last_sync age < 40 min", False, "missing last_sync.at")
+
+          check(
+              "circuit not open",
+              circuit.get("open") is not True,
+              f"open={circuit.get('open')!r} failures={circuit.get('failures')!r}",
+          )
+          check(
+              "runner.supabase_pipeline_writes",
+              runner.get("supabase_pipeline_writes") is True,
+          )
+          check(
+              "runner.studio_write_source=airtable",
+              runner.get("studio_write_source") == "airtable",
+              f"got {runner.get('studio_write_source')!r}",
+          )
+
+          sample = {
+              "probed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+              "health": {
+                  k: health.get(k)
+                  for k in (
+                      "ok",
+                      "version",
+                      "studio_read_source",
+                      "studio_supabase_configured",
+                      "studio_supabase_phase5_writes_v1",
+                      "studio_supabase_last_sync_at",
+                      "studio_supabase_last_sync_ok",
+                  )
+              },
+              "sync": {
+                  "configured": sync.get("configured"),
+                  "read_source": sync.get("read_source"),
+                  "phase5_writes": sync.get("phase5_writes"),
+                  "last_sync": {
+                      "status": last.get("status"),
+                      "ok": last.get("ok"),
+                      "at": last.get("at"),
+                      "finished_at": last.get("finished_at"),
+                      "duration_ms": last.get("duration_ms"),
+                      "error": last.get("error"),
+                      "circuit": circuit,
+                  },
+              },
+              "runner": {
+                  k: runner.get(k)
+                  for k in ("ok", "version", "studio_write_source", "supabase_pipeline_writes")
+              },
+              "checks": [{"name": n, "ok": o, "detail": d} for n, o, d in checks],
+              "note": (
+                  "A4 (≥3 consecutive completed+ok half-hour syncs) needs multiple "
+                  "scheduled runs of this workflow; one probe only proves the latest stamp."
+              ),
+          }
+          Path("/tmp/supabase-migration-gate-sample.json").write_text(
+              json.dumps(sample, indent=2) + "\n"
+          )
+
+          hard = [c for c in checks if not c[1]]
+          if hard:
+              print("WORKSTREAM_A_SNAPSHOT=FAIL")
+              print("Do not restore Supabase reads (Workstream B) until A4–A5 pass.")
+              sys.exit(1)
+          print("WORKSTREAM_A_SNAPSHOT=PASS_LATEST_ONLY")
+          print(
+              "Latest stamp looks healthy. Keep scheduled probes until ≥3 consecutive "
+              "PASS_LATEST_ONLY runs cover distinct :00/:30 windows before B1."
+          )
+          PY
+
+      - name: Upload gate sample artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-migration-gate-${{ github.run_id }}
+          path: |
+            /tmp/studio-health.json
+            /tmp/studio-sync.json
+            /tmp/runner-health.json
+            /tmp/supabase-migration-gate-sample.json
+          if-no-files-found: warn
+
+      - name: Restore consecutive healthy half-hour streak
+        if: success()
+        uses: actions/cache/restore@v4
+        with:
+          path: .supabase-gate-streak
+          key: supabase-gate-streak-${{ github.run_id }}
+          restore-keys: |
+            supabase-gate-streak-
+
+      - name: Update consecutive healthy streak file
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .supabase-gate-streak
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          sample = json.loads(Path("/tmp/supabase-migration-gate-sample.json").read_text())
+          last = (sample.get("sync") or {}).get("last_sync") or {}
+          stamp_at = last.get("at")
+          path = Path(".supabase-gate-streak/history.json")
+          history = []
+          if path.exists():
+              try:
+                  history = json.loads(path.read_text())
+              except Exception:
+                  history = []
+          if not isinstance(history, list):
+              history = []
+          entry = {
+              "probed_at": sample.get("probed_at"),
+              "last_sync_at": stamp_at,
+              "last_sync_finished_at": last.get("finished_at"),
+              "status": last.get("status"),
+              "ok": last.get("ok"),
+              "run_id": """${{ github.run_id }}""",
+          }
+          # Dedupe identical sync stamps so re-probes of the same half-hour do not inflate streak.
+          if not history or history[-1].get("last_sync_at") != stamp_at:
+              history.append(entry)
+          history = history[-12:]
+          path.write_text(json.dumps(history, indent=2) + "\n")
+
+          streak = 0
+          for row in reversed(history):
+              if row.get("status") == "completed" and row.get("ok") is True:
+                  streak += 1
+              else:
+                  break
+          print(f"CONSECUTIVE_HEALTHY_SYNCS={streak}")
+          print(f"HISTORY_LEN={len(history)}")
+          if streak >= 3:
+              print("WORKSTREAM_A4_GATE=PASS")
+          else:
+              print("WORKSTREAM_A4_GATE=INCOMPLETE")
+              print(f"Need {3 - streak} more distinct completed+ok half-hour stamps.")
+          PY
+          cat .supabase-gate-streak/history.json
+
+      - name: Persist streak for next scheduled probe
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: .supabase-gate-streak
+          key: supabase-gate-streak-${{ github.run_id }}
