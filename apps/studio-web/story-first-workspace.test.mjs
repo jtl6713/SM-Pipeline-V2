@@ -66,3 +66,11 @@ test("Canonical Airtable Ideas remain the only writable story source, other Idea
   assert.match(helper, /story_first: parseStoryFirstNotes/);
   assert.match(worker, /assertWriteRequest\(request, env\)/);
 });
+
+test("Successful storyboard handoff opens the actual Production navigation route", () => {
+  assert.match(html, /data-page="content">Production<\/button>/);
+  assert.match(app, /button\.nav-item\[data-page="content"\]/);
+  assert.doesNotMatch(app, /data-page="production"/);
+  assert.match(app, /result\.created === false/);
+  assert.match(app, /production_request_id/);
+});
