@@ -3629,10 +3629,11 @@ export async function createProductionRequestFromBody(request, env, authorizatio
     }
   }
   const created = await createDraftForIdea(env, idea, authorization, input, { preferredProfileId });
+  const validatedCreated = await ensureStoryFirstProductionMedia(env, created, approvedStory);
   return respond(request, env, {
     ok: true,
     created: true,
-    record: mapProductionRequestLight(created),
+    record: mapProductionRequestLight(validatedCreated),
   }, 201);
 }
 
