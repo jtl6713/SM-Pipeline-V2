@@ -718,3 +718,4 @@ Deploy Studio UI 0.6.902-scene-cards 2026-11-07: polish Script a Short scene edi
 Deploy Studio UI 0.6.903-inline-scene-icons 2026-11-07: fix Script a Short per-scene SVG icon placement by nesting each icon/label/control in its own field; add native hover descriptions, maintain mobile labels. UI-only; no Worker, Airtable, production, or publish changes.
 
 Deploy Studio UI 0.6.904-upload-error-details 2026-11-07: preserve upload errors against background classification updates and report measured transferred bytes without changing saved receipts.
+Deploy Studio UI 0.6.905 2026-11-07: Script a Short confirmed Airtable save receipts, safe interrupted-PATCH read-back, no redundant Ideas-list reload, and selected asset labels. UI-only; no publishing change.
