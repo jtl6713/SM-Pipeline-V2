@@ -747,6 +747,22 @@
       document.querySelector('[data-page="production"]')?.click();
     } catch (error) { report(error.message, true); }
   });
+  // Upgrade the EXISTING Script a Short form rather than adding a second Idea Generator.
+  // Capture submit before the legacy asset-first Script a Short handler runs.
+  const originalShortForm = $("scriptedShortForm");
+  if (originalShortForm) originalShortForm.addEventListener("submit", event => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    $("storyFirstBrief").value = String($("scriptedShortPrompt")?.value || "").trim();
+    $("scriptedShortResult").hidden = true;
+    propose().catch(error => report(error.message, true));
+  }, true);
+  const originalShortPanel = $("scriptedShortPanel");
+  if (originalShortPanel && panel.parentElement !== originalShortPanel) originalShortPanel.appendChild(panel);
+  $("storyFirstNewForm").hidden = true;
+  const jump = $("scriptedShortStoryFirstJump");
+  if (jump) jump.hidden = true;
+  if ($("scriptedShortPropose")) $("scriptedShortPropose").textContent = "Generate Script & Storyboard";
   setInterval(switchProfile, 2500);
   switchProfile();
 })();
