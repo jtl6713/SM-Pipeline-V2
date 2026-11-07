@@ -469,137 +469,163 @@
     const workspace = $("storyFirstWorkspace");
     workspace.hidden = !current.story;
     if (!current.story) return;
-    $("storyFirstTitle").value = current.title;
-    $("storyFirstSummary").value = current.summary;
-    const scenes = current.story.scenes;
-    const total = scenes.length, selected = selectedCount();
-    $("storyFirstProgress").textContent = selected + " of " + total + " scenes have selected media — " +
-      (total - selected) + " still need attention. Save partial progress at any time.";
-    const list = $("storyFirstShots");
+    $("storyFirstTitle").value=current.title;
+    $("storyFirstSummary").value=current.summary;
+    const scenes=current.story.scenes;
+    const selected=scenes.filter(row=>row.selected_approved===true && isId(row.assigned_asset_id)).length;
+    $("storyFirstProgress").textContent=selected+" of "+scenes.length+
+      " scenes have selected media — "+(scenes.length-selected)+" still need attention.";
+    const handoff=$("storyFirstHandoff");
+    if(handoff){handoff.disabled=selected!==scenes.length;handoff.title=handoff.disabled?
+      "Select and verify media for every scene first":"Explicitly hand off this complete storyboard";}
+    const list=$("storyFirstShots");
     list.replaceChildren();
-    scenes.forEach((shot, index) => {
-      const card = node("article", "story-first-shot");
-      const head = node("div", "story-first-shot-head");
-      put(head, node("strong", "", "Scene " + (index + 1)), node("span", "", clock(shot.time)));
+    function previewAsset(parent, asset, text) {
+      const wrap=node("div","story-first-candidate");
+      const img=node("img","story-first-candidate-img");
+      img.src=root+"/api/media-assets/"+encodeURIComponent(asset.id)+"/preview";
+      img.loading="lazy";img.alt="Library preview for "+String(asset.name||"media");
+      const desc=node("div","story-first-candidate-desc");
+      put(desc,node("strong","",asset.name||"Asset"),
+        node("small","",asset.media_kind==="video"?"Video clip":"Still image"));
+      if(asset.reason)put(desc,node("small","",asset.reason));
+      if(text)put(desc,node("small","",text));
+      const open=node("a","story-first-preview","View preview");
+      open.href=img.src;open.target="_blank";open.rel="noopener noreferrer";
+      put(desc,open);
+      button("Select","secondary-button",()=>selectSceneAsset(asset._index,asset).catch(e=>report(e.message,true)),desc);
+      put(wrap,img,desc);parent.appendChild(wrap);
+    }
+    scenes.forEach((shot,index)=>{
+      const card=node("article","story-first-shot");
+      const head=node("div","story-first-shot-head");
+      put(head,node("strong","","Scene "+(index+1)),node("span","",clock(shot.time)));
       card.appendChild(head);
-      put(card, node("p", "story-first-scene-status", sceneStatus(shot)));
-      const time = label(card, "Timing (start-end seconds)", shot.time, "input");
-      time.maxLength = 24;
-      time.oninput = () => { shot.time = time.value; head.lastChild.textContent = clock(shot.time); markEditing(); };
-      const visual = label(card, "Required visual — story remains authoritative", shot.visual);
-      visual.maxLength = 340;
-      visual.oninput = () => { shot.visual = visual.value; markEditing(); };
-      const voice = label(card, "Voiceover", shot.voiceover || "");
-      voice.maxLength = 380;
-      voice.oninput = () => { shot.voiceover = voice.value; markEditing(); };
-      const media = label(card, "Required media type", "", "select");
-      [["still_or_clip", "Image or clip"], ["still", "Still image"], ["clip", "Video clip required"]]
-        .forEach(pair => media.add(new Option(pair[1], pair[0])));
-      media.value = shot.media === "video" ? "clip" : shot.media || "still_or_clip";
-      media.onchange = () => { shot.media = media.value; markEditing(); };
-      const actions = node("div", "story-first-shot-detail");
-      if (shot.selected_approved && isId(shot.assigned_asset_id)) {
-        put(actions, node("strong", "", "Media Selected"));
-        const picture = node("img", "story-first-generated-preview");
-        picture.src = root + "/api/media-assets/" + encodeURIComponent(shot.assigned_asset_id) + "/preview";
-        picture.alt = "Approved media for scene " + (index + 1);
-        actions.appendChild(picture);
-        button("Remove Selection", "secondary-button", async () => {
-          try {
-            readForm();
-            const old = { ...shot };
-            shot.assigned_asset_id = null; shot.selected_approved = false; shot.media_override = false;
-            shot.state = "missing";
-            await save(); render();
-          } catch (error) { report(error.message, true); }
-        }, actions);
-      } else if (shot.generated_master_id) {
-        put(actions, node("p", "subtle", "Awaiting Image Review — no media has been selected"));
-        const image = node("img", "story-first-generated-preview");
-        image.src = root + "/api/story-first/ideas/" + encodeURIComponent(current.record?.id || "") +
-          "/scenes/" + (index + 1) + "/preview/" + encodeURIComponent(shot.generated_master_id);
-        image.alt = "Generated AI scene image awaiting review";
-        actions.appendChild(image);
-        if (shot.media === "clip") {
-          const override = node("label", "story-first-override");
-          const checkbox = node("input"); checkbox.type = "checkbox";
-          put(override, checkbox, node("span", "", "Explicitly accept a still instead of video footage"));
-          actions.appendChild(override);
-          button("Accept Image", "primary-button",
-            () => reviewImage(index, true, checkbox.checked).catch(e => report(e.message, true)), actions);
-        } else {
-          button("Accept Image", "primary-button", () => reviewImage(index, true).catch(e => report(e.message, true)), actions);
-        }
-        button("Decline Image", "secondary-button",
-          () => reviewImage(index, false).catch(e => report(e.message, true)), actions);
-      } else {
-        const suggestedIds = (shot.candidate_assets || []).map(item => item.id);
-        if (!suggestedIds.length && shot.candidate_asset_id) suggestedIds.push(shot.candidate_asset_id);
-        const recommended = suggestedIds.slice(0,3).map(id => ({
-          asset: current.libraryRows.find(row => row.id === id),
-          reason: (shot.candidate_assets || []).find(item => item.id === id)?.reason || "Unverified candidate",
-        })).filter(item => eligible(item.asset));
-        if (recommended.length) {
-          put(actions, node("strong", "", "Available library matches"));
-          put(actions, node("p", "subtle", "Up to three suggested assets. Preview before choosing; metadata does not prove time of day or framing."));
-          recommended.forEach(item => candidateCard(actions, index, item.asset, item.reason));
-        } else {
-          put(actions, node("p", "subtle", "Media needed for this scene — no credible candidate selected."));
-        }
-        const prompt = label(actions, "AI Image Prompt — edit before generation",
-          shot.ai_prompt || "Realistic vertical 9:16 city photograph: " + shot.visual);
-        prompt.rows = 3; prompt.maxLength = 850;
-        prompt.oninput = () => { shot.ai_prompt = prompt.value; markEditing(); };
-        if (shot.media === "clip") {
-          put(actions, node("p", "subtle", "AI creates a STILL, not footage. Keep the clip requirement unless you explicitly approve an override."));
-        }
-        button((shot.rejected_ai_ids || []).length ? "Generate Again" : "Generate AI Image",
-          "secondary-button", () => generateSceneImage(index).catch(e => report(e.message, true)), actions);
-        button("I'll Supply the Image or Clip", "secondary-button", async () => {
-          try {
-            readForm();
-            shot.decision = "capture"; shot.state = "awaiting_operator_upload";
-            await save(); render();
-          } catch (e) { report(e.message, true); }
-        }, actions);
-        const capture = label(actions, "My capture / upload instructions", shot.capture_note || shot.visual);
-        capture.maxLength = 450;
-        capture.oninput = () => { shot.capture_note = capture.value; markEditing(); };
-        const upload = node("label", "secondary-button story-first-upload-label", "Upload Image / Clip Here");
-        const file = node("input"); file.type = "file"; file.className = "native-file-input";
-        file.accept = "image/*,video/*,.heic,.heif,.mp4,.mov";
-        upload.appendChild(file); actions.appendChild(upload);
-        const progress = node("p", "story-first-upload-progress");
-        progress.setAttribute("role","status"); progress.setAttribute("aria-live","polite");
-        actions.appendChild(progress);
-        file.onchange = () => uploadFile(index, file.files?.[0], progress).catch(e => {
-          progress.textContent = "Upload not completed"; report(e.message, true);
-        });
-        button("Save and Open Asset Manager", "secondary-button",
-          () => openAssetManager().catch(e => report(e.message, true)), actions);
-        const uploaded = current.uploadedAssets[index];
-        if (uploaded && eligible(uploaded)) {
-          put(actions, node("strong", "", "Newly uploaded — select after preview"));
-          candidateCard(actions, index, uploaded);
-        }
-        button("Choose Existing Asset", "secondary-button",
-          () => browseAssets(index).catch(e => report(e.message, true)), actions);
-        if (current.wideResults[index]) {
-          const query = label(actions, "Search the eligible library", "", "input");
-          query.placeholder = "Asset name, subject or location";
-          button("Search Library", "secondary-button",
-            () => browseAssets(index, query.value).catch(e => report(e.message, true)), actions);
-          const results = node("div", "story-first-browse-results");
-          current.wideResults[index].slice(0,30).forEach(asset => candidateCard(results, index, asset));
-          if (!current.wideResults[index].length) results.appendChild(node("p", "subtle", "No matching eligible media."));
-          actions.appendChild(results);
-        }
+      const statusText=shot.selected_approved&&isId(shot.assigned_asset_id)?"Media Selected":
+        shot.generated_master_id?"Awaiting Image Review":
+        current.pendingUpload[index]?"Uploading Media":
+        shot.decision==="capture"?"Awaiting Your Media":
+        current.candidates[index]?.length?"Candidates Available":
+        shot.decision==="ai"?"Awaiting AI Generation":"Missing Media";
+      card.appendChild(node("p","story-first-status","Status: "+statusText));
+      const time=label(card,"Scene timing (start-end seconds)",shot.time,"input");
+      time.maxLength=24;
+      time.oninput=()=>{shot.time=time.value;markEditing();};
+      const visual=label(card,"Required visual — do not change just to fit library media",shot.visual);
+      visual.maxLength=340;
+      visual.oninput=()=>{shot.visual=visual.value;current.attempted.delete(index);delete current.candidates[index];markEditing();};
+      const voice=label(card,"Voiceover / narration",shot.voiceover||"");
+      voice.maxLength=380;
+      voice.oninput=()=>{shot.voiceover=voice.value;markEditing();};
+      const media=label(card,"Preferred media","", "select");
+      [["still","Still image"],["clip","Real video clip"],["still_or_clip","Still or clip"]]
+        .forEach(([key,text])=>media.add(new Option(text,key)));
+      media.value=shot.media==="video"?"clip":shot.media||"still_or_clip";
+      media.addEventListener("change",()=>{shot.media=media.value;current.attempted.delete(index);
+        delete current.candidates[index];render();markEditing();});
+      if(shot.selected_approved && isId(shot.assigned_asset_id)){
+        const selectedArea=node("div","story-first-selected");
+        const chosen={id:shot.assigned_asset_id,name:"Selected media for scene "+(index+1)};
+        const img=node("img","story-first-candidate-img");
+        img.src=root+"/api/media-assets/"+encodeURIComponent(chosen.id)+"/preview";
+        img.alt="Selected media for this scene";img.loading="lazy";
+        put(selectedArea,img,node("p","subtle","Selected Media Asset: "+chosen.id));
+        button("Change selected media","secondary-button",()=>{
+          shot.selected_approved=false;shot.assigned_asset_id=null;shot.media_override=false;
+          render();markEditing();
+        },selectedArea);
+        card.appendChild(selectedArea);
       }
-      card.appendChild(actions); list.appendChild(card);
+      const mode=label(card,"Media sourcing","", "select");
+      [["unassigned","Choose a source"],["library","Choose library asset"],
+       ["ai","Generate AI Image"],["capture","I'll Supply the Media"]]
+        .forEach(([key,text])=>mode.add(new Option(text,key)));
+      mode.value=["library","ai","capture"].includes(shot.decision)?shot.decision:"unassigned";
+      const actions=node("div","story-first-shot-detail");
+      function renderAssets(area, assets, titleText) {
+        area.appendChild(node("p","story-first-asset-heading",titleText));
+        if(!assets?.length){area.appendChild(node("p","subtle","No credible recommendations. The required scene remains unchanged."));return;}
+        assets.slice(0,3).forEach(asset=>previewAsset(area,{...asset,_index:index}));
+      }
+      function renderActions(){
+        actions.replaceChildren();
+        if(current.pendingUpload[index])actions.appendChild(node("p","story-first-upload-progress",
+          current.pendingUpload[index]));
+        if(shot.generated_master_id && !shot.rejected_ai_ids?.includes(shot.generated_master_id)){
+          const img=node("img","story-first-generated-preview");
+          img.src=root+sceneUrl(index,"preview/"+encodeURIComponent(shot.generated_master_id));
+          img.alt="AI-generated scene image, awaiting explicit review";
+          actions.appendChild(node("p","story-first-asset-heading","AI image awaiting your decision"));
+          actions.appendChild(img);
+          button("Accept Image","primary-button",()=>decideGenerated(index,"accept").catch(e=>report(e.message,true)),actions);
+          button("Decline Image","secondary-button",()=>decideGenerated(index,"decline").catch(e=>report(e.message,true)),actions);
+        }else if(mode.value==="ai"){
+          const prompt=label(actions,"Editable AI image prompt",shot.ai_prompt||shot.visual);
+          prompt.maxLength=850;prompt.rows=3;
+          prompt.oninput=()=>{shot.ai_prompt=prompt.value;markEditing();};
+          if(shot.media==="clip")actions.appendChild(node("p","subtle",
+            "AI creates a STILL IMAGE. You must supply real video or explicitly override the clip requirement when accepting."));
+          button("Generate this AI image","secondary-button",()=>generateSceneImage(index).catch(e=>report(e.message,true)),actions);
+          button("I'll Supply the Media","secondary-button",()=>{
+            shot.decision="capture";mode.value="capture";renderActions();markEditing();
+          },actions);
+        }else if(mode.value==="capture"){
+          const capture=label(actions,"My photography / footage instructions",shot.capture_note||shot.visual);
+          capture.maxLength=450;
+          capture.oninput=()=>{shot.capture_note=capture.value;markEditing();};
+          actions.appendChild(node("p","subtle","Awaiting Your Media. You can leave and return to the saved storyboard."));
+          button("Generate Again","secondary-button",()=>{
+            shot.decision="ai";mode.value="ai";renderActions();markEditing();
+          },actions);
+        }else if(!shot.selected_approved){
+          actions.appendChild(node("p","subtle","Media needed for this scene. Studio will not substitute an unrelated image."));
+          button("Generate AI Image","secondary-button",()=>{
+            shot.decision="ai";mode.value="ai";renderActions();markEditing();
+          },actions);
+          button("I'll Supply the Media","secondary-button",()=>{
+            shot.decision="capture";mode.value="capture";renderActions();markEditing();
+          },actions);
+        }
+        const libraryArea=node("div","story-first-library-results");
+        const recommendations=current.candidates[index];
+        if(recommendations===undefined){
+          libraryArea.appendChild(node("p","subtle","Searching the profile library for scene-specific matches…"));
+        }else{
+          renderAssets(libraryArea,recommendations,"Available library matches (up to 3)");
+        }
+        actions.appendChild(libraryArea);
+        button("Choose Existing Asset","secondary-button",()=>{
+          const browse=node("div","story-first-browse");
+          const search=label(browse,"Search eligible assets in this profile","","input");
+          search.placeholder="Name or location; leave blank to browse";
+          const results=node("div","story-first-browse-results");
+          button("Search Library","secondary-button",async()=>{
+            results.replaceChildren(node("p","subtle","Searching…"));
+            try{
+              const matches=await findSceneAssets(index,search.value,true);
+              results.replaceChildren();
+              if(!matches.length){results.appendChild(node("p","subtle","No eligible assets found."));return;}
+              results.appendChild(node("p","subtle",matches.length+" eligible library result(s) — manually verify the visual before selecting."));
+              matches.forEach(asset=>previewAsset(results,{...asset,_index:index}));
+            }catch(e){results.replaceChildren(node("p","form-message error-text",e.message));}
+          },browse);
+          browse.appendChild(results);
+          libraryArea.appendChild(browse);
+        },actions);
+        const upload=node("input");
+        upload.type="file";upload.accept=shot.media==="clip"?"video/*,.mp4,.mov,.m4v":
+          shot.media==="still"?"image/*,.heic,.heif": "image/*,video/*,.heic,.heif,.mp4,.mov";
+        upload.hidden=true;
+        upload.addEventListener("change",()=>uploadScene(index,upload.files?.[0]).catch(e=>report(e.message,true)));
+        actions.appendChild(upload);
+        button("Upload Image / Clip Here","secondary-button",()=>upload.click(),actions);
+        button("Save & open Asset Manager","secondary-button",()=>openAssetManager().catch(e=>report(e.message,true)),actions);
+      }
+      mode.addEventListener("change",()=>{shot.decision=mode.value;renderActions();markEditing();});
+      card.appendChild(actions);renderActions();list.appendChild(card);
     });
-    $("storyFirstSave").textContent = current.record ? "Save Idea" : "Save New Idea";
-    const handoff = $("storyFirstProduction");
-    if (handoff) handoff.hidden = selected !== total;
+    $("storyFirstSave").textContent=current.record?"Save changes to idea":"Save idea";
+    scenes.forEach((_,i)=>discoverScene(i));
   }
   async function propose(e) {
     e?.preventDefault?.();
