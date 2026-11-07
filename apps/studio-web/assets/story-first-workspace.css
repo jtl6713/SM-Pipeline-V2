@@ -35,3 +35,27 @@
 .story-first-override{display:flex;gap:9px;align-items:flex-start;margin:9px 0}
 .story-first-actions>button[hidden]{display:none}
 @media(max-width:640px){.story-first-asset{flex-direction:column}.story-first-asset-preview{max-width:100%;width:100%;height:auto;max-height:260px;object-fit:contain}.story-first-shot-detail>button,.story-first-shot-detail>.story-first-upload-label,.story-first-asset button{width:100%;box-sizing:border-box}}
+
+/* Scene-level upload, review, and library candidate UX. Keep interactive previews usable on iPhone. */
+.story-first-status{font-size:.85rem;font-weight:650;margin:8px 0;color:var(--text-muted,#9aaac0)}
+.story-first-shot-detail{display:flex;flex-direction:column;align-items:stretch;gap:8px}
+.story-first-shot-detail>button{min-height:42px;white-space:normal;word-break:normal}
+.story-first-asset-heading{font-size:.95rem;font-weight:700;margin:8px 0 4px}
+.story-first-library-results,.story-first-browse,.story-first-browse-results{display:grid;gap:10px;min-width:0}
+.story-first-candidate{display:grid;grid-template-columns:minmax(96px,120px) minmax(0,1fr);gap:12px;
+  border:1px solid var(--border-color,#777);border-radius:10px;padding:9px;min-width:0}
+.story-first-candidate-img{width:100%;max-width:180px;aspect-ratio:9/12;object-fit:cover;border-radius:7px;
+  background:var(--surface,#1e2329)}
+.story-first-candidate-desc{display:flex;flex-direction:column;align-items:flex-start;gap:6px;min-width:0;overflow-wrap:anywhere}
+.story-first-candidate-desc>small{font-size:.82rem;opacity:.85}
+.story-first-candidate-desc button{min-height:38px}
+.story-first-selected{padding:10px;border:1px solid var(--border-color,#777);border-radius:9px;margin:9px 0}
+.story-first-selected .story-first-candidate-img{width:min(100%,210px)}
+.story-first-upload-progress{font-size:.86rem;font-weight:600;margin:5px 0}
+.story-first-actions>button{min-height:44px}
+@media(max-width:640px){
+  .story-first-candidate{grid-template-columns:minmax(90px,33%) minmax(0,1fr);gap:9px}
+  .story-first-candidate-desc{font-size:.9rem}
+  .story-first-candidate-desc>button{width:100%}
+  .story-first-shot-detail>button{width:100%}
+}
