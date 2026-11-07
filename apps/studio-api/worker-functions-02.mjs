@@ -11251,6 +11251,13 @@ export async function promoteIdeaViaI3I4(request, env, url, authorization) {
     });
   }
 
+  const storyFirst = parseStoryFirstNotes(f(record, "Production_Config_Notes"));
+  if (storyFirst) {
+    const approvedStory = await verifiedStoryFirstProduction(env, record);
+    const draft = await existingDraftForIdea(env, recordId, authorization, record);
+    if (!draft) throw new HttpError(409, "Complete Script a Short and explicitly open its Production draft before promoting.");
+    await ensureStoryFirstProductionMedia(env, draft, approvedStory);
+  }
   const status = String(f(record, "Candidate_Status") || "").trim();
   if (status === "On Hold") throw new HttpError(409, "Restore this idea before approving and promoting it");
   if (status === "Promoted") throw new HttpError(409, "Idea is marked Promoted but its Content Item link is missing; reconcile the Airtable record before retrying");
@@ -12587,6 +12594,9 @@ export async function anotherVibeCutRoute(request, env, authorization) {
 export async function createIdeaTimedScriptRoute(request, env, url, authorization, ctx = null) {
   const recordId = ideaRecordIdFromPath(url);
   let idea = await loadAuthorizedIdea(env, recordId, authorization);
+  if (parseStoryFirstNotes(f(idea, "Production_Config_Notes"))) {
+    throw new HttpError(409, "Script a Short uses its own timed storyboard and verified scene selection. Return to Script a Short to continue.");
+  }
   let body = {};
   try { body = await request.json(); } catch { body = {}; }
   if (!body || typeof body !== "object" || Array.isArray(body)) body = {};
