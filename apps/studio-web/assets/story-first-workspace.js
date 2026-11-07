@@ -313,6 +313,16 @@
   $("storyFirstNewForm").addEventListener("submit", e => propose(e).catch(err => report(err.message, true)));
   $("storyFirstSave").addEventListener("click", () => save().catch(err => report(err.message, true)));
   $("storyFirstRefresh").addEventListener("click", () => refresh().catch(err => report(err.message, true)));
+  $("storyFirstOpenId").addEventListener("click", async () => {
+    const recordId = String($("storyFirstRecordId").value || "").trim();
+    if (!isId(recordId)) { report("Enter an Airtable Idea record ID beginning with rec.", true); return; }
+    try {
+      const id = profileId();
+      const result = await call("/api/ideas/" + encodeURIComponent(recordId) + "?profile=" + encodeURIComponent(id));
+      if (!result.record) throw new Error("Idea record was not returned.");
+      openRecord(result.record);
+    } catch (e) { report(e.message || "Could not reopen this idea.", true); }
+  });
   $("storyFirstSaved").addEventListener("change", e => {
     const record = current.ideaRecords.find(row => row.id === e.target.value);
     if (record) try { openRecord(record); } catch (err) { report(err.message, true); }
