@@ -3570,7 +3570,7 @@ export async function ensureStoryFirstProductionMedia(env, requestRecord, valida
   // Commit creative directives only after the exact selected asset set is confirmed.
   // A rejected handoff must not leave the draft with new storyboard notes but
   // a stale or incomplete media manifest.
-  return await item4UpdateRequestState(env, attached.record.id, {
+  return await item4UpdateRequestState(env, confirmed.id, {
     Production_Notes: [notes,marker + JSON.stringify(sceneDirectives)].filter(Boolean).join("\n"),
     Script_Mode: "Force exact", Requested_Script: script,
     Video_Clip_Count_Mode: "Exact", Video_Clip_Count_Exact: story.scenes.length,
