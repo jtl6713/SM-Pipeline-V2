@@ -4,6 +4,8 @@
   const $ = id => document.getElementById(id);
   const panel = $("storyFirstPanel");
   if (!panel) return;
+  // Integrate storyboard under the existing Script a Short entry, not a second Idea Generator.
+  $("scriptedShortPanel")?.appendChild(panel);
   const config = window.CHICAGOSHINING_STUDIO_CONFIG || {};
   const root = String(config.apiBase || window.location.origin).replace(/\/$/, "");
   const select = $("studioProfileSelect");
@@ -109,7 +111,7 @@
     current.libraryRows = [];
     localStorage.setItem("studio.story_first_resume." + id, record.id);
     render();
-    discoverLibrary().catch(error => report("Story reopened; library discovery failed: " + error.message, true));
+    // Per-scene discovery is launched by render() after the complete story is loaded.
     $("storyFirstSaved").value = record.id;
     report("Reopened saved Idea " + (record.candidate_id || record.id) + ". All shot requirements and sourcing choices are preserved.");
   }
@@ -661,7 +663,7 @@
         })),
       };
       render();
-      await discoverLibrary().catch(error => report("Story authored; library discovery unavailable: " + error.message, true));
+      // Per-scene discovery follows story authoring and never changes its visual requirements.
       report("Story and timed visuals written first. Review up to three recommendations per scene, or generate/supply your own. Save partial progress anytime.");
     } finally { $("storyFirstPropose").disabled = false; }
   }
@@ -671,8 +673,31 @@
     panel.scrollIntoView({ behavior: "smooth", block: "start" });
     $("storyFirstBrief").focus();
   });
+  $("scriptedShortForm")?.addEventListener("submit", event => {
+    event.preventDefault(); event.stopImmediatePropagation();
+    $("storyFirstBrief").value=String($("scriptedShortPrompt")?.value||"").trim();
+    if ($("scriptedShortResult")) $("scriptedShortResult").hidden=true;
+    propose(event).catch(err=>report(err.message,true));
+  },true);
   $("storyFirstNewForm").addEventListener("submit", e => propose(e).catch(err => report(err.message, true)));
   $("storyFirstSave").addEventListener("click", () => save().catch(err => report(err.message, true)));
+  $("storyFirstHandoff")?.addEventListener("click",async()=>{
+    if(current.busy)return;
+    const scenes=current.story?.scenes||[];
+    if(!scenes.length||scenes.some(row=>!row.selected_approved||!isId(row.assigned_asset_id))){
+      report("Every scene must have selected, verified media before Production.",true);return;
+    }
+    if(!confirm("Create a Production draft from this media-complete storyboard? No rendering, scheduling or publishing."))return;
+    try{
+      const record=await save();
+      const result=await call("/api/ideas/"+record.id+"/production-request?profile="+encodeURIComponent(assertProfile()),{
+        method:"POST",body:JSON.stringify({content_profile_id:assertProfile(),story_first_handoff:true})
+      });
+      if(!result.record?.id)throw new Error("Production Request did not return a draft.");
+      report("Production draft "+result.record.id+" opened. Nothing was published.");
+      document.querySelector('[data-page="production"]')?.click();
+    }catch(e){report("Production handoff blocked: "+e.message,true);}
+  });
   $("storyFirstRefresh").addEventListener("click", () => refresh().catch(err => report(err.message, true)));
   $("storyFirstOpenId").addEventListener("click", async () => {
     const recordId = String($("storyFirstRecordId").value || "").trim();
