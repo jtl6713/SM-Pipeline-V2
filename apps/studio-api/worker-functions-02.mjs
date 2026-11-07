@@ -3538,13 +3538,14 @@ export async function ensureStoryFirstProductionMedia(env, requestRecord, valida
   // library eligibility, watermark or provenance checks. Preflight eligibility
   // before replaceAll can mutate the existing draft's asset manifest.
   const mediaRows = await Promise.all(ids.map(id => airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, id)));
-  const blocked = mediaRows.filter(row => ideaLibraryRejectReason(row, { allowVideo: true }));
-  if (blocked.length) {
-    const missingScenes = story.scenes.map((scene, index) =>
-      blocked.some(row => row.id === scene.assigned_asset_id) ? index + 1 : null
-    ).filter(Boolean);
-    throw new HttpError(409, "Selected storyboard media requires review for scene(s) " +
-      missingScenes.join(", ") + "; Production draft was not updated");
+  const blocked = new Map(mediaRows.map(row => [row.id,
+    ideaLibraryRejectReason(row, { allowVideo: true })]).filter(([, reason]) => Boolean(reason)));
+  if (blocked.size) {
+    const blockedScenes = story.scenes.flatMap((scene, index) =>
+      blocked.has(scene.assigned_asset_id)
+        ? ["scene " + (index + 1) + ": " + blocked.get(scene.assigned_asset_id)] : []);
+    throw new HttpError(409, "Selected storyboard media requires review (" +
+      blockedScenes.join("; ") + "); Production draft was not updated");
   }
   const attached = await applyLibraryAssetsToProductionRequest(env,requestRecord,ids,{
     replaceWaitAssets:true,allowManagePaused:true,replaceAll:true,allowVideo:true,requireAll:true
