@@ -6,27 +6,60 @@ const html = read("./index.html");
 const app = read("./assets/story-first-workspace.js");
 const helper = read("../studio-api/worker-functions-01.mjs");
 const propose = read("../studio-api/worker-functions-02.mjs");
-test("Ideas exposes story-first choice, saved draft reopening, and per-shot AI/capture controls", () => {
-  for (const id of ["scriptedShortStoryFirstJump","storyFirstPanel","storyFirstBrief","storyFirstSaved","storyFirstShots","storyFirstSave","storyFirstRefresh"]) {
+const worker = read("../studio-api/worker.js");
+const api = read("../studio-api/worker-functions-03.mjs");
+
+test("Script a Short is the one visible story-first entry and can resume a saved Idea", () => {
+  for (const id of ["storyFirstPanel","storyFirstBrief","storyFirstSaved","storyFirstShots",
+    "storyFirstSave","storyFirstRefresh","storyFirstProduction"]) {
     assert.ok(html.includes('id="' + id + '"'), id);
   }
-  assert.match(html, /assets\/story-first-workspace\.js\?v=0\.6\.901-story-first/);
-  assert.match(html, /assets\/story-first-workspace\.css\?v=0\.6\.901-story-first/);
-  assert.match(app, /Generate this AI image/);
-  assert.match(app, /Save & open Asset Manager/);
-  assert.match(app, /story_first/);
+  assert.match(html, /id="scriptedShortPanel" hidden/);
+  assert.match(html, /<h2>Script a Short<\/h2>/);
+  assert.match(app, /studio\.story_first_resume\./);
   assert.match(app, /storyboard:/);
   assert.match(app, /creative_first: true/);
 });
-test("Story is written with empty writer catalog and unverified candidates are not silently owned", () => {
+test("Idea is authored independently before no more than three verified-profile suggestions per scene", () => {
   assert.match(propose, /creativeFirst \? \[\] : pool/);
   assert.match(propose, /candidate_asset_id: match\?\.id \|\| null/);
   assert.match(propose, /asset_id: "", shot_status: "suggestion"/);
+  assert.match(app, /function rankCandidate/);
+  assert.match(app, /slice\(0,3\)|slice\(0, 3\)/);
+  assert.match(app, /content_profile_id === current\.profile/);
+  assert.match(app, /rights_status/);
+  assert.match(app, /google_drive_file_id/);
+  assert.match(app, /Preview video/);
+  assert.match(app, /Select This Asset/);
 });
-test("Story-first revisions are in canonical Ideas with no photo auto-listen or publish mutation", () => {
+test("On-demand AI generation has preview, accept, decline, no premature production", () => {
+  assert.match(app, /Generate AI Image/);
+  assert.match(app, /Accept Image/);
+  assert.match(app, /Decline Image/);
+  assert.match(app, /Generate Again/);
+  assert.match(app, /reviewImage/);
+  assert.match(api, /\/jobs\/studio-ai-image/);
+  assert.match(api, /studio\/story-first\/pending/);
+  assert.match(api, /promoteStudioAssetToDrive/);
+  assert.match(api, /"AI Generated"/);
+  assert.doesNotMatch(app.slice(app.indexOf("async function generateSceneImage"),app.indexOf("function render()")), /\/production-request/);
+});
+test("Self-service uploads, existing library browse and guarded production handoff", () => {
+  assert.match(app, /Upload Image \/ Clip Here/);
+  assert.match(app, /XMLHttpRequest/);
+  assert.match(app, /\/api\/library\?profile=/);
+  assert.match(app, /Choose Existing Asset/);
+  assert.match(app, /Save and Open Asset Manager/);
+  assert.match(app, /selectedCount\(\) !== current\.story\.scenes\.length/);
+  assert.match(propose, /verifiedStoryFirstProduction/);
+  assert.match(propose, /validateStoryFirstSelectedMedia/);
+  assert.match(worker, /isStoryFirstSceneMediaRoute/);
+  assert.doesNotMatch(app, /\/api\/outputs\/.*\/publish|\/api\/production-requests\/.*\/approve/);
+});
+test("Canonical Airtable Ideas remain the only writable story source, other Idea paths are gated", () => {
   assert.match(helper, /normalizeStoryFirst\(payload\?\.storyboard, profile\.id\)/);
   assert.match(helper, /!vibeCut && ctx\?\.waitUntil && !storyFirst/);
   assert.match(helper, /fields\.Production_Config_Notes = upsertStoryFirstNotes/);
   assert.match(helper, /story_first: parseStoryFirstNotes/);
-  assert.doesNotMatch(app, /\/api\/outputs\/.*\/publish|\/api\/production-requests\/.*\/approve/);
+  assert.match(worker, /assertWriteRequest\(request, env\)/);
 });
