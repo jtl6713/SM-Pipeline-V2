@@ -234,6 +234,7 @@
     const old = { ...scene };
     scene.decision = "library";
     scene.assigned_asset_id = asset.id;
+    scene.assigned_asset_name = String(asset.name || asset.filename || asset.title || "").trim();
     scene.selected_approved = true;
     scene.state = "media_approved";
     try { await save(); await reopenLatest(); }
@@ -629,10 +630,10 @@
         img.alt="Selected media for this scene";img.loading="lazy";
         const assetLists = [current.libraryRows, current.wideResults[index], current.candidates[index], [current.uploadedAssets[index]]];
         const selectedAsset = assetLists.flat().find(asset => asset && asset.id === chosen.id);
-        const selectedName = String(selectedAsset?.name || selectedAsset?.filename || selectedAsset?.title || "").trim();
+        const selectedName = String(selectedAsset?.name || selectedAsset?.filename || selectedAsset?.title || shot.assigned_asset_name || "").trim();
         put(selectedArea,img,node("p","subtle","Selected Media Asset: "+(selectedName || "Selected asset")));
         button("Change selected media","secondary-button",()=>{
-          shot.selected_approved=false;shot.assigned_asset_id=null;shot.media_override=false;
+          shot.selected_approved=false;shot.assigned_asset_id=null;shot.assigned_asset_name="";shot.media_override=false;
           render();markEditing();
         },selectedArea);
         card.appendChild(selectedArea);
