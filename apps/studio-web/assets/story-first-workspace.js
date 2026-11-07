@@ -155,6 +155,161 @@
     if (!tab) throw new Error("Asset Manager navigation is not available.");
     tab.click();
   }
+
+  const stopWords = new Set("the and with from into this that there is are of in on at for near city chicago scene image clip photo video downtown morning early bright show showing still a an".split(" "));
+  function tokens(value) { return new Set(String(value || "").toLowerCase().split(/[^a-z0-9]+/).filter(x => x.length > 2 && !stopWords.has(x))); }
+  function eligible(row) {
+    return row && row.content_profile_id === current.profile && !row.do_not_use
+      && ["owned","licensed","cleared","public domain"].includes(String(row.rights_status || "").toLowerCase())
+      && ["available","ready"].includes(String(row.status || "").toLowerCase())
+      && Boolean(row.google_drive_file_id);
+  }
+  function isClip(row) { return row.media_kind === "video" || String(row.mime_type || "").startsWith("video/"); }
+  function rankCandidate(scene, row) {
+    if (!eligible(row) || (scene.media === "clip" && !isClip(row))) return null;
+    const subject = String(scene.visual || "").toLowerCase();
+    const info = [row.name,row.location,row.description].filter(Boolean).join(" ").toLowerCase();
+    if (/\bsunrise|dawn|pre-sunrise|early morning\b/.test(subject) && /\bnoon|midday|afternoon|sunset|night\b/.test(info)) return null;
+    if (/\bnight|after dark\b/.test(subject) && /\bdaylight|noon|afternoon|sunrise\b/.test(info)) return null;
+    const match = [...tokens(scene.visual)].filter(token => tokens(info).has(token));
+    const distinctive = match.filter(token => !["view","skyline","river","morning","dawn","sunrise","light"].includes(token));
+    if (!distinctive.length && match.length < 2) return null;
+    return {row, score: distinctive.length * 3 + match.length, reason: "Metadata: " + match.slice(0,3).join(", ") + " — verify visually"};
+  }
+  async function discoverLibrary() {
+    const id = assertProfile();
+    const rows = [];
+    let offset = "";
+    for (let page = 0; page < 3; page++) {
+      const result = await call("/api/library?profile=" + encodeURIComponent(id) + "&limit=100&sort=newest" +
+        (offset ? "&offset=" + encodeURIComponent(offset) : ""));
+      if (!Array.isArray(result.records)) throw new Error("Asset Manager list was not returned");
+      rows.push(...result.records.filter(row => row.content_profile_id === id));
+      offset = String(result.offset || "");
+      if (!offset) break;
+    }
+    current.libraryRows = rows;
+    if (!current.story) return;
+    current.story.scenes.forEach(scene => {
+      const hits = rows.map(row => rankCandidate(scene, row)).filter(Boolean)
+        .sort((a,b) => b.score - a.score).slice(0,3);
+      scene.candidate_assets = hits.map(hit => ({ id: hit.row.id, reason: hit.reason }));
+      if (hits.length) scene.candidate_asset_id = hits[0].row.id;
+    });
+    render();
+  }
+  function selectedCount() {
+    return current.story.scenes.filter(scene => scene.selected_approved === true && isId(scene.assigned_asset_id)
+      && scene.state === "media_approved").length;
+  }
+  function sceneStatus(scene) {
+    if (scene.selected_approved && isId(scene.assigned_asset_id)) return "Media Selected";
+    if (scene.generated_master_id) return "Awaiting Image Review";
+    if (scene.decision === "capture") return "Awaiting Your Media";
+    if ((scene.candidate_assets || []).length) return "Candidates Available";
+    return "Missing Media";
+  }
+  async function reopenLatest() {
+    const id = assertProfile();
+    const data = await call("/api/ideas/" + current.record.id + "?profile=" + encodeURIComponent(id));
+    if (!data.record) throw new Error("Saved storyboard could not be reloaded");
+    const savedRows = current.libraryRows, uploaded = current.uploadedAssets;
+    openRecord(data.record);
+    current.libraryRows = savedRows; current.uploadedAssets = uploaded;
+    render();
+  }
+  async function selectAsset(index, asset) {
+    readForm();
+    if (!eligible(asset)) throw new Error("This asset is not eligible for the selected Content Profile.");
+    const scene = current.story.scenes[index];
+    if (scene.media === "clip" && !isClip(asset)) throw new Error("This scene requires footage, not a still.");
+    const old = { ...scene };
+    scene.decision = "library";
+    scene.assigned_asset_id = asset.id;
+    scene.selected_approved = true;
+    scene.state = "media_approved";
+    try { await save(); await reopenLatest(); }
+    catch (error) { Object.assign(scene, old); render(); throw error; }
+  }
+  async function browseAssets(index, query = "") {
+    const id = assertProfile();
+    const result = await call("/api/library?profile=" + encodeURIComponent(id) + "&limit=100" +
+      (query ? "&q=" + encodeURIComponent(query) : ""));
+    current.wideResults[index] = (result.records || []).filter(eligible)
+      .filter(row => current.story.scenes[index].media !== "clip" || isClip(row));
+    render();
+  }
+  async function uploadFile(index, file, progress) {
+    if (!file) return;
+    const scene = current.story.scenes[index];
+    if (scene.media === "clip" && !String(file.type).startsWith("video/")) throw new Error("A video clip is required.");
+    await save();
+    const id = assertProfile();
+    const body = new FormData();
+    body.append("content_profile_id", id);
+    body.append("batch_name", current.title.slice(0, 65) + " Scene " + (index + 1));
+    body.append("description", "Script a Short Idea " + current.record.id + " scene " + (index + 1) + ": " + scene.visual);
+    body.append("files", file, file.name);
+    const data = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", root + "/api/library?profile=" + encodeURIComponent(id));
+      xhr.withCredentials = true;
+      xhr.upload.onprogress = e => {
+        progress.textContent = e.lengthComputable ? "Uploading " + file.name + ": " +
+          Math.round(100 * e.loaded / e.total) + "%" : "Uploading " + file.name + "…";
+      };
+      xhr.onerror = () => reject(new Error("Upload interrupted; no media selected"));
+      xhr.onabort = () => reject(new Error("Upload cancelled; no media selected"));
+      xhr.onload = () => {
+        let reply = {};
+        try { reply = JSON.parse(xhr.responseText || "{}"); } catch {}
+        if (xhr.status >= 200 && xhr.status < 300 && reply.ok !== false) resolve(reply);
+        else reject(new Error(reply.error || "Media upload failed"));
+      };
+      xhr.send(body);
+    });
+    const uploaded = (data.records || data.uploaded || data.assets || [])[0];
+    if (!uploaded?.id) throw new Error("Upload sent, but catalog registration was not confirmed. Check Asset Manager.");
+    current.uploadedAssets[index] = uploaded;
+    current.libraryRows.unshift(uploaded);
+    render();
+    report("Upload complete. Review the new asset and choose Select This Asset.");
+  }
+  function candidateCard(parent, index, asset, reason = "") {
+    const wrapper = node("div", "story-first-asset");
+    const img = node("img", "story-first-asset-preview");
+    img.src = root + "/api/media-assets/" + encodeURIComponent(asset.id) + "/preview";
+    img.loading = "lazy"; img.alt = asset.name || "Media candidate";
+    wrapper.appendChild(img);
+    const copy = node("div");
+    put(copy, node("strong", "", asset.name || "Media Asset"),
+      node("p", "subtle", (isClip(asset) ? "Video clip" : "Image") +
+        (reason ? " · " + reason : "")));
+    if (isClip(asset)) {
+      const link = node("a", "story-first-preview", "Preview video");
+      link.href = root + "/api/media-assets/" + encodeURIComponent(asset.id) + "/stream";
+      link.target = "_blank"; link.rel = "noopener noreferrer";
+      copy.appendChild(link);
+    }
+    button("Select This Asset", "secondary-button", () => selectAsset(index, asset).catch(e => report(e.message, true)), copy);
+    wrapper.appendChild(copy); parent.appendChild(wrapper);
+  }
+  async function reviewImage(index, accept, override = false) {
+    const scene = readForm().scenes[index];
+    if (!scene.generated_master_id) throw new Error("No generated image is awaiting review.");
+    await save();
+    const action = accept ? "accept" : "decline";
+    const result = await call("/api/story-first/ideas/" + current.record.id + "/scenes/" + (index + 1) + "/" + action +
+      "?profile=" + encodeURIComponent(assertProfile()), {
+      method: "POST", body: JSON.stringify({ generated_master_id: scene.generated_master_id,
+        content_profile_id: assertProfile(), media_override: override }),
+    });
+    await reopenLatest();
+    report(accept ? "AI image accepted and registered to the exact scene in Drive and Airtable."
+      : "AI image declined. You can generate again or supply media.");
+    return result;
+  }
+
   async function generateSceneImage(index) {
     const story = readForm();
     const scene = story.scenes[index];
