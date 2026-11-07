@@ -931,8 +931,13 @@
         method: "POST", body: JSON.stringify({ content_profile_id: assertProfile(), input_kind: "story-first" }),
       });
       if (!result.record?.id && !result.production_request?.id) throw new Error("Production Request was not confirmed.");
-      report("Editable Production draft created. No rendering or publishing was initiated.");
-      document.querySelector('[data-page="production"]')?.click();
+      const productionId = String(result.record?.production_request_id || result.production_request?.production_request_id || "").trim();
+      report((result.created === false ? "Existing Production draft updated" : "Editable Production draft created") +
+        (productionId ? " · " + productionId : "") + ". No rendering or publishing was initiated.");
+      // The Production navigation route is "content", not "production".
+      const productionNav = document.querySelector('button.nav-item[data-page="content"]');
+      if (productionNav) productionNav.click();
+      else report("Production Request confirmed. Open the Production tab to view the draft.");
     } catch (error) { report(error.message, true); }
   });
   // Script a Short is the only user-facing idea-first entry point.
