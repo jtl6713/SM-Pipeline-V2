@@ -3534,7 +3534,7 @@ export async function ensureStoryFirstProductionMedia(env, requestRecord, valida
   // before replaceAll can mutate the existing draft's asset manifest.
   const mediaRows = await Promise.all(ids.map(id => airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, id)));
   const blocked = new Map(mediaRows.map(row => [row.id,
-    ideaLibraryRejectReason(row, { allowVideo: true })]).filter(([, reason]) => Boolean(reason)));
+    ideaLibraryRejectReason(row, { allowVideo: true, approvedStoryboard: true })]).filter(([, reason]) => Boolean(reason)));
   if (blocked.size) {
     const blockedScenes = story.scenes.flatMap((scene, index) =>
       blocked.has(scene.assigned_asset_id)
@@ -3543,7 +3543,7 @@ export async function ensureStoryFirstProductionMedia(env, requestRecord, valida
       blockedScenes.join("; ") + "); Production draft was not updated");
   }
   const attached = await applyLibraryAssetsToProductionRequest(env,requestRecord,ids,{
-    replaceWaitAssets:true,allowManagePaused:true,replaceAll:true,allowVideo:true,requireAll:true
+    replaceWaitAssets:true,allowManagePaused:true,replaceAll:true,allowVideo:true,requireAll:true,approvedStoryboard:true
   });
   const expected = new Set(ids);
   const actual = new Set((attached?.assets || []).map(asset =>
