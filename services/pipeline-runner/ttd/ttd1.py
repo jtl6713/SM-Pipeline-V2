@@ -28,6 +28,7 @@ from ttd.constants import (
     MAKE_TTD1_ID,
     MAKE_TTD1_NAME,
     MUSIC_MANUAL,
+    MUSIC_NOT_REQUESTED,
     MUSIC_MODE_MANUAL,
     PUBLISH_STATUS_FAILED,
     PUBLISH_STATUS_PUBLISHING,
@@ -176,7 +177,7 @@ def process_request(
             record_id,
             {
                 **unlock_fields(),
-                "Music_Status": MUSIC_MANUAL,
+                "Music_Status": MUSIC_NOT_REQUESTED,  # action required only after inbox delivery
                 "Publish_Status": PUBLISH_STATUS_PUBLISHING,
                 "TikTok_Draft_Type": draft_type or field_str(output, "TikTok_Draft_Type"),
                 "Music_Handling_Mode": MUSIC_MODE_MANUAL,
