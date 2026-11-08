@@ -88,7 +88,14 @@ export function scriptedShortSceneDirections(brief) {
     const body = source.slice(head.index + head[0].length, headers[i+1]?.index ?? source.length);
     if (head[2] !== undefined && head[3] !== undefined) time.set(n, {start:Number(head[2]),end:Number(head[3])});
     const label = compact(head[4]).replace(/^\*\*\s*|\s*\*\*$/g, "");
-    if (label) labels.set(n,label);
+    // "(5 seconds)" duration markers and Visual:/Voiceover: dumps are not titles.
+    // Keep only a short human scene name when the brief actually provides one.
+    if (label
+      && !/^\(\s*\d{1,3}\s*(?:s|sec|secs|seconds)?\s*\)$/i.test(label)
+      && !/\b(?:visual|voice\s*over|voiceover|narration)\s*:/i.test(label)
+      && label.length <= 90) {
+      labels.set(n, label);
+    }
     for (const line of body.split("\n")) {
       const field = line.match(labelledLine);
       if (!field) continue;

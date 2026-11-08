@@ -829,7 +829,9 @@
       thumb.appendChild(node("span","story-first-thumbnail-note",previewNote));
       const heroCopy=node("div","story-first-shot-hero-copy");
       const topLine=node("div","story-first-shot-title-line");
-      const title=node("h3","story-first-shot-title","Scene "+(index+1)+(shot.scene_label?" — "+shot.scene_label:""));
+      // Card hero shows only the scene number. Timing, visual, and voiceover are
+      // already rendered in the fields below — never dump them into the title.
+      const title=node("h3","story-first-shot-title","Scene "+(index+1));
       const timeBadge=node("span","story-first-time-pill",clock(shot.time));
       put(topLine,title,timeBadge);
       const statusBadge=node("span","story-first-status-chip "+statusClass,statusText);

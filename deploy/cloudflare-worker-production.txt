@@ -954,3 +954,5 @@ Deploy 2026-11-08 Worker 0.10.771-story-idea-sync: sync Idea Studio_Matched_Medi
 Deploy 2026-11-08 Worker 0.10.772-storyboard-schema: reject corrupt AI storyboard fields; creative-first ITS1.
 
 Deploy 2026-11-08 Worker 0.10.773-storyboard-brief: accept numbered storyboard briefs; only reject brief-dump corruption.
+
+Deploy 2026-11-08 Worker 0.10.774-scene-title: do not treat (N seconds) / Visual dumps as scene_label.

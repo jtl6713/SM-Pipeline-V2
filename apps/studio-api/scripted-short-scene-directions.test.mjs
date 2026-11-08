@@ -36,6 +36,24 @@ test("seven user-specified scene blocks become seven distinct exact VO and visua
   assert.equal(scriptedShortCheckBriefRequirements(sceneBrief, timeline, []).ok, true);
 });
 
+test("Scene N (5 seconds) duration markers are not stored as scene labels", () => {
+  const brief = [
+    "Storyboard: Chicago Blue Hour",
+    "Scene 1 (5 seconds)",
+    "Visual: Wide shot of the Chicago River at blue hour.",
+    'Voiceover: "Most people leave Chicago right before it gets good."',
+    "Scene 2 (5 seconds)",
+    "Visual: Skyline from North Avenue Beach.",
+    'Voiceover: "This is the window."',
+  ].join("\n");
+  const req = scriptedShortSceneDirections(brief);
+  assert.equal(req.requested_count, 2);
+  assert.deepEqual(req.scene_labels, ["", ""]);
+  assert.match(req.visuals[0], /Chicago River/);
+  const scenes = scriptedShortDirectedScenes(brief);
+  assert.equal(scenes[0].scene_label, "");
+});
+
 test("named seven scenes and a separate numbered VO list are kept in exact order", () => {
   const brief = [
     "Produce a 7-scene Chicago storyboard.",
