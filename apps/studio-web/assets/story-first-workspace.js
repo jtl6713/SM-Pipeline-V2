@@ -160,12 +160,15 @@
       || !Array.isArray(saved.scenes) || saved.scenes.length !== expected.scenes.length) return false;
     const textKeys = ["time","visual","voiceover","media","decision","candidate_asset_id",
       "assigned_asset_id","generated_master_id","accepted_generated_master_id","selected_origin",
-      "ai_prompt","capture_note"];
+      "ai_prompt","capture_note","scene_label","on_screen_text","on_screen_text_instagram",
+      "voiceover_instagram"];
     const boolKeys = ["selected_approved","media_override"];
+    const numericKeys = ["music_only_last_seconds"];
     return saved.scenes.every((scene, index) => {
       const wanted = expected.scenes[index];
       return textKeys.every(key => String(scene[key] ?? "") === String(wanted[key] ?? ""))
         && boolKeys.every(key => Boolean(scene[key]) === Boolean(wanted[key]))
+        && numericKeys.every(key => Number(scene[key] || 0) === Number(wanted[key] || 0))
         && JSON.stringify(scene.candidate_assets || []) === JSON.stringify(wanted.candidate_assets || [])
         && JSON.stringify(scene.rejected_ai_ids || []) === JSON.stringify(wanted.rejected_ai_ids || []);
     });
@@ -711,7 +714,7 @@
       thumb.appendChild(node("span","story-first-thumbnail-note",previewNote));
       const heroCopy=node("div","story-first-shot-hero-copy");
       const topLine=node("div","story-first-shot-title-line");
-      const title=node("h3","story-first-shot-title","Scene "+(index+1));
+      const title=node("h3","story-first-shot-title","Scene "+(index+1)+(shot.scene_label?" — "+shot.scene_label:""));
       const timeBadge=node("span","story-first-time-pill",clock(shot.time));
       put(topLine,title,timeBadge);
       const statusBadge=node("span","story-first-status-chip "+statusClass,statusText);
@@ -728,6 +731,25 @@
       const voice=sceneField(card,"voice","Voiceover / narration",shot.voiceover||"");
       voice.maxLength=380;
       voice.oninput=()=>{shot.voiceover=voice.value;markEditing();};
+      if (shot.on_screen_text || shot.on_screen_text_instagram) {
+        const overlay=sceneField(card,"overlay","Required on-screen text",shot.on_screen_text||"");
+        overlay.maxLength=280;
+        overlay.oninput=()=>{shot.on_screen_text=overlay.value;markEditing();};
+      }
+      if (shot.on_screen_text_instagram) {
+        const overlayIg=sceneField(card,"overlay","Instagram on-screen text alternative",shot.on_screen_text_instagram);
+        overlayIg.maxLength=280;
+        overlayIg.oninput=()=>{shot.on_screen_text_instagram=overlayIg.value;markEditing();};
+      }
+      if (shot.voiceover_instagram) {
+        const voiceIg=sceneField(card,"voice","Instagram-specific voiceover alternative",shot.voiceover_instagram);
+        voiceIg.maxLength=380;
+        voiceIg.oninput=()=>{shot.voiceover_instagram=voiceIg.value;markEditing();};
+      }
+      if (shot.music_only_last_seconds) {
+        card.appendChild(node("p","subtle","Keep the final "+shot.music_only_last_seconds+
+          " seconds of this scene narration-free, with music only."));
+      }
       const media=sceneField(card,"media","Preferred media","", "select");
       [["still","Still image"],["clip","Real video clip"],["still_or_clip","Still or clip"]]
         .forEach(([key,text])=>media.add(new Option(text,key)));
@@ -942,6 +964,11 @@
           time: Math.round(Number(r.start_seconds || 0)) + "-" + Math.round(Number(r.end_seconds || 0)),
           visual: String(r.suggested_visual || ""),
           voiceover: String(r.voiceover_text || ""),
+          scene_label: String(r.scene_label || ""),
+          on_screen_text: String(r.on_screen_text || ""),
+          on_screen_text_instagram: String(r.on_screen_text_instagram || ""),
+          voiceover_instagram: String(r.voiceover_instagram || ""),
+          music_only_last_seconds: Number(r.music_only_last_seconds || 0),
           media: /video|footage|moving|train|drone|timelapse/i.test(String(r.suggested_visual || "")) ? "clip" : "still_or_clip",
           state: "missing", decision: "unassigned", candidate_assets: [],
           candidate_asset_id: r.candidate_asset_id || null, assigned_asset_id: null,
