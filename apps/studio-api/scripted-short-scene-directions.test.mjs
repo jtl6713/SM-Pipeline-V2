@@ -113,3 +113,99 @@ test("story-first sends the complete multiline brief to the writer and blocks so
   assert.ok(long.length>2000);
   assert.deepEqual(scriptedShortSceneDirections(long).voiceovers,lines.map(x=>x.voice));
 });
+
+
+const realSevenScenePrompt = [
+  "Scene 1 (0-3s): Hook",
+  "\t• Visual: Wide gold skyline from the lakefront",
+  '\t• On-screen text: "Chicago sunset is at 4:30 now"',
+  '\t• VO: "Sunset\'s at 4:30 now. Here\'s where to be."',
+  "",
+  "Scene 2 (3-7s): Riverwalk",
+  "\t• Visual: Slow walking shot, gold light on the glass and water",
+  '\t• On-screen text: "1/5"',
+  '\t• VO: "Start at the Riverwalk, where the buildings turn to gold."',
+  "",
+  "Scene 3 (7-10s): The Bean",
+  "\t• Visual: Orange sky bending across the surface, with a silhouette for scale",
+  '\t• On-screen text: "2/5"',
+  '\t• VO: "Hit the Bean for that orange reflection."',
+  "",
+  "Scene 4 (10-13s): The L",
+  "\t• Visual: Train curving between buildings, sunlight flashing through the gaps",
+  '\t• On-screen text: "3/5"',
+  '\t• VO: "Catch the L curving through the Loop."',
+  "",
+  "Scene 5 (13-17s): Lakefront Trail",
+  "\t• Visual: Backlit runners or bikers with the skyline behind them",
+  '\t• On-screen text: "4/5"',
+  '\t• VO: "Walk the lakefront with the skyline behind you."',
+  "",
+  "Scene 6 (17-22s): Finale",
+  "\t• Visual: Blue-hour skyline, lights coming on (hold this one longer)",
+  '\t• On-screen text: "5/5"',
+  '\t• VO: "Then stay till the lights come on." Leave the last 2 seconds silent with just music, so the shot can breathe.',
+  "",
+  "Scene 7 (22-25s): CTA",
+  "\t• Visual: Freeze frame on the skyline",
+  '\t• On-screen text: "Save this for your next golden hour" (Instagram: "Send this to someone you\'d watch it with")',
+  '\t• VO: "Save this, and go chase it." (Instagram: "Send this to someone who\'d love it.")',
+].join("\n");
+
+test("real seven-scene sunset prompt is never collapsed to three or given full-script VO per scene", () => {
+  const original = scriptedShortSceneDirections(realSevenScenePrompt);
+  assert.equal(original.requested_count, 7);
+  assert.equal(original.recognized_voiceovers, 7);
+  assert.equal(original.recognized_visuals, 7);
+  assert.equal(original.recognized_on_screen_texts, 7);
+  assert.deepEqual(original.timings.map(t=>[t.start_seconds,t.end_seconds]),
+    [[0,3],[3,7],[7,10],[10,13],[13,17],[17,22],[22,25]]);
+  assert.deepEqual(original.on_screen_texts,
+    ["Chicago sunset is at 4:30 now","1/5","2/5","3/5","4/5","5/5",
+     "Save this for your next golden hour"]);
+  assert.equal(original.on_screen_texts_instagram[6],"Send this to someone you'd watch it with");
+  assert.equal(original.voiceovers_instagram[6],"Send this to someone who'd love it.");
+  assert.equal(original.voiceovers[0],"Sunset's at 4:30 now. Here's where to be.");
+  assert.equal(original.voiceovers[5],"Then stay till the lights come on.");
+  assert.equal(original.voiceovers[6],"Save this, and go chase it.");
+  assert.equal(original.music_only_last_seconds[5],2);
+  const scenes=scriptedShortDirectedScenes(realSevenScenePrompt);
+  assert.equal(scenes.length,7);
+  const timeline=buildTimelineFromScenes(scenes);
+  assert.equal(timeline.duration_seconds,25);
+  assert.equal(timeline.segments[5].duration_seconds,5);
+  assert.equal(timeline.segments[5].music_only_last_seconds,2);
+  assert.deepEqual(timeline.segments.map(s=>s.voiceover_text),original.voiceovers);
+  assert.equal(scriptedShortCheckBriefRequirements(realSevenScenePrompt,timeline,[]).ok,true);
+  const bad=buildTimelineFromScenes(Array.from({length:3},(_,i)=>({
+    suggested_visual:"Generic scene "+(i+1),
+    voiceover_text:original.voiceovers.join(" "),
+  })));
+  const failed=scriptedShortCheckBriefRequirements(realSevenScenePrompt,bad,[]);
+  assert.equal(failed.ok,false);
+  assert.match(failed.errors.join(" "),/exactly 7 scenes/);
+  assert.match(failed.errors.join(" "),/voiceover/);
+});
+
+test("real scene overlay and Instagram substitution cannot be silently dropped", () => {
+  const scenes=scriptedShortDirectedScenes(realSevenScenePrompt);
+  delete scenes[6].on_screen_text_instagram;
+  delete scenes[6].voiceover_instagram;
+  delete scenes[5].music_only_last_seconds;
+  const checked=scriptedShortCheckBriefRequirements(realSevenScenePrompt,
+    buildTimelineFromScenes(scenes),[]);
+  assert.equal(checked.ok,false);
+  assert.match(checked.errors.join(" "),/Instagram on-screen text/);
+  assert.match(checked.errors.join(" "),/Instagram voiceover/);
+  assert.match(checked.errors.join(" "),/music-only hold/);
+});
+
+test("story-first Airtable and Studio editor persist all scene-specific production text", async () => {
+  const saved=await readFile(new URL("./idea-first-storyboard.mjs",import.meta.url),"utf8");
+  const web=await readFile(new URL("../studio-web/assets/story-first-workspace.js",import.meta.url),"utf8");
+  for(const key of ["on_screen_text","on_screen_text_instagram","voiceover_instagram",
+    "music_only_last_seconds","scene_label"]) {
+    assert.ok(saved.includes(key),"server omitted "+key);
+    assert.ok(web.includes(key),"web UI omitted "+key);
+  }
+});
