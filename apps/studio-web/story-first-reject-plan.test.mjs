@@ -64,7 +64,7 @@ test("rejecting an unsaved plan clears all scenes and selections but keeps origi
   assert.equal(h.current.planRevision, 5);
   assert.equal(h.current.title, "");
   assert.equal(h.current.attempted.size, 0);
-  assert.deepEqual(h.current.libraryRows, []);
+  assert.equal(h.current.libraryRows.length, 0);
   assert.equal(h.elements.get("storyFirstWorkspace").hidden, true);
   assert.equal(h.elements.get("scriptedShortResult").hidden, true);
   assert.equal(h.elements.get("scriptedShortPrompt").value, "Make a better short about the skyline");
