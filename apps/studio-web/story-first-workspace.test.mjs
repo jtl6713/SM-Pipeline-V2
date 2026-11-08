@@ -33,7 +33,7 @@ test("Idea is authored independently before no more than three verified-profile 
   assert.match(app, /rights_status/);
   assert.match(app, /google_drive_file_id/);
   assert.match(app, /View preview/);
-  assert.match(app, /selectSceneAsset\(asset\._index,asset\)/);
+  assert.match(app, /selectSceneAsset\(asset\._index,\s*asset\)/);
 });
 test("On-demand AI generation has preview, accept, decline, no premature production", () => {
   assert.match(app, /Generate AI Image/);
