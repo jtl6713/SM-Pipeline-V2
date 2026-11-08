@@ -515,15 +515,40 @@
         confidence:hits.length>=3?"Strong keywords":"Review composition"};
     }).filter(Boolean).sort((a,b)=>b.score-a.score).slice(0,3);
   }
+  // Operator-entered searches must put visible title/location matches ahead of
+  // broad catalog/AI keyword matches. Preserve all eligibility and profile guards.
+  function rankSceneBrowseResults(scene, rows, search) {
+    const needle = String(search || "").trim().toLowerCase().replace(/\s+/g, " ");
+    return rows.filter(row => eligibility(scene, row)).map((row, order) => {
+      if (!needle) return { ...row, reason: "Browse result; manually verify visual", _browseRank: 0, _browseOrder: order };
+      const name = String(row.name || "").toLowerCase();
+      const location = String(row.location || "").toLowerCase();
+      const description = String(row.description || "").toLowerCase();
+      const terms = needle.split(/\s+/).filter(Boolean);
+      const fullText = [name, location, description].join(" ");
+      const allTerms = terms.length > 1 && terms.every(term => fullText.includes(term));
+      const score = name.includes(needle) ? 100
+        : location.includes(needle) ? 80
+        : description.includes(needle) ? 60
+        : allTerms ? 40 : 10;
+      const reason = score === 100 ? "Asset name matches search"
+        : score === 80 ? "Location matches search"
+        : score === 60 ? "Description matches search"
+        : score === 40 ? "Metadata matches search terms"
+        : "Catalog keyword match; verify visual";
+      return { ...row, reason, _browseRank: score, _browseOrder: order };
+    }).sort((a, b) => b._browseRank - a._browseRank || a._browseOrder - b._browseOrder)
+      .slice(0, 50);
+  }
+
   async function findSceneAssets(index, search=null, browse=false) {
     const scene=current.story.scenes[index];
     const query=search===null?keyTerms(scene.visual).slice(0,6).join(" "):String(search||"").trim();
-    const route="/api/library?profile="+encodeURIComponent(assertProfile())+"&limit=50"+
+    const route="/api/library?profile="+encodeURIComponent(assertProfile())+"&limit="+(browse && query ? "100" : "50")+
       (query?"&q="+encodeURIComponent(query):"");
     const result=await call(route);
     if (!Array.isArray(result.records)) throw new Error("Asset Manager catalog unavailable");
-    return browse ? result.records.filter(row=>eligibility(scene,row)).slice(0,50)
-      .map(row=>({...row,reason:"Browse result; manually verify visual"})) :
+    return browse ? rankSceneBrowseResults(scene, result.records, query) :
       credibleMatches(scene,result.records);
   }
   function discoverScene(index) {
@@ -640,7 +665,8 @@
     function previewAsset(parent, asset, text) {
       const wrap=node("div","story-first-candidate");
       const img=node("img","story-first-candidate-img");
-      img.src=root+"/api/media-assets/"+encodeURIComponent(asset.id)+"/preview";
+      const proxyPreview=root+"/api/media-assets/"+encodeURIComponent(asset.id)+"/preview";
+      img.src=proxyPreview;
       img.loading="lazy";img.alt="Library preview for "+String(asset.name||"media");
       const desc=node("div","story-first-candidate-desc");
       put(desc,node("strong","",asset.name||"Asset"),
@@ -648,8 +674,33 @@
       if(asset.reason)put(desc,node("small","",asset.reason));
       if(text)put(desc,node("small","",text));
       const open=node("a","story-first-preview","View preview");
-      open.href=img.src;open.target="_blank";open.rel="noopener noreferrer";
+      open.href=proxyPreview;open.target="_blank";open.rel="noopener noreferrer";
       put(desc,open);
+      const driveId=String(asset.google_drive_file_id||"").trim();
+      const hasDriveId=/^[A-Za-z0-9_-]{10,}$/.test(driveId);
+      const driveView=hasDriveId?"https://drive.google.com/file/d/"+encodeURIComponent(driveId)+"/view":"";
+      const thumbnail=hasDriveId?"https://drive.google.com/thumbnail?id="+encodeURIComponent(driveId)+"&sz=w640":"";
+      let attemptedDriveThumbnail=false;
+      img.addEventListener("error",()=>{
+        if(!attemptedDriveThumbnail && thumbnail){
+          attemptedDriveThumbnail=true;
+          img.src=thumbnail;
+          return;
+        }
+        img.hidden=true;
+        if(!wrap.querySelector(".story-first-preview-unavailable")){
+          wrap.insertBefore(node("div","story-first-preview-unavailable","Preview unavailable"),img);
+          desc.appendChild(node("small","story-first-preview-warning",
+            "Thumbnail could not load. Verify the original in Google Drive before selecting."));
+        }
+        if(driveView){open.href=driveView;open.textContent="View original in Drive";}
+        else {open.href=proxyPreview;open.textContent="Retry preview";}
+      });
+      img.addEventListener("load",()=>{
+        if(attemptedDriveThumbnail && img.naturalWidth>0 && driveView){
+          open.href=driveView;open.textContent="View original in Drive";
+        }
+      });
       const choose = button("Select", "secondary-button", async () => {
         choose.disabled = true;
         choose.textContent = "Saving selection…";
@@ -892,7 +943,7 @@
               const matches=await findSceneAssets(index,search.value,true);
               results.replaceChildren();
               if(!matches.length){results.appendChild(node("p","subtle","No eligible assets found."));return;}
-              results.appendChild(node("p","subtle",matches.length+" eligible library result(s) — manually verify the visual before selecting."));
+              results.appendChild(node("p","subtle",matches.length+" eligible library result(s) — name and location matches first; catalog keyword matches after. Verify the visual before selecting."));
               matches.forEach(asset=>previewAsset(results,{...asset,_index:index}));
             }catch(e){results.replaceChildren(node("p","form-message error-text",e.message));}
           },browse);
