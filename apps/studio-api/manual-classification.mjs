@@ -65,3 +65,49 @@ export function applyManualClassification({ ai = {}, manual = {}, patch, mode = 
     },
   };
 }
+
+// Airtable's existing AI fields remain authoritative for AI classification;
+// explicit human overrides are stored separately and never written to A3 fields.
+function field(record, name) {
+  return record?.fields?.[name] ?? record?.[name] ?? "";
+}
+function splitTags(raw) {
+  return String(raw || "").split(/[,;\n]+/).map(value => value.trim()).filter(Boolean).slice(0, 40);
+}
+export function airtableAiClassification(record, profileName = "") {
+  return {
+    city: String(profileName || "").trim(),
+    location: String(field(record, "Location") || "").trim(),
+    scene_type: String(field(record, "Shot_Type") || "").trim(),
+    time_of_day: String(field(record, "Time_Of_Day") || "").trim(),
+    weather: String(field(record, "Weather") || "").trim(),
+    subjects: splitTags(field(record, "Visible_Subjects")),
+    objects: splitTags(field(record, "AI_Tags")),
+    keywords: splitTags(field(record, "Search_Keywords")),
+  };
+}
+export function parseManualClassification(raw) {
+  if (!raw) return {};
+  const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new TypeError("Stored manual classification is not an object");
+  const result = {};
+  for (const key of CLASSIFICATION_FIELDS) {
+    if (has(parsed, key)) {
+      result[key] = MULTI_VALUE_FIELDS.has(key) ? list(parsed[key]) : clean(parsed[key]);
+    }
+  }
+  return result;
+}
+export function parseClassificationAudit(raw) {
+  if (!raw) return [];
+  const events = typeof raw === "string" ? JSON.parse(raw) : raw;
+  if (!Array.isArray(events)) throw new TypeError("Stored classification history is not an array");
+  return events;
+}
+export function appendClassificationAudit(previous, event) {
+  // Bounded long-text journal; recent entries are displayed on the asset editor.
+  // Protect against Airtable long-text limits.
+  const events = [...previous, event].slice(-60);
+  while (JSON.stringify(events).length > 48000 && events.length > 1) events.shift();
+  return events;
+}
