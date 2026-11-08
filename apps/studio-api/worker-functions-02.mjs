@@ -17,7 +17,7 @@ import {
   scriptedShortCheckBriefRequirements,
 } from "./scripted-short-producer-plan.mjs";
 import { parseScriptedShortFeedback, chooseScriptedShortLibraryClip, applyScriptedShortFeedback } from "./scripted-short-feedback.mjs";
-import { scriptedShortSceneDirections, scriptedShortDirectedScenes } from "./scripted-short-scene-directions.mjs";
+import { scriptedShortSceneDirections, scriptedShortDirectedScenes, scriptedShortApplySceneDirections } from "./scripted-short-scene-directions.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import { scheduleReservationAuthorityEnabled, scheduleReservationLaneEnabled } from "./schedule-reservation-authority.mjs";
 import { creativeSettingName, parseCreativeGuidance } from "./profile-creative-guidance.mjs";
@@ -12070,7 +12070,8 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   // Independent Quality Agent guard: repair only from the eligible catalog,
   // otherwise mark a scene as missing rather than reporting a false match.
   const recovery = recoverScriptedShortAssets(buildTimelineFromScenes(scenes), pool, assetPolicy, profile?.id);
-  const timeline = scriptedShortHonorDuration(buildTimelineFromScenes(recovery.timeline.segments), creativeBrief);
+  const timeline = scriptedShortApplySceneDirections(creativeBrief,
+    scriptedShortHonorDuration(buildTimelineFromScenes(recovery.timeline.segments), creativeBrief));
   if (creativeFirst) {
     // A library candidate is NOT a confirmed match. Preserve the author-required visual.
     const candidatePool = pool.filter(row => row.confidence === "high" || row.confidence === "medium");
