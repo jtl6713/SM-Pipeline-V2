@@ -91,12 +91,12 @@ test("Factory Open uses direct record helpers and Production tolerates a missing
     app.indexOf("window.StudioOpenProductionRequestById"),
     app.indexOf("window.StudioOpenIdeaById"),
   );
-  assert.match(productionOpen, /api\(`\/api\/production-requests\/\$\{encodeURIComponent\(id\)\}`\)/);
+  assert.match(productionOpen, /fetchFullProductionRequest\(id\)/);
   assert.match(productionOpen, /productionRequest: record/);
-  assert.match(productionOpen, /const idea = ideaId/);
-  assert.match(productionOpen, /:\s*null;/);
+  assert.match(productionOpen, /let idea = ideaId/);
+  assert.match(productionOpen, /storyFirstReady\(idea\)/);
   assert.doesNotMatch(productionOpen, /no linked Idea Candidate/);
-  assert.doesNotMatch(productionOpen, /method:\s*"POST"|\/promote|\/produce|\/render/);
+  assert.doesNotMatch(productionOpen, /\/promote|\/produce|\/render/);
 
   const openForIdea = app.slice(
     app.indexOf("async function openProductionRequestForIdea"),

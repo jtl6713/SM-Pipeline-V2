@@ -104,8 +104,10 @@ test("Worker and Pipeline UI advertise TikTok draft resend", async () => {
 test("TTD reconcile wakes future TikTok drafts only inside the inbox lead window and checks retry backoff", () => {
   const worker = readStudioWorkerSource();
   const begin = worker.indexOf("async function studioReconcileTiktokDrafts");
-  const end = worker.indexOf("STUDIO_WORKER_END:studioReconcileTiktokDrafts", begin);
-  assert.ok(begin >= 0 && end > begin, "Expected real reconciliation function");
+  assert.ok(begin >= 0, "Expected real reconciliation function");
+  // Restored Worker source omits END markers; bound the body by the next function.
+  const next = worker.indexOf("\nasync function ", begin + 1);
+  const end = next > begin ? next : begin + 4000;
   const reconcile = worker.slice(begin, end);
   assert.match(reconcile, /TikTok_Draft_Status}="Waiting for Schedule"/);
   assert.match(reconcile, /Publish_Next_Retry_At}=BLANK/);
