@@ -950,3 +950,5 @@ Deploy 2026-11-08 Worker 0.10.768-story-handoff: allow approved storyboard soft 
 Deploy 2026-11-08 Worker 0.10.770-story-open: skip replaceAll when storyboard already matches; light mapper returns ordered studio_master_media_asset_ids; mapIdea exposes story-first assigned assets.
 
 Deploy 2026-11-08 Worker 0.10.771-story-idea-sync: sync Idea Studio_Matched_Media_Assets + media_asset_ids= after confirmed storyboard handoff.
+
+Deploy 2026-11-08 Worker 0.10.772-storyboard-schema: reject corrupt AI storyboard fields; creative-first ITS1.

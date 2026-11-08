@@ -4,6 +4,47 @@ from __future__ import annotations
 
 from studio_produce.creative_guidance import creative_prompt_suffix
 
+CREATIVE_FIRST_PROMPT_TEMPLATE = """You are ChicagoShining's story-first Script a Short writer.
+
+Return strict JSON only. No markdown. No explanations.
+
+Write a production-ready storyboard BEFORE any library search. Each scene needs one shootable visual requirement and spoken narration.
+
+Return exactly this structure:
+{{
+  "scenes": [
+    {{
+      "voiceover_text": "Spoken narration only. Words that will be read aloud.",
+      "suggested_visual": "Specific camera-ready visual description for this one scene."
+    }}
+  ]
+}}
+
+SCENE RULES
+- Write 6 to 8 scenes unless the brief clearly asks for a different count between 4 and 10.
+- suggested_visual is a concrete shot description (place, subject, framing, light/time of day). Never paste the whole brief. Never write planning commentary, concept essays, or media-sourcing instructions.
+- voiceover_text is spoken audio only. No stage directions, no "you still need a photo", no library or media selection instructions, no camera directions.
+- Scenes must be distinct. Do not repeat the same visual or spoken line.
+- Do not invent prices, hours, rankings, or unverifiable claims.
+
+CREATIVE BRIEF
+{summary}
+
+IDEA TITLE / HOOK
+{title}
+
+PRIMARY LOCATION
+{location}
+
+MARKET
+{market}
+
+FINAL SELF-CHECK
+- Every suggested_visual is a specific scene shot, not the overall concept.
+- Every voiceover_text is speakable narration.
+- Output is valid JSON only."""
+
+
 PROMPT_TEMPLATE = """You are ChicagoShining's timed-script writer for a mixed-media Reel / Short with spoken voiceover.
 
 Return strict JSON only. No markdown. No explanations.
@@ -60,6 +101,23 @@ FINAL SELF-CHECK
 - No duplicate assets.
 - Every voiceover_text is spoken words only.
 - Output is valid JSON only."""
+
+
+def build_creative_first_prompt(
+    *,
+    title: str,
+    summary: str,
+    location: str,
+    market: str,
+    creative_guidance: dict | None = None,
+) -> str:
+    prompt = CREATIVE_FIRST_PROMPT_TEMPLATE.format(
+        title=title or "",
+        summary=summary or "",
+        location=location or "",
+        market=market or "Chicago",
+    )
+    return prompt + creative_prompt_suffix(creative_guidance, mode="narration")
 
 
 def build_timed_script_prompt(

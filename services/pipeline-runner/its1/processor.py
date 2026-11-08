@@ -6,7 +6,7 @@ from typing import Any
 
 from its1.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from its1.openai_script import generate_timed_script
-from its1.prompt import build_timed_script_prompt
+from its1.prompt import build_creative_first_prompt, build_timed_script_prompt
 
 
 def _still_id(item: dict[str, Any] | None) -> str:
@@ -51,6 +51,31 @@ def _match_catalog(scene: dict[str, Any], catalog: list[dict[str, Any]], used: s
     if len(contains) == 1:
         return contains[0]
     return None
+
+
+def normalize_creative_scenes(parsed: dict[str, Any] | None) -> list[dict[str, str]]:
+    """Story-first creative scenes keep shot descriptions; they do not bind library filenames."""
+    raw = parsed.get("scenes") if isinstance(parsed, dict) else None
+    rows: list[dict[str, str]] = []
+    for item in raw or []:
+        if isinstance(item, str):
+            voice = item.strip()
+            visual = ""
+        elif isinstance(item, dict):
+            voice = str(item.get("voiceover_text") or item.get("line") or "").strip()
+            visual = str(item.get("suggested_visual") or item.get("visual") or "").strip()
+        else:
+            continue
+        if not voice and not visual:
+            continue
+        rows.append(
+            {
+                "voiceover_text": voice,
+                "suggested_visual": visual,
+                "media_asset_id": "",
+            }
+        )
+    return rows
 
 
 def normalize_scenes(parsed: dict[str, Any] | None, catalog: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -100,34 +125,49 @@ def process_request(
     market: str = "Chicago",
     catalog: list[dict[str, Any]] | None = None,
     creative_guidance: dict[str, Any] | None = None,
+    creative_first: bool = False,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     stills = [item for item in (catalog or []) if isinstance(item, dict) and _still_id(item) and _still_name(item)]
-    prompt = build_timed_script_prompt(
-        title=title,
-        summary=summary,
-        location=location,
-        market=market or "Chicago",
-        catalog=stills,
-        creative_guidance=creative_guidance,
-    )
+    if creative_first:
+        prompt = build_creative_first_prompt(
+            title=title,
+            summary=summary,
+            location=location,
+            market=market or "Chicago",
+            creative_guidance=creative_guidance,
+        )
+    else:
+        prompt = build_timed_script_prompt(
+            title=title,
+            summary=summary,
+            location=location,
+            market=market or "Chicago",
+            catalog=stills,
+            creative_guidance=creative_guidance,
+        )
     preview = {
         "make_scenario_id": MAKE_SCENARIO_ID,
         "make_scenario_name": MAKE_SCENARIO_NAME,
         "title": title,
         "market": str(market or "Chicago").strip() or "Chicago",
         "catalog_count": len(stills),
+        "creative_first": bool(creative_first),
         "prompt_chars": len(prompt),
     }
     if dry_run:
         return {"processed": False, "dry_run": True, "scenes": [], **preview}
-    if not str(title or "").strip():
+    if not str(title or "").strip() and not str(summary or "").strip():
         return {"processed": False, "reason": "missing_title", "scenes": [], **preview}
-    if len(stills) < 2:
+    if not creative_first and len(stills) < 2:
         return {"processed": False, "reason": "not_enough_stills", "scenes": [], **preview}
 
     generated = generate_timed_script(prompt)
-    scenes = normalize_scenes(generated["parsed"], stills)
+    scenes = (
+        normalize_creative_scenes(generated["parsed"])
+        if creative_first
+        else normalize_scenes(generated["parsed"], stills)
+    )
     if len(scenes) < 2:
         return {"processed": False, "reason": "empty_scenes", "scenes": scenes, **preview}
     return {"processed": True, "scenes": scenes, **preview}
