@@ -209,3 +209,80 @@ test("story-first Airtable and Studio editor persist all scene-specific producti
     assert.ok(web.includes(key),"web UI omitted "+key);
   }
 });
+
+
+const suppliedSunsetBrief = [
+  "Scene 1 (0-3s): Hook",
+  "  • Visual: Wide gold skyline from the lakefront",
+  '  • On-screen text: "Chicago sunset is at 4:30 now"',
+  '  • VO: "Sunset\'s at 4:30 now. Here\'s where to be."',
+  "Scene 2 (3-7s): Riverwalk",
+  "  • Visual: Slow walking shot, gold light on the glass and water",
+  '  • On-screen text: "1/5"',
+  '  • VO: "Start at the Riverwalk, where the buildings turn to gold."',
+  "Scene 3 (7-10s): The Bean",
+  "  • Visual: Orange sky bending across the surface, with a silhouette for scale",
+  '  • On-screen text: "2/5"',
+  '  • VO: "Hit the Bean for that orange reflection."',
+  "Scene 4 (10-13s): The L",
+  "  • Visual: Train curving between buildings, sunlight flashing through the gaps",
+  '  • On-screen text: "3/5"',
+  '  • VO: "Catch the L curving through the Loop."',
+  "Scene 5 (13-17s): Lakefront Trail",
+  "  • Visual: Backlit runners or bikers with the skyline behind them",
+  '  • On-screen text: "4/5"',
+  '  • VO: "Walk the lakefront with the skyline behind you."',
+  "Scene 6 (17-22s): Finale",
+  "  • Visual: Blue-hour skyline, lights coming on (hold this one longer)",
+  '  • On-screen text: "5/5"',
+  '  • VO: "Then stay till the lights come on." Leave the last 2 seconds silent with just music, so the shot can breathe.',
+  "Scene 7 (22-25s): CTA",
+  "  • Visual: Freeze frame on the skyline",
+  '  • On-screen text: "Save this for your next golden hour" (Instagram: "Send this to someone you\'d watch it with")',
+  '  • VO: "Save this, and go chase it." (Instagram: "Send this to someone who\'d love it.")',
+].join("\n");
+
+test("exact seven-scene sunset brief remains a 25-second storyboard with unique voiceover and platform overlays", () => {
+  const data = scriptedShortSceneDirections(suppliedSunsetBrief);
+  assert.equal(data.requested_count, 7);
+  assert.equal(data.recognized_voiceovers, 7);
+  assert.equal(data.recognized_visuals, 7);
+  assert.equal(data.recognized_timings, 7);
+  assert.deepEqual(data.timings, [
+    {start:0,end:3},{start:3,end:7},{start:7,end:10},
+    {start:10,end:13},{start:13,end:17},{start:17,end:22},{start:22,end:25},
+  ]);
+  const scenes = scriptedShortDirectedScenes(suppliedSunsetBrief);
+  assert.equal(scenes.length, 7);
+  assert.equal(scenes[0].voiceover_text, "Sunset's at 4:30 now. Here's where to be.");
+  assert.equal(scenes[3].voiceover_text, "Catch the L curving through the Loop.");
+  assert.equal(scenes[6].voiceover_text, "Save this, and go chase it.");
+  assert.equal(new Set(scenes.map(s=>s.voiceover_text)).size, 7);
+  assert.deepEqual(scenes.map(s=>s.on_screen_text), [
+    "Chicago sunset is at 4:30 now","1/5","2/5","3/5","4/5","5/5",
+    "Save this for your next golden hour",
+  ]);
+  assert.equal(scenes[6].on_screen_text_instagram, "Send this to someone you'd watch it with");
+  assert.equal(scenes[6].voiceover_instagram, "Send this to someone who'd love it.");
+  assert.equal(scenes[5].music_only_last_seconds, 2);
+  const timeline = buildTimelineFromScenes(scenes);
+  assert.equal(timeline.duration_seconds, 25);
+  assert.equal(timeline.segments[5].start_seconds, 17);
+  assert.equal(timeline.segments[5].end_seconds, 22);
+  assert.equal(timeline.segments[5].music_only_last_seconds, 2);
+  assert.equal(timeline.segments[6].end_seconds, 25);
+  const result = scriptedShortCheckBriefRequirements(suppliedSunsetBrief, timeline, []);
+  assert.equal(result.ok,true,result.errors.join(" "));
+});
+
+test("reject the three-scene all-voiceover defect reported for sunset storyboard", () => {
+  const completeVoiceover=scriptedShortDirectedScenes(suppliedSunsetBrief).map(s=>s.voiceover_text).join(" ");
+  const broken=buildTimelineFromScenes(Array.from({length:3},(_,i)=>({
+    voiceover_text:completeVoiceover,
+    suggested_visual:"Generic sunset scene "+(i+1),
+  })));
+  const result=scriptedShortSceneDirectionErrors(suppliedSunsetBrief,broken);
+  assert.equal(result.ok,false);
+  assert.match(result.errors.join(" "),/exactly 7 scenes/);
+  assert.match(result.errors.join(" "),/voiceover/);
+});
