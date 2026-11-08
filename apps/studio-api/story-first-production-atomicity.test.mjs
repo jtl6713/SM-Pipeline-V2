@@ -35,6 +35,14 @@ test("story-first preserves ordered scene voiceover, time and selected asset ID"
   assert.ok(ensure.indexOf("return await item4UpdateRequestState") > ensure.indexOf("if (!confirmed)"), "creative directives must be committed after asset validation");
 });
 
+test("seven-scene editorial metadata survives the handoff into the Production draft", () => {
+  for (const key of ["scene_label","on_screen_text","on_screen_text_instagram",
+    "voiceover_instagram","music_only_last_seconds"]) {
+    assert.ok(ensure.includes(key+":row."+key) ||
+      ensure.includes(key+":Number(row."+key), "Producer handoff omitted "+key);
+  }
+});
+
 test("explicitly approved storyboard media uses a guarded classification exception", () => {
   const policy = readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
   assert.match(policy, /approvedStoryboard = false/);

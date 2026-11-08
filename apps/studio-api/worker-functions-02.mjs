@@ -17,6 +17,7 @@ import {
   scriptedShortCheckBriefRequirements,
 } from "./scripted-short-producer-plan.mjs";
 import { parseScriptedShortFeedback, chooseScriptedShortLibraryClip, applyScriptedShortFeedback } from "./scripted-short-feedback.mjs";
+import { scriptedShortSceneDirections, scriptedShortDirectedScenes, scriptedShortApplySceneDirections } from "./scripted-short-scene-directions.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import { scheduleReservationAuthorityEnabled, scheduleReservationLaneEnabled } from "./schedule-reservation-authority.mjs";
 import { creativeSettingName, parseCreativeGuidance } from "./profile-creative-guidance.mjs";
@@ -3526,6 +3527,11 @@ export async function ensureStoryFirstProductionMedia(env, requestRecord, valida
   const sceneDirectives = { schema:"story-first-production.1", profile_id:story.profile_id,
     target_seconds:story.target_seconds, scenes:story.scenes.map(row => ({
       time:row.time, voiceover:row.voiceover, visual:row.visual, media:row.media,
+      scene_label:row.scene_label || "",
+      on_screen_text:row.on_screen_text || "",
+      on_screen_text_instagram:row.on_screen_text_instagram || "",
+      voiceover_instagram:row.voiceover_instagram || "",
+      music_only_last_seconds:Number(row.music_only_last_seconds || 0),
       asset_id:row.assigned_asset_id, media_override:row.media_override===true
     }))};
   const script = story.scenes.map(row => String(row.voiceover || "").trim()).filter(Boolean).join(" ");
@@ -11972,11 +11978,15 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   if (prompt.length < 3) throw new HttpError(400, "Describe the short in a sentence.");
   const assetPolicy = parseScriptedShortAssetPolicy(prompt);
   const creativeFirst = payload?.creative_first === true;
+  const sceneDirections = scriptedShortSceneDirections(creativeBrief);
+  const directedScenes = creativeFirst ? scriptedShortDirectedScenes(creativeBrief) : null;
   const synthetic = {
     id: "scripted-short-proposal",
     fields: {
       Candidate_Title: prompt.slice(0, 160),
-      Idea_Summary: prompt.slice(0, 2000),
+      // Writer receives the full, line-preserving human brief (up to 5,000).
+      // Flattening/truncating it loses Scene 4+ and breaks numbered VO blocks.
+      Idea_Summary: creativeBrief,
       ...(assetPolicy.subject ? { Primary_Location: assetPolicy.subject } : {}),
     },
   };
@@ -12016,8 +12026,8 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
     ...picked.selected,
     ...picked.catalog.filter((row) => !selectedIds.has(row.id) && (row.media_kind !== "video" || timelineCatalogIsRelevantVideo(row))),
   ];
-  let source = "fallback";
-  let scenes = [];
+  let source = directedScenes ? "explicit-scene-directions" : "fallback";
+  let scenes = directedScenes || [];
   // A named all-clips list plus exact voiceover is executable direction, not
   // an AI suggestion. Preserve every clip and every word, even if the writer
   // proposes a shorter story.
@@ -12030,7 +12040,7 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   } catch (error) {
     throw new HttpError(409, error.message || "Required clips are unavailable.");
   }
-  if (source !== "exact-brief") {
+  if (source !== "exact-brief" && source !== "explicit-scene-directions") {
     try {
       // Story is authored against an empty inventory. Matching is a SECOND step.
       const writer = await pulseIdeaTimedScriptWriter(env, synthetic, creativeFirst ? [] : pool);
@@ -12050,10 +12060,23 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
       if (!creativeFirst) scenes = ensureRelevantVideoScene(scenes, pool);
     }
   }
+  // The original numbered storyboard is creative authority. Where a complete
+  // set of per-scene directions exists, overwrite AI narration/visual drift
+  // without inventing assets or accepting a reduced scene count.
+  if (creativeFirst && sceneDirections.requested_count && scenes.length === sceneDirections.requested_count) {
+    if (sceneDirections.voiceovers?.every(Boolean) || sceneDirections.visuals?.every(Boolean)) {
+      scenes = scenes.map((scene, index) => ({
+        ...scene,
+        ...(sceneDirections.voiceovers?.every(Boolean) ? { voiceover_text: sceneDirections.voiceovers[index] } : {}),
+        ...(sceneDirections.visuals?.every(Boolean) ? { suggested_visual: sceneDirections.visuals[index] } : {}),
+      }));
+    }
+  }
   // Independent Quality Agent guard: repair only from the eligible catalog,
   // otherwise mark a scene as missing rather than reporting a false match.
   const recovery = recoverScriptedShortAssets(buildTimelineFromScenes(scenes), pool, assetPolicy, profile?.id);
-  const timeline = scriptedShortHonorDuration(buildTimelineFromScenes(recovery.timeline.segments), creativeBrief);
+  const timeline = scriptedShortApplySceneDirections(creativeBrief,
+    scriptedShortHonorDuration(buildTimelineFromScenes(recovery.timeline.segments), creativeBrief));
   if (creativeFirst) {
     // A library candidate is NOT a confirmed match. Preserve the author-required visual.
     const candidatePool = pool.filter(row => row.confidence === "high" || row.confidence === "medium");

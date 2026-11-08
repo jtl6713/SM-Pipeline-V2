@@ -1,4 +1,5 @@
 import { libraryAssetSatisfiesPolicy } from "./scripted-short-asset-policy.mjs";
+import { scriptedShortSceneDirectionErrors } from "./scripted-short-scene-directions.mjs";
 
 export const SCRIPTED_SHORT_BRIEF_LIMIT = 5000;
 export const SCRIPTED_SHORT_PLAN_SIGNATURE = "QA-SCRIPTED-SHORT-PRODUCER-CONSTRAINTS";
@@ -277,7 +278,7 @@ export function scriptedShortHonorDuration(timeline, brief) {
 /** Accept must reject stale or browser-edited proposals before any Airtable writes. */
 export function scriptedShortCheckBriefRequirements(brief, timeline, catalog) {
   const req = scriptedShortBriefRequirements(brief);
-  const errors = [];
+  const errors = [...scriptedShortSceneDirectionErrors(brief, timeline).errors];
   const scenes = Array.isArray(timeline?.segments) ? timeline.segments : [];
   if (req.required_clips.length) {
     const byId = new Map((catalog || []).map((row) => [mediaId(row), mediaLabel(row).toLowerCase()]));
