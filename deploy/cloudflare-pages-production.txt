@@ -722,3 +722,4 @@ Deploy Studio UI 0.6.905 2026-11-07: Script a Short confirmed Airtable save rece
 Deploy Studio UI 0.6.906 2026-11-07: storyboard Production handoff opens actual content nav, reflects existing-draft receipt. No media attachment, rendering, scheduling or publishing change.
 Deploy UI 0.6.907 plan-reject: visible whole-plan rejection for story-first Script a Short, preserving the brief and protecting against stale AI replies. Existing saved Ideas and assets are unchanged.
 Deploy Studio UI 0.6.908 2026-11-07: preserve exact seven-scene Script a Short prompt, per-scene voiceover, authored 25s timings, overlays, Instagram CTA alternatives, and scene 6 music-only hold; editorial review only, no automatic publish.
+Deploy Studio UI 0.6.908-seven-scene-vo 2026-11-08: display and persist scene-specific voiceover, overlays, platform CTA variants and music-only tail; respect original 7-scene 25-second brief. Preserve human media review and all publication gates.
