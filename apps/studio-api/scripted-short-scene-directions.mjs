@@ -13,7 +13,7 @@ const unquote = value => compact(value).replace(/^[\s"'“”‘’`*]+|[\s"'“
 function requestedSceneCount(source) {
   const word = "(\\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)";
   const candidates = [
-    new RegExp("\\b" + word + "\\s*[-–—]?\\s*(?:distinct\\s+|separate\\s+|numbered\\s+)?(?:scenes|shots|segments)\\b", "i"),
+    new RegExp("\\b" + word + "\\s*[-–—]?\\s*(?:distinct\\s+|separate\\s+|numbered\\s+)?(?:scenes?|shots?|segments?)\\b", "i"),
     new RegExp("\\b(?:number\\s+of\\s+scenes|scene\\s+count|total\\s+scenes|scenes)\\s*[:=]\\s*" + word + "\\b", "i"),
   ];
   for (const re of candidates) {
