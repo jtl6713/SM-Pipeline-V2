@@ -22,6 +22,14 @@ test("scene cards have real preview provenance and accurately distinguish availa
   assert.match(render, /preview\.onerror=/);
   assert.doesNotMatch(render, /https?:\/\/(?:images\.unsplash\.com|source\.unsplash\.com|picsum\.photos)/);
 });
+
+test("collapsed scene card title is only Scene N — visual and voiceover stay in fields below", () => {
+  const render = ui.slice(ui.indexOf("function render()"), ui.indexOf("async function propose("));
+  assert.match(render, /"Scene "\+\(index\+1\)/);
+  assert.doesNotMatch(render, /shot\.scene_label\?" — "\+shot\.scene_label/);
+  assert.match(render, /sceneField\(card,"visual"/);
+  assert.match(render, /sceneField\(card,"voice"/);
+});
 test("every editable story field survives the visual redesign", () => {
   assert.match(ui, /const time=sceneField\(card,"timing"/);
   assert.match(ui, /const visual=sceneField\(card,"visual"/);
