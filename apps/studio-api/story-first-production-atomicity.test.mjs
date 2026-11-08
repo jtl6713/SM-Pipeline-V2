@@ -63,3 +63,11 @@ test("approved storyboard bypasses first-party watermark runner but retains thir
     attach.indexOf("const storyboardBrandingPending"), "third-party overlay preflight must precede watermark warning");
   assert.match(attach, /if \(requireAll &&/);
 });
+
+test("production handoff explicitly imports its media eligibility validator", () => {
+  const imported = handoff.match(/import\\s*\\{([\\s\\S]*?)\\}\\s*from\\s*["']\\.\\/worker-functions-01\\.mjs["']/g) || [];
+  assert.ok(imported.some(group => /\\bideaLibraryRejectReason\\b/.test(group)),
+    "story-first preflight must not reference an undefined validator");
+  const policy = readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
+  assert.match(policy, /export function ideaLibraryRejectReason\\(/);
+});
