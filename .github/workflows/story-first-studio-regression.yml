@@ -6,6 +6,7 @@ on:
       - 'apps/studio-api/story-first-production-atomicity.test.mjs'
       - 'apps/studio-api/worker-functions-0*.mjs'
       - 'apps/studio-web/story-first-workspace.test.mjs'
+      - 'apps/studio-web/story-first-reject-plan.test.mjs'
       - 'apps/studio-web/story-first-scene-icons.test.mjs'
       - 'apps/studio-web/story-first-scene-card-design.test.mjs'
       - 'apps/studio-web/story-first-save-receipt.test.mjs'
@@ -39,4 +40,4 @@ jobs:
           node --test apps/studio-web/ui-release-contract.test.mjs apps/studio-web/pages-production-deploy-contract.test.mjs
       - name: Story-first and existing scripted-short regressions
         run: |
-          node --test             apps/studio-api/idea-first-storyboard.test.mjs             apps/studio-api/story-first-production-atomicity.test.mjs             apps/studio-api/idea-timed-script.test.mjs             apps/studio-api/scripted-short-asset-policy.test.mjs             apps/studio-api/scripted-short-producer-plan.test.mjs             apps/studio-web/story-first-workspace.test.mjs             apps/studio-web/story-first-scene-icons.test.mjs             apps/studio-web/story-first-scene-card-design.test.mjs             apps/studio-web/story-first-save-receipt.test.mjs             apps/studio-web/scripted-short-profile-routing.test.mjs             apps/studio-web/scripted-short-enhancement.test.mjs
+          node --test             apps/studio-api/idea-first-storyboard.test.mjs             apps/studio-api/story-first-production-atomicity.test.mjs             apps/studio-api/idea-timed-script.test.mjs             apps/studio-api/scripted-short-asset-policy.test.mjs             apps/studio-api/scripted-short-producer-plan.test.mjs             apps/studio-web/story-first-workspace.test.mjs             apps/studio-web/story-first-reject-plan.test.mjs             apps/studio-web/story-first-scene-icons.test.mjs             apps/studio-web/story-first-scene-card-design.test.mjs             apps/studio-web/story-first-save-receipt.test.mjs             apps/studio-web/scripted-short-profile-routing.test.mjs             apps/studio-web/scripted-short-enhancement.test.mjs
