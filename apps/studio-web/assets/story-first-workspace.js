@@ -1163,20 +1163,44 @@
   $("storyFirstProduction")?.addEventListener("click", async () => {
     try {
       const record = await save();
-      if (selectedCount() !== current.story.scenes.length) throw new Error("All scenes need selected media before Production.");
+      const expectedScenes = current.story.scenes.length;
+      if (selectedCount() !== expectedScenes) throw new Error("All scenes need selected media before Production.");
       if (!confirm("Create an editable Production Request for this completed storyboard? Rendering and publishing remain under normal review controls.")) return;
+      report("Saving storyboard media into Production…");
       const result = await call("/api/ideas/" + encodeURIComponent(record.id) + "/production-request?profile=" +
         encodeURIComponent(assertProfile()), {
         method: "POST", body: JSON.stringify({ content_profile_id: assertProfile(), input_kind: "story-first" }),
       });
-      if (!result.record?.id && !result.production_request?.id) throw new Error("Production Request was not confirmed.");
-      const productionId = String(result.record?.production_request_id || result.production_request?.production_request_id || "").trim();
-      report((result.created === false ? "Existing Production draft updated" : "Editable Production draft created") +
-        (productionId ? " · " + productionId : "") + ". No rendering or publishing was initiated.");
-      // The Production navigation route is "content", not "production".
-      const productionNav = document.querySelector('button.nav-item[data-page="content"]');
-      if (productionNav) productionNav.click();
-      else report("Production Request confirmed. Open the Production tab to view the draft.");
+      const productionRecord = result.record || result.production_request;
+      if (!productionRecord?.id) throw new Error("Production Request was not confirmed.");
+      const productionId = String(productionRecord.production_request_id || "").trim();
+      const verifiedIds = Array.isArray(result.storyboard_asset_ids)
+        ? result.storyboard_asset_ids.map(id => String(id || "").trim()).filter(Boolean)
+        : [];
+      const expectedIds = current.story.scenes.map(scene => String(scene.assigned_asset_id || "").trim());
+      const persistedCount = Number(productionRecord.studio_master_asset_count || verifiedIds.length || 0);
+      if (persistedCount !== expectedScenes) {
+        throw new Error("Production draft did not keep all " + expectedScenes +
+          " selected scene assets (found " + persistedCount + "). Retry Send to Production; nothing was rendered or published.");
+      }
+      if (verifiedIds.length === expectedScenes &&
+        verifiedIds.some((id, index) => id !== expectedIds[index])) {
+        throw new Error("Production draft media order does not match the storyboard. Retry Send to Production.");
+      }
+      report((result.created === false ? "Existing Production draft verified" : "Editable Production draft created") +
+        (productionId ? " · " + productionId : "") +
+        " · " + persistedCount + " scene assets confirmed. Opening Production…");
+      // Open the exact request. Clicking the Production nav alone only shows the landing page.
+      if (typeof window.StudioOpenProductionRequestById === "function") {
+        await window.StudioOpenProductionRequestById(productionRecord.id);
+      } else {
+        const productionNav = document.querySelector('button.nav-item[data-page="content"]');
+        if (productionNav) productionNav.click();
+        else throw new Error("Production Request verified, but the Production editor could not be opened automatically.");
+      }
+      report((result.created === false ? "Opened existing Production draft" : "Opened new Production draft") +
+        (productionId ? " · " + productionId : "") +
+        " with " + persistedCount + " confirmed scene assets. No rendering or publishing was initiated.");
     } catch (error) { report(error.message, true); }
   });
   // Script a Short is the only user-facing idea-first entry point.

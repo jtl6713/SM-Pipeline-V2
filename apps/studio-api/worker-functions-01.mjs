@@ -7110,15 +7110,22 @@ export function ideaLibraryRejectReason(record, { allowVideo = false, allowLowQu
     const reasons = (Array.isArray(exclusions) ? exclusions : [exclusions])
       .flatMap(value => String((value && typeof value === "object" ? value.name : value) || "").split(","))
       .map(value => value.trim().toLowerCase()).filter(Boolean);
+    // Soft catalog flags are advisory for automation. An operator who already
+    // approved each scene may keep Low Quality or first-party Watermarked/Branded
+    // masters. Hard exclusion reasons still fail closed.
+    const softStoryboardExclusions = new Set(["low quality", "watermarked/branded"]);
+    const hardExclusions = reasons.filter(reason => !softStoryboardExclusions.has(reason));
     const review = String(f(record, "Potential_Match_Notes") || "");
     if (Boolean(f(record, "Do_Not_Use")) || f(record, "Active") === false)
       return `${name} is disabled or marked Do Not Use`;
     if (!["owned", "licensed", "public domain", "cleared"].includes(rights))
       return `${name} has uncleared rights`;
     if (!["available", "ready"].includes(status)) return `${name} is not available`;
-    if (eligibility === "ineligible" || reasons.length)
+    if (eligibility === "ineligible")
       return `${name} has exclusion or source eligibility restrictions`;
-    if (/QA-ASSET-THIRD-PARTY-OVERLAY:\\s*(?:REVIEW|Review required)/i.test(review))
+    if (hardExclusions.length)
+      return `${name} has exclusion or source eligibility restrictions (${hardExclusions.join(", ")})`;
+    if (/QA-ASSET-THIRD-PARTY-OVERLAY:\s*(?:REVIEW|Review required)/i.test(review))
       return `${name} requires third-party overlay review`;
     if (!googleDriveFileId(record)) return `${name} is missing its Drive master`;
     if (isVideo && !allowVideo) return `${name} is a video; this picker attaches stills only`;
@@ -7126,7 +7133,7 @@ export function ideaLibraryRejectReason(record, { allowVideo = false, allowLowQu
     if (isVideo && access && access !== "public") return `${name} does not have permitted Drive access`;
     if (!isVideo && mediaClass && !["image", "graphic"].includes(mediaClass))
       return `${name} is not a supported still image`;
-    if (/__\\d+x\\d+__/i.test(name) || /fill-crop-v\\d+/i.test(name))
+    if (/__\d+x\d+__/i.test(name) || /fill-crop-v\d+/i.test(name))
       return `${name} is a derived asset, not an original master`;
     if (!isVideo && ideaLibraryFileBytes(record) > ITEM4_MAX_FILE_BYTES)
       return `${name} exceeds the 25 MB per-image limit`;

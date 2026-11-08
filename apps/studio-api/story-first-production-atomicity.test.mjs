@@ -74,3 +74,29 @@ test("production handoff explicitly imports its media eligibility validator", ()
   const policy = readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
   assert.ok(policy.includes("export function ideaLibraryRejectReason("));
 });
+
+test("approved storyboard soft exclusions keep Low Quality and Watermarked/Branded selectable", () => {
+  const policy = readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
+  const start = policy.indexOf("export function ideaLibraryRejectReason(");
+  const end = policy.indexOf("/*__STUDIO_WORKER_END:ideaLibraryRejectReason__*/", start);
+  const body = policy.slice(start, end);
+  assert.match(body, /softStoryboardExclusions/);
+  assert.match(body, /"low quality"/);
+  assert.match(body, /"watermarked\/branded"/);
+  assert.match(body, /hardExclusions/);
+  assert.ok(body.includes("/QA-ASSET-THIRD-PARTY-OVERLAY:\\s*(?:REVIEW|Review required)/i"),
+    "third-party overlay regex must use a real whitespace escape");
+  assert.ok(body.includes("/__\\d+x\\d+__/i") && body.includes("/fill-crop-v\\d+/i"),
+    "derived-asset regexes must use real digit escapes");
+  assert.ok(!body.includes("/QA-ASSET-THIRD-PARTY-OVERLAY:\\\\s"),
+    "double-escaped overlay regex must not return");
+});
+
+test("getOrCreate returns verified storyboard asset IDs after successful handoff", () => {
+  const start = handoff.indexOf("export async function getOrCreateProductionRequestForIdea(");
+  const end = handoff.indexOf("/*__STUDIO_WORKER_END:getOrCreateProductionRequestForIdea__*/", start);
+  const body = handoff.slice(start, end);
+  assert.match(body, /storyboard_verified: true/);
+  assert.match(body, /storyboard_asset_ids: approvedStory\.ids/);
+  assert.match(body, /storyboard_asset_count: approvedStory\.ids\.length/);
+});

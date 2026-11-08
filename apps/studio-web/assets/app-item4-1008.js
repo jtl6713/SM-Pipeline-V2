@@ -300,7 +300,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.911-library-preview";
+  const BUILD_ID = "item4-0.6.912-story-handoff";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -14855,18 +14855,44 @@ function timedScriptAssetLabel(asset, index) {
         result = await createEzProductionRequest(idea.id, payload);
       } else {
         const existing = await findExistingProductionRequestForIdea(idea).catch(() => null);
-        if (existing) {
+        const storyFirst = idea?.story_first;
+        const storyScenes = Array.isArray(storyFirst?.scenes) ? storyFirst.scenes : [];
+        const storyReady = storyScenes.length > 0 && storyScenes.every((scene) =>
+          scene?.selected_approved === true && /^rec[A-Za-z0-9]+$/.test(String(scene?.assigned_asset_id || "")));
+        const existingCount = Number(existing?.studio_master_asset_count || 0);
+        // Story-first drafts must re-enter the idempotent handoff when media is
+        // missing or incomplete. Skipping straight to an empty draft is what left
+        // Open Production stuck on zero master assets.
+        const mustReconcileStoryboard = storyReady && (!existing || existingCount !== storyScenes.length);
+        if (existing && !mustReconcileStoryboard) {
           result = { record: existing, created: false, opened_existing: true };
         } else {
           try {
-            result = await api(`/api/ideas/${encodeURIComponent(idea.id)}/production-request`, {
+            const profileId = String(
+              (Array.isArray(idea?.content_profile_links) && idea.content_profile_links[0])
+              || idea?.content_profile_id
+              || selectedProfileId
+              || ""
+            ).trim();
+            result = await api(`/api/ideas/${encodeURIComponent(idea.id)}/production-request` +
+              (profileId ? `?profile=${encodeURIComponent(profileId)}` : ""), {
               method: "POST",
-              body: JSON.stringify({}),
-              timeoutMs: 20000,
+              body: JSON.stringify({
+                ...(profileId ? { content_profile_id: profileId } : {}),
+                ...(storyReady ? { input_kind: "story-first" } : {}),
+              }),
+              timeoutMs: storyReady ? 60000 : 20000,
               retries: 0,
             });
+            if (storyReady) {
+              const count = Number(result?.record?.studio_master_asset_count
+                || result?.storyboard_asset_count || 0);
+              if (count !== storyScenes.length) {
+                throw new Error(`Storyboard handoff confirmed only ${count} of ${storyScenes.length} selected assets. Production was not opened.`);
+              }
+            }
           } catch (error) {
-            const recoverable = isTimeoutError(error) || Number(error?.status || 0) >= 500;
+            const recoverable = !storyReady && (isTimeoutError(error) || Number(error?.status || 0) >= 500);
             if (!recoverable) throw error;
             const recovered = await findExistingProductionRequestForIdea(idea).catch(() => null);
             if (!recovered) throw error;

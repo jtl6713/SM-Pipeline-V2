@@ -3602,19 +3602,31 @@ export async function getOrCreateProductionRequestForIdea(request, env, url, aut
   const existing = await existingDraftForIdea(env, ideaRecordId, authorization, idea);
   if (existing) {
     const validatedDraft = approvedStory ? await ensureStoryFirstProductionMedia(env, existing, approvedStory) : existing;
+    const light = mapProductionRequestLight(validatedDraft);
     return respond(request, env, {
       ok: true,
       created: false,
-      record: mapProductionRequestLight(validatedDraft),
+      record: light,
+      ...(approvedStory ? {
+        storyboard_verified: true,
+        storyboard_asset_ids: approvedStory.ids,
+        storyboard_asset_count: approvedStory.ids.length,
+      } : {}),
     });
   }
 
   const created = await createDraftForIdea(env, idea, authorization, null, { preferredProfileId });
   const validatedCreated = approvedStory ? await ensureStoryFirstProductionMedia(env, created, approvedStory) : created;
+  const lightCreated = mapProductionRequestLight(validatedCreated);
   return respond(request, env, {
     ok: true,
     created: true,
-    record: mapProductionRequestLight(validatedCreated),
+    record: lightCreated,
+    ...(approvedStory ? {
+      storyboard_verified: true,
+      storyboard_asset_ids: approvedStory.ids,
+      storyboard_asset_count: approvedStory.ids.length,
+    } : {}),
   }, 201);
 }
 /*__STUDIO_WORKER_END:getOrCreateProductionRequestForIdea__*/
@@ -3632,10 +3644,17 @@ export async function createProductionRequestFromBody(request, env, authorizatio
     ? await verifiedStoryFirstProduction(env, idea) : null;
   const existing = await existingDraftForIdea(env, ideaRecordId, authorization, idea);
   if (existing) {
+    const validatedExisting = approvedStory
+      ? await ensureStoryFirstProductionMedia(env, existing, approvedStory) : existing;
     return respond(request, env, {
       ok: true,
       created: false,
-      record: mapProductionRequestLight(approvedStory ? await ensureStoryFirstProductionMedia(env, existing, approvedStory) : existing),
+      record: mapProductionRequestLight(validatedExisting),
+      ...(approvedStory ? {
+        storyboard_verified: true,
+        storyboard_asset_ids: approvedStory.ids,
+        storyboard_asset_count: approvedStory.ids.length,
+      } : {}),
     });
   }
 
@@ -3680,6 +3699,11 @@ export async function createProductionRequestFromBody(request, env, authorizatio
     ok: true,
     created: true,
     record: mapProductionRequestLight(validatedCreated),
+    ...(approvedStory ? {
+      storyboard_verified: true,
+      storyboard_asset_ids: approvedStory.ids,
+      storyboard_asset_count: approvedStory.ids.length,
+    } : {}),
   }, 201);
 }
 

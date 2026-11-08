@@ -53,7 +53,7 @@ test("Self-service uploads, existing library browse and guarded production hando
   assert.match(app, /\/api\/library\?profile=/);
   assert.match(app, /Choose Existing Asset/);
   assert.match(app, /Save (?:&|and) open Asset Manager/i);
-  assert.match(app, /selectedCount\(\) !== current\.story\.scenes\.length/);
+  assert.match(app, /selectedCount\(\) !== expectedScenes/);
   assert.match(propose, /verifiedStoryFirstProduction/);
   assert.match(propose, /validateStoryFirstSelectedMedia/);
   assert.match(worker, /isStoryFirstSceneMediaRoute/);
@@ -67,10 +67,21 @@ test("Canonical Airtable Ideas remain the only writable story source, other Idea
   assert.match(worker, /assertWriteRequest\(request, env\)/);
 });
 
-test("Successful storyboard handoff opens the actual Production navigation route", () => {
+test("Successful storyboard handoff opens the exact Production Request after verified persistence", () => {
   assert.match(html, /data-page="content">Production<\/button>/);
-  assert.match(app, /button\.nav-item\[data-page="content"\]/);
+  assert.match(app, /StudioOpenProductionRequestById/);
+  assert.match(app, /studio_master_asset_count/);
+  assert.match(app, /storyboard_asset_ids/);
+  assert.match(app, /persistedCount !== expectedScenes/);
   assert.doesNotMatch(app, /data-page="production"/);
   assert.match(app, /result\.created === false/);
   assert.match(app, /production_request_id/);
+});
+
+test("Open Production reconciles incomplete story-first drafts instead of opening empty media", () => {
+  const opener = read("./assets/app-item4-1008.js");
+  assert.match(opener, /mustReconcileStoryboard/);
+  assert.match(opener, /storyReady && \(!existing \|\| existingCount !== storyScenes\.length\)/);
+  assert.match(opener, /input_kind: "story-first"/);
+  assert.match(opener, /Storyboard handoff confirmed only/);
 });
