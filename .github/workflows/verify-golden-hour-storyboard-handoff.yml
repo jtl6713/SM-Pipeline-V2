@@ -78,8 +78,7 @@ jobs:
               const count=Number(record.studio_master_asset_count||(handoff.body&&handoff.body.storyboard_asset_count)||0);
               const get=await callApi(env,'/api/production-requests/'+EXPECTED_PR+'?fields=light');
               const getRec=(get.body&&get.body.record)||{};
-              let recommend=await callApi(env,'/api/production-requests/'+EXPECTED_PR+'/recommend-outputs','POST',{});
-              if(recommend.status===404) recommend=await callApi(env,'/api/production-requests/'+EXPECTED_PR+'/output-plan','POST',{});
+              const recommend=await callApi(env,'/api/production-requests/'+EXPECTED_PR+'/plan','POST',{});
               const ok=Boolean(handoff.ok && handoff.status<300 && record.id===EXPECTED_PR && count===7 && Number(getRec.studio_master_asset_count||0)===7 && (ids.length===0 || (ids.length===7 && ids.every((id,i)=>id===EXPECTED_IDS[i]))));
               return Response.json({
                 ok,
