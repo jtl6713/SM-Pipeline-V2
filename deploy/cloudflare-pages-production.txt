@@ -729,3 +729,5 @@ Deploy Studio UI 0.6.908-seven-scene-vo 2026-11-08: display and persist scene-sp
 2026-11-08: Deploy Studio UI 0.6.911-library-preview following UI 0.6.910-scene-collapse. Rank exact Story-first Library name/location/description matches above catalog keyword matches; use Google Drive thumbnail fallback, show readable unavailable state and original Drive link after preview failures. Preserve collapsed scene details, Airtable write authority, original Google Drive media and all human approvals/production/publishing gates. Run Story-first and release contract regression, verify Pages custom-domain BUILD_ID.
 
 Deploy Studio UI 0.6.912-story-handoff 2026-11-08: open exact Production Request after verified storyboard handoff; Open Production reconciles incomplete story-first drafts. Preserve Airtable authority and human gates.
+
+2026-11-08: Deploy merged PR #1701 TikTok native photos ready vs failed draft delivery; no Airtable writes or publication.
