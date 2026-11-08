@@ -735,3 +735,5 @@ Deploy Studio UI 0.6.912-story-handoff 2026-11-08: open exact Production Request
 2026-11-08: Release UI 0.6.913-tiktok-photo-ready, PR #1701 + #1703. Cache-busted six TikTok native-photo delivery statuses; verify production custom domain.
 
 Deploy 2026-11-08 UI 0.6.914-story-open: Open Production visible for storyboard drafts; full-request reopen; Media tab fail-closed when story assets missing.
+
+Deploy 2026-11-08 UI 0.6.915-story-idea-sync: treat storyboard-approved assets as hasPhotos for Manage Idea actions.
