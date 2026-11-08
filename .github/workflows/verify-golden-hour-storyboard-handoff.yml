@@ -1,4 +1,5 @@
 name: Verify Golden Hour Storyboard Handoff
+# reprobe after 0.10.770-story-open / UI 0.6.914-story-open deploy
 
 on:
   push:
