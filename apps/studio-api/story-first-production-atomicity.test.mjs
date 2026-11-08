@@ -65,9 +65,12 @@ test("approved storyboard bypasses first-party watermark runner but retains thir
 });
 
 test("production handoff explicitly imports its media eligibility validator", () => {
-  const imported = handoff.match(/import\\s*\\{([\\s\\S]*?)\\}\\s*from\\s*["']\\.\\/worker-functions-01\\.mjs["']/g) || [];
-  assert.ok(imported.some(group => /\\bideaLibraryRejectReason\\b/.test(group)),
+  const importEnd = handoff.indexOf('from "./worker-functions-01.mjs";');
+  assert.ok(importEnd > 0, "production worker must import its shared policy functions");
+  const importStart = handoff.lastIndexOf("import {", importEnd);
+  const importNames = handoff.slice(importStart, importEnd);
+  assert.ok(importNames.split(",").some(name => name.trim() === "ideaLibraryRejectReason"),
     "story-first preflight must not reference an undefined validator");
   const policy = readFileSync(new URL("./worker-functions-01.mjs", import.meta.url), "utf8");
-  assert.match(policy, /export function ideaLibraryRejectReason\\(/);
+  assert.ok(policy.includes("export function ideaLibraryRejectReason("));
 });
