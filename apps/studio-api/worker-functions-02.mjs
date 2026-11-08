@@ -12196,7 +12196,11 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   }
   if (creativeFirst) {
     try {
-      assertStoryboardSceneContent(timeline.segments, { brief: creativeBrief });
+      // Numbered storyboards already contain each scene's text in the brief.
+      // Overlap checks use the brief only for freeform / AI-authored proposes.
+      assertStoryboardSceneContent(timeline.segments, {
+        brief: source === "explicit-scene-directions" ? "" : creativeBrief,
+      });
     } catch (error) {
       throw new HttpError(422, error?.message
         || "Storyboard fields contained planning text instead of scene visuals and narration.");

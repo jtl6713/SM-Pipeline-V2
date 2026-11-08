@@ -739,3 +739,5 @@ Deploy 2026-11-08 UI 0.6.914-story-open: Open Production visible for storyboard 
 Deploy 2026-11-08 UI 0.6.915-story-idea-sync: treat storyboard-approved assets as hasPhotos for Manage Idea actions.
 
 Deploy 2026-11-08 UI 0.6.916-storyboard-schema: refuse planning-text storyboard population; preserve valid scene edits.
+
+Deploy 2026-11-08 UI 0.6.917-storyboard-brief: cache bump with Worker brief-overlap false-positive fix.
