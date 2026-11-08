@@ -1,1 +1,2 @@
 2026-11-08T18:00:00Z read-only TikTok photo CDN preflight for six stalled drafts
+2026-11-08 full GET photo deliverability proof after partial-byte probe
