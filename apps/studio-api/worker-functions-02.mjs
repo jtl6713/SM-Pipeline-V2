@@ -3527,6 +3527,11 @@ export async function ensureStoryFirstProductionMedia(env, requestRecord, valida
   const sceneDirectives = { schema:"story-first-production.1", profile_id:story.profile_id,
     target_seconds:story.target_seconds, scenes:story.scenes.map(row => ({
       time:row.time, voiceover:row.voiceover, visual:row.visual, media:row.media,
+      scene_label:row.scene_label || "",
+      on_screen_text:row.on_screen_text || "",
+      on_screen_text_instagram:row.on_screen_text_instagram || "",
+      voiceover_instagram:row.voiceover_instagram || "",
+      music_only_last_seconds:Number(row.music_only_last_seconds || 0),
       asset_id:row.assigned_asset_id, media_override:row.media_override===true
     }))};
   const script = story.scenes.map(row => String(row.voiceover || "").trim()).filter(Boolean).join(" ");
