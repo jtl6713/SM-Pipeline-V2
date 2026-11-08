@@ -26,6 +26,7 @@ test("scene handoff checks exact IDs rather than just asset count", () => {
   assert.match(ensure, /actual\.every\(\(id, index\) => id === ids\[index\]\)/);
   assert.match(ensure, /await airtableFetch\(env, PRODUCTION_REQUEST_TABLE, requestRecord\.id\)/);
   assert.match(ensure, /for \(let attempt = 0; attempt < 2; attempt\+\+\)/);
+  assert.match(ensure, /if \(matchesStoryboard\(current\)\) \{\s*confirmed = current;/);
 });
 
 test("story-first preserves ordered scene voiceover, time and selected asset ID", () => {

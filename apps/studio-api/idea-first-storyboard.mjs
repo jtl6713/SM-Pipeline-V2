@@ -27,6 +27,22 @@ export function parseStoryFirstNotes(notes) {
   } catch { return null; }
 }
 
+/** Explicitly approved storyboard asset IDs in scene order. */
+export function storyFirstAssignedAssetIds(story) {
+  if (!story || !Array.isArray(story.scenes)) return [];
+  return story.scenes
+    .map((scene) => String(scene?.assigned_asset_id || "").trim())
+    .filter((id) => RECORD_ID.test(id));
+}
+
+/** True when every scene has an approved assigned library/AI asset. */
+export function storyFirstMediaComplete(story) {
+  if (!story || !Array.isArray(story.scenes) || !story.scenes.length) return false;
+  if (String(story.status || "") === "media_complete") return true;
+  return story.scenes.every((scene) =>
+    scene?.selected_approved === true && RECORD_ID.test(String(scene?.assigned_asset_id || "")));
+}
+
 export function normalizeStoryFirst(input, profileId = "") {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new TypeError("Storyboard object is required");
   const suppliedProfile = trim(input.profile_id, 64);

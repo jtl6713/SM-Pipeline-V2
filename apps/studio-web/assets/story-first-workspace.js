@@ -1176,7 +1176,9 @@
       const productionId = String(productionRecord.production_request_id || "").trim();
       const verifiedIds = Array.isArray(result.storyboard_asset_ids)
         ? result.storyboard_asset_ids.map(id => String(id || "").trim()).filter(Boolean)
-        : [];
+        : (Array.isArray(productionRecord.studio_master_media_asset_ids)
+          ? productionRecord.studio_master_media_asset_ids.map(id => String(id || "").trim()).filter(Boolean)
+          : []);
       const expectedIds = current.story.scenes.map(scene => String(scene.assigned_asset_id || "").trim());
       const persistedCount = Number(productionRecord.studio_master_asset_count || verifiedIds.length || 0);
       if (persistedCount !== expectedScenes) {

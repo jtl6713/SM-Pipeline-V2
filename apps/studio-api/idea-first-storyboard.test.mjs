@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   parseStoryFirstNotes, normalizeStoryFirst, upsertStoryFirstNotes,
   storyFirstShotChecklist, storyFirstReadiness, validateStoryFirstSelectedMedia,
+  storyFirstAssignedAssetIds, storyFirstMediaComplete,
 } from "./idea-first-storyboard.mjs";
 
 const CHICAGO = "recT2rbKX3MF7cVFU";
@@ -120,4 +121,15 @@ test("integer scene timings round fractional writer duration and enforce still m
   assert.equal(st.target_seconds,30);
   const wrong=new Map([[ASSET1,asset(ASSET1,CHICAGO,{Media_Class:"Video",MIME_Type:"video/mp4"})]]);
   assert.match(validateStoryFirstSelectedMedia(st,wrong).problems.join(" " ),/still image/i);
+});
+test("approved storyboard asset IDs stay ordered for Idea library and Production open",()=>{
+  const ready=normalizeStoryFirst({...idea,scenes:[
+    scene("0-10","Hook skyline",{assigned_asset_id:ASSET1,selected_approved:true}),
+    scene("10-20","Riverwalk",{assigned_asset_id:ASSET2,selected_approved:true}),
+    scene("20-30","CTA clip",{media:"clip",assigned_asset_id:"recCTATrain00001",selected_approved:true}),
+  ]},CHICAGO);
+  assert.equal(storyFirstMediaComplete(ready),true);
+  assert.deepEqual(storyFirstAssignedAssetIds(ready),[ASSET1,ASSET2,"recCTATrain00001"]);
+  assert.equal(storyFirstMediaComplete(idea),false);
+  assert.deepEqual(storyFirstAssignedAssetIds(idea),[]);
 });

@@ -1,4 +1,4 @@
-import { parseStoryFirstNotes, normalizeStoryFirst, upsertStoryFirstNotes, storyFirstShotChecklist, validateStoryFirstSelectedMedia } from "./idea-first-storyboard.mjs";
+import { parseStoryFirstNotes, normalizeStoryFirst, upsertStoryFirstNotes, storyFirstShotChecklist, validateStoryFirstSelectedMedia, storyFirstAssignedAssetIds, storyFirstMediaComplete } from "./idea-first-storyboard.mjs";
 import { formalFactoryApprovalReady, evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { scanOutstandingFailedOutputs, failedOutputRetryGate } from "./failed-output-monitor.mjs";
 import { staleInstagramPublishingDisplay } from "./ig-publishing-display.mjs";
@@ -2167,6 +2167,7 @@ export function normalizedContentStage(record, outputRecords = null) {
 /*__STUDIO_WORKER_END:normalizedContentStage__*/
 
 export function mapIdea(record) {
+  const storyFirst = parseStoryFirstNotes(f(record, "Production_Config_Notes"));
   return {
     id: record.id,
     candidate_id: f(record, "Candidate_ID"),
@@ -2183,13 +2184,16 @@ export function mapIdea(record) {
     carousel_image_mode: f(record, "Production_Carousel_Image_Mode"),
     photo_wait_status: f(record, "Studio_Photo_Wait_Status") || null,
     photo_listening_paused: ideaManagePhotoPauseActive(f(record, "Production_Config_Notes")),
-    story_first: parseStoryFirstNotes(f(record, "Production_Config_Notes")),
+    story_first: storyFirst,
+    story_first_media_complete: storyFirstMediaComplete(storyFirst),
     suggested_visuals: String(f(record, "Suggested_Visuals") || ""),
     photo_match: parseIdeaPhotoMatchJson(f(record, "Studio_Photo_Match_JSON")),
     matched_media_asset_links: f(record, "Studio_Matched_Media_Assets") || [],
     library_asset_ids: [...new Set([
       ...(Array.isArray(f(record, "Studio_Matched_Media_Assets")) ? f(record, "Studio_Matched_Media_Assets") : []),
       ...parseIdeaNotedMediaIds(f(record, "Production_Config_Notes")),
+      // Script a Short approvals live in storyboard notes, not photo-wait links.
+      ...storyFirstAssignedAssetIds(storyFirst),
     ].map((id) => String(id || "").trim()).filter(Boolean))],
     production_notes_user: parseIdeaMachineNotes(f(record, "Production_Config_Notes")).user,
     production_request_links: f(record, "Production Requests") || f(record, "Production_Request") || [],

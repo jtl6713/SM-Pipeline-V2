@@ -75,7 +75,8 @@ jobs:
               });
               const record=(handoff.body&&handoff.body.record)||{};
               const ids=Array.isArray(handoff.body&&handoff.body.storyboard_asset_ids)?handoff.body.storyboard_asset_ids:[];
-              const count=Number(record.studio_master_asset_count||(handoff.body&&handoff.body.storyboard_asset_count)||0);
+              const lightIds=Array.isArray(record.studio_master_media_asset_ids)?record.studio_master_media_asset_ids:[];
+              const count=Number(record.studio_master_asset_count||lightIds.length||(handoff.body&&handoff.body.storyboard_asset_count)||0);
               const get=await callApi(env,'/api/production-requests/'+EXPECTED_PR+'?fields=light');
               const getRec=(get.body&&get.body.record)||{};
               const recommend=await callApi(env,'/api/production-requests/'+EXPECTED_PR+'/plan','POST',{
@@ -86,7 +87,10 @@ jobs:
               });
               const recommendOk=Boolean(recommend.ok && recommend.status<300);
               const recommendOutputs=Array.isArray(recommend.body&&recommend.body.outputs)?recommend.body.outputs.length:0;
-              const ok=Boolean(handoff.ok && handoff.status<300 && record.id===EXPECTED_PR && count===7 && Number(getRec.studio_master_asset_count||0)===7 && (ids.length===0 || (ids.length===7 && ids.every((id,i)=>id===EXPECTED_IDS[i]))) && recommendOk && recommendOutputs>0);
+              const lightOk=!lightIds.length || (lightIds.length===7 && lightIds.every((id,i)=>id===EXPECTED_IDS[i]));
+              const getLightIds=Array.isArray(getRec.studio_master_media_asset_ids)?getRec.studio_master_media_asset_ids:[];
+              const getLightOk=!getLightIds.length || (getLightIds.length===7 && getLightIds.every((id,i)=>id===EXPECTED_IDS[i]));
+              const ok=Boolean(handoff.ok && handoff.status<300 && record.id===EXPECTED_PR && count===7 && Number(getRec.studio_master_asset_count||0)===7 && lightOk && getLightOk && (ids.length===0 || (ids.length===7 && ids.every((id,i)=>id===EXPECTED_IDS[i]))) && recommendOk && recommendOutputs>0);
               return Response.json({
                 ok,
                 worker_health:{status:health.status,ok:health.ok,version:(health.body&& (health.body.version||health.body.worker_version))||null},
