@@ -1,5 +1,5 @@
-from its1.processor import normalize_scenes
-from its1.prompt import build_timed_script_prompt
+from its1.processor import normalize_creative_scenes, normalize_scenes, process_request
+from its1.prompt import build_creative_first_prompt, build_timed_script_prompt
 from stages.registry import STAGE_NAMES, is_implemented
 
 
@@ -24,6 +24,70 @@ def test_its1_prompt_requires_exact_catalog_names():
     assert "recOmny2" in prompt
     assert "TARGET MARKET" not in prompt
     assert "suggested_visual MUST be copied exactly" in prompt
+
+
+def test_its1_creative_first_prompt_asks_for_shot_descriptions_not_filenames():
+    prompt = build_creative_first_prompt(
+        title="Chicago golden hour",
+        summary="A conversational concept about winter light, the riverwalk, and the CTA. Do not dump this whole brief into one scene.",
+        location="Chicago",
+        market="Chicago",
+    )
+    assert "story-first Script a Short writer" in prompt
+    assert "Never paste the whole brief" in prompt
+    assert 'no "you still need a photo"' in prompt
+    assert "Exact Asset Name" not in prompt
+    assert "LIBRARY MEDIA CATALOG" not in prompt
+
+
+def test_normalize_creative_scenes_keeps_shot_text_without_forcing_catalog_ids():
+    scenes = normalize_creative_scenes(
+        {
+            "scenes": [
+                {
+                    "voiceover_text": "Chicago's golden hour now starts at four.",
+                    "suggested_visual": "Blue-hour aerial of icy Lake Michigan with the skyline behind it",
+                },
+                {
+                    "voiceover_text": "Follow the river while the light is still warm.",
+                    "suggested_visual": "Sunlit Riverwalk steps facing downtown towers",
+                },
+            ]
+        }
+    )
+    assert len(scenes) == 2
+    assert scenes[0]["media_asset_id"] == ""
+    assert "Lake Michigan" in scenes[0]["suggested_visual"]
+
+
+def test_creative_first_process_skips_catalog_floor(monkeypatch):
+    monkeypatch.setattr(
+        "its1.processor.generate_timed_script",
+        lambda prompt: {
+            "raw_text": "{}",
+            "parsed": {
+                "scenes": [
+                    {
+                        "voiceover_text": "Start on the shoreline.",
+                        "suggested_visual": "Icy breakwater with skyline glow",
+                    },
+                    {
+                        "voiceover_text": "Then walk the river.",
+                        "suggested_visual": "Riverwalk terrace in late afternoon light",
+                    },
+                ]
+            },
+        },
+    )
+    result = process_request(
+        title="Golden hour",
+        summary="Winter light short",
+        creative_first=True,
+        catalog=[],
+    )
+    assert result["processed"] is True
+    assert result["creative_first"] is True
+    assert len(result["scenes"]) == 2
 
 
 def test_normalize_scenes_matches_catalog_filenames():

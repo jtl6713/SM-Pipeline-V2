@@ -399,6 +399,10 @@ import {
   unassignedSuggestionCount,
 } from "./idea-timed-script.mjs";
 import {
+  assertStoryboardSceneContent,
+  storyboardSceneContentErrors,
+} from "./storyboard-scene-content.mjs";
+import {
   anotherCutFromUnused,
   capVibeCutPlanItems,
   defaultVibeCutConfig,
@@ -11954,7 +11958,7 @@ export function ideaTimedScriptCatalogRow(row) {
 }
 /*__STUDIO_WORKER_END:ideaTimedScriptCatalogRow__*/
 
-export async function pulseIdeaTimedScriptWriter(env, idea, catalog) {
+export async function pulseIdeaTimedScriptWriter(env, idea, catalog, { creativeFirst = false } = {}) {
   const title = String(f(idea, "Candidate_Title") || "").trim();
   const summary = String(f(idea, "Idea_Summary") || "").trim();
   const location = String(f(idea, "Primary_Location") || f(idea, "Neighborhood_or_Area") || "").trim();
@@ -11982,21 +11986,32 @@ export async function pulseIdeaTimedScriptWriter(env, idea, catalog) {
   }));
   try {
     const { response, payload } = await item4PulsePipelineStage(env, "its1", {
-      source: "studio-idea-timed-script",
+      source: creativeFirst ? "studio-story-first-creative" : "studio-idea-timed-script",
       title,
       summary,
       location,
       market,
-      catalog: compact,
+      catalog: creativeFirst ? [] : compact,
       creative_guidance: creativeGuidance,
+      creative_first: creativeFirst === true,
     }, "ITS1");
     if (response.ok && payload?.status === "ok") {
       const scenes = payload?.details?.run?.scenes || payload?.details?.themes?.scenes;
-      const parsed = scenesFromModelPayload({ scenes }, catalog);
-      if (parsed.length >= 2) return { source: "its1", scenes: parsed };
+      const parsed = scenesFromModelPayload({ scenes }, creativeFirst ? [] : catalog);
+      if (parsed.length >= 2) {
+        const contentErrors = storyboardSceneContentErrors(parsed, { brief: summary || title });
+        if (!contentErrors.length) return { source: "its1", scenes: parsed };
+        console.warn("ITS1 storyboard scene content rejected", idea?.id, contentErrors.slice(0, 3));
+      }
     }
   } catch (error) {
     console.warn("ITS1 idea timed script pulse failed", idea?.id, error);
+  }
+  // Story-first authoring must never fall through to SAI1 slide themes or the
+  // prompt-embedding proposal fallback. Those paths put planning text into
+  // Required Visual / Voiceover.
+  if (creativeFirst) {
+    return { source: "failed", scenes: [] };
   }
   try {
     const covered = compact.map((row, index) => `${index + 1}. ${row.name}${row.location ? ` — ${row.location}` : ""}`).join("\n");
@@ -12110,8 +12125,11 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   if (source !== "exact-brief" && source !== "explicit-scene-directions") {
     try {
       // Story is authored against an empty inventory. Matching is a SECOND step.
-      const writer = await pulseIdeaTimedScriptWriter(env, synthetic, creativeFirst ? [] : pool);
-      source = writer.source && writer.source !== "fallback" ? writer.source : "fallback";
+      const writer = await pulseIdeaTimedScriptWriter(env, synthetic, creativeFirst ? [] : pool, {
+        creativeFirst,
+      });
+      source = writer.source && writer.source !== "fallback" && writer.source !== "failed"
+        ? writer.source : (creativeFirst ? "failed" : "fallback");
       const authoredScenes = (writer.scenes || []).map((scene) => ({
         voiceover_text: scene.voiceover_text,
         suggested_visual: scene.suggested_visual,
@@ -12122,9 +12140,15 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
       console.warn("scripted short writer failed", error);
     }
     if (!scriptedShortProposalReady(buildTimelineFromScenes(scenes))) {
+      // Creative-first must fail closed. Embedding the conversational brief into
+      // Required Visual / Voiceover is the defect that made storyboards unusable.
+      if (creativeFirst) {
+        throw new HttpError(502,
+          "Studio could not write a valid storyboard from that brief. Required visual and voiceover must be scene-specific narration, not planning text. Try again or number the scenes explicitly.");
+      }
       source = "fallback";
-      scenes = creativeFirst ? fallbackProposalScenes(prompt, []) : assignOwnedScenes(fallbackProposalScenes(prompt, pool), pool);
-      if (!creativeFirst) scenes = ensureRelevantVideoScene(scenes, pool);
+      scenes = assignOwnedScenes(fallbackProposalScenes(prompt, pool), pool);
+      scenes = ensureRelevantVideoScene(scenes, pool);
     }
   }
   // The original numbered storyboard is creative authority. Where a complete
@@ -12169,6 +12193,14 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   }
   if (!scriptedShortProposalReady(timeline)) {
     throw new HttpError(502, "Studio could not write a scripted short from that prompt.");
+  }
+  if (creativeFirst) {
+    try {
+      assertStoryboardSceneContent(timeline.segments, { brief: creativeBrief });
+    } catch (error) {
+      throw new HttpError(422, error?.message
+        || "Storyboard fields contained planning text instead of scene visuals and narration.");
+    }
   }
   const owned = assetValidation.verified;
   const suggestions = assetValidation.unassigned;

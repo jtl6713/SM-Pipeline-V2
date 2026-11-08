@@ -90,6 +90,15 @@ test("cross-profile storyboards and invalid or broken timelines fail closed",()=
   assert.throws(()=>normalizeStoryFirst({...idea,scenes:[scene("0-20","Riverwalk sunrise")]},CHICAGO),/Last scene/i);
   assert.equal(parseStoryFirstNotes("[story-first.1] {broken"),null);
 });
+
+test("planning-text and media-selection corruption cannot be saved into storyboard notes",()=>{
+  assert.throws(()=>normalizeStoryFirst({...idea,scenes:[
+    scene("0-15","Vertical frame of a long conversational concept dump that is not in the library yet.",{
+      voiceover:"You still need a photo for this beat of the concept.",
+    }),
+    scene("15-30","Close detail that proves the point of the same concept"),
+  ]},CHICAGO),/planning|media-selection|library-sourcing/i);
+});
 test("repeated partial saves replace the story directive instead of duplicating it",()=>{
   const once=upsertStoryFirstNotes("ez-photo-wait=off",idea,CHICAGO);
   const twice=upsertStoryFirstNotes(once,normalizeStoryFirst(idea,CHICAGO),CHICAGO);

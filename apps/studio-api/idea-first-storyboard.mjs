@@ -3,6 +3,8 @@
  * The script and required visuals are creative authority. Candidates are never approved.
  * Permission and media validation MUST run on the Worker before persisting a selection.
  */
+import { assertStoryboardSceneContent } from "./storyboard-scene-content.mjs";
+
 export const STORY_FIRST_SCHEMA = "story-first.1";
 export const STORY_FIRST_PREFIX = "[story-first.1] ";
 const RECORD_ID = /^rec[A-Za-z0-9]+$/;
@@ -119,6 +121,12 @@ export function normalizeStoryFirst(input, profileId = "") {
     };
   });
   if (priorEnd !== seconds) throw new TypeError("Last scene must end at the requested duration");
+  try {
+    // Persist path rejects corruption only so short operator-edited visuals remain valid.
+    assertStoryboardSceneContent(scenes, { mode: "persist" });
+  } catch (error) {
+    throw new TypeError(error?.message || "Storyboard scene content is invalid");
+  }
   return {
     schema: STORY_FIRST_SCHEMA, profile_id: owner, target_seconds: seconds,
     status: scenes.every(scene => scene.state === "media_approved") ? "media_complete" : "awaiting_shots",

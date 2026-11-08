@@ -35,6 +35,15 @@ test("Idea is authored independently before no more than three verified-profile 
   assert.match(app, /View preview/);
   assert.match(app, /selectSceneAsset\(asset\._index,\s*asset\)/);
 });
+
+test("AI storyboard propose rejects planning text and never maps the brief into scene fields", () => {
+  assert.match(propose, /assertStoryboardSceneContent\(timeline\.segments/);
+  assert.match(propose, /Studio could not write a valid storyboard from that brief/);
+  assert.doesNotMatch(propose, /creativeFirst \? fallbackProposalScenes\(prompt, \[\]\)/);
+  assert.match(app, /planning or media-selection text instead of scene visuals/);
+  assert.match(app, /Choose Media sourcing on each scene/);
+  assert.match(app, /keep \? \{ \.\.\.prior, n: index \+ 1/);
+});
 test("On-demand AI generation has preview, accept, decline, no premature production", () => {
   assert.match(app, /Generate AI Image/);
   assert.match(app, /Accept Image/);

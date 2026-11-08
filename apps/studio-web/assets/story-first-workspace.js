@@ -1075,29 +1075,55 @@
       if ($("storyFirstSaved")) $("storyFirstSaved").value = "";
       current.title = proposal.suggested_title || "Story-first short";
       current.summary = prompt;
-      current.story = {
-        schema: "story-first.1", profile_id: id, target_seconds: Number(proposal.duration_seconds || 30),
-        status: "awaiting_shots", publications_blocked: true,
-        scenes: rows.map((r, i) => ({
+      const proposedScenes = rows.map((r, i) => {
+        const visual = String(r.suggested_visual || "").trim();
+        const voiceover = String(r.voiceover_text || "").trim();
+        if (visual.length < 12 || voiceover.length < 8) {
+          throw new Error("Scene " + (i + 1) + " is missing a specific visual or spoken narration. The storyboard was not applied.");
+        }
+        if (/you still need (a |an |the )?(photo|image|clip)|not in the library yet|save .{3,80} for last|this beat of|close detail that proves the point of|hero frame of .{3,120} with clean space for a title/i.test(visual + " " + voiceover)) {
+          throw new Error("Studio returned planning or media-selection text instead of scene visuals and narration. The storyboard was not applied.");
+        }
+        const media = /\b(video clip|real (?:video|footage)|moving (?:shot|footage)|timelapse|time[- ]lapse|drone (?:flight|shot)|train passing|clip of)\b/i.test(visual)
+          ? "clip"
+          : /\b(still (?:image|photo)|photograph|static frame)\b/i.test(visual) ? "still" : "still_or_clip";
+        return {
           n: i + 1,
           time: Math.round(Number(r.start_seconds || 0)) + "-" + Math.round(Number(r.end_seconds || 0)),
-          visual: String(r.suggested_visual || ""),
-          voiceover: String(r.voiceover_text || ""),
+          visual,
+          voiceover,
           scene_label: String(r.scene_label || ""),
           on_screen_text: String(r.on_screen_text || ""),
           on_screen_text_instagram: String(r.on_screen_text_instagram || ""),
           voiceover_instagram: String(r.voiceover_instagram || ""),
           music_only_last_seconds: Number(r.music_only_last_seconds || 0),
-          media: /video|footage|moving|train|drone|timelapse/i.test(String(r.suggested_visual || "")) ? "clip" : "still_or_clip",
+          media,
           state: "missing", decision: "unassigned", candidate_assets: [],
           candidate_asset_id: r.candidate_asset_id || null, assigned_asset_id: null,
           selected_approved: false, rejected_ai_ids: [],
-          ai_prompt: "Vertical 9:16 realistic documentary city image: " + String(r.suggested_visual || "") + ". Authentic architecture and natural light; no text or logo.",
-        })),
+          ai_prompt: "Vertical 9:16 realistic documentary city image: " + visual + ". Authentic architecture and natural light; no text or logo.",
+        };
+      });
+      const previousScenes = Array.isArray(current.story?.scenes) ? current.story.scenes : [];
+      const scenes = proposedScenes.map((scene, index) => {
+        const prior = previousScenes[index];
+        if (!prior) return scene;
+        const priorVisual = String(prior.visual || "").trim();
+        const priorVoice = String(prior.voiceover || "").trim();
+        const priorOk = priorVisual.length >= 12 && priorVoice.length >= 8
+          && !/you still need (a |an |the )?(photo|image|clip)|not in the library yet|this beat of/i.test(priorVisual + " " + priorVoice);
+        const keep = priorOk && (prior.selected_approved === true
+          || prior.decision === "library" || prior.decision === "ai" || prior.decision === "capture"
+          || prior.media_override === true);
+        return keep ? { ...prior, n: index + 1, time: scene.time || prior.time } : scene;
+      });
+      current.story = {
+        schema: "story-first.1", profile_id: id, target_seconds: Number(proposal.duration_seconds || 30),
+        status: "awaiting_shots", publications_blocked: true, scenes,
       };
       render();
       // Per-scene discovery follows story authoring and never changes its visual requirements.
-      report("Story and timed visuals written first. Review up to three recommendations per scene, or generate/supply your own. Save partial progress anytime.");
+      report("Story and timed visuals written first. Choose Media sourcing on each scene, then review recommendations or generate/supply your own. Save partial progress anytime.");
     } catch (error) {
       // An obsolete response must not overwrite the new blank-state message.
       if (generation === current.planRevision) throw error;

@@ -737,3 +737,5 @@ Deploy Studio UI 0.6.912-story-handoff 2026-11-08: open exact Production Request
 Deploy 2026-11-08 UI 0.6.914-story-open: Open Production visible for storyboard drafts; full-request reopen; Media tab fail-closed when story assets missing.
 
 Deploy 2026-11-08 UI 0.6.915-story-idea-sync: treat storyboard-approved assets as hasPhotos for Manage Idea actions.
+
+Deploy 2026-11-08 UI 0.6.916-storyboard-schema: refuse planning-text storyboard population; preserve valid scene edits.
