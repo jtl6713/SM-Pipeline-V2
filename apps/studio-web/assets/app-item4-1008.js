@@ -300,7 +300,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.914-story-open";
+  const BUILD_ID = "item4-0.6.915-story-idea-sync";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -3792,6 +3792,8 @@
       (Array.isArray(idea?.matched_media_asset_links) && idea.matched_media_asset_links.length)
       || (Array.isArray(idea?.photo_match?.selected) && idea.photo_match.selected.length)
       || (ideaLibrarySelected && ideaLibrarySelected.size)
+      || storyFirstReady(idea)
+      || storyFirstAssignedIds(idea).length
       || String(idea?.photo_wait_status || "") === "Ready"
     );
     const canPrepare = !promoted && !idea?.is_on_hold && promotable && hasPhotos;

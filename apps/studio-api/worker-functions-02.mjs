@@ -3582,11 +3582,43 @@ export async function ensureStoryFirstProductionMedia(env, requestRecord, valida
   // Commit creative directives only after the exact selected asset set is confirmed.
   // A rejected handoff must not leave the draft with new storyboard notes but
   // a stale or incomplete media manifest.
-  return await item4UpdateRequestState(env, confirmed.id, {
+  const updated = await item4UpdateRequestState(env, confirmed.id, {
     Production_Notes: [notes,marker + JSON.stringify(sceneDirectives)].filter(Boolean).join("\n"),
     Script_Mode: "Force exact", Requested_Script: script,
     Video_Clip_Count_Mode: "Exact", Video_Clip_Count_Exact: story.scenes.length,
   });
+  // Keep the Idea's matched-media links and media_asset_ids= notes aligned with the
+  // confirmed storyboard order so Manage Idea / Assigned assets do not show zero
+  // while Production already has the masters.
+  const ideaId = firstLinkedRecordId(f(updated, "Idea_Candidate"))
+    || firstLinkedRecordId(f(confirmed, "Idea_Candidate"));
+  if (ideaId && env.AIRTABLE_IDEA_TABLE_ID) {
+    try {
+      const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId);
+      const linked = (Array.isArray(f(idea, "Studio_Matched_Media_Assets"))
+        ? f(idea, "Studio_Matched_Media_Assets") : [])
+        .map((id) => String(id || "").trim()).filter(Boolean);
+      const ideaNotes = String(f(idea, "Production_Config_Notes") || "");
+      const noted = parseIdeaNotedMediaIds(ideaNotes);
+      const sameLinks = linked.length === ids.length && linked.every((id, index) => id === ids[index]);
+      const sameNotes = noted.length === ids.length && noted.every((id, index) => id === ids[index]);
+      if (!sameLinks || !sameNotes) {
+        await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId, {
+          method: "PATCH",
+          body: JSON.stringify({
+            fields: {
+              Studio_Matched_Media_Assets: ids,
+              Production_Config_Notes: mergeIdeaProductionNotes(ideaNotes, undefined, ids),
+            },
+            typecast: true,
+          }),
+        });
+      }
+    } catch (error) {
+      console.warn("story-first idea matched-media sync deferred", error);
+    }
+  }
+  return updated;
 }
 
 /*__STUDIO_WORKER_END:ensureStoryFirstProductionMedia__*/

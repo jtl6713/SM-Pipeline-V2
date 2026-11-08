@@ -948,3 +948,5 @@ Deploy 2026-11-08 Worker 0.10.768-story-handoff: allow approved storyboard soft 
 2026-11-08 deploy Studio API 0.10.769-tiktok-photo-auto-recovery. TTD1 scheduled Waiting for Schedule rows wake in the 15-minute inbox lead window and TTD1/TTD2 respect Publish_Next_Retry_At backoff. No manual fallback for unconfirmed photo downloads.
 
 Deploy 2026-11-08 Worker 0.10.770-story-open: skip replaceAll when storyboard already matches; light mapper returns ordered studio_master_media_asset_ids; mapIdea exposes story-first assigned assets.
+
+Deploy 2026-11-08 Worker 0.10.771-story-idea-sync: sync Idea Studio_Matched_Media_Assets + media_asset_ids= after confirmed storyboard handoff.

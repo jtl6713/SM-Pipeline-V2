@@ -29,11 +29,22 @@ test("scene handoff checks exact IDs rather than just asset count", () => {
   assert.match(ensure, /if \(matchesStoryboard\(current\)\) \{\s*confirmed = current;/);
 });
 
+test("confirmed storyboard handoff syncs Idea matched-media links in scene order", () => {
+  assert.match(ensure, /Studio_Matched_Media_Assets: ids/);
+  assert.match(ensure, /mergeIdeaProductionNotes\(ideaNotes, undefined, ids\)/);
+  assert.match(ensure, /story-first idea matched-media sync deferred/);
+  assert.ok(
+    ensure.indexOf("Studio_Matched_Media_Assets: ids") >
+      ensure.indexOf("const updated = await item4UpdateRequestState"),
+    "Idea matched-media sync must follow Production confirmation",
+  );
+});
+
 test("story-first preserves ordered scene voiceover, time and selected asset ID", () => {
   assert.match(ensure, /time:row\.time, voiceover:row\.voiceover, visual:row\.visual, media:row\.media/);
   assert.match(ensure, /asset_id:row\.assigned_asset_id/);
   assert.match(ensure, /Script_Mode: "Force exact", Requested_Script: script/);
-  assert.ok(ensure.indexOf("return await item4UpdateRequestState") > ensure.indexOf("if (!confirmed)"), "creative directives must be committed after asset validation");
+  assert.ok(ensure.indexOf("const updated = await item4UpdateRequestState") > ensure.indexOf("if (!confirmed)"), "creative directives must be committed after asset validation");
 });
 
 test("seven-scene editorial metadata survives the handoff into the Production draft", () => {
