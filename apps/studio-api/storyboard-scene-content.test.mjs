@@ -22,6 +22,50 @@ test("exact corrupt fallback pattern is rejected before storyboard fields are po
   assert.throws(() => assertStoryboardSceneContent(scenes, { brief: BRIEF }), /Voiceover|visual/i);
 });
 
+test("numbered Chicago Blue Hour storyboard scenes are accepted even when the brief contains them", () => {
+  const brief = `Storyboard: Chicago Blue Hour
+Total length: ~22 seconds
+Scene 1 (5 seconds)
+Visual: Wide shot of the Chicago River at blue hour. Calm water reflecting buildings, deep blue sky still holding light. Slow push-in.
+Voiceover: "Most people leave Chicago right before it gets good."
+Scene 2 (5 seconds)
+Visual: Skyline from North Avenue Beach. City lights just beginning to glow against the blue. Gentle pan right.
+Voiceover: "This is the window."
+Scene 3 (4 seconds)
+Visual: Low angle under a Riverwalk bridge. Warm lights reflecting hard on the water. Camera drifts forward.
+Voiceover: "Twenty minutes when the whole city turns expensive."
+Scene 4 (4 seconds)
+Visual: Elevated train platform at dusk. Train passes, skyline framed cleanly behind it. Blue hour fully locked in.
+Voiceover: "Blue hour doesn't ask for attention."
+Scene 5 (4 seconds)
+Visual: Final wide skyline from Streeterville. Full city lights on, deep blue sky still present. Hold steady.
+Voiceover: "It just shows up… and then it's gone."`;
+  const scenes = [
+    {
+      suggested_visual: "Wide shot of the Chicago River at blue hour. Calm water reflecting buildings, deep blue sky still holding light. Slow push-in.",
+      voiceover_text: "Most people leave Chicago right before it gets good.",
+    },
+    {
+      suggested_visual: "Skyline from North Avenue Beach. City lights just beginning to glow against the blue. Gentle pan right.",
+      voiceover_text: "This is the window.",
+    },
+    {
+      suggested_visual: "Low angle under a Riverwalk bridge. Warm lights reflecting hard on the water. Camera drifts forward.",
+      voiceover_text: "Twenty minutes when the whole city turns expensive.",
+    },
+    {
+      suggested_visual: "Elevated train platform at dusk. Train passes, skyline framed cleanly behind it. Blue hour fully locked in.",
+      voiceover_text: "Blue hour doesn't ask for attention.",
+    },
+    {
+      suggested_visual: "Final wide skyline from Streeterville. Full city lights on, deep blue sky still present. Hold steady.",
+      voiceover_text: "It just shows up… and then it's gone.",
+    },
+  ];
+  assert.deepEqual(storyboardSceneContentErrors(scenes, { brief }), []);
+  assert.equal(assertStoryboardSceneContent(scenes, { brief }), true);
+});
+
 test("valid scene-specific visuals and narration pass the propose gate", () => {
   const scenes = [
     {
@@ -89,6 +133,7 @@ test("creative-first propose path never embeds the conversational brief via fall
   assert.match(body, /creative_first: creativeFirst === true|creativeFirst,/);
   assert.match(body, /Studio could not write a valid storyboard from that brief/);
   assert.match(body, /assertStoryboardSceneContent\(timeline\.segments/);
+  assert.match(body, /source === "explicit-scene-directions" \? "" : creativeBrief/);
   assert.ok(!/creativeFirst \? fallbackProposalScenes\(prompt, \[\]\)/.test(body),
     "creative-first must not call fallbackProposalScenes with an empty catalog");
   assert.match(body, /if \(creativeFirst\) \{\s*throw new HttpError\(502/);

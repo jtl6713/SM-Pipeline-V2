@@ -952,3 +952,5 @@ Deploy 2026-11-08 Worker 0.10.770-story-open: skip replaceAll when storyboard al
 Deploy 2026-11-08 Worker 0.10.771-story-idea-sync: sync Idea Studio_Matched_Media_Assets + media_asset_ids= after confirmed storyboard handoff.
 
 Deploy 2026-11-08 Worker 0.10.772-storyboard-schema: reject corrupt AI storyboard fields; creative-first ITS1.
+
+Deploy 2026-11-08 Worker 0.10.773-storyboard-brief: accept numbered storyboard briefs; only reject brief-dump corruption.

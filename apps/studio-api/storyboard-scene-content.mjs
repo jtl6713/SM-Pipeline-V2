@@ -51,6 +51,19 @@ function overlapRatio(a, b) {
   return hit / Math.min(left.size, right.size);
 }
 
+/**
+ * True only when a scene field is dumping most of the creative brief into itself.
+ * A numbered storyboard brief naturally contains each scene's text; short excerpts
+ * from that brief must not be treated as corruption.
+ */
+function fieldDumpsBrief(field, brief) {
+  const value = compact(field);
+  const source = compact(brief);
+  if (source.length < 80 || value.length < 60) return false;
+  if (value.length / source.length < 0.4) return false;
+  return overlapRatio(value, source) >= 0.72;
+}
+
 /** Preferred media from a concrete shot description — never from a concept essay. */
 export function inferStoryboardPreferredMedia(visual) {
   const text = compact(visual);
@@ -85,10 +98,10 @@ export function storyboardSceneCorruptionErrors(scenes, { brief = "" } = {}) {
         break;
       }
     }
-    if (briefText.length >= 40 && visual.length >= 40 && overlapRatio(visual, briefText) >= 0.72) {
+    if (fieldDumpsBrief(visual, briefText)) {
       errors.push(`Scene ${n}: Required visual repeats the creative brief instead of a scene-specific shot.`);
     }
-    if (briefText.length >= 40 && voice.length >= 40 && overlapRatio(voice, briefText) >= 0.72) {
+    if (fieldDumpsBrief(voice, briefText)) {
       errors.push(`Scene ${n}: Voiceover repeats the creative brief instead of spoken narration.`);
     }
     if (visual && voice && overlapRatio(visual, voice) >= 0.9 && visual.length > 40) {
