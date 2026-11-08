@@ -98,5 +98,5 @@ test("late AI proposal replies cannot re-display a rejected or cross-profile pla
   assert.match(app, /const generation = \+\+current\.planRevision/);
   assert.match(app, /if \(generation !== current\.planRevision \|\| profileId\(\) !== id\) return;/);
   assert.match(app, /current\.planRevision \+= 1;\s+current\.proposing = false;/);
-  assert.match(app, /if \(current\.story !== original\) return;/);
+  assert.match(app, /if\s*\(\s*current\.story\s*!==\s*original\s*\)\s*return;/);
 });
