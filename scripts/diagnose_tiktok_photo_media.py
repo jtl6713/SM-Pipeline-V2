@@ -36,7 +36,7 @@ def check(item):
             status = response.status
             media_type = response.headers.get("Content-Type", "").split(";")[0].lower()
             chunk = response.read(32)
-            valid = chunk.startswith(b"\\xff\\xd8\\xff") or chunk.startswith(b"\\x89PNG\\r\\n\\x1a\\n") or (chunk.startswith(b"RIFF") and chunk[8:12] == b"WEBP")
+            valid = chunk.startswith(b"\xff\xd8\xff") or chunk.startswith(b"\x89PNG\r\n\x1a\n") or (chunk.startswith(b"RIFF") and chunk[8:12] == b"WEBP")
             challenge = response.headers.get("cf-mitigated", "")
             length = response.headers.get("Content-Length", "unknown")
             ok = status in {200, 206} and valid and media_type in {"image/jpeg","image/png","image/webp"} and not challenge
