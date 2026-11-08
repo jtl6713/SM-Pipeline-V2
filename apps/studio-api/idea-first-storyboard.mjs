@@ -77,9 +77,19 @@ export function normalizeStoryFirst(input, profileId = "") {
       : decision === "ai" ? "awaiting_ai_generation"
       : decision === "capture" ? "awaiting_operator_upload"
       : candidate || candidateAssets.length ? "candidate_unverified" : "missing";
+    const musicOnlyLastSeconds = Number(raw?.music_only_last_seconds || 0);
+    if (!Number.isFinite(musicOnlyLastSeconds) || !Number.isInteger(musicOnlyLastSeconds)
+      || musicOnlyLastSeconds < 0 || musicOnlyLastSeconds > (+match[2] - +match[1])) {
+      throw new TypeError("Music-only scene hold must fit within its scene timing");
+    }
     return {
       n: index + 1, time, visual, media,
       voiceover: trim(raw?.voiceover, 380),
+      scene_label: trim(raw?.scene_label, 90),
+      on_screen_text: trim(raw?.on_screen_text, 280),
+      on_screen_text_instagram: trim(raw?.on_screen_text_instagram, 280),
+      voiceover_instagram: trim(raw?.voiceover_instagram, 380),
+      music_only_last_seconds: musicOnlyLastSeconds,
       decision, state,
       candidate_asset_id: candidate || null, candidate_assets: candidateAssets,
       assigned_asset_id: assigned || null, selected_approved: approved,
