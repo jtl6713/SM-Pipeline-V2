@@ -137,6 +137,36 @@ export function scriptedShortDirectedScenes(brief) {
     asset_id:"", media_asset_id:"", shot_status:"suggestion",
   }));
 }
+
+/**
+ * Restore metadata after timeline normalization, which may otherwise discard
+ * exact authored screen text, IG variants or a timed silent hold.
+ * Do not change the numbered voiceover or visuals: QA rejects their drift.
+ */
+export function scriptedShortApplySceneDirections(brief, timeline) {
+  const source = scriptedShortSceneDirections(brief);
+  const rows = Array.isArray(timeline?.segments) ? timeline.segments : [];
+  if (!source.requested_count || rows.length !== source.requested_count) return timeline;
+  const timed = source.timings?.every((row,i) =>
+    row && row.start === (i ? source.timings[i-1]?.end : 0) && row.end > row.start);
+  const segments = rows.map((row,i) => {
+    const next = { ...row, index: i + 1,
+      scene_label: source.scene_labels?.[i] || "",
+      on_screen_text: source.on_screen_text?.[i] || "",
+      on_screen_text_instagram: source.on_screen_text_instagram?.[i] || "",
+      voiceover_instagram: source.voiceovers_instagram?.[i] || "",
+      music_only_last_seconds: source.music_only_last_seconds?.[i] || 0,
+    };
+    if (timed) {
+      next.start_seconds = source.timings[i].start;
+      next.end_seconds = source.timings[i].end;
+      next.duration_seconds = next.end_seconds - next.start_seconds;
+    }
+    return next;
+  });
+  return { ...timeline, segments,
+    duration_seconds: timed ? source.timings.at(-1).end : timeline.duration_seconds };
+}
 export function scriptedShortSceneDirectionErrors(brief, timeline) {
   const data = scriptedShortSceneDirections(brief);
   const scenes = Array.isArray(timeline?.segments) ? timeline.segments : [];
