@@ -11979,7 +11979,9 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
     id: "scripted-short-proposal",
     fields: {
       Candidate_Title: prompt.slice(0, 160),
-      Idea_Summary: prompt.slice(0, 2000),
+      // Writer receives the full, line-preserving human brief (up to 5,000).
+      // Flattening/truncating it loses Scene 4+ and breaks numbered VO blocks.
+      Idea_Summary: creativeBrief,
       ...(assetPolicy.subject ? { Primary_Location: assetPolicy.subject } : {}),
     },
   };
