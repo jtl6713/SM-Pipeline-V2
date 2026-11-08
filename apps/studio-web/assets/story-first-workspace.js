@@ -11,7 +11,7 @@
   const root = String(config.apiBase || window.location.origin).replace(/\/$/, "");
   const select = $("studioProfileSelect");
   const status = $("storyFirstStatus");
-  const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, ideaRecords: [], generatedAssets: {}, candidates: {}, attempted: new Set(), browsing: {}, pendingUpload: {}, libraryRows: [], wideResults: {}, uploadedAssets: {}, selectedAssetNames: {} };
+  const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, ideaRecords: [], generatedAssets: {}, candidates: {}, attempted: new Set(), browsing: {}, pendingUpload: {}, libraryRows: [], wideResults: {}, uploadedAssets: {}, selectedAssetNames: {}, planRequest: 0 };
 
   const profileId = () => String(select?.value || localStorage.getItem("studio.content_profile_id") || "").trim();
   const isId = id => /^rec[A-Za-z0-9]+$/.test(String(id || ""));
@@ -26,6 +26,101 @@
     status.textContent = message;
     status.className = "form-message" + (error ? " error-text" : "");
   }
+  function resetRejectedPlan() {
+    const id = current.profile || profileId();
+    const previousRecord = current.record?.id || "";
+    const brief = String($("storyFirstSummary")?.value || current.summary ||
+      $("scriptedShortPrompt")?.value || "").trim();
+    // Invalidate an outstanding AI proposal before it can repaint this workspace.
+    current.planRequest += 1;
+    current.record = null;
+    current.story = null;
+    current.title = "";
+    current.summary = "";
+    current.profile = id;
+    current.candidates = {};
+    current.attempted = new Set();
+    current.browsing = {};
+    current.pendingUpload = {};
+    current.libraryRows = [];
+    current.wideResults = {};
+    current.uploadedAssets = {};
+    current.selectedAssetNames = {};
+    if (previousRecord && localStorage.getItem("studio.story_first_resume." + id) === previousRecord)
+      localStorage.removeItem("studio.story_first_resume." + id);
+    const picker = $("storyFirstSaved");
+    if (picker) picker.value = "";
+    if ($("storyFirstRecordId")) $("storyFirstRecordId").value = "";
+    if ($("storyFirstBrief")) $("storyFirstBrief").value = brief;
+    if ($("scriptedShortPrompt")) $("scriptedShortPrompt").value = brief;
+    $("scriptedShortPrompt")?.dispatchEvent(new Event("input", { bubbles: true }));
+    if ($("scriptedShortPropose")) $("scriptedShortPropose").disabled = false;
+    if ($("storyFirstPropose")) $("storyFirstPropose").disabled = false;
+    render();
+    $("scriptedShortPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    $("scriptedShortPrompt")?.focus({ preventScroll: true });
+  }
+
+  function rejectWholePlan() {
+    if (!current.story) return;
+    if (current.busy || Object.values(current.pendingUpload).some(Boolean)) {
+      report("Wait for the current save, upload or image action to finish before rejecting.", true);
+      return;
+    }
+    const saved = isId(current.record?.id);
+    if (!confirm(saved
+      ? "Reject this storyboard and start a new plan?\\n\\nThe saved Idea will remain in Airtable and can be reopened. Use Delete Saved Plan to remove it permanently."
+      : "Reject this entire unsaved plan and start over?\\n\\nThe scenes, narration and local selections will be discarded. Uploaded library media will not be deleted.")) return;
+    resetRejectedPlan();
+    report(saved
+      ? "Plan closed. Your saved Idea is still available. Edit the brief above to generate a new plan."
+      : "Plan rejected. Edit the brief above and generate a completely new storyboard.");
+  }
+
+  async function deleteSavedPlan() {
+    const record = current.record;
+    if (!isId(record?.id)) return;
+    if (current.busy || Object.values(current.pendingUpload).some(Boolean)) {
+      report("Wait for the current action to finish before deleting the saved plan.", true);
+      return;
+    }
+    if (record.production_request_id || record.promoted_content_record_id ||
+      record.content_item_links?.length) {
+      report("This Idea is already linked to Production and cannot be deleted here.", true);
+      return;
+    }
+    if (!confirm("Permanently delete saved Idea " +
+      (record.candidate_id || record.id) +
+      "?\\n\\nThis removes the unpromoted storyboard from Airtable and cannot be undone. It does not delete uploaded media or published content.")) return;
+    const id = assertProfile();
+    const button = $("storyFirstDeleteSaved");
+    current.busy = true;
+    if (button) button.disabled = true;
+    report("Deleting this saved storyboard from Airtable…");
+    try {
+      await call("/api/ideas/" + encodeURIComponent(record.id) +
+        "?profile=" + encodeURIComponent(id), {
+        method: "DELETE", body: JSON.stringify({}),
+      });
+      current.ideaRecords = current.ideaRecords.filter(row => row.id !== record.id);
+      const picker = $("storyFirstSaved");
+      picker?.querySelector('option[value="' + record.id + '"]')?.remove();
+      resetRejectedPlan();
+      report("Saved storyboard deleted. Uploaded library assets remain untouched. Start again with the brief above.");
+    } catch (error) {
+      report("Deletion was not confirmed: " + (error.message || "Connection error") +
+        ". Refresh saved ideas before retrying.", true);
+    } finally {
+      current.busy = false;
+      if (button) button.disabled = false;
+    }
+  }
+
+  function syncDeleteSavedPlan() {
+    const button = $("storyFirstDeleteSaved");
+    if (button) button.hidden = !isId(current.record?.id);
+  }
+
   async function call(path, options = {}) {
     const response = await fetch(root + path, {
       credentials: "same-origin", cache: "no-store",
@@ -230,6 +325,7 @@
       // A successful Airtable write is already the receipt. Keep the saved-Ideas
       // selector current locally; do not issue an abort-prone second network request.
       rememberSavedIdea(result.record);
+      syncDeleteSavedPlan();
       report("Saved to Airtable · Idea " + (result.record.candidate_id || result.record.id) +
         (result.verified_after_interruption ? " · Verified after connection interruption." :
           ". You can leave and reopen it from Ideas."));
@@ -585,6 +681,7 @@
   function render() {
     const workspace = $("storyFirstWorkspace");
     workspace.hidden = !current.story;
+    syncDeleteSavedPlan();
     if (!current.story) return;
     $("storyFirstTitle").value=current.title;
     $("storyFirstSummary").value=current.summary;
@@ -845,12 +942,16 @@
     const prompt = String($("storyFirstBrief").value || "").trim();
     if (!isId(id)) throw new Error("Choose a city profile first.");
     if (prompt.length < 12) throw new Error("Describe the story to create, not just a location.");
+    if (current.busy) throw new Error("Finish the current storyboard action before generating a new plan.");
+    const request = ++current.planRequest;
     report("Writing the story first, before checking available assets…");
     $("storyFirstPropose").disabled = true;
+    if ($("scriptedShortPropose")) $("scriptedShortPropose").disabled = true;
     try {
       const proposal = await call("/api/scripted-short/propose?profile=" + encodeURIComponent(id), {
         method: "POST", body: JSON.stringify({ prompt, creative_first: true, content_profile_id: id }),
       });
+      if (request !== current.planRequest || profileId() !== id) return;
       const rows = proposal.timeline?.segments || [];
       if (rows.length < 2) throw new Error("The Producer did not return a complete shot list.");
       current.profile = id;
@@ -875,7 +976,12 @@
       render();
       // Per-scene discovery follows story authoring and never changes its visual requirements.
       report("Story and timed visuals written first. Review up to three recommendations per scene, or generate/supply your own. Save partial progress anytime.");
-    } finally { $("storyFirstPropose").disabled = false; }
+    } finally {
+      if (request === current.planRequest) {
+        $("storyFirstPropose").disabled = false;
+        if ($("scriptedShortPropose")) $("scriptedShortPropose").disabled = false;
+      }
+    }
   }
   $("scriptedShortStoryFirstJump")?.addEventListener("click", () => {
     const entry = $("scriptedShortPrompt");
@@ -885,6 +991,9 @@
   });
   $("storyFirstNewForm").addEventListener("submit", e => propose(e).catch(err => report(err.message, true)));
   $("storyFirstSave").addEventListener("click", () => save().catch(err => report(err.message, true)));
+  $("storyFirstReject")?.addEventListener("click", rejectWholePlan);
+  $("storyFirstRejectBottom")?.addEventListener("click", rejectWholePlan);
+  $("storyFirstDeleteSaved")?.addEventListener("click", () => deleteSavedPlan().catch(err => report(err.message, true)));
   $("storyFirstRefresh").addEventListener("click", () => refresh().catch(err => report(err.message, true)));
   $("storyFirstOpenId").addEventListener("click", async () => {
     const recordId = String($("storyFirstRecordId").value || "").trim();
@@ -905,11 +1014,15 @@
   const switchProfile = () => {
     const id = profileId();
     if (!isId(id) || current.profile === id) return;
+    current.planRequest += 1;
     current.profile = id;
     current.record = null;
     current.story = null;
     current.selectedAssetNames = {};
+    if ($("scriptedShortPropose")) $("scriptedShortPropose").disabled = false;
+    $("storyFirstPropose").disabled = false;
     $("storyFirstWorkspace").hidden = true;
+    syncDeleteSavedPlan();
     $("storyFirstSaved").replaceChildren(new Option("Choose a saved storyboard…", ""));
     refresh().catch(e => report(e.message, true));
   };
