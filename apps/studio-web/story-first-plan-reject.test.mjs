@@ -28,7 +28,7 @@ test("reject clears the active draft and preserves the editable original brief a
   assert.match(reset, /scriptedShortPrompt/);
   assert.match(reset, /render\(\)/);
   assert.doesNotMatch(reset, /method: "DELETE"|\/api\/production-requests|\/api\/library/);
-  assert.match(app, /Saved Idea will remain in Airtable and can be reopened/);
+  assert.match(app, /saved Idea will remain in Airtable and can be reopened/);
 });
 
 test("saved storyboard has a separate guarded permanent delete, never a media or production delete", () => {
