@@ -11,7 +11,7 @@
   const root = String(config.apiBase || window.location.origin).replace(/\/$/, "");
   const select = $("studioProfileSelect");
   const status = $("storyFirstStatus");
-  const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, ideaRecords: [], generatedAssets: {}, candidates: {}, attempted: new Set(), browsing: {}, pendingUpload: {}, libraryRows: [], wideResults: {}, uploadedAssets: {}, selectedAssetNames: {} };
+  const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, proposing: false, planRevision: 0, ideaRecords: [], generatedAssets: {}, candidates: {}, attempted: new Set(), browsing: {}, pendingUpload: {}, libraryRows: [], wideResults: {}, uploadedAssets: {}, selectedAssetNames: {} };
 
   const profileId = () => String(select?.value || localStorage.getItem("studio.content_profile_id") || "").trim();
   const isId = id => /^rec[A-Za-z0-9]+$/.test(String(id || ""));
@@ -103,6 +103,9 @@
     }
     const story = storyNotesFromRecord(record);
     if (!story?.scenes?.length || story.profile_id !== id) throw new Error("This Idea has no valid story-first storyboard for the selected city.");
+    current.planRevision += 1;
+    current.proposing = false;
+    if ($("scriptedShortPropose")) $("scriptedShortPropose").disabled = false;
     current.record = record;
     current.story = JSON.parse(JSON.stringify(story));
     current.candidates = {}; current.attempted = new Set(); current.browsing = {};
@@ -839,22 +842,96 @@
     $("storyFirstSave").textContent=current.record?"Save changes to idea":"Save idea";
     scenes.forEach((_,i)=>discoverScene(i));
   }
+  // Reject the whole AI storyboard, not individual image candidates. This is a
+  // local discard only: persisted Ideas, Drive assets and Production are untouched.
+  function rejectPlan() {
+    if (!current.story) return;
+    if (current.busy) {
+      report("Finish the current save, image review or upload before rejecting this plan.", true);
+      return;
+    }
+    const saved = Boolean(current.record?.id);
+    const warning = saved
+      ? "Reject this plan and start a NEW storyboard? The previously saved Idea will remain in Airtable and can be reopened. No assets or production records will be deleted."
+      : "Reject the entire unsaved Producer Plan and start over? All proposed scenes, narration and media choices will be discarded.";
+    if (!window.confirm(warning)) return;
+    // Increment the revision so a late AI response cannot resurrect the rejected plan.
+    current.planRevision += 1;
+    current.proposing = false;
+    const id = current.profile || profileId();
+    const brief = String($("storyFirstSummary")?.value || current.summary ||
+      $("scriptedShortPrompt")?.value || $("storyFirstBrief")?.value || "").trim();
+    current.record = null;
+    current.story = null;
+    current.title = "";
+    current.summary = "";
+    current.candidates = {};
+    current.attempted = new Set();
+    current.browsing = {};
+    current.pendingUpload = {};
+    current.generatedAssets = {};
+    current.libraryRows = [];
+    current.wideResults = {};
+    current.uploadedAssets = {};
+    current.selectedAssetNames = {};
+    if (isId(id)) localStorage.removeItem("studio.story_first_resume." + id);
+    const picker = $("storyFirstSaved");
+    if (picker) picker.value = "";
+    $("storyFirstShots").replaceChildren();
+    $("storyFirstWorkspace").hidden = true;
+    if ($("scriptedShortResult")) $("scriptedShortResult").hidden = true;
+    if ($("storyFirstPropose")) $("storyFirstPropose").disabled = false;
+    if ($("scriptedShortPropose")) $("scriptedShortPropose").disabled = false;
+    $("storyFirstBrief").value = brief;
+    const prompt = $("scriptedShortPrompt");
+    if (prompt) {
+      prompt.value = brief;
+      prompt.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    const message = saved
+      ? "Plan rejected. Start a new storyboard above. The saved Idea remains available to reopen; nothing in Production or Asset Manager was changed."
+      : "Plan rejected. Edit your original brief above and generate a completely new storyboard. No production or assets were changed.";
+    report(message);
+    const mainMessage = $("scriptedShortMessage");
+    if (mainMessage) {
+      mainMessage.textContent = message;
+      mainMessage.className = "form-message success";
+    }
+    prompt?.scrollIntoView({ behavior: "smooth", block: "center" });
+    prompt?.focus({ preventScroll: true });
+  }
+
   async function propose(e) {
     e?.preventDefault?.();
     const id = profileId();
     const prompt = String($("storyFirstBrief").value || "").trim();
     if (!isId(id)) throw new Error("Choose a city profile first.");
     if (prompt.length < 12) throw new Error("Describe the story to create, not just a location.");
+    if (current.proposing || current.busy) throw new Error("A storyboard action is already running.");
+    const generation = ++current.planRevision;
+    current.proposing = true;
     report("Writing the story first, before checking available assets…");
     $("storyFirstPropose").disabled = true;
+    if ($("scriptedShortPropose")) $("scriptedShortPropose").disabled = true;
     try {
       const proposal = await call("/api/scripted-short/propose?profile=" + encodeURIComponent(id), {
         method: "POST", body: JSON.stringify({ prompt, creative_first: true, content_profile_id: id }),
       });
+      if (generation !== current.planRevision || profileId() !== id) return;
       const rows = proposal.timeline?.segments || [];
       if (rows.length < 2) throw new Error("The Producer did not return a complete shot list.");
       current.profile = id;
       current.record = null;
+      current.candidates = {};
+      current.attempted = new Set();
+      current.browsing = {};
+      current.pendingUpload = {};
+      current.generatedAssets = {};
+      current.libraryRows = [];
+      current.wideResults = {};
+      current.uploadedAssets = {};
+      current.selectedAssetNames = {};
+      if ($("storyFirstSaved")) $("storyFirstSaved").value = "";
       current.title = proposal.suggested_title || "Story-first short";
       current.summary = prompt;
       current.story = {
@@ -875,7 +952,16 @@
       render();
       // Per-scene discovery follows story authoring and never changes its visual requirements.
       report("Story and timed visuals written first. Review up to three recommendations per scene, or generate/supply your own. Save partial progress anytime.");
-    } finally { $("storyFirstPropose").disabled = false; }
+    } catch (error) {
+      // An obsolete response must not overwrite the new blank-state message.
+      if (generation === current.planRevision) throw error;
+    } finally {
+      if (generation === current.planRevision) {
+        current.proposing = false;
+        $("storyFirstPropose").disabled = false;
+        if ($("scriptedShortPropose")) $("scriptedShortPropose").disabled = false;
+      }
+    }
   }
   $("scriptedShortStoryFirstJump")?.addEventListener("click", () => {
     const entry = $("scriptedShortPrompt");
@@ -885,6 +971,8 @@
   });
   $("storyFirstNewForm").addEventListener("submit", e => propose(e).catch(err => report(err.message, true)));
   $("storyFirstSave").addEventListener("click", () => save().catch(err => report(err.message, true)));
+  $("storyFirstRejectPlan").addEventListener("click", rejectPlan);
+  $("storyFirstRejectPlanBottom").addEventListener("click", rejectPlan);
   $("storyFirstRefresh").addEventListener("click", () => refresh().catch(err => report(err.message, true)));
   $("storyFirstOpenId").addEventListener("click", async () => {
     const recordId = String($("storyFirstRecordId").value || "").trim();
@@ -905,6 +993,10 @@
   const switchProfile = () => {
     const id = profileId();
     if (!isId(id) || current.profile === id) return;
+    current.planRevision += 1;
+    current.proposing = false;
+    if ($("scriptedShortPropose")) $("scriptedShortPropose").disabled = false;
+    if ($("storyFirstPropose")) $("storyFirstPropose").disabled = false;
     current.profile = id;
     current.record = null;
     current.story = null;
