@@ -449,3 +449,23 @@
   #storyFirstPanel * {scroll-behavior: auto}
   #storyFirstPanel .story-first-shot-caret {transition: none}
 }
+
+/* An image request can fail when the authenticated Worker preview and the
+   Drive thumbnail are unavailable. Never leave a broken-image glyph. */
+#storyFirstPanel .story-first-candidate .story-first-preview-unavailable {
+  display: grid;
+  place-items: center;
+  min-height: 135px;
+  aspect-ratio: 9 / 12;
+  padding: 12px;
+  border-radius: 8px;
+  background: #e8eef5;
+  color: #435a76;
+  font-size: .84rem;
+  font-weight: 700;
+  text-align: center;
+}
+#storyFirstPanel .story-first-preview-warning {
+  color: #744f18;
+  line-height: 1.35;
+}
