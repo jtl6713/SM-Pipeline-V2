@@ -100,3 +100,14 @@ test("Worker and Pipeline UI advertise TikTok draft resend", async () => {
   assert.match(worker, /function overlayLiveTikTokPublishRows/);
   assert.match(worker, /decorate: \(records\) => overlayLiveTikTokPublishRows/);
 });
+
+test("TTD reconcile wakes future TikTok drafts only inside the inbox lead window and checks retry backoff", () => {
+  const worker = readStudioWorkerSource();
+  const begin = worker.indexOf("async function studioReconcileTiktokDrafts");
+  const end = worker.indexOf("STUDIO_WORKER_END:studioReconcileTiktokDrafts", begin);
+  assert.ok(begin >= 0 && end > begin, "Expected real reconciliation function");
+  const reconcile = worker.slice(begin, end);
+  assert.match(reconcile, /TikTok_Draft_Status}="Waiting for Schedule"/);
+  assert.match(reconcile, /Publish_Next_Retry_At}=BLANK/);
+  assert.match(reconcile, /STUDIO_TIKTOK_INBOX_DUE_FORMULA/);
+});

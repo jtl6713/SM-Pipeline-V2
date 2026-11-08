@@ -945,3 +945,4 @@ Deploy guarded Studio API Worker 2026-11-08: Script a Short honors all 7 operato
 Deploy 2026-11-08 story-first media handoff import fix PR #1696. Preserve seven scene selections and Airtable authority; no publishing or rendering.
 
 Deploy 2026-11-08 Worker 0.10.768-story-handoff: allow approved storyboard soft exclusions (Low Quality / Watermarked-Branded), return verified storyboard asset IDs, keep exact seven-asset handoff for Idea recYmYbMAwMoReAet / PR-20261108122348-H2U2N6. No render or publish.
+2026-11-08 deploy Studio API 0.10.769-tiktok-photo-auto-recovery. TTD1 scheduled Waiting for Schedule rows wake in the 15-minute inbox lead window and TTD1/TTD2 respect Publish_Next_Retry_At backoff. No manual fallback for unconfirmed photo downloads.

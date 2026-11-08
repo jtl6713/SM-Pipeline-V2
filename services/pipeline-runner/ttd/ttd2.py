@@ -10,6 +10,12 @@ from asset.helpers import parse_int
 from carousel.timeutil import iso_utc, stamp_minutes
 from item4.settings import PipelineSettings
 from render.fields import field, field_str, json_text
+from ttd.assets import is_video_route
+from ttd.recovery import (
+    AUTO_REINIT_DELAY_MINUTES,
+    SLOW_POLL_MINUTES,
+    photo_delivery_recovery,
+)
 from ttd.client import (
     TikTokDraftClient,
     TikTokDraftError,
@@ -38,6 +44,7 @@ from ttd.constants import (
     STATUS_FAILED,
     STATUS_MANUAL_RECEIVED,
     STATUS_PROCESSING,
+    STATUS_READY_FOR_DELIVERY,
     STATUS_RETRY,
     VIDEO_RETRY_MINUTES,
 )
@@ -132,6 +139,67 @@ def process_request(
     token = hash_completion_token(completion_token_material(record_id, publish_id))
     form_url = completion_url(settings.get("TTD4_WEBHOOK_URL"), record_id, token)
     public_ids = public_post_ids_from(body)
+
+    # TikTok photo URLs have already been accepted by the Content Posting API,
+    # but an accepted publish_id is not evidence that any draft was delivered.
+    # Retry a failed pull or a >2h stalled pull automatically, with an upper
+    # bound on new uploads. Never ask a creator to perform a nonexistent
+    # manual action before SEND_TO_USER_INBOX has actually been confirmed.
+    recovery = None
+    if not is_video_route(output) and not field_str(output, "TikTok_Draft_Delivered_At"):
+        recovery = photo_delivery_recovery(
+            status=status,
+            fail_reason=fail_reason_from(body),
+            poll_attempts=attempts,
+            max_poll_attempts=max_attempts,
+            init_attempts=parse_int(field(output, "Publish_Attempt_Count"), 0) or 0,
+            last_attempt_at=field_str(output, "Last_Publish_Attempt_At"),
+        )
+    if recovery == "reinit":
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            record_id,
+            {
+                **unlock_fields(),
+                "Output_Notes": append_note(output, f"TTD2 automatically rearming photo draft after TikTok {status} at {stamp_minutes()}."),
+                "Publish_Status": PUBLISH_STATUS_READY,
+                "Publish_Error_Stage": "TTD2_AUTO_REINIT",
+                "TikTok_Draft_Status": STATUS_READY_FOR_DELIVERY,
+                "Publish_Error_Message": "TikTok photo download did not complete; Studio will retry delivery automatically.",
+                "Publish_Next_Retry_At": retry_at(AUTO_REINIT_DELAY_MINUTES),
+                "Publish_Retry_Eligible": True,
+                "Manual_Fallback_Required": False,
+                "TikTok_Draft_Publish_ID": "",
+                "TikTok_Draft_Response_JSON": response_json(body),
+                "TikTok_Draft_Poll_Attempt_Count": 0,
+                "TikTok_Draft_Last_Checked_At": now,
+            },
+        )
+        return {"processed": True, "auto_reinit": True, "retry": True, **result}
+    if recovery in {"slow_poll", "provider_hold"}:
+        provider_hold = recovery == "provider_hold"
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            record_id,
+            {
+                **unlock_fields(),
+                "Publish_Status": PUBLISH_STATUS_FAILED if provider_hold else PUBLISH_STATUS_PUBLISHING,
+                "Publish_Error_Stage": "TTD2_PROVIDER_HOLD" if provider_hold else "TTD2_SLOW_DOWNLOAD",
+                "TikTok_Draft_Status": STATUS_RETRY if provider_hold else STATUS_PROCESSING,
+                "Publish_Error_Message": (
+                    "TikTok has not completed the photo download after automatic recovery attempts. Studio will continue provider status checks; no user action is possible."
+                    if provider_hold else
+                    "TikTok is still downloading photos. Studio is monitoring the existing draft; no user action is needed."
+                ),
+                "Publish_Next_Retry_At": retry_at(60 if provider_hold else SLOW_POLL_MINUTES),
+                "Publish_Retry_Eligible": True,
+                "Manual_Fallback_Required": False,
+                "TikTok_Draft_Response_JSON": response_json(body),
+                "TikTok_Draft_Last_Checked_At": now,
+                "TikTok_Draft_Poll_Attempt_Count": attempts,
+            },
+        )
+        return {"processed": True, "retry": True, "provider_hold": provider_hold, **result}
 
     if status == INBOX_STATUS:
         client.update_record(

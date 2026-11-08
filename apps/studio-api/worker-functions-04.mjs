@@ -1150,12 +1150,12 @@ export async function studioReconcileTiktokDrafts(env, options = {}) {
     {
       stage: "ttd1",
       pulse: studioPulseTtd1,
-      formula: `AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{TikTok_Draft_Publish_ID}="",${STUDIO_TIKTOK_INBOX_DUE_FORMULA},OR({TikTok_Draft_Status}="Ready for Delivery",AND({TikTok_Draft_Status}="Retry Pending",OR(FIND("TTD1",UPPER({Publish_Error_Stage}&""))>0,{Publish_Error_Stage}="TTD_CAPACITY"))))`,
+      formula: `AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{TikTok_Draft_Publish_ID}="",${STUDIO_TIKTOK_INBOX_DUE_FORMULA},OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())),OR({TikTok_Draft_Status}="Ready for Delivery",{TikTok_Draft_Status}="Waiting for Schedule",AND({TikTok_Draft_Status}="Retry Pending",OR(FIND("TTD1",UPPER({Publish_Error_Stage}&""))>0,{Publish_Error_Stage}="TTD_CAPACITY"))))`,
     },
     {
       stage: "ttd2",
       pulse: studioPulseTtd2,
-      formula: `AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{TikTok_Draft_Publish_ID}!="",${STUDIO_TIKTOK_INBOX_DUE_FORMULA},OR({TikTok_Draft_Status}="Processing",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD2",UPPER({Publish_Error_Stage}&""))>0)))`,
+      formula: `AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{TikTok_Draft_Publish_ID}!="",${STUDIO_TIKTOK_INBOX_DUE_FORMULA},OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())),OR({TikTok_Draft_Status}="Processing",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD2",UPPER({Publish_Error_Stage}&""))>0)))`,
     },
     {
       stage: "ttd3",

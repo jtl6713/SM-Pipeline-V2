@@ -61,6 +61,19 @@ def _scheduled_ms(record: dict[str, Any]) -> int | None:
         return None
 
 
+def _retry_not_due(record: dict[str, Any]) -> bool:
+    raw = field_str(record, "Publish_Next_Retry_At")
+    if not raw:
+        return False
+    try:
+        retry = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if retry.tzinfo is None:
+            retry = retry.replace(tzinfo=timezone.utc)
+        return retry > datetime.now(timezone.utc)
+    except (TypeError, ValueError):
+        return False
+
+
 def _inbox_lead_hold(record: dict[str, Any]) -> str | None:
     if tiktok_inbox_is_due(record):
         return None
@@ -126,10 +139,10 @@ def ttd1_eligibility_reason(
     ):
         return "replace_address_mismatch"
     status = _ci(field_str(record, "TikTok_Draft_Status"))
-    if status == _ci(STATUS_READY_FOR_DELIVERY):
-        return _inbox_lead_hold(record)
+    if status in {_ci(STATUS_READY_FOR_DELIVERY), _ci(STATUS_WAITING_FOR_SCHEDULE)}:
+        return _inbox_lead_hold(record) or ("tiktok_retry_backoff" if _retry_not_due(record) else None)
     if is_retry_for(record, STAGE_TTD1) or is_retry_for(record, STAGE_CAPACITY):
-        return _inbox_lead_hold(record)
+        return _inbox_lead_hold(record) or ("tiktok_retry_backoff" if _retry_not_due(record) else None)
     return "tiktok_draft_not_ready_for_delivery"
 
 
@@ -155,7 +168,7 @@ def ttd2_eligibility_reason(
         return "replace_address_mismatch"
     status = _ci(field_str(record, "TikTok_Draft_Status"))
     if status == _ci(STATUS_PROCESSING) or is_retry_for(record, STAGE_TTD2):
-        return _inbox_lead_hold(record)
+        return _inbox_lead_hold(record) or ("tiktok_retry_backoff" if _retry_not_due(record) else None)
     return "tiktok_draft_not_processing"
 
 
