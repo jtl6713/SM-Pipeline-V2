@@ -87,9 +87,7 @@
 }
 #storyFirstPanel .story-first-shot {
   box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
+  display: block;
   min-width: 0;
   width: 100%;
   overflow: hidden;
@@ -101,9 +99,14 @@
   box-shadow: 0 7px 20px rgba(22, 52, 88, .10), 0 2px 6px rgba(22, 52, 88, .045);
   isolation: isolate;
 }
+#storyFirstPanel details.story-first-shot:not([open]) > :not(summary) {
+  display: none !important;
+}
 #storyFirstPanel .story-first-shot-hero {
   display: grid;
-  grid-template-columns: minmax(118px, 35%) minmax(0, 1fr);
+  grid-template-columns: minmax(118px, 35%) minmax(0, 1fr) 34px;
+  cursor: pointer;
+  list-style: none;
   align-items: center;
   gap: 18px;
   padding: 14px;
@@ -112,6 +115,23 @@
   border-radius: 16px;
   background: linear-gradient(120deg, #f2f7ff, #eaf3ff 62%, #dcecff);
 }
+#storyFirstPanel .story-first-shot-hero::-webkit-details-marker {display: none}
+#storyFirstPanel .story-first-shot-hero::marker {content: ""}
+#storyFirstPanel .story-first-shot-hero:hover {background: linear-gradient(120deg, #eaf4ff, #e2efff 62%, #d5e8ff)}
+#storyFirstPanel .story-first-shot-caret {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: #114c88;
+  background: #fff;
+  font-size: 1.6rem;
+  font-weight: 800;
+  line-height: 1;
+  transition: transform .15s ease;
+}
+#storyFirstPanel details.story-first-shot[open] .story-first-shot-caret {transform: rotate(180deg)}
 #storyFirstPanel .story-first-shot-thumbnail {
   position: relative;
   min-width: 0;
@@ -295,7 +315,8 @@
   overflow-y: auto;
 }
 #storyFirstPanel .story-first-shot :is(input, select, textarea):focus-visible,
-#storyFirstPanel .story-first-shot button:focus-visible {
+#storyFirstPanel .story-first-shot button:focus-visible,
+#storyFirstPanel .story-first-shot-hero:focus-visible {
   outline: 3px solid #5ca9f7;
   outline-offset: 2px;
   border-color: #216eb9;
@@ -402,11 +423,12 @@
   #storyFirstPanel .story-first-shot-list {gap: 14px}
   #storyFirstPanel .story-first-shot {padding: 11px;border-radius: 16px}
   #storyFirstPanel .story-first-shot-hero {
-    grid-template-columns: minmax(90px, 34%) minmax(0, 1fr);
-    gap: 12px;
+    grid-template-columns: minmax(90px, 34%) minmax(0, 1fr) 28px;
+    gap: 10px;
     padding: 11px;
     min-height: 104px;
   }
+  #storyFirstPanel .story-first-shot-caret {width: 28px;height: 28px;font-size: 1.4rem}
   #storyFirstPanel .story-first-shot-thumbnail {height: 102px}
   #storyFirstPanel .story-first-shot-title {font-size: 1.27rem}
   #storyFirstPanel .story-first-shot-title-line {gap: 6px;margin-bottom: 9px}
@@ -425,4 +447,5 @@
 }
 @media (prefers-reduced-motion: reduce) {
   #storyFirstPanel * {scroll-behavior: auto}
+  #storyFirstPanel .story-first-shot-caret {transition: none}
 }
