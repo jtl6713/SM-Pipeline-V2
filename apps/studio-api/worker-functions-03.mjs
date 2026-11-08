@@ -1,3 +1,12 @@
+import {
+  airtableAiClassification,
+  effectiveClassification,
+  parseManualClassification,
+  parseClassificationAudit,
+  appendClassificationAudit,
+  applyManualClassification,
+  validateClassificationPatch,
+} from "./manual-classification.mjs";
 import { parseStoryFirstNotes, upsertStoryFirstNotes, storyFirstShotChecklist } from "./idea-first-storyboard.mjs";
 import { loadAuthorizedIdea, assertIdeaUnpromoted, assertIdeaNotApproved } from "./worker-functions-01.mjs";
 import { serveMichiganV2CachedPreview } from "./michigan-review-preview-cache.mjs";
@@ -2899,7 +2908,7 @@ export function assetLibraryFilterFormula(query, kind, needsProfile = false) {
     // Prefer strong tokens so weak words like "parked" do not empty the scan.
     const keys = ideaLibrarySearchFilterKeys(ideaLibraryTokens(query)).slice(0, 10);
     if (keys.length) {
-      const hay = "LOWER(CONCATENATE({Search_Keywords},' ',{AI_Tags},' ',{Location},' ',{Asset Name},' ',{Topic},' ',{Subtopic},' ',{Asset_Description}))";
+      const hay = "LOWER(CONCATENATE({Search_Keywords},' ',{AI_Tags},' ',{Manual_Classification_JSON},' ',{Location},' ',{Asset Name},' ',{Topic},' ',{Subtopic},' ',{Asset_Description}))";
       const clauses = keys.map((key) => `FIND("${ideaLibraryAirtableEscape(String(key).toLowerCase())}", ${hay})`);
       parts.push(clauses.length === 1 ? clauses[0] : `OR(${clauses.join(",")})`);
     }
@@ -2917,8 +2926,19 @@ export function mapLibraryAsset(record, profilesById = {}) {
   const sizeBytes = ideaLibraryFileBytes(record);
   const profileId = firstLinkedRecordId(f(record, "Content_Profile"));
   const profile = profileId ? profilesById[profileId] : null;
+  const aiClassification = airtableAiClassification(record, profile ? f(profile, "Profile_Name") : "");
+  let manualClassification = {};
+  let classificationHistory = [];
+  try { manualClassification = parseManualClassification(f(record, "Manual_Classification_JSON")); } catch {}
+  try { classificationHistory = parseClassificationAudit(f(record, "Manual_Classification_Audit")); } catch {}
+  const classification = effectiveClassification(aiClassification, manualClassification);
   return {
     record_type: "media_asset",
+    ai_classification: aiClassification,
+    manual_classification: manualClassification,
+    effective_classification: classification,
+    classification_history: classificationHistory.slice(-20),
+    manually_classified: Object.keys(manualClassification).length > 0,
     id: record.id,
     name: f(record, "Asset Name"),
     media_kind: video ? "video" : "photo",
@@ -2926,7 +2946,7 @@ export function mapLibraryAsset(record, profilesById = {}) {
     duration_seconds: Number(f(record, "Duration_Seconds") || 0) || null,
     file_size_bytes: sizeBytes || null,
     file_size_mb: sizeBytes ? Math.round((sizeBytes / 1048576) * 100) / 100 : null,
-    location: f(record, "Location") || null,
+    location: classification.location || null,
     description: f(record, "Asset_Description") || null,
     google_drive_file_id: googleDriveFileId(record),
     google_drive_url: String(f(record, "Google Drive URL") || "").trim() || null,
@@ -3494,6 +3514,94 @@ export async function pulseLibraryAssetClassification(env, recordId) {
   return payload;
 }
 /*__STUDIO_WORKER_END:pulseLibraryAssetClassification__*/
+
+
+/*__STUDIO_MANUAL_ASSET_CLASSIFICATION_1716__*/
+export async function manualLibraryClassificationRoute(request, env, url, authorization) {
+  if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
+  requirePermission(authorization, "production_configure");
+  const profileId = String(url.searchParams.get("profile") || "").trim();
+  if (!/^rec[A-Za-z0-9]+$/.test(profileId)) throw new HttpError(400, "Select a Studio Content Profile before editing classifications");
+  const profile = await resolveWorkingContentProfile(env, authorization, profileId);
+  if (!profile || profile.id !== profileId) throw new HttpError(403, "This profile is not available to your Studio account");
+
+  const match = /^\/api\/library\/(rec[A-Za-z0-9]+)\/manual-classification$/.exec(url.pathname);
+  const bulk = url.pathname === "/api/library/manual-classification";
+  if (!match && !bulk) throw new HttpError(404, "Classification route not found");
+  if (!bulk && !["GET", "PATCH"].includes(request.method)) throw new HttpError(405, "Method not allowed");
+  if (bulk && request.method !== "POST") throw new HttpError(405, "Method not allowed");
+
+  const readAsset = async (id) => {
+    const record = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, id);
+    assertLibrarySourceAsset(record);
+    const owner = firstLinkedRecordId(f(record, "Content_Profile"));
+    if (!owner || owner !== profileId) throw new HttpError(403, "Asset belongs to a different profile or has not been assigned a profile");
+    return record;
+  };
+
+  if (request.method === "GET") {
+    const record = await readAsset(match[1]);
+    const mapped = mapLibraryAsset(record, {[profile.id]: profile});
+    return respond(request, env, {ok: true, record: mapped});
+  }
+
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Valid JSON is required"); }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new HttpError(400, "Invalid classification payload");
+  const mode = String(payload.mode || "add");
+  let patch;
+  try {
+    patch = validateClassificationPatch(payload.patch);
+    if (!["add", "override"].includes(mode)) throw new TypeError("Invalid classification mode");
+  } catch (error) {
+    throw new HttpError(400, error.message || "Invalid classification patch");
+  }
+  const ids = bulk ? payload.record_ids : [match[1]];
+  if (!Array.isArray(ids) || ids.length < 1 || ids.length > 10 ||
+      ids.some(id => !/^rec[A-Za-z0-9]+$/.test(String(id))) ||
+      new Set(ids).size !== ids.length) {
+    throw new HttpError(400, "Select 1 to 10 distinct library assets");
+  }
+  const actor = String(authorization?.user?.record_id || authorization?.user?.email || "studio-member");
+  const results = [];
+  for (const id of ids) {
+    try {
+      const record = await readAsset(id);
+      let previous, history;
+      try {
+        previous = parseManualClassification(f(record, "Manual_Classification_JSON"));
+        history = parseClassificationAudit(f(record, "Manual_Classification_Audit"));
+      } catch {
+        throw new HttpError(409, "Stored classification history needs review before editing");
+      }
+      const ai = airtableAiClassification(record, f(profile, "Profile_Name") || "");
+      const applied = applyManualClassification({
+        ai, manual: previous, patch, mode, actor, at: new Date().toISOString(),
+      });
+      const auditEvent = {...applied.audit, asset_id: id, profile_id: profileId};
+      const events = appendClassificationAudit(history, auditEvent);
+      const saved = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, id, {
+        method: "PATCH",
+        body: JSON.stringify({fields: {
+          Manual_Classification_JSON: JSON.stringify(applied.manual),
+          Manual_Classification_Audit: JSON.stringify(events),
+        }}),
+      });
+      results.push({id, ok: true, record: mapLibraryAsset(saved || record, {[profile.id]: profile})});
+    } catch (error) {
+      results.push({id, ok: false, error: error?.message || "Save failed"});
+    }
+  }
+  const count = results.filter(row => row.ok).length;
+  return respond(request, env, {
+    ok: count > 0, saved: count, failed: results.length - count,
+    count: results.length, results,
+    message: count === results.length
+      ? (count === 1 ? "Manual classification saved." : `${count} asset classifications saved.`)
+      : `${count} of ${results.length} saved. Review the failed items below.`,
+  }, count === results.length ? 200 : 207);
+}
+/*__STUDIO_MANUAL_ASSET_CLASSIFICATION_1716_END__*/
 
 export async function renameAssetLibraryItem(request, env, url, ctx) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
