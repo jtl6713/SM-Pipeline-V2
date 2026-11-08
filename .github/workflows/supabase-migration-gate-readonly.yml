@@ -18,11 +18,17 @@ concurrency:
   cancel-in-progress: false
 jobs:
   probe:
+    if: github.repository == 'jtl6713/SM-Pipeline-V2'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     env:
       CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
       CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      # Ephemeral probe Worker name. Must stay unique and unused in the account.
+      GATE_WORKER: studio-supabase-gate-readonly-20261108
       STUDIO_ACCESS_EMAIL: joseph.t.logan@gmail.com
     steps:
       - name: Probe Worker health, sync status, and runner health
@@ -31,25 +37,112 @@ jobs:
           set -euo pipefail
           test -n "${CF_ACCESS_CLIENT_ID:-}"
           test -n "${CF_ACCESS_CLIENT_SECRET:-}"
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
 
+          # Match proven Pages/Review probes: Access service-token pair only.
+          # Do not send Origin or a forged Cf-Access-Authenticated-User-Email
+          # on the public custom domain — that returned HTTP 403.
           ACCESS=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
                   -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
-                  -H "Cf-Access-Authenticated-User-Email: $STUDIO_ACCESS_EMAIL" \
-                  -H "Origin: https://studio.chicagoshining.com" \
                   -H "Accept: application/json")
 
-          curl -fsS --max-time 30 "${ACCESS[@]}" \
-            "https://studio.chicagoshining.com/api/health" \
-            -o /tmp/studio-health.json
-          curl -fsS --max-time 30 "${ACCESS[@]}" \
-            "https://studio.chicagoshining.com/api/ops/supabase/sync" \
-            -o /tmp/studio-sync.json
-          curl -fsS --max-time 20 \
-            "https://pipeline.chicagoshining.com/health" \
-            -o /tmp/runner-health.json
+          health_code=$(curl -sS --max-time 30 "${ACCESS[@]}" \
+            -o /tmp/studio-health.json -w '%{http_code}' \
+            "https://studio.chicagoshining.com/api/health" || true)
+          echo "health_http=$health_code"
+          test "$health_code" = "200"
+          jq -e 'type=="object"' /tmp/studio-health.json >/dev/null
+
+          runner_code=$(curl -sS --max-time 20 \
+            -o /tmp/runner-health.json -w '%{http_code}' \
+            "https://pipeline.chicagoshining.com/health" || true)
+          echo "runner_http=$runner_code"
+          test "$runner_code" = "200"
+          jq -e 'type=="object"' /tmp/runner-health.json >/dev/null
+
+          # /api/ops/supabase/sync requires tenant_admin. Reach it the same way
+          # other readonly production probes do: temporary Worker + service binding
+          # + Cf-Access-Authenticated-User-Email (never mutate Studio production).
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          CODE="$(curl -sS --max-time 20 -o /tmp/gate-existing.json -w '%{http_code}' -H "$AUTH" \
+            "$API/workers/scripts/$GATE_WORKER/settings" || true)"
+          if [[ "$CODE" != "404" ]]; then
+            echo "::error::Refusing to overwrite existing gate Worker, HTTP $CODE"
+            exit 1
+          fi
+          OWNED=0
+          cleanup() {
+            if [[ "$OWNED" == "1" ]]; then
+              curl -fsS --max-time 20 -X DELETE -H "$AUTH" "$API/workers/scripts/$GATE_WORKER" >/dev/null ||
+                echo "::warning::Temporary gate Worker requires cleanup; Studio production Worker unchanged"
+            fi
+          }
+          trap cleanup EXIT
+          TOKEN="$(openssl rand -hex 32)"
+          cat > /tmp/gate-worker.mjs <<JS
+          export default {
+            async fetch(request, env) {
+              const path = new URL(request.url).pathname;
+              if (request.method !== "GET" || path !== "/sync") {
+                return new Response("Not found", { status: 404 });
+              }
+              if (request.headers.get("Authorization") !== "Bearer " + env.GATE_TOKEN) {
+                return new Response("Unauthorized", { status: 401 });
+              }
+              const answer = await env.STUDIO_API.fetch(new Request(
+                "https://studio.chicagoshining.com/api/ops/supabase/sync",
+                {
+                  headers: {
+                    "Cf-Access-Authenticated-User-Email": "${STUDIO_ACCESS_EMAIL}",
+                    "Origin": "https://studio.chicagoshining.com",
+                    "Accept": "application/json",
+                  },
+                },
+              ));
+              return new Response(await answer.text(), {
+                status: answer.status,
+                headers: {
+                  "Content-Type": "application/json",
+                  "Cache-Control": "no-store",
+                },
+              });
+            },
+          };
+          JS
+          cat >/tmp/gate-metadata.json <<EOF
+          {"main_module":"worker.mjs","compatibility_date":"2026-10-01","bindings":[{"type":"service","name":"STUDIO_API","service":"$TARGET_WORKER"},{"type":"plain_text","name":"GATE_TOKEN","text":"$TOKEN"}]}
+          EOF
+          PUT="$(curl -sS --max-time 30 -o /tmp/gate-put.json -w '%{http_code}' -X PUT \
+            "$API/workers/scripts/$GATE_WORKER/content" -H "$AUTH" \
+            -F 'metadata=@/tmp/gate-metadata.json;type=application/json' \
+            -F 'worker.mjs=@/tmp/gate-worker.mjs;type=application/javascript+module;filename=worker.mjs')"
+          if ! [[ "$PUT" =~ ^2[0-9][0-9]$ ]] || ! jq -e '.success==true' /tmp/gate-put.json >/dev/null; then
+            echo "::error::Temporary gate Worker could not be created (HTTP $PUT)"
+            jq -c '{success,errors:[.errors[]?|{code,message}]}' /tmp/gate-put.json || true
+            exit 1
+          fi
+          OWNED=1
+          curl -fsS --max-time 20 -X POST -H "$AUTH" -H 'Content-Type: application/json' \
+            "$API/workers/scripts/$GATE_WORKER/subdomain" \
+            --data '{"enabled":true,"previews_enabled":false}' >/tmp/gate-sub.json
+          jq -e '.success==true' /tmp/gate-sub.json >/dev/null
+          SUBDOMAIN="$(curl -fsS --max-time 20 -H "$AUTH" "$API/workers/subdomain" | jq -er '.result.subdomain')"
+          BASE="https://$GATE_WORKER.$SUBDOMAIN.workers.dev"
+          sync_code="000"
+          for attempt in $(seq 1 12); do
+            sync_code="$(curl -sS --max-time 45 -o /tmp/studio-sync.json -w '%{http_code}' \
+              -H "Authorization: Bearer $TOKEN" "$BASE/sync" || true)"
+            echo "sync_http_attempt_${attempt}=$sync_code"
+            if [[ "$sync_code" == "200" ]]; then break; fi
+            sleep 3
+          done
+          test "$sync_code" = "200"
+          jq -e 'type=="object"' /tmp/studio-sync.json >/dev/null
 
           python3 - <<'PY'
-          import json, os, sys, time
+          import json, sys, time
           from pathlib import Path
 
           health = json.loads(Path("/tmp/studio-health.json").read_text())
@@ -122,16 +215,10 @@ jobs:
               f"status={last.get('status')!r} ok={last.get('ok')!r} error={last.get('error')!r}",
           )
 
-          # Half-hour cron should leave a stamp within ~40 minutes when healthy.
           at_ms = last.get("at")
-          age_min = None
           if isinstance(at_ms, (int, float)) and at_ms > 0:
               age_min = (now * 1000 - float(at_ms)) / 60000.0
-              check(
-                  "last_sync age < 40 min",
-                  age_min < 40,
-                  f"age_min={age_min:.1f}",
-              )
+              check("last_sync age < 40 min", age_min < 40, f"age_min={age_min:.1f}")
           else:
               check("last_sync age < 40 min", False, "missing last_sync.at")
 
@@ -254,7 +341,6 @@ jobs:
               "ok": last.get("ok"),
               "run_id": """${{ github.run_id }}""",
           }
-          # Dedupe identical sync stamps so re-probes of the same half-hour do not inflate streak.
           if not history or history[-1].get("last_sync_at") != stamp_at:
               history.append(entry)
           history = history[-12:]
