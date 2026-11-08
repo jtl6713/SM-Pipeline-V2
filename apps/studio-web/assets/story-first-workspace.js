@@ -544,14 +544,48 @@
     });
   }
   async function selectSceneAsset(index, asset) {
-    if(current.busy)return;
-    if(!eligibility(current.story.scenes[index],asset))
+    if (current.busy) throw new Error("A storyboard save is already in progress. Retry when it finishes.");
+    const profile = assertProfile();
+    if (!current.story?.scenes?.[index] || !eligibility(current.story.scenes[index], asset))
       throw new Error("Media type, ownership, rights or Drive availability is not eligible.");
-    const shot=current.story.scenes[index],prior=JSON.parse(JSON.stringify(shot));
-    shot.assigned_asset_id=asset.id;shot.selected_approved=true;shot.decision="library";shot.media_override=false;
-    current.selectedAssetNames[asset.id] = String(asset.name || asset.filename || asset.title || "").trim();
-    try {await save();render();report("Scene "+(index+1)+" selection verified and saved.");}
-    catch(err){Object.assign(shot,prior);render();throw err;}
+    // The Worker deliberately rejects selected assets on initial Idea creation.
+    // Create the unselected Idea first, then PATCH the approved selection.
+    // Never retry an ambiguous POST: save() already handles that boundary.
+    if (!current.record?.id) {
+      await save();
+      if (assertProfile() !== profile) throw new Error("Profile changed while saving. Reopen the saved Idea.");
+    }
+    const shot = current.story.scenes[index];
+    const prior = JSON.parse(JSON.stringify(shot));
+    const previousName = current.selectedAssetNames[asset.id];
+    shot.assigned_asset_id = asset.id;
+    shot.assigned_asset_name = String(asset.name || asset.filename || asset.title || "").trim();
+    shot.selected_approved = true;
+    shot.decision = "library";
+    shot.state = "media_approved";
+    shot.media_override = false;
+    current.selectedAssetNames[asset.id] = shot.assigned_asset_name;
+    try {
+      const saved = await save();
+      const confirmed = storyNotesFromRecord(saved)?.scenes?.[index];
+      if (confirmed?.assigned_asset_id !== asset.id || confirmed?.selected_approved !== true ||
+          confirmed?.state !== "media_approved") {
+        const error = new Error("Airtable did not confirm the selected image. Reopen the saved Idea and verify before retrying.");
+        error.saveUnconfirmed = true;
+        throw error;
+      }
+      render();
+      report("Scene " + (index + 1) + " selected image saved and verified in Airtable.");
+    } catch (err) {
+      // Keep search results open on failure instead of silently closing the
+      // picker and showing a different suggested thumbnail.
+      if (!err.saveUnconfirmed) {
+        Object.assign(shot, prior);
+        if (previousName === undefined) delete current.selectedAssetNames[asset.id];
+        else current.selectedAssetNames[asset.id] = previousName;
+      }
+      throw err;
+    }
   }
   async function uploadScene(index, file) {
     if(!file||current.busy)return;
@@ -616,7 +650,23 @@
       const open=node("a","story-first-preview","View preview");
       open.href=img.src;open.target="_blank";open.rel="noopener noreferrer";
       put(desc,open);
-      button("Select","secondary-button",()=>selectSceneAsset(asset._index,asset).catch(e=>report(e.message,true)),desc);
+      const choose = button("Select", "secondary-button", async () => {
+        choose.disabled = true;
+        choose.textContent = "Saving selection…";
+        desc.querySelector(".story-first-select-error")?.remove();
+        try {
+          await selectSceneAsset(asset._index, asset);
+        } catch (error) {
+          const message = "Scene " + (asset._index + 1) + " image not selected: " + error.message;
+          report(message, true);
+          const inline = node("p", "form-message error-text story-first-select-error", message);
+          inline.setAttribute("role", "alert");
+          desc.appendChild(inline);
+        } finally {
+          choose.disabled = false;
+          choose.textContent = "Select";
+        }
+      }, desc);
       put(wrap,img,desc);parent.appendChild(wrap);
     }
     // All editorial controls remain the same inputs and save to the same Airtable storyboard.
