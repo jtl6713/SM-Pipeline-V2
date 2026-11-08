@@ -1,0 +1,137 @@
+name: Verify Golden Hour Storyboard Handoff
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/verify-golden-hour-storyboard-handoff.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      BRIDGE_WORKER: chicagoshining-story-handoff-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Probe live storyboard production handoff through service binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$ROOT/workers/scripts/$TARGET_WORKER/deployments" -H "$AUTH" -o /tmp/deployments.json
+          ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments.json)
+          echo "active_worker_version=$ACTIVE"
+          TOKEN=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
+          export TOKEN
+          python3 <<'PY'
+          import os
+          from pathlib import Path
+          token = os.environ["TOKEN"]
+          Path("/tmp/bridge.js").write_text(
+          """
+          const OWNER='joseph.t.logan@gmail.com';
+          const IDEA='recYmYbMAwMoReAet';
+          const PROFILE='recT2rbKX3MF7cVFU';
+          const EXPECTED_PR='recyffrFd4OwNPz8I';
+          const EXPECTED_TOKEN='""" + token + """';
+          const EXPECTED_IDS=['recVL46KTaLLefNzd','receoP41M6mfmUGTM','recXpMZ9APuThWWiA','receJNGFZP7RAtBtm','recgahJUVfHF137cz','recdbmbHlwKvVEDtG','rectwUMUdaUI0CkBp'];
+          async function callApi(env,path,method='GET',body=null){
+            const headers=new Headers({
+              'Cf-Access-Authenticated-User-Email':OWNER,
+              'Origin':'https://studio.chicagoshining.com',
+              'Accept':'application/json'
+            });
+            let payload;
+            if(method!=='GET'){
+              headers.set('Content-Type','application/json');
+              payload=JSON.stringify(body||{});
+            }
+            try{
+              const r=await env.STUDIO_API.fetch(new Request('https://studio.chicagoshining.com'+path,{method,headers,body:payload}));
+              const text=await r.text();
+              let parsed; try{ parsed=text?JSON.parse(text):null; }catch{ parsed={raw:text.slice(0,2000)}; }
+              return {path,method,status:r.status,ok:r.ok,body:parsed};
+            }catch(error){
+              return {path,method,status:599,ok:false,body:{error:String(error&&error.message||error)}};
+            }
+          }
+          export default {
+            async fetch(request, env){
+              const url=new URL(request.url);
+              if(url.pathname !== '/'+EXPECTED_TOKEN) return new Response('not found',{status:404});
+              const health=await callApi(env,'/api/health');
+              const handoff=await callApi(env,'/api/ideas/'+IDEA+'/production-request?profile='+PROFILE,'POST',{
+                content_profile_id:PROFILE, input_kind:'story-first'
+              });
+              const record=(handoff.body&&handoff.body.record)||{};
+              const ids=Array.isArray(handoff.body&&handoff.body.storyboard_asset_ids)?handoff.body.storyboard_asset_ids:[];
+              const count=Number(record.studio_master_asset_count||(handoff.body&&handoff.body.storyboard_asset_count)||0);
+              const get=await callApi(env,'/api/production-requests/'+EXPECTED_PR+'?fields=light');
+              const getRec=(get.body&&get.body.record)||{};
+              let recommend=await callApi(env,'/api/production-requests/'+EXPECTED_PR+'/recommend-outputs','POST',{});
+              if(recommend.status===404) recommend=await callApi(env,'/api/production-requests/'+EXPECTED_PR+'/output-plan','POST',{});
+              const ok=Boolean(handoff.ok && handoff.status<300 && record.id===EXPECTED_PR && count===7 && Number(getRec.studio_master_asset_count||0)===7 && (ids.length===0 || (ids.length===7 && ids.every((id,i)=>id===EXPECTED_IDS[i]))));
+              return Response.json({
+                ok,
+                worker_health:{status:health.status,ok:health.ok,version:(health.body&& (health.body.version||health.body.worker_version))||null},
+                handoff:{
+                  status:handoff.status, ok:handoff.ok,
+                  error:(handoff.body&& (handoff.body.error||handoff.body.message))||null,
+                  created:handoff.body&&handoff.body.created,
+                  storyboard_verified:handoff.body&&handoff.body.storyboard_verified||null,
+                  storyboard_asset_ids:ids,
+                  record:{
+                    id:record.id||null,
+                    production_request_id:record.production_request_id||null,
+                    studio_master_asset_count:record.studio_master_asset_count??null,
+                    studio_master_asset_status:record.studio_master_asset_status||null,
+                    studio_item4_state:record.studio_item4_state||null
+                  }
+                },
+                get:{status:get.status,ok:get.ok,studio_master_asset_count:getRec.studio_master_asset_count??null,production_request_id:getRec.production_request_id||null},
+                recommend:{status:recommend.status,ok:recommend.ok,error:(recommend.body&& (recommend.body.error||recommend.body.message))||null,body_keys:recommend.body&&typeof recommend.body==='object'?Object.keys(recommend.body).slice(0,20):[]}
+              }, {status: ok ? 200 : 500});
+            }
+          };
+          """.strip()
+          )
+          print("bridge written", len(Path("/tmp/bridge.js").read_text()))
+          PY
+          mkdir -p /tmp/bridge-src
+          cp /tmp/bridge.js /tmp/bridge-src/bridge.js
+          cat >/tmp/bridge-src/wrangler.jsonc <<JSON
+          {
+            "name": "$BRIDGE_WORKER",
+            "main": "bridge.js",
+            "compatibility_date": "2024-09-23",
+            "workers_dev": true,
+            "services": [{ "binding": "STUDIO_API", "service": "$TARGET_WORKER" }]
+          }
+          JSON
+          npm install --prefix /tmp/bridge-src --no-save wrangler@4.123.0 >/tmp/wrangler-install.log
+          (cd /tmp/bridge-src && ./node_modules/.bin/wrangler deploy --config wrangler.jsonc) >/tmp/bridge-deploy.log 2>&1 || { tail -80 /tmp/bridge-deploy.log; exit 1; }
+          curl -fsS "$ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain.json
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
+          URL="https://$BRIDGE_WORKER.$SUBDOMAIN.workers.dev/$TOKEN"
+          CODE=000
+          for i in $(seq 1 40); do
+            CODE=$(curl -sS --max-time 120 -o /tmp/handoff-result.json -w '%{http_code}' "$URL" || true)
+            echo "attempt=$i http=$CODE"
+            if grep -Fq 'error code: 1042' /tmp/handoff-result.json 2>/dev/null; then sleep 3; continue; fi
+            break
+          done
+          echo "result_http=$CODE"
+          cat /tmp/handoff-result.json
+          test "$CODE" = "200"
+          jq -e '.ok==true and .handoff.record.id=="recyffrFd4OwNPz8I" and .handoff.record.studio_master_asset_count==7 and .get.studio_master_asset_count==7' /tmp/handoff-result.json >/dev/null
+          curl -fsS -X DELETE "$ROOT/workers/scripts/$BRIDGE_WORKER" -H "$AUTH" >/dev/null || true
