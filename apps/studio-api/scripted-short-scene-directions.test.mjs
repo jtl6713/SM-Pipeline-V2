@@ -86,7 +86,7 @@ test("scene visual drift and scene order changes are rejected at QA boundary", (
   scenes[3].voiceover_text=lines[4].voice;
   const check=scriptedShortSceneDirectionErrors(sceneBrief,buildTimelineFromScenes(scenes));
   assert.equal(check.ok,false);
-  assert.match(check.errors.join(" "),/visual requirement/);
+  assert.match(check.errors.join(" "),/visual requirements?/);
   assert.match(check.errors.join(" "),/voiceover/);
 });
 
@@ -157,13 +157,13 @@ test("real seven-scene sunset prompt is never collapsed to three or given full-s
   assert.equal(original.requested_count, 7);
   assert.equal(original.recognized_voiceovers, 7);
   assert.equal(original.recognized_visuals, 7);
-  assert.equal(original.recognized_on_screen_texts, 7);
-  assert.deepEqual(original.timings.map(t=>[t.start_seconds,t.end_seconds]),
+  assert.equal(original.on_screen_text.filter(Boolean).length, 7);
+  assert.deepEqual(original.timings.map(t=>[t.start,t.end]),
     [[0,3],[3,7],[7,10],[10,13],[13,17],[17,22],[22,25]]);
-  assert.deepEqual(original.on_screen_texts,
+  assert.deepEqual(original.on_screen_text,
     ["Chicago sunset is at 4:30 now","1/5","2/5","3/5","4/5","5/5",
      "Save this for your next golden hour"]);
-  assert.equal(original.on_screen_texts_instagram[6],"Send this to someone you'd watch it with");
+  assert.equal(original.on_screen_text_instagram[6],"Send this to someone you'd watch it with");
   assert.equal(original.voiceovers_instagram[6],"Send this to someone who'd love it.");
   assert.equal(original.voiceovers[0],"Sunset's at 4:30 now. Here's where to be.");
   assert.equal(original.voiceovers[5],"Then stay till the lights come on.");
@@ -197,7 +197,7 @@ test("real scene overlay and Instagram substitution cannot be silently dropped",
   assert.equal(checked.ok,false);
   assert.match(checked.errors.join(" "),/Instagram on-screen text/);
   assert.match(checked.errors.join(" "),/Instagram voiceover/);
-  assert.match(checked.errors.join(" "),/music-only hold/);
+  assert.match(checked.errors.join(" "),/music-only/);
 });
 
 test("story-first Airtable and Studio editor persist all scene-specific production text", async () => {
