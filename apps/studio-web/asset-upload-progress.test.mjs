@@ -206,3 +206,117 @@ test("classification polling cannot overwrite an unresolved upload failure", () 
   context.syncLibraryClassifyStatusMessage(1);
   assert.equal(message,"Classifying 1 of 1 remaining.");
 });
+
+function libraryPollHarness(ids, records, startingMessage = "Asset saved") {
+  const watched = { ids: new Set(ids), total: ids.length, startedAt: Date.now() };
+  const status = { message: startingMessage, className: "", syncCalls: [], scheduled: 0 };
+  const sourceStart = source.indexOf("async function pollLibraryClassification()");
+  const sourceEnd = source.indexOf("function markLibraryCardsClassifying(", sourceStart);
+  assert.ok(sourceStart > 0 && sourceEnd > sourceStart);
+  const context = vm.createContext({
+    activeNavPage: () => "library",
+    document: { visibilityState: "visible", querySelectorAll: () => [] },
+    libraryListQueryParams: () => ({published: false, params: {toString: () => ""}}),
+    libraryClassifyPollInFlight: false,
+    libraryClassifyWatch: watched,
+    api: async () => ({records}),
+    fetchLibraryClassificationRecords: async () => records,
+    patchLibraryClassificationCard: () => {},
+    libraryClassificationInProgress: value => value === "Processing",
+    persistLibraryClassifyWatch: () => {},
+    syncLibraryClassifyStatusMessage: left => {
+      status.syncCalls.push(left);
+      if (left === 0) watched.ids.clear();
+    },
+    libraryVisibleClassifying: () => records.some(record => record.classification_status === "Processing"),
+    libraryClassifyWatchActive: () => watched.ids.size > 0,
+    scheduleLibraryClassifyPoll: () => { status.scheduled++; },
+    stopLibraryClassifyPoll: () => {},
+    libraryUploadMessageBusy: () => false,
+    setLibraryUploadMessage: (message, className = "") => {
+      status.message = message; status.className = className;
+    },
+    $: id => id === "libraryUploadProgress"
+      ? {dataset: {state: "complete"}}
+      : {textContent: status.message},
+  });
+  vm.runInContext(source.slice(sourceStart, sourceEnd), context);
+  return {context, status, watched};
+}
+
+test("classified watched asset finishes its progress message rather than staying Classifying", async () => {
+  const {context, status, watched} = libraryPollHarness(
+    ["recCTA18"], [{id: "recCTA18", record_type: "media_asset", classification_status: "Classified"}],
+    "Classifying 1 of 1 remaining.",
+  );
+  await context.pollLibraryClassification();
+  assert.deepEqual(status.syncCalls, [0]);
+  assert.equal(watched.ids.size, 0);
+  assert.match(status.message, /Classification complete.*1 of 1/i);
+  assert.equal(status.className, "success");
+});
+
+test("unrelated library Processing cards never resurrect upload classification progress", async () => {
+  const {context, status} = libraryPollHarness(
+    [], [{id: "recOther", record_type: "media_asset", classification_status: "Processing"}],
+    "Asset Manager upload complete",
+  );
+  await context.pollLibraryClassification();
+  assert.deepEqual(status.syncCalls, []);
+  assert.equal(status.message, "Asset Manager upload complete");
+  const stale = libraryPollHarness([], [], "Classifying 1 of 1 remaining.");
+  await stale.context.pollLibraryClassification();
+  assert.equal(stale.status.message, "Status: ready");
+  assert.deepEqual(stale.status.syncCalls, []);
+});
+
+test("classification errors and missing records do not claim a successful classification", async () => {
+  const error = libraryPollHarness(["recCTA18"], [{id:"recCTA18", record_type:"media_asset", classification_status:"Classification Error"}], "Classifying 1 of 1 remaining.");
+  await error.context.pollLibraryClassification();
+  assert.match(error.status.message, /needs attention/i);
+  assert.equal(error.status.className, "error-text");
+  const missing = libraryPollHarness(["recUnknown"], [], "Classifying 1 of 1 remaining.");
+  await missing.context.pollLibraryClassification();
+  assert.match(missing.status.message, /could not be verified/i);
+  assert.equal(missing.status.className, "error-text");
+});
+
+test("expired classification watch clears its pending status without claiming completion", () => {
+  const start = source.indexOf("function scheduleLibraryClassifyPoll(");
+  const end = source.indexOf("async function fetchLibraryClassificationRecords(", start);
+  let cleared = false, stopped = false, message = "";
+  const watch = {ids:new Set(["recCTA18"])};
+  const context = vm.createContext({
+    libraryClassifyWatchActive: () => watch.ids.size > 0,
+    libraryClassifyWatchIsFresh: () => false,
+    libraryClassifyWatch: watch,
+    clearLibraryClassificationWatch: () => {watch.ids.clear();cleared = true;},
+    libraryUploadMessageBusy: () => false,
+    $: () => ({dataset: {state:"complete"}}),
+    setLibraryUploadMessage: value => {message = value;},
+    stopLibraryClassifyPoll: () => {stopped = true;},
+  });
+  vm.runInContext(source.slice(start,end), context);
+  context.scheduleLibraryClassifyPoll(true);
+  assert.equal(cleared, true);
+  assert.equal(stopped, true);
+  assert.match(message, /not verified/i);
+  assert.doesNotMatch(message, /complete/i);
+});
+
+test("failed status GET does not falsely report classification still running", () => {
+  const start = source.indexOf("function libraryClassifyPollError(");
+  const end = source.indexOf("async function pollLibraryClassification(", start);
+  let message = "", retried = 0;
+  const context = vm.createContext({
+    libraryClassifyWatchActive: () => true,
+    libraryUploadMessageBusy: () => false,
+    $: () => ({dataset: {state:"complete"}}),
+    setLibraryUploadMessage: value => {message = value;},
+    scheduleLibraryClassifyPoll: () => {retried++;},
+  });
+  vm.runInContext(source.slice(start,end), context);
+  context.libraryClassifyPollError(new Error("network"));
+  assert.match(message, /Unable to verify/i);
+  assert.equal(retried, 1);
+});

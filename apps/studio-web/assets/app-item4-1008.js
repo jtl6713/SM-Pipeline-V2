@@ -300,7 +300,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.911-library-preview";
+  const BUILD_ID = "item4-0.6.912-classification-watch";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -24511,6 +24511,17 @@ function timedScriptAssetLabel(asset, index) {
   }
 
   function scheduleLibraryClassifyPoll(force = false) {
+    // A browser-side classification watch has a bounded lifetime. Expiry is
+    // unknown, not "still processing" and never proof of failure or success.
+    if (libraryClassifyWatchActive() && !libraryClassifyWatchIsFresh()) {
+      const unresolved = libraryClassifyWatch.ids.size;
+      clearLibraryClassificationWatch();
+      if (!libraryUploadMessageBusy() && !["failed", "partial"].includes($("libraryUploadProgress")?.dataset?.state)) {
+        setLibraryUploadMessage(`Classification status not verified for ${unresolved} asset(s). Check the classification badge in Asset Manager.`, "error-text");
+      }
+      stopLibraryClassifyPoll();
+      return;
+    }
     if (activeNavPage() !== "library" || libraryKindFilterValue() === "published") {
       stopLibraryClassifyPoll();
       return;
@@ -24522,7 +24533,7 @@ function timedScriptAssetLabel(asset, index) {
     if (libraryClassifyPollTimer) return;
     libraryClassifyPollTimer = window.setTimeout(() => {
       libraryClassifyPollTimer = null;
-      pollLibraryClassification().catch(() => scheduleLibraryClassifyPoll(true));
+      pollLibraryClassification().catch(libraryClassifyPollError);
     }, LIBRARY_CLASSIFY_POLL_MS);
   }
 
@@ -24535,6 +24546,14 @@ function timedScriptAssetLabel(asset, index) {
       records.push(...(data.records || []));
     }
     return records;
+  }
+
+  function libraryClassifyPollError(error) {
+    // A failed status GET is not evidence that A3 is still running.
+    if (libraryClassifyWatchActive() && !libraryUploadMessageBusy() && !["failed", "partial"].includes($("libraryUploadProgress")?.dataset?.state)) {
+      setLibraryUploadMessage("Unable to verify classification status. Retrying the status check…", "error-text");
+    }
+    scheduleLibraryClassifyPoll(true);
   }
 
   async function pollLibraryClassification() {
@@ -24569,22 +24588,28 @@ function timedScriptAssetLabel(asset, index) {
         if (libraryClassificationInProgress(record.classification_status)) still += 1;
       }
       if (watchIds.length) {
-        const activeIds = records
-          .filter((record) => watchIds.includes(record.id) && libraryClassificationInProgress(record.classification_status))
-          .map((record) => record.id);
-        // Finished, failed, re-queued, or deleted rows must leave the watch immediately.
-        // Missing rows used to count forever, which is how "1 of 2 remaining" became stale.
+        const byId = new Map(records.filter((record) => watchIds.includes(record.id)).map((record) => [record.id, record]));
+        // Only an actual Processing record keeps this upload's watch active.
+        // Missing records are unknown, never assumed successful.
+        const processingIds = watchIds.filter((id) => libraryClassificationInProgress(byId.get(id)?.classification_status));
         libraryClassifyWatch.ids.clear();
-        activeIds.forEach((id) => libraryClassifyWatch.ids.add(id));
+        processingIds.forEach((id) => libraryClassifyWatch.ids.add(id));
         persistLibraryClassifyWatch();
-        still = activeIds.length;
+        still = processingIds.length;
         syncLibraryClassifyStatusMessage(still);
+        if (!still && !libraryUploadMessageBusy() && !["failed", "partial"].includes($("libraryUploadProgress")?.dataset?.state)) {
+          const checked = watchIds.map((id) => byId.get(id));
+          const errors = checked.filter((record) => record?.classification_status === "Classification Error").length;
+          const classified = checked.filter((record) => record?.classification_status === "Classified").length;
+          if (errors) setLibraryUploadMessage(`Classification needs attention for ${errors} asset(s). Review the asset badge.`, "error-text");
+          else if (classified === watchIds.length) setLibraryUploadMessage(`Classification complete — ${classified} of ${watchIds.length} watched asset(s) classified.`, "success");
+          else setLibraryUploadMessage("Classification status could not be verified for every watched asset. Check its classification badge.", "error-text");
+        }
       } else {
-        const visible = [...document.querySelectorAll("#libraryList [data-library-classification]")]
-          .filter((node) => /Classifying/i.test(node.textContent || "")).length;
-        const left = Math.max(still, visible);
-        if (left) syncLibraryClassifyStatusMessage(left);
-        else syncLibraryClassifyStatusMessage(0);
+        // Unrelated Processing library cards must not resurrect the previous
+        // upload's "Classifying 1 of 1 remaining" banner.
+        const current = String($("libraryUploadMessage")?.textContent || "");
+        if (!libraryUploadMessageBusy() && /^Classifying \d+(?: of \d+)? remaining\./i.test(current)) setLibraryUploadMessage("Status: ready");
       }
       if (still || libraryVisibleClassifying() || libraryClassifyWatchActive()) scheduleLibraryClassifyPoll(true);
     } finally {
@@ -25149,7 +25174,7 @@ function timedScriptAssetLabel(asset, index) {
       if (document.visibilityState !== "visible") return;
       if (libraryVisibleClassifying() || libraryClassifyWatchActive()) {
         stopLibraryClassifyPoll();
-        pollLibraryClassification().catch(() => scheduleLibraryClassifyPoll(true));
+        pollLibraryClassification().catch(libraryClassifyPollError);
       }
     });
   }
