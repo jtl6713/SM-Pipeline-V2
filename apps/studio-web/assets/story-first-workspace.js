@@ -952,6 +952,9 @@
       render();
       // Per-scene discovery follows story authoring and never changes its visual requirements.
       report("Story and timed visuals written first. Review up to three recommendations per scene, or generate/supply your own. Save partial progress anytime.");
+    } catch (error) {
+      // An obsolete response must not overwrite the new blank-state message.
+      if (generation === current.planRevision) throw error;
     } finally {
       if (generation === current.planRevision) {
         current.proposing = false;
