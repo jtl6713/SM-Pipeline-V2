@@ -1791,9 +1791,19 @@
     // Keep the workflow bar but suppress misleading destination render counts (0/3).
     if (/^Native Photo Route$/i.test(String(record?.render_status || "").trim())) {
       const state = String(record?.studio_state || "").trim();
-      const label = ["Ready for Review", "Approved", "Scheduled", "Published", "Uploading", "Platform Processing", "Draft Delivered"].includes(state)
-        ? "Photos ready"
-        : state === "Failed" ? "Photo error" : state === "Skipped" ? "Skipped" : "Preparing photos";
+      // Native photo assets and destination delivery are independent stages.
+      // A failed TikTok draft must never send an already-selected photo set
+      // back to the misleading "Preparing photos" / "Photo error" state.
+      const draft = String(record?.tiktok_draft_status || "").trim();
+      const publish = String(record?.publish_status || "").trim();
+      const output = String(record?.output_status || "").trim();
+      const deliveryFailed = /^Failed$/i.test(draft) || /^Failed$/i.test(publish);
+      const assetsComplete = /^(Approved for Publishing|Approved|Scheduled|Published)$/i.test(output)
+        || ["Ready for Review", "Approved", "Scheduled", "Published", "Uploading", "Platform Processing", "Draft Delivered", "Manual Action Required"].includes(state);
+      const label = state === "Skipped" ? "Skipped"
+        : deliveryFailed && assetsComplete ? "Photos ready · delivery failed"
+        : assetsComplete ? "Photos ready"
+        : state === "Failed" ? "Photo error" : "Preparing photos";
       const pct = pipelineDisplayPercent(record);
       const n = Number(pct);
       if (pct === null || pct === undefined || !Number.isFinite(n)) {
