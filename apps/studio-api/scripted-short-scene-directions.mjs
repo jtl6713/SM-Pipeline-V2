@@ -81,8 +81,8 @@ export function scriptedShortSceneDirections(brief) {
   const labels = new Map(), time = new Map(), silent = new Map();
   const headers = [...source.matchAll(headingPattern)].filter(row => +row[1] >= 1 && +row[1] <= 12);
   const consecutive = headers.length >= 2 && headers.every((row,index) => Number(row[1]) === index + 1);
-  const explicitCount = requestedSceneCount(source);
-  const count = explicitCount || (consecutive ? headers.length : null);
+  const statedCount = explicitCount(source);
+  const count = statedCount || (consecutive ? headers.length : null);
   for (let i = 0; i < headers.length; i++) {
     const head = headers[i], n = Number(head[1]);
     const body = source.slice(head.index + head[0].length, headers[i+1]?.index ?? source.length);
@@ -111,11 +111,11 @@ export function scriptedShortSceneDirections(brief) {
     if (!voice.has(+row[1])) voice.set(+row[1],parseLabelledValue(row[2]).primary);
   }
   return {
-    requested_count:count, explicit_count:explicitCount, header_count:headers.length,
+    requested_count:count, explicit_count:statedCount, header_count:headers.length,
     voiceovers:sequence(voice,count), visuals:sequence(visual,count),
     on_screen_text:sequence(overlay,count), on_screen_text_instagram:sequence(instagramOverlay,count),
     voiceovers_instagram:sequence(instagramVoice,count), scene_labels:sequence(labels,count),
-    timings:sequence(time,count), music_only_tail_seconds:sequence(silent,count)?.map(v => Number(v) || 0) || null,
+    timings:sequence(time,count), music_only_last_seconds:sequence(silent,count)?.map(v => Number(v) || 0) || null,
     recognized_voiceovers:voice.size, recognized_visuals:visual.size, recognized_timings:time.size,
   };
 }
@@ -132,7 +132,7 @@ export function scriptedShortDirectedScenes(brief) {
     on_screen_text:data.on_screen_text?.[i] || "",
     on_screen_text_instagram:data.on_screen_text_instagram?.[i] || "",
     voiceover_instagram:data.voiceovers_instagram?.[i] || "",
-    music_only_tail_seconds:data.music_only_tail_seconds?.[i] || 0,
+    music_only_last_seconds:data.music_only_last_seconds?.[i] || 0,
     ...(timed ? {start_seconds:data.timings[i].start,end_seconds:data.timings[i].end} : {}),
     asset_id:"", media_asset_id:"", shot_status:"suggestion",
   }));
@@ -189,9 +189,9 @@ export function scriptedShortSceneDirectionErrors(brief, timeline) {
       errors.push("The proposal changed the " + label + " instructions.");
     }
   }
-  if (data.music_only_tail_seconds?.some(Boolean) &&
-      (scenes.length !== data.music_only_tail_seconds.length ||
-       scenes.some((row,i) => (Number(row.music_only_tail_seconds) || 0) !== data.music_only_tail_seconds[i]))) {
+  if (data.music_only_last_seconds?.some(Boolean) &&
+      (scenes.length !== data.music_only_last_seconds.length ||
+       scenes.some((row,i) => (Number(row.music_only_last_seconds) || 0) !== data.music_only_last_seconds[i]))) {
     errors.push("The proposal changed the music-only narration hold.");
   }
   return {ok:errors.length === 0,errors,requirements:data};
