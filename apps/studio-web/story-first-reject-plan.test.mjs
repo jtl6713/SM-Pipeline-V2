@@ -34,6 +34,7 @@ function harness({ saved = false, busy = false, confirm = true } = {}) {
     attempted: new Set([0]), browsing: { 0: true },
     pendingUpload: {}, generatedAssets: {}, libraryRows: ["old"],
     wideResults: {}, uploadedAssets: {}, selectedAssetNames: {},
+    expandedScenes: new Set([0]),
   };
   const context = { current, $: id => elements.get(id), profileId: () => "recProfile123",
     isId: id => /^rec[A-Za-z0-9]+$/.test(id),
@@ -64,6 +65,7 @@ test("rejecting an unsaved plan clears all scenes and selections but keeps origi
   assert.equal(h.current.planRevision, 5);
   assert.equal(h.current.title, "");
   assert.equal(h.current.attempted.size, 0);
+  assert.equal(h.current.expandedScenes.size, 0, "reject collapses all scene details");
   assert.equal(h.current.libraryRows.length, 0);
   assert.equal(h.elements.get("storyFirstWorkspace").hidden, true);
   assert.equal(h.elements.get("scriptedShortResult").hidden, true);
@@ -90,6 +92,7 @@ test("confirmation cancel and in-progress writes leave the plan unchanged", () =
     h.run();
     assert.equal(h.current.story, original);
     assert.equal(h.current.planRevision, 4);
+    assert.equal(h.current.expandedScenes.has(0), true, "cancel/busy must preserve disclosure state");
     assert.equal(h.removes.length, 0);
   }
 });
