@@ -78,9 +78,15 @@ jobs:
               const count=Number(record.studio_master_asset_count||(handoff.body&&handoff.body.storyboard_asset_count)||0);
               const get=await callApi(env,'/api/production-requests/'+EXPECTED_PR+'?fields=light');
               const getRec=(get.body&&get.body.record)||{};
-              let recommend=await callApi(env,'/api/production-requests/'+EXPECTED_PR+'/recommend-outputs','POST',{});
-              if(recommend.status===404) recommend=await callApi(env,'/api/production-requests/'+EXPECTED_PR+'/output-plan','POST',{});
-              const ok=Boolean(handoff.ok && handoff.status<300 && record.id===EXPECTED_PR && count===7 && Number(getRec.studio_master_asset_count||0)===7 && (ids.length===0 || (ids.length===7 && ids.every((id,i)=>id===EXPECTED_IDS[i]))));
+              const recommend=await callApi(env,'/api/production-requests/'+EXPECTED_PR+'/plan','POST',{
+                platforms:['Instagram','Facebook','TikTok','YouTube'],
+                overrides:{},
+                extras:[],
+                skip_fbs1_guard:true
+              });
+              const recommendOk=Boolean(recommend.ok && recommend.status<300);
+              const recommendOutputs=Array.isArray(recommend.body&&recommend.body.outputs)?recommend.body.outputs.length:0;
+              const ok=Boolean(handoff.ok && handoff.status<300 && record.id===EXPECTED_PR && count===7 && Number(getRec.studio_master_asset_count||0)===7 && (ids.length===0 || (ids.length===7 && ids.every((id,i)=>id===EXPECTED_IDS[i]))) && recommendOk && recommendOutputs>0);
               return Response.json({
                 ok,
                 worker_health:{status:health.status,ok:health.ok,version:(health.body&& (health.body.version||health.body.worker_version))||null},
@@ -99,7 +105,7 @@ jobs:
                   }
                 },
                 get:{status:get.status,ok:get.ok,studio_master_asset_count:getRec.studio_master_asset_count??null,production_request_id:getRec.production_request_id||null},
-                recommend:{status:recommend.status,ok:recommend.ok,error:(recommend.body&& (recommend.body.error||recommend.body.message))||null,body_keys:recommend.body&&typeof recommend.body==='object'?Object.keys(recommend.body).slice(0,20):[]}
+                recommend:{status:recommend.status,ok:recommend.ok,error:(recommend.body&& (recommend.body.error||recommend.body.message))||null,output_count:recommendOutputs,body_keys:recommend.body&&typeof recommend.body==='object'?Object.keys(recommend.body).slice(0,20):[]}
               }, {status: ok ? 200 : 500});
             }
           };
