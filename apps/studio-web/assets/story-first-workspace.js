@@ -976,6 +976,10 @@
       render();
       // Per-scene discovery follows story authoring and never changes its visual requirements.
       report("Story and timed visuals written first. Review up to three recommendations per scene, or generate/supply your own. Save partial progress anytime.");
+    } catch (error) {
+      // Reject or profile change invalidates the request. Its late failure must
+      // not overwrite the fresh-start confirmation with an irrelevant error.
+      if (request === current.planRequest && profileId() === id) throw error;
     } finally {
       if (request === current.planRequest) {
         $("storyFirstPropose").disabled = false;
