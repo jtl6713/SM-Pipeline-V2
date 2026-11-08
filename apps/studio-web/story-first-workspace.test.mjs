@@ -63,7 +63,9 @@ test("Canonical Airtable Ideas remain the only writable story source, other Idea
   assert.match(helper, /normalizeStoryFirst\(payload\?\.storyboard, profile\.id\)/);
   assert.match(helper, /!vibeCut && ctx\?\.waitUntil && !storyFirst/);
   assert.match(helper, /fields\.Production_Config_Notes = upsertStoryFirstNotes/);
-  assert.match(helper, /story_first: parseStoryFirstNotes/);
+  assert.match(helper, /story_first: storyFirst/);
+  assert.match(helper, /storyFirstAssignedAssetIds\(storyFirst\)/);
+  assert.match(helper, /story_first_media_complete: storyFirstMediaComplete\(storyFirst\)/);
   assert.match(worker, /assertWriteRequest\(request, env\)/);
 });
 
@@ -81,7 +83,13 @@ test("Successful storyboard handoff opens the exact Production Request after ver
 test("Open Production reconciles incomplete story-first drafts instead of opening empty media", () => {
   const opener = read("./assets/app-item4-1008.js");
   assert.match(opener, /mustReconcileStoryboard/);
-  assert.match(opener, /storyReady && \(!existing \|\| existingCount !== storyScenes\.length\)/);
+  assert.match(opener, /existingCount !== storyScenes\.length \|\| orderMismatch/);
+  assert.match(opener, /fetchFullProductionRequest/);
+  assert.match(opener, /studio_master_media_asset_ids/);
   assert.match(opener, /input_kind: "story-first"/);
   assert.match(opener, /Storyboard handoff confirmed only/);
+  assert.match(opener, /Production opened without the .* storyboard assets in Media/);
+  assert.match(opener, /setProductionWorkspaceTab\("media"\)/);
+  assert.match(opener, /openProd\.hidden = promoted \|\| !canOpenStoryOrDraft/);
+  assert.match(opener, /storyFirstAssignedIds/);
 });

@@ -300,7 +300,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.913-tiktok-photo-ready";
+  const BUILD_ID = "item4-0.6.914-story-open";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -3522,6 +3522,24 @@
       .trim();
   }
 
+  function storyFirstScenes(idea) {
+    const story = idea?.story_first;
+    return Array.isArray(story?.scenes) ? story.scenes : [];
+  }
+
+  function storyFirstReady(idea) {
+    if (idea?.story_first_media_complete === true) return true;
+    const scenes = storyFirstScenes(idea);
+    return scenes.length > 0 && scenes.every((scene) =>
+      scene?.selected_approved === true && /^rec[A-Za-z0-9]+$/.test(String(scene?.assigned_asset_id || "")));
+  }
+
+  function storyFirstAssignedIds(idea) {
+    return storyFirstScenes(idea)
+      .map((scene) => String(scene?.assigned_asset_id || "").trim())
+      .filter((id) => /^rec[A-Za-z0-9]+$/.test(id));
+  }
+
   function ideaLibraryIdsFromIdea(idea) {
     const fromField = Array.isArray(idea?.library_asset_ids) ? idea.library_asset_ids : [];
     const fromLinks = Array.isArray(idea?.matched_media_asset_links) ? idea.matched_media_asset_links : [];
@@ -3532,7 +3550,8 @@
     const noted = fromNotes
       ? fromNotes[1].split(/[,\s]+/).map((value) => String(value || "").trim())
       : [];
-    return [...new Set([...fromField, ...fromLinks, ...fromSelected, ...noted].map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+    const fromStory = storyFirstAssignedIds(idea);
+    return [...new Set([...fromField, ...fromLinks, ...fromSelected, ...noted, ...fromStory].map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
   }
 
   function ideaAssignedAssetRows(idea) {
@@ -3703,9 +3722,12 @@
     const configureButton = $("configureProductionButton");
     if (configureButton) {
       configureButton.disabled = promoted || Boolean(idea?.is_on_hold);
+      const hasDraftOrStory = Boolean(String(idea?.production_request_id || "").trim())
+        || storyFirstReady(idea)
+        || String(idea?.photo_wait_status || "") === "Ready";
       configureButton.textContent = promoted
         ? "Production locked"
-        : (String(idea?.photo_wait_status || "") === "Ready" ? "Open Production" : "Add new media");
+        : (hasDraftOrStory ? "Open Production" : "Add new media");
     }
     const useExistingButton = $("useExistingLibraryButton");
     if (useExistingButton) {
@@ -3757,7 +3779,12 @@
     }
     const openProd = $("openIdeaProductionButton");
     if (openProd) {
-      openProd.hidden = String(idea?.photo_wait_status || "") !== "Ready" || promoted;
+      // Script a Short drafts never use photo-wait Ready. Surface Open Production
+      // whenever a linked draft or completed storyboard already exists.
+      const canOpenStoryOrDraft = storyFirstReady(idea)
+        || Boolean(String(idea?.production_request_id || "").trim())
+        || String(idea?.photo_wait_status || "") === "Ready";
+      openProd.hidden = promoted || !canOpenStoryOrDraft;
     }
     const prepareBtn = $("prepareIdeaToReviewButton");
     const prepareHint = $("prepareIdeaToReviewHint");
@@ -4245,6 +4272,7 @@
         productionRequest: resolvedRequest,
         successMessage: success,
         strict: true,
+        fromTimedScript: true,
       });
       setIdeasAutonomousMessage("", "");
       setRequestMessage(success, "success");
@@ -14840,7 +14868,30 @@ function timedScriptAssetLabel(asset, index) {
     });
   }
 
-  async function openProductionRequestForIdea(idea, { fromWizard = false, productionRequest = null, successMessage = "", strict = false } = {}) {
+  async function fetchFullProductionRequest(requestId) {
+    const id = String(requestId || "").trim();
+    if (!/^rec[A-Za-z0-9]+$/.test(id)) throw new Error("Production Request ID is missing.");
+    const result = await api(`/api/production-requests/${encodeURIComponent(id)}`, {
+      timeoutMs: 30000,
+      retries: 0,
+    });
+    if (!result?.record?.id) throw new Error("Production Request could not be loaded.");
+    return result.record;
+  }
+
+  function productionMasterAssetIds(record) {
+    if (Array.isArray(record?.studio_master_media_asset_ids) && record.studio_master_media_asset_ids.length) {
+      return record.studio_master_media_asset_ids.map((id) => String(id || "").trim()).filter(Boolean);
+    }
+    if (Array.isArray(record?.studio_master_assets)) {
+      return record.studio_master_assets
+        .map((asset) => String(asset?.media_asset_record_id || "").trim())
+        .filter((id) => /^rec[A-Za-z0-9]+$/.test(id));
+    }
+    return [];
+  }
+
+  async function openProductionRequestForIdea(idea, { fromWizard = false, productionRequest = null, successMessage = "", strict = false, fromTimedScript = false } = {}) {
     // Exact Production opens are allowed without an Idea list row. Promoted and
     // stale requests often disappear from the current Ideas list by design.
     if (!idea?.id && !productionRequest?.id) return;
@@ -14854,9 +14905,12 @@ function timedScriptAssetLabel(asset, index) {
 
     try {
       loadEzAudioOptions().catch(() => {});
+      const storyScenes = storyFirstScenes(idea);
+      const storyReady = storyFirstReady(idea);
+      const expectedStoryIds = storyFirstAssignedIds(idea);
       let result;
       if (productionRequest?.id) {
-        result = { record: productionRequest, created: false, opened_existing: true, from_timed_script: true };
+        result = { record: productionRequest, created: false, opened_existing: true, from_timed_script: fromTimedScript };
       } else if (ezWizardPending) {
         applyEzWizardAnswersToIntake();
         const payload = ezWizardRequestPayload(ezWizardPending.planned, {
@@ -14865,15 +14919,16 @@ function timedScriptAssetLabel(asset, index) {
         result = await createEzProductionRequest(idea.id, payload);
       } else {
         const existing = await findExistingProductionRequestForIdea(idea).catch(() => null);
-        const storyFirst = idea?.story_first;
-        const storyScenes = Array.isArray(storyFirst?.scenes) ? storyFirst.scenes : [];
-        const storyReady = storyScenes.length > 0 && storyScenes.every((scene) =>
-          scene?.selected_approved === true && /^rec[A-Za-z0-9]+$/.test(String(scene?.assigned_asset_id || "")));
-        const existingCount = Number(existing?.studio_master_asset_count || 0);
+        const existingIds = productionMasterAssetIds(existing);
+        const existingCount = Number(existing?.studio_master_asset_count || existingIds.length || 0);
+        const orderMismatch = storyReady && existingIds.length === storyScenes.length
+          && existingIds.some((id, index) => id !== expectedStoryIds[index]);
         // Story-first drafts must re-enter the idempotent handoff when media is
-        // missing or incomplete. Skipping straight to an empty draft is what left
+        // missing, incomplete, or reordered. Skipping an empty draft is what left
         // Open Production stuck on zero master assets.
-        const mustReconcileStoryboard = storyReady && (!existing || existingCount !== storyScenes.length);
+        const mustReconcileStoryboard = storyReady && (
+          !existing || existingCount !== storyScenes.length || orderMismatch
+        );
         if (existing && !mustReconcileStoryboard) {
           result = { record: existing, created: false, opened_existing: true };
         } else {
@@ -14895,10 +14950,17 @@ function timedScriptAssetLabel(asset, index) {
               retries: 0,
             });
             if (storyReady) {
+              const verifiedIds = Array.isArray(result?.storyboard_asset_ids)
+                ? result.storyboard_asset_ids.map((id) => String(id || "").trim())
+                : productionMasterAssetIds(result?.record);
               const count = Number(result?.record?.studio_master_asset_count
-                || result?.storyboard_asset_count || 0);
+                || result?.storyboard_asset_count || verifiedIds.length || 0);
               if (count !== storyScenes.length) {
                 throw new Error(`Storyboard handoff confirmed only ${count} of ${storyScenes.length} selected assets. Production was not opened.`);
+              }
+              if (verifiedIds.length === storyScenes.length
+                && verifiedIds.some((id, index) => id !== expectedStoryIds[index])) {
+                throw new Error("Storyboard handoff media order does not match the selected scenes. Production was not opened.");
               }
             }
           } catch (error) {
@@ -14912,6 +14974,43 @@ function timedScriptAssetLabel(asset, index) {
       }
 
       if (!result?.record?.id) throw new Error("Production Request could not be resolved.");
+
+      // Light list/create payloads omit the asset manifest. Always reopen from
+      // the authoritative full Production Request before painting the editor.
+      let record = result.record;
+      if (!Array.isArray(record.studio_master_assets)) {
+        record = await fetchFullProductionRequest(record.id);
+        result = { ...result, record };
+      }
+      if (storyReady) {
+        const fullIds = productionMasterAssetIds(record);
+        if (fullIds.length !== storyScenes.length
+          || fullIds.some((id, index) => id !== expectedStoryIds[index])) {
+          const profileId = String(
+            (Array.isArray(idea?.content_profile_links) && idea.content_profile_links[0])
+            || idea?.content_profile_id
+            || selectedProfileId
+            || ""
+          ).trim();
+          const repaired = await api(`/api/ideas/${encodeURIComponent(idea.id)}/production-request` +
+            (profileId ? `?profile=${encodeURIComponent(profileId)}` : ""), {
+            method: "POST",
+            body: JSON.stringify({
+              ...(profileId ? { content_profile_id: profileId } : {}),
+              input_kind: "story-first",
+            }),
+            timeoutMs: 60000,
+            retries: 0,
+          });
+          record = await fetchFullProductionRequest(repaired?.record?.id || record.id);
+          result = { ...result, ...repaired, record, created: false };
+          const repairedIds = productionMasterAssetIds(record);
+          if (repairedIds.length !== storyScenes.length
+            || repairedIds.some((id, index) => id !== expectedStoryIds[index])) {
+            throw new Error(`Production draft still missing storyboard media (${repairedIds.length}/${storyScenes.length}). Nothing was rendered or published.`);
+          }
+        }
+      }
 
       await closeIdeaDrawer({ save: false, resumePhotoListening: false });
       activeIdea = idea?.id ? idea : null;
@@ -14932,6 +15031,12 @@ function timedScriptAssetLabel(asset, index) {
         loadItem4Workspace(result.record),
       ]);
       const assetCount = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets.length : 0;
+      const failedHydration = hydration.filter((entry) => entry.status === "rejected");
+      if (storyReady && (assetCount !== storyScenes.length || failedHydration.length)) {
+        throw new Error(
+          `Production opened without the ${storyScenes.length} storyboard assets in Media (found ${assetCount}). Retry Open Production; nothing was rendered or published.`
+        );
+      }
 
       if (ezWizardPending) {
         const extras = ezWizardPending.planned?.extras || [];
@@ -14950,14 +15055,15 @@ function timedScriptAssetLabel(asset, index) {
         syncPrMediaKindUi();
       }
 
-      if (!ezWizardPending && timedScriptActive()) {
+      if (!ezWizardPending && (fromTimedScript || result.from_timed_script) && timedScriptActive()) {
         setProductionWorkspaceTab("rendering");
         renderTimedScriptReview();
         syncProductionVoBanner();
+      } else if (storyReady || assetCount) {
+        setProductionWorkspaceTab("media");
       }
 
       loadProductionRequests().catch(() => {});
-      const failedHydration = hydration.filter((entry) => entry.status === "rejected");
       if (failedHydration.length) {
         setRequestMessage(
           successMessage
@@ -14983,7 +15089,7 @@ function timedScriptAssetLabel(asset, index) {
         setRequestMessage(successMessage, "success");
       } else if (result.created) {
         setRequestMessage("Production Request draft created. Choose Single or Multiple photos, then upload.", "success");
-      } else if (timedScriptActive()) {
+      } else if ((fromTimedScript || result.from_timed_script) && timedScriptActive()) {
         const scenes = productionTimedScript.segments.length;
         setRequestMessage(`Voiceover timeline is attached (${scenes} scene${scenes === 1 ? "" : "s"}). Rendering is open. Tap Approve when Ready. This does not publish.`, "success");
       } else if (assetCount) {
@@ -15000,7 +15106,10 @@ function timedScriptAssetLabel(asset, index) {
     } finally {
       if (button && activeIdea && !ideaIsPromoted(activeIdea) && !activeIdea.is_on_hold) {
         button.disabled = false;
-        button.textContent = "Add new media";
+        button.textContent = storyFirstReady(activeIdea) || String(activeIdea?.production_request_id || "").trim()
+          || String(activeIdea?.photo_wait_status || "") === "Ready"
+          ? "Open Production"
+          : "Add new media";
       }
     }
   }
@@ -15008,24 +15117,36 @@ function timedScriptAssetLabel(asset, index) {
   window.StudioOpenProductionRequestById = async function StudioOpenProductionRequestById(requestId) {
     const id = String(requestId || "").trim();
     if (!/^rec[A-Za-z0-9]+$/.test(id)) throw new Error("Production Request ID is missing.");
-    const result = await api(`/api/production-requests/${encodeURIComponent(id)}`);
-    const record = result?.record;
-    if (!record?.id) throw new Error("Production Request could not be loaded.");
+    const record = await fetchFullProductionRequest(id);
     if (record.revision_open === true || ["Draft", "Ready"].includes(String(record.status || ""))) {
       item4PromotedRequestIds.delete(String(record.id));
     }
     const ideaId = String(record.idea_record_id || (Array.isArray(record.idea_candidate_links) ? record.idea_candidate_links[0] : "") || "").trim();
     await ensureIdeasCache().catch(() => []);
-    const idea = ideaId
-      ? (ideasCache.find((row) => row?.id === ideaId) || {
-          id: ideaId,
-          title: record.idea_title || record.requested_title || "Production item",
-        })
+    let idea = ideaId
+      ? (ideasCache.find((row) => row?.id === ideaId) || null)
       : null;
+    if (ideaId && (!idea?.story_first || !storyFirstReady(idea))) {
+      try {
+        const detail = await api(`/api/ideas/${encodeURIComponent(ideaId)}`, { timeoutMs: 12000, retries: 0 });
+        idea = detail?.record || idea;
+      } catch (_error) {
+        // Keep the Production open even if Idea detail enrichment fails.
+      }
+    }
+    if (!idea && ideaId) {
+      idea = {
+        id: ideaId,
+        title: record.idea_title || record.requested_title || "Production item",
+      };
+    }
     return openProductionRequestForIdea(idea, {
       productionRequest: record,
-      successMessage: "Opened this Production item from Factory.",
+      successMessage: storyFirstReady(idea)
+        ? `Opened Production with ${productionMasterAssetIds(record).length || Number(record.studio_master_asset_count || 0)} storyboard assets.`
+        : "Opened this Production item.",
       strict: true,
+      fromTimedScript: false,
     });
   };
 

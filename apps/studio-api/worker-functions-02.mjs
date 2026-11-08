@@ -3558,17 +3558,22 @@ export async function ensureStoryFirstProductionMedia(env, requestRecord, valida
   };
   let current = requestRecord;
   let confirmed = null;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const attached = await applyLibraryAssetsToProductionRequest(env,current,ids,{
-      replaceWaitAssets:true,allowManagePaused:true,replaceAll:true,allowVideo:true,requireAll:true,approvedStoryboard:true
-    });
-    if (attached?.skipped || !attached?.record) {
-      throw new HttpError(409, "Storyboard media handoff rejected: " +
-        String(attached?.reason || "asset eligibility check failed") +
-        "; existing Production draft preserved");
+  // Idempotent reopen: never replaceAll wipe a draft that already matches.
+  if (matchesStoryboard(current)) {
+    confirmed = current;
+  } else {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const attached = await applyLibraryAssetsToProductionRequest(env,current,ids,{
+        replaceWaitAssets:true,allowManagePaused:true,replaceAll:true,allowVideo:true,requireAll:true,approvedStoryboard:true
+      });
+      if (attached?.skipped || !attached?.record) {
+        throw new HttpError(409, "Storyboard media handoff rejected: " +
+          String(attached?.reason || "asset eligibility check failed") +
+          "; existing Production draft preserved");
+      }
+      current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
+      if (matchesStoryboard(current)) { confirmed = current; break; }
     }
-    current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id);
-    if (matchesStoryboard(current)) { confirmed = current; break; }
   }
   if (!confirmed) {
     throw new HttpError(409, "Production draft did not persist all " + ids.length +
@@ -3763,6 +3768,11 @@ export function mapProductionRequestLight(record, ideaTitle = null) {
     active: Boolean(f(record, "Active")),
     studio_master_asset_count: Number(f(record, "Studio_Master_Asset_Count") || 0),
     studio_master_asset_status: f(record, "Studio_Master_Asset_Status") || "None",
+    // Ordered Media Asset record IDs only — keeps light payloads small while
+    // letting Script a Short verify scene order without parsing multi-MB JSON.
+    studio_master_media_asset_ids: item4AssetManifest(record)
+      .map((asset) => String(asset?.media_asset_record_id || "").trim())
+      .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)),
     studio_output_plan_status: f(record, "Studio_Output_Plan_Status") || "Needs Plan",
     studio_variant_status: f(record, "Studio_Variant_Status") || "None",
     studio_variant_updated_at: f(record, "Studio_Variant_Updated_At") || null,
