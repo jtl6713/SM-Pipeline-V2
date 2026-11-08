@@ -943,3 +943,5 @@ Deploy Worker 0.10.767-story-first 2026-11-07: Airtable-persistent per-scene cre
 Deploy Studio API 2026-11-07 Script a Short seven-scene brief fidelity: multiline 5000-character input, deterministic numbered scene/VO extraction, exact timings, overlay and Instagram metadata, strict Quality Agent rejection of scene-count or narration drift; Airtable remains authoritative.
 Deploy guarded Studio API Worker 2026-11-08: Script a Short honors all 7 operator-authored scenes, exact per-scene voiceover, 25-second timing, overlay text and Instagram alternatives; fail closed on mismatches. No auto-render, approval, publication, scheduling, feature flag or source-of-truth change.
 Deploy 2026-11-08 story-first media handoff import fix PR #1696. Preserve seven scene selections and Airtable authority; no publishing or rendering.
+
+Deploy 2026-11-08 Worker 0.10.768-story-handoff: allow approved storyboard soft exclusions (Low Quality / Watermarked-Branded), return verified storyboard asset IDs, keep exact seven-asset handoff for Idea recYmYbMAwMoReAet / PR-20261108122348-H2U2N6. No render or publish.
