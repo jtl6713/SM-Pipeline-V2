@@ -15,5 +15,7 @@ jobs:
     timeout-minutes: 9
     steps:
       - uses: actions/checkout@v4
+      - name: Install JPEG decoder
+        run: python3 -m pip install --quiet pillow
       - name: Verify all 38 photo URLs from GitHub-hosted external network
         run: python3 scripts/diagnose_tiktok_photo_media.py
