@@ -11,7 +11,7 @@
   const root = String(config.apiBase || window.location.origin).replace(/\/$/, "");
   const select = $("studioProfileSelect");
   const status = $("storyFirstStatus");
-  const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, proposing: false, planRevision: 0, ideaRecords: [], generatedAssets: {}, candidates: {}, attempted: new Set(), browsing: {}, pendingUpload: {}, libraryRows: [], wideResults: {}, uploadedAssets: {}, selectedAssetNames: {} };
+  const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, proposing: false, planRevision: 0, ideaRecords: [], generatedAssets: {}, candidates: {}, attempted: new Set(), browsing: {}, pendingUpload: {}, libraryRows: [], wideResults: {}, uploadedAssets: {}, selectedAssetNames: {}, expandedScenes: new Set() };
 
   const profileId = () => String(select?.value || localStorage.getItem("studio.content_profile_id") || "").trim();
   const isId = id => /^rec[A-Za-z0-9]+$/.test(String(id || ""));
@@ -108,6 +108,7 @@
     if ($("scriptedShortPropose")) $("scriptedShortPropose").disabled = false;
     current.record = record;
     current.story = JSON.parse(JSON.stringify(story));
+    current.expandedScenes.clear();
     current.candidates = {}; current.attempted = new Set(); current.browsing = {};
     const voiceovers = String(record.summary || "").split(/\r?\n/).filter(line => /^\s*[1-9]\d*\.\s+/.test(line) && !/\s\u2014\s/.test(line)).map(line => line.replace(/^\s*\d+\.\s+/, "").trim());
     if (voiceovers.length === current.story.scenes.length && current.story.scenes.every(row => !row.voiceover)) {
@@ -622,6 +623,18 @@
       report("Upload registered. Preview and select "+asset.name+" for this scene.");
     }finally{current.pendingUpload[index]="";current.busy=false;render();}
   }
+  // Native details/summary provides keyboard and touch activation without
+  // changing scene data. The open set survives background candidate rerenders.
+  function sceneDisclosure(index) {
+    const card = node("details", "story-first-shot");
+    card.open = current.expandedScenes.has(index);
+    card.addEventListener("toggle", () => {
+      if (!card.isConnected) return; // Ignore late events on discarded cards.
+      if (card.open) current.expandedScenes.add(index);
+      else current.expandedScenes.delete(index);
+    });
+    return card;
+  }
   function render() {
     const workspace = $("storyFirstWorkspace");
     workspace.hidden = !current.story;
@@ -729,7 +742,7 @@
       return field;
     }
     scenes.forEach((shot,index)=>{
-      const card=node("article","story-first-shot");
+      const card=sceneDisclosure(index);
       const statusText=shot.selected_approved&&isId(shot.assigned_asset_id)?"Media Selected":
         current.pendingUpload[index]?"Uploading Media":
         shot.generated_master_id?"Awaiting Image Review":
@@ -740,7 +753,8 @@
         current.pendingUpload[index]?"is-uploading":
         shot.generated_master_id?"is-review":
         current.candidates[index]?.length?"is-candidates":"is-pending";
-      const hero=node("div","story-first-shot-hero");
+      const hero=node("summary","story-first-shot-hero");
+      hero.title="Expand or collapse Scene "+(index+1)+" details";
       const thumb=node("div","story-first-shot-thumbnail");
       let previewUrl="",previewNote="Visual not selected";
       if(shot.selected_approved&&isId(shot.assigned_asset_id)) {
@@ -770,7 +784,9 @@
       const statusBadge=node("span","story-first-status-chip "+statusClass,statusText);
       statusBadge.setAttribute("role","status");
       put(heroCopy,topLine,statusBadge);
-      put(hero,thumb,heroCopy);
+      const caret=node("span","story-first-shot-caret","⌄");
+      caret.setAttribute("aria-hidden","true");
+      put(hero,thumb,heroCopy,caret);
       card.appendChild(hero);
       const time=sceneField(card,"timing","Scene timing (start-end seconds)",shot.time,"input");
       time.maxLength=24;
@@ -946,6 +962,7 @@
     current.wideResults = {};
     current.uploadedAssets = {};
     current.selectedAssetNames = {};
+    current.expandedScenes.clear();
     if (isId(id)) localStorage.removeItem("studio.story_first_resume." + id);
     const picker = $("storyFirstSaved");
     if (picker) picker.value = "";
@@ -1003,6 +1020,7 @@
       current.wideResults = {};
       current.uploadedAssets = {};
       current.selectedAssetNames = {};
+    current.expandedScenes.clear();
       if ($("storyFirstSaved")) $("storyFirstSaved").value = "";
       current.title = proposal.suggested_title || "Story-first short";
       current.summary = prompt;
@@ -1078,6 +1096,7 @@
     current.record = null;
     current.story = null;
     current.selectedAssetNames = {};
+    current.expandedScenes.clear();
     $("storyFirstWorkspace").hidden = true;
     $("storyFirstSaved").replaceChildren(new Option("Choose a saved storyboard…", ""));
     refresh().catch(e => report(e.message, true));
