@@ -59,161 +59,140 @@ function numberedSection(source, kind) {
 
 const HEADER = /^\s*(?:#{1,4}\s*)?(?:\*\*)?(?:scene|shot|segment)\s*#?\s*(\d{1,2})\s*(?:\(\s*(\d{1,3})\s*[-–—]\s*(\d{1,3})\s*s?\s*\))?\s*(?::\s*([^\n*]+))?/gim;
 
+const headingPattern = /^\s*(?:#{1,5}\s*)?(?:\*\*)?(?:scene|shot|segment)\s*#?\s*(\d{1,2})(?:\*\*)?\s*(?:\(\s*(\d{1,3})\s*[-–—]\s*(\d{1,3})\s*(?:s|sec|seconds)?\s*\))?\s*[:—-]?\s*([^\n]*)/gim;
+const labelledLine = /^\s*(?:[-*•]\s*)?(?:\*\*)?(visual|image|footage|media|shot description|on[- ]screen text|screen text|overlay text|vo|voice ?over|narration|spoken line)(?:\*\*)?\s*[:—=-]\s*(.*?)\s*$/i;
+function parseLabelledValue(raw) {
+  const value = String(raw || "").trim().replace(/\*\*\s*$/, "");
+  const alternate = value.match(/\(\s*Instagram\s*:\s*["“](.*?)["”]\s*\)\s*$/i);
+  const main = alternate ? value.slice(0, alternate.index).trim() : value;
+  const quoted = main.match(/^\s*["“](.*?)["”]\s*(.*)$/);
+  return { primary: quoted ? quoted[1] : unquote(main), instagram: alternate?.[1] || "", trailing: quoted?.[2] || "" };
+}
+const sequence = (map, count) => {
+  const max = count || (map.size ? Math.max(...map.keys()) : 0);
+  if (!max || max > 12) return null;
+  return Array.from({length:max}, (_,i) => map.get(i + 1) ?? "");
+};
 export function scriptedShortSceneDirections(brief) {
-  const source=String(brief||"").replace(/\r\n?/g,"\n");
-  const voice=numberedSection(source,"voice");
-  const visual=numberedSection(source,"visual");
-  const overlays=new Map(),igOverlays=new Map(),igVoices=new Map(),timings=new Map();
-  const labels=new Map(),musicOnly=new Map();
-  const headers=[...source.matchAll(HEADER)]
-    .filter(match=>Number(match[1])>=1&&Number(match[1])<=12);
-  for(let i=0;i<headers.length;i++) {
-    const h=headers[i],n=Number(h[1]);
-    const next=headers[i+1]?.index??source.length;
-    const body=source.slice(h.index+h[0].length,next);
-    if(h[2]!==undefined&&h[3]!==undefined) {
-      timings.set(n,{start_seconds:Number(h[2]),end_seconds:Number(h[3])});
+  const source = String(brief || "").replace(/\r\n?/g, "\n");
+  const voice = numberedSection(source, "voice");
+  const visual = numberedSection(source, "visual");
+  const overlay = new Map(), instagramOverlay = new Map(), instagramVoice = new Map();
+  const labels = new Map(), time = new Map(), silent = new Map();
+  const headers = [...source.matchAll(headingPattern)].filter(row => +row[1] >= 1 && +row[1] <= 12);
+  const consecutive = headers.length >= 2 && headers.every((row,index) => Number(row[1]) === index + 1);
+  const explicitCount = requestedSceneCount(source);
+  const count = explicitCount || (consecutive ? headers.length : null);
+  for (let i = 0; i < headers.length; i++) {
+    const head = headers[i], n = Number(head[1]);
+    const body = source.slice(head.index + head[0].length, headers[i+1]?.index ?? source.length);
+    if (head[2] !== undefined && head[3] !== undefined) time.set(n, {start:Number(head[2]),end:Number(head[3])});
+    const label = compact(head[4]).replace(/^\*\*\s*|\s*\*\*$/g, "");
+    if (label) labels.set(n,label);
+    for (const line of body.split("\n")) {
+      const field = line.match(labelledLine);
+      if (!field) continue;
+      const kind = field[1].toLowerCase().replace(/[\s-]+/g, "");
+      const value = parseLabelledValue(field[2]);
+      if (/^(?:vo|voiceover|narration|spokenline)$/.test(kind)) {
+        if (value.primary && !voice.has(n)) voice.set(n,value.primary);
+        if (value.instagram) instagramVoice.set(n,value.instagram);
+        const last = value.trailing.match(/\blast\s+(\d{1,2})\s+seconds?\s+(?:silent|without\s+(?:voice|narration)|music[- ]only)/i);
+        if (last) silent.set(n,Number(last[1]));
+      } else if (/^(?:onscreentext|screentext|overlaytext)$/.test(kind)) {
+        if (value.primary) overlay.set(n,value.primary);
+        if (value.instagram) instagramOverlay.set(n,value.instagram);
+      } else if (value.primary && !visual.has(n)) visual.set(n,value.primary);
     }
-    const label=compact(h[4]||"").replace(/\*+$/,"");
-    if(label)labels.set(n,label);
-    for(const raw of body.split(/\n/)) {
-      const line=raw.trim().replace(/^[-*•]\s*/,"").replace(/^\*\*(.*?)\*\*$/,"$1");
-      const match=line.match(/^(visual|image|footage|media|shot description|on[- ]screen text|on screen|overlay text|voice\s*over|voiceover|vo|narration|spoken line)\s*[:—=-]\s*(.+)$/i);
-      if(!match)continue;
-      const kind=match[1].toLowerCase().replace(/\s+/g," ");
-      const parsed=mainAndInstagram(match[2]);
-      if(/^(visual|image|footage|media|shot description)$/.test(kind)) {
-        if(!visual.has(n))visual.set(n,parsed.main);
-      } else if(/^(on[- ]screen text|on screen|overlay text)$/.test(kind)) {
-        overlays.set(n,parsed.main);
-        if(parsed.instagram)igOverlays.set(n,parsed.instagram);
-      } else {
-        voice.set(n,parsed.main);
-        if(parsed.instagram)igVoices.set(n,parsed.instagram);
-        const note=match[2].match(/\blast\s+(\d{1,2})\s+seconds?\s+silent\b/i)
-          || match[2].match(/\bleave\s+(?:the\s+)?last\s+(\d{1,2})\s+seconds?\s+(?:without\s+narration|with\s+just\s+music)\b/i);
-        if(note)musicOnly.set(n,Number(note[1]));
-      }
-    }
+    const last = body.match(/\blast\s+(\d{1,2})\s+seconds?\s+(?:silent|without\s+(?:voice|narration)|music[- ]only)/i);
+    if (last) silent.set(n,Number(last[1]));
   }
-  // "VO for Scene 3: ..." without explicit scene headers is also supported.
-  for(const match of source.matchAll(/^\s*(?:voice\s*over|voiceover|vo|narration)\s+(?:for\s+)?scene\s*(\d{1,2})\s*[:—=-]\s*([^\n]+)/gim)) {
-    if(!voice.has(Number(match[1])))voice.set(Number(match[1]),mainAndInstagram(match[2]).main);
+  for (const row of source.matchAll(/^\s*(?:vo|voiceover|voice over|narration)\s+(?:for\s+)?scene\s*(\d{1,2})\s*[:—=-]\s*([^\n]+)/gim)) {
+    if (!voice.has(+row[1])) voice.set(+row[1],parseLabelledValue(row[2]).primary);
   }
-  const headingIndices=[...new Set(headers.map(h=>Number(h[1])))].sort((a,b)=>a-b);
-  const headerCount=headingIndices.length>=2
-    && headingIndices.every((n,i)=>n===i+1) ? headingIndices.length : null;
-  const count=explicitCount(source)??headerCount;
-  const ordered=(map,empty="")=> validCount(count)
-    ?Array.from({length:count},(_,i)=>map.get(i+1)??empty):null;
-  const requestedTimings=ordered(timings,null);
-  const validTimings=requestedTimings?.every((t,i)=> t && Number.isInteger(t.start_seconds)
-    && Number.isInteger(t.end_seconds) && t.end_seconds>t.start_seconds
-    && (i===0?t.start_seconds===0:t.start_seconds===requestedTimings[i-1]?.end_seconds));
   return {
-    requested_count:count,
-    voiceovers:ordered(voice),
-    visuals:ordered(visual),
-    on_screen_texts:ordered(overlays),
-    on_screen_texts_instagram:ordered(igOverlays),
-    voiceovers_instagram:ordered(igVoices),
-    scene_labels:ordered(labels),
-    music_only_last_seconds:ordered(musicOnly,0),
-    timings:validTimings?requestedTimings:null,
-    recognized_voiceovers:voice.size,
-    recognized_visuals:visual.size,
-    recognized_on_screen_texts:overlays.size,
-    has_timing_headers:timings.size>0,
+    requested_count:count, explicit_count:explicitCount, header_count:headers.length,
+    voiceovers:sequence(voice,count), visuals:sequence(visual,count),
+    on_screen_text:sequence(overlay,count), on_screen_text_instagram:sequence(instagramOverlay,count),
+    voiceovers_instagram:sequence(instagramVoice,count), scene_labels:sequence(labels,count),
+    timings:sequence(time,count), music_only_tail_seconds:sequence(silent,count)?.map(v => Number(v) || 0) || null,
+    recognized_voiceovers:voice.size, recognized_visuals:visual.size, recognized_timings:time.size,
   };
 }
-
 export function scriptedShortDirectedScenes(brief) {
-  const req=scriptedShortSceneDirections(brief),n=req.requested_count;
-  if(!validCount(n)||!req.voiceovers||!req.visuals||
-     req.voiceovers.some(x=>!x)||req.visuals.some(x=>!x))return null;
-  return Array.from({length:n},(_,i)=>({
-    voiceover_text:req.voiceovers[i],
-    suggested_visual:req.visuals[i],
-    ...(req.scene_labels?.[i]?{scene_label:req.scene_labels[i]}:{}),
-    ...(req.on_screen_texts?.[i]?{on_screen_text:req.on_screen_texts[i]}:{}),
-    ...(req.on_screen_texts_instagram?.[i]?{on_screen_text_instagram:req.on_screen_texts_instagram[i]}:{}),
-    ...(req.voiceovers_instagram?.[i]?{voiceover_instagram:req.voiceovers_instagram[i]}:{}),
-    ...(req.music_only_last_seconds?.[i]?{music_only_last_seconds:req.music_only_last_seconds[i]}:{}),
-    ...(req.timings?.[i]?{start_seconds:req.timings[i].start_seconds,end_seconds:req.timings[i].end_seconds}:{}),
-    asset_id:"",media_asset_id:"",shot_status:"suggestion",
+  const data = scriptedShortSceneDirections(brief), count = data.requested_count;
+  if (!count || count < 2 || count > 12 || !data.voiceovers || !data.visuals ||
+      data.voiceovers.length !== count || data.visuals.length !== count ||
+      data.voiceovers.some(v => !v) || data.visuals.some(v => !v)) return null;
+  const timed = data.timings?.length === count && data.timings.every((row,i) =>
+    row && row.start === (i ? data.timings[i-1].end : 0) && row.end > row.start);
+  return Array.from({length:count}, (_,i) => ({
+    voiceover_text:data.voiceovers[i], suggested_visual:data.visuals[i],
+    scene_label:data.scene_labels?.[i] || "",
+    on_screen_text:data.on_screen_text?.[i] || "",
+    on_screen_text_instagram:data.on_screen_text_instagram?.[i] || "",
+    voiceover_instagram:data.voiceovers_instagram?.[i] || "",
+    music_only_tail_seconds:data.music_only_tail_seconds?.[i] || 0,
+    ...(timed ? {start_seconds:data.timings[i].start,end_seconds:data.timings[i].end} : {}),
+    asset_id:"", media_asset_id:"", shot_status:"suggestion",
   }));
 }
-
-/** Attach verbatim scene editorial metadata after internal timeline normalization. */
-export function scriptedShortApplySceneDirections(brief,timeline) {
-  const req=scriptedShortSceneDirections(brief);
-  const rows=Array.isArray(timeline?.segments)?timeline.segments:[];
-  if(!validCount(req.requested_count)||rows.length!==req.requested_count)return timeline;
-  const segments=rows.map((segment,i)=>{
-    const t=req.timings?.[i];
-    const result={...segment,index:i+1,
-      ...(req.scene_labels?.[i]?{scene_label:req.scene_labels[i]}:{}),
-      ...(req.on_screen_texts?.[i]?{on_screen_text:req.on_screen_texts[i]}:{}),
-      ...(req.on_screen_texts_instagram?.[i]?{on_screen_text_instagram:req.on_screen_texts_instagram[i]}:{}),
-      ...(req.voiceovers_instagram?.[i]?{voiceover_instagram:req.voiceovers_instagram[i]}:{}),
-      ...(req.music_only_last_seconds?.[i]?{music_only_last_seconds:req.music_only_last_seconds[i]}:{}),
-    };
-    if(t) {
-      result.start_seconds=t.start_seconds;
-      result.end_seconds=t.end_seconds;
-      result.duration_seconds=t.end_seconds-t.start_seconds;
-    }
-    return result;
-  });
-  return {...timeline,segments,
-    duration_seconds:req.timings?.at(-1)?.end_seconds??timeline.duration_seconds};
-}
-
-export function scriptedShortSceneDirectionErrors(brief,timeline) {
-  const req=scriptedShortSceneDirections(brief);
-  const scenes=Array.isArray(timeline?.segments)?timeline.segments:[];
-  const errors=[];
-  if(req.requested_count) {
-    if(!validCount(req.requested_count))
+export function scriptedShortSceneDirectionErrors(brief, timeline) {
+  const data = scriptedShortSceneDirections(brief);
+  const scenes = Array.isArray(timeline?.segments) ? timeline.segments : [];
+  const errors = [];
+  if (data.requested_count) {
+    if (data.requested_count < 2 || data.requested_count > 12) {
       errors.push("The requested scene count must be between 2 and 12.");
-    else if(scenes.length!==req.requested_count)
-      errors.push("The brief requires exactly "+req.requested_count+" scenes, but the proposal contains "+scenes.length+". No shortened storyboard was accepted.");
+    } else if (scenes.length !== data.requested_count) {
+      errors.push("The brief requires exactly " + data.requested_count +
+        " scenes, but the proposal contains " + scenes.length + ". No shortened storyboard was accepted.");
+    }
   }
-  if(req.recognized_voiceovers>0) {
-    if(!req.voiceovers||req.voiceovers.some(x=>!x)||
-       (req.requested_count&&req.recognized_voiceovers!==req.requested_count))
-      errors.push("The original brief contains incomplete numbered scene voiceovers; all scenes must have their own narration.");
-    else if(scenes.length!==req.voiceovers.length||
-      scenes.some((s,i)=>compact(s.voiceover_text)!==compact(req.voiceovers[i])))
+  if (data.explicit_count && data.header_count >= 2 && data.header_count !== data.explicit_count) {
+    errors.push("The stated scene count conflicts with the numbered scene instructions.");
+  }
+  if (data.recognized_voiceovers) {
+    if (!data.voiceovers || data.voiceovers.some(v => !v) ||
+        (data.requested_count && data.recognized_voiceovers !== data.requested_count)) {
+      errors.push("The original brief contains incomplete numbered scene voiceovers.");
+    } else if (scenes.length !== data.voiceovers.length ||
+      scenes.some((row,i) => compact(row.voiceover_text) !== compact(data.voiceovers[i]))) {
       errors.push("The proposal repeats, changes or misassigns the exact voiceover for one or more numbered scenes.");
-  } else if(req.requested_count&&scenes.length>2) {
-    const narration=scenes.map(s=>compact(s.voiceover_text)).filter(Boolean);
-    if(narration.length===scenes.length&&new Set(narration).size===1&&narration[0].length>45)
-      errors.push("The same full narration was repeated in every scene instead of being divided by scene.");
+    }
+  } else if (data.requested_count && scenes.length > 2 && scenes.every(s => compact(s.voiceover_text) === compact(scenes[0]?.voiceover_text)) &&
+             compact(scenes[0]?.voiceover_text).length > 45) {
+    errors.push("The same full narration was repeated in every scene.");
   }
-  if(req.recognized_visuals>0&&req.visuals?.every(Boolean)&&
-     (scenes.length!==req.visuals.length||
-      scenes.some((s,i)=>compact(s.suggested_visual)!==compact(req.visuals[i]))))
-    errors.push("The proposal omitted or changed the exact visual requirement for one or more numbered scenes.");
-  if(req.has_timing_headers&&!req.timings)
-    errors.push("The original scene timing ranges are incomplete or not contiguous.");
-  if(req.timings&&(scenes.length!==req.timings.length||
-    scenes.some((s,i)=>Number(s.start_seconds)!==req.timings[i].start_seconds||
-      Number(s.end_seconds)!==req.timings[i].end_seconds)))
-    errors.push("The scene timings must exactly match the original storyboard.");
-  for(const [field,values,label] of [
-    ["on_screen_text",req.on_screen_texts,"on-screen text"],
-    ["on_screen_text_instagram",req.on_screen_texts_instagram,"Instagram on-screen text"],
-    ["voiceover_instagram",req.voiceovers_instagram,"Instagram voiceover"],
-    ["scene_label",req.scene_labels,"scene name"],
+  if (data.recognized_visuals && data.visuals?.every(Boolean) &&
+      (scenes.length !== data.visuals.length || scenes.some((row,i) => compact(row.suggested_visual) !== compact(data.visuals[i])))) {
+    errors.push("The proposal changed the numbered visual requirements.");
+  }
+  if (data.recognized_timings) {
+    if (data.recognized_timings !== data.requested_count || !data.timings?.every((row,i) =>
+      row && row.start === (i ? data.timings[i-1]?.end : 0) && row.end > row.start)) {
+      errors.push("The supplied scene timings are incomplete or not contiguous.");
+    } else if (scenes.length !== data.timings.length ||
+      scenes.some((row,i) => Number(row.start_seconds) !== data.timings[i].start ||
+                           Number(row.end_seconds) !== data.timings[i].end)) {
+      errors.push("The proposal changed the scene start or end times.");
+    }
+  }
+  for (const [field,source,label] of [
+    ["on_screen_text","on_screen_text","on-screen text"],
+    ["on_screen_text_instagram","on_screen_text_instagram","Instagram on-screen text"],
+    ["voiceover_instagram","voiceovers_instagram","Instagram voiceover"],
   ]) {
-    if(values?.some(Boolean)&&scenes.length===values.length&&
-       scenes.some((s,i)=>values[i]&&compact(s[field])!==compact(values[i])))
-      errors.push("The proposal did not preserve the original "+label+" for every scene.");
+    const expected = data[source];
+    if (expected?.some(Boolean) && (scenes.length !== expected.length ||
+      scenes.some((row,i) => compact(row[field]) !== compact(expected[i])))) {
+      errors.push("The proposal changed the " + label + " instructions.");
+    }
   }
-  if(req.music_only_last_seconds?.some(Boolean)&&scenes.length===req.music_only_last_seconds.length&&
-     scenes.some((s,i)=>req.music_only_last_seconds[i] &&
-       Number(s.music_only_last_seconds||0)!==req.music_only_last_seconds[i]))
-    errors.push("The music-only hold was not preserved.");
-  return {ok:errors.length===0,errors,requirements:req};
+  if (data.music_only_tail_seconds?.some(Boolean) &&
+      (scenes.length !== data.music_only_tail_seconds.length ||
+       scenes.some((row,i) => (Number(row.music_only_tail_seconds) || 0) !== data.music_only_tail_seconds[i]))) {
+    errors.push("The proposal changed the music-only narration hold.");
+  }
+  return {ok:errors.length === 0,errors,requirements:data};
 }
