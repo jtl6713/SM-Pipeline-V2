@@ -1,0 +1,19 @@
+name: Diagnose TikTok Photo Media
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/diagnose-tiktok-photo-media.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify all 38 photo URLs from GitHub-hosted external network
+        run: python3 scripts/diagnose_tiktok_photo_media.py
