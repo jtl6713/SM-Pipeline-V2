@@ -213,15 +213,29 @@ export function buildTimelineFromScenes(scenes) {
   for (const raw of Array.isArray(scenes) ? scenes : []) {
     const voiceover = String(raw?.voiceover_text || raw?.line || "").replace(/\s+/g, " ").trim();
     if (!voiceover && !raw?.suggested_visual) continue;
+    const explicitStart = Number(raw?.start_seconds);
+    const explicitEnd = Number(raw?.end_seconds);
+    const hasExplicitRange = raw?.start_seconds !== undefined && raw?.end_seconds !== undefined
+      && Number.isFinite(explicitStart) && Number.isFinite(explicitEnd)
+      && Math.abs(explicitStart - cursor) < 0.001 && explicitEnd > explicitStart;
     const duration = sceneDurationSeconds(voiceover);
     const start = Math.round((cursor + Number.EPSILON) * 1000) / 1000;
-    const end = Math.round((start + duration + Number.EPSILON) * 1000) / 1000;
+    const end = hasExplicitRange ? explicitEnd
+      : Math.round((start + duration + Number.EPSILON) * 1000) / 1000;
+    // Optional editorial directives survive intermediate timeline rebuilding.
+    // Never infer them from an image filename or overwrite the human brief.
+    const editorial = {};
+    for (const key of ["scene_label","on_screen_text","on_screen_text_instagram",
+      "voiceover_instagram","music_only_last_seconds"]) {
+      if (raw?.[key] !== undefined && raw?.[key] !== null) editorial[key] = raw[key];
+    }
     cleaned.push({
       index: cleaned.length + 1,
       start_seconds: start,
       end_seconds: end,
       duration_seconds: Math.round((end - start + Number.EPSILON) * 1000) / 1000,
       voiceover_text: voiceover,
+      ...editorial,
       suggested_visual: String(raw?.suggested_visual || "").trim(),
       asset_id: String(raw?.asset_id || raw?.media_asset_id || "").trim(),
       shot_status: String(raw?.shot_status || "").trim() || (String(raw?.asset_id || raw?.media_asset_id || "").trim() ? "owned" : "suggestion"),
