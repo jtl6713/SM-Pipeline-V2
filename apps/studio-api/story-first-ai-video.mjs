@@ -145,7 +145,10 @@ export function requireStoryVideoPaidApproval(quote,payload) {
 export function buildStoryVideoProviderSettings(settings,uploaded={}) {
   const s=normalizeStoryVideoSettings(settings);
   const {references:_,...payload}=s;
-  const provider=uploaded.provider_references||{};
+  const provider={...(uploaded.provider_references||{})};
+  if(s.model_id==="bytedance-seedance-v2.5"&&Array.isArray(provider.images)) {
+    provider.images=provider.images.map(item=>item?.image||item);
+  }
   const hasRefs=Boolean(s.references.start_frame||s.references.end_frame||
     s.references.images.length||s.references.videos.length||s.references.audios.length);
   if(hasRefs&&!Object.keys(provider).length)
