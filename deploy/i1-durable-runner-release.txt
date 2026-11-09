@@ -33,3 +33,5 @@ Deploy pipeline-runner rendering-review source reuse correction: watermark_verif
 2026-11-08 runner 2026-11-08-tiktok-photo-auto-recovery-v2. Correct photo draft pre-delivery Music_Status to valid Airtable choice Not Required; after SEND_TO_USER_INBOX use Manual Action Required. Prevent new TTD1 init from failing its Airtable write after TikTok accepted publish_id.
 
 Deploy 2026-11-08 ITS1 creative_first storyboard writer for Script a Short empty-catalog authoring.
+
+2026-11-09 guarded ITS1 storyboard writer exact scene count: 5 scenes means 5, one bounded regeneration for incorrect output, no truncation or premature acceptance. Verify /health code version 2026-11-09-its1-exact-scene-count-v1 before use. No media render, approval, scheduling or publishing changes.
