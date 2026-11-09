@@ -721,9 +721,12 @@ jobs:
           SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
           TOKEN=$(cat /tmp/verify-token.txt)
           BASE="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN"
-          curl -fsS --retry 5 --retry-delay 2 --max-time 45 "$BASE/qa-catalog" -o /tmp/qa-live-catalog.json
+          # curl --retry does not retry HTTP 404. The bridge's first requests
+          # after upload are often Cloudflare 1042 served as 404, which rolled
+          # Worker 0.10.782 back even after the session probe had recovered.
+          curl -fsS --retry 8 --retry-all-errors --retry-delay 2 --max-time 60 "$BASE/qa-catalog" -o /tmp/qa-live-catalog.json
           jq -e '.ok==true and .writeAuthority=="Airtable" and (.tests|type)=="array" and (.tests|length)>=88 and (.safeAutomations|type)=="array"' /tmp/qa-live-catalog.json >/dev/null
-          curl -fsS --retry 5 --retry-delay 2 --max-time 45 "$BASE/qa-runs" -o /tmp/qa-live-runs.json
+          curl -fsS --retry 8 --retry-all-errors --retry-delay 2 --max-time 60 "$BASE/qa-runs" -o /tmp/qa-live-runs.json
           jq -e '.ok==true and (.runs|type)=="array" and (.limited_to==1)' /tmp/qa-live-runs.json >/dev/null
           code=$(curl -sS --max-time 45 -o /tmp/qa-live-denied.json -w '%{http_code}' "$BASE/qa-unauthenticated")
           if [[ "$code" != "401" && "$code" != "403" ]]; then
