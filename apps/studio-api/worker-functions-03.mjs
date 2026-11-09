@@ -13517,7 +13517,8 @@ export async function storyFirstSceneMediaRoute(request, env, url, authorization
       }
       const body = await request.json().catch(() => ({}));
       if (String(body.content_profile_id || "") !== profileId) throw new HttpError(403, "Video profile mismatch");
-      const quote = await storyVideoQuote(env, body);
+      const quote = await storyVideoQuote(env, { ...body, idea_id: ideaId,
+        scene_number: Number(sceneNumber), content_profile_id: profileId });
       if (videoAction === "quote") return respond(request, env, { ok: true, quote });
       requireStoryVideoPaidApproval(quote, body);
       const prior = await readJob();
