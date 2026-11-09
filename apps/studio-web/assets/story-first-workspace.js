@@ -891,12 +891,15 @@
     scenes.forEach((shot,index)=>{
       const card=sceneDisclosure(index);
       const statusText=shot.selected_approved&&isId(shot.assigned_asset_id)?"Media Selected":
+        ["pending","generating"].includes(current.videoJobs[index]?.state) ? videoJobLabel(current.videoJobs[index]) :
+        current.videoJobs[index]?.state==="awaiting_review" ? "Awaiting Video Review" :
         current.pendingUpload[index]?"Uploading Media":
         shot.generated_master_id?"Awaiting Image Review":
         shot.decision==="capture"?"Awaiting Your Media":
         current.candidates[index]?.length?"Candidates Available":
         shot.decision==="ai"?"Awaiting AI Generation":"Missing Media";
       const statusClass=shot.selected_approved&&isId(shot.assigned_asset_id)?"is-ready":
+        current.videoJobs[index]?.state === "awaiting_review" ? "is-review" :
         current.pendingUpload[index]?"is-uploading":
         shot.generated_master_id?"is-review":
         current.candidates[index]?.length?"is-candidates":"is-pending";
@@ -990,7 +993,7 @@
       }
       const mode=sceneField(card,"sourcing","Media sourcing","", "select");
       [["unassigned","Choose a source"],["library","Choose library asset"],
-       ["ai","Generate AI Image"],["capture","I'll Supply the Media"]]
+       ["ai","Generate AI Image or Video"],["capture","I'll Supply the Media"]]
         .forEach(([key,text])=>mode.add(new Option(text,key)));
       mode.value=["library","ai","capture"].includes(shot.decision)?shot.decision:"unassigned";
       const actions=node("div","story-first-shot-detail");
@@ -1003,6 +1006,38 @@
         actions.replaceChildren();
         if(current.pendingUpload[index])actions.appendChild(node("p","story-first-upload-progress",
           current.pendingUpload[index]));
+        const videoJob = current.videoJobs[index];
+        if (shot.selected_approved && isId(shot.assigned_asset_id)) {
+          actions.appendChild(node("p", "subtle", "Media selected and saved. Choose Change selected media before generating anything new."));
+          return;
+        }
+        if (videoJob && !["none", "declined", "failed"].includes(videoJob.state)) {
+          actions.appendChild(node("p", "story-first-asset-heading", videoJobLabel(videoJob)));
+          if (videoJob.estimated_credits) {
+            actions.appendChild(node("p", "subtle", "Approved estimate: " +
+              videoJob.estimated_credits + " ElevenLabs credits · attempt " + videoJob.attempted));
+          }
+          if (videoJob.message || videoJob.error) {
+            actions.appendChild(node("p", "form-message", videoJob.message || videoJob.error));
+          }
+          if (videoJob.state === "awaiting_review" && videoJob.preview_url) {
+            const preview = node("video", "story-first-generated-preview");
+            preview.src = root + videoJob.preview_url;
+            preview.controls = true; preview.playsInline = true; preview.preload = "metadata";
+            preview.setAttribute("aria-label", "AI-generated video awaiting explicit review");
+            actions.appendChild(preview);
+            button("Accept Video", "primary-button", () =>
+              decideSceneVideo(index, "accept").catch(e => report(e.message, true)), actions);
+            button("Decline Video", "secondary-button", () =>
+              decideSceneVideo(index, "decline").catch(e => report(e.message, true)), actions);
+          } else if (videoJob.state === "registered") {
+            button("Finalize Video Selection", "primary-button", () =>
+              decideSceneVideo(index, "accept").catch(e => report(e.message, true)), actions);
+          }
+          button("Refresh Video Status", "secondary-button", () =>
+            checkSceneVideo(index).catch(e => report(e.message, true)), actions);
+          return;
+        }
         if(shot.generated_master_id && !shot.rejected_ai_ids?.includes(shot.generated_master_id)){
           const img=node("img","story-first-generated-preview");
           img.src=root+sceneUrl(index,"preview/"+encodeURIComponent(shot.generated_master_id));
@@ -1018,6 +1053,26 @@
           if(shot.media==="clip")actions.appendChild(node("p","subtle",
             "AI creates a STILL IMAGE. You must supply real video or explicitly override the clip requirement when accepting."));
           button("Generate this AI image","secondary-button",()=>generateSceneImage(index).catch(e=>report(e.message,true)),actions);
+          const opts=videoOptions(index);
+          const duration=label(actions,"AI video length","","select");
+          [[4,"4 seconds"],[6,"6 seconds"],[8,"8 seconds"]].forEach(([n,label])=>duration.add(new Option(label,String(n))));
+          duration.value=String(opts.duration_secs);
+          duration.onchange=()=>{opts.duration_secs=Number(duration.value);};
+          const ratio=label(actions,"AI video aspect ratio","","select");
+          [["9:16","9:16 Vertical"],["16:9","16:9 Horizontal"]]
+            .forEach(([value,label])=>ratio.add(new Option(label,value)));
+          ratio.value=opts.aspect_ratio;
+          ratio.onchange=()=>{opts.aspect_ratio=ratio.value;};
+          actions.appendChild(node("p","subtle",
+            "ElevenLabs Veo 3.1 Fast · 720p · video only, no generated sound. Studio will use its own narration. Credit estimate and explicit paid approval are required."));
+          button("Review Video Cost & Generate","secondary-button",()=>
+            generateSceneVideo(index).catch(e=>report(e.message,true)),actions);
+          if (!videoJob) button("Check Existing Video Job","secondary-button",()=>
+            checkSceneVideo(index).catch(e=>report(e.message,true)),actions);
+          else if (videoJob.state==="failed") actions.appendChild(node("p","form-message error-text",
+            "Previous video failed. A new attempt requires fresh credit approval. " + (videoJob.error||"")));
+          else if (videoJob.state==="declined") actions.appendChild(node("p","subtle",
+            "Previous clip declined. A new paid generation requires fresh approval."));
           button("I'll Supply the Media","secondary-button",()=>{
             shot.decision="capture";mode.value="capture";renderActions();markEditing();
           },actions);
