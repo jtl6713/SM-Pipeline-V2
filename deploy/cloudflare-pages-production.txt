@@ -751,3 +751,5 @@ Deploy 2026-11-09 UI 0.6.921-approval-blackout: clear Production approval and St
 Deploy Studio UI 0.6.922 ElevenLabs Script a Short video pilot on Pages; feature billing remains disabled, Worker 0.10.781 verified, preserve preview/production safeguards. 2026-11-09.
 
 Deploy Studio UI 0.6.923-ai-video-progress after PR #1757: lock ElevenLabs video quote/generate before save and price fetch, show per-scene inline progress, prevent duplicate paid submissions after uncertain receipt. 2026-11-09.
+
+Retry Studio UI 0.6.923-ai-video-progress deployment 2026-11-09: pin production browser preflight runner to Ubuntu 24.04 because Playwright 1.56.1 cannot install Chromium on GitHub ubuntu-26.04. No changes to AI video billing or publishing controls.

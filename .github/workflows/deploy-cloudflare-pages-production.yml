@@ -17,7 +17,8 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    # Playwright 1.56.1 does not support ubuntu-26.04 from ubuntu-latest.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
