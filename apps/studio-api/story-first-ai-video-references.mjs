@@ -114,6 +114,7 @@ export async function fetchStudioReferenceFromDrive(source, driveAccessToken, fe
 
 /** Upload user-authorized Media Asset as an ElevenLabs workspace asset. */
 export async function uploadStudioReferenceToEleven(env, source, bytes, fetcher=fetch) {
+  if (!clean(env.ELEVENLABS_VIDEO_API_KEY)) throw fail(503, "Dedicated ElevenLabs video key is not configured");
   const extension = {"image/png":".png","image/jpeg":".jpg","image/webp":".webp",
     "video/mp4":".mp4","video/webm":".webm","video/quicktime":".mov",
     "audio/mpeg":".mp3","audio/wav":".wav"}[source.mime] || ".bin";
