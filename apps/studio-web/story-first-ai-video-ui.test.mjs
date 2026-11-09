@@ -11,9 +11,15 @@ test("Script a Short retains image and uploaded-media choices while adding opt-i
   assert.match(ui, /Generate this AI image/);
   assert.match(ui, /Generate AI Image or Video/);
   assert.match(ui, /Review Video Cost & Generate/);
-  assert.match(ui, /4 seconds/);
-  assert.match(ui, /6 seconds/);
-  assert.match(ui, /8 seconds/);
+  assert.match(ui, /\[4,6,8\]/);
+  assert.match(ui, /Array\.from\(\{length:27\}/);
+  assert.match(ui, /bytedance-seedance-v2\.5/);
+  assert.match(ui, /veo-3\.1-generate-001/);
+  assert.match(ui, /Generated audio/);
+  assert.match(ui, /Reference image/);
+  assert.match(ui, /Reference video/);
+  assert.match(ui, /Reference audio/);
+  assert.match(ui, /browseSceneVideoReferences/);
   assert.match(ui, /9:16 Vertical/);
   assert.match(ui, /16:9 Horizontal/);
   assert.match(ui, /Check Existing Video Job/);
