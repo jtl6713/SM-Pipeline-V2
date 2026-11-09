@@ -108,9 +108,9 @@
     if ($("scriptedShortPropose")) $("scriptedShortPropose").disabled = false;
     current.record = record;
     current.story = JSON.parse(JSON.stringify(story));
+    current.expandedScenes.clear();
     Object.values(current.videoTimers).forEach(clearTimeout);
     current.videoTimers = {}; current.videoJobs = {}; current.videoOptions = {};
-    current.expandedScenes.clear();
     current.candidates = {}; current.attempted = new Set(); current.browsing = {};
     const voiceovers = String(record.summary || "").split(/\r?\n/).filter(line => /^\s*[1-9]\d*\.\s+/.test(line) && !/\s\u2014\s/.test(line)).map(line => line.replace(/^\s*\d+\.\s+/, "").trim());
     if (voiceovers.length === current.story.scenes.length && current.story.scenes.every(row => !row.voiceover)) {
