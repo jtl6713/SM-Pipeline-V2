@@ -115,3 +115,100 @@ def test_normalize_scenes_matches_catalog_filenames():
     assert scenes[0]["media_asset_id"] == "recWide1"
     assert scenes[1]["suggested_visual"] == "OMNY_reader_closeup.jpg"
     assert scenes[1]["media_asset_id"] == "recOmny2"
+
+def test_creative_first_prompt_respects_exact_five_scenes():
+    prompt = build_creative_first_prompt(
+        title="Chicago evening guide",
+        summary="Create exactly five scenes with a specific shot and unique voiceover per scene.",
+        location="Chicago",
+        market="Chicago",
+        required_scene_count=5,
+    )
+    assert "Write EXACTLY 5 distinct scenes" in prompt
+    assert "Do not add hook/CTA scenes beyond this count" in prompt
+    assert "- Write 6 to 8 scenes" not in prompt
+
+
+def test_its1_retries_seven_scene_ai_response_into_five_without_truncation(monkeypatch):
+    calls = []
+
+    def fake_ai(prompt):
+        calls.append(prompt)
+        count = 7 if len(calls) == 1 else 5
+        return {
+            "parsed": {
+                "scenes": [
+                    {
+                        "voiceover_text": f"Unique spoken narration for scene {i + 1}.",
+                        "suggested_visual": f"Specific shot {i + 1} of the Chicago skyline.",
+                    }
+                    for i in range(count)
+                ]
+            }
+        }
+
+    monkeypatch.setattr("its1.processor.generate_timed_script", fake_ai)
+    result = process_request(
+        title="Chicago evening guide",
+        summary="Make exactly five scenes, each with a different skyline visual.",
+        required_scene_count=5,
+        creative_first=True,
+        catalog=[],
+    )
+    assert result["processed"] is True
+    assert result["required_scene_count"] == 5
+    assert len(result["scenes"]) == 5
+    assert len(calls) == 2
+    assert "Write EXACTLY 5 distinct scenes" in calls[0]
+    assert "previous AI proposal returned 7 scenes" in calls[1]
+    assert len({scene["voiceover_text"] for scene in result["scenes"]}) == 5
+
+
+def test_its1_never_silently_slices_seven_scenes_to_five(monkeypatch):
+    calls = []
+
+    def fake_ai(prompt):
+        calls.append(prompt)
+        return {
+            "parsed": {
+                "scenes": [
+                    {
+                        "voiceover_text": f"Distinct spoken scene {i + 1}.",
+                        "suggested_visual": f"Specific scene visual {i + 1}.",
+                    }
+                    for i in range(7)
+                ]
+            }
+        }
+
+    monkeypatch.setattr("its1.processor.generate_timed_script", fake_ai)
+    result = process_request(
+        title="Chicago landmarks", summary="Five scenes only.",
+        required_scene_count=5, creative_first=True,
+    )
+    assert len(calls) == 2
+    assert result["processed"] is False
+    assert result["reason"] == "scene_count_mismatch"
+    assert result["actual_scene_count"] == 7
+    assert result["scenes"] == []
+
+
+def test_its1_rejects_out_of_range_and_boolean_scene_count():
+    import pytest
+    for count in (True, 1, 13, "5", 5.5):
+        with pytest.raises(ValueError, match="integer between 2 and 12"):
+            process_request(
+                title="Chicago", required_scene_count=count, creative_first=True,
+                dry_run=True,
+            )
+
+
+def test_worker_and_runner_forward_exact_scene_count():
+    from pathlib import Path
+    runner_root = Path(__file__).resolve().parents[1]
+    stage = (runner_root / "stages" / "its1.py").read_text()
+    worker = (runner_root.parents[1] / "apps" / "studio-api" / "worker-functions-02.mjs").read_text()
+    assert '"required_scene_count": extra.get("required_scene_count")' in stage
+    assert 'required_scene_count: Number.isInteger(requiredSceneCount)' in worker
+    assert "requiredSceneCount: sceneDirections.requested_count" in worker
+    assert "parsed.length === requiredSceneCount" in worker
