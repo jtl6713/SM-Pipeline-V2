@@ -57,3 +57,22 @@ test("review preview and status are visible before Asset Manager registration", 
   assert.match(server, /AIRTABLE_MEDIA_TABLE_ID/);
   assert.match(html, /Generated AI images and video clips are reviewed inline/);
 });
+
+
+test("video quote locks synchronously and reports status by its own button", () => {
+  const start = ui.slice(ui.indexOf("async function generateSceneVideo(index)"),
+    ui.indexOf("async function decideSceneVideo(index"));
+  assert.ok(start.includes("current.videoRequestBusy = true;"));
+  assert.ok(start.indexOf("current.videoRequestBusy = true;") < start.indexOf("await save();"),
+    "must lock before save and before the quote's network call");
+  assert.match(start, /if \(current\.busy \|\| current\.videoRequestBusy \|\|/);
+  assert.match(start, /paidPostStarted = true;/);
+  assert.match(start, /paidReceiptReceived = true;/);
+  assert.match(start, /current\.videoSubmissionUncertain\[videoSceneIdentity\(index\)\] = true;/);
+  assert.match(ui, /generateButton\.disabled = current\.videoRequestBusy \|\| uncertain;/);
+  assert.match(ui, /videoProgress\.setAttribute\("aria-live","polite"\);/);
+  assert.match(ui, /videoProgress\.id = "storyFirstVideoProgress-" \+ index;/);
+  assert.match(ui, /\[data-story-video-generate\]/);
+  assert.match(start, /await checkSceneVideo\(index, true\);/);
+  assert.match(ui, /Paid submission may have reached ElevenLabs/);
+});
