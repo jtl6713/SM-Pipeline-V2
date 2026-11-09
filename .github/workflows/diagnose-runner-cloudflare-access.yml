@@ -50,6 +50,16 @@ jobs:
               print(name+"_content_type="+str(hdr.get("content-type","unknown")).split(";")[0][:55])
               print(name+"_access_edge_headers="+("YES" if hdr.get("cf-ray") or hdr.get("cf-mitigated") else "NO"))
               print(name+"_cf_mitigated="+str(hdr.get("cf-mitigated","none"))[:40])
+              print(name+"_server="+str(hdr.get("server","unknown"))[:40])
+              print(name+"_access_request_header="+str(bool(hdr.get("cf-access-aud") or hdr.get("cf-access-unauthorized") or hdr.get("cf-access-request-id"))))
+              try:
+                  result=json.loads(body)
+                  print(name+"_body_keys="+",".join(sorted(result.keys()))[:120] if isinstance(result,dict) else name+"_body_type=array")
+                  body_status=json.dumps(result,sort_keys=True).lower()[:4096]
+                  markers=["forbidden","unauthorized","access denied","access","not allowed","cloudflare","host","token","authentication","origin","waf","gateway","invalid"]
+                  print(name+"_body_error_markers="+",".join(x for x in markers if x in body_status))
+              except Exception:
+                  print(name+"_body_is_json=NO")
               if status == 200:
                   try:
                       p=json.loads(body)
@@ -72,6 +82,7 @@ jobs:
                   if isinstance(apps,dict):apps=apps.get("items") or []
                   matching=[a for a in apps if domain in [str(a.get("domain") or "")]+[str(x.get("public_domain") or "") for x in a.get("destinations") or []]]
                   print("access_app_inventory=PASS")
+                  print("access_app_inventory_total="+str(len(apps)))
                   print("pipeline_access_app_count="+str(len(matching)))
                   for a in matching[:3]:
                       print("pipeline_access_app_type="+str(a.get("type") or "unknown")[:35])
@@ -94,6 +105,56 @@ jobs:
                   print("access_app_inventory_http="+str(err.code))
               except Exception as err:
                   print("access_app_inventory_error="+type(err).__name__)
+          # Check Tunnel ingress and zone Access without changing routing or policy.
+          if token and account:
+              base_headers={"Authorization":"Bearer "+token,"Accept":"application/json"}
+              tunnel="f7a22f0f-f760-4e16-a085-3538d22981f1"
+              tunnel_url="https://api.cloudflare.com/client/v4/accounts/"+account+"/cfd_tunnel/"+tunnel+"/configurations"
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(tunnel_url,headers=base_headers),timeout=25) as res:
+                      td=json.load(res)
+                  ingress=((td.get("result") or {}).get("config") or {}).get("ingress") or []
+                  routes=[x for x in ingress if x.get("hostname")==domain]
+                  print("tunnel_configuration_read=PASS")
+                  print("tunnel_pipeline_route_count="+str(len(routes)))
+                  print("tunnel_pipeline_route_to_localhost_3350="+str(any(str(x.get("service") or "").lower() in ("http://localhost:3350","http://127.0.0.1:3350") for x in routes)))
+              except urllib.error.HTTPError as err:
+                  print("tunnel_configuration_read_http="+str(err.code))
+              except Exception as err:
+                  print("tunnel_configuration_read_error="+type(err).__name__)
+              try:
+                  zones_url="https://api.cloudflare.com/client/v4/zones?name=chicagoshining.com"
+                  with urllib.request.urlopen(urllib.request.Request(zones_url,headers=base_headers),timeout=25) as res:
+                      zd=json.load(res)
+                  zones=zd.get("result") or []
+                  print("zone_list_read=PASS")
+                  print("exact_zone_count="+str(len(zones)))
+                  for zone in zones[:1]:
+                      z=zone.get("id")
+                      url="https://api.cloudflare.com/client/v4/zones/"+str(z)+"/access/apps?per_page=100"
+                      try:
+                          with urllib.request.urlopen(urllib.request.Request(url,headers=base_headers),timeout=25) as res:
+                              pd=json.load(res)
+                          apps=pd.get("result") or []
+                          if isinstance(apps,dict):apps=apps.get("items") or []
+                          print("zone_access_apps_total="+str(len(apps)))
+                          print("zone_pipeline_access_app_count="+str(sum(domain in str(a.get("domain") or "") for a in apps)))
+                      except urllib.error.HTTPError as err:
+                          print("zone_access_apps_http="+str(err.code))
+                      durl="https://api.cloudflare.com/client/v4/zones/"+str(z)+"/dns_records?name="+domain
+                      try:
+                          with urllib.request.urlopen(urllib.request.Request(durl,headers=base_headers),timeout=25) as res:
+                              dd=json.load(res)
+                          rs=dd.get("result") or []
+                          print("pipeline_dns_records_count="+str(len(rs)))
+                          print("pipeline_dns_record_types="+",".join(sorted({str(x.get("type")) for x in rs}))[:50])
+                          print("pipeline_dns_records_proxied="+str(all(x.get("proxied") is True for x in rs) if rs else "unknown"))
+                      except urllib.error.HTTPError as err:
+                          print("pipeline_dns_records_http="+str(err.code))
+              except urllib.error.HTTPError as err:
+                  print("zone_list_http="+str(err.code))
+              except Exception as err:
+                  print("zone_list_error="+type(err).__name__)
           print("diagnostic_only=YES")
           PY
       - name: Check Windows Runner local health through existing protected Ops interface
