@@ -1,0 +1,115 @@
+name: Studio ElevenLabs Video Canary Read-only Preflight
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-studio-elevenlabs-video-canary-preflight.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicagoshining-elevenlabs-video-readonly-preflight
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Read active Cloudflare Worker binding state (no mutations, no billing)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          python - <<'PY'
+          import json, os, urllib.request, urllib.parse
+          from pathlib import Path
+          api = "https://api.cloudflare.com/client/v4/accounts/{}/workers/scripts/chicagoshining-studio-api".format(os.environ["CLOUDFLARE_ACCOUNT_ID"])
+          headers = {"Authorization": "Bearer " + os.environ["CLOUDFLARE_API_TOKEN"]}
+          def fetch(path):
+              request = urllib.request.Request(api + path, headers=headers)
+              with urllib.request.urlopen(request, timeout=30) as res:
+                  data = json.load(res)
+              if data.get("success") is not True:
+                  raise SystemExit("Cloudflare read-only preflight failed")
+              return data["result"]
+          d = fetch("/deployments")
+          version = max(d["deployments"][0]["versions"], key=lambda v:v.get("percentage",0))["version_id"]
+          info = fetch("/versions/" + version)
+          bindings = {row["name"]:row for row in (info.get("resources") or {}).get("bindings") or []}
+          required = {"AIRTABLE_PAT":"secret_text", "STUDIO_MEDIA":"r2_bucket",
+                      "ELEVENLABS_API_KEY":"secret_text", "ELEVENLABS_VIDEO_API_KEY":"secret_text"}
+          required_ok = all(bindings.get(name,{}).get("type")==typ for name,typ in required.items())
+          names = ["STUDIO_ELEVENLABS_VIDEO_ENABLED",
+                   "STUDIO_ELEVENLABS_VIDEO_PRICE_REVIEWED_AT",
+                   "STUDIO_ELEVENLABS_VIDEO_CREDITS_4S_720P_9X16",
+                   "STUDIO_ELEVENLABS_VIDEO_RIGHTS_VERIFIED",
+                   "STUDIO_ELEVENLABS_VIDEO_WATERMARK_VERIFIED",
+                   "STUDIO_ELEVENLABS_VIDEO_REFERENCE_TRANSFER_ENABLED",
+                   "STUDIO_ELEVENLABS_SEEDANCE_API_APPROVED"]
+          settings = {}
+          for n in names:
+              v = bindings.get(n)
+              # Only summarize allowlisted non-secret settings. Never print any unknown values.
+              if v is None:
+                  settings[n]="absent"
+              elif v.get("type") == "secret_text":
+                  settings[n]="present_secret_text_value_not_readable"
+              elif v.get("type") == "plain_text":
+                  raw=str(v.get("text") or "").strip()
+                  if n.endswith("PRICE_REVIEWED_AT"):
+                      settings[n] = raw if len(raw)==10 and raw[4:5]=="-" and raw[7:8]=="-" else "invalid"
+                  elif n.endswith("CREDITS_4S_720P_9X16"):
+                      settings[n] = raw if raw == "2425" else "not_2425"
+                  else:
+                      settings[n] = raw if raw in ("true","false") else "unrecognized"
+              else:
+                  settings[n]="wrong_binding_type"
+          runner = bindings.get("PIPELINE_RUNNER_URL") or {}
+          runner_present = runner.get("type") == "plain_text" and bool(str(runner.get("text") or "").strip())
+          health="not_checked"
+          if runner_present:
+              candidate = str(runner.get("text")).strip().rstrip("/")
+              parsed=urllib.parse.urlsplit(candidate)
+              if parsed.scheme=="https" and parsed.hostname and not parsed.username and not parsed.password:
+                  try:
+                      with urllib.request.urlopen(urllib.request.Request(candidate+"/health",headers={"Accept":"application/json"}),timeout=15) as response:
+                          health="http_"+str(response.status)
+                  except urllib.error.HTTPError as e:
+                      health="http_"+str(e.code)
+                  except Exception:
+                      health="unreachable"
+              else:
+                  health="non_https_or_invalid"
+          report={
+            "worker":"chicagoshining-studio-api",
+            "required_existing_bindings_preserved":required_ok,
+            "runner_url_present":bool(runner_present),
+            "runner_health":health,
+            "settings":settings,
+            "single_4s_720p_9x16_silent_price_verified_in_ui":2425,
+            "paid_request_submitted":False,
+            "safe_to_generate_now":False,
+            "note":"Read-only deployment inspection only; commercial rights and watermark require independent live verification. Do not infer readiness from this run."
+          }
+          print(json.dumps(report,indent=2,sort_keys=True))
+          Path("/tmp/elevenlabs-video-preflight-sanitized.json").write_text(json.dumps(report,indent=2))
+          if not required_ok:
+              raise SystemExit("Required binding missing or changed")
+          PY
+      - name: Upload sanitized read-only preflight evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-elevenlabs-video-preflight-${{ github.run_id }}
+          path: /tmp/elevenlabs-video-preflight-sanitized.json
+          if-no-files-found: ignore
+          retention-days: 30
