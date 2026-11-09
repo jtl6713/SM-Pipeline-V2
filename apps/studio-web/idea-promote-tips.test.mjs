@@ -89,22 +89,10 @@ test("Approved Ideas reopen linked Production Requests, not regenerate voiceover
   assert.match(app, /function leaveProductionWorkspace/);
 });
 
-test("Ideas shows Current expanded and Archived collapsed by default", () => {
+test("Ideas shows Current expanded by default", () => {
   assert.match(app, /let ideasCurrentSectionOpen = true/);
-  assert.match(app, /let ideasArchivedSectionOpen = false/);
   assert.match(app, /title: "Current ideas"/);
-  assert.match(app, /title: "Archived"/);
   assert.match(app, /data-idea-section-toggle/);
-  assert.match(app, /not in production/);
-  assert.match(app, /already in production/);
-});
-
-test("Ideas archives promoted items in the Archived section", () => {
-  assert.match(app, /let ideasArchivedSectionOpen = false/);
-  assert.match(app, /function partitionIdeaRecords/);
-  assert.match(app, /if \(ideaIsPromoted\(record\)\) archived\.push\(record\)/);
-  assert.match(app, /key: "archived"/);
-  assert.match(app, /already in production/);
 });
 
 test("Pipeline group headers include linked Content ID and title", () => {
