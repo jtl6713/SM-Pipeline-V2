@@ -1,0 +1,93 @@
+name: Enable Studio B3 Factory Ops Supabase Reads
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicagoshining-studio-api-b3-factory-ops-read
+  cancel-in-progress: false
+
+jobs:
+  put:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+    steps:
+      - name: Install Factory and Ops read flag without printing secret values
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          python - <<'PY'
+          import json, os, urllib.request, urllib.error
+          target = "https://api.cloudflare.com/client/v4/accounts/{}/workers/scripts/{}".format(
+              os.environ["CLOUDFLARE_ACCOUNT_ID"], os.environ["TARGET_WORKER"])
+          auth = {"Authorization": "Bearer " + os.environ["CLOUDFLARE_API_TOKEN"]}
+          def get_json(path):
+              req = urllib.request.Request(target + path, headers=auth)
+              with urllib.request.urlopen(req, timeout=45) as response:
+                  payload = json.loads(response.read().decode())
+              if payload.get("success") is not True:
+                  raise SystemExit("Cloudflare binding verification response was not successful")
+              return payload.get("result")
+          def active_bindings():
+              versions = get_json("/deployments")
+              version_id = max(versions["deployments"][0]["versions"],
+                               key=lambda item: item.get("percentage", 0))["version_id"]
+              details = get_json("/versions/" + version_id)
+              return {row["name"]: row["type"] for row in
+                      (details.get("resources") or {}).get("bindings") or []}
+          req = urllib.request.Request(target + "/content", headers=auth)
+          with urllib.request.urlopen(req, timeout=60) as response:
+              script = response.read()
+          if b"0.10.782-supabase-b3-factory-ops-reads" not in script:
+              raise SystemExit("Refusing to enable B3 reads: live Worker is not 0.10.782-supabase-b3-factory-ops-reads")
+          before = active_bindings()
+          expected = {
+              "AIRTABLE_PAT": "secret_text",
+              "STUDIO_MEDIA": "r2_bucket",
+              "STUDIO_CONTENT_READ_SOURCE": "secret_text",
+          }
+          for name, typ in expected.items():
+              if before.get(name) != typ:
+                  raise SystemExit("Existing production binding missing or changed: " + name)
+          secret = {
+              "name": "STUDIO_FACTORY_OPS_READ_SOURCE",
+              "text": "supabase",
+              "type": "secret_text",
+          }
+          headers = dict(auth, **{"Content-Type": "application/json"})
+          put = urllib.request.Request(
+              target + "/secrets", headers=headers,
+              data=json.dumps(secret).encode(), method="PUT")
+          try:
+              with urllib.request.urlopen(put, timeout=60) as response:
+                  result = json.loads(response.read().decode())
+          except urllib.error.HTTPError as error:
+              raise SystemExit("Cloudflare refused B3 read flag (HTTP {})".format(error.code))
+          entry = result.get("result") or {}
+          if (result.get("success") is not True
+                  or entry.get("name") != "STUDIO_FACTORY_OPS_READ_SOURCE"
+                  or entry.get("type") != "secret_text"):
+              raise SystemExit("Cloudflare did not confirm B3 read flag")
+          after = active_bindings()
+          for name, typ in {**expected, "STUDIO_FACTORY_OPS_READ_SOURCE": "secret_text"}.items():
+              if after.get(name) != typ:
+                  raise SystemExit("Required binding missing after B3 flag installation: " + name)
+          for name, typ in before.items():
+              if after.get(name) != typ:
+                  raise SystemExit("Pre-existing Worker binding changed during B3 flag install: " + name)
+          print("b3_factory_ops_read_secret_installed=PASS")
+          print("content_read_secret_preserved=PASS")
+          print("home_reads_changed=NO")
+          print("write_source_changed=NO")
+          PY
