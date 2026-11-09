@@ -6,7 +6,7 @@ import path from "node:path";
 import {
   compareAirtableSupabaseOutputMirror,
   compareAirtableSupabaseContentMirror,
-} from "./worker-functions-03.mjs";
+} from "./supabase-mirror-check.mjs";
 import { stripDeletedDuplicateOutputRecords } from "./supabase-pipeline-reads.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -75,8 +75,11 @@ test("Worker exposes tenant_admin mirror-check route and bumped version", () => 
   const worker = readFileSync(path.join(here, "worker.js"), "utf8");
   assert.match(worker, /pathname === "\/api\/ops\/supabase\/mirror-check"/);
   assert.match(worker, /getStudioSupabaseMirrorCheck/);
+  assert.match(worker, /\/\*__STUDIO_WORKER_EXTRACT:getStudioSupabaseMirrorCheck__\*\//);
   assert.match(worker, /version: "0\.10\.775-supabase-mirror-check"/);
   const source = readFileSync(path.join(here, "worker-functions-03.mjs"), "utf8");
   assert.match(source, /export async function getStudioSupabaseMirrorCheck/);
-  assert.match(source, /workstream_a5/);
+  assert.match(source, /\/\*__STUDIO_WORKER_END:getStudioSupabaseMirrorCheck__\*\//);
+  const helper = readFileSync(path.join(here, "supabase-mirror-check.mjs"), "utf8");
+  assert.match(helper, /workstream_a5/);
 });

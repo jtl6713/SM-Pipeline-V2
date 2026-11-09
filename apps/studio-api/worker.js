@@ -7000,6 +7000,7 @@ const STUDIO_SUPABASE_SYNC_LAST_KEY = "studio/state/supabase-pipeline-sync-last.
 /*__STUDIO_WORKER_EXTRACT:writeStudioSupabaseSyncLast__*/
 /*__STUDIO_WORKER_EXTRACT:studioSyncSupabasePipelineReads__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioSupabaseSyncStatus__*/
+/*__STUDIO_WORKER_EXTRACT:getStudioSupabaseMirrorCheck__*/
 /*__STUDIO_WORKER_EXTRACT:postStudioSupabaseSync__*/
 /*__STUDIO_WORKER_EXTRACT:warmOldestStudioReadSnapshot__*/
 /*__STUDIO_WORKER_EXTRACT:mappedTikTokNeedsLivePublishCheck__*/
