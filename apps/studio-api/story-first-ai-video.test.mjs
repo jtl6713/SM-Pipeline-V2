@@ -200,3 +200,37 @@ test("provider payload converts trusted media only and never contains Airtable I
   const basic=buildStoryVideoProviderSettings(normalizeStoryVideoSettings(input));
   assert.equal(basic.references,undefined);
 });
+
+
+test("Cloudflare Worker-compatible manual redirects do not forward paid key or silently retry", async () => {
+  let calls = 0;
+  const settings = buildStoryVideoProviderSettings(normalizeStoryVideoSettings(input));
+  const redirect = async (url, options) => {
+    calls += 1;
+    assert.equal(options.redirect, "manual", "Cloudflare rejects redirect:error");
+    assert.equal(url, "https://api.elevenlabs.io/v1/flows/video");
+    return new Response(null, { status: 302, headers: { Location: "https://evil.example/receive-key" } });
+  };
+  await assert.rejects(() => submitStoryVideo(env, settings, redirect), /unexpected redirect.*no automatic retry/i);
+  assert.equal(calls, 1, "provider POST cannot be repeated after redirect");
+  let getCalls = 0;
+  await assert.rejects(() => readStoryVideo(env, "Gen123456789", async (url, opts) => {
+    getCalls += 1;
+    assert.equal(opts.redirect, "manual");
+    return new Response(null, { status: 307, headers: { Location: "https://evil.example/status" } });
+  }), /unexpected redirect/i);
+  assert.equal(getCalls, 1);
+});
+
+test("signed video download uses manual redirect handling and rejects redirects", async () => {
+  const remote = { status: "completed", content_mime_type: "video/mp4",
+    content_url: "https://storage.googleapis.com/generations/signed-video?token=x" };
+  let calls = 0;
+  await assert.rejects(() => downloadStoryVideo(remote, async (url, opts) => {
+    calls += 1;
+    assert.equal(url, remote.content_url);
+    assert.equal(opts.redirect, "manual");
+    return new Response(null, { status: 302, headers: { Location: "https://evil.example/video.mp4" } });
+  }), /redirected unexpectedly/i);
+  assert.equal(calls, 1);
+});
