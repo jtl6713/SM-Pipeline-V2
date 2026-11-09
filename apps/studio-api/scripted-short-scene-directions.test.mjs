@@ -331,5 +331,6 @@ test("Producer forwards five requested scenes instead of falling back to generic
   assert.match(writer, /creativeFirst \|\| requiredSceneCount/);
   assert.match(route, /requiredSceneCount: sceneDirections\.requested_count/);
   assert.match(route, /sceneDirections\.header_count !== sceneDirections\.explicit_count/);
-  assert.match(route, /creativeFirst \|\| sceneDirections\.requested_count/);
+  assert.match(route, /if \(creativeFirst\) \{\s*throw new HttpError\(502/);
+  assert.match(route, /if \(sceneDirections\.requested_count\) \{/);
 });
