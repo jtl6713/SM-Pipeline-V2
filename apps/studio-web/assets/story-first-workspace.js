@@ -1465,6 +1465,8 @@
     current.record = null;
     current.story = null;
     current.selectedAssetNames = {};
+    Object.values(current.videoTimers).forEach(clearTimeout);
+    current.videoTimers={};current.videoJobs={};current.videoOptions={};
     current.expandedScenes.clear();
     $("storyFirstWorkspace").hidden = true;
     $("storyFirstSaved").replaceChildren(new Option("Choose a saved storyboard…", ""));
