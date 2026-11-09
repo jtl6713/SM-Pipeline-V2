@@ -8,6 +8,7 @@ import {
   validateClassificationPatch,
 } from "./manual-classification.mjs";
 import { parseStoryFirstNotes, upsertStoryFirstNotes, storyFirstShotChecklist } from "./idea-first-storyboard.mjs";
+import { storyVideoQuote, requireStoryVideoPaidApproval, submitStoryVideo, readStoryVideo, downloadStoryVideo, storyVideoJobKey, storyVideoMediaKey, STORY_VIDEO_POLL_MIN_MS } from "./story-first-ai-video.mjs";
 import { loadAuthorizedIdea, assertIdeaUnpromoted, assertIdeaNotApproved } from "./worker-functions-01.mjs";
 import { serveMichiganV2CachedPreview } from "./michigan-review-preview-cache.mjs";
 import { evaluateReviewPackage } from "./review-package-readiness.mjs";
@@ -13450,7 +13451,7 @@ export async function studioParkStaleYoutubeQuotaPolls(env, options = {}) {
  * are transferred by the existing Studio Runner into Drive + Media Assets.
  * Creating a storyboard or generating a preview never makes a Production Request. */
 export async function storyFirstSceneMediaRoute(request, env, url, authorization) {
-  const path = /^\/api\/story-first\/ideas\/(rec[A-Za-z0-9]+)\/scenes\/([1-9]\d*)\/(generate|accept|decline|preview\/aipre[A-Za-z0-9]+)$/.exec(url.pathname);
+  const path = /^\/api\/story-first\/ideas\/(rec[A-Za-z0-9]+)\/scenes\/([1-9]\d*)\/(generate|accept|decline|preview\/aipre[A-Za-z0-9]+|video\/(?:quote|start|status|preview|accept|decline))$/.exec(url.pathname);
   if (!path) throw new HttpError(404, "Story scene was not found");
   const [, ideaId, sceneNumber, action] = path;
   const idea = await loadAuthorizedIdea(env, ideaId, authorization);
@@ -13478,6 +13479,219 @@ export async function storyFirstSceneMediaRoute(request, env, url, authorization
       } }),
     });
   };
+
+  // Paid video is an opt-in scene action. R2 holds only a pending job receipt and
+  // temporary preview. The accepted original remains in Google Drive, with
+  // the Media Asset and scene selection registered in authoritative Airtable.
+  if (action.startsWith("video/")) {
+    const videoAction = action.slice(6);
+    const jobKey = storyVideoJobKey(ideaId, sceneNumber);
+    const mediaKey = storyVideoMediaKey(ideaId, sceneNumber);
+    const readJob = async () => {
+      const object = await env.STUDIO_MEDIA.get(jobKey);
+      return object ? { job: JSON.parse(await object.text()), etag: object.etag } : { job: null, etag: null };
+    };
+    const writeJob = async (job, etag = null) => {
+      const result = await env.STUDIO_MEDIA.put(jobKey, JSON.stringify(job), {
+        onlyIf: etag ? { etagMatches: etag } : new Headers({ "If-None-Match": "*" }),
+        httpMetadata: { contentType: "application/json" },
+      });
+      if (!result) throw new HttpError(409, "Scene video changed during this action; refresh status before proceeding");
+      return result.etag;
+    };
+    const visible = (job) => ({
+      ok: true, state: job?.state || "none", attempted: Number(job?.attempt || 0),
+      estimated_credits: job?.estimated_credits || null,
+      last_checked_at: job?.last_checked_at || null,
+      error: job?.error || null,
+      preview_url: job?.state === "awaiting_review" ? "/api/story-first/ideas/" +
+        ideaId + "/scenes/" + sceneNumber + "/video/preview" : null,
+      asset_id: job?.asset_id || null,
+      message: job?.state === "submission_uncertain" ?
+        "Provider submission outcome uncertain. Do not retry; an administrator must reconcile charges." : null,
+    });
+    if (videoAction === "quote" || videoAction === "start") {
+      if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+      if (scene.selected_approved || scene.assigned_asset_id || scene.generated_master_id) {
+        throw new HttpError(409, "Remove or decline existing selected/pending media before generating video");
+      }
+      const body = await request.json().catch(() => ({}));
+      if (String(body.content_profile_id || "") !== profileId) throw new HttpError(403, "Video profile mismatch");
+      const quote = await storyVideoQuote(env, body);
+      if (videoAction === "quote") return respond(request, env, { ok: true, quote });
+      requireStoryVideoPaidApproval(quote, body);
+      const prior = await readJob();
+      if (prior.job && prior.job.state !== "declined" && prior.job.state !== "failed") {
+        throw new HttpError(409, "This scene already has a video job. Check its status; no second charge was submitted");
+      }
+      const attempt = Number(prior.job?.attempt || 0) + 1;
+      if (attempt > 2) throw new HttpError(409, "Two video attempts reached for this scene; review before further spending");
+      // The conditional R2 write happens BEFORE a paid remote POST.
+      // A timeout or an ambiguous provider response leaves the intent durable
+      // and intentionally blocks any automatic duplicate charge.
+      const job = {
+        schema: "studio.story-video.1", run_id: crypto.randomUUID(),
+        idea_id: ideaId, scene_number: Number(sceneNumber), profile_id: profileId,
+        scene_visual: String(scene.visual || ""), attempt, state: "submitting",
+        settings: { prompt: quote.prompt, duration_secs: quote.duration_secs, aspect_ratio: quote.aspect_ratio,
+          model_id: quote.model_id, resolution: quote.resolution, generate_audio: false },
+        estimated_credits: quote.estimated_credits,
+        price_reviewed_at: quote.price_reviewed_at,
+        approved_at: new Date().toISOString(), generation_id: null, last_checked_at: null,
+        error: null,
+      };
+      const reservedEtag = await writeJob(job, prior.etag);
+      let receipt;
+      try {
+        receipt = await submitStoryVideo(env, job.settings);
+      } catch (error) {
+        // Even an HTTP error can race with an upstream charge or interrupted
+        // response. Do not allow a second paid submission on this scene.
+        await writeJob({ ...job, state: "submission_uncertain", error: "Manual provider reconciliation required" },
+          reservedEtag).catch(() => {});
+        throw error;
+      }
+      await writeJob({ ...job, state: "pending", generation_id: receipt.id }, reservedEtag);
+      return respond(request, env, visible({ ...job, state: "pending" }));
+    }
+    if (videoAction === "status") {
+      if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+      const found = await readJob();
+      const job = found.job;
+      if (!job) return respond(request, env, visible(null));
+      if (job.profile_id !== profileId || job.idea_id !== ideaId || job.scene_number !== Number(sceneNumber)) {
+        throw new HttpError(403, "Video job owner mismatch");
+      }
+      if (["pending", "generating"].includes(job.state) && job.generation_id &&
+        (!job.last_checked_at || Date.now() - Date.parse(job.last_checked_at) >= STORY_VIDEO_POLL_MIN_MS)) {
+        // Reserve the polling window via CAS so simultaneous tabs do not
+        // hammer ElevenLabs. Provider status GET never submits a new charge.
+        const checkedAt = new Date().toISOString();
+        const checkingEtag = await writeJob({ ...job, last_checked_at: checkedAt }, found.etag)
+          .catch((error) => { if (error.status === 409) return null; throw error; });
+        if (checkingEtag) {
+          const remote = await readStoryVideo(env, job.generation_id);
+          const next = { ...job, last_checked_at: checkedAt };
+          if (remote.status === "failed") {
+            next.state = "failed";
+            next.error = "ElevenLabs reported " + String(remote.failure_reason || "generation failure").slice(0, 100);
+          } else if (remote.status === "completed") {
+            // The signed provider URL expires. Save actual bytes to R2, never
+            // a provider URL, so the user can review later without paying again.
+            const bytes = await downloadStoryVideo(remote);
+            await env.STUDIO_MEDIA.put(mediaKey, bytes, {
+              httpMetadata: { contentType: "video/mp4" },
+              customMetadata: { source: "elevenlabs_video", ideaId, profileId, sceneNumber: String(sceneNumber),
+                run_id: job.run_id },
+            });
+            next.state = "awaiting_review";
+          } else {
+            next.state = remote.status;
+          }
+          await writeJob(next, checkingEtag);
+          return respond(request, env, visible(next));
+        }
+      }
+      return respond(request, env, visible(job));
+    }
+    if (videoAction === "preview") {
+      if (request.method !== "GET" && request.method !== "HEAD") throw new HttpError(405, "Method not allowed");
+      const { job } = await readJob();
+      if (job?.state !== "awaiting_review") throw new HttpError(404, "No AI video is awaiting review");
+      const object = await env.STUDIO_MEDIA.get(mediaKey);
+      if (!object) throw new HttpError(410, "AI video preview is missing");
+      return new Response(request.method === "HEAD" ? null : object.body, {
+        headers: { "Content-Type": "video/mp4", "Cache-Control": "private, no-store",
+          "X-Content-Type-Options": "nosniff" },
+      });
+    }
+    if (videoAction === "decline" || videoAction === "accept") {
+      if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+      const body = await request.json().catch(() => ({}));
+      if (String(body.content_profile_id || "") !== profileId) throw new HttpError(403, "Video profile mismatch");
+      const found = await readJob();
+      const job = found.job;
+      if (!job || job.profile_id !== profileId || job.idea_id !== ideaId ||
+          job.scene_number !== Number(sceneNumber)) throw new HttpError(404, "No owned video job for this scene");
+      if (videoAction === "decline") {
+        if (!["awaiting_review", "failed"].includes(job.state)) {
+          throw new HttpError(409, "Only completed or failed video jobs can be declined");
+        }
+        await writeJob({ ...job, state: "declined" }, found.etag);
+        await env.STUDIO_MEDIA.delete(mediaKey).catch(() => {});
+        return respond(request, env, visible({ ...job, state: "declined" }));
+      }
+      if (!["awaiting_review", "registered"].includes(job.state)) {
+        throw new HttpError(409, "Video is not ready for explicit acceptance");
+      }
+      if (scene.selected_approved || scene.assigned_asset_id || scene.generated_master_id ||
+          String(scene.visual || "") !== job.scene_visual) {
+        throw new HttpError(409, "Scene changed since video generation. Review its visual and media before accepting");
+      }
+      if (scene.media === "still" && body.media_override !== true) {
+        throw new HttpError(409, "Explicitly approve using moving footage in a still-only scene");
+      }
+      if (String(env.STUDIO_ELEVENLABS_VIDEO_RIGHTS_VERIFIED || "").toLowerCase() !== "true") {
+        throw new HttpError(503, "AI video commercial usage rights have not been verified by Studio administrator");
+      }
+      let assetId = job.asset_id || "";
+      let latestEtag = found.etag;
+      if (!assetId) {
+        const object = await env.STUDIO_MEDIA.get(mediaKey);
+        if (!object) throw new HttpError(410, "Generated video master is missing");
+        latestEtag = await writeJob({ ...job, state: "accepting" }, latestEtag);
+        const bytes = await object.arrayBuffer();
+        const base = String(f(idea, "Candidate_Title") || "Script a Short").replace(/[^a-zA-Z0-9 ]/g, "").slice(0, 65) +
+          " Scene " + sceneNumber;
+        const filename = base.trim().replace(/\s+/g, "-") + "-" + job.run_id.slice(0, 8) + ".mp4";
+        const drive = await promoteStudioAssetToDrive(env, {
+          filename, bytes, contentType: "video/mp4",
+          profileName: String(f(profile, "Profile_Name") || ""),
+        });
+        if (drive?.provenance_screen?.decision !== "clean") throw new HttpError(503, "AI video provenance gate not confirmed");
+        if (studioProfileRequiresChicagoWatermark(profile) && !drive?.watermarked) {
+          throw new HttpError(503, "ChicagoShining watermarking not confirmed on AI video");
+        }
+        const created = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, "", {
+          method: "POST", body: JSON.stringify({ records: [{ fields: {
+            "Asset Name": base.trim() + " " + job.run_id.slice(0, 6),
+            Media_Class: "Video",
+            "Google Drive URL": drive.google_drive_url,
+            "Google Drive File ID": drive.google_drive_file_id,
+            MIME_Type: "video/mp4", File_Extension: "mp4",
+            File_Size_Bytes: Number(drive.file_size_bytes || bytes.byteLength || 0) || null,
+            Intake_Status: "Created", Intake_Date: new Date().toISOString(),
+            Drive_Access_Status: "Public", Classification_Status: "Processing",
+            Asset_Status: "Available", Active: true, Do_Not_Use: false,
+            Capture_Source: "AI Generated", Rights_Status: "Licensed", Asset_Role: "Other",
+            Raw_Source_Eligibility: "Not Applicable",
+            "Asset_Description": "ElevenLabs AI video generated by paid user request for Idea " +
+              ideaId + " scene " + sceneNumber + ". Model: " + job.settings.model_id +
+              ". Prompt: " + String(job.settings.prompt || "").slice(0, 650),
+            Studio_Transfer_ID: "LIB-AIV-" + job.run_id,
+            Content_Profile: [profileId],
+          } }], typecast: true }),
+        });
+        const record = created?.records?.[0];
+        if (!record?.id || firstLinkedRecordId(f(record, "Content_Profile")) !== profileId) {
+          throw new HttpError(502, "AI video transferred to Drive but profile registration failed; reconcile before retrying");
+        }
+        assetId = record.id;
+        latestEtag = await writeJob({ ...job, state: "registered", asset_id: assetId }, latestEtag);
+      }
+      scene.assigned_asset_id = assetId;
+      scene.selected_approved = true;
+      scene.selected_origin = "ai";
+      scene.decision = "ai";
+      scene.media_override = scene.media === "still" && body.media_override === true;
+      scene.state = "media_approved";
+      await saveStory();
+      await writeJob({ ...job, state: "accepted", asset_id: assetId }, latestEtag);
+      await env.STUDIO_MEDIA.delete(mediaKey).catch(() => {});
+      return respond(request, env, { ok: true, state: "accepted", record_id: assetId });
+    }
+    throw new HttpError(404, "Unsupported AI video action");
+  }
 
   if (action.startsWith("preview/")) {
     if (request.method !== "GET" && request.method !== "HEAD") throw new HttpError(405, "Method not allowed");
