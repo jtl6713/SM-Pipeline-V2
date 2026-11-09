@@ -10,9 +10,10 @@ const env = {
   STUDIO_ELEVENLABS_VIDEO_ENABLED: "true",
   ELEVENLABS_API_KEY: "test-key-never-real",
   STUDIO_ELEVENLABS_VIDEO_PRICE_REVIEWED_AT: "2026-11-08",
-  STUDIO_ELEVENLABS_VIDEO_CREDITS_4S_720P: "100",
-  STUDIO_ELEVENLABS_VIDEO_CREDITS_6S_720P: "150",
-  STUDIO_ELEVENLABS_VIDEO_CREDITS_8S_720P: "200",
+  STUDIO_ELEVENLABS_VIDEO_CREDITS_4S_720P_9X16: "100",
+  STUDIO_ELEVENLABS_VIDEO_CREDITS_6S_720P_9X16: "150",
+  STUDIO_ELEVENLABS_VIDEO_CREDITS_8S_720P_9X16: "200",
+  STUDIO_ELEVENLABS_VIDEO_CREDITS_8S_720P_16X9: "225",
 };
 const input = {prompt:"A beautiful golden-hour view of the Chicago River, cinematic slow push in",
   duration_secs:8, aspect_ratio:"9:16"};
@@ -32,7 +33,7 @@ test("fixed safe Veo model, bounded duration and ratio; never generate audio", (
 test("pricing must be enabled, fresh and configured; no fabricated zero-credit quote", () => {
   assert.equal(videoPriceConfig(env,8,Date.parse("2026-11-08T00:00:00Z")).estimated_credits,200);
   assert.equal(videoPriceConfig({...env,STUDIO_ELEVENLABS_VIDEO_ENABLED:"false"},8).enabled,false);
-  assert.equal(videoPriceConfig({...env,STUDIO_ELEVENLABS_VIDEO_CREDITS_8S_720P:""},8,Date.parse("2026-11-09T00:00:00Z")).enabled,false);
+  assert.equal(videoPriceConfig({...env,STUDIO_ELEVENLABS_VIDEO_CREDITS_8S_720P_9X16:""},8,Date.parse("2026-11-09T00:00:00Z")).enabled,false);
   assert.equal(videoPriceConfig(env,8,Date.parse("2026-12-10T00:00:00Z")).enabled,false);
 });
 
@@ -40,6 +41,9 @@ test("quote binds exact prompt and cost, and requires explicit paid approval", a
   const now=Date.parse("2026-11-09T00:00:00Z");
   const quote=await storyVideoQuote(env,input,now);
   assert.equal(quote.estimated_credits,200);
+  const landscape = await storyVideoQuote(env,{...input,aspect_ratio:"16:9"},now);
+  assert.equal(landscape.estimated_credits,225);
+  assert.notEqual(quote.quote_id, landscape.quote_id);
   assert.match(quote.quote_id,/^[a-f0-9]{64}$/);
   assert.equal(requireStoryVideoPaidApproval(quote,{quote_id:quote.quote_id,approve_paid_generation:true}),true);
   assert.throws(()=>requireStoryVideoPaidApproval(quote,{quote_id:quote.quote_id}),/approval/);
