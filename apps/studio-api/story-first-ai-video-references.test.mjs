@@ -44,7 +44,7 @@ test("authenticated Drive bytes must come from exact stored Drive file ID",async
   assert.equal(bytes.byteLength,2048);
   assert.match(calls[0].url,/www.googleapis.com\/drive\/v3\/files\/ABCdef0123456789\?alt=media/);
   assert.equal(calls[0].options.headers.Authorization,"Bearer oauth-access-token");
-  await assert.rejects(()=>fetchStudioReferenceFromDrive(record,""),/authenticated Google Drive/);
+  await assert.rejects(()=>fetchStudioReferenceFromDrive(record,""),/Google Drive access/);
 });
 
 test("ElevenLabs asset upload uses trusted bytes, correct MIME and managed API key",async()=>{
