@@ -1047,11 +1047,11 @@
           button("Accept Image","primary-button",()=>decideGenerated(index,"accept").catch(e=>report(e.message,true)),actions);
           button("Decline Image","secondary-button",()=>decideGenerated(index,"decline").catch(e=>report(e.message,true)),actions);
         }else if(mode.value==="ai"){
-          const prompt=label(actions,"Editable AI image prompt",shot.ai_prompt||shot.visual);
+          const prompt=label(actions,"Editable AI scene prompt (image or video)",shot.ai_prompt||shot.visual);
           prompt.maxLength=850;prompt.rows=3;
           prompt.oninput=()=>{shot.ai_prompt=prompt.value;markEditing();};
           if(shot.media==="clip")actions.appendChild(node("p","subtle",
-            "AI creates a STILL IMAGE. You must supply real video or explicitly override the clip requirement when accepting."));
+            "The AI Image button creates a still. Use Review Video Cost & Generate below for real moving footage, or explicitly override the clip requirement when accepting an AI still."));
           button("Generate this AI image","secondary-button",()=>generateSceneImage(index).catch(e=>report(e.message,true)),actions);
           const opts=videoOptions(index);
           const duration=label(actions,"AI video length","","select");
@@ -1086,7 +1086,7 @@
           },actions);
         }else if(!shot.selected_approved){
           actions.appendChild(node("p","subtle","Media needed for this scene. Studio will not substitute an unrelated image."));
-          button("Generate AI Image","secondary-button",()=>{
+          button("Generate AI Image or Video","secondary-button",()=>{
             shot.decision="ai";mode.value="ai";renderActions();markEditing();
           },actions);
           button("I'll Supply the Media","secondary-button",()=>{
