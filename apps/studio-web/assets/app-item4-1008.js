@@ -300,7 +300,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.918-scene-title";
+  const BUILD_ID = "item4-0.6.919-manual-classification";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -24638,6 +24638,7 @@ function timedScriptAssetLabel(asset, index) {
     const published = kind === "published";
     const params = new URLSearchParams({ limit: String(libraryPageSize()) });
     if (selectedProfileId) params.set("profile", selectedProfileId);
+    if (window.StudioManualClassificationRefreshToken) params.set("manual_refresh", window.StudioManualClassificationRefreshToken);
     if (query) params.set("q", query);
     if (kind && !needsProfile) params.set("kind", kind);
     if (needsProfile) params.set("needs_profile", "1");
@@ -24833,7 +24834,7 @@ function timedScriptAssetLabel(asset, index) {
       r.content_profile_name ? `<span>${escapeHtml(r.content_profile_name)}</span>` : "",
     ].filter(Boolean).join("");
     const classify = libraryNeedsManualClassify(r) ? libraryProfileSelectHtml(r) : "";
-    return `<article class="library-card" data-library-id="${escapeHtml(r.id)}" data-library-record-type="media_asset" data-library-needs-duration="${needsDuration}"><div class="library-card-media"${playAttrs}>${media}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${escapeHtml(studioPhotoLabel(r, null, video ? "Clip" : "Photo"))}</h3><div class="library-meta">${meta}</div><div class="subtle">${value(r.description, "No description yet")}</div>${classify}<div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}${libraryClassificationBadge(r)}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="secondary-button" data-library-rename="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "")}">Rename</button><button type="button" class="danger-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;
+    return `<article class="library-card" data-library-id="${escapeHtml(r.id)}" data-library-record-type="media_asset" data-library-needs-duration="${needsDuration}"><div class="library-card-media"${playAttrs}>${media}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${escapeHtml(studioPhotoLabel(r, null, video ? "Clip" : "Photo"))}</h3><div class="library-meta">${meta}</div><div class="subtle">${value(r.description, "No description yet")}</div>${classify}<div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}${libraryClassificationBadge(r)}${r.manually_classified ? '<span class="badge ready-for-review">Manual labels</span>' : ""}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="secondary-button" data-library-rename="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "")}">Rename</button><button type="button" class="danger-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;
   }
 
   function renderLibraryCards(records) {
@@ -24927,6 +24928,14 @@ function timedScriptAssetLabel(asset, index) {
       if (pager) pager.hidden = true;
     }
   }
+
+  // Explicit API bridge for scoped manual Asset Manager classification UI.
+  // Authentication and profile-scoped authorization are enforced in Worker.
+  window.StudioManualClassificationBridge = {
+    api: (path, options) => api(path, options),
+    profileId: () => selectedProfileId,
+    reload: () => loadLibrary(),
+  };
 
   const LIBRARY_PICKER_FLAG = "studioLibraryPicker";
   const LIBRARY_PHONE_RE = /iPhone|iPad|iPod|Android/i;
