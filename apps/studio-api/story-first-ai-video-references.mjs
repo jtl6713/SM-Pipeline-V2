@@ -114,7 +114,10 @@ export async function fetchStudioReferenceFromDrive(source, driveAccessToken, fe
 
 /** Upload user-authorized Media Asset as an ElevenLabs workspace asset. */
 export async function uploadStudioReferenceToEleven(env, source, bytes, fetcher=fetch) {
-  const fileName = source.filename + ({image:".png",video:".mp4",audio:".mp3"}[source.type] || ".bin");
+  const extension = {"image/png":".png","image/jpeg":".jpg","image/webp":".webp",
+    "video/mp4":".mp4","video/webm":".webm","video/quicktime":".mov",
+    "audio/mpeg":".mp3","audio/wav":".wav"}[source.mime] || ".bin";
+  const fileName = source.filename.replace(/\.(?:png|jpg|jpeg|webp|mp4|webm|mov|mp3|wav)$/i,"") + extension;
   const form = new FormData();
   form.set("name", fileName);
   form.set("asset",new Blob([bytes],{type:source.mime}),fileName);
@@ -155,10 +158,18 @@ export async function uploadStoryVideoReferences(env, refs, profileId, operation
   }
   const token=await operations.driveToken();
   if(!token)throw fail(503,"Reference transfer requires authenticated Drive access");
-  const result={}, assetIds=[];
+  const staged=[];
+  let actualTotal=0;
   for(const item of prepared){
     const bytes=await fetchStudioReferenceFromDrive(item.source,token,operations.fetcher||fetch);
-    const reference=await uploadStudioReferenceToEleven(env,item.source,bytes,operations.fetcher||fetch);
+    actualTotal+=bytes.byteLength;
+    if(actualTotal>STORY_VIDEO_REFERENCE_TOTAL_MAX_BYTES)
+      throw fail(413,"Actual reference originals exceed total 36 MB pilot budget");
+    staged.push({...item,bytes});
+  }
+  const result={}, assetIds=[];
+  for(const item of staged){
+    const reference=await uploadStudioReferenceToEleven(env,item.source,item.bytes,operations.fetcher||fetch);
     assetIds.push(reference.asset_id);
     if(item.field==="images"){
       (result.images ||= []).push(item.role ? {image:reference,role:item.role}:reference);
