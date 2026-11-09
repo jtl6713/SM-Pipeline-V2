@@ -5942,7 +5942,9 @@ async function runHomeOverviewAirtableParityAfterRefresh(env, {
     if (homeParity.status === "mismatch") {
       const reconciledRows = reconcileHomeOverviewWithAirtable(supabaseRows, airtableRows, homeParity);
       const parityAt = Math.max(Date.now(), Number(baselineSnapshotAt || 0) + 1);
-      const parityGeneration = `${baselineGeneration}-parity`;
+      // Keep the same manual generation so concurrent exception-recovery /
+      // Home census audits do not see a mid-census generation rewrite.
+      const parityGeneration = String(baselineGeneration || "");
       await writeStudioProfilesOverviewSnapshot(
         env,
         reconciledRows,
@@ -5963,7 +5965,7 @@ async function runHomeOverviewAirtableParityAfterRefresh(env, {
         reconciled: true,
         snapshot_generation: parityGeneration,
         snapshot_at: parityAt,
-        note: "Mismatched Home columns were overwritten with Airtable values after the Supabase snapshot published.",
+        note: "Mismatched Home display columns (including calendar slots) were overwritten with Airtable values after the Supabase snapshot published.",
       };
       await patchProfilesOverviewRefreshState(env, operationId, {
         snapshot_at: parityAt,
