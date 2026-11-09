@@ -760,6 +760,7 @@ import {
   deleteMusicLibraryTrack,
   uploadMusicLibraryTracks,
   listAssetLibrary,
+  manualLibraryClassificationRoute,
   uploadAssetLibraryItems,
   storyFirstSceneMediaRoute,
   assignLibraryAssetProfile,
@@ -1078,6 +1079,11 @@ export default {
       const isAssetLibraryRoute = url.pathname === "/api/library";
       const isAssetLibraryUploadWrite = isAssetLibraryRoute && request.method === "POST";
       const isAssetLibraryRecordRoute = /^\/api\/library\/rec[A-Za-z0-9]+$/.test(url.pathname);
+      const isAssetLibraryManualClassificationRoute =
+        /^\/api\/library\/rec[A-Za-z0-9]+\/manual-classification$/.test(url.pathname) ||
+        url.pathname === "/api/library/manual-classification";
+      const isAssetLibraryManualClassificationWrite =
+        isAssetLibraryManualClassificationRoute && ["POST", "PATCH"].includes(request.method);
       const isAssetLibraryDeleteWrite = isAssetLibraryRecordRoute && request.method === "DELETE";
       const isAssetLibraryRenameWrite = isAssetLibraryRecordRoute && request.method === "PATCH";
       const isAssetLibraryProfileRoute = /^\/api\/library\/rec[A-Za-z0-9]+\/profile$/.test(url.pathname);
@@ -1222,6 +1228,7 @@ export default {
         isAssetLibraryUploadWrite ||
         isAssetLibraryDeleteWrite ||
         isAssetLibraryRenameWrite ||
+        isAssetLibraryManualClassificationWrite ||
         isAssetLibraryProfileWrite ||
         isAssetLibraryClassifyAllWrite ||
         isAssetLibraryDurationWrite ||
@@ -4258,6 +4265,11 @@ export default {
       if (isPublishedLibraryReleaseWrite) {
         assertWriteRequest(request, env);
         return releasePublishedLibraryFile(request, env, url);
+      }
+
+      if (isAssetLibraryManualClassificationRoute) {
+        if (isAssetLibraryManualClassificationWrite) assertWriteRequest(request, env);
+        return await manualLibraryClassificationRoute(request, env, url, authorization);
       }
 
       if (isAssetLibraryRenameWrite) {
