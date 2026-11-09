@@ -9,6 +9,9 @@ on:
       - 'apps/studio-web/story-first-reject-plan.test.mjs'
       - 'apps/studio-api/scripted-short-scene-directions.*'
       - 'apps/studio-api/idea-timed-script.mjs'
+      - 'services/pipeline-runner/its1/**'
+      - 'services/pipeline-runner/stages/its1.py'
+      - 'services/pipeline-runner/tests/test_its1_timed_script.py'
       - 'apps/studio-web/story-first-scene-icons.test.mjs'
       - 'apps/studio-web/story-first-scene-card-design.test.mjs'
       - 'apps/studio-web/story-first-scene-collapse.test.mjs'
@@ -44,6 +47,15 @@ jobs:
         run: |
           node apps/studio-web/ui-release-contract.mjs
           node --test apps/studio-web/ui-release-contract.test.mjs apps/studio-web/pages-production-deploy-contract.test.mjs
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify AI writer exact-scene-count with mocked model
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet -r services/pipeline-runner/requirements.txt pytest
+          PYTHONPATH=services/pipeline-runner python -m pytest -q services/pipeline-runner/tests/test_its1_timed_script.py
       - name: Story-first and existing scripted-short regressions
         run: |
           node --test             apps/studio-api/idea-first-storyboard.test.mjs             apps/studio-api/story-first-production-atomicity.test.mjs             apps/studio-api/idea-timed-script.test.mjs             apps/studio-api/scripted-short-asset-policy.test.mjs             apps/studio-api/scripted-short-producer-plan.test.mjs             apps/studio-api/scripted-short-scene-directions.test.mjs             apps/studio-web/story-first-workspace.test.mjs             apps/studio-web/story-first-reject-plan.test.mjs             apps/studio-web/story-first-scene-icons.test.mjs             apps/studio-web/story-first-scene-card-design.test.mjs             apps/studio-web/story-first-scene-collapse.test.mjs             apps/studio-web/story-first-save-receipt.test.mjs             apps/studio-web/story-first-library-select.test.mjs             apps/studio-web/story-first-library-preview.test.mjs             apps/studio-web/scripted-short-profile-routing.test.mjs             apps/studio-web/scripted-short-enhancement.test.mjs
