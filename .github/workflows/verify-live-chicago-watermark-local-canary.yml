@@ -143,16 +143,9 @@ jobs:
           if($health.ok -ne $true -or $health.service -ne 'pipeline-runner' -or $health.studio_write_source -ne 'airtable') { throw 'runner_health_or_write_authority_unverified' }
           Write-Output 'canary_runner_health=PASS'
           Write-Output 'canary_python_lookup=START'
-          $proc=@(Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^python(w)?\.exe$' -and $_.CommandLine -match 'pipeline-runner|app\.py' } | Select-Object -First 1)
-          $exe=''
-          if($proc.Count -gt 0 -and $proc[0].ExecutablePath -and (Test-Path $proc[0].ExecutablePath)) { $exe=$proc[0].ExecutablePath }
-          if(-not $exe) {
-              $p=Get-Command python -ErrorAction SilentlyContinue
-              if(-not $p) { throw 'python_executable_missing' }
-              $exe=$p.Source
-          }
-          if($exe -match '(?i)pythonw\.exe$') { $consoleExe=Join-Path (Split-Path $exe -Parent) 'python.exe'; if(Test-Path $consoleExe) { $exe=$consoleExe } }
-          Write-Output 'canary_python_lookup=PASS'
+          $exe=Join-Path $runnerRoot '.venv\Scripts\python.exe'
+          if(-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'production_runner_venv_python_missing' }
+          Write-Output 'canary_production_venv_python=PASS'
           $testRoot=Join-Path $env:TEMP ('chicagoshining-wm-canary-'+[guid]::NewGuid().ToString('N'))
           [void](New-Item -Path $testRoot -ItemType Directory -Force)
           Write-Output 'canary_temporary_workspace=READY'
