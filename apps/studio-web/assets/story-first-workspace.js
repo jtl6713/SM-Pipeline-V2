@@ -625,12 +625,18 @@
       mediaOverride = confirm("This scene requests a STILL. Explicitly use this generated VIDEO clip instead?");
       if (!mediaOverride) return;
     } else if (action === "accept" && !confirm("Accept this AI-generated video into the Drive-backed Asset Manager and this exact scene?")) return;
+    let audioAck = false;
+    if (action === "accept" && video.generate_audio === true) {
+      audioAck = confirm("This AI clip contains a generated soundtrack. Studio narration and music may overlap. Explicitly accept this clip and review its audio mix before publishing?");
+      if (!audioAck) return;
+    }
     await save();
     current.busy = true;
     try {
       report(action === "accept" ? "Registering video in Drive and Airtable…" : "Declining generated video…");
       await call(sceneUrl(index, "video/" + action) + "?profile=" + encodeURIComponent(profile), {
-        method: "POST", body: JSON.stringify({ content_profile_id: profile, media_override: mediaOverride }),
+        method: "POST", body: JSON.stringify({ content_profile_id: profile, media_override: mediaOverride,
+          audio_mix_acknowledged: audioAck }),
       });
       await reloadIdea();
       await checkSceneVideo(index, true);
