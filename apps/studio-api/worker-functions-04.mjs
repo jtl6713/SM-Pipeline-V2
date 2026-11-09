@@ -5919,6 +5919,82 @@ function profilesOverviewRefreshFailureComponents(error) {
   return { outputs: "failed", ideas: "failed" };
 }
 
+async function runHomeOverviewAirtableParityAfterRefresh(env, {
+  operationId,
+  profiles,
+  supabaseRows,
+  baselineGeneration,
+  baselineSnapshotAt,
+}) {
+  let homeParity;
+  try {
+    const airtableRows = await raceStudioOverviewBudget(
+      buildStudioProfilesOverviewRows(env, profiles, {
+        forceIdeas: true,
+        commitIdeas: false,
+        forceAirtable: true,
+      }),
+      45_000,
+      "overview-force-airtable-parity",
+    );
+    validateStudioProfilesOverviewRows(airtableRows, profiles);
+    homeParity = compareHomeOverviewParity(airtableRows, supabaseRows);
+    if (homeParity.status === "mismatch") {
+      const reconciledRows = reconcileHomeOverviewWithAirtable(supabaseRows, airtableRows, homeParity);
+      const parityAt = Math.max(Date.now(), Number(baselineSnapshotAt || 0) + 1);
+      const parityGeneration = `${baselineGeneration}-parity`;
+      await writeStudioProfilesOverviewSnapshot(
+        env,
+        reconciledRows,
+        studioProfilesOverviewAuthKey(profiles),
+        {
+          at: parityAt,
+          generation: parityGeneration,
+          durableRequired: true,
+          preserveRowIdeas: true,
+          ideasAt: parityAt,
+          ideasSource: reconciledRows[0]?.ideas_source || "airtable",
+          readSource: reconciledRows[0]?.read_source || "supabase_reconciled_airtable",
+        },
+      );
+      await verifyStudioProfilesOverviewSnapshot(env, parityGeneration);
+      homeParity = {
+        ...homeParity,
+        reconciled: true,
+        snapshot_generation: parityGeneration,
+        snapshot_at: parityAt,
+        note: "Mismatched Home columns were overwritten with Airtable values after the Supabase snapshot published.",
+      };
+      await patchProfilesOverviewRefreshState(env, operationId, {
+        snapshot_at: parityAt,
+        snapshot_generation: parityGeneration,
+        ideas_at: parityAt,
+        read_source: "supabase_reconciled_airtable",
+        home_parity: homeParity,
+      });
+    } else {
+      homeParity = { ...homeParity, reconciled: false };
+      await patchProfilesOverviewRefreshState(env, operationId, { home_parity: homeParity });
+    }
+  } catch (error) {
+    homeParity = {
+      status: "airtable_parity_incomplete",
+      reconciled: false,
+      error: String(error?.message || error || "Airtable parity rebuild failed").slice(0, 400),
+      note: "Supabase Home snapshot remains published; Airtable column comparison did not finish.",
+    };
+    await patchProfilesOverviewRefreshState(env, operationId, { home_parity: homeParity }).catch(() => null);
+    throw error;
+  }
+  console.info("profiles overview airtable parity finished", {
+    operation_id: operationId,
+    home_parity_status: homeParity?.status || "unknown",
+    home_parity_differences: homeParity?.differences?.length || 0,
+    reconciled: Boolean(homeParity?.reconciled),
+  });
+  return homeParity;
+}
+
 export async function runStudioProfilesOverviewForceRefresh(env, authorization, refreshState) {
   const operationId = String(refreshState?.operation_id || "");
   const startedMs = Date.now();
@@ -5953,50 +6029,15 @@ export async function runStudioProfilesOverviewForceRefresh(env, authorization, 
     cache.inflight = trackedBuild;
     // Keep the detached waitUntil operation safely inside Cloudflare's post-response
     // lifetime. If this budget is exceeded, state is marked failed instead of hanging.
-    let rows = await raceStudioOverviewBudget(trackedBuild, 26_000, "overview-force-build");
+    const rows = await raceStudioOverviewBudget(trackedBuild, 26_000, "overview-force-build");
     validateStudioProfilesOverviewRows(rows, profiles);
 
-    let homeParity = null;
-    if (studioHomeReadSource(env) === "supabase" && rows[0]?.read_source === "supabase") {
-      const remainingMs = Math.max(3_000, 26_000 - (Date.now() - startedMs));
-      try {
-        const airtableRows = await raceStudioOverviewBudget(
-          buildStudioProfilesOverviewRows(env, profiles, {
-            forceIdeas: true,
-            commitIdeas: false,
-            forceAirtable: true,
-          }),
-          remainingMs,
-          "overview-force-airtable-parity",
-        );
-        validateStudioProfilesOverviewRows(airtableRows, profiles);
-        homeParity = compareHomeOverviewParity(airtableRows, rows);
-        if (homeParity.status === "mismatch") {
-          rows = reconcileHomeOverviewWithAirtable(rows, airtableRows, homeParity);
-          homeParity = {
-            ...homeParity,
-            reconciled: true,
-            note: "Mismatched Home columns were overwritten with Airtable values before publishing the snapshot.",
-          };
-        } else {
-          homeParity = { ...homeParity, reconciled: false };
-        }
-      } catch (error) {
-        homeParity = {
-          status: "airtable_parity_incomplete",
-          reconciled: false,
-          error: String(error?.message || error || "Airtable parity rebuild failed").slice(0, 400),
-          note: "Supabase Home snapshot published without a completed Airtable column comparison.",
-        };
-        console.warn("profiles overview airtable parity check failed", {
-          operation_id: operationId,
-          error: homeParity.error,
-        });
-      }
-    }
-
+    // Publish the Supabase (or Airtable-fallback) snapshot first so the deploy
+    // canary and Home UI leave the 26s critical path. Airtable column parity
+    // runs after status=completed and may rewrite the snapshot if needed.
     const snapshotAt = Math.max(Date.now(), Number(refreshState?.baseline_snapshot_at || 0) + 1);
     const generation = `manual-${operationId}`;
+    const needsParity = studioHomeReadSource(env) === "supabase" && rows[0]?.read_source === "supabase";
     const snapshot = await writeStudioProfilesOverviewSnapshot(
       env,
       rows,
@@ -6027,7 +6068,13 @@ export async function runStudioProfilesOverviewForceRefresh(env, authorization, 
       duration_ms: durationMs,
       error: "",
       component_status: { outputs: "completed", ideas: "completed" },
-      home_parity: homeParity,
+      home_parity: needsParity
+        ? {
+          status: "pending",
+          reconciled: false,
+          note: "Supabase Home snapshot published; Airtable column parity is running after the critical path.",
+        }
+        : null,
     });
     console.info("profiles overview force refresh completed", {
       operation_id: operationId,
@@ -6036,9 +6083,23 @@ export async function runStudioProfilesOverviewForceRefresh(env, authorization, 
       snapshot_generation: generation,
       profiles: rows.length,
       read_source: rows[0]?.read_source || "",
-      home_parity_status: homeParity?.status || "skipped",
-      home_parity_differences: homeParity?.differences?.length || 0,
+      home_parity_status: needsParity ? "pending" : "skipped",
     });
+
+    if (needsParity) {
+      await runHomeOverviewAirtableParityAfterRefresh(env, {
+        operationId,
+        profiles,
+        supabaseRows: rows,
+        baselineGeneration: generation,
+        baselineSnapshotAt: snapshotAt,
+      }).catch((error) => {
+        console.warn("profiles overview airtable parity follow-up failed", {
+          operation_id: operationId,
+          error: error?.message || String(error || ""),
+        });
+      });
+    }
     return verified;
   } catch (error) {
     const durationMs = Date.now() - startedMs;

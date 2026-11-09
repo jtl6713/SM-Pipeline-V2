@@ -91,15 +91,18 @@ test("reconcile overwrites only mismatched columns from Airtable", () => {
   assert.equal(reconciled[0].parity_reconciled, true);
 });
 
-test("force refresh runs Airtable parity when Home is on Supabase", () => {
+test("force refresh publishes first, then runs Airtable parity off the critical path", () => {
   const functions04 = fs.readFileSync(path.join(here, "worker-functions-04.mjs"), "utf8");
   const start = functions04.indexOf("export async function runStudioProfilesOverviewForceRefresh");
   const end = functions04.indexOf("/*__STUDIO_WORKER_END:runStudioProfilesOverviewForceRefresh__*/", start);
   const force = functions04.slice(start, end);
-  assert.match(force, /compareHomeOverviewParity/);
-  assert.match(force, /reconcileHomeOverviewWithAirtable/);
-  assert.match(force, /forceAirtable: true/);
-  assert.match(force, /overview-force-airtable-parity/);
-  assert.match(force, /home_parity/);
+  const completedAt = force.indexOf('status: "completed"');
+  const parityAt = force.indexOf("runHomeOverviewAirtableParityAfterRefresh");
+  assert.ok(completedAt > 0 && parityAt > completedAt, "parity must run after status=completed");
+  assert.match(force, /status: "pending"/);
+  assert.match(functions04, /compareHomeOverviewParity/);
+  assert.match(functions04, /reconcileHomeOverviewWithAirtable/);
+  assert.match(functions04, /forceAirtable: true/);
+  assert.match(functions04, /overview-force-airtable-parity/);
   assert.match(functions04, /options\.forceAirtable !== true && studioHomeReadSource\(env\) === "supabase"/);
 });
