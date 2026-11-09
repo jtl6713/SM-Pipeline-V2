@@ -58,15 +58,16 @@ export function storyVideoReferenceManifest(refs) {
   ];
 }
 
-export function verifyStudioReferenceAsset(record, {asset_id, type}, profileId) {
+export function verifyStudioReferenceAsset(record, {asset_id, type}, profileId, {allowLicensed=false}={}) {
   if (record?.id !== asset_id || !ID.test(asset_id))
     throw fail(409, "Reference was not verified against its exact Media Asset");
   const owners = Array.isArray(field(record,"Content_Profile")) ? field(record,"Content_Profile") : [];
   if (!owners.includes(profileId))
     throw fail(403, "Reference media is not assigned to the selected profile");
   const rights = clean(field(record,"Rights_Status")).toLowerCase();
-  if (!["owned","licensed","public domain","cleared"].includes(rights)
-    || field(record,"Do_Not_Use") === true || field(record,"Active") === false)
+  const clearedForAi=rights==="owned"||rights==="public domain"||
+    (allowLicensed&&["licensed","cleared"].includes(rights));
+  if (!clearedForAi || field(record,"Do_Not_Use") === true || field(record,"Active") === false)
     throw fail(403, "Reference media is not cleared for third-party AI use");
   if (!["available","ready"].includes(clean(field(record,"Asset_Status")).toLowerCase()))
     throw fail(409, "Reference Media Asset is unavailable");
@@ -79,6 +80,9 @@ export function verifyStudioReferenceAsset(record, {asset_id, type}, profileId) 
   const size = Number(field(record,"File_Size_Bytes") || 0);
   if (size > STORY_VIDEO_REFERENCE_MAX_BYTES)
     throw fail(413, "Reference exceeds the 12 MB per-file limit for the pilot");
+  const duration=Number(field(record,"Duration_Seconds")||0);
+  if ((type==="video"||type==="audio") && duration > 30)
+    throw fail(400, "Reference clip exceeds the Seedance 30-second media reference limit");
   return {asset_id, type, mime, size, drive_id:driveId,
     filename: clean(field(record,"Asset Name")).replace(/[^a-zA-Z0-9 _.-]/g,"").slice(0,60) || asset_id};
 }
@@ -141,7 +145,9 @@ export async function uploadStoryVideoReferences(env, refs, profileId, operation
   // All sources must be verified before any external upload.
   for(const item of manifest){
     const record=await operations.loadAsset(item.asset_id);
-    const source=verifyStudioReferenceAsset(record,item,profileId);
+    const source=verifyStudioReferenceAsset(record,item,profileId,{
+      allowLicensed:String(env.STUDIO_ELEVENLABS_VIDEO_LICENSED_REFERENCES_VERIFIED||"").toLowerCase()==="true",
+    });
     total+=source.size;
     if(total>STORY_VIDEO_REFERENCE_TOTAL_MAX_BYTES)
       throw fail(413,"Reference selection exceeds total 36 MB pilot budget");
