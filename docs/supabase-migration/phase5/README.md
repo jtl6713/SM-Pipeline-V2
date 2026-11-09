@@ -44,7 +44,7 @@ The pipeline runner is the other writer. `AirtableClient` create, update, and at
 
 ## Operator notes
 
-Supabase-backed Studio reads are **intentionally paused**. As of Phase 5, `studioReadSource()` always returns `airtable` even if `STUDIO_READ_SOURCE=supabase` is configured. Do **not** rely on the old flag to enable reads; route-by-route activation requires separate implementation, pool-safety proof, and rollback. Keep `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` configured on the Worker and the pipeline runner for mirroring. Leave `STUDIO_WRITE_SOURCE=airtable` on **both** services. Drive remains the media authority.
+`studioReadSource()` always returns `airtable` so Content, Factory, Ops, and Home stay paused even if `STUDIO_READ_SOURCE=supabase` is set. Workstream **B1** restores Phase 3 Pipeline + schedule-grid via `studioPipelineReadSource()` (`STUDIO_PIPELINE_READ_SOURCE=supabase`, or legacy `STUDIO_READ_SOURCE=supabase` when the narrower flag is unset). Roll back Pipeline reads with `STUDIO_PIPELINE_READ_SOURCE=airtable`. Keep `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` configured on the Worker and the pipeline runner for mirroring. Leave `STUDIO_WRITE_SOURCE=airtable` on **both** services. Drive remains the media authority. Home stays last among read restores.
 
 ## Half-hour synchronization safety
 
