@@ -987,3 +987,5 @@ Deploy 2026-11-09 Worker 0.10.788-home-display-parity: Home Airtable↔Supabase 
 Deploy 2026-11-09 Worker 0.10.789-supabase-phase6-media-writes: Phase 6 Media Asset metadata write-through after Airtable commit. Drive file id and URL only; no media bytes. phase5_writes stays airtable_sor_write_through. No read-flag changes. STUDIO_WRITE_SOURCE stays airtable. No half-hour media backfill.
 
 Deploy 2026-11-09 Worker 0.10.790-elevenlabs-video-cloudflare-redirects: Cloudflare Workers-compatible manual redirect mode for ElevenLabs paid POST/status/download and reference transfers; explicitly reject redirects, preserve managed secrets, existing paid job reservation and independent flags. PR #1760. No automatic AI generation or publishing.
+
+Retry 2026-11-09 Worker 0.10.790-elevenlabs-video-cloudflare-redirects after PR #1762: recognize only the three operator-installed plain_text AI video pilot gates in the binding allowlist; preserve live values, Secrets, Airtable authority, R2 job reservation, no generation or publishing. Previous deploy blocked before mutation by predeploy contract.
