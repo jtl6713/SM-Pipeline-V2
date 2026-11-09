@@ -85,7 +85,7 @@ jobs:
               parsed=urllib.parse.urlsplit(candidate)
               if parsed.scheme=="https" and parsed.hostname and not parsed.username and not parsed.password:
                   try:
-                      health_headers={"Accept":"application/json"}
+                      # Cloudflare 1010 rejects Python-urllib default browser signatures. Identify our read-only probe.\n                      health_headers={"Accept":"application/json","User-Agent":"ChicagoShining-Runner-Health/1.0"}
                       access_id=os.environ.get("CF_ACCESS_CLIENT_ID") or ""
                       access_secret=os.environ.get("CF_ACCESS_CLIENT_SECRET") or ""
                       if access_id and access_secret:
@@ -122,6 +122,8 @@ jobs:
           Path("/tmp/elevenlabs-video-preflight-sanitized.json").write_text(json.dumps(report,indent=2))
           if not required_ok:
               raise SystemExit("Required binding missing or changed")
+          if health!="http_200" or not runner_jobs_available or not runner_write_authority_verified:
+              raise SystemExit("Runner health/asset and Airtable authority were not confirmed through secure probe")
           PY
       - name: Upload sanitized read-only preflight evidence
         if: always()
