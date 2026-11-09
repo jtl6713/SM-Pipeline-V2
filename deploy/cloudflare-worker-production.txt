@@ -971,3 +971,4 @@ Deploy 2026-11-09 Worker 0.10.780-blackout-approval-seed: preserve Supabase B2 i
 
 Retry 2026-11-09 Worker 0.10.780-blackout-approval-seed after predeploy binding contract: preserve exact secret_text STUDIO_CONTENT_READ_SOURCE from Supabase B2; no flag flips, no automatic publishing. PR #1724 follow-up.
 Deploy Worker 0.10.781 ElevenLabs video pilot dormant release (PR #1723); preserve separate narration/video secrets, no paid calls, Airtable write authority, rollout flags unchanged. 2026-11-09.
+Deploy 2026-11-09 Worker 0.10.782-supabase-b3-factory-ops-reads: B3 Factory desk and Ops queue can read Supabase when STUDIO_FACTORY_OPS_READ_SOURCE=supabase; default stays Airtable. Home stays Airtable. Writes stay Airtable. Preserve STUDIO_CONTENT_READ_SOURCE secret_text.

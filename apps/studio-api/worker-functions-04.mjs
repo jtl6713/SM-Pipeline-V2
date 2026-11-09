@@ -98,6 +98,7 @@ import {
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
   studioReadSource,
+  studioFactoryOpsReadSource,
   studioSupabaseConfigured,
   listSupabasePipelineOutputs,
   listSupabaseScheduleGrid,
@@ -11110,7 +11111,7 @@ export async function getStudioOperationsQueue(request, env, authorization) {
   let ideaMetaById = new Map();
   let queueReadSource = "airtable";
 
-  if (studioReadSource(env) === "supabase") {
+  if (studioFactoryOpsReadSource(env) === "supabase") {
     try {
       const pack = await listSupabaseFactoryDeskPack(env);
       const packedOutputs = pack.outputs || [];
@@ -11502,7 +11503,7 @@ export async function getFactoryDesk(request, env, authorization) {
       || authorization?.permissions?.publishing_control
       || authorization?.permissions?.production_configure
     ),
-    read_source: queue.read_source || studioReadSource(env),
+    read_source: queue.read_source || studioFactoryOpsReadSource(env),
     warning: warningBits.length ? warningBits.join(" · ") : null,
   });
 }
