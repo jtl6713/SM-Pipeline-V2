@@ -978,3 +978,5 @@ Deploy 2026-11-09 Worker 0.10.783-supabase-home-reads: Home overview can read Su
 Deploy 2026-11-09 Worker 0.10.784-supabase-phase6-request-writes: Phase 6 Production Request Airtable-first write-through only. Supabase errors do not fail the Airtable write. phase5_writes stays airtable_sor_write_through. No read-flag changes. STUDIO_WRITE_SOURCE stays airtable. Do not re-run the B3 or Home secret installers.
 
 Deploy 2026-11-09 Worker 0.10.785-home-ideas-airtable-unpromoted: Home Ideas column uses Airtable unpromoted filter even when STUDIO_HOME_READ_SOURCE=supabase; stop counting stale idea_candidates as open Ideas. No read-flag changes. Writes stay airtable.
+
+Deploy 2026-11-09 Worker 0.10.786-home-airtable-supabase-parity: Home force refresh compares Supabase overview columns to Airtable and reconciles mismatches to Airtable. Keep STUDIO_HOME_READ_SOURCE=supabase. No read-flag changes.

@@ -38,6 +38,9 @@ export function normalizeProfilesOverviewRefreshState(value) {
     component_status: state.component_status && typeof state.component_status === "object"
       ? { ...state.component_status }
       : {},
+    home_parity: state.home_parity && typeof state.home_parity === "object"
+      ? { ...state.home_parity }
+      : null,
   };
 }
 
@@ -80,6 +83,7 @@ export function publicProfilesOverviewRefreshState(state, now = Date.now()) {
       ? "Refresh operation expired before completion; the previous complete snapshot is still in use."
       : (normalized.error || null),
     component_status: normalized.component_status,
+    home_parity: normalized.home_parity,
     cooldown_remaining_ms: cooldownRemainingMs,
     stale_operation: stale,
   };

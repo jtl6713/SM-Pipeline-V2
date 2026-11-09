@@ -24,6 +24,10 @@ import { verifyExistingProviderReceipt } from "./exception-recovery-receipt.mjs"
 import { reconcileExceptionCensus } from "./exception-recovery-counts.mjs";
 import { QA_HOME_FAILED_CANDIDATE_FORMULA, qaHomePastDueCandidateFormula, classifyQualityAgentHomeBuckets } from "./quality-agent-home-parity.mjs";
 import { compareHomeSnapshotToExceptionCensus } from "./exception-recovery-home-parity.mjs";
+import {
+  compareHomeOverviewParity,
+  reconcileHomeOverviewWithAirtable,
+} from "./home-supabase-airtable-parity.mjs";
 import { readExceptionRecoveryCensusCache, persistExceptionRecoveryCensusCache } from "./exception-recovery-census-cache.mjs";
 import { FB3_ACTION, RECEIPT_REPAIR_ACTION, executeFb3AdminRecovery, executeApprovedReceiptRepair } from "./exception-recovery-actions.mjs";
 import { actionApprovalAudit, actionOutcomeAudit } from "./exception-recovery-action-audit.mjs";
@@ -5230,7 +5234,9 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
 
   // Home opens Supabase only when its own flag is set. preferSupabase marks a
   // manual refresh, but it must not open a database connection on its own.
-  if (studioHomeReadSource(env) === "supabase") {
+  // forceAirtable is the parity hardener: rebuild the same columns from Airtable
+  // so a Supabase projection cannot silently drift from the write source of truth.
+  if (options.forceAirtable !== true && studioHomeReadSource(env) === "supabase") {
     try {
       const pack = await listSupabaseOverviewPack(env, {
         profileAirtableIds: profileIds,
@@ -5947,8 +5953,47 @@ export async function runStudioProfilesOverviewForceRefresh(env, authorization, 
     cache.inflight = trackedBuild;
     // Keep the detached waitUntil operation safely inside Cloudflare's post-response
     // lifetime. If this budget is exceeded, state is marked failed instead of hanging.
-    const rows = await raceStudioOverviewBudget(trackedBuild, 26_000, "overview-force-build");
+    let rows = await raceStudioOverviewBudget(trackedBuild, 26_000, "overview-force-build");
     validateStudioProfilesOverviewRows(rows, profiles);
+
+    let homeParity = null;
+    if (studioHomeReadSource(env) === "supabase" && rows[0]?.read_source === "supabase") {
+      const remainingMs = Math.max(3_000, 26_000 - (Date.now() - startedMs));
+      try {
+        const airtableRows = await raceStudioOverviewBudget(
+          buildStudioProfilesOverviewRows(env, profiles, {
+            forceIdeas: true,
+            commitIdeas: false,
+            forceAirtable: true,
+          }),
+          remainingMs,
+          "overview-force-airtable-parity",
+        );
+        validateStudioProfilesOverviewRows(airtableRows, profiles);
+        homeParity = compareHomeOverviewParity(airtableRows, rows);
+        if (homeParity.status === "mismatch") {
+          rows = reconcileHomeOverviewWithAirtable(rows, airtableRows, homeParity);
+          homeParity = {
+            ...homeParity,
+            reconciled: true,
+            note: "Mismatched Home columns were overwritten with Airtable values before publishing the snapshot.",
+          };
+        } else {
+          homeParity = { ...homeParity, reconciled: false };
+        }
+      } catch (error) {
+        homeParity = {
+          status: "airtable_parity_incomplete",
+          reconciled: false,
+          error: String(error?.message || error || "Airtable parity rebuild failed").slice(0, 400),
+          note: "Supabase Home snapshot published without a completed Airtable column comparison.",
+        };
+        console.warn("profiles overview airtable parity check failed", {
+          operation_id: operationId,
+          error: homeParity.error,
+        });
+      }
+    }
 
     const snapshotAt = Math.max(Date.now(), Number(refreshState?.baseline_snapshot_at || 0) + 1);
     const generation = `manual-${operationId}`;
@@ -5982,6 +6027,7 @@ export async function runStudioProfilesOverviewForceRefresh(env, authorization, 
       duration_ms: durationMs,
       error: "",
       component_status: { outputs: "completed", ideas: "completed" },
+      home_parity: homeParity,
     });
     console.info("profiles overview force refresh completed", {
       operation_id: operationId,
@@ -5990,6 +6036,8 @@ export async function runStudioProfilesOverviewForceRefresh(env, authorization, 
       snapshot_generation: generation,
       profiles: rows.length,
       read_source: rows[0]?.read_source || "",
+      home_parity_status: homeParity?.status || "skipped",
+      home_parity_differences: homeParity?.differences?.length || 0,
     });
     return verified;
   } catch (error) {

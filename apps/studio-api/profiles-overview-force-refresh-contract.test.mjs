@@ -35,6 +35,10 @@ test("manual refresh bypasses normal snapshot TTL and refreshes Ideas too", () =
   assert.match(functions04, /forceIdeas && !supabaseIdeasUsable/);
   assert.match(functions04, /listStudioOverviewUnpromotedIdeas/);
   assert.match(functions04, /AIRTABLE_IDEA_TABLE_ID/);
+  assert.match(force, /compareHomeOverviewParity/);
+  assert.match(force, /reconcileHomeOverviewWithAirtable/);
+  assert.match(force, /forceAirtable: true/);
+  assert.match(force, /home_parity/);
 });
 
 test("forced result is complete, durable, generation-verified and last-good safe", () => {
