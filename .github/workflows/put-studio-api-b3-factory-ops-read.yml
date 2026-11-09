@@ -46,9 +46,13 @@ jobs:
               details = get_json("/versions/" + version_id)
               return {row["name"]: row["type"] for row in
                       (details.get("resources") or {}).get("bindings") or []}
-          req = urllib.request.Request(target + "/content", headers=auth)
-          with urllib.request.urlopen(req, timeout=60) as response:
-              script = response.read()
+          # GET /content returns 405. The deploy verifier reads /content/v2.
+          req = urllib.request.Request(target + "/content/v2", headers=auth)
+          try:
+              with urllib.request.urlopen(req, timeout=60) as response:
+                  script = response.read()
+          except urllib.error.HTTPError as error:
+              raise SystemExit("Cloudflare refused live Worker source read (HTTP {})".format(error.code))
           if b"0.10.782-supabase-b3-factory-ops-reads" not in script:
               raise SystemExit("Refusing to enable B3 reads: live Worker is not 0.10.782-supabase-b3-factory-ops-reads")
           before = active_bindings()

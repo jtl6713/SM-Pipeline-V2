@@ -9,6 +9,8 @@ test("B3 read flag install is main-only, secret_text, and does not retarget Home
   ), "utf8");
   assert.match(workflow, /if: github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /0\.10\.782-supabase-b3-factory-ops-reads/);
+  assert.match(workflow, /\/content\/v2/);
+  assert.doesNotMatch(workflow, /target \+ "\/content"/);
   assert.match(workflow, /STUDIO_CONTENT_READ_SOURCE/);
   assert.match(workflow, /"name": "STUDIO_FACTORY_OPS_READ_SOURCE"/);
   assert.match(workflow, /"text": "supabase"/);
