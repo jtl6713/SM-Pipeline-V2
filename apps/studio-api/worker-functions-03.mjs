@@ -3601,6 +3601,7 @@ export async function manualLibraryClassificationRoute(request, env, url, author
       : `${count} of ${results.length} saved. Review the failed items below.`,
   }, count === results.length ? 200 : 207);
 }
+/*__STUDIO_WORKER_END:manualLibraryClassificationRoute__*/
 /*__STUDIO_MANUAL_ASSET_CLASSIFICATION_1716_END__*/
 
 export async function renameAssetLibraryItem(request, env, url, ctx) {
