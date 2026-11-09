@@ -22,6 +22,8 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
     steps:
       - name: Read active Cloudflare Worker binding state (no mutations, no billing)
         shell: bash
@@ -76,13 +78,27 @@ jobs:
           runner = bindings.get("PIPELINE_RUNNER_URL") or {}
           runner_present = runner.get("type") == "plain_text" and bool(str(runner.get("text") or "").strip())
           health="not_checked"
+          runner_jobs_available=False
+          runner_write_authority_verified=False
           if runner_present:
               candidate = str(runner.get("text")).strip().rstrip("/")
               parsed=urllib.parse.urlsplit(candidate)
               if parsed.scheme=="https" and parsed.hostname and not parsed.username and not parsed.password:
                   try:
-                      with urllib.request.urlopen(urllib.request.Request(candidate+"/health",headers={"Accept":"application/json"}),timeout=15) as response:
-                          health="http_"+str(response.status)
+                      health_headers={"Accept":"application/json"}
+                      access_id=os.environ.get("CF_ACCESS_CLIENT_ID") or ""
+                      access_secret=os.environ.get("CF_ACCESS_CLIENT_SECRET") or ""
+                      if access_id and access_secret:
+                          health_headers["CF-Access-Client-Id"]=access_id
+                          health_headers["CF-Access-Client-Secret"]=access_secret
+                      with urllib.request.urlopen(urllib.request.Request(candidate+"/health",headers=health_headers),timeout=15) as response:
+                          status=response.status
+                          payload=json.load(response) if status==200 else {}
+                          runner_jobs_available=(payload.get("ok") is True and payload.get("service")=="pipeline-runner" and
+                            all(x in {job.get("path") for job in payload.get("jobs") or []} for x in
+                              ("/jobs/studio-asset-library","/jobs/studio-asset-watermark")))
+                          runner_write_authority_verified=(payload.get("studio_write_source")=="airtable")
+                          health="http_"+str(status)
                   except urllib.error.HTTPError as e:
                       health="http_"+str(e.code)
                   except Exception:
@@ -94,6 +110,8 @@ jobs:
             "required_existing_bindings_preserved":required_ok,
             "runner_url_present":bool(runner_present),
             "runner_health":health,
+            "runner_asset_watermark_routes_present":runner_jobs_available,
+            "runner_airtable_write_authority_verified":runner_write_authority_verified,
             "settings":settings,
             "single_4s_720p_9x16_silent_price_verified_in_ui":2425,
             "paid_request_submitted":False,

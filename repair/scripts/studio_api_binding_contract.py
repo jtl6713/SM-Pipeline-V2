@@ -93,6 +93,9 @@ OPTIONAL_BINDINGS = {
     "ELEVENLABS_API_KEY": "secret_text",
     # Dedicated budget-capped video key. Preserve without replacing TTS secret.
     "ELEVENLABS_VIDEO_API_KEY": "secret_text",
+    # Reviewed one-setting price only; no feature enablement, rights or watermark bypass.
+    "STUDIO_ELEVENLABS_VIDEO_PRICE_REVIEWED_AT": "secret_text",
+    "STUDIO_ELEVENLABS_VIDEO_CREDITS_4S_720P_9X16": "secret_text",
     # Guarded durable I1 activation is a separate release; preserve its
     # secret binding on every ordinary Worker deployment without changing
     # the live value or treating an arbitrary new binding as authorized.

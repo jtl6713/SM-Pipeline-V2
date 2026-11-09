@@ -1,0 +1,100 @@
+name: Install Reviewed ElevenLabs Video Quote (No Generation)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/install-studio-elevenlabs-video-reviewed-price.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicagoshining-studio-api-production
+  cancel-in-progress: false
+
+jobs:
+  install:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Verify exact dormant state, install reviewed price and date without enabling generation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          python - <<'PY'
+          import json, os, urllib.request, urllib.error
+          worker = "chicagoshining-studio-api"
+          api="https://api.cloudflare.com/client/v4/accounts/{}/workers/scripts/{}".format(
+            os.environ["CLOUDFLARE_ACCOUNT_ID"],worker)
+          auth={"Authorization":"Bearer "+os.environ["CLOUDFLARE_API_TOKEN"]}
+          def get_json(path):
+              req=urllib.request.Request(api+path,headers=auth)
+              with urllib.request.urlopen(req,timeout=45) as res:
+                  data=json.load(res)
+              if data.get("success") is not True:
+                  raise SystemExit("Cloudflare preflight failed")
+              return data.get("result")
+          def active_bindings():
+              deployment=get_json("/deployments")
+              if len(deployment["deployments"][0]["versions"]) != 1 or deployment["deployments"][0]["versions"][0].get("percentage") != 100:
+                  raise SystemExit("Require one 100% active Worker version for safe price configuration")
+              version=deployment["deployments"][0]["versions"][0]["version_id"]
+              info=get_json("/versions/"+version)
+              return version,{row["name"]:row["type"] for row in (info.get("resources") or {}).get("bindings") or []}
+          first_version,before=active_bindings()
+          required={
+            "AIRTABLE_PAT":"secret_text",
+            "STUDIO_MEDIA":"r2_bucket",
+            "ELEVENLABS_API_KEY":"secret_text",
+            "ELEVENLABS_VIDEO_API_KEY":"secret_text"
+          }
+          for name,typ in required.items():
+              if before.get(name)!=typ:
+                  raise SystemExit("Existing critical Worker binding absent or changed: "+name)
+          # A pricing install must not modify an already running paid feature.
+          if "STUDIO_ELEVENLABS_VIDEO_ENABLED" in before:
+              raise SystemExit("Refusing to update an active or potentially active video feature")
+          values={
+            "STUDIO_ELEVENLABS_VIDEO_PRICE_REVIEWED_AT":"2026-11-09",
+            "STUDIO_ELEVENLABS_VIDEO_CREDITS_4S_720P_9X16":"2425"
+          }
+          for name in values:
+              if name in before and before[name]!="secret_text":
+                  raise SystemExit("Unexpected existing quote binding type: "+name)
+          for name,value in values.items():
+              payload={"name":name,"text":value,"type":"secret_text"}
+              req=urllib.request.Request(api+"/secrets",headers={**auth,"Content-Type":"application/json"},
+                  data=json.dumps(payload).encode(),method="PUT")
+              try:
+                  with urllib.request.urlopen(req,timeout=60) as res:
+                      answer=json.load(res)
+              except urllib.error.HTTPError as err:
+                  raise SystemExit("Cloudflare rejected reviewed quote binding: "+name+" (HTTP "+str(err.code)+")")
+              entry=answer.get("result") or {}
+              if answer.get("success") is not True or entry.get("name")!=name or entry.get("type")!="secret_text":
+                  raise SystemExit("Cloudflare did not confirm reviewed quote binding: "+name)
+          version_after,after=active_bindings()
+          for name,typ in {**before,**{n:"secret_text" for n in values}}.items():
+              if after.get(name)!=typ:
+                  raise SystemExit("Active Worker binding lost or changed after reviewed price install: "+name)
+          if set(after)!=set(before)|set(values):
+              raise SystemExit("Unexpected new or missing Worker bindings after price install")
+          if "STUDIO_ELEVENLABS_VIDEO_ENABLED" in after:
+              raise SystemExit("Price installation unexpectedly enabled paid generation")
+          print("reviewed_price_signature=veo-3.1-fast-generate-001|4|720p|9:16|silent|no-start|no-end|0images|0videos|0audios")
+          print("reviewed_estimate_credits=2425")
+          print("price_reviewed_at=2026-11-09")
+          print("existing_narration_and_video_keys_preserved=PASS")
+          print("existing_worker_binding_types_preserved=PASS")
+          print("video_generation_enabled=NO")
+          print("paid_generation_triggered=NO")
+          print("publishing_triggered=NO")
+          PY
