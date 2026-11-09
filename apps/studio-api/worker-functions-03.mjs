@@ -8,7 +8,8 @@ import {
   validateClassificationPatch,
 } from "./manual-classification.mjs";
 import { parseStoryFirstNotes, upsertStoryFirstNotes, storyFirstShotChecklist } from "./idea-first-storyboard.mjs";
-import { storyVideoQuote, requireStoryVideoPaidApproval, submitStoryVideo, readStoryVideo, downloadStoryVideo, storyVideoJobKey, storyVideoMediaKey, STORY_VIDEO_POLL_MIN_MS } from "./story-first-ai-video.mjs";
+import { storyVideoQuote, requireStoryVideoPaidApproval, submitStoryVideo, readStoryVideo, downloadStoryVideo, storyVideoJobKey, storyVideoMediaKey, STORY_VIDEO_POLL_MIN_MS, buildStoryVideoProviderSettings, availableStoryVideoModels } from "./story-first-ai-video.mjs";
+import { storyVideoReferenceManifest, verifyStudioReferenceAsset, uploadStoryVideoReferences, deleteStudioElevenReferenceAssets } from "./story-first-ai-video-references.mjs";
 import { loadAuthorizedIdea, assertIdeaUnpromoted, assertIdeaNotApproved } from "./worker-functions-01.mjs";
 import { serveMichiganV2CachedPreview } from "./michigan-review-preview-cache.mjs";
 import { evaluateReviewPackage } from "./review-package-readiness.mjs";
@@ -13507,6 +13508,8 @@ export async function storyFirstSceneMediaRoute(request, env, url, authorization
       preview_url: job?.state === "awaiting_review" ? "/api/story-first/ideas/" +
         ideaId + "/scenes/" + sceneNumber + "/video/preview" : null,
       asset_id: job?.asset_id || null,
+      model_id: job?.settings?.model_id || null, resolution: job?.settings?.resolution || null,
+      generate_audio: job?.settings?.generate_audio === true,
       message: job?.state === "submission_uncertain" ?
         "Provider submission outcome uncertain. Do not retry; an administrator must reconcile charges." : null,
     });
@@ -13529,9 +13532,20 @@ export async function storyFirstSceneMediaRoute(request, env, url, authorization
           String(env.STUDIO_ELEVENLABS_VIDEO_WATERMARK_VERIFIED || "").toLowerCase() !== "true") {
         throw new HttpError(503, "AI video watermarking is not verified for this profile");
       }
+      // Each reference ID is resolved from canonical Airtable, checked for
+      // profile membership, rights, MIME and verified Drive provenance before
+      // an estimated price or billable request can be offered.
+      const manifest = storyVideoReferenceManifest(body.references || {});
+      if (manifest.length && String(env.STUDIO_ELEVENLABS_VIDEO_REFERENCE_TRANSFER_ENABLED || "").toLowerCase() !== "true") {
+        throw new HttpError(503, "Media reference transfer to ElevenLabs is not enabled for this Studio");
+      }
+      for (const reference of manifest) {
+        const media = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, reference.asset_id);
+        verifyStudioReferenceAsset(media, reference, profileId);
+      }
       const quote = await storyVideoQuote(env, { ...body, idea_id: ideaId,
         scene_number: Number(sceneNumber), content_profile_id: profileId });
-      if (videoAction === "quote") return respond(request, env, { ok: true, quote });
+      if (videoAction === "quote") return respond(request, env, { ok: true, quote, models: availableStoryVideoModels(env) });
       requireStoryVideoPaidApproval(quote, body);
       const prior = await readJob();
       if (prior.job && prior.job.state !== "declined" && prior.job.state !== "failed") {
@@ -13547,7 +13561,8 @@ export async function storyFirstSceneMediaRoute(request, env, url, authorization
         idea_id: ideaId, scene_number: Number(sceneNumber), profile_id: profileId,
         scene_visual: String(scene.visual || ""), attempt, state: "submitting",
         settings: { prompt: quote.prompt, duration_secs: quote.duration_secs, aspect_ratio: quote.aspect_ratio,
-          model_id: quote.model_id, resolution: quote.resolution, generate_audio: false },
+          model_id: quote.model_id, resolution: quote.resolution, generate_audio: quote.generate_audio,
+          references: quote.references, ...(quote.negative_prompt ? { negative_prompt: quote.negative_prompt } : {}) },
         estimated_credits: quote.estimated_credits,
         price_reviewed_at: quote.price_reviewed_at,
         approved_at: new Date().toISOString(), generation_id: null, last_checked_at: null,
@@ -13556,15 +13571,28 @@ export async function storyFirstSceneMediaRoute(request, env, url, authorization
       const reservedEtag = await writeJob(job, prior.etag);
       let receipt;
       try {
-        receipt = await submitStoryVideo(env, job.settings);
+        const uploaded = await uploadStoryVideoReferences(env, job.settings.references, profileId, {
+          loadAsset: (id) => airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, id),
+          driveToken: () => item4GoogleAccessToken(env),
+        });
+        // Intent remains reserved for this exact scene while originals are
+        // transferred; reference uploads do not themselves trigger a charge.
+        const providerSettings = buildStoryVideoProviderSettings(job.settings, uploaded);
+        await writeJob({ ...job, state: "submitting", provider_asset_ids: uploaded.provider_asset_ids },
+          reservedEtag).catch(() => {});
+        receipt = await submitStoryVideo(env, providerSettings);
       } catch (error) {
         // Even an HTTP error can race with an upstream charge or interrupted
         // response. Do not allow a second paid submission on this scene.
-        await writeJob({ ...job, state: "submission_uncertain", error: "Manual provider reconciliation required" },
-          reservedEtag).catch(() => {});
+        const freshest = await readJob();
+        await writeJob({ ...job, provider_asset_ids: freshest.job?.provider_asset_ids || [],
+          state: "submission_uncertain", error: "Manual provider/reference reconciliation required" },
+          freshest.etag).catch(() => {});
         throw error;
       }
-      await writeJob({ ...job, state: "pending", generation_id: receipt.id }, reservedEtag);
+      const freshest = await readJob();
+      await writeJob({ ...job, state: "pending", generation_id: receipt.id,
+        provider_asset_ids: freshest.job?.provider_asset_ids || [] }, freshest.etag);
       return respond(request, env, visible({ ...job, state: "pending" }));
     }
     if (videoAction === "status") {
@@ -13605,7 +13633,7 @@ export async function storyFirstSceneMediaRoute(request, env, url, authorization
           return respond(request, env, visible(next));
         }
       }
-      return respond(request, env, visible(job));
+      return respond(request, env, { ...visible(job), models: availableStoryVideoModels(env) });
     }
     if (videoAction === "preview") {
       if (request.method !== "GET" && request.method !== "HEAD") throw new HttpError(405, "Method not allowed");
