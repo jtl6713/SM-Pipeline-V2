@@ -97,8 +97,8 @@ import {
 } from "./factory-approval-groups.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
-  studioReadSource,
   studioFactoryOpsReadSource,
+  studioHomeReadSource,
   studioSupabaseConfigured,
   listSupabasePipelineOutputs,
   listSupabaseScheduleGrid,
@@ -5198,9 +5198,9 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
   const ideaCounts = overviewIdeaCountMap();
   const missingIdeaCounts = forceIdeas || profileIds.some((id) => !ideaCounts.has(String(id)));
 
-  // Supabase overview reads are paused. preferSupabase stays in the call so a
-  // manual refresh still runs, but it must not open a database connection.
-  if (false && (studioReadSource(env) === "supabase" || preferSupabase)) {
+  // Home opens Supabase only when its own flag is set. preferSupabase marks a
+  // manual refresh, but it must not open a database connection on its own.
+  if (studioHomeReadSource(env) === "supabase") {
     try {
       const pack = await listSupabaseOverviewPack(env, {
         profileAirtableIds: profileIds,
@@ -5589,7 +5589,7 @@ export async function verifyStudioProfilesOverviewSnapshot(env, expectedGenerati
 export async function refreshStudioProfilesOverviewSnapshot(env, authorization) {
   const cache = studioProfilesOverviewCache;
   if (cache.inflight) return cache.inflight;
-  const supabase = studioReadSource(env) === "supabase";
+  const supabase = studioHomeReadSource(env) === "supabase";
   // Supabase output refresh does not wait on Airtable cooldown. The Airtable
   // fallback still does, so a cooling base cannot start a full overview scan.
   if (!supabase && airtableCooldownWaitMs() > AIRTABLE_SLOT_FAIL_FAST_MS) return cache.rows || [];
@@ -5692,7 +5692,7 @@ export async function refreshStudioProfilesOverviewIdeas(env, authorization) {
 /*__STUDIO_WORKER_END:refreshStudioProfilesOverviewIdeas__*/
 
 export function scheduleStudioProfilesOverviewIdeasRefresh(ctx, env, authorization) {
-  if (studioReadSource(env) !== "supabase") return null;
+  if (studioHomeReadSource(env) !== "supabase") return null;
   if (studioProfilesOverviewIdeasFresh()) return null;
   const pending = refreshStudioProfilesOverviewIdeas(env, authorization);
   ctx?.waitUntil?.(Promise.resolve(pending).catch((error) => {
@@ -5732,7 +5732,9 @@ export async function profilesOverview(request, env, authorization, ctx) {
   const manualRefreshing = manualRefresh.status === "refreshing";
   const age = snapshot?.at ? Date.now() - snapshot.at : Infinity;
   const freshMs = studioProfilesOverviewFreshMs(snapshot);
-  if (snapshot?.rows?.length && snapshot.complete === true && snapshot.schemaVersion === 6 && age < freshMs) {
+  const homeSupabase = studioHomeReadSource(env) === "supabase";
+  const snapshotSupabase = studioProfilesOverviewReadSource(snapshot) === "supabase";
+  if (snapshot?.rows?.length && snapshot.complete === true && snapshot.schemaVersion === 6 && age < freshMs && (!homeSupabase || snapshotSupabase)) {
     if (!manualRefreshing) scheduleStudioProfilesOverviewIdeasRefresh(ctx, env, authorization);
     return respondProfilesOverviewSoft(request, env, {
       records: snapshot.rows,
@@ -5742,11 +5744,14 @@ export async function profilesOverview(request, env, authorization, ctx) {
     });
   }
   if (snapshot?.rows?.length) {
-    const supabaseBacked = studioProfilesOverviewReadSource(snapshot) === "supabase" || studioReadSource(env) === "supabase";
+    const supabaseBacked = snapshotSupabase || homeSupabase;
     const cooling = !supabaseBacked && airtableCooldownWaitMs() > AIRTABLE_SLOT_FAIL_FAST_MS;
-    // Expired Airtable snapshots must rebuild output counts after approvals;
-    // never reactivate the Supabase read path or retry during Airtable cooling.
-    if (!manualRefreshing && !supabaseBacked && !cooling) {
+    // Expired Airtable snapshots rebuild from Airtable. The Home flag rebuilds
+    // from Supabase, including a still-fresh Airtable snapshot and a Supabase
+    // snapshot older than its short cache. Airtable cooldown does not apply then.
+    if (!manualRefreshing && homeSupabase) {
+      scheduleStudioProfilesOverviewRefresh(ctx, env, authorization);
+    } else if (!manualRefreshing && !supabaseBacked && !cooling) {
       scheduleStudioProfilesOverviewRefresh(ctx, env, authorization);
     }
     if (!manualRefreshing) scheduleStudioProfilesOverviewIdeasRefresh(ctx, env, authorization);
@@ -5770,7 +5775,7 @@ export async function profilesOverview(request, env, authorization, ctx) {
       snapshot: Boolean(cache.rows?.length),
     });
   }
-  const supabase = studioReadSource(env) === "supabase";
+  const supabase = studioHomeReadSource(env) === "supabase";
   const coolMs = airtableCooldownWaitMs();
   if (!supabase && coolMs > AIRTABLE_SLOT_FAIL_FAST_MS) {
     return respondProfilesOverviewSoft(request, env, { records: [], cooling: true });
@@ -5986,7 +5991,7 @@ export async function startProfilesOverviewForceRefresh(request, env, authorizat
   const coolMs = airtableCooldownWaitMs();
   // Supabase-backed force refreshes no longer depend on Airtable unless the
   // Supabase Ideas pack proves incomplete, so Airtable cooldown must not block them.
-  if (!studioSupabaseConfigured(env) && studioReadSource(env) !== "supabase" && coolMs > AIRTABLE_SLOT_FAIL_FAST_MS) {
+  if (!studioSupabaseConfigured(env) && studioHomeReadSource(env) !== "supabase" && coolMs > AIRTABLE_SLOT_FAIL_FAST_MS) {
     return respond(request, env, {
       ok: true,
       accepted: false,

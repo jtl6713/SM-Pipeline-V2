@@ -104,7 +104,8 @@ test("manual force refresh can prefer Supabase without changing the global Studi
   const buildEnd = functions04.indexOf("/*__STUDIO_WORKER_END:buildStudioProfilesOverviewRows__*/", buildStart);
   const build = functions04.slice(buildStart, buildEnd);
   assert.match(build, /const preferSupabase = options\.preferSupabase === true && studioSupabaseConfigured\(env\)/);
-  assert.match(build, /studioReadSource\(env\) === "supabase" \|\| preferSupabase/);
+  assert.match(build, /studioHomeReadSource\(env\) === "supabase"/);
+  assert.doesNotMatch(build, /studioReadSource\(env\) === "supabase" \|\| preferSupabase/);
 });
 
 

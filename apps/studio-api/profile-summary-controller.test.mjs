@@ -90,7 +90,8 @@ test("reconciliation fences updates and never publishes staged partial totals", 
 test("Supabase Phase 5 read wall and feature gates remain intact", () => {
   const home = raw("worker-functions-04.mjs");
   const worker = raw("worker.js");
-  assert.match(home, /if \(false && \(studioReadSource\(env\) === "supabase"/);
+  assert.match(home, /studioHomeReadSource\(env\) === "supabase"/);
+  assert.doesNotMatch(home, /if \(false && \(studioReadSource\(env\) === "supabase"/);
   assert.match(home, /STUDIO_HOME_PROFILE_SUMMARY_READS === "true"/);
   assert.match(worker, /STUDIO_PROFILE_SUMMARY_RECONCILE_ENABLED === "true"/);
   assert.match(home, /STUDIO_REFILL_PROFILE_SUMMARY_READS === "true"/);

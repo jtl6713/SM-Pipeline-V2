@@ -127,9 +127,8 @@ export function studioSupabaseConfigured(env) {
 }
 
 export function studioReadSource(env) {
-  // Global/default reads stay on Airtable. Home must not follow
-  // STUDIO_READ_SOURCE. Content and Factory/Ops use their own flags.
-  // A live "supabase" flag previously saturated the pool on every Home poll.
+  // Global/default reads stay on Airtable. Home, Content, and Factory/Ops
+  // each use their own flag and must not follow STUDIO_READ_SOURCE.
   void env;
   return "airtable";
 }
@@ -166,12 +165,25 @@ export function studioContentReadSource(env) {
 /**
  * Workstream B3 — GET /api/factory/desk and GET /api/operations/queue only.
  * Does not follow STUDIO_READ_SOURCE, the Pipeline flag, or the Content flag.
- * Home stays on studioReadSource, which always returns airtable.
+ * Home uses studioHomeReadSource and does not follow this flag.
  * Opt-in: STUDIO_FACTORY_OPS_READ_SOURCE=supabase. Roll back with airtable or unset.
  */
 export function studioFactoryOpsReadSource(env) {
   if (!studioSupabaseConfigured(env)) return "airtable";
   return String(env?.STUDIO_FACTORY_OPS_READ_SOURCE || "").trim().toLowerCase() === "supabase"
+    ? "supabase"
+    : "airtable";
+}
+
+/**
+ * Home — GET /api/profiles/overview only.
+ * Does not follow STUDIO_READ_SOURCE, the Pipeline flag, the Content flag,
+ * or the Factory/Ops flag. A deploy leaves Home on Airtable until this secret
+ * is set. Opt-in: STUDIO_HOME_READ_SOURCE=supabase. Roll back with airtable or unset.
+ */
+export function studioHomeReadSource(env) {
+  if (!studioSupabaseConfigured(env)) return "airtable";
+  return String(env?.STUDIO_HOME_READ_SOURCE || "").trim().toLowerCase() === "supabase"
     ? "supabase"
     : "airtable";
 }
