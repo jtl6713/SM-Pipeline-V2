@@ -55,6 +55,21 @@ jobs:
               try:
                   result=json.loads(body)
                   print(name+"_body_keys="+",".join(sorted(result.keys()))[:120] if isinstance(result,dict) else name+"_body_type=array")
+                  if isinstance(result,dict):
+                      import re
+                      for field in ("error_code","error_name","error_category","stat"):
+                          value=str(result.get(field) if result.get(field) is not None else "")
+                          if re.fullmatch(r"[A-Za-z0-9_.:-]{1,100}",value):
+                              print(name+"_"+field+"="+value)
+                      print(name+"_owner_action_required="+str(result.get("owner_action_required") is True))
+                      print(name+"_retryable="+str(result.get("retryable") is True))
+                      cf=result.get("cloudflare_error")
+                      if isinstance(cf,dict):
+                          print(name+"_cloudflare_error_keys="+",".join(sorted(cf.keys()))[:100])
+                          for field in ("code","error_code","name"):
+                              value=str(cf.get(field) if cf.get(field) is not None else "")
+                              if re.fullmatch(r"[A-Za-z0-9_.:-]{1,100}",value):
+                                  print(name+"_cloudflare_"+field+"="+value)
                   body_status=json.dumps(result,sort_keys=True).lower()[:4096]
                   markers=["forbidden","unauthorized","access denied","access","not allowed","cloudflare","host","token","authentication","origin","waf","gateway","invalid"]
                   print(name+"_body_error_markers="+",".join(x for x in markers if x in body_status))
@@ -155,6 +170,25 @@ jobs:
                   print("zone_list_http="+str(err.code))
               except Exception as err:
                   print("zone_list_error="+type(err).__name__)
+          if token and account:
+              worker="https://api.cloudflare.com/client/v4/accounts/"+account+"/workers/scripts/chicagoshining-studio-api"
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(worker+"/deployments",headers=base_headers),timeout=25) as res:
+                      deployments=json.load(res)
+                  versions=(deployments.get("result") or {}).get("deployments") or []
+                  if versions:
+                      active=max(versions[0].get("versions") or [],key=lambda x:x.get("percentage",0))
+                      version=active.get("version_id")
+                      with urllib.request.urlopen(urllib.request.Request(worker+"/versions/"+str(version),headers=base_headers),timeout=25) as res:
+                          version_data=json.load(res)
+                      binding_list=((version_data.get("result") or {}).get("resources") or {}).get("bindings") or []
+                      bindings={x.get("name"):x.get("type") for x in binding_list}
+                      for name in ("CF_ACCESS_CLIENT_ID","CF_ACCESS_CLIENT_SECRET","PIPELINE_RUNNER_SHARED_SECRET","PIPELINE_RUNNER_URL"):
+                          print("worker_binding_"+name+"="+str(bindings.get(name) or "absent"))
+              except urllib.error.HTTPError as err:
+                  print("worker_binding_diagnostic_http="+str(err.code))
+              except Exception as err:
+                  print("worker_binding_diagnostic_error="+type(err).__name__)
           print("diagnostic_only=YES")
           PY
       - name: Check Windows Runner local health through existing protected Ops interface
