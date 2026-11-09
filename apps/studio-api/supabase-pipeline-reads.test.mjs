@@ -524,7 +524,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_supabase_pipeline_read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES/);
   const release = /version: "0\.10\.(\d+)-[^"]+"/.exec(worker);
   assert.ok(release, "Worker /health must identify a versioned release");
-  assert.ok(Number(release[1]) >= 784, "Phase 6 request write-through cannot regress behind Worker 0.10.784");
+  assert.ok(Number(release[1]) >= 785, "Home Ideas Airtable unpromoted fix cannot regress behind Worker 0.10.785");
   const pipelineFns = await readFile(path.join(here, "worker-functions-03.mjs"), "utf8");
   assert.match(pipelineFns, /studioPipelineReadSource\(env\) === "supabase"/);
   assert.match(pipelineFns, /studioContentReadSource\(env\) === "supabase"/);
@@ -561,6 +561,14 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /Reuse last-good Ideas counts/);
   assert.match(worker, /must not block that output rebuild/);
   assert.match(worker, /includeIdeas/);
+  const factoryFnsHome = await readFile(path.join(here, "worker-functions-04.mjs"), "utf8");
+  const homePack = factoryFnsHome.slice(
+    factoryFnsHome.indexOf("export async function buildStudioProfilesOverviewRows"),
+    factoryFnsHome.indexOf("/*__STUDIO_WORKER_END:buildStudioProfilesOverviewRows__*/"),
+  );
+  assert.match(homePack, /includeIdeas: false/);
+  assert.match(homePack, /listStudioOverviewUnpromotedIdeas/);
+  assert.doesNotMatch(homePack, /ideasSource = "supabase"/);
   const reads = await readFile(path.join(here, "supabase-pipeline-reads.mjs"), "utf8");
   assert.match(reads, /export async function supabaseRestAll/);
   assert.match(reads, /listSupabaseOverviewPack[\s\S]*supabaseRestAll/);
@@ -573,6 +581,8 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(reads, /export async function resolveSupabaseProfileId\(env, airtableProfileId, options = \{\}\)/);
   assert.match(reads, /promoted:payload-%3E%3EPromoted_Content_Record_ID/);
   assert.match(reads, /const \[outputGroups, ideaResult\] = await Promise\.all/);
+  assert.match(reads, /Keep promotion keys even on the lean fallback/);
+  assert.match(reads, /"Promoted_Content_Record_ID",\s*"Content Items"/);
 });
 
 test("phase4 docs exist", async () => {

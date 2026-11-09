@@ -1366,7 +1366,17 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
         sortField: "Create_Date",
         sortDirection: "desc",
         filterFormula: profileFormula,
-        fields: ["Candidate_ID", "Candidate_Title", "Candidate_Status", "Content_Profile", "Create_Date"],
+        // Keep promotion keys even on the lean fallback. Dropping them made
+        // Home Ideas count every historical idea_candidate as still open.
+        fields: [
+          "Candidate_ID",
+          "Candidate_Title",
+          "Candidate_Status",
+          "Content_Profile",
+          "Create_Date",
+          "Promoted_Content_Record_ID",
+          "Content Items",
+        ],
       }))
       : Promise.resolve([]),
   ]);

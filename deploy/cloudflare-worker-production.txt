@@ -976,3 +976,5 @@ Retry 2026-11-09 Worker 0.10.782-supabase-b3-factory-ops-reads after the verify 
 Retry 2026-11-09 Worker 0.10.782-supabase-b3-factory-ops-reads after the unauthenticated QA probe also received a workers.dev routing 404 and rolled back. No flag flips. Home stays Airtable. Writes stay Airtable.
 Deploy 2026-11-09 Worker 0.10.783-supabase-home-reads: Home overview can read Supabase when STUDIO_HOME_READ_SOURCE=supabase; default stays Airtable. Preserve content and Factory/Ops secret_text flags. Writes stay Airtable. Do not enable STUDIO_HOME_PROFILE_SUMMARY_READS.
 Deploy 2026-11-09 Worker 0.10.784-supabase-phase6-request-writes: Phase 6 Production Request Airtable-first write-through only. Supabase errors do not fail the Airtable write. phase5_writes stays airtable_sor_write_through. No read-flag changes. STUDIO_WRITE_SOURCE stays airtable. Do not re-run the B3 or Home secret installers.
+
+Deploy 2026-11-09 Worker 0.10.785-home-ideas-airtable-unpromoted: Home Ideas column uses Airtable unpromoted filter even when STUDIO_HOME_READ_SOURCE=supabase; stop counting stale idea_candidates as open Ideas. No read-flag changes. Writes stay airtable.
