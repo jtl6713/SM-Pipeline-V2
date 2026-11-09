@@ -64,6 +64,18 @@ test("ElevenLabs asset upload uses trusted bytes, correct MIME and managed API k
   assert.ok(calls[0].options.body instanceof FormData);
 });
 
+test("reference transfers never fall back to the narration-only API key",async()=>{
+  const record=verifyStudioReferenceAsset(source,{asset_id:"recImageOne",type:"image"},profileId);
+  let calls=0;
+  const blocked=async()=>{calls+=1;return new Response("{}");};
+  await assert.rejects(
+    ()=>uploadStudioReferenceToEleven({ELEVENLABS_API_KEY:"voice-only-secret"},record,
+      new Uint8Array(2048),blocked),
+    /Dedicated ElevenLabs video key is not configured/,
+  );
+  assert.equal(calls,0);
+});
+
 test("reference-to-provider conversion checks all sources and uploads only after approval",async()=>{
   const requests=[];
   const fetcher=async(url,opts)=>{
