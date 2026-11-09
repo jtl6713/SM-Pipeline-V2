@@ -11,7 +11,7 @@
   const root = String(config.apiBase || window.location.origin).replace(/\/$/, "");
   const select = $("studioProfileSelect");
   const status = $("storyFirstStatus");
-  const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, proposing: false, planRevision: 0, ideaRecords: [], generatedAssets: {}, candidates: {}, attempted: new Set(), browsing: {}, pendingUpload: {}, libraryRows: [], wideResults: {}, uploadedAssets: {}, selectedAssetNames: {}, expandedScenes: new Set() };
+  const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, proposing: false, planRevision: 0, ideaRecords: [], generatedAssets: {}, candidates: {}, attempted: new Set(), browsing: {}, pendingUpload: {}, libraryRows: [], wideResults: {}, uploadedAssets: {}, selectedAssetNames: {}, expandedScenes: new Set(), videoJobs: {}, videoOptions: {}, videoTimers: {} };
 
   const profileId = () => String(select?.value || localStorage.getItem("studio.content_profile_id") || "").trim();
   const isId = id => /^rec[A-Za-z0-9]+$/.test(String(id || ""));
@@ -109,6 +109,8 @@
     current.record = record;
     current.story = JSON.parse(JSON.stringify(story));
     current.expandedScenes.clear();
+    Object.values(current.videoTimers).forEach(clearTimeout);
+    current.videoTimers = {}; current.videoJobs = {}; current.videoOptions = {};
     current.candidates = {}; current.attempted = new Set(); current.browsing = {};
     const voiceovers = String(record.summary || "").split(/\r?\n/).filter(line => /^\s*[1-9]\d*\.\s+/.test(line) && !/\s\u2014\s/.test(line)).map(line => line.replace(/^\s*\d+\.\s+/, "").trim());
     if (voiceovers.length === current.story.scenes.length && current.story.scenes.every(row => !row.voiceover)) {
@@ -120,6 +122,20 @@
     current.libraryRows = [];
     localStorage.setItem("studio.story_first_resume." + id, record.id);
     render();
+    // On reopen, poll existing jobs without generating or charging.
+    // Avoid a 12-request Airtable burst while reopening a storyboard.
+    // Only AI-sourced scenes can have paid video jobs; check a bounded three
+    // sequentially, with manual status controls available for the remainder.
+    const reopenedIdeaId=current.record.id;
+    void (async()=>{
+      const indexes=current.story.scenes.map((shot,index)=>shot.decision==="ai"?index:null)
+        .filter(index=>index!==null).slice(0,3);
+      for(const index of indexes){
+        if(current.record?.id!==reopenedIdeaId)break;
+        await checkSceneVideo(index,true).catch(error=>
+          report("Scene "+(index+1)+" video status check: "+error.message,true));
+      }
+    })();
     // Rehydrate filenames for existing selections by exact record ID; do not rely
     // on the scene keyword search or the latest-100 list after reopen.
     void loadSelectedAssetNames();
@@ -482,6 +498,164 @@
         "Declined. Generate again or supply the media yourself.");
     } finally { current.busy = false; }
   }
+  // ElevenLabs video generation is asynchronous; these timers only poll a
+  // previously paid job. They never retry or create a second paid generation.
+  function videoOptions(index) {
+    return current.videoOptions[index] ||= { model_id: "veo-3.1-fast-generate-001",
+      duration_secs: 8, aspect_ratio: "9:16", resolution: "720p", generate_audio: false,
+      negative_prompt: "", references: { start_frame: null, end_frame: null, images: [], videos: [], audios: [] } };
+  }
+  function videoJobLabel(job) {
+    const labels = {
+      none: "No video job", submitting: "Submitting paid request",
+      pending: "Queued at ElevenLabs", generating: "Generating video",
+      awaiting_review: "Video ready for review", registered: "Video registered; finalize scene",
+      accepted: "Video accepted", declined: "Video declined",
+      failed: "Generation failed", accepting: "Asset registration in progress",
+      submission_uncertain: "Submission uncertain — administrator review required",
+    };
+    return labels[job?.state || "none"] || "Video status: " + String(job?.state || "unknown");
+  }
+  async function checkSceneVideo(index, auto = false) {
+    if (!isId(current.record?.id)) return;
+    const ideaId = current.record.id;
+    const result = await call(sceneUrl(index, "video/status") + "?profile=" + encodeURIComponent(assertProfile()));
+    if (current.record?.id !== ideaId) return;
+    current.videoJobs[index] = result;
+    render();
+    if (current.videoTimers[index]) clearTimeout(current.videoTimers[index]);
+    delete current.videoTimers[index];
+    if (["pending", "generating"].includes(result.state)) {
+      current.videoTimers[index] = setTimeout(() => {
+        checkSceneVideo(index, true).catch(error => {
+          // A status lookup failure must not retry paid generation.
+          report("Scene " + (index + 1) + " video status unavailable: " + error.message, true);
+        });
+      }, 15000);
+    } else if (!auto) {
+      report("Scene " + (index + 1) + ": " + videoJobLabel(result));
+    }
+  }
+  async function browseSceneVideoReferences(index, destination, field, kind, role = "subject") {
+    const profile = assertProfile();
+    destination.replaceChildren(node("p","subtle","Loading profile-owned Asset Manager files…"));
+    const res = await call("/api/library?profile=" + encodeURIComponent(profile) + "&limit=100");
+    const rows = Array.isArray(res.records) ? res.records : [];
+    destination.replaceChildren();
+    const search = label(destination,"Search Asset Manager references","","input");
+    search.placeholder = "Filter files by name";
+    const matches = node("div","story-first-browse-results");
+    destination.appendChild(matches);
+    const opts = videoOptions(index);
+    const show = () => {
+      matches.replaceChildren();
+      const needle = String(search.value || "").toLowerCase().trim();
+      const candidates = rows.filter(row => {
+        const mime=String(row.mime_type || "").toLowerCase();
+        const type = mime.startsWith("image/") ? "image"
+          : mime.startsWith("video/") ? "video"
+          : mime.startsWith("audio/") ? "audio" : String(row.media_kind || "").toLowerCase();
+        return type===kind && row.google_drive_file_id && !row.do_not_use &&
+          ["owned","licensed","cleared","public domain"].includes(String(row.rights_status||"").toLowerCase()) &&
+          (!needle || String(row.name||"").toLowerCase().includes(needle));
+      }).slice(0,35);
+      if (!candidates.length) matches.appendChild(node("p","subtle","No eligible references found in this profile. Upload and classify an original in Asset Manager first."));
+      for(const asset of candidates){
+        const row=node("div","story-first-asset");
+        put(row,node("span","",asset.name||asset.id));
+        button("Use reference","secondary-button",()=>{
+          const refs=opts.references;
+          if(field==="start_frame" || field==="end_frame"){
+            refs[field]=asset.id;
+            refs.images=[];refs.videos=[];refs.audios=[];
+          }else{
+            refs.start_frame=null;refs.end_frame=null;
+            const list=refs[field];
+            if(!list.some(x=>x.asset_id===asset.id)){
+              const limit=field==="images"?3:field==="videos"?2:1;
+              if(list.length>=limit){report("Only " + limit + " " + kind + " reference(s) allowed in the pilot.",true);return;}
+              list.push(field==="images"?{asset_id:asset.id,role}:{asset_id:asset.id});
+            }
+          }
+          render();report("Reference selected. It will be sent to ElevenLabs ONLY after credit approval.");
+        },row);
+        matches.appendChild(row);
+      }
+    };
+    search.addEventListener("input",show);
+    show();
+  }
+
+  async function generateSceneVideo(index) {
+    if (current.busy) return;
+    const scene = readForm().scenes[index];
+    if (!String(scene.ai_prompt || "").trim()) throw new Error("Add a prompt for this AI video scene.");
+    await save();
+    const opts = videoOptions(index), profile = assertProfile();
+    const request = { prompt: scene.ai_prompt, model_id: opts.model_id,
+      duration_secs: opts.duration_secs, aspect_ratio: opts.aspect_ratio, resolution: opts.resolution,
+      generate_audio: opts.generate_audio, negative_prompt: opts.negative_prompt,
+      references: opts.references, content_profile_id: profile };
+    const quoted = await call(sceneUrl(index, "video/quote") + "?profile=" + encodeURIComponent(profile), {
+      method: "POST", body: JSON.stringify(request),
+    });
+    const quote = quoted.quote;
+    if (!quote?.enabled || !quote.quote_id) {
+      throw new Error(quote?.reason || "AI video pricing is unavailable. No paid generation was submitted.");
+    }
+    const refCount = Object.values(quote.references || {}).flat().filter(Boolean).length;
+    const approved = confirm("Generate one " + quote.duration_secs + "-second " + quote.aspect_ratio +
+      " " + quote.resolution + " " + quote.model_id + (quote.generate_audio ? " WITH sound" : " without sound") +
+      " video for scene " + (index+1) + "?" +
+      (refCount ? "\n\n" + refCount + " reference(s) will be transferred from Asset Manager to ElevenLabs." : "") +
+      "\n\nEstimated ElevenLabs charge for this configuration: " +
+      quote.estimated_credits + " credits (reviewed " + quote.price_reviewed_at +
+      "). Actual billing may vary.\n\nPress OK to authorize this ONE paid generation.");
+    if (!approved) { report("AI video request cancelled. No paid generation submitted."); return; }
+    current.busy = true;
+    report("Submitting exactly one authorized video generation for scene " + (index+1) + "…");
+    try {
+      const result = await call(sceneUrl(index, "video/start") + "?profile=" + encodeURIComponent(profile), {
+        method: "POST", body: JSON.stringify({ ...request, quote_id: quote.quote_id,
+          approve_paid_generation: true }),
+      });
+      current.videoJobs[index] = result;
+      render();
+      report("Scene " + (index+1) + " video queued. The status will update without generating a second charge.");
+    } finally { current.busy = false; }
+    await checkSceneVideo(index, true);
+  }
+  async function decideSceneVideo(index, action) {
+    if (current.busy) return;
+    const scene = readForm().scenes[index], profile = assertProfile();
+    const video = current.videoJobs[index];
+    if (!video || (video.state !== "awaiting_review" && video.state !== "registered")) {
+      throw new Error("No completed video is awaiting this decision.");
+    }
+    let mediaOverride = false;
+    if (action === "accept" && scene.media === "still") {
+      mediaOverride = confirm("This scene requests a STILL. Explicitly use this generated VIDEO clip instead?");
+      if (!mediaOverride) return;
+    } else if (action === "accept" && !confirm("Accept this AI-generated video into the Drive-backed Asset Manager and this exact scene?")) return;
+    let audioAck = false;
+    if (action === "accept" && video.generate_audio === true) {
+      audioAck = confirm("This AI clip contains a generated soundtrack. Studio narration and music may overlap. Explicitly accept this clip and review its audio mix before publishing?");
+      if (!audioAck) return;
+    }
+    await save();
+    current.busy = true;
+    try {
+      report(action === "accept" ? "Registering video in Drive and Airtable…" : "Declining generated video…");
+      await call(sceneUrl(index, "video/" + action) + "?profile=" + encodeURIComponent(profile), {
+        method: "POST", body: JSON.stringify({ content_profile_id: profile, media_override: mediaOverride,
+          audio_mix_acknowledged: audioAck }),
+      });
+      await reloadIdea();
+      await checkSceneVideo(index, true);
+      report(action === "accept" ? "AI video accepted and saved to this scene and Asset Manager." :
+        "AI video declined. Another generation requires a new explicit quote and approval.");
+    } finally { current.busy = false; }
+  }
   function keyTerms(value) {
     return [...new Set(String(value || "").toLowerCase().replace(/[^a-z0-9 ]+/g," ").split(/\s+/)
       .filter(s=>s.length>=4 && !["with","from","then","this","that","scene","still","video",
@@ -795,12 +969,15 @@
     scenes.forEach((shot,index)=>{
       const card=sceneDisclosure(index);
       const statusText=shot.selected_approved&&isId(shot.assigned_asset_id)?"Media Selected":
+        ["pending","generating"].includes(current.videoJobs[index]?.state) ? videoJobLabel(current.videoJobs[index]) :
+        current.videoJobs[index]?.state==="awaiting_review" ? "Awaiting Video Review" :
         current.pendingUpload[index]?"Uploading Media":
         shot.generated_master_id?"Awaiting Image Review":
         shot.decision==="capture"?"Awaiting Your Media":
         current.candidates[index]?.length?"Candidates Available":
         shot.decision==="ai"?"Awaiting AI Generation":"Missing Media";
       const statusClass=shot.selected_approved&&isId(shot.assigned_asset_id)?"is-ready":
+        current.videoJobs[index]?.state === "awaiting_review" ? "is-review" :
         current.pendingUpload[index]?"is-uploading":
         shot.generated_master_id?"is-review":
         current.candidates[index]?.length?"is-candidates":"is-pending";
@@ -894,7 +1071,7 @@
       }
       const mode=sceneField(card,"sourcing","Media sourcing","", "select");
       [["unassigned","Choose a source"],["library","Choose library asset"],
-       ["ai","Generate AI Image"],["capture","I'll Supply the Media"]]
+       ["ai","Generate AI Image or Video"],["capture","I'll Supply the Media"]]
         .forEach(([key,text])=>mode.add(new Option(text,key)));
       mode.value=["library","ai","capture"].includes(shot.decision)?shot.decision:"unassigned";
       const actions=node("div","story-first-shot-detail");
@@ -907,6 +1084,38 @@
         actions.replaceChildren();
         if(current.pendingUpload[index])actions.appendChild(node("p","story-first-upload-progress",
           current.pendingUpload[index]));
+        const videoJob = current.videoJobs[index];
+        if (shot.selected_approved && isId(shot.assigned_asset_id)) {
+          actions.appendChild(node("p", "subtle", "Media selected and saved. Choose Change selected media before generating anything new."));
+          return;
+        }
+        if (videoJob && !["none", "declined", "failed"].includes(videoJob.state)) {
+          actions.appendChild(node("p", "story-first-asset-heading", videoJobLabel(videoJob)));
+          if (videoJob.estimated_credits) {
+            actions.appendChild(node("p", "subtle", "Approved estimate: " +
+              videoJob.estimated_credits + " ElevenLabs credits · attempt " + videoJob.attempted));
+          }
+          if (videoJob.message || videoJob.error) {
+            actions.appendChild(node("p", "form-message", videoJob.message || videoJob.error));
+          }
+          if (videoJob.state === "awaiting_review" && videoJob.preview_url) {
+            const preview = node("video", "story-first-generated-preview");
+            preview.src = root + videoJob.preview_url;
+            preview.controls = true; preview.playsInline = true; preview.preload = "metadata";
+            preview.setAttribute("aria-label", "AI-generated video awaiting explicit review");
+            actions.appendChild(preview);
+            button("Accept Video", "primary-button", () =>
+              decideSceneVideo(index, "accept").catch(e => report(e.message, true)), actions);
+            button("Decline Video", "secondary-button", () =>
+              decideSceneVideo(index, "decline").catch(e => report(e.message, true)), actions);
+          } else if (videoJob.state === "registered") {
+            button("Finalize Video Selection", "primary-button", () =>
+              decideSceneVideo(index, "accept").catch(e => report(e.message, true)), actions);
+          }
+          button("Refresh Video Status", "secondary-button", () =>
+            checkSceneVideo(index).catch(e => report(e.message, true)), actions);
+          return;
+        }
         if(shot.generated_master_id && !shot.rejected_ai_ids?.includes(shot.generated_master_id)){
           const img=node("img","story-first-generated-preview");
           img.src=root+sceneUrl(index,"preview/"+encodeURIComponent(shot.generated_master_id));
@@ -916,12 +1125,105 @@
           button("Accept Image","primary-button",()=>decideGenerated(index,"accept").catch(e=>report(e.message,true)),actions);
           button("Decline Image","secondary-button",()=>decideGenerated(index,"decline").catch(e=>report(e.message,true)),actions);
         }else if(mode.value==="ai"){
-          const prompt=label(actions,"Editable AI image prompt",shot.ai_prompt||shot.visual);
+          const prompt=label(actions,"Editable AI scene prompt (image or video)",shot.ai_prompt||shot.visual);
           prompt.maxLength=850;prompt.rows=3;
           prompt.oninput=()=>{shot.ai_prompt=prompt.value;markEditing();};
           if(shot.media==="clip")actions.appendChild(node("p","subtle",
-            "AI creates a STILL IMAGE. You must supply real video or explicitly override the clip requirement when accepting."));
+            "The AI Image button creates a still. Use Review Video Cost & Generate below for real moving footage, or explicitly override the clip requirement when accepting an AI still."));
           button("Generate this AI image","secondary-button",()=>generateSceneImage(index).catch(e=>report(e.message,true)),actions);
+          const opts=videoOptions(index);
+          const model=label(actions,"ElevenLabs video model","","select");
+          [["veo-3.1-fast-generate-001","Google Veo 3.1 Fast"],
+           ["veo-3.1-generate-001","Google Veo 3.1 (quality)"],
+           ["bytedance-seedance-v2.5","Seedance 2.5 (separate API approval)"]]
+            .forEach(([id,label])=>model.add(new Option(label,id)));
+          model.value=opts.model_id;
+          model.onchange=()=>{
+            opts.model_id=model.value;
+            const seedance=opts.model_id==="bytedance-seedance-v2.5";
+            if(!seedance){opts.duration_secs=[4,6,8].includes(opts.duration_secs)?opts.duration_secs:8;
+              opts.aspect_ratio=["9:16","16:9"].includes(opts.aspect_ratio)?opts.aspect_ratio:"9:16";
+              opts.resolution=["720p","1080p"].includes(opts.resolution)?opts.resolution:"720p";
+              opts.references.videos=[];opts.references.audios=[];
+            } else {opts.resolution="720p";opts.negative_prompt="";}
+            renderActions();
+          };
+          const duration=label(actions,"AI video length","","select");
+          const seedance=opts.model_id==="bytedance-seedance-v2.5";
+          const durations=seedance ? Array.from({length:27},(_,i)=>i+4) : [4,6,8];
+          durations.forEach(n=>duration.add(new Option(n+" seconds",String(n))));
+          duration.value=String(opts.duration_secs);
+          duration.onchange=()=>{opts.duration_secs=Number(duration.value);};
+          const ratio=label(actions,"AI video aspect ratio","","select");
+          const ratios=seedance ? [["9:16","9:16 Vertical"],["16:9","16:9 Horizontal"],
+            ["4:3","4:3"],["3:4","3:4"],["1:1","1:1"],["21:9","21:9 Wide"]]
+            : [["9:16","9:16 Vertical"],["16:9","16:9 Horizontal"]];
+          ratios.forEach(([value,label])=>ratio.add(new Option(label,value)));
+          ratio.value=opts.aspect_ratio;
+          ratio.onchange=()=>{opts.aspect_ratio=ratio.value;};
+          const resolution=label(actions,"Output resolution","","select");
+          const sizes=seedance?["480p","720p"]:["720p","1080p"];
+          sizes.forEach(value=>resolution.add(new Option(value,value)));
+          resolution.value=opts.resolution;
+          resolution.onchange=()=>{opts.resolution=resolution.value;};
+          const sound=label(actions,"Generated audio","","select");
+          [["false","Off — Studio narration/music"],["true","On — review for narration conflicts"]]
+            .forEach(([value,label])=>sound.add(new Option(label,value)));
+          sound.value=String(opts.generate_audio);
+          sound.onchange=()=>{opts.generate_audio=sound.value==="true";};
+          if(!seedance){
+            const negative=label(actions,"Negative prompt (optional, Veo only)",opts.negative_prompt||"");
+            negative.maxLength=280;negative.rows=2;
+            negative.oninput=()=>{opts.negative_prompt=negative.value;};
+          }
+          const refPanel=node("div","story-first-browse");
+          refPanel.appendChild(node("p","story-first-asset-heading","Optional references · verified Asset Manager originals"));
+          refPanel.appendChild(node("p","subtle",
+            "Start/end frames cannot be combined with free-form references. References are transferred to ElevenLabs only after explicit approval."));
+          const refs=opts.references;
+          const refsList=[
+            ["start_frame","image","Start frame"],["end_frame","image","End frame"],
+            ["images","image","Reference image"],...(seedance?[
+              ["videos","video","Reference video"],["audios","audio","Reference audio"]
+            ]:[])
+          ];
+          for(const [field,kind,labelText] of refsList){
+            const row=node("div","story-first-reference-row");
+            const pieces=field==="start_frame"||field==="end_frame"
+              ? (refs[field]?[{asset_id:refs[field]}]:[]) : refs[field];
+            row.appendChild(node("span","subtle",labelText+": "+(pieces.map(x=>x.asset_id).join(", ")||"none")));
+            for(const piece of pieces){
+              button("Remove","secondary-button",()=>{
+                if(field==="start_frame"||field==="end_frame")refs[field]=null;
+                else refs[field]=refs[field].filter(x=>x.asset_id!==piece.asset_id);
+                renderActions();
+              },row);
+            }
+            let roleChoice=null;
+            if(field==="images" && !seedance){
+              roleChoice=label(row,"Reference role","","select");
+              [["subject","Subject"],["style","Style"]].forEach(([value,label])=>
+                roleChoice.add(new Option(label,value)));
+            }
+            button("Choose from Asset Manager","secondary-button",()=>{
+              const picker=node("div","story-first-browse-results");
+              row.appendChild(picker);
+              browseSceneVideoReferences(index,picker,field,kind,roleChoice?.value||"subject")
+                .catch(e=>report(e.message,true));
+            },row);
+            refPanel.appendChild(row);
+          }
+          actions.appendChild(refPanel);
+          actions.appendChild(node("p","subtle",
+            "Model-specific settings. Native sound is optional and may conflict with Studio narration. All references require approval and a matching credit estimate."));
+          button("Review Video Cost & Generate","secondary-button",()=>
+            generateSceneVideo(index).catch(e=>report(e.message,true)),actions);
+          if (!videoJob) button("Check Existing Video Job","secondary-button",()=>
+            checkSceneVideo(index).catch(e=>report(e.message,true)),actions);
+          else if (videoJob.state==="failed") actions.appendChild(node("p","form-message error-text",
+            "Previous video failed. A new attempt requires fresh credit approval. " + (videoJob.error||"")));
+          else if (videoJob.state==="declined") actions.appendChild(node("p","subtle",
+            "Previous clip declined. A new paid generation requires fresh approval."));
           button("I'll Supply the Media","secondary-button",()=>{
             shot.decision="capture";mode.value="capture";renderActions();markEditing();
           },actions);
@@ -935,7 +1237,7 @@
           },actions);
         }else if(!shot.selected_approved){
           actions.appendChild(node("p","subtle","Media needed for this scene. Studio will not substitute an unrelated image."));
-          button("Generate AI Image","secondary-button",()=>{
+          button("Generate AI Image or Video","secondary-button",()=>{
             shot.decision="ai";mode.value="ai";renderActions();markEditing();
           },actions);
           button("I'll Supply the Media","secondary-button",()=>{
@@ -1175,6 +1477,8 @@
     current.record = null;
     current.story = null;
     current.selectedAssetNames = {};
+    Object.values(current.videoTimers).forEach(clearTimeout);
+    current.videoTimers={};current.videoJobs={};current.videoOptions={};
     current.expandedScenes.clear();
     $("storyFirstWorkspace").hidden = true;
     $("storyFirstSaved").replaceChildren(new Option("Choose a saved storyboard…", ""));

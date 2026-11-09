@@ -469,3 +469,27 @@
   color: #744f18;
   line-height: 1.35;
 }
+
+/* Optional ElevenLabs video reference controls stay readable on phone/tablet. */
+#storyFirstPanel .story-first-reference-row {
+  display:flex;align-items:center;flex-wrap:wrap;gap:8px;
+  min-width:0;margin:9px 0;padding:9px 0;
+  border-bottom:1px solid var(--border-color,#d1d5db);
+}
+#storyFirstPanel .story-first-reference-row > span {
+  flex:1 1 170px;min-width:0;overflow-wrap:anywhere;
+}
+#storyFirstPanel .story-first-reference-row > .story-first-field {
+  flex:0 1 170px;min-width:120px;
+}
+#storyFirstPanel .story-first-reference-row button {
+  white-space:normal;max-width:100%;
+}
+#storyFirstPanel video.story-first-generated-preview {
+  width:min(100%,380px);max-height:55vh;object-fit:contain;background:#111;
+}
+@media(max-width:640px) {
+  #storyFirstPanel .story-first-reference-row {align-items:stretch;}
+  #storyFirstPanel .story-first-reference-row > span,
+  #storyFirstPanel .story-first-reference-row button {flex:1 1 100%;}
+}
