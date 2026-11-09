@@ -453,7 +453,9 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_pipeline_read_source: studioPipelineReadSource\(env\)/);
   assert.match(worker, /studio_content_read_source: studioContentReadSource\(env\)/);
   assert.match(worker, /studio_supabase_pipeline_read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES/);
-  assert.match(worker, /version: "0\.10\.779-supabase-b2-content-reads"/);
+  const release = /version: "0\.10\.(\d+)-[^"]+"/.exec(worker);
+  assert.ok(release, "Worker /health must identify a versioned release");
+  assert.ok(Number(release[1]) >= 779, "B2 content reads cannot regress behind Worker 0.10.779");
   const pipelineFns = await readFile(path.join(here, "worker-functions-03.mjs"), "utf8");
   assert.match(pipelineFns, /studioPipelineReadSource\(env\) === "supabase"/);
   assert.match(pipelineFns, /studioContentReadSource\(env\) === "supabase"/);
