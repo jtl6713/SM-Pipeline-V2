@@ -1,7 +1,7 @@
 # Phase 6 handoff (new agent start here)
 
 **Date:** November 9, 2026, 12:18 AM CT. Updated after Joseph said to execute Phase 6.  
-**Status:** Production Request write-through is in Worker `0.10.784-supabase-phase6-request-writes`. Media metadata, the transfer queue, and cron writers are not started.  
+**Status:** Production Request write-through is confirmed live on Worker `0.10.787-home-parity-after-publish` by gate [42654476347](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/42654476347) at 10:24 AM CT on November 9, 2026. It shipped in Worker `0.10.784-supabase-phase6-request-writes`. Media metadata, the transfer queue, and cron writers are not started.  
 **Joseph’s ask:** Execute Phase 6. The first slice is Production Request write-through only. Later slices wait for a confirming gate and a separate go-ahead.
 
 Read [the migration index](../supabase-migration/README.md) and [Phase 6](../supabase-migration/phase6/README.md) before editing code.

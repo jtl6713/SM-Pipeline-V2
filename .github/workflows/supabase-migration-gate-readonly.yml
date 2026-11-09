@@ -259,10 +259,15 @@ jobs:
                   f"got {health.get(flag)!r}",
               )
           version = str(health.get("version") or "")
-          if "supabase-phase6-request-writes" in version:
+          phase6_flag = health.get("studio_supabase_phase6_writes_v1")
+          # Later Worker releases keep the flag and drop the 0.10.784 suffix.
+          if phase6_flag is None and "supabase-phase6-request-writes" not in version:
+              print("GATE[SKIP] phase6 write-through — health flag absent")
+          else:
               check(
                   "studio_supabase_phase6_writes_v1",
-                  health.get("studio_supabase_phase6_writes_v1") is True,
+                  phase6_flag is True,
+                  f"version={version!r}",
               )
               check(
                   "phase6_writes=airtable_sor_write_through",
@@ -274,8 +279,6 @@ jobs:
                   sync.get("phase6_write_tables") == ["production_requests"],
                   f"got {sync.get('phase6_write_tables')!r}",
               )
-          else:
-              print("GATE[SKIP] phase6 write-through — waiting for Worker 0.10.784-supabase-phase6-request-writes")
           check(
               "last_sync completed+ok",
               last.get("status") == "completed" and last.get("ok") is True,
