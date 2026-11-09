@@ -1,0 +1,61 @@
+name: Verify Dedicated ElevenLabs Video API Access (Read Only)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-elevenlabs-video-readonly.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-video-key:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ELEVENLABS_VIDEO_API_KEY: ${{ secrets.ELEVENLABS_VIDEO_API_KEY }}
+    steps:
+      - name: Check dedicated Image & Video API access without generation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${ELEVENLABS_VIDEO_API_KEY:-}" || { echo "video_key_present=NO"; exit 1; }
+          umask 077
+          status=$(curl -sS --proto '=https' --max-time 30 -o /tmp/eleven-video-list.json -w '%{http_code}' \
+            -H "xi-api-key: $ELEVENLABS_VIDEO_API_KEY" \
+            -H 'Accept: application/json' \
+            'https://api.elevenlabs.io/v1/flows/video?page_size=1')
+          if [[ "$status" != 200 ]]; then
+            echo "video_api_read_http=$status; no paid calls made"
+            exit 1
+          fi
+          jq -e '.generations | type == "array"' /tmp/eleven-video-list.json >/dev/null
+          echo 'video_api_read_access=PASS'
+          echo 'paid_generation_triggered=NO'
+      - name: Check subscription tier if restricted key permits read access
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          status=$(curl -sS --proto '=https' --max-time 30 -o /tmp/eleven-subscription.json -w '%{http_code}' \
+            -H "xi-api-key: $ELEVENLABS_VIDEO_API_KEY" \
+            -H 'Accept: application/json' \
+            'https://api.elevenlabs.io/v1/user/subscription')
+          if [[ "$status" == 200 ]]; then
+            tier=$(jq -er '.tier | select(type=="string")' /tmp/eleven-subscription.json)
+            echo "subscription_tier=$tier"
+            if [[ "$tier" != "pro" && "$tier" != "scale" && "$tier" != "business" && "$tier" != "enterprise" ]]; then
+              echo 'plan_api_requirement=NOT_VERIFIED'
+              exit 1
+            fi
+            echo 'plan_api_requirement=PASS'
+          elif [[ "$status" == 401 || "$status" == 403 ]]; then
+            echo 'subscription_tier=UNVERIFIED_RESTRICTED_KEY'
+          else
+            echo "subscription_tier=UNVERIFIED_HTTP_$status"
+          fi
+          echo 'api_key_credit_cap=NOT_RETURNED_BY_READONLY_API'
+          echo 'paid_generation_triggered=NO'
