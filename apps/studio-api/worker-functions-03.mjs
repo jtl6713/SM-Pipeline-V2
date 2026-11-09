@@ -2001,7 +2001,7 @@ export async function getStudioSupabaseSyncStatus(request, env) {
     phase5_writes: "airtable_sor_write_through",
     phase5_write_tables: ["platform_outputs", "content_items"],
     phase6_writes: "airtable_sor_write_through",
-    phase6_write_tables: ["production_requests"],
+    phase6_write_tables: ["production_requests", "media_assets"],
     last_sync: last,
   });
 }
@@ -2040,7 +2040,7 @@ export async function postStudioSupabaseSync(request, env) {
     phase5_writes: "airtable_sor_write_through",
     phase5_write_tables: ["platform_outputs", "content_items"],
     phase6_writes: "airtable_sor_write_through",
-    phase6_write_tables: ["production_requests"],
+    phase6_write_tables: ["production_requests", "media_assets"],
     sync: result,
   });
 }
