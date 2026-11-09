@@ -56,7 +56,7 @@ test("ElevenLabs asset upload uses trusted bytes, correct MIME and managed API k
       status:200,headers:{"Content-Type":"application/json"},
     });
   };
-  const data=await uploadStudioReferenceToEleven({ELEVENLABS_API_KEY:"secret"},record,
+  const data=await uploadStudioReferenceToEleven({ELEVENLABS_VIDEO_API_KEY:"secret"},record,
     new Uint8Array(2048),fetcher);
   assert.deepEqual(data,{type:"asset",asset_id:"ElevenRef12345"});
   assert.equal(calls[0].url,"https://api.elevenlabs.io/v1/assets");
@@ -75,7 +75,7 @@ test("reference-to-provider conversion checks all sources and uploads only after
       status:200,headers:{"Content-Type":"application/json"},
     });
   };
-  const env={ELEVENLABS_API_KEY:"secret"};
+  const env={ELEVENLABS_VIDEO_API_KEY:"secret"};
   const result=await uploadStoryVideoReferences(env,{start_frame:"recImageOne"},profileId,{
     loadAsset:async id=>({...source,id}),driveToken:async()=>"oauth-token",fetcher,
   });
