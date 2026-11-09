@@ -49,7 +49,8 @@ export async function storyVideoQuote(env, input, now = Date.now()) {
   const settings = normalizeStoryVideoSettings(input);
   const pricing = videoPriceConfig(env, settings.duration_secs, now, settings.aspect_ratio);
   if (!pricing.enabled) return { ...settings, ...pricing, quote_id: null };
-  const quoteText = [settings.model_id, settings.resolution, settings.aspect_ratio,
+  const quoteText = [clean(input.idea_id), clean(input.scene_number), clean(input.content_profile_id),
+    settings.model_id, settings.resolution, settings.aspect_ratio,
     settings.duration_secs, settings.generate_audio, settings.prompt,
     pricing.estimated_credits, pricing.price_reviewed_at].join("|");
   const quote_id = bytesHex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(quoteText)));
