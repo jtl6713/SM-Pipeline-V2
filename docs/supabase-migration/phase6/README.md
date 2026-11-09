@@ -1,8 +1,8 @@
 # Phase 6 — Production Requests, media metadata, transfer queue, cron
 
-Production Request write-through ships in Worker `0.10.784-supabase-phase6-request-writes`. Media metadata, the transfer queue, and cron writers are not started. Airtable remains the write source of truth. Drive remains the media authority.
+Production Request write-through is confirmed live. **Supabase Migration Gate Read-Only** [run 42654476347](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/42654476347) at 10:24 AM CT on November 9, 2026 showed Worker `0.10.787-home-parity-after-publish`, `studio_supabase_phase6_writes_v1` true, `phase6_writes=airtable_sor_write_through`, and `phase6_write_tables` `production_requests`. It shipped in Worker `0.10.784-supabase-phase6-request-writes` and stayed on through the Home parity release. Media metadata, the transfer queue, and cron writers are not started. Airtable remains the write source of truth. Drive remains the media authority.
 
-Treat that request slice as confirmed only after a post-deploy **Supabase Migration Gate Read-Only** run shows Worker `0.10.784-supabase-phase6-request-writes`, `studio_supabase_phase6_writes_v1` true, and `phase6_writes=airtable_sor_write_through`. `phase5_writes` stays `airtable_sor_write_through`.
+`phase5_writes` stayed `airtable_sor_write_through` on that gate. The four list-read flags stayed `supabase`, `studio_read_source` stayed `airtable`, the runner write source stayed `airtable`, and the last sync was `completed` with the circuit closed.
 
 The list-read cutover is already live. Phase 6 does not redo Pipeline, Content, Factory, Ops, or Home overview reads. It also does not flip `STUDIO_WRITE_SOURCE`. That switch is the Phase 5 remainder and stays off while the pipeline runner still reads Airtable.
 
