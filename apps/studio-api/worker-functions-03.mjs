@@ -13539,11 +13539,18 @@ export async function storyFirstSceneMediaRoute(request, env, url, authorization
       if (manifest.length && String(env.STUDIO_ELEVENLABS_VIDEO_REFERENCE_TRANSFER_ENABLED || "").toLowerCase() !== "true") {
         throw new HttpError(503, "Media reference transfer to ElevenLabs is not enabled for this Studio");
       }
+      let referenceBytes=0, referenceVideoSeconds=0, referenceAudioSeconds=0;
       for (const reference of manifest) {
         const media = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, reference.asset_id);
-        verifyStudioReferenceAsset(media, reference, profileId, {
+        const verified=verifyStudioReferenceAsset(media, reference, profileId, {
           allowLicensed: String(env.STUDIO_ELEVENLABS_VIDEO_LICENSED_REFERENCES_VERIFIED || "").toLowerCase() === "true",
         });
+        referenceBytes+=verified.size;
+        if(reference.type==="video")referenceVideoSeconds+=verified.duration_seconds;
+        if(reference.type==="audio")referenceAudioSeconds+=verified.duration_seconds;
+      }
+      if(referenceBytes>36*1024*1024||referenceVideoSeconds>30||referenceAudioSeconds>30) {
+        throw new HttpError(413,"Video reference size or combined duration exceeds the guarded pilot budget");
       }
       const quote = await storyVideoQuote(env, { ...body, idea_id: ideaId,
         scene_number: Number(sceneNumber), content_profile_id: profileId });
