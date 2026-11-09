@@ -142,6 +142,7 @@ jobs:
           $health=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/health' -TimeoutSec 12
           if($health.ok -ne $true -or $health.service -ne 'pipeline-runner' -or $health.studio_write_source -ne 'airtable') { throw 'runner_health_or_write_authority_unverified' }
           Write-Output 'canary_runner_health=PASS'
+          Write-Output 'canary_python_lookup=START'
           $proc=@(Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^python(w)?\.exe$' -and $_.CommandLine -match 'pipeline-runner|app\.py' } | Select-Object -First 1)
           $exe=''
           if($proc.Count -gt 0 -and $proc[0].ExecutablePath -and (Test-Path $proc[0].ExecutablePath)) { $exe=$proc[0].ExecutablePath }
@@ -150,6 +151,74 @@ jobs:
               if(-not $p) { throw 'python_executable_missing' }
               $exe=$p.Source
           }
+          if($exe -match '(?i)pythonw\.exeJoin-Path $env:TEMP ('chicagoshining-wm-canary-'+[guid]::NewGuid().ToString('N'))
+          [void](New-Item -Path $testRoot -ItemType Directory -Force)
+          Write-Output 'canary_temporary_workspace=READY'
+          $previous=(Get-Location).Path
+          $previousPath=$env:PYTHONPATH
+          try {
+              $scriptPath=Join-Path $testRoot 'synthetic_watermark_canary.py'
+              $packed=[Convert]::FromBase64String('@@SCRIPT_GZIP_BASE64@@')
+              $memory=[IO.MemoryStream]::new($packed)
+              $zip=[IO.Compression.GzipStream]::new($memory,[IO.Compression.CompressionMode]::Decompress)
+              $output=[IO.File]::Create($scriptPath)
+              try { $zip.CopyTo($output) } finally { $output.Dispose(); $zip.Dispose(); $memory.Dispose() }
+              Write-Output 'canary_gzip_script_restored=PASS'
+              $env:PYTHONPATH=$runnerRoot
+              $env:PYTHONDONTWRITEBYTECODE='1'
+              Set-Location $runnerRoot
+              Write-Output 'canary_python_execution=START'
+              & $exe $scriptPath
+              if($LASTEXITCODE -ne 0) { throw 'live_watermark_canary_failed' }
+          } finally {
+              Set-Location $previous
+              $env:PYTHONPATH=$previousPath
+              Remove-Item -Path $testRoot -Recurse -Force -ErrorAction SilentlyContinue
+          }'''
+          command=command.replace('@@SCRIPT_GZIP_BASE64@@',script)
+          print('ops_shell_command_chars='+str(len(command)),file=__import__('sys').stderr)
+          if len(command)>7800: raise SystemExit('ops_shell_command_size_exceeded')
+          print(json.dumps({'command':command,'confirm':True}))
+          PY
+          echo 'local_synthetic_watermark_canary_prepared=YES'
+      - name: Execute isolated nonbillable watermark processing on Windows host
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS --max-time 20 -o /tmp/canary-start.json -w '%{http_code}' \
+            -X POST 'https://ops.chicagoshining.com/api/shell' \
+            -H "Authorization: Bearer $OPS_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/chicago-watermark-canary-request.json || true)
+          echo "runner_canary_start_http=$code"
+          if [[ "$code" != 202 && "$code" != 200 ]]; then jq -r '.error // "ops_rejected_command"' /tmp/canary-start.json | cut -c1-200; exit 1; fi
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/canary-start.json)
+          test -n "$job"
+          for n in $(seq 1 65); do
+            code=$(curl -sS --max-time 20 -o /tmp/canary-job.json -w '%{http_code}' \
+              -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" || true)
+            [[ "$code" == 200 ]] || { echo "runner_canary_poll_http=$code"; exit 1; }
+            state=$(jq -r '.job.status // empty' /tmp/canary-job.json)
+            if [[ "$state" == ok || "$state" == failed ]]; then
+              jq -r '.job.log // ""' /tmp/canary-job.json | grep -E '^(canary_|runner_canary_)' || true
+              if [[ "$state" == ok ]]; then
+                jq -e '.job.log|contains("canary_result=PASS") and contains("canary_watermark_persists_across_video=PASS") and contains("canary_drive_uploads=ZERO")' /tmp/canary-job.json >/dev/null
+                echo "live_windows_watermark_canary=PASS"
+                exit 0
+              fi
+              echo "live_windows_watermark_canary=FAIL"
+              jq -r '.job.log // ""' /tmp/canary-job.json \
+                | grep -Ei 'canary_|^At |^Traceback|^File "|error|exception|cannot|not recognized|no module|import|syntax|invalid|failed|not found' \
+                | tail -n 22 | cut -c1-220 || true
+              exit 1
+            fi
+            sleep 3
+          done
+          echo 'live_windows_watermark_canary=TIMED_OUT'
+          exit 1
+) { $consoleExe=Join-Path (Split-Path $exe -Parent) 'python.exe'; if(Test-Path $consoleExe) { $exe=$consoleExe } }
+          Write-Output 'canary_python_lookup=PASS'
           $testRoot=Join-Path $env:TEMP ('chicagoshining-wm-canary-'+[guid]::NewGuid().ToString('N'))
           [void](New-Item -Path $testRoot -ItemType Directory -Force)
           $previous=(Get-Location).Path
