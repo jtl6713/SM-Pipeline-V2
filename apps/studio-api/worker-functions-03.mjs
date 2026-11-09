@@ -13579,7 +13579,7 @@ export async function storyFirstSceneMediaRoute(request, env, url, authorization
         // transferred; reference uploads do not themselves trigger a charge.
         const providerSettings = buildStoryVideoProviderSettings(job.settings, uploaded);
         await writeJob({ ...job, state: "submitting", provider_asset_ids: uploaded.provider_asset_ids },
-          reservedEtag).catch(() => {});
+          reservedEtag);
         receipt = await submitStoryVideo(env, providerSettings);
       } catch (error) {
         // Even an HTTP error can race with an upstream charge or interrupted
@@ -13668,6 +13668,9 @@ export async function storyFirstSceneMediaRoute(request, env, url, authorization
       if (scene.selected_approved || scene.assigned_asset_id || scene.generated_master_id ||
           String(scene.visual || "") !== job.scene_visual) {
         throw new HttpError(409, "Scene changed since video generation. Review its visual and media before accepting");
+      }
+      if (job.settings?.generate_audio===true && body.audio_mix_acknowledged!==true) {
+        throw new HttpError(409, "Generated soundtrack needs explicit acknowledgement before entering a narrated Studio production");
       }
       if (scene.media === "still" && body.media_override !== true) {
         throw new HttpError(409, "Explicitly approve using moving footage in a still-only scene");
