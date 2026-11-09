@@ -81,9 +81,9 @@ export function verifyStudioReferenceAsset(record, {asset_id, type}, profileId, 
   if (size > STORY_VIDEO_REFERENCE_MAX_BYTES)
     throw fail(413, "Reference exceeds the 12 MB per-file limit for the pilot");
   const duration=Number(field(record,"Duration_Seconds")||0);
-  if ((type==="video"||type==="audio") && duration > 30)
-    throw fail(400, "Reference clip exceeds the Seedance 30-second media reference limit");
-  return {asset_id, type, mime, size, drive_id:driveId,
+  if ((type==="video"||type==="audio") && (!Number.isFinite(duration)||duration<=0||duration>30))
+    throw fail(400, "Audio/video references require confirmed duration metadata of at most 30 seconds");
+  return {asset_id, type, mime, size, duration_seconds: duration, drive_id:driveId,
     filename: clean(field(record,"Asset Name")).replace(/[^a-zA-Z0-9 _.-]/g,"").slice(0,60) || asset_id};
 }
 
@@ -144,7 +144,7 @@ export async function uploadStoryVideoReferences(env, refs, profileId, operation
   const manifest=storyVideoReferenceManifest(refs);
   if (!manifest.length) return {provider_references:{},provider_asset_ids:[]};
   const prepared=[];
-  let total=0;
+  let total=0, videoSeconds=0, audioSeconds=0;
   // All sources must be verified before any external upload.
   for(const item of manifest){
     const record=await operations.loadAsset(item.asset_id);
@@ -152,6 +152,10 @@ export async function uploadStoryVideoReferences(env, refs, profileId, operation
       allowLicensed:String(env.STUDIO_ELEVENLABS_VIDEO_LICENSED_REFERENCES_VERIFIED||"").toLowerCase()==="true",
     });
     total+=source.size;
+    if(item.type==="video")videoSeconds+=source.duration_seconds;
+    if(item.type==="audio")audioSeconds+=source.duration_seconds;
+    if(videoSeconds>30||audioSeconds>30)
+      throw fail(400,"Seedance reference video/audio combined duration exceeds 30 seconds");
     if(total>STORY_VIDEO_REFERENCE_TOTAL_MAX_BYTES)
       throw fail(413,"Reference selection exceeds total 36 MB pilot budget");
     prepared.push({...item,source});
