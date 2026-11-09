@@ -255,7 +255,6 @@
   let pipelineSort = { key: "output", dir: "desc" };
   let ideasSort = { key: "idea", dir: "desc" };
   let ideasCurrentSectionOpen = true;
-  let ideasArchivedSectionOpen = false;
   let contentSort = { key: "content", dir: "desc" };
   const pipelineGroupOpen = new Map();
   let pipelineArchivedSectionOpen = false;
@@ -300,7 +299,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.919-manual-classification";
+  const BUILD_ID = "item4-0.6.920-current-ideas-only";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -17074,8 +17073,7 @@ function timedScriptAssetLabel(asset, index) {
     if (!next?.id) return;
     const list = $("ideasList");
     if (!list) return;
-    // A lifecycle transition changes the Current/Archived partition and both
-    // section counts. Replacing just the old row leaves it in the wrong table.
+    // Promotion changes list membership and the current ideas count.
     if (wasPromoted === null || wasPromoted !== ideaIsPromoted(next)) {
       renderIdeasTable(list, ideasCache);
       return;
@@ -17151,16 +17149,6 @@ function timedScriptAssetLabel(asset, index) {
     });
   }
 
-  function partitionIdeaRecords(records) {
-    const active = [];
-    const archived = [];
-    for (const record of records || []) {
-      if (ideaIsPromoted(record)) archived.push(record);
-      else active.push(record);
-    }
-    return { active, archived };
-  }
-
   function renderIdeaSection({ key, title, records, open, meta }) {
     const rows = records.length
       ? records.map(ideaRowHtml).join("")
@@ -17173,13 +17161,12 @@ function timedScriptAssetLabel(asset, index) {
 
   function renderIdeasTable(target, records) {
     if (!target) return;
-    if (!records.length) {
-      target.innerHTML = '<div class="empty"><strong>No ideas are currently in the intake queue.</strong><br><span class="subtle">Studio is connected; the Idea Candidates table is simply empty after the recent reset/test cycle.</span></div>';
+    const active = records.filter((record) => !ideaIsPromoted(record));
+    if (!active.length) {
+      target.innerHTML = '<div class="empty"><strong>No ideas are currently in the intake queue.</strong></div>';
       return;
     }
-    const { active, archived } = partitionIdeaRecords(records);
     const sortedActive = sortedIdeaRecords(active);
-    const sortedArchived = sortedIdeaRecords(archived);
     const currentSection = renderIdeaSection({
       key: "current",
       title: "Current ideas",
@@ -17187,14 +17174,7 @@ function timedScriptAssetLabel(asset, index) {
       open: ideasCurrentSectionOpen,
       meta: `${sortedActive.length} idea${sortedActive.length === 1 ? "" : "s"} not in production`,
     });
-    const archivedSection = renderIdeaSection({
-      key: "archived",
-      title: "Archived",
-      records: sortedArchived,
-      open: ideasArchivedSectionOpen,
-      meta: `${sortedArchived.length} idea${sortedArchived.length === 1 ? "" : "s"} already in production`,
-    });
-    target.innerHTML = `<div class="idea-window-stack">${currentSection}${archivedSection}</div>`;
+    target.innerHTML = `<div class="idea-window-stack">${currentSection}</div>`;
 
     target.querySelectorAll("[data-idea-sort]").forEach((button) => {
       button.addEventListener("click", (event) => {
@@ -17215,7 +17195,6 @@ function timedScriptAssetLabel(asset, index) {
         event.stopPropagation();
         const section = button.dataset.ideaSectionToggle;
         if (section === "current") ideasCurrentSectionOpen = !ideasCurrentSectionOpen;
-        if (section === "archived") ideasArchivedSectionOpen = !ideasArchivedSectionOpen;
         renderIdeasTable(target, records);
       });
     });

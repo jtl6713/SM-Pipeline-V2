@@ -45,7 +45,7 @@ test("Ideas page shows numeric Candidate_ID before the actual title", () => {
     /class="title-cell">2001 – River Bridge Lift<\/div>/);
 });
 
-test("Archived and freshly updated Ideas use the same title formatter", () => {
+test("Listed and freshly updated Ideas use the same title formatter", () => {
   assert.match(render({ is_on_hold: true, photo_wait_status: "Waiting" }),
     /class="title-cell">2000 – Marina City Reflections <span class="subtle">\(Listening for photos\)<\/span><\/div>/);
   assert.match(app, /records\.map\(ideaRowHtml\)/);
