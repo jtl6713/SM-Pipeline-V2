@@ -160,6 +160,7 @@ export function buildStoryVideoProviderSettings(settings,uploaded={}) {
 }
 
 async function elevenJson(env, path, options = {}, fetcher = fetch) {
+  if (!clean(env.ELEVENLABS_VIDEO_API_KEY)) throw fail(503, "Dedicated ElevenLabs video key is not configured");
   const response = await fetcher("https://api.elevenlabs.io" + path, {
     ...options,
     headers: { "xi-api-key": clean(env.ELEVENLABS_VIDEO_API_KEY),
