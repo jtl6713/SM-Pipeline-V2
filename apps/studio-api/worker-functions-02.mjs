@@ -354,6 +354,7 @@ import {
   maeNormalizeTimeZone,
   maePickBalancedSuggestedIso,
   maeResolveStorySchedule,
+  maeResolveSeedSchedule,
   maeScheduleConflicts,
   maeScheduleLaneKey,
   maeScheduleNextSlot,
@@ -4328,11 +4329,32 @@ export async function item4SourceToProductionBridgePreflight(env, requestRecord,
     }
   }
 
+  const scheduleRows = outputRows.filter(row => String(f(row, "Scheduled_At") || "").trim());
+  if (scheduleRows.length) {
+    const profile = await item4ProductionProfileRecord(env, requestRecord).catch(() => null);
+    if (profile?.id) {
+      const timeZone = studioScheduleTimeZoneForProfile(profile, MAE_DEFAULT_TIME_ZONE);
+      for (const row of scheduleRows) {
+        const ms = Date.parse(String(f(row, "Scheduled_At") || ""));
+        if (!Number.isFinite(ms) || !maeIsBlackoutLocalTime(ms, timeZone)) continue;
+        const platform = String(f(row, "Platform") || "").trim();
+        const type = String(f(row, "Output_Type") || "").trim();
+        const local = new Intl.DateTimeFormat("en-US", { timeZone, month: "short", day: "numeric",
+          year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(ms));
+        if (scheduleReservationLaneEnabled(env, profile.id, platform)) {
+          notes.push(`Scheduling: ${platform} / ${type} requested ${local} inside the profile-local 8 PM–3:30 AM blackout. Approve will reserve the next eligible MAE slot at or after this time. Confirm the final reservation in Pipeline.`);
+        } else {
+          issues.push(`${platform} / ${type} requested ${local} inside the blackout. Change the requested time in Platforms & Frames before approval.`);
+        }
+      }
+    }
+  }
+
   const compatibility = productionRequestCompatibilityIssues(requestRecord);
   if (compatibility.length) issues.push(...compatibility);
   warnings.push(...productionRequestAudioPlatformWarnings(requestRecord, routeRows));
   if (routeRows.some((row) => row.output_type === "Story" && (row.platform === "Instagram" || row.platform === "Facebook"))) {
-    notes.push("Instagram and Facebook Stories will be a 10-second clip from the first vertical photo, with a slight zoom and your music. They do not inherit the 30-second main-video length.");
+    notes.push("Instagram and Facebook Stories use the 9:16 crop of Photo 1 as a 10-second teaser with slight zoom and the selected music. Story duration is independent of the main video.");
   }
 
   return {
@@ -7157,34 +7179,17 @@ export async function studioAtomicApplyPlatformOutputSeedSchedule(env, {
       // Reel and other post types may retain their cross-type platform policy.
       // Never vacate or shift an operator's explicitly requested Story time.
       const seedOccupiedMs = outputType === "Story" ? laneMs : platformMs;
-      const requestedSchedule = String(desiredSchedule || "").trim();
-      let candidate = requestedSchedule;
-      let candidateMs = Date.parse(candidate);
-      if (requestedSchedule) {
-        // Production Request Output Scheduled_At is explicit scheduling intent.
-        // Preserve it when valid; never silently replace it with another MAE slot.
-        if (!Number.isFinite(candidateMs)) {
-          throw new HttpError(400, "Requested Platform Output seed schedule is invalid");
-        }
-        if (maeIsBlackoutLocalTime(candidateMs, timeZone)) {
-          throw new HttpError(409, "Requested Platform Output seed schedule is inside the profile-local blackout");
-        }
-        if (maeScheduleConflicts(candidateMs, seedOccupiedMs)) {
-          throw new HttpError(
-            409,
-            "Requested Platform Output seed schedule conflicts with another output on this profile/platform",
-          );
-        }
-      } else {
-        const picked = maeScheduleNextSlot({
-          timeZone,
-          laneOccupiedMs: laneMs,
-          platformOccupiedMs: seedOccupiedMs,
-          horizonDays,
-        });
-        if (!picked.ok) throw new HttpError(409, picked.error || "No safe MAE slot is available for Platform Output seed");
-        candidate = picked.iso;
-        candidateMs = Date.parse(candidate);
+      const resolved = maeResolveSeedSchedule({
+        requestedIso: desiredSchedule, timeZone,
+        laneOccupiedMs: laneMs, platformOccupiedMs: seedOccupiedMs, horizonDays,
+      });
+      if (!resolved.ok) throw new HttpError(resolved.reason === "invalid" ? 400 : 409,
+        resolved.error || "No safe MAE slot is available for Platform Output seed");
+      const candidate = resolved.iso;
+      const candidateMs = Date.parse(candidate);
+      // Verify the allocator's result again at the atomic transaction boundary.
+      if (maeIsBlackoutLocalTime(candidateMs, timeZone) || maeScheduleConflicts(candidateMs, seedOccupiedMs)) {
+        throw new HttpError(409, "Platform Output seed did not produce a safe, unoccupied schedule");
       }
       if (!Number.isFinite(candidateMs)) {
         throw new HttpError(409, "Platform Output seed did not produce a verifiable schedule");
@@ -10433,6 +10438,11 @@ export async function fanoutProductionRequestOutputsToContentItems(env, requestR
           vacate: atomicSeedVacate,
           operationId: `production-seed:${requestRecord.id}:${outputRow.id}:${po.id}`,
         });
+        const requestedMs = Date.parse(String(atomicSeedSchedule || ""));
+        const reservedMs = Date.parse(String(f(po, "Scheduled_Post_Date") || ""));
+        if (Number.isFinite(requestedMs) && Number.isFinite(reservedMs) && requestedMs !== reservedMs) {
+          deferredScheduleMessage = ` Blackout requested time ${new Date(requestedMs).toISOString()} automatically moved to verified MAE reservation ${new Date(reservedMs).toISOString()}.`;
+        }
       } catch(error) {
         // Production routing is not a publishing approval. If another output
         // owns the requested time, keep the source+Platform Output but withhold

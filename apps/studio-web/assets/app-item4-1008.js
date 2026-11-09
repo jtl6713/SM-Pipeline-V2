@@ -299,7 +299,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.921-eleven-video-v1";
+  const BUILD_ID = "item4-0.6.922-elevenlabs-video";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -14622,7 +14622,7 @@ function timedScriptAssetLabel(asset, index) {
           text = "Plan is ready. Next: prepare the platform crops.";
         } else if (item4BridgePreflight?.ready) {
           kind = "success";
-          const extra = [...notes, ...warnings].filter(Boolean);
+          const extra = [...notes.filter(note => !/^(Scheduling:|Instagram and Facebook Stories )/i.test(String(note || ""))), ...warnings].filter(Boolean);
           text = extra.length
             ? `Ready to approve. ${extra.join(" ")}`
             : "Ready to approve.";
@@ -14644,6 +14644,25 @@ function timedScriptAssetLabel(asset, index) {
         } else {
           text = "Finishing a quick check. Your crops are saved.";
         }
+      }
+      const storySummary = $("productionStorySummary");
+      if (storySummary) {
+        const routes = Array.isArray(item4BridgePreflight?.routes) ? item4BridgePreflight.routes : [];
+        const platforms = [...new Set(routes.filter(route =>
+          route?.output_type === "Story" && ["Instagram", "Facebook"].includes(route?.platform)).map(route => route.platform))];
+        const first = (item4Workspace?.assets || []).slice()
+          .sort((a, b) => (Number(a?.order) || 9999) - (Number(b?.order) || 9999))[0];
+        const name = String(first?.name || first?.original_name || "").trim();
+        storySummary.hidden = !platforms.length;
+        storySummary.textContent = platforms.length
+          ? `${platforms.join(" + ")} Story: Photo 1${name ? ` — ${name}` : ""} is cropped to vertical 9:16, then made into a 10-second teaser with slight zoom and selected music. The main video has its own duration. Change Photo 1 in Media to change the Story source; review its 9:16 crop in Platforms & Frames.`
+          : "";
+      }
+      const scheduleSummary = $("productionScheduleSummary");
+      if (scheduleSummary) {
+        const info = notes.filter(note => /^Scheduling:/i.test(String(note || "")));
+        scheduleSummary.hidden = !info.length;
+        scheduleSummary.textContent = info.join(" ");
       }
       compatibility.className = `form-message${kind ? ` ${kind}` : ""}`;
       compatibility.textContent = text;

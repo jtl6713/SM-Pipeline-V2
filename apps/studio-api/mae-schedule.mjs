@@ -398,6 +398,37 @@ export function maeScheduleNextSlot(options = {}) {
   return { ok: true, iso, capacity: false, error: "" };
 }
 
+
+/** Reserve Production seeds safely; manual scheduling routes remain strict. */
+export function maeResolveSeedSchedule({ requestedIso = "", timeZone = MAE_DEFAULT_TIME_ZONE,
+  laneOccupiedMs = [], platformOccupiedMs = laneOccupiedMs,
+  horizonDays = MAE_SUGGEST_HORIZON_DAYS, now = new Date() } = {}) {
+  const zone = maeNormalizeTimeZone(timeZone);
+  const clock = now instanceof Date && Number.isFinite(now.getTime()) ? now : new Date();
+  const raw = String(requestedIso || "").trim();
+  if (raw) {
+    const requestedMs = Date.parse(raw);
+    if (!Number.isFinite(requestedMs)) return {
+      ok: false, iso: "", adjusted: false, reason: "invalid",
+      error: "Requested Platform Output seed schedule is invalid",
+    };
+    if (!maeIsBlackoutLocalTime(requestedMs, zone)) {
+      if (maeScheduleConflicts(requestedMs, platformOccupiedMs)) return {
+        ok: false, iso: "", adjusted: false, reason: "conflict",
+        error: "Requested Platform Output seed schedule conflicts with another output on this profile/platform",
+      };
+      return { ok: true, iso: new Date(requestedMs).toISOString(), adjusted: false, reason: "requested", error: "" };
+    }
+    // A blackout seed moves forward, never earlier than the requested date.
+    const picked = maeScheduleNextSlot({ timeZone: zone,
+      now: new Date(Math.max(clock.getTime(), requestedMs)),
+      laneOccupiedMs, platformOccupiedMs, horizonDays });
+    return { ...picked, adjusted: picked.ok, reason: "blackout" };
+  }
+  return { ...maeScheduleNextSlot({ timeZone: zone, now: clock, laneOccupiedMs, platformOccupiedMs, horizonDays }),
+    adjusted: false, reason: "automatic" };
+}
+
 export function maeNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = MAE_SCHEDULE_GAP_MS, options = {}) {
   const timeZone = maeNormalizeTimeZone(options.timeZone);
   const now = options.now instanceof Date ? options.now : new Date();

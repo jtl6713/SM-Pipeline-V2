@@ -120,6 +120,22 @@ class StudioApiBindingContractTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             assert_live_contract(got, "unexpected I1 binding")
 
+    def test_b2_content_list_read_flag_is_optional_secret_only(self):
+        got = self.legacy_core()
+        got.update(RESERVATION_BINDINGS)
+        self.assertTrue(assert_live_contract(got, "B2 flag absent")["ok"])
+        got["STUDIO_CONTENT_READ_SOURCE"] = "secret_text"
+        result = assert_live_contract(got, "B2 flag present")
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["optional_present"]["STUDIO_CONTENT_READ_SOURCE"])
+        got["STUDIO_CONTENT_READ_SOURCE"] = "plain_text"
+        with self.assertRaises(SystemExit):
+            assert_live_contract(got, "B2 flag type mismatch")
+        got.pop("STUDIO_CONTENT_READ_SOURCE")
+        got["STUDIO_CONTENT_READ_SOURCE_BYPASS"] = "secret_text"
+        with self.assertRaises(SystemExit):
+            assert_live_contract(got, "unknown B2 flag")
+
     def test_unknown_scheduling_binding_is_still_rejected(self):
         got = self.legacy_core()
         got.update(RESERVATION_BINDINGS)
