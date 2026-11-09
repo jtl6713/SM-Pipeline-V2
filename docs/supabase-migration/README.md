@@ -39,7 +39,7 @@ The last sync in that gate finished at 12:03 AM CT with `status=completed`, `ok=
 | 4 Content, Factory, Ops, Home list reads | Live as B2, B3, and the Home flag. Authorization reads were not moved | [phase4](./phase4/README.md) |
 | 5 Output and Content Item write-through | Live. The legacy-export switch `STUDIO_WRITE_SOURCE=supabase` is not on | [phase5](./phase5/README.md) |
 | 5 remainder | Not started. Runner reads of `platform_outputs` and `content_items` have to be proven before that switch can be considered. Creates still have to mint Airtable `rec` ids. Do not combine this with Phase 6 | This file |
-| 6 Production Requests, media metadata, transfer queue, and the cron/autonomous writers | Not started. Handoff is written | [phase6](./phase6/README.md), [handoff](../handoffs/supabase-phase6-handoff.md) |
+| 6 Production Requests, media metadata, transfer queue, and the cron/autonomous writers | Production Request write-through is in Worker `0.10.784-supabase-phase6-request-writes`. Media metadata, the transfer queue, and cron writers are not started | [phase6](./phase6/README.md), [handoff](../handoffs/supabase-phase6-handoff.md) |
 | 7 Retire Airtable | Not started. Do not delete or stop Airtable records in Phase 6 | This file |
 
-Phase 6 execution waits for an explicit go-ahead. Writing the handoff did not start it. Phase 7, retiring Airtable, is not started either.
+Phase 6 Production Request write-through is in Worker `0.10.784-supabase-phase6-request-writes`. Confirm it with the post-deploy read-only gate. The later Phase 6 slices are not started. Phase 7, retiring Airtable, is not started either. `STUDIO_WRITE_SOURCE` stays `airtable`.

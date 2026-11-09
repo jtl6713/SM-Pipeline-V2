@@ -2000,6 +2000,8 @@ export async function getStudioSupabaseSyncStatus(request, env) {
     phase4_read_routes: STUDIO_SUPABASE_PHASE4_READ_ROUTES,
     phase5_writes: "airtable_sor_write_through",
     phase5_write_tables: ["platform_outputs", "content_items"],
+    phase6_writes: "airtable_sor_write_through",
+    phase6_write_tables: ["production_requests"],
     last_sync: last,
   });
 }
@@ -2037,6 +2039,8 @@ export async function postStudioSupabaseSync(request, env) {
     phase4_read_routes: STUDIO_SUPABASE_PHASE4_READ_ROUTES,
     phase5_writes: "airtable_sor_write_through",
     phase5_write_tables: ["platform_outputs", "content_items"],
+    phase6_writes: "airtable_sor_write_through",
+    phase6_write_tables: ["production_requests"],
     sync: result,
   });
 }

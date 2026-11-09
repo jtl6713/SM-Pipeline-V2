@@ -1,8 +1,8 @@
 # Phase 6 handoff (new agent start here)
 
-**Date:** November 9, 2026, 12:18 AM CT  
-**Status:** Handoff only. Phase 6 is not started.  
-**Joseph’s ask:** Document the remaining phases and leave a Phase 6 handoff. Do not execute Phase 6 until he says to.
+**Date:** November 9, 2026, 12:18 AM CT. Updated after Joseph said to execute Phase 6.  
+**Status:** Production Request write-through is in Worker `0.10.784-supabase-phase6-request-writes`. Media metadata, the transfer queue, and cron writers are not started.  
+**Joseph’s ask:** Execute Phase 6. The first slice is Production Request write-through only. Later slices wait for a confirming gate and a separate go-ahead.
 
 Read [the migration index](../supabase-migration/README.md) and [Phase 6](../supabase-migration/phase6/README.md) before editing code.
 
@@ -31,7 +31,7 @@ The B3 installer refuses to run unless the live Worker still contains `0.10.782-
 
 Phase 6 is the next write-through domain: Production Requests, then media metadata, then the transfer queue, then the autonomous/cron writers for those tables. The shape is the Phase 5 pattern in `apps/studio-api/supabase-pipeline-reads.mjs` and `services/pipeline-runner/supabase_pipeline.py`: Airtable commit first, Supabase upsert after, Supabase failure does not fail the Airtable write.
 
-The first code change, when Joseph says to execute, is Production Request write-through only. Leave every read flag and `STUDIO_WRITE_SOURCE` alone.
+The first code change is Production Request write-through in Worker `0.10.784-supabase-phase6-request-writes`. Leave every read flag and `STUDIO_WRITE_SOURCE` alone. Do not start media metadata, the transfer queue, or cron writers in that same change.
 
 ## What this handoff is not
 
@@ -43,7 +43,7 @@ The first code change, when Joseph says to execute, is Production Request write-
 
 ## Before writing code
 
-1. Wait for Joseph to say to execute Phase 6.
+1. The Production Request slice is already the Worker change above. The next slice still waits for Joseph to ask for it.
 2. Dispatch is not available to the cloud agent (`workflow_dispatch` returns 403). Ask Joseph to run **Supabase Migration Gate Read-Only** on `main`.
 3. Read the artifact. Continue only when `studio_pipeline_read_source`, `studio_content_read_source`, `studio_factory_ops_read_source`, and `studio_home_read_source` are `supabase`, `studio_read_source` is `airtable`, `phase5_writes` is `airtable_sor_write_through`, runner `studio_write_source` is `airtable`, and the latest sync is `completed` / `ok=true` with the circuit closed.
 4. If the circuit is open or the sync is `partial`, `failed`, or lease-skipped, stop and report. Do not start Phase 6.

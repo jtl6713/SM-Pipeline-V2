@@ -22,6 +22,7 @@ import {
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
   syncAirtableContentRowToSupabase,
+  syncAirtableProductionRequestRowToSupabase,
   enqueueStudioSideEffectOutbox,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
@@ -1000,17 +1001,20 @@ export function airtableWriteThroughRecords(body) {
 
 /**
  * Phase 5: after a successful Airtable PATCH/POST, mirror Output and Content
- * Item rows into Supabase. Airtable remains write SoR. Failures are logged
- * and do not fail the Airtable write. GET/HEAD/DELETE are ignored.
- * A row is mirrored only when Airtable returned an identity field, so a
- * partial body cannot blank the Supabase projection.
+ * Item rows into Supabase. Phase 6 adds Production Requests the same way.
+ * Airtable remains write SoR. Failures are logged and do not fail the Airtable
+ * write. GET/HEAD/DELETE are ignored. A row is mirrored only when Airtable
+ * returned an identity field, so a partial body cannot blank the Supabase
+ * projection. Other tables stay unchanged.
  */
 export async function studioSupabaseWriteThroughAirtableMutation(env, tableId, method, body) {
   const ready = (record, kind) => {
     const fields = record?.fields;
     if (!record?.id || !fields || typeof fields !== "object") return false;
     if (kind === "output") return fields.Output_ID != null || fields.Platform != null;
-    return fields.Content_ID != null || fields.Content_Title != null || fields.Content_Status != null;
+    if (kind === "content") return fields.Content_ID != null || fields.Content_Title != null || fields.Content_Status != null;
+    if (kind === "request") return fields.Production_Request_ID != null || fields.Request_Status != null;
+    return false;
   };
   const snapshot = (record, kind) => {
     const fields = record?.fields || {};
@@ -1020,6 +1024,12 @@ export async function studioSupabaseWriteThroughAirtableMutation(env, tableId, m
         publish_status: fields.Publish_Status ?? null,
         review_status: fields.Review_Status ?? null,
         render_status: fields.Render_Status ?? null,
+      };
+    }
+    if (kind === "request") {
+      return {
+        production_request_id: fields.Production_Request_ID ?? null,
+        request_status: fields.Request_Status ?? null,
       };
     }
     return {
@@ -1032,11 +1042,14 @@ export async function studioSupabaseWriteThroughAirtableMutation(env, tableId, m
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
   if (supabaseCircuitOpen()) return { skipped: true, reason: "supabase_circuit_open" };
   const table = String(tableId || "");
+  const requestTable = String(env?.AIRTABLE_PRODUCTION_REQUEST_TABLE_ID || "");
   const kind = env?.AIRTABLE_OUTPUT_TABLE_ID && table === env.AIRTABLE_OUTPUT_TABLE_ID
     ? "output"
     : env?.AIRTABLE_CONTENT_TABLE_ID && table === env.AIRTABLE_CONTENT_TABLE_ID
       ? "content"
-      : "";
+      : (table === "Production Requests" || (requestTable && table === requestTable))
+        ? "request"
+        : "";
   if (!kind) return { skipped: true, reason: "table" };
   const records = airtableWriteThroughRecords(body).filter((record) => ready(record, kind));
   if (!records.length) return { skipped: true, reason: "no_records", kind };
@@ -1044,9 +1057,14 @@ export async function studioSupabaseWriteThroughAirtableMutation(env, tableId, m
   for (const record of records) {
     const synced = kind === "output"
       ? await studioSupabaseWriteThroughOutput(env, record, "output")
-      : await studioSupabaseWriteThroughContent(env, record, "content");
+      : kind === "content"
+        ? await studioSupabaseWriteThroughContent(env, record, "content")
+        : await syncAirtableProductionRequestRowToSupabase(env, record).catch((error) => {
+          console.warn("supabase request write-through failed", record.id, error);
+          return { ok: false, error: error instanceof Error ? error.message : String(error) };
+        });
     const outbox = await enqueueStudioSideEffectOutbox(env, {
-      airtable_table: kind === "output" ? "platform_outputs" : "content_items",
+      airtable_table: kind === "output" ? "platform_outputs" : kind === "content" ? "content_items" : "production_requests",
       airtable_record_id: record.id,
       mutation: verb,
       payload: snapshot(record, kind),
