@@ -11,7 +11,7 @@
   const root = String(config.apiBase || window.location.origin).replace(/\/$/, "");
   const select = $("studioProfileSelect");
   const status = $("storyFirstStatus");
-  const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, proposing: false, planRevision: 0, ideaRecords: [], generatedAssets: {}, candidates: {}, attempted: new Set(), browsing: {}, pendingUpload: {}, libraryRows: [], wideResults: {}, uploadedAssets: {}, selectedAssetNames: {}, expandedScenes: new Set(), videoJobs: {}, videoOptions: {}, videoTimers: {} };
+  const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, proposing: false, planRevision: 0, ideaRecords: [], generatedAssets: {}, candidates: {}, attempted: new Set(), browsing: {}, pendingUpload: {}, libraryRows: [], wideResults: {}, uploadedAssets: {}, selectedAssetNames: {}, expandedScenes: new Set(), videoJobs: {}, videoOptions: {}, videoTimers: {}, videoRequestBusy: false, videoRequestStatus: {}, videoSubmissionUncertain: {} };
 
   const profileId = () => String(select?.value || localStorage.getItem("studio.content_profile_id") || "").trim();
   const isId = id => /^rec[A-Za-z0-9]+$/.test(String(id || ""));
@@ -522,6 +522,9 @@
     const result = await call(sceneUrl(index, "video/status") + "?profile=" + encodeURIComponent(assertProfile()));
     if (current.record?.id !== ideaId) return;
     current.videoJobs[index] = result;
+    if (result.state && result.state !== "none") {
+      delete current.videoSubmissionUncertain[videoSceneIdentity(index)];
+    }
     render();
     if (current.videoTimers[index]) clearTimeout(current.videoTimers[index]);
     delete current.videoTimers[index];
@@ -586,44 +589,102 @@
     show();
   }
 
+  // A browser-wide request lock starts before Airtable save and quote fetch, not
+  // just before the paid POST. The Worker independently guards duplicate charges.
+  function videoSceneIdentity(index) {
+    return String(current.record?.id || "unsaved") + ":" + index;
+  }
+  function updateVideoRequestProgress(index, message, busyLabel = "Reviewing video…") {
+    current.videoRequestStatus[index] = message;
+    const progress = $("storyFirstVideoProgress-" + index);
+    if (progress) { progress.textContent = message; progress.hidden = !message; }
+    document.querySelectorAll("[data-story-video-generate]").forEach(control => {
+      const sceneIndex = Number(control.dataset.storyVideoGenerate);
+      const uncertain = !!current.videoSubmissionUncertain[videoSceneIdentity(sceneIndex)];
+      control.disabled = current.videoRequestBusy || uncertain;
+      const activeScene = current.videoRequestBusy && sceneIndex === index;
+      control.textContent = activeScene ? busyLabel :
+        uncertain ? "Check existing video job first" : "Review Video Cost & Generate";
+      control.setAttribute("aria-busy", String(activeScene));
+    });
+    report(message);
+  }
   async function generateSceneVideo(index) {
-    if (current.busy) return;
+    if (current.busy || current.videoRequestBusy ||
+      current.videoSubmissionUncertain[videoSceneIdentity(index)]) return;
     const scene = readForm().scenes[index];
     if (!String(scene.ai_prompt || "").trim()) throw new Error("Add a prompt for this AI video scene.");
-    await save();
-    const opts = videoOptions(index), profile = assertProfile();
-    const request = { prompt: scene.ai_prompt, model_id: opts.model_id,
-      duration_secs: opts.duration_secs, aspect_ratio: opts.aspect_ratio, resolution: opts.resolution,
-      generate_audio: opts.generate_audio, negative_prompt: opts.negative_prompt,
-      references: opts.references, content_profile_id: profile };
-    const quoted = await call(sceneUrl(index, "video/quote") + "?profile=" + encodeURIComponent(profile), {
-      method: "POST", body: JSON.stringify(request),
-    });
-    const quote = quoted.quote;
-    if (!quote?.enabled || !quote.quote_id) {
-      throw new Error(quote?.reason || "AI video pricing is unavailable. No paid generation was submitted.");
-    }
-    const refCount = Object.values(quote.references || {}).flat().filter(Boolean).length;
-    const approved = confirm("Generate one " + quote.duration_secs + "-second " + quote.aspect_ratio +
-      " " + quote.resolution + " " + quote.model_id + (quote.generate_audio ? " WITH sound" : " without sound") +
-      " video for scene " + (index+1) + "?" +
-      (refCount ? "\n\n" + refCount + " reference(s) will be transferred from Asset Manager to ElevenLabs." : "") +
-      "\n\nEstimated ElevenLabs charge for this configuration: " +
-      quote.estimated_credits + " credits (reviewed " + quote.price_reviewed_at +
-      "). Actual billing may vary.\n\nPress OK to authorize this ONE paid generation.");
-    if (!approved) { report("AI video request cancelled. No paid generation submitted."); return; }
-    current.busy = true;
-    report("Submitting exactly one authorized video generation for scene " + (index+1) + "…");
+    // Synchronously lock every Generate button before ANY network call.
+    current.videoRequestBusy = true;
+    const number = index + 1;
+    let paidPostStarted = false, paidReceiptReceived = false;
+    updateVideoRequestProgress(index, "Scene " + number + ": Saving storyboard before cost review…", "Saving storyboard…");
     try {
+      await save();
+      const opts = videoOptions(index), profile = assertProfile();
+      const request = { prompt: scene.ai_prompt, model_id: opts.model_id,
+        duration_secs: opts.duration_secs, aspect_ratio: opts.aspect_ratio, resolution: opts.resolution,
+        generate_audio: opts.generate_audio, negative_prompt: opts.negative_prompt,
+        references: opts.references, content_profile_id: profile };
+      updateVideoRequestProgress(index, "Scene " + number + ": Checking ElevenLabs video cost. No paid generation submitted.",
+        "Checking cost…");
+      const quoted = await call(sceneUrl(index, "video/quote") + "?profile=" + encodeURIComponent(profile), {
+        method: "POST", body: JSON.stringify(request),
+      });
+      const quote = quoted.quote;
+      if (!quote?.enabled || !quote.quote_id) {
+        throw new Error(quote?.reason || "AI video pricing is unavailable. No paid generation was submitted.");
+      }
+      const refCount = Object.values(quote.references || {}).flat().filter(Boolean).length;
+      updateVideoRequestProgress(index, "Scene " + number + ": Quote returned " + quote.estimated_credits +
+        " credits. Awaiting your approval; no charge yet.", "Confirming cost…");
+      const approved = confirm("Generate one " + quote.duration_secs + "-second " + quote.aspect_ratio +
+        " " + quote.resolution + " " + quote.model_id + (quote.generate_audio ? " WITH sound" : " without sound") +
+        " video for scene " + number + "?" +
+        (refCount ? "\n\n" + refCount + " reference(s) will be transferred from Asset Manager to ElevenLabs." : "") +
+        "\n\nEstimated ElevenLabs charge for this configuration: " +
+        quote.estimated_credits + " credits (reviewed " + quote.price_reviewed_at +
+        "). Actual billing may vary.\n\nPress OK to authorize this ONE paid generation.");
+      if (!approved) {
+        updateVideoRequestProgress(index, "Scene " + number + ": Cancelled. No paid generation submitted.");
+        return;
+      }
+      updateVideoRequestProgress(index, "Scene " + number + ": Submitting one approved paid generation. Do not retry.",
+        "Submitting one video…");
+      // Even if the transport fails after this point, never allow a second click.
+      paidPostStarted = true;
       const result = await call(sceneUrl(index, "video/start") + "?profile=" + encodeURIComponent(profile), {
         method: "POST", body: JSON.stringify({ ...request, quote_id: quote.quote_id,
           approve_paid_generation: true }),
       });
+      paidReceiptReceived = true;
+      // Keep the button locked even if a subsequent status read temporarily says "none".
+      // A confirmed non-none provider job releases this conservative local hold.
+      current.videoSubmissionUncertain[videoSceneIdentity(index)] = true;
       current.videoJobs[index] = result;
+      updateVideoRequestProgress(index, "Scene " + number + ": Generation receipt received. Checking existing job…",
+        "Checking status…");
       render();
-      report("Scene " + (index+1) + " video queued. The status will update without generating a second charge.");
-    } finally { current.busy = false; }
-    await checkSceneVideo(index, true);
+      await checkSceneVideo(index, true);
+      updateVideoRequestProgress(index, "Scene " + number + ": " +
+        videoJobLabel(current.videoJobs[index]) + ". No second generation will be submitted.");
+    } catch (error) {
+      if (paidPostStarted && !paidReceiptReceived) {
+        current.videoSubmissionUncertain[videoSceneIdentity(index)] = true;
+        updateVideoRequestProgress(index, "Scene " + number +
+          ": Paid submission status is uncertain. Do NOT generate again; select Check Existing Video Job.");
+      } else if (paidReceiptReceived) {
+        updateVideoRequestProgress(index, "Scene " + number +
+          ": Generation was submitted once, but status check failed. Use Refresh Video Status, not Generate.");
+      } else {
+        updateVideoRequestProgress(index, "Scene " + number +
+          ": No paid generation was started. " + error.message);
+      }
+      throw error;
+    } finally {
+      current.videoRequestBusy = false;
+      updateVideoRequestProgress(index, current.videoRequestStatus[index]);
+    }
   }
   async function decideSceneVideo(index, action) {
     if (current.busy) return;
@@ -1216,8 +1277,22 @@
           actions.appendChild(refPanel);
           actions.appendChild(node("p","subtle",
             "Model-specific settings. Native sound is optional and may conflict with Studio narration. All references require approval and a matching credit estimate."));
-          button("Review Video Cost & Generate","secondary-button",()=>
+          const generateButton = button("Review Video Cost & Generate","secondary-button",()=>
             generateSceneVideo(index).catch(e=>report(e.message,true)),actions);
+          generateButton.dataset.storyVideoGenerate = String(index);
+          const uncertain = !!current.videoSubmissionUncertain[videoSceneIdentity(index)];
+          generateButton.disabled = current.videoRequestBusy || uncertain;
+          generateButton.setAttribute("aria-busy", String(current.videoRequestBusy));
+          if (current.videoRequestBusy) generateButton.textContent = "Video review in progress…";
+          else if (uncertain) generateButton.textContent = "Check existing video job first";
+          const videoProgress = node("p","story-first-upload-progress",
+            current.videoRequestStatus[index] || (uncertain ?
+              "Paid submission may have reached ElevenLabs. Check the existing job; do not resubmit." : ""));
+          videoProgress.id = "storyFirstVideoProgress-" + index;
+          videoProgress.hidden = !videoProgress.textContent;
+          videoProgress.setAttribute("role","status");
+          videoProgress.setAttribute("aria-live","polite");
+          actions.appendChild(videoProgress);
           if (!videoJob) button("Check Existing Video Job","secondary-button",()=>
             checkSceneVideo(index).catch(e=>report(e.message,true)),actions);
           else if (videoJob.state==="failed") actions.appendChild(node("p","form-message error-text",
