@@ -11,7 +11,7 @@
   const root = String(config.apiBase || window.location.origin).replace(/\/$/, "");
   const select = $("studioProfileSelect");
   const status = $("storyFirstStatus");
-  const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, proposing: false, planRevision: 0, ideaRecords: [], generatedAssets: {}, candidates: {}, attempted: new Set(), browsing: {}, pendingUpload: {}, libraryRows: [], wideResults: {}, uploadedAssets: {}, selectedAssetNames: {}, expandedScenes: new Set() };
+  const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, proposing: false, planRevision: 0, ideaRecords: [], generatedAssets: {}, candidates: {}, attempted: new Set(), browsing: {}, pendingUpload: {}, libraryRows: [], wideResults: {}, uploadedAssets: {}, selectedAssetNames: {}, expandedScenes: new Set(), videoJobs: {}, videoOptions: {}, videoTimers: {} };
 
   const profileId = () => String(select?.value || localStorage.getItem("studio.content_profile_id") || "").trim();
   const isId = id => /^rec[A-Za-z0-9]+$/.test(String(id || ""));
@@ -108,6 +108,8 @@
     if ($("scriptedShortPropose")) $("scriptedShortPropose").disabled = false;
     current.record = record;
     current.story = JSON.parse(JSON.stringify(story));
+    Object.values(current.videoTimers).forEach(clearTimeout);
+    current.videoTimers = {}; current.videoJobs = {}; current.videoOptions = {};
     current.expandedScenes.clear();
     current.candidates = {}; current.attempted = new Set(); current.browsing = {};
     const voiceovers = String(record.summary || "").split(/\r?\n/).filter(line => /^\s*[1-9]\d*\.\s+/.test(line) && !/\s\u2014\s/.test(line)).map(line => line.replace(/^\s*\d+\.\s+/, "").trim());
@@ -480,6 +482,100 @@
       await reloadIdea();
       report(action === "accept" ? "Scene " + (index+1) + " image accepted and saved." :
         "Declined. Generate again or supply the media yourself.");
+    } finally { current.busy = false; }
+  }
+  // ElevenLabs video generation is asynchronous; these timers only poll a
+  // previously paid job. They never retry or create a second paid generation.
+  function videoOptions(index) {
+    return current.videoOptions[index] ||= { duration_secs: 8, aspect_ratio: "9:16" };
+  }
+  function videoJobLabel(job) {
+    const labels = {
+      none: "No video job", submitting: "Submitting paid request",
+      pending: "Queued at ElevenLabs", generating: "Generating video",
+      awaiting_review: "Video ready for review", registered: "Video registered; finalize scene",
+      accepted: "Video accepted", declined: "Video declined",
+      failed: "Generation failed", accepting: "Asset registration in progress",
+      submission_uncertain: "Submission uncertain — administrator review required",
+    };
+    return labels[job?.state || "none"] || "Video status: " + String(job?.state || "unknown");
+  }
+  async function checkSceneVideo(index, auto = false) {
+    if (!isId(current.record?.id)) return;
+    const ideaId = current.record.id;
+    const result = await call(sceneUrl(index, "video/status") + "?profile=" + encodeURIComponent(assertProfile()));
+    if (current.record?.id !== ideaId) return;
+    current.videoJobs[index] = result;
+    render();
+    if (current.videoTimers[index]) clearTimeout(current.videoTimers[index]);
+    delete current.videoTimers[index];
+    if (["pending", "generating"].includes(result.state)) {
+      current.videoTimers[index] = setTimeout(() => {
+        checkSceneVideo(index, true).catch(error => {
+          // A status lookup failure must not retry paid generation.
+          report("Scene " + (index + 1) + " video status unavailable: " + error.message, true);
+        });
+      }, 15000);
+    } else if (!auto) {
+      report("Scene " + (index + 1) + ": " + videoJobLabel(result));
+    }
+  }
+  async function generateSceneVideo(index) {
+    if (current.busy) return;
+    const scene = readForm().scenes[index];
+    if (!String(scene.ai_prompt || "").trim()) throw new Error("Add a prompt for this AI video scene.");
+    await save();
+    const opts = videoOptions(index), profile = assertProfile();
+    const request = { prompt: scene.ai_prompt, duration_secs: opts.duration_secs,
+      aspect_ratio: opts.aspect_ratio, content_profile_id: profile };
+    const quoted = await call(sceneUrl(index, "video/quote") + "?profile=" + encodeURIComponent(profile), {
+      method: "POST", body: JSON.stringify(request),
+    });
+    const quote = quoted.quote;
+    if (!quote?.enabled || !quote.quote_id) {
+      throw new Error(quote?.reason || "AI video pricing is unavailable. No paid generation was submitted.");
+    }
+    const approved = confirm("Generate one " + quote.duration_secs + "-second " + quote.aspect_ratio +
+      " Veo 3.1 Fast video for scene " + (index+1) + "?\n\nEstimated ElevenLabs charge: " +
+      quote.estimated_credits + " credits (reviewed " + quote.price_reviewed_at +
+      "). Actual billing may vary.\n\nPress OK to authorize this ONE paid generation.");
+    if (!approved) { report("AI video request cancelled. No paid generation submitted."); return; }
+    current.busy = true;
+    report("Submitting exactly one authorized video generation for scene " + (index+1) + "…");
+    try {
+      const result = await call(sceneUrl(index, "video/start") + "?profile=" + encodeURIComponent(profile), {
+        method: "POST", body: JSON.stringify({ ...request, quote_id: quote.quote_id,
+          approve_paid_generation: true }),
+      });
+      current.videoJobs[index] = result;
+      render();
+      report("Scene " + (index+1) + " video queued. The status will update without generating a second charge.");
+    } finally { current.busy = false; }
+    await checkSceneVideo(index, true);
+  }
+  async function decideSceneVideo(index, action) {
+    if (current.busy) return;
+    const scene = readForm().scenes[index], profile = assertProfile();
+    const video = current.videoJobs[index];
+    if (!video || (video.state !== "awaiting_review" && video.state !== "registered")) {
+      throw new Error("No completed video is awaiting this decision.");
+    }
+    let mediaOverride = false;
+    if (action === "accept" && scene.media === "still") {
+      mediaOverride = confirm("This scene requests a STILL. Explicitly use this generated VIDEO clip instead?");
+      if (!mediaOverride) return;
+    } else if (action === "accept" && !confirm("Accept this AI-generated video into the Drive-backed Asset Manager and this exact scene?")) return;
+    await save();
+    current.busy = true;
+    try {
+      report(action === "accept" ? "Registering video in Drive and Airtable…" : "Declining generated video…");
+      await call(sceneUrl(index, "video/" + action) + "?profile=" + encodeURIComponent(profile), {
+        method: "POST", body: JSON.stringify({ content_profile_id: profile, media_override: mediaOverride }),
+      });
+      await reloadIdea();
+      await checkSceneVideo(index, true);
+      report(action === "accept" ? "AI video accepted and saved to this scene and Asset Manager." :
+        "AI video declined. Another generation requires a new explicit quote and approval.");
     } finally { current.busy = false; }
   }
   function keyTerms(value) {
