@@ -451,6 +451,65 @@ test("overview pack pages open rows and keeps blank statuses", async () => {
   }
 });
 
+test("overview pack ideas query excludes promoted status and blank promotion ids", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const href = String(url);
+    calls.push(href);
+    const path = new URL(href).pathname;
+    if (path.endsWith("/content_profiles")) {
+      return { ok: true, async text() { return JSON.stringify([{ id: "aa4b857d-e588-46aa-97ba-77cdd3c25dff" }]); } };
+    }
+    if (path.endsWith("/platform_outputs")) {
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify([{
+            airtable_record_id: "recOpenOutput00001",
+            content_profile_id: "aa4b857d-e588-46aa-97ba-77cdd3c25dff",
+            output_number: 411,
+            output_status: "Ready for Review",
+            publish_status: null,
+            platform: "Instagram",
+          }]);
+        },
+      };
+    }
+    if (path.endsWith("/idea_candidates")) {
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify([{
+            airtable_record_id: "recOpenIdea0000001",
+            content_profile_id: "aa4b857d-e588-46aa-97ba-77cdd3c25dff",
+            status: "Generated",
+            promoted: null,
+            content_items: [],
+          }]);
+        },
+      };
+    }
+    return { ok: true, async text() { return "[]"; } };
+  };
+  try {
+    const pack = await listSupabaseOverviewPack(
+      { SUPABASE_URL: "https://example.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test" },
+      { profileAirtableIds: ["recF7UAn0LkMZZrWZ"], includeIdeas: true },
+    );
+    const ideaCall = calls.find((href) => href.includes("/idea_candidates"));
+    assert.ok(ideaCall);
+    assert.match(ideaCall, /status\.neq\.Promoted/);
+    assert.match(ideaCall, /payload-%3E%3EPromoted_Content_Record_ID\.is\.null/);
+    assert.match(ideaCall, /select=.*status/);
+    assert.equal(pack.ideas.length, 1);
+    assert.equal(pack.ideas[0].fields.Candidate_Status, "Generated");
+    assert.equal(pack.ideas[0].fields.Promoted_Content_Record_ID, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("overview pack aborts a hung profile lookup before the 26s race", async () => {
   mock.timers.enable({ apis: ["setTimeout"] });
   const originalFetch = globalThis.fetch;
@@ -524,7 +583,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_supabase_pipeline_read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES/);
   const release = /version: "0\.10\.(\d+)-[^"]+"/.exec(worker);
   assert.ok(release, "Worker /health must identify a versioned release");
-  assert.ok(Number(release[1]) >= 784, "Phase 6 request write-through cannot regress behind Worker 0.10.784");
+  assert.ok(Number(release[1]) >= 786, "Home Airtable/Supabase parity hardener cannot regress behind Worker 0.10.786");
   const pipelineFns = await readFile(path.join(here, "worker-functions-03.mjs"), "utf8");
   assert.match(pipelineFns, /studioPipelineReadSource\(env\) === "supabase"/);
   assert.match(pipelineFns, /studioContentReadSource\(env\) === "supabase"/);
@@ -561,6 +620,14 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /Reuse last-good Ideas counts/);
   assert.match(worker, /must not block that output rebuild/);
   assert.match(worker, /includeIdeas/);
+  const factoryFnsHome = await readFile(path.join(here, "worker-functions-04.mjs"), "utf8");
+  const homePack = factoryFnsHome.slice(
+    factoryFnsHome.indexOf("export async function buildStudioProfilesOverviewRows"),
+    factoryFnsHome.indexOf("/*__STUDIO_WORKER_END:buildStudioProfilesOverviewRows__*/"),
+  );
+  assert.match(homePack, /includeIdeas: missingIdeaCounts/);
+  assert.match(homePack, /ideasSource = "supabase"/);
+  assert.match(homePack, /listStudioOverviewUnpromotedIdeas/);
   const reads = await readFile(path.join(here, "supabase-pipeline-reads.mjs"), "utf8");
   assert.match(reads, /export async function supabaseRestAll/);
   assert.match(reads, /listSupabaseOverviewPack[\s\S]*supabaseRestAll/);
@@ -568,11 +635,17 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(reads, /publish_status\.is\.null,publish_status\.neq\.Published/);
   assert.match(reads, /Prefer: "count=none"/);
   assert.match(reads, /OVERVIEW_OUTPUT_SELECT/);
+  assert.match(reads, /OVERVIEW_OPEN_IDEA_FILTER/);
+  assert.match(reads, /status\.neq\.Promoted/);
+  assert.match(reads, /payload-%3E%3EPromoted_Content_Record_ID\.is\.null/);
   assert.match(reads, /supabase overview pack timed out after 18s/);
   assert.match(reads, /const controller = new AbortController\(\);[\s\S]*resolveSupabaseProfileId\(env, airtableId, \{ signal/);
   assert.match(reads, /export async function resolveSupabaseProfileId\(env, airtableProfileId, options = \{\}\)/);
   assert.match(reads, /promoted:payload-%3E%3EPromoted_Content_Record_ID/);
+  assert.match(reads, /"status"/);
   assert.match(reads, /const \[outputGroups, ideaResult\] = await Promise\.all/);
+  assert.match(reads, /Keep promotion keys even on the lean fallback/);
+  assert.match(reads, /"Promoted_Content_Record_ID",\s*"Content Items"/);
 });
 
 test("phase4 docs exist", async () => {

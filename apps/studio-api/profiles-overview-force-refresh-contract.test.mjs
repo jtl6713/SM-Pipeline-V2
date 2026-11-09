@@ -32,8 +32,13 @@ test("manual refresh bypasses normal snapshot TTL and refreshes Ideas too", () =
   assert.doesNotMatch(force, /studioProfilesOverviewFreshMs/);
   assert.match(functions04, /includeIdeas: missingIdeaCounts/);
   assert.match(functions04, /supabaseIdeasUsable = missingIdeaCounts && pack\.ideas_incomplete !== true/);
-  assert.match(functions04, /usedSupabaseOutputs && forceIdeas && !supabaseIdeasUsable/);
+  assert.match(functions04, /forceIdeas && !supabaseIdeasUsable/);
+  assert.match(functions04, /listStudioOverviewUnpromotedIdeas/);
   assert.match(functions04, /AIRTABLE_IDEA_TABLE_ID/);
+  assert.match(force, /compareHomeOverviewParity/);
+  assert.match(force, /reconcileHomeOverviewWithAirtable/);
+  assert.match(force, /forceAirtable: true/);
+  assert.match(force, /home_parity/);
 });
 
 test("forced result is complete, durable, generation-verified and last-good safe", () => {
@@ -114,8 +119,19 @@ test("Airtable force fallback interleaves lean output and idea scans instead of 
   const end = functions04.indexOf("/*__STUDIO_WORKER_END:buildStudioProfilesOverviewRows__*/", start);
   const build = functions04.slice(start, end);
   assert.match(build, /const \[outputs, ideas\] = await Promise\.all\(\[/);
-  assert.match(build, /fields: \["Content_Profile", "Promoted_Content_Record_ID", "Content Items"\]/);
+  assert.match(build, /fields: \["Content_Profile", "Promoted_Content_Record_ID", "Content Items", "Candidate_Status"\]/);
   assert.match(build, /if \(usedSupabaseOutputs\) \{[\s\S]*overlayLiveTikTokPublishRows/);
+});
+
+test("Home Supabase path counts Ideas from the open-idea filtered pack", () => {
+  const start = functions04.indexOf("async function buildStudioProfilesOverviewRows");
+  const end = functions04.indexOf("/*__STUDIO_WORKER_END:buildStudioProfilesOverviewRows__*/", start);
+  const build = functions04.slice(start, end);
+  assert.match(build, /includeIdeas: missingIdeaCounts/);
+  assert.match(build, /supabaseIdeasUsable/);
+  assert.match(build, /ideasSource = "supabase"/);
+  assert.match(build, /forceIdeas && !supabaseIdeasUsable/);
+  assert.match(build, /listStudioOverviewUnpromotedIdeas\(env, profileList/);
 });
 
 
@@ -124,7 +140,10 @@ test("authoritative Airtable refresh filters terminal output history and promote
   const end = functions04.indexOf("/*__STUDIO_WORKER_END:buildStudioProfilesOverviewRows__*/", start);
   const build = functions04.slice(start, end);
   assert.match(build, /profileOutputFormula = profileFormula[\s\S]*\{Output_Status\}!="Published"[\s\S]*\{Publish_Status\}!="Published"/);
-  assert.match(build, /profileIdeaFormula = profileFormula[\s\S]*\{Promoted_Content_Record_ID\}=BLANK\(\)[\s\S]*\{Content Items\}=BLANK\(\)/);
+  assert.match(functions04, /studioOverviewUnpromotedIdeaFormula/);
+  assert.match(functions04, /\{Promoted_Content_Record_ID\}=BLANK\(\)/);
+  assert.match(functions04, /\{Content Items\}=BLANK\(\)/);
+  assert.match(functions04, /\{Candidate_Status\}!="Promoted"/);
   assert.match(build, /filterFormula: profileOutputFormula/);
-  assert.match(build, /filterFormula: profileIdeaFormula/);
+  assert.match(build, /filterFormula: studioOverviewUnpromotedIdeaFormula\(profileFormula\)/);
 });

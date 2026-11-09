@@ -47,6 +47,8 @@ test("idea count excludes promoted or linked content", () => {
   assert.equal(homeIdeaContribution(idea).ideas_not_in_production, 1);
   assert.equal(homeIdeaContribution({ ...idea, promoted_content_record_id: "recContent" }).ideas_not_in_production, 0);
   assert.equal(homeIdeaContribution({ ...idea, content_item_links: ["recContent"] }).ideas_not_in_production, 0);
+  assert.equal(homeIdeaContribution({ ...idea, status: "Promoted" }).ideas_not_in_production, 0);
+  assert.equal(homeIdeaContribution({ ...idea, status: "Generated" }).ideas_not_in_production, 1);
 });
 
 test("record contributions support correct reversible deltas and no double counting", () => {

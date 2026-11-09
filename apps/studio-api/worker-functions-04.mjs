@@ -24,6 +24,10 @@ import { verifyExistingProviderReceipt } from "./exception-recovery-receipt.mjs"
 import { reconcileExceptionCensus } from "./exception-recovery-counts.mjs";
 import { QA_HOME_FAILED_CANDIDATE_FORMULA, qaHomePastDueCandidateFormula, classifyQualityAgentHomeBuckets } from "./quality-agent-home-parity.mjs";
 import { compareHomeSnapshotToExceptionCensus } from "./exception-recovery-home-parity.mjs";
+import {
+  compareHomeOverviewParity,
+  reconcileHomeOverviewWithAirtable,
+} from "./home-supabase-airtable-parity.mjs";
 import { readExceptionRecoveryCensusCache, persistExceptionRecoveryCensusCache } from "./exception-recovery-census-cache.mjs";
 import { FB3_ACTION, RECEIPT_REPAIR_ACTION, executeFb3AdminRecovery, executeApprovedReceiptRepair } from "./exception-recovery-actions.mjs";
 import { actionApprovalAudit, actionOutcomeAudit } from "./exception-recovery-action-audit.mjs";
@@ -5184,6 +5188,36 @@ function ideasNotInProductionFromRows(ideaRows, profile) {
   };
 }
 
+function studioOverviewUnpromotedIdeaFormula(profileFormula) {
+  const unpromoted = 'AND({Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK(),{Candidate_Status}!="Promoted")';
+  return profileFormula ? `AND(${profileFormula},${unpromoted})` : unpromoted;
+}
+
+async function listStudioOverviewUnpromotedIdeas(env, profiles, options = {}) {
+  const profileList = Array.isArray(profiles) ? profiles : [];
+  const egress = options.airtableEgressSource === "autonomous_refill_scan"
+    ? "autonomous_refill_scan"
+    : (options.airtableEgressSource || "home_overview_refresh");
+  const perProfile = await Promise.all(profileList.map(async (profile) => {
+    const profileFormula = contentProfileFilterFormula(profile);
+    const ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+      airtableEgressSource: egress,
+      limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
+      filterFormula: studioOverviewUnpromotedIdeaFormula(profileFormula),
+      fields: ["Content_Profile", "Promoted_Content_Record_ID", "Content Items", "Candidate_Status"],
+    });
+    if (ideas.length >= STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT) {
+      throw new Error(`Profiles overview ideas exceeded complete-scan safety ceiling for ${profile?.id || "profile"}`);
+    }
+    return ideas;
+  }));
+  const ideaById = new Map();
+  for (const rows of perProfile) {
+    for (const row of rows || []) if (row?.id) ideaById.set(row.id, row);
+  }
+  return [...ideaById.values()];
+}
+
 export async function buildStudioProfilesOverviewRows(env, profiles, options = {}) {
   let outputRows = null;
   let supabaseIdeaRows = [];
@@ -5200,15 +5234,16 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
 
   // Home opens Supabase only when its own flag is set. preferSupabase marks a
   // manual refresh, but it must not open a database connection on its own.
-  if (studioHomeReadSource(env) === "supabase") {
+  // forceAirtable is the parity hardener: rebuild the same columns from Airtable
+  // so a Supabase projection cannot silently drift from the write source of truth.
+  if (options.forceAirtable !== true && studioHomeReadSource(env) === "supabase") {
     try {
       const pack = await listSupabaseOverviewPack(env, {
         profileAirtableIds: profileIds,
         outputLimit: STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT,
         ideaLimit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
-        // A manual force refresh must fetch a fresh idea_candidates snapshot too.
-        // Supabase is the configured hot source and this call bypasses the Studio
-        // overview cache, so use its complete idea pack before falling back to Airtable.
+        // Open-idea filter (status != Promoted + blank promotion id) lives in
+        // listSupabaseOverviewPack so Home can keep STUDIO_HOME_READ_SOURCE=supabase.
         includeIdeas: missingIdeaCounts,
       });
       // Require a non-empty output pack. Empty ideas used to short-circuit to 0
@@ -5238,9 +5273,6 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
       const profileOutputFormula = profileFormula
         ? `AND(${profileFormula},{Output_Status}!="Published",{Publish_Status}!="Published")`
         : `AND({Output_Status}!="Published",{Publish_Status}!="Published")`;
-      const profileIdeaFormula = profileFormula
-        ? `AND(${profileFormula},{Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK())`
-        : `AND({Promoted_Content_Record_ID}=BLANK(),{Content Items}=BLANK())`;
       const [outputs, ideas] = await Promise.all([
         listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
           airtableEgressSource: options.airtableEgressSource === "autonomous_refill_scan" ? "autonomous_refill_scan" : "home_overview_refresh",
@@ -5253,8 +5285,8 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
         listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
           airtableEgressSource: options.airtableEgressSource === "autonomous_refill_scan" ? "autonomous_refill_scan" : "home_overview_refresh",
           limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
-          filterFormula: profileIdeaFormula,
-          fields: ["Content_Profile", "Promoted_Content_Record_ID", "Content Items"],
+          filterFormula: studioOverviewUnpromotedIdeaFormula(profileFormula),
+          fields: ["Content_Profile", "Promoted_Content_Record_ID", "Content Items", "Candidate_Status"],
         }),
       ]);
       if (outputs.length >= STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT) {
@@ -5274,11 +5306,14 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
     outputRows = [...outputById.values()];
     airtableIdeaRows = [...ideaById.values()];
     readSource = "airtable";
-  }
-
-  if (usedSupabaseOutputs && forceIdeas && !supabaseIdeasUsable) {
-    // Last-good Ideas counts are applied below. An Airtable idea scan here
-    // stayed inside the 26s refresh budget and kept Home Refresh failed.
+  } else if (forceIdeas && !supabaseIdeasUsable) {
+    // Supabase idea pack timed out or failed. Lean Airtable unpromoted scans
+    // recover Ideas without abandoning the Supabase output path.
+    airtableIdeaRows = await listStudioOverviewUnpromotedIdeas(env, profileList, {
+      airtableEgressSource: options.airtableEgressSource === "autonomous_refill_scan"
+        ? "autonomous_refill_scan"
+        : "home_ideas_refresh",
+    });
   }
 
   // Only Supabase-backed rows need the Airtable live-publish overlay. A direct
@@ -5297,6 +5332,9 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
   if (airtableIdeaRows && commitIdeas) {
     studioProfilesOverviewCache.ideasAt = Date.now();
     studioProfilesOverviewCache.ideasSource = "airtable";
+  } else if (supabaseIdeasUsable && commitIdeas) {
+    studioProfilesOverviewCache.ideasAt = Date.now();
+    studioProfilesOverviewCache.ideasSource = "supabase";
   }
 
   return profileList.map((profile) => {
@@ -5652,18 +5690,11 @@ export async function refreshStudioProfilesOverviewIdeas(env, authorization) {
       ? await resolveAuthorizedContentProfiles(env, authorization)
       : (await listContentProfileRecords(env)).filter((record) => Boolean(f(record, "Active")));
     if (!profiles?.length) return cache.rows || [];
-    const formula = studioProfilesOverviewCombinedFormula(profiles);
-    const ideaRows = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+    // Unpromoted-only scan. Loading every idea then filtering in JS previously
+    // re-counted hundreds of promoted rows when Home was already on Supabase.
+    const ideaRows = await listStudioOverviewUnpromotedIdeas(env, profiles, {
       airtableEgressSource: "home_ideas_refresh",
-      limit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
-      sortField: "Create_Date",
-      filterFormula: formula,
     });
-    if (ideaRows.length >= STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT) {
-      console.warn("profiles overview ideas exceeded complete-scan safety ceiling; keeping last-good Ideas counts");
-      cache.ideasAt = Date.now();
-      return cache.rows || [];
-    }
     for (const profile of profiles) {
       const counted = ideasNotInProductionFromRows(ideaRows, profile);
       rememberOverviewIdeaCount(profile.id, counted.count, "airtable");
@@ -5922,8 +5953,47 @@ export async function runStudioProfilesOverviewForceRefresh(env, authorization, 
     cache.inflight = trackedBuild;
     // Keep the detached waitUntil operation safely inside Cloudflare's post-response
     // lifetime. If this budget is exceeded, state is marked failed instead of hanging.
-    const rows = await raceStudioOverviewBudget(trackedBuild, 26_000, "overview-force-build");
+    let rows = await raceStudioOverviewBudget(trackedBuild, 26_000, "overview-force-build");
     validateStudioProfilesOverviewRows(rows, profiles);
+
+    let homeParity = null;
+    if (studioHomeReadSource(env) === "supabase" && rows[0]?.read_source === "supabase") {
+      const remainingMs = Math.max(3_000, 26_000 - (Date.now() - startedMs));
+      try {
+        const airtableRows = await raceStudioOverviewBudget(
+          buildStudioProfilesOverviewRows(env, profiles, {
+            forceIdeas: true,
+            commitIdeas: false,
+            forceAirtable: true,
+          }),
+          remainingMs,
+          "overview-force-airtable-parity",
+        );
+        validateStudioProfilesOverviewRows(airtableRows, profiles);
+        homeParity = compareHomeOverviewParity(airtableRows, rows);
+        if (homeParity.status === "mismatch") {
+          rows = reconcileHomeOverviewWithAirtable(rows, airtableRows, homeParity);
+          homeParity = {
+            ...homeParity,
+            reconciled: true,
+            note: "Mismatched Home columns were overwritten with Airtable values before publishing the snapshot.",
+          };
+        } else {
+          homeParity = { ...homeParity, reconciled: false };
+        }
+      } catch (error) {
+        homeParity = {
+          status: "airtable_parity_incomplete",
+          reconciled: false,
+          error: String(error?.message || error || "Airtable parity rebuild failed").slice(0, 400),
+          note: "Supabase Home snapshot published without a completed Airtable column comparison.",
+        };
+        console.warn("profiles overview airtable parity check failed", {
+          operation_id: operationId,
+          error: homeParity.error,
+        });
+      }
+    }
 
     const snapshotAt = Math.max(Date.now(), Number(refreshState?.baseline_snapshot_at || 0) + 1);
     const generation = `manual-${operationId}`;
@@ -5937,7 +6007,7 @@ export async function runStudioProfilesOverviewForceRefresh(env, authorization, 
         durableRequired: true,
         preserveRowIdeas: true,
         ideasAt: snapshotAt,
-        ideasSource: "airtable",
+        ideasSource: rows[0]?.ideas_source || studioProfilesOverviewCache.ideasSource || "airtable",
         readSource: rows[0]?.read_source || "",
       },
     );
@@ -5957,6 +6027,7 @@ export async function runStudioProfilesOverviewForceRefresh(env, authorization, 
       duration_ms: durationMs,
       error: "",
       component_status: { outputs: "completed", ideas: "completed" },
+      home_parity: homeParity,
     });
     console.info("profiles overview force refresh completed", {
       operation_id: operationId,
@@ -5965,6 +6036,8 @@ export async function runStudioProfilesOverviewForceRefresh(env, authorization, 
       snapshot_generation: generation,
       profiles: rows.length,
       read_source: rows[0]?.read_source || "",
+      home_parity_status: homeParity?.status || "skipped",
+      home_parity_differences: homeParity?.differences?.length || 0,
     });
     return verified;
   } catch (error) {

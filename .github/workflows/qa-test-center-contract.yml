@@ -15,7 +15,9 @@ permissions:
   contents: read
 jobs:
   qa-contract:
-    runs-on: ubuntu-latest
+    # Pin 24.04: ubuntu-latest moved to 26.04 and Playwright 1.58.2 cannot
+    # install Chromium deps there (ubuntu26.04-x64 unsupported).
+    runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4

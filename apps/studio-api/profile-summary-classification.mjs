@@ -166,8 +166,12 @@ export function homeIdeaContribution(row) {
   const result = emptyHomeContribution();
   if (!row) return result;
   result.ideas = 1;
+  // Match Ideas-page ideaIsPromoted: status Promoted OR promotion links.
+  // Home must not count historical idea_candidates that only look open because
+  // Supabase payload promotion keys are missing or stale.
   result.ideas_not_in_production = Number(!(
-    Boolean(row.promoted_content_record_id)
+    String(row.status || "").trim() === "Promoted"
+    || Boolean(row.promoted_content_record_id)
     || (Array.isArray(row.content_item_links) && row.content_item_links.length > 0)
   ));
   return result;

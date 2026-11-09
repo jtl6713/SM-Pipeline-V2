@@ -12,10 +12,15 @@ permissions:
   contents: read
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    # Pin 24.04 + Node 22: ubuntu-latest/26 ships Node 24 whose default
+    # --test reporter no longer emits TAP "# tests / # pass / # fail" lines.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Check module sizes and JS syntax
         shell: bash
         run: |
@@ -51,7 +56,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if node --test apps/studio-api/*.test.mjs >/tmp/studio-api-regression.log 2>&1; then
+          if node --test --test-reporter=tap apps/studio-api/*.test.mjs >/tmp/studio-api-regression.log 2>&1; then
             grep -E '^# tests |^# pass |^# fail ' /tmp/studio-api-regression.log | tail -3
           else
             echo "::error::Studio API test failures; compact diagnostic listing follows"
