@@ -12153,7 +12153,7 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
       // Required Visual / Voiceover is the defect that made storyboards unusable.
       if (creativeFirst || sceneDirections.requested_count) {
         throw new HttpError(502,
-          "The storyboard writer could not produce exactly " + (sceneDirections.requested_count || "the required number of") +
+          "Studio could not write a valid storyboard from that brief. The writer could not produce exactly " + (sceneDirections.requested_count || "the required number of") +
           " valid, distinct scenes after a bounded retry. Your original brief is unchanged; retry Propose.");
       }
       source = "fallback";
