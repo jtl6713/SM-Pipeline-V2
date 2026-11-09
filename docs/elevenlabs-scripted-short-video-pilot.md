@@ -137,6 +137,9 @@ New flags (ALL default false):
   approved Asset Manager originals to ElevenLabs.
 - STUDIO_ELEVENLABS_SEEDANCE_API_APPROVED: independently confirmed ByteDance API
   permission.
+- STUDIO_ELEVENLABS_LONG_VIDEO_VERIFIED: only after 13–30 second output
+  transfer, media-size and Runner throughput have passed operator tests; until
+  then these Seedance durations are selectable but quotes are blocked.
 - STUDIO_ELEVENLABS_VIDEO_LICENSED_REFERENCES_VERIFIED: separately checked
   generative-AI usage rights for Licensed/Cleared sources.
 
