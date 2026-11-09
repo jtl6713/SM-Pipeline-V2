@@ -985,3 +985,5 @@ Deploy 2026-11-09 Worker 0.10.787-home-parity-after-publish: publish Supabase Ho
 
 Deploy 2026-11-09 Worker 0.10.788-home-display-parity: Home Airtable↔Supabase parity compares the same display math the All Profiles table uses (calendar slots + awaiting for Pipeline/Future/Past Due) and reconciles full Airtable display payloads without changing the manual snapshot generation. Keep STUDIO_HOME_READ_SOURCE=supabase.
 Deploy 2026-11-09 Worker 0.10.789-supabase-phase6-media-writes: Phase 6 Media Asset metadata write-through after Airtable commit. Drive file id and URL only; no media bytes. phase5_writes stays airtable_sor_write_through. No read-flag changes. STUDIO_WRITE_SOURCE stays airtable. No half-hour media backfill.
+
+Deploy 2026-11-09 Worker 0.10.790-elevenlabs-video-cloudflare-redirects: Cloudflare Workers-compatible manual redirect mode for ElevenLabs paid POST/status/download and reference transfers; explicitly reject redirects, preserve managed secrets, existing paid job reservation and independent flags. PR #1760. No automatic AI generation or publishing.
