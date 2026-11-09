@@ -162,6 +162,30 @@ class StudioApiBindingContractTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             assert_live_contract(got, "unreviewed paid enablement blocked")
 
+    def test_operator_video_canary_flags_are_exact_plain_text_bindings_only(self):
+        got = self.legacy_core()
+        got.update(RESERVATION_BINDINGS)
+        names = (
+            "STUDIO_ELEVENLABS_VIDEO_ENABLED",
+            "STUDIO_ELEVENLABS_VIDEO_RIGHTS_VERIFIED",
+            "STUDIO_ELEVENLABS_VIDEO_WATERMARK_VERIFIED",
+        )
+        # Never invent an enabled flag during deploy: all three are optional.
+        self.assertTrue(assert_live_contract(got, "video flags absent")["ok"])
+        for name in names:
+            got[name] = "plain_text"
+        approved = assert_live_contract(got, "operator verified video flags")
+        self.assertTrue(approved["ok"])
+        for name in names:
+            self.assertTrue(approved["optional_present"][name])
+            got[name] = "secret_text"
+            with self.assertRaises(SystemExit):
+                assert_live_contract(got, "wrong video flag type rejected")
+            got[name] = "plain_text"
+        got["STUDIO_ELEVENLABS_VIDEO_UNREVIEWED_OPTION"] = "plain_text"
+        with self.assertRaises(SystemExit):
+            assert_live_contract(got, "unknown video config stays blocked")
+
     def test_b2_content_list_read_flag_is_optional_secret_only(self):
         got = self.legacy_core()
         got.update(RESERVATION_BINDINGS)

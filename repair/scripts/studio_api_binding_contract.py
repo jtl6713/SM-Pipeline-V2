@@ -93,9 +93,18 @@ OPTIONAL_BINDINGS = {
     "ELEVENLABS_API_KEY": "secret_text",
     # Dedicated budget-capped video key. Preserve without replacing TTS secret.
     "ELEVENLABS_VIDEO_API_KEY": "secret_text",
-    # Reviewed one-setting price only; no feature enablement, rights or watermark bypass.
+    # Reviewed 4s text-to-video price is still secret_text, and cannot inherit
+    # the dedicated API key or any other pricing configuration.
     "STUDIO_ELEVENLABS_VIDEO_PRICE_REVIEWED_AT": "secret_text",
     "STUDIO_ELEVENLABS_VIDEO_CREDITS_4S_720P_9X16": "secret_text",
+    # The operator separately enabled these THREE explicit, non-secret flags
+    # in the Cloudflare dashboard for the bounded private video POC.
+    # Allowlisted by exact name and TYPE only: do not set, toggle, or infer
+    # their values. Protected deployment preserves their active plaintext
+    # values byte-for-byte; Worker runtime must still verify each safeguard.
+    "STUDIO_ELEVENLABS_VIDEO_ENABLED": "plain_text",
+    "STUDIO_ELEVENLABS_VIDEO_RIGHTS_VERIFIED": "plain_text",
+    "STUDIO_ELEVENLABS_VIDEO_WATERMARK_VERIFIED": "plain_text",
     # Guarded durable I1 activation is a separate release; preserve its
     # secret binding on every ordinary Worker deployment without changing
     # the live value or treating an arbitrary new binding as authorized.
