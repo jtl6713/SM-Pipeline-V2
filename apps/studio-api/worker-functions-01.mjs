@@ -6732,7 +6732,7 @@ export function ideaLibraryFilterFormula(placeKeys, { includeVideo = false } = {
   const base = `AND(${media},{Classification_Status}='Classified',{Active},NOT({Do_Not_Use}),${notDerived})`;
   const keys = (placeKeys || []).filter(Boolean).slice(0, 10);
   if (!keys.length) return base;
-  const hay = "LOWER(CONCATENATE({Search_Keywords},' ',{AI_Tags},' ',{Location},' ',{Asset Name},' ',{Topic},' ',{Subtopic}))";
+  const hay = "LOWER(CONCATENATE({Search_Keywords},' ',{AI_Tags},' ',{Manual_Classification_JSON},' ',{Location},' ',{Asset Name},' ',{Topic},' ',{Subtopic}))";
   const clauses = keys.map((key) => `FIND("${ideaLibraryAirtableEscape(String(key).toLowerCase())}", ${hay})`);
   return `AND(${base},OR(${clauses.join(",")}))`;
 }
@@ -6759,6 +6759,7 @@ export function ideaLibraryHaystack(record) {
     f(record, "Subtopic"),
     f(record, "Location"),
     f(record, "Asset_Description"),
+    f(record, "Manual_Classification_JSON"),
     Array.isArray(tags) ? tags.join(" ") : tags,
     Array.isArray(keywords) ? keywords.join(" ") : keywords,
   ].filter(Boolean).join(" ").toLowerCase();

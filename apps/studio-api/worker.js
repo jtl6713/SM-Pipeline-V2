@@ -760,6 +760,7 @@ import {
   deleteMusicLibraryTrack,
   uploadMusicLibraryTracks,
   listAssetLibrary,
+  manualLibraryClassificationRoute,
   uploadAssetLibraryItems,
   storyFirstSceneMediaRoute,
   assignLibraryAssetProfile,
@@ -1078,6 +1079,11 @@ export default {
       const isAssetLibraryRoute = url.pathname === "/api/library";
       const isAssetLibraryUploadWrite = isAssetLibraryRoute && request.method === "POST";
       const isAssetLibraryRecordRoute = /^\/api\/library\/rec[A-Za-z0-9]+$/.test(url.pathname);
+      const isAssetLibraryManualClassificationRoute =
+        /^\/api\/library\/rec[A-Za-z0-9]+\/manual-classification$/.test(url.pathname) ||
+        url.pathname === "/api/library/manual-classification";
+      const isAssetLibraryManualClassificationWrite =
+        isAssetLibraryManualClassificationRoute && ["POST", "PATCH"].includes(request.method);
       const isAssetLibraryDeleteWrite = isAssetLibraryRecordRoute && request.method === "DELETE";
       const isAssetLibraryRenameWrite = isAssetLibraryRecordRoute && request.method === "PATCH";
       const isAssetLibraryProfileRoute = /^\/api\/library\/rec[A-Za-z0-9]+\/profile$/.test(url.pathname);
@@ -1222,6 +1228,7 @@ export default {
         isAssetLibraryUploadWrite ||
         isAssetLibraryDeleteWrite ||
         isAssetLibraryRenameWrite ||
+        isAssetLibraryManualClassificationWrite ||
         isAssetLibraryProfileWrite ||
         isAssetLibraryClassifyAllWrite ||
         isAssetLibraryDurationWrite ||
@@ -1315,7 +1322,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.774-scene-title",
+          version: "0.10.775-manual-classification",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -4260,6 +4267,11 @@ export default {
         return releasePublishedLibraryFile(request, env, url);
       }
 
+      if (isAssetLibraryManualClassificationRoute) {
+        if (isAssetLibraryManualClassificationWrite) assertWriteRequest(request, env);
+        return await manualLibraryClassificationRoute(request, env, url, authorization);
+      }
+
       if (isAssetLibraryRenameWrite) {
         assertWriteRequest(request, env);
         return renameAssetLibraryItem(request, env, url, ctx);
@@ -7043,6 +7055,7 @@ const LIBRARY_CLASSIFY_PENDING_FORMULA = libraryClassifyPendingFormula(ASSET_LIB
 // Needs Classification / Classification Error goes to A3 in one background run.
 /*__STUDIO_WORKER_EXTRACT:classifyAllLibraryAssets__*/
 /*__STUDIO_WORKER_EXTRACT:pulseLibraryAssetClassification__*/
+/*__STUDIO_WORKER_EXTRACT:manualLibraryClassificationRoute__*/
 /*__STUDIO_WORKER_EXTRACT:renameAssetLibraryItem__*/
 /*__STUDIO_WORKER_EXTRACT:deleteAssetLibraryItem__*/
 /*__STUDIO_WORKER_EXTRACT:patchAssetLibraryDuration__*/
