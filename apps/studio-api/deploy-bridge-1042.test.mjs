@@ -13,4 +13,7 @@ test("deployment retries only Cloudflare bridge routing 1042, never a real Home 
   assert.match(workflow, /grep -Fq "error code: 1042" "\$output"/);
   assert.match(workflow, /bridge_get "\$BASE\/overview-status" \/tmp\/overview-refresh-status\.json/);
   assert.match(workflow, /automatic_rollback_verified=true/);
+  const qa = workflow.slice(workflow.indexOf("qa-catalog"), workflow.indexOf("qa_admin_catalog_read=PASS"));
+  assert.match(qa, /--retry 8 --retry-all-errors --retry-delay 2/);
+  assert.doesNotMatch(qa, /--retry 5 --retry-delay 2 --max-time 45 "\$BASE\/qa-catalog"/);
 });
