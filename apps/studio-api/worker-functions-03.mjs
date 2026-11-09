@@ -13715,6 +13715,13 @@ export async function storyFirstSceneMediaRoute(request, env, url, authorization
   const requestedProfile = String(payload?.content_profile_id || url.searchParams.get("profile") || "").trim();
   if (requestedProfile && requestedProfile !== profileId) throw new HttpError(403, "Wrong content profile");
   if (action === "generate") {
+    const activeVideoObject = await env.STUDIO_MEDIA.get(storyVideoJobKey(ideaId, sceneNumber));
+    if (activeVideoObject) {
+      const videoJob = JSON.parse(await activeVideoObject.text());
+      if (!["declined", "failed", "accepted"].includes(videoJob.state)) {
+        throw new HttpError(409, "A paid AI video is active or pending review for this scene. Review or reconcile it before generating an image");
+      }
+    }
     if (scene.selected_approved || scene.assigned_asset_id) throw new HttpError(409, "Remove a selected image before replacing it");
     if (scene.generated_master_id && !scene.rejected_ai_ids?.includes(scene.generated_master_id)) {
       throw new HttpError(409, "Review or decline the existing image before generating another");
