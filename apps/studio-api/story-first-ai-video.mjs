@@ -27,10 +27,12 @@ export function normalizeStoryVideoSettings(input = {}) {
     resolution: STORY_VIDEO_RESOLUTION, generate_audio: false };
 }
 
-export function videoPriceConfig(env, duration_secs, now = Date.now()) {
+export function videoPriceConfig(env, duration_secs, now = Date.now(), aspect_ratio = "9:16") {
   const day = isoDay(env.STUDIO_ELEVENLABS_VIDEO_PRICE_REVIEWED_AT);
   const reviewed = day ? Date.parse(day + "T00:00:00Z") : NaN;
-  const credits = Number(env["STUDIO_ELEVENLABS_VIDEO_CREDITS_" + duration_secs + "S_720P"]);
+  if (!["9:16", "16:9"].includes(aspect_ratio)) return { enabled: false, reason: "Video ratio is unsupported" };
+  const creditKey = "STUDIO_ELEVENLABS_VIDEO_CREDITS_" + duration_secs + "S_720P_" + aspect_ratio.replace(":", "X");
+  const credits = Number(env[creditKey]);
   const active = String(env.STUDIO_ELEVENLABS_VIDEO_ENABLED || "").toLowerCase() === "true";
   if (!active) return { enabled: false, reason: "AI video generation is disabled by administrator" };
   if (!clean(env.ELEVENLABS_API_KEY)) return { enabled: false, reason: "ElevenLabs Image & Video API key is not configured" };
@@ -45,7 +47,7 @@ export function videoPriceConfig(env, duration_secs, now = Date.now()) {
 
 export async function storyVideoQuote(env, input, now = Date.now()) {
   const settings = normalizeStoryVideoSettings(input);
-  const pricing = videoPriceConfig(env, settings.duration_secs, now);
+  const pricing = videoPriceConfig(env, settings.duration_secs, now, settings.aspect_ratio);
   if (!pricing.enabled) return { ...settings, ...pricing, quote_id: null };
   const quoteText = [settings.model_id, settings.resolution, settings.aspect_ratio,
     settings.duration_secs, settings.generate_audio, settings.prompt,
