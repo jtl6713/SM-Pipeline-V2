@@ -22,6 +22,7 @@ import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import { submittedApprovalAge, verifySubmittedPromotionOwnership, orderSubmittedRecoveryRequests, SUBMITTED_RECOVERY_GRACE_MS } from "./submitted-approval-recovery.mjs";
 import {
   studioReadSource,
+  studioPipelineReadSource,
   studioSupabaseConfigured,
   supabaseCircuitOpen,
   supabaseCircuitSnapshot,
@@ -1503,7 +1504,7 @@ export async function listOutputScheduleGrid(request, env, url, authorization) {
   const startFloor = new Date(startMs - 1000).toISOString();
   const endIso = new Date(endMs).toISOString();
 
-  if (!forceFresh && studioReadSource(env) === "supabase") {
+  if (!forceFresh && studioPipelineReadSource(env) === "supabase") {
     try {
       const grid = await listSupabaseScheduleGrid(env, {
         profileAirtableId: profile.id,
@@ -1806,7 +1807,7 @@ export async function buildPipelineOutputsPayloadFromSupabase(env, profile, { li
 /*__STUDIO_WORKER_END:buildPipelineOutputsPayloadFromSupabase__*/
 
 export async function buildPipelineOutputsPayload(env, profile, { limit, reviewOnly, ctx = null } = {}) {
-  if (studioReadSource(env) === "supabase") {
+  if (studioPipelineReadSource(env) === "supabase") {
     try {
       return await buildPipelineOutputsPayloadFromSupabase(env, profile, { limit, reviewOnly, ctx });
     } catch (error) {
@@ -1985,7 +1986,9 @@ export async function getStudioSupabaseSyncStatus(request, env) {
     ok: true,
     configured: studioSupabaseConfigured(env),
     read_source: studioReadSource(env),
+    pipeline_read_source: studioPipelineReadSource(env),
     read_routes: STUDIO_SUPABASE_READ_ROUTES,
+    pipeline_read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
     phase4_read_routes: STUDIO_SUPABASE_PHASE4_READ_ROUTES,
     phase5_writes: "airtable_sor_write_through",
     phase5_write_tables: ["platform_outputs", "content_items"],
@@ -2194,7 +2197,7 @@ export async function listOutputs(request, env, url, authorization, ctx = null) 
   // a one-page live read of recent outputs scoped to this content profile.
   if (url.searchParams.get("mode") === "latest") {
     const key = `pipeline-latest:${profile.id}`;
-    if (studioReadSource(env) === "supabase") {
+    if (studioPipelineReadSource(env) === "supabase") {
       try {
         const packed = await studioReadCoalesce(key, 7000, () => listSupabasePipelineOutputs(env, {
           profileAirtableId: profile.id,

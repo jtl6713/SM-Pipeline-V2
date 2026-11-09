@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
   studioReadSource,
+  studioPipelineReadSource,
   studioSupabaseConfigured,
   supabaseCircuitOpen,
   noteSupabaseCircuitFailure,
@@ -58,6 +59,37 @@ test("studioReadSource defaults to airtable and requires supabase secrets", () =
       SUPABASE_URL: "https://example.supabase.co",
       SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
     }),
+    "airtable",
+  );
+});
+
+test("studioPipelineReadSource restores Phase 3 only when flagged and configured", () => {
+  const configured = {
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+  };
+  assert.equal(studioPipelineReadSource({}), "airtable");
+  assert.equal(studioPipelineReadSource({ STUDIO_READ_SOURCE: "supabase" }), "airtable");
+  assert.equal(studioPipelineReadSource({ ...configured }), "airtable");
+  assert.equal(
+    studioPipelineReadSource({ ...configured, STUDIO_READ_SOURCE: "supabase" }),
+    "supabase",
+  );
+  assert.equal(
+    studioPipelineReadSource({ ...configured, STUDIO_PIPELINE_READ_SOURCE: "supabase" }),
+    "supabase",
+  );
+  assert.equal(
+    studioPipelineReadSource({
+      ...configured,
+      STUDIO_READ_SOURCE: "supabase",
+      STUDIO_PIPELINE_READ_SOURCE: "airtable",
+    }),
+    "airtable",
+  );
+  // Global pause still covers Content/Home even when Pipeline is restored.
+  assert.equal(
+    studioReadSource({ ...configured, STUDIO_READ_SOURCE: "supabase" }),
     "airtable",
   );
 });
@@ -395,6 +427,15 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /listOpenOutputs/);
   assert.match(worker, /getStudioSupabaseSyncStatus/);
   assert.match(worker, /studio_read_source: studioReadSource\(env\)/);
+  assert.match(worker, /studio_pipeline_read_source: studioPipelineReadSource\(env\)/);
+  assert.match(worker, /studio_supabase_pipeline_read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES/);
+  assert.match(worker, /version: "0\.10\.777-supabase-b1-pipeline-reads"/);
+  const pipelineFns = await readFile(path.join(here, "worker-functions-03.mjs"), "utf8");
+  assert.match(pipelineFns, /studioPipelineReadSource\(env\) === "supabase"/);
+  assert.doesNotMatch(
+    pipelineFns.slice(pipelineFns.indexOf("listOutputScheduleGrid"), pipelineFns.indexOf("buildPipelineOutputsPayloadFromSupabase")),
+    /studioReadSource\(env\) === "supabase"/,
+  );
   assert.match(worker, /studio_supabase_last_sync_at/);
   assert.match(worker, /STUDIO_SUPABASE_READ_ROUTES/);
   assert.match(worker, /supabase content list read failed/);

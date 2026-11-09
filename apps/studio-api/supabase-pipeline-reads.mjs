@@ -127,10 +127,27 @@ export function studioSupabaseConfigured(env) {
 }
 
 export function studioReadSource(env) {
-  // Reads stay on Airtable while the Supabase pool is recovering. A live
-  // "supabase" flag was starting a rebuild on every Home poll.
+  // Global/default reads stay on Airtable. Home, Content, Factory, and Ops
+  // must not follow STUDIO_READ_SOURCE until later B workstreams. A live
+  // "supabase" flag previously saturated the pool on every Home poll.
   void env;
   return "airtable";
+}
+
+/**
+ * Workstream B1 — Phase 3 Pipeline + schedule-grid only.
+ * Does not enable Content / Factory / Ops / Home (those still use studioReadSource).
+ * Opt-in: STUDIO_PIPELINE_READ_SOURCE=supabase, or legacy STUDIO_READ_SOURCE=supabase
+ * when the narrower flag is unset. Roll back with STUDIO_PIPELINE_READ_SOURCE=airtable.
+ */
+export function studioPipelineReadSource(env) {
+  if (!studioSupabaseConfigured(env)) return "airtable";
+  const pipeline = String(env?.STUDIO_PIPELINE_READ_SOURCE || "").trim().toLowerCase();
+  if (pipeline === "airtable") return "airtable";
+  if (pipeline === "supabase") return "supabase";
+  return String(env?.STUDIO_READ_SOURCE || "").trim().toLowerCase() === "supabase"
+    ? "supabase"
+    : "airtable";
 }
 
 export function studioSupabaseBaseUrl(env) {

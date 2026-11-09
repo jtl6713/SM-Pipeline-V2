@@ -175,6 +175,7 @@ function makeReviewFactoryHandoffOperations(env) {
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
   studioReadSource,
+  studioPipelineReadSource,
   studioSupabaseConfigured,
   listSupabasePipelineOutputs,
   listSupabaseScheduleGrid,
@@ -1324,7 +1325,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.777-its1-scene-count",
+          version: "0.10.778-supabase-b1-pipeline-reads",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -1350,7 +1351,9 @@ export default {
           studio_supabase_approve_writethrough_v1: true,
           studio_supabase_phase5_writes_v1: true,
           studio_read_source: studioReadSource(env),
+          studio_pipeline_read_source: studioPipelineReadSource(env),
           studio_supabase_configured: studioSupabaseConfigured(env),
+          studio_supabase_pipeline_read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
           studio_supabase_read_routes: STUDIO_SUPABASE_READ_ROUTES,
           studio_supabase_phase4_read_routes: STUDIO_SUPABASE_PHASE4_READ_ROUTES,
           studio_supabase_last_sync_at: supabaseSyncLast?.at || null,
