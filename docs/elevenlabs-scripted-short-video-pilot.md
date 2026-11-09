@@ -35,6 +35,7 @@ repository. Existing `ELEVENLABS_API_KEY` must have ElevenLabs Image & Video
 | `STUDIO_ELEVENLABS_VIDEO_CREDITS_6S_720P_9X16` | Ditto for 6 seconds |
 | `STUDIO_ELEVENLABS_VIDEO_CREDITS_8S_720P_9X16` | Ditto for 8 seconds |
 | `STUDIO_ELEVENLABS_VIDEO_CREDITS_{4,6,8}S_720P_16X9` | Independently reviewed estimates for each 16:9 duration. No ratio inherits another ratio\x27s price |\n| `STUDIO_ELEVENLABS_VIDEO_RIGHTS_VERIFIED` | Exactly `true` only after checking applicable provider/license restrictions for commercial posting |
+| `STUDIO_ELEVENLABS_VIDEO_WATERMARK_VERIFIED` | Exactly `true` only after proving the existing Runner reliably applies the required brand watermark to AI-generated video for profiles requiring it |
 | `STUDIO_MEDIA` | Existing private R2 bucket |
 | `PIPELINE_RUNNER_URL`, `PIPELINE_RUNNER_SHARED_SECRET` | Existing authenticated Google Drive transfer |
 
@@ -51,7 +52,7 @@ bounded by the account/organization.
    request, which makes **no paid provider call**.
 2. Server validates prompt, fixed model/settings, configuration and pricing.
    SHA-256 quote ID binds exact request and cost.
-3. Browser displays estimated credits; only an affirmative human
+3. Before a quote is shown, the Worker also requires commercial-rights confirmation, configured Drive runner and Media Assets table, and required brand-watermark verification. Browser displays estimated credits; only an affirmative human
    confirmation POST with `approve_paid_generation: true` may proceed.
 4. Before a paid provider POST, a conditional R2 write reserves the exact
    `idea / scene` generation intent. If the POST response is lost or
