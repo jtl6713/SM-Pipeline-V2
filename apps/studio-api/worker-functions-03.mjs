@@ -1999,7 +1999,7 @@ export async function getStudioSupabaseMirrorCheck(request, env) {
   const limit = Number(url.searchParams.get("limit") || 12) || 12;
   const result = await studioSupabaseMirrorSpotCheck(env, {
     listRecords,
-    airtableFetch,
+    readRecord: airtableFetch,
     HttpError,
     limit,
   });

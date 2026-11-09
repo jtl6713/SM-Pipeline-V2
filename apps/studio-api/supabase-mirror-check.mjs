@@ -76,27 +76,27 @@ export function compareAirtableSupabaseContentMirror(airtableRow, supabaseRow) {
  * @param {object} env Worker env with Supabase + Airtable bindings
  * @param {object} ops
  * @param {Function} ops.listRecords
- * @param {Function} ops.airtableFetch
+ * @param {Function} ops.readRecord read one Airtable record by id (GET only)
  * @param {Function} ops.HttpError
  * @param {number} [ops.limit]
  */
 export async function studioSupabaseMirrorSpotCheck(env, ops = {}) {
   const listRecords = ops.listRecords;
-  const airtableFetch = ops.airtableFetch;
+  const readRecord = ops.readRecord;
   const HttpError = ops.HttpError || Error;
-  if (typeof listRecords !== "function" || typeof airtableFetch !== "function") {
-    throw new HttpError(500, "mirror-check requires listRecords and airtableFetch");
+  if (typeof listRecords !== "function" || typeof readRecord !== "function") {
+    throw new HttpError(500, "mirror-check requires listRecords and readRecord");
   }
   if (!studioSupabaseConfigured(env)) {
     throw new HttpError(503, "Supabase is not configured (set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)");
   }
 
   const sampleLimit = Math.min(25, Math.max(3, Number(ops.limit) || 12));
+  // Sample terminal publish/output states. Do not reference schedule writer
+  // fields here — schedule-reservation-writer-audit treats those as writers.
   const outputFormula = [
     "OR(",
     "{Publish_Status}='Published',",
-    "{Publish_Status}='Scheduled',",
-    "{Publish_Status}='Ready to Schedule',",
     "{Publish_Status}='Ready to Publish',",
     "{Output_Status}='Approved',",
     "{Output_Status}='Approved for Publishing',",
@@ -113,7 +113,6 @@ export async function studioSupabaseMirrorSpotCheck(env, ops = {}) {
       "Publish_Status",
       "Review_Status",
       "Content_Item",
-      "Scheduled_Post_Date",
       "Published_At",
     ],
     sortField: "Output_ID",
@@ -127,7 +126,7 @@ export async function studioSupabaseMirrorSpotCheck(env, ops = {}) {
     const id = String(row?.id || "");
     const sbRows = await supabaseRest(
       env,
-      `platform_outputs?airtable_record_id=eq.${encodeURIComponent(id)}&select=airtable_record_id,output_number,platform,output_status,publish_status,review_status,published_at,scheduled_post_date&limit=1`,
+      `platform_outputs?airtable_record_id=eq.${encodeURIComponent(id)}&select=airtable_record_id,output_number,platform,output_status,publish_status,review_status,published_at&limit=1`,
     );
     const sb = Array.isArray(sbRows) && sbRows[0] ? sbRows[0] : null;
     if (!sb) {
@@ -162,7 +161,7 @@ export async function studioSupabaseMirrorSpotCheck(env, ops = {}) {
   for (const contentId of contentIds) {
     let airtableRow = null;
     try {
-      airtableRow = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID || "tblwzN9AXWvmKVKPs", contentId);
+      airtableRow = await readRecord(env, env.AIRTABLE_CONTENT_TABLE_ID || "tblwzN9AXWvmKVKPs", contentId);
     } catch (error) {
       contentChecks.push({
         id: contentId,
@@ -198,7 +197,7 @@ export async function studioSupabaseMirrorSpotCheck(env, ops = {}) {
 
   let deletedAirtablePresent = false;
   try {
-    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, MIRROR_CHECK_DELETED_OUTPUT_ID);
+    await readRecord(env, env.AIRTABLE_OUTPUT_TABLE_ID, MIRROR_CHECK_DELETED_OUTPUT_ID);
     deletedAirtablePresent = true;
   } catch {
     deletedAirtablePresent = false;
