@@ -968,3 +968,5 @@ Deploy 2026-11-09 Worker 0.10.778-supabase-b1-pipeline-reads: B1 restore Pipelin
 Deploy 2026-11-09 Worker 0.10.779-supabase-b2-content-reads: B2 GET /api/content can read Supabase when STUDIO_CONTENT_READ_SOURCE=supabase; default stays Airtable. Factory/Ops/Home stay Airtable. Writes stay Airtable.
 
 Deploy 2026-11-09 Worker 0.10.780-blackout-approval-seed: preserve Supabase B2 independent content reads; recover Production seed blackouts into verified MAE slots; preserve Airtable authority and manual gates. PR #1724.
+
+Retry 2026-11-09 Worker 0.10.780-blackout-approval-seed after predeploy binding contract: preserve exact secret_text STUDIO_CONTENT_READ_SOURCE from Supabase B2; no flag flips, no automatic publishing. PR #1724 follow-up.
