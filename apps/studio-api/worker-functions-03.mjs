@@ -3009,7 +3009,7 @@ export async function listAssetLibrary(request, env, url, authorization) {
   // Airtable filter, offset and sort are identical. Cache read results,
   // never response headers or user permissions. Relevant writes invalidate.
   const [page, profiles] = await Promise.all([
-    studioReadCoalesce("library:page:" + JSON.stringify(pageOptions), 8000,
+    studioReadCoalesce("library:page:" + JSON.stringify(pageOptions) + ":" + String(url.searchParams.get("manual_refresh") || "").slice(0, 24), 8000,
       () => listRecordsPage(env, env.AIRTABLE_MEDIA_TABLE_ID, pageOptions)),
     studioReadCoalesce("library:profiles", 15000,
       () => listContentProfileRecords(env)).catch(() => []),
