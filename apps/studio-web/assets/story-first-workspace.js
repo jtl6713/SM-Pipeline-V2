@@ -122,6 +122,8 @@
     current.libraryRows = [];
     localStorage.setItem("studio.story_first_resume." + id, record.id);
     render();
+    // On reopen, poll existing jobs without generating or charging.
+    void Promise.allSettled(current.story.scenes.map((_,index)=>checkSceneVideo(index,true)));
     // Rehydrate filenames for existing selections by exact record ID; do not rely
     // on the scene keyword search or the latest-100 list after reopen.
     void loadSelectedAssetNames();
@@ -487,7 +489,9 @@
   // ElevenLabs video generation is asynchronous; these timers only poll a
   // previously paid job. They never retry or create a second paid generation.
   function videoOptions(index) {
-    return current.videoOptions[index] ||= { duration_secs: 8, aspect_ratio: "9:16" };
+    return current.videoOptions[index] ||= { model_id: "veo-3.1-fast-generate-001",
+      duration_secs: 8, aspect_ratio: "9:16", resolution: "720p", generate_audio: false,
+      negative_prompt: "", references: { start_frame: null, end_frame: null, images: [], videos: [], audios: [] } };
   }
   function videoJobLabel(job) {
     const labels = {
@@ -520,14 +524,66 @@
       report("Scene " + (index + 1) + ": " + videoJobLabel(result));
     }
   }
+  async function browseSceneVideoReferences(index, destination, field, kind, role = "subject") {
+    const profile = assertProfile();
+    destination.replaceChildren(node("p","subtle","Loading profile-owned Asset Manager files…"));
+    const res = await call("/api/library?profile=" + encodeURIComponent(profile) + "&limit=100");
+    const rows = Array.isArray(res.records) ? res.records : [];
+    destination.replaceChildren();
+    const search = label(destination,"Search Asset Manager references","","input");
+    search.placeholder = "Filter files by name";
+    const matches = node("div","story-first-browse-results");
+    destination.appendChild(matches);
+    const opts = videoOptions(index);
+    const show = () => {
+      matches.replaceChildren();
+      const needle = String(search.value || "").toLowerCase().trim();
+      const candidates = rows.filter(row => {
+        const mime=String(row.mime_type || "").toLowerCase();
+        const type = mime.startsWith("image/") ? "image"
+          : mime.startsWith("video/") ? "video"
+          : mime.startsWith("audio/") ? "audio" : String(row.media_kind || "").toLowerCase();
+        return type===kind && row.google_drive_file_id && !row.do_not_use &&
+          ["owned","licensed","cleared","public domain"].includes(String(row.rights_status||"").toLowerCase()) &&
+          (!needle || String(row.name||"").toLowerCase().includes(needle));
+      }).slice(0,35);
+      if (!candidates.length) matches.appendChild(node("p","subtle","No eligible references found in this profile. Upload and classify an original in Asset Manager first."));
+      for(const asset of candidates){
+        const row=node("div","story-first-asset");
+        put(row,node("span","",asset.name||asset.id));
+        button("Use reference","secondary-button",()=>{
+          const refs=opts.references;
+          if(field==="start_frame" || field==="end_frame"){
+            refs[field]=asset.id;
+            refs.images=[];refs.videos=[];refs.audios=[];
+          }else{
+            refs.start_frame=null;refs.end_frame=null;
+            const list=refs[field];
+            if(!list.some(x=>x.asset_id===asset.id)){
+              const limit=field==="images"?3:field==="videos"?2:1;
+              if(list.length>=limit){report("Only " + limit + " " + kind + " reference(s) allowed in the pilot.",true);return;}
+              list.push(field==="images"?{asset_id:asset.id,role}:{asset_id:asset.id});
+            }
+          }
+          render();report("Reference selected. It will be sent to ElevenLabs ONLY after credit approval.");
+        },row);
+        matches.appendChild(row);
+      }
+    };
+    search.addEventListener("input",show);
+    show();
+  }
+
   async function generateSceneVideo(index) {
     if (current.busy) return;
     const scene = readForm().scenes[index];
     if (!String(scene.ai_prompt || "").trim()) throw new Error("Add a prompt for this AI video scene.");
     await save();
     const opts = videoOptions(index), profile = assertProfile();
-    const request = { prompt: scene.ai_prompt, duration_secs: opts.duration_secs,
-      aspect_ratio: opts.aspect_ratio, content_profile_id: profile };
+    const request = { prompt: scene.ai_prompt, model_id: opts.model_id,
+      duration_secs: opts.duration_secs, aspect_ratio: opts.aspect_ratio, resolution: opts.resolution,
+      generate_audio: opts.generate_audio, negative_prompt: opts.negative_prompt,
+      references: opts.references, content_profile_id: profile };
     const quoted = await call(sceneUrl(index, "video/quote") + "?profile=" + encodeURIComponent(profile), {
       method: "POST", body: JSON.stringify(request),
     });
@@ -535,8 +591,12 @@
     if (!quote?.enabled || !quote.quote_id) {
       throw new Error(quote?.reason || "AI video pricing is unavailable. No paid generation was submitted.");
     }
+    const refCount = Object.values(quote.references || {}).flat().filter(Boolean).length;
     const approved = confirm("Generate one " + quote.duration_secs + "-second " + quote.aspect_ratio +
-      " Veo 3.1 Fast video for scene " + (index+1) + "?\n\nEstimated ElevenLabs charge: " +
+      " " + quote.resolution + " " + quote.model_id + (quote.generate_audio ? " WITH sound" : " without sound") +
+      " video for scene " + (index+1) + "?" +
+      (refCount ? "\n\n" + refCount + " reference(s) will be transferred from Asset Manager to ElevenLabs." : "") +
+      "\n\nEstimated ElevenLabs charge for this configuration: " +
       quote.estimated_credits + " credits (reviewed " + quote.price_reviewed_at +
       "). Actual billing may vary.\n\nPress OK to authorize this ONE paid generation.");
     if (!approved) { report("AI video request cancelled. No paid generation submitted."); return; }
@@ -1054,17 +1114,84 @@
             "The AI Image button creates a still. Use Review Video Cost & Generate below for real moving footage, or explicitly override the clip requirement when accepting an AI still."));
           button("Generate this AI image","secondary-button",()=>generateSceneImage(index).catch(e=>report(e.message,true)),actions);
           const opts=videoOptions(index);
+          const model=label(actions,"ElevenLabs video model","","select");
+          [["veo-3.1-fast-generate-001","Google Veo 3.1 Fast"],
+           ["veo-3.1-generate-001","Google Veo 3.1 (quality)"],
+           ["bytedance-seedance-v2.5","Seedance 2.5 (separate API approval)"]]
+            .forEach(([id,label])=>model.add(new Option(label,id)));
+          model.value=opts.model_id;
+          model.onchange=()=>{
+            opts.model_id=model.value;
+            const seedance=opts.model_id==="bytedance-seedance-v2.5";
+            if(!seedance){opts.duration_secs=[4,6,8].includes(opts.duration_secs)?opts.duration_secs:8;
+              opts.aspect_ratio=["9:16","16:9"].includes(opts.aspect_ratio)?opts.aspect_ratio:"9:16";
+              opts.resolution=["720p","1080p"].includes(opts.resolution)?opts.resolution:"720p";
+              opts.references.videos=[];opts.references.audios=[];
+            } else {opts.resolution="720p";opts.negative_prompt="";}
+            renderActions();
+          };
           const duration=label(actions,"AI video length","","select");
-          [[4,"4 seconds"],[6,"6 seconds"],[8,"8 seconds"]].forEach(([n,label])=>duration.add(new Option(label,String(n))));
+          const seedance=opts.model_id==="bytedance-seedance-v2.5";
+          const durations=seedance ? Array.from({length:27},(_,i)=>i+4) : [4,6,8];
+          durations.forEach(n=>duration.add(new Option(n+" seconds",String(n))));
           duration.value=String(opts.duration_secs);
           duration.onchange=()=>{opts.duration_secs=Number(duration.value);};
           const ratio=label(actions,"AI video aspect ratio","","select");
-          [["9:16","9:16 Vertical"],["16:9","16:9 Horizontal"]]
-            .forEach(([value,label])=>ratio.add(new Option(label,value)));
+          const ratios=seedance ? [["9:16","9:16 Vertical"],["16:9","16:9 Horizontal"],
+            ["4:3","4:3"],["3:4","3:4"],["1:1","1:1"],["21:9","21:9 Wide"]]
+            : [["9:16","9:16 Vertical"],["16:9","16:9 Horizontal"]];
+          ratios.forEach(([value,label])=>ratio.add(new Option(label,value)));
           ratio.value=opts.aspect_ratio;
           ratio.onchange=()=>{opts.aspect_ratio=ratio.value;};
+          const resolution=label(actions,"Output resolution","","select");
+          const sizes=seedance?["480p","720p"]:["720p","1080p"];
+          sizes.forEach(value=>resolution.add(new Option(value,value)));
+          resolution.value=opts.resolution;
+          resolution.onchange=()=>{opts.resolution=resolution.value;};
+          const sound=label(actions,"Generated audio","","select");
+          [["false","Off — Studio narration/music"],["true","On — review for narration conflicts"]]
+            .forEach(([value,label])=>sound.add(new Option(label,value)));
+          sound.value=String(opts.generate_audio);
+          sound.onchange=()=>{opts.generate_audio=sound.value==="true";};
+          if(!seedance){
+            const negative=label(actions,"Negative prompt (optional, Veo only)",opts.negative_prompt||"");
+            negative.maxLength=280;negative.rows=2;
+            negative.oninput=()=>{opts.negative_prompt=negative.value;};
+          }
+          const refPanel=node("div","story-first-browse");
+          refPanel.appendChild(node("p","story-first-asset-heading","Optional references · verified Asset Manager originals"));
+          refPanel.appendChild(node("p","subtle",
+            "Start/end frames cannot be combined with free-form references. References are transferred to ElevenLabs only after explicit approval."));
+          const refs=opts.references;
+          const refsList=[
+            ["start_frame","image","Start frame"],["end_frame","image","End frame"],
+            ["images","image","Reference image"],...(seedance?[
+              ["videos","video","Reference video"],["audios","audio","Reference audio"]
+            ]:[])
+          ];
+          for(const [field,kind,labelText] of refsList){
+            const row=node("div","story-first-reference-row");
+            const pieces=field==="start_frame"||field==="end_frame"
+              ? (refs[field]?[{asset_id:refs[field]}]:[]) : refs[field];
+            row.appendChild(node("span","subtle",labelText+": "+(pieces.map(x=>x.asset_id).join(", ")||"none")));
+            for(const piece of pieces){
+              button("Remove","secondary-button",()=>{
+                if(field==="start_frame"||field==="end_frame")refs[field]=null;
+                else refs[field]=refs[field].filter(x=>x.asset_id!==piece.asset_id);
+                renderActions();
+              },row);
+            }
+            button("Choose from Asset Manager","secondary-button",()=>{
+              const picker=node("div","story-first-browse-results");
+              row.appendChild(picker);
+              browseSceneVideoReferences(index,picker,field,kind)
+                .catch(e=>report(e.message,true));
+            },row);
+            refPanel.appendChild(row);
+          }
+          actions.appendChild(refPanel);
           actions.appendChild(node("p","subtle",
-            "ElevenLabs Veo 3.1 Fast · 720p · video only, no generated sound. Studio will use its own narration. Credit estimate and explicit paid approval are required."));
+            "Model-specific settings. Native sound is optional and may conflict with Studio narration. All references require approval and a matching credit estimate."));
           button("Review Video Cost & Generate","secondary-button",()=>
             generateSceneVideo(index).catch(e=>report(e.message,true)),actions);
           if (!videoJob) button("Check Existing Video Job","secondary-button",()=>
