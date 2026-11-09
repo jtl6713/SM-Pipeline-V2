@@ -2904,7 +2904,7 @@ export function assetLibraryFilterFormula(query, kind, needsProfile = false) {
   if (phrase) {
     parts.push(libraryAssetNameFindFormula(phrase));
   } else {
-    // Token OR avoids treating unquoted terms as a single phrase.
+    // Token OR search.
     const keys = ideaLibrarySearchFilterKeys(ideaLibraryTokens(query)).slice(0, 10);
     if (keys.length) {
       const hay = "LOWER(CONCATENATE({Search_Keywords},' ',{AI_Tags},' ',{Manual_Classification_JSON},' ',{Location},' ',{Asset Name},' ',{Topic},' ',{Subtopic},' ',{Asset_Description}))";
