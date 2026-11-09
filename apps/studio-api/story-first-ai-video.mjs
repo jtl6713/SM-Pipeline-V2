@@ -95,6 +95,9 @@ export function videoPriceConfig(env, settingsOrDuration, now=Date.now(), ratio=
   if(settings.model_id==="bytedance-seedance-v2.5"&&
     String(env.STUDIO_ELEVENLABS_SEEDANCE_API_APPROVED||"").toLowerCase()!=="true")
     return {enabled:false,reason:"Seedance 2.5 API access has not been explicitly approved"};
+  if(settings.duration_secs>12&&
+    String(env.STUDIO_ELEVENLABS_LONG_VIDEO_VERIFIED||"").toLowerCase()!=="true")
+    return {enabled:false,reason:"Long AI video transfer has not been verified for this Studio Runner"};
   if(settings.generate_audio&&
     String(env.STUDIO_ELEVENLABS_VIDEO_AUDIO_ENABLED||"").toLowerCase()!=="true")
     return {enabled:false,reason:"Generated audio has not been authorized for Studio"};
