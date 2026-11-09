@@ -7055,6 +7055,7 @@ const LIBRARY_CLASSIFY_PENDING_FORMULA = libraryClassifyPendingFormula(ASSET_LIB
 // Needs Classification / Classification Error goes to A3 in one background run.
 /*__STUDIO_WORKER_EXTRACT:classifyAllLibraryAssets__*/
 /*__STUDIO_WORKER_EXTRACT:pulseLibraryAssetClassification__*/
+/*__STUDIO_WORKER_EXTRACT:manualLibraryClassificationRoute__*/
 /*__STUDIO_WORKER_EXTRACT:renameAssetLibraryItem__*/
 /*__STUDIO_WORKER_EXTRACT:deleteAssetLibraryItem__*/
 /*__STUDIO_WORKER_EXTRACT:patchAssetLibraryDuration__*/
