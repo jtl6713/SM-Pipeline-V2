@@ -1187,10 +1187,16 @@
                 renderActions();
               },row);
             }
+            let roleChoice=null;
+            if(field==="images" && !seedance){
+              roleChoice=label(row,"Reference role","","select");
+              [["subject","Subject"],["style","Style"]].forEach(([value,label])=>
+                roleChoice.add(new Option(label,value)));
+            }
             button("Choose from Asset Manager","secondary-button",()=>{
               const picker=node("div","story-first-browse-results");
               row.appendChild(picker);
-              browseSceneVideoReferences(index,picker,field,kind)
+              browseSceneVideoReferences(index,picker,field,kind,roleChoice?.value||"subject")
                 .catch(e=>report(e.message,true));
             },row);
             refPanel.appendChild(row);
