@@ -94,8 +94,15 @@ export async function fetchStudioReferenceFromDrive(source, driveAccessToken, fe
     encodeURIComponent(source.drive_id) + "?alt=media&supportsAllDrives=true";
   const response = await fetcher(url, {
     headers: {Authorization:"Bearer "+driveAccessToken,Accept:source.mime},
-    redirect:"error",
+    // Cloudflare Workers rejects redirect:"error"; do not follow an OAuth
+    // credential-bearing Drive request to a different host.
+    redirect:"manual",
   });
+  if ((response.status >= 300 && response.status < 400) ||
+      response.type === "opaqueredirect" || response.redirected) {
+    await response.body?.cancel().catch(()=>{});
+    throw fail(502, "Verified Google Drive reference unexpectedly redirected");
+  }
   const mime = clean(response.headers.get("Content-Type")).toLowerCase().split(";")[0];
   if (!response.ok || ![source.mime,"application/octet-stream"].includes(mime)) {
     await response.body?.cancel().catch(()=>{});
@@ -124,8 +131,11 @@ export async function uploadStudioReferenceToEleven(env, source, bytes, fetcher=
   form.set("asset",new Blob([bytes],{type:source.mime}),fileName);
   const response = await fetcher("https://api.elevenlabs.io/v1/assets", {
     method:"POST",headers:{"xi-api-key":clean(env.ELEVENLABS_VIDEO_API_KEY)},
-    body:form,redirect:"error",
+    body:form,redirect:"manual",
   });
+  if ((response.status >= 300 && response.status < 400) ||
+      response.type === "opaqueredirect" || response.redirected)
+    throw fail(502, "ElevenLabs reference upload redirected; inspect provider before retrying");
   const result=await response.json().catch(()=>({}));
   if (!response.ok || !/^[A-Za-z0-9_-]{8,100}$/.test(clean(result.asset_id)))
     throw fail(502, "ElevenLabs reference upload failed; inspect job before retrying");
@@ -136,9 +146,15 @@ export async function uploadStudioReferenceToEleven(env, source, bytes, fetcher=
 
 export async function deleteStudioElevenReferenceAssets(env, ids, fetcher=fetch) {
   const unique=[...new Set((ids||[]).filter(v=>/^[A-Za-z0-9_-]{8,100}$/.test(clean(v))))];
-  return Promise.allSettled(unique.map(id=>fetcher("https://api.elevenlabs.io/v1/assets/"+encodeURIComponent(id),{
-    method:"DELETE", headers:{"xi-api-key":clean(env.ELEVENLABS_VIDEO_API_KEY)},redirect:"error",
-  })));
+  return Promise.allSettled(unique.map(async id=>{
+    const response=await fetcher("https://api.elevenlabs.io/v1/assets/"+encodeURIComponent(id),{
+      method:"DELETE", headers:{"xi-api-key":clean(env.ELEVENLABS_VIDEO_API_KEY)},redirect:"manual",
+    });
+    if ((response.status >= 300 && response.status < 400) ||
+        response.type === "opaqueredirect" || response.redirected || !response.ok)
+      throw fail(502, "ElevenLabs reference cleanup failed without following a redirect");
+    return response;
+  }));
 }
 
 export async function uploadStoryVideoReferences(env, refs, profileId, operations) {
