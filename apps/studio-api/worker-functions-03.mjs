@@ -13517,6 +13517,18 @@ export async function storyFirstSceneMediaRoute(request, env, url, authorization
       }
       const body = await request.json().catch(() => ({}));
       if (String(body.content_profile_id || "") !== profileId) throw new HttpError(403, "Video profile mismatch");
+      // Check every downstream requirement BEFORE presenting a billable quote,
+      // not after the user has already spent credits on an unusable clip.
+      if (!env.AIRTABLE_MEDIA_TABLE_ID || !String(env.PIPELINE_RUNNER_URL || "").trim()) {
+        throw new HttpError(503, "AI video acceptance is unavailable: Asset Manager or Drive runner is not configured");
+      }
+      if (String(env.STUDIO_ELEVENLABS_VIDEO_RIGHTS_VERIFIED || "").toLowerCase() !== "true") {
+        throw new HttpError(503, "AI video commercial usage rights are not verified");
+      }
+      if (studioProfileRequiresChicagoWatermark(profile) &&
+          String(env.STUDIO_ELEVENLABS_VIDEO_WATERMARK_VERIFIED || "").toLowerCase() !== "true") {
+        throw new HttpError(503, "AI video watermarking is not verified for this profile");
+      }
       const quote = await storyVideoQuote(env, { ...body, idea_id: ideaId,
         scene_number: Number(sceneNumber), content_profile_id: profileId });
       if (videoAction === "quote") return respond(request, env, { ok: true, quote });
