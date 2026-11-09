@@ -964,3 +964,5 @@ Deploy 2026-11-09 Worker 0.10.776-supabase-mirror-check: readonly A5 Airtable↔
 Deploy 2026-11-09 Worker 0.10.777-its1-scene-count: send explicit storyboard scene count from Script a Short to ITS1, reject failed/mismatched AI fallback; no publishing changes.
 
 Deploy 2026-11-09 Worker 0.10.778-supabase-b1-pipeline-reads: B1 restore Pipeline list + schedule-grid Supabase reads only; Home/Content/Factory stay Airtable; writes stay Airtable.
+
+Deploy 2026-11-09 Worker 0.10.779-supabase-b2-content-reads: B2 GET /api/content can read Supabase when STUDIO_CONTENT_READ_SOURCE=supabase; default stays Airtable. Factory/Ops/Home stay Airtable. Writes stay Airtable.

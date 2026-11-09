@@ -23,6 +23,7 @@ import { submittedApprovalAge, verifySubmittedPromotionOwnership, orderSubmitted
 import {
   studioReadSource,
   studioPipelineReadSource,
+  studioContentReadSource,
   studioSupabaseConfigured,
   supabaseCircuitOpen,
   supabaseCircuitSnapshot,
@@ -1393,7 +1394,7 @@ export async function listContent(request, env, url, authorization) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   const limit = clampLimit(url);
   const payload = await studioReadCoalesce(`content-list:${profile.id}:${limit}`, 25000, async () => {
-  if (studioReadSource(env) === "supabase") {
+  if (studioContentReadSource(env) === "supabase") {
     try {
       const packed = await listSupabaseContentItems(env, {
         profileAirtableId: profile.id,
@@ -1987,6 +1988,7 @@ export async function getStudioSupabaseSyncStatus(request, env) {
     configured: studioSupabaseConfigured(env),
     read_source: studioReadSource(env),
     pipeline_read_source: studioPipelineReadSource(env),
+    content_read_source: studioContentReadSource(env),
     read_routes: STUDIO_SUPABASE_READ_ROUTES,
     pipeline_read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
     phase4_read_routes: STUDIO_SUPABASE_PHASE4_READ_ROUTES,

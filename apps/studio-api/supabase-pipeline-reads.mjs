@@ -150,6 +150,19 @@ export function studioPipelineReadSource(env) {
     : "airtable";
 }
 
+/**
+ * Workstream B2 — GET /api/content only.
+ * Does not follow STUDIO_READ_SOURCE or the Pipeline flag, so a deploy does
+ * not turn Content on by itself. Factory, Ops, and Home stay on studioReadSource.
+ * Opt-in: STUDIO_CONTENT_READ_SOURCE=supabase. Roll back with airtable or unset.
+ */
+export function studioContentReadSource(env) {
+  if (!studioSupabaseConfigured(env)) return "airtable";
+  return String(env?.STUDIO_CONTENT_READ_SOURCE || "").trim().toLowerCase() === "supabase"
+    ? "supabase"
+    : "airtable";
+}
+
 export function studioSupabaseBaseUrl(env) {
   return String(env?.SUPABASE_URL || "").trim().replace(/\/+$/, "");
 }
