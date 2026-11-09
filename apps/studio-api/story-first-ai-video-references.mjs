@@ -122,7 +122,7 @@ export async function uploadStudioReferenceToEleven(env, source, bytes, fetcher=
   form.set("name", fileName);
   form.set("asset",new Blob([bytes],{type:source.mime}),fileName);
   const response = await fetcher("https://api.elevenlabs.io/v1/assets", {
-    method:"POST",headers:{"xi-api-key":clean(env.ELEVENLABS_API_KEY)},
+    method:"POST",headers:{"xi-api-key":clean(env.ELEVENLABS_VIDEO_API_KEY)},
     body:form,redirect:"error",
   });
   const result=await response.json().catch(()=>({}));
@@ -136,7 +136,7 @@ export async function uploadStudioReferenceToEleven(env, source, bytes, fetcher=
 export async function deleteStudioElevenReferenceAssets(env, ids, fetcher=fetch) {
   const unique=[...new Set((ids||[]).filter(v=>/^[A-Za-z0-9_-]{8,100}$/.test(clean(v))))];
   return Promise.allSettled(unique.map(id=>fetcher("https://api.elevenlabs.io/v1/assets/"+encodeURIComponent(id),{
-    method:"DELETE", headers:{"xi-api-key":clean(env.ELEVENLABS_API_KEY)},redirect:"error",
+    method:"DELETE", headers:{"xi-api-key":clean(env.ELEVENLABS_VIDEO_API_KEY)},redirect:"error",
   })));
 }
 
