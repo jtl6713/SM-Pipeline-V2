@@ -658,6 +658,9 @@
           approve_paid_generation: true }),
       });
       paidReceiptReceived = true;
+      // Keep the button locked even if a subsequent status read temporarily says "none".
+      // A confirmed non-none provider job releases this conservative local hold.
+      current.videoSubmissionUncertain[videoSceneIdentity(index)] = true;
       current.videoJobs[index] = result;
       updateVideoRequestProgress(index, "Scene " + number + ": Generation receipt received. Checking existing job…",
         "Checking status…");
