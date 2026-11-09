@@ -1699,6 +1699,77 @@ export async function syncAirtableProductionRequestRowToSupabase(env, record) {
   return { ok: true, mode: "patch" };
 }
 
+/**
+ * Phase 6 media slice: mirror Media Asset metadata after Airtable commits.
+ * Drive stays the file store. Only scalar metadata columns that are present
+ * on the Airtable body are sent, and file bytes are never written. An insert
+ * requires Asset Name because media_assets.asset_name is not null. A thinner
+ * body patches an existing row.
+ */
+function mediaAssetWriteThroughRow(record) {
+  const fields = record?.fields || {};
+  const row = {};
+  const text = (value) => {
+    const trimmed = String(value || "").trim();
+    return trimmed || null;
+  };
+  if ("Asset Name" in fields) {
+    const name = text(fields["Asset Name"]);
+    if (name) row.asset_name = name;
+  }
+  if ("Media_Class" in fields) row.media_class = selectName(fields.Media_Class);
+  if ("Asset_Role" in fields) row.asset_role = selectName(fields.Asset_Role);
+  if ("Asset_Status" in fields) row.asset_status = selectName(fields.Asset_Status);
+  if ("Active" in fields) row.active = Boolean(fields.Active);
+  if ("Do_Not_Use" in fields) row.do_not_use = Boolean(fields.Do_Not_Use);
+  if ("Studio_Favorite" in fields) row.studio_favorite = Boolean(fields.Studio_Favorite);
+  if ("Google Drive File ID" in fields) {
+    const driveId = text(fields["Google Drive File ID"]);
+    if (driveId) row.google_drive_file_id = driveId;
+  }
+  if ("Google Drive URL" in fields) {
+    const url = text(fields["Google Drive URL"]);
+    if (url && !/^https:\/\/media\.chicagoshining\.com\//i.test(url)) row.google_drive_url = url;
+  }
+  if ("MIME_Type" in fields) {
+    const mime = text(fields.MIME_Type);
+    if (mime) row.mime_type = mime;
+  }
+  if ("File_Extension" in fields) {
+    const extension = text(fields.File_Extension);
+    if (extension) row.file_extension = extension;
+  }
+  if ("File_Size_Bytes" in fields && fields.File_Size_Bytes != null && fields.File_Size_Bytes !== "") {
+    const size = Number(fields.File_Size_Bytes);
+    if (Number.isFinite(size)) row.file_size_bytes = Math.trunc(size);
+  }
+  return row;
+}
+
+export async function syncAirtableMediaAssetRowToSupabase(env, record) {
+  if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
+  if (!record?.id) return { skipped: true, reason: "missing_record" };
+  const row = mediaAssetWriteThroughRow(record);
+  if (!Object.keys(row).length) return { skipped: true, reason: "empty_patch" };
+  if (row.asset_name) {
+    await upsertChunk(env, "media_assets", [{
+      airtable_record_id: record.id,
+      ...row,
+    }]);
+    return { ok: true, mode: "upsert" };
+  }
+  await supabaseRest(
+    env,
+    `media_assets?airtable_record_id=eq.${encodeURIComponent(record.id)}`,
+    {
+      method: "PATCH",
+      body: row,
+      headers: { Prefer: "return=minimal" },
+    },
+  );
+  return { ok: true, mode: "patch" };
+}
+
 export function studioSideEffectOutboxMissing(error) {
   const text = String(error?.message || error || "");
   return /PGRST205|schema cache|does not exist|Could not find the table|404/.test(text);

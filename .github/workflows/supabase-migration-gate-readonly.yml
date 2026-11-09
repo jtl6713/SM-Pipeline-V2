@@ -274,11 +274,19 @@ jobs:
                   sync.get("phase6_writes") == "airtable_sor_write_through",
                   f"got {sync.get('phase6_writes')!r}",
               )
-              check(
-                  "phase6_write_tables=production_requests",
-                  sync.get("phase6_write_tables") == ["production_requests"],
-                  f"got {sync.get('phase6_write_tables')!r}",
-              )
+              tables = sync.get("phase6_write_tables")
+              if isinstance(tables, list) and "media_assets" in tables:
+                  check(
+                      "phase6_write_tables=production_requests,media_assets",
+                      tables == ["production_requests", "media_assets"],
+                      f"got {tables!r}",
+                  )
+              else:
+                  check(
+                      "phase6_write_tables=production_requests",
+                      tables == ["production_requests"],
+                      f"got {tables!r}",
+                  )
           check(
               "last_sync completed+ok",
               last.get("status") == "completed" and last.get("ok") is True,
