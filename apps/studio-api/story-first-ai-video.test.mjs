@@ -8,7 +8,7 @@ import {
 
 const env = {
   STUDIO_ELEVENLABS_VIDEO_ENABLED: "true",
-  ELEVENLABS_API_KEY: "test-key-never-real",
+  ELEVENLABS_VIDEO_API_KEY: "test-key-never-real",
   STUDIO_ELEVENLABS_VIDEO_PRICE_REVIEWED_AT: "2026-11-08",
   STUDIO_ELEVENLABS_VIDEO_CREDITS_4S_720P_9X16: "100",
   STUDIO_ELEVENLABS_VIDEO_CREDITS_6S_720P_9X16: "150",
@@ -70,7 +70,7 @@ test("only valid provider receipt is accepted and transport sends a single POST"
   assert.equal(calls.length,1);
   assert.equal(calls[0].url,"https://api.elevenlabs.io/v1/flows/video");
   assert.equal(JSON.parse(calls[0].options.body).generate_audio,false);
-  assert.equal(calls[0].options.headers["xi-api-key"],env.ELEVENLABS_API_KEY);
+  assert.equal(calls[0].options.headers["xi-api-key"],env.ELEVENLABS_VIDEO_API_KEY);
 });
 
 test("read status refuses a mismatched generation ID", async () => {
