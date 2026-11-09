@@ -5216,6 +5216,8 @@ async function listStudioOverviewUnpromotedIdeas(env, profiles, options = {}) {
 
 export async function buildStudioProfilesOverviewRows(env, profiles, options = {}) {
   let outputRows = null;
+  let supabaseIdeaRows = [];
+  let supabaseIdeasUsable = false;
   let readSource = "airtable";
   let usedSupabaseOutputs = false;
   const forceIdeas = options.forceIdeas === true;
@@ -5234,15 +5236,16 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
         profileAirtableIds: profileIds,
         outputLimit: STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT,
         ideaLimit: STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT,
-        // idea_candidates promotion metadata is cron-only and can lag or omit
-        // Promoted_Content_Record_ID / Content Items. Never paint Home Ideas from
-        // that pack — the Ideas page still lists live Airtable unpromoted rows.
-        includeIdeas: false,
+        // Open-idea filter (status != Promoted + blank promotion id) lives in
+        // listSupabaseOverviewPack so Home can keep STUDIO_HOME_READ_SOURCE=supabase.
+        includeIdeas: missingIdeaCounts,
       });
       // Require a non-empty output pack. Empty ideas used to short-circuit to 0
       // Ideas totals while still painting supabase scheduled counts.
       if (!pack.profilesMissing && (pack.outputs || []).length) {
         outputRows = pack.outputs || [];
+        supabaseIdeaRows = Array.isArray(pack.ideas) ? pack.ideas : [];
+        supabaseIdeasUsable = missingIdeaCounts && pack.ideas_incomplete !== true;
         usedSupabaseOutputs = true;
         readSource = "supabase";
       }
@@ -5297,10 +5300,9 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
     outputRows = [...outputById.values()];
     airtableIdeaRows = [...ideaById.values()];
     readSource = "airtable";
-  } else if (missingIdeaCounts) {
-    // Supabase outputs stay hot, but Ideas must come from the same Airtable
-    // unpromoted filter the Ideas page uses. Lean idea-only scans fit the
-    // force-refresh budget; a full idea_candidates dump was painting ~400+/city.
+  } else if (forceIdeas && !supabaseIdeasUsable) {
+    // Supabase idea pack timed out or failed. Lean Airtable unpromoted scans
+    // recover Ideas without abandoning the Supabase output path.
     airtableIdeaRows = await listStudioOverviewUnpromotedIdeas(env, profileList, {
       airtableEgressSource: options.airtableEgressSource === "autonomous_refill_scan"
         ? "autonomous_refill_scan"
@@ -5324,6 +5326,9 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
   if (airtableIdeaRows && commitIdeas) {
     studioProfilesOverviewCache.ideasAt = Date.now();
     studioProfilesOverviewCache.ideasSource = "airtable";
+  } else if (supabaseIdeasUsable && commitIdeas) {
+    studioProfilesOverviewCache.ideasAt = Date.now();
+    studioProfilesOverviewCache.ideasSource = "supabase";
   }
 
   return profileList.map((profile) => {
@@ -5342,6 +5347,12 @@ export async function buildStudioProfilesOverviewRows(env, profiles, options = {
       ideasSource = "airtable";
       metrics.ideas = counted.total;
       if (commitIdeas) rememberOverviewIdeaCount(profile.id, ideasCount, "airtable");
+    } else if (supabaseIdeasUsable) {
+      const counted = ideasNotInProductionFromRows(supabaseIdeaRows, profile);
+      ideasCount = counted.count;
+      ideasSource = "supabase";
+      metrics.ideas = counted.total;
+      if (commitIdeas) rememberOverviewIdeaCount(profile.id, ideasCount, "supabase");
     } else if (ideaCounts.has(String(profile.id))) {
       // Reuse last-good Ideas counts only when no complete fresh idea pack is available.
       ideasCount = ideaCounts.get(String(profile.id));

@@ -31,7 +31,7 @@ jobs:
           assert.match(entry,/STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT = 10000/);
           assert.match(entry,/STUDIO_PROFILES_OVERVIEW_CACHE_MS = 2 \* 60 \* 1000/);
           assert.match(module,/outputs\.length >= STUDIO_PROFILES_OVERVIEW_OUTPUT_LIMIT/);
-          assert.match(module,/ideaRows\.length >= STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT/);
+          assert.match(module,/ideas\.length >= STUDIO_PROFILES_OVERVIEW_IDEA_LIMIT/);
           assert.match(module,/snapshot\.complete === true/);
           assert.match(module,/complete: true/);
           console.log('overview source assertions PASS');

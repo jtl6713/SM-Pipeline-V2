@@ -579,9 +579,19 @@ const OVERVIEW_OUTPUT_SELECT = [
 const OVERVIEW_IDEA_SELECT = [
   "airtable_record_id",
   "content_profile_id",
+  "status",
   "promoted:payload-%3E%3EPromoted_Content_Record_ID",
   "content_items:payload-%3EContent%20Items",
 ].join(",");
+
+/** Home Ideas: exclude already-promoted candidates at the PostgREST source.
+ * Filter on real columns / JSON paths — select aliases like `promoted:` are not
+ * valid PostgREST filter targets.
+ */
+const OVERVIEW_OPEN_IDEA_FILTER = [
+  "or=(status.is.null,status.neq.Promoted)",
+  "or=(payload-%3E%3EPromoted_Content_Record_ID.is.null,payload-%3E%3EPromoted_Content_Record_ID.eq.)",
+].join("&");
 
 const CONTENT_SELECT = [
   "id",
@@ -835,9 +845,11 @@ export async function listSupabaseOverviewPack(env, { profileAirtableIds = [], o
     const ideaPromise = includeIdeas
       ? new Promise((resolve) => {
         const timer = setTimeout(() => resolve(null), 8000);
+        // Filter promoted status + blank Promoted_Content_Record_ID at source so
+        // Home does not page/count hundreds of historical idea_candidates.
         supabaseRestAll(
           env,
-          `idea_candidates?${profileFilter}&select=${OVERVIEW_IDEA_SELECT}&order=created_at.desc.nullslast`,
+          `idea_candidates?${profileFilter}&${OVERVIEW_OPEN_IDEA_FILTER}&select=${OVERVIEW_IDEA_SELECT}&order=created_at.desc.nullslast`,
           { pageSize: 1000, maxRows: ideaCeiling, headers: pageHeaders, signal },
         ).then(
           (rows) => { clearTimeout(timer); resolve(rows); },
@@ -853,6 +865,9 @@ export async function listSupabaseOverviewPack(env, { profileAirtableIds = [], o
     if (outputGroups.some((group) => group.length >= outCeiling)) {
       throw new Error("Profiles overview outputs exceeded complete-scan safety ceiling");
     }
+    if (includeIdeas && !ideasIncomplete && ideaRows.length >= ideaCeiling) {
+      throw new Error("Profiles overview ideas exceeded complete-scan safety ceiling");
+    }
 
     const shapeOutput = (row) => {
       const flat = flattenOutputRow(row);
@@ -861,14 +876,31 @@ export async function listSupabaseOverviewPack(env, { profileAirtableIds = [], o
       }
       return airtableShapedOutputFromSupabase(flat);
     };
+    const normalizeIdeaLinks = (linked) => {
+      if (Array.isArray(linked)) return linked;
+      if (typeof linked === "string" && linked.trim()) {
+        try {
+          const parsed = JSON.parse(linked);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      }
+      return [];
+    };
     const shapeIdea = (row) => {
       const promoted = row?.promoted ?? (isPlainObject(row?.payload) ? row.payload.Promoted_Content_Record_ID : null);
       const linked = row?.content_items ?? (isPlainObject(row?.payload) ? row.payload["Content Items"] : null);
+      const status = row?.status
+        ?? (isPlainObject(row?.payload) ? row.payload.Candidate_Status : null)
+        ?? null;
       const flat = flattenIdeaRow({
         ...row,
+        status,
         payload: {
+          Candidate_Status: status,
           Promoted_Content_Record_ID: promoted || null,
-          "Content Items": Array.isArray(linked) ? linked : [],
+          "Content Items": normalizeIdeaLinks(linked),
         },
       });
       if (!flat.content_profile_airtable_id) {

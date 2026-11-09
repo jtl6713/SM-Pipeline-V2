@@ -30,9 +30,10 @@ test("manual refresh bypasses normal snapshot TTL and refreshes Ideas too", () =
   const force = functions04.slice(start, end);
   assert.match(force, /buildStudioProfilesOverviewRows\(env, profiles, \{ forceIdeas: true, commitIdeas: false, preferSupabase: true \}\)/);
   assert.doesNotMatch(force, /studioProfilesOverviewFreshMs/);
-  assert.match(functions04, /includeIdeas: false/);
+  assert.match(functions04, /includeIdeas: missingIdeaCounts/);
+  assert.match(functions04, /supabaseIdeasUsable = missingIdeaCounts && pack\.ideas_incomplete !== true/);
+  assert.match(functions04, /forceIdeas && !supabaseIdeasUsable/);
   assert.match(functions04, /listStudioOverviewUnpromotedIdeas/);
-  assert.match(functions04, /Never paint Home Ideas from/);
   assert.match(functions04, /AIRTABLE_IDEA_TABLE_ID/);
 });
 
@@ -118,15 +119,15 @@ test("Airtable force fallback interleaves lean output and idea scans instead of 
   assert.match(build, /if \(usedSupabaseOutputs\) \{[\s\S]*overlayLiveTikTokPublishRows/);
 });
 
-test("Home Supabase path never counts Ideas from idea_candidates", () => {
+test("Home Supabase path counts Ideas from the open-idea filtered pack", () => {
   const start = functions04.indexOf("async function buildStudioProfilesOverviewRows");
   const end = functions04.indexOf("/*__STUDIO_WORKER_END:buildStudioProfilesOverviewRows__*/", start);
   const build = functions04.slice(start, end);
-  assert.match(build, /includeIdeas: false/);
-  assert.match(build, /else if \(missingIdeaCounts\)/);
+  assert.match(build, /includeIdeas: missingIdeaCounts/);
+  assert.match(build, /supabaseIdeasUsable/);
+  assert.match(build, /ideasSource = "supabase"/);
+  assert.match(build, /forceIdeas && !supabaseIdeasUsable/);
   assert.match(build, /listStudioOverviewUnpromotedIdeas\(env, profileList/);
-  assert.doesNotMatch(build, /supabaseIdeasUsable/);
-  assert.doesNotMatch(build, /ideasSource = "supabase"/);
 });
 
 
