@@ -91,7 +91,7 @@ export function videoPriceConfig(env, settingsOrDuration, now=Date.now(), ratio=
   const reviewed=day?Date.parse(day+"T00:00:00Z"):NaN;
   const active=String(env.STUDIO_ELEVENLABS_VIDEO_ENABLED||"").toLowerCase()==="true";
   if(!active)return {enabled:false,reason:"AI video generation is disabled by administrator"};
-  if(!clean(env.ELEVENLABS_API_KEY))return {enabled:false,reason:"ElevenLabs Image & Video API key is not configured"};
+  if(!clean(env.ELEVENLABS_VIDEO_API_KEY))return {enabled:false,reason:"ElevenLabs Image & Video API key is not configured"};
   if(settings.model_id==="bytedance-seedance-v2.5"&&
     String(env.STUDIO_ELEVENLABS_SEEDANCE_API_APPROVED||"").toLowerCase()!=="true")
     return {enabled:false,reason:"Seedance 2.5 API access has not been explicitly approved"};
@@ -162,7 +162,7 @@ export function buildStoryVideoProviderSettings(settings,uploaded={}) {
 async function elevenJson(env, path, options = {}, fetcher = fetch) {
   const response = await fetcher("https://api.elevenlabs.io" + path, {
     ...options,
-    headers: { "xi-api-key": clean(env.ELEVENLABS_API_KEY),
+    headers: { "xi-api-key": clean(env.ELEVENLABS_VIDEO_API_KEY),
       ...(options.body ? { "Content-Type": "application/json" } : {}) },
     redirect: "error",
   });
