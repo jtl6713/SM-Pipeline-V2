@@ -13541,7 +13541,9 @@ export async function storyFirstSceneMediaRoute(request, env, url, authorization
       }
       for (const reference of manifest) {
         const media = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, reference.asset_id);
-        verifyStudioReferenceAsset(media, reference, profileId);
+        verifyStudioReferenceAsset(media, reference, profileId, {
+          allowLicensed: String(env.STUDIO_ELEVENLABS_VIDEO_LICENSED_REFERENCES_VERIFIED || "").toLowerCase() === "true",
+        });
       }
       const quote = await storyVideoQuote(env, { ...body, idea_id: ideaId,
         scene_number: Number(sceneNumber), content_profile_id: profileId });
