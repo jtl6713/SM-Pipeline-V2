@@ -32,7 +32,7 @@ jobs:
           pairs_ok=bool(os.environ.get("CF_ACCESS_CLIENT_ID") and os.environ.get("CF_ACCESS_CLIENT_SECRET"))
           print("github_access_service_credential_pair_present="+("YES" if pairs_ok else "NO"))
           def probe(auth=False):
-              headers={"Accept":"application/json"}
+              headers={"Accept":"application/json","User-Agent":"ChicagoShining-Runner-Health/1.0"}
               if auth and pairs_ok:
                   headers.update({"CF-Access-Client-Id":os.environ["CF_ACCESS_CLIENT_ID"],
                                   "CF-Access-Client-Secret":os.environ["CF_ACCESS_CLIENT_SECRET"]})
