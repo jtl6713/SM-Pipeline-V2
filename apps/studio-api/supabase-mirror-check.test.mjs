@@ -76,7 +76,7 @@ test("Worker exposes tenant_admin mirror-check route and bumped version", () => 
   assert.match(worker, /pathname === "\/api\/ops\/supabase\/mirror-check"/);
   assert.match(worker, /getStudioSupabaseMirrorCheck/);
   assert.match(worker, /\/\*__STUDIO_WORKER_EXTRACT:getStudioSupabaseMirrorCheck__\*\//);
-  assert.match(worker, /version: "0\.10\.775-supabase-mirror-check"/);
+  assert.match(worker, /version: "0\.10\.776-supabase-mirror-check"/);
   const source = readFileSync(path.join(here, "worker-functions-03.mjs"), "utf8");
   assert.match(source, /export async function getStudioSupabaseMirrorCheck/);
   assert.match(source, /\/\*__STUDIO_WORKER_END:getStudioSupabaseMirrorCheck__\*\//);
