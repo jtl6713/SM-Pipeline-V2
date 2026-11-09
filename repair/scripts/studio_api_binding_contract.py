@@ -152,6 +152,9 @@ OPTIONAL_BINDINGS = {
     # B2 independent content-list read gate is stored as a Cloudflare secret.
     # Preserve its exact secret_text type; do not print or change the live value.
     "STUDIO_CONTENT_READ_SOURCE": "secret_text",
+    # B3 Factory desk + Ops queue read gate. Optional until the secret is set.
+    # Preserve secret_text; do not print or change the live value.
+    "STUDIO_FACTORY_OPS_READ_SOURCE": "secret_text",
     "SUPABASE_URL": "plain_text",
     "SUPABASE_SERVICE_ROLE_KEY": "secret_text",
 }

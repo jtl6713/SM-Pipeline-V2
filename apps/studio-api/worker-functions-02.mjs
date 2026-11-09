@@ -23,7 +23,7 @@ import { scheduleReservationAuthorityEnabled, scheduleReservationLaneEnabled } f
 import { creativeSettingName, parseCreativeGuidance } from "./profile-creative-guidance.mjs";
 import { runAtomicScheduleTransaction } from "./schedule-reservation-transaction.mjs";
 import {
-  studioReadSource,
+  studioFactoryOpsReadSource,
   studioSupabaseConfigured,
   listSupabasePipelineOutputs,
   listSupabaseScheduleGrid,
@@ -1116,7 +1116,7 @@ export async function writeFactoryDeskControls(env, controls, actor = null) {
 /*__STUDIO_WORKER_END:writeFactoryDeskControls__*/
 
 export async function loadFactoryIdeaCandidates(env) {
-  if (studioReadSource(env) === "supabase") {
+  if (studioFactoryOpsReadSource(env) === "supabase") {
     try {
       const pack = await listSupabaseFactoryDeskPack(env, { outputLimit: 50, requestLimit: 20 });
       const profileMap = new Map((pack.profiles || []).map((row) => [row.id, row]));

@@ -26,6 +26,7 @@ import {
   studioReadSource,
   studioPipelineReadSource,
   studioContentReadSource,
+  studioFactoryOpsReadSource,
   studioSupabaseConfigured,
   supabaseCircuitOpen,
   supabaseCircuitSnapshot,
@@ -1991,6 +1992,7 @@ export async function getStudioSupabaseSyncStatus(request, env) {
     read_source: studioReadSource(env),
     pipeline_read_source: studioPipelineReadSource(env),
     content_read_source: studioContentReadSource(env),
+    factory_ops_read_source: studioFactoryOpsReadSource(env),
     read_routes: STUDIO_SUPABASE_READ_ROUTES,
     pipeline_read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
     phase4_read_routes: STUDIO_SUPABASE_PHASE4_READ_ROUTES,
@@ -2027,6 +2029,7 @@ export async function postStudioSupabaseSync(request, env) {
   return respond(request, env, {
     ok: result?.ok === true,
     read_source: studioReadSource(env),
+    factory_ops_read_source: studioFactoryOpsReadSource(env),
     read_routes: STUDIO_SUPABASE_READ_ROUTES,
     phase4_read_routes: STUDIO_SUPABASE_PHASE4_READ_ROUTES,
     phase5_writes: "airtable_sor_write_through",

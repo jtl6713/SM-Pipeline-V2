@@ -127,16 +127,16 @@ export function studioSupabaseConfigured(env) {
 }
 
 export function studioReadSource(env) {
-  // Global/default reads stay on Airtable. Home, Content, Factory, and Ops
-  // must not follow STUDIO_READ_SOURCE until later B workstreams. A live
-  // "supabase" flag previously saturated the pool on every Home poll.
+  // Global/default reads stay on Airtable. Home must not follow
+  // STUDIO_READ_SOURCE. Content and Factory/Ops use their own flags.
+  // A live "supabase" flag previously saturated the pool on every Home poll.
   void env;
   return "airtable";
 }
 
 /**
  * Workstream B1 — Phase 3 Pipeline + schedule-grid only.
- * Does not enable Content / Factory / Ops / Home (those still use studioReadSource).
+ * Does not enable Content, Factory, Ops, or Home.
  * Opt-in: STUDIO_PIPELINE_READ_SOURCE=supabase, or legacy STUDIO_READ_SOURCE=supabase
  * when the narrower flag is unset. Roll back with STUDIO_PIPELINE_READ_SOURCE=airtable.
  */
@@ -153,12 +153,25 @@ export function studioPipelineReadSource(env) {
 /**
  * Workstream B2 — GET /api/content only.
  * Does not follow STUDIO_READ_SOURCE or the Pipeline flag, so a deploy does
- * not turn Content on by itself. Factory, Ops, and Home stay on studioReadSource.
+ * not turn Content on by itself. Factory, Ops, and Home stay on their own gates.
  * Opt-in: STUDIO_CONTENT_READ_SOURCE=supabase. Roll back with airtable or unset.
  */
 export function studioContentReadSource(env) {
   if (!studioSupabaseConfigured(env)) return "airtable";
   return String(env?.STUDIO_CONTENT_READ_SOURCE || "").trim().toLowerCase() === "supabase"
+    ? "supabase"
+    : "airtable";
+}
+
+/**
+ * Workstream B3 — GET /api/factory/desk and GET /api/operations/queue only.
+ * Does not follow STUDIO_READ_SOURCE, the Pipeline flag, or the Content flag.
+ * Home stays on studioReadSource, which always returns airtable.
+ * Opt-in: STUDIO_FACTORY_OPS_READ_SOURCE=supabase. Roll back with airtable or unset.
+ */
+export function studioFactoryOpsReadSource(env) {
+  if (!studioSupabaseConfigured(env)) return "airtable";
+  return String(env?.STUDIO_FACTORY_OPS_READ_SOURCE || "").trim().toLowerCase() === "supabase"
     ? "supabase"
     : "airtable";
 }

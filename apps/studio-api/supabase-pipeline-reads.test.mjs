@@ -8,6 +8,7 @@ import {
   studioReadSource,
   studioPipelineReadSource,
   studioContentReadSource,
+  studioFactoryOpsReadSource,
   studioSupabaseConfigured,
   supabaseCircuitOpen,
   noteSupabaseCircuitFailure,
@@ -113,6 +114,36 @@ test("studioContentReadSource restores the content list only when its own flag i
   );
   assert.equal(
     studioPipelineReadSource({ ...configured, STUDIO_CONTENT_READ_SOURCE: "supabase" }),
+    "airtable",
+  );
+  assert.equal(
+    studioFactoryOpsReadSource({ ...configured, STUDIO_CONTENT_READ_SOURCE: "supabase", STUDIO_PIPELINE_READ_SOURCE: "supabase", STUDIO_READ_SOURCE: "supabase" }),
+    "airtable",
+  );
+});
+
+test("studioFactoryOpsReadSource restores Factory desk and Ops queue only when its own flag is set", () => {
+  const configured = {
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+  };
+  assert.equal(studioFactoryOpsReadSource({}), "airtable");
+  assert.equal(studioFactoryOpsReadSource({ STUDIO_FACTORY_OPS_READ_SOURCE: "supabase" }), "airtable");
+  assert.equal(studioFactoryOpsReadSource({ ...configured, STUDIO_FACTORY_OPS_READ_SOURCE: "supabase" }), "supabase");
+  assert.equal(
+    studioFactoryOpsReadSource({ ...configured, STUDIO_FACTORY_OPS_READ_SOURCE: "airtable" }),
+    "airtable",
+  );
+  assert.equal(
+    studioFactoryOpsReadSource({ ...configured, STUDIO_READ_SOURCE: "supabase", STUDIO_PIPELINE_READ_SOURCE: "supabase", STUDIO_CONTENT_READ_SOURCE: "supabase" }),
+    "airtable",
+  );
+  assert.equal(
+    studioContentReadSource({ ...configured, STUDIO_FACTORY_OPS_READ_SOURCE: "supabase" }),
+    "airtable",
+  );
+  assert.equal(
+    studioReadSource({ ...configured, STUDIO_FACTORY_OPS_READ_SOURCE: "supabase" }),
     "airtable",
   );
 });
@@ -452,13 +483,26 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_read_source: studioReadSource\(env\)/);
   assert.match(worker, /studio_pipeline_read_source: studioPipelineReadSource\(env\)/);
   assert.match(worker, /studio_content_read_source: studioContentReadSource\(env\)/);
+  assert.match(worker, /studio_factory_ops_read_source: studioFactoryOpsReadSource\(env\)/);
   assert.match(worker, /studio_supabase_pipeline_read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES/);
   const release = /version: "0\.10\.(\d+)-[^"]+"/.exec(worker);
   assert.ok(release, "Worker /health must identify a versioned release");
-  assert.ok(Number(release[1]) >= 779, "B2 content reads cannot regress behind Worker 0.10.779");
+  assert.ok(Number(release[1]) >= 782, "B3 Factory/Ops reads cannot regress behind Worker 0.10.782");
   const pipelineFns = await readFile(path.join(here, "worker-functions-03.mjs"), "utf8");
   assert.match(pipelineFns, /studioPipelineReadSource\(env\) === "supabase"/);
   assert.match(pipelineFns, /studioContentReadSource\(env\) === "supabase"/);
+  assert.match(pipelineFns, /factory_ops_read_source: studioFactoryOpsReadSource\(env\)/);
+  const factoryFns = await readFile(path.join(here, "worker-functions-04.mjs"), "utf8");
+  const queueStart = factoryFns.indexOf("export async function getStudioOperationsQueue");
+  const queueEnd = factoryFns.indexOf("export async function getFactoryDesk");
+  assert.match(factoryFns.slice(queueStart, queueEnd), /studioFactoryOpsReadSource\(env\) === "supabase"/);
+  assert.doesNotMatch(factoryFns.slice(queueStart, queueEnd), /studioReadSource\(env\) === "supabase"/);
+  assert.match(factoryFns, /if \(false && \(studioReadSource\(env\) === "supabase"/);
+  const deskFns = await readFile(path.join(here, "worker-functions-02.mjs"), "utf8");
+  const ideaStart = deskFns.indexOf("export async function loadFactoryIdeaCandidates");
+  const ideaEnd = deskFns.indexOf("/*__STUDIO_WORKER_END:loadFactoryIdeaCandidates__*/");
+  assert.match(deskFns.slice(ideaStart, ideaEnd), /studioFactoryOpsReadSource\(env\) === "supabase"/);
+  assert.doesNotMatch(deskFns.slice(ideaStart, ideaEnd), /studioReadSource\(env\) === "supabase"/);
   assert.doesNotMatch(
     pipelineFns.slice(pipelineFns.indexOf("listOutputScheduleGrid"), pipelineFns.indexOf("buildPipelineOutputsPayloadFromSupabase")),
     /studioReadSource\(env\) === "supabase"/,
