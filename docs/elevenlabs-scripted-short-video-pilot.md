@@ -31,10 +31,10 @@ repository. Existing `ELEVENLABS_API_KEY` must have ElevenLabs Image & Video
 | `STUDIO_ELEVENLABS_VIDEO_ENABLED` | Exactly `true` to enable paid requests |
 | `ELEVENLABS_API_KEY` | Existing managed ElevenLabs key with video API access |
 | `STUDIO_ELEVENLABS_VIDEO_PRICE_REVIEWED_AT` | Actual reviewed pricing date YYYY-MM-DD; fails closed after 30 days |
-| `STUDIO_ELEVENLABS_VIDEO_CREDITS_4S_720P` | Positively verified, integer estimated credits for 4-second Veo 3.1 Fast **video without audio** |
-| `STUDIO_ELEVENLABS_VIDEO_CREDITS_6S_720P` | Ditto for 6 seconds |
-| `STUDIO_ELEVENLABS_VIDEO_CREDITS_8S_720P` | Ditto for 8 seconds |
-| `STUDIO_ELEVENLABS_VIDEO_RIGHTS_VERIFIED` | Exactly `true` only after checking applicable provider/license restrictions for commercial posting |
+| `STUDIO_ELEVENLABS_VIDEO_CREDITS_4S_720P_9X16` | Positively verified, integer estimated credits for 4-second Veo 3.1 Fast **video without audio** at 9:16 |
+| `STUDIO_ELEVENLABS_VIDEO_CREDITS_6S_720P_9X16` | Ditto for 6 seconds |
+| `STUDIO_ELEVENLABS_VIDEO_CREDITS_8S_720P_9X16` | Ditto for 8 seconds |
+| `STUDIO_ELEVENLABS_VIDEO_CREDITS_{4,6,8}S_720P_16X9` | Independently reviewed estimates for each 16:9 duration. No ratio inherits another ratio\x27s price |\n| `STUDIO_ELEVENLABS_VIDEO_RIGHTS_VERIFIED` | Exactly `true` only after checking applicable provider/license restrictions for commercial posting |
 | `STUDIO_MEDIA` | Existing private R2 bucket |
 | `PIPELINE_RUNNER_URL`, `PIPELINE_RUNNER_SHARED_SECRET` | Existing authenticated Google Drive transfer |
 
