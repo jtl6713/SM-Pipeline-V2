@@ -106,6 +106,11 @@ test("Seedance 2.5 is selectable but gated by separate API entitlement", async (
   assert.equal(normalizeStoryVideoSettings(seedance).duration_secs,20);
   assert.equal(availableStoryVideoModels(env).find(x=>x.id==="bytedance-seedance-v2.5").enabled,false);
   assert.equal((await storyVideoQuote(env,seedance,Date.parse("2026-11-09T00:00:00Z"))).enabled,false);
+  const longConfig={...env,STUDIO_ELEVENLABS_SEEDANCE_API_APPROVED:"true",
+    STUDIO_ELEVENLABS_VIDEO_AUDIO_ENABLED:"true"};
+  const blockedLong=await storyVideoQuote(longConfig,seedance,Date.parse("2026-11-09T00:00:00Z"));
+  assert.equal(blockedLong.enabled,false);
+  assert.match(blockedLong.reason,/Long AI video transfer/);
   assert.equal(availableStoryVideoModels({...env,STUDIO_ELEVENLABS_SEEDANCE_API_APPROVED:"true"})
     .find(x=>x.id==="bytedance-seedance-v2.5").enabled,true);
   assert.deepEqual(STORY_VIDEO_MODELS["bytedance-seedance-v2.5"].resolutions,["480p","720p"]);
