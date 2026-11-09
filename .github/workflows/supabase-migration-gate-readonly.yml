@@ -28,10 +28,10 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       TARGET_WORKER: chicagoshining-studio-api
       # Ephemeral probe Worker name. Must stay unique and unused in the account.
-      GATE_WORKER: studio-supabase-gate-readonly-20261108
+      GATE_WORKER: studio-supabase-gate-readonly-20261109
       STUDIO_ACCESS_EMAIL: joseph.t.logan@gmail.com
     steps:
-      - name: Probe Worker health, sync status, and runner health
+      - name: Probe Worker health, sync status, mirror-check, and runner health
         shell: bash
         run: |
           set -euo pipefail
@@ -61,7 +61,7 @@ jobs:
           test "$runner_code" = "200"
           jq -e 'type=="object"' /tmp/runner-health.json >/dev/null
 
-          # /api/ops/supabase/sync requires tenant_admin. Reach it the same way
+          # /api/ops/supabase/* requires tenant_admin. Reach it the same way
           # other readonly production probes do: temporary Worker + service binding
           # + Cf-Access-Authenticated-User-Email (never mutate Studio production).
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
@@ -85,14 +85,19 @@ jobs:
           export default {
             async fetch(request, env) {
               const path = new URL(request.url).pathname;
-              if (request.method !== "GET" || path !== "/sync") {
+              const route = path === "/sync"
+                ? "/api/ops/supabase/sync"
+                : path === "/mirror-check"
+                  ? "/api/ops/supabase/mirror-check?limit=12"
+                  : null;
+              if (request.method !== "GET" || !route) {
                 return new Response("Not found", { status: 404 });
               }
               if (request.headers.get("Authorization") !== "Bearer " + env.GATE_TOKEN) {
                 return new Response("Unauthorized", { status: 401 });
               }
               const answer = await env.STUDIO_API.fetch(new Request(
-                "https://studio.chicagoshining.com/api/ops/supabase/sync",
+                "https://studio.chicagoshining.com" + route,
                 {
                   headers: {
                     "Cf-Access-Authenticated-User-Email": "${STUDIO_ACCESS_EMAIL}",
@@ -141,6 +146,26 @@ jobs:
           test "$sync_code" = "200"
           jq -e 'type=="object"' /tmp/studio-sync.json >/dev/null
 
+          echo '{}' > /tmp/studio-mirror-check.json
+          WORKER_VERSION="$(jq -r '.version // empty' /tmp/studio-health.json)"
+          echo "worker_version=$WORKER_VERSION"
+          if [[ "$WORKER_VERSION" == *supabase-mirror-check* ]]; then
+            mirror_code="000"
+            for attempt in $(seq 1 12); do
+              mirror_code="$(curl -sS --max-time 90 -o /tmp/studio-mirror-check.json -w '%{http_code}' \
+                -H "Authorization: Bearer $TOKEN" "$BASE/mirror-check" || true)"
+              echo "mirror_http_attempt_${attempt}=$mirror_code"
+              if [[ "$mirror_code" == "200" ]]; then break; fi
+              sleep 3
+            done
+            test "$mirror_code" = "200"
+            jq -e 'type=="object"' /tmp/studio-mirror-check.json >/dev/null
+          else
+            echo "WORKSTREAM_A5=SKIPPED_WAITING_FOR_WORKER_0.10.775"
+            jq -n '{ok:null,workstream_a5:"SKIPPED",reason:"worker_version_missing_mirror_check",worker_version:$v}' \
+              --arg v "$WORKER_VERSION" > /tmp/studio-mirror-check.json
+          fi
+
           python3 - <<'PY'
           import json, sys, time
           from pathlib import Path
@@ -148,6 +173,7 @@ jobs:
           health = json.loads(Path("/tmp/studio-health.json").read_text())
           sync = json.loads(Path("/tmp/studio-sync.json").read_text())
           runner = json.loads(Path("/tmp/runner-health.json").read_text())
+          mirror = json.loads(Path("/tmp/studio-mirror-check.json").read_text())
           now = time.time()
 
           print("=== /api/health (selected) ===")
@@ -237,6 +263,36 @@ jobs:
               f"got {runner.get('studio_write_source')!r}",
           )
 
+          print("=== /api/ops/supabase/mirror-check (A5) ===")
+          print(f"workstream_a5={mirror.get('workstream_a5')!r}")
+          print(f"sampled_outputs={mirror.get('sampled_outputs')!r}")
+          print(f"sampled_content_items={mirror.get('sampled_content_items')!r}")
+          print(f"output_missing_in_supabase={mirror.get('output_missing_in_supabase')!r}")
+          print(f"content_missing_in_supabase={mirror.get('content_missing_in_supabase')!r}")
+          print(f"output_mismatches={mirror.get('output_mismatches')!r}")
+          print(f"content_mismatches={mirror.get('content_mismatches')!r}")
+          print(f"deletion_guard={mirror.get('deletion_guard')!r}")
+          a5 = mirror.get("workstream_a5")
+          if a5 == "SKIPPED":
+              print("GATE[SKIP] workstream_a5 — waiting for Worker 0.10.776-supabase-mirror-check")
+          else:
+              check(
+                  "workstream_a5=PASS",
+                  a5 == "PASS" and mirror.get("ok") is True,
+                  f"workstream_a5={a5!r} ok={mirror.get('ok')!r}",
+              )
+              deletion = mirror.get("deletion_guard") or {}
+              check(
+                  "deleted_7894_not_in_airtable",
+                  deletion.get("airtable_present") is not True,
+                  f"airtable_present={deletion.get('airtable_present')!r}",
+              )
+              check(
+                  "deleted_7894_list_strip",
+                  deletion.get("list_strip_suppresses") is True,
+                  f"list_strip_suppresses={deletion.get('list_strip_suppresses')!r}",
+              )
+
           sample = {
               "probed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
               "health": {
@@ -265,6 +321,17 @@ jobs:
                       "circuit": circuit,
                   },
               },
+              "mirror_check": {
+                  "workstream_a5": mirror.get("workstream_a5"),
+                  "ok": mirror.get("ok"),
+                  "sampled_outputs": mirror.get("sampled_outputs"),
+                  "sampled_content_items": mirror.get("sampled_content_items"),
+                  "output_missing_in_supabase": mirror.get("output_missing_in_supabase"),
+                  "content_missing_in_supabase": mirror.get("content_missing_in_supabase"),
+                  "output_mismatches": mirror.get("output_mismatches"),
+                  "content_mismatches": mirror.get("content_mismatches"),
+                  "deletion_guard": mirror.get("deletion_guard"),
+              },
               "runner": {
                   k: runner.get(k)
                   for k in ("ok", "version", "studio_write_source", "supabase_pipeline_writes")
@@ -272,7 +339,8 @@ jobs:
               "checks": [{"name": n, "ok": o, "detail": d} for n, o, d in checks],
               "note": (
                   "A4 (≥3 consecutive completed+ok half-hour syncs) needs multiple "
-                  "scheduled runs of this workflow; one probe only proves the latest stamp."
+                  "scheduled runs of this workflow; one probe only proves the latest stamp. "
+                  "A5 requires Worker 0.10.776-supabase-mirror-check."
               ),
           }
           Path("/tmp/supabase-migration-gate-sample.json").write_text(
@@ -285,6 +353,10 @@ jobs:
               print("Do not restore Supabase reads (Workstream B) until A4–A5 pass.")
               sys.exit(1)
           print("WORKSTREAM_A_SNAPSHOT=PASS_LATEST_ONLY")
+          if a5 == "PASS":
+              print("WORKSTREAM_A5=PASS")
+          elif a5 == "SKIPPED":
+              print("WORKSTREAM_A5=SKIPPED")
           print(
               "Latest stamp looks healthy. Keep scheduled probes until ≥3 consecutive "
               "PASS_LATEST_ONLY runs cover distinct :00/:30 windows before B1."
@@ -299,6 +371,7 @@ jobs:
           path: |
             /tmp/studio-health.json
             /tmp/studio-sync.json
+            /tmp/studio-mirror-check.json
             /tmp/runner-health.json
             /tmp/supabase-migration-gate-sample.json
           if-no-files-found: warn

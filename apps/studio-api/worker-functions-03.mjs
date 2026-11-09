@@ -38,6 +38,7 @@ import {
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
   STUDIO_SUPABASE_READ_ROUTES,
 } from "./supabase-pipeline-reads.mjs";
+import { studioSupabaseMirrorSpotCheck } from "./supabase-mirror-check.mjs";
 import {
   DESK_SETTING_NAME,
   DESK_CAPS_SETTING_NAME,
@@ -1992,6 +1993,19 @@ export async function getStudioSupabaseSyncStatus(request, env) {
   });
 }
 /*__STUDIO_WORKER_END:getStudioSupabaseSyncStatus__*/
+
+export async function getStudioSupabaseMirrorCheck(request, env) {
+  const url = new URL(request.url);
+  const limit = Number(url.searchParams.get("limit") || 12) || 12;
+  const result = await studioSupabaseMirrorSpotCheck(env, {
+    listRecords,
+    readRecord: airtableFetch,
+    HttpError,
+    limit,
+  });
+  return respond(request, env, result);
+}
+/*__STUDIO_WORKER_END:getStudioSupabaseMirrorCheck__*/
 
 export async function postStudioSupabaseSync(request, env) {
   if (!studioSupabaseConfigured(env)) {

@@ -752,6 +752,7 @@ import {
   readStudioSupabaseSyncLast,
   studioSyncSupabasePipelineReads,
   getStudioSupabaseSyncStatus,
+  getStudioSupabaseMirrorCheck,
   postStudioSupabaseSync,
   warmOldestStudioReadSnapshot,
   listOutputs,
@@ -1040,6 +1041,7 @@ export default {
       const isOpsDeskActivityRoute = url.pathname === "/api/ops/desk/activity";
       const isOpsDeskModeRoute = url.pathname === "/api/ops/desk/mode";
       const isOpsSupabaseSyncRoute = url.pathname === "/api/ops/supabase/sync";
+      const isOpsSupabaseMirrorCheckRoute = url.pathname === "/api/ops/supabase/mirror-check";
       const isAiApiRoute = url.pathname === "/api/ai-api";
       const isOpsLibraryCrossScopeRoute = url.pathname === "/api/ops/library/cross-scope";
       const isOperationsResetRenderUrlsRoute = url.pathname === "/api/operations/reset-render-urls";
@@ -1322,7 +1324,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.775-manual-classification",
+          version: "0.10.776-supabase-mirror-check",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -2824,6 +2826,12 @@ export default {
         if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
         assertWriteRequest(request, env);
         return postStudioSupabaseSync(request, env);
+      }
+
+      if (isOpsSupabaseMirrorCheckRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        return getStudioSupabaseMirrorCheck(request, env);
       }
 
       if (isOpsDeskActivityRoute) {
@@ -6992,6 +7000,7 @@ const STUDIO_SUPABASE_SYNC_LAST_KEY = "studio/state/supabase-pipeline-sync-last.
 /*__STUDIO_WORKER_EXTRACT:writeStudioSupabaseSyncLast__*/
 /*__STUDIO_WORKER_EXTRACT:studioSyncSupabasePipelineReads__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioSupabaseSyncStatus__*/
+/*__STUDIO_WORKER_EXTRACT:getStudioSupabaseMirrorCheck__*/
 /*__STUDIO_WORKER_EXTRACT:postStudioSupabaseSync__*/
 /*__STUDIO_WORKER_EXTRACT:warmOldestStudioReadSnapshot__*/
 /*__STUDIO_WORKER_EXTRACT:mappedTikTokNeedsLivePublishCheck__*/
