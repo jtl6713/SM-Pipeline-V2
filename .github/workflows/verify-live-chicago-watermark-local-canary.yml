@@ -1,0 +1,207 @@
+name: Verify Live ChicagoShining Watermark (Nonbillable Local Canary)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-live-chicago-watermark-local-canary.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicagoshining-live-watermark-local-canary
+  cancel-in-progress: false
+
+jobs:
+  local-watermark-canary:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Prepare a synthetic two-second clip test for live Windows Runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OPS_TOKEN"
+          cat > /tmp/chicago-watermark-canary.py <<'WATERMARK_CANARY_PY'
+import io
+import json
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from PIL import Image, ImageChops
+
+STAGE = "initialize"
+
+def cmd(args, timeout=90):
+    proc = subprocess.run(args, capture_output=True, timeout=timeout, check=False)
+    if proc.returncode:
+        summary=(proc.stderr or b"").decode("utf-8",errors="replace")
+        details=[x for x in summary.splitlines() if any(k in x.lower() for k in ("error", "failed", "filter", "scale2ref", "decoder"))]
+        print("canary_ffmpeg_failure_hint=" + (details[-1][:180] if details else "nonzero_exit"))
+        raise RuntimeError("subprocess_failed")
+    return proc.stdout
+
+def frame(path, position):
+    data=cmd(["ffmpeg","-hide_banner","-loglevel","error","-ss",str(position),"-i",str(path),
+          "-frames:v","1","-f","image2pipe","-vcodec","png","-"],timeout=40)
+    if not data: raise RuntimeError("decoded_frame_empty")
+    return Image.open(io.BytesIO(data)).convert("RGB")
+
+try:
+    STAGE="runner_import"
+    from config import load_settings
+    from branding.watermark import profile_requires_watermark
+    from studio_library.processor import _watermark_payload
+    settings=load_settings()
+    if not settings.get("airtable_pat"): raise RuntimeError("airtable_read_credential_unavailable")
+    if not profile_requires_watermark("ChicagoShining"): raise RuntimeError("watermark_policy_missing")
+    if profile_requires_watermark("New York Shining"): raise RuntimeError("cross_profile_watermark_policy_failed")
+    print("canary_profile_policy=PASS")
+
+    with tempfile.TemporaryDirectory(prefix="chicagoshining-wm-canary-") as tmp:
+        root=Path(tmp)
+        source=root/"synthetic-unbranded.mp4"
+        output=root/"synthetic-chicagoshining-watermarked.mp4"
+        STAGE="synthetic_video"
+        cmd(["ffmpeg","-hide_banner","-loglevel","error","-y",
+             "-f","lavfi","-i","color=c=0x406f86:s=360x640:r=4:d=2",
+             "-c:v","libx264","-pix_fmt","yuv420p",str(source)],timeout=50)
+        source_bytes=source.read_bytes()
+        if len(source_bytes)<1000: raise RuntimeError("synthetic_source_unusable")
+        print("canary_synthetic_source=PASS")
+        STAGE="official_brand_watermark_processing"
+        result=_watermark_payload(content=source_bytes, filename="synthetic-chicago-canary.mp4",
+            mime_type="video/mp4", profile_name="ChicagoShining")
+        if result.get("watermarked") is not True: raise RuntimeError("watermarked_flag_not_true")
+        if result.get("mime_type")!="video/mp4": raise RuntimeError("watermarked_mime_unexpected")
+        video=bytes(result.get("bytes") or b"")
+        if len(video)<1000 or video==source_bytes: raise RuntimeError("watermarked_video_missing")
+        output.write_bytes(video)
+        print("canary_official_chicago_brand_loaded=PASS")
+        print("canary_real_processor_output=PASS")
+
+        STAGE="probe_video_metadata"
+        metadata=json.loads(cmd(["ffprobe","-v","error","-select_streams","v:0","-show_entries",
+                    "stream=width,height,codec_name","-show_entries","format=duration",
+                    "-of","json",str(output)],timeout=30))
+        streams=metadata.get("streams") or []
+        if len(streams)!=1: raise RuntimeError("unexpected_video_streams")
+        stream=streams[0]
+        length=float((metadata.get("format") or {}).get("duration") or 0)
+        if stream.get("width")!=360 or stream.get("height")!=640 or stream.get("codec_name")!="h264":
+            raise RuntimeError("watermarked_codec_or_dimensions_wrong")
+        if not 1.7<=length<=2.3: raise RuntimeError("duration_mismatch")
+        print("canary_output_360x640_h264_2sec=PASS")
+
+        STAGE="verify_logo_in_early_middle_late_frames"
+        roi=(24,24,150,150)
+        background=(180,170,355,635)
+        counts=[]
+        for timestamp in (0.10,0.90,1.70):
+            base=frame(source,timestamp)
+            branded=frame(output,timestamp)
+            diff=ImageChops.difference(base,branded)
+            logo_pixels=sum(1 for p in diff.crop(roi).getdata() if max(p)>18)
+            distant_pixels=sum(1 for p in diff.crop(background).getdata() if max(p)>18)
+            counts.append(logo_pixels)
+            if logo_pixels<20:
+                raise RuntimeError("branding_pixels_missing_at_sample")
+            if distant_pixels>100:
+                raise RuntimeError("branding_changed_pixels_outside_expected_region")
+        print("canary_early_logo_changed_pixels="+str(counts[0]))
+        print("canary_middle_logo_changed_pixels="+str(counts[1]))
+        print("canary_late_logo_changed_pixels="+str(counts[2]))
+        print("canary_watermark_persists_across_video=PASS")
+    print("canary_temporary_video_cleanup=PASS")
+    print("canary_airtable_writes=ZERO")
+    print("canary_drive_uploads=ZERO")
+    print("canary_elevenlabs_generation=ZERO")
+    print("canary_publishing=ZERO")
+    print("canary_result=PASS")
+except Exception as exc:
+    print("canary_failed_stage="+STAGE)
+    print("canary_failure_class="+type(exc).__name__)
+    print("canary_result=FAIL")
+    sys.exit(1)
+WATERMARK_CANARY_PY
+          python - <<'PY' > /tmp/chicago-watermark-canary-request.json
+          import base64,json
+          from pathlib import Path
+          script=base64.b64encode(Path('/tmp/chicago-watermark-canary.py').read_bytes()).decode('ascii')
+          command=r'''$ErrorActionPreference='Stop'
+          $root=(Get-Location).Path
+          $runnerRoot=Join-Path $root 'Services\pipeline-runner\service'
+          if(-not (Test-Path (Join-Path $runnerRoot 'studio_library\processor.py'))) { throw 'runner_python_source_unavailable' }
+          if(-not (Test-Path (Join-Path $runnerRoot '.env'))) { throw 'runner_environment_file_missing' }
+          $health=Invoke-RestMethod -Uri 'http://127.0.0.1:3350/health' -TimeoutSec 12
+          if($health.ok -ne $true -or $health.service -ne 'pipeline-runner' -or $health.studio_write_source -ne 'airtable') { throw 'runner_health_or_write_authority_unverified' }
+          Write-Output 'canary_runner_health=PASS'
+          $proc=@(Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^python(w)?\.exe$' -and $_.CommandLine -match 'pipeline-runner|app\.py' } | Select-Object -First 1)
+          $exe=''
+          if($proc.Count -gt 0 -and $proc[0].ExecutablePath -and (Test-Path $proc[0].ExecutablePath)) { $exe=$proc[0].ExecutablePath }
+          if(-not $exe) {
+              $p=Get-Command python -ErrorAction SilentlyContinue
+              if(-not $p) { throw 'python_executable_missing' }
+              $exe=$p.Source
+          }
+          $testRoot=Join-Path $env:TEMP ('chicagoshining-wm-canary-'+[guid]::NewGuid().ToString('N'))
+          [void](New-Item -Path $testRoot -ItemType Directory -Force)
+          $previous=(Get-Location).Path
+          $previousPath=$env:PYTHONPATH
+          try {
+              $scriptPath=Join-Path $testRoot 'synthetic_watermark_canary.py'
+              $bytes=[Convert]::FromBase64String('@@SCRIPT_BASE64@@')
+              [System.IO.File]::WriteAllBytes($scriptPath,$bytes)
+              $env:PYTHONPATH=$runnerRoot
+              $env:PYTHONDONTWRITEBYTECODE='1'
+              Set-Location $runnerRoot
+              & $exe $scriptPath
+              if($LASTEXITCODE -ne 0) { throw 'live_watermark_canary_failed' }
+          } finally {
+              Set-Location $previous
+              $env:PYTHONPATH=$previousPath
+              Remove-Item -Path $testRoot -Recurse -Force -ErrorAction SilentlyContinue
+          }'''
+          command=command.replace('@@SCRIPT_BASE64@@',script)
+          print(json.dumps({'command':command,'confirm':True}))
+          PY
+          echo 'local_synthetic_watermark_canary_prepared=YES'
+      - name: Execute isolated nonbillable watermark processing on Windows host
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS --max-time 20 -o /tmp/canary-start.json -w '%{http_code}' \
+            -X POST 'https://ops.chicagoshining.com/api/shell' \
+            -H "Authorization: Bearer $OPS_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/chicago-watermark-canary-request.json || true)
+          echo "runner_canary_start_http=$code"
+          if [[ "$code" != 202 && "$code" != 200 ]]; then exit 1; fi
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/canary-start.json)
+          test -n "$job"
+          for n in $(seq 1 65); do
+            code=$(curl -sS --max-time 20 -o /tmp/canary-job.json -w '%{http_code}' \
+              -H "Authorization: Bearer $OPS_TOKEN" \
+              "https://ops.chicagoshining.com/api/jobs/$job" || true)
+            [[ "$code" == 200 ]] || { echo "runner_canary_poll_http=$code"; exit 1; }
+            state=$(jq -r '.job.status // empty' /tmp/canary-job.json)
+            if [[ "$state" == ok || "$state" == failed ]]; then
+              jq -r '.job.log // ""' /tmp/canary-job.json | grep -E '^(canary_|runner_canary_)' || true
+              if [[ "$state" == ok ]]; then
+                jq -e '.job.log|contains("canary_result=PASS") and contains("canary_watermark_persists_across_video=PASS") and contains("canary_drive_uploads=ZERO")' /tmp/canary-job.json >/dev/null
+                echo "live_windows_watermark_canary=PASS"
+                exit 0
+              fi
+              echo "live_windows_watermark_canary=FAIL"
+              exit 1
+            fi
+            sleep 3
+          done
+          echo 'live_windows_watermark_canary=TIMED_OUT'
+          exit 1
