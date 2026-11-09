@@ -1,6 +1,8 @@
 # Phase 6 — Production Requests, media metadata, transfer queue, cron
 
-Not started. Airtable remains the write source of truth. Drive remains the media authority.
+Production Request write-through ships in Worker `0.10.784-supabase-phase6-request-writes`. Media metadata, the transfer queue, and cron writers are not started. Airtable remains the write source of truth. Drive remains the media authority.
+
+Treat that request slice as confirmed only after a post-deploy **Supabase Migration Gate Read-Only** run shows Worker `0.10.784-supabase-phase6-request-writes`, `studio_supabase_phase6_writes_v1` true, and `phase6_writes=airtable_sor_write_through`. `phase5_writes` stays `airtable_sor_write_through`.
 
 The list-read cutover is already live. Phase 6 does not redo Pipeline, Content, Factory, Ops, or Home overview reads. It also does not flip `STUDIO_WRITE_SOURCE`. That switch is the Phase 5 remainder and stays off while the pipeline runner still reads Airtable.
 
@@ -19,7 +21,7 @@ The half-hour sync may keep copying Airtable into Supabase while Airtable is sti
 
 ## First slice
 
-Production Request write-through only, matching Phase 5:
+Production Request write-through, in Worker `0.10.784-supabase-phase6-request-writes`, matching Phase 5:
 
 - After a successful Airtable PATCH or POST, upsert the returned row into `production_requests`.
 - A Supabase error is logged and does not fail the Airtable write.

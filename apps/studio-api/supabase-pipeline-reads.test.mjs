@@ -28,6 +28,7 @@ import {
   listSupabaseFactoryDeskPack,
   listSupabaseOverviewPack,
   syncAirtableContentRowToSupabase,
+  syncAirtableProductionRequestRowToSupabase,
   syncProfilePipelineToSupabase,
   enqueueStudioSideEffectOutbox,
   purgeDeletedDuplicatePackages,
@@ -493,10 +494,14 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_supabase_schedule_writethrough_v1: true/);
   assert.match(worker, /studio_supabase_approve_writethrough_v1: true/);
   assert.match(worker, /studio_supabase_phase5_writes_v1: true/);
+  assert.match(worker, /studio_supabase_phase6_writes_v1: true/);
   assert.match(worker, /studioSupabaseWriteThroughAirtableMutation/);
   assert.match(worker, /syncAirtableContentRowToSupabase/);
+  assert.match(worker, /syncAirtableProductionRequestRowToSupabase/);
   assert.match(worker, /enqueueStudioSideEffectOutbox/);
   assert.match(worker, /phase5_writes: "airtable_sor_write_through"/);
+  assert.match(worker, /phase6_writes: "airtable_sor_write_through"/);
+  assert.match(worker, /phase6_write_tables: \["production_requests"\]/);
   assert.match(worker, /supabase airtable write-through failed/);
   assert.match(worker, /from "\.\/supabase-pipeline-reads\.mjs"/);
   assert.match(worker, /listSupabaseContentItems/);
@@ -519,7 +524,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_supabase_pipeline_read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES/);
   const release = /version: "0\.10\.(\d+)-[^"]+"/.exec(worker);
   assert.ok(release, "Worker /health must identify a versioned release");
-  assert.ok(Number(release[1]) >= 783, "Home reads cannot regress behind Worker 0.10.783");
+  assert.ok(Number(release[1]) >= 784, "Phase 6 request write-through cannot regress behind Worker 0.10.784");
   const pipelineFns = await readFile(path.join(here, "worker-functions-03.mjs"), "utf8");
   assert.match(pipelineFns, /studioPipelineReadSource\(env\) === "supabase"/);
   assert.match(pipelineFns, /studioContentReadSource\(env\) === "supabase"/);
@@ -718,6 +723,101 @@ test("phase 5 airtable mutation mirrors an output PATCH and ignores GET", async 
   }
 });
 
+test("phase 6 production request write-through patches one present column", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method || "GET", body: init?.body || "" });
+    return { ok: true, async text() { return ""; } };
+  };
+  try {
+    const result = await syncAirtableProductionRequestRowToSupabase(supabaseEnv, {
+      id: "recRequest1",
+      fields: { Request_Status: "Submitted" },
+    });
+    assert.equal(result.mode, "patch");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "PATCH");
+    assert.match(calls[0].url, /production_requests\?airtable_record_id=eq\.recRequest1/);
+    assert.deepEqual(JSON.parse(calls[0].body), { request_status: "Submitted" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("phase 6 production request write-through upserts identity fields without omitted columns", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method || "GET", body: init?.body || "" });
+    return { ok: true, async text() { return ""; } };
+  };
+  try {
+    const result = await syncAirtableProductionRequestRowToSupabase(supabaseEnv, {
+      id: "recRequest2",
+      fields: {
+        Production_Request_ID: 480,
+        Request_Status: "Ready",
+        Requested_Title: "Pier lights",
+      },
+    });
+    assert.equal(result.mode, "upsert");
+    const post = calls.find((call) => call.method === "POST" && call.url.includes("production_requests"));
+    assert.ok(post);
+    assert.match(post.url, /on_conflict=airtable_record_id/);
+    const rows = JSON.parse(post.body);
+    assert.equal(rows.length, 1);
+    assert.deepEqual(rows[0], {
+      airtable_record_id: "recRequest2",
+      production_request_id: "480",
+      request_status: "Ready",
+      requested_title: "Pier lights",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("phase 6 production request mutation skips other tables and a supabase failure", async () => {
+  const { studioSupabaseWriteThroughAirtableMutation } = await import("./worker-functions-01.mjs");
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method || "GET" });
+    return {
+      ok: false,
+      status: 500,
+      async text() { return JSON.stringify({ message: "upsert failed" }); },
+    };
+  };
+  try {
+    const other = await studioSupabaseWriteThroughAirtableMutation(supabaseEnv, "tblMedia", "PATCH", {
+      id: "recMedia1",
+      fields: { Request_Status: "Ready", Production_Request_ID: 1 },
+    });
+    assert.equal(other.reason, "table");
+    assert.equal(calls.length, 0);
+    const notesOnly = await studioSupabaseWriteThroughAirtableMutation(supabaseEnv, "Production Requests", "PATCH", {
+      id: "recRequestNotes",
+      fields: { Production_Notes: "only a note" },
+    });
+    assert.equal(notesOnly.reason, "no_records");
+    assert.equal(calls.length, 0);
+    const failed = await studioSupabaseWriteThroughAirtableMutation(supabaseEnv, "Production Requests", "POST", {
+      id: "recRequest3",
+      fields: { Production_Request_ID: 481, Request_Status: "Draft" },
+    });
+    assert.equal(failed.ok, true);
+    assert.equal(failed.kind, "request");
+    assert.equal(failed.count, 1);
+    assert.equal(failed.results[0].synced.ok, false);
+    assert.match(failed.results[0].synced.error, /upsert failed/);
+    assert.equal(failed.results[0].outbox.ok, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("profile sync refreshes Supabase rows that left the Airtable open pack", async () => {
   const posts = [];
   const originalFetch = globalThis.fetch;
@@ -823,7 +923,7 @@ test("phase5 docs keep Airtable as write source of truth", async () => {
   assert.match(readme, /content_items/);
   assert.match(readme, /studio_side_effect_outbox/);
   assert.match(readme, /legacy export/);
-  assert.match(readme, /Phase 6 is documented and not started/);
+  assert.match(readme, /Phase 6 Production Request write-through/);
   const phase6 = await readFile(path.join(here, "../../docs/supabase-migration/phase6/README.md"), "utf8");
   const handoff = await readFile(path.join(here, "../../docs/handoffs/supabase-phase6-handoff.md"), "utf8");
   const index = await readFile(path.join(here, "../../docs/supabase-migration/README.md"), "utf8");
@@ -832,8 +932,9 @@ test("phase5 docs keep Airtable as write source of truth", async () => {
     assert.match(doc, /not started|Not started/);
     assert.match(doc, /STUDIO_WRITE_SOURCE/);
   }
-  assert.match(handoff, /Do not execute Phase 6 until he says to/);
+  assert.match(handoff, /0\.10\.784-supabase-phase6-request-writes/);
   assert.match(phase6, /production_requests/);
+  assert.match(phase6, /Media metadata, the transfer queue, and cron writers are not started/);
   assert.match(index, /Phase 7/);
   const sql = await readFile(path.join(here, "../../docs/supabase-migration/phase5/003_side_effect_outbox.sql"), "utf8");
   assert.match(sql, /create table if not exists studio_side_effect_outbox/);

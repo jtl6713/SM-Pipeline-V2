@@ -1597,6 +1597,66 @@ export async function syncAirtableContentRowToSupabase(env, record) {
   return { ok: true, mode: "patch" };
 }
 
+/**
+ * Phase 6 first slice: mirror one Production Request after Airtable commits.
+ * Only columns present on the Airtable body are sent, so a partial response
+ * cannot blank title, notes, or the production job. Identity for an insert
+ * is Production_Request_ID plus Request_Status. Anything thinner patches an
+ * existing row, or skips when there is nothing safe to write.
+ */
+function productionRequestWriteThroughRow(record) {
+  const fields = record?.fields || {};
+  const row = {};
+  if ("Production_Request_ID" in fields && fields.Production_Request_ID != null) {
+    row.production_request_id = String(fields.Production_Request_ID);
+  }
+  if ("Request_Status" in fields) {
+    const rawStatus = selectName(fields.Request_Status) || "Draft";
+    const allowedStatus = new Set(["Draft", "Ready", "Submitted", "Promoted", "Cancelled"]);
+    row.request_status = allowedStatus.has(rawStatus) ? rawStatus : "Draft";
+  }
+  if ("Requested_Title" in fields) row.requested_title = fields.Requested_Title || null;
+  if ("Production_Notes" in fields) row.production_notes = fields.Production_Notes || null;
+  if ("Studio_Variant_Status" in fields) row.variant_status = selectName(fields.Studio_Variant_Status);
+  if ("Studio_Output_Plan_Status" in fields) row.output_plan_status = selectName(fields.Studio_Output_Plan_Status);
+  if ("Studio_Production_Job_JSON" in fields) {
+    let productionJob = {};
+    const rawJob = fields.Studio_Production_Job_JSON;
+    if (typeof rawJob === "string" && rawJob.trim()) {
+      try { productionJob = JSON.parse(rawJob); } catch { productionJob = { raw: rawJob.slice(0, 2000) }; }
+    } else if (isPlainObject(rawJob)) {
+      productionJob = rawJob;
+    }
+    row.production_job = productionJob;
+  }
+  return row;
+}
+
+export async function syncAirtableProductionRequestRowToSupabase(env, record) {
+  if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
+  if (!record?.id) return { skipped: true, reason: "missing_record" };
+  const row = productionRequestWriteThroughRow(record);
+  if (!Object.keys(row).length) return { skipped: true, reason: "empty_patch" };
+  const identity = row.production_request_id != null && row.request_status != null;
+  if (identity) {
+    await upsertChunk(env, "production_requests", [{
+      airtable_record_id: record.id,
+      ...row,
+    }]);
+    return { ok: true, mode: "upsert" };
+  }
+  await supabaseRest(
+    env,
+    `production_requests?airtable_record_id=eq.${encodeURIComponent(record.id)}`,
+    {
+      method: "PATCH",
+      body: row,
+      headers: { Prefer: "return=minimal" },
+    },
+  );
+  return { ok: true, mode: "patch" };
+}
+
 export function studioSideEffectOutboxMissing(error) {
   const text = String(error?.message || error || "");
   return /PGRST205|schema cache|does not exist|Could not find the table|404/.test(text);

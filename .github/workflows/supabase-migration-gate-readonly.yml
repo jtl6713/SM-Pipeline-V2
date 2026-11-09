@@ -182,8 +182,13 @@ jobs:
               "ok",
               "version",
               "studio_read_source",
+              "studio_pipeline_read_source",
+              "studio_content_read_source",
+              "studio_factory_ops_read_source",
+              "studio_home_read_source",
               "studio_supabase_configured",
               "studio_supabase_phase5_writes_v1",
+              "studio_supabase_phase6_writes_v1",
               "studio_supabase_last_sync_at",
               "studio_supabase_last_sync_ok",
           ):
@@ -193,8 +198,14 @@ jobs:
           last = sync.get("last_sync") or {}
           print(f"configured={sync.get('configured')!r}")
           print(f"read_source={sync.get('read_source')!r}")
+          print(f"pipeline_read_source={sync.get('pipeline_read_source')!r}")
+          print(f"content_read_source={sync.get('content_read_source')!r}")
+          print(f"factory_ops_read_source={sync.get('factory_ops_read_source')!r}")
+          print(f"home_read_source={sync.get('home_read_source')!r}")
           print(f"phase5_writes={sync.get('phase5_writes')!r}")
           print(f"phase5_write_tables={sync.get('phase5_write_tables')!r}")
+          print(f"phase6_writes={sync.get('phase6_writes')!r}")
+          print(f"phase6_write_tables={sync.get('phase6_write_tables')!r}")
           print(f"last_sync.status={last.get('status')!r}")
           print(f"last_sync.ok={last.get('ok')!r}")
           print(f"last_sync.at={last.get('at')!r}")
@@ -236,6 +247,35 @@ jobs:
               sync.get("phase5_writes") == "airtable_sor_write_through",
               f"got {sync.get('phase5_writes')!r}",
           )
+          for flag in (
+              "studio_pipeline_read_source",
+              "studio_content_read_source",
+              "studio_factory_ops_read_source",
+              "studio_home_read_source",
+          ):
+              check(
+                  f"{flag}=supabase",
+                  health.get(flag) == "supabase",
+                  f"got {health.get(flag)!r}",
+              )
+          version = str(health.get("version") or "")
+          if "supabase-phase6-request-writes" in version:
+              check(
+                  "studio_supabase_phase6_writes_v1",
+                  health.get("studio_supabase_phase6_writes_v1") is True,
+              )
+              check(
+                  "phase6_writes=airtable_sor_write_through",
+                  sync.get("phase6_writes") == "airtable_sor_write_through",
+                  f"got {sync.get('phase6_writes')!r}",
+              )
+              check(
+                  "phase6_write_tables=production_requests",
+                  sync.get("phase6_write_tables") == ["production_requests"],
+                  f"got {sync.get('phase6_write_tables')!r}",
+              )
+          else:
+              print("GATE[SKIP] phase6 write-through — waiting for Worker 0.10.784-supabase-phase6-request-writes")
           check(
               "last_sync completed+ok",
               last.get("status") == "completed" and last.get("ok") is True,
@@ -302,8 +342,13 @@ jobs:
                       "ok",
                       "version",
                       "studio_read_source",
+                      "studio_pipeline_read_source",
+                      "studio_content_read_source",
+                      "studio_factory_ops_read_source",
+                      "studio_home_read_source",
                       "studio_supabase_configured",
                       "studio_supabase_phase5_writes_v1",
+                      "studio_supabase_phase6_writes_v1",
                       "studio_supabase_last_sync_at",
                       "studio_supabase_last_sync_ok",
                   )
@@ -311,7 +356,13 @@ jobs:
               "sync": {
                   "configured": sync.get("configured"),
                   "read_source": sync.get("read_source"),
+                  "pipeline_read_source": sync.get("pipeline_read_source"),
+                  "content_read_source": sync.get("content_read_source"),
+                  "factory_ops_read_source": sync.get("factory_ops_read_source"),
+                  "home_read_source": sync.get("home_read_source"),
                   "phase5_writes": sync.get("phase5_writes"),
+                  "phase6_writes": sync.get("phase6_writes"),
+                  "phase6_write_tables": sync.get("phase6_write_tables"),
                   "last_sync": {
                       "status": last.get("status"),
                       "ok": last.get("ok"),
