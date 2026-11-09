@@ -65,7 +65,7 @@ test("only valid provider receipt is accepted and transport sends a single POST"
     return new Response(JSON.stringify({id:"Gen123456789",status:"pending"}),{status:200,headers:{"Content-Type":"application/json"}});
   };
   const settings=normalizeStoryVideoSettings(input);
-  assert.throws(()=>submitStoryVideo(env,settings,fetcher),/./);
+  await assert.rejects(()=>submitStoryVideo(env,settings,fetcher),/Upload and translate/);
   assert.deepEqual(await submitStoryVideo(env,buildStoryVideoProviderSettings(settings),fetcher),{id:"Gen123456789",status:"pending"});
   assert.equal(calls.length,1);
   assert.equal(calls[0].url,"https://api.elevenlabs.io/v1/flows/video");
