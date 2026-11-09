@@ -183,6 +183,15 @@ jobs:
                           version_data=json.load(res)
                       binding_list=((version_data.get("result") or {}).get("resources") or {}).get("bindings") or []
                       bindings={x.get("name"):x.get("type") for x in binding_list}
+                      bound=next((x for x in binding_list if x.get("name")=="PIPELINE_RUNNER_URL"),None)
+                      configured=str(bound.get("text") or "").strip().rstrip("/") if bound else ""
+                      canonical="https://pipeline.chicagoshining.com"
+                      print("worker_runner_url_equals_canonical="+str(configured==canonical))
+                      parts=urllib.parse.urlsplit(configured)
+                      print("worker_runner_url_https="+str(parts.scheme=="https"))
+                      print("worker_runner_url_host_under_brand="+str((parts.hostname or "").endswith(".chicagoshining.com")))
+                      print("worker_runner_url_has_nonempty_path="+str(bool(parts.path and parts.path!="/")))
+                      print("worker_runner_url_has_port="+str(parts.port is not None if parts.scheme in ("https","http") else False))
                       for name in ("CF_ACCESS_CLIENT_ID","CF_ACCESS_CLIENT_SECRET","PIPELINE_RUNNER_SHARED_SECRET","PIPELINE_RUNNER_URL"):
                           print("worker_binding_"+name+"="+str(bindings.get(name) or "absent"))
               except urllib.error.HTTPError as err:
