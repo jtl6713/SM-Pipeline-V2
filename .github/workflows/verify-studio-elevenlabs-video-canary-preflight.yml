@@ -85,7 +85,8 @@ jobs:
               parsed=urllib.parse.urlsplit(candidate)
               if parsed.scheme=="https" and parsed.hostname and not parsed.username and not parsed.password:
                   try:
-                      # Cloudflare 1010 rejects Python-urllib default browser signatures. Identify our read-only probe.\n                      health_headers={"Accept":"application/json","User-Agent":"ChicagoShining-Runner-Health/1.0"}
+                      # Cloudflare 1010 blocks the Python-urllib default User-Agent.
+                      health_headers={"Accept":"application/json","User-Agent":"ChicagoShining-Runner-Health/1.0"}
                       access_id=os.environ.get("CF_ACCESS_CLIENT_ID") or ""
                       access_secret=os.environ.get("CF_ACCESS_CLIENT_SECRET") or ""
                       if access_id and access_secret:
@@ -101,8 +102,8 @@ jobs:
                           health="http_"+str(status)
                   except urllib.error.HTTPError as e:
                       health="http_"+str(e.code)
-                  except Exception:
-                      health="unreachable"
+                  except Exception as error:
+                      health="unreachable_"+type(error).__name__
               else:
                   health="non_https_or_invalid"
           report={
