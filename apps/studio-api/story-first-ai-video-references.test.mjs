@@ -99,3 +99,22 @@ test("reference-to-provider conversion checks all sources and uploads only after
     "recDifferentProfile",{loadAsset:async()=>source,driveToken:async()=>"oauth-token",fetcher}),/profile/);
   assert.equal(requests.length,2);
 });
+
+
+test("reference requests use Cloudflare manual redirects and reject cross-host redirects", async () => {
+  const record = verifyStudioReferenceAsset(source,
+    {asset_id: "recImageOne", type: "image"}, profileId);
+  await assert.rejects(() => fetchStudioReferenceFromDrive(record, "access-token", async (url, opts) => {
+    assert.equal(opts.redirect, "manual");
+    assert.match(url, /^https:\/\/www\.googleapis\.com\//);
+    return new Response(null, {status: 302, headers: {Location: "https://evil.example/source"}});
+  }), /unexpectedly redirected/i);
+  await assert.rejects(() => uploadStudioReferenceToEleven(
+    {ELEVENLABS_VIDEO_API_KEY: "secret"}, record, new Uint8Array(2048),
+    async (url, opts) => {
+      assert.equal(opts.redirect, "manual");
+      assert.equal(url, "https://api.elevenlabs.io/v1/assets");
+      return new Response(null, {status: 307, headers: {Location: "https://evil.example/upload"}});
+    },
+  ), /upload redirected/i);
+});

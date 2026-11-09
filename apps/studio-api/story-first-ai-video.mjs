@@ -165,8 +165,14 @@ async function elevenJson(env, path, options = {}, fetcher = fetch) {
     ...options,
     headers: { "xi-api-key": clean(env.ELEVENLABS_VIDEO_API_KEY),
       ...(options.body ? { "Content-Type": "application/json" } : {}) },
-    redirect: "error",
+    // Cloudflare Workers only supports "manual" and "follow"; never follow
+    // redirects with the dedicated billable ElevenLabs API key attached.
+    redirect: "manual",
   });
+  if ((response.status >= 300 && response.status < 400) ||
+      response.type === "opaqueredirect" || response.redirected) {
+    throw fail(502, "ElevenLabs returned an unexpected redirect; no automatic retry. Reconcile the existing job.");
+  }
   const result = await response.json().catch(() => ({}));
   if (!response.ok) {
     const message = response.status === 402 ? "ElevenLabs Pro plan or video credits are required"
@@ -211,7 +217,13 @@ export async function downloadStoryVideo(remote, fetcher = fetch) {
     || !isSafeStoryVideoDownloadUrl(remote.content_url)) {
     throw fail(502, "ElevenLabs returned an unsupported or untrusted video download URL");
   }
-  const response = await fetcher(remote.content_url, { redirect: "error" });
+  const response = await fetcher(remote.content_url, { redirect: "manual" });
+  // The signed URL is trusted only for this exact Google Storage host.
+  // Do not follow a redirect to another location after validating the URL.
+  if ((response.status >= 300 && response.status < 400) ||
+      response.type === "opaqueredirect" || response.redirected) {
+    throw fail(502, "ElevenLabs video download redirected unexpectedly");
+  }
   if (!response.ok || String(response.headers.get("Content-Type") || "").split(";")[0] !== "video/mp4") {
     throw fail(502, "ElevenLabs video download failed content validation");
   }
