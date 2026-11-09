@@ -30,12 +30,15 @@ jobs:
           cat > /tmp/chicago-watermark-canary.py <<'WATERMARK_CANARY_PY'
           import io
           import json
+          import os
           import subprocess
           import sys
           import tempfile
           from pathlib import Path
           from PIL import Image, ImageChops
           
+          # Ops deliberately sets PORT='' for its shell; use Runner default only in this transient test.
+          os.environ["PORT"] = os.environ.get("PORT") or "3350"
           STAGE = "initialize"
           
           def cmd(args, timeout=90):
