@@ -19,7 +19,8 @@ permissions:
   contents: read
 jobs:
   staging-ui:
-    runs-on: ubuntu-latest
+    # Playwright 1.58 headless-shell installer does not support ubuntu-26.04 (ubuntu-latest).
+    runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v6
