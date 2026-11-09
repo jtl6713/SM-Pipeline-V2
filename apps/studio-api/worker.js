@@ -1078,7 +1078,7 @@ export default {
       const isMusicFavoriteWrite = isMusicFavoriteRoute && request.method === "PATCH";
       const isMusicRecordRoute = /^\/api\/music\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isMusicDeleteWrite = isMusicRecordRoute && request.method === "DELETE";
-      const isStoryFirstSceneMediaRoute = /^\/api\/story-first\/ideas\/rec[A-Za-z0-9]+\/scenes\/[1-9]\d*\/(generate|accept|decline|preview\/aipre[A-Za-z0-9]+)$/.test(url.pathname);
+      const isStoryFirstSceneMediaRoute = /^\/api\/story-first\/ideas\/rec[A-Za-z0-9]+\/scenes\/[1-9]\d*\/(generate|accept|decline|preview\/aipre[A-Za-z0-9]+|video\/(?:quote|start|status|preview|accept|decline))$/.test(url.pathname);
       const isAssetLibraryRoute = url.pathname === "/api/library";
       const isAssetLibraryUploadWrite = isAssetLibraryRoute && request.method === "POST";
       const isAssetLibraryRecordRoute = /^\/api\/library\/rec[A-Za-z0-9]+$/.test(url.pathname);
