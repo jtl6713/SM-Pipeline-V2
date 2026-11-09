@@ -16,4 +16,7 @@ test("deployment retries only Cloudflare bridge routing 1042, never a real Home 
   const qa = workflow.slice(workflow.indexOf("qa-catalog"), workflow.indexOf("qa_admin_catalog_read=PASS"));
   assert.match(qa, /--retry 8 --retry-all-errors --retry-delay 2/);
   assert.doesNotMatch(qa, /--retry 5 --retry-delay 2 --max-time 45 "\$BASE\/qa-catalog"/);
+  assert.match(qa, /qa_unauthenticated_attempt=\$i http=\$code/);
+  assert.match(qa, /error code: 1042/);
+  assert.match(qa, /error code: 1104/);
 });

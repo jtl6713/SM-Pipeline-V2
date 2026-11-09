@@ -728,7 +728,22 @@ jobs:
           jq -e '.ok==true and .writeAuthority=="Airtable" and (.tests|type)=="array" and (.tests|length)>=88 and (.safeAutomations|type)=="array"' /tmp/qa-live-catalog.json >/dev/null
           curl -fsS --retry 8 --retry-all-errors --retry-delay 2 --max-time 60 "$BASE/qa-runs" -o /tmp/qa-live-runs.json
           jq -e '.ok==true and (.runs|type)=="array" and (.limited_to==1)' /tmp/qa-live-runs.json >/dev/null
-          code=$(curl -sS --max-time 45 -o /tmp/qa-live-denied.json -w '%{http_code}' "$BASE/qa-unauthenticated")
+          # A workers.dev 1042/1104 is served as 404/500 and is not an auth result.
+          # Keep retrying only those routing errors. Any other status fails immediately.
+          code=000
+          for i in $(seq 1 20); do
+            code=$(curl -sS --max-time 45 -o /tmp/qa-live-denied.json -w '%{http_code}' "$BASE/qa-unauthenticated" || true)
+            echo "qa_unauthenticated_attempt=$i http=$code"
+            if [[ "$code" == "401" || "$code" == "403" ]]; then
+              break
+            fi
+            if grep -Fq 'error code: 1042' /tmp/qa-live-denied.json 2>/dev/null || grep -Fq 'error code: 1104' /tmp/qa-live-denied.json 2>/dev/null; then
+              sleep 3
+              continue
+            fi
+            echo "QA authorization guard failed; unauthenticated request returned $code" >&2
+            exit 1
+          done
           if [[ "$code" != "401" && "$code" != "403" ]]; then
             echo "QA authorization guard failed; unauthenticated request returned $code" >&2
             exit 1
