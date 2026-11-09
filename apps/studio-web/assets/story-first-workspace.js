@@ -123,7 +123,19 @@
     localStorage.setItem("studio.story_first_resume." + id, record.id);
     render();
     // On reopen, poll existing jobs without generating or charging.
-    void Promise.allSettled(current.story.scenes.map((_,index)=>checkSceneVideo(index,true)));
+    // Avoid a 12-request Airtable burst while reopening a storyboard.
+    // Only AI-sourced scenes can have paid video jobs; check a bounded three
+    // sequentially, with manual status controls available for the remainder.
+    const reopenedIdeaId=current.record.id;
+    void (async()=>{
+      const indexes=current.story.scenes.map((shot,index)=>shot.decision==="ai"?index:null)
+        .filter(index=>index!==null).slice(0,3);
+      for(const index of indexes){
+        if(current.record?.id!==reopenedIdeaId)break;
+        await checkSceneVideo(index,true).catch(error=>
+          report("Scene "+(index+1)+" video status check: "+error.message,true));
+      }
+    })();
     // Rehydrate filenames for existing selections by exact record ID; do not rely
     // on the scene keyword search or the latest-100 list after reopen.
     void loadSelectedAssetNames();
