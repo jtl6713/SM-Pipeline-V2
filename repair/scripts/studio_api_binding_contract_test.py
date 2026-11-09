@@ -120,6 +120,24 @@ class StudioApiBindingContractTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             assert_live_contract(got, "unexpected I1 binding")
 
+    def test_dedicated_video_key_is_optional_secret_and_cannot_replace_narration(self):
+        got = self.legacy_core()
+        got.update(RESERVATION_BINDINGS)
+        got["ELEVENLABS_API_KEY"] = "secret_text"
+        self.assertTrue(assert_live_contract(got, "tts only")["ok"])
+        got["ELEVENLABS_VIDEO_API_KEY"] = "secret_text"
+        result = assert_live_contract(got, "separate video key")
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["optional_present"]["ELEVENLABS_API_KEY"])
+        self.assertTrue(result["optional_present"]["ELEVENLABS_VIDEO_API_KEY"])
+        got["ELEVENLABS_VIDEO_API_KEY"] = "plain_text"
+        with self.assertRaises(SystemExit):
+            assert_live_contract(got, "video key must be secret_text")
+        got.pop("ELEVENLABS_VIDEO_API_KEY")
+        got["ELEVENLABS_VIDEO_API_KEY_UNSAFE"] = "secret_text"
+        with self.assertRaises(SystemExit):
+            assert_live_contract(got, "arbitrary video API secret name rejected")
+
     def test_b2_content_list_read_flag_is_optional_secret_only(self):
         got = self.legacy_core()
         got.update(RESERVATION_BINDINGS)
