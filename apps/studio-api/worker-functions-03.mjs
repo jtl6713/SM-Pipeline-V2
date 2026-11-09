@@ -3584,6 +3584,7 @@ export async function manualLibraryClassificationRoute(request, env, url, author
         body: JSON.stringify({fields: {
           Manual_Classification_JSON: JSON.stringify(applied.manual),
           Manual_Classification_Audit: JSON.stringify(events),
+          Classification_Status: "Classified",
         }}),
       });
       results.push({id, ok: true, record: mapLibraryAsset(saved || record, {[profile.id]: profile})});
