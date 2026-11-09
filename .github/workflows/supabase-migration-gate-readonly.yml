@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
   schedule:
     # Catch half-hour cron shortly after :00 / :30 UTC
+    # Reprobe after Worker 0.10.776-supabase-mirror-check production deploy.
     - cron: "5,35 * * * *"
   push:
     branches: [main]
