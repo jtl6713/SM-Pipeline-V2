@@ -78,8 +78,8 @@ test("Worker exposes tenant_admin mirror-check route and bumped version", () => 
   assert.match(worker, /\/\*__STUDIO_WORKER_EXTRACT:getStudioSupabaseMirrorCheck__\*\//);
   const version = /version: "0\.10\.(\d+)-([^"]+)"/.exec(worker);
   assert.ok(version, "Studio API must expose a version in /health");
-  assert.ok(Number(version[1]) >= 778, "Studio API release must not regress behind B1 pipeline reads");
-  assert.equal(version[2], "supabase-b1-pipeline-reads");
+  assert.ok(Number(version[1]) >= 779, "Studio API release must not regress behind B2 content reads");
+  assert.equal(version[2], "supabase-b2-content-reads");
   const source = readFileSync(path.join(here, "worker-functions-03.mjs"), "utf8");
   assert.match(source, /export async function getStudioSupabaseMirrorCheck/);
   assert.match(source, /\/\*__STUDIO_WORKER_END:getStudioSupabaseMirrorCheck__\*\//);
