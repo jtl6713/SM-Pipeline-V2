@@ -956,3 +956,5 @@ Deploy 2026-11-08 Worker 0.10.772-storyboard-schema: reject corrupt AI storyboar
 Deploy 2026-11-08 Worker 0.10.773-storyboard-brief: accept numbered storyboard briefs; only reject brief-dump corruption.
 
 Deploy 2026-11-08 Worker 0.10.774-scene-title: do not treat (N seconds) / Visual dumps as scene_label.
+
+Deploy 2026-11-08 Worker 0.10.775-manual-classification: authenticated profile-scoped single/bulk manual asset classification and Airtable audit. No publishing or scheduling changes.
