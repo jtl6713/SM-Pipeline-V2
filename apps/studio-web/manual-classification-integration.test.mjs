@@ -18,9 +18,12 @@ test("Issue 1716 Studio editor is connected and publishes matching version", () 
   const html = read("./index.html");
   const ui = read("./assets/manual-asset-classification.js");
   const main = read("./assets/app-item4-1008.js");
-  assert.match(html, /manual-asset-classification\.js\?v=0\.6\.919-manual-classification/);
-  assert.match(html, /manual-asset-classification\.css\?v=0\.6\.919-manual-classification/);
-  assert.match(main, /item4-0\.6\.919-manual-classification/);
+  const jsVersion = /manual-asset-classification\.js\?v=([^"]+)/.exec(html)?.[1];
+  const cssVersion = /manual-asset-classification\.css\?v=([^"]+)/.exec(html)?.[1];
+  const appVersion = /const BUILD_ID = "item4-([^"]+)"/.exec(main)?.[1];
+  assert.ok(jsVersion, "manual classification runtime must remain wired to Studio HTML");
+  assert.equal(cssVersion, jsVersion, "manual classification CSS must share UI release");
+  assert.equal(appVersion, jsVersion, "manual classification UI must share the app's active build");
   assert.match(main, /window\.StudioManualClassificationBridge/);
   assert.match(main, /StudioManualClassificationRefreshToken/);
   assert.match(ui, /MutationObserver/);
