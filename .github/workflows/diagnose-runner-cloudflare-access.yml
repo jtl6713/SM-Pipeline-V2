@@ -1,0 +1,136 @@
+name: Diagnose Runner Cloudflare Access (Read Only)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-runner-cloudflare-access.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      OPS_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+    steps:
+      - name: Diagnose Cloudflare edge and Access app policy without changing settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,os,urllib.request,urllib.error,urllib.parse
+          domain="pipeline.chicagoshining.com"
+          pairs_ok=bool(os.environ.get("CF_ACCESS_CLIENT_ID") and os.environ.get("CF_ACCESS_CLIENT_SECRET"))
+          print("github_access_service_credential_pair_present="+("YES" if pairs_ok else "NO"))
+          def probe(auth=False):
+              headers={"Accept":"application/json"}
+              if auth and pairs_ok:
+                  headers.update({"CF-Access-Client-Id":os.environ["CF_ACCESS_CLIENT_ID"],
+                                  "CF-Access-Client-Secret":os.environ["CF_ACCESS_CLIENT_SECRET"]})
+              req=urllib.request.Request("https://"+domain+"/health",headers=headers)
+              try:
+                  with urllib.request.urlopen(req,timeout=20) as r:
+                      status=r.status; hdr=r.headers; body=r.read(16384)
+              except urllib.error.HTTPError as err:
+                  status=err.code;hdr=err.headers;body=err.read(4096)
+              except Exception as err:
+                  print(("auth" if auth else "anonymous")+"_probe_error="+type(err).__name__)
+                  return
+              name="auth" if auth else "anonymous"
+              print(name+"_http="+str(status))
+              print(name+"_content_type="+str(hdr.get("content-type","unknown")).split(";")[0][:55])
+              print(name+"_access_edge_headers="+("YES" if hdr.get("cf-ray") or hdr.get("cf-mitigated") else "NO"))
+              print(name+"_cf_mitigated="+str(hdr.get("cf-mitigated","none"))[:40])
+              if status == 200:
+                  try:
+                      p=json.loads(body)
+                      print(name+"_runner_service_verified="+str(p.get("service")=="pipeline-runner"))
+                      print(name+"_airtable_write_authority="+str(p.get("studio_write_source")=="airtable"))
+                  except Exception:
+                      print(name+"_body_valid_json=NO")
+          probe(False);probe(True)
+          token=os.environ.get("CLOUDFLARE_API_TOKEN") or ""
+          account=os.environ.get("CLOUDFLARE_ACCOUNT_ID") or ""
+          if not token or not account:
+              print("access_app_inventory=SKIPPED_CREDENTIALS")
+          else:
+              api="https://api.cloudflare.com/client/v4/accounts/"+account+"/access/apps?per_page=100"
+              req=urllib.request.Request(api,headers={"Authorization":"Bearer "+token,"Accept":"application/json"})
+              try:
+                  with urllib.request.urlopen(req,timeout=25) as r:
+                      payload=json.load(r)
+                  apps=payload.get("result") or []
+                  if isinstance(apps,dict):apps=apps.get("items") or []
+                  matching=[a for a in apps if domain in [str(a.get("domain") or "")]+[str(x.get("public_domain") or "") for x in a.get("destinations") or []]]
+                  print("access_app_inventory=PASS")
+                  print("pipeline_access_app_count="+str(len(matching)))
+                  for a in matching[:3]:
+                      print("pipeline_access_app_type="+str(a.get("type") or "unknown")[:35])
+                      policies=a.get("policies") or []
+                      print("pipeline_access_app_policy_actions="+",".join(sorted({str(x.get("decision") or "") for x in policies if isinstance(x,dict)}))[:100])
+                      appid=str(a.get("id") or "")
+                      if appid:
+                          purl="https://api.cloudflare.com/client/v4/accounts/"+account+"/access/apps/"+urllib.parse.quote(appid)+"/policies"
+                          preq=urllib.request.Request(purl,headers={"Authorization":"Bearer "+token,"Accept":"application/json"})
+                          try:
+                              with urllib.request.urlopen(preq,timeout=20) as r:
+                                  pd=json.load(r)
+                              found=pd.get("result") or []
+                              if isinstance(found,dict):found=found.get("items") or []
+                              print("pipeline_access_policy_decisions="+",".join(sorted({str(x.get("decision") or "") for x in found if isinstance(x,dict)}))[:100])
+                              print("pipeline_service_auth_policy_present="+str(any(str(x.get("decision") or "").lower()=="non_identity" for x in found if isinstance(x,dict))))
+                          except urllib.error.HTTPError as ex:
+                              print("pipeline_access_policy_read_http="+str(ex.code))
+              except urllib.error.HTTPError as err:
+                  print("access_app_inventory_http="+str(err.code))
+              except Exception as err:
+                  print("access_app_inventory_error="+type(err).__name__)
+          print("diagnostic_only=YES")
+          PY
+      - name: Check Windows Runner local health through existing protected Ops interface
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${OPS_TOKEN:-}" ]]; then
+            echo 'ops_token_present=NO'
+            exit 0
+          fi
+          python - <<'PY' > /tmp/runner-ops-readonly.json
+          import json
+          command = r'''$ErrorActionPreference='Stop'; try { $r=Invoke-WebRequest -Uri 'http://127.0.0.1:3350/health' -UseBasicParsing -TimeoutSec 12; $o=$r.Content|ConvertFrom-Json; Write-Output ('runner_local_http='+$r.StatusCode); Write-Output ('runner_local_service_verified='+($o.service -eq 'pipeline-runner')); Write-Output ('runner_local_airtable_authority='+($o.studio_write_source -eq 'airtable')); Write-Output ('runner_local_asset_ingest_route='+([bool](@($o.jobs|Where-Object {$_.path -eq '/jobs/studio-asset-library'}).Count))); Write-Output ('runner_local_watermark_route='+([bool](@($o.jobs|Where-Object {$_.path -eq '/jobs/studio-asset-watermark'}).Count))) } catch { Write-Output ('runner_local_health_error='+$_.Exception.GetType().Name) }; $t=@(Get-Process -Name cloudflared -ErrorAction SilentlyContinue); Write-Output ('runner_cloudflared_process_running='+($t.Count -gt 0))'''
+          print(json.dumps({"command":command,"confirm":True}))
+          PY
+          code=$(curl -sS --max-time 20 -w '%{http_code}' -o /tmp/ops-start.json -X POST             'https://ops.chicagoshining.com/api/shell'             -H "Authorization: Bearer $OPS_TOKEN"             -H 'Content-Type: application/json'             --data-binary @/tmp/runner-ops-readonly.json || true)
+          echo "ops_shell_submit_http=$code"
+          if [[ "$code" != "200" && "$code" != "202" ]]; then
+            exit 0
+          fi
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/ops-start.json)
+          if [[ -z "$job" ]]; then
+            echo 'ops_shell_job_received=NO'
+            exit 0
+          fi
+          for n in $(seq 1 18); do
+            curl -sS --max-time 20 -H "Authorization: Bearer $OPS_TOKEN"               "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/ops-job.json || true
+            state=$(jq -r '.job.status // empty' /tmp/ops-job.json 2>/dev/null || true)
+            if [[ "$state" == "ok" ]]; then
+              jq -r '.job.log // ""' /tmp/ops-job.json                 | grep -E '^runner_(local_|cloudflared_)' || true
+              echo 'ops_readonly_probe=COMPLETE'
+              exit 0
+            fi
+            if [[ "$state" == "failed" ]]; then
+              echo 'ops_readonly_probe=FAILED'
+              exit 0
+            fi
+            sleep 3
+          done
+          echo 'ops_readonly_probe=INCOMPLETE'
