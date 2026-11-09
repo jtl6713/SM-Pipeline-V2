@@ -12151,10 +12151,15 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
     if (!scriptedShortProposalReady(buildTimelineFromScenes(scenes))) {
       // Creative-first must fail closed. Embedding the conversational brief into
       // Required Visual / Voiceover is the defect that made storyboards unusable.
-      if (creativeFirst || sceneDirections.requested_count) {
+      if (creativeFirst) {
         throw new HttpError(502,
           "Studio could not write a valid storyboard from that brief. The writer could not produce exactly " + (sceneDirections.requested_count || "the required number of") +
           " valid, distinct scenes after a bounded retry. Your original brief is unchanged; retry Propose.");
+      }
+      if (sceneDirections.requested_count) {
+        throw new HttpError(502,
+          "Studio could not write a valid storyboard from that brief. The writer could not produce exactly " +
+          sceneDirections.requested_count + " valid, distinct scenes after a bounded retry. Your original brief is unchanged; retry Propose.");
       }
       source = "fallback";
       scenes = assignOwnedScenes(fallbackProposalScenes(prompt, pool), pool);
