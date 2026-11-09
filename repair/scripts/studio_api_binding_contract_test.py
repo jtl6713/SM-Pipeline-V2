@@ -138,6 +138,30 @@ class StudioApiBindingContractTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             assert_live_contract(got, "arbitrary video API secret name rejected")
 
+    def test_restricted_video_canary_price_bindings_are_optional_secrets_only(self):
+        got = self.legacy_core()
+        got.update(RESERVATION_BINDINGS)
+        got["ELEVENLABS_API_KEY"] = "secret_text"
+        got["ELEVENLABS_VIDEO_API_KEY"] = "secret_text"
+        for name in (
+            "STUDIO_ELEVENLABS_VIDEO_PRICE_REVIEWED_AT",
+            "STUDIO_ELEVENLABS_VIDEO_CREDITS_4S_720P_9X16",
+        ):
+            got[name] = "secret_text"
+        self.assertTrue(assert_live_contract(got, "reviewed video price only")["ok"])
+        for name in (
+            "STUDIO_ELEVENLABS_VIDEO_PRICE_REVIEWED_AT",
+            "STUDIO_ELEVENLABS_VIDEO_CREDITS_4S_720P_9X16",
+        ):
+            self.assertTrue(assert_live_contract(got)["optional_present"][name])
+            got[name] = "plain_text"
+            with self.assertRaises(SystemExit):
+                assert_live_contract(got, "never leak reviewed video price binding")
+            got[name] = "secret_text"
+        got["STUDIO_ELEVENLABS_VIDEO_ENABLED"] = "secret_text"
+        with self.assertRaises(SystemExit):
+            assert_live_contract(got, "unreviewed paid enablement blocked")
+
     def test_b2_content_list_read_flag_is_optional_secret_only(self):
         got = self.legacy_core()
         got.update(RESERVATION_BINDINGS)
