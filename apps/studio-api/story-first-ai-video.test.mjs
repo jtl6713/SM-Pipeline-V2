@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  STORY_VIDEO_MODEL, normalizeStoryVideoSettings, videoPriceConfig, storyVideoQuote,
+  STORY_VIDEO_MODEL, STORY_VIDEO_MODELS, availableStoryVideoModels, buildStoryVideoProviderSettings, storyVideoPriceKey, normalizeStoryVideoSettings, videoPriceConfig, storyVideoQuote,
   requireStoryVideoPaidApproval, submitStoryVideo, readStoryVideo,
   isSafeStoryVideoDownloadUrl, downloadStoryVideo, storyVideoJobKey,
 } from "./story-first-ai-video.mjs";
@@ -18,9 +18,10 @@ const env = {
 const input = {prompt:"A beautiful golden-hour view of the Chicago River, cinematic slow push in",
   duration_secs:8, aspect_ratio:"9:16"};
 
-test("fixed safe Veo model, bounded duration and ratio; never generate audio", () => {
+test("Veo model retains safe defaults and rejects unsupported duration/ratio", () => {
   assert.deepEqual(normalizeStoryVideoSettings(input), {
     ...input, model_id:STORY_VIDEO_MODEL, resolution:"720p", generate_audio:false,
+    references:{ start_frame:null,end_frame:null,images:[],videos:[],audios:[] },
   });
   for (const duration_secs of [1,5,10]) {
     assert.throws(()=>normalizeStoryVideoSettings({...input,duration_secs}),/duration/);
@@ -64,7 +65,8 @@ test("only valid provider receipt is accepted and transport sends a single POST"
     return new Response(JSON.stringify({id:"Gen123456789",status:"pending"}),{status:200,headers:{"Content-Type":"application/json"}});
   };
   const settings=normalizeStoryVideoSettings(input);
-  assert.deepEqual(await submitStoryVideo(env,settings,fetcher),{id:"Gen123456789",status:"pending"});
+  assert.throws(()=>submitStoryVideo(env,settings,fetcher),/./);
+  assert.deepEqual(await submitStoryVideo(env,buildStoryVideoProviderSettings(settings),fetcher),{id:"Gen123456789",status:"pending"});
   assert.equal(calls.length,1);
   assert.equal(calls[0].url,"https://api.elevenlabs.io/v1/flows/video");
   assert.equal(JSON.parse(calls[0].options.body).generate_audio,false);
@@ -96,4 +98,78 @@ test("reject untrusted video download URLs (SSRF) and non-video content", async 
 
 test("job keys are scoped to exact idea and scene", () => {
   assert.equal(storyVideoJobKey("rec123",2),"studio/story-first/ai-video/v1/rec123/scene-2.json");
+});
+
+test("Seedance 2.5 is selectable but gated by separate API entitlement", async () => {
+  const seedance={...input,model_id:"bytedance-seedance-v2.5",duration_secs:20,
+    aspect_ratio:"4:3",resolution:"480p",generate_audio:true};
+  assert.equal(normalizeStoryVideoSettings(seedance).duration_secs,20);
+  assert.equal(availableStoryVideoModels(env).find(x=>x.id==="bytedance-seedance-v2.5").enabled,false);
+  assert.equal((await storyVideoQuote(env,seedance,Date.parse("2026-11-09T00:00:00Z"))).enabled,false);
+  assert.equal(availableStoryVideoModels({...env,STUDIO_ELEVENLABS_SEEDANCE_API_APPROVED:"true"})
+    .find(x=>x.id==="bytedance-seedance-v2.5").enabled,true);
+  assert.deepEqual(STORY_VIDEO_MODELS["bytedance-seedance-v2.5"].resolutions,["480p","720p"]);
+  assert.throws(()=>normalizeStoryVideoSettings({...seedance,duration_secs:31}),/duration/);
+  assert.throws(()=>normalizeStoryVideoSettings({...seedance,resolution:"1080p"}),/resolution/);
+});
+
+test("Veo frame, image reference and Seedance audio/video capabilities validate exact exclusivity", () => {
+  const ids=["recReferenceOne","recReferenceTwo","recReferenceThree"];
+  assert.equal(normalizeStoryVideoSettings({...input,references:{start_frame:ids[0],end_frame:ids[1]}})
+    .references.end_frame,ids[1]);
+  assert.throws(()=>normalizeStoryVideoSettings({...input,references:{end_frame:ids[1]}}),/start frame/);
+  assert.throws(()=>normalizeStoryVideoSettings({...input,references:{
+    start_frame:ids[0],images:[{asset_id:ids[1],role:"subject"}]}}),/OR free-form/);
+  assert.throws(()=>normalizeStoryVideoSettings({...input,duration_secs:4,references:{
+    images:[{asset_id:ids[0],role:"style"}]}}),/8-second/);
+  assert.throws(()=>normalizeStoryVideoSettings({...input,references:{
+    videos:[{asset_id:ids[0]}]}}),/not supported/);
+  const seedance=normalizeStoryVideoSettings({...input,model_id:"bytedance-seedance-v2.5",
+    references:{audios:[{asset_id:ids[0]}],videos:[{asset_id:ids[1]}] }});
+  assert.equal(seedance.references.audios.length,1);
+  assert.equal(seedance.references.videos.length,1);
+  assert.throws(()=>normalizeStoryVideoSettings({...input,
+    model_id:"bytedance-seedance-v2.5",
+    references:{images:[{asset_id:ids[0]},{asset_id:ids[1]},{asset_id:ids[2]},
+      {asset_id:"recReferenceFour"}]}}),/Too many/);
+});
+
+test("audio or reference options never inherit text-only credit pricing", async () => {
+  const now=Date.parse("2026-11-09T00:00:00Z");
+  const withAudio=await storyVideoQuote(env,{...input,generate_audio:true},now);
+  assert.equal(withAudio.enabled,false);
+  const withFrame=await storyVideoQuote(env,{...input,references:{start_frame:"recFrameOne"}},now);
+  assert.equal(withFrame.enabled,false);
+  const extra=storyVideoPriceKey({...input,generate_audio:true});
+  const priceMap={ [extra]: 350 };
+  const updated={...env,STUDIO_ELEVENLABS_VIDEO_AUDIO_ENABLED:"true",
+    STUDIO_ELEVENLABS_VIDEO_CREDIT_ESTIMATES_JSON:JSON.stringify(priceMap)};
+  assert.equal((await storyVideoQuote(updated,{...input,generate_audio:true},now)).estimated_credits,350);
+  assert.equal((await storyVideoQuote(updated,{...input,references:{start_frame:"recFrameOne"}},now)).enabled,false);
+});
+
+test("paid quote hashes exact referenced Media Assets and selected model settings", async () => {
+  const now=Date.parse("2026-11-09T00:00:00Z");
+  const withFrame={...input,references:{start_frame:"recFrameOne"}};
+  const priceKey=storyVideoPriceKey(withFrame);
+  const configured={...env,STUDIO_ELEVENLABS_VIDEO_CREDIT_ESTIMATES_JSON:
+    JSON.stringify({[priceKey]:300})};
+  const q=await storyVideoQuote(configured,withFrame,now);
+  assert.equal(q.estimated_credits,300);
+  const changed=await storyVideoQuote(configured,{...withFrame,references:{start_frame:"recFrameTwo"}},now);
+  assert.notEqual(q.quote_id,changed.quote_id);
+  assert.notEqual(q.quote_id,(await storyVideoQuote(configured,{...withFrame,
+    negative_prompt:"Avoid signage"},now)).quote_id);
+});
+
+test("provider payload converts trusted media only and never contains Airtable IDs or empty references", () => {
+  const s=normalizeStoryVideoSettings({...input,references:{
+    start_frame:"recReferenceOne"}});
+  assert.throws(()=>buildStoryVideoProviderSettings(s),/upload/);
+  const provider=buildStoryVideoProviderSettings(s,{provider_references:{
+    start_frame:{type:"asset",asset_id:"elevenId012345"}}});
+  assert.deepEqual(provider.start_frame,{type:"asset",asset_id:"elevenId012345"});
+  assert.equal(provider.references,undefined);
+  const basic=buildStoryVideoProviderSettings(normalizeStoryVideoSettings(input));
+  assert.equal(basic.references,undefined);
 });
