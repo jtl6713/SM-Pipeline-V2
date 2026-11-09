@@ -31,6 +31,28 @@ test("Veo model retains safe defaults and rejects unsupported duration/ratio", (
   assert.throws(()=>normalizeStoryVideoSettings({...input,prompt:"hello"}),/prompt/);
 });
 
+test("dedicated video key is mandatory; legacy narration key cannot authorize billing", async () => {
+  const onlyNarration = { ...env, ELEVENLABS_API_KEY: "voice-only-secret" };
+  delete onlyNarration.ELEVENLABS_VIDEO_API_KEY;
+  const now = Date.parse("2026-11-09T00:00:00Z");
+  const quote = await storyVideoQuote(onlyNarration, input, now);
+  assert.equal(quote.enabled, false);
+  assert.match(quote.reason, /key is not configured/);
+  const calls = [];
+  const http = async (url,options) => {
+    calls.push({url,options});
+    return new Response(JSON.stringify({id:"Gen123456789",status:"pending"}),{
+      headers:{"Content-Type":"application/json"},
+    });
+  };
+  const provider = buildStoryVideoProviderSettings(normalizeStoryVideoSettings(input));
+  await assert.rejects(
+    () => submitStoryVideo(onlyNarration,provider,http),
+    /video key/i,
+  );
+  assert.equal(calls.length,0,"missing video secret must never call ElevenLabs");
+});
+
 test("pricing must be enabled, fresh and configured; no fabricated zero-credit quote", () => {
   assert.equal(videoPriceConfig(env,8,Date.parse("2026-11-08T00:00:00Z")).estimated_credits,200);
   assert.equal(videoPriceConfig({...env,STUDIO_ELEVENLABS_VIDEO_ENABLED:"false"},8).enabled,false);
