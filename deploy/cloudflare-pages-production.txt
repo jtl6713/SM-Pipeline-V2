@@ -746,3 +746,5 @@ Deploy 2026-11-08 UI 0.6.918-scene-title: scene cards show Scene N only; details
 
 Deploy 2026-11-08 UI 0.6.919-manual-classification: Asset Manager individual and bulk classification editor, AI/manual precedence, history, release check.
 2026-11-08: Deploy Studio UI 0.6.920-current-ideas-only. Ideas shows the current intake queue without an Archived section.
+
+Deploy 2026-11-09 UI 0.6.921-approval-blackout: clear Production approval and Story status; compact alerts; explicit profile-local MAE blackout recovery. PR #1724.

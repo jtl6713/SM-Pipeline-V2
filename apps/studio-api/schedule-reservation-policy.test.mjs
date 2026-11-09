@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { maeResolveSeedSchedule, maeIsBlackoutLocalTime } from "./mae-schedule.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const worker02 = fs.readFileSync(path.join(here, "worker-functions-02.mjs"), "utf8");
@@ -36,14 +37,23 @@ test("already-committed approval retry revalidates current approval state and le
   assert.match(atomic, /__already_approved: true/);
 });
 
-test("Production Request Scheduled_At is preserved as explicit intent rather than silently re-picked", () => {
+test("Production Request valid explicit time stays exact, while blackout seed uses MAE", () => {
   const seed = sliceBetween(worker02, "async function studioAtomicApplyPlatformOutputSeedSchedule", "/*__STUDIO_WORKER_END:studioAtomicApplyPlatformOutputSeedSchedule__*/");
-  assert.match(seed, /const requestedSchedule = String\(desiredSchedule \|\| ""\)\.trim\(\)/);
-  assert.match(seed, /Production Request Output Scheduled_At is explicit scheduling intent/);
-  assert.match(seed, /Requested Platform Output seed schedule is invalid/);
-  assert.match(seed, /Requested Platform Output seed schedule is inside the profile-local blackout/);
-  assert.match(seed, /Requested Platform Output seed schedule conflicts with another output on this profile\/platform/);
-  assert.match(seed, /maeScheduleNextSlot\(/);
+  assert.match(seed, /maeResolveSeedSchedule\(\{/);
+  assert.match(seed, /requestedIso: desiredSchedule/);
+  assert.match(seed, /resolved\.reason === "invalid" \? 400 : 409/);
+  assert.match(seed, /Platform Output seed did not produce a safe, unoccupied schedule/);
+  const now = new Date("2026-11-08T20:00:00Z");
+  const requested = "2026-11-09T17:30:00.000Z";
+  const exact = maeResolveSeedSchedule({ requestedIso: requested, timeZone: "America/Chicago", now });
+  assert.equal(exact.ok, true);
+  assert.equal(exact.iso, requested);
+  const blocked = maeResolveSeedSchedule({ requestedIso: "2026-11-09T03:00:00.000Z",
+    timeZone: "America/Chicago", now });
+  assert.equal(blocked.ok, true);
+  assert.equal(blocked.adjusted, true);
+  assert.ok(Date.parse(blocked.iso) > Date.parse("2026-11-09T03:00:00.000Z"));
+  assert.equal(maeIsBlackoutLocalTime(Date.parse(blocked.iso), "America/Chicago"), false);
 });
 
 test("atomic seed schedule mutation is abortable and authoritatively verified", () => {
@@ -91,12 +101,21 @@ test("cron independently recovers stale Submitted approvals even when request pa
   assert.match(worker, /ctx\.waitUntil\(studioHealPromotedMissingFanout\(env, \{ limit: cadence\.heavy \? 8 : 4, ctx \}\)/);
 });
 
-test("Atomic seed respects a separate Story lane for companion scheduling", () => {
+test("Atomic seed respects separate Story lane and rejects collisions after MAE selection", () => {
   const seed = sliceBetween(worker02, "export async function studioAtomicApplyPlatformOutputSeedSchedule", "/*__STUDIO_WORKER_END:studioAtomicApplyPlatformOutputSeedSchedule__*/");
   assert.match(seed, /const seedOccupiedMs = outputType === "Story" \? laneMs : platformMs/);
-  assert.match(seed, /maeScheduleConflicts\(candidateMs, seedOccupiedMs\)/);
   assert.match(seed, /platformOccupiedMs: seedOccupiedMs/);
-  assert.match(seed, /if \(maeIsBlackoutLocalTime\(candidateMs, timeZone\)\)/);
-  assert.match(seed, /Requested Platform Output seed schedule conflicts with another output on this profile\/platform/);
+  assert.match(seed, /maeScheduleConflicts\(candidateMs, seedOccupiedMs\)/);
+  assert.match(seed, /maeIsBlackoutLocalTime\(candidateMs, timeZone\) \|\| maeScheduleConflicts/);
   assert.match(seed, /if \(vacate\)/);
+  const now = new Date("2026-11-08T20:00:00Z");
+  const raw = "2026-11-09T03:00:00Z";
+  const main = maeResolveSeedSchedule({ requestedIso: raw, timeZone: "America/Chicago", now });
+  const story = maeResolveSeedSchedule({ requestedIso: raw, timeZone: "America/Chicago", now, platformOccupiedMs: [] });
+  assert.equal(story.ok, true); // independent Story lane may share a companion time with the main.
+  assert.equal(story.iso, main.iso);
+  const competingStory = maeResolveSeedSchedule({ requestedIso: raw, timeZone: "America/Chicago", now,
+    platformOccupiedMs: [Date.parse(story.iso)] });
+  assert.equal(competingStory.ok, true);
+  assert.notEqual(competingStory.iso, story.iso);
 });

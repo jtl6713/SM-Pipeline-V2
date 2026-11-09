@@ -1,0 +1,18 @@
+/* Clear approval, scheduling and Story messages without vertical dead space. */
+#page-content .production-studio-form { row-gap: 16px; }
+#page-content #productionRequestMessage:empty { display: none; }
+#page-content #productionPromotionCompatibility { margin: 0; }
+#page-content .production-schedule-summary,
+#page-content .production-story-summary {
+ margin: 0; padding: 12px 16px; border: 1px solid #c8d7e4;
+ border-radius: 10px; background: #f3f7fb; color: #173853;
+ font-size: .85rem; line-height: 1.45; overflow-wrap: anywhere;
+}
+#page-content .production-schedule-summary[hidden],
+#page-content .production-story-summary[hidden] { display: none !important; }
+#page-content .production-studio-actions { margin-top: 0; padding-top: 8px; }
+@media (max-width: 720px) {
+ #page-content .production-studio-form { row-gap: 12px; }
+ #page-content .production-schedule-summary,
+ #page-content .production-story-summary { padding: 10px 12px; }
+}
