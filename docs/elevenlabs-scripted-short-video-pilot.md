@@ -25,13 +25,12 @@ render a final video, schedule or publish anything.
 ## Admin prerequisites (OFF by default)
 
 Use managed Worker secrets and configuration; never store actual tokens in the
-repository. Existing `ELEVENLABS_API_KEY` must have ElevenLabs Image & Video
-(or Flows) permission on a Pro-or-higher account.
+repository. The existing `ELEVENLABS_API_KEY` remains narration-only. `ELEVENLABS_VIDEO_API_KEY` is a *different* budget-capped secret with Image & Video (Flows) permission on a Pro-or-higher account. There is deliberately no fallback between them.
 
 | Worker setting | Required behavior |
 | --- | --- |
 | `STUDIO_ELEVENLABS_VIDEO_ENABLED` | Exactly `true` to enable paid requests |
-| `ELEVENLABS_API_KEY` | Existing managed ElevenLabs key with video API access |
+| `ELEVENLABS_VIDEO_API_KEY` | Dedicated managed video-only key, not the existing narration key; must be installed separately |
 | `STUDIO_ELEVENLABS_VIDEO_PRICE_REVIEWED_AT` | Actual reviewed pricing date YYYY-MM-DD; fails closed after 30 days |
 | `STUDIO_ELEVENLABS_VIDEO_CREDITS_4S_720P_9X16` | Positively verified, integer estimated credits for 4-second Veo 3.1 Fast **video without audio** at 9:16 |
 | `STUDIO_ELEVENLABS_VIDEO_CREDITS_6S_720P_9X16` | Ditto for 6 seconds |
@@ -108,6 +107,19 @@ It is not part of this single-scene pilot. Also add automated admin
 reconciliation for ambiguous receipts and stranded `accepting` states before
 high-volume rollout.
 
+
+## Safe setup for a newly created restricted Video API Key
+
+1. In ElevenLabs, verify the new `ChicagoShining Studio Video AI` key has **Image & Video Generation = Access**, **Text to Speech = No Access**, and a **10,000-credit per-refresh-period limit**. This key is different from the existing TTS key. Do not share its value in chat or screenshots.
+2. In GitHub repository `jtl6713/SM-Pipeline-V2`, choose **Settings → Secrets and variables → Actions → New repository secret**. Name it exactly `ELEVENLABS_VIDEO_API_KEY`. Paste the raw new key as the secret *value*. GitHub displays only the name afterward, not the value. Do **not** replace `ELEVENLABS_API_KEY`.
+3. GitHub repository secret storage **does not** automatically configure the Cloudflare Worker, and this draft PR must not be deployed to production merely to test a key.
+4. **Only after this PR is merged and the deployed Worker binding contract is compatible**, run the main-branch manual workflow **Install Dedicated Studio ElevenLabs Video API Secret** (`.github/workflows/put-studio-api-elevenlabs-video-secret.yml`). It installs the key as `secret_text` on **`chicagoshining-studio-api`** using Cloudflare's secrets endpoint, checks the original TTS binding, and never prints the value.
+5. The workflow does *not* set `STUDIO_ELEVENLABS_VIDEO_ENABLED`, create an ElevenLabs generation, change Airtable/Supabase source authority, or authorize publishing. Follow the separately gated pricing, rights and one-scene canary procedure before enabling this feature.
+
+The dedicated video API key is required for every video quote, reference upload,
+video status check, and generation request. The existing `ELEVENLABS_API_KEY`
+is intentionally rejected as a fallback for video. Never place keys in a Git
+file, PR comment, browser URL, plaintext Cloudflare variable or log.
 
 ## Expanded API capability and safety contract
 
