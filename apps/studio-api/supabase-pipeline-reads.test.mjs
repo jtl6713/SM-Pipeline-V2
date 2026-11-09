@@ -823,6 +823,18 @@ test("phase5 docs keep Airtable as write source of truth", async () => {
   assert.match(readme, /content_items/);
   assert.match(readme, /studio_side_effect_outbox/);
   assert.match(readme, /legacy export/);
+  assert.match(readme, /Phase 6 is documented and not started/);
+  const phase6 = await readFile(path.join(here, "../../docs/supabase-migration/phase6/README.md"), "utf8");
+  const handoff = await readFile(path.join(here, "../../docs/handoffs/supabase-phase6-handoff.md"), "utf8");
+  const index = await readFile(path.join(here, "../../docs/supabase-migration/README.md"), "utf8");
+  for (const doc of [phase6, handoff, index]) {
+    assert.match(doc, /Airtable remains the write source of truth|Writes are still Airtable|Airtable is still the write source of truth/);
+    assert.match(doc, /not started|Not started/);
+    assert.match(doc, /STUDIO_WRITE_SOURCE/);
+  }
+  assert.match(handoff, /Do not execute Phase 6 until he says to/);
+  assert.match(phase6, /production_requests/);
+  assert.match(index, /Phase 7/);
   const sql = await readFile(path.join(here, "../../docs/supabase-migration/phase5/003_side_effect_outbox.sql"), "utf8");
   assert.match(sql, /create table if not exists studio_side_effect_outbox/);
 });
