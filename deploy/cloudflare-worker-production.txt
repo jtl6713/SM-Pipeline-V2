@@ -982,3 +982,5 @@ Deploy 2026-11-09 Worker 0.10.785-home-ideas-airtable-unpromoted: Home Ideas col
 Deploy 2026-11-09 Worker 0.10.786-home-airtable-supabase-parity: Home force refresh compares Supabase overview columns to Airtable and reconciles mismatches to Airtable. Keep STUDIO_HOME_READ_SOURCE=supabase. No read-flag changes.
 
 Deploy 2026-11-09 Worker 0.10.787-home-parity-after-publish: publish Supabase Home snapshot inside the 26s canary path, then compare Airtable columns asynchronously and reconcile mismatches. Keep STUDIO_HOME_READ_SOURCE=supabase.
+
+Deploy 2026-11-09 Worker 0.10.788-home-display-parity: Home Airtable↔Supabase parity compares the same display math the All Profiles table uses (calendar slots + awaiting for Pipeline/Future/Past Due) and reconciles full Airtable display payloads without changing the manual snapshot generation. Keep STUDIO_HOME_READ_SOURCE=supabase.
