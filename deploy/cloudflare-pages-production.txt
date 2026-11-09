@@ -749,3 +749,5 @@ Deploy 2026-11-08 UI 0.6.919-manual-classification: Asset Manager individual and
 
 Deploy 2026-11-09 UI 0.6.921-approval-blackout: clear Production approval and Story status; compact alerts; explicit profile-local MAE blackout recovery. PR #1724.
 Deploy Studio UI 0.6.922 ElevenLabs Script a Short video pilot on Pages; feature billing remains disabled, Worker 0.10.781 verified, preserve preview/production safeguards. 2026-11-09.
+
+Deploy Studio UI 0.6.923-ai-video-progress after PR #1757: lock ElevenLabs video quote/generate before save and price fetch, show per-scene inline progress, prevent duplicate paid submissions after uncertain receipt. 2026-11-09.
