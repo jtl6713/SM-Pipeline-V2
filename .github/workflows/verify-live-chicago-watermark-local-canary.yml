@@ -131,9 +131,9 @@ jobs:
               sys.exit(1)
           WATERMARK_CANARY_PY
           python - <<'PY' > /tmp/chicago-watermark-canary-request.json
-          import base64,json
+          import base64,gzip,json
           from pathlib import Path
-          script=base64.b64encode(Path('/tmp/chicago-watermark-canary.py').read_bytes()).decode('ascii')
+          script=base64.b64encode(gzip.compress(Path('/tmp/chicago-watermark-canary.py').read_bytes(),compresslevel=9)).decode('ascii')
           command=r'''$ErrorActionPreference='Stop'
           $root=(Get-Location).Path
           $runnerRoot=Join-Path $root 'Services\pipeline-runner\service'
@@ -156,8 +156,11 @@ jobs:
           $previousPath=$env:PYTHONPATH
           try {
               $scriptPath=Join-Path $testRoot 'synthetic_watermark_canary.py'
-              $bytes=[Convert]::FromBase64String('@@SCRIPT_BASE64@@')
-              [System.IO.File]::WriteAllBytes($scriptPath,$bytes)
+              $packed=[Convert]::FromBase64String('@@SCRIPT_GZIP_BASE64@@')
+              $memory=[IO.MemoryStream]::new($packed)
+              $zip=[IO.Compression.GzipStream]::new($memory,[IO.Compression.CompressionMode]::Decompress)
+              $output=[IO.File]::Create($scriptPath)
+              try { $zip.CopyTo($output) } finally { $output.Dispose(); $zip.Dispose(); $memory.Dispose() }
               $env:PYTHONPATH=$runnerRoot
               $env:PYTHONDONTWRITEBYTECODE='1'
               Set-Location $runnerRoot
@@ -168,7 +171,9 @@ jobs:
               $env:PYTHONPATH=$previousPath
               Remove-Item -Path $testRoot -Recurse -Force -ErrorAction SilentlyContinue
           }'''
-          command=command.replace('@@SCRIPT_BASE64@@',script)
+          command=command.replace('@@SCRIPT_GZIP_BASE64@@',script)
+          print('ops_shell_command_chars='+str(len(command)),file=__import__('sys').stderr)
+          if len(command)>7800: raise SystemExit('ops_shell_command_size_exceeded')
           print(json.dumps({'command':command,'confirm':True}))
           PY
           echo 'local_synthetic_watermark_canary_prepared=YES'
@@ -182,7 +187,7 @@ jobs:
             -H 'Content-Type: application/json' \
             --data-binary @/tmp/chicago-watermark-canary-request.json || true)
           echo "runner_canary_start_http=$code"
-          if [[ "$code" != 202 && "$code" != 200 ]]; then exit 1; fi
+          if [[ "$code" != 202 && "$code" != 200 ]]; then jq -r '.error // "ops_rejected_command"' /tmp/canary-start.json | cut -c1-200; exit 1; fi
           job=$(jq -r '.job.id // .jobId // empty' /tmp/canary-start.json)
           test -n "$job"
           for n in $(seq 1 65); do
