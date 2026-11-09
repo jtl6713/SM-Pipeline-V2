@@ -748,3 +748,4 @@ Deploy 2026-11-08 UI 0.6.919-manual-classification: Asset Manager individual and
 2026-11-08: Deploy Studio UI 0.6.920-current-ideas-only. Ideas shows the current intake queue without an Archived section.
 
 Deploy 2026-11-09 UI 0.6.921-approval-blackout: clear Production approval and Story status; compact alerts; explicit profile-local MAE blackout recovery. PR #1724.
+Deploy Studio UI 0.6.922 ElevenLabs Script a Short video pilot on Pages; feature billing remains disabled, Worker 0.10.781 verified, preserve preview/production safeguards. 2026-11-09.
