@@ -429,7 +429,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_read_source: studioReadSource\(env\)/);
   assert.match(worker, /studio_pipeline_read_source: studioPipelineReadSource\(env\)/);
   assert.match(worker, /studio_supabase_pipeline_read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES/);
-  assert.match(worker, /version: "0\.10\.777-supabase-b1-pipeline-reads"/);
+  assert.match(worker, /version: "0\.10\.778-supabase-b1-pipeline-reads"/);
   const pipelineFns = await readFile(path.join(here, "worker-functions-03.mjs"), "utf8");
   assert.match(pipelineFns, /studioPipelineReadSource\(env\) === "supabase"/);
   assert.doesNotMatch(
