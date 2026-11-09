@@ -583,7 +583,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_supabase_pipeline_read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES/);
   const release = /version: "0\.10\.(\d+)-[^"]+"/.exec(worker);
   assert.ok(release, "Worker /health must identify a versioned release");
-  assert.ok(Number(release[1]) >= 786, "Home Airtable/Supabase parity hardener cannot regress behind Worker 0.10.786");
+  assert.ok(Number(release[1]) >= 787, "Home Airtable/Supabase parity hardener cannot regress behind Worker 0.10.787");
   const pipelineFns = await readFile(path.join(here, "worker-functions-03.mjs"), "utf8");
   assert.match(pipelineFns, /studioPipelineReadSource\(env\) === "supabase"/);
   assert.match(pipelineFns, /studioContentReadSource\(env\) === "supabase"/);
