@@ -172,6 +172,7 @@ async function elevenJson(env, path, options = {}, fetcher = fetch) {
 }
 
 export async function submitStoryVideo(env, settings, fetcher = fetch) {
+  if (settings?.references) throw fail(400, "Upload and translate canonical Media Asset references before provider submission");
   const result = await elevenJson(env, "/v1/flows/video", {
     method: "POST", body: JSON.stringify(settings),
   }, fetcher);
