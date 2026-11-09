@@ -21,7 +21,7 @@ Return exactly this structure:
 }}
 
 SCENE RULES
-- Write 6 to 8 scenes unless the brief clearly asks for a different count between 4 and 10.
+- {scene_count_rule}
 - suggested_visual is a concrete shot description (place, subject, framing, light/time of day). Never paste the whole brief. Never write planning commentary, concept essays, or media-sourcing instructions.
 - voiceover_text is spoken audio only. No stage directions, no "you still need a photo", no library or media selection instructions, no camera directions.
 - Scenes must be distinct. Do not repeat the same visual or spoken line.
@@ -64,7 +64,7 @@ Return exactly this structure:
 }}
 
 SCENE RULES
-- Write 6 to 8 scenes when the catalog has at least 6 assets. If the catalog is smaller, use every usable asset, at least 4 when 4 or more exist.
+- {scene_count_rule}
 - Each scene uses ONE asset. Never reuse a media_asset_id or Asset Name.
 - suggested_visual MUST be copied exactly from the catalog's name field. Do not invent filenames. Do not describe a shot that is not in the catalog.
 - media_asset_id MUST be the matching catalog id for that name.
@@ -96,7 +96,7 @@ LIBRARY MEDIA CATALOG (use only these)
 {catalog}
 
 FINAL SELF-CHECK
-- scenes length is between 4 and 8, or equal to the catalog size when the catalog is smaller than 4.
+- {scene_count_check}
 - Every suggested_visual and media_asset_id pair exists in the catalog.
 - No duplicate assets.
 - Every voiceover_text is spoken words only.
@@ -110,8 +110,16 @@ def build_creative_first_prompt(
     location: str,
     market: str,
     creative_guidance: dict | None = None,
+    required_scene_count: int | None = None,
 ) -> str:
+    scene_rule = (
+        f"Write EXACTLY {required_scene_count} distinct scenes in order. This is a hard requirement, "
+        "not a suggestion; the default 6-to-8-scene rule does not apply. Do not add hook/CTA scenes beyond this count."
+        if required_scene_count is not None else
+        "Write 6 to 8 scenes unless the brief clearly asks for a different count between 2 and 12."
+    )
     prompt = CREATIVE_FIRST_PROMPT_TEMPLATE.format(
+        scene_count_rule=scene_rule,
         title=title or "",
         summary=summary or "",
         location=location or "",
@@ -128,8 +136,22 @@ def build_timed_script_prompt(
     market: str,
     catalog: list[dict],
     creative_guidance: dict | None = None,
+    required_scene_count: int | None = None,
 ) -> str:
+    scene_rule = (
+        f"Write EXACTLY {required_scene_count} distinct scenes in order, using only approved catalog items. "
+        "Do not add scenes beyond the requested count or silently remove required shots."
+        if required_scene_count is not None else
+        "Write 6 to 8 scenes when the catalog has at least 6 assets. If the catalog is smaller, use every usable asset, at least 4 when 4 or more exist."
+    )
+    scene_check = (
+        f"The scenes array MUST have exactly {required_scene_count} entries."
+        if required_scene_count is not None else
+        "Scenes length is between 4 and 8, or equals the catalog size when the catalog is smaller than 4."
+    )
     prompt = PROMPT_TEMPLATE.format(
+        scene_count_rule=scene_rule,
+        scene_count_check=scene_check,
         title=title or "",
         summary=summary or "",
         location=location or "",

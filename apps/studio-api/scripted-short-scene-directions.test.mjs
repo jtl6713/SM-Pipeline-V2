@@ -304,3 +304,33 @@ test("reject the three-scene all-voiceover defect reported for sunset storyboard
   assert.match(result.errors.join(" "),/exactly 7 scenes/);
   assert.match(result.errors.join(" "),/voiceover/);
 });
+
+test("five requested scenes are hard constraints even when writer returns seven", () => {
+  const brief = "Make exactly five scenes about Chicago and give each a distinct visual and voiceover.";
+  const requirements = scriptedShortSceneDirections(brief);
+  assert.equal(requirements.requested_count, 5);
+  assert.equal(requirements.explicit_count, 5);
+  assert.equal(scriptedShortDirectedScenes(brief), null);
+  const bad = buildTimelineFromScenes(Array.from({length: 7}, (_,i) => ({
+    suggested_visual: "Distinct Chicago landmark " + (i + 1),
+    voiceover_text: "Voiceover for Chicago scene " + (i + 1) + ".",
+  })));
+  const checked = scriptedShortCheckBriefRequirements(brief, bad, []);
+  assert.equal(checked.ok, false);
+  assert.match(checked.errors.join(" "), /exactly 5 scenes, but the proposal contains 7/);
+});
+
+test("Producer forwards five requested scenes instead of falling back to generic seven-scene output", async () => {
+  const code = await readFile(new URL("./worker-functions-02.mjs", import.meta.url), "utf8");
+  const writer = code.split("export async function pulseIdeaTimedScriptWriter(")[1]
+    .split("/*__STUDIO_WORKER_END:pulseIdeaTimedScriptWriter__*/")[0];
+  const route = code.split("export async function proposeScriptedShortRoute(")[1]
+    .split("/*__STUDIO_WORKER_END:proposeScriptedShortRoute__*/")[0];
+  assert.match(writer, /required_scene_count: Number\.isInteger\(requiredSceneCount\)/);
+  assert.match(writer, /parsed\.length === requiredSceneCount/);
+  assert.match(writer, /creativeFirst \|\| requiredSceneCount/);
+  assert.match(route, /requiredSceneCount: sceneDirections\.requested_count/);
+  assert.match(route, /sceneDirections\.header_count !== sceneDirections\.explicit_count/);
+  assert.match(route, /if \(creativeFirst\) \{\s*throw new HttpError\(502/);
+  assert.match(route, /if \(sceneDirections\.requested_count\) \{/);
+});

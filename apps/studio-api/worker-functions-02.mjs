@@ -11958,7 +11958,7 @@ export function ideaTimedScriptCatalogRow(row) {
 }
 /*__STUDIO_WORKER_END:ideaTimedScriptCatalogRow__*/
 
-export async function pulseIdeaTimedScriptWriter(env, idea, catalog, { creativeFirst = false } = {}) {
+export async function pulseIdeaTimedScriptWriter(env, idea, catalog, { creativeFirst = false, requiredSceneCount = null } = {}) {
   const title = String(f(idea, "Candidate_Title") || "").trim();
   const summary = String(f(idea, "Idea_Summary") || "").trim();
   const location = String(f(idea, "Primary_Location") || f(idea, "Neighborhood_or_Area") || "").trim();
@@ -11994,11 +11994,12 @@ export async function pulseIdeaTimedScriptWriter(env, idea, catalog, { creativeF
       catalog: creativeFirst ? [] : compact,
       creative_guidance: creativeGuidance,
       creative_first: creativeFirst === true,
+      required_scene_count: Number.isInteger(requiredSceneCount) ? requiredSceneCount : null,
     }, "ITS1");
     if (response.ok && payload?.status === "ok") {
       const scenes = payload?.details?.run?.scenes || payload?.details?.themes?.scenes;
       const parsed = scenesFromModelPayload({ scenes }, creativeFirst ? [] : catalog);
-      if (parsed.length >= 2) {
+      if (parsed.length >= 2 && (!requiredSceneCount || parsed.length === requiredSceneCount)) {
         const contentErrors = storyboardSceneContentErrors(parsed, { brief: summary || title });
         if (!contentErrors.length) return { source: "its1", scenes: parsed };
         console.warn("ITS1 storyboard scene content rejected", idea?.id, contentErrors.slice(0, 3));
@@ -12010,7 +12011,8 @@ export async function pulseIdeaTimedScriptWriter(env, idea, catalog, { creativeF
   // Story-first authoring must never fall through to SAI1 slide themes or the
   // prompt-embedding proposal fallback. Those paths put planning text into
   // Required Visual / Voiceover.
-  if (creativeFirst) {
+  if (creativeFirst || requiredSceneCount) {
+    // A generic fallback cannot satisfy an operator-specified exact scene count.
     return { source: "failed", scenes: [] };
   }
   try {
@@ -12061,6 +12063,12 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
   const assetPolicy = parseScriptedShortAssetPolicy(prompt);
   const creativeFirst = payload?.creative_first === true;
   const sceneDirections = scriptedShortSceneDirections(creativeBrief);
+  if (sceneDirections.explicit_count && sceneDirections.header_count >= 2 &&
+      sceneDirections.header_count !== sceneDirections.explicit_count) {
+    throw new HttpError(409, "The brief requests " + sceneDirections.explicit_count +
+      " scenes, but provides " + sceneDirections.header_count +
+      " numbered scene headings. Correct the conflicting instructions before proposing.");
+  }
   const directedScenes = creativeFirst ? scriptedShortDirectedScenes(creativeBrief) : null;
   const synthetic = {
     id: "scripted-short-proposal",
@@ -12127,6 +12135,7 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
       // Story is authored against an empty inventory. Matching is a SECOND step.
       const writer = await pulseIdeaTimedScriptWriter(env, synthetic, creativeFirst ? [] : pool, {
         creativeFirst,
+        requiredSceneCount: sceneDirections.requested_count,
       });
       source = writer.source && writer.source !== "fallback" && writer.source !== "failed"
         ? writer.source : (creativeFirst ? "failed" : "fallback");
@@ -12144,7 +12153,13 @@ export async function proposeScriptedShortRoute(request, env, authorization, url
       // Required Visual / Voiceover is the defect that made storyboards unusable.
       if (creativeFirst) {
         throw new HttpError(502,
-          "Studio could not write a valid storyboard from that brief. Required visual and voiceover must be scene-specific narration, not planning text. Try again or number the scenes explicitly.");
+          "Studio could not write a valid storyboard from that brief. The writer could not produce exactly " + (sceneDirections.requested_count || "the required number of") +
+          " valid, distinct scenes after a bounded retry. Your original brief is unchanged; retry Propose.");
+      }
+      if (sceneDirections.requested_count) {
+        throw new HttpError(502,
+          "Studio could not write a valid storyboard from that brief. The writer could not produce exactly " +
+          sceneDirections.requested_count + " valid, distinct scenes after a bounded retry. Your original brief is unchanged; retry Propose.");
       }
       source = "fallback";
       scenes = assignOwnedScenes(fallbackProposalScenes(prompt, pool), pool);

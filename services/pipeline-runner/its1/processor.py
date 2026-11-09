@@ -126,8 +126,11 @@ def process_request(
     catalog: list[dict[str, Any]] | None = None,
     creative_guidance: dict[str, Any] | None = None,
     creative_first: bool = False,
+    required_scene_count: int | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    if required_scene_count is not None and (type(required_scene_count) is not int or not 2 <= required_scene_count <= 12):
+        raise ValueError("Requested scene count must be an integer between 2 and 12")
     stills = [item for item in (catalog or []) if isinstance(item, dict) and _still_id(item) and _still_name(item)]
     if creative_first:
         prompt = build_creative_first_prompt(
@@ -136,6 +139,7 @@ def process_request(
             location=location,
             market=market or "Chicago",
             creative_guidance=creative_guidance,
+            required_scene_count=required_scene_count,
         )
     else:
         prompt = build_timed_script_prompt(
@@ -145,6 +149,7 @@ def process_request(
             market=market or "Chicago",
             catalog=stills,
             creative_guidance=creative_guidance,
+            required_scene_count=required_scene_count,
         )
     preview = {
         "make_scenario_id": MAKE_SCENARIO_ID,
@@ -153,6 +158,7 @@ def process_request(
         "market": str(market or "Chicago").strip() or "Chicago",
         "catalog_count": len(stills),
         "creative_first": bool(creative_first),
+        "required_scene_count": required_scene_count,
         "prompt_chars": len(prompt),
     }
     if dry_run:
@@ -168,6 +174,30 @@ def process_request(
         if creative_first
         else normalize_scenes(generated["parsed"], stills)
     )
+    # Never accept a scene-count mismatch or silently drop unapproved beats.
+    # One bounded AI correction is safer than approving the wrong storyboard.
+    if required_scene_count is not None and len(scenes) != required_scene_count:
+        retry_prompt = (
+            prompt
+            + "\n\nCORRECTION REQUIRED: The previous AI proposal returned "
+            + str(len(scenes)) + " scenes but the operator requested EXACTLY "
+            + str(required_scene_count) + " scenes. Return a completely new, valid JSON "
+            "storyboard with exactly that many distinct, fully written scenes. "
+            "Preserve the requested story and any exact scene-specific instructions. "
+            "Do not copy an entire brief into individual scene text and do not invent media."
+        )
+        regenerated = generate_timed_script(retry_prompt)
+        scenes = (
+            normalize_creative_scenes(regenerated["parsed"])
+            if creative_first
+            else normalize_scenes(regenerated["parsed"], stills)
+        )
+        if len(scenes) != required_scene_count:
+            return {
+                "processed": False, "reason": "scene_count_mismatch",
+                "scenes": [], "actual_scene_count": len(scenes),
+                **preview,
+            }
     if len(scenes) < 2:
         return {"processed": False, "reason": "empty_scenes", "scenes": scenes, **preview}
     return {"processed": True, "scenes": scenes, **preview}

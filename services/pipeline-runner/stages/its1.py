@@ -24,6 +24,7 @@ def run(request: StageRequest) -> StageResult:
             "catalog": catalog,
             "creative_guidance": extra.get("creative_guidance") if isinstance(extra.get("creative_guidance"), dict) else {},
             "creative_first": bool(extra.get("creative_first")),
+            "required_scene_count": extra.get("required_scene_count"),
             "dry_run": bool(extra.get("dry_run")),
         },
         skip_message="ITS1 did not return a timed script",
