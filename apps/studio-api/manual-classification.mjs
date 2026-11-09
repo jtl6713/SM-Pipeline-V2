@@ -10,8 +10,8 @@ const MAX_ITEMS = 40;
 const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 function clean(value) {
   if (typeof value !== "string") throw new TypeError("Classification values must be strings");
-  const v = value.trim().replace(/\\s+/g, " ");
-  if (v.length > MAX_VALUE || /[\\u0000-\\u001f]/.test(v)) throw new RangeError("Invalid classification value");
+  const v = value.trim().replace(/\s+/g, " ");
+  if (v.length > MAX_VALUE || /[\u0000-\u001f]/.test(v)) throw new RangeError("Invalid classification value");
   return v;
 }
 function list(value) {
