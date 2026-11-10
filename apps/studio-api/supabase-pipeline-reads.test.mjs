@@ -24,6 +24,7 @@ import {
   mapAirtableIdeaToSupabase,
   mapAirtableProductionRequestToSupabase,
   packOutputListFields,
+  retainProjectionKeys,
   RUNNER_RECORD_PROJECTION,
   supabaseRestAll,
   listSupabaseFactoryDeskPack,
@@ -795,7 +796,14 @@ test("lean output upsert keeps a stored runner marker", async () => {
     const row = JSON.parse(post.body)[0];
     assert.equal(row.error_messages._runner_record_projection, "v1");
     assert.equal(row.error_messages.Publish_Retry_Eligible, true);
+    assert.equal(row.error_messages.Output_Notes, "old");
     assert.equal(row.error_messages._airtable_links.Content_Item, "recContent1");
+    const unmarked = retainProjectionKeys(
+      { Output_Notes: "stale" },
+      { Publish_Retry_Eligible: true },
+    );
+    assert.equal(unmarked.Output_Notes, undefined);
+    assert.equal(unmarked.Publish_Retry_Eligible, true);
   } finally {
     globalThis.fetch = originalFetch;
   }
