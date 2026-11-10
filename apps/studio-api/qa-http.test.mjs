@@ -189,7 +189,7 @@ test("Airtable canonical QA run assertion only passes on observed canonical row"
 });
 
 
-test("Runner attestation allows only the fixed health origin and Airtable source",async()=>{
+test("Runner attestation allows only the fixed health origin and known write sources",async()=>{
   let calls=0;
   const healthy=async()=>{
     calls++;
@@ -201,8 +201,12 @@ test("Runner attestation allows only the fixed health origin and Airtable source
   assert.equal(await verifiedRunnerVersion({PIPELINE_RUNNER_URL:"https://pipeline.chicagoshining.com"},healthy),
     "2026-11-05-video-watermark-scale-v2");
   assert.equal(calls,1);
-  const invalid=async()=>new Response(JSON.stringify({ok:true,service:"pipeline-runner",
+  const supabaseWrite=async()=>new Response(JSON.stringify({ok:true,service:"pipeline-runner",
     version:"v1",studio_write_source:"supabase"}),{status:200});
+  assert.equal(await verifiedRunnerVersion({PIPELINE_RUNNER_URL:"https://pipeline.chicagoshining.com"},supabaseWrite),
+    "v1");
+  const invalid=async()=>new Response(JSON.stringify({ok:true,service:"pipeline-runner",
+    version:"v1",studio_write_source:"mystery"}),{status:200});
   assert.equal(await verifiedRunnerVersion({PIPELINE_RUNNER_URL:"https://pipeline.chicagoshining.com"},invalid),
     "unverified");
   assert.equal(await verifiedRunnerVersion({PIPELINE_RUNNER_URL:"https://pipeline.chicagoshining.com"},

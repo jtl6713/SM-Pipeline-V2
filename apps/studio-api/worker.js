@@ -5270,6 +5270,7 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     airtableNextRequestAt = Math.max(airtableNextRequestAt, Date.now() + cooldown);
     console.warn("Airtable rate limited; failing fast", { attempt: 1, cooldownMs: cooldown });
   }
+  let airtableCommitted = response.ok;
   if (!response.ok) {
     // Soft-fail only ordinary Output/Content legacy exports. Callers that own
     // MAE verify under skipSupabaseWriteThrough still need Airtable to succeed.
@@ -5279,29 +5280,25 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
       body = mutationRecords.length === 1 && !raw.includes('"records"')
         ? mutationRecords[0]
         : { records: mutationRecords };
+      airtableCommitted = false;
     } else {
       const airtableType = body?.error?.type ? String(body.error.type) : "";
       const airtableMessage = body?.error?.message ? String(body.error.message) : "";
       const detail = [airtableType, airtableMessage].filter(Boolean).join(": ");
       throw new HttpError(response.status, detail ? `Airtable: ${detail}` : `Airtable request failed (${response.status})`);
     }
-  } else if (legacyExport && options?.skipSupabaseWriteThrough !== true) {
-    // Successful legacy export: refresh Supabase from the Airtable response.
-    await studioSupabaseWriteThroughAirtableMutation(env, tableId, method, body).catch((error) => {
-      console.warn("supabase airtable write-through failed", tableId, error);
-    });
   }
+  // Queue the summary change BEFORE optional Supabase mirror calls so a
+  // slow/broken mirror never prevents Home's near-real-time invalidation.
   // Callers that own the post-commit Supabase mirror (Factory approve,
   // schedule regen, calendar save) pass skipSupabaseWriteThrough so Airtable
   // verify under the scheduling lock is not followed by a second in-lock mirror.
-  // Queue the summary change BEFORE optional post-path mirrors so a slow/broken
-  // mirror never prevents Home's near-real-time invalidation.
   if (method !== "GET") {
     await notifyStudioProfileSummary(env, tableId, method, body).catch((error) => {
       console.warn("profile summary dirty notification failed", error);
     });
   }
-  if (options?.skipSupabaseWriteThrough !== true && !legacyExport) {
+  if (options?.skipSupabaseWriteThrough !== true && airtableCommitted) {
     await studioSupabaseWriteThroughAirtableMutation(env, tableId, method, body).catch((error) => {
       console.warn("supabase airtable write-through failed", tableId, error);
     });
