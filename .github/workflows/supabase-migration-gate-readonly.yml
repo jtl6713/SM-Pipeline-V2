@@ -186,6 +186,7 @@ jobs:
               "studio_content_read_source",
               "studio_factory_ops_read_source",
               "studio_home_read_source",
+              "studio_music_read_source",
               "studio_supabase_configured",
               "studio_supabase_phase5_writes_v1",
               "studio_supabase_phase6_writes_v1",
@@ -202,6 +203,7 @@ jobs:
           print(f"content_read_source={sync.get('content_read_source')!r}")
           print(f"factory_ops_read_source={sync.get('factory_ops_read_source')!r}")
           print(f"home_read_source={sync.get('home_read_source')!r}")
+          print(f"music_read_source={sync.get('music_read_source')!r}")
           print(f"phase5_writes={sync.get('phase5_writes')!r}")
           print(f"phase5_write_tables={sync.get('phase5_write_tables')!r}")
           print(f"phase6_writes={sync.get('phase6_writes')!r}")

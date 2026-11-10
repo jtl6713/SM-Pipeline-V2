@@ -170,6 +170,10 @@ OPTIONAL_BINDINGS = {
     # Home overview read gate. Optional until the secret is set.
     # Preserve secret_text; do not print or change the live value.
     "STUDIO_HOME_READ_SOURCE": "secret_text",
+    # Library music list read gate (GET /api/music). Optional until the
+    # enable-studio-music-reads workflow installs it. Preserve secret_text;
+    # do not print or change the live value during ordinary Worker deploys.
+    "STUDIO_MUSIC_READ_SOURCE": "secret_text",
     # Phase 5 write SoR switch for Output/Content updates. Optional until
     # enable-studio-write-sor installs it. Preserve secret_text; do not print
     # or change the live value during ordinary Worker deploys.

@@ -29,6 +29,7 @@ import {
   studioContentReadSource,
   studioFactoryOpsReadSource,
   studioHomeReadSource,
+  studioMusicReadSource,
   studioWriteSource,
   studioPhase5WritesMode,
   studioSupabaseConfigured,
@@ -39,12 +40,14 @@ import {
   listSupabaseContentItems,
   listSupabaseOverviewPack,
   listSupabaseFactoryDeskPack,
+  listSupabaseMusicRecords,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
   stripDeletedDuplicateOutputRecords,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
+  STUDIO_SUPABASE_MUSIC_READ_ROUTES,
   STUDIO_SUPABASE_READ_ROUTES,
 } from "./supabase-pipeline-reads.mjs";
 import { studioSupabaseMirrorSpotCheck } from "./supabase-mirror-check.mjs";
@@ -2001,9 +2004,11 @@ export async function getStudioSupabaseSyncStatus(request, env) {
     content_read_source: studioContentReadSource(env),
     factory_ops_read_source: studioFactoryOpsReadSource(env),
     home_read_source: studioHomeReadSource(env),
+    music_read_source: studioMusicReadSource(env),
     read_routes: STUDIO_SUPABASE_READ_ROUTES,
     pipeline_read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
     phase4_read_routes: STUDIO_SUPABASE_PHASE4_READ_ROUTES,
+    music_read_routes: STUDIO_SUPABASE_MUSIC_READ_ROUTES,
     studio_write_source: studioWriteSource(env),
     phase5_writes: studioPhase5WritesMode(env),
     phase5_write_tables: ["platform_outputs", "content_items"],
@@ -2045,8 +2050,10 @@ export async function postStudioSupabaseSync(request, env) {
     read_source: studioReadSource(env),
     factory_ops_read_source: studioFactoryOpsReadSource(env),
     home_read_source: studioHomeReadSource(env),
+    music_read_source: studioMusicReadSource(env),
     read_routes: STUDIO_SUPABASE_READ_ROUTES,
     phase4_read_routes: STUDIO_SUPABASE_PHASE4_READ_ROUTES,
+    music_read_routes: STUDIO_SUPABASE_MUSIC_READ_ROUTES,
     studio_write_source: studioWriteSource(env),
     phase5_writes: studioPhase5WritesMode(env),
     phase5_write_tables: ["platform_outputs", "content_items"],
@@ -2328,18 +2335,45 @@ export async function listMusic(request, env, url) {
     }
     const key = "music:linked:" + ids.slice().sort().join(",");
     const payload = await studioReadCoalesce(key, 60000, async () => {
+      if (studioMusicReadSource(env) === "supabase") {
+        try {
+          const packed = await listSupabaseMusicRecords(env, { ids });
+          return {
+            records: sortMusicRecords(packed.records || []).map(mapMusic),
+            selected_only: true,
+            read_source: "supabase",
+          };
+        } catch (error) {
+          console.warn("supabase music ids read failed; falling back to Airtable", error);
+        }
+      }
       const formula = "OR(" + ids.map((id) => 'RECORD_ID()="' + id + '"').join(",") + ")";
       const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
         limit: ids.length, filterFormula: formula,
       });
-      return { records: sortMusicRecords(records.filter(
-        (record) => String(f(record, "Asset_Role") || "") === "Music"
-      )).map(mapMusic), selected_only: true };
+      return {
+        records: sortMusicRecords(records.filter(
+          (record) => String(f(record, "Asset_Role") || "") === "Music"
+        )).map(mapMusic),
+        selected_only: true,
+        read_source: "airtable",
+      };
     });
     return respond(request, env, { ok: true, ...payload });
   }
   const limit = clampLimit(url, 100, 100);
   const payload = await studioReadCoalesce(`music:${limit}`, 60000, async () => {
+  if (studioMusicReadSource(env) === "supabase") {
+    try {
+      const packed = await listSupabaseMusicRecords(env, { limit });
+      return {
+        records: sortMusicRecords(packed.records || []).map(mapMusic),
+        read_source: "supabase",
+      };
+    } catch (error) {
+      console.warn("supabase music list read failed; falling back to Airtable", error);
+    }
+  }
   const [catalog, uploaded] = await Promise.all([
     listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
       limit,
@@ -2359,7 +2393,7 @@ export async function listMusic(request, env, url) {
     records.push(record);
   }
 
-  return { records: sortMusicRecords(records).map(mapMusic) };
+  return { records: sortMusicRecords(records).map(mapMusic), read_source: "airtable" };
   });
   return respond(request, env, { ok: true, ...payload });
 }

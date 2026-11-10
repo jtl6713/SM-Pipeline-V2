@@ -44,9 +44,15 @@ export const STUDIO_SUPABASE_PHASE4_READ_ROUTES = Object.freeze([
   "GET /api/operations/queue",
 ]);
 
+/** Library music list — GET /api/music only. Independent of Pipeline/Content/Home. */
+export const STUDIO_SUPABASE_MUSIC_READ_ROUTES = Object.freeze([
+  "/api/music",
+]);
+
 export const STUDIO_SUPABASE_READ_ROUTES = Object.freeze([
   ...STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   ...STUDIO_SUPABASE_PHASE4_READ_ROUTES,
+  ...STUDIO_SUPABASE_MUSIC_READ_ROUTES,
 ]);
 
 /** Large / unused-on-list Airtable columns — never pack into jsonb projection. */
@@ -148,6 +154,10 @@ export const MEDIA_ASSET_SYNC_FIELDS = Object.freeze([
   "File_Extension",
   "File_Size_Bytes",
   "Added_At",
+  // Library music extras densified into media_assets.metadata (no DDL).
+  "Rights_Status",
+  "Asset_Description",
+  "Studio_Transfer_ID",
 ]);
 
 /** Phase 6 half-hour queue backfill — status + Drive id payload; no file bytes. */
@@ -232,6 +242,20 @@ export function studioFactoryOpsReadSource(env) {
 export function studioHomeReadSource(env) {
   if (!studioSupabaseConfigured(env)) return "airtable";
   return String(env?.STUDIO_HOME_READ_SOURCE || "").trim().toLowerCase() === "supabase"
+    ? "supabase"
+    : "airtable";
+}
+
+/**
+ * Library music — GET /api/music only.
+ * Does not follow STUDIO_READ_SOURCE, Pipeline, Content, Factory/Ops, or Home.
+ * A deploy leaves music on Airtable until this secret is set.
+ * Opt-in: STUDIO_MUSIC_READ_SOURCE=supabase. Roll back with airtable or unset.
+ * Asset Manager /api/assets stays on Airtable (needs profile/classification columns).
+ */
+export function studioMusicReadSource(env) {
+  if (!studioSupabaseConfigured(env)) return "airtable";
+  return String(env?.STUDIO_MUSIC_READ_SOURCE || "").trim().toLowerCase() === "supabase"
     ? "supabase"
     : "airtable";
 }
@@ -632,6 +656,103 @@ export function airtableShapedContentFromSupabase(row) {
         : (Array.isArray(bag.Content_Profile) ? bag.Content_Profile : []),
     },
   };
+}
+
+/**
+ * Shape a media_assets row for mapMusic / music helpers.
+ * Drive ids stay on columns; library extras and studio CDN URLs live in metadata
+ * because google_drive_url intentionally drops media.chicagoshining.com values.
+ */
+export function airtableShapedMusicFromSupabase(row) {
+  const meta = isPlainObject(row?.metadata) ? row.metadata : {};
+  const bytes = row?.file_size_bytes != null && Number.isFinite(Number(row.file_size_bytes))
+    ? Number(row.file_size_bytes)
+    : null;
+  const sizeMb = bytes != null
+    ? bytes / (1024 * 1024)
+    : (meta.file_size_mb != null && Number.isFinite(Number(meta.file_size_mb))
+      ? Number(meta.file_size_mb)
+      : null);
+  const driveUrl = row?.google_drive_url || meta.google_drive_url || null;
+  return {
+    id: row.airtable_record_id,
+    createdTime: row.created_at || meta.added_at || undefined,
+    fields: {
+      "Asset Name": row.asset_name || null,
+      Media_Class: row.media_class || null,
+      Asset_Role: row.asset_role || "Music",
+      Asset_Status: row.asset_status || null,
+      Active: row.active !== false,
+      Do_Not_Use: Boolean(row.do_not_use),
+      Studio_Favorite: Boolean(row.studio_favorite),
+      "Google Drive File ID": row.google_drive_file_id || null,
+      "Google Drive URL": driveUrl,
+      MIME_Type: row.mime_type || null,
+      File_Extension: row.file_extension || null,
+      File_Size_Bytes: bytes,
+      File_Size_MB: sizeMb,
+      Rights_Status: meta.rights_status || null,
+      Asset_Description: meta.asset_description || null,
+      Studio_Transfer_ID: meta.studio_transfer_id || null,
+      Added_At: meta.added_at || row.created_at || null,
+    },
+  };
+}
+
+const MEDIA_MUSIC_SELECT = [
+  "airtable_record_id",
+  "asset_name",
+  "media_class",
+  "asset_role",
+  "asset_status",
+  "active",
+  "do_not_use",
+  "studio_favorite",
+  "google_drive_file_id",
+  "google_drive_url",
+  "mime_type",
+  "file_extension",
+  "file_size_bytes",
+  "metadata",
+  "created_at",
+  "updated_at",
+].join(",");
+
+/**
+ * GET /api/music Supabase path. Returns Airtable-shaped Music role rows.
+ * Prefer favorites then name; caller applies sortMusicRecords + mapMusic.
+ */
+export async function listSupabaseMusicRecords(env, { limit = 100, ids = null } = {}) {
+  if (Array.isArray(ids) && ids.length) {
+    const unique = [...new Set(ids.map((id) => String(id || "").trim()).filter(Boolean))];
+    const records = [];
+    for (let i = 0; i < unique.length; i += 40) {
+      const batch = unique.slice(i, i + 40);
+      const orParts = batch.map((id) => `airtable_record_id.eq.${id}`).join(",");
+      const rows = await supabaseRest(
+        env,
+        `media_assets?or=(${orParts})&asset_role=eq.Music&select=${MEDIA_MUSIC_SELECT}&limit=${batch.length}`,
+      );
+      for (const row of rows || []) {
+        if (row?.airtable_record_id) records.push(airtableShapedMusicFromSupabase(row));
+      }
+    }
+    return { records, read_source: "supabase" };
+  }
+
+  const capped = Math.max(1, Math.min(500, Number(limit) || 100));
+  // Airtable merges view + uploaded slices (up to 2× limit). Pull a wider
+  // Music-role page so studio-library uploads missing from the view still appear.
+  const fetchLimit = Math.min(500, Math.max(capped, capped * 2));
+  const rows = await supabaseRest(
+    env,
+    `media_assets?asset_role=eq.Music&select=${MEDIA_MUSIC_SELECT}`
+      + `&order=studio_favorite.desc,asset_name.asc.nullslast&limit=${fetchLimit}`,
+  );
+  const records = (rows || [])
+    .filter((row) => row?.airtable_record_id)
+    .map(airtableShapedMusicFromSupabase);
+  return { records, read_source: "supabase" };
 }
 
 export function airtableShapedIdeaFromSupabase(row) {
@@ -2262,6 +2383,13 @@ export async function syncAirtableProductionRequestRowToSupabase(env, record) {
  * on the Airtable body are sent, and file bytes are never written. An insert
  * requires Asset Name because media_assets.asset_name is not null. A thinner
  * body patches an existing row.
+ *
+ * Library extras (rights, description, transfer id, added_at) and studio CDN
+ * URLs densify into media_assets.metadata so music list reads can leave
+ * Airtable without a DDL migration. google_drive_url still drops
+ * media.chicagoshining.com values; the raw URL is kept under metadata.
+ * Partial patches that omit library fields do not send metadata, so a
+ * favorite-only PATCH cannot wipe densified keys.
  */
 function mediaAssetWriteThroughRow(record) {
   const fields = record?.fields || {};
@@ -2300,7 +2428,35 @@ function mediaAssetWriteThroughRow(record) {
     const size = Number(fields.File_Size_Bytes);
     if (Number.isFinite(size)) row.file_size_bytes = Math.trunc(size);
   }
+  const meta = {};
+  if ("Rights_Status" in fields) {
+    meta.rights_status = selectName(fields.Rights_Status) || text(fields.Rights_Status);
+  }
+  if ("Asset_Description" in fields) {
+    meta.asset_description = text(fields.Asset_Description);
+  }
+  if ("Studio_Transfer_ID" in fields) {
+    meta.studio_transfer_id = text(fields.Studio_Transfer_ID);
+  }
+  if ("Added_At" in fields) {
+    meta.added_at = text(fields.Added_At) || fields.Added_At || null;
+  }
+  if ("Google Drive URL" in fields) {
+    const rawUrl = text(fields["Google Drive URL"]);
+    if (rawUrl) meta.google_drive_url = rawUrl;
+  }
+  if (Object.keys(meta).length) row.metadata = meta;
   return row;
+}
+
+async function mergeMediaAssetMetadata(env, recordId, patchMeta) {
+  if (!patchMeta || typeof patchMeta !== "object" || !Object.keys(patchMeta).length) return null;
+  const existing = await supabaseRest(
+    env,
+    `media_assets?airtable_record_id=eq.${encodeURIComponent(recordId)}&select=metadata&limit=1`,
+  ).catch(() => []);
+  const prior = isPlainObject(existing?.[0]?.metadata) ? existing[0].metadata : {};
+  return { ...prior, ...patchMeta };
 }
 
 export async function syncAirtableMediaAssetRowToSupabase(env, record) {
@@ -2308,6 +2464,9 @@ export async function syncAirtableMediaAssetRowToSupabase(env, record) {
   if (!record?.id) return { skipped: true, reason: "missing_record" };
   const row = mediaAssetWriteThroughRow(record);
   if (!Object.keys(row).length) return { skipped: true, reason: "empty_patch" };
+  if (row.metadata) {
+    row.metadata = await mergeMediaAssetMetadata(env, record.id, row.metadata) || row.metadata;
+  }
   if (row.asset_name) {
     await upsertChunk(env, "media_assets", [{
       airtable_record_id: record.id,

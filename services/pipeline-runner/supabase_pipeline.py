@@ -569,7 +569,12 @@ def _mirror_request(settings: dict, record: dict) -> None:
 
 
 def _media_row(record: dict) -> dict:
-    """Scalar Media Asset metadata. Drive id and URL only; never file bytes."""
+    """Scalar Media Asset metadata. Drive id and URL only; never file bytes.
+
+    Library extras and studio CDN URLs densify into media_assets.metadata so
+    Worker music list reads can leave Airtable. google_drive_url still drops
+    media.chicagoshining.com; the raw URL is kept under metadata.
+    """
     fields = record.get("fields") or {}
     row: dict[str, Any] = {}
     if "Asset Name" in fields:
@@ -611,13 +616,46 @@ def _media_row(record: dict) -> dict:
             row["file_size_bytes"] = int(fields.get("File_Size_Bytes"))
         except (TypeError, ValueError):
             pass
+    meta: dict[str, Any] = {}
+    if "Rights_Status" in fields:
+        meta["rights_status"] = _select(fields.get("Rights_Status")) or _queue_text(fields.get("Rights_Status"))
+    if "Asset_Description" in fields:
+        meta["asset_description"] = _queue_text(fields.get("Asset_Description"))
+    if "Studio_Transfer_ID" in fields:
+        meta["studio_transfer_id"] = _queue_text(fields.get("Studio_Transfer_ID"))
+    if "Added_At" in fields:
+        added = _queue_text(fields.get("Added_At"))
+        meta["added_at"] = added if added is not None else fields.get("Added_At")
+    if "Google Drive URL" in fields:
+        raw_url = _queue_text(fields.get("Google Drive URL"))
+        if raw_url:
+            meta["google_drive_url"] = raw_url
+    if meta:
+        row["metadata"] = meta
     return row
+
+
+def _merge_media_metadata(settings: dict, record_id: str, patch_meta: dict) -> dict:
+    prior: dict[str, Any] = {}
+    try:
+        existing = _rest(
+            settings,
+            f"media_assets?airtable_record_id=eq.{record_id}&select=metadata&limit=1",
+            "GET",
+        )
+        if isinstance(existing, list) and existing and isinstance(existing[0].get("metadata"), dict):
+            prior = existing[0]["metadata"]
+    except Exception:
+        prior = {}
+    return {**prior, **patch_meta}
 
 
 def _mirror_media(settings: dict, record: dict) -> None:
     row = _media_row(record)
     if not row or not record.get("id"):
         return
+    if row.get("metadata"):
+        row["metadata"] = _merge_media_metadata(settings, record["id"], row["metadata"])
     if row.get("asset_name"):
         _rest(
             settings,

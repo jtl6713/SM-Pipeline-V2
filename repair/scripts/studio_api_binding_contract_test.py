@@ -260,6 +260,28 @@ class StudioApiBindingContractTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             assert_live_contract(got, "unknown write source flag")
 
+    def test_music_read_flag_is_optional_secret_and_keeps_earlier_flags(self):
+        got = self.legacy_core()
+        got.update(RESERVATION_BINDINGS)
+        got["STUDIO_CONTENT_READ_SOURCE"] = "secret_text"
+        got["STUDIO_FACTORY_OPS_READ_SOURCE"] = "secret_text"
+        got["STUDIO_HOME_READ_SOURCE"] = "secret_text"
+        got["STUDIO_WRITE_SOURCE"] = "secret_text"
+        self.assertTrue(assert_live_contract(got, "Music flag absent")["ok"])
+        got["STUDIO_MUSIC_READ_SOURCE"] = "secret_text"
+        result = assert_live_contract(got, "Music flag present")
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["optional_present"]["STUDIO_MUSIC_READ_SOURCE"])
+        self.assertTrue(result["optional_present"]["STUDIO_HOME_READ_SOURCE"])
+        self.assertTrue(result["optional_present"]["STUDIO_WRITE_SOURCE"])
+        got["STUDIO_MUSIC_READ_SOURCE"] = "plain_text"
+        with self.assertRaises(SystemExit):
+            assert_live_contract(got, "Music flag type mismatch")
+        got.pop("STUDIO_MUSIC_READ_SOURCE")
+        got["STUDIO_MUSIC_READ_SOURCE_BYPASS"] = "secret_text"
+        with self.assertRaises(SystemExit):
+            assert_live_contract(got, "unknown Music flag")
+
     def test_unknown_scheduling_binding_is_still_rejected(self):
         got = self.legacy_core()
         got.update(RESERVATION_BINDINGS)
