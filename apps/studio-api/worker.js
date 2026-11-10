@@ -179,6 +179,11 @@ import {
   studioContentReadSource,
   studioFactoryOpsReadSource,
   studioHomeReadSource,
+  studioWriteSource,
+  studioPhase5WritesMode,
+  studioLegacyExportEnabled,
+  parseAirtableMutationRecords,
+  studioSupabaseCommitOutputContentFirst,
   studioSupabaseConfigured,
   listSupabasePipelineOutputs,
   listSupabaseScheduleGrid,
@@ -1328,7 +1333,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.800-supabase-phase5-runner-marker-backfill",
+          version: "0.10.801-supabase-phase5-write-sor",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -1354,6 +1359,8 @@ export default {
           studio_supabase_approve_writethrough_v1: true,
           studio_supabase_phase5_writes_v1: true,
           studio_supabase_phase6_writes_v1: true,
+          studio_write_source: studioWriteSource(env),
+          studio_phase5_writes: studioPhase5WritesMode(env),
           studio_read_source: studioReadSource(env),
           studio_pipeline_read_source: studioPipelineReadSource(env),
           studio_content_read_source: studioContentReadSource(env),
@@ -5205,6 +5212,18 @@ function studioMarkMappedListDirty() {
 /*__STUDIO_WORKER_EXTRACT:studioReadCoalesce__*/
 async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   studioInvalidateHotReads(env, tableId, options?.method);
+  const method = String(options?.method || "GET").toUpperCase();
+  const legacyExport = method === "PATCH" && studioLegacyExportEnabled(env, tableId);
+  const mutationRecords = legacyExport
+    ? parseAirtableMutationRecords(pathOrParams, options?.body)
+    : [];
+  // STUDIO_WRITE_SOURCE=supabase: Output/Content PATCH commits to Supabase
+  // first. Creates (POST) still mint Airtable rec ids. Schedule/approve paths
+  // that pass skipSupabaseWriteThrough still require a successful Airtable
+  // export so MAE verify can re-read Airtable under the reservation lock.
+  if (legacyExport && mutationRecords.length) {
+    await studioSupabaseCommitOutputContentFirst(env, tableId, mutationRecords);
+  }
   const suffix = pathOrParams ? (pathOrParams.startsWith("?") || pathOrParams.startsWith("/") ? pathOrParams : `/${pathOrParams}`) : "";
   const tableRef = encodeURIComponent(String(tableId));
   const endpoint = `https://api.airtable.com/v0/${env.AIRTABLE_BASE_ID}/${tableRef}${suffix}`;
@@ -5230,7 +5249,7 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
       source,
       table_kind: String(tableId) === String(env.AIRTABLE_OUTPUT_TABLE_ID) ? "outputs"
         : String(tableId) === String(env.AIRTABLE_IDEA_TABLE_ID) ? "ideas" : "other",
-      method: String(options.method || "GET").toUpperCase(),
+      method,
       status: response?.status ?? 0,
       duration_ms: Date.now() - airtableRequestStarted,
       at: new Date().toISOString(),
@@ -5251,25 +5270,36 @@ async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
     airtableNextRequestAt = Math.max(airtableNextRequestAt, Date.now() + cooldown);
     console.warn("Airtable rate limited; failing fast", { attempt: 1, cooldownMs: cooldown });
   }
+  let airtableCommitted = response.ok;
   if (!response.ok) {
-    const airtableType = body?.error?.type ? String(body.error.type) : "";
-    const airtableMessage = body?.error?.message ? String(body.error.message) : "";
-    const detail = [airtableType, airtableMessage].filter(Boolean).join(": ");
-    throw new HttpError(response.status, detail ? `Airtable: ${detail}` : `Airtable request failed (${response.status})`);
+    // Soft-fail only ordinary Output/Content legacy exports. Callers that own
+    // MAE verify under skipSupabaseWriteThrough still need Airtable to succeed.
+    if (legacyExport && mutationRecords.length && options?.skipSupabaseWriteThrough !== true) {
+      console.warn("Airtable legacy export failed; keeping Supabase commit", tableId, response.status);
+      const raw = String(options?.body || "");
+      body = mutationRecords.length === 1 && !raw.includes('"records"')
+        ? mutationRecords[0]
+        : { records: mutationRecords };
+      airtableCommitted = false;
+    } else {
+      const airtableType = body?.error?.type ? String(body.error.type) : "";
+      const airtableMessage = body?.error?.message ? String(body.error.message) : "";
+      const detail = [airtableType, airtableMessage].filter(Boolean).join(": ");
+      throw new HttpError(response.status, detail ? `Airtable: ${detail}` : `Airtable request failed (${response.status})`);
+    }
   }
+  // Queue the summary change BEFORE optional Supabase mirror calls so a
+  // slow/broken mirror never prevents Home's near-real-time invalidation.
   // Callers that own the post-commit Supabase mirror (Factory approve,
   // schedule regen, calendar save) pass skipSupabaseWriteThrough so Airtable
-  // verify under the scheduling lock is not followed by a second mirror.
-  // Airtable has already confirmed this write. Queue the summary change
-  // BEFORE optional Supabase mirror calls so a slow/broken mirror never
-  // prevents Home's near-real-time invalidation.
-  if (options?.method && String(options.method).toUpperCase() !== "GET") {
-    await notifyStudioProfileSummary(env, tableId, options.method, body).catch((error) => {
+  // verify under the scheduling lock is not followed by a second in-lock mirror.
+  if (method !== "GET") {
+    await notifyStudioProfileSummary(env, tableId, method, body).catch((error) => {
       console.warn("profile summary dirty notification failed", error);
     });
   }
-  if (options?.skipSupabaseWriteThrough !== true) {
-    await studioSupabaseWriteThroughAirtableMutation(env, tableId, options?.method, body).catch((error) => {
+  if (options?.skipSupabaseWriteThrough !== true && airtableCommitted) {
+    await studioSupabaseWriteThroughAirtableMutation(env, tableId, method, body).catch((error) => {
       console.warn("supabase airtable write-through failed", tableId, error);
     });
   }

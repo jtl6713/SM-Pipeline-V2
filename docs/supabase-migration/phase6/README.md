@@ -6,7 +6,7 @@ Production Request write-through is confirmed live. Media asset metadata write-t
 
 `phase5_writes` stayed `airtable_sor_write_through` on that gate. The four list-read flags stayed `supabase`, `studio_read_source` stayed `airtable`, the runner write source stayed `airtable`, and the last sync was `completed` with the circuit closed.
 
-The list-read cutover is already live. Phase 6 does not redo Pipeline, Content, Factory, Ops, or Home overview reads. It also does not flip `STUDIO_WRITE_SOURCE`. That switch is the Phase 5 remainder and stays off while the pipeline runner still reads Airtable.
+The list-read cutover is already live. Phase 6 does not redo Pipeline, Content, Factory, Ops, or Home overview reads. It also does not flip `STUDIO_WRITE_SOURCE` for Production Requests, media, or the transfer queue. Output/Content write SoR is the Phase 5 remainder (`deploy/enable-studio-write-sor.txt`) and does not change Phase 6 Airtable-first write-through.
 
 ## In scope, when execution is approved
 
@@ -36,8 +36,8 @@ Media metadata, the transfer queue, and cron writers come after that slice has a
 
 ## Out of scope
 
-- `STUDIO_WRITE_SOURCE=supabase` for Platform Outputs or Content Items.
-- Pipeline-runner reads moving to Supabase. That is the Phase 5 remainder.
+- Using `STUDIO_WRITE_SOURCE` to change Production Request / media / queue SoR. That flag only covers Platform Outputs and Content Items (Phase 5 remainder).
+- Treating Phase 6 tables as Supabase-first writers in this phase.
 - `resolveAuthorization` on `studio_users` / `studio_memberships`.
 - Deleting, archiving, or stopping Airtable records. That is Phase 7 and is not started.
 - Putting originals in Supabase or treating R2 as the media authority.

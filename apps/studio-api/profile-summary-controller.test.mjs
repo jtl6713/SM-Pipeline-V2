@@ -67,8 +67,8 @@ test("POST/PATCH notifications are scoped to confirmed authoritative output/idea
 test("Airtable response handling enqueues summary after success and before optional mirror", () => {
   const worker = raw("worker.js");
   const successful = worker.indexOf("if (!response.ok) {");
-  const notify = worker.indexOf("await notifyStudioProfileSummary(env, tableId, options.method, body)");
-  const mirror = worker.indexOf("await studioSupabaseWriteThroughAirtableMutation(env, tableId, options?.method, body)");
+  const notify = worker.indexOf("await notifyStudioProfileSummary(env, tableId, method, body)");
+  const mirror = worker.indexOf("await studioSupabaseWriteThroughAirtableMutation(env, tableId, method, body)");
   assert.ok(successful >= 0 && notify > successful && mirror > notify);
 });
 

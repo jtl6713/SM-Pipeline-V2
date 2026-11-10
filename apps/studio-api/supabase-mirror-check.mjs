@@ -5,6 +5,8 @@
  */
 import {
   studioReadSource,
+  studioWriteSource,
+  studioPhase5WritesMode,
   studioSupabaseConfigured,
   supabaseRest,
   stripDeletedDuplicateOutputRecords,
@@ -225,7 +227,8 @@ export async function studioSupabaseMirrorSpotCheck(env, ops = {}) {
     ok,
     workstream_a5: ok ? "PASS" : "FAIL",
     read_source: studioReadSource(env),
-    phase5_writes: "airtable_sor_write_through",
+    studio_write_source: studioWriteSource(env),
+    phase5_writes: studioPhase5WritesMode(env),
     sampled_outputs: outputChecks.length,
     sampled_content_items: contentChecks.length,
     output_missing_in_supabase: outputMissingInSupabase,
