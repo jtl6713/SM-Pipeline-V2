@@ -793,8 +793,15 @@ export async function listSupabasePipelineOutputs(env, { profileAirtableId, limi
       });
     }
   }
+  const records = stripDeletedDuplicateOutputRecords(flat.map(airtableShapedOutputFromSupabase));
+  // Number-keyed DELETE only — never the heavy airtable-id purge from the read path.
+  if (flat.some((row) => deletedDuplicateOutputNumberSet.has(Number(row?.output_number || 0)))) {
+    purgeOrphanDuplicateOutputNumbers(env).catch((error) => {
+      console.warn("orphan output number purge failed", error);
+    });
+  }
   return {
-    records: stripDeletedDuplicateOutputRecords(flat.map(airtableShapedOutputFromSupabase)),
+    records,
     contentByAirtableId,
     profileMissing: false,
   };
@@ -2062,27 +2069,133 @@ const DELETED_DUPLICATE_IDEA_IDS = [
   "rec3MEcGx2f57CMjf", "recPxlSeI2GTSqQKN", "rectCnhidhH8Cpgxy", "recrJBlA3riWLsU4p", "recZ4YHN22cxgfbjq",
   "recADH46vGkP4wmF0", "recUse7oQCD9RZ5Vf", "recEnznMatnL5Ucot", "recKNaLQpFwMeDjsk", "recG1wQIPE9hJDevc",
 ];
-const DELETED_DUPLICATE_PROFILE_IDS = ["recF7UAn0LkMZZrWZ", "recpNlNn6U6eq0M9r"];
+const DELETED_DUPLICATE_PROFILE_IDS = [
+  "recF7UAn0LkMZZrWZ",
+  "recpNlNn6U6eq0M9r",
+  // NYC — DUMBO Pebble Beach Sunset (content 2051) orphan mirror rows 10236/10238/10240.
+  "recgtK8Z7eNADNtVy",
+];
+// Ghost Platform Outputs that no longer exist in Airtable. Strip/purge by Output_ID
+// when the Airtable record id is unknown (Supabase MCP unavailable).
+const DELETED_DUPLICATE_OUTPUT_NUMBERS = [10236, 10238, 10240];
 const deletedDuplicateOutputIdSet = new Set(DELETED_DUPLICATE_OUTPUT_IDS);
 const deletedDuplicateContentIdSet = new Set(DELETED_DUPLICATE_CONTENT_IDS);
+const deletedDuplicateOutputNumberSet = new Set(
+  DELETED_DUPLICATE_OUTPUT_NUMBERS.map((n) => Number(n)).filter((n) => Number.isFinite(n) && n > 0),
+);
 
 function firstLinkedId(value) {
   return Array.isArray(value) && value.length ? String(value[0] || "") : "";
 }
 
+function recordOutputNumber(row) {
+  const raw = row?.output_number ?? row?.output_id ?? row?.fields?.Output_ID ?? null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function recordContentId(row) {
+  return String(
+    row?.content_item_id
+    || row?.content_item_airtable_id
+    || firstLinkedId(row?.content_item_links)
+    || firstLinkedId(row?.fields?.Content_Item)
+    || "",
+  );
+}
+
+function recordPlatform(row) {
+  return String(row?.platform || row?.fields?.Platform || "").trim().toLowerCase();
+}
+
+function recordStudioTypeKey(row) {
+  const raw = String(
+    row?.studio_output_type
+    || row?.platform_output_type
+    || row?.fields?.Studio_Output_Type
+    || row?.fields?.Platform_Output_Type
+    || "",
+  ).trim().toLowerCase();
+  // TikTok "Video Draft" ghosts against a live "Video" sibling share one slot.
+  if (raw === "video draft") return "video";
+  return raw;
+}
+
+function recordHasDeliverable(row) {
+  const fields = row?.fields || {};
+  return Boolean(
+    row?.final_file_url
+    || row?.studio_preview_url
+    || row?.publish_asset_url
+    || fields.Final_File_URL
+    || fields.Studio_Preview_URL
+    || fields.Publish_Asset_URL,
+  );
+}
+
+function recordOutputStatus(row) {
+  return String(row?.output_status || row?.fields?.Output_Status || "").trim().toLowerCase();
+}
+
+function siblingOutputRank(row) {
+  let score = 0;
+  const status = recordOutputStatus(row);
+  if (status === "published" || status === "scheduled" || status === "approved") score += 120;
+  else if (status === "ready for review") score += 100;
+  else if (status === "preparing assets" || status === "draft") score -= 10;
+  if (recordHasDeliverable(row)) score += 50;
+  const render = String(row?.render_status || row?.fields?.Render_Status || "").trim().toLowerCase();
+  if (render === "rendered" || render === "complete" || render === "completed") score += 20;
+  // Tiny tie-break so ranking is stable; never enough alone to collapse two ready rows.
+  score += recordOutputNumber(row) / 1e9;
+  return score;
+}
+
+/** Drop clearly weaker same-content/platform/type siblings (ghost Preparing vs Ready). */
+export function collapseSupersededSiblingOutputs(records) {
+  if (!Array.isArray(records) || records.length < 2) return records;
+  const groups = new Map();
+  records.forEach((row, index) => {
+    const content = recordContentId(row);
+    const platform = recordPlatform(row);
+    const type = recordStudioTypeKey(row);
+    if (!content || !platform || !type) return;
+    const key = `${content}|${platform}|${type}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ row, index });
+  });
+  const drop = new Set();
+  for (const members of groups.values()) {
+    if (members.length < 2) continue;
+    let best = members[0];
+    let bestRank = siblingOutputRank(best.row);
+    for (const member of members.slice(1)) {
+      const rank = siblingOutputRank(member.row);
+      if (rank > bestRank) {
+        best = member;
+        bestRank = rank;
+      }
+    }
+    for (const member of members) {
+      if (member.index === best.index) continue;
+      // Require a decisive gap so two Ready siblings of the same type stay.
+      if (bestRank >= siblingOutputRank(member.row) + 40) drop.add(member.index);
+    }
+  }
+  if (!drop.size) return records;
+  return records.filter((_, index) => !drop.has(index));
+}
+
 export function stripDeletedDuplicateOutputRecords(records) {
   if (!Array.isArray(records) || !records.length) return records;
-  const next = records.filter((row) => {
+  const filtered = records.filter((row) => {
     if (deletedDuplicateOutputIdSet.has(String(row?.id || ""))) return false;
-    const contentId = String(
-      row?.content_item_id
-      || row?.content_item_airtable_id
-      || firstLinkedId(row?.content_item_links)
-      || firstLinkedId(row?.fields?.Content_Item)
-      || "",
-    );
+    const outputNumber = recordOutputNumber(row);
+    if (outputNumber && deletedDuplicateOutputNumberSet.has(outputNumber)) return false;
+    const contentId = recordContentId(row);
     return !deletedDuplicateContentIdSet.has(contentId);
   });
+  const next = collapseSupersededSiblingOutputs(filtered);
   return next.length === records.length ? records : next;
 }
 
@@ -2098,6 +2211,18 @@ async function deleteSupabaseByAirtableIds(env, table, ids) {
     deleted += Array.isArray(rows) ? rows.length : 0;
   }
   return deleted;
+}
+
+async function deleteSupabaseByOutputNumbers(env, numbers) {
+  const unique = [...new Set(
+    (numbers || []).map((n) => Number(n)).filter((n) => Number.isFinite(n) && n > 0),
+  )];
+  if (!unique.length) return 0;
+  const rows = await supabaseRest(env, `platform_outputs?output_number=in.(${unique.join(",")})`, {
+    method: "DELETE",
+    headers: { Prefer: "return=representation" },
+  });
+  return Array.isArray(rows) ? rows.length : 0;
 }
 
 async function stripDeletedDuplicateSnapshots(env) {
@@ -2128,13 +2253,41 @@ async function stripDeletedDuplicateSnapshots(env) {
   return touched;
 }
 
+/**
+ * Lightweight orphan cleanup: delete known ghost Output_IDs and strip R2 snapshots.
+ * Safe to call from Pipeline reads. Do NOT call purgeDeletedDuplicatePackages from cron.
+ */
+export async function purgeOrphanDuplicateOutputNumbers(env) {
+  const result = { outputs: 0, snapshots: 0 };
+  if (studioSupabaseConfigured(env)) {
+    try {
+      result.outputs = await deleteSupabaseByOutputNumbers(env, DELETED_DUPLICATE_OUTPUT_NUMBERS);
+    } catch (error) {
+      result.outputs_error = String(error?.message || error).slice(0, 180);
+    }
+  } else {
+    result.skipped = "supabase_not_configured";
+  }
+  try {
+    result.snapshots = await stripDeletedDuplicateSnapshots(env);
+  } catch (error) {
+    result.snapshots_error = String(error?.message || error).slice(0, 180);
+  }
+  return result;
+}
+
 // Do not call this from the 5-minute cron. production_request_outputs.platform_output_id
 // has no index, so each DELETE scans that table until Postgres cancels it (57014)
 // and the pool fills (PGRST003). The Pipeline list filter already drops these ids.
 export async function purgeDeletedDuplicatePackages(env) {
-  const result = { outputs: 0, requests: 0, ideas: 0, content: 0, snapshots: 0 };
+  const result = { outputs: 0, requests: 0, ideas: 0, content: 0, snapshots: 0, orphan_output_numbers: 0 };
   if (studioSupabaseConfigured(env)) {
     result.outputs = await deleteSupabaseByAirtableIds(env, "platform_outputs", DELETED_DUPLICATE_OUTPUT_IDS);
+    try {
+      result.orphan_output_numbers = await deleteSupabaseByOutputNumbers(env, DELETED_DUPLICATE_OUTPUT_NUMBERS);
+    } catch (error) {
+      result.orphan_output_numbers_error = String(error?.message || error).slice(0, 180);
+    }
     for (const [key, table, ids] of [
       ["requests", "production_requests", DELETED_DUPLICATE_REQUEST_IDS],
       ["ideas", "idea_candidates", DELETED_DUPLICATE_IDEA_IDS],
