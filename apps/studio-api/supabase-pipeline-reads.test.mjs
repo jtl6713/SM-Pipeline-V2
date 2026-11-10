@@ -30,6 +30,7 @@ import {
   syncAirtableContentRowToSupabase,
   syncAirtableProductionRequestRowToSupabase,
   syncAirtableMediaAssetRowToSupabase,
+  syncAirtableTransferQueueRowToSupabase,
   syncProfilePipelineToSupabase,
   enqueueStudioSideEffectOutbox,
   purgeDeletedDuplicatePackages,
@@ -561,8 +562,9 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /enqueueStudioSideEffectOutbox/);
   assert.match(worker, /phase5_writes: "airtable_sor_write_through"/);
   assert.match(worker, /phase6_writes: "airtable_sor_write_through"/);
-  assert.match(worker, /phase6_write_tables: \["production_requests", "media_assets"\]/);
+  assert.match(worker, /phase6_write_tables: \["production_requests", "media_assets", "studio_media_transfer_queue"\]/);
   assert.match(worker, /syncAirtableMediaAssetRowToSupabase/);
+  assert.match(worker, /syncAirtableTransferQueueRowToSupabase/);
   assert.match(worker, /supabase airtable write-through failed/);
   assert.match(worker, /from "\.\/supabase-pipeline-reads\.mjs"/);
   assert.match(worker, /listSupabaseContentItems/);
@@ -585,7 +587,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_supabase_pipeline_read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES/);
   const release = /version: "0\.10\.(\d+)-[^"]+"/.exec(worker);
   assert.ok(release, "Worker /health must identify a versioned release");
-  assert.ok(Number(release[1]) >= 789, "Phase 6 media write-through cannot regress behind Worker 0.10.789");
+  assert.ok(Number(release[1]) >= 791, "Phase 6 queue write-through cannot regress behind Worker 0.10.791");
   const pipelineFns = await readFile(path.join(here, "worker-functions-03.mjs"), "utf8");
   assert.match(pipelineFns, /studioPipelineReadSource\(env\) === "supabase"/);
   assert.match(pipelineFns, /studioContentReadSource\(env\) === "supabase"/);
@@ -990,6 +992,79 @@ test("phase 6 media mutation ignores a description-only body and a supabase fail
   }
 });
 
+test("phase 6 queue write-through keeps status and a Drive id and drops source URLs", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method || "GET", body: init?.body || "" });
+    return { ok: true, async text() { return ""; } };
+  };
+  try {
+    const result = await syncAirtableTransferQueueRowToSupabase(supabaseEnv, {
+      id: "recQueue1",
+      fields: {
+        Transfer_Status: "Ready",
+        Error_Message: null,
+        Source_Drive_File_ID: "drive-file-9",
+        Source_URL: "https://media.chicagoshining.com/studio/library/pier.jpg",
+        Source_R2_Key: "library/pier.jpg",
+        Source_Media_Asset: ["recMedia9"],
+        Preview_Status: "Pending",
+      },
+    });
+    assert.equal(result.mode, "upsert");
+    const post = calls.find((call) => call.method === "POST" && call.url.includes("studio_media_transfer_queue"));
+    assert.ok(post);
+    const body = JSON.parse(post.body);
+    assert.equal(body[0].status, "Ready");
+    assert.equal(body[0].error_message, null);
+    assert.equal(body[0].payload.source_drive_file_id, "drive-file-9");
+    assert.equal(body[0].payload.source_media_asset_id, "recMedia9");
+    assert.equal(body[0].payload.preview_status, "Pending");
+    assert.equal(JSON.stringify(body).includes("Source_URL"), false);
+    assert.equal(JSON.stringify(body).includes("r2"), false);
+    assert.equal(body[0].source_media_asset_id, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("phase 6 queue mutation survives a supabase failure and ignores a url-only body", async () => {
+  const { studioSupabaseWriteThroughAirtableMutation } = await import("./worker-functions-01.mjs");
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    calls.push(1);
+    return {
+      ok: false,
+      status: 500,
+      async text() { return JSON.stringify({ message: "queue upsert failed" }); },
+    };
+  };
+  try {
+    const urlOnly = await studioSupabaseWriteThroughAirtableMutation(
+      supabaseEnv,
+      "tblBZLXPd1p2NRWRK",
+      "PATCH",
+      { id: "recQueueUrl", fields: { Source_URL: "https://example.com/file.jpg" } },
+    );
+    assert.equal(urlOnly.reason, "no_records");
+    assert.equal(calls.length, 0);
+    const failed = await studioSupabaseWriteThroughAirtableMutation(
+      supabaseEnv,
+      "tblBZLXPd1p2NRWRK",
+      "PATCH",
+      { id: "recQueue2", fields: { Transfer_Status: "Error", Error_Message: "crop failed" } },
+    );
+    assert.equal(failed.ok, true);
+    assert.equal(failed.kind, "queue");
+    assert.equal(failed.results[0].synced.ok, false);
+    assert.match(failed.results[0].synced.error, /queue upsert failed/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("profile sync refreshes Supabase rows that left the Airtable open pack", async () => {
   const posts = [];
   const originalFetch = globalThis.fetch;
@@ -1107,7 +1182,9 @@ test("phase5 docs keep Airtable as write source of truth", async () => {
   assert.match(handoff, /0\.10\.784-supabase-phase6-request-writes/);
   assert.match(phase6, /production_requests/);
   assert.match(phase6, /Media asset metadata write-through/);
-  assert.match(phase6, /The transfer queue and cron writers are not started/);
+  assert.match(phase6, /Transfer queue write-through/);
+  assert.match(phase6, /Cron writers are not started/);
+  assert.match(phase6, /studio_media_transfer_targets are not written/);
   assert.match(index, /Phase 7/);
   const sql = await readFile(path.join(here, "../../docs/supabase-migration/phase5/003_side_effect_outbox.sql"), "utf8");
   assert.match(sql, /create table if not exists studio_side_effect_outbox/);

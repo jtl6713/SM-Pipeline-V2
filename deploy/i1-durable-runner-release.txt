@@ -35,3 +35,4 @@ Deploy pipeline-runner rendering-review source reuse correction: watermark_verif
 Deploy 2026-11-08 ITS1 creative_first storyboard writer for Script a Short empty-catalog authoring.
 
 2026-11-09 guarded ITS1 storyboard writer exact scene count: 5 scenes means 5, one bounded regeneration for incorrect output, no truncation or premature acceptance. Verify /health code version 2026-11-09-its1-exact-scene-count-v1 before use. No media render, approval, scheduling or publishing changes.
+2026-11-09 runner 2026-11-09-supabase-phase6-queue-writes: after an Airtable Studio Media Transfer Queue commit, mirror status and the Drive file id into studio_media_transfer_queue. No file bytes, no source URLs, no transfer targets, no STUDIO_WRITE_SOURCE change, no queue backfill. Verify /health version 2026-11-09-supabase-phase6-queue-writes.

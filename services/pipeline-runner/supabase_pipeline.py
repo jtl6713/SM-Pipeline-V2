@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
+from airtable.constants import CONTENT_ITEMS_TABLE, MEDIA_TRANSFER_QUEUE_TABLE, PLATFORM_OUTPUTS_TABLE
 
 logger = logging.getLogger("pipeline-runner.supabase")
 
@@ -98,6 +98,7 @@ def studio_write_source(settings: dict | None) -> str:
 
 
 def table_kind(table_id: str) -> str:
+    """Output and Content Item only. The transfer queue is not part of STUDIO_WRITE_SOURCE."""
     if table_id == PLATFORM_OUTPUTS_TABLE:
         return "output"
     if table_id == CONTENT_ITEMS_TABLE:
@@ -287,6 +288,65 @@ def _partial_patch(record: dict, kind: str) -> dict:
     return body
 
 
+def _queue_text(value: Any) -> str | None:
+    if isinstance(value, list):
+        value = value[0] if value else None
+    if isinstance(value, dict):
+        value = value.get("id") or value.get("name")
+    text = str(value or "").strip()
+    return text or None
+
+
+def _queue_row(record: dict) -> dict:
+    """Scalar queue metadata only. Drive file ids, never file bytes or source URLs."""
+    fields = record.get("fields") or {}
+    row: dict[str, Any] = {}
+    if "Transfer_Status" in fields:
+        row["status"] = _select(fields.get("Transfer_Status"))
+    if "Error_Message" in fields:
+        row["error_message"] = _queue_text(fields.get("Error_Message"))
+    if "Preview_Error" in fields:
+        row["preview_error"] = _queue_text(fields.get("Preview_Error"))
+    payload: dict[str, Any] = {}
+    for airtable_key, column in (
+        ("Transfer_ID", "transfer_id"),
+        ("Production_Request_Record_ID", "production_request_record_id"),
+        ("Asset_Kind", "asset_kind"),
+        ("Source_Asset_ID", "source_asset_id"),
+        ("Source_Name", "source_name"),
+        ("Source_Drive_File_ID", "source_drive_file_id"),
+        ("Source_Media_Asset", "source_media_asset_id"),
+        ("Generated_Media_Asset", "generated_media_asset_id"),
+        ("Aspect_Ratio", "aspect_ratio"),
+        ("Preview_Status", "preview_status"),
+        ("Test_Run_ID", "test_run_id"),
+    ):
+        if airtable_key not in fields:
+            continue
+        value = _queue_text(fields.get(airtable_key))
+        if airtable_key in {"Source_Media_Asset", "Generated_Media_Asset"} and value and not value.startswith("rec"):
+            continue
+        if value:
+            payload[column] = value
+    if payload:
+        row["payload"] = payload
+    return row
+
+
+def _mirror_queue(settings: dict, record: dict) -> None:
+    row = _queue_row(record)
+    if not row or not record.get("id"):
+        return
+    _rest(
+        settings,
+        "studio_media_transfer_queue?on_conflict=airtable_record_id",
+        "POST",
+        [{"airtable_record_id": record["id"], **row}],
+        prefer="resolution=merge-duplicates,return=minimal",
+    )
+    _enqueue_outbox(settings, "queue", record, "PATCH")
+
+
 def _enqueue_outbox(settings: dict, kind: str, record: dict, mutation: str) -> None:
     fields = record.get("fields") or {}
     if kind == "output":
@@ -297,6 +357,12 @@ def _enqueue_outbox(settings: dict, kind: str, record: dict, mutation: str) -> N
             "render_status": fields.get("Render_Status"),
         }
         table = "platform_outputs"
+    elif kind == "queue":
+        payload = {
+            "status": _select(fields.get("Transfer_Status")),
+            "source_drive_file_id": _queue_text(fields.get("Source_Drive_File_ID")),
+        }
+        table = "studio_media_transfer_queue"
     else:
         payload = {
             "content_status": fields.get("Content_Status"),
@@ -369,8 +435,9 @@ def _mirror_one(settings: dict, kind: str, record: dict, *, partial: bool) -> No
 
 
 def mirror_airtable_records(settings: dict | None, table_id: str, records: list[dict], *, partial: bool = False) -> dict:
-    """Mirror Output / Content Item rows. Never raises."""
-    kind = table_kind(str(table_id or ""))
+    """Mirror Output, Content Item, or transfer-queue rows. Never raises."""
+    table = str(table_id or "")
+    kind = "queue" if table == MEDIA_TRANSFER_QUEUE_TABLE else table_kind(table)
     if not kind:
         return {"skipped": True, "reason": "table"}
     if not supabase_configured(settings):
@@ -380,7 +447,10 @@ def mirror_airtable_records(settings: dict | None, table_id: str, records: list[
         if not isinstance(record, dict) or not record.get("id"):
             continue
         try:
-            _mirror_one(settings or {}, kind, record, partial=partial)
+            if kind == "queue":
+                _mirror_queue(settings or {}, record)
+            else:
+                _mirror_one(settings or {}, kind, record, partial=partial)
             mirrored += 1
         except Exception as error:
             logger.warning("supabase %s write-through failed for %s: %s", kind, record.get("id"), error)

@@ -275,7 +275,13 @@ jobs:
                   f"got {sync.get('phase6_writes')!r}",
               )
               tables = sync.get("phase6_write_tables")
-              if isinstance(tables, list) and "media_assets" in tables:
+              if isinstance(tables, list) and "studio_media_transfer_queue" in tables:
+                  check(
+                      "phase6_write_tables=production_requests,media_assets,studio_media_transfer_queue",
+                      tables == ["production_requests", "media_assets", "studio_media_transfer_queue"],
+                      f"got {tables!r}",
+                  )
+              elif isinstance(tables, list) and "media_assets" in tables:
                   check(
                       "phase6_write_tables=production_requests,media_assets",
                       tables == ["production_requests", "media_assets"],
