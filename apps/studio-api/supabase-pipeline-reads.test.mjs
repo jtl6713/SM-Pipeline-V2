@@ -37,6 +37,8 @@ import {
   syncProfilePipelineToSupabase,
   enqueueStudioSideEffectOutbox,
   purgeDeletedDuplicatePackages,
+  purgeOrphanDuplicateOutputNumbers,
+  collapseSupersededSiblingOutputs,
   stripDeletedDuplicateOutputRecords,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
@@ -54,6 +56,56 @@ test("deleted Instagram 7894 cannot resurrect from Supabase while sibling varian
   ];
   assert.deepEqual(stripDeletedDuplicateOutputRecords(rows).map(row => row.id), [
     "recCqQ25AvLeysIlS", "reck9cu90TsGp9JxI", "rectXNIdVeJEQo4tZ"
+  ]);
+});
+
+test("orphan DUMBO Output_IDs 10236/10238/10240 are stripped without Airtable ids", () => {
+  const rows = [
+    { id: "recKeepIgReel", output_id: 10235, content_item_id: "recnOxCM4ushmXdfW", platform: "Instagram", studio_output_type: "Reel", output_status: "Ready for Review", final_file_url: "https://cdn.example/ig.mp4" },
+    { id: "recGhostIg", output_id: 10236, content_item_id: "recnOxCM4ushmXdfW", platform: "Instagram", studio_output_type: "Reel", output_status: "Preparing Assets" },
+    { id: "recKeepFbReel", output_id: 10237, content_item_id: "recnOxCM4ushmXdfW", platform: "Facebook", studio_output_type: "Reel", output_status: "Ready for Review", final_file_url: "https://cdn.example/fb.mp4" },
+    { id: "recGhostFb", fields: { Output_ID: 10238, Content_Item: ["recnOxCM4ushmXdfW"], Platform: "Facebook", Studio_Output_Type: "Reel", Output_Status: "Preparing Assets" } },
+    { id: "recKeepTt", output_id: 10239, content_item_id: "recnOxCM4ushmXdfW", platform: "TikTok", studio_output_type: "Video Draft", output_status: "Ready for Review", studio_preview_url: "https://cdn.example/tt.mp4" },
+    { id: "recGhostTt", output_number: 10240, content_item_id: "recnOxCM4ushmXdfW", platform: "TikTok", studio_output_type: "Video", output_status: "Preparing Assets" },
+  ];
+  assert.deepEqual(
+    stripDeletedDuplicateOutputRecords(rows).map((row) => row.id),
+    ["recKeepIgReel", "recKeepFbReel", "recKeepTt"],
+  );
+});
+
+test("collapse drops Preparing Assets sibling when Ready deliverable exists", () => {
+  const rows = [
+    {
+      id: "recReady",
+      content_item_id: "recContentSame",
+      platform: "Instagram",
+      studio_output_type: "Reel",
+      output_status: "Ready for Review",
+      final_file_url: "https://cdn.example/ready.mp4",
+      output_id: 2001,
+    },
+    {
+      id: "recGhost",
+      content_item_id: "recContentSame",
+      platform: "Instagram",
+      studio_output_type: "Reel",
+      output_status: "Preparing Assets",
+      output_id: 2002,
+    },
+    {
+      id: "recStory",
+      content_item_id: "recContentSame",
+      platform: "Instagram",
+      studio_output_type: "Story",
+      output_status: "Ready for Review",
+      final_file_url: "https://cdn.example/story.jpg",
+      output_id: 2003,
+    },
+  ];
+  assert.deepEqual(collapseSupersededSiblingOutputs(rows).map((row) => row.id), [
+    "recReady",
+    "recStory",
   ]);
 });
 
@@ -1228,6 +1280,52 @@ test("profile sync refreshes Supabase rows that left the Airtable open pack", as
     assert.equal(skipped.do_not_publish, true);
     assert.equal(skipped.publish_status, "Not Ready");
     assert.equal(skipped.scheduled_post_date, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("purgeOrphanDuplicateOutputNumbers deletes known ghost Output_IDs and strips NYC snapshots", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  const stored = new Map();
+  stored.set("studio/state/pipeline-list-recgtK8Z7eNADNtVy-250-full.json", JSON.stringify({
+    at: 1,
+    payload: {
+      records: [
+        { id: "recGhost", output_id: 10236, content_item_id: "recnOxCM4ushmXdfW" },
+        { id: "recKeep", output_id: 10235, content_item_id: "recnOxCM4ushmXdfW" },
+      ],
+    },
+  }));
+  globalThis.fetch = async (url, init) => {
+    calls.push({ method: init?.method || "GET", url: String(url) });
+    return { ok: true, async text() { return JSON.stringify([{ output_number: 10236 }]); } };
+  };
+  const env = {
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "sb_secret_test",
+    STUDIO_MEDIA: {
+      async get(key) {
+        const text = stored.get(key);
+        return text ? { async json() { return JSON.parse(text); } } : null;
+      },
+      async put(key, body) { stored.set(key, body); },
+    },
+  };
+  try {
+    const result = await purgeOrphanDuplicateOutputNumbers(env);
+    assert.ok(result.outputs >= 1);
+    assert.ok(calls.some((call) => (
+      call.method === "DELETE"
+      && call.url.includes("platform_outputs?output_number=in.(")
+      && call.url.includes("10236")
+      && call.url.includes("10238")
+      && call.url.includes("10240")
+    )));
+    const snapshot = JSON.parse(stored.get("studio/state/pipeline-list-recgtK8Z7eNADNtVy-250-full.json"));
+    assert.deepEqual(snapshot.payload.records.map((row) => row.id), ["recKeep"]);
+    assert.equal(result.snapshots, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }
