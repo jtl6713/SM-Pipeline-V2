@@ -493,3 +493,69 @@
   #storyFirstPanel .story-first-reference-row > span,
   #storyFirstPanel .story-first-reference-row button {flex:1 1 100%;}
 }
+
+
+/* ElevenLabs: visible scene-local progress near the status button. The
+   provider supplies discrete states, not percent complete, so the moving
+   track is intentionally indeterminate and never invents a numeric ETA. */
+#storyFirstPanel .story-first-video-progress {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  margin: 6px 0 2px;
+  border: 1px solid #b9cce3;
+  border-radius: 12px;
+  background: #f0f6ff;
+  color: #173c67;
+}
+#storyFirstPanel .story-first-video-progress[hidden] { display: none; }
+#storyFirstPanel .story-first-video-progress-caption {
+  font-size: .92rem;
+  font-weight: 750;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+#storyFirstPanel .story-first-video-progress-note {
+  font-size: .82rem;
+  line-height: 1.4;
+  color: #395a79;
+}
+#storyFirstPanel .story-first-video-progress-track {
+  position: relative;
+  overflow: hidden;
+  height: 9px;
+  border-radius: 999px;
+  background: #cfdeef;
+}
+#storyFirstPanel .story-first-video-progress-track::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: #2c70bc;
+  transform: translateX(-102%);
+}
+#storyFirstPanel .story-first-video-progress.is-active .story-first-video-progress-track::before {
+  width: 42%;
+  animation: storyFirstVideoInFlight 1.65s ease-in-out infinite;
+}
+#storyFirstPanel .story-first-video-progress.is-complete {
+  background: #edf7f0;
+  border-color: #bcd9c2;
+  color: #215c36;
+}
+#storyFirstPanel .story-first-video-progress.is-complete .story-first-video-progress-track { display: none; }
+@keyframes storyFirstVideoInFlight {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(350%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #storyFirstPanel .story-first-video-progress.is-active .story-first-video-progress-track::before {
+    animation: none;
+    transform: none;
+    width: 100%;
+  }
+}
