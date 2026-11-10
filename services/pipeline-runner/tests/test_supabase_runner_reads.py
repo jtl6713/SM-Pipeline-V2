@@ -81,6 +81,105 @@ def test_formula_and_content_flag_stay_independent(monkeypatch):
     assert seen["supabase"] == 0
 
 
+def test_get_record_uses_a_marked_projection_and_keeps_links(monkeypatch):
+    def fake_get(*_args, **_kwargs):
+        raise AssertionError("airtable get")
+
+    def fake_request(method, url, *, headers, json, timeout):
+        assert method == "GET"
+        assert "airtable_record_id=eq.recOutput9" in url
+        assert "content_items" in url
+        return Response([{
+            "airtable_record_id": "recOutput9",
+            "platform": "Instagram",
+            "output_number": 9,
+            "selected_assets": {"clips": [1]},
+            "error_messages": {
+                "_runner_record_projection": "v1",
+                "_airtable_links": {"Content_Item": "recContent9"},
+                "Output_Notes": "keep",
+            },
+            "content_items": {"airtable_record_id": "recContent9"},
+            "content_profiles": {"airtable_record_id": "recProfile9"},
+        }])
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(requests, "request", fake_request)
+    row = _client(studio_runner_output_read_source="supabase").get_record(
+        PLATFORM_OUTPUTS_TABLE, "recOutput9",
+    )
+    assert row["id"] == "recOutput9"
+    assert row["fields"]["Platform"] == "Instagram"
+    assert row["fields"]["Output_Notes"] == "keep"
+    assert row["fields"]["Selected_Assets_JSON"] == {"clips": [1]}
+    assert row["fields"]["Content_Item"] == ["recContent9"]
+    assert row["fields"]["Content_Profile"] == ["recProfile9"]
+    assert "_runner_record_projection" not in row["fields"]
+
+
+def test_unmarked_get_and_write_source_stay_on_airtable(monkeypatch):
+    airtable = []
+
+    def fake_get(url, *, headers, timeout):
+        airtable.append(url)
+        return Response({"id": "recOutput1", "fields": {"Platform": "TikTok"}})
+
+    def fake_request(*_args, **_kwargs):
+        return Response([{
+            "airtable_record_id": "recOutput1",
+            "platform": "Instagram",
+            "error_messages": {"Output_Notes": "old"},
+        }])
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(requests, "request", fake_request)
+    unmarked = _client(studio_runner_output_read_source="supabase").get_record(
+        PLATFORM_OUTPUTS_TABLE, "recOutput1",
+    )
+    write_source = _client(studio_write_source="supabase").get_record(
+        PLATFORM_OUTPUTS_TABLE, "recOutput1",
+    )
+    assert unmarked["fields"]["Platform"] == "TikTok"
+    assert write_source["fields"]["Platform"] == "TikTok"
+    assert len(airtable) == 2
+
+
+def test_full_mirror_marks_a_resolved_output(monkeypatch):
+    seen = []
+
+    def fake_patch(url, *, headers, json, timeout):
+        return Response({
+            "id": "recOutput1",
+            "fields": {
+                "Output_ID": 4,
+                "Platform": "Instagram",
+                "Content_Profile": ["recProfile1"],
+                "Content_Item": ["recContent1"],
+                "Selected_Assets_JSON": {"clips": [2]},
+                "Output_Notes": "ready",
+            },
+        })
+
+    def fake_request(method, url, *, headers, json, timeout):
+        seen.append((method, url, json))
+        if "content_profiles" in url:
+            return Response([{"id": "prof-uuid"}])
+        if "content_items" in url and method == "GET" and "select=id" in url:
+            return Response([{"id": "content-uuid"}])
+        if "studio_side_effect_outbox" in url:
+            return Response('{"code":"PGRST205"}', status_code=404)
+        return Response("")
+
+    monkeypatch.setattr(requests, "patch", fake_patch)
+    monkeypatch.setattr(requests, "request", fake_request)
+    _client().update_record(PLATFORM_OUTPUTS_TABLE, "recOutput1", {"Publish_Status": "Scheduled"})
+    posts = [row for row in seen if row[0] == "POST" and "platform_outputs" in row[1]]
+    assert posts[0][2][0]["selected_assets"] == {"clips": [2]}
+    assert posts[0][2][0]["error_messages"]["_runner_record_projection"] == "v1"
+    assert posts[0][2][0]["error_messages"]["Output_Notes"] == "ready"
+    assert posts[0][2][0]["content_item_id"] == "content-uuid"
+
+
 def test_supabase_read_failure_falls_back_to_airtable(monkeypatch):
     def fake_get(url, *, headers, params, timeout):
         return Response({"records": [{"id": "recOutput1", "fields": {"Platform": "TikTok"}}]})

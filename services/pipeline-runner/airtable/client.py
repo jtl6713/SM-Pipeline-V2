@@ -40,6 +40,12 @@ class AirtableClient:
     def get_record(self, table_id: str, record_id: str) -> dict:
         import requests
 
+        from supabase_reads import try_get_supabase_record
+
+        supabase_row = try_get_supabase_record(self._settings, table_id, record_id)
+        if supabase_row is not None:
+            return supabase_row
+
         url = f"{self._api_root}/{self._base_id}/{table_id}/{record_id}"
         response = self._request("GET", url, table_id=table_id, headers=self._headers, timeout=60)
         response.raise_for_status()

@@ -13,7 +13,14 @@ from typing import Any
 from urllib.parse import quote
 
 from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
-from supabase_pipeline import CONTENT_PATCH_COLUMNS, OUTPUT_PATCH_COLUMNS, _rest, supabase_configured
+from supabase_pipeline import (
+    CONTENT_PATCH_COLUMNS,
+    OUTPUT_JSON_COLUMNS,
+    OUTPUT_PATCH_COLUMNS,
+    RUNNER_RECORD_PROJECTION,
+    _rest,
+    supabase_configured,
+)
 
 logger = logging.getLogger("pipeline-runner.supabase-reads")
 
@@ -114,3 +121,80 @@ def try_list_supabase_records(
         if shaped:
             records.append(shaped)
     return records[:limit]
+
+
+def _overlay_bag(fields: dict[str, Any], bag: dict) -> None:
+    for key, value in bag.items():
+        if not key or str(key).startswith("_") or value is None:
+            continue
+        fields[key] = value
+
+
+def _linked(row: dict, key: str) -> str:
+    value = row.get(key)
+    if isinstance(value, dict):
+        return str(value.get("airtable_record_id") or "").strip()
+    return ""
+
+
+def _record_from_row(row: dict, table_id: str) -> dict | None:
+    if table_id == PLATFORM_OUTPUTS_TABLE:
+        bag = row.get("error_messages") if isinstance(row.get("error_messages"), dict) else {}
+        columns = _OUTPUT_FIELDS
+    elif table_id == CONTENT_ITEMS_TABLE:
+        bag = row.get("extras") if isinstance(row.get("extras"), dict) else {}
+        columns = _CONTENT_FIELDS
+    else:
+        return None
+    if bag.get("_runner_record_projection") != RUNNER_RECORD_PROJECTION:
+        return None
+    shaped = _shaped(row, columns, None)
+    if not shaped:
+        return None
+    _overlay_bag(shaped["fields"], bag)
+    if table_id == PLATFORM_OUTPUTS_TABLE:
+        for airtable_key, column in OUTPUT_JSON_COLUMNS.items():
+            if row.get(column) is not None:
+                shaped["fields"][airtable_key] = row.get(column)
+        content_id = _linked(row, "content_items")
+        profile_id = _linked(row, "content_profiles")
+        if content_id:
+            shaped["fields"]["Content_Item"] = [content_id]
+        if profile_id:
+            shaped["fields"]["Content_Profile"] = [profile_id]
+    else:
+        profile_id = _linked(row, "content_profiles")
+        if profile_id:
+            shaped["fields"]["Content_Profile"] = [profile_id]
+    return shaped
+
+
+def try_get_supabase_record(settings: dict | None, table_id: str, record_id: str) -> dict | None:
+    """One Airtable-shaped record, or None when this call must use Airtable.
+
+    Rows written before the full-record marker stay on Airtable. A missing row
+    or a Supabase error also stays on Airtable.
+    """
+    if runner_table_read_source(settings, table_id) != "supabase":
+        return None
+    record_id = str(record_id or "").strip()
+    if not record_id:
+        return None
+    if table_id == PLATFORM_OUTPUTS_TABLE:
+        select = "*,content_items(airtable_record_id),content_profiles(airtable_record_id)"
+    elif table_id == CONTENT_ITEMS_TABLE:
+        select = "*,content_profiles(airtable_record_id)"
+    else:
+        return None
+    path = (
+        f"{_supabase_table(table_id)}?airtable_record_id=eq.{quote(record_id, safe='')}"
+        f"&select={quote(select, safe='(),*')}&limit=1"
+    )
+    try:
+        payload = _rest(settings or {}, path, "GET")
+    except Exception as error:
+        logger.warning("supabase runner get failed for %s %s; using Airtable: %s", table_id, record_id, error)
+        return None
+    if not isinstance(payload, list) or not payload or not isinstance(payload[0], dict):
+        return None
+    return _record_from_row(payload[0], table_id)
