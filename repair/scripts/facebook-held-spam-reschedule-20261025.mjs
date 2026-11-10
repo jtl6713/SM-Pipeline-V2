@@ -35,7 +35,7 @@ function verifiedSlot(result,item) {
     hour:"numeric",minute:"numeric",hour12:false}).formatToParts(new Date(ms));
   const hh=Number(parts.find(x=>x.type==="hour")?.value||0);
   const mm=Number(parts.find(x=>x.type==="minute")?.value||0);
-  if(hh>=20||hh<3||(hh===3&&mm<30))throw Error("slot_violates_MAE_blackout");
+  if(hh>22||(hh===22&&mm>=30)||hh<3||(hh===3&&mm<30))throw Error("slot_violates_MAE_blackout");
   return new Date(ms).toISOString();
 }
 // Independent authenticated Worker GET re-reads the authoritative Airtable

@@ -10,6 +10,7 @@ import {
   MAE_SCHEDULE_HORIZON_SETTING,
   maeBuildSuggestedScheduleMap,
   maeIsBlackoutLocalTime,
+  maeSafeSuggestedIso,
   maeNextOpenScheduleIso,
   maeNormalizeHorizonDays,
   maePickBalancedSuggestedIso,
@@ -263,14 +264,16 @@ test("current-day past windows are skipped", () => {
   assert.deepEqual(localParts(iso, zone), { hour: 11, minute: 30 });
 });
 
-test("blackout is 8:00 PM through 3:30 AM", () => {
+test("blackout is 10:30 PM through 3:30 AM", () => {
   const zone = "America/New_York";
+  const tenThirtyPm = maeZonedWallToUtcMs(2026, 10, 8, 22, 30, zone);
+  const tenTwentyNine = maeZonedWallToUtcMs(2026, 10, 8, 22, 29, zone);
   const eightPm = maeZonedWallToUtcMs(2026, 10, 8, 20, 0, zone);
-  const sevenFiftyNine = maeZonedWallToUtcMs(2026, 10, 8, 19, 59, zone);
   const threeThirty = maeZonedWallToUtcMs(2026, 10, 9, 3, 30, zone);
   const threeThirtyOne = maeZonedWallToUtcMs(2026, 10, 9, 3, 31, zone);
-  assert.equal(maeIsBlackoutLocalTime(eightPm, zone), true);
-  assert.equal(maeIsBlackoutLocalTime(sevenFiftyNine, zone), false);
+  assert.equal(maeIsBlackoutLocalTime(tenThirtyPm, zone), true);
+  assert.equal(maeIsBlackoutLocalTime(tenTwentyNine, zone), false);
+  assert.equal(maeIsBlackoutLocalTime(eightPm, zone), false);
   assert.equal(maeIsBlackoutLocalTime(threeThirty, zone), true);
   assert.equal(maeIsBlackoutLocalTime(threeThirtyOne, zone), false);
 });
@@ -299,7 +302,7 @@ test("capacity failure returns explicit error", () => {
   const now = new Date("2026-10-05T08:00:00Z");
   const occupied = fillMaeHorizon(zone, { year: 2026, month: 10, day: 5 }, 1);
   // Saturate open hours every 45 minutes so no 90-minute-clear gap remains.
-  for (let minute = 3 * 60 + 31; minute <= 19 * 60 + 59; minute += 45) {
+  for (let minute = 3 * 60 + 31; minute <= 22 * 60 + 29; minute += 45) {
     const hh = Math.floor(minute / 60);
     const mm = minute % 60;
     occupied.push(maeZonedWallToUtcMs(2026, 10, 5, hh, mm, zone));
@@ -383,6 +386,43 @@ test("Approve resolves a Story to the same-platform main plus 10 minutes when co
   });
   assert.equal(resolved.source, "companion");
   assert.equal(Date.parse(resolved.iso), reelMs + 10 * 60 * 1000);
+});
+
+test("maeSafeSuggestedIso advances a Story companion out of overnight blackout", () => {
+  const zone = "America/Chicago";
+  const lateMain = maeZonedWallToUtcMs(2026, 10, 6, 22, 25, zone); // 10:25 PM
+  const companionRaw = lateMain + 10 * 60 * 1000; // 10:35 PM blackout
+  assert.equal(maeIsBlackoutLocalTime(companionRaw, zone), true);
+  const safe = maeSafeSuggestedIso(companionRaw, 0, zone);
+  assert.ok(safe);
+  assert.equal(maeIsBlackoutLocalTime(Date.parse(safe), zone), false);
+  assert.ok(Date.parse(safe) > companionRaw);
+});
+
+test("new-idea suggest map never stamps blackout Story companions after a late main", () => {
+  const zone = "America/Chicago";
+  const now = new Date("2026-10-05T08:00:00Z");
+  const day = { year: 2026, month: 10, day: 6 };
+  // Saturate Instagram Reel MAE windows for that civil day so a late existing
+  // main is treated as covered overflow and kept; companion +10 then hits blackout.
+  const morning = maeZonedWallToUtcMs(day.year, day.month, day.day, 5, 30, zone);
+  const afternoon = maeZonedWallToUtcMs(day.year, day.month, day.day, 11, 30, zone);
+  const evening = maeZonedWallToUtcMs(day.year, day.month, day.day, 16, 30, zone);
+  const lateMain = maeZonedWallToUtcMs(day.year, day.month, day.day, 22, 25, zone);
+  const stamps = maeBuildSuggestedScheduleMap(
+    [
+      { platform: "Instagram", output_type: "Reel", scheduled_at: new Date(lateMain).toISOString() },
+      { platform: "Instagram", output_type: "Story", scheduled_at: "" },
+    ],
+    { "instagram::reel": [morning, afternoon, evening] },
+    now,
+    { timeZone: zone, storyCompanion: true, spreadPlatforms: false, preserveExisting: true },
+  );
+  assert.equal(stamps.get("Instagram::Reel"), new Date(lateMain).toISOString());
+  const story = stamps.get("Instagram::Story");
+  assert.ok(story, "Story must still receive a stamp");
+  assert.equal(maeIsBlackoutLocalTime(Date.parse(story), zone), false);
+  assert.ok(Date.parse(story) >= lateMain + 10 * 60 * 1000);
 });
 
 test("Worker stamp paths use MAE horizon engine", () => {

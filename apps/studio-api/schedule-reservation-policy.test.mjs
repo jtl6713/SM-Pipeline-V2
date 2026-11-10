@@ -48,11 +48,11 @@ test("Production Request valid explicit time stays exact, while blackout seed us
   const exact = maeResolveSeedSchedule({ requestedIso: requested, timeZone: "America/Chicago", now });
   assert.equal(exact.ok, true);
   assert.equal(exact.iso, requested);
-  const blocked = maeResolveSeedSchedule({ requestedIso: "2026-11-09T03:00:00.000Z",
+  const blocked = maeResolveSeedSchedule({ requestedIso: "2026-11-09T05:00:00.000Z",
     timeZone: "America/Chicago", now });
   assert.equal(blocked.ok, true);
   assert.equal(blocked.adjusted, true);
-  assert.ok(Date.parse(blocked.iso) > Date.parse("2026-11-09T03:00:00.000Z"));
+  assert.ok(Date.parse(blocked.iso) > Date.parse("2026-11-09T05:00:00.000Z"));
   assert.equal(maeIsBlackoutLocalTime(Date.parse(blocked.iso), "America/Chicago"), false);
 });
 
@@ -109,7 +109,7 @@ test("Atomic seed respects separate Story lane and rejects collisions after MAE 
   assert.match(seed, /maeIsBlackoutLocalTime\(candidateMs, timeZone\) \|\| maeScheduleConflicts/);
   assert.match(seed, /if \(vacate\)/);
   const now = new Date("2026-11-08T20:00:00Z");
-  const raw = "2026-11-09T03:00:00Z";
+  const raw = "2026-11-09T05:00:00Z";
   const main = maeResolveSeedSchedule({ requestedIso: raw, timeZone: "America/Chicago", now });
   const story = maeResolveSeedSchedule({ requestedIso: raw, timeZone: "America/Chicago", now, platformOccupiedMs: [] });
   assert.equal(story.ok, true); // independent Story lane may share a companion time with the main.

@@ -478,11 +478,11 @@
   }
 
   const EZ_DEFAULT_TIME_ZONE = "America/Chicago";
-  /** Inclusive local blackout: 8:00 PM through 3:30 AM profile time. */
-  const EZ_SCHEDULE_BLACKOUT_START_MINUTES = 20 * 60;
+  /** Inclusive local blackout: 10:30 PM through 3:30 AM profile time. */
+  const EZ_SCHEDULE_BLACKOUT_START_MINUTES = 22 * 60 + 30;
   const EZ_SCHEDULE_BLACKOUT_END_MINUTES = 3 * 60 + 30;
   const EZ_SCHEDULE_OPEN_START_MINUTES = 3 * 60 + 31;
-  const EZ_SCHEDULE_OPEN_END_MINUTES = 19 * 60 + 59;
+  const EZ_SCHEDULE_OPEN_END_MINUTES = 22 * 60 + 29;
 
   function ezNormalizeHorizonDays(value, fallback = EZ_SUGGEST_HORIZON_DAYS) {
     const n = Number(value);
@@ -580,11 +580,14 @@
   }
 
   function ezAdvancePastBlackout(ms, timeZone = EZ_DEFAULT_TIME_ZONE) {
-    if (!Number.isFinite(ms) || !ezIsBlackoutLocalTime(ms, timeZone)) return ms;
-    const parts = ezZonedDateTimeParts(new Date(ms), timeZone);
-    let civil = { year: parts.year, month: parts.month, day: parts.day };
-    if (parts.hour >= 23) civil = ezAddCivilDays(civil.year, civil.month, civil.day, 1);
-    return ezZonedWallToUtcMs(civil.year, civil.month, civil.day, 3, 1, timeZone);
+    if (!Number.isFinite(ms)) return ms;
+    let cursor = ms;
+    // Match Worker MAE: walk minute-by-minute out of 10:30 PM–3:30 AM inclusive.
+    for (let i = 0; i < 12 * 60; i += 1) {
+      if (!ezIsBlackoutLocalTime(cursor, timeZone)) return cursor;
+      cursor += 60 * 1000;
+    }
+    return cursor;
   }
 
   function ezIsPriorityLocalTime(ms, timeZone = EZ_DEFAULT_TIME_ZONE) {

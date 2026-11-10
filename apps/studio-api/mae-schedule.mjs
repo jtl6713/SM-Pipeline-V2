@@ -14,12 +14,12 @@
  * same platform must not stack at the same publish time. Different platforms
  * may share the same time. Stories may intentionally sit near their companion main.
  *
- * Overnight blackout: 8:00 PM through 3:30 AM profile-local (inclusive).
+ * Overnight blackout: 10:30 PM through 3:30 AM profile-local (inclusive).
  */
 
 /** Minimum separation between posts in the same lane (profile/platform/output).
  * 90 minutes leaves room for overflow midpoints between MAE windows under the
- * 8:00 PM blackout (5:00 / 10:30 / 16:00 are only 5.5h apart). */
+ * 10:30 PM blackout (5:00 / 10:30 / 16:00 remain 5.5h apart with evening room). */
 export const MAE_SCHEDULE_GAP_MS = 90 * 60 * 1000;
 export const MAE_SUGGEST_HORIZON_DAYS = 30;
 export const MAE_PRIORITY_SCHEDULE_WINDOWS = Object.freeze([
@@ -31,13 +31,13 @@ export const MAE_SUGGEST_LEAD_MS = 10 * 60 * 1000;
 /** Companion Stories sit this far after the same-platform main when MAE has no open slot. */
 export const MAE_STORY_COMPANION_OFFSET_MS = 10 * 60 * 1000;
 export const MAE_DEFAULT_TIME_ZONE = "America/Chicago";
-/** Inclusive local blackout: 8:00 PM through 3:30 AM profile time. */
-export const MAE_SCHEDULE_BLACKOUT_START_MINUTES = 20 * 60;
+/** Inclusive local blackout: 10:30 PM through 3:30 AM profile time. */
+export const MAE_SCHEDULE_BLACKOUT_START_MINUTES = 22 * 60 + 30;
 export const MAE_SCHEDULE_BLACKOUT_END_MINUTES = 3 * 60 + 30;
 /** First allowed minute after overnight blackout (3:31 AM). */
 export const MAE_SCHEDULE_OPEN_START_MINUTES = 3 * 60 + 31;
-/** Last allowed minute before overnight blackout (7:59 PM). */
-export const MAE_SCHEDULE_OPEN_END_MINUTES = 19 * 60 + 59;
+/** Last allowed minute before overnight blackout (10:29 PM). */
+export const MAE_SCHEDULE_OPEN_END_MINUTES = 22 * 60 + 29;
 /** Pipeline Settings key for the rolling scheduling horizon. */
 export const MAE_SCHEDULE_HORIZON_SETTING = "STUDIO_SCHEDULE_HORIZON_DAYS";
 export const MAE_SCHEDULE_HORIZON_MIN = 1;
@@ -460,12 +460,26 @@ export function maeNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = MAE_SCH
 export function maeAdvancePastBlackout(ms, timeZone = MAE_DEFAULT_TIME_ZONE) {
   if (!Number.isFinite(ms)) return ms;
   let cursor = ms;
-  // Overnight blackout is 8:00 PM through 3:30 AM. Walk forward at most twelve hours.
+  // Overnight blackout is 10:30 PM through 3:30 AM. Walk forward at most twelve hours.
   for (let i = 0; i < 12 * 60; i += 1) {
     if (!maeIsBlackoutLocalTime(cursor, timeZone)) return cursor;
     cursor += 60 * 1000;
   }
   return cursor;
+}
+
+/** Never emit a blackout ISO from suggest/stamp paths. Advance or drop. */
+export function maeSafeSuggestedIso(isoOrMs, notBeforeMs, timeZone = MAE_DEFAULT_TIME_ZONE) {
+  const zone = maeNormalizeTimeZone(timeZone);
+  const ms = typeof isoOrMs === "number" ? isoOrMs : Date.parse(String(isoOrMs || "").trim());
+  if (!Number.isFinite(ms)) return "";
+  let cursor = ms;
+  if (maeIsBlackoutLocalTime(cursor, zone)) {
+    cursor = maeAdvancePastBlackout(cursor, zone);
+  }
+  if (!Number.isFinite(cursor) || cursor <= Number(notBeforeMs || 0)) return "";
+  if (maeIsBlackoutLocalTime(cursor, zone)) return "";
+  return new Date(cursor).toISOString();
 }
 
 function maeStoryCompanionIso(stamps, platform, notBeforeMs) {
@@ -643,8 +657,10 @@ export function maeBuildSuggestedScheduleMap(items, occupiedByLane = {}, now = n
       }
     }
     if (isStory) {
-      const companion = maeStoryCompanionIso(stamps, platform, notBeforeMs);
-      if (companion && options.storyCompanion !== false) {
+      const companion = options.storyCompanion !== false
+        ? maeSafeSuggestedIso(maeStoryCompanionIso(stamps, platform, notBeforeMs), notBeforeMs, timeZone)
+        : "";
+      if (companion) {
         stamps.set(key, companion);
         (reserved[lane] ||= []).push(Date.parse(companion));
         continue;
@@ -661,16 +677,19 @@ export function maeBuildSuggestedScheduleMap(items, occupiedByLane = {}, now = n
       avoidCivilKeys: isStory || !spreadPlatforms ? new Set() : otherPackageDays(platform),
     };
     const iso = maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, scheduleNow, pickOpts);
-    let safeIso = iso && Number.isFinite(Date.parse(iso)) && Date.parse(iso) > notBeforeMs
-      ? iso
-      : maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, scheduleNow, {
+    let safeIso = maeSafeSuggestedIso(iso, notBeforeMs, timeZone)
+      || maeSafeSuggestedIso(
+        maePickBalancedSuggestedIso(MAE_PRIORITY_SCHEDULE_WINDOWS, scheduleNow, {
           ...pickOpts,
           leadMs: options.leadMs ?? MAE_SUGGEST_LEAD_MS,
-        });
-    if (isStory && !(safeIso && Number.isFinite(Date.parse(safeIso)) && Date.parse(safeIso) > notBeforeMs)) {
-      safeIso = maeStoryCompanionIso(stamps, platform, notBeforeMs);
+        }),
+        notBeforeMs,
+        timeZone,
+      );
+    if (isStory && !safeIso && options.storyCompanion !== false) {
+      safeIso = maeSafeSuggestedIso(maeStoryCompanionIso(stamps, platform, notBeforeMs), notBeforeMs, timeZone);
     }
-    stamps.set(key, safeIso);
+    stamps.set(key, safeIso || "");
     if (safeIso) {
       (reserved[lane] ||= []).push(Date.parse(safeIso));
       if (!isStory) rememberPackageDay(platform, safeIso);
@@ -681,13 +700,20 @@ export function maeBuildSuggestedScheduleMap(items, occupiedByLane = {}, now = n
     const outputType = String(item.output_type || "").trim();
     if (!platform || !/story/i.test(outputType)) continue;
     const key = `${platform}::${outputType}`;
-    const current = String(stamps.get(key) || "").trim();
-    if (current && Number.isFinite(Date.parse(current)) && Date.parse(current) > notBeforeMs) continue;
-    const companion = maeStoryCompanionIso(stamps, platform, notBeforeMs);
+    const current = maeSafeSuggestedIso(stamps.get(key), notBeforeMs, timeZone);
+    if (current) {
+      stamps.set(key, current);
+      continue;
+    }
+    const companion = options.storyCompanion !== false
+      ? maeSafeSuggestedIso(maeStoryCompanionIso(stamps, platform, notBeforeMs), notBeforeMs, timeZone)
+      : "";
     if (companion) {
       stamps.set(key, companion);
       const lane = maeScheduleLaneKey(platform, outputType);
       (reserved[lane] ||= []).push(Date.parse(companion));
+    } else {
+      stamps.delete(key);
     }
   }
   return stamps;

@@ -2773,7 +2773,7 @@ async function studioApproveOutputRecordAtomic(env, record, note, stamp, payload
           throw new HttpError(400, "Scheduled date/time is invalid");
         }
         if (maeIsBlackoutLocalTime(requestedMs, timeZone)) {
-          throw new HttpError(409, "The requested manual schedule is inside the profile-local 8:00 PM–3:30 AM blackout");
+          throw new HttpError(409, "The requested manual schedule is inside the profile-local 10:30 PM–3:30 AM blackout");
         }
         if (maeScheduleConflicts(requestedMs, platformLane)) {
           throw new HttpError(409, "The requested manual schedule conflicts with an existing reservation on this profile/platform");
@@ -4122,7 +4122,7 @@ export async function getStudioScheduleSettings(request, env, authorization) {
     default_horizon_days: MAE_SUGGEST_HORIZON_DAYS,
     setting_name: MAE_SCHEDULE_HORIZON_SETTING,
     mae_windows: [...MAE_PRIORITY_SCHEDULE_WINDOWS],
-    blackout: "20:00-03:30",
+    blackout: "22:30-03:30",
     global_automatic_idea_target: globalTarget,
     global_automatic_idea_target_default: 500,
     global_automatic_idea_setting_name: GLOBAL_IDEA_TARGET_SETTING,
@@ -16273,7 +16273,7 @@ export async function scheduleStudioPublishOutput(request, env, url, authorizati
           const requestedMs = Date.parse(value);
           if (!Number.isFinite(requestedMs)) throw new HttpError(400, "Scheduled date/time is invalid");
           if (maeIsBlackoutLocalTime(requestedMs, timeZone)) {
-            throw new HttpError(409, "Requested manual schedule is inside the 8:00 PM–3:30 AM profile blackout");
+            throw new HttpError(409, "Requested manual schedule is inside the 10:30 PM–3:30 AM profile blackout");
           }
           if (maeScheduleConflicts(requestedMs, platformOccupiedMs)) {
             throw new HttpError(409, "Requested manual schedule conflicts with another output on this profile and platform");

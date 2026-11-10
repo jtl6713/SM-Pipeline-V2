@@ -4342,7 +4342,7 @@ export async function item4SourceToProductionBridgePreflight(env, requestRecord,
         const local = new Intl.DateTimeFormat("en-US", { timeZone, month: "short", day: "numeric",
           year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(ms));
         if (scheduleReservationLaneEnabled(env, profile.id, platform)) {
-          notes.push(`Scheduling: ${platform} / ${type} requested ${local} inside the profile-local 8 PM–3:30 AM blackout. Approve will reserve the next eligible MAE slot at or after this time. Confirm the final reservation in Pipeline.`);
+          notes.push(`Scheduling: ${platform} / ${type} requested ${local} inside the profile-local 10:30 PM–3:30 AM blackout. Approve will reserve the next eligible MAE slot at or after this time. Confirm the final reservation in Pipeline.`);
         } else {
           issues.push(`${platform} / ${type} requested ${local} inside the blackout. Change the requested time in Platforms & Frames before approval.`);
         }
@@ -9214,7 +9214,7 @@ export async function getInsightsBestTimes(request, env, url, authorization) {
     similar_sample_size: 0,
     similar_profile: themeName,
     caption: null,
-    note: note || `${seasonLabel} stamps use MAE-first scheduling in ${timeZone}: Morning → Afternoon → Evening on Day 1, then Day 2 through the configured horizon (default 30). Each platform × output type is an independent lane. Once MAE is full, extras use each day's widest gap on the least-populated days. Overnight 8:00 PM–3:30 AM is never used.`,
+    note: note || `${seasonLabel} stamps use MAE-first scheduling in ${timeZone}: Morning → Afternoon → Evening on Day 1, then Day 2 through the configured horizon (default 30). Each platform × output type is an independent lane. Once MAE is full, extras use each day's widest gap on the least-populated days. Overnight 10:30 PM–3:30 AM is never used.`,
   });
 
   try {
@@ -9307,7 +9307,7 @@ export async function getInsightsBestTimes(request, env, url, authorization) {
       similar_sample_size: similar?.sample_size || 0,
       similar_profile: similar?.profile || theme,
       caption,
-      note: `${seasonLabel} stamps use MAE-first scheduling in ${timeZone}: Day 1 Morning → Afternoon → Evening through the configured horizon, then balanced overflow on the least-populated days. Overnight 8:00 PM–3:30 AM is never used.`,
+      note: `${seasonLabel} stamps use MAE-first scheduling in ${timeZone}: Day 1 Morning → Afternoon → Evening through the configured horizon, then balanced overflow on the least-populated days. Overnight 10:30 PM–3:30 AM is never used.`,
     });
   } catch (error) {
     console.warn("best-times failed; MAE fallback", error);

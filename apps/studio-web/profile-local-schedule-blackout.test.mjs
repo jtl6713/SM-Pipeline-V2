@@ -107,10 +107,11 @@ test("once the 30-day MAE horizon is covered, the extra is day 1's largest gap",
   assert.equal(dayOf(next, zone), "2026-10-04");
 });
 
-test("8:00 PM profile local is blackout; 7:59 PM is not", () => {
+test("10:30 PM profile local is blackout; 10:29 PM is not", () => {
   const zone = "America/Los_Angeles";
-  assert.equal(plan.ezIsBlackoutLocalTime(wallMs(2026, 10, 8, 20, 0, zone), zone), true);
-  assert.equal(plan.ezIsBlackoutLocalTime(wallMs(2026, 10, 8, 19, 59, zone), zone), false);
+  assert.equal(plan.ezIsBlackoutLocalTime(wallMs(2026, 10, 8, 22, 30, zone), zone), true);
+  assert.equal(plan.ezIsBlackoutLocalTime(wallMs(2026, 10, 8, 22, 29, zone), zone), false);
+  assert.equal(plan.ezIsBlackoutLocalTime(wallMs(2026, 10, 8, 20, 0, zone), zone), false);
   assert.equal(plan.ezIsBlackoutLocalTime(wallMs(2026, 10, 9, 3, 30, zone), zone), true);
   assert.equal(plan.ezIsBlackoutLocalTime(wallMs(2026, 10, 9, 3, 31, zone), zone), false);
 });
