@@ -11,7 +11,7 @@
   const root = String(config.apiBase || window.location.origin).replace(/\/$/, "");
   const select = $("studioProfileSelect");
   const status = $("storyFirstStatus");
-  const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, proposing: false, planRevision: 0, ideaRecords: [], generatedAssets: {}, candidates: {}, attempted: new Set(), browsing: {}, pendingUpload: {}, libraryRows: [], wideResults: {}, uploadedAssets: {}, selectedAssetNames: {}, expandedScenes: new Set(), videoJobs: {}, videoOptions: {}, videoTimers: {}, videoRequestBusy: false, videoRequestStatus: {}, videoSubmissionUncertain: {} };
+  const current = { record: null, story: null, profile: "", title: "", summary: "", busy: false, proposing: false, planRevision: 0, ideaRecords: [], generatedAssets: {}, candidates: {}, attempted: new Set(), browsing: {}, pendingUpload: {}, libraryRows: [], wideResults: {}, uploadedAssets: {}, selectedAssetNames: {}, expandedScenes: new Set(), videoJobs: {}, videoOptions: {}, videoTimers: {}, videoRequestBusy: false, videoRequestStatus: {}, videoLastChecked: {}, videoSubmissionUncertain: {} };
 
   const profileId = () => String(select?.value || localStorage.getItem("studio.content_profile_id") || "").trim();
   const isId = id => /^rec[A-Za-z0-9]+$/.test(String(id || ""));
@@ -110,7 +110,7 @@
     current.story = JSON.parse(JSON.stringify(story));
     current.expandedScenes.clear();
     Object.values(current.videoTimers).forEach(clearTimeout);
-    current.videoTimers = {}; current.videoJobs = {}; current.videoOptions = {};
+    current.videoTimers = {}; current.videoJobs = {}; current.videoOptions = {}; current.videoLastChecked = {}; current.videoRequestStatus = {};
     current.candidates = {}; current.attempted = new Set(); current.browsing = {};
     const voiceovers = String(record.summary || "").split(/\r?\n/).filter(line => /^\s*[1-9]\d*\.\s+/.test(line) && !/\s\u2014\s/.test(line)).map(line => line.replace(/^\s*\d+\.\s+/, "").trim());
     if (voiceovers.length === current.story.scenes.length && current.story.scenes.every(row => !row.voiceover)) {
@@ -516,12 +516,43 @@
     };
     return labels[job?.state || "none"] || "Video status: " + String(job?.state || "unknown");
   }
+  // Provider video jobs expose states, not a trustworthy percentage complete.
+  // Keep an honest *indeterminate* moving indicator next to Refresh Video Status,
+  // including after a page reload. Only the existing read-only status route polls.
+  function appendVideoJobProgress(index, job, actions) {
+    const stage = {
+      submitting: "Submitted · verifying the provider request",
+      pending: "Queued at ElevenLabs · awaiting generation",
+      generating: "Generating video at ElevenLabs",
+      accepting: "Registering reviewed video privately",
+      awaiting_review: "Complete · your video is ready to review",
+      registered: "Registered · finalize your media selection",
+    }[job?.state];
+    if (!stage) return;
+    const active = ["submitting", "pending", "generating", "accepting"].includes(job.state);
+    const progress = node("div","story-first-video-progress" + (active ? " is-active" : " is-complete"));
+    progress.setAttribute("role","status");
+    progress.setAttribute("aria-live","polite");
+    progress.appendChild(node("span","story-first-video-progress-caption",stage));
+    if (active) {
+      progress.appendChild(node("div","story-first-video-progress-track"));
+      const time = current.videoLastChecked[index];
+      progress.appendChild(node("span","story-first-video-progress-note",
+        (time ? "Last checked " + new Date(time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }) + ". " : "") +
+        "Checking this existing job automatically about every 15 seconds. No repeat generation or charge."));
+    } else if (job.state === "awaiting_review") {
+      progress.appendChild(node("span","story-first-video-progress-note",
+        "Generation finished. Play the preview and Accept or Decline; nothing publishes automatically."));
+    }
+    actions.appendChild(progress);
+  }
   async function checkSceneVideo(index, auto = false) {
     if (!isId(current.record?.id)) return;
     const ideaId = current.record.id;
     const result = await call(sceneUrl(index, "video/status") + "?profile=" + encodeURIComponent(assertProfile()));
     if (current.record?.id !== ideaId) return;
     current.videoJobs[index] = result;
+    current.videoLastChecked[index] = Date.now();
     if (result.state && result.state !== "none") {
       delete current.videoSubmissionUncertain[videoSceneIdentity(index)];
     }
@@ -597,7 +628,13 @@
   function updateVideoRequestProgress(index, message, busyLabel = "Reviewing video…") {
     current.videoRequestStatus[index] = message;
     const progress = $("storyFirstVideoProgress-" + index);
-    if (progress) { progress.textContent = message; progress.hidden = !message; }
+    if (progress) {
+      const caption = progress.querySelector(".story-first-video-progress-caption");
+      if (caption) caption.textContent = message;
+      progress.hidden = !message;
+      progress.classList.toggle("is-active", current.videoRequestBusy);
+      progress.classList.toggle("is-complete", !current.videoRequestBusy);
+    }
     document.querySelectorAll("[data-story-video-generate]").forEach(control => {
       const sceneIndex = Number(control.dataset.storyVideoGenerate);
       const uncertain = !!current.videoSubmissionUncertain[videoSceneIdentity(sceneIndex)];
@@ -1226,6 +1263,9 @@
             button("Finalize Video Selection", "primary-button", () =>
               decideSceneVideo(index, "accept").catch(e => report(e.message, true)), actions);
           }
+          // Render progress NEXT TO the scene's status control, not in the
+          // distant page-level notice. It follows every read-only poll state.
+          appendVideoJobProgress(index, videoJob, actions);
           button("Refresh Video Status", "secondary-button", () =>
             checkSceneVideo(index).catch(e => report(e.message, true)), actions);
           return;
@@ -1338,13 +1378,16 @@
           generateButton.setAttribute("aria-busy", String(current.videoRequestBusy));
           if (current.videoRequestBusy) generateButton.textContent = "Video review in progress…";
           else if (uncertain) generateButton.textContent = "Check existing video job first";
-          const videoProgress = node("p","story-first-upload-progress",
-            current.videoRequestStatus[index] || (uncertain ?
-              "Paid submission may have reached ElevenLabs. Check the existing job; do not resubmit." : ""));
+          const progressMessage = current.videoRequestStatus[index] || (uncertain ?
+            "Paid submission may have reached ElevenLabs. Check the existing job; do not resubmit." : "");
+          const videoProgress = node("div","story-first-video-progress" +
+            (current.videoRequestBusy ? " is-active" : " is-complete"));
           videoProgress.id = "storyFirstVideoProgress-" + index;
-          videoProgress.hidden = !videoProgress.textContent;
+          videoProgress.hidden = !progressMessage;
           videoProgress.setAttribute("role","status");
           videoProgress.setAttribute("aria-live","polite");
+          videoProgress.appendChild(node("span","story-first-video-progress-caption",progressMessage));
+          videoProgress.appendChild(node("div","story-first-video-progress-track"));
           actions.appendChild(videoProgress);
           if (!videoJob) button("Check Existing Video Job","secondary-button",()=>
             checkSceneVideo(index).catch(e=>report(e.message,true)),actions);
