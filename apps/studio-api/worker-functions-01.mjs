@@ -967,7 +967,7 @@ export async function studioSupabaseWriteThroughOutput(env, record, label = "out
   if (!studioSupabaseConfigured(env) || !record?.id) return { skipped: true };
   if (supabaseCircuitOpen()) return { skipped: true, reason: "supabase_circuit_open" };
   try {
-    const result = await syncAirtableOutputRowToSupabase(env, record);
+    const result = await syncAirtableOutputRowToSupabase(env, record, { fullRecord: true });
     studioMarkMappedListDirty();
     studioReadCacheDropPrefix("outputs:");
     studioReadCacheDropPrefix("schedule-grid:");
@@ -983,7 +983,7 @@ export async function studioSupabaseWriteThroughContent(env, record, label = "co
   if (!studioSupabaseConfigured(env) || !record?.id) return { skipped: true };
   if (supabaseCircuitOpen()) return { skipped: true, reason: "supabase_circuit_open" };
   try {
-    const result = await syncAirtableContentRowToSupabase(env, record);
+    const result = await syncAirtableContentRowToSupabase(env, record, { fullRecord: true });
     studioReadCacheDropPrefix("content-labels:");
     studioReadCacheDropPrefix("content-list:");
     return result;

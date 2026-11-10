@@ -29,6 +29,7 @@ import {
   listSupabaseFactoryDeskPack,
   listSupabaseOverviewPack,
   syncAirtableContentRowToSupabase,
+  syncAirtableOutputRowToSupabase,
   syncAirtableProductionRequestRowToSupabase,
   syncAirtableMediaAssetRowToSupabase,
   syncAirtableTransferQueueRowToSupabase,
@@ -750,14 +751,51 @@ test("phase 5 content write-through patches present columns when profile is unre
       fields: { Content_ID: 12, Content_Status: "Thumbnail Ready", Content_Title: "Pier" },
     });
     assert.equal(result.mode, "patch");
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].method, "PATCH");
-    assert.match(calls[0].url, /content_items\?airtable_record_id=eq\.recContent1/);
-    const body = JSON.parse(calls[0].body);
+    const patch = calls.find((call) => call.method === "PATCH");
+    assert.ok(patch);
+    assert.match(patch.url, /content_items\?airtable_record_id=eq\.recContent1/);
+    const body = JSON.parse(patch.body);
     assert.equal(body.content_number, 12);
     assert.equal(body.content_title, "Pier");
     assert.equal(body.content_status, "Thumbnail Ready");
     assert.equal(body.content_profile_id, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("lean output upsert keeps a stored runner marker", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method || "GET", body: init?.body || "" });
+    if (String(url).includes("content_profiles")) {
+      return { ok: true, async text() { return JSON.stringify([{ id: "prof-uuid" }]); } };
+    }
+    if (String(url).includes("error_messages") && (init?.method || "GET") === "GET") {
+      return { ok: true, async text() { return JSON.stringify([{
+        airtable_record_id: "recOutput1",
+        error_messages: { _runner_record_projection: "v1", _airtable_links: { Content_Item: "recContent1" }, Output_Notes: "old" },
+      }]); } };
+    }
+    return { ok: true, async text() { return ""; } };
+  };
+  try {
+    const result = await syncAirtableOutputRowToSupabase(supabaseEnv, {
+      id: "recOutput1",
+      fields: {
+        Output_ID: 4,
+        Platform: "Instagram",
+        Content_Profile: ["recProfile1"],
+        Publish_Retry_Eligible: true,
+      },
+    });
+    assert.equal(result.mode, "upsert");
+    const post = calls.find((call) => call.method === "POST" && call.url.includes("platform_outputs"));
+    const row = JSON.parse(post.body)[0];
+    assert.equal(row.error_messages._runner_record_projection, "v1");
+    assert.equal(row.error_messages.Publish_Retry_Eligible, true);
+    assert.equal(row.error_messages._airtable_links.Content_Item, "recContent1");
   } finally {
     globalThis.fetch = originalFetch;
   }

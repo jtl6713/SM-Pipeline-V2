@@ -419,6 +419,44 @@ function stampRunnerProjection(bag, links, complete) {
   };
 }
 
+export function retainProjectionKeys(existing, next) {
+  const bag = isPlainObject(next) ? { ...next } : {};
+  if (!isPlainObject(existing)) return bag;
+  for (const [key, value] of Object.entries(existing)) {
+    if (String(key).startsWith("_") && value != null) bag[key] = value;
+  }
+  return bag;
+}
+
+async function applyStoredProjection(env, table, rows, column) {
+  const ids = [...new Set(rows.map((row) => row?.airtable_record_id).filter(Boolean))];
+  if (!ids.length) return rows;
+  const existing = new Map();
+  try {
+    for (let index = 0; index < ids.length; index += 100) {
+      const quoted = ids.slice(index, index + 100).map((id) => encodeURIComponent(id)).join(",");
+      const found = await supabaseRest(
+        env,
+        `${table}?airtable_record_id=in.(${quoted})&select=airtable_record_id,${column}&limit=100`,
+      );
+      for (const row of found || []) {
+        if (row?.airtable_record_id) existing.set(row.airtable_record_id, row[column]);
+      }
+    }
+  } catch (error) {
+    console.warn("supabase projection marker read failed", table, error);
+    return rows.map((row) => {
+      const copy = { ...row };
+      delete copy[column];
+      return copy;
+    });
+  }
+  return rows.map((row) => ({
+    ...row,
+    [column]: retainProjectionKeys(existing.get(row.airtable_record_id), row[column]),
+  }));
+}
+
 /** Build an Airtable-shaped record so existing mapOutput / f() keep working. */
 export function airtableShapedOutputFromSupabase(row) {
   const contentAirtableId = row.content_item_airtable_id || null;
@@ -1497,7 +1535,12 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
 
   // Lean list fields. A full-record marker here would make a later runner get
   // treat omitted JSON and extras as empty, so this copy stays unmarked.
-  const contentRows = (contents || []).map((row) => mapAirtableContentToSupabase(row, profileUuid));
+  const contentRows = await applyStoredProjection(
+    env,
+    "content_items",
+    (contents || []).map((row) => mapAirtableContentToSupabase(row, profileUuid)),
+    "extras",
+  );
   for (let i = 0; i < contentRows.length; i += 200) {
     await guardedUpsert("content_items", contentRows.slice(i, i + 200));
   }
@@ -1512,10 +1555,10 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
   );
 
   // Same lean list as the field request above. Leave these rows unmarked.
-  const outputRows = outputs.map((row) => mapAirtableOutputToSupabase(row, {
+  const outputRows = await applyStoredProjection(env, "platform_outputs", outputs.map((row) => mapAirtableOutputToSupabase(row, {
     profileUuid,
     contentUuidByAirtableId,
-  }));
+  })), "error_messages");
   for (let i = 0; i < outputRows.length; i += 200) {
     await guardedUpsert("platform_outputs", outputRows.slice(i, i + 200));
   }
@@ -1630,7 +1673,7 @@ export async function syncAllProfilesPipelineToSupabase(env, profiles, deps = {}
  * Write-through after an Airtable schedule (or similar) PATCH so Pipeline
  * schedule-grid reads do not snap the bubble back to a stale Supabase time.
  */
-export async function syncAirtableOutputRowToSupabase(env, record) {
+export async function syncAirtableOutputRowToSupabase(env, record, options = {}) {
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
   if (!record?.id) return { skipped: true, reason: "missing_record" };
 
@@ -1650,7 +1693,6 @@ export async function syncAirtableOutputRowToSupabase(env, record) {
           publish_status: selectName(record.fields?.Publish_Status),
           output_status: selectName(record.fields?.Output_Status),
           review_status: selectName(record.fields?.Review_Status),
-          error_messages: packOutputListFields(record.fields || {}),
         },
         headers: { Prefer: "return=minimal" },
       },
@@ -1670,7 +1712,14 @@ export async function syncAirtableOutputRowToSupabase(env, record) {
     }
   }
 
-  const row = mapAirtableOutputToSupabase(record, { profileUuid, contentUuidByAirtableId, fullRecord: true });
+  let row = mapAirtableOutputToSupabase(record, {
+    profileUuid,
+    contentUuidByAirtableId,
+    fullRecord: options.fullRecord === true,
+  });
+  if (options.fullRecord !== true) {
+    [row] = await applyStoredProjection(env, "platform_outputs", [row], "error_messages");
+  }
   await upsertChunk(env, "platform_outputs", [row]);
   return { ok: true, mode: "upsert" };
 }
@@ -1680,7 +1729,7 @@ export async function syncAirtableOutputRowToSupabase(env, record) {
  * Without a resolved profile uuid, patch columns that are present on the
  * Airtable record so a partial body cannot blank content_profile_id.
  */
-export async function syncAirtableContentRowToSupabase(env, record) {
+export async function syncAirtableContentRowToSupabase(env, record, options = {}) {
   if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
   if (!record?.id) return { skipped: true, reason: "missing_record" };
   const fields = record.fields || {};
@@ -1690,7 +1739,11 @@ export async function syncAirtableContentRowToSupabase(env, record) {
     fields.Content_ID != null || fields.Content_Status != null || fields.Content_Title != null
   );
   if (canUpsert) {
-    await upsertChunk(env, "content_items", [mapAirtableContentToSupabase(record, profileUuid, { fullRecord: true })]);
+    let row = mapAirtableContentToSupabase(record, profileUuid, { fullRecord: options.fullRecord === true });
+    if (options.fullRecord !== true) {
+      [row] = await applyStoredProjection(env, "content_items", [row], "extras");
+    }
+    await upsertChunk(env, "content_items", [row]);
     return { ok: true, mode: "upsert" };
   }
 
@@ -1702,7 +1755,13 @@ export async function syncAirtableContentRowToSupabase(env, record) {
   if ("Voiceover_Status" in fields) patch.voiceover_status = selectName(fields.Voiceover_Status);
   if ("Thumbnail_URL" in fields) patch.thumbnail_url = fields.Thumbnail_URL || null;
   if ("Created_At" in fields || record.createdTime) patch.created_at = fields.Created_At || record.createdTime || null;
-  if ("Content_ID" in fields) patch.extras = packContentExtras(fields);
+  if ("Content_ID" in fields) {
+    const [kept] = await applyStoredProjection(env, "content_items", [{
+      airtable_record_id: record.id,
+      extras: packContentExtras(fields),
+    }], "extras");
+    if (kept?.extras) patch.extras = kept.extras;
+  }
   if (!Object.keys(patch).length) return { skipped: true, reason: "empty_patch" };
   await supabaseRest(
     env,
