@@ -3,7 +3,13 @@
 import requests
 
 from airtable.client import AirtableClient
-from airtable.constants import CONTENT_ITEMS_TABLE, MEDIA_TRANSFER_QUEUE_TABLE, PLATFORM_OUTPUTS_TABLE
+from airtable.constants import (
+    CONTENT_ITEMS_TABLE,
+    MEDIA_ASSETS_TABLE,
+    MEDIA_TRANSFER_QUEUE_TABLE,
+    PLATFORM_OUTPUTS_TABLE,
+    PRODUCTION_REQUESTS_TABLE,
+)
 from supabase_pipeline import mirror_airtable_records
 
 
@@ -19,6 +25,10 @@ class Response:
         if isinstance(self.data, str):
             raise ValueError("not json")
         return self.data
+
+    def raise_for_status(self):
+        if not self.ok:
+            raise requests.HTTPError(self.reason)
 
 
 def _settings(**extra):
@@ -201,6 +211,75 @@ def test_queue_supabase_failure_does_not_fail_airtable_update(monkeypatch):
         MEDIA_TRANSFER_QUEUE_TABLE, "recQueue2", {"Transfer_Status": "Error"}
     )
     assert record["fields"]["Transfer_Status"] == "Error"
+
+
+def test_runner_request_status_patch_does_not_send_omitted_columns(monkeypatch):
+    seen = []
+
+    def fake_patch(url, *, headers, json, timeout):
+        return Response({
+            "id": "recRequest1",
+            "fields": {"Request_Status": "Submitted"},
+        })
+
+    def fake_request(method, url, *, headers, json, timeout):
+        seen.append((method, url, json))
+        if "studio_side_effect_outbox" in url:
+            return Response('{"code":"PGRST205"}', status_code=404)
+        return Response("")
+
+    monkeypatch.setattr(requests, "patch", fake_patch)
+    monkeypatch.setattr(requests, "request", fake_request)
+    record = AirtableClient(settings=_settings()).update_record(
+        PRODUCTION_REQUESTS_TABLE, "recRequest1", {"Request_Status": "Submitted"}
+    )
+    assert record["id"] == "recRequest1"
+    patches = [row for row in seen if row[0] == "PATCH" and "production_requests" in row[1]]
+    posts = [row for row in seen if row[0] == "POST" and "production_requests" in row[1]]
+    assert posts == []
+    assert patches[0][2] == {"request_status": "Submitted"}
+
+
+def test_runner_media_upsert_drops_catalog_url_and_survives_supabase_failure(monkeypatch):
+    seen = []
+
+    def fake_patch(url, *, headers, json, timeout):
+        return Response({
+            "id": "recMedia9",
+            "fields": {
+                "Asset Name": "Pier lights",
+                "Google Drive File ID": "drive-file-9",
+                "Google Drive URL": "https://media.chicagoshining.com/studio/library/pier.jpg",
+                "Studio_Favorite": True,
+            },
+        })
+
+    def fake_request(method, url, *, headers, json, timeout):
+        seen.append((method, url, json))
+        if "media_assets" in url:
+            raise RuntimeError("supabase down")
+        return Response("")
+
+    monkeypatch.setattr(requests, "patch", fake_patch)
+    monkeypatch.setattr(requests, "request", fake_request)
+    record = AirtableClient(settings=_settings(studio_write_source="supabase")).update_record(
+        MEDIA_ASSETS_TABLE, "recMedia9", {"Studio_Favorite": True}
+    )
+    assert record["fields"]["Asset Name"] == "Pier lights"
+    posts = [row for row in seen if row[0] == "POST" and "media_assets" in row[1]]
+    assert len(posts) == 1
+    body = posts[0][2][0]
+    assert body["asset_name"] == "Pier lights"
+    assert body["google_drive_file_id"] == "drive-file-9"
+    assert body["studio_favorite"] is True
+    assert "google_drive_url" not in body
+
+
+def test_runner_media_delete_does_not_mirror(monkeypatch):
+    monkeypatch.setattr(requests, "delete", lambda *_args, **_kwargs: Response({"deleted": True}))
+    monkeypatch.setattr(requests, "request", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("supabase")))
+    deleted = AirtableClient(settings=_settings()).delete_record(MEDIA_ASSETS_TABLE, "recMedia9")
+    assert deleted["deleted"] is True
 
 
 def test_default_mode_still_raises_airtable_errors(monkeypatch):

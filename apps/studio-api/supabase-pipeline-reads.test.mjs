@@ -1183,7 +1183,8 @@ test("phase5 docs keep Airtable as write source of truth", async () => {
   assert.match(phase6, /production_requests/);
   assert.match(phase6, /Media asset metadata write-through/);
   assert.match(phase6, /Transfer queue write-through/);
-  assert.match(phase6, /Cron writers are not started/);
+  assert.match(phase6, /runner Airtable client/);
+  assert.match(phase6, /half-hour media and queue backfill is not started/);
   assert.match(phase6, /studio_media_transfer_targets are not written/);
   assert.match(index, /Phase 7/);
   const sql = await readFile(path.join(here, "../../docs/supabase-migration/phase5/003_side_effect_outbox.sql"), "utf8");

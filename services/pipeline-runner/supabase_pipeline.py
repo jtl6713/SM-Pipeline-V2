@@ -18,7 +18,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from airtable.constants import CONTENT_ITEMS_TABLE, MEDIA_TRANSFER_QUEUE_TABLE, PLATFORM_OUTPUTS_TABLE
+from airtable.constants import (
+    CONTENT_ITEMS_TABLE,
+    MEDIA_ASSETS_TABLE,
+    MEDIA_TRANSFER_QUEUE_TABLE,
+    PLATFORM_OUTPUTS_TABLE,
+    PRODUCTION_REQUESTS_TABLE,
+)
 
 logger = logging.getLogger("pipeline-runner.supabase")
 
@@ -363,6 +369,18 @@ def _enqueue_outbox(settings: dict, kind: str, record: dict, mutation: str) -> N
             "source_drive_file_id": _queue_text(fields.get("Source_Drive_File_ID")),
         }
         table = "studio_media_transfer_queue"
+    elif kind == "request":
+        payload = {
+            "production_request_id": fields.get("Production_Request_ID"),
+            "request_status": _select(fields.get("Request_Status")),
+        }
+        table = "production_requests"
+    elif kind == "media":
+        payload = {
+            "asset_name": _queue_text(fields.get("Asset Name")),
+            "google_drive_file_id": _queue_text(fields.get("Google Drive File ID")),
+        }
+        table = "media_assets"
     else:
         payload = {
             "content_status": fields.get("Content_Status"),
@@ -434,10 +452,128 @@ def _mirror_one(settings: dict, kind: str, record: dict, *, partial: bool) -> No
     _enqueue_outbox(settings, kind, record, "PATCH")
 
 
+_REQUEST_STATUSES = {"Draft", "Ready", "Submitted", "Promoted", "Cancelled"}
+
+
+def _request_row(record: dict) -> dict:
+    fields = record.get("fields") or {}
+    row: dict[str, Any] = {}
+    if "Production_Request_ID" in fields and fields.get("Production_Request_ID") is not None:
+        row["production_request_id"] = str(fields.get("Production_Request_ID"))
+    if "Request_Status" in fields:
+        raw = _select(fields.get("Request_Status")) or "Draft"
+        row["request_status"] = raw if raw in _REQUEST_STATUSES else "Draft"
+    if "Requested_Title" in fields:
+        row["requested_title"] = _queue_text(fields.get("Requested_Title"))
+    if "Production_Notes" in fields:
+        row["production_notes"] = _queue_text(fields.get("Production_Notes"))
+    if "Studio_Variant_Status" in fields:
+        row["variant_status"] = _select(fields.get("Studio_Variant_Status"))
+    if "Studio_Output_Plan_Status" in fields:
+        row["output_plan_status"] = _select(fields.get("Studio_Output_Plan_Status"))
+    return row
+
+
+def _mirror_request(settings: dict, record: dict) -> None:
+    row = _request_row(record)
+    if not row or not record.get("id"):
+        return
+    if row.get("production_request_id") is not None and row.get("request_status") is not None:
+        _rest(
+            settings,
+            "production_requests?on_conflict=airtable_record_id",
+            "POST",
+            [{"airtable_record_id": record["id"], **row}],
+            prefer="resolution=merge-duplicates,return=minimal",
+        )
+    else:
+        _rest(
+            settings,
+            f"production_requests?airtable_record_id=eq.{record['id']}",
+            "PATCH",
+            row,
+            prefer="return=minimal",
+        )
+    _enqueue_outbox(settings, "request", record, "PATCH")
+
+
+def _media_row(record: dict) -> dict:
+    """Scalar Media Asset metadata. Drive id and URL only; never file bytes."""
+    fields = record.get("fields") or {}
+    row: dict[str, Any] = {}
+    if "Asset Name" in fields:
+        name = _queue_text(fields.get("Asset Name"))
+        if name:
+            row["asset_name"] = name
+    for airtable_key, column in (
+        ("Media_Class", "media_class"),
+        ("Asset_Role", "asset_role"),
+        ("Asset_Status", "asset_status"),
+    ):
+        if airtable_key in fields:
+            row[column] = _select(fields.get(airtable_key))
+    for airtable_key, column in (
+        ("Active", "active"),
+        ("Do_Not_Use", "do_not_use"),
+        ("Studio_Favorite", "studio_favorite"),
+    ):
+        if airtable_key in fields:
+            row[column] = bool(fields.get(airtable_key))
+    if "Google Drive File ID" in fields:
+        drive_id = _queue_text(fields.get("Google Drive File ID"))
+        if drive_id:
+            row["google_drive_file_id"] = drive_id
+    if "Google Drive URL" in fields:
+        url = _queue_text(fields.get("Google Drive URL"))
+        if url and not url.lower().startswith("https://media.chicagoshining.com/"):
+            row["google_drive_url"] = url
+    if "MIME_Type" in fields:
+        mime = _queue_text(fields.get("MIME_Type"))
+        if mime:
+            row["mime_type"] = mime
+    if "File_Extension" in fields:
+        extension = _queue_text(fields.get("File_Extension"))
+        if extension:
+            row["file_extension"] = extension
+    if "File_Size_Bytes" in fields and fields.get("File_Size_Bytes") not in (None, ""):
+        try:
+            row["file_size_bytes"] = int(fields.get("File_Size_Bytes"))
+        except (TypeError, ValueError):
+            pass
+    return row
+
+
+def _mirror_media(settings: dict, record: dict) -> None:
+    row = _media_row(record)
+    if not row or not record.get("id"):
+        return
+    if row.get("asset_name"):
+        _rest(
+            settings,
+            "media_assets?on_conflict=airtable_record_id",
+            "POST",
+            [{"airtable_record_id": record["id"], **row}],
+            prefer="resolution=merge-duplicates,return=minimal",
+        )
+    else:
+        _rest(
+            settings,
+            f"media_assets?airtable_record_id=eq.{record['id']}",
+            "PATCH",
+            row,
+            prefer="return=minimal",
+        )
+    _enqueue_outbox(settings, "media", record, "PATCH")
+
+
 def mirror_airtable_records(settings: dict | None, table_id: str, records: list[dict], *, partial: bool = False) -> dict:
-    """Mirror Output, Content Item, or transfer-queue rows. Never raises."""
+    """Mirror Output, Content Item, request, media, or transfer-queue rows. Never raises."""
     table = str(table_id or "")
-    kind = "queue" if table == MEDIA_TRANSFER_QUEUE_TABLE else table_kind(table)
+    kind = {
+        MEDIA_TRANSFER_QUEUE_TABLE: "queue",
+        PRODUCTION_REQUESTS_TABLE: "request",
+        MEDIA_ASSETS_TABLE: "media",
+    }.get(table) or table_kind(table)
     if not kind:
         return {"skipped": True, "reason": "table"}
     if not supabase_configured(settings):
@@ -449,6 +585,10 @@ def mirror_airtable_records(settings: dict | None, table_id: str, records: list[
         try:
             if kind == "queue":
                 _mirror_queue(settings or {}, record)
+            elif kind == "request":
+                _mirror_request(settings or {}, record)
+            elif kind == "media":
+                _mirror_media(settings or {}, record)
             else:
                 _mirror_one(settings or {}, kind, record, partial=partial)
             mirrored += 1
