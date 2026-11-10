@@ -23,7 +23,7 @@ The last sync in that gate finished at 12:03 AM CT with `status=completed`, `ok=
 ## What is still Airtable
 
 - Every write, including approve, schedule, publish, produce, and Factory mutations.
-- Pipeline-runner reads (`services/pipeline-runner/`). Runner `2026-11-10-supabase-phase5-runner-record` can list Platform Outputs and Content Items and can load one marked row by its Airtable `rec` id. `STUDIO_RUNNER_OUTPUT_READ_SOURCE` and `STUDIO_RUNNER_CONTENT_READ_SOURCE` stay `airtable`. Formula and view selectors stay on Airtable. Older rows stay on Airtable.
+- Pipeline-runner reads (`services/pipeline-runner/`). Runner `2026-11-10-supabase-phase5-runner-record` can list Platform Outputs and Content Items and can load one marked row by its Airtable `rec` id. Worker `0.10.794-supabase-phase5-record-marker` stamps that marker on a full Output or Content Item write-through. The half-hour lean list stays unmarked. `STUDIO_RUNNER_OUTPUT_READ_SOURCE` and `STUDIO_RUNNER_CONTENT_READ_SOURCE` stay `airtable`. Formula and view selectors stay on Airtable. Older rows stay on Airtable.
 - The half-hour cron that copies Airtable into Supabase. Supabase is the replica, not the source of that job.
 - `resolveAuthorization` and the other record-detail routes that were never in the list-read cutover.
 - Asset and music library metadata.

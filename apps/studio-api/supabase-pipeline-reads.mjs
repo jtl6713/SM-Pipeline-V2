@@ -59,6 +59,17 @@ export const SUPABASE_OUTPUT_LIST_EXCLUDE = Object.freeze([
   "Insights_Platform_Metrics_JSON",
 ]);
 
+const OUTPUT_JSON_COLUMNS = Object.freeze({
+  Selected_Assets_JSON: "selected_assets",
+  Creative_Render_Manifest_JSON: "creative_render_manifest",
+  Render_Clip_List_JSON: "render_clip_list",
+  Remotion_Props_JSON: "remotion_props",
+  Platform_Publish_Response_JSON: "platform_publish_response",
+  Insights_Platform_Metrics_JSON: "insights_metrics",
+});
+
+export const RUNNER_RECORD_PROJECTION = "v1";
+
 export const CONTENT_LIST_SYNC_FIELDS = Object.freeze([
   "Content_ID",
   "Content_Title",
@@ -374,10 +385,44 @@ export function packContentExtras(fields = {}) {
   return bag;
 }
 
+function jsonColumn(value) {
+  if (value && typeof value === "object") return value;
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text.startsWith("{") || text.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed && typeof parsed === "object") return parsed;
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+function publicProjectionBag(bag) {
+  const out = {};
+  for (const [key, value] of Object.entries(bag || {})) {
+    if (!key || key.startsWith("_")) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
+function stampRunnerProjection(bag, links, complete) {
+  if (!complete) return bag;
+  return {
+    ...bag,
+    _runner_record_projection: RUNNER_RECORD_PROJECTION,
+    _airtable_links: links,
+  };
+}
+
 /** Build an Airtable-shaped record so existing mapOutput / f() keep working. */
 export function airtableShapedOutputFromSupabase(row) {
   const contentAirtableId = row.content_item_airtable_id || null;
-  const bag = isPlainObject(row.error_messages) ? row.error_messages : {};
+  const bag = publicProjectionBag(isPlainObject(row.error_messages) ? row.error_messages : {});
   return {
     id: row.airtable_record_id,
     createdTime: row.created_at || undefined,
@@ -419,7 +464,7 @@ export function airtableShapedOutputFromSupabase(row) {
 }
 
 export function airtableShapedContentFromSupabase(row) {
-  const bag = isPlainObject(row.extras) ? row.extras : {};
+  const bag = publicProjectionBag(isPlainObject(row.extras) ? row.extras : {});
   const profileId = row.content_profile_airtable_id || null;
   return {
     id: row.airtable_record_id,
@@ -1114,8 +1159,15 @@ export function mapAirtableProfileToSupabase(record, { organizationId = null, br
   };
 }
 
-export function mapAirtableContentToSupabase(record, profileUuid) {
+export function mapAirtableContentToSupabase(record, profileUuid, options = {}) {
   const fields = record?.fields || {};
+  const profileAirtableId = firstLink(fields.Content_Profile);
+  const links = {};
+  let complete = Boolean(options.fullRecord);
+  if (profileAirtableId) {
+    if (profileUuid) links.Content_Profile = profileAirtableId;
+    else complete = false;
+  }
   return {
     airtable_record_id: record.id,
     content_number: fields.Content_ID ?? null,
@@ -1126,14 +1178,16 @@ export function mapAirtableContentToSupabase(record, profileUuid) {
     voiceover_status: selectName(fields.Voiceover_Status),
     thumbnail_url: fields.Thumbnail_URL || null,
     created_at: fields.Created_At || record.createdTime || null,
-    extras: packContentExtras(fields),
+    extras: stampRunnerProjection(packContentExtras(fields), links, complete),
   };
 }
 
-export function mapAirtableOutputToSupabase(record, { profileUuid, contentUuidByAirtableId }) {
+export function mapAirtableOutputToSupabase(record, { profileUuid, contentUuidByAirtableId, fullRecord = false }) {
   const fields = record?.fields || {};
   const contentAirtableId = firstLink(fields.Content_Item);
-  return {
+  const profileAirtableId = firstLink(fields.Content_Profile);
+  const bag = packOutputListFields(fields);
+  const row = {
     airtable_record_id: record.id,
     output_number: fields.Output_ID ?? null,
     content_item_id: contentAirtableId ? (contentUuidByAirtableId.get(contentAirtableId) || null) : null,
@@ -1164,8 +1218,28 @@ export function mapAirtableOutputToSupabase(record, { profileUuid, contentUuidBy
     published_at: fields.Published_At || null,
     remotion_job_id: fields.Remotion_Job_ID || null,
     selected_clip_count: fields.Selected_Clip_Count ?? null,
-    error_messages: packOutputListFields(fields),
+    error_messages: bag,
   };
+  let complete = Boolean(fullRecord);
+  const links = {};
+  if (contentAirtableId) {
+    if (contentUuidByAirtableId?.get(contentAirtableId)) links.Content_Item = contentAirtableId;
+    else complete = false;
+  }
+  if (profileAirtableId) {
+    if (profileUuid) links.Content_Profile = profileAirtableId;
+    else complete = false;
+  }
+  if (fullRecord) {
+    for (const [airtableKey, column] of Object.entries(OUTPUT_JSON_COLUMNS)) {
+      if (!Object.prototype.hasOwnProperty.call(fields, airtableKey)) continue;
+      const parsed = jsonColumn(fields[airtableKey]);
+      if (parsed) row[column] = parsed;
+      else if (fields[airtableKey] != null && fields[airtableKey] !== "") bag[airtableKey] = fields[airtableKey];
+    }
+    row.error_messages = stampRunnerProjection(bag, links, complete);
+  }
+  return row;
 }
 
 export function mapAirtableIdeaToSupabase(record, profileUuid) {
@@ -1421,6 +1495,8 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
   }
   const outputs = [...outputsById.values()];
 
+  // Lean list fields. A full-record marker here would make a later runner get
+  // treat omitted JSON and extras as empty, so this copy stays unmarked.
   const contentRows = (contents || []).map((row) => mapAirtableContentToSupabase(row, profileUuid));
   for (let i = 0; i < contentRows.length; i += 200) {
     await guardedUpsert("content_items", contentRows.slice(i, i + 200));
@@ -1435,6 +1511,7 @@ export async function syncProfilePipelineToSupabase(env, profile, deps = {}) {
     (contentUuidRows || []).map((row) => [row.airtable_record_id, row.id]),
   );
 
+  // Same lean list as the field request above. Leave these rows unmarked.
   const outputRows = outputs.map((row) => mapAirtableOutputToSupabase(row, {
     profileUuid,
     contentUuidByAirtableId,
@@ -1593,7 +1670,7 @@ export async function syncAirtableOutputRowToSupabase(env, record) {
     }
   }
 
-  const row = mapAirtableOutputToSupabase(record, { profileUuid, contentUuidByAirtableId });
+  const row = mapAirtableOutputToSupabase(record, { profileUuid, contentUuidByAirtableId, fullRecord: true });
   await upsertChunk(env, "platform_outputs", [row]);
   return { ok: true, mode: "upsert" };
 }
@@ -1613,7 +1690,7 @@ export async function syncAirtableContentRowToSupabase(env, record) {
     fields.Content_ID != null || fields.Content_Status != null || fields.Content_Title != null
   );
   if (canUpsert) {
-    await upsertChunk(env, "content_items", [mapAirtableContentToSupabase(record, profileUuid)]);
+    await upsertChunk(env, "content_items", [mapAirtableContentToSupabase(record, profileUuid, { fullRecord: true })]);
     return { ok: true, mode: "upsert" };
   }
 

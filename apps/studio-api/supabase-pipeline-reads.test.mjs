@@ -24,6 +24,7 @@ import {
   mapAirtableIdeaToSupabase,
   mapAirtableProductionRequestToSupabase,
   packOutputListFields,
+  RUNNER_RECORD_PROJECTION,
   supabaseRestAll,
   listSupabaseFactoryDeskPack,
   listSupabaseOverviewPack,
@@ -259,6 +260,75 @@ test("mapAirtableOutputToSupabase maps lean Pipeline fields into projection bag"
   assert.equal(row.error_messages.Publish_Retry_Eligible, true);
   assert.equal(row.error_messages.TikTok_Draft_Status, "Draft Delivered");
   assert.equal(row.error_messages.Selected_Assets_JSON, undefined);
+  assert.equal(row.error_messages._runner_record_projection, undefined);
+});
+
+test("full Airtable output write-through stamps the runner record marker", () => {
+  const row = mapAirtableOutputToSupabase(
+    {
+      id: "recOutABCDEFGHIJK",
+      fields: {
+        Output_ID: 99,
+        Platform: "TikTok",
+        Content_Item: ["recContentABCDEFGH"],
+        Content_Profile: ["recProfileABCDEFGH"],
+        Publish_Retry_Eligible: true,
+        Selected_Assets_JSON: "{\"clips\":[1]}",
+      },
+    },
+    {
+      profileUuid: "11111111-1111-1111-1111-111111111111",
+      contentUuidByAirtableId: new Map([
+        ["recContentABCDEFGH", "22222222-2222-2222-2222-222222222222"],
+      ]),
+      fullRecord: true,
+    },
+  );
+  assert.equal(row.error_messages._runner_record_projection, RUNNER_RECORD_PROJECTION);
+  assert.deepEqual(row.error_messages._airtable_links, {
+    Content_Item: "recContentABCDEFGH",
+    Content_Profile: "recProfileABCDEFGH",
+  });
+  assert.deepEqual(row.selected_assets, { clips: [1] });
+  assert.equal(row.error_messages.Selected_Assets_JSON, undefined);
+  const shaped = airtableShapedOutputFromSupabase({
+    ...row,
+    content_item_airtable_id: "recContentABCDEFGH",
+    content_profile_airtable_id: "recProfileABCDEFGH",
+  });
+  assert.equal(shaped.fields._runner_record_projection, undefined);
+  assert.equal(shaped.fields.Publish_Retry_Eligible, true);
+});
+
+test("unresolved content link and lean sync leave the runner marker off", () => {
+  const unresolved = mapAirtableOutputToSupabase(
+    {
+      id: "recOutABCDEFGHIJK",
+      fields: {
+        Output_ID: 1,
+        Platform: "Instagram",
+        Content_Item: ["recContentABCDEFGH"],
+        Content_Profile: ["recProfileABCDEFGH"],
+      },
+    },
+    {
+      profileUuid: "11111111-1111-1111-1111-111111111111",
+      contentUuidByAirtableId: new Map(),
+      fullRecord: true,
+    },
+  );
+  assert.equal(unresolved.error_messages._runner_record_projection, undefined);
+  const lean = mapAirtableContentToSupabase({
+    id: "recContentABCDEFGH",
+    fields: { Content_ID: 3, Content_Title: "Pier", Content_Profile: ["recProfileABCDEFGH"] },
+  }, "11111111-1111-1111-1111-111111111111");
+  assert.equal(lean.extras._runner_record_projection, undefined);
+  const full = mapAirtableContentToSupabase({
+    id: "recContentABCDEFGH",
+    fields: { Content_ID: 3, Content_Title: "Pier", Content_Profile: ["recProfileABCDEFGH"], Content_Type: "Reel" },
+  }, "11111111-1111-1111-1111-111111111111", { fullRecord: true });
+  assert.equal(full.extras._runner_record_projection, RUNNER_RECORD_PROJECTION);
+  assert.equal(full.extras.Content_Type, "Reel");
 });
 
 test("content / idea / request shapings keep Airtable ids", () => {
