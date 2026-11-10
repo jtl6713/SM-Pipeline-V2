@@ -67,6 +67,7 @@ test("Engagement queue survives optional Insights failure at runtime", async () 
   function el(id) {
     if (!elements.has(id)) elements.set(id, {
       value: "", textContent: "", innerHTML: "", checked: false,
+      addEventListener: () => {},
       classList: { contains: () => false, toggle: () => {}, add: () => {} },
     });
     return elements.get(id);
