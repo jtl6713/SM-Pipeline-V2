@@ -1,0 +1,279 @@
+name: Enable Runner Supabase Reads
+# Turns on STUDIO_RUNNER_OUTPUT_READ_SOURCE and STUDIO_RUNNER_CONTENT_READ_SOURCE
+# via Ops against the production runner .env. Does not flip STUDIO_WRITE_SOURCE.
+# Formula and view selectors stay on Airtable. Phase 7 is not started.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/enable-runner-supabase-reads.txt"
+permissions:
+  contents: read
+concurrency:
+  group: enable-runner-supabase-reads
+  cancel-in-progress: false
+jobs:
+  enable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    env:
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+      RUN_ID: ${{ github.run_id }}
+      REQUIRED_VERSION: "2026-11-10-supabase-phase5-marker-backfill"
+    steps:
+      - name: Require live runner marker-backfill build before enabling reads
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 3 --max-time 20 https://pipeline.chicagoshining.com/health -o /tmp/preflight.json
+          jq -e --arg v "$REQUIRED_VERSION" '
+            .ok==true
+            and .version==$v
+            and .supabase_pipeline_writes==true
+            and (.studio_write_source // "airtable")=="airtable"
+          ' /tmp/preflight.json >/dev/null
+          echo "runner_supabase_reads_preflight=PASS"
+          echo "write_source_changed=NO"
+
+      - name: Select Ops token
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://ops.chicagoshining.com'
+          selected=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            [[ -z "$candidate" ]] && continue
+            code=$(curl -sS --max-time 20 -o /tmp/ops-catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == '200' ]] && jq -e '.ok==true' /tmp/ops-catalog.json >/dev/null; then
+              selected="$candidate"
+              break
+            fi
+          done
+          test -n "$selected"
+          echo "::add-mask::$selected"
+          printf '%s' "$selected" >/tmp/ops-selected-token
+
+      - name: Back up and set only the two runner read flags through Ops
+        shell: bash
+        run: |
+          set -euo pipefail
+          token=$(cat /tmp/ops-selected-token)
+          python - <<'PY' > /tmp/enable-runner-reads.json
+          import json, os
+          run = os.environ["RUN_ID"]
+          ps = r'''$ErrorActionPreference='Stop'
+          $root=(Get-Location).Path
+          $envFile=Join-Path $root 'Services\pipeline-runner\service\.env'
+          if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) { throw 'runner_env_file_missing' }
+          $backup=$envFile+'.runner-reads-'+RUN_TOKEN+'.backup'
+          if (Test-Path -LiteralPath $backup) { throw 'backup_conflict' }
+          Copy-Item -LiteralPath $envFile -Destination $backup -ErrorAction Stop
+          $lines=@(Get-Content -LiteralPath $envFile)
+          $hasUrl=@($lines|Where-Object {$_ -match '^\s*SUPABASE_URL\s*=\s*\S'}).Count -gt 0
+          $hasKey=@($lines|Where-Object {$_ -match '^\s*SUPABASE_SERVICE_ROLE_KEY\s*=\s*\S'}).Count -gt 0
+          if (-not $hasUrl -or -not $hasKey) { throw 'runner_supabase_authority_not_configured' }
+          $writeRows=@($lines|Where-Object {$_ -match '^\s*STUDIO_WRITE_SOURCE\s*='})
+          foreach ($row in $writeRows) {
+            $value=([string]($row -split '=',2)[1]).Trim().Trim('"').Trim([char]39).ToLowerInvariant()
+            if ($value -and $value -ne 'airtable') { throw 'refusing_to_enable_reads_while_write_source_not_airtable' }
+          }
+          $seenOutput=$false
+          $seenContent=$false
+          $next=@(foreach ($line in $lines) {
+            if ($line -match '^\s*STUDIO_RUNNER_OUTPUT_READ_SOURCE\s*=') {
+              'STUDIO_RUNNER_OUTPUT_READ_SOURCE=supabase'; $seenOutput=$true
+            } elseif ($line -match '^\s*STUDIO_RUNNER_CONTENT_READ_SOURCE\s*=') {
+              'STUDIO_RUNNER_CONTENT_READ_SOURCE=supabase'; $seenContent=$true
+            } else { $line }
+          })
+          if (-not $seenOutput) { $next += 'STUDIO_RUNNER_OUTPUT_READ_SOURCE=supabase' }
+          if (-not $seenContent) { $next += 'STUDIO_RUNNER_CONTENT_READ_SOURCE=supabase' }
+          $tmp=$envFile+'.runner-reads-tmp-'+RUN_TOKEN
+          try {
+            [System.IO.File]::WriteAllLines($tmp,[string[]]$next,([System.Text.UTF8Encoding]::new($false)))
+            Move-Item -LiteralPath $tmp -Destination $envFile -Force
+          } finally {
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+          }
+          $readback=@(Get-Content -LiteralPath $envFile)
+          $outCount=@($readback|Where-Object {$_ -eq 'STUDIO_RUNNER_OUTPUT_READ_SOURCE=supabase'}).Count
+          $contentCount=@($readback|Where-Object {$_ -eq 'STUDIO_RUNNER_CONTENT_READ_SOURCE=supabase'}).Count
+          if ($outCount -ne 1 -or $contentCount -ne 1) { throw 'runner_read_flag_readback_failed' }
+          $badWrite=@($readback|Where-Object {
+            $_ -match '^\s*STUDIO_WRITE_SOURCE\s*=' -and
+            ([string]($_ -split '=',2)[1]).Trim().Trim('"').Trim([char]39).ToLowerInvariant() -eq 'supabase'
+          }).Count
+          if ($badWrite -gt 0) { throw 'write_source_must_stay_airtable' }
+          Write-Output 'runner_supabase_reads_flag_configured=true'
+          Write-Output 'write_source_changed=NO'
+          '''
+          print(json.dumps({"command": ps.replace("RUN_TOKEN", run), "confirm": True}))
+          PY
+          code=$(curl -sS --max-time 25 -o /tmp/enable-result.json -w '%{http_code}' \
+            -X POST "https://ops.chicagoshining.com/api/shell" \
+            -H "Authorization: Bearer $token" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/enable-runner-reads.json || true)
+          if [[ "$code" != "200" && "$code" != "202" ]]; then
+            echo "runner_reads_env_setup_rejected=$code"
+            exit 1
+          fi
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/enable-result.json)
+          test -n "$job"
+          for n in $(seq 1 40); do
+            curl -fsS --max-time 15 -H "Authorization: Bearer $token" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/enable-status.json
+            status=$(jq -r '.job.status // empty' /tmp/enable-status.json)
+            if [[ "$status" == "ok" ]]; then
+              jq -e '.job.log | contains("runner_supabase_reads_flag_configured=true")' /tmp/enable-status.json >/dev/null
+              echo "runner_supabase_reads_flag_written=true"
+              exit 0
+            fi
+            if [[ "$status" == "failed" ]]; then
+              echo "runner_supabase_reads_flag_write=FAILED"
+              exit 1
+            fi
+            sleep 3
+          done
+          echo "runner_supabase_reads_flag_write=TIMEOUT"
+          exit 1
+
+      - name: Restart Runner once via allowlisted Ops action
+        shell: bash
+        run: |
+          set -euo pipefail
+          token=$(cat /tmp/ops-selected-token)
+          code=$(curl -sS --max-time 30 -o /tmp/restart.json -w '%{http_code}' \
+            -X POST "https://ops.chicagoshining.com/api/run" \
+            -H "Authorization: Bearer $token" \
+            -H 'Content-Type: application/json' \
+            --data '{"action":"restart-one","service":"pipeline-runner","confirm":true}' || true)
+          if [[ "$code" != "202" && "$code" != "409" ]]; then
+            echo "runner_reads_restart_rejected=$code"
+            exit 1
+          fi
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/restart.json)
+          test -n "$job"
+          for n in $(seq 1 95); do
+            curl -fsS --max-time 15 -H "Authorization: Bearer $token" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/restart-status.json
+            status=$(jq -r '.job.status // empty' /tmp/restart-status.json)
+            if [[ "$status" == "ok" ]]; then
+              echo "runner_supabase_reads_restart=PASS"
+              exit 0
+            fi
+            if [[ "$status" == "failed" ]]; then
+              echo "runner_supabase_reads_restart=FAILED"
+              exit 1
+            fi
+            sleep 4
+          done
+          echo "runner_supabase_reads_restart=TIMEOUT"
+          exit 1
+
+      - name: Verify runner health shows both Supabase reads and Airtable writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          for n in $(seq 1 24); do
+            code=$(curl -sS --max-time 20 -o /tmp/health-after.json -w '%{http_code}' \
+              https://pipeline.chicagoshining.com/health || true)
+            if [[ "$code" == "200" ]] && jq -e --arg v "$REQUIRED_VERSION" '
+              .ok==true
+              and .version==$v
+              and .studio_runner_output_read_source=="supabase"
+              and .studio_runner_content_read_source=="supabase"
+              and (.studio_write_source // "airtable")=="airtable"
+              and .supabase_pipeline_writes==true
+            ' /tmp/health-after.json >/dev/null 2>&1; then
+              echo "runner_supabase_reads_health=PASS"
+              echo "write_source_changed=NO"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "runner_supabase_reads_health=FAILED"
+          cat /tmp/health-after.json || true
+          exit 1
+
+      - name: Fail-safe restore runner environment when activation unsuccessful
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          token=$(cat /tmp/ops-selected-token 2>/dev/null || true)
+          if [[ -z "${token:-}" ]]; then
+            echo "runner_reads_rollback_skipped=no_ops_token"
+            exit 1
+          fi
+          python - <<'PY' > /tmp/restore-runner-reads.json
+          import json, os
+          run = os.environ["RUN_ID"]
+          ps = r'''$root=(Get-Location).Path
+          $envFile=Join-Path $root 'Services\pipeline-runner\service\.env'
+          $backup=$envFile+'.runner-reads-'+RUN_TOKEN+'.backup'
+          if (Test-Path -LiteralPath $backup) {
+            Copy-Item -LiteralPath $backup -Destination $envFile -Force
+            Write-Output 'runner_supabase_reads_environment_rollback=RESTORED'
+          } else {
+            Write-Output 'runner_supabase_reads_environment_rollback=BACKUP_UNAVAILABLE'
+          }'''
+          print(json.dumps({"command": ps.replace("RUN_TOKEN", run), "confirm": True}))
+          PY
+          code=$(curl -sS --max-time 20 -o /tmp/rollback-submit.json -w '%{http_code}' \
+            -X POST "https://ops.chicagoshining.com/api/shell" \
+            -H "Authorization: Bearer $token" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/restore-runner-reads.json || true)
+          [[ "$code" == "200" || "$code" == "202" ]] || {
+            echo "runner_reads_rollback_submission_failed=$code"
+            exit 1
+          }
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/rollback-submit.json)
+          [[ -n "$job" ]] || exit 1
+          restored=false
+          for n in $(seq 1 30); do
+            curl -sS --max-time 20 -H "Authorization: Bearer $token" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/rollback-status.json
+            status=$(jq -r '.job.status // empty' /tmp/rollback-status.json)
+            if [[ "$status" == "ok" ]]; then
+              if jq -e '.job.log | contains("runner_supabase_reads_environment_rollback=RESTORED")' \
+                /tmp/rollback-status.json >/dev/null; then
+                restored=true
+              fi
+              break
+            fi
+            [[ "$status" == "failed" ]] && break
+            sleep 3
+          done
+          if [[ "$restored" != "true" ]]; then
+            echo "runner_reads_rollback_backup_not_restored"
+            exit 1
+          fi
+          code=$(curl -sS --max-time 30 -o /tmp/rollback-restart.json -w '%{http_code}' \
+            -X POST "https://ops.chicagoshining.com/api/run" \
+            -H "Authorization: Bearer $token" \
+            -H 'Content-Type: application/json' \
+            --data '{"action":"restart-one","service":"pipeline-runner","confirm":true}' || true)
+          [[ "$code" == "202" || "$code" == "409" ]] || {
+            echo "runner_reads_rollback_restart_rejected=$code"
+            exit 1
+          }
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/rollback-restart.json)
+          [[ -n "$job" ]] || exit 1
+          for n in $(seq 1 95); do
+            curl -sS --max-time 20 -H "Authorization: Bearer $token" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/rollback-restart-status.json
+            status=$(jq -r '.job.status // empty' /tmp/rollback-restart-status.json)
+            if [[ "$status" == "ok" ]]; then
+              echo "runner_supabase_reads_rollback_restart=PASS"
+              exit 0
+            fi
+            [[ "$status" == "failed" ]] && exit 1
+            sleep 4
+          done
+          echo "runner_supabase_reads_rollback_restart=TIMEOUT"
+          exit 1

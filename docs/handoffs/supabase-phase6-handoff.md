@@ -35,7 +35,7 @@ The first code change is Production Request write-through in Worker `0.10.784-su
 
 ## What this handoff is not
 
-- Not the Phase 5 remainder write switch. Runner `2026-11-10-supabase-phase5-marker-backfill` can list Platform Outputs and Content Items and can load one marked row by its Airtable `rec` id. Worker `0.10.800` densifies markers during half-hour sync. Both read flags stay `airtable` until Joseph enables them. `STUDIO_WRITE_SOURCE=supabase` makes those updates commit to Supabase first and treats Airtable as a legacy export. Creates still mint `rec` ids in Airtable. That switch stays off. Phase 7 is not started.
+- Not the Phase 5 remainder write switch. Runner `2026-11-10-supabase-phase5-marker-backfill` can list Platform Outputs and Content Items and can load one marked row by its Airtable `rec` id. Worker `0.10.800` densifies markers during half-hour sync. Enable both runner read flags with `deploy/enable-runner-supabase-reads.txt`. `STUDIO_WRITE_SOURCE=supabase` makes those updates commit to Supabase first and treats Airtable as a legacy export. Creates still mint `rec` ids in Airtable. That write switch stays off. Phase 7 is not started.
 - Not Home profile-summary reads (`STUDIO_HOME_PROFILE_SUMMARY_READS`).
 - Not `resolveAuthorization`.
 - Not Phase 7. Do not delete or stop Airtable records.
