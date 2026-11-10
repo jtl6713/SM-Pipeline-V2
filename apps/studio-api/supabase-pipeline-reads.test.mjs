@@ -36,6 +36,7 @@ import {
   syncAirtableTransferQueueRowToSupabase,
   syncRecentMediaAssetsToSupabase,
   syncRecentTransferQueueToSupabase,
+  backfillRunnerRecordProjections,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   enqueueStudioSideEffectOutbox,
@@ -692,14 +693,17 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /phase6_write_tables: \["production_requests", "media_assets", "studio_media_transfer_queue"\]/);
   assert.match(worker, /phase6_backfill: "media_and_queue"/);
   assert.match(worker, /phase6_backfill_tables: \["media_assets", "studio_media_transfer_queue"\]/);
-  assert.match(worker, /0\.10\.799-supabase-phase6-media-queue-backfill/);
+  assert.match(worker, /phase5_runner_projection_backfill: true/);
+  assert.match(worker, /0\.10\.800-supabase-phase5-runner-marker-backfill/);
   assert.match(worker, /syncAirtableMediaAssetRowToSupabase/);
   assert.match(worker, /syncAirtableTransferQueueRowToSupabase/);
   const syncModule = await readFile(path.join(here, "supabase-pipeline-reads.mjs"), "utf8");
   assert.match(syncModule, /export async function syncRecentMediaAssetsToSupabase/);
   assert.match(syncModule, /export async function syncRecentTransferQueueToSupabase/);
+  assert.match(syncModule, /export async function backfillRunnerRecordProjections/);
   assert.match(syncModule, /media_assets: media/);
   assert.match(syncModule, /studio_media_transfer_queue: queue/);
+  assert.match(syncModule, /runner_record_projections: runnerMarkers/);
   assert.match(worker, /supabase airtable write-through failed/);
   assert.match(worker, /from "\.\/supabase-pipeline-reads\.mjs"/);
   assert.match(worker, /listSupabaseContentItems/);
@@ -1239,6 +1243,108 @@ test("phase 6 queue mutation survives a supabase failure and ignores a url-only 
     assert.equal(failed.kind, "queue");
     assert.equal(failed.results[0].synced.ok, false);
     assert.match(failed.results[0].synced.error, /queue upsert failed/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("phase 5 remainder marker backfill stamps full-record projections for unmarked rows", async () => {
+  const posts = [];
+  const listed = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const href = String(url);
+    const method = init?.method || "GET";
+    if (method === "GET" && href.includes("platform_outputs?")) {
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify([
+            { airtable_record_id: "recOutMarked00001", error_messages: { _runner_record_projection: "v1" } },
+            { airtable_record_id: "recOutUnmarked001", error_messages: { Output_Notes: "lean" } },
+          ]);
+        },
+      };
+    }
+    if (method === "GET" && href.includes("content_items?") && href.includes("extras")) {
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify([
+            { airtable_record_id: "recContentUnmark1", extras: { Content_Type: "Reel" } },
+          ]);
+        },
+      };
+    }
+    if (method === "GET" && href.includes("content_items?") && href.includes("airtable_record_id=in.")) {
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify([
+            { id: "cccccccc-cccc-cccc-cccc-cccccccccccc", airtable_record_id: "recContentLink001" },
+          ]);
+        },
+      };
+    }
+    if (method === "GET" && href.includes("content_profiles?")) {
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify([{ id: "pppppppp-pppp-pppp-pppp-pppppppppppp", airtable_record_id: "recProfileABCDEFGH" }]);
+        },
+      };
+    }
+    if (method === "POST" && href.includes("platform_outputs")) {
+      posts.push({ table: "platform_outputs", body: JSON.parse(init.body) });
+    }
+    if (method === "POST" && href.includes("content_items")) {
+      posts.push({ table: "content_items", body: JSON.parse(init.body) });
+    }
+    return { ok: true, async text() { return method === "GET" ? "[]" : ""; } };
+  };
+  try {
+    const result = await backfillRunnerRecordProjections({
+      ...supabaseEnv,
+      AIRTABLE_OUTPUT_TABLE_ID: "tblOutputs",
+      AIRTABLE_CONTENT_TABLE_ID: "tblContent",
+    }, {
+      markerScanLimit: 20,
+      markerBackfillLimit: 10,
+      listRecords: async (_env, table, opts) => {
+        listed.push({ table, formula: opts?.filterFormula || "" });
+        if (table === "tblOutputs") {
+          return [{
+            id: "recOutUnmarked001",
+            fields: {
+              Output_ID: 501,
+              Platform: "Instagram",
+              Content_Item: ["recContentLink001"],
+              Content_Profile: ["recProfileABCDEFGH"],
+              Selected_Assets_JSON: "{\"clips\":[1]}",
+            },
+          }];
+        }
+        return [{
+          id: "recContentUnmark1",
+          fields: {
+            Content_ID: 77,
+            Content_Title: "Riverwalk",
+            Content_Status: "Ready",
+            Content_Profile: ["recProfileABCDEFGH"],
+            Content_Type: "Reel",
+          },
+        }];
+      },
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.platform_outputs_marked, 1);
+    assert.equal(result.content_items_marked, 1);
+    assert.ok(listed.some((row) => row.table === "tblOutputs" && row.formula.includes("recOutUnmarked001")));
+    const outputPost = posts.find((row) => row.table === "platform_outputs");
+    assert.equal(outputPost.body[0].error_messages._runner_record_projection, RUNNER_RECORD_PROJECTION);
+    assert.deepEqual(outputPost.body[0].selected_assets, { clips: [1] });
+    const contentPost = posts.find((row) => row.table === "content_items");
+    assert.equal(contentPost.body[0].extras._runner_record_projection, RUNNER_RECORD_PROJECTION);
   } finally {
     globalThis.fetch = originalFetch;
   }
