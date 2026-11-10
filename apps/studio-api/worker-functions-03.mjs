@@ -1980,6 +1980,7 @@ export async function studioSyncSupabasePipelineReads(env, options = {}) {
       production_requests: result?.production_requests || null,
       media_assets: result?.media_assets || null,
       studio_media_transfer_queue: result?.studio_media_transfer_queue || null,
+      runner_record_projections: result?.runner_record_projections || null,
       read_source: studioReadSource(env),
     };
     await writeStudioSupabaseSyncLast(env, stamp);
@@ -2007,6 +2008,7 @@ export async function getStudioSupabaseSyncStatus(request, env) {
     phase6_write_tables: ["production_requests", "media_assets", "studio_media_transfer_queue"],
     phase6_backfill: "media_and_queue",
     phase6_backfill_tables: ["media_assets", "studio_media_transfer_queue"],
+    phase5_runner_projection_backfill: true,
     last_sync: last,
   });
 }
@@ -2048,6 +2050,7 @@ export async function postStudioSupabaseSync(request, env) {
     phase6_write_tables: ["production_requests", "media_assets", "studio_media_transfer_queue"],
     phase6_backfill: "media_and_queue",
     phase6_backfill_tables: ["media_assets", "studio_media_transfer_queue"],
+    phase5_runner_projection_backfill: true,
     sync: result,
   });
 }

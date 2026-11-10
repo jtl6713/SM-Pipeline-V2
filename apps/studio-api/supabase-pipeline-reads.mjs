@@ -1766,6 +1766,179 @@ export async function syncRecentTransferQueueToSupabase(env, deps = {}) {
   };
 }
 
+function projectionBagMarked(bag) {
+  return isPlainObject(bag) && bag._runner_record_projection === RUNNER_RECORD_PROJECTION;
+}
+
+async function fetchAirtableRecordsByIds(env, tableId, ids, listRecords) {
+  const unique = [...new Set((ids || []).map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]{14}$/.test(id)))];
+  const out = [];
+  for (let index = 0; index < unique.length; index += 20) {
+    const batch = unique.slice(index, index + 20);
+    const formula = `OR(${batch.map((id) => `RECORD_ID()="${id}"`).join(",")})`;
+    // No fields filter — full Airtable bodies are required to stamp the marker.
+    const rows = await listRecords(env, tableId, {
+      limit: batch.length,
+      filterFormula: formula,
+    });
+    out.push(...(rows || []));
+  }
+  return out;
+}
+
+/**
+ * Phase 5 remainder: densify full-record markers for runner get/list reads.
+ * Lean half-hour sync must not stamp markers. This bounded pass re-reads full
+ * Airtable rows for unmarked open outputs / recent content and upserts with
+ * fullRecord=true. Flags stay airtable until Joseph enables them.
+ */
+export async function backfillRunnerRecordProjections(env, deps = {}) {
+  await deps.assertLease?.();
+  const listRecords = deps.listRecords;
+  if (!listRecords) throw new Error("backfillRunnerRecordProjections requires listRecords");
+  if (!studioSupabaseConfigured(env)) {
+    return { skipped: true, reason: "supabase_not_configured", ok: true };
+  }
+  const scanLimit = Math.max(20, Math.min(400, Number(deps.markerScanLimit) || 150));
+  const backfillLimit = Math.max(5, Math.min(80, Number(deps.markerBackfillLimit) || 40));
+  const outputTableId = deps.outputTableId || env.AIRTABLE_OUTPUT_TABLE_ID;
+  const contentTableId = deps.contentTableId || env.AIRTABLE_CONTENT_TABLE_ID;
+  if (!outputTableId || !contentTableId) {
+    return { skipped: true, reason: "airtable_tables_not_configured", ok: true };
+  }
+
+  await deps.assertLease?.();
+  const openOutputs = await supabaseRest(
+    env,
+    `platform_outputs?do_not_publish=eq.false&output_status=neq.Published&output_status=neq.Cancelled`
+      + `&select=airtable_record_id,error_messages,content_item_id`
+      + `&order=output_number.desc.nullslast&limit=${scanLimit}`,
+  ).catch(() => []);
+  const unmarkedOutputs = (openOutputs || [])
+    .filter((row) => row?.airtable_record_id && !projectionBagMarked(row.error_messages))
+    .slice(0, backfillLimit);
+
+  await deps.assertLease?.();
+  const recentContent = await supabaseRest(
+    env,
+    `content_items?select=airtable_record_id,extras,content_profile_id`
+      + `&order=content_number.desc.nullslast&limit=${scanLimit}`,
+  ).catch(() => []);
+  const unmarkedContent = (recentContent || [])
+    .filter((row) => row?.airtable_record_id && !projectionBagMarked(row.extras))
+    .slice(0, backfillLimit);
+
+  let outputsMarked = 0;
+  let contentMarked = 0;
+  let outputsUnresolved = 0;
+  let contentUnresolved = 0;
+
+  if (unmarkedOutputs.length) {
+    await deps.assertLease?.();
+    const airtableOutputs = await fetchAirtableRecordsByIds(
+      env,
+      outputTableId,
+      unmarkedOutputs.map((row) => row.airtable_record_id),
+      listRecords,
+    );
+    const contentAirtableIds = [...new Set(
+      airtableOutputs.map((row) => firstLink(row?.fields?.Content_Item)).filter(Boolean),
+    )];
+    const contentUuidByAirtableId = new Map();
+    for (let index = 0; index < contentAirtableIds.length; index += 50) {
+      const batch = contentAirtableIds.slice(index, index + 50);
+      const found = await supabaseRest(
+        env,
+        `content_items?airtable_record_id=in.(${batch.map((id) => encodeURIComponent(id)).join(",")})`
+          + `&select=id,airtable_record_id&limit=50`,
+      ).catch(() => []);
+      for (const row of found || []) {
+        if (row?.airtable_record_id && row?.id) contentUuidByAirtableId.set(row.airtable_record_id, row.id);
+      }
+    }
+    const profileCache = new Map();
+    const mapped = [];
+    for (const record of airtableOutputs) {
+      const profileAirtableId = firstLink(record?.fields?.Content_Profile);
+      let profileUuid = profileAirtableId ? profileCache.get(profileAirtableId) : null;
+      if (profileAirtableId && profileUuid === undefined) {
+        profileUuid = await resolveSupabaseProfileId(env, profileAirtableId);
+        profileCache.set(profileAirtableId, profileUuid || null);
+      }
+      if (!profileUuid) {
+        outputsUnresolved += 1;
+        continue;
+      }
+      const row = mapAirtableOutputToSupabase(record, {
+        profileUuid,
+        contentUuidByAirtableId,
+        fullRecord: true,
+      });
+      if (!projectionBagMarked(row.error_messages)) {
+        outputsUnresolved += 1;
+        continue;
+      }
+      mapped.push(row);
+    }
+    for (let index = 0; index < mapped.length; index += 50) {
+      await deps.assertLease?.();
+      const started = Date.now();
+      const chunk = mapped.slice(index, index + 50);
+      await upsertChunk(env, "platform_outputs", chunk);
+      deps.onUpsert?.("platform_outputs", chunk.length, Date.now() - started);
+      outputsMarked += chunk.length;
+    }
+  }
+
+  if (unmarkedContent.length) {
+    await deps.assertLease?.();
+    const airtableContent = await fetchAirtableRecordsByIds(
+      env,
+      contentTableId,
+      unmarkedContent.map((row) => row.airtable_record_id),
+      listRecords,
+    );
+    const profileCache = new Map();
+    const mapped = [];
+    for (const record of airtableContent) {
+      const profileAirtableId = firstLink(record?.fields?.Content_Profile);
+      let profileUuid = profileAirtableId ? profileCache.get(profileAirtableId) : null;
+      if (profileAirtableId && profileUuid === undefined) {
+        profileUuid = await resolveSupabaseProfileId(env, profileAirtableId);
+        profileCache.set(profileAirtableId, profileUuid || null);
+      }
+      if (!profileUuid) {
+        contentUnresolved += 1;
+        continue;
+      }
+      const row = mapAirtableContentToSupabase(record, profileUuid, { fullRecord: true });
+      if (!projectionBagMarked(row.extras)) {
+        contentUnresolved += 1;
+        continue;
+      }
+      mapped.push(row);
+    }
+    for (let index = 0; index < mapped.length; index += 50) {
+      await deps.assertLease?.();
+      const started = Date.now();
+      const chunk = mapped.slice(index, index + 50);
+      await upsertChunk(env, "content_items", chunk);
+      deps.onUpsert?.("content_items", chunk.length, Date.now() - started);
+      contentMarked += chunk.length;
+    }
+  }
+
+  return {
+    ok: true,
+    platform_outputs_marked: outputsMarked,
+    content_items_marked: contentMarked,
+    platform_outputs_scanned: (openOutputs || []).length,
+    content_items_scanned: (recentContent || []).length,
+    platform_outputs_unresolved: outputsUnresolved,
+    content_items_unresolved: contentUnresolved,
+  };
+}
+
 export async function syncAllProfilesPipelineToSupabase(env, profiles, deps = {}) {
   const results = [];
   const assertLease = async () => {
@@ -1793,43 +1966,52 @@ export async function syncAllProfilesPipelineToSupabase(env, profiles, deps = {}
   let requests = null;
   let media = null;
   let queue = null;
-  const runPhase6Backfill = async (label, runner) => {
+  let runnerMarkers = null;
+  const runPhaseBackfill = async (label, runner) => {
     try {
       await assertLease();
       return await runner();
     } catch (error) {
       const failed = { ok: false, error: error?.message || String(error) };
       if (/Phase 5 sync lost lease|renewal lost CAS/.test(String(error?.message || ""))) throw error;
-      console.warn(`phase6 ${label} backfill failed`, error);
+      console.warn(`${label} backfill failed`, error);
       return failed;
     }
   };
   if (!abortedForCircuit && !supabaseCircuitOpen()) {
-    requests = await runPhase6Backfill("production_requests", () => (
+    requests = await runPhaseBackfill("production_requests", () => (
       syncOpenProductionRequestsToSupabase(env, { ...deps, assertLease })
     ));
     if (!supabaseCircuitOpen()) {
-      media = await runPhase6Backfill("media_assets", () => (
+      media = await runPhaseBackfill("media_assets", () => (
         syncRecentMediaAssetsToSupabase(env, { ...deps, assertLease })
       ));
     } else {
       media = { skipped: true, reason: "supabase_circuit_open" };
     }
     if (!supabaseCircuitOpen()) {
-      queue = await runPhase6Backfill("studio_media_transfer_queue", () => (
+      queue = await runPhaseBackfill("studio_media_transfer_queue", () => (
         syncRecentTransferQueueToSupabase(env, { ...deps, assertLease })
       ));
     } else {
       queue = { skipped: true, reason: "supabase_circuit_open" };
     }
+    if (!supabaseCircuitOpen()) {
+      runnerMarkers = await runPhaseBackfill("runner_record_projections", () => (
+        backfillRunnerRecordProjections(env, { ...deps, assertLease })
+      ));
+    } else {
+      runnerMarkers = { skipped: true, reason: "supabase_circuit_open" };
+    }
   } else {
     requests = { skipped: true, reason: "supabase_circuit_open" };
     media = { skipped: true, reason: "supabase_circuit_open" };
     queue = { skipped: true, reason: "supabase_circuit_open" };
+    runnerMarkers = { skipped: true, reason: "supabase_circuit_open" };
   }
-  const phase6Ok = (row) => row?.ok === true || row?.skipped === true;
+  const phaseOk = (row) => row?.ok === true || row?.skipped === true;
   const ok = results.length > 0 && results.every((row) => row?.ok === true)
-    && phase6Ok(requests) && phase6Ok(media) && phase6Ok(queue)
+    && phaseOk(requests) && phaseOk(media) && phaseOk(queue) && phaseOk(runnerMarkers)
     && !abortedForCircuit && !supabaseCircuitOpen();
   return {
     ok,
@@ -1839,6 +2021,7 @@ export async function syncAllProfilesPipelineToSupabase(env, profiles, deps = {}
     production_requests: requests,
     media_assets: media,
     studio_media_transfer_queue: queue,
+    runner_record_projections: runnerMarkers,
   };
 }
 
