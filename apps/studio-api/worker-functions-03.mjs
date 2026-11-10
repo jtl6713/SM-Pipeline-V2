@@ -10,6 +10,7 @@ import {
 import { parseStoryFirstNotes, upsertStoryFirstNotes, storyFirstShotChecklist } from "./idea-first-storyboard.mjs";
 import { storyVideoQuote, requireStoryVideoPaidApproval, submitStoryVideo, readStoryVideo, downloadStoryVideo, storyVideoJobKey, storyVideoMediaKey, STORY_VIDEO_POLL_MIN_MS, buildStoryVideoProviderSettings, availableStoryVideoModels } from "./story-first-ai-video.mjs";
 import { storyVideoReferenceManifest, verifyStudioReferenceAsset, uploadStoryVideoReferences, deleteStudioElevenReferenceAssets } from "./story-first-ai-video-references.mjs";
+import { reconcileUnbilledChicagoVideoAttempt } from "./story-first-ai-video-unbilled-reconciliation.mjs";
 import { loadAuthorizedIdea, assertIdeaUnpromoted, assertIdeaNotApproved } from "./worker-functions-01.mjs";
 import { serveMichiganV2CachedPreview } from "./michigan-review-preview-cache.mjs";
 import { evaluateReviewPackage } from "./review-package-readiness.mjs";
@@ -13464,7 +13465,7 @@ export async function studioParkStaleYoutubeQuotaPolls(env, options = {}) {
  * are transferred by the existing Studio Runner into Drive + Media Assets.
  * Creating a storyboard or generating a preview never makes a Production Request. */
 export async function storyFirstSceneMediaRoute(request, env, url, authorization) {
-  const path = /^\/api\/story-first\/ideas\/(rec[A-Za-z0-9]+)\/scenes\/([1-9]\d*)\/(generate|accept|decline|preview\/aipre[A-Za-z0-9]+|video\/(?:quote|start|status|preview|accept|decline))$/.exec(url.pathname);
+  const path = /^\/api\/story-first\/ideas\/(rec[A-Za-z0-9]+)\/scenes\/([1-9]\d*)\/(generate|accept|decline|preview\/aipre[A-Za-z0-9]+|video\/(?:quote|start|status|preview|accept|decline|reconcile-unbilled))$/.exec(url.pathname);
   if (!path) throw new HttpError(404, "Story scene was not found");
   const [, ideaId, sceneNumber, action] = path;
   const idea = await loadAuthorizedIdea(env, ideaId, authorization);
@@ -13515,6 +13516,7 @@ export async function storyFirstSceneMediaRoute(request, env, url, authorization
     const visible = (job) => ({
       ok: true, state: job?.state || "none", attempted: Number(job?.attempt || 0),
       estimated_credits: job?.estimated_credits || null,
+      run_id: job?.run_id || null,
       last_checked_at: job?.last_checked_at || null,
       error: job?.error || null,
       preview_url: job?.state === "awaiting_review" ? "/api/story-first/ideas/" +
@@ -13525,6 +13527,50 @@ export async function storyFirstSceneMediaRoute(request, env, url, authorization
       message: job?.state === "submission_uncertain" ?
         "Provider submission outcome uncertain. Do not retry; an administrator must reconcile charges." : null,
     });
+    if (videoAction === "reconcile-unbilled") {
+      if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+      requirePermission(authorization, "tenant_admin");
+      const body = await request.json().catch(() => ({}));
+      if (String(body.content_profile_id || "") !== profileId)
+        throw new HttpError(403, "Video reconciliation profile mismatch");
+      if (scene.selected_approved || scene.assigned_asset_id || scene.generated_master_id)
+        throw new HttpError(409, "Cannot reconcile an uncertain job when scene media is already selected");
+      const found = await readJob();
+      const original = found.job;
+      if (!original || !found.etag || String(body.expected_run_id || "") !== String(original.run_id || ""))
+        throw new HttpError(409, "Video job changed; refresh its status before reconciling");
+      let reviewed;
+      try {
+        reviewed = reconcileUnbilledChicagoVideoAttempt(
+          original,
+          { ideaId, sceneNumber: Number(sceneNumber), profileId },
+          body, authorization?.email, Date.now());
+      } catch (error) {
+        throw new HttpError(409, error.message);
+      }
+      // Archive the complete original reservation BEFORE changing its state.
+      // The immutable path is scoped to the exact run and cannot be overwritten.
+      // Neither this branch nor its helper can contact ElevenLabs or change billing.
+      const auditKey = "studio/story-first/ai-video/v1/" + ideaId +
+        "/scene-" + sceneNumber + "-unbilled-reconciliation-" + original.run_id + ".json";
+      const existingAudit = await env.STUDIO_MEDIA.get(auditKey);
+      if (existingAudit) {
+        const priorAudit = await existingAudit.json().catch(() => null);
+        if (priorAudit?.original_job?.run_id !== original.run_id ||
+            priorAudit?.reconciliation?.kind !== reviewed.audit.reconciliation.kind) {
+          throw new HttpError(409, "Conflicting reconciliation evidence; administrator review required");
+        }
+      } else {
+        const auditWritten = await env.STUDIO_MEDIA.put(auditKey, JSON.stringify(reviewed.audit), {
+          onlyIf: new Headers({ "If-None-Match": "*" }),
+          httpMetadata: { contentType: "application/json" },
+        });
+        if (!auditWritten) throw new HttpError(409, "Reconciliation audit changed; refresh status");
+      }
+      await writeJob(reviewed.next, found.etag);
+      return respond(request, env, { ...visible(reviewed.next), audit_preserved: true,
+        paid_generation_submitted: false });
+    }
     if (videoAction === "quote" || videoAction === "start") {
       if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
       if (scene.selected_approved || scene.assigned_asset_id || scene.generated_master_id) {
