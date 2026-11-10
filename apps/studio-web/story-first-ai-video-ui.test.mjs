@@ -76,3 +76,22 @@ test("video quote locks synchronously and reports status by its own button", () 
   assert.match(start, /await checkSceneVideo\(index, true\);/);
   assert.match(ui, /Paid submission may have reached ElevenLabs/);
 });
+
+
+test("admin reconciliation is exact-scoped, cannot generate, and requires original run receipt", () => {
+  assert.match(ui, /Reconcile No-Charge Attempt \(Admin\)/);
+  assert.match(ui, /async function reconcileUnbilledVideoAttempt\(index\)/);
+  assert.match(ui, /expected_run_id: job\.run_id/);
+  assert.match(ui, /no_charge_confirmed:true/);
+  assert.match(ui, /provider_post_absent_confirmed:true/);
+  assert.match(ui, /no_provider_generation_confirmed:true/);
+  assert.match(ui, /result\.paid_generation_submitted !== false/);
+  assert.match(server, /requirePermission\(authorization, "tenant_admin"\)/);
+  assert.match(server, /videoAction === "reconcile-unbilled"/);
+  assert.match(server, /studio\/story-first\/ai-video\/v1\//);
+  assert.match(server, /"If-None-Match": "\*"/);
+  assert.match(server, /await writeJob\(reviewed\.next, found\.etag\)/);
+  const code = ui.slice(ui.indexOf("async function reconcileUnbilledVideoAttempt("),
+    ui.indexOf("async function decideSceneVideo("));
+  assert.doesNotMatch(code, /generateSceneVideo\(|video\/start|submitStoryVideo\(/);
+});
