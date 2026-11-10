@@ -6,6 +6,7 @@ const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
 const ui = readFileSync(new URL("./assets/story-first-workspace.js", import.meta.url), "utf8");
 const worker = readFileSync(new URL("../studio-api/worker.js", import.meta.url), "utf8");
 const server = readFileSync(new URL("../studio-api/worker-functions-03.mjs", import.meta.url), "utf8");
+const css = readFileSync(new URL("./assets/story-first-workspace.css", import.meta.url), "utf8");
 
 test("Script a Short retains image and uploaded-media choices while adding opt-in AI video", () => {
   assert.match(ui, /Generate this AI image/);
@@ -134,4 +135,35 @@ test("Phase 2A method gate and scene handler both recognize POST video/reconcile
     "matched request must dispatch to scene handler");
   assert.match(handlerSource, /if \(videoAction === "reconcile-unbilled"\) \{\s*if \(request\.method !== "POST"\)[\s\S]*?requirePermission\(authorization, "tenant_admin"\)/,
     "recovery remains admin-only and POST-only");
+});
+
+
+test("live video progress stays beside refresh control for queued, generating and review states", () => {
+  const renderProgress = ui.slice(ui.indexOf("function appendVideoJobProgress("),
+    ui.indexOf("async function checkSceneVideo("));
+  assert.match(renderProgress, /submitting: "Submitted/);
+  assert.match(renderProgress, /pending: "Queued at ElevenLabs/);
+  assert.match(renderProgress, /generating: "Generating video at ElevenLabs/);
+  assert.match(renderProgress, /awaiting_review: "Complete/);
+  assert.match(renderProgress, /"story-first-video-progress-track"/);
+  assert.match(renderProgress, /"aria-live","polite"/);
+  assert.match(renderProgress, /current\.videoLastChecked\[index\]/);
+  assert.match(renderProgress, /automatically about every 15 seconds/);
+  assert.doesNotMatch(renderProgress, /submitStoryVideo|generateSceneVideo\(|video\/start|approve_paid_generation/);
+  const progressInsertion = ui.indexOf("appendVideoJobProgress(index, videoJob, actions);");
+  const refreshButton = ui.indexOf('button("Refresh Video Status", "secondary-button", () =>',progressInsertion);
+  assert.ok(progressInsertion > 0 && refreshButton > progressInsertion &&
+    refreshButton - progressInsertion < 170,
+    "progress display must sit immediately beside Refresh Video Status");
+  assert.match(ui, /current\.videoLastChecked\[index\] = Date\.now\(\);/);
+});
+
+test("quote progress uses the same visible animated track and supports reduced motion", () => {
+  assert.match(ui, /videoProgress\.appendChild\(node\("div","story-first-video-progress-track"\)\)/);
+  assert.match(ui, /progress\.classList\.toggle\("is-active", current\.videoRequestBusy\)/);
+  assert.match(css, /story-first-video-progress\.is-active .*story-first-video-progress-track::before/);
+  assert.match(css, /animation: storyFirstVideoInFlight/);
+  assert.match(css, /prefers-reduced-motion: reduce/);
+  assert.match(css, /story-first-video-progress\[hidden\]/);
+  assert.doesNotMatch(css, /width:\s*100%.*estimated|percent-complete/i);
 });
