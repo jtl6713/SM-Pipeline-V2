@@ -1081,7 +1081,7 @@ export default {
       const isMusicFavoriteWrite = isMusicFavoriteRoute && request.method === "PATCH";
       const isMusicRecordRoute = /^\/api\/music\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isMusicDeleteWrite = isMusicRecordRoute && request.method === "DELETE";
-      const isStoryFirstSceneMediaRoute = /^\/api\/story-first\/ideas\/rec[A-Za-z0-9]+\/scenes\/[1-9]\d*\/(generate|accept|decline|preview\/aipre[A-Za-z0-9]+|video\/(?:quote|start|status|preview|accept|decline))$/.test(url.pathname);
+      const isStoryFirstSceneMediaRoute = /^\/api\/story-first\/ideas\/rec[A-Za-z0-9]+\/scenes\/[1-9]\d*\/(generate|accept|decline|preview\/aipre[A-Za-z0-9]+|video\/(?:quote|start|status|preview|accept|decline|reconcile-unbilled))$/.test(url.pathname);
       const isAssetLibraryRoute = url.pathname === "/api/library";
       const isAssetLibraryUploadWrite = isAssetLibraryRoute && request.method === "POST";
       const isAssetLibraryRecordRoute = /^\/api\/library\/rec[A-Za-z0-9]+$/.test(url.pathname);
@@ -1328,7 +1328,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.792-video-unbilled-poc-reconciliation",
+          version: "0.10.793-video-reconcile-route-gate",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
