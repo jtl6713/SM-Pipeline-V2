@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { studioApplyEngagementAction } from "./engagement-service.mjs";
 import { defaultEngagementSettings } from "./engagement.mjs";
 
-function harness() {
+function harness({ scopedKey = "private-test-key", legacyKey = "", suspended = true } = {}) {
   let savedStore = JSON.stringify({
     schema_version: "studio.engagement.1",
     targets: [{
@@ -16,7 +16,7 @@ function harness() {
       discovered_at: new Date().toISOString(),
     }],
     actions: [],
-    suspended: { "nyc:youtube": { at: new Date().toISOString(), reason: "Unauthorized" } },
+    suspended: suspended ? { "nyc:youtube": { at: new Date().toISOString(), reason: "Unauthorized" } } : {},
   });
   let savedSettings = JSON.stringify({ nyc: { ...defaultEngagementSettings("nyc"), stage_b_enabled: true } });
   let writeCount = 0;
@@ -24,6 +24,9 @@ function harness() {
     async studioSettingsByName(_env, name) {
       if (name === "ENGAGEMENT_STORE_V1") return { fields: { Setting_Value: savedStore } };
       if (name === "ENGAGEMENT_SETTINGS_V1") return { fields: { Setting_Value: savedSettings } };
+      if (name === "YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET" && legacyKey) {
+        return { fields: { Setting_Value: legacyKey } };
+      }
       return null;
     },
     async studioUpsertSetting(_env, name, value) {
@@ -32,7 +35,7 @@ function harness() {
       if (name === "ENGAGEMENT_SETTINGS_V1") savedSettings = value;
     },
     async studioActivePipelineSettings() {
-      return { YOUTUBE_UPLOAD_SERVICE_URL: "https://uploader.example", YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET: "private-test-key" };
+      return { YOUTUBE_UPLOAD_SERVICE_URL: "https://uploader.example", YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET: scopedKey };
     },
   };
   return { deps, getStore: () => JSON.parse(savedStore), getWriteCount: () => writeCount };
@@ -85,6 +88,51 @@ test("a healthy read-only auth probe heals suspension on explicit Comment and wr
     assert.equal(h.getStore().suspended["nyc:youtube"], undefined);
     assert.equal(h.getStore().actions.filter((a) => a.execution_status === "published").length, 1);
     assert.equal(calls.filter((c) => c.method === "POST").length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("NYC suspended uploader uses existing active shared key when scoped batch omits it", async () => {
+  const h = harness({ scopedKey: "", legacyKey: "active-legacy-key" });
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url, method: options.method || "GET", key: options.headers?.["X-SM-Pipeline-Key"] });
+    if (String(url).endsWith("/youtube/oauth/status")) return json({ ok: true, refresh_ok: true });
+    if (String(url).endsWith("/health")) return json({ ok: true, version: "2026-10-09-engagement-comment-like" });
+    if (String(url).endsWith("/youtube/engage/comment")) return json({ comment_id: "explicit_click_only" });
+    throw new Error("unexpected request");
+  };
+  try {
+    const result = await studioApplyEngagementAction(
+      {}, { profile: "nyc", action: "comment", target_id: "target_nyc_test" }, h.deps
+    );
+    assert.equal(result.ok, true);
+    assert.equal(h.getStore().suspended["nyc:youtube"], undefined);
+    assert.equal(calls.find((c) => c.url.endsWith("/youtube/oauth/status"))?.key, "active-legacy-key");
+    assert.equal(calls.filter((c) => c.method === "POST").length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("missing uploader key fails closed without making any HTTP request", async () => {
+  const h = harness({ scopedKey: "", legacyKey: "", suspended: false });
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (...args) => {
+    calls.push(args);
+    throw new Error("missing-key flow must never reach network");
+  };
+  try {
+    const result = await studioApplyEngagementAction(
+      {}, { profile: "nyc", action: "comment", target_id: "target_nyc_test" }, h.deps
+    );
+    assert.equal(result.ok, false);
+    assert.match(result.message, /no uploader service key available/i);
+    assert.equal(calls.length, 0);
+    assert.ok(h.getStore().actions.every((a) => a.execution_status !== "published"));
   } finally {
     globalThis.fetch = originalFetch;
   }
