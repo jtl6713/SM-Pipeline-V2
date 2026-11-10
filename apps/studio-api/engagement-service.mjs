@@ -384,15 +384,37 @@ export async function studioListEngagementRecommendations(env, options, deps) {
   };
 }
 
-// Read-only check before lifting a permission suspension. Never retry a write
-// automatically: only a fresh, explicit Comment/Like click can execute one.
-async function probeYoutubeEngagementConnection(env, deps) {
+// The Engagement resolver uses per-profile destinations, but its batched
+// Airtable lookup can omit an active legacy key. Recover a missing key using
+// the same active-only single-setting lookup used elsewhere in Studio. This
+// never invents a key, changes a stored credential, or posts on its own.
+async function resolveEngagementYoutubeUploader(env, deps, profile) {
   const settings = await deps.studioActivePipelineSettings(env, [
     "YOUTUBE_UPLOAD_SERVICE_URL",
     "YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET",
   ]).catch(() => ({}));
   const base = String(settings.YOUTUBE_UPLOAD_SERVICE_URL || "").trim().replace(/\/+$/, "");
-  const secret = settings.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET || env.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET || "";
+  let secret = String(settings.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET || env?.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET || "").trim();
+  if (!secret && typeof deps.studioSettingsByName === "function") {
+    // Try a profile-specific legacy key before the shared key. If neither
+    // exists, fail closed rather than issuing an unauthenticated action.
+    const prefix = { nyc: "NYC_", la: "LA_", miami: "MIAMI_" }[String(profile || "").toLowerCase()] || "";
+    for (const name of [
+      ...(prefix ? [`${prefix}YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET`] : []),
+      "YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET",
+    ]) {
+      const row = await deps.studioSettingsByName(env, name).catch(() => null);
+      secret = String(row?.fields?.Setting_Value || row?.fields?.Value || "").trim();
+      if (secret) break;
+    }
+  }
+  return { base, secret };
+}
+
+// Read-only check before lifting a permission suspension. Never retry a write
+// automatically: only a fresh, explicit Comment/Like click can execute one.
+async function probeYoutubeEngagementConnection(env, deps, profile) {
+  const { base, secret } = await resolveEngagementYoutubeUploader(env, deps, profile);
   if (!base) return { ok: false, error: "This profile has no YouTube uploader URL configured" };
   if (!secret) return { ok: false, error: "This profile has no uploader service key configured" };
   try {
@@ -413,14 +435,12 @@ async function probeYoutubeEngagementConnection(env, deps) {
 }
 
 async function executeYoutubeAction(env, target, actionType, comment, deps) {
-  const settings = await deps.studioActivePipelineSettings(env, [
-    "YOUTUBE_UPLOAD_SERVICE_URL",
-    "YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET",
-  ]).catch(() => ({}));
-  const base = String(settings.YOUTUBE_UPLOAD_SERVICE_URL || "").trim().replace(/\/+$/, "");
-  const secret = settings.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET || env.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET || "";
+  const { base, secret } = await resolveEngagementYoutubeUploader(env, deps, target.profile);
   if (!base) {
     return { ok: false, status: "needs_authorization", error: "YouTube uploader service is not configured for this profile." };
+  }
+  if (!secret) {
+    return { ok: false, status: "needs_authorization", error: "This profile has no uploader service key available to Studio. No action was sent." };
   }
   // Health is public. Engage routes sit behind the shared secret, so a missing
   // route looks like 404 only after auth. Detect stale builds up front.
@@ -646,7 +666,7 @@ export async function studioApplyEngagementAction(env, payload, deps) {
     // Permission blocks can heal after an operator fixes the service connection.
     // Abuse/spam suspensions remain blocked until explicitly reviewed.
     if (target.platform === "youtube" && /unauthorized|oauth|permission|401/i.test(reason)) {
-      const probe = await probeYoutubeEngagementConnection(env, deps);
+      const probe = await probeYoutubeEngagementConnection(env, deps, profile);
       if (!probe.ok) {
         return {
           ok: false,
