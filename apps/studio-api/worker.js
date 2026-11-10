@@ -179,6 +179,7 @@ import {
   studioContentReadSource,
   studioFactoryOpsReadSource,
   studioHomeReadSource,
+  studioMusicReadSource,
   studioWriteSource,
   studioPhase5WritesMode,
   studioLegacyExportEnabled,
@@ -197,6 +198,7 @@ import {
   enqueueStudioSideEffectOutbox,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
+  STUDIO_SUPABASE_MUSIC_READ_ROUTES,
   STUDIO_SUPABASE_READ_ROUTES,
 } from "./supabase-pipeline-reads.mjs";
 import {
@@ -1333,7 +1335,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.805-blackout-story-safe",
+          version: "0.10.806-supabase-music-reads",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -1367,10 +1369,12 @@ export default {
           studio_content_read_source: studioContentReadSource(env),
           studio_factory_ops_read_source: studioFactoryOpsReadSource(env),
           studio_home_read_source: studioHomeReadSource(env),
+          studio_music_read_source: studioMusicReadSource(env),
           studio_supabase_configured: studioSupabaseConfigured(env),
           studio_supabase_pipeline_read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
           studio_supabase_read_routes: STUDIO_SUPABASE_READ_ROUTES,
           studio_supabase_phase4_read_routes: STUDIO_SUPABASE_PHASE4_READ_ROUTES,
+          studio_supabase_music_read_routes: STUDIO_SUPABASE_MUSIC_READ_ROUTES,
           studio_supabase_last_sync_at: supabaseSyncLast?.at || null,
           studio_supabase_last_sync_ok: supabaseSyncLast?.ok ?? null,
           studio_voiceover_once_v1: true,

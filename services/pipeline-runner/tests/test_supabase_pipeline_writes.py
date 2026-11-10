@@ -273,6 +273,9 @@ def test_runner_media_upsert_drops_catalog_url_and_survives_supabase_failure(mon
     assert body["google_drive_file_id"] == "drive-file-9"
     assert body["studio_favorite"] is True
     assert "google_drive_url" not in body
+    assert body["metadata"]["google_drive_url"] == (
+        "https://media.chicagoshining.com/studio/library/pier.jpg"
+    )
 
 
 def test_runner_media_delete_does_not_mirror(monkeypatch):
