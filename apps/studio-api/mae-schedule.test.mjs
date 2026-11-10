@@ -263,14 +263,16 @@ test("current-day past windows are skipped", () => {
   assert.deepEqual(localParts(iso, zone), { hour: 11, minute: 30 });
 });
 
-test("blackout is 8:00 PM through 3:30 AM", () => {
+test("blackout is 10:30 PM through 3:30 AM", () => {
   const zone = "America/New_York";
+  const tenThirtyPm = maeZonedWallToUtcMs(2026, 10, 8, 22, 30, zone);
+  const tenTwentyNine = maeZonedWallToUtcMs(2026, 10, 8, 22, 29, zone);
   const eightPm = maeZonedWallToUtcMs(2026, 10, 8, 20, 0, zone);
-  const sevenFiftyNine = maeZonedWallToUtcMs(2026, 10, 8, 19, 59, zone);
   const threeThirty = maeZonedWallToUtcMs(2026, 10, 9, 3, 30, zone);
   const threeThirtyOne = maeZonedWallToUtcMs(2026, 10, 9, 3, 31, zone);
-  assert.equal(maeIsBlackoutLocalTime(eightPm, zone), true);
-  assert.equal(maeIsBlackoutLocalTime(sevenFiftyNine, zone), false);
+  assert.equal(maeIsBlackoutLocalTime(tenThirtyPm, zone), true);
+  assert.equal(maeIsBlackoutLocalTime(tenTwentyNine, zone), false);
+  assert.equal(maeIsBlackoutLocalTime(eightPm, zone), false);
   assert.equal(maeIsBlackoutLocalTime(threeThirty, zone), true);
   assert.equal(maeIsBlackoutLocalTime(threeThirtyOne, zone), false);
 });
@@ -299,7 +301,7 @@ test("capacity failure returns explicit error", () => {
   const now = new Date("2026-10-05T08:00:00Z");
   const occupied = fillMaeHorizon(zone, { year: 2026, month: 10, day: 5 }, 1);
   // Saturate open hours every 45 minutes so no 90-minute-clear gap remains.
-  for (let minute = 3 * 60 + 31; minute <= 19 * 60 + 59; minute += 45) {
+  for (let minute = 3 * 60 + 31; minute <= 22 * 60 + 29; minute += 45) {
     const hh = Math.floor(minute / 60);
     const mm = minute % 60;
     occupied.push(maeZonedWallToUtcMs(2026, 10, 5, hh, mm, zone));

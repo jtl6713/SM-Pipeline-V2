@@ -8,7 +8,7 @@ const html = readFileSync(new URL("../studio-web/index.html", import.meta.url), 
 const css = readFileSync(new URL("../studio-web/assets/production-approval-clarity.css", import.meta.url), "utf8");
 
 test("Chicago blackout seed moves forward to non-blackout slot", () => {
- const requested = "2026-11-09T03:00:00.000Z"; // Nov 8, 9 PM CST
+ const requested = "2026-11-09T05:00:00.000Z"; // Nov 8, 11 PM CST
  const result = maeResolveSeedSchedule({ requestedIso: requested, timeZone: "America/Chicago",
    now: new Date("2026-11-08T20:00:00.000Z"), horizonDays: 30 });
  assert.equal(result.ok, true);
@@ -19,7 +19,7 @@ test("Chicago blackout seed moves forward to non-blackout slot", () => {
 });
 
 test("blackout recovery keeps 90-minute platform occupancy gap", () => {
- const args = { requestedIso: "2026-11-09T03:00:00Z", timeZone: "America/Chicago",
+ const args = { requestedIso: "2026-11-09T05:00:00Z", timeZone: "America/Chicago",
    now: new Date("2026-11-08T20:00:00Z"), horizonDays: 30 };
  const first = maeResolveSeedSchedule(args);
  const second = maeResolveSeedSchedule({ ...args, platformOccupiedMs: [Date.parse(first.iso)] });

@@ -53,6 +53,6 @@ test("auth table writes invalidate the auth cache prefix", () => {
 });
 
 test("Worker health advertises auth Airtable cache build", () => {
-  assert.match(worker, /0\.10\.803-auth-membership-user-id/);
+  assert.match(worker, /0\.10\.804-blackout-1030pm/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
 });

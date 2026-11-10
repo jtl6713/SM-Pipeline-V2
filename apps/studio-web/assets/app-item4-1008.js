@@ -299,7 +299,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.927-mobile-upload-contrast";
+  const BUILD_ID = "item4-0.6.928-blackout-1030pm";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -20691,7 +20691,7 @@ function timedScriptAssetLabel(asset, index) {
     if (!raw) return false;
     const iso = studioDateTimeLocalToIso(raw, workingStudioTimeZone());
     // The profile timezone is the scheduling authority. Treat a future schedule
-    // inside 8:00 PM–3:30 AM in that profile as invalid/missing so the automatic
+    // inside 10:30 PM–3:30 AM in that profile as invalid/missing so the automatic
     // scheduler replaces it instead of preserving a slot interpreted in the
     // browser/user timezone.
     return Boolean(iso) && !pipelineScheduleIsBlackout(iso, workingStudioTimeZone());
@@ -21525,7 +21525,7 @@ function timedScriptAssetLabel(asset, index) {
       const minute = Number(parts.find((part) => part.type === "minute")?.value);
       if (!Number.isFinite(hour) || !Number.isFinite(minute)) return true;
       const localMinutes = hour * 60 + minute;
-      return localMinutes >= 20 * 60 || localMinutes <= 3 * 60 + 30;
+      return localMinutes >= 22 * 60 + 30 || localMinutes <= 3 * 60 + 30;
     } catch {
       return true;
     }
@@ -23193,7 +23193,7 @@ function timedScriptAssetLabel(asset, index) {
     if (summary) {
       summary.textContent = error
         ? `${total} scheduled in the loaded Pipeline rows · schedule service retrying · ${rangeLabel} · ${timezone}`
-        : `${total} scheduled output${total === 1 ? "" : "s"} · ${rangeLabel} · ${timezone} · blackout hours ${pipelineScheduleBlackoutHoursOpen ? "shown" : "collapsed"} (8 PM–3:30 AM, off limits)`;
+        : `${total} scheduled output${total === 1 ? "" : "s"} · ${rangeLabel} · ${timezone} · blackout hours ${pipelineScheduleBlackoutHoursOpen ? "shown" : "collapsed"} (10:30 PM–3:30 AM, off limits)`;
     }
 
     const now = new Date();
@@ -23246,17 +23246,17 @@ function timedScriptAssetLabel(asset, index) {
         ].filter(Boolean).join(" ");
         const interactive = !isPast && !isBlackout;
         const aria = isBlackout
-          ? `Off limits: ${date.toLocaleString(undefined, { timeZone: workingStudioTimeZone(), weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} (8:00 PM–3:30 AM local)`
+          ? `Off limits: ${date.toLocaleString(undefined, { timeZone: workingStudioTimeZone(), weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} (10:30 PM–3:30 AM local)`
           : `Schedule selected output for ${date.toLocaleString(undefined, { timeZone: workingStudioTimeZone(), weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
         const emptyLabel = isBlackout
           ? '<span class="pipeline-schedule-slot-empty">Off limits</span>'
           : '<span class="pipeline-schedule-slot-empty">Drop here</span>';
         return `<td class="${classes}"${interactive ? ` data-pipeline-schedule-drop="${escapeHtml(date.toISOString())}" tabindex="0" role="button" aria-label="${escapeHtml(aria)}"` : ` aria-label="${escapeHtml(aria)}"`}><div class="pipeline-schedule-cell-inner">${bubbles || emptyLabel}</div></td>`;
       }).join("");
-      return `<tr${rowBlackout ? ' class="is-blackout-row"' : ""}><th scope="row" class="pipeline-schedule-hour${rowBlackout ? " is-blackout" : ""}"${rowBlackout ? ' title="Off limits: 8:00 PM–3:30 AM local"' : ""}>${escapeHtml(pipelineScheduleSlotLabel(slotIndex))}</th>${cellsHtml}</tr>`;
+      return `<tr${rowBlackout ? ' class="is-blackout-row"' : ""}><th scope="row" class="pipeline-schedule-hour${rowBlackout ? " is-blackout" : ""}"${rowBlackout ? ' title="Off limits: 10:30 PM–3:30 AM local"' : ""}>${escapeHtml(pipelineScheduleSlotLabel(slotIndex))}</th>${cellsHtml}</tr>`;
     }).join("");
 
-    const windowToolbar = `<div class="pipeline-schedule-window-toolbar" aria-label="Calendar date range controls"><div class="pipeline-schedule-window-controls"><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="-7">← Previous 7 days</button><button type="button" class="text-button" data-pipeline-schedule-window-today${pipelineScheduleWindowStartsToday(windowValue) ? ' disabled aria-current="date"' : ""}>Today</button><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="7">Next 7 days →</button><button type="button" class="secondary-button" data-pipeline-blackout-toggle aria-expanded="${pipelineScheduleBlackoutHoursOpen ? "true" : "false"}">${pipelineScheduleBlackoutHoursOpen ? "Hide blackout hours" : "Show blackout hours"}</button></div><strong class="pipeline-schedule-window-range">${escapeHtml(rangeLabel)}</strong><span class="pipeline-schedule-window-hint">Only approved posts with a publish time appear here. Select a bubble, change the 7-day window if needed, then click its destination slot. Blackout hours (8:00 PM–3:30 AM local) are collapsed by default.</span></div>`;
+    const windowToolbar = `<div class="pipeline-schedule-window-toolbar" aria-label="Calendar date range controls"><div class="pipeline-schedule-window-controls"><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="-7">← Previous 7 days</button><button type="button" class="text-button" data-pipeline-schedule-window-today${pipelineScheduleWindowStartsToday(windowValue) ? ' disabled aria-current="date"' : ""}>Today</button><button type="button" class="secondary-button" data-pipeline-schedule-window-shift="7">Next 7 days →</button><button type="button" class="secondary-button" data-pipeline-blackout-toggle aria-expanded="${pipelineScheduleBlackoutHoursOpen ? "true" : "false"}">${pipelineScheduleBlackoutHoursOpen ? "Hide blackout hours" : "Show blackout hours"}</button></div><strong class="pipeline-schedule-window-range">${escapeHtml(rangeLabel)}</strong><span class="pipeline-schedule-window-hint">Only approved posts with a publish time appear here. Select a bubble, change the 7-day window if needed, then click its destination slot. Blackout hours (10:30 PM–3:30 AM local) are collapsed by default.</span></div>`;
     // Unscheduled / waiting-for-approval rows stay off the calendar. Scheduling
     // is assigned at Approve time, so the old Ready-to-schedule tray is gone.
     target.innerHTML = `${windowToolbar}<div class="pipeline-schedule-grid-scroll"><table class="pipeline-schedule-grid-table"><thead><tr><th class="pipeline-hour-head" scope="col">Time</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
@@ -23358,7 +23358,7 @@ function timedScriptAssetLabel(asset, index) {
       text.textContent = past
         ? "Choose a future date and time."
         : blackout
-          ? "That time is off limits (8:00 PM–3:30 AM local). Pick another slot."
+          ? "That time is off limits (10:30 PM–3:30 AM local). Pick another slot."
           : `Schedule for ${selected.toLocaleString(undefined, { timeZone: workingStudioTimeZone(), weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}`;
     }
     const spacing = helper?.spacingWarning?.(
@@ -23369,7 +23369,7 @@ function timedScriptAssetLabel(asset, index) {
     );
     if (warning) {
       warning.textContent = blackout
-        ? "Overnight blackout: 8:00 PM–3:30 AM local is shaded and not available."
+        ? "Overnight blackout: 10:30 PM–3:30 AM local is shaded and not available."
         : (spacing?.message || "");
     }
     if (save) save.disabled = past || blackout;
@@ -23454,12 +23454,12 @@ function timedScriptAssetLabel(asset, index) {
           isBlackout ? "is-blackout" : "",
         ].filter(Boolean).join(" ");
         const title = isBlackout
-          ? "Off limits: 8:00 PM–3:30 AM local"
+          ? "Off limits: 10:30 PM–3:30 AM local"
           : (spacing?.message || (events.length ? events.map(platformCalendarEventLabel).join("\n") : "Choose this time"));
         const disabled = isPast || isBlackout;
         return `<td><button type="button" class="${classes}" data-platform-calendar-slot="${escapeHtml(slot.toISOString())}" title="${escapeHtml(title)}"${disabled ? " disabled" : ""}>${eventHtml || (isBlackout ? '<span class="platform-calendar-slot-add">Off limits</span>' : '<span class="platform-calendar-slot-add">＋</span>')}</button></td>`;
       }).join("");
-      return `<tr${rowBlackout ? ' class="is-blackout-row"' : ""}><th scope="row" class="platform-calendar-slot-label${rowBlackout ? " is-blackout" : ""}"${rowBlackout ? ' title="Off limits: 8:00 PM–3:30 AM local"' : ""}>${escapeHtml(platformCalendarSlotLabel(slotIndex))}</th>${cells}</tr>`;
+      return `<tr${rowBlackout ? ' class="is-blackout-row"' : ""}><th scope="row" class="platform-calendar-slot-label${rowBlackout ? " is-blackout" : ""}"${rowBlackout ? ' title="Off limits: 10:30 PM–3:30 AM local"' : ""}>${escapeHtml(platformCalendarSlotLabel(slotIndex))}</th>${cells}</tr>`;
     }).join("");
     const previousScrollTop = target.scrollTop;
     target.innerHTML = `<table class="platform-calendar-table"><thead><tr><th class="platform-calendar-hour-head" scope="col">Time</th>${head}</tr></thead><tbody>${rows}</tbody></table>`;
@@ -27509,7 +27509,7 @@ function timedScriptAssetLabel(asset, index) {
       if (input && Number.isFinite(days) && days > 0) input.value = String(Math.floor(days));
       pipelineScheduleHorizonDays = Number.isFinite(days) && days > 0 ? Math.floor(days) : 30;
       if (meta) {
-        meta.textContent = `Horizon ${pipelineScheduleHorizonDays} days. Morning 5:00–7:00, Afternoon 10:30–12:30, Evening 4:00–6:00. Blackout 8:00 PM–3:30 AM profile-local.`;
+        meta.textContent = `Horizon ${pipelineScheduleHorizonDays} days. Morning 5:00–7:00, Afternoon 10:30–12:30, Evening 4:00–6:00. Blackout 10:30 PM–3:30 AM profile-local.`;
       }
     } catch (error) {
       if (meta) meta.textContent = error?.message || "Could not load scheduling horizon.";

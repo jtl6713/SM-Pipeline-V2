@@ -281,7 +281,7 @@
       "<dt>Short code</dt><dd>" + escapeHtml(p.short_code || "—") + "</dd>",
       "<dt>Website</dt><dd>" + escapeHtml(p.website_url || "Not set") + "</dd>",
       "<dt>Platforms</dt><dd>" + escapeHtml(activePlatforms.join(", ") || "None") + "</dd>",
-      "<dt>Scheduling</dt><dd>Profile-local timezone; 5:30–7:00 AM, 11:30 AM–1:00 PM, 4:30–6:00 PM; blackout 8:00 PM–3:30 AM.</dd>",
+      "<dt>Scheduling</dt><dd>Profile-local timezone; 5:30–7:00 AM, 11:30 AM–1:00 PM, 4:30–6:00 PM; blackout 10:30 PM–3:30 AM.</dd>",
       "<dt>Output defaults</dt><dd>9:16, five hashtags, IG/TikTok covers, initial schedule empty.</dd>",
       "</dl>"
     ].join("");

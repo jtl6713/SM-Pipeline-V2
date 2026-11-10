@@ -478,11 +478,11 @@
   }
 
   const EZ_DEFAULT_TIME_ZONE = "America/Chicago";
-  /** Inclusive local blackout: 8:00 PM through 3:30 AM profile time. */
-  const EZ_SCHEDULE_BLACKOUT_START_MINUTES = 20 * 60;
+  /** Inclusive local blackout: 10:30 PM through 3:30 AM profile time. */
+  const EZ_SCHEDULE_BLACKOUT_START_MINUTES = 22 * 60 + 30;
   const EZ_SCHEDULE_BLACKOUT_END_MINUTES = 3 * 60 + 30;
   const EZ_SCHEDULE_OPEN_START_MINUTES = 3 * 60 + 31;
-  const EZ_SCHEDULE_OPEN_END_MINUTES = 19 * 60 + 59;
+  const EZ_SCHEDULE_OPEN_END_MINUTES = 22 * 60 + 29;
 
   function ezNormalizeHorizonDays(value, fallback = EZ_SUGGEST_HORIZON_DAYS) {
     const n = Number(value);

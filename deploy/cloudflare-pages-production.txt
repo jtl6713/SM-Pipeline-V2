@@ -758,3 +758,5 @@ Deploy 2026-11-10 Studio UI 0.6.925-ai-video-live-progress: visible animated ind
 
 Deploy 2026-11-09 Studio UI 0.6.926-engagement-tab-recovery: Engagement queue remains visible if Insights/capabilities reads fail; failed action buttons recover; lazy-load errors are visible. Preserve authorization, Airtable authority, manual approvals, and publishing gates. Trigger controlled Pages verification on merge.
 Deploy Studio UI 0.6.927 finished-video upload contrast and mobile overflow fix, PR #1778. Trigger protected Pages production verification.
+
+Deploy Studio UI 0.6.928 blackout 10:30 PM–3:30 AM profile-local (was 8:00 PM–3:30 AM). Calendar shading, manual slot picker, and settings copy match Worker 0.10.804. Trigger protected Pages production verification.
