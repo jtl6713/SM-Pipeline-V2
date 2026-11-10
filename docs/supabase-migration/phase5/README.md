@@ -31,13 +31,16 @@ Approve, schedule, publish-status, and heal paths remain authoritative Airtable 
 
 The pipeline runner is the other writer. `AirtableClient` create, update, and atomic upsert of Platform Outputs and Content Items now mirror the Airtable response into Supabase when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set on the runner. A Supabase error does not fail the Airtable write. Other tables are unchanged.
 
-`STUDIO_WRITE_SOURCE` stays `airtable`. Setting it to `supabase` makes those two tables commit to Supabase first and treats the Airtable update as a best-effort legacy export. Creates still go to Airtable first so Airtable can mint `rec` ids. Leave the flag on `airtable` until the runner host has the Supabase secrets and the project is on Pro. Pipeline-runner reads are still Airtable.
+`STUDIO_WRITE_SOURCE` stays `airtable`. Setting it to `supabase` makes those two tables commit to Supabase first and treats the Airtable update as a best-effort legacy export. Creates still go to Airtable first so Airtable can mint `rec` ids. Leave the flag on `airtable`.
 
-`/health` on the runner reports `studio_write_source` and `supabase_pipeline_writes`.
+Runner `2026-11-09-supabase-phase5-runner-reads` can list `platform_outputs` and `content_items` when `STUDIO_RUNNER_OUTPUT_READ_SOURCE` or `STUDIO_RUNNER_CONTENT_READ_SOURCE` is `supabase`. Both flags default to `airtable`, and this release does not turn them on. A formula, a view, an unmapped sort, or an unmapped requested field stays on Airtable. A Supabase read error falls back to Airtable. `STUDIO_WRITE_SOURCE` does not turn these reads on.
+
+`/health` on the runner reports `studio_write_source`, `supabase_pipeline_writes`, `studio_runner_output_read_source`, and `studio_runner_content_read_source`. Production values stay `airtable` for the write source and both read sources.
 
 ## Still out of scope
 
-- Turning on `STUDIO_WRITE_SOURCE=supabase` in production. That is the legacy-export switch, and it stays off while reads in the runner still come from Airtable.
+- Turning on `STUDIO_WRITE_SOURCE=supabase` in production. That is the legacy-export switch, and it stays off while the runner read flags stay `airtable`.
+- Turning on `STUDIO_RUNNER_OUTPUT_READ_SOURCE` or `STUDIO_RUNNER_CONTENT_READ_SOURCE`. The read path is in the runner, and production selectors that use a formula or a view still read Airtable.
 - Deleting or stopping Airtable records.
 - Production Requests, media metadata, and cron as a write source of truth (Phase 6).
 - `resolveAuthorization` on Supabase user tables.

@@ -136,12 +136,17 @@ def durable_airtable_egress():
 
 @app.get("/health")
 def health():
+    from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
+    from supabase_reads import runner_table_read_source
+
     return jsonify(
         {
             "ok": True,
             "service": "pipeline-runner",
             "version": settings["service_version"],
             "studio_write_source": settings.get("studio_write_source") or "airtable",
+            "studio_runner_output_read_source": runner_table_read_source(settings, PLATFORM_OUTPUTS_TABLE),
+            "studio_runner_content_read_source": runner_table_read_source(settings, CONTENT_ITEMS_TABLE),
             "ig_publish_lease_required": os.environ.get("IG_PUBLISH_LEASE_REQUIRED","").strip().lower() == "true",
             "ig_publish_lease_protocol_version": 1,
             "supabase_pipeline_writes": bool(settings.get("supabase_url") and settings.get("supabase_service_role_key")),
