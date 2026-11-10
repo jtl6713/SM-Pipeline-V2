@@ -1,0 +1,18 @@
+/* High-contrast mobile upload workflow. Scoped to the finished-video path. */
+#azFinishedDrop{background:#101d42;color:#f8fbff;min-width:0;max-width:100%;box-sizing:border-box;overflow-wrap:anywhere}
+#azFinishedDrop h2{color:#fff;font-weight:800;text-shadow:none}
+#azFinishedDrop>p,#azFinishedDrop .az-drop-title>span,#azFinishedDrop .az-drop-zone span{color:#edf3ff}
+#azFinishedDrop .ez-portal-back{color:#fff}
+#azFinishedDrop .az-drop-title input,#azFinishedDrop .az-optional-fields input,#azFinishedDrop .az-optional-fields textarea{background:#08172f;color:#fff;border:1px solid #a5bce2;max-width:100%;box-sizing:border-box}
+#azFinishedDrop input::placeholder,#azFinishedDrop textarea::placeholder{color:#c3d1e8;opacity:1}
+#azFinishedDrop .az-optional-fields{background:#12234c;border-color:#7d9ac6}
+#azFinishedDrop .az-optional-fields summary{color:#fff}
+#azFinishedDrop .az-drop-zone{min-width:0;max-width:100%;box-sizing:border-box;border-color:#b7c9e8;background:#091a39;color:#fff}
+#azFinishedDrop .az-drop-zone strong{color:#fff}
+#azFinishedDrop .form-message{color:#14254b;background:#fff3b4;border-radius:10px;padding:10px 12px;line-height:1.5;overflow-wrap:anywhere}
+#azFinishedDrop .form-message:empty{display:none}
+#azFinishedDrop .form-message.error-text{color:#7f1d1d;background:#fff0ee}
+#azFinishedDrop .form-message.success{color:#14532d;background:#e7f7ed}
+#azFinishedDrop .az-drop-progress{color:#fff;letter-spacing:0;line-height:1.5;overflow-wrap:anywhere}
+#azFinishedDrop :focus-visible{outline:3px solid #ffd24a;outline-offset:3px}
+@media(max-width:600px){#azFinishedDrop{padding:14px 12px}#azFinishedDrop .az-drop-title{min-width:0}#azFinishedDrop .az-drop-zone{padding:14px 12px}#azFinishedDrop .az-drop-zone>div{min-width:0}#azFinishedDrop .az-drop-title input{width:100%}}
