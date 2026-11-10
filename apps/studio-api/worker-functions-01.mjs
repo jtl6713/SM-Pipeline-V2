@@ -638,12 +638,19 @@ export function accessIdentity(request) {
 
 /*__STUDIO_WORKER_END:accessIdentity__*/
 
-export async function resolveAuthorization(request, env) {
-  const identity = accessIdentity(request);
-  const email = String(identity.email || "").trim().toLowerCase();
+function studioAuthFormulaLiteral(value) {
+  return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
 
+function studioAuthCacheTtlMs(env) {
+  const raw = Number(env?.STUDIO_AUTH_CACHE_TTL_MS);
+  if (Number.isFinite(raw) && raw >= 5_000 && raw <= 300_000) return Math.floor(raw);
+  return 60_000;
+}
+
+async function loadAuthorizationFromAirtable(env, email, identity) {
   const base = {
-    authenticated: Boolean(identity.email || identity.jwt_present),
+    authenticated: true,
     authorized: false,
     email: identity.email,
     identity_source: identity.source,
@@ -656,20 +663,15 @@ export async function resolveAuthorization(request, env) {
     role: null,
     permissions: ROLE_PERMISSIONS.Viewer,
     authorization_error: null,
+    auth_cache: "miss",
   };
 
-  if (!base.authenticated) {
-    base.authorization_error = "No Cloudflare Access identity was present";
-    return base;
-  }
-
-  if (!email) {
-    base.authorization_error = "Authenticated identity did not contain an email address";
-    return base;
-  }
-
-  const users = await listRecords(env, STUDIO_TABLES.users, { limit: 100 });
-  const userRecord = users.find((record) =>
+  // Targeted email lookup — never list the whole Studio Users table on a miss.
+  const users = await listRecords(env, STUDIO_TABLES.users, {
+    limit: 5,
+    filterFormula: `LOWER({Email})="${studioAuthFormulaLiteral(email)}"`,
+  });
+  const userRecord = (users || []).find((record) =>
     String(f(record, "Email") || "").trim().toLowerCase() === email
   );
 
@@ -693,8 +695,11 @@ export async function resolveAuthorization(request, env) {
     status: userStatus,
   };
 
-  const memberships = await listRecords(env, STUDIO_TABLES.memberships, { limit: 100 });
-  const userMemberships = memberships.filter((record) => {
+  const memberships = await listRecords(env, STUDIO_TABLES.memberships, {
+    limit: 25,
+    filterFormula: `AND({Active}=1,LOWER({Membership_Status})="active",FIND("${studioAuthFormulaLiteral(userRecord.id)}",ARRAYJOIN({User})))`,
+  });
+  const userMemberships = (memberships || []).filter((record) => {
     const linkedUsers = Array.isArray(f(record, "User")) ? f(record, "User") : [];
     const active = Boolean(f(record, "Active"));
     const status = String(f(record, "Membership_Status") || "").trim().toLowerCase();
@@ -726,14 +731,23 @@ export async function resolveAuthorization(request, env) {
     return base;
   }
 
-  const [organizationRecord, allBrands] = await Promise.all([
+  const brandIds = [...new Set([...allowedBrandLinks, ...defaultBrandLinks].filter(Boolean))];
+  const brandFormula = brandIds.length
+    ? (brandIds.length === 1
+      ? `RECORD_ID()="${studioAuthFormulaLiteral(brandIds[0])}"`
+      : `OR(${brandIds.map((id) => `RECORD_ID()="${studioAuthFormulaLiteral(id)}"`).join(",")})`)
+    : null;
+
+  const [organizationRecord, brandRows] = await Promise.all([
     airtableFetch(env, STUDIO_TABLES.organizations, organizationLinks[0]),
-    listRecords(env, STUDIO_TABLES.brands, { limit: 100 }),
+    brandFormula
+      ? listRecords(env, STUDIO_TABLES.brands, { limit: Math.min(50, brandIds.length), filterFormula: brandFormula })
+      : Promise.resolve([]),
   ]);
 
-  const allowedBrandRecords = allBrands.filter((record) => allowedBrandLinks.includes(record.id));
+  const allowedBrandRecords = (brandRows || []).filter((record) => allowedBrandLinks.includes(record.id));
   const defaultBrandRecord =
-    allBrands.find((record) => defaultBrandLinks.includes(record.id)) ||
+    (brandRows || []).find((record) => defaultBrandLinks.includes(record.id)) ||
     allowedBrandRecords[0] ||
     null;
 
@@ -770,6 +784,58 @@ export async function resolveAuthorization(request, env) {
   base.authorization_error = null;
 
   return base;
+}
+
+export async function resolveAuthorization(request, env) {
+  const identity = accessIdentity(request);
+  const email = String(identity.email || "").trim().toLowerCase();
+
+  const base = {
+    authenticated: Boolean(identity.email || identity.jwt_present),
+    authorized: false,
+    email: identity.email,
+    identity_source: identity.source,
+    jwt_present: identity.jwt_present,
+    user: null,
+    membership: null,
+    organization: null,
+    brand: null,
+    allowed_brands: [],
+    role: null,
+    permissions: ROLE_PERMISSIONS.Viewer,
+    authorization_error: null,
+    auth_cache: "bypass",
+  };
+
+  if (!base.authenticated) {
+    base.authorization_error = "No Cloudflare Access identity was present";
+    return base;
+  }
+
+  if (!email) {
+    base.authorization_error = "Authenticated identity did not contain an email address";
+    return base;
+  }
+
+  // Short-TTL coalesce: every Studio data route called this and listed full
+  // Users + Memberships + Brands tables. Cache hits avoid those Airtable lists.
+  const ttlMs = studioAuthCacheTtlMs(env);
+  const cacheKey = `auth:${email}`;
+  const prior = studioHotReadCache.get(cacheKey);
+  const cacheHit = Boolean(
+    prior && prior.value !== undefined && (Date.now() - Number(prior.at || 0)) < ttlMs
+  );
+  const cached = await studioReadCoalesce(cacheKey, ttlMs, () =>
+    loadAuthorizationFromAirtable(env, email, identity)
+  );
+  const result = typeof structuredClone === "function"
+    ? structuredClone(cached)
+    : JSON.parse(JSON.stringify(cached));
+  result.email = identity.email;
+  result.identity_source = identity.source;
+  result.jwt_present = identity.jwt_present;
+  result.auth_cache = cacheHit ? "hit" : "miss";
+  return result;
 }
 /*__STUDIO_WORKER_END:resolveAuthorization__*/
 
@@ -1123,6 +1189,14 @@ export function studioInvalidateHotReads(env, tableId, method) {
   const verb = String(method || "GET").toUpperCase();
   if (verb === "GET" || verb === "HEAD") return;
   const id = String(tableId || "");
+  if ([
+    STUDIO_TABLES.users,
+    STUDIO_TABLES.memberships,
+    STUDIO_TABLES.organizations,
+    STUDIO_TABLES.brands,
+  ].includes(id)) {
+    studioReadCacheDropPrefix("auth:");
+  }
   // Operations reads profile settings, output queues and media intake.
   // Never serve a pre-write snapshot after an authoritative Airtable mutation.
   if ([env?.AIRTABLE_OUTPUT_TABLE_ID, env?.AIRTABLE_MEDIA_TABLE_ID,
