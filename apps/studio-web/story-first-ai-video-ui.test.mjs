@@ -39,7 +39,7 @@ test("paid video requires a reviewed quote and direct human authorization", () =
 });
 
 test("Worker admits scene video endpoints, not autonomous publishing", () => {
-  assert.ok(worker.includes("video\\/(?:quote|start|status|preview|accept|decline)"));
+  assert.ok(worker.includes("video\\/(?:quote|start|status|preview|accept|decline|reconcile-unbilled)"));
   assert.match(server, /storyVideoJobKey\(ideaId, sceneNumber\)/);
   assert.match(server, /Video is not ready for explicit acceptance/);
   assert.match(server, /studioProfileRequiresChicagoWatermark\(profile\)/);
@@ -94,4 +94,44 @@ test("admin reconciliation is exact-scoped, cannot generate, and requires origin
   const code = ui.slice(ui.indexOf("async function reconcileUnbilledVideoAttempt("),
     ui.indexOf("async function decideSceneVideo("));
   assert.doesNotMatch(code, /generateSceneVideo\(|video\/start|submitStoryVideo\(/);
+});
+
+
+test("Phase 2A method gate and scene handler both recognize POST video/reconcile-unbilled", () => {
+  // An admin recovery UI button can otherwise emit 405 before the route runs.
+  const gateLine = worker.split("\n").find(line =>
+    line.includes("const isStoryFirstSceneMediaRoute ="));
+  assert.ok(gateLine, "top-level route allowlist must exist");
+  const gateLiteral = gateLine.match(/= (\/\^[^\n]+\$\/)\.test\(url\.pathname\)/);
+  assert.ok(gateLiteral, "extract and validate the actual Phase 2A regex");
+  const gate = new RegExp(gateLiteral[1].slice(1,-1));
+  const handlerSource = server.slice(server.indexOf("export async function storyFirstSceneMediaRoute("));
+  const handlerLiteral = handlerSource.match(/const path = (\/\^[^\n]+\$\/)\.exec\(url\.pathname\)/);
+  assert.ok(handlerLiteral, "extract and validate the actual scene route regex");
+  const handler = new RegExp(handlerLiteral[1].slice(1,-1));
+
+  const expected = [
+    "/api/story-first/ideas/recTgiblVhRnCfNuf/scenes/1/video/reconcile-unbilled",
+    "/api/story-first/ideas/recTgiblVhRnCfNuf/scenes/1/video/status",
+    "/api/story-first/ideas/recTgiblVhRnCfNuf/scenes/1/video/quote",
+    "/api/story-first/ideas/recTgiblVhRnCfNuf/scenes/1/video/start",
+  ];
+  for (const path of expected) {
+    assert.ok(gate.test(path), "Phase 2A must accept " + path);
+    assert.ok(handler.test(path), "Scene handler must accept " + path);
+  }
+  for (const path of [
+    "/api/story-first/ideas/recTgiblVhRnCfNuf/scenes/0/video/reconcile-unbilled",
+    "/api/story-first/ideas/recTgiblVhRnCfNuf/scenes/1/video/reset",
+    "/api/story-first/ideas/recTgiblVhRnCfNuf/scenes/1/video/reconcile-unbilled/extra",
+  ]) {
+    assert.equal(gate.test(path),false);
+    assert.equal(handler.test(path),false);
+  }
+  assert.match(worker, /\(isStoryFirstSceneMediaRoute && request\.method === "POST"\)/,
+    "Phase 2A must allow POST for matched media routes");
+  assert.match(worker, /if \(isStoryFirstSceneMediaRoute\) \{[\s\S]*?return await storyFirstSceneMediaRoute\(/,
+    "matched request must dispatch to scene handler");
+  assert.match(handlerSource, /if \(videoAction === "reconcile-unbilled"\) \{\s*if \(request\.method !== "POST"\)[\s\S]*?requirePermission\(authorization, "tenant_admin"\)/,
+    "recovery remains admin-only and POST-only");
 });
