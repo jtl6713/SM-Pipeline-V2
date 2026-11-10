@@ -27,7 +27,7 @@ The last sync in that gate finished at 12:03 AM CT with `status=completed`, `ok=
 - Production Requests, media metadata, and transfer-queue writes (Phase 6 Airtable-first write-through).
 - Pipeline-runner formula and view selectors. Runner reads of marked Output/Content rows are enabled via `deploy/enable-runner-supabase-reads.txt`. Older unmarked rows stay on Airtable.
 - The half-hour cron that copies Airtable into Supabase. Supabase is the replica, not the source of that job.
-- `resolveAuthorization` still uses Airtable, but Worker `0.10.802-auth-airtable-cache` short-TTL caches per email and uses targeted Users/Memberships/Brands filters instead of full-table lists (biggest continuous Airtable tax cut while Supabase auth sync is unfinished).
+- `resolveAuthorization` still uses Airtable, but Worker `0.10.803-auth-membership-user-id` short-TTL caches per email and uses targeted Users/Memberships/Brands filters instead of full-table lists (biggest continuous Airtable tax cut while Supabase auth sync is unfinished). Membership FIND matches Studio Users `User_ID` (linked primary), not record ids.
 - Asset and music library metadata (still Airtable list reads; media write-through exists but library fields are incomplete).
 - `STUDIO_HOME_PROFILE_SUMMARY_READS`. That is a separate Durable Object summary, and this cutover did not turn it on.
 - Phase 6 `studio_media_transfer_targets` mirror (write-through gap only; does not cut Airtable reads).

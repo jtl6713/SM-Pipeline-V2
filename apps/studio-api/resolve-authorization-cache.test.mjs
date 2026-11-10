@@ -11,8 +11,16 @@ test("resolveAuthorization uses short-TTL coalesce and targeted Airtable filters
   assert.match(workerFns, /const cacheKey = `auth:\$\{email\}`/);
   assert.match(workerFns, /studioAuthCacheTtlMs/);
   assert.match(workerFns, /LOWER\(\{Email\}\)="/);
-  assert.match(workerFns, /ARRAYJOIN\(\{User\}\)/);
+  assert.match(workerFns, /ARRAYJOIN\(\{User\}\)&""/);
+  assert.match(workerFns, /User_ID/);
   assert.match(workerFns, /RECORD_ID\(\)="/);
+  assert.doesNotMatch(
+    workerFns.slice(
+      workerFns.indexOf("async function loadAuthorizationFromAirtable"),
+      workerFns.indexOf("export async function resolveAuthorization"),
+    ),
+    /FIND\("\$\{studioAuthFormulaLiteral\(userRecord\.id\)\}"/,
+  );
   assert.doesNotMatch(
     workerFns.slice(
       workerFns.indexOf("async function loadAuthorizationFromAirtable"),
@@ -45,6 +53,6 @@ test("auth table writes invalidate the auth cache prefix", () => {
 });
 
 test("Worker health advertises auth Airtable cache build", () => {
-  assert.match(worker, /0\.10\.802-auth-airtable-cache/);
+  assert.match(worker, /0\.10\.803-auth-membership-user-id/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
 });

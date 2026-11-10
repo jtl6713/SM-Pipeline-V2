@@ -695,9 +695,13 @@ async function loadAuthorizationFromAirtable(env, email, identity) {
     status: userStatus,
   };
 
+  // ARRAYJOIN({User}) resolves linked primary values (User_ID), not record ids.
+  // FIND(rec…) therefore misses every membership; match User_ID and keep the
+  // client-side record-id check as the authority.
+  const userPrimary = String(f(userRecord, "User_ID") || "").trim() || userRecord.id;
   const memberships = await listRecords(env, STUDIO_TABLES.memberships, {
     limit: 25,
-    filterFormula: `AND({Active}=1,LOWER({Membership_Status})="active",FIND("${studioAuthFormulaLiteral(userRecord.id)}",ARRAYJOIN({User})))`,
+    filterFormula: `AND({Active}=1,LOWER({Membership_Status})="active",FIND("${studioAuthFormulaLiteral(userPrimary)}",ARRAYJOIN({User})&"")>0)`,
   });
   const userMemberships = (memberships || []).filter((record) => {
     const linkedUsers = Array.isArray(f(record, "User")) ? f(record, "User") : [];
