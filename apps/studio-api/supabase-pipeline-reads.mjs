@@ -1770,6 +1770,65 @@ export async function syncAirtableMediaAssetRowToSupabase(env, record) {
   return { ok: true, mode: "patch" };
 }
 
+function transferQueueLinkId(value) {
+  const item = Array.isArray(value) ? value[0] : value;
+  if (item && typeof item === "object") {
+    const id = String(item.id || "").trim();
+    return id.startsWith("rec") ? id : null;
+  }
+  const text = String(item || "").trim();
+  return text.startsWith("rec") ? text : null;
+}
+
+function transferQueueText(value) {
+  const text = String(value || "").trim();
+  return text || null;
+}
+
+/**
+ * Phase 6 queue slice: mirror one Studio Media Transfer Queue row after
+ * Airtable commits. Scalar status and a Drive file id only. Source URLs,
+ * R2 keys, and file bytes are omitted. Linked media stays an Airtable id in
+ * payload so a missing media_assets row cannot fail the foreign key.
+ */
+function transferQueueWriteThroughRow(record) {
+  const fields = record?.fields || {};
+  const row = {};
+  if ("Transfer_Status" in fields) row.status = selectName(fields.Transfer_Status);
+  if ("Error_Message" in fields) row.error_message = transferQueueText(fields.Error_Message);
+  if ("Preview_Error" in fields) row.preview_error = transferQueueText(fields.Preview_Error);
+  const payload = {};
+  const copy = (key, column, value) => {
+    if (!(key in fields) || !value) return;
+    payload[column] = value;
+  };
+  copy("Transfer_ID", "transfer_id", transferQueueText(fields.Transfer_ID));
+  copy("Production_Request_Record_ID", "production_request_record_id", transferQueueText(fields.Production_Request_Record_ID));
+  copy("Asset_Kind", "asset_kind", transferQueueText(fields.Asset_Kind));
+  copy("Source_Asset_ID", "source_asset_id", transferQueueText(fields.Source_Asset_ID));
+  copy("Source_Name", "source_name", transferQueueText(fields.Source_Name));
+  copy("Source_Drive_File_ID", "source_drive_file_id", transferQueueText(fields.Source_Drive_File_ID));
+  copy("Source_Media_Asset", "source_media_asset_id", transferQueueLinkId(fields.Source_Media_Asset));
+  copy("Generated_Media_Asset", "generated_media_asset_id", transferQueueLinkId(fields.Generated_Media_Asset));
+  copy("Aspect_Ratio", "aspect_ratio", transferQueueText(fields.Aspect_Ratio));
+  copy("Preview_Status", "preview_status", transferQueueText(selectName(fields.Preview_Status) || fields.Preview_Status));
+  copy("Test_Run_ID", "test_run_id", transferQueueText(fields.Test_Run_ID));
+  if (Object.keys(payload).length) row.payload = payload;
+  return row;
+}
+
+export async function syncAirtableTransferQueueRowToSupabase(env, record) {
+  if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured" };
+  if (!record?.id) return { skipped: true, reason: "missing_record" };
+  const row = transferQueueWriteThroughRow(record);
+  if (!Object.keys(row).length) return { skipped: true, reason: "empty_patch" };
+  await upsertChunk(env, "studio_media_transfer_queue", [{
+    airtable_record_id: record.id,
+    ...row,
+  }]);
+  return { ok: true, mode: "upsert" };
+}
+
 export function studioSideEffectOutboxMissing(error) {
   const text = String(error?.message || error || "");
   return /PGRST205|schema cache|does not exist|Could not find the table|404/.test(text);

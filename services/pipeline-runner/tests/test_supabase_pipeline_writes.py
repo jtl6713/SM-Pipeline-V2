@@ -3,7 +3,7 @@
 import requests
 
 from airtable.client import AirtableClient
-from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
+from airtable.constants import CONTENT_ITEMS_TABLE, MEDIA_TRANSFER_QUEUE_TABLE, PLATFORM_OUTPUTS_TABLE
 from supabase_pipeline import mirror_airtable_records
 
 
@@ -142,6 +142,65 @@ def test_legacy_export_keeps_going_when_airtable_update_fails(monkeypatch):
     patches = [row for row in seen if row[0] == "PATCH" and "content_items" in row[1]]
     assert patches[0][2]["content_status"] == "Thumbnail Ready"
     assert "content_profile_id" not in patches[0][2]
+
+
+def test_queue_update_mirrors_status_and_drive_id_without_source_urls(monkeypatch):
+    seen = []
+
+    def fake_patch(url, *, headers, json, timeout):
+        return Response({
+            "id": "recQueue1",
+            "fields": {
+                "Transfer_Status": "Ready",
+                "Error_Message": None,
+                "Source_Drive_File_ID": "drive-file-9",
+                "Source_URL": "https://media.chicagoshining.com/studio/library/pier.jpg",
+                "Source_R2_Key": "library/pier.jpg",
+                "Source_Media_Asset": ["recMedia9"],
+                "Preview_Status": "Pending",
+            },
+        })
+
+    def fake_request(method, url, *, headers, json, timeout):
+        seen.append((method, url, json))
+        if "studio_side_effect_outbox" in url:
+            return Response('{"code":"PGRST205"}', status_code=404)
+        return Response("")
+
+    monkeypatch.setattr(requests, "patch", fake_patch)
+    monkeypatch.setattr(requests, "request", fake_request)
+    record = AirtableClient(settings=_settings(studio_write_source="supabase")).update_record(
+        MEDIA_TRANSFER_QUEUE_TABLE,
+        "recQueue1",
+        {"Transfer_Status": "Ready"},
+    )
+    assert record["id"] == "recQueue1"
+    posts = [row for row in seen if row[0] == "POST" and "studio_media_transfer_queue" in row[1]]
+    assert len(posts) == 1
+    body = posts[0][2][0]
+    assert body["status"] == "Ready"
+    assert body["error_message"] is None
+    assert body["payload"]["source_drive_file_id"] == "drive-file-9"
+    assert body["payload"]["source_media_asset_id"] == "recMedia9"
+    assert "source_url" not in body["payload"]
+    assert "Source_R2_Key" not in str(body)
+    assert "source_media_asset_id" not in body or body.get("source_media_asset_id") is None
+
+
+def test_queue_supabase_failure_does_not_fail_airtable_update(monkeypatch):
+    monkeypatch.setattr(requests, "patch", lambda *_args, **_kwargs: Response({
+        "id": "recQueue2",
+        "fields": {"Transfer_Status": "Error", "Error_Message": "crop failed"},
+    }))
+
+    def fake_request(*_args, **_kwargs):
+        raise RuntimeError("supabase down")
+
+    monkeypatch.setattr(requests, "request", fake_request)
+    record = AirtableClient(settings=_settings()).update_record(
+        MEDIA_TRANSFER_QUEUE_TABLE, "recQueue2", {"Transfer_Status": "Error"}
+    )
+    assert record["fields"]["Transfer_Status"] == "Error"
 
 
 def test_default_mode_still_raises_airtable_errors(monkeypatch):
