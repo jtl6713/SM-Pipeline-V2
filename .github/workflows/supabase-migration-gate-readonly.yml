@@ -242,11 +242,24 @@ jobs:
               "studio_supabase_configured",
               health.get("studio_supabase_configured") is True,
           )
-          check(
-              "phase5_writes=airtable_sor_write_through",
-              sync.get("phase5_writes") == "airtable_sor_write_through",
-              f"got {sync.get('phase5_writes')!r}",
+          phase5_mode = sync.get("phase5_writes")
+          runner_write = runner.get("studio_write_source")
+          health_write = health.get("studio_write_source")
+          write_pair_ok = (
+              (phase5_mode == "airtable_sor_write_through" and runner_write == "airtable")
+              or (phase5_mode == "supabase_sor_legacy_export" and runner_write == "supabase")
           )
+          check(
+              "phase5_writes matches runner studio_write_source",
+              write_pair_ok,
+              f"phase5_writes={phase5_mode!r} runner={runner_write!r}",
+          )
+          if health_write is not None:
+              check(
+                  "health.studio_write_source matches runner",
+                  health_write == runner_write,
+                  f"health={health_write!r} runner={runner_write!r}",
+              )
           for flag in (
               "studio_pipeline_read_source",
               "studio_content_read_source",
@@ -316,8 +329,8 @@ jobs:
               runner.get("supabase_pipeline_writes") is True,
           )
           check(
-              "runner.studio_write_source=airtable",
-              runner.get("studio_write_source") == "airtable",
+              "runner.studio_write_source in {airtable,supabase}",
+              runner.get("studio_write_source") in ("airtable", "supabase"),
               f"got {runner.get('studio_write_source')!r}",
           )
 

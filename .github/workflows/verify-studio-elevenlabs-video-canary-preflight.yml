@@ -98,7 +98,7 @@ jobs:
                           runner_jobs_available=(payload.get("ok") is True and payload.get("service")=="pipeline-runner" and
                             all(x in {job.get("path") for job in payload.get("jobs") or []} for x in
                               ("/jobs/studio-asset-library","/jobs/studio-asset-watermark")))
-                          runner_write_authority_verified=(payload.get("studio_write_source")=="airtable")
+                          runner_write_authority_verified=(payload.get("studio_write_source") in ("airtable", "supabase"))
                           health="http_"+str(status)
                   except urllib.error.HTTPError as e:
                       health="http_"+str(e.code)

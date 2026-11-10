@@ -79,6 +79,7 @@ jobs:
                   try:
                       p=json.loads(body)
                       print(name+"_runner_service_verified="+str(p.get("service")=="pipeline-runner"))
+                      print(name+"_write_source_verified="+str(p.get("studio_write_source") in ("airtable","supabase")))
                       print(name+"_airtable_write_authority="+str(p.get("studio_write_source")=="airtable"))
                   except Exception:
                       print(name+"_body_valid_json=NO")
@@ -210,7 +211,7 @@ jobs:
           fi
           python - <<'PY' > /tmp/runner-ops-readonly.json
           import json
-          command = r'''$ErrorActionPreference='Stop'; try { $r=Invoke-WebRequest -Uri 'http://127.0.0.1:3350/health' -UseBasicParsing -TimeoutSec 12; $o=$r.Content|ConvertFrom-Json; Write-Output ('runner_local_http='+$r.StatusCode); Write-Output ('runner_local_service_verified='+($o.service -eq 'pipeline-runner')); Write-Output ('runner_local_airtable_authority='+($o.studio_write_source -eq 'airtable')); Write-Output ('runner_local_asset_ingest_route='+([bool](@($o.jobs|Where-Object {$_.path -eq '/jobs/studio-asset-library'}).Count))); Write-Output ('runner_local_watermark_route='+([bool](@($o.jobs|Where-Object {$_.path -eq '/jobs/studio-asset-watermark'}).Count))) } catch { Write-Output ('runner_local_health_error='+$_.Exception.GetType().Name) }; $t=@(Get-Process -Name cloudflared -ErrorAction SilentlyContinue); Write-Output ('runner_cloudflared_process_running='+($t.Count -gt 0))'''
+          command = r'''$ErrorActionPreference='Stop'; try { $r=Invoke-WebRequest -Uri 'http://127.0.0.1:3350/health' -UseBasicParsing -TimeoutSec 12; $o=$r.Content|ConvertFrom-Json; Write-Output ('runner_local_http='+$r.StatusCode); Write-Output ('runner_local_service_verified='+($o.service -eq 'pipeline-runner')); Write-Output ('runner_local_write_source_verified='+(@('airtable','supabase') -contains [string]$o.studio_write_source)); Write-Output ('runner_local_airtable_authority='+($o.studio_write_source -eq 'airtable')); Write-Output ('runner_local_asset_ingest_route='+([bool](@($o.jobs|Where-Object {$_.path -eq '/jobs/studio-asset-library'}).Count))); Write-Output ('runner_local_watermark_route='+([bool](@($o.jobs|Where-Object {$_.path -eq '/jobs/studio-asset-watermark'}).Count))) } catch { Write-Output ('runner_local_health_error='+$_.Exception.GetType().Name) }; $t=@(Get-Process -Name cloudflared -ErrorAction SilentlyContinue); Write-Output ('runner_cloudflared_process_running='+($t.Count -gt 0))'''
           print(json.dumps({"command":command,"confirm":True}))
           PY
           code=$(curl -sS --max-time 20 -w '%{http_code}' -o /tmp/ops-start.json -X POST             'https://ops.chicagoshining.com/api/shell'             -H "Authorization: Bearer $OPS_TOKEN"             -H 'Content-Type: application/json'             --data-binary @/tmp/runner-ops-readonly.json || true)

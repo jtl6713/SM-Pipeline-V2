@@ -1,6 +1,6 @@
 # Phase 5 — Output and Content Item write-through
 
-Airtable remains the write source of truth. This slice mirrors successful Studio Worker writes so Supabase reads do not lag approve, schedule, publish, and heal updates.
+Airtable remains the write source of truth for creates (Airtable mints `rec` ids) and for the default Airtable-first write-through path. This slice mirrors successful Studio Worker writes so Supabase reads do not lag approve, schedule, publish, and heal updates. The optional write SoR flip (`STUDIO_WRITE_SOURCE=supabase`) makes Output/Content **updates** commit to Supabase first with Airtable as a best-effort legacy export.
 
 ## What changed
 
@@ -11,48 +11,47 @@ After `airtableFetch` gets a successful **PATCH** or **POST** for:
 | Platform Outputs | `platform_outputs` |
 | Content Items | `content_items` |
 
-the Worker awaits a write-through of the records Airtable returned. GET, HEAD, and DELETE are ignored. A Supabase error is logged and does not fail the Airtable write.
+the Worker awaits a write-through of the records Airtable returned when write SoR is still Airtable. GET, HEAD, and DELETE are ignored. A Supabase error is logged and does not fail the Airtable write.
 
 Rows are mirrored only when the Airtable body includes an identity field (`Output_ID` / `Platform`, or `Content_ID` / `Content_Title` / `Content_Status`). A partial body cannot blank the Supabase projection. Content rows whose profile uuid is not resolved yet are patched in place and do not clear `content_profile_id`.
 
-Approve, schedule, publish-status, and heal paths remain authoritative Airtable writes. For schedule-changing operations (Factory/legacy approve, atomic/legacy regeneration, vacate, and calendar save), the verified Airtable mutation is completed under the scheduling reservation lock, and exactly **one** Supabase mirror is issued **after** release. These callers pass `skipSupabaseWriteThrough: true` to suppress the ordinary `airtableFetch` hook for the in-lock mutation. **Never restore the former second upsert:** it was a production pool-saturation bug. Ordinary Platform Output and Content Item PATCH/POST operations continue using the `airtableFetch` hook.
+Approve, schedule, publish-status, and heal paths that pass `skipSupabaseWriteThrough: true` still complete the verified Airtable mutation under the scheduling reservation lock, and issue exactly **one** post-lock Supabase mirror. **Never restore the former second upsert:** it was a production pool-saturation bug. When `STUDIO_WRITE_SOURCE=supabase`, those PATCH paths commit the partial fields to Supabase first, then still require a successful Airtable legacy export so MAE verify can re-read Airtable under the lock.
 
 ## Side-effect outbox
 
-`docs/supabase-migration/phase5/003_side_effect_outbox.sql` defines `studio_side_effect_outbox`. The Worker inserts a small status snapshot after each mirrored row. If the table is not created yet, the insert is skipped (`PGRST205` / schema cache). Nothing in this slice reads that table. The pipeline runner still reads Airtable.
+`docs/supabase-migration/phase5/003_side_effect_outbox.sql` defines `studio_side_effect_outbox`. The Worker inserts a small status snapshot after each mirrored row. If the table is not created yet, the insert is skipped (`PGRST205` / schema cache). Nothing in this slice reads that table.
 
 ## Health
 
-`/api/health` includes `studio_supabase_phase5_writes_v1: true`.
+`/api/health` includes `studio_supabase_phase5_writes_v1: true`, `studio_write_source`, and `studio_phase5_writes`.
 
-`GET /api/ops/supabase/sync` includes `phase5_writes: "airtable_sor_write_through"` and `phase5_write_tables`.
+`GET /api/ops/supabase/sync` includes `phase5_writes` (`airtable_sor_write_through` or `supabase_sor_legacy_export`) and `phase5_write_tables`.
 
 ## Second half — pipeline runner
 
-The pipeline runner is the other writer. `AirtableClient` create, update, and atomic upsert of Platform Outputs and Content Items now mirror the Airtable response into Supabase when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set on the runner. A Supabase error does not fail the Airtable write. Other tables are unchanged.
+The pipeline runner is the other writer. `AirtableClient` create, update, and atomic upsert of Platform Outputs and Content Items mirror into Supabase when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set. Other tables are unchanged.
 
-`STUDIO_WRITE_SOURCE` stays `airtable`. Setting it to `supabase` makes those two tables commit to Supabase first and treats the Airtable update as a best-effort legacy export. Creates still go to Airtable first so Airtable can mint `rec` ids. Leave the flag on `airtable`.
+Setting `STUDIO_WRITE_SOURCE=supabase` makes Output/Content updates commit to Supabase first and treats the Airtable update as a best-effort legacy export. Creates still go to Airtable first so Airtable can mint `rec` ids.
 
-Runner `2026-11-10-supabase-phase5-marker-backfill` can list `platform_outputs` and `content_items`, and can load one record by its Airtable `rec` id, when `STUDIO_RUNNER_OUTPUT_READ_SOURCE` or `STUDIO_RUNNER_CONTENT_READ_SOURCE` is `supabase`. Both flags default to `airtable`. Enable them in production with the guarded Ops workflow triggered by `deploy/enable-runner-supabase-reads.txt`. That workflow backs up the runner `.env`, sets only those two flags to `supabase`, restarts `pipeline-runner`, and verifies `/health`. It refuses to run when `studio_write_source` is not `airtable`, and it never sets `STUDIO_WRITE_SOURCE`. An unfiltered list uses Supabase only when every returned row has the full-record marker. An empty page stays on Airtable. A single-record read uses Supabase only when that row carries the full-record marker from a later Airtable commit. Worker `0.10.795-supabase-phase5-keep-record-marker` stamps that marker when a full Airtable mutation response is mirrored. A lean half-hour or overlay upsert keeps an existing marker and, when the marker is present, keeps the fields that the lean copy did not send. It does not create a marker. Worker `0.10.797-supabase-phase5-keep-marked-fields`. Worker `0.10.800-supabase-phase5-runner-marker-backfill` densifies markers: after the lean sync, a bounded pass re-reads full Airtable bodies for unmarked open outputs and recent content items and upserts them with `fullRecord=true`. The lean half-hour list still omits the JSON columns and the extra fields. Older rows, a formula, a view, an unmapped sort, an unmapped requested field, a missing row, and a Supabase error stay on Airtable. `STUDIO_WRITE_SOURCE` does not turn these reads on. Phase 7 is not started.
+Runner `2026-11-10-supabase-phase5-marker-backfill` can list `platform_outputs` and `content_items`, and can load one record by its Airtable `rec` id, when `STUDIO_RUNNER_OUTPUT_READ_SOURCE` or `STUDIO_RUNNER_CONTENT_READ_SOURCE` is `supabase`. Enable the read flags with `deploy/enable-runner-supabase-reads.txt`. Worker `0.10.800-supabase-phase5-runner-marker-backfill` densifies full-record markers during half-hour sync. Older rows, a formula, a view, an unmapped sort, an unmapped requested field, a missing row, and a Supabase error stay on Airtable. Phase 7 is not started.
 
-`/health` on the runner reports `studio_write_source`, `supabase_pipeline_writes`, `studio_runner_output_read_source`, and `studio_runner_content_read_source`. After the enable workflow, production keeps `studio_write_source=airtable` and both runner read sources report `supabase`.
+Worker `0.10.801-supabase-phase5-write-sor` honors `STUDIO_WRITE_SOURCE` the same way. Enable both services together with `deploy/enable-studio-write-sor.txt`: that workflow waits for the live Worker build, puts the Worker secret, sets the runner `.env`, restarts the runner, and verifies `/health`.
+
+`/health` on the runner reports `studio_write_source`, `supabase_pipeline_writes`, `studio_runner_output_read_source`, and `studio_runner_content_read_source`.
 
 ## Still out of scope
 
-- Turning on `STUDIO_WRITE_SOURCE=supabase` in production. That is the legacy-export switch, and it stays off.
 - Retiring formula or view selectors from Airtable. Those paths still read Airtable even when the runner read flags are `supabase`.
-- Deleting or stopping Airtable records.
-- Production Requests, media metadata, and cron as a write source of truth (Phase 6).
+- Deleting or stopping Airtable records (Phase 7).
+- Production Requests, media metadata, and cron as a write source of truth (Phase 6 stays Airtable-first write-through).
 - `resolveAuthorization` on Supabase user tables.
 
 ## Operator notes
 
-`studioReadSource()` always returns `airtable`. Home does not follow `STUDIO_READ_SOURCE`. Workstream **B1** restores Phase 3 Pipeline + schedule-grid via `studioPipelineReadSource()` (`STUDIO_PIPELINE_READ_SOURCE=supabase`, or legacy `STUDIO_READ_SOURCE=supabase` when the narrower flag is unset). Roll back Pipeline reads with `STUDIO_PIPELINE_READ_SOURCE=airtable`. Workstream **B2** restores `GET /api/content` only via `studioContentReadSource()`. It does not follow the Pipeline or legacy read flag. Set `STUDIO_CONTENT_READ_SOURCE=supabase` to turn it on, and `airtable` (or unset) to roll it back. Workstream **B3** restores `GET /api/factory/desk` and `GET /api/operations/queue` only via `studioFactoryOpsReadSource()`. It does not follow the Pipeline, Content, or legacy read flag. Set `STUDIO_FACTORY_OPS_READ_SOURCE=supabase` to turn it on, and `airtable` (or unset) to roll it back. As of 12:16 AM CT on November 9, 2026, the Factory/Ops secret is `supabase` in production. Home restores `GET /api/profiles/overview` only via `studioHomeReadSource()`. It does not follow `STUDIO_READ_SOURCE`, the Pipeline flag, the Content flag, or the Factory/Ops flag. Set `STUDIO_HOME_READ_SOURCE=supabase` to turn it on, and `airtable` (or unset) to roll it back. That Home secret is also `supabase` as of the same gate. See [the migration index](../README.md). Keep `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` configured on the Worker and the pipeline runner for mirroring. Leave `STUDIO_WRITE_SOURCE=airtable` on **both** services. Drive remains the media authority. Do not turn `STUDIO_HOME_PROFILE_SUMMARY_READS` on with this flag.
+`studioReadSource()` always returns `airtable`. Home does not follow `STUDIO_READ_SOURCE`. Workstream **B1** restores Phase 3 Pipeline + schedule-grid via `studioPipelineReadSource()`. Workstream **B2** restores `GET /api/content` via `studioContentReadSource()`. Workstream **B3** restores Factory/Ops via `studioFactoryOpsReadSource()`. Home restores overview via `studioHomeReadSource()`. Keep `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` configured on the Worker and the pipeline runner. Drive remains the media authority. Do not turn `STUDIO_HOME_PROFILE_SUMMARY_READS` on with this flag. Roll back write SoR by setting `STUDIO_WRITE_SOURCE=airtable` on both services.
 
 ## Half-hour synchronization safety
 
-Cron at UTC minute 0 and 30 still mirrors Airtable profiles, outputs, content, ideas, and open production requests. A separate R2 conditional-write lease (`studio/state/phase5-sync-lease.json` under `STUDIO_MEDIA`) prevents cron and manual sweeps from overlapping across Worker isolates; absent R2 or an unknown lease state causes a fail-closed skip/error, not an unlocked sweep. The lease uses compare-and-swap renewal and expires after a hung Worker; stale owners cannot release a newer owner's lease. This is unrelated to MAE scheduling reservation locks.
+Cron at UTC minute 0 and 30 still mirrors Airtable profiles, outputs, content, ideas, and open production requests. A separate R2 conditional-write lease (`studio/state/phase5-sync-lease.json` under `STUDIO_MEDIA`) prevents cron and manual sweeps from overlapping across Worker isolates. Only `completed` with `ok=true` counts as success. The in-memory two-error / 15-minute Supabase pool circuit remains active; do not weaken it.
 
-`GET /api/ops/supabase/sync` includes the last run `status`, `duration_ms`, per-table upsert `chunks`, `rows`, and `duration_ms`, circuit snapshot, and per-profile failures. Only `completed` with `ok=true` counts as success. `partial`, `failed`, `circuit_open`, and lease-skipped invocations do **not** prove health. The in-memory two-error / 15-minute Supabase pool circuit remains active; do not weaken it.
-
-**Activation gate:** this read gate is closed. The list reads were restored per route, Home last, after completed syncs and a closed pool circuit. Phase 6 Production Request write-through is confirmed live (shipped in Worker `0.10.784-supabase-phase6-request-writes`, still on in `0.10.787-home-parity-after-publish`). Media asset metadata write-through is confirmed live on Worker `0.10.789-supabase-phase6-media-writes`. Transfer queue write-through is confirmed live. Scheduled runner writes of Production Requests and Media Assets mirror through the runner Airtable client in `2026-11-09-supabase-phase6-cron-writers`. Half-hour media and queue backfill ships in Worker `0.10.799-supabase-phase6-media-queue-backfill`. See [Phase 6](../phase6/README.md) and the [Phase 6 handoff](../../handoffs/supabase-phase6-handoff.md).
+**Activation gate:** list reads were restored per route. Phase 6 Production Request, media metadata, and transfer-queue write-through are confirmed live. Half-hour media and queue backfill ships in Worker `0.10.799`. Write SoR enable is `deploy/enable-studio-write-sor.txt` after Worker `0.10.801`. See [Phase 6](../phase6/README.md) and the [Phase 6 handoff](../../handoffs/supabase-phase6-handoff.md).

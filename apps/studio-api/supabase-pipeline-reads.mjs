@@ -236,6 +236,71 @@ export function studioHomeReadSource(env) {
     : "airtable";
 }
 
+/**
+ * Phase 5 remainder write switch for Platform Outputs and Content Items.
+ * Default remains Airtable-first write-through. When STUDIO_WRITE_SOURCE=supabase,
+ * Output/Content updates commit to Supabase first and Airtable is a best-effort
+ * legacy export. Creates still mint Airtable rec ids. Production Requests, media,
+ * and the transfer queue are not part of this flag. Phase 7 is not started.
+ */
+export function studioWriteSource(env) {
+  if (!studioSupabaseConfigured(env)) return "airtable";
+  return String(env?.STUDIO_WRITE_SOURCE || "").trim().toLowerCase() === "supabase"
+    ? "supabase"
+    : "airtable";
+}
+
+export function studioPhase5WritesMode(env) {
+  return studioWriteSource(env) === "supabase"
+    ? "supabase_sor_legacy_export"
+    : "airtable_sor_write_through";
+}
+
+export function studioLegacyExportEnabled(env, tableId) {
+  if (studioWriteSource(env) !== "supabase") return false;
+  const table = String(tableId || "");
+  return Boolean(
+    (env?.AIRTABLE_OUTPUT_TABLE_ID && table === env.AIRTABLE_OUTPUT_TABLE_ID)
+    || (env?.AIRTABLE_CONTENT_TABLE_ID && table === env.AIRTABLE_CONTENT_TABLE_ID),
+  );
+}
+
+export function parseAirtableMutationRecords(pathOrParams, rawBody) {
+  let parsed = rawBody;
+  if (typeof rawBody === "string") {
+    try { parsed = JSON.parse(rawBody); } catch { return []; }
+  }
+  if (!parsed || typeof parsed !== "object") return [];
+  if (Array.isArray(parsed.records)) {
+    return parsed.records.filter((row) => row?.id && row?.fields && typeof row.fields === "object");
+  }
+  if (parsed.fields && typeof parsed.fields === "object") {
+    const id = String(pathOrParams || "").replace(/^\//, "").split("?")[0].trim();
+    if (id.startsWith("rec")) return [{ id, fields: parsed.fields }];
+  }
+  return [];
+}
+
+export async function studioSupabaseCommitOutputContentFirst(env, tableId, records) {
+  const rows = Array.isArray(records) ? records.filter((row) => row?.id && row?.fields) : [];
+  if (!rows.length) return { skipped: true, reason: "no_records" };
+  const table = String(tableId || "");
+  const kind = env?.AIRTABLE_OUTPUT_TABLE_ID && table === env.AIRTABLE_OUTPUT_TABLE_ID
+    ? "output"
+    : env?.AIRTABLE_CONTENT_TABLE_ID && table === env.AIRTABLE_CONTENT_TABLE_ID
+      ? "content"
+      : "";
+  if (!kind) return { skipped: true, reason: "table" };
+  const results = [];
+  for (const record of rows) {
+    const synced = kind === "output"
+      ? await syncAirtableOutputRowToSupabase(env, record, { fullRecord: false })
+      : await syncAirtableContentRowToSupabase(env, record, { fullRecord: false });
+    results.push({ id: record.id, synced });
+  }
+  return { ok: true, kind, count: results.length, results };
+}
+
 export function studioSupabaseBaseUrl(env) {
   return String(env?.SUPABASE_URL || "").trim().replace(/\/+$/, "");
 }

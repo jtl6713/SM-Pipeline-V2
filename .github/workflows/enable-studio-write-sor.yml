@@ -1,0 +1,361 @@
+name: Enable Studio Write SoR (Supabase)
+# Sets STUDIO_WRITE_SOURCE=supabase on the Worker secret and the runner .env.
+# Output/Content updates become Supabase-first with Airtable legacy export.
+# Creates still mint Airtable rec ids. Phase 6 tables and Phase 7 stay unchanged.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/enable-studio-write-sor.txt"
+permissions:
+  contents: read
+concurrency:
+  group: enable-studio-write-sor
+  cancel-in-progress: false
+jobs:
+  enable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      REQUIRED_WORKER: "0.10.801-supabase-phase5-write-sor"
+      REQUIRED_RUNNER: "2026-11-10-supabase-phase5-marker-backfill"
+      OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+      OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+      OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+      RUN_ID: ${{ github.run_id }}
+    steps:
+      - name: Wait for live Worker write-SoR build, then install STUDIO_WRITE_SOURCE
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          python - <<'PY'
+          import json, os, time, urllib.request, urllib.error
+          required = os.environ["REQUIRED_WORKER"].encode()
+          target = "https://api.cloudflare.com/client/v4/accounts/{}/workers/scripts/{}".format(
+              os.environ["CLOUDFLARE_ACCOUNT_ID"], os.environ["TARGET_WORKER"])
+          auth = {"Authorization": "Bearer " + os.environ["CLOUDFLARE_API_TOKEN"]}
+
+          def get_json(path):
+              req = urllib.request.Request(target + path, headers=auth)
+              with urllib.request.urlopen(req, timeout=45) as response:
+                  payload = json.loads(response.read().decode())
+              if payload.get("success") is not True:
+                  raise SystemExit("Cloudflare binding verification response was not successful")
+              return payload.get("result")
+
+          def active_bindings():
+              versions = get_json("/deployments")
+              version_id = max(versions["deployments"][0]["versions"],
+                               key=lambda item: item.get("percentage", 0))["version_id"]
+              details = get_json("/versions/" + version_id)
+              return {row["name"]: row["type"] for row in
+                      (details.get("resources") or {}).get("bindings") or []}
+
+          def live_script():
+              req = urllib.request.Request(target + "/content/v2", headers=auth)
+              with urllib.request.urlopen(req, timeout=60) as response:
+                  return response.read()
+
+          script = None
+          for attempt in range(60):
+              try:
+                  script = live_script()
+              except urllib.error.HTTPError as error:
+                  print("worker_source_read_http={}".format(error.code))
+                  time.sleep(15)
+                  continue
+              if required in script:
+                  print("worker_write_sor_source=VERIFIED")
+                  break
+              print("worker_write_sor_source=WAITING attempt={}".format(attempt + 1))
+              time.sleep(15)
+          else:
+              raise SystemExit("Timed out waiting for live Worker " + os.environ["REQUIRED_WORKER"])
+
+          before = active_bindings()
+          expected = {
+              "AIRTABLE_PAT": "secret_text",
+              "STUDIO_MEDIA": "r2_bucket",
+              "STUDIO_CONTENT_READ_SOURCE": "secret_text",
+              "STUDIO_FACTORY_OPS_READ_SOURCE": "secret_text",
+              "STUDIO_HOME_READ_SOURCE": "secret_text",
+          }
+          for name, typ in expected.items():
+              if before.get(name) != typ:
+                  raise SystemExit("Existing production binding missing or changed: " + name)
+          secret = {
+              "name": "STUDIO_WRITE_SOURCE",
+              "text": "supabase",
+              "type": "secret_text",
+          }
+          headers = dict(auth, **{"Content-Type": "application/json"})
+          put = urllib.request.Request(
+              target + "/secrets", headers=headers,
+              data=json.dumps(secret).encode(), method="PUT")
+          try:
+              with urllib.request.urlopen(put, timeout=60) as response:
+                  result = json.loads(response.read().decode())
+          except urllib.error.HTTPError as error:
+              raise SystemExit("Cloudflare refused write source flag (HTTP {})".format(error.code))
+          entry = result.get("result") or {}
+          if (result.get("success") is not True
+                  or entry.get("name") != "STUDIO_WRITE_SOURCE"
+                  or entry.get("type") != "secret_text"):
+              raise SystemExit("Cloudflare did not confirm write source flag")
+          after = active_bindings()
+          for name, typ in {**expected, "STUDIO_WRITE_SOURCE": "secret_text"}.items():
+              if after.get(name) != typ:
+                  raise SystemExit("Required binding missing after write source install: " + name)
+          for name, typ in before.items():
+              if name == "STUDIO_WRITE_SOURCE":
+                  continue
+              if after.get(name) != typ:
+                  raise SystemExit("Pre-existing Worker binding changed during write source install: " + name)
+          print("worker_write_source_secret_installed=PASS")
+          print("content_read_secret_preserved=PASS")
+          print("factory_ops_read_secret_preserved=PASS")
+          print("home_read_secret_preserved=PASS")
+          print("phase7_started=NO")
+          PY
+
+      - name: Require runner marker-backfill build and Supabase reads before write flip
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 3 --max-time 20 https://pipeline.chicagoshining.com/health -o /tmp/runner-preflight.json
+          jq -e --arg v "$REQUIRED_RUNNER" '
+            .ok==true
+            and .version==$v
+            and .supabase_pipeline_writes==true
+            and .studio_runner_output_read_source=="supabase"
+            and .studio_runner_content_read_source=="supabase"
+          ' /tmp/runner-preflight.json >/dev/null
+          echo "runner_write_sor_preflight=PASS"
+
+      - name: Select Ops token
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://ops.chicagoshining.com'
+          selected=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            [[ -z "$candidate" ]] && continue
+            code=$(curl -sS --max-time 20 -o /tmp/ops-catalog.json -w '%{http_code}' \
+              -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == '200' ]] && jq -e '.ok==true' /tmp/ops-catalog.json >/dev/null; then
+              selected="$candidate"
+              break
+            fi
+          done
+          test -n "$selected"
+          echo "::add-mask::$selected"
+          printf '%s' "$selected" >/tmp/ops-selected-token
+
+      - name: Back up and set only STUDIO_WRITE_SOURCE on the runner via Ops
+        shell: bash
+        run: |
+          set -euo pipefail
+          token=$(cat /tmp/ops-selected-token)
+          python - <<'PY' > /tmp/enable-write-sor.json
+          import json, os
+          run = os.environ["RUN_ID"]
+          ps = r'''$ErrorActionPreference='Stop'
+          $root=(Get-Location).Path
+          $envFile=Join-Path $root 'Services\pipeline-runner\service\.env'
+          if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) { throw 'runner_env_file_missing' }
+          $backup=$envFile+'.write-sor-'+RUN_TOKEN+'.backup'
+          if (Test-Path -LiteralPath $backup) { throw 'backup_conflict' }
+          Copy-Item -LiteralPath $envFile -Destination $backup -ErrorAction Stop
+          $lines=@(Get-Content -LiteralPath $envFile)
+          $hasUrl=@($lines|Where-Object {$_ -match '^\s*SUPABASE_URL\s*=\s*\S'}).Count -gt 0
+          $hasKey=@($lines|Where-Object {$_ -match '^\s*SUPABASE_SERVICE_ROLE_KEY\s*=\s*\S'}).Count -gt 0
+          if (-not $hasUrl -or -not $hasKey) { throw 'runner_supabase_authority_not_configured' }
+          $outOk=@($lines|Where-Object {$_ -match '^\s*STUDIO_RUNNER_OUTPUT_READ_SOURCE\s*=\s*supabase\s*$'}).Count -eq 1
+          $contentOk=@($lines|Where-Object {$_ -match '^\s*STUDIO_RUNNER_CONTENT_READ_SOURCE\s*=\s*supabase\s*$'}).Count -eq 1
+          if (-not $outOk -or -not $contentOk) { throw 'runner_reads_must_be_supabase_before_write_flip' }
+          $seen=$false
+          $next=@(foreach ($line in $lines) {
+            if ($line -match '^\s*STUDIO_WRITE_SOURCE\s*=') {
+              'STUDIO_WRITE_SOURCE=supabase'; $seen=$true
+            } else { $line }
+          })
+          if (-not $seen) { $next += 'STUDIO_WRITE_SOURCE=supabase' }
+          $tmp=$envFile+'.write-sor-tmp-'+RUN_TOKEN
+          try {
+            [System.IO.File]::WriteAllLines($tmp,[string[]]$next,([System.Text.UTF8Encoding]::new($false)))
+            Move-Item -LiteralPath $tmp -Destination $envFile -Force
+          } finally {
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+          }
+          $readback=@(Get-Content -LiteralPath $envFile)
+          if ((@($readback|Where-Object {$_ -eq 'STUDIO_WRITE_SOURCE=supabase'})).Count -ne 1) {
+            throw 'write_source_readback_failed'
+          }
+          if ((@($readback|Where-Object {$_ -eq 'STUDIO_RUNNER_OUTPUT_READ_SOURCE=supabase'})).Count -ne 1) {
+            throw 'runner_output_read_changed'
+          }
+          if ((@($readback|Where-Object {$_ -eq 'STUDIO_RUNNER_CONTENT_READ_SOURCE=supabase'})).Count -ne 1) {
+            throw 'runner_content_read_changed'
+          }
+          Write-Output 'runner_write_source_flag_configured=true'
+          Write-Output 'runner_reads_preserved=YES'
+          Write-Output 'phase7_started=NO'
+          '''
+          print(json.dumps({"command": ps.replace("RUN_TOKEN", run), "confirm": True}))
+          PY
+          code=$(curl -sS --max-time 25 -o /tmp/enable-result.json -w '%{http_code}' \
+            -X POST "https://ops.chicagoshining.com/api/shell" \
+            -H "Authorization: Bearer $token" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/enable-write-sor.json || true)
+          if [[ "$code" != "200" && "$code" != "202" ]]; then
+            echo "write_sor_env_setup_rejected=$code"
+            exit 1
+          fi
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/enable-result.json)
+          test -n "$job"
+          for n in $(seq 1 40); do
+            curl -fsS --max-time 15 -H "Authorization: Bearer $token" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/enable-status.json
+            status=$(jq -r '.job.status // empty' /tmp/enable-status.json)
+            if [[ "$status" == "ok" ]]; then
+              jq -e '.job.log | contains("runner_write_source_flag_configured=true")' /tmp/enable-status.json >/dev/null
+              echo "runner_write_source_flag_written=true"
+              exit 0
+            fi
+            if [[ "$status" == "failed" ]]; then
+              echo "runner_write_source_flag_write=FAILED"
+              exit 1
+            fi
+            sleep 3
+          done
+          echo "runner_write_source_flag_write=TIMEOUT"
+          exit 1
+
+      - name: Restart Runner once via allowlisted Ops action
+        shell: bash
+        run: |
+          set -euo pipefail
+          token=$(cat /tmp/ops-selected-token)
+          code=$(curl -sS --max-time 30 -o /tmp/restart.json -w '%{http_code}' \
+            -X POST "https://ops.chicagoshining.com/api/run" \
+            -H "Authorization: Bearer $token" \
+            -H 'Content-Type: application/json' \
+            --data '{"action":"restart-one","service":"pipeline-runner","confirm":true}' || true)
+          if [[ "$code" != "202" && "$code" != "409" ]]; then
+            echo "write_sor_restart_rejected=$code"
+            exit 1
+          fi
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/restart.json)
+          test -n "$job"
+          for n in $(seq 1 95); do
+            curl -fsS --max-time 15 -H "Authorization: Bearer $token" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/restart-status.json
+            status=$(jq -r '.job.status // empty' /tmp/restart-status.json)
+            if [[ "$status" == "ok" ]]; then
+              echo "runner_write_sor_restart=PASS"
+              exit 0
+            fi
+            if [[ "$status" == "failed" ]]; then
+              echo "runner_write_sor_restart=FAILED"
+              exit 1
+            fi
+            sleep 4
+          done
+          echo "runner_write_sor_restart=TIMEOUT"
+          exit 1
+
+      - name: Verify runner health shows supabase write source
+        shell: bash
+        run: |
+          set -euo pipefail
+          for n in $(seq 1 24); do
+            code=$(curl -sS --max-time 20 -o /tmp/health-after.json -w '%{http_code}' \
+              https://pipeline.chicagoshining.com/health || true)
+            if [[ "$code" == "200" ]] && jq -e --arg v "$REQUIRED_RUNNER" '
+              .ok==true
+              and .version==$v
+              and .studio_write_source=="supabase"
+              and .studio_runner_output_read_source=="supabase"
+              and .studio_runner_content_read_source=="supabase"
+              and .supabase_pipeline_writes==true
+            ' /tmp/health-after.json >/dev/null 2>&1; then
+              echo "runner_write_sor_health=PASS"
+              echo "phase7_started=NO"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "runner_write_sor_health=FAILED"
+          cat /tmp/health-after.json || true
+          exit 1
+
+      - name: Fail-safe restore runner environment when activation unsuccessful
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          token=$(cat /tmp/ops-selected-token 2>/dev/null || true)
+          if [[ -z "${token:-}" ]]; then
+            echo "write_sor_rollback_skipped=no_ops_token"
+            exit 1
+          fi
+          python - <<'PY' > /tmp/restore-write-sor.json
+          import json, os
+          run = os.environ["RUN_ID"]
+          ps = r'''$root=(Get-Location).Path
+          $envFile=Join-Path $root 'Services\pipeline-runner\service\.env'
+          $backup=$envFile+'.write-sor-'+RUN_TOKEN+'.backup'
+          if (Test-Path -LiteralPath $backup) {
+            Copy-Item -LiteralPath $backup -Destination $envFile -Force
+            Write-Output 'runner_write_sor_environment_rollback=RESTORED'
+          } else {
+            Write-Output 'runner_write_sor_environment_rollback=BACKUP_UNAVAILABLE'
+          }'''
+          print(json.dumps({"command": ps.replace("RUN_TOKEN", run), "confirm": True}))
+          PY
+          code=$(curl -sS --max-time 20 -o /tmp/rollback-submit.json -w '%{http_code}' \
+            -X POST "https://ops.chicagoshining.com/api/shell" \
+            -H "Authorization: Bearer $token" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/restore-write-sor.json || true)
+          [[ "$code" == "200" || "$code" == "202" ]] || {
+            echo "write_sor_rollback_submission_failed=$code"
+            exit 1
+          }
+          job=$(jq -r '.job.id // .jobId // empty' /tmp/rollback-submit.json)
+          [[ -n "$job" ]] || exit 1
+          restored=false
+          for n in $(seq 1 30); do
+            curl -sS --max-time 20 -H "Authorization: Bearer $token" \
+              "https://ops.chicagoshining.com/api/jobs/$job" -o /tmp/rollback-status.json
+            status=$(jq -r '.job.status // empty' /tmp/rollback-status.json)
+            if [[ "$status" == "ok" ]]; then
+              if jq -e '.job.log | contains("runner_write_sor_environment_rollback=RESTORED")' \
+                /tmp/rollback-status.json >/dev/null; then
+                restored=true
+              fi
+              break
+            fi
+            [[ "$status" == "failed" ]] && break
+            sleep 3
+          done
+          if [[ "$restored" != "true" ]]; then
+            echo "write_sor_rollback_backup_not_restored"
+            exit 1
+          fi
+          code=$(curl -sS --max-time 30 -o /tmp/rollback-restart.json -w '%{http_code}' \
+            -X POST "https://ops.chicagoshining.com/api/run" \
+            -H "Authorization: Bearer $token" \
+            -H 'Content-Type: application/json' \
+            --data '{"action":"restart-one","service":"pipeline-runner","confirm":true}' || true)
+          [[ "$code" == "202" || "$code" == "409" ]] || {
+            echo "write_sor_rollback_restart_rejected=$code"
+            exit 1
+          }
+          echo "runner_write_sor_rollback_restart_submitted=PASS"

@@ -18,7 +18,7 @@ export async function verifiedRunnerVersion(env,requester){
     if(!response.ok)return "unverified";
     const info=await response.json();
     if(info?.ok!==true||info?.service!=="pipeline-runner"||
-      info?.studio_write_source!=="airtable"||
+      !["airtable","supabase"].includes(info?.studio_write_source)||
       typeof info?.version!=="string"||info.version.length>120||!info.version.trim())
       return "unverified";
     return info.version.trim();
