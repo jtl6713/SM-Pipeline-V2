@@ -53,10 +53,10 @@ test("capability matrix documents unsupported automation honestly", () => {
 });
 
 test("Engagement still loads recommendations when optional reads fail", () => {
-  assert.match(js, /Promise\\.allSettled/);
-  assert.match(js, /queueResult\\.status === "rejected"/);
-  assert.match(js, /insightsResult\\.status === "fulfilled"/);
+  assert.match(js, /Promise\.allSettled/);
+  assert.match(js, /queueResult\.status === "rejected"/);
+  assert.match(js, /insightsResult\.status === "fulfilled"/);
   assert.match(js, /Recommendations remain usable/);
-  assert.match(js, /button\\.disabled = false/);
+  assert.match(js, /button\.disabled = false/);
   assert.match(app, /Engagement could not initialize/);
 });
