@@ -88,6 +88,21 @@ class AirtableClient:
     ) -> list[dict[str, Any]]:
         import requests
 
+        from supabase_reads import try_list_supabase_records
+
+        supabase_rows = try_list_supabase_records(
+            self._settings,
+            table_id,
+            formula=formula,
+            view=view,
+            max_records=max_records,
+            fields=fields,
+            sort_field=sort_field,
+            sort_direction=sort_direction,
+        )
+        if supabase_rows is not None:
+            return supabase_rows
+
         params: dict = {"maxRecords": max_records}
         if formula:
             params["filterByFormula"] = formula

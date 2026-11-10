@@ -15,7 +15,7 @@ StageStatus = Literal["ok", "skipped", "deferred", "not_implemented", "error"]
 
 # Bump on every ship that must show through public /health. Deploy also syncs
 # this into runtime .env, but a stale pin must never win.
-PIPELINE_RUNNER_CODE_VERSION = "2026-11-09-supabase-phase6-cron-writers"
+PIPELINE_RUNNER_CODE_VERSION = "2026-11-09-supabase-phase5-runner-reads"
 
 
 def _resolve_service_version() -> str:
@@ -75,6 +75,8 @@ def load_settings() -> dict[str, Any]:
         "supabase_url": os.environ.get("SUPABASE_URL", "").strip().rstrip("/"),
         "supabase_service_role_key": os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip(),
         "studio_write_source": os.environ.get("STUDIO_WRITE_SOURCE", "airtable").strip().lower() or "airtable",
+        "studio_runner_output_read_source": os.environ.get("STUDIO_RUNNER_OUTPUT_READ_SOURCE", "airtable").strip().lower() or "airtable",
+        "studio_runner_content_read_source": os.environ.get("STUDIO_RUNNER_CONTENT_READ_SOURCE", "airtable").strip().lower() or "airtable",
         "remotion_renderer_url": os.environ.get("REMOTION_RENDERER_URL", "http://127.0.0.1:3333"),
         "timing_engine_url": os.environ.get("TIMING_ENGINE_URL", "http://127.0.0.1:3336"),
         "voiceover_normalizer_url": os.environ.get("VOICEOVER_NORMALIZER_URL", "http://127.0.0.1:3012"),
