@@ -10,6 +10,7 @@ import {
   MAE_SCHEDULE_HORIZON_SETTING,
   maeBuildSuggestedScheduleMap,
   maeIsBlackoutLocalTime,
+  maeSafeSuggestedIso,
   maeNextOpenScheduleIso,
   maeNormalizeHorizonDays,
   maePickBalancedSuggestedIso,
@@ -385,6 +386,43 @@ test("Approve resolves a Story to the same-platform main plus 10 minutes when co
   });
   assert.equal(resolved.source, "companion");
   assert.equal(Date.parse(resolved.iso), reelMs + 10 * 60 * 1000);
+});
+
+test("maeSafeSuggestedIso advances a Story companion out of overnight blackout", () => {
+  const zone = "America/Chicago";
+  const lateMain = maeZonedWallToUtcMs(2026, 10, 6, 22, 25, zone); // 10:25 PM
+  const companionRaw = lateMain + 10 * 60 * 1000; // 10:35 PM blackout
+  assert.equal(maeIsBlackoutLocalTime(companionRaw, zone), true);
+  const safe = maeSafeSuggestedIso(companionRaw, 0, zone);
+  assert.ok(safe);
+  assert.equal(maeIsBlackoutLocalTime(Date.parse(safe), zone), false);
+  assert.ok(Date.parse(safe) > companionRaw);
+});
+
+test("new-idea suggest map never stamps blackout Story companions after a late main", () => {
+  const zone = "America/Chicago";
+  const now = new Date("2026-10-05T08:00:00Z");
+  const day = { year: 2026, month: 10, day: 6 };
+  // Saturate Instagram Reel MAE windows for that civil day so a late existing
+  // main is treated as covered overflow and kept; companion +10 then hits blackout.
+  const morning = maeZonedWallToUtcMs(day.year, day.month, day.day, 5, 30, zone);
+  const afternoon = maeZonedWallToUtcMs(day.year, day.month, day.day, 11, 30, zone);
+  const evening = maeZonedWallToUtcMs(day.year, day.month, day.day, 16, 30, zone);
+  const lateMain = maeZonedWallToUtcMs(day.year, day.month, day.day, 22, 25, zone);
+  const stamps = maeBuildSuggestedScheduleMap(
+    [
+      { platform: "Instagram", output_type: "Reel", scheduled_at: new Date(lateMain).toISOString() },
+      { platform: "Instagram", output_type: "Story", scheduled_at: "" },
+    ],
+    { "instagram::reel": [morning, afternoon, evening] },
+    now,
+    { timeZone: zone, storyCompanion: true, spreadPlatforms: false, preserveExisting: true },
+  );
+  assert.equal(stamps.get("Instagram::Reel"), new Date(lateMain).toISOString());
+  const story = stamps.get("Instagram::Story");
+  assert.ok(story, "Story must still receive a stamp");
+  assert.equal(maeIsBlackoutLocalTime(Date.parse(story), zone), false);
+  assert.ok(Date.parse(story) >= lateMain + 10 * 60 * 1000);
 });
 
 test("Worker stamp paths use MAE horizon engine", () => {
