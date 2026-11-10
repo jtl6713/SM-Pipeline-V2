@@ -23,7 +23,7 @@ The last sync in that gate finished at 12:03 AM CT with `status=completed`, `ok=
 ## What is still Airtable
 
 - Every write, including approve, schedule, publish, produce, and Factory mutations.
-- Pipeline-runner reads (`services/pipeline-runner/`). Runner `2026-11-10-supabase-phase5-runner-record` can list Platform Outputs and Content Items and can load one marked row by its Airtable `rec` id. Worker `0.10.795-supabase-phase5-keep-record-marker` stamps that marker on a full Airtable mutation response. A lean half-hour or overlay upsert keeps an existing marker. `STUDIO_RUNNER_OUTPUT_READ_SOURCE` and `STUDIO_RUNNER_CONTENT_READ_SOURCE` stay `airtable`. Formula and view selectors stay on Airtable. Older rows stay on Airtable.
+- Pipeline-runner reads (`services/pipeline-runner/`). Runner `2026-11-10-supabase-phase5-runner-list-guard` can list Platform Outputs and Content Items only when every returned row has the full-record marker, and can load one marked row by its Airtable `rec` id. An empty or mixed page stays on Airtable. Worker `0.10.795-supabase-phase5-keep-record-marker` stamps that marker on a full Airtable mutation response. A lean half-hour or overlay upsert keeps an existing marker. `STUDIO_RUNNER_OUTPUT_READ_SOURCE` and `STUDIO_RUNNER_CONTENT_READ_SOURCE` stay `airtable`. Formula and view selectors stay on Airtable. Older rows stay on Airtable.
 - The half-hour cron that copies Airtable into Supabase. Supabase is the replica, not the source of that job.
 - `resolveAuthorization` and the other record-detail routes that were never in the list-read cutover.
 - Asset and music library metadata.
@@ -38,7 +38,7 @@ The last sync in that gate finished at 12:03 AM CT with `status=completed`, `ok=
 | 3 Pipeline reads | Live as B1 | [phase3](./phase3/README.md) |
 | 4 Content, Factory, Ops, Home list reads | Live as B2, B3, and the Home flag. Authorization reads were not moved | [phase4](./phase4/README.md) |
 | 5 Output and Content Item write-through | Live. The legacy-export switch `STUDIO_WRITE_SOURCE=supabase` is not on | [phase5](./phase5/README.md) |
-| 5 remainder | List and single-record reads are in runner `2026-11-10-supabase-phase5-runner-record`. Both flags stay `airtable`. Formula and view selectors stay on Airtable. A single-record Supabase read requires the full-record marker. `STUDIO_WRITE_SOURCE` stays `airtable`. Creates still mint Airtable `rec` ids. Turning the flags on is a later change. Phase 7 is not started | This file |
+| 5 remainder | List and single-record reads are in runner `2026-11-10-supabase-phase5-runner-list-guard`. Both flags stay `airtable`. An unfiltered list stays on Airtable unless every returned row has the full-record marker. Formula and view selectors stay on Airtable. `STUDIO_WRITE_SOURCE` stays `airtable`. Creates still mint Airtable `rec` ids. Turning the flags on is a later change. Phase 7 is not started | This file |
 | 6 Production Requests, media metadata, transfer queue, and the cron/autonomous writers | Production Request, media metadata, and transfer-queue write-through are confirmed live. Scheduled runner writes of those tables mirror through the runner Airtable client in `2026-11-09-supabase-phase6-cron-writers`. The half-hour media and queue backfill is not started | [phase6](./phase6/README.md), [handoff](../handoffs/supabase-phase6-handoff.md) |
 | 7 Retire Airtable | Not started. Do not delete or stop Airtable records in Phase 6 | This file |
 

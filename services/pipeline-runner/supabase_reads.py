@@ -101,9 +101,9 @@ def try_list_supabase_records(
             return None
     direction = "desc" if str(sort_direction or "").lower() == "desc" else "asc"
     limit = max(1, min(int(max_records or 10), 100))
-    select = ",".join(["airtable_record_id", *dict.fromkeys(columns.values())])
+    select = _list_select(table_id)
     path = (
-        f"{_supabase_table(table_id)}?select={quote(select, safe=',')}"
+        f"{_supabase_table(table_id)}?select={quote(select, safe='(),*')}"
         f"&order={quote(order_column, safe='')}.{direction}&limit={limit}"
     )
     try:
@@ -111,16 +111,34 @@ def try_list_supabase_records(
     except Exception as error:
         logger.warning("supabase runner read failed for %s; using Airtable: %s", table_id, error)
         return None
-    if not isinstance(payload, list):
+    if not isinstance(payload, list) or not payload:
         return None
     records = []
     for row in payload:
         if not isinstance(row, dict):
-            continue
-        shaped = _shaped(row, columns, fields)
-        if shaped:
-            records.append(shaped)
+            return None
+        shaped = _record_from_row(row, table_id)
+        if not shaped:
+            return None
+        if fields:
+            shaped = {
+                "id": shaped["id"],
+                "fields": {key: value for key, value in shaped["fields"].items() if key in fields},
+            }
+        records.append(shaped)
     return records[:limit]
+
+
+def _list_select(table_id: str) -> str:
+    columns = _columns_for(table_id)
+    base = ",".join(["airtable_record_id", *dict.fromkeys(columns.values())])
+    if table_id == PLATFORM_OUTPUTS_TABLE:
+        blobs = ",".join(OUTPUT_JSON_COLUMNS.values())
+        return (
+            f"{base},error_messages,{blobs},"
+            "content_items(airtable_record_id),content_profiles(airtable_record_id)"
+        )
+    return f"{base},extras,content_profiles(airtable_record_id)"
 
 
 def _overlay_bag(fields: dict[str, Any], bag: dict) -> None:

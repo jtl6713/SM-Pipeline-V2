@@ -41,6 +41,7 @@ def test_output_flag_reads_supabase_and_keeps_the_airtable_id(monkeypatch):
             "output_number": 9,
             "platform": "Instagram",
             "do_not_publish": False,
+            "error_messages": {"_runner_record_projection": "v1"},
         }])
 
     monkeypatch.setattr(requests, "get", fake_get)
@@ -52,6 +53,28 @@ def test_output_flag_reads_supabase_and_keeps_the_airtable_id(monkeypatch):
         "id": "recOutput9",
         "fields": {"Output_ID": 9, "Platform": "Instagram", "Do_Not_Publish": False},
     }]
+
+
+def test_unmarked_or_empty_list_stays_on_airtable(monkeypatch):
+    def fake_get(url, *, headers, params, timeout):
+        return Response({"records": [{"id": "recOutput1", "fields": {"Platform": "TikTok"}}]})
+
+    def fake_request(method, url, *, headers, json, timeout):
+        if "order=output_number" in url:
+            return Response([])
+        return Response([{
+            "airtable_record_id": "recOutput1",
+            "platform": "Instagram",
+            "error_messages": {"Output_Notes": "lean"},
+        }])
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(requests, "request", fake_request)
+    client = _client(studio_runner_output_read_source="supabase")
+    unmarked = client.list_records(PLATFORM_OUTPUTS_TABLE, max_records=5)
+    empty = client.list_records(PLATFORM_OUTPUTS_TABLE, max_records=5, sort_field="Output_ID")
+    assert unmarked[0]["fields"]["Platform"] == "TikTok"
+    assert empty[0]["id"] == "recOutput1"
 
 
 def test_formula_and_content_flag_stay_independent(monkeypatch):
