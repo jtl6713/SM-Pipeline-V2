@@ -686,6 +686,50 @@
       updateVideoRequestProgress(index, current.videoRequestStatus[index]);
     }
   }
+  async function reconcileUnbilledVideoAttempt(index) {
+    if (current.busy || current.videoRequestBusy) return;
+    const job = current.videoJobs[index];
+    if (!job || job.state !== "submission_uncertain" || !job.run_id)
+      throw new Error("Refresh the exact uncertain video job before administrator reconciliation.");
+    if (current.record?.id !== "recTgiblVhRnCfNuf" || index !== 0 ||
+        assertProfile() !== "recT2rbKX3MF7cVFU") {
+      throw new Error("This one-time unbilled reconciliation is limited to Chicago River Idea 2217, Scene 1.");
+    }
+    const reviewed = confirm(
+      "ADMINISTRATOR RECOVERY · IDEA 2217 · SCENE 1" +
+      "\n\nElevenLabs seven-day request log showed GET only, no video POST." +
+      "\nYou confirmed ZERO video credits were charged and no generated video exists." +
+      "\n\nPreserve an immutable audit copy of attempt 1 and mark it UNBILLED / FAILED?" +
+      "\nThis action does NOT submit or retry a generation. New billing will require a separate quote and explicit approval."
+    );
+    if (!reviewed) return;
+    current.busy = true;
+    report("Archiving the unbilled attempt and reconciling its existing Studio reservation. No provider call.");
+    try {
+      const result = await call(sceneUrl(index, "video/reconcile-unbilled") +
+        "?profile=" + encodeURIComponent(assertProfile()), {
+        method:"POST", body:JSON.stringify({
+          content_profile_id: assertProfile(),
+          expected_run_id: job.run_id,
+          acknowledgement:"RECONCILE-UNBILLED-2217-SCENE-1",
+          provider_post_absent_confirmed:true,
+          no_charge_confirmed:true,
+          no_provider_generation_confirmed:true,
+        }),
+      });
+      if (!result.audit_preserved || result.paid_generation_submitted !== false ||
+          result.state !== "failed") {
+        throw new Error("Reconciliation response was incomplete; refresh status. Do not generate again.");
+      }
+      current.videoJobs[index] = result;
+      delete current.videoSubmissionUncertain[videoSceneIdentity(index)];
+      current.videoRequestStatus[index] = "Attempt 1 archived as unbilled; no charge was made. Review a fresh quote before any new video.";
+      render();
+      report("Unbilled attempt archived with audit evidence. New generation remains separate and requires a new quote and approval.");
+    } finally {
+      current.busy = false;
+    }
+  }
   async function decideSceneVideo(index, action) {
     if (current.busy) return;
     const scene = readForm().scenes[index], profile = assertProfile();
@@ -1158,6 +1202,15 @@
           }
           if (videoJob.message || videoJob.error) {
             actions.appendChild(node("p", "form-message", videoJob.message || videoJob.error));
+          }
+          if (videoJob.state === "submission_uncertain" &&
+              current.record?.id === "recTgiblVhRnCfNuf" && index === 0 &&
+              assertProfile() === "recT2rbKX3MF7cVFU") {
+            actions.appendChild(node("p", "subtle",
+              "Administrator recovery for this exact POC only: use after verifying the ElevenLabs request log has no paid POST, no video was generated, and no credits were charged. The original reservation will be archived."));
+            const reconcile = button("Reconcile No-Charge Attempt (Admin)", "secondary-button", () =>
+              reconcileUnbilledVideoAttempt(index).catch(e => report(e.message, true)), actions);
+            reconcile.disabled = current.busy || current.videoRequestBusy || !videoJob.run_id;
           }
           if (videoJob.state === "awaiting_review" && videoJob.preview_url) {
             const preview = node("video", "story-first-generated-preview");
