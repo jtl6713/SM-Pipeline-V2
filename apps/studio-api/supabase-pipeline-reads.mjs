@@ -133,6 +133,43 @@ export const PRODUCTION_REQUEST_SYNC_FIELDS = Object.freeze([
   "Test_Run_ID",
 ]);
 
+/** Phase 6 half-hour media backfill — scalar metadata only; Drive stays DAM. */
+export const MEDIA_ASSET_SYNC_FIELDS = Object.freeze([
+  "Asset Name",
+  "Media_Class",
+  "Asset_Role",
+  "Asset_Status",
+  "Active",
+  "Do_Not_Use",
+  "Studio_Favorite",
+  "Google Drive File ID",
+  "Google Drive URL",
+  "MIME_Type",
+  "File_Extension",
+  "File_Size_Bytes",
+  "Added_At",
+]);
+
+/** Phase 6 half-hour queue backfill — status + Drive id payload; no file bytes. */
+export const TRANSFER_QUEUE_SYNC_FIELDS = Object.freeze([
+  "Transfer_ID",
+  "Transfer_Status",
+  "Error_Message",
+  "Preview_Error",
+  "Production_Request_Record_ID",
+  "Asset_Kind",
+  "Source_Asset_ID",
+  "Source_Name",
+  "Source_Drive_File_ID",
+  "Source_Media_Asset",
+  "Generated_Media_Asset",
+  "Aspect_Ratio",
+  "Preview_Status",
+  "Test_Run_ID",
+]);
+
+export const PHASE6_TRANSFER_QUEUE_TABLE_ID = "tblBZLXPd1p2NRWRK";
+
 export function studioSupabaseConfigured(env) {
   return Boolean(String(env?.SUPABASE_URL || "").trim() && String(env?.SUPABASE_SERVICE_ROLE_KEY || "").trim());
 }
@@ -1638,6 +1675,97 @@ export async function syncOpenProductionRequestsToSupabase(env, deps = {}) {
   return { ok: true, production_requests: requestRows.length };
 }
 
+/**
+ * Phase 6 half-hour media backfill: newest Media Assets → media_assets.
+ * Airtable remains SoR; Drive remains the file store. Rows without Asset Name
+ * cannot insert (NOT NULL) and are skipped. Never writes file bytes.
+ */
+export async function syncRecentMediaAssetsToSupabase(env, deps = {}) {
+  await deps.assertLease?.();
+  const listRecords = deps.listRecords;
+  if (!listRecords) throw new Error("syncRecentMediaAssetsToSupabase requires listRecords");
+  if (!studioSupabaseConfigured(env)) {
+    return { skipped: true, reason: "supabase_not_configured", ok: true };
+  }
+  const mediaTableId = deps.mediaTableId
+    || env.AIRTABLE_MEDIA_TABLE_ID
+    || null;
+  if (!mediaTableId) {
+    return { skipped: true, reason: "media_table_not_configured", ok: true };
+  }
+  const mediaLimit = Math.max(20, Math.min(500, Number(deps.mediaLimit) || 200));
+  const filterFormula = deps.mediaFilterFormula || null;
+  const records = await listRecords(env, mediaTableId, {
+    limit: mediaLimit,
+    sortField: deps.mediaSortField || "Added_At",
+    sortDirection: deps.mediaSortDirection || "desc",
+    fields: [...MEDIA_ASSET_SYNC_FIELDS],
+    ...(filterFormula ? { filterFormula } : {}),
+  });
+  const mediaRows = (records || []).map((record) => {
+    const body = mediaAssetWriteThroughRow(record);
+    if (!body.asset_name) return null;
+    return { airtable_record_id: record.id, ...body };
+  }).filter(Boolean);
+  for (let i = 0; i < mediaRows.length; i += 200) {
+    await deps.assertLease?.();
+    const started = Date.now();
+    const chunk = mediaRows.slice(i, i + 200);
+    await upsertChunk(env, "media_assets", chunk);
+    deps.onUpsert?.("media_assets", chunk.length, Date.now() - started);
+  }
+  return {
+    ok: true,
+    media_assets: mediaRows.length,
+    scanned: (records || []).length,
+    skipped_unnamed: Math.max(0, (records || []).length - mediaRows.length),
+  };
+}
+
+/**
+ * Phase 6 half-hour queue backfill: open Studio Media Transfer Queue rows →
+ * studio_media_transfer_queue. Linked media stays an Airtable id in payload so
+ * a missing media_assets FK cannot fail. Targets are not written.
+ */
+export async function syncRecentTransferQueueToSupabase(env, deps = {}) {
+  await deps.assertLease?.();
+  const listRecords = deps.listRecords;
+  if (!listRecords) throw new Error("syncRecentTransferQueueToSupabase requires listRecords");
+  if (!studioSupabaseConfigured(env)) {
+    return { skipped: true, reason: "supabase_not_configured", ok: true };
+  }
+  const queueTableId = deps.queueTableId
+    || env.AIRTABLE_MEDIA_TRANSFER_QUEUE_TABLE_ID
+    || PHASE6_TRANSFER_QUEUE_TABLE_ID;
+  const queueLimit = Math.max(20, Math.min(400, Number(deps.queueLimit) || 150));
+  const filterFormula = deps.queueFilterFormula
+    || 'AND({Test_Run_ID}=BLANK(),OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded",{Transfer_Status}="Processing",{Transfer_Status}="Ready",{Transfer_Status}="Error"))';
+  const records = await listRecords(env, queueTableId, {
+    limit: queueLimit,
+    sortField: deps.queueSortField || "Transfer_ID",
+    sortDirection: deps.queueSortDirection || "desc",
+    fields: [...TRANSFER_QUEUE_SYNC_FIELDS],
+    filterFormula,
+  });
+  const queueRows = (records || []).map((record) => {
+    const body = transferQueueWriteThroughRow(record);
+    if (!Object.keys(body).length) return null;
+    return { airtable_record_id: record.id, ...body };
+  }).filter(Boolean);
+  for (let i = 0; i < queueRows.length; i += 200) {
+    await deps.assertLease?.();
+    const started = Date.now();
+    const chunk = queueRows.slice(i, i + 200);
+    await upsertChunk(env, "studio_media_transfer_queue", chunk);
+    deps.onUpsert?.("studio_media_transfer_queue", chunk.length, Date.now() - started);
+  }
+  return {
+    ok: true,
+    studio_media_transfer_queue: queueRows.length,
+    scanned: (records || []).length,
+  };
+}
+
 export async function syncAllProfilesPipelineToSupabase(env, profiles, deps = {}) {
   const results = [];
   const assertLease = async () => {
@@ -1663,25 +1791,54 @@ export async function syncAllProfilesPipelineToSupabase(env, profiles, deps = {}
     }
   }
   let requests = null;
-  if (!abortedForCircuit && !supabaseCircuitOpen()) {
+  let media = null;
+  let queue = null;
+  const runPhase6Backfill = async (label, runner) => {
     try {
       await assertLease();
-      requests = await syncOpenProductionRequestsToSupabase(env, { ...deps, assertLease });
+      return await runner();
     } catch (error) {
-      requests = { ok: false, error: error?.message || String(error) };
+      const failed = { ok: false, error: error?.message || String(error) };
       if (/Phase 5 sync lost lease|renewal lost CAS/.test(String(error?.message || ""))) throw error;
+      console.warn(`phase6 ${label} backfill failed`, error);
+      return failed;
+    }
+  };
+  if (!abortedForCircuit && !supabaseCircuitOpen()) {
+    requests = await runPhase6Backfill("production_requests", () => (
+      syncOpenProductionRequestsToSupabase(env, { ...deps, assertLease })
+    ));
+    if (!supabaseCircuitOpen()) {
+      media = await runPhase6Backfill("media_assets", () => (
+        syncRecentMediaAssetsToSupabase(env, { ...deps, assertLease })
+      ));
+    } else {
+      media = { skipped: true, reason: "supabase_circuit_open" };
+    }
+    if (!supabaseCircuitOpen()) {
+      queue = await runPhase6Backfill("studio_media_transfer_queue", () => (
+        syncRecentTransferQueueToSupabase(env, { ...deps, assertLease })
+      ));
+    } else {
+      queue = { skipped: true, reason: "supabase_circuit_open" };
     }
   } else {
     requests = { skipped: true, reason: "supabase_circuit_open" };
+    media = { skipped: true, reason: "supabase_circuit_open" };
+    queue = { skipped: true, reason: "supabase_circuit_open" };
   }
+  const phase6Ok = (row) => row?.ok === true || row?.skipped === true;
   const ok = results.length > 0 && results.every((row) => row?.ok === true)
-    && requests?.ok === true && !abortedForCircuit && !supabaseCircuitOpen();
+    && phase6Ok(requests) && phase6Ok(media) && phase6Ok(queue)
+    && !abortedForCircuit && !supabaseCircuitOpen();
   return {
     ok,
     status: abortedForCircuit || supabaseCircuitOpen() ? "circuit_open"
       : ok ? "completed" : "partial",
     results,
     production_requests: requests,
+    media_assets: media,
+    studio_media_transfer_queue: queue,
   };
 }
 
