@@ -170,6 +170,10 @@ OPTIONAL_BINDINGS = {
     # Home overview read gate. Optional until the secret is set.
     # Preserve secret_text; do not print or change the live value.
     "STUDIO_HOME_READ_SOURCE": "secret_text",
+    # Phase 5 write SoR switch for Output/Content updates. Optional until
+    # enable-studio-write-sor installs it. Preserve secret_text; do not print
+    # or change the live value during ordinary Worker deploys.
+    "STUDIO_WRITE_SOURCE": "secret_text",
     "SUPABASE_URL": "plain_text",
     "SUPABASE_SERVICE_ROLE_KEY": "secret_text",
 }
