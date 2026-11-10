@@ -39,7 +39,7 @@ test("paid video requires a reviewed quote and direct human authorization", () =
 });
 
 test("Worker admits scene video endpoints, not autonomous publishing", () => {
-  assert.ok(worker.includes("video\\/(?:quote|start|status|preview|accept|decline)"));
+  assert.ok(worker.includes("video\\/(?:quote|start|status|preview|accept|decline|reconcile-unbilled)"));
   assert.match(server, /storyVideoJobKey\(ideaId, sceneNumber\)/);
   assert.match(server, /Video is not ready for explicit acceptance/);
   assert.match(server, /studioProfileRequiresChicagoWatermark\(profile\)/);
