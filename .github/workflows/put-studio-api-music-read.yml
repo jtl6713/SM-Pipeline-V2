@@ -1,6 +1,12 @@
 name: Enable Studio Music Supabase Reads
-
+# Puts STUDIO_MUSIC_READ_SOURCE=supabase on the Worker. Trigger by pushing
+# deploy/enable-studio-music-reads.txt on main (same pattern as write-SoR).
+# workflow_dispatch remains for manual re-runs when the token allows it.
 on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/enable-studio-music-reads.txt"
   workflow_dispatch:
 
 permissions:

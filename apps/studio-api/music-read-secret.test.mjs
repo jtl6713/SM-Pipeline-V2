@@ -8,6 +8,7 @@ test("Music read flag install is main-only, secret_text, and does not retarget w
     import.meta.url,
   ), "utf8");
   assert.match(workflow, /if: github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /deploy\/enable-studio-music-reads\.txt/);
   assert.match(workflow, /0\.10\.806-supabase-music-reads/);
   assert.match(workflow, /\/content\/v2/);
   assert.doesNotMatch(workflow, /target \+ "\/content"/);
@@ -29,4 +30,5 @@ test("Music read flag install is main-only, secret_text, and does not retarget w
   assert.match(marker, /0\.10\.806-supabase-music-reads/);
   assert.match(marker, /STUDIO_MUSIC_READ_SOURCE=supabase/);
   assert.match(marker, /Asset Manager/);
+  assert.match(marker, /Trigger STUDIO_MUSIC_READ_SOURCE=supabase now/);
 });
