@@ -33,7 +33,7 @@ The pipeline runner is the other writer. `AirtableClient` create, update, and at
 
 `STUDIO_WRITE_SOURCE` stays `airtable`. Setting it to `supabase` makes those two tables commit to Supabase first and treats the Airtable update as a best-effort legacy export. Creates still go to Airtable first so Airtable can mint `rec` ids. Leave the flag on `airtable`.
 
-Runner `2026-11-09-supabase-phase5-runner-reads` can list `platform_outputs` and `content_items` when `STUDIO_RUNNER_OUTPUT_READ_SOURCE` or `STUDIO_RUNNER_CONTENT_READ_SOURCE` is `supabase`. Both flags default to `airtable`, and this release does not turn them on. A formula, a view, an unmapped sort, or an unmapped requested field stays on Airtable. A Supabase read error falls back to Airtable. `STUDIO_WRITE_SOURCE` does not turn these reads on.
+Runner `2026-11-10-supabase-phase5-runner-record` can list `platform_outputs` and `content_items`, and can load one record by its Airtable `rec` id, when `STUDIO_RUNNER_OUTPUT_READ_SOURCE` or `STUDIO_RUNNER_CONTENT_READ_SOURCE` is `supabase`. Both flags default to `airtable`, and this release does not turn them on. A single-record read uses Supabase only when that row carries the full-record marker from a later Airtable commit. Older rows, a formula, a view, an unmapped sort, an unmapped requested field, a missing row, and a Supabase error stay on Airtable. `STUDIO_WRITE_SOURCE` does not turn these reads on. Phase 7 is not started.
 
 `/health` on the runner reports `studio_write_source`, `supabase_pipeline_writes`, `studio_runner_output_read_source`, and `studio_runner_content_read_source`. Production values stay `airtable` for the write source and both read sources.
 

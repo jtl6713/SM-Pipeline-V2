@@ -15,6 +15,7 @@ Creates still go to Airtable first so Airtable can mint rec ids.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -36,6 +37,17 @@ OUTPUT_EXCLUDE = {
     "Platform_Publish_Response_JSON",
     "Insights_Platform_Metrics_JSON",
 }
+
+OUTPUT_JSON_COLUMNS = {
+    "Selected_Assets_JSON": "selected_assets",
+    "Creative_Render_Manifest_JSON": "creative_render_manifest",
+    "Render_Clip_List_JSON": "render_clip_list",
+    "Remotion_Props_JSON": "remotion_props",
+    "Platform_Publish_Response_JSON": "platform_publish_response",
+    "Insights_Platform_Metrics_JSON": "insights_metrics",
+}
+
+RUNNER_RECORD_PROJECTION = "v1"
 
 TYPED_OUTPUT = {
     "Output_ID", "Platform", "Format", "Platform_Output_Type", "Studio_Output_Type", "Aspect_Ratio",
@@ -218,10 +230,54 @@ def _content_uuid(settings: dict, airtable_id: str | None) -> str | None:
     return None
 
 
+def _json_column(value: Any) -> Any:
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if text[:1] in "[{":
+            try:
+                parsed = json.loads(text)
+            except Exception:
+                return None
+            if isinstance(parsed, (dict, list)):
+                return parsed
+    return None
+
+
+def _projection_bag(bag: dict, links: dict[str, str], *, complete: bool) -> dict:
+    """Mark a full Airtable record. A partial body must not set this marker."""
+    if not complete:
+        return bag
+    marked = dict(bag)
+    marked["_runner_record_projection"] = RUNNER_RECORD_PROJECTION
+    marked["_airtable_links"] = links
+    return marked
+
+
 def _output_row(record: dict, profile_uuid: str, content_uuid: str | None) -> dict:
     fields = record.get("fields") or {}
     content_airtable_id = _first_link(fields.get("Content_Item"))
-    return {
+    profile_airtable_id = _first_link(fields.get("Content_Profile"))
+    links: dict[str, str] = {}
+    complete = True
+    if content_airtable_id:
+        if content_uuid:
+            links["Content_Item"] = content_airtable_id
+        else:
+            complete = False
+    if profile_airtable_id:
+        if profile_uuid:
+            links["Content_Profile"] = profile_airtable_id
+        else:
+            complete = False
+    bag = _pack(fields, TYPED_OUTPUT, OUTPUT_EXCLUDE)
+    for airtable_key in OUTPUT_JSON_COLUMNS:
+        if airtable_key not in fields:
+            continue
+        if _json_column(fields.get(airtable_key)) is None and fields.get(airtable_key) not in (None, ""):
+            bag[airtable_key] = fields.get(airtable_key)
+    row = {
         "airtable_record_id": record["id"],
         "output_number": fields.get("Output_ID"),
         "content_item_id": content_uuid if content_airtable_id else None,
@@ -252,12 +308,27 @@ def _output_row(record: dict, profile_uuid: str, content_uuid: str | None) -> di
         "published_at": fields.get("Published_At") or None,
         "remotion_job_id": fields.get("Remotion_Job_ID") or None,
         "selected_clip_count": fields.get("Selected_Clip_Count"),
-        "error_messages": _pack(fields, TYPED_OUTPUT, OUTPUT_EXCLUDE),
+        "error_messages": _projection_bag(bag, links, complete=complete),
     }
+    for airtable_key, column in OUTPUT_JSON_COLUMNS.items():
+        if airtable_key not in fields:
+            continue
+        parsed = _json_column(fields.get(airtable_key))
+        if parsed is not None:
+            row[column] = parsed
+    return row
 
 
 def _content_row(record: dict, profile_uuid: str) -> dict:
     fields = record.get("fields") or {}
+    profile_airtable_id = _first_link(fields.get("Content_Profile"))
+    links: dict[str, str] = {}
+    complete = True
+    if profile_airtable_id:
+        if profile_uuid:
+            links["Content_Profile"] = profile_airtable_id
+        else:
+            complete = False
     return {
         "airtable_record_id": record["id"],
         "content_number": fields.get("Content_ID"),
@@ -268,7 +339,7 @@ def _content_row(record: dict, profile_uuid: str) -> dict:
         "voiceover_status": _select(fields.get("Voiceover_Status")),
         "thumbnail_url": fields.get("Thumbnail_URL") or None,
         "created_at": fields.get("Created_At") or record.get("createdTime") or None,
-        "extras": _pack(fields, TYPED_CONTENT),
+        "extras": _projection_bag(_pack(fields, TYPED_CONTENT), links, complete=complete),
     }
 
 
