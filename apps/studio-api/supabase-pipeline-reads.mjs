@@ -420,8 +420,17 @@ function stampRunnerProjection(bag, links, complete) {
 }
 
 export function retainProjectionKeys(existing, next) {
-  const bag = isPlainObject(next) ? { ...next } : {};
-  if (!isPlainObject(existing)) return bag;
+  const incoming = isPlainObject(next) ? next : {};
+  if (!isPlainObject(existing)) return { ...incoming };
+  const marked = existing._runner_record_projection === RUNNER_RECORD_PROJECTION;
+  const bag = marked ? { ...existing } : { ...incoming };
+  if (marked) {
+    for (const [key, value] of Object.entries(incoming)) {
+      if (!key || key.startsWith("_") || value == null || value === "") continue;
+      bag[key] = value;
+    }
+    return bag;
+  }
   for (const [key, value] of Object.entries(existing)) {
     if (String(key).startsWith("_") && value != null) bag[key] = value;
   }
