@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -50,4 +51,55 @@ test("capability matrix documents unsupported automation honestly", () => {
   assert.match(matrix, /Open Post/);
   assert.match(matrix, /business_discovery/);
   assert.match(matrix, /commentThreads\.insert/);
+});
+
+test("Engagement still loads recommendations when optional reads fail", () => {
+  assert.match(js, /Promise\.allSettled/);
+  assert.match(js, /queueResult\.status === "rejected"/);
+  assert.match(js, /insightsResult\.status === "fulfilled"/);
+  assert.match(js, /Recommendations remain usable/);
+  assert.match(js, /button\.disabled = false/);
+  assert.match(app, /Engagement could not initialize/);
+});
+
+test("Engagement queue survives optional Insights failure at runtime", async () => {
+  const elements = new Map();
+  function el(id) {
+    if (!elements.has(id)) elements.set(id, {
+      value: "", textContent: "", innerHTML: "", checked: false,
+      addEventListener: () => {},
+      classList: { contains: () => false, toggle: () => {}, add: () => {} },
+    });
+    return elements.get(id);
+  }
+  const context = {
+    URL,
+    window: { location: { origin: "https://studio.example" } },
+    document: {
+      getElementById: el,
+      querySelectorAll: () => [],
+      addEventListener: () => {},
+      querySelector: () => null,
+    },
+    fetch: async (url) => {
+      if (url.includes("/api/engagement/recommendations")) {
+        return { ok: true, json: async () => ({
+          ok: true, settings: { stage_b_enabled: false },
+          capabilities: { youtube: { discover: "supported", stage_b_comment: true, stage_b_like: true } },
+          recommendations: [{ target_id: "t1", creator_name: "Creator One", platform: "youtube",
+            relevance_score: 0.9, approval_status: "pending",
+            post_url: "https://www.youtube.com/watch?v=test", suggested_comments: ["Thoughtful framing"] }],
+          history: [],
+        }) };
+      }
+      if (url.includes("/api/engagement/insights")) throw new Error("Insights backend offline");
+      return { ok: true, json: async () => ({ matrix: {} }) };
+    },
+  };
+  vm.runInNewContext(js, context);
+  await context.window.StudioEngagement.load(true);
+  assert.match(el("engagementRecommendations").innerHTML, /Creator One/);
+  assert.match(el("engagementSubtitle").textContent, /1 open recommendation/);
+  assert.match(el("engagementInsights").textContent, /temporarily unavailable/);
+  assert.match(el("engagementStatus").textContent, /insights unavailable/);
 });

@@ -299,7 +299,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.925-ai-video-live-progress";
+  const BUILD_ID = "item4-0.6.926-engagement-tab-recovery";
   const NAV_COLLAPSE_STORAGE_KEY = "studio.nav_collapsed";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
@@ -27876,7 +27876,19 @@ function timedScriptAssetLabel(asset, index) {
   function loadPage(page) {
     const pending = window.StudioLazyLoad?.ensure(page);
     if (pending && typeof pending.then === "function") {
-      return pending.then(() => runLoadPage(page)).catch(() => runLoadPage(page));
+      return pending.then(() => runLoadPage(page)).catch((error) => {
+        if (page === "engagement") {
+          const subtitle = $("engagementSubtitle");
+          if (subtitle) subtitle.textContent = "Engagement could not initialize.";
+          const status = $("engagementStatus");
+          if (status) {
+            status.textContent = `Engagement failed to load: ${error?.message || String(error)}. Reload the page and retry.`;
+            status.classList.add("is-error");
+          }
+          return;
+        }
+        return runLoadPage(page);
+      });
     }
     return runLoadPage(page);
   }

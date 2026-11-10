@@ -40,6 +40,10 @@ jobs:
           echo "main_ui_version_at_pr_base=$BASE_VERSION"
           node apps/studio-web/ui-release-contract.mjs --assert-newer-than "$BASE_VERSION"
           echo "studio_ui_release_increase_verified=true"
+      - name: Engagement queue resilience regression
+        run: |
+          node --check apps/studio-web/assets/engagement-1008.js
+          node --test apps/studio-web/engagement.test.mjs
       - name: UI version and affected workflow regression
         run: |
           node --check apps/studio-web/assets/app-item4-1008.js
