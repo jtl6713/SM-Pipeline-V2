@@ -34,6 +34,9 @@ import {
   syncAirtableProductionRequestRowToSupabase,
   syncAirtableMediaAssetRowToSupabase,
   syncAirtableTransferQueueRowToSupabase,
+  syncRecentMediaAssetsToSupabase,
+  syncRecentTransferQueueToSupabase,
+  syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   enqueueStudioSideEffectOutbox,
   purgeDeletedDuplicatePackages,
@@ -687,8 +690,16 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /phase5_writes: "airtable_sor_write_through"/);
   assert.match(worker, /phase6_writes: "airtable_sor_write_through"/);
   assert.match(worker, /phase6_write_tables: \["production_requests", "media_assets", "studio_media_transfer_queue"\]/);
+  assert.match(worker, /phase6_backfill: "media_and_queue"/);
+  assert.match(worker, /phase6_backfill_tables: \["media_assets", "studio_media_transfer_queue"\]/);
+  assert.match(worker, /0\.10\.799-supabase-phase6-media-queue-backfill/);
   assert.match(worker, /syncAirtableMediaAssetRowToSupabase/);
   assert.match(worker, /syncAirtableTransferQueueRowToSupabase/);
+  const syncModule = await readFile(path.join(here, "supabase-pipeline-reads.mjs"), "utf8");
+  assert.match(syncModule, /export async function syncRecentMediaAssetsToSupabase/);
+  assert.match(syncModule, /export async function syncRecentTransferQueueToSupabase/);
+  assert.match(syncModule, /media_assets: media/);
+  assert.match(syncModule, /studio_media_transfer_queue: queue/);
   assert.match(worker, /supabase airtable write-through failed/);
   assert.match(worker, /from "\.\/supabase-pipeline-reads\.mjs"/);
   assert.match(worker, /listSupabaseContentItems/);
@@ -1233,6 +1244,150 @@ test("phase 6 queue mutation survives a supabase failure and ignores a url-only 
   }
 });
 
+test("phase 6 half-hour media backfill upserts named assets and skips unnamed rows", async () => {
+  const posts = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if ((init?.method || "GET") === "POST" && String(url).includes("media_assets")) {
+      posts.push(JSON.parse(init.body));
+    }
+    return { ok: true, async text() { return ""; } };
+  };
+  try {
+    const result = await syncRecentMediaAssetsToSupabase({
+      ...supabaseEnv,
+      AIRTABLE_MEDIA_TABLE_ID: "tblMedia",
+    }, {
+      mediaLimit: 50,
+      listRecords: async () => ([
+        {
+          id: "recMediaKeep1",
+          fields: {
+            "Asset Name": "Navy Pier dusk",
+            Active: true,
+            "Google Drive File ID": "drive-keep-1",
+            "Google Drive URL": "https://media.chicagoshining.com/proxy.jpg",
+          },
+        },
+        {
+          id: "recMediaSkip1",
+          fields: {
+            Active: true,
+            "Google Drive File ID": "drive-skip-1",
+          },
+        },
+      ]),
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.media_assets, 1);
+    assert.equal(result.skipped_unnamed, 1);
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0][0].airtable_record_id, "recMediaKeep1");
+    assert.equal(posts[0][0].asset_name, "Navy Pier dusk");
+    assert.equal(posts[0][0].google_drive_file_id, "drive-keep-1");
+    assert.equal(posts[0][0].google_drive_url, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("phase 6 half-hour queue backfill upserts open rows without FK media uuids", async () => {
+  const posts = [];
+  const listed = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if ((init?.method || "GET") === "POST" && String(url).includes("studio_media_transfer_queue")) {
+      posts.push(JSON.parse(init.body));
+    }
+    return { ok: true, async text() { return ""; } };
+  };
+  try {
+    const result = await syncRecentTransferQueueToSupabase(supabaseEnv, {
+      queueLimit: 40,
+      listRecords: async (_env, table, opts) => {
+        listed.push({ table, ...opts });
+        return [{
+          id: "recQueueOpen1",
+          fields: {
+            Transfer_ID: "TQ-100",
+            Transfer_Status: "Ready",
+            Source_Drive_File_ID: "drive-q-1",
+            Source_Media_Asset: ["recMedia9"],
+            Source_URL: "https://example.com/should-not-mirror",
+          },
+        }];
+      },
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.studio_media_transfer_queue, 1);
+    assert.equal(listed[0].table, "tblBZLXPd1p2NRWRK");
+    assert.match(String(listed[0].filterFormula || ""), /Transfer_Status/);
+    assert.equal(posts[0][0].airtable_record_id, "recQueueOpen1");
+    assert.equal(posts[0][0].status, "Ready");
+    assert.equal(posts[0][0].payload.source_drive_file_id, "drive-q-1");
+    assert.equal(posts[0][0].payload.source_media_asset_id, "recMedia9");
+    assert.equal(posts[0][0].source_media_asset_id, undefined);
+    assert.equal(JSON.stringify(posts).includes("Source_URL"), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("phase 6 media and queue backfill run after production requests in the all-profile sync", async () => {
+  const order = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const href = String(url);
+    const method = init?.method || "GET";
+    if (method === "POST") {
+      if (href.includes("production_requests")) order.push("production_requests");
+      if (href.includes("media_assets")) order.push("media_assets");
+      if (href.includes("studio_media_transfer_queue")) order.push("studio_media_transfer_queue");
+    }
+    if (href.includes("content_profiles") && method === "GET") {
+      return { ok: true, async text() { return JSON.stringify([{ id: "prof-uuid", airtable_record_id: "recProfile1" }]); } };
+    }
+    return { ok: true, async text() { return method === "GET" ? "[]" : ""; } };
+  };
+  try {
+    const result = await syncAllProfilesPipelineToSupabase(supabaseEnv, [{
+      id: "recProfile1",
+      fields: { Active: true, Profile_Name: "Chicago" },
+    }], {
+      listRecords: async (_env, table) => {
+        if (table === "tblMedia") {
+          return [{ id: "recMediaA", fields: { "Asset Name": "Riverwalk", Active: true } }];
+        }
+        if (table === "tblBZLXPd1p2NRWRK") {
+          return [{ id: "recQueueA", fields: { Transfer_Status: "Pending", Source_Drive_File_ID: "d1" } }];
+        }
+        if (table === "Production Requests") {
+          return [{
+            id: "recReqA",
+            fields: { Production_Request_ID: 88, Request_Status: "Ready", Updated_At: "2026-11-10T12:00:00.000Z" },
+          }];
+        }
+        return [];
+      },
+      f: (record, name) => record?.fields?.[name],
+      contentProfileFilterFormula: () => '{Content_Profile}="recProfile1"',
+      mediaTableId: "tblMedia",
+      queueTableId: "tblBZLXPd1p2NRWRK",
+      requestTableId: "Production Requests",
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.status, "completed");
+    assert.equal(result.media_assets.media_assets, 1);
+    assert.equal(result.studio_media_transfer_queue.studio_media_transfer_queue, 1);
+    assert.deepEqual(
+      order.filter((name, index) => order.indexOf(name) === index),
+      ["production_requests", "media_assets", "studio_media_transfer_queue"],
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("profile sync refreshes Supabase rows that left the Airtable open pack", async () => {
   const posts = [];
   const originalFetch = globalThis.fetch;
@@ -1398,7 +1553,8 @@ test("phase5 docs keep Airtable as write source of truth", async () => {
   assert.match(phase6, /Media asset metadata write-through/);
   assert.match(phase6, /Transfer queue write-through/);
   assert.match(phase6, /runner Airtable client/);
-  assert.match(phase6, /half-hour media and queue backfill is not started/);
+  assert.match(phase6, /0\.10\.799-supabase-phase6-media-queue-backfill/);
+  assert.match(phase6, /half-hour media and queue backfill ships/);
   assert.match(phase6, /studio_media_transfer_targets are not written/);
   assert.match(index, /Phase 7/);
   const sql = await readFile(path.join(here, "../../docs/supabase-migration/phase5/003_side_effect_outbox.sql"), "utf8");
