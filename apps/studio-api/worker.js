@@ -1328,7 +1328,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.794-supabase-phase5-record-marker",
+          version: "0.10.795-supabase-phase5-keep-record-marker",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -2647,7 +2647,7 @@ export default {
               // Mirror is never the approval/schedule authority. Its failure
               // must not rewrite or revert an Airtable-verified vacate.
               try {
-                const synced = await syncAirtableOutputRowToSupabase(env, output);
+                const synced = await syncAirtableOutputRowToSupabase(env, output, { fullRecord: true });
                 if (synced?.ok === false)
                   console.warn("Rendering Review atomic vacate mirror deferred", output.id);
               } catch (error) {
