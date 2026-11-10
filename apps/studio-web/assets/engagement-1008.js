@@ -272,6 +272,7 @@
     const button = document.querySelector(
       `#page-engagement [data-action="${action}"][data-target-id="${CSS.escape(targetId)}"]`
     );
+    const originalButtonText = button?.textContent || action;
     if (button) {
       button.disabled = true;
       button.textContent = `Sending ${action}…`;
@@ -304,6 +305,12 @@
     const subtitle = $("engagementSubtitle");
     if (subtitle && message) subtitle.textContent = message;
     if (failed || action === "comment" || action === "like") pinEngagementResult(targetId, message, failed);
+    // The card may remain in the queue after an API failure. Never leave its
+    // action disabled indefinitely when no new DOM card replaces it.
+    if (button && button.isConnected) {
+      button.disabled = false;
+      button.textContent = originalButtonText;
+    }
   }
 
   async function saveSettings() {
@@ -338,32 +345,72 @@
   async function loadEngagement(force = false) {
     if (state.loading && !force) return;
     state.loading = true;
+    const requestId = (state.loadRequestId || 0) + 1;
+    state.loadRequestId = requestId;
     const platform = String($("engagementPlatform")?.value || "all");
     const subtitle = $("engagementSubtitle");
     if (subtitle) subtitle.textContent = "Loading engagement queue…";
     try {
       const query = platform && platform !== "all" ? `?platform=${encodeURIComponent(platform)}` : "";
-      const [bundle, insights, capabilities] = await Promise.all([
+      // Recommendations are the primary workflow. A failed Insights or
+      // capabilities request must never make a healthy queue disappear.
+      const [queueResult, insightsResult, capabilitiesResult] = await Promise.allSettled([
         fetchJson("/api/engagement/recommendations" + query),
         fetchJson("/api/engagement/insights"),
         fetchJson("/api/engagement/capabilities"),
       ]);
+      if (requestId !== state.loadRequestId) return;
+      if (queueResult.status === "rejected" || queueResult.value?.ok === false) {
+        const reason = queueResult.status === "rejected"
+          ? queueResult.reason
+          : new Error(queueResult.value?.error || queueResult.value?.message || "Unknown queue error");
+        state.recommendations = [];
+        state.history = [];
+        state.selected.clear();
+        renderRecommendations();
+        renderHistory();
+        const kpis = $("engagementKpis");
+        if (kpis) kpis.innerHTML = "";
+        const insights = $("engagementInsights");
+        if (insights) insights.textContent = "Insights will return when the engagement queue is available.";
+        if (subtitle) subtitle.textContent = "Could not load engagement recommendations.";
+        setStatus(`Engagement queue unavailable: ${reason?.message || String(reason)}`, true);
+        return;
+      }
+      const bundle = queueResult.value || {};
       fillSettingsForm(bundle.settings || {});
-      renderCapabilityNote(capabilities.matrix || bundle.capabilities || {});
       state.recommendations = Array.isArray(bundle.recommendations) ? bundle.recommendations : [];
       state.history = Array.isArray(bundle.history) ? bundle.history : [];
+      state.selected.clear();
       renderRecommendations();
       renderHistory();
-      renderInsights(insights);
+      const warnings = [];
+      if (capabilitiesResult.status === "fulfilled") {
+        renderCapabilityNote(capabilitiesResult.value?.matrix || bundle.capabilities || {});
+      } else {
+        renderCapabilityNote(bundle.capabilities || {});
+        warnings.push("capabilities unavailable");
+      }
+      if (insightsResult.status === "fulfilled" && insightsResult.value?.ok !== false) {
+        renderInsights(insightsResult.value);
+      } else {
+        const kpis = $("engagementKpis");
+        if (kpis) kpis.innerHTML = "";
+        const insights = $("engagementInsights");
+        if (insights) insights.textContent = "Engagement insights are temporarily unavailable. Recommendations remain usable.";
+        warnings.push("insights unavailable");
+      }
       if (subtitle) {
         subtitle.textContent = `${state.recommendations.length} open recommendation(s) · Stage ${bundle.settings?.stage_b_enabled ? "B" : "A"}`;
       }
-      if (!force) setStatus("");
+      if (warnings.length) setStatus(`Queue loaded. ${warnings.join("; ")}. Use Refresh to retry.`, true);
+      else if (!force || $("engagementStatus")?.classList.contains("is-error")) setStatus("");
     } catch (error) {
+      if (requestId !== state.loadRequestId) return;
       setStatus(error.message || String(error), true);
       if (subtitle) subtitle.textContent = "Could not load engagement data.";
     } finally {
-      state.loading = false;
+      if (requestId === state.loadRequestId) state.loading = false;
     }
   }
 
