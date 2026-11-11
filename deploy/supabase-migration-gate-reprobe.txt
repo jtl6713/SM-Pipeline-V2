@@ -18,3 +18,6 @@ reprobe_811_shrink=2026-11-11T06:35:52Z
 
 # Reprobe after expected 1:00 AM CT half-hour sync under Worker 0.10.811
 reprobe_811_100_sync=2026-11-11T07:07:24Z
+
+# Reprobe after 0.10.812-supabase-auth-reads deploy (prior gate raced at 811)
+reprobe_812_auth_reads=2026-11-11T12:07:31Z
