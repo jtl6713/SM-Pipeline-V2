@@ -7033,9 +7033,15 @@ function schedulePipelineListHeal(ctx, env, records) {
     const stalled = (records || []).filter((record) => {
       const output = String(f(record, "Output_Status") || "");
       const render = String(f(record, "Render_Status") || "");
-      if (isRenderQueueCandidateStatus(render)) return false;
+      // A ready/waiting render without a Remotion job can be stranded when
+      // its original producer dispatch was lost. Requeue the parent request;
+      // Requeue at most once per parent request in this bounded sweep.
+      // Never requeue native-photo routes, finished media, or active jobs.
+      if (render === "Native Photo Route" || render === "Rendering") return false;
       return /^in production$/i.test(output)
-        && !String(f(record, "Remotion_Job_ID") || "").trim();
+        && !String(f(record, "Remotion_Job_ID") || "").trim()
+        && !String(f(record, "Final_File_URL") || "").trim()
+        && (!render || isRenderQueueCandidateStatus(render));
     });
     if (!stalled.length) return;
     const requestIds = [];
