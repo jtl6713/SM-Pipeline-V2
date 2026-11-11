@@ -53,6 +53,7 @@ test("auth table writes invalidate the auth cache prefix", () => {
 });
 
 test("Worker health advertises auth Airtable cache build", () => {
-  assert.match(worker, /0\.10\.808-supabase-media-not-null/);
+  assert.match(worker, /0\.10\.809-supabase-auth-mirror/);
+  assert.match(worker, /studio_supabase_auth_mirror_v1: true/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
 });
