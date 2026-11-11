@@ -48,6 +48,7 @@ import {
   collapseSupersededSiblingOutputs,
   stripDeletedDuplicateOutputRecords,
   homogenizeUpsertRows,
+  mediaAssetBackfillRow,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
   STUDIO_SUPABASE_MUSIC_READ_ROUTES,
@@ -723,7 +724,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.807-supabase-upsert-key-align/);
+  assert.match(worker, /0\.10\.808-supabase-media-not-null/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /phase6_writes: "airtable_sor_write_through"/);
   assert.match(worker, /phase6_write_tables: \["production_requests", "media_assets", "studio_media_transfer_queue"\]/);
@@ -764,7 +765,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_supabase_music_read_routes: STUDIO_SUPABASE_MUSIC_READ_ROUTES/);
   const release = /version: "0\.10\.(\d+)-[^"]+"/.exec(worker);
   assert.ok(release, "Worker /health must identify a versioned release");
-  assert.ok(Number(release[1]) >= 807, "Upsert key align cannot regress behind Worker 0.10.807");
+  assert.ok(Number(release[1]) >= 808, "Media NOT NULL backfill cannot regress behind Worker 0.10.808");
   const pipelineFns = await readFile(path.join(here, "worker-functions-03.mjs"), "utf8");
   assert.match(pipelineFns, /studioPipelineReadSource\(env\) === "supabase"/);
   assert.match(pipelineFns, /studioContentReadSource\(env\) === "supabase"/);
@@ -1483,6 +1484,25 @@ test("homogenizeUpsertRows pads sparse PostgREST batch keys with null", () => {
   assert.equal(rows[1].google_drive_file_id, "drive-b");
 });
 
+test("mediaAssetBackfillRow fills NOT NULL booleans so homogenize cannot null them", () => {
+  const row = mediaAssetBackfillRow({
+    id: "recMediaDefaults1",
+    fields: {
+      "Asset Name": "Fill crop",
+      "Google Drive File ID": "drive-defaults-1",
+      Added_At: "2026-11-10T21:33:41.000Z",
+    },
+  });
+  assert.equal(row.airtable_record_id, "recMediaDefaults1");
+  assert.equal(row.asset_name, "Fill crop");
+  assert.equal(row.active, true);
+  assert.equal(row.do_not_use, false);
+  assert.equal(row.studio_favorite, false);
+  assert.equal(row.google_drive_file_id, "drive-defaults-1");
+  assert.deepEqual(row.metadata, { added_at: "2026-11-10T21:33:41.000Z" });
+  assert.equal(mediaAssetBackfillRow({ id: "recX", fields: { Active: true } }), null);
+});
+
 test("phase 6 media backfill POST bodies share identical keys across sparse rows", async () => {
   const posts = [];
   const originalFetch = globalThis.fetch;
@@ -1523,8 +1543,12 @@ test("phase 6 media backfill POST bodies share identical keys across sparse rows
     assert.equal(posts.length, 1);
     assert.equal(posts[0].length, 2);
     assert.deepEqual(Object.keys(posts[0][0]).sort(), Object.keys(posts[0][1]).sort());
+    assert.equal(posts[0][0].do_not_use, false);
+    assert.equal(posts[0][1].do_not_use, false);
+    assert.equal(posts[0][0].studio_favorite, false);
+    assert.equal(posts[0][1].google_drive_file_id, "drive-sparse-2");
     assert.equal(posts[0][0].google_drive_file_id, null);
-    assert.equal(posts[0][1].metadata, null);
+    assert.deepEqual(posts[0][1].metadata, {});
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -1571,7 +1595,9 @@ test("phase 6 half-hour media backfill upserts named assets and skips unnamed ro
     assert.equal(posts[0][0].airtable_record_id, "recMediaKeep1");
     assert.equal(posts[0][0].asset_name, "Navy Pier dusk");
     assert.equal(posts[0][0].google_drive_file_id, "drive-keep-1");
-    assert.equal(posts[0][0].google_drive_url, undefined);
+    assert.equal(posts[0][0].google_drive_url, null);
+    assert.equal(posts[0][0].do_not_use, false);
+    assert.equal(posts[0][0].studio_favorite, false);
     assert.equal(
       posts[0][0].metadata?.google_drive_url,
       "https://media.chicagoshining.com/proxy.jpg",
