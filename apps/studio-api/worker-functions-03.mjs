@@ -53,6 +53,7 @@ import {
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
+  syncRecentMediaAssetsToSupabase,
   stripDeletedDuplicateOutputRecords,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
@@ -1943,6 +1944,28 @@ export async function studioSyncSupabasePipelineReads(env, options = {}) {
     };
     let result;
     try {
+      // Asset Manager densify oneshot: skip the full profile pipeline so a
+      // partial Factory/Home sync cannot mark ok=false after media already ran
+      // (or worse, burn the lease before media_assets densify starts).
+      if (options.mediaOnly === true) {
+        await assertOwned();
+        const media = await syncRecentMediaAssetsToSupabase(env, {
+          listRecords,
+          assertLease: assertOwned,
+          onUpsert,
+          mediaLimit: options.mediaLimit ?? 600,
+        });
+        result = {
+          ok: media?.ok === true,
+          status: media?.ok === true ? "completed" : "failed",
+          results: [],
+          production_requests: { skipped: true, reason: "media_only" },
+          media_assets: media,
+          studio_media_transfer_queue: { skipped: true, reason: "media_only" },
+          runner_record_projections: { skipped: true, reason: "media_only" },
+          auth_tables: { skipped: true, reason: "media_only" },
+        };
+      } else {
       const profiles = (await listContentProfileRecords(env))
         .filter((row) => Boolean(f(row, "Active")))
         .sort((a, b) => String(a.id).localeCompare(String(b.id)));
@@ -1970,6 +1993,7 @@ export async function studioSyncSupabasePipelineReads(env, options = {}) {
           return mergePipelineOutputRecords(pack.open || [], pack.siblings || []);
         },
       });
+      }
     } catch (error) {
       result = { ok: false, status: "failed", results: [],
         production_requests: null, error: error?.message || String(error) };
@@ -2093,6 +2117,7 @@ export async function postStudioSupabaseSync(request, env) {
   const queueLimit = payload?.queue_limit != null ? Number(payload.queue_limit) : undefined;
   const skipMediaAssetsBackfill = payload?.skip_media_assets_backfill === true;
   const skipTransferQueueBackfill = payload?.skip_transfer_queue_backfill === true;
+  const mediaOnly = payload?.media_only === true;
   const result = await studioSyncSupabasePipelineReads(env, {
     outputLimit,
     contentLimit,
@@ -2101,6 +2126,7 @@ export async function postStudioSupabaseSync(request, env) {
     queueLimit,
     skipMediaAssetsBackfill,
     skipTransferQueueBackfill,
+    mediaOnly,
   });
   studioMarkMappedListDirty();
   return respond(request, env, {

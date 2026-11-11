@@ -1,5 +1,5 @@
 name: Densify Studio Assets Media
-# One-shot POST /api/ops/supabase/sync with media_limit for Asset Manager densify.
+# One-shot POST /api/ops/supabase/sync with media_only + media_limit for Asset Manager densify.
 # Requires an explicit Trigger line in deploy/densify-studio-assets-media.txt.
 on:
   push:
@@ -34,7 +34,7 @@ jobs:
           test "$GITHUB_REF" = "refs/heads/main"
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
-          if ! grep -q 'Trigger densify STUDIO_ASSETS media_limit=600 now' deploy/densify-studio-assets-media.txt; then
+          if ! grep -q 'Trigger densify STUDIO_ASSETS media_only media_limit=600 now' deploy/densify-studio-assets-media.txt; then
             echo "assets_densify_skipped=NO_TRIGGER"
             exit 0
           fi
@@ -69,12 +69,8 @@ jobs:
                   "Content-Type":"application/json"
                 },
                 body: JSON.stringify({
-                  output_limit: 100,
-                  content_limit: 50,
-                  idea_limit: 100,
-                  media_limit: 600,
-                  queue_limit: 50,
-                  skip_transfer_queue_backfill: true
+                  media_only: true,
+                  media_limit: 600
                 })
               });
               const response = await env.STUDIO_API.fetch(internal);
@@ -101,27 +97,31 @@ jobs:
           READY=0
           for i in $(seq 1 90); do
             CODE=$(curl -sS --max-time 45 -o /tmp/health.json -w '%{http_code}' "$URL?mode=health" || true)
-            if [[ "$CODE" == "200" ]] && jq -e '.ok==true and ((.version|tostring|contains("817-assets-densify-oneshot")) or (.studio_supabase_assets_densify_oneshot_v1==true))' /tmp/health.json >/dev/null 2>&1; then
+            if [[ "$CODE" == "200" ]] && jq -e '.ok==true and ((.version|tostring|contains("818-assets-densify-media-only")) or (.studio_supabase_assets_densify_media_only_v1==true))' /tmp/health.json >/dev/null 2>&1; then
               READY=1
               break
             fi
-            echo "waiting for Worker 0.10.817 densify oneshot (try $i code=$CODE version=$(jq -r '.version // empty' /tmp/health.json 2>/dev/null || true))"
+            echo "waiting for Worker 0.10.818 densify media-only (try $i code=$CODE version=$(jq -r '.version // empty' /tmp/health.json 2>/dev/null || true))"
             sleep 8
           done
           test "$READY" = "1"
           echo "worker_ready=$(jq -r '.version' /tmp/health.json)"
           SYNC_OK=0
-          for i in $(seq 1 6); do
+          for i in $(seq 1 8); do
             CODE=$(curl -sS --max-time 240 -o /tmp/sync.json -w '%{http_code}' "$URL?mode=sync" || true)
             echo "sync_http_attempt_$i=$CODE"
-            if [[ "$CODE" == "200" ]] && jq -e '.ok==true' /tmp/sync.json >/dev/null 2>&1; then
+            # Success is media densify, not a full profile pipeline green.
+            if [[ "$CODE" == "200" ]] && jq -e '((.ok==true) or (.sync.media_assets.ok==true)) and ((.sync.media_assets.media_assets // 0) >= 100)' /tmp/sync.json >/dev/null 2>&1; then
               SYNC_OK=1
               break
             fi
-            # Lease contention with half-hour cron: brief backoff then retry.
+            echo "sync_summary=$(jq -c '{ok, status:(.sync.status // null), media:(.sync.media_assets // null), error:(.sync.error // null)}' /tmp/sync.json 2>/dev/null || true)"
             sleep 20
           done
+          if [[ "$SYNC_OK" != "1" ]]; then
+            echo "sync_body=$(jq -c '{ok, sync:{status:(.sync.status // null), media_assets:(.sync.media_assets // null), error:(.sync.error // null)}}' /tmp/sync.json 2>/dev/null || true)"
+          fi
           test "$SYNC_OK" = "1"
           echo "assets_media_densify_sync=PASS"
-          echo "media_assets=$(jq -c '.media_assets // .stamp.media_assets // {}' /tmp/sync.json)"
+          echo "media_assets=$(jq -c '.sync.media_assets // {}' /tmp/sync.json)"
           curl -sS -X DELETE "$API_ROOT/workers/scripts/$VERIFY_BRIDGE" -H "$AUTH" >/dev/null || true
