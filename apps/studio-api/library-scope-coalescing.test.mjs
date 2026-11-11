@@ -23,9 +23,11 @@ test("Library resolves profile scope once and uses same resolution in response f
 
 test("Library coalesces only identical authoritative Airtable requests", () => {
   assert.match(list, /const pageOptions = \{/);
-  assert.match(list, /"library:page:" \+ JSON\.stringify\(pageOptions\), 8000/);
+  assert.match(list, /"library:page:" \+ JSON\.stringify\(\{/);
+  assert.match(list, /assets_read_source: studioAssetsReadSource\(env\)/);
   assert.match(list, /"library:profiles", 15000/);
   assert.match(list, /listRecordsPage\(env, env\.AIRTABLE_MEDIA_TABLE_ID, pageOptions\)/);
+  assert.match(list, /listSupabaseAssetLibraryRecords/);
   assert.match(list, /requestedIds\.length\s*\?\s*libraryRecordIdsFilterFormula\(requestedIds\)/);
   assert.match(list, /scopeFormula/);
 });
