@@ -2088,7 +2088,20 @@ export async function postStudioSupabaseSync(request, env) {
   try { payload = await request.json(); } catch { payload = {}; }
   const outputLimit = Number(payload?.output_limit || 500) || 500;
   const contentLimit = Number(payload?.content_limit || 250) || 250;
-  const result = await studioSyncSupabasePipelineReads(env, { outputLimit, contentLimit });
+  const ideaLimit = payload?.idea_limit != null ? Number(payload.idea_limit) : undefined;
+  const mediaLimit = payload?.media_limit != null ? Number(payload.media_limit) : undefined;
+  const queueLimit = payload?.queue_limit != null ? Number(payload.queue_limit) : undefined;
+  const skipMediaAssetsBackfill = payload?.skip_media_assets_backfill === true;
+  const skipTransferQueueBackfill = payload?.skip_transfer_queue_backfill === true;
+  const result = await studioSyncSupabasePipelineReads(env, {
+    outputLimit,
+    contentLimit,
+    ideaLimit,
+    mediaLimit,
+    queueLimit,
+    skipMediaAssetsBackfill,
+    skipTransferQueueBackfill,
+  });
   studioMarkMappedListDirty();
   return respond(request, env, {
     ok: result?.ok === true,

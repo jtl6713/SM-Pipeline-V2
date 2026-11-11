@@ -1,5 +1,5 @@
-2026-11-11: After Worker 0.10.816-assets-densify-catchup (or 0.10.815-supabase-assets-reads)
-is live and media backfill has densified Content_Profile / Classification_Status /
+2026-11-11: After Worker 0.10.817-assets-densify-oneshot (or later) is live and
+media backfill has densified Content_Profile / Classification_Status /
 Manual_Classification_* / search fields into media_assets.metadata across the
 library catalog (not only the newest 50), push a follow-up line on this marker
 to run workflow "Enable Studio Assets Supabase Reads". That puts
@@ -7,8 +7,8 @@ STUDIO_ASSETS_READ_SOURCE=supabase (secret_text) without changing
 HOME/CONTENT/FACTORY/MUSIC/AUTH/WRITE secrets. GET /api/library then reads
 Supabase with Airtable fallback. Published library and Asset Manager writes
 stay on Airtable. Roll back by setting STUDIO_ASSETS_READ_SOURCE=airtable.
-Do not trigger until densify is confirmed on live media_assets rows.
-Phase 7 is not started.
+Do not trigger until densify is confirmed on live media_assets rows
+(oneshot via deploy/densify-studio-assets-media.txt). Phase 7 is not started.
 
 2026-11-11T14:35:00Z: Accidental enable on marker edit before full densify.
 Rollback STUDIO_ASSETS_READ_SOURCE=airtable now.

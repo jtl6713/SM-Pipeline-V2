@@ -776,12 +776,13 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.816-assets-densify-catchup/);
+  assert.match(worker, /0\.10\.817-assets-densify-oneshot/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
   assert.match(worker, /studio_supabase_assets_reads_v1: true/);
   assert.match(worker, /studio_supabase_assets_densify_catchup_v1: true/);
+  assert.match(worker, /studio_supabase_assets_densify_oneshot_v1: true/);
   assert.match(worker, /studio_auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(worker, /studio_assets_read_source: studioAssetsReadSource\(env\)/);
   assert.match(worker, /phase6_writes: "airtable_sor_write_through"/);
@@ -823,7 +824,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_supabase_music_read_routes: STUDIO_SUPABASE_MUSIC_READ_ROUTES/);
   const release = /version: "0\.10\.(\d+)-[^"]+"/.exec(worker);
   assert.ok(release, "Worker /health must identify a versioned release");
-  assert.ok(Number(release[1]) >= 816, "Assets densify catch-up cannot regress behind Worker 0.10.816");
+  assert.ok(Number(release[1]) >= 817, "Assets densify oneshot cannot regress behind Worker 0.10.817");
   assert.match(
     await readFile(path.join(here, "worker-functions-03.mjs"), "utf8"),
     /auth_tables: result\?\.auth_tables/,
@@ -841,6 +842,9 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(pipelineFns, /home_read_source: studioHomeReadSource\(env\)/);
   assert.match(pipelineFns, /music_read_source: studioMusicReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
+  assert.match(pipelineFns, /payload\?\.media_limit/);
+  assert.match(pipelineFns, /skipMediaAssetsBackfill/);
+  assert.match(pipelineFns, /mediaLimit,/);
   const factoryFns = await readFile(path.join(here, "worker-functions-04.mjs"), "utf8");
   const queueStart = factoryFns.indexOf("export async function getStudioOperationsQueue");
   const queueEnd = factoryFns.indexOf("export async function getFactoryDesk");
@@ -869,7 +873,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.816-assets-densify-catchup/);
+  assert.match(worker, /0\.10\.817-assets-densify-oneshot/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
@@ -1638,8 +1642,56 @@ test("mediaAssetBackfillRow fills NOT NULL booleans so homogenize cannot null th
   assert.equal(row.do_not_use, false);
   assert.equal(row.studio_favorite, false);
   assert.equal(row.google_drive_file_id, "drive-defaults-1");
-  assert.deepEqual(row.metadata, { added_at: "2026-11-10T21:33:41.000Z" });
+  assert.equal(row.metadata.added_at, "2026-11-10T21:33:41.000Z");
+  assert.equal(row.metadata.classification_status, null);
+  assert.equal(row.metadata.content_profile_airtable_id, null);
+  assert.equal(row.metadata.manual_classification_json, null);
+  assert.equal(row.metadata.search_keywords, null);
   assert.equal(mediaAssetBackfillRow({ id: "recX", fields: { Active: true } }), null);
+});
+
+test("mediaAssetBackfillRow always stamps Asset Manager densify keys when Airtable omits blanks", () => {
+  const row = mediaAssetBackfillRow({
+    id: "recMediaDensify1",
+    fields: {
+      "Asset Name": "Older clip",
+      Active: true,
+      Classification_Status: "Classified",
+      Content_Profile: ["recProfile1"],
+      Search_Keywords: "river bridge",
+    },
+  });
+  assert.equal(row.metadata.classification_status, "Classified");
+  assert.equal(row.metadata.content_profile_airtable_id, "recProfile1");
+  assert.equal(row.metadata.search_keywords, "river bridge");
+  assert.equal(row.metadata.manual_classification_json, null);
+  assert.equal(row.metadata.manual_classification_audit, null);
+  assert.equal(row.metadata.location, null);
+  assert.equal(row.metadata.duration_seconds, null);
+  const blank = mediaAssetBackfillRow({
+    id: "recMediaDensify2",
+    fields: { "Asset Name": "Blank fields omitted", Active: true },
+  });
+  for (const key of [
+    "content_profile_airtable_id",
+    "classification_status",
+    "manual_classification_json",
+    "manual_classification_audit",
+    "search_keywords",
+    "ai_tags",
+    "location",
+    "topic",
+    "subtopic",
+    "shot_type",
+    "time_of_day",
+    "weather",
+    "visible_subjects",
+    "duration_seconds",
+    "intake_date",
+  ]) {
+    assert.ok(key in blank.metadata, key);
+    assert.equal(blank.metadata[key], null);
+  }
 });
 
 test("phase 6 media backfill POST bodies share identical keys across sparse rows", async () => {
@@ -1687,7 +1739,10 @@ test("phase 6 media backfill POST bodies share identical keys across sparse rows
     assert.equal(posts[0][0].studio_favorite, false);
     assert.equal(posts[0][1].google_drive_file_id, "drive-sparse-2");
     assert.equal(posts[0][0].google_drive_file_id, null);
-    assert.deepEqual(posts[0][1].metadata, {});
+    assert.equal(posts[0][1].metadata.classification_status, null);
+    assert.equal(posts[0][1].metadata.content_profile_airtable_id, null);
+    assert.equal(posts[0][0].metadata.classification_status, null);
+    assert.equal(posts[0][0].metadata.rights_status, "Cleared");
   } finally {
     globalThis.fetch = originalFetch;
   }
