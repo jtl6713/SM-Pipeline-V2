@@ -1413,11 +1413,39 @@ export async function listSupabaseFactoryDeskPack(env, { outputLimit = 800, requ
   };
 }
 
+/**
+ * PostgREST rejects batch POST bodies when objects omit different keys
+ * (PGRST102 "All object keys must match"). Media backfill and full-record
+ * marker densify naturally produce sparse rows; pad missing keys with null so
+ * the half-hour sync can finish completed+ok instead of partial.
+ */
+export function homogenizeUpsertRows(rows) {
+  if (!Array.isArray(rows) || rows.length <= 1) return rows || [];
+  const keys = [];
+  const seen = new Set();
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    for (const key of Object.keys(row)) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+      keys.push(key);
+    }
+  }
+  if (!keys.length) return rows;
+  return rows.map((row) => {
+    const out = {};
+    for (const key of keys) {
+      out[key] = row && Object.prototype.hasOwnProperty.call(row, key) ? row[key] : null;
+    }
+    return out;
+  });
+}
+
 function upsertChunk(env, table, rows) {
   if (!rows.length) return Promise.resolve();
   return supabaseRest(env, `${table}?on_conflict=airtable_record_id`, {
     method: "POST",
-    body: rows,
+    body: homogenizeUpsertRows(rows),
     headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
   });
 }

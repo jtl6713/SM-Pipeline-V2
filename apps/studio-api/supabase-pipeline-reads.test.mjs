@@ -47,6 +47,7 @@ import {
   purgeOrphanDuplicateOutputNumbers,
   collapseSupersededSiblingOutputs,
   stripDeletedDuplicateOutputRecords,
+  homogenizeUpsertRows,
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
   STUDIO_SUPABASE_MUSIC_READ_ROUTES,
@@ -722,7 +723,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.806-supabase-music-reads/);
+  assert.match(worker, /0\.10\.807-supabase-upsert-key-align/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /phase6_writes: "airtable_sor_write_through"/);
   assert.match(worker, /phase6_write_tables: \["production_requests", "media_assets", "studio_media_transfer_queue"\]/);
@@ -763,7 +764,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_supabase_music_read_routes: STUDIO_SUPABASE_MUSIC_READ_ROUTES/);
   const release = /version: "0\.10\.(\d+)-[^"]+"/.exec(worker);
   assert.ok(release, "Worker /health must identify a versioned release");
-  assert.ok(Number(release[1]) >= 806, "Music library reads cannot regress behind Worker 0.10.806");
+  assert.ok(Number(release[1]) >= 807, "Upsert key align cannot regress behind Worker 0.10.807");
   const pipelineFns = await readFile(path.join(here, "worker-functions-03.mjs"), "utf8");
   assert.match(pipelineFns, /studioPipelineReadSource\(env\) === "supabase"/);
   assert.match(pipelineFns, /studioContentReadSource\(env\) === "supabase"/);
@@ -1465,6 +1466,65 @@ test("phase 5 remainder marker backfill stamps full-record projections for unmar
     assert.deepEqual(outputPost.body[0].selected_assets, { clips: [1] });
     const contentPost = posts.find((row) => row.table === "content_items");
     assert.equal(contentPost.body[0].extras._runner_record_projection, RUNNER_RECORD_PROJECTION);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("homogenizeUpsertRows pads sparse PostgREST batch keys with null", () => {
+  const rows = homogenizeUpsertRows([
+    { airtable_record_id: "recA", asset_name: "A", metadata: { added_at: "1" } },
+    { airtable_record_id: "recB", asset_name: "B", google_drive_file_id: "drive-b" },
+  ]);
+  assert.deepEqual(Object.keys(rows[0]), Object.keys(rows[1]));
+  assert.equal(rows[0].google_drive_file_id, null);
+  assert.equal(rows[1].metadata, null);
+  assert.deepEqual(rows[0].metadata, { added_at: "1" });
+  assert.equal(rows[1].google_drive_file_id, "drive-b");
+});
+
+test("phase 6 media backfill POST bodies share identical keys across sparse rows", async () => {
+  const posts = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if ((init?.method || "GET") === "POST" && String(url).includes("media_assets")) {
+      posts.push(JSON.parse(init.body));
+    }
+    return { ok: true, async text() { return ""; } };
+  };
+  try {
+    const result = await syncRecentMediaAssetsToSupabase({
+      ...supabaseEnv,
+      AIRTABLE_MEDIA_TABLE_ID: "tblMedia",
+    }, {
+      mediaLimit: 50,
+      listRecords: async () => ([
+        {
+          id: "recMediaSparse1",
+          fields: {
+            "Asset Name": "With metadata",
+            Active: true,
+            Added_At: "2026-11-10T00:00:00.000Z",
+            Rights_Status: "Cleared",
+          },
+        },
+        {
+          id: "recMediaSparse2",
+          fields: {
+            "Asset Name": "With drive id",
+            Active: true,
+            "Google Drive File ID": "drive-sparse-2",
+            File_Size_Bytes: 2048,
+          },
+        },
+      ]),
+    });
+    assert.equal(result.ok, true);
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].length, 2);
+    assert.deepEqual(Object.keys(posts[0][0]).sort(), Object.keys(posts[0][1]).sort());
+    assert.equal(posts[0][0].google_drive_file_id, null);
+    assert.equal(posts[0][1].metadata, null);
   } finally {
     globalThis.fetch = originalFetch;
   }
