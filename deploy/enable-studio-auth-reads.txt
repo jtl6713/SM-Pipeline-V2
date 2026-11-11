@@ -6,3 +6,5 @@ puts STUDIO_AUTH_READ_SOURCE=supabase (secret_text) without changing
 HOME/CONTENT/FACTORY/MUSIC/WRITE secrets. resolveAuthorization then reads the
 mirrored auth tables. Roll back by setting STUDIO_AUTH_READ_SOURCE=airtable.
 Do not trigger until auth-prove PASSes. Phase 7 is not started.
+
+2026-11-11T12:37:15Z: Worker 0.10.813-auth-prove live; migration gate auth_prove.ok=true (core_match=true brand_acceptable=true) for joseph.t.logan@gmail.com; studio_auth_read_source still airtable. Trigger STUDIO_AUTH_READ_SOURCE=supabase now.
