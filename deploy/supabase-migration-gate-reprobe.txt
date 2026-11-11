@@ -24,3 +24,6 @@ reprobe_812_auth_reads=2026-11-11T12:07:31Z
 
 # Reprobe after 0.10.813-auth-prove deploy (prior gate raced at 812)
 reprobe_813_auth_prove=2026-11-11T12:34:00Z
+
+# Reprobe after STUDIO_AUTH_READ_SOURCE=supabase enable
+reprobe_813_auth_enabled=2026-11-11T12:46:00Z

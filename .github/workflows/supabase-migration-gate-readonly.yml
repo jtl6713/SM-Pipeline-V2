@@ -406,6 +406,11 @@ jobs:
           print(f"auth_prove.brand_acceptable={auth_prove.get('brand_acceptable')!r}")
           print(f"auth_prove.skipped={auth_prove.get('skipped')!r}")
           print(f"auth_prove.email={auth_prove.get('email')!r}")
+          auth_read_source = (
+              auth_prove.get("studio_auth_read_source")
+              or auth_prove.get("auth_read_source")
+              or health.get("studio_auth_read_source")
+          )
           if auth_prove.get("skipped"):
               print("GATE[SKIP] auth_prove — waiting for Worker 0.10.813-auth-prove")
           else:
@@ -414,10 +419,16 @@ jobs:
                   auth_prove.get("ok") is True,
                   f"core_match={auth_prove.get('core_match')!r} brand_acceptable={auth_prove.get('brand_acceptable')!r}",
               )
+              # After enable-studio-auth-reads Trigger, production must stay on supabase.
               check(
-                  "auth_prove keeps studio_auth_read_source=airtable until enable",
-                  (auth_prove.get("studio_auth_read_source") or auth_prove.get("auth_read_source") or health.get("studio_auth_read_source")) == "airtable",
-                  f"got {(auth_prove.get('studio_auth_read_source') or auth_prove.get('auth_read_source') or health.get('studio_auth_read_source'))!r}",
+                  "studio_auth_read_source=supabase",
+                  auth_read_source == "supabase",
+                  f"got {auth_read_source!r}",
+              )
+              check(
+                  "health.studio_auth_read_source=supabase",
+                  health.get("studio_auth_read_source") == "supabase",
+                  f"got {health.get('studio_auth_read_source')!r}",
               )
 
           sample = {
