@@ -1030,3 +1030,5 @@ Deploy 2026-11-11 merged PR #1812: bounded recovery of orphaned prepared video s
 2026-11-11T13:01:46Z factory-overlap-empty-activity Worker 0.10.814-factory-overlap-activity
 
 Deploy 2026-11-11 Worker 0.10.815-supabase-assets-reads: Dormant STUDIO_ASSETS_READ_SOURCE for GET /api/library. Densify Content_Profile / Classification_* / search fields into media_assets.metadata on write-through/backfill. Binding contract allowlists the optional secret_text. Enable via deploy/enable-studio-assets-reads.txt after densify verify. Music/auth/write flags unchanged. Phase 7 not started.
+
+Deploy 2026-11-11 Worker 0.10.816-assets-densify-catchup: Temporary media backfill mediaLimit 600 on :00 and :30 so Asset Manager profile/classification/search densify covers the full media_assets catalog (newest-50 shrink left older rows undensified). Enable STUDIO_ASSETS_READ_SOURCE still gated. Phase 7 not started.

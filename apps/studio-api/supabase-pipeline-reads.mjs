@@ -2149,7 +2149,7 @@ export async function syncRecentMediaAssetsToSupabase(env, deps = {}) {
   if (!mediaTableId) {
     return { skipped: true, reason: "media_table_not_configured", ok: true };
   }
-  const mediaLimit = Math.max(20, Math.min(500, Number(deps.mediaLimit) || 200));
+  const mediaLimit = Math.max(20, Math.min(800, Number(deps.mediaLimit) || 200));
   const filterFormula = deps.mediaFilterFormula || null;
   const records = await listRecords(env, mediaTableId, {
     limit: mediaLimit,

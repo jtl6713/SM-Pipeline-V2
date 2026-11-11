@@ -1340,7 +1340,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.815-supabase-assets-reads",
+          version: "0.10.816-assets-densify-catchup",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -1371,6 +1371,7 @@ export default {
           studio_supabase_auth_reads_v1: true,
           studio_supabase_auth_prove_v1: true,
           studio_supabase_assets_reads_v1: true,
+          studio_supabase_assets_densify_catchup_v1: true,
           studio_supabase_sync_shrink_v1: true,
           studio_write_source: studioWriteSource(env),
           studio_phase5_writes: studioPhase5WritesMode(env),
@@ -4868,14 +4869,17 @@ export default {
         // completed+ok and Phase 5/6 write-through covers live mutations.
         // Keep open Pipeline pack + newest-N content/outputs; do not flip auth.
         const deferPhase6Catchup = Number(cadence.minute) === 30;
+        // Temporary Asset Manager densify catch-up: newest-50 never reaches older
+        // library rows. Raise mediaLimit and keep media backfill on :30 until
+        // classification/profile metadata covers the catalog, then shrink again.
         await studioSyncSupabasePipelineReads(env, {
           outputLimit: 400,
           contentLimit: 200,
           ideaLimit: 600,
-          mediaLimit: 50,
+          mediaLimit: 600,
           queueLimit: 50,
           markerBackfillLimit: 10,
-          skipMediaAssetsBackfill: deferPhase6Catchup,
+          skipMediaAssetsBackfill: false,
           skipTransferQueueBackfill: deferPhase6Catchup,
         });
       } catch (error) {

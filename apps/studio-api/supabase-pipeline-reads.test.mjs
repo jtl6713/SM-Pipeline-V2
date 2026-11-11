@@ -776,11 +776,12 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.815-supabase-assets-reads/);
+  assert.match(worker, /0\.10\.816-assets-densify-catchup/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
   assert.match(worker, /studio_supabase_assets_reads_v1: true/);
+  assert.match(worker, /studio_supabase_assets_densify_catchup_v1: true/);
   assert.match(worker, /studio_auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(worker, /studio_assets_read_source: studioAssetsReadSource\(env\)/);
   assert.match(worker, /phase6_writes: "airtable_sor_write_through"/);
@@ -822,7 +823,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_supabase_music_read_routes: STUDIO_SUPABASE_MUSIC_READ_ROUTES/);
   const release = /version: "0\.10\.(\d+)-[^"]+"/.exec(worker);
   assert.ok(release, "Worker /health must identify a versioned release");
-  assert.ok(Number(release[1]) >= 815, "Assets reads cannot regress behind Worker 0.10.815");
+  assert.ok(Number(release[1]) >= 816, "Assets densify catch-up cannot regress behind Worker 0.10.816");
   assert.match(
     await readFile(path.join(here, "worker-functions-03.mjs"), "utf8"),
     /auth_tables: result\?\.auth_tables/,
@@ -868,15 +869,15 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.815-supabase-assets-reads/);
-  assert.match(worker, /skipMediaAssetsBackfill: deferPhase6Catchup/);
+  assert.match(worker, /0\.10\.816-assets-densify-catchup/);
+  assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
   assert.match(pipelineFns, /getStudioSupabaseAuthProve/);
   assert.match(pipelineFns, /proveStudioAuthorizationSources/);
   assert.match(worker, /skipTransferQueueBackfill: deferPhase6Catchup/);
   assert.match(worker, /ideaLimit: 600/);
-  assert.match(worker, /mediaLimit: 50/);
+  assert.match(worker, /mediaLimit: 600/);
   assert.match(worker, /queueLimit: 50/);
   assert.match(worker, /markerBackfillLimit: 10/);
   assert.match(worker, /mediaLimit: options\.mediaLimit/);
