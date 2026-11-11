@@ -1020,3 +1020,5 @@ Deploy 2026-11-10 Worker 0.10.808-supabase-media-not-null: Media half-hour backf
 Deploy 2026-11-10 Worker 0.10.809-supabase-auth-mirror: Best-effort half-hour Airtable→Supabase mirror for Organizations, Brands, Studio Users, and Studio Memberships (plus auth-table write-through). resolveAuthorization stays on Airtable+cache. Apply docs/supabase-migration/phase4/001_auth_mirror_extras.sql for densified keys. Auth mirror soft-fails must not reopen sync partial. Phase 7 not started.
 
 Deploy 2026-11-10 Worker 0.10.810-auth-mirror-stamp: Persist auth_tables on the half-hour sync stamp so gate/ops can see Organizations/Brands/Users/Memberships mirror results. resolveAuthorization still Airtable+cache. Phase 7 not started.
+
+Deploy 2026-11-11 Worker 0.10.811-sync-shrink-v1: Shrink half-hour Airtable catch-up after consecutive healthy syncs — cron ideaLimit 600, media/queue 50, markerBackfillLimit 10; defer media+queue catch-up on :30 (write-through covers live). Open pack and resolveAuthorization unchanged. Phase 7 not started.
