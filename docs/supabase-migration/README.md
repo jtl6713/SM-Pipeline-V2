@@ -26,7 +26,7 @@ The last sync in that gate finished at 12:03 AM CT with `status=completed`, `ok=
 - Creates of Platform Outputs and Content Items (Airtable mints `rec` ids), then mirror to Supabase.
 - Schedule/approve MAE verify still re-reads Airtable under the reservation lock even after the write SoR flip; those paths require a successful Airtable legacy export.
 - Production Requests, media metadata, and transfer-queue writes (Phase 6 Airtable-first write-through).
-- Pipeline-runner formula and view selectors. Runner reads of marked Output/Content rows are enabled via `deploy/enable-runner-supabase-reads.txt`. Older unmarked rows stay on Airtable.
+- Pipeline-runner Airtable views and `FIND`/`ARRAYJOIN`/`OR` formula selectors. Allowlisted Output/Content formulas run on Supabase when runner read flags are enabled (`deploy/enable-runner-supabase-reads.txt`). Unmarked rows still fall back to Airtable.
 - The half-hour cron that copies Airtable into Supabase. Supabase is the replica, not the source of that job.
 - `resolveAuthorization` still uses Airtable, but Worker `0.10.803-auth-membership-user-id` short-TTL caches per email and uses targeted Users/Memberships/Brands filters instead of full-table lists (biggest continuous Airtable tax cut while Supabase auth sync is unfinished). Membership FIND matches Studio Users `User_ID` (linked primary), not record ids.
 - Music library list until `STUDIO_MUSIC_READ_SOURCE=supabase` (Worker `0.10.806` densifies library extras into `media_assets.metadata`; enable is separate).
@@ -43,7 +43,7 @@ The last sync in that gate finished at 12:03 AM CT with `status=completed`, `ok=
 | 3 Pipeline reads | Live as B1 | [phase3](./phase3/README.md) |
 | 4 Content, Factory, Ops, Home list reads | Live as B2, B3, and the Home flag. Authorization reads were not moved | [phase4](./phase4/README.md) |
 | 5 Output and Content Item write-through | Live. Write SoR flip is Worker `0.10.801` + `deploy/enable-studio-write-sor.txt` | [phase5](./phase5/README.md) |
-| 5 remainder | Runner reads enabled via `deploy/enable-runner-supabase-reads.txt`. Write SoR flip via `deploy/enable-studio-write-sor.txt` after Worker `0.10.801-supabase-phase5-write-sor`. Creates still mint Airtable `rec` ids. Formula and view selectors stay on Airtable. Phase 7 is not started | This file |
+| 5 remainder | Runner reads enabled via `deploy/enable-runner-supabase-reads.txt`. Write SoR flip via `deploy/enable-studio-write-sor.txt` after Worker `0.10.801-supabase-phase5-write-sor`. Creates still mint Airtable `rec` ids. Allowlisted formulas on Supabase in runner `2026-11-10-supabase-runner-formula-fallbacks`; views and FIND/ARRAYJOIN still Airtable. Phase 7 is not started | This file |
 | 6 Production Requests, media metadata, transfer queue, and the cron/autonomous writers | Production Request, media metadata, and transfer-queue write-through are confirmed live. Scheduled runner writes of those tables mirror through the runner Airtable client in `2026-11-09-supabase-phase6-cron-writers`. Half-hour media and queue backfill ships in Worker `0.10.799-supabase-phase6-media-queue-backfill`. `studio_media_transfer_targets` are not written | [phase6](./phase6/README.md), [handoff](../handoffs/supabase-phase6-handoff.md) |
 | 7 Retire Airtable | Not started. Do not delete or stop Airtable records in Phase 6 | This file |
 

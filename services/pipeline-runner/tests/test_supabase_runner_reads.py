@@ -78,15 +78,19 @@ def test_unmarked_or_empty_list_stays_on_airtable(monkeypatch):
 
 
 def test_formula_and_content_flag_stay_independent(monkeypatch):
-    seen = {"airtable": 0, "supabase": 0}
+    seen = {"airtable": 0, "supabase": []}
 
     def fake_get(url, *, headers, params, timeout):
         seen["airtable"] += 1
         return Response({"records": [{"id": "recContent1", "fields": {"Content_Title": "Pier"}}]})
 
     def fake_request(method, url, *, headers, json, timeout):
-        seen["supabase"] += 1
-        return Response([])
+        seen["supabase"].append(url)
+        return Response([{
+            "airtable_record_id": "recOutputIg",
+            "platform": "Instagram",
+            "error_messages": {"_runner_record_projection": "v1"},
+        }])
 
     monkeypatch.setattr(requests, "get", fake_get)
     monkeypatch.setattr(requests, "request", fake_request)
@@ -98,10 +102,74 @@ def test_formula_and_content_flag_stay_independent(monkeypatch):
         PLATFORM_OUTPUTS_TABLE, formula='{Platform}="Instagram"', max_records=2,
     )
     content_rows = client.list_records(CONTENT_ITEMS_TABLE, max_records=2)
-    assert formula_rows[0]["id"] == "recContent1"
+    assert formula_rows[0]["id"] == "recOutputIg"
     assert content_rows[0]["id"] == "recContent1"
-    assert seen["airtable"] == 2
-    assert seen["supabase"] == 0
+    assert seen["airtable"] == 1
+    assert len(seen["supabase"]) == 1
+    assert "platform.eq.Instagram" in seen["supabase"][0]
+
+
+def test_unsupported_formula_and_views_stay_on_airtable(monkeypatch):
+    airtable = []
+
+    def fake_get(url, *, headers, params, timeout):
+        airtable.append(params.get("filterByFormula") or params.get("view"))
+        return Response({"records": [{"id": "recOutput1", "fields": {"Platform": "TikTok"}}]})
+
+    def fake_request(*_args, **_kwargs):
+        raise AssertionError("supabase read")
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(requests, "request", fake_request)
+    client = _client(studio_runner_output_read_source="supabase")
+    find_rows = client.list_records(
+        PLATFORM_OUTPUTS_TABLE,
+        formula='FIND("recParent", ARRAYJOIN({Content_Item}))',
+        max_records=2,
+    )
+    view_rows = client.list_records(PLATFORM_OUTPUTS_TABLE, view="Ready Queue", max_records=2)
+    assert find_rows[0]["fields"]["Platform"] == "TikTok"
+    assert view_rows[0]["fields"]["Platform"] == "TikTok"
+    assert len(airtable) == 2
+
+
+def test_r4_style_formula_reads_supabase(monkeypatch):
+    seen = []
+
+    def fake_get(*_args, **_kwargs):
+        raise AssertionError("airtable list")
+
+    def fake_request(method, url, *, headers, json, timeout):
+        seen.append(url)
+        return Response([{
+            "airtable_record_id": "recReady1",
+            "render_status": "Ready for Render",
+            "final_file_url": None,
+            "remotion_job_id": None,
+            "test_run_id": None,
+            "error_messages": {
+                "_runner_record_projection": "v1",
+                "Composition_ID": "Main",
+                "Output_Filename": "out.mp4",
+                "Render_Clip_List_JSON": "[]",
+                "Render_Total_Frames": 120,
+            },
+        }])
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(requests, "request", fake_request)
+    formula = (
+        'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",'
+        '{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",'
+        '{Render_Total_Frames}>0,{Final_File_URL}="",{Remotion_Job_ID}=""))'
+    )
+    rows = _client(studio_runner_output_read_source="supabase").list_records(
+        PLATFORM_OUTPUTS_TABLE, formula=formula, max_records=5,
+    )
+    assert rows[0]["id"] == "recReady1"
+    assert "render_status.eq.Ready" in seen[0]
+    assert "error_messages->>Composition_ID" in seen[0]
+    assert "Render_Total_Frames.gt.0" in seen[0]
 
 
 def test_get_record_uses_a_marked_projection_and_keeps_links(monkeypatch):

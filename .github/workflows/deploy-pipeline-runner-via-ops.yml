@@ -51,6 +51,7 @@ jobs:
             services/pipeline-runner/tests/test_fbs3_eligibility.py \
             services/pipeline-runner/tests/test_supabase_pipeline_writes.py \
             services/pipeline-runner/tests/test_supabase_runner_reads.py \
+            services/pipeline-runner/tests/test_supabase_formula.py \
             services/pipeline-runner/tests/test_visual_watermark.py \
             services/pipeline-runner/tests/test_apc_cover_selection_qa1050.py \
             services/pipeline-runner/tests/test_ap1_igs_eligibility.py \
