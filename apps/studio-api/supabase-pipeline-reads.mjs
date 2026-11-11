@@ -1916,11 +1916,7 @@ export async function syncRecentMediaAssetsToSupabase(env, deps = {}) {
     fields: [...MEDIA_ASSET_SYNC_FIELDS],
     ...(filterFormula ? { filterFormula } : {}),
   });
-  const mediaRows = (records || []).map((record) => {
-    const body = mediaAssetWriteThroughRow(record);
-    if (!body.asset_name) return null;
-    return { airtable_record_id: record.id, ...body };
-  }).filter(Boolean);
+  const mediaRows = (records || []).map((record) => mediaAssetBackfillRow(record)).filter(Boolean);
   for (let i = 0; i < mediaRows.length; i += 200) {
     await deps.assertLease?.();
     const started = Date.now();
@@ -2475,6 +2471,33 @@ function mediaAssetWriteThroughRow(record) {
   }
   if (Object.keys(meta).length) row.metadata = meta;
   return row;
+}
+
+/**
+ * Full media upsert body for half-hour backfill. Sparse write-through patches
+ * omit booleans; homogenizeUpsertRows would pad those as null and trip
+ * Postgres 23502 on NOT NULL do_not_use / studio_favorite / active. Always
+ * emit the same key set with schema-safe defaults.
+ */
+export function mediaAssetBackfillRow(record) {
+  const body = mediaAssetWriteThroughRow(record);
+  if (!body.asset_name) return null;
+  return {
+    airtable_record_id: record.id,
+    asset_name: body.asset_name,
+    media_class: body.media_class ?? null,
+    asset_role: body.asset_role ?? null,
+    asset_status: body.asset_status ?? null,
+    active: body.active ?? true,
+    do_not_use: body.do_not_use ?? false,
+    studio_favorite: body.studio_favorite ?? false,
+    google_drive_file_id: body.google_drive_file_id ?? null,
+    google_drive_url: body.google_drive_url ?? null,
+    mime_type: body.mime_type ?? null,
+    file_extension: body.file_extension ?? null,
+    file_size_bytes: body.file_size_bytes ?? null,
+    metadata: body.metadata ?? {},
+  };
 }
 
 async function mergeMediaAssetMetadata(env, recordId, patchMeta) {
