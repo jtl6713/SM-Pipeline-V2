@@ -4,13 +4,16 @@ name: Supabase Migration Gate Read-Only
 on:
   workflow_dispatch:
   schedule:
-    # Catch half-hour cron shortly after :00 / :30 UTC
-    # Reprobe after Worker 0.10.776-supabase-mirror-check production deploy.
+    # Catch half-hour cron shortly after :00 / :30 UTC.
+    # GitHub schedule delivery can lag or skip; Worker deploy pushes also
+    # retrigger this probe so sync health is not stuck waiting on cron alone.
     - cron: "5,35 * * * *"
   push:
     branches: [main]
     paths:
       - ".github/workflows/supabase-migration-gate-readonly.yml"
+      - "deploy/cloudflare-worker-production.txt"
+      - "deploy/supabase-migration-gate-reprobe.txt"
 permissions:
   contents: read
   actions: write
