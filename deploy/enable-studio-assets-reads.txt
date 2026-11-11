@@ -7,8 +7,11 @@ STUDIO_ASSETS_READ_SOURCE=supabase (secret_text) without changing
 HOME/CONTENT/FACTORY/MUSIC/AUTH/WRITE secrets. GET /api/library then reads
 Supabase with Airtable fallback. Published library and Asset Manager writes
 stay on Airtable. Roll back by setting STUDIO_ASSETS_READ_SOURCE=airtable.
-Do not trigger until densify is confirmed on live media_assets rows
-(oneshot via deploy/densify-studio-assets-media.txt media_only). Phase 7 is not started.
+Phase 7 is not started.
 
 2026-11-11T14:35:00Z: Accidental enable on marker edit before full densify.
-Rollback STUDIO_ASSETS_READ_SOURCE=airtable now.
+Rolled back STUDIO_ASSETS_READ_SOURCE to airtable (historical; do not re-run).
+
+2026-11-11T19:20:00Z: Worker 0.10.819-assets-densify-null-sanitize live; densify oneshot PASS
+via deploy/densify-studio-assets-media.txt (media_assets=600 densify keys on 600/613 rows).
+Trigger STUDIO_ASSETS_READ_SOURCE=supabase now.
