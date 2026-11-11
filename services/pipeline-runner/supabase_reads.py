@@ -2,8 +2,9 @@
 
 Airtable stays the default. Each table has its own flag, so a global
 STUDIO_READ_SOURCE value cannot turn both on. STUDIO_WRITE_SOURCE does not
-turn these reads on. A formula, a view, an unmapped sort, or an unmapped
-requested field stays on Airtable. A Supabase error falls back to Airtable.
+turn these reads on. Allowlisted formulas translate to PostgREST filters;
+views, FIND/ARRAYJOIN/OR, unmapped sorts, unmapped requested fields, unmarked
+rows (when none remain), and Supabase errors stay on Airtable.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from typing import Any
 from urllib.parse import quote
 
 from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
+from supabase_formula import attach_formula_filter, formula_to_postgrest_filter
 from supabase_pipeline import (
     CONTENT_PATCH_COLUMNS,
     OUTPUT_JSON_COLUMNS,
@@ -87,8 +89,14 @@ def try_list_supabase_records(
     """Airtable-shaped rows, or None when this call must use Airtable."""
     if runner_table_read_source(settings, table_id) != "supabase":
         return None
-    if formula or view:
+    # Views stay on Airtable. Allowlisted formulas become PostgREST filters.
+    if view:
         return None
+    formula_filter = None
+    if formula:
+        formula_filter = formula_to_postgrest_filter(table_id, formula)
+        if formula_filter is None:
+            return None
     columns = _columns_for(table_id)
     if not columns:
         return None
@@ -106,6 +114,7 @@ def try_list_supabase_records(
         f"{_supabase_table(table_id)}?select={quote(select, safe='(),*')}"
         f"&order={quote(order_column, safe='')}.{direction}&limit={limit}"
     )
+    path = attach_formula_filter(path, formula_filter)
     try:
         payload = _rest(settings or {}, path, "GET")
     except Exception as error:
@@ -118,14 +127,18 @@ def try_list_supabase_records(
         if not isinstance(row, dict):
             return None
         shaped = _record_from_row(row, table_id)
+        # Unmarked rows stay on Airtable. Skip them here; if none remain,
+        # fall back so densify/backfill gaps cannot hide work forever.
         if not shaped:
-            return None
+            continue
         if fields:
             shaped = {
                 "id": shaped["id"],
                 "fields": {key: value for key, value in shaped["fields"].items() if key in fields},
             }
         records.append(shaped)
+    if not records:
+        return None
     return records[:limit]
 
 
