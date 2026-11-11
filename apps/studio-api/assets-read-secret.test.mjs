@@ -35,10 +35,9 @@ test("Assets read flag install is main-only, secret_text, and does not retarget 
   assert.match(marker, /0\.10\.819-assets-densify-null-sanitize|0\.10\.818-assets-densify-media-only|0\.10\.817-assets-densify-oneshot|0\.10\.816-assets-densify-catchup|0\.10\.815-supabase-assets-reads/);
   assert.match(marker, /STUDIO_ASSETS_READ_SOURCE=supabase/);
   assert.match(marker, /media_assets\.metadata/);
-  assert.match(marker, /Do not trigger until densify is confirmed/);
-  assert.match(marker, /densify-studio-assets-media\.txt/);
-  assert.match(marker, /Rollback STUDIO_ASSETS_READ_SOURCE=airtable now/);
-  assert.doesNotMatch(marker, /Trigger STUDIO_ASSETS_READ_SOURCE=supabase now/);
+  assert.match(marker, /densify-studio-assets-media\.txt|densify oneshot PASS/);
+  assert.match(marker, /Trigger STUDIO_ASSETS_READ_SOURCE=supabase now/);
+  assert.doesNotMatch(marker, /Rollback STUDIO_ASSETS_READ_SOURCE=airtable now/);
 });
 
 test("Assets densify oneshot workflow waits for 819 then POSTs media_only densify", () => {
