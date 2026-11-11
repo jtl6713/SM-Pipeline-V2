@@ -7035,7 +7035,7 @@ function schedulePipelineListHeal(ctx, env, records) {
       const render = String(f(record, "Render_Status") || "");
       // A ready/waiting render without a Remotion job can be stranded when
       // its original producer dispatch was lost. Requeue the parent request;
-      // enqueueStudioProductionJob is deduplicated by request identity.
+      // Requeue at most once per parent request in this bounded sweep.
       // Never requeue native-photo routes, finished media, or active jobs.
       if (render === "Native Photo Route" || render === "Rendering") return false;
       return /^in production$/i.test(output)
