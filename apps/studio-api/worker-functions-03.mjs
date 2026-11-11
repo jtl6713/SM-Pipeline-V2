@@ -11,7 +11,12 @@ import { parseStoryFirstNotes, upsertStoryFirstNotes, storyFirstShotChecklist } 
 import { storyVideoQuote, requireStoryVideoPaidApproval, submitStoryVideo, readStoryVideo, downloadStoryVideo, storyVideoJobKey, storyVideoMediaKey, STORY_VIDEO_POLL_MIN_MS, buildStoryVideoProviderSettings, availableStoryVideoModels } from "./story-first-ai-video.mjs";
 import { storyVideoReferenceManifest, verifyStudioReferenceAsset, uploadStoryVideoReferences, deleteStudioElevenReferenceAssets } from "./story-first-ai-video-references.mjs";
 import { reconcileUnbilledChicagoVideoAttempt } from "./story-first-ai-video-unbilled-reconciliation.mjs";
-import { loadAuthorizedIdea, assertIdeaUnpromoted, assertIdeaNotApproved } from "./worker-functions-01.mjs";
+import {
+  loadAuthorizedIdea,
+  assertIdeaUnpromoted,
+  assertIdeaNotApproved,
+  proveStudioAuthorizationSources,
+} from "./worker-functions-01.mjs";
 import { serveMichiganV2CachedPreview } from "./michigan-review-preview-cache.mjs";
 import { evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { verifyFacebookStoryByMediaId } from "./facebook-story-remote-verification.mjs";
@@ -2045,6 +2050,30 @@ export async function getStudioSupabaseMirrorCheck(request, env) {
   return respond(request, env, result);
 }
 /*__STUDIO_WORKER_END:getStudioSupabaseMirrorCheck__*/
+
+export async function getStudioSupabaseAuthProve(request, env) {
+  // Route is tenant_admin-gated in worker.js before this runs. Compares Airtable
+  // vs Supabase loaders without flipping STUDIO_AUTH_READ_SOURCE.
+  const url = new URL(request.url);
+  const headerEmail = String(
+    request.headers.get("Cf-Access-Authenticated-User-Email") || "",
+  ).trim();
+  const email = String(url.searchParams.get("email") || headerEmail || "").trim().toLowerCase();
+  if (!email) throw new HttpError(400, "email query or Access identity is required");
+  const last = await readStudioSupabaseSyncLast(env);
+  const prove = await proveStudioAuthorizationSources(env, email, {
+    email: headerEmail || email,
+    source: "auth-prove",
+    jwt_present: true,
+  });
+  return respond(request, env, {
+    ...prove,
+    last_sync_auth_tables: last?.auth_tables || null,
+    last_sync_finished_at: last?.finished_at || null,
+    studio_auth_read_source: studioAuthReadSource(env),
+  });
+}
+/*__STUDIO_WORKER_END:getStudioSupabaseAuthProve__*/
 
 export async function postStudioSupabaseSync(request, env) {
   if (!studioSupabaseConfigured(env)) {

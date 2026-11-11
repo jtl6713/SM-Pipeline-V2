@@ -214,10 +214,32 @@ function authLinkIds(value) {
   }).filter(Boolean);
 }
 
+async function authRestSelect(rest, env, pathWithExtras, pathCore) {
+  try {
+    return await rest(env, pathWithExtras);
+  } catch (error) {
+    if (pathCore && authExtrasMissing(error)) {
+      return await rest(env, pathCore);
+    }
+    throw error;
+  }
+}
+
+function mapBrandAuthView(row) {
+  const extras = authExtrasBag(row?.extras);
+  return {
+    record_id: row.airtable_record_id,
+    brand_id: row.brand_key || extras.Brand_ID || null,
+    name: row.name || extras.Brand_Name || null,
+  };
+}
+
 /**
  * Dormant Supabase auth loader. Shape matches loadAuthorizationFromAirtable
  * (record_id values stay Airtable rec ids). Only used when
  * STUDIO_AUTH_READ_SOURCE=supabase. No silent Airtable fallback.
+ * Tolerates missing extras densify columns (phase4/001) by retrying core selects
+ * and falling back to organization-scoped brands when Allowed_Brands is absent.
  */
 export async function loadAuthorizationFromSupabase(env, email, identity, deps = {}) {
   const rolePermissions = deps.rolePermissions || {};
@@ -239,6 +261,7 @@ export async function loadAuthorizationFromSupabase(env, email, identity, deps =
     permissions: viewerPermissions,
     authorization_error: null,
     auth_cache: "miss",
+    auth_mirror_extras: null,
   };
 
   if (!studioSupabaseConfigured(env)) {
@@ -250,10 +273,13 @@ export async function loadAuthorizationFromSupabase(env, email, identity, deps =
     return base;
   }
 
-  const users = await rest(
+  const users = await authRestSelect(
+    rest,
     env,
     `studio_users?email=eq.${encodeURIComponent(normalizedEmail)}`
       + `&select=id,airtable_record_id,email,display_name,user_status,active,user_key,extras&limit=5`,
+    `studio_users?email=eq.${encodeURIComponent(normalizedEmail)}`
+      + `&select=id,airtable_record_id,email,display_name,user_status,active&limit=5`,
   );
   const userRow = (users || []).find((row) =>
     String(row?.email || "").trim().toLowerCase() === normalizedEmail
@@ -279,11 +305,16 @@ export async function loadAuthorizationFromSupabase(env, email, identity, deps =
     status: userStatus,
   };
 
-  const memberships = await rest(
+  const memberships = await authRestSelect(
+    rest,
     env,
     `studio_memberships?user_id=eq.${encodeURIComponent(userRow.id)}`
       + `&active=eq.true`
       + `&select=id,airtable_record_id,user_id,organization_id,role,active,membership_status,membership_key,is_default,extras`
+      + `&limit=25`,
+    `studio_memberships?user_id=eq.${encodeURIComponent(userRow.id)}`
+      + `&active=eq.true`
+      + `&select=id,airtable_record_id,user_id,organization_id,role,active,membership_status`
       + `&limit=25`,
   );
   const activeMemberships = (memberships || []).filter((row) => {
@@ -300,8 +331,7 @@ export async function loadAuthorizationFromSupabase(env, email, identity, deps =
     || activeMemberships.find((row) => authExtrasBag(row.extras).Is_Default === true)
     || activeMemberships[0];
   const membershipExtras = authExtrasBag(membershipRow.extras);
-  const organizationUuid = membershipRow.organization_id
-    || null;
+  const organizationUuid = membershipRow.organization_id || null;
   const organizationAirtableFallback = authLinkIds(membershipExtras.Organization)[0] || null;
   if (!organizationUuid && !organizationAirtableFallback) {
     base.authorization_error = "Membership is not linked to an Organization";
@@ -311,21 +341,31 @@ export async function loadAuthorizationFromSupabase(env, email, identity, deps =
   const allowedBrandLinks = authLinkIds(membershipExtras.Allowed_Brands);
   const defaultBrandLinks = authLinkIds(membershipExtras.Default_Brand);
   const brandIds = [...new Set([...allowedBrandLinks, ...defaultBrandLinks].filter(Boolean))];
+  const densifyPresent = Object.keys(membershipExtras).length > 0
+    || Object.prototype.hasOwnProperty.call(membershipRow, "is_default")
+    || Object.prototype.hasOwnProperty.call(userRow, "user_key");
+  base.auth_mirror_extras = densifyPresent;
 
   let organizationRow = null;
   if (organizationUuid) {
-    const orgRows = await rest(
+    const orgRows = await authRestSelect(
+      rest,
       env,
       `organizations?id=eq.${encodeURIComponent(organizationUuid)}`
         + `&select=id,airtable_record_id,name,organization_key,extras&limit=1`,
+      `organizations?id=eq.${encodeURIComponent(organizationUuid)}`
+        + `&select=id,airtable_record_id,name&limit=1`,
     );
     organizationRow = (orgRows || [])[0] || null;
   }
   if (!organizationRow && organizationAirtableFallback) {
-    const orgRows = await rest(
+    const orgRows = await authRestSelect(
+      rest,
       env,
       `organizations?airtable_record_id=eq.${encodeURIComponent(organizationAirtableFallback)}`
         + `&select=id,airtable_record_id,name,organization_key,extras&limit=1`,
+      `organizations?airtable_record_id=eq.${encodeURIComponent(organizationAirtableFallback)}`
+        + `&select=id,airtable_record_id,name&limit=1`,
     );
     organizationRow = (orgRows || [])[0] || null;
   }
@@ -335,21 +375,41 @@ export async function loadAuthorizationFromSupabase(env, email, identity, deps =
   }
 
   let brandRows = [];
+  let usedOrgBrandFallback = false;
   if (brandIds.length) {
     const quoted = brandIds.map((id) => encodeURIComponent(id)).join(",");
-    brandRows = await rest(
+    brandRows = await authRestSelect(
+      rest,
       env,
       `brands?airtable_record_id=in.(${quoted})`
         + `&select=id,airtable_record_id,name,brand_key,extras&limit=${Math.min(50, brandIds.length)}`,
+      `brands?airtable_record_id=in.(${quoted})`
+        + `&select=id,airtable_record_id,name&limit=${Math.min(50, brandIds.length)}`,
+    ) || [];
+  } else if (organizationRow.id || organizationUuid) {
+    // Extras densify not applied yet: Allowed_Brands missing. Fall back to the
+    // membership organization brands so brand.record_id is still populated.
+    usedOrgBrandFallback = true;
+    const orgBrandUuid = organizationRow.id || organizationUuid;
+    brandRows = await authRestSelect(
+      rest,
+      env,
+      `brands?organization_id=eq.${encodeURIComponent(orgBrandUuid)}`
+        + `&select=id,airtable_record_id,name,brand_key,extras&order=name.asc&limit=20`,
+      `brands?organization_id=eq.${encodeURIComponent(orgBrandUuid)}`
+        + `&select=id,airtable_record_id,name&order=name.asc&limit=20`,
     ) || [];
   }
 
   const orgExtras = authExtrasBag(organizationRow.extras);
-  const allowedBrandRecords = (brandRows || []).filter((row) => allowedBrandLinks.includes(row.airtable_record_id));
-  const defaultBrandRecord =
-    (brandRows || []).find((row) => defaultBrandLinks.includes(row.airtable_record_id))
-    || allowedBrandRecords[0]
-    || null;
+  const allowedBrandRecords = usedOrgBrandFallback
+    ? (brandRows || [])
+    : (brandRows || []).filter((row) => allowedBrandLinks.includes(row.airtable_record_id));
+  const defaultBrandRecord = usedOrgBrandFallback
+    ? (brandRows || [])[0] || null
+    : (brandRows || []).find((row) => defaultBrandLinks.includes(row.airtable_record_id))
+      || allowedBrandRecords[0]
+      || null;
 
   base.membership = {
     record_id: membershipRow.airtable_record_id,
@@ -362,21 +422,9 @@ export async function loadAuthorizationFromSupabase(env, email, identity, deps =
     organization_id: organizationRow.organization_key || orgExtras.Organization_ID || null,
     name: organizationRow.name || orgExtras.Organization_Name || null,
   };
-  base.allowed_brands = allowedBrandRecords.map((row) => {
-    const extras = authExtrasBag(row.extras);
-    return {
-      record_id: row.airtable_record_id,
-      brand_id: row.brand_key || extras.Brand_ID || null,
-      name: row.name || extras.Brand_Name || null,
-    };
-  });
-  base.brand = defaultBrandRecord
-    ? {
-        record_id: defaultBrandRecord.airtable_record_id,
-        brand_id: defaultBrandRecord.brand_key || authExtrasBag(defaultBrandRecord.extras).Brand_ID || null,
-        name: defaultBrandRecord.name || authExtrasBag(defaultBrandRecord.extras).Brand_Name || null,
-      }
-    : null;
+  base.allowed_brands = allowedBrandRecords.map(mapBrandAuthView);
+  base.brand = defaultBrandRecord ? mapBrandAuthView(defaultBrandRecord) : null;
+  base.auth_org_brand_fallback = usedOrgBrandFallback;
 
   const role = String(membershipRow.role || membershipExtras.Role || "Viewer").trim();
   base.role = role;
