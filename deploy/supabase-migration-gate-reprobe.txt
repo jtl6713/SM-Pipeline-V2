@@ -15,3 +15,6 @@ reprobe_1130_sync=2026-11-11T05:44:15Z
 
 # Reprobe after 0.10.811-sync-shrink-v1 deploy (prior gate raced at 810)
 reprobe_811_shrink=2026-11-11T06:35:52Z
+
+# Reprobe after expected 1:00 AM CT half-hour sync under Worker 0.10.811
+reprobe_811_100_sync=2026-11-11T07:07:24Z
