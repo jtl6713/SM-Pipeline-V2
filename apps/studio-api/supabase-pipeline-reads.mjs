@@ -2784,6 +2784,53 @@ function mediaAssetWriteThroughRow(record) {
 export function mediaAssetBackfillRow(record) {
   const body = mediaAssetWriteThroughRow(record);
   if (!body.asset_name) return null;
+  const fields = record?.fields || {};
+  const text = (value) => {
+    const trimmed = String(value || "").trim();
+    return trimmed || null;
+  };
+  // Half-hour / oneshot backfill always stamps Asset Manager densify keys.
+  // Airtable omits blank fields from `fields[]` responses; without explicit
+  // nulls those keys stay absent and coverage metrics never move past the
+  // newest classified slice.
+  const meta = { ...(body.metadata || {}) };
+  meta.content_profile_airtable_id = firstLink(fields.Content_Profile) || null;
+  meta.classification_status = selectName(fields.Classification_Status)
+    || text(fields.Classification_Status);
+  if ("Manual_Classification_JSON" in fields) {
+    const raw = fields.Manual_Classification_JSON;
+    if (raw == null || raw === "") meta.manual_classification_json = null;
+    else if (typeof raw === "string") meta.manual_classification_json = raw;
+    else if (isPlainObject(raw)) meta.manual_classification_json = raw;
+    else meta.manual_classification_json = String(raw);
+  } else {
+    meta.manual_classification_json = null;
+  }
+  if ("Manual_Classification_Audit" in fields) {
+    const raw = fields.Manual_Classification_Audit;
+    if (raw == null || raw === "") meta.manual_classification_audit = null;
+    else if (typeof raw === "string") meta.manual_classification_audit = raw;
+    else if (Array.isArray(raw)) meta.manual_classification_audit = raw;
+    else meta.manual_classification_audit = String(raw);
+  } else {
+    meta.manual_classification_audit = null;
+  }
+  meta.search_keywords = text(fields.Search_Keywords);
+  meta.ai_tags = text(fields.AI_Tags);
+  meta.location = text(fields.Location);
+  meta.topic = text(fields.Topic);
+  meta.subtopic = text(fields.Subtopic);
+  meta.shot_type = text(fields.Shot_Type);
+  meta.time_of_day = text(fields.Time_Of_Day);
+  meta.weather = text(fields.Weather);
+  meta.visible_subjects = text(fields.Visible_Subjects);
+  if (fields.Duration_Seconds != null && fields.Duration_Seconds !== "") {
+    const duration = Number(fields.Duration_Seconds);
+    meta.duration_seconds = Number.isFinite(duration) ? duration : null;
+  } else {
+    meta.duration_seconds = null;
+  }
+  meta.intake_date = text(fields.Intake_Date) || fields.Intake_Date || null;
   return {
     airtable_record_id: record.id,
     asset_name: body.asset_name,
@@ -2798,7 +2845,7 @@ export function mediaAssetBackfillRow(record) {
     mime_type: body.mime_type ?? null,
     file_extension: body.file_extension ?? null,
     file_size_bytes: body.file_size_bytes ?? null,
-    metadata: body.metadata ?? {},
+    metadata: meta,
   };
 }
 
