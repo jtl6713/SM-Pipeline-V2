@@ -1097,6 +1097,21 @@ export async function studioSupabaseWriteThroughAirtableMutation(env, tableId, m
         || fields.Transfer_ID != null || fields.Source_Media_Asset != null
         || fields.Generated_Media_Asset != null;
     }
+    if (kind === "auth_org") {
+      return fields.Organization_Name != null || fields.Organization_ID != null;
+    }
+    if (kind === "auth_brand") {
+      return fields.Brand_Name != null || fields.Brand_ID != null || fields.Organization != null;
+    }
+    if (kind === "auth_user") {
+      return fields.Email != null || fields.User_ID != null || fields.Display_Name != null
+        || "Active" in fields || fields.User_Status != null;
+    }
+    if (kind === "auth_membership") {
+      return fields.Role != null || fields.User != null || fields.Organization != null
+        || "Active" in fields || fields.Membership_Status != null || "Is_Default" in fields
+        || fields.Allowed_Brands != null || fields.Default_Brand != null;
+    }
     return false;
   };
   const snapshot = (record, kind) => {
@@ -1149,40 +1164,64 @@ export async function studioSupabaseWriteThroughAirtableMutation(env, tableId, m
           ? "media"
           : (table === "Studio Media Transfer Queue" || table === "tblBZLXPd1p2NRWRK")
             ? "queue"
-            : "";
+            : table === STUDIO_TABLES.organizations
+              ? "auth_org"
+              : table === STUDIO_TABLES.brands
+                ? "auth_brand"
+                : table === STUDIO_TABLES.users
+                  ? "auth_user"
+                  : table === STUDIO_TABLES.memberships
+                    ? "auth_membership"
+                    : "";
   if (!kind) return { skipped: true, reason: "table" };
   const records = airtableWriteThroughRecords(body).filter((record) => ready(record, kind));
   if (!records.length) return { skipped: true, reason: "no_records", kind };
   const results = [];
+  const authKinds = new Set(["auth_org", "auth_brand", "auth_user", "auth_membership"]);
   for (const record of records) {
-    const synced = kind === "output"
-      ? await studioSupabaseWriteThroughOutput(env, record, "output")
-      : kind === "content"
-        ? await studioSupabaseWriteThroughContent(env, record, "content")
-        : kind === "request"
-          ? await syncAirtableProductionRequestRowToSupabase(env, record).catch((error) => {
-            console.warn("supabase request write-through failed", record.id, error);
-            return { ok: false, error: error instanceof Error ? error.message : String(error) };
-          })
-          : kind === "media"
-            ? await syncAirtableMediaAssetRowToSupabase(env, record).catch((error) => {
-              console.warn("supabase media write-through failed", record.id, error);
+    let synced;
+    if (authKinds.has(kind)) {
+      // Auth write-through reuses the bounded half-hour mirror (small tables).
+      // resolveAuthorization stays on Airtable until STUDIO_AUTH_READ_SOURCE flips.
+      try {
+        const { syncAuthTablesToSupabase } = await import("./supabase-auth-mirror.mjs");
+        synced = await syncAuthTablesToSupabase(env, { listRecords });
+      } catch (error) {
+        console.warn("supabase auth write-through failed", record.id, error);
+        synced = { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    } else {
+      synced = kind === "output"
+        ? await studioSupabaseWriteThroughOutput(env, record, "output")
+        : kind === "content"
+          ? await studioSupabaseWriteThroughContent(env, record, "content")
+          : kind === "request"
+            ? await syncAirtableProductionRequestRowToSupabase(env, record).catch((error) => {
+              console.warn("supabase request write-through failed", record.id, error);
               return { ok: false, error: error instanceof Error ? error.message : String(error) };
             })
-            : await syncAirtableTransferQueueRowToSupabase(env, record).catch((error) => {
-              console.warn("supabase queue write-through failed", record.id, error);
-              return { ok: false, error: error instanceof Error ? error.message : String(error) };
-            });
-    const outbox = await enqueueStudioSideEffectOutbox(env, {
-      airtable_table: kind === "output" ? "platform_outputs"
-        : kind === "content" ? "content_items"
-          : kind === "request" ? "production_requests"
-            : kind === "media" ? "media_assets"
-              : "studio_media_transfer_queue",
-      airtable_record_id: record.id,
-      mutation: verb,
-      payload: snapshot(record, kind),
-    }).catch((error) => ({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+            : kind === "media"
+              ? await syncAirtableMediaAssetRowToSupabase(env, record).catch((error) => {
+                console.warn("supabase media write-through failed", record.id, error);
+                return { ok: false, error: error instanceof Error ? error.message : String(error) };
+              })
+              : await syncAirtableTransferQueueRowToSupabase(env, record).catch((error) => {
+                console.warn("supabase queue write-through failed", record.id, error);
+                return { ok: false, error: error instanceof Error ? error.message : String(error) };
+              });
+    }
+    const outbox = authKinds.has(kind)
+      ? { skipped: true, reason: "auth_mirror_no_outbox" }
+      : await enqueueStudioSideEffectOutbox(env, {
+        airtable_table: kind === "output" ? "platform_outputs"
+          : kind === "content" ? "content_items"
+            : kind === "request" ? "production_requests"
+              : kind === "media" ? "media_assets"
+                : "studio_media_transfer_queue",
+        airtable_record_id: record.id,
+        mutation: verb,
+        payload: snapshot(record, kind),
+      }).catch((error) => ({ ok: false, error: error instanceof Error ? error.message : String(error) }));
     results.push({ id: record.id, synced, outbox });
   }
   return { ok: true, kind, count: results.length, results };

@@ -2219,6 +2219,21 @@ export async function syncAllProfilesPipelineToSupabase(env, profiles, deps = {}
     queue = { skipped: true, reason: "supabase_circuit_open" };
     runnerMarkers = { skipped: true, reason: "supabase_circuit_open" };
   }
+  // Auth mirror is best-effort until extras DDL is applied and tables proven.
+  // A soft failure must not reopen half-hour partial after media/marker fixes.
+  let authTables = null;
+  if (!abortedForCircuit && !supabaseCircuitOpen()) {
+    try {
+      const { syncAuthTablesToSupabase } = await import("./supabase-auth-mirror.mjs");
+      authTables = await runPhaseBackfill("auth_tables", () => (
+        syncAuthTablesToSupabase(env, { ...deps, assertLease })
+      ));
+    } catch (error) {
+      authTables = { ok: false, error: error?.message || String(error) };
+    }
+  } else {
+    authTables = { skipped: true, reason: "supabase_circuit_open" };
+  }
   const phaseOk = (row) => row?.ok === true || row?.skipped === true;
   const ok = results.length > 0 && results.every((row) => row?.ok === true)
     && phaseOk(requests) && phaseOk(media) && phaseOk(queue) && phaseOk(runnerMarkers)
@@ -2232,6 +2247,7 @@ export async function syncAllProfilesPipelineToSupabase(env, profiles, deps = {}
     media_assets: media,
     studio_media_transfer_queue: queue,
     runner_record_projections: runnerMarkers,
+    auth_tables: authTables,
   };
 }
 
