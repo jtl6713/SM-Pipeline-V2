@@ -345,8 +345,6 @@ const resolveMotionType = (
   switch (String(clip.motion?.type ?? clip.motionStyle ?? "").trim().toLowerCase()) {
     case "none":
     case "still":
-    case "stillphoto":
-    case "still_photo":
     case "photo_sequence_hold":
     case "photo_sequence_static":
       return "none";
@@ -376,7 +374,9 @@ const resolveMotionType = (
     case "slowzoom":
       return "slowZoom";
     default:
-      return "none";
+      // Subtle motion is the default for photographs unless explicitly held.
+      // Legacy stillPhoto tokens are not an instruction to disable animation.
+      return "slowZoom";
   }
 };
 
