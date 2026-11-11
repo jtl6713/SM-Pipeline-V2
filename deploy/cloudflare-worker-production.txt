@@ -1012,3 +1012,5 @@ Deploy 2026-11-10 Worker 0.10.803-auth-membership-user-id: Fix auth membership f
 Deploy 2026-11-10 Worker 0.10.805-blackout-story-safe: Move overnight blackout start to 10:30 PM profile-local (through 3:30 AM) and never stamp new-idea/Story companion schedules inside blackout — advance past blackout like approve. Preserve publisher authorization and existing scheduling safeguards.
 
 Deploy 2026-11-10 Worker 0.10.806-supabase-music-reads: Dormant STUDIO_MUSIC_READ_SOURCE for GET /api/music (Supabase list with Airtable fallback). Densify library extras + studio CDN URLs into media_assets.metadata on write-through/backfill. Binding contract allowlists the optional secret_text. Enable via deploy/enable-studio-music-reads.txt after live verify. Asset Manager stays Airtable. No write SoR change. Phase 7 not started.
+
+Deploy 2026-11-10 Worker 0.10.807-supabase-upsert-key-align: Homogenize sparse PostgREST upsert batches (PGRST102 All object keys must match) so half-hour media_assets backfill and runner marker densify finish completed+ok instead of partial. Write SoR / read flags unchanged. Auth resolveAuthorization still Airtable+cache. Phase 7 not started.
