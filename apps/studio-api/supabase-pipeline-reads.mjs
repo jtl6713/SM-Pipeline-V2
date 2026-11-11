@@ -49,10 +49,16 @@ export const STUDIO_SUPABASE_MUSIC_READ_ROUTES = Object.freeze([
   "/api/music",
 ]);
 
+/** Asset Manager library list — GET /api/library only (not published). */
+export const STUDIO_SUPABASE_ASSETS_READ_ROUTES = Object.freeze([
+  "/api/library",
+]);
+
 export const STUDIO_SUPABASE_READ_ROUTES = Object.freeze([
   ...STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   ...STUDIO_SUPABASE_PHASE4_READ_ROUTES,
   ...STUDIO_SUPABASE_MUSIC_READ_ROUTES,
+  ...STUDIO_SUPABASE_ASSETS_READ_ROUTES,
 ]);
 
 /** Large / unused-on-list Airtable columns — never pack into jsonb projection. */
@@ -154,10 +160,26 @@ export const MEDIA_ASSET_SYNC_FIELDS = Object.freeze([
   "File_Extension",
   "File_Size_Bytes",
   "Added_At",
-  // Library music extras densified into media_assets.metadata (no DDL).
+  // Library extras densified into media_assets.metadata (no DDL).
   "Rights_Status",
   "Asset_Description",
   "Studio_Transfer_ID",
+  // Asset Manager list densify (profile / classification / search).
+  "Content_Profile",
+  "Classification_Status",
+  "Manual_Classification_JSON",
+  "Manual_Classification_Audit",
+  "Search_Keywords",
+  "AI_Tags",
+  "Location",
+  "Topic",
+  "Subtopic",
+  "Shot_Type",
+  "Time_Of_Day",
+  "Weather",
+  "Visible_Subjects",
+  "Duration_Seconds",
+  "Intake_Date",
 ]);
 
 /** Phase 6 half-hour queue backfill — status + Drive id payload; no file bytes. */
@@ -251,11 +273,24 @@ export function studioHomeReadSource(env) {
  * Does not follow STUDIO_READ_SOURCE, Pipeline, Content, Factory/Ops, or Home.
  * A deploy leaves music on Airtable until this secret is set.
  * Opt-in: STUDIO_MUSIC_READ_SOURCE=supabase. Roll back with airtable or unset.
- * Asset Manager /api/assets stays on Airtable (needs profile/classification columns).
  */
 export function studioMusicReadSource(env) {
   if (!studioSupabaseConfigured(env)) return "airtable";
   return String(env?.STUDIO_MUSIC_READ_SOURCE || "").trim().toLowerCase() === "supabase"
+    ? "supabase"
+    : "airtable";
+}
+
+/**
+ * Asset Manager — GET /api/library only (not published files).
+ * Does not follow STUDIO_READ_SOURCE, Pipeline, Content, Factory/Ops, Home, Music, or Auth.
+ * A deploy leaves Asset Manager on Airtable until this secret is set.
+ * Opt-in: STUDIO_ASSETS_READ_SOURCE=supabase. Roll back with airtable or unset.
+ * Requires library densify in media_assets.metadata (profile/classification/search).
+ */
+export function studioAssetsReadSource(env) {
+  if (!studioSupabaseConfigured(env)) return "airtable";
+  return String(env?.STUDIO_ASSETS_READ_SOURCE || "").trim().toLowerCase() === "supabase"
     ? "supabase"
     : "airtable";
 }
@@ -731,6 +766,199 @@ const MEDIA_MUSIC_SELECT = [
   "created_at",
   "updated_at",
 ].join(",");
+
+const MEDIA_LIBRARY_SELECT = MEDIA_MUSIC_SELECT;
+
+/**
+ * Shape a media_assets row for mapLibraryAsset / Asset Manager helpers.
+ * Profile, classification, and search fields live in metadata (no DDL).
+ */
+export function airtableShapedLibraryAssetFromSupabase(row) {
+  const meta = isPlainObject(row?.metadata) ? row.metadata : {};
+  const bytes = row?.file_size_bytes != null && Number.isFinite(Number(row.file_size_bytes))
+    ? Number(row.file_size_bytes)
+    : null;
+  const driveUrl = row?.google_drive_url || meta.google_drive_url || null;
+  const profileId = meta.content_profile_airtable_id || null;
+  return {
+    id: row.airtable_record_id,
+    createdTime: row.created_at || meta.added_at || undefined,
+    fields: {
+      "Asset Name": row.asset_name || null,
+      Media_Class: row.media_class || null,
+      Asset_Role: row.asset_role || null,
+      Asset_Status: row.asset_status || null,
+      Active: row.active !== false,
+      Do_Not_Use: Boolean(row.do_not_use),
+      Studio_Favorite: Boolean(row.studio_favorite),
+      "Google Drive File ID": row.google_drive_file_id || null,
+      "Google Drive URL": driveUrl,
+      MIME_Type: row.mime_type || null,
+      File_Extension: row.file_extension || null,
+      File_Size_Bytes: bytes,
+      Rights_Status: meta.rights_status || null,
+      Asset_Description: meta.asset_description || null,
+      Studio_Transfer_ID: meta.studio_transfer_id || null,
+      Added_At: meta.added_at || row.created_at || null,
+      Content_Profile: profileId ? [profileId] : [],
+      Classification_Status: meta.classification_status || null,
+      Manual_Classification_JSON: meta.manual_classification_json || null,
+      Manual_Classification_Audit: meta.manual_classification_audit || null,
+      Search_Keywords: meta.search_keywords || null,
+      AI_Tags: meta.ai_tags || null,
+      Location: meta.location || null,
+      Topic: meta.topic || null,
+      Subtopic: meta.subtopic || null,
+      Shot_Type: meta.shot_type || null,
+      Time_Of_Day: meta.time_of_day || null,
+      Weather: meta.weather || null,
+      Visible_Subjects: meta.visible_subjects || null,
+      Duration_Seconds: meta.duration_seconds ?? null,
+      Intake_Date: meta.intake_date || null,
+    },
+  };
+}
+
+function encodePostgrestValue(value) {
+  return encodeURIComponent(String(value ?? ""));
+}
+
+function libraryAssetSearchOrFilter(query) {
+  const raw = String(query || "").trim().toLowerCase();
+  if (!raw) return null;
+  const quoted = raw.match(/^"([^"]+)"$/);
+  const tokens = quoted
+    ? [quoted[1].trim()].filter(Boolean)
+    : raw.split(/[\s,]+/).map((part) => part.trim()).filter(Boolean).slice(0, 10);
+  if (!tokens.length) return null;
+  const columns = [
+    "asset_name",
+    "metadata->>search_keywords",
+    "metadata->>ai_tags",
+    "metadata->>manual_classification_json",
+    "metadata->>location",
+    "metadata->>topic",
+    "metadata->>subtopic",
+    "metadata->>asset_description",
+  ];
+  const clauses = [];
+  for (const token of tokens) {
+    const pattern = `*${token.replace(/[*]/g, "")}*`;
+    if (pattern === "**") continue;
+    for (const column of columns) {
+      clauses.push(`${column}.ilike.${encodePostgrestValue(pattern)}`);
+    }
+  }
+  if (!clauses.length) return null;
+  return `or=(${clauses.join(",")})`;
+}
+
+/**
+ * GET /api/library Supabase path. Returns Airtable-shaped Media Asset rows
+ * for mapLibraryAsset. Mirrors ASSET_LIBRARY_LIST_FORMULA (non-music image/
+ * graphic/video, no fill-crop) plus optional profile/kind/search filters.
+ * Offset is a numeric skip token (string), not an Airtable opaque cursor.
+ */
+export async function listSupabaseAssetLibraryRecords(env, {
+  limit = 50,
+  offset = null,
+  ids = null,
+  query = "",
+  kind = "",
+  needsProfile = false,
+  profileId = "",
+  addedFrom = null,
+  addedTo = null,
+  sortField = "Added_At",
+  sortDirection = "desc",
+} = {}) {
+  const capped = Math.max(1, Math.min(200, Number(limit) || 50));
+  if (Array.isArray(ids) && ids.length) {
+    const unique = [...new Set(ids.map((id) => String(id || "").trim()).filter(Boolean))];
+    const records = [];
+    for (let i = 0; i < unique.length; i += 40) {
+      const batch = unique.slice(i, i + 40);
+      const orParts = batch.map((id) => `airtable_record_id.eq.${id}`).join(",");
+      const rows = await supabaseRest(
+        env,
+        `media_assets?or=(${orParts})&select=${MEDIA_LIBRARY_SELECT}&limit=${batch.length}`,
+      );
+      for (const row of rows || []) {
+        if (!row?.airtable_record_id) continue;
+        const shaped = airtableShapedLibraryAssetFromSupabase(row);
+        const mediaClass = String(shaped.fields.Media_Class || "");
+        const role = String(shaped.fields.Asset_Role || "");
+        const name = String(shaped.fields["Asset Name"] || "");
+        if (!["Image", "Graphic", "Video"].includes(mediaClass)) continue;
+        if (role === "Music") continue;
+        if (/fill-crop/i.test(name)) continue;
+        records.push(shaped);
+      }
+    }
+    return {
+      records,
+      offset: null,
+      has_more: false,
+      read_source: "supabase",
+    };
+  }
+
+  const filters = [
+    "media_class=in.(Image,Graphic,Video)",
+    "or=(asset_role.is.null,asset_role.eq.,asset_role.neq.Music)",
+    "asset_name=not.ilike.*fill-crop*",
+  ];
+  const normalizedKind = String(kind || "").trim().toLowerCase();
+  if (normalizedKind === "video") filters.push("media_class=eq.Video");
+  if (normalizedKind === "photo" || normalizedKind === "image") {
+    filters.push("media_class=in.(Image,Graphic)");
+  }
+  const needsProfileFlag = needsProfile || normalizedKind === "needs_profile";
+  if (needsProfileFlag) {
+    filters.push("or=(metadata->>content_profile_airtable_id.is.null,metadata->>content_profile_airtable_id.eq.)");
+    filters.push(
+      "or=(metadata->>classification_status.eq.Needs%20Classification,"
+      + "metadata->>classification_status.eq.Classification%20Error)",
+    );
+  }
+  const scopedProfile = String(profileId || "").trim();
+  if (scopedProfile && !needsProfileFlag) {
+    filters.push(`metadata->>content_profile_airtable_id=eq.${encodePostgrestValue(scopedProfile)}`);
+  }
+  if (addedFrom) {
+    filters.push(`metadata->>added_at=gte.${encodePostgrestValue(addedFrom)}`);
+  }
+  if (addedTo) {
+    filters.push(`metadata->>added_at=lte.${encodePostgrestValue(`${addedTo}T23:59:59.999Z`)}`);
+  }
+  const searchFilter = libraryAssetSearchOrFilter(query);
+  if (searchFilter) filters.push(searchFilter);
+
+  const sortKey = String(sortField || "Added_At");
+  const direction = String(sortDirection || "desc").toLowerCase() === "asc" ? "asc" : "desc";
+  let order = `created_at.${direction}.nullslast`;
+  if (sortKey === "Asset Name") {
+    order = `asset_name.${direction}.nullslast`;
+  } else if (sortKey === "Added_At") {
+    order = `created_at.${direction}.nullslast`;
+  }
+
+  const skipRaw = String(offset || "").trim();
+  const skip = /^\d+$/.test(skipRaw) ? Number(skipRaw) : 0;
+  const fetchLimit = capped + 1;
+  const path = `media_assets?${filters.join("&")}&select=${MEDIA_LIBRARY_SELECT}`
+    + `&order=${order}&limit=${fetchLimit}&offset=${skip}`;
+  const rows = await supabaseRest(env, path);
+  const page = (rows || []).filter((row) => row?.airtable_record_id).slice(0, capped);
+  const hasMore = (rows || []).length > capped;
+  const records = page.map(airtableShapedLibraryAssetFromSupabase);
+  return {
+    records,
+    offset: hasMore ? String(skip + page.length) : null,
+    has_more: hasMore,
+    read_source: "supabase",
+  };
+}
 
 /**
  * GET /api/music Supabase path. Returns Airtable-shaped Music role rows.
@@ -2444,8 +2672,9 @@ export async function syncAirtableProductionRequestRowToSupabase(env, record) {
  * requires Asset Name because media_assets.asset_name is not null. A thinner
  * body patches an existing row.
  *
- * Library extras (rights, description, transfer id, added_at) and studio CDN
- * URLs densify into media_assets.metadata so music list reads can leave
+ * Library extras (rights, description, transfer id, added_at, profile,
+ * classification, search) and studio CDN URLs densify into
+ * media_assets.metadata so music + Asset Manager list reads can leave
  * Airtable without a DDL migration. google_drive_url still drops
  * media.chicagoshining.com values; the raw URL is kept under metadata.
  * Partial patches that omit library fields do not send metadata, so a
@@ -2504,6 +2733,43 @@ function mediaAssetWriteThroughRow(record) {
   if ("Google Drive URL" in fields) {
     const rawUrl = text(fields["Google Drive URL"]);
     if (rawUrl) meta.google_drive_url = rawUrl;
+  }
+  if ("Content_Profile" in fields) {
+    meta.content_profile_airtable_id = firstLink(fields.Content_Profile);
+  }
+  if ("Classification_Status" in fields) {
+    meta.classification_status = selectName(fields.Classification_Status)
+      || text(fields.Classification_Status);
+  }
+  if ("Manual_Classification_JSON" in fields) {
+    const raw = fields.Manual_Classification_JSON;
+    if (raw == null || raw === "") meta.manual_classification_json = null;
+    else if (typeof raw === "string") meta.manual_classification_json = raw;
+    else if (isPlainObject(raw)) meta.manual_classification_json = raw;
+    else meta.manual_classification_json = String(raw);
+  }
+  if ("Manual_Classification_Audit" in fields) {
+    const raw = fields.Manual_Classification_Audit;
+    if (raw == null || raw === "") meta.manual_classification_audit = null;
+    else if (typeof raw === "string") meta.manual_classification_audit = raw;
+    else if (Array.isArray(raw)) meta.manual_classification_audit = raw;
+    else meta.manual_classification_audit = String(raw);
+  }
+  if ("Search_Keywords" in fields) meta.search_keywords = text(fields.Search_Keywords);
+  if ("AI_Tags" in fields) meta.ai_tags = text(fields.AI_Tags);
+  if ("Location" in fields) meta.location = text(fields.Location);
+  if ("Topic" in fields) meta.topic = text(fields.Topic);
+  if ("Subtopic" in fields) meta.subtopic = text(fields.Subtopic);
+  if ("Shot_Type" in fields) meta.shot_type = text(fields.Shot_Type);
+  if ("Time_Of_Day" in fields) meta.time_of_day = text(fields.Time_Of_Day);
+  if ("Weather" in fields) meta.weather = text(fields.Weather);
+  if ("Visible_Subjects" in fields) meta.visible_subjects = text(fields.Visible_Subjects);
+  if ("Duration_Seconds" in fields && fields.Duration_Seconds != null && fields.Duration_Seconds !== "") {
+    const duration = Number(fields.Duration_Seconds);
+    if (Number.isFinite(duration)) meta.duration_seconds = duration;
+  }
+  if ("Intake_Date" in fields) {
+    meta.intake_date = text(fields.Intake_Date) || fields.Intake_Date || null;
   }
   if (Object.keys(meta).length) row.metadata = meta;
   return row;

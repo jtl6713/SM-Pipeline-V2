@@ -11,10 +11,13 @@ import {
   studioFactoryOpsReadSource,
   studioHomeReadSource,
   studioMusicReadSource,
+  studioAssetsReadSource,
   studioAuthReadSource,
   studioSupabaseConfigured,
   airtableShapedMusicFromSupabase,
+  airtableShapedLibraryAssetFromSupabase,
   listSupabaseMusicRecords,
+  listSupabaseAssetLibraryRecords,
   supabaseCircuitOpen,
   noteSupabaseCircuitFailure,
   noteSupabaseCircuitSuccess,
@@ -53,6 +56,7 @@ import {
   STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
   STUDIO_SUPABASE_MUSIC_READ_ROUTES,
+  STUDIO_SUPABASE_ASSETS_READ_ROUTES,
   STUDIO_SUPABASE_READ_ROUTES,
   MEDIA_ASSET_SYNC_FIELDS,
 } from "./supabase-pipeline-reads.mjs";
@@ -266,6 +270,26 @@ test("studioMusicReadSource restores music list only when its own flag is set", 
   assert.ok(STUDIO_SUPABASE_READ_ROUTES.includes("/api/music"));
   assert.ok(MEDIA_ASSET_SYNC_FIELDS.includes("Rights_Status"));
   assert.ok(MEDIA_ASSET_SYNC_FIELDS.includes("Studio_Transfer_ID"));
+});
+
+test("studioAssetsReadSource restores Asset Manager list only when its own flag is set", () => {
+  const configured = {
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "service-role",
+  };
+  assert.equal(studioAssetsReadSource({}), "airtable");
+  assert.equal(studioAssetsReadSource({ STUDIO_ASSETS_READ_SOURCE: "supabase" }), "airtable");
+  assert.equal(studioAssetsReadSource({ ...configured, STUDIO_ASSETS_READ_SOURCE: "supabase" }), "supabase");
+  assert.equal(studioAssetsReadSource({ ...configured, STUDIO_ASSETS_READ_SOURCE: " Supabase " }), "supabase");
+  assert.equal(studioAssetsReadSource({ ...configured, STUDIO_ASSETS_READ_SOURCE: "airtable" }), "airtable");
+  assert.equal(studioMusicReadSource({ ...configured, STUDIO_ASSETS_READ_SOURCE: "supabase" }), "airtable");
+  assert.equal(studioAuthReadSource({ ...configured, STUDIO_ASSETS_READ_SOURCE: "supabase" }), "airtable");
+  assert.ok(STUDIO_SUPABASE_ASSETS_READ_ROUTES.includes("/api/library"));
+  assert.ok(STUDIO_SUPABASE_READ_ROUTES.includes("/api/library"));
+  assert.ok(MEDIA_ASSET_SYNC_FIELDS.includes("Content_Profile"));
+  assert.ok(MEDIA_ASSET_SYNC_FIELDS.includes("Classification_Status"));
+  assert.ok(MEDIA_ASSET_SYNC_FIELDS.includes("Manual_Classification_JSON"));
+  assert.ok(MEDIA_ASSET_SYNC_FIELDS.includes("Search_Keywords"));
 });
 
 test("studioAuthReadSource stays airtable until its own flag is set", () => {
@@ -519,7 +543,7 @@ test("mapAirtableContent/Idea/Request helpers populate jsonb bags", () => {
   assert.equal(request.publish_status.idea_candidate_airtable_id, "recIdeaABCDEFGHIJK");
 });
 
-test("supabase read-route inventory includes Phase 3, Phase 4, and music", () => {
+test("supabase read-route inventory includes Phase 3, Phase 4, music, and assets", () => {
   assert.ok(STUDIO_SUPABASE_PIPELINE_READ_ROUTES.includes("GET /api/outputs"));
   assert.ok(STUDIO_SUPABASE_PIPELINE_READ_ROUTES.includes("GET /api/outputs/schedule-grid"));
   assert.ok(STUDIO_SUPABASE_PHASE4_READ_ROUTES.includes("GET /api/content"));
@@ -527,11 +551,13 @@ test("supabase read-route inventory includes Phase 3, Phase 4, and music", () =>
   assert.ok(STUDIO_SUPABASE_PHASE4_READ_ROUTES.includes("GET /api/factory/desk"));
   assert.ok(STUDIO_SUPABASE_PHASE4_READ_ROUTES.includes("GET /api/operations/queue"));
   assert.ok(STUDIO_SUPABASE_MUSIC_READ_ROUTES.includes("/api/music"));
+  assert.ok(STUDIO_SUPABASE_ASSETS_READ_ROUTES.includes("/api/library"));
   assert.equal(
     STUDIO_SUPABASE_READ_ROUTES.length,
     STUDIO_SUPABASE_PIPELINE_READ_ROUTES.length
       + STUDIO_SUPABASE_PHASE4_READ_ROUTES.length
-      + STUDIO_SUPABASE_MUSIC_READ_ROUTES.length,
+      + STUDIO_SUPABASE_MUSIC_READ_ROUTES.length
+      + STUDIO_SUPABASE_ASSETS_READ_ROUTES.length,
   );
 });
 
@@ -750,11 +776,13 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.814-factory-overlap-activity/);
+  assert.match(worker, /0\.10\.815-supabase-assets-reads/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
+  assert.match(worker, /studio_supabase_assets_reads_v1: true/);
   assert.match(worker, /studio_auth_read_source: studioAuthReadSource\(env\)/);
+  assert.match(worker, /studio_assets_read_source: studioAssetsReadSource\(env\)/);
   assert.match(worker, /phase6_writes: "airtable_sor_write_through"/);
   assert.match(worker, /phase6_write_tables: \["production_requests", "media_assets", "studio_media_transfer_queue"\]/);
   assert.match(worker, /phase6_backfill: "media_and_queue"/);
@@ -794,7 +822,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_supabase_music_read_routes: STUDIO_SUPABASE_MUSIC_READ_ROUTES/);
   const release = /version: "0\.10\.(\d+)-[^"]+"/.exec(worker);
   assert.ok(release, "Worker /health must identify a versioned release");
-  assert.ok(Number(release[1]) >= 813, "Auth prove cannot regress behind Worker 0.10.813");
+  assert.ok(Number(release[1]) >= 815, "Assets reads cannot regress behind Worker 0.10.815");
   assert.match(
     await readFile(path.join(here, "worker-functions-03.mjs"), "utf8"),
     /auth_tables: result\?\.auth_tables/,
@@ -803,11 +831,15 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(pipelineFns, /studioPipelineReadSource\(env\) === "supabase"/);
   assert.match(pipelineFns, /studioContentReadSource\(env\) === "supabase"/);
   assert.match(pipelineFns, /studioMusicReadSource\(env\) === "supabase"/);
+  assert.match(pipelineFns, /studioAssetsReadSource\(env\) === "supabase"/);
   assert.match(pipelineFns, /listSupabaseMusicRecords/);
+  assert.match(pipelineFns, /listSupabaseAssetLibraryRecords/);
   assert.match(pipelineFns, /supabase music list read failed/);
+  assert.match(pipelineFns, /supabase asset library list failed/);
   assert.match(pipelineFns, /factory_ops_read_source: studioFactoryOpsReadSource\(env\)/);
   assert.match(pipelineFns, /home_read_source: studioHomeReadSource\(env\)/);
   assert.match(pipelineFns, /music_read_source: studioMusicReadSource\(env\)/);
+  assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
   const factoryFns = await readFile(path.join(here, "worker-functions-04.mjs"), "utf8");
   const queueStart = factoryFns.indexOf("export async function getStudioOperationsQueue");
   const queueEnd = factoryFns.indexOf("export async function getFactoryDesk");
@@ -836,9 +868,10 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.814-factory-overlap-activity/);
+  assert.match(worker, /0\.10\.815-supabase-assets-reads/);
   assert.match(worker, /skipMediaAssetsBackfill: deferPhase6Catchup/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
+  assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
   assert.match(pipelineFns, /getStudioSupabaseAuthProve/);
   assert.match(pipelineFns, /proveStudioAuthorizationSources/);
   assert.match(worker, /skipTransferQueueBackfill: deferPhase6Catchup/);
@@ -1271,6 +1304,64 @@ test("airtableShapedMusicFromSupabase restores studio CDN URL and library extras
     "https://media.chicagoshining.com/studio/music-library/night.mp3",
   );
   assert.equal(shaped.fields.File_Size_MB, 3);
+});
+
+test("airtableShapedLibraryAssetFromSupabase densifies profile and classification", () => {
+  const shaped = airtableShapedLibraryAssetFromSupabase({
+    airtable_record_id: "recLib1",
+    asset_name: "Riverwalk",
+    media_class: "Image",
+    asset_role: null,
+    metadata: {
+      content_profile_airtable_id: "recProfile1",
+      classification_status: "Needs Classification",
+      search_keywords: "chicago river",
+      asset_description: "Evening light",
+      rights_status: "Owned",
+    },
+  });
+  assert.equal(shaped.id, "recLib1");
+  assert.deepEqual(shaped.fields.Content_Profile, ["recProfile1"]);
+  assert.equal(shaped.fields.Classification_Status, "Needs Classification");
+  assert.equal(shaped.fields.Search_Keywords, "chicago river");
+  assert.equal(shaped.fields.Asset_Description, "Evening light");
+});
+
+test("listSupabaseAssetLibraryRecords filters non-music library rows", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return {
+      ok: true,
+      async text() {
+        return JSON.stringify([{
+          airtable_record_id: "recLibList1",
+          asset_name: "Harbor pier",
+          media_class: "Image",
+          asset_role: null,
+          metadata: {
+            content_profile_airtable_id: "recProfile1",
+            classification_status: "Classified",
+          },
+        }]);
+      },
+    };
+  };
+  try {
+    const packed = await listSupabaseAssetLibraryRecords(supabaseEnv, {
+      limit: 25,
+      profileId: "recProfile1",
+    });
+    assert.equal(packed.read_source, "supabase");
+    assert.equal(packed.records.length, 1);
+    assert.equal(packed.records[0].id, "recLibList1");
+    assert.match(calls[0], /media_class=in\.\(Image,Graphic,Video\)/);
+    assert.match(calls[0], /content_profile_airtable_id=eq\.recProfile1/);
+    assert.match(calls[0], /not\.ilike\.\*fill-crop\*/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("listSupabaseMusicRecords queries Music role and shapes rows", async () => {

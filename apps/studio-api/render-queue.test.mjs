@@ -198,7 +198,11 @@ test("Worker admit + mapOutput expose queue meta and Remotion job id", () => {
   assert.match(worker, /isRealRemotionRetryFailure/);
   assert.match(worker, /remotion_job_id: f\(record, "Remotion_Job_ID"\)/);
   assert.match(worker, /render_queue_label: queueMeta\?\.label/);
-  assert.match(worker, /\(\!render \|\| isRenderQueueCandidateStatus\(render\)\)/);
+  // #1812: stranded In Production rows without a Remotion job / final file are
+  // requeued; skip active Rendering and Native Photo Route, and only consider
+  // blank/ready/waiting render statuses via isRenderQueueCandidateStatus.
+  assert.match(worker, /render === "Native Photo Route" \|\| render === "Rendering"\) return false/);
+  assert.match(worker, /\(!render \|\| isRenderQueueCandidateStatus\(render\)\)/);
   assert.match(worker, /reason: "remotion_slot_busy"/);
   assert.match(worker, /shared_siblings_waiting/);
   assert.match(worker, /assignRenderQueuePositions\(candidates, f, \{\s*activeHolds/);

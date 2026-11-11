@@ -35,6 +35,7 @@ import {
   studioFactoryOpsReadSource,
   studioHomeReadSource,
   studioMusicReadSource,
+  studioAssetsReadSource,
   studioAuthReadSource,
   studioWriteSource,
   studioPhase5WritesMode,
@@ -47,6 +48,8 @@ import {
   listSupabaseOverviewPack,
   listSupabaseFactoryDeskPack,
   listSupabaseMusicRecords,
+  listSupabaseAssetLibraryRecords,
+  STUDIO_SUPABASE_ASSETS_READ_ROUTES,
   syncAllProfilesPipelineToSupabase,
   syncProfilePipelineToSupabase,
   syncAirtableOutputRowToSupabase,
@@ -2019,11 +2022,13 @@ export async function getStudioSupabaseSyncStatus(request, env) {
     factory_ops_read_source: studioFactoryOpsReadSource(env),
     home_read_source: studioHomeReadSource(env),
     music_read_source: studioMusicReadSource(env),
+    assets_read_source: studioAssetsReadSource(env),
     auth_read_source: studioAuthReadSource(env),
     read_routes: STUDIO_SUPABASE_READ_ROUTES,
     pipeline_read_routes: STUDIO_SUPABASE_PIPELINE_READ_ROUTES,
     phase4_read_routes: STUDIO_SUPABASE_PHASE4_READ_ROUTES,
     music_read_routes: STUDIO_SUPABASE_MUSIC_READ_ROUTES,
+    assets_read_routes: STUDIO_SUPABASE_ASSETS_READ_ROUTES,
     studio_write_source: studioWriteSource(env),
     phase5_writes: studioPhase5WritesMode(env),
     phase5_write_tables: ["platform_outputs", "content_items"],
@@ -2091,10 +2096,12 @@ export async function postStudioSupabaseSync(request, env) {
     factory_ops_read_source: studioFactoryOpsReadSource(env),
     home_read_source: studioHomeReadSource(env),
     music_read_source: studioMusicReadSource(env),
+    assets_read_source: studioAssetsReadSource(env),
     auth_read_source: studioAuthReadSource(env),
     read_routes: STUDIO_SUPABASE_READ_ROUTES,
     phase4_read_routes: STUDIO_SUPABASE_PHASE4_READ_ROUTES,
     music_read_routes: STUDIO_SUPABASE_MUSIC_READ_ROUTES,
+    assets_read_routes: STUDIO_SUPABASE_ASSETS_READ_ROUTES,
     studio_write_source: studioWriteSource(env),
     phase5_writes: studioPhase5WritesMode(env),
     phase5_write_tables: ["platform_outputs", "content_items"],
@@ -3125,11 +3132,45 @@ export async function listAssetLibrary(request, env, url, authorization) {
       ),
   };
   // Coalesce duplicate Library refreshes only when their authoritative
-  // Airtable filter, offset and sort are identical. Cache read results,
+  // filter, offset and sort are identical. Cache read results,
   // never response headers or user permissions. Relevant writes invalidate.
+  const loadPage = async () => {
+    if (studioAssetsReadSource(env) === "supabase") {
+      try {
+        const packed = await listSupabaseAssetLibraryRecords(env, {
+          limit: pageOptions.limit,
+          offset: pageOptions.offset,
+          ids: requestedIds.length ? requestedIds : null,
+          query,
+          kind: needsProfile ? "" : kind,
+          needsProfile,
+          profileId: scopedProfileId || "",
+          addedFrom,
+          addedTo,
+          sortField: pageOptions.sortField || sort.sortField,
+          sortDirection: pageOptions.sortDirection || sort.sortDirection,
+        });
+        return {
+          records: packed.records || [],
+          offset: packed.offset || null,
+          read_source: "supabase",
+        };
+      } catch (error) {
+        console.warn("supabase asset library list failed; falling back to Airtable", error);
+      }
+    }
+    const page = await listRecordsPage(env, env.AIRTABLE_MEDIA_TABLE_ID, pageOptions);
+    return {
+      records: page.records || [],
+      offset: page.offset || null,
+      read_source: "airtable",
+    };
+  };
   const [page, profiles] = await Promise.all([
-    studioReadCoalesce("library:page:" + JSON.stringify(pageOptions), 8000,
-      () => listRecordsPage(env, env.AIRTABLE_MEDIA_TABLE_ID, pageOptions)),
+    studioReadCoalesce("library:page:" + JSON.stringify({
+      ...pageOptions,
+      assets_read_source: studioAssetsReadSource(env),
+    }), 8000, loadPage),
     studioReadCoalesce("library:profiles", 15000,
       () => listContentProfileRecords(env)).catch(() => []),
   ]);
@@ -3154,6 +3195,8 @@ export async function listAssetLibrary(request, env, url, authorization) {
     limit,
     cross_scope: crossScope,
     content_profile_id: scopedProfileId || null,
+    read_source: page.read_source || "airtable",
+    assets_read_routes: STUDIO_SUPABASE_ASSETS_READ_ROUTES,
     records: mapped,
   });
 }

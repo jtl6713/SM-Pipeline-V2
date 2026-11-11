@@ -70,12 +70,14 @@ test("auth table writes invalidate the auth cache prefix", () => {
 });
 
 test("Worker health advertises auth Airtable cache build", () => {
-  assert.match(worker, /0\.10\.814-factory-overlap-activity/);
+  assert.match(worker, /0\.10\.815-supabase-assets-reads/);
   assert.match(worker, /studio_supabase_auth_mirror_v1: true/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
+  assert.match(worker, /studio_supabase_assets_reads_v1: true/);
   assert.match(worker, /studio_auth_read_source: studioAuthReadSource\(env\)/);
+  assert.match(worker, /studio_assets_read_source: studioAssetsReadSource\(env\)/);
   assert.match(worker, /\/api\/ops\/supabase\/auth-prove/);
   assert.match(worker, /getStudioSupabaseAuthProve/);
 });

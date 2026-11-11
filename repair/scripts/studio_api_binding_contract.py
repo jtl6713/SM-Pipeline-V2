@@ -179,6 +179,11 @@ OPTIONAL_BINDINGS = {
     # do not print or change the live value during ordinary Worker deploys.
     # Default remains Airtable (flag unset).
     "STUDIO_AUTH_READ_SOURCE": "secret_text",
+    # Asset Manager GET /api/library read gate. Optional until
+    # enable-studio-assets-reads installs STUDIO_ASSETS_READ_SOURCE=supabase.
+    # Preserve secret_text; do not print or change the live value during
+    # ordinary Worker deploys. Default remains Airtable (flag unset).
+    "STUDIO_ASSETS_READ_SOURCE": "secret_text",
     # Phase 5 write SoR switch for Output/Content updates. Optional until
     # enable-studio-write-sor installs it. Preserve secret_text; do not print
     # or change the live value during ordinary Worker deploys.
