@@ -242,6 +242,70 @@ test("loadAuthorizationFromSupabase rebuilds Airtable-shaped authorization from 
   assert.ok(calls.some((path) => path.includes("studio_memberships?user_id=eq.")));
 });
 
+test("loadAuthorizationFromSupabase falls back to org brands when extras densify is absent", async () => {
+  const rolePermissions = {
+    Owner: { tenant_admin: true },
+    Viewer: { tenant_admin: false },
+  };
+  const result = await loadAuthorizationFromSupabase(
+    {
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "service-role",
+    },
+    "joseph.t.logan@gmail.com",
+    { email: "joseph.t.logan@gmail.com", source: "access", jwt_present: true },
+    {
+      rolePermissions,
+      supabaseRest: async (_env, path) => {
+        if (path.includes("user_key,extras") || path.includes("membership_key,is_default,extras") || path.includes("organization_key,extras") || path.includes("brand_key,extras")) {
+          const err = new Error("Could not find the 'extras' column of 'studio_users' in the schema cache");
+          throw err;
+        }
+        if (path.startsWith("studio_users?")) {
+          return [{
+            id: "uuid-user",
+            airtable_record_id: "recUser1",
+            email: "joseph.t.logan@gmail.com",
+            display_name: "Joseph",
+            user_status: "Active",
+            active: true,
+          }];
+        }
+        if (path.startsWith("studio_memberships?")) {
+          return [{
+            id: "uuid-mem",
+            airtable_record_id: "recMem1",
+            user_id: "uuid-user",
+            organization_id: "uuid-org",
+            role: "Owner",
+            active: true,
+            membership_status: "Active",
+          }];
+        }
+        if (path.startsWith("organizations?")) {
+          return [{
+            id: "uuid-org",
+            airtable_record_id: "recOrg1",
+            name: "Chicago Shining",
+          }];
+        }
+        if (path.startsWith("brands?organization_id=")) {
+          return [{
+            id: "uuid-brand",
+            airtable_record_id: "recBrand1",
+            name: "Chicago",
+          }];
+        }
+        return [];
+      },
+    },
+  );
+  assert.equal(result.authorized, true);
+  assert.equal(result.auth_org_brand_fallback, true);
+  assert.equal(result.brand.record_id, "recBrand1");
+  assert.equal(result.organization.record_id, "recOrg1");
+});
+
 test("loadAuthorizationFromSupabase returns the same unregistered error as Airtable", async () => {
   const result = await loadAuthorizationFromSupabase(
     {

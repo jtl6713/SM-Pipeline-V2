@@ -93,7 +93,9 @@ jobs:
                 ? "/api/ops/supabase/sync"
                 : path === "/mirror-check"
                   ? "/api/ops/supabase/mirror-check?limit=12"
-                  : null;
+                  : path === "/auth-prove"
+                    ? "/api/ops/supabase/auth-prove"
+                    : null;
               if (request.method !== "GET" || !route) {
                 return new Response("Not found", { status: 404 });
               }
@@ -170,6 +172,31 @@ jobs:
               --arg v "$WORKER_VERSION" > /tmp/studio-mirror-check.json
           fi
 
+          echo '{}' > /tmp/studio-auth-prove.json
+          if [[ "$WORKER_VERSION" == *auth-prove* || "$WORKER_VERSION" == *supabase-auth-reads* ]]; then
+            # Prefer auth-prove Worker; also try when auth-reads is live after 0.10.813.
+            if [[ "$WORKER_VERSION" == *auth-prove* ]]; then
+              auth_code="000"
+              for attempt in $(seq 1 12); do
+                auth_code="$(curl -sS --max-time 90 -o /tmp/studio-auth-prove.json -w '%{http_code}' \
+                  -H "Authorization: Bearer $TOKEN" "$BASE/auth-prove" || true)"
+                echo "auth_prove_http_attempt_${attempt}=$auth_code"
+                if [[ "$auth_code" == "200" ]]; then break; fi
+                sleep 3
+              done
+              test "$auth_code" = "200"
+              jq -e 'type=="object"' /tmp/studio-auth-prove.json >/dev/null
+            else
+              echo "AUTH_PROVE=SKIPPED_WAITING_FOR_WORKER_0.10.813-auth-prove"
+              jq -n '{ok:null,skipped:true,reason:"worker_version_missing_auth_prove",worker_version:$v}' \
+                --arg v "$WORKER_VERSION" > /tmp/studio-auth-prove.json
+            fi
+          else
+            echo "AUTH_PROVE=SKIPPED"
+            jq -n '{ok:null,skipped:true,reason:"auth_prove_not_on_worker",worker_version:$v}' \
+              --arg v "$WORKER_VERSION" > /tmp/studio-auth-prove.json
+          fi
+
           python3 - <<'PY'
           import json, sys, time
           from pathlib import Path
@@ -178,6 +205,7 @@ jobs:
           sync = json.loads(Path("/tmp/studio-sync.json").read_text())
           runner = json.loads(Path("/tmp/runner-health.json").read_text())
           mirror = json.loads(Path("/tmp/studio-mirror-check.json").read_text())
+          auth_prove = json.loads(Path("/tmp/studio-auth-prove.json").read_text())
           now = time.time()
 
           print("=== /api/health (selected) ===")
@@ -195,6 +223,9 @@ jobs:
               "studio_supabase_phase6_writes_v1",
               "studio_supabase_last_sync_at",
               "studio_supabase_last_sync_ok",
+              "studio_auth_read_source",
+              "studio_supabase_auth_reads_v1",
+              "studio_supabase_auth_prove_v1",
           ):
               print(f"{key}={health.get(key)!r}")
 
@@ -369,6 +400,26 @@ jobs:
                   f"list_strip_suppresses={deletion.get('list_strip_suppresses')!r}",
               )
 
+          print("=== /api/ops/supabase/auth-prove ===")
+          print(f"auth_prove.ok={auth_prove.get('ok')!r}")
+          print(f"auth_prove.core_match={auth_prove.get('core_match')!r}")
+          print(f"auth_prove.brand_acceptable={auth_prove.get('brand_acceptable')!r}")
+          print(f"auth_prove.skipped={auth_prove.get('skipped')!r}")
+          print(f"auth_prove.email={auth_prove.get('email')!r}")
+          if auth_prove.get("skipped"):
+              print("GATE[SKIP] auth_prove — waiting for Worker 0.10.813-auth-prove")
+          else:
+              check(
+                  "auth_prove.ok",
+                  auth_prove.get("ok") is True,
+                  f"core_match={auth_prove.get('core_match')!r} brand_acceptable={auth_prove.get('brand_acceptable')!r}",
+              )
+              check(
+                  "auth_prove keeps studio_auth_read_source=airtable until enable",
+                  (auth_prove.get("studio_auth_read_source") or auth_prove.get("auth_read_source") or health.get("studio_auth_read_source")) == "airtable",
+                  f"got {(auth_prove.get('studio_auth_read_source') or auth_prove.get('auth_read_source') or health.get('studio_auth_read_source'))!r}",
+              )
+
           sample = {
               "probed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
               "health": {
@@ -386,6 +437,9 @@ jobs:
                       "studio_supabase_phase6_writes_v1",
                       "studio_supabase_last_sync_at",
                       "studio_supabase_last_sync_ok",
+                      "studio_auth_read_source",
+                      "studio_supabase_auth_reads_v1",
+                      "studio_supabase_auth_prove_v1",
                   )
               },
               "sync": {
@@ -418,6 +472,14 @@ jobs:
                   "output_mismatches": mirror.get("output_mismatches"),
                   "content_mismatches": mirror.get("content_mismatches"),
                   "deletion_guard": mirror.get("deletion_guard"),
+              },
+              "auth_prove": {
+                  "ok": auth_prove.get("ok"),
+                  "skipped": auth_prove.get("skipped"),
+                  "core_match": auth_prove.get("core_match"),
+                  "brand_acceptable": auth_prove.get("brand_acceptable"),
+                  "email": auth_prove.get("email"),
+                  "studio_auth_read_source": auth_prove.get("studio_auth_read_source") or auth_prove.get("auth_read_source"),
               },
               "runner": {
                   k: runner.get(k)
@@ -459,6 +521,7 @@ jobs:
             /tmp/studio-health.json
             /tmp/studio-sync.json
             /tmp/studio-mirror-check.json
+            /tmp/studio-auth-prove.json
             /tmp/runner-health.json
             /tmp/supabase-migration-gate-sample.json
           if-no-files-found: warn

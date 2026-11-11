@@ -765,6 +765,7 @@ import {
   studioSyncSupabasePipelineReads,
   getStudioSupabaseSyncStatus,
   getStudioSupabaseMirrorCheck,
+  getStudioSupabaseAuthProve,
   postStudioSupabaseSync,
   warmOldestStudioReadSnapshot,
   listOutputs,
@@ -1054,6 +1055,7 @@ export default {
       const isOpsDeskModeRoute = url.pathname === "/api/ops/desk/mode";
       const isOpsSupabaseSyncRoute = url.pathname === "/api/ops/supabase/sync";
       const isOpsSupabaseMirrorCheckRoute = url.pathname === "/api/ops/supabase/mirror-check";
+      const isOpsSupabaseAuthProveRoute = url.pathname === "/api/ops/supabase/auth-prove";
       const isAiApiRoute = url.pathname === "/api/ai-api";
       const isOpsLibraryCrossScopeRoute = url.pathname === "/api/ops/library/cross-scope";
       const isOperationsResetRenderUrlsRoute = url.pathname === "/api/operations/reset-render-urls";
@@ -1336,7 +1338,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.812-supabase-auth-reads",
+          version: "0.10.813-auth-prove",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -1365,6 +1367,7 @@ export default {
           studio_auth_airtable_cache_v1: true,
           studio_supabase_auth_mirror_v1: true,
           studio_supabase_auth_reads_v1: true,
+          studio_supabase_auth_prove_v1: true,
           studio_supabase_sync_shrink_v1: true,
           studio_write_source: studioWriteSource(env),
           studio_phase5_writes: studioPhase5WritesMode(env),
@@ -2859,6 +2862,12 @@ export default {
         requirePermission(authorization, "tenant_admin");
         if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
         return getStudioSupabaseMirrorCheck(request, env);
+      }
+
+      if (isOpsSupabaseAuthProveRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        return getStudioSupabaseAuthProve(request, env);
       }
 
       if (isOpsDeskActivityRoute) {
@@ -5181,6 +5190,7 @@ const ROLE_PERMISSIONS = {
   },
 };
 
+/*__STUDIO_WORKER_EXTRACT:proveStudioAuthorizationSources__*/
 /*__STUDIO_WORKER_EXTRACT:resolveAuthorization__*/
 /*__STUDIO_WORKER_EXTRACT:resolveStudioCronAuthorization__*/
 /*__STUDIO_WORKER_EXTRACT:membershipAllowsBrand__*/
@@ -7064,6 +7074,7 @@ const STUDIO_SUPABASE_SYNC_LAST_KEY = "studio/state/supabase-pipeline-sync-last.
 /*__STUDIO_WORKER_EXTRACT:studioSyncSupabasePipelineReads__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioSupabaseSyncStatus__*/
 /*__STUDIO_WORKER_EXTRACT:getStudioSupabaseMirrorCheck__*/
+/*__STUDIO_WORKER_EXTRACT:getStudioSupabaseAuthProve__*/
 /*__STUDIO_WORKER_EXTRACT:postStudioSupabaseSync__*/
 /*__STUDIO_WORKER_EXTRACT:warmOldestStudioReadSnapshot__*/
 /*__STUDIO_WORKER_EXTRACT:mappedTikTokNeedsLivePublishCheck__*/

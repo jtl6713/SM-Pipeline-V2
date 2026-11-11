@@ -792,6 +792,89 @@ async function loadAuthorizationFromAirtable(env, email, identity) {
   return base;
 }
 
+function studioAuthCompareSnapshot(row) {
+  return {
+    authorized: row?.authorized === true,
+    role: row?.role || null,
+    user_record_id: row?.user?.record_id || null,
+    membership_record_id: row?.membership?.record_id || null,
+    organization_record_id: row?.organization?.record_id || null,
+    brand_record_id: row?.brand?.record_id || null,
+    allowed_brand_ids: (row?.allowed_brands || [])
+      .map((brand) => brand?.record_id)
+      .filter(Boolean)
+      .slice()
+      .sort(),
+    authorization_error: row?.authorization_error || null,
+    auth_org_brand_fallback: row?.auth_org_brand_fallback === true,
+    auth_mirror_extras: row?.auth_mirror_extras === true,
+  };
+}
+
+/**
+ * Read-only parity check: Airtable vs Supabase auth loaders for one email.
+ * Does not flip STUDIO_AUTH_READ_SOURCE. Used by /api/ops/supabase/auth-prove.
+ */
+export async function proveStudioAuthorizationSources(env, email, identity = {}, deps = {}) {
+  const normalized = String(email || "").trim().toLowerCase();
+  if (!normalized) {
+    return {
+      ok: false,
+      core_match: false,
+      brand_match: false,
+      error: "email_required",
+    };
+  }
+  const proveIdentity = {
+    email: identity.email || email,
+    source: identity.source || "auth-prove",
+    jwt_present: identity.jwt_present ?? true,
+  };
+  const loadAirtable = deps.loadAuthorizationFromAirtable || loadAuthorizationFromAirtable;
+  const loadSupabase = deps.loadAuthorizationFromSupabase || loadAuthorizationFromSupabase;
+  const [airtable, supabase] = await Promise.all([
+    loadAirtable(env, normalized, proveIdentity),
+    loadSupabase(env, normalized, proveIdentity, {
+      rolePermissions: ROLE_PERMISSIONS,
+    }),
+  ]);
+  const airtableSnap = studioAuthCompareSnapshot(airtable);
+  const supabaseSnap = studioAuthCompareSnapshot(supabase);
+  const coreMatch = airtableSnap.authorized === supabaseSnap.authorized
+    && airtableSnap.role === supabaseSnap.role
+    && airtableSnap.user_record_id === supabaseSnap.user_record_id
+    && airtableSnap.membership_record_id === supabaseSnap.membership_record_id
+    && airtableSnap.organization_record_id === supabaseSnap.organization_record_id
+    && airtableSnap.authorized === true
+    && supabaseSnap.authorized === true;
+  const brandMatch = airtableSnap.brand_record_id === supabaseSnap.brand_record_id
+    && JSON.stringify(airtableSnap.allowed_brand_ids)
+      === JSON.stringify(supabaseSnap.allowed_brand_ids);
+  // Org-brand fallback can expand Allowed_Brands; still require a brand id and
+  // that Airtable's default brand is included in the Supabase allowed set.
+  const brandAcceptable = brandMatch
+    || (
+      supabaseSnap.auth_org_brand_fallback === true
+      && Boolean(supabaseSnap.brand_record_id)
+      && (
+        !airtableSnap.brand_record_id
+        || supabaseSnap.allowed_brand_ids.includes(airtableSnap.brand_record_id)
+        || supabaseSnap.brand_record_id === airtableSnap.brand_record_id
+      )
+    );
+  return {
+    ok: coreMatch && brandAcceptable,
+    core_match: coreMatch,
+    brand_match: brandMatch,
+    brand_acceptable: brandAcceptable,
+    email: normalized,
+    auth_read_source: studioAuthReadSource(env),
+    airtable: airtableSnap,
+    supabase: supabaseSnap,
+  };
+}
+/*__STUDIO_WORKER_END:proveStudioAuthorizationSources__*/
+
 export async function resolveAuthorization(request, env) {
   const identity = accessIdentity(request);
   const email = String(identity.email || "").trim().toLowerCase();

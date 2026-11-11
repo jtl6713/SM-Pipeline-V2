@@ -1,0 +1,8 @@
+2026-11-11: After Worker 0.10.813-auth-prove is live and the migration gate
+auth-prove check PASSes (Airtable vs Supabase authorization core_match for a
+tenant_admin email, studio_auth_read_source still airtable), push a follow-up
+line on this marker to run workflow "Enable Studio Auth Supabase Reads". That
+puts STUDIO_AUTH_READ_SOURCE=supabase (secret_text) without changing
+HOME/CONTENT/FACTORY/MUSIC/WRITE secrets. resolveAuthorization then reads the
+mirrored auth tables. Roll back by setting STUDIO_AUTH_READ_SOURCE=airtable.
+Do not trigger until auth-prove PASSes. Phase 7 is not started.
