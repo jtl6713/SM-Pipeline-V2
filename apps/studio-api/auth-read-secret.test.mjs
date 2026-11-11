@@ -30,6 +30,5 @@ test("Auth read flag install is main-only, secret_text, and does not retarget wr
   assert.match(marker, /0\.10\.813-auth-prove/);
   assert.match(marker, /STUDIO_AUTH_READ_SOURCE=supabase/);
   assert.match(marker, /auth-prove/);
-  assert.match(marker, /Do not trigger until auth-prove PASSes/);
-  assert.doesNotMatch(marker, /Trigger STUDIO_AUTH_READ_SOURCE=supabase now/);
+  assert.match(marker, /Trigger STUDIO_AUTH_READ_SOURCE=supabase now/);
 });
