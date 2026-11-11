@@ -9,7 +9,7 @@ test("Assets read flag install is main-only, secret_text, and does not retarget 
   ), "utf8");
   assert.match(workflow, /if: github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /deploy\/enable-studio-assets-reads\.txt/);
-  assert.match(workflow, /0\.10\.814-supabase-assets-reads/);
+  assert.match(workflow, /0\.10\.815-supabase-assets-reads/);
   assert.match(workflow, /\/content\/v2/);
   assert.doesNotMatch(workflow, /target \+ "\/content"/);
   assert.match(workflow, /STUDIO_CONTENT_READ_SOURCE/);
@@ -28,7 +28,7 @@ test("Assets read flag install is main-only, secret_text, and does not retarget 
     "../../deploy/enable-studio-assets-reads.txt",
     import.meta.url,
   ), "utf8");
-  assert.match(marker, /0\.10\.814-supabase-assets-reads/);
+  assert.match(marker, /0\.10\.815-supabase-assets-reads/);
   assert.match(marker, /STUDIO_ASSETS_READ_SOURCE=supabase/);
   assert.match(marker, /media_assets\.metadata/);
   assert.match(marker, /Do not trigger until densify is confirmed/);

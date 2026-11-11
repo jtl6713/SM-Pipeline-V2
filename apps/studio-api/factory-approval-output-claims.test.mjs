@@ -126,7 +126,7 @@ test("unbacked claims stay sticky inside grace then transfer to a new request ID
   assert.equal(reserved.already_reserved, true);
 });
 
-test("terminal failed child ledger may be reclaimed; approved ownership may not", async () => {
+test("terminal failed child ledger may be reclaimed; inactive approved ownership may too", async () => {
   const failedBucket = new R2();
   await factoryOutputClaimReserve(failedBucket, { profileId: profile, requestId: groupA, ids });
   const prefix = "studio/state/factory-approvals/v2/jobs/" + profile + "/";
@@ -138,17 +138,37 @@ test("terminal failed child ledger may be reclaimed; approved ownership may not"
   assert.equal(ok.ok, true);
   assert.deepEqual(ok.reclaimed, ids);
 
+  // Completed approved ledgers do not appear in Active Approvals. Sticky claims
+  // must not recreate empty-Activity overlap fences for Ready-for-Review rows.
   const approvedBucket = new R2();
   await factoryOutputClaimReserve(approvedBucket, {
     profileId: profile, requestId: groupA, ids: [ids[0]],
   });
   await approvedBucket.put(prefix + groupA + ".json", JSON.stringify(legacyJob(
     "approved", groupA, [{ id: ids[0], status: "approved" }], "2026-11-04T12:05:00Z")));
-  const blocked = await factoryOutputClaimReclaimIfSafe(approvedBucket, {
+  const reclaimed = await factoryOutputClaimReclaimIfSafe(approvedBucket, {
+    profileId: profile, requestId: groupB, ids: [ids[0]],
+  });
+  assert.equal(reclaimed.ok, true);
+  assert.deepEqual(reclaimed.reclaimed, [ids[0]]);
+  assert.deepEqual(reclaimed.previous_owners, [groupA]);
+});
+
+test("live pending ownership stays fail-closed even when Activity scan is separate", async () => {
+  const bucket = new R2();
+  await factoryOutputClaimReserve(bucket, {
+    profileId: profile, requestId: groupA, ids: [ids[0]],
+  });
+  const prefix = "studio/state/factory-approvals/v2/jobs/" + profile + "/";
+  await bucket.put(prefix + groupA + ".json", JSON.stringify({
+    ...legacyJob("pending", groupA, [{ id: ids[0], status: "pending" }], "2026-11-11T12:00:00Z"),
+    status: "running",
+  }));
+  const blocked = await factoryOutputClaimReclaimIfSafe(bucket, {
     profileId: profile, requestId: groupB, ids: [ids[0]],
   });
   assert.equal(blocked.ok, false);
-  assert.equal(blocked.conflicts[0].reason, "durable_active_or_approved");
+  assert.equal(blocked.conflicts[0].reason, "durable_active_work");
 });
 
 test("legacy ledgers migrate oldest valid owner; superseded duplicates do not own claims", async () => {
@@ -185,14 +205,20 @@ test("orphan global parent is indexed when a crash prevented child enqueue", asy
 
 test("global and profile-local routes share the same canonical output-ID fence", () => {
   const worker = readFileSync(new URL("./worker-functions-04.mjs", import.meta.url), "utf8");
+  const claims = readFileSync(new URL("./factory-approval-output-claims.mjs", import.meta.url), "utf8");
   assert.match(worker, /factoryOutputClaimReserve/);
   assert.match(worker, /factoryOutputClaimInspect/);
   assert.match(worker, /factoryOutputClaimReclaimIfSafe/);
+  assert.match(worker, /still committing/);
+  assert.match(claims, /terminal_inactive/);
+  assert.match(claims, /durable_active_work/);
   assert.match(worker, /factoryGroupRecordsFromAirtablePreflight\(\s*env, authorization, ids, payload, policy/);
   assert.match(worker, /duplicate_prevented: true/);
   const ui = readFileSync(new URL("../studio-web/assets/factory-desk.js", import.meta.url), "utf8");
   assert.match(ui, /rememberFactoryAccepted\(plan\.ids\)/);
   assert.match(ui, /reconcilePersistedFactoryPending/);
+  assert.match(ui, /surfaceFactoryBlockingApproval/);
+  assert.match(ui, /factoryBlockingRequestIdsFromMessage/);
   assert.doesNotMatch(ui, /Recover saved submission first/);
   assert.match(ui, /const ready = selected\.filter\(card => !recovering\.has\(card\.id\)\)/,
     "Only outputs owned by an unresolved request must wait; unrelated selections proceed");

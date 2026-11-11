@@ -1,4 +1,4 @@
-2026-11-11: After Worker 0.10.814-supabase-assets-reads is live and half-hour
+2026-11-11: After Worker 0.10.815-supabase-assets-reads is live and half-hour
 media backfill has densified Content_Profile / Classification_Status /
 Manual_Classification_* / search fields into media_assets.metadata, push a
 follow-up line on this marker to run workflow "Enable Studio Assets Supabase

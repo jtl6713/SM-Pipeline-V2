@@ -776,7 +776,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.814-supabase-assets-reads/);
+  assert.match(worker, /0\.10\.815-supabase-assets-reads/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
@@ -822,7 +822,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_supabase_music_read_routes: STUDIO_SUPABASE_MUSIC_READ_ROUTES/);
   const release = /version: "0\.10\.(\d+)-[^"]+"/.exec(worker);
   assert.ok(release, "Worker /health must identify a versioned release");
-  assert.ok(Number(release[1]) >= 814, "Assets reads cannot regress behind Worker 0.10.814");
+  assert.ok(Number(release[1]) >= 815, "Assets reads cannot regress behind Worker 0.10.815");
   assert.match(
     await readFile(path.join(here, "worker-functions-03.mjs"), "utf8"),
     /auth_tables: result\?\.auth_tables/,
@@ -868,7 +868,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.814-supabase-assets-reads/);
+  assert.match(worker, /0\.10\.815-supabase-assets-reads/);
   assert.match(worker, /skipMediaAssetsBackfill: deferPhase6Catchup/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
