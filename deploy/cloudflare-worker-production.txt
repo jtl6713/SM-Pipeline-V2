@@ -1034,3 +1034,5 @@ Deploy 2026-11-11 Worker 0.10.815-supabase-assets-reads: Dormant STUDIO_ASSETS_R
 Deploy 2026-11-11 Worker 0.10.816-assets-densify-catchup: Temporary media backfill mediaLimit 600 on :00 and :30 so Asset Manager profile/classification/search densify covers the full media_assets catalog (newest-50 shrink left older rows undensified). Enable STUDIO_ASSETS_READ_SOURCE still gated. Phase 7 not started.
 
 Deploy 2026-11-11 Worker 0.10.817-assets-densify-oneshot: POST /api/ops/supabase/sync accepts media_limit; mediaAssetBackfillRow always stamps Asset Manager densify keys (null when Airtable omits blanks). One-shot densify via deploy/densify-studio-assets-media.txt. Phase 7 not started.
+
+Deploy 2026-11-11 Worker 0.10.818-assets-densify-media-only: POST /api/ops/supabase/sync media_only=true runs media densify under lease without the full profile pipeline (partial Factory sync was marking ok=false and burning the lease before densify landed). Densify workflow uses media_only + media_limit=600. Phase 7 not started.

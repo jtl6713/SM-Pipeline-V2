@@ -776,13 +776,14 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.817-assets-densify-oneshot/);
+  assert.match(worker, /0\.10\.818-assets-densify-media-only/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /studio_supabase_auth_reads_v1: true/);
   assert.match(worker, /studio_supabase_auth_prove_v1: true/);
   assert.match(worker, /studio_supabase_assets_reads_v1: true/);
   assert.match(worker, /studio_supabase_assets_densify_catchup_v1: true/);
   assert.match(worker, /studio_supabase_assets_densify_oneshot_v1: true/);
+  assert.match(worker, /studio_supabase_assets_densify_media_only_v1: true/);
   assert.match(worker, /studio_auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(worker, /studio_assets_read_source: studioAssetsReadSource\(env\)/);
   assert.match(worker, /phase6_writes: "airtable_sor_write_through"/);
@@ -824,7 +825,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_supabase_music_read_routes: STUDIO_SUPABASE_MUSIC_READ_ROUTES/);
   const release = /version: "0\.10\.(\d+)-[^"]+"/.exec(worker);
   assert.ok(release, "Worker /health must identify a versioned release");
-  assert.ok(Number(release[1]) >= 817, "Assets densify oneshot cannot regress behind Worker 0.10.817");
+  assert.ok(Number(release[1]) >= 818, "Assets densify oneshot cannot regress behind Worker 0.10.818");
   assert.match(
     await readFile(path.join(here, "worker-functions-03.mjs"), "utf8"),
     /auth_tables: result\?\.auth_tables/,
@@ -845,6 +846,9 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(pipelineFns, /payload\?\.media_limit/);
   assert.match(pipelineFns, /skipMediaAssetsBackfill/);
   assert.match(pipelineFns, /mediaLimit,/);
+  assert.match(pipelineFns, /payload\?\.media_only === true/);
+  assert.match(pipelineFns, /options\.mediaOnly === true/);
+  assert.match(pipelineFns, /syncRecentMediaAssetsToSupabase/);
   const factoryFns = await readFile(path.join(here, "worker-functions-04.mjs"), "utf8");
   const queueStart = factoryFns.indexOf("export async function getStudioOperationsQueue");
   const queueEnd = factoryFns.indexOf("export async function getFactoryDesk");
@@ -873,7 +877,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.817-assets-densify-oneshot/);
+  assert.match(worker, /0\.10\.818-assets-densify-media-only/);
   assert.match(worker, /skipMediaAssetsBackfill: false/);
   assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(pipelineFns, /assets_read_source: studioAssetsReadSource\(env\)/);
