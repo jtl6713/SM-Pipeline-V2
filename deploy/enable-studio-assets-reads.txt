@@ -1,4 +1,4 @@
-2026-11-11: After Worker 0.10.818-assets-densify-media-only (or later) is live and
+2026-11-11: After Worker 0.10.819-assets-densify-null-sanitize (or later) is live and
 media backfill has densified Content_Profile / Classification_Status /
 Manual_Classification_* / search fields into media_assets.metadata across the
 library catalog (not only the newest 50), push a follow-up line on this marker
