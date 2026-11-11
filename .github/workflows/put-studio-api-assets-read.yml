@@ -59,8 +59,10 @@ jobs:
                   script = response.read()
           except urllib.error.HTTPError as error:
               raise SystemExit("Cloudflare refused live Worker source read (HTTP {})".format(error.code))
-          if b"0.10.815-supabase-assets-reads" not in script:
-              raise SystemExit("Refusing to enable Assets reads: live Worker is not 0.10.815-supabase-assets-reads")
+          # Assets densify/read path shipped in 0.10.815; catch-up Workers keep the
+          # health flag. Require that marker, not a frozen version string.
+          if b"studio_supabase_assets_reads_v1: true" not in script and b"0.10.815-supabase-assets-reads" not in script:
+              raise SystemExit("Refusing to enable Assets reads: live Worker lacks assets-reads (need >= 0.10.815)")
           before = active_bindings()
           expected = {
               "AIRTABLE_PAT": "secret_text",

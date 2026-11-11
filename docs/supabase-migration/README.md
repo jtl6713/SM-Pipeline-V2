@@ -15,7 +15,7 @@ Confirmed by **Supabase Migration Gate Read-Only** run [42571989580](https://git
 | Factory desk and Ops queue | `GET /api/factory/desk`, `GET /api/operations/queue` | `STUDIO_FACTORY_OPS_READ_SOURCE` (`secret_text`) | `supabase` |
 | Home overview | `GET /api/profiles/overview` | `STUDIO_HOME_READ_SOURCE` (`secret_text`) | `supabase` |
 | Music library list | `GET /api/music` | `STUDIO_MUSIC_READ_SOURCE` (`secret_text`) | `supabase` |
-| Asset Manager library list | `GET /api/library` | `STUDIO_ASSETS_READ_SOURCE` (`secret_text`) | dormant until `deploy/enable-studio-assets-reads.txt` after Worker `0.10.815-supabase-assets-reads` densify |
+| Asset Manager library list | `GET /api/library` | `STUDIO_ASSETS_READ_SOURCE` (`secret_text`) | dormant until `deploy/enable-studio-assets-reads.txt` after Worker `0.10.816-assets-densify-catchup` densify |
 | Global read flag reported as `studio_read_source` | — | `studioReadSource()` | `airtable` (hard-coded) |
 | Worker and runner writes | Platform Outputs and Content Items | `STUDIO_WRITE_SOURCE` | enable via `deploy/enable-studio-write-sor.txt` → `supabase` (creates still Airtable-first) |
 | Phase 5 mirror mode | `/api/ops/supabase/sync` `phase5_writes` | — | `airtable_sor_write_through` until enable, then `supabase_sor_legacy_export` |
@@ -30,7 +30,7 @@ The last sync in that gate finished at 12:03 AM CT with `status=completed`, `ok=
 - Pipeline-runner Airtable views and `FIND`/`ARRAYJOIN`/`OR` formula selectors. Allowlisted Output/Content formulas run on Supabase when runner read flags are enabled (`deploy/enable-runner-supabase-reads.txt`). Unmarked rows still fall back to Airtable.
 - The half-hour cron that copies Airtable into Supabase. Supabase is the replica, not the source of that job.
 - `resolveAuthorization` reads Supabase when `STUDIO_AUTH_READ_SOURCE=supabase` (Worker `0.10.813-auth-prove` + enable). Apply `docs/supabase-migration/phase4/001_auth_mirror_extras.sql` for densified keys (`User_ID`, Allowed_Brands, etc.); org-brand fallback covers missing extras.
-- Asset Manager `GET /api/library` stays on Airtable until `STUDIO_ASSETS_READ_SOURCE=supabase`. Worker `0.10.815-supabase-assets-reads` densifies profile/classification/search into `media_assets.metadata` and ships a dormant loader with Airtable fallback. Enable via `deploy/enable-studio-assets-reads.txt` after densify is confirmed.
+- Asset Manager `GET /api/library` stays on Airtable until `STUDIO_ASSETS_READ_SOURCE=supabase`. Worker `0.10.816-assets-densify-catchup` densifies profile/classification/search into `media_assets.metadata` and ships a dormant loader with Airtable fallback. Enable via `deploy/enable-studio-assets-reads.txt` after densify is confirmed.
 - `STUDIO_HOME_PROFILE_SUMMARY_READS`. That is a separate Durable Object summary, and this cutover did not turn it on.
 - Phase 6 `studio_media_transfer_targets` mirror (write-through gap only; does not cut Airtable reads).
 
