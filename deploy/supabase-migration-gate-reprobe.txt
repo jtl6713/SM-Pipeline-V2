@@ -6,3 +6,6 @@ reprobe_810_stamp=2026-11-11T04:19:18Z
 
 # Reprobe after expected 10:30 PM CT half-hour sync under Worker 0.10.810
 reprobe_auth_tables_1030=2026-11-11T04:45:25Z
+
+# Reprobe after expected 11:00 PM CT half-hour sync under Worker 0.10.810
+reprobe_1100_sync=2026-11-11T05:14:41Z
