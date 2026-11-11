@@ -3,3 +3,6 @@ Confirm last_sync completed+ok and auth_tables present.
 
 # Reprobe after 0.10.810-auth-mirror-stamp deploy (prior gate raced at 809)
 reprobe_810_stamp=2026-11-11T04:19:18Z
+
+# Reprobe after expected 10:30 PM CT half-hour sync under Worker 0.10.810
+reprobe_auth_tables_1030=2026-11-11T04:45:25Z
