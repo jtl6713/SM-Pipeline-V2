@@ -1,7 +1,10 @@
 name: Enable Studio Assets Supabase Reads
-# Puts STUDIO_ASSETS_READ_SOURCE=supabase on the Worker. Trigger by pushing
-# deploy/enable-studio-assets-reads.txt on main after densify + live verify.
-# workflow_dispatch remains for manual re-runs when the token allows it.
+# Puts STUDIO_ASSETS_READ_SOURCE on the Worker from deploy/enable-studio-assets-reads.txt.
+# Safe no-op unless the marker explicitly contains:
+#   Trigger STUDIO_ASSETS_READ_SOURCE=supabase now
+# or
+#   Rollback STUDIO_ASSETS_READ_SOURCE=airtable now
+# Editing the marker without one of those lines must not flip the secret.
 on:
   push:
     branches: [main]
@@ -26,7 +29,8 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       TARGET_WORKER: chicagoshining-studio-api
     steps:
-      - name: Install Assets read flag without printing secret values
+      - uses: actions/checkout@v4
+      - name: Install or roll back Assets read flag without printing secret values
         shell: bash
         run: |
           set -euo pipefail
@@ -34,7 +38,16 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           python - <<'PY'
-          import json, os, urllib.request, urllib.error
+          import json, os, pathlib, urllib.request, urllib.error
+          marker = pathlib.Path("deploy/enable-studio-assets-reads.txt").read_text()
+          want_supabase = "Trigger STUDIO_ASSETS_READ_SOURCE=supabase now" in marker
+          want_airtable = "Rollback STUDIO_ASSETS_READ_SOURCE=airtable now" in marker
+          if want_supabase and want_airtable:
+              raise SystemExit("Marker requests both Trigger and Rollback; refuse ambiguous put")
+          if not want_supabase and not want_airtable:
+              print("assets_read_secret_skipped=NO_TRIGGER_OR_ROLLBACK")
+              raise SystemExit(0)
+          secret_text = "supabase" if want_supabase else "airtable"
           target = "https://api.cloudflare.com/client/v4/accounts/{}/workers/scripts/{}".format(
               os.environ["CLOUDFLARE_ACCOUNT_ID"], os.environ["TARGET_WORKER"])
           auth = {"Authorization": "Bearer " + os.environ["CLOUDFLARE_API_TOKEN"]}
@@ -62,7 +75,7 @@ jobs:
           # Assets densify/read path shipped in 0.10.815; catch-up Workers keep the
           # health flag. Require that marker, not a frozen version string.
           if b"studio_supabase_assets_reads_v1: true" not in script and b"0.10.815-supabase-assets-reads" not in script:
-              raise SystemExit("Refusing to enable Assets reads: live Worker lacks assets-reads (need >= 0.10.815)")
+              raise SystemExit("Refusing Assets read put: live Worker lacks assets-reads (need >= 0.10.815)")
           before = active_bindings()
           expected = {
               "AIRTABLE_PAT": "secret_text",
@@ -79,7 +92,7 @@ jobs:
                   raise SystemExit("Existing production binding missing or changed: " + name)
           secret = {
               "name": "STUDIO_ASSETS_READ_SOURCE",
-              "text": "supabase",
+              "text": secret_text,
               "type": "secret_text",
           }
           headers = dict(auth, **{"Content-Type": "application/json"})
@@ -99,11 +112,12 @@ jobs:
           after = active_bindings()
           for name, typ in {**expected, "STUDIO_ASSETS_READ_SOURCE": "secret_text"}.items():
               if after.get(name) != typ:
-                  raise SystemExit("Required binding missing after Assets flag installation: " + name)
+                  raise SystemExit("Required binding missing after Assets flag put: " + name)
           for name, typ in before.items():
               if after.get(name) != typ:
-                  raise SystemExit("Pre-existing Worker binding changed during Assets flag install: " + name)
+                  raise SystemExit("Pre-existing Worker binding changed during Assets flag put: " + name)
           print("assets_read_secret_installed=PASS")
+          print("assets_read_secret_value={}".format(secret_text))
           print("auth_read_secret_preserved=PASS")
           print("music_read_secret_preserved=PASS")
           print("write_source_changed=NO")

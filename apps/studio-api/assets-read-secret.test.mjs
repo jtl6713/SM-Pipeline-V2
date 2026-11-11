@@ -9,6 +9,10 @@ test("Assets read flag install is main-only, secret_text, and does not retarget 
   ), "utf8");
   assert.match(workflow, /if: github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /deploy\/enable-studio-assets-reads\.txt/);
+  assert.match(workflow, /actions\/checkout@v4/);
+  assert.match(workflow, /Trigger STUDIO_ASSETS_READ_SOURCE=supabase now/);
+  assert.match(workflow, /Rollback STUDIO_ASSETS_READ_SOURCE=airtable now/);
+  assert.match(workflow, /assets_read_secret_skipped=NO_TRIGGER_OR_ROLLBACK/);
   assert.match(workflow, /studio_supabase_assets_reads_v1: true/);
   assert.match(workflow, /\/content\/v2/);
   assert.doesNotMatch(workflow, /target \+ "\/content"/);
@@ -19,9 +23,9 @@ test("Assets read flag install is main-only, secret_text, and does not retarget 
   assert.match(workflow, /STUDIO_AUTH_READ_SOURCE/);
   assert.match(workflow, /STUDIO_WRITE_SOURCE/);
   assert.match(workflow, /"name": "STUDIO_ASSETS_READ_SOURCE"/);
-  assert.match(workflow, /"text": "supabase"/);
   assert.match(workflow, /"type": "secret_text"/);
-  assert.match(workflow, /Pre-existing Worker binding changed during Assets flag install/);
+  assert.match(workflow, /secret_text = "supabase" if want_supabase else "airtable"/);
+  assert.match(workflow, /Pre-existing Worker binding changed during Assets flag put/);
   assert.doesNotMatch(workflow, /STUDIO_READ_SOURCE/);
   assert.doesNotMatch(workflow, /print\(secret|print\(result|print\(script/);
   const marker = readFileSync(new URL(
@@ -32,5 +36,6 @@ test("Assets read flag install is main-only, secret_text, and does not retarget 
   assert.match(marker, /STUDIO_ASSETS_READ_SOURCE=supabase/);
   assert.match(marker, /media_assets\.metadata/);
   assert.match(marker, /Do not trigger until densify is confirmed/);
+  assert.match(marker, /Rollback STUDIO_ASSETS_READ_SOURCE=airtable now/);
   assert.doesNotMatch(marker, /Trigger STUDIO_ASSETS_READ_SOURCE=supabase now/);
 });
