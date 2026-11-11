@@ -1683,11 +1683,30 @@ export function homogenizeUpsertRows(rows) {
   });
 }
 
+/**
+ * Postgres/jsonb rejects U+0000 in text. Airtable long-text / JSON fields
+ * occasionally carry null bytes; strip them before PostgREST upsert so media
+ * densify cannot fail the whole chunk with 22P05.
+ */
+export function stripNullBytesDeep(value) {
+  if (typeof value === "string") return value.replace(/\u0000/g, "");
+  if (Array.isArray(value)) return value.map((item) => stripNullBytesDeep(item));
+  if (isPlainObject(value)) {
+    const out = {};
+    for (const [key, nested] of Object.entries(value)) {
+      out[key] = stripNullBytesDeep(nested);
+    }
+    return out;
+  }
+  return value;
+}
+
 function upsertChunk(env, table, rows) {
   if (!rows.length) return Promise.resolve();
+  const body = homogenizeUpsertRows(rows).map((row) => stripNullBytesDeep(row));
   return supabaseRest(env, `${table}?on_conflict=airtable_record_id`, {
     method: "POST",
-    body: homogenizeUpsertRows(rows),
+    body,
     headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
   });
 }
@@ -2684,7 +2703,7 @@ function mediaAssetWriteThroughRow(record) {
   const fields = record?.fields || {};
   const row = {};
   const text = (value) => {
-    const trimmed = String(value || "").trim();
+    const trimmed = String(value || "").replace(/\u0000/g, "").trim();
     return trimmed || null;
   };
   if ("Asset Name" in fields) {
@@ -2744,16 +2763,16 @@ function mediaAssetWriteThroughRow(record) {
   if ("Manual_Classification_JSON" in fields) {
     const raw = fields.Manual_Classification_JSON;
     if (raw == null || raw === "") meta.manual_classification_json = null;
-    else if (typeof raw === "string") meta.manual_classification_json = raw;
-    else if (isPlainObject(raw)) meta.manual_classification_json = raw;
-    else meta.manual_classification_json = String(raw);
+    else if (typeof raw === "string") meta.manual_classification_json = stripNullBytesDeep(raw);
+    else if (isPlainObject(raw)) meta.manual_classification_json = stripNullBytesDeep(raw);
+    else meta.manual_classification_json = stripNullBytesDeep(String(raw));
   }
   if ("Manual_Classification_Audit" in fields) {
     const raw = fields.Manual_Classification_Audit;
     if (raw == null || raw === "") meta.manual_classification_audit = null;
-    else if (typeof raw === "string") meta.manual_classification_audit = raw;
-    else if (Array.isArray(raw)) meta.manual_classification_audit = raw;
-    else meta.manual_classification_audit = String(raw);
+    else if (typeof raw === "string") meta.manual_classification_audit = stripNullBytesDeep(raw);
+    else if (Array.isArray(raw)) meta.manual_classification_audit = stripNullBytesDeep(raw);
+    else meta.manual_classification_audit = stripNullBytesDeep(String(raw));
   }
   if ("Search_Keywords" in fields) meta.search_keywords = text(fields.Search_Keywords);
   if ("AI_Tags" in fields) meta.ai_tags = text(fields.AI_Tags);
@@ -2786,7 +2805,7 @@ export function mediaAssetBackfillRow(record) {
   if (!body.asset_name) return null;
   const fields = record?.fields || {};
   const text = (value) => {
-    const trimmed = String(value || "").trim();
+    const trimmed = String(value || "").replace(/\u0000/g, "").trim();
     return trimmed || null;
   };
   // Half-hour / oneshot backfill always stamps Asset Manager densify keys.
@@ -2800,18 +2819,18 @@ export function mediaAssetBackfillRow(record) {
   if ("Manual_Classification_JSON" in fields) {
     const raw = fields.Manual_Classification_JSON;
     if (raw == null || raw === "") meta.manual_classification_json = null;
-    else if (typeof raw === "string") meta.manual_classification_json = raw;
-    else if (isPlainObject(raw)) meta.manual_classification_json = raw;
-    else meta.manual_classification_json = String(raw);
+    else if (typeof raw === "string") meta.manual_classification_json = stripNullBytesDeep(raw);
+    else if (isPlainObject(raw)) meta.manual_classification_json = stripNullBytesDeep(raw);
+    else meta.manual_classification_json = stripNullBytesDeep(String(raw));
   } else {
     meta.manual_classification_json = null;
   }
   if ("Manual_Classification_Audit" in fields) {
     const raw = fields.Manual_Classification_Audit;
     if (raw == null || raw === "") meta.manual_classification_audit = null;
-    else if (typeof raw === "string") meta.manual_classification_audit = raw;
-    else if (Array.isArray(raw)) meta.manual_classification_audit = raw;
-    else meta.manual_classification_audit = String(raw);
+    else if (typeof raw === "string") meta.manual_classification_audit = stripNullBytesDeep(raw);
+    else if (Array.isArray(raw)) meta.manual_classification_audit = stripNullBytesDeep(raw);
+    else meta.manual_classification_audit = stripNullBytesDeep(String(raw));
   } else {
     meta.manual_classification_audit = null;
   }

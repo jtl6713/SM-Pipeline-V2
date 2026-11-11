@@ -97,11 +97,11 @@ jobs:
           READY=0
           for i in $(seq 1 90); do
             CODE=$(curl -sS --max-time 45 -o /tmp/health.json -w '%{http_code}' "$URL?mode=health" || true)
-            if [[ "$CODE" == "200" ]] && jq -e '.ok==true and ((.version|tostring|contains("818-assets-densify-media-only")) or (.studio_supabase_assets_densify_media_only_v1==true))' /tmp/health.json >/dev/null 2>&1; then
+            if [[ "$CODE" == "200" ]] && jq -e '.ok==true and ((.version|tostring|contains("819-assets-densify-null-sanitize")) or (.studio_supabase_assets_densify_null_sanitize_v1==true))' /tmp/health.json >/dev/null 2>&1; then
               READY=1
               break
             fi
-            echo "waiting for Worker 0.10.818 densify media-only (try $i code=$CODE version=$(jq -r '.version // empty' /tmp/health.json 2>/dev/null || true))"
+            echo "waiting for Worker 0.10.819 densify null-sanitize (try $i code=$CODE version=$(jq -r '.version // empty' /tmp/health.json 2>/dev/null || true))"
             sleep 8
           done
           test "$READY" = "1"

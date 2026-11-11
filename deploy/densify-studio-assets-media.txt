@@ -1,15 +1,17 @@
 2026-11-11: One-shot Asset Manager media densify.
-After Worker 0.10.818-assets-densify-media-only is live, append:
+After Worker 0.10.819-assets-densify-null-sanitize is live, append:
 Trigger densify STUDIO_ASSETS media_only media_limit=600 now
 to run workflow "Densify Studio Assets Media". That POSTs
 /api/ops/supabase/sync with media_only=true and media_limit=600 through a
-service-binding bridge (skips the full profile pipeline so partial Factory
-sync cannot burn the lease before densify). Do not enable
-STUDIO_ASSETS_READ_SOURCE until densify coverage is confirmed on
-media_assets.metadata.
+service-binding bridge. Null bytes in Airtable text/JSON are stripped before
+upsert (Worker 0.10.819). Do not enable STUDIO_ASSETS_READ_SOURCE until
+densify coverage is confirmed on media_assets.metadata.
 
 2026-11-11T15:05:00Z: Trigger densify STUDIO_ASSETS media_limit=600 now
 (full-pipeline attempt; sync returned HTTP 200 with ok=false / partial and
 media densify keys stayed at 50/526).
 
 2026-11-11T15:45:00Z: Trigger densify STUDIO_ASSETS media_only media_limit=600 now
+(Worker 0.10.818; failed PostgREST 22P05 U+0000 in text).
+
+2026-11-11T19:10:00Z: Trigger densify STUDIO_ASSETS media_only media_limit=600 now
