@@ -724,7 +724,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.810-auth-mirror-stamp/);
+  assert.match(worker, /0\.10\.811-sync-shrink-v1/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /phase6_writes: "airtable_sor_write_through"/);
   assert.match(worker, /phase6_write_tables: \["production_requests", "media_assets", "studio_media_transfer_queue"\]/);
@@ -765,7 +765,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_supabase_music_read_routes: STUDIO_SUPABASE_MUSIC_READ_ROUTES/);
   const release = /version: "0\.10\.(\d+)-[^"]+"/.exec(worker);
   assert.ok(release, "Worker /health must identify a versioned release");
-  assert.ok(Number(release[1]) >= 810, "Auth mirror stamp cannot regress behind Worker 0.10.810");
+  assert.ok(Number(release[1]) >= 811, "Sync shrink cannot regress behind Worker 0.10.811");
   assert.match(
     await readFile(path.join(here, "worker-functions-03.mjs"), "utf8"),
     /auth_tables: result\?\.auth_tables/,
@@ -806,6 +806,17 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /supabase factory\/ops queue read failed/);
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
+  assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
+  assert.match(worker, /0\.10\.811-sync-shrink-v1/);
+  assert.match(worker, /skipMediaAssetsBackfill: deferPhase6Catchup/);
+  assert.match(worker, /skipTransferQueueBackfill: deferPhase6Catchup/);
+  assert.match(worker, /ideaLimit: 600/);
+  assert.match(worker, /mediaLimit: 50/);
+  assert.match(worker, /queueLimit: 50/);
+  assert.match(worker, /markerBackfillLimit: 10/);
+  assert.match(worker, /mediaLimit: options\.mediaLimit/);
+  assert.match(worker, /queueLimit: options\.queueLimit/);
+  assert.match(worker, /markerBackfillLimit: options\.markerBackfillLimit/);
   assert.match(worker, /usedSupabaseOutputs/);
   assert.match(worker, /Reuse last-good Ideas counts/);
   assert.match(worker, /must not block that output rebuild/);
@@ -1703,6 +1714,53 @@ test("phase 6 media and queue backfill run after production requests in the all-
       order.filter((name, index) => order.indexOf(name) === index),
       ["production_requests", "media_assets", "studio_media_transfer_queue"],
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("all-profile sync can defer media and queue catch-up without failing ok", async () => {
+  const listed = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const href = String(url);
+    const method = init?.method || "GET";
+    if (href.includes("content_profiles") && method === "GET") {
+      return { ok: true, async text() { return JSON.stringify([{ id: "prof-uuid", airtable_record_id: "recProfile1" }]); } };
+    }
+    return { ok: true, async text() { return method === "GET" ? "[]" : ""; } };
+  };
+  try {
+    const result = await syncAllProfilesPipelineToSupabase(supabaseEnv, [{
+      id: "recProfile1",
+      fields: { Active: true, Profile_Name: "Chicago" },
+    }], {
+      listRecords: async (_env, table) => {
+        listed.push(table);
+        if (table === "Production Requests") {
+          return [{
+            id: "recReqA",
+            fields: { Production_Request_ID: 88, Request_Status: "Ready", Updated_At: "2026-11-10T12:00:00.000Z" },
+          }];
+        }
+        return [];
+      },
+      f: (record, name) => record?.fields?.[name],
+      contentProfileFilterFormula: () => '{Content_Profile}="recProfile1"',
+      mediaTableId: "tblMedia",
+      queueTableId: "tblBZLXPd1p2NRWRK",
+      requestTableId: "Production Requests",
+      skipMediaAssetsBackfill: true,
+      skipTransferQueueBackfill: true,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.status, "completed");
+    assert.equal(result.media_assets?.skipped, true);
+    assert.equal(result.media_assets?.reason, "cron_catchup_deferred");
+    assert.equal(result.studio_media_transfer_queue?.skipped, true);
+    assert.equal(result.studio_media_transfer_queue?.reason, "cron_catchup_deferred");
+    assert.equal(listed.includes("tblMedia"), false);
+    assert.equal(listed.includes("tblBZLXPd1p2NRWRK"), false);
   } finally {
     globalThis.fetch = originalFetch;
   }

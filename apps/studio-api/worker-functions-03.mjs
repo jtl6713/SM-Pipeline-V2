@@ -1947,8 +1947,15 @@ export async function studioSyncSupabasePipelineReads(env, options = {}) {
         outputFields: OUTPUT_LIST_FIELDS,
         outputLimit: options.outputLimit,
         contentLimit: options.contentLimit,
-        // Preserve deep unpromoted-idea coverage; do not truncate the mirror.
+        // Cron may lower this after write-SoR is solid; manual sync keeps 2000.
         ideaLimit: options.ideaLimit ?? 2000,
+        mediaLimit: options.mediaLimit,
+        queueLimit: options.queueLimit,
+        requestLimit: options.requestLimit,
+        markerBackfillLimit: options.markerBackfillLimit,
+        markerScanLimit: options.markerScanLimit,
+        skipMediaAssetsBackfill: options.skipMediaAssetsBackfill === true,
+        skipTransferQueueBackfill: options.skipTransferQueueBackfill === true,
         listOpenOutputs: async (profile) => {
           const pack = await loadOpenPipelineOutputPack(env, profile);
           return mergePipelineOutputRecords(pack.open || [], pack.siblings || []);

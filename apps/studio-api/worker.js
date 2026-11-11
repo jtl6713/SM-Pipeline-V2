@@ -1335,7 +1335,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.810-auth-mirror-stamp",
+          version: "0.10.811-sync-shrink-v1",
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -1363,6 +1363,7 @@ export default {
           studio_supabase_phase6_writes_v1: true,
           studio_auth_airtable_cache_v1: true,
           studio_supabase_auth_mirror_v1: true,
+          studio_supabase_sync_shrink_v1: true,
           studio_write_source: studioWriteSource(env),
           studio_phase5_writes: studioPhase5WritesMode(env),
           studio_read_source: studioReadSource(env),
@@ -4846,7 +4847,20 @@ export default {
         console.warn("studio list snapshot warm failed", error);
       }
       try {
-        await studioSyncSupabasePipelineReads(env, { outputLimit: 400, contentLimit: 200 });
+        // Shrink catch-up Airtable reads now that consecutive syncs stay
+        // completed+ok and Phase 5/6 write-through covers live mutations.
+        // Keep open Pipeline pack + newest-N content/outputs; do not flip auth.
+        const deferPhase6Catchup = Number(cadence.minute) === 30;
+        await studioSyncSupabasePipelineReads(env, {
+          outputLimit: 400,
+          contentLimit: 200,
+          ideaLimit: 600,
+          mediaLimit: 50,
+          queueLimit: 50,
+          markerBackfillLimit: 10,
+          skipMediaAssetsBackfill: deferPhase6Catchup,
+          skipTransferQueueBackfill: deferPhase6Catchup,
+        });
       } catch (error) {
         console.warn("supabase pipeline sync cron failed", error);
       }

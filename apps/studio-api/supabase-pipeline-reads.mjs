@@ -2192,14 +2192,20 @@ export async function syncAllProfilesPipelineToSupabase(env, profiles, deps = {}
     requests = await runPhaseBackfill("production_requests", () => (
       syncOpenProductionRequestsToSupabase(env, { ...deps, assertLease })
     ));
-    if (!supabaseCircuitOpen()) {
+    if (deps.skipMediaAssetsBackfill === true) {
+      // Phase 6 write-through covers live media mutations; cron may defer the
+      // newest-N catch-up to the top of the hour to cut Airtable RPS.
+      media = { skipped: true, reason: "cron_catchup_deferred", ok: true };
+    } else if (!supabaseCircuitOpen()) {
       media = await runPhaseBackfill("media_assets", () => (
         syncRecentMediaAssetsToSupabase(env, { ...deps, assertLease })
       ));
     } else {
       media = { skipped: true, reason: "supabase_circuit_open" };
     }
-    if (!supabaseCircuitOpen()) {
+    if (deps.skipTransferQueueBackfill === true) {
+      queue = { skipped: true, reason: "cron_catchup_deferred", ok: true };
+    } else if (!supabaseCircuitOpen()) {
       queue = await runPhaseBackfill("studio_media_transfer_queue", () => (
         syncRecentTransferQueueToSupabase(env, { ...deps, assertLease })
       ));
