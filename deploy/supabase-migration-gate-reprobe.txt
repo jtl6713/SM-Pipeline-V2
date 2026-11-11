@@ -1,4 +1,2 @@
-2026-11-10 reprobe after Worker 0.10.809-supabase-auth-mirror deploy.
-Prior gate raced the Worker deploy and still read 0.10.808.
-Expect health.version=0.10.809-supabase-auth-mirror and last_sync completed+ok.
-auth_tables appears after the next half-hour sync under 809.
+2026-11-10 22:08 CT reprobe after expected 10:00 PM half-hour sync under Worker 0.10.809.
+Confirm last_sync completed+ok and auth_tables present.
