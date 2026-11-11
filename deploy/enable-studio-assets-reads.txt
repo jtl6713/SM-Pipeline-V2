@@ -12,6 +12,6 @@ Phase 7 is not started.
 2026-11-11T14:35:00Z: Accidental enable on marker edit before full densify.
 Rolled back STUDIO_ASSETS_READ_SOURCE to airtable (historical; do not re-run).
 
-2026-11-11T19:20:00Z: Worker 0.10.819-assets-densify-null-sanitize live; densify
-oneshot PASS (media_assets=600 densify keys present on 600/613 rows).
+2026-11-11T19:20:00Z: Worker 0.10.819-assets-densify-null-sanitize live; densify oneshot PASS
+via deploy/densify-studio-assets-media.txt (media_assets=600 densify keys on 600/613 rows).
 Trigger STUDIO_ASSETS_READ_SOURCE=supabase now.
