@@ -53,7 +53,21 @@ test("auth table writes invalidate the auth cache prefix", () => {
 });
 
 test("Worker health advertises auth Airtable cache build", () => {
-  assert.match(worker, /0\.10\.811-sync-shrink-v1/);
+  assert.match(worker, /0\.10\.812-supabase-auth-reads/);
   assert.match(worker, /studio_supabase_auth_mirror_v1: true/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
+  assert.match(worker, /studio_supabase_auth_reads_v1: true/);
+  assert.match(worker, /studio_auth_read_source: studioAuthReadSource\(env\)/);
+});
+
+test("resolveAuthorization keeps Airtable default and can opt into Supabase loader", () => {
+  assert.match(workerFns, /studioAuthReadSource\(env\) === "supabase"/);
+  assert.match(workerFns, /loadAuthorizationFromSupabase/);
+  assert.match(workerFns, /loadAuthorizationFromAirtable/);
+  assert.match(workerFns, /rolePermissions: ROLE_PERMISSIONS/);
+  // Default path must still call Airtable when the flag is unset.
+  assert.match(
+    workerFns,
+    /studioAuthReadSource\(env\) === "supabase"\s*\?[\s\S]*loadAuthorizationFromSupabase[\s\S]*:[\s\S]*loadAuthorizationFromAirtable/,
+  );
 });

@@ -1022,3 +1022,5 @@ Deploy 2026-11-10 Worker 0.10.809-supabase-auth-mirror: Best-effort half-hour Ai
 Deploy 2026-11-10 Worker 0.10.810-auth-mirror-stamp: Persist auth_tables on the half-hour sync stamp so gate/ops can see Organizations/Brands/Users/Memberships mirror results. resolveAuthorization still Airtable+cache. Phase 7 not started.
 
 Deploy 2026-11-11 Worker 0.10.811-sync-shrink-v1: Shrink half-hour Airtable catch-up after consecutive healthy syncs — cron ideaLimit 600, media/queue 50, markerBackfillLimit 10; defer media+queue catch-up on :30 (write-through covers live). Open pack and resolveAuthorization unchanged. Phase 7 not started.
+
+Deploy 2026-11-11 Worker 0.10.812-supabase-auth-reads: Dormant STUDIO_AUTH_READ_SOURCE + loadAuthorizationFromSupabase. Default remains airtable; resolveAuthorization unchanged until the secret is set. Health advertises studio_auth_read_source + studio_supabase_auth_reads_v1. Phase 7 not started.
