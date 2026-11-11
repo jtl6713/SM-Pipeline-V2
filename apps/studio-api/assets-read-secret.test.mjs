@@ -32,10 +32,33 @@ test("Assets read flag install is main-only, secret_text, and does not retarget 
     "../../deploy/enable-studio-assets-reads.txt",
     import.meta.url,
   ), "utf8");
-  assert.match(marker, /0\.10\.816-assets-densify-catchup|0\.10\.815-supabase-assets-reads/);
+  assert.match(marker, /0\.10\.817-assets-densify-oneshot|0\.10\.816-assets-densify-catchup|0\.10\.815-supabase-assets-reads/);
   assert.match(marker, /STUDIO_ASSETS_READ_SOURCE=supabase/);
   assert.match(marker, /media_assets\.metadata/);
   assert.match(marker, /Do not trigger until densify is confirmed/);
+  assert.match(marker, /densify-studio-assets-media\.txt/);
   assert.match(marker, /Rollback STUDIO_ASSETS_READ_SOURCE=airtable now/);
   assert.doesNotMatch(marker, /Trigger STUDIO_ASSETS_READ_SOURCE=supabase now/);
+});
+
+test("Assets densify oneshot workflow waits for 817 then POSTs media_limit=600", () => {
+  const workflow = readFileSync(new URL(
+    "../../.github/workflows/densify-studio-assets-media.yml",
+    import.meta.url,
+  ), "utf8");
+  assert.match(workflow, /if: github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /deploy\/densify-studio-assets-media\.txt/);
+  assert.match(workflow, /Trigger densify STUDIO_ASSETS media_limit=600 now/);
+  assert.match(workflow, /assets_densify_skipped=NO_TRIGGER/);
+  assert.match(workflow, /media_limit: 600/);
+  assert.match(workflow, /method: "POST"/);
+  assert.match(workflow, /817-assets-densify-oneshot/);
+  assert.match(workflow, /studio_supabase_assets_densify_oneshot_v1/);
+  assert.match(workflow, /\/api\/ops\/supabase\/sync/);
+  const marker = readFileSync(new URL(
+    "../../deploy/densify-studio-assets-media.txt",
+    import.meta.url,
+  ), "utf8");
+  assert.match(marker, /0\.10\.817-assets-densify-oneshot/);
+  assert.match(marker, /Trigger densify STUDIO_ASSETS media_limit=600 now/);
 });
