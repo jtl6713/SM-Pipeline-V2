@@ -724,7 +724,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.809-supabase-auth-mirror/);
+  assert.match(worker, /0\.10\.810-auth-mirror-stamp/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
   assert.match(worker, /phase6_writes: "airtable_sor_write_through"/);
   assert.match(worker, /phase6_write_tables: \["production_requests", "media_assets", "studio_media_transfer_queue"\]/);
@@ -765,7 +765,11 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_supabase_music_read_routes: STUDIO_SUPABASE_MUSIC_READ_ROUTES/);
   const release = /version: "0\.10\.(\d+)-[^"]+"/.exec(worker);
   assert.ok(release, "Worker /health must identify a versioned release");
-  assert.ok(Number(release[1]) >= 809, "Auth mirror cannot regress behind Worker 0.10.809");
+  assert.ok(Number(release[1]) >= 810, "Auth mirror stamp cannot regress behind Worker 0.10.810");
+  assert.match(
+    await readFile(path.join(here, "worker-functions-03.mjs"), "utf8"),
+    /auth_tables: result\?\.auth_tables/,
+  );
   const pipelineFns = await readFile(path.join(here, "worker-functions-03.mjs"), "utf8");
   assert.match(pipelineFns, /studioPipelineReadSource\(env\) === "supabase"/);
   assert.match(pipelineFns, /studioContentReadSource\(env\) === "supabase"/);

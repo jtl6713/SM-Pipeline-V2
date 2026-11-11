@@ -1986,6 +1986,7 @@ export async function studioSyncSupabasePipelineReads(env, options = {}) {
       media_assets: result?.media_assets || null,
       studio_media_transfer_queue: result?.studio_media_transfer_queue || null,
       runner_record_projections: result?.runner_record_projections || null,
+      auth_tables: result?.auth_tables || null,
       read_source: studioReadSource(env),
     };
     await writeStudioSupabaseSyncLast(env, stamp);
@@ -2017,6 +2018,7 @@ export async function getStudioSupabaseSyncStatus(request, env) {
     phase6_backfill: "media_and_queue",
     phase6_backfill_tables: ["media_assets", "studio_media_transfer_queue"],
     phase5_runner_projection_backfill: true,
+    phase_auth_mirror: true,
     last_sync: last,
   });
 }
