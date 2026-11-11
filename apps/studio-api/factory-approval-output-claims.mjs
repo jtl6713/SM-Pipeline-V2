@@ -10,12 +10,19 @@
  * stranded reservations (crash between claim and enqueue, or a lost browser
  * request ID). Those may be transferred by an audited reclaim. Terminal child
  * ledgers whose conflicting items are only failed/skipped may likewise move.
- * Active, enqueuing, or approved/already_satisfied ownership stays fail-closed.
+ *
+ * Completed ledgers that no longer need Activity attention (all conflicting
+ * items terminal, no pending/running work) also transfer: otherwise a sticky
+ * approved/already_satisfied claim blocks Ready-for-Review resubmit while
+ * Active Approvals correctly shows "All clear." Live pending/enqueuing work
+ * stays fail-closed.
  *
  * Legacy per-profile batch ledgers are indexed on first use. An incomplete
  * migration fails closed, never silently treating an old approved output as new.
  */
-import { FACTORY_BATCH_PREFIX, factoryBatchRead } from "./factory-approval-queue.mjs";
+import {
+  FACTORY_BATCH_PREFIX, factoryBatchRead, factoryBatchNeedsAttention,
+} from "./factory-approval-queue.mjs";
 import { factoryApprovalGroupRead } from "./factory-approval-groups.mjs";
 
 export const FACTORY_OUTPUT_CLAIMS_PREFIX = FACTORY_BATCH_PREFIX + "/output-claims-v1";
@@ -25,6 +32,9 @@ const RID = /^[A-Za-z0-9_-]{12,128}$/;
 const SCHEMA = "studio.factory-output-claims.1";
 const MAX_LEGACY_JOBS = 4000;
 const RECLAIMABLE_ITEM = new Set(["failed", "skipped_removed", "superseded_duplicate"]);
+const TERMINAL_ITEM = new Set([
+  "approved", "already_satisfied", "failed", "skipped_removed", "superseded_duplicate",
+]);
 
 function assertInput(bucket, profileId, requestId, ids) {
   if (!bucket?.get || !bucket?.put || !bucket?.list) throw Error("Durable R2 claims require read/write/list");
@@ -205,6 +215,7 @@ async function claimOwnerLedgerState(bucket, profileId, ownerRequestId, conflict
   if (group?.schema === "studio.factory-approval-group.1" && Array.isArray(group.children)) {
     const wanted = new Set(conflictIds);
     const statuses = [];
+    const jobs = [];
     for (const child of group.children) {
       const job = await factoryBatchRead(bucket, child.profile_id, child.request_id);
       if (!job) {
@@ -212,15 +223,23 @@ async function claimOwnerLedgerState(bucket, profileId, ownerRequestId, conflict
         // the parent itself is fresh enough; otherwise allow reclaim below.
         return { kind: "group_incomplete", parent: group, statuses };
       }
+      jobs.push(job);
       for (const item of job.items || []) {
         if (wanted.has(item.id)) statuses.push(String(item.status || "pending"));
       }
     }
     if (!statuses.length) return { kind: "group_incomplete", parent: group, statuses };
-    if (statuses.some((status) => !RECLAIMABLE_ITEM.has(status))) {
-      return { kind: "blocking", parent: group, statuses };
+    if (statuses.every((status) => RECLAIMABLE_ITEM.has(status))) {
+      return { kind: "terminal_reclaimable", parent: group, statuses };
     }
-    return { kind: "terminal_reclaimable", parent: group, statuses };
+    const liveConflict = statuses.some((status) => !TERMINAL_ITEM.has(status));
+    const activeChildren = jobs.some((job) => factoryBatchNeedsAttention(job));
+    // Completed / routed ownership is invisible on Active Approvals. Keeping the
+    // claim forever recreates "overlap" while Activity shows All clear.
+    if (!liveConflict && !activeChildren) {
+      return { kind: "terminal_inactive", parent: group, statuses };
+    }
+    return { kind: "blocking", parent: group, statuses };
   }
   const job = await factoryBatchRead(bucket, profileId, ownerRequestId);
   if (job?.schema === "studio.factory-batch.2" && Array.isArray(job.items)) {
@@ -229,17 +248,23 @@ async function claimOwnerLedgerState(bucket, profileId, ownerRequestId, conflict
       .filter((item) => wanted.has(item.id))
       .map((item) => String(item.status || "pending"));
     if (!statuses.length) return { kind: "blocking", job, statuses };
-    if (statuses.some((status) => !RECLAIMABLE_ITEM.has(status))) {
-      return { kind: "blocking", job, statuses };
+    if (statuses.every((status) => RECLAIMABLE_ITEM.has(status))) {
+      return { kind: "terminal_reclaimable", job, statuses };
     }
-    return { kind: "terminal_reclaimable", job, statuses };
+    const liveConflict = statuses.some((status) => !TERMINAL_ITEM.has(status));
+    if (!liveConflict && !factoryBatchNeedsAttention(job)) {
+      return { kind: "terminal_inactive", job, statuses };
+    }
+    return { kind: "blocking", job, statuses };
   }
   return { kind: "unbacked" };
 }
 
 /**
- * Transfer safe conflicts onto requestId. Never steals active/approved ownership.
- * Unbacked reservations require grace so an in-flight enqueue is not raced.
+ * Transfer safe conflicts onto requestId. Never steals live pending/enqueuing
+ * ownership. Unbacked reservations require grace so an in-flight enqueue is
+ * not raced. Inactive completed ownership may move so Activity-empty fences
+ * cannot permanently block a Ready-for-Review resubmit.
  */
 export async function factoryOutputClaimReclaimIfSafe(bucket, {
   profileId, requestId, ids,
@@ -273,6 +298,10 @@ export async function factoryOutputClaimReclaimIfSafe(bucket, {
         reclaim.push({ id, request_id: owner, reason: "terminal_failed" });
         continue;
       }
+      if (state.kind === "terminal_inactive") {
+        reclaim.push({ id, request_id: owner, reason: "terminal_inactive" });
+        continue;
+      }
       if (state.kind === "unbacked") {
         const atMs = Date.parse(claim.at || "");
         const aged = Number.isFinite(atMs) && (nowMs - atMs) >= graceMs;
@@ -293,7 +322,7 @@ export async function factoryOutputClaimReclaimIfSafe(bucket, {
         reclaim.push({ id, request_id: owner, reason: "group_incomplete" });
         continue;
       }
-      hard.push({ id, request_id: owner, reason: "durable_active_or_approved" });
+      hard.push({ id, request_id: owner, reason: "durable_active_work" });
     }
     if (hard.length) {
       return {

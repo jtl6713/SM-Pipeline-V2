@@ -198,7 +198,7 @@ test("Worker admit + mapOutput expose queue meta and Remotion job id", () => {
   assert.match(worker, /isRealRemotionRetryFailure/);
   assert.match(worker, /remotion_job_id: f\(record, "Remotion_Job_ID"\)/);
   assert.match(worker, /render_queue_label: queueMeta\?\.label/);
-  assert.match(worker, /isRenderQueueCandidateStatus\(render\)\) return false/);
+  assert.match(worker, /\(\!render \|\| isRenderQueueCandidateStatus\(render\)\)/);
   assert.match(worker, /reason: "remotion_slot_busy"/);
   assert.match(worker, /shared_siblings_waiting/);
   assert.match(worker, /assignRenderQueuePositions\(candidates, f, \{\s*activeHolds/);

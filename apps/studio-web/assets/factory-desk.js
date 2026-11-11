@@ -165,14 +165,73 @@
       }));
       else sessionStorage.removeItem(FACTORY_SUBMISSION_ERROR_KEY);
     } catch {}
-    if (state.batchSubmissionError) setStatus(state.batchSubmissionError, true);
+    if (state.batchSubmissionError) {
+      setStatus(state.batchSubmissionError, true);
+      surfaceFactoryBlockingApproval(state.batchSubmissionError).catch(() => {});
+    }
   }
 
   // Already-approved / permanently ineligible outputs must not keep a browser
   // recovery fence that re-paints "Submission not accepted yet" forever.
+  // Live overlap / still-committing claim fences stay visible so the operator
+  // can wait or inspect the blocking batch ID.
   function factoryTerminalEligibilityError(message) {
-    return /\bpast_review\b|no longer ready for approval|already belong to a Factory approval|Approved for Publishing|already past review/i
-      .test(String(message || ""));
+    const text = String(message || "");
+    if (/\blive Factory approval\b|still committing\b|overlap another (live )?Factory approval\b/i.test(text)) {
+      return false;
+    }
+    return /\bpast_review\b|no longer ready for approval|Approved for Publishing|already past review/i
+      .test(text);
+  }
+
+  function factoryBlockingRequestIdsFromMessage(message) {
+    const match = String(message || "").match(/\(([A-Za-z0-9_,. -]{12,400})\)/);
+    if (!match) return [];
+    return [...new Set(match[1].split(",").map((part) => part.trim())
+      .filter((id) => /^[A-Za-z0-9_-]{12,128}$/.test(id)))].slice(0, 3);
+  }
+
+  async function surfaceFactoryBlockingApproval(message) {
+    const owners = factoryBlockingRequestIdsFromMessage(message);
+    if (!owners.length || state.submittingBatch) return;
+    for (const requestId of owners) {
+      let status = null;
+      try {
+        status = await fetchJson(
+          "/api/factory/approval-batches?scope=all&request_id=" + encodeURIComponent(requestId),
+          { cache: "no-store" },
+        );
+      } catch { continue; }
+      const batch = (status?.batches || []).find((row) =>
+        String(row?.request_id || "") === requestId
+        || String(row?.job_id || "") === `fg_${requestId}`
+        || String(row?.job_id || "") === requestId) || (status?.batches || [])[0];
+      if (!batch) {
+        setStatus(`Blocking claim ${requestId} has no Activity ledger yet (ghost reservation). Wait ~90s if it is still committing, then retry Submit.`, true);
+        continue;
+      }
+      state.completedOpen = false;
+      state.activeApprovalsCollapsed = false;
+      state.batchDetailsOpen = true;
+      state.inspectedBatchKey = batch.job_id || `fg_${requestId}`;
+      const current = state.batch || { batches: [], totals: {} };
+      const batches = [batch, ...(current.batches || [])
+        .filter((row) => row?.job_id && row.job_id !== batch.job_id)];
+      renderFactoryBatchActivity({
+        ...current,
+        batches,
+        totals: {
+          ...(current.totals || {}),
+          batches: batches.length,
+          active: batches.filter((row) => ["queued", "running", "enqueuing"].includes(row.status)).length,
+          approved: batches.reduce((sum, row) => sum + Number(row.approved_count || 0), 0),
+          pending: batches.reduce((sum, row) => sum + Number(row.pending_count || 0), 0),
+          failed: batches.reduce((sum, row) => sum + Number(row.failed_count || 0), 0),
+        },
+      });
+      setStatus(`Blocking approval ${requestId} is ${batch.status || "stored"} · ${Number(batch.pending_count) || 0} pending · ${Number(batch.approved_count) || 0} approved. Active list hid completed ownership; inspect it above.`, true);
+      return;
+    }
   }
 
   function dropFactoryRecoveryEntry(recoveryKey, saved, reason) {
