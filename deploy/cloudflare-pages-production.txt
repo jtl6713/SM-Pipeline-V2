@@ -760,3 +760,4 @@ Deploy 2026-11-09 Studio UI 0.6.926-engagement-tab-recovery: Engagement queue re
 Deploy Studio UI 0.6.927 finished-video upload contrast and mobile overflow fix, PR #1778. Trigger protected Pages production verification.
 
 Deploy Studio UI 0.6.929 blackout 10:30 PM–3:30 AM profile-local and Story companion blackout-safe scheduling copy/helpers matching Worker 0.10.805. Trigger protected Pages production verification.
+2026-11-11T13:01:46Z factory-overlap-empty-activity UI 0.6.930-factory-overlap-activity

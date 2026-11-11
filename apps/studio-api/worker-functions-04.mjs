@@ -17667,9 +17667,14 @@ export async function factoryBatchSubmitRoute(request, env, authorization, ctx =
     });
     if (!reclaim.ok) {
       const owners = (reclaim.owners || []).slice(0, 3).join(", ") || "unknown";
-      throw new HttpError(409,
-        "One or more outputs already belong to a Factory approval (" + owners
-        + "). Check Activity; no duplicate was created.");
+      const reasons = [...new Set((reclaim.conflicts || []).map((row) => row.reason).filter(Boolean))];
+      const waitingCommit = reasons.some((reason) =>
+        reason === "unbacked_within_grace" || reason === "group_committing");
+      throw new HttpError(409, waitingCommit
+        ? ("A recent Factory claim is still committing (" + owners
+          + "). Wait about 90 seconds, then retry; no duplicate was created.")
+        : ("One or more outputs already belong to a live Factory approval (" + owners
+          + "). Open that batch ID in Activity; no duplicate was created."));
     }
     const claim = await factoryOutputClaimReserve(env.STUDIO_MEDIA, {
       profileId: profile.id, requestId, ids: outputIds,
@@ -17942,9 +17947,9 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
         });
       }
     }
-    // Stranded reservations (claim without ledger) and terminal failed-only
-    // ownership must not permanently block a Ready-for-Review resubmit when
-    // Activity shows nothing active. Active/approved ownership stays closed.
+    // Stranded reservations, terminal failed-only ownership, and inactive
+    // completed ownership must not permanently block a Ready-for-Review
+    // resubmit when Activity shows nothing active. Live pending work stays closed.
     try {
       for (const [profileId, outputIds] of [...byProfile].sort(([a], [b]) => a.localeCompare(b))) {
         const reclaim = await factoryOutputClaimReclaimIfSafe(env.STUDIO_MEDIA, {
@@ -17952,9 +17957,14 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
         });
         if (!reclaim.ok) {
           const blockedOwners = (reclaim.owners || []).slice(0, 3).join(", ") || owners.slice(0, 3).join(", ");
-          throw new HttpError(409,
-            "Selected outputs overlap another Factory approval (" + blockedOwners
-            + "). No new batch was created; check Activity.");
+          const reasons = [...new Set((reclaim.conflicts || []).map((row) => row.reason).filter(Boolean))];
+          const waitingCommit = reasons.some((reason) =>
+            reason === "unbacked_within_grace" || reason === "group_committing");
+          throw new HttpError(409, waitingCommit
+            ? ("A recent Factory claim is still committing (" + blockedOwners
+              + "). Wait about 90 seconds, then retry; no new batch was created.")
+            : ("Selected outputs overlap another live Factory approval (" + blockedOwners
+              + "). No new batch was created; open that batch ID in Activity."));
         }
       }
       const refreshed = [];
@@ -17971,8 +17981,8 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
     if (conflicting.length) {
       const blockedOwners = [...new Set(conflicting.map(row => row.request_id))].slice(0, 3).join(", ");
       throw new HttpError(409,
-        "Selected outputs overlap another Factory approval (" + blockedOwners
-        + "). No new batch was created; check Activity.");
+        "Selected outputs overlap another live Factory approval (" + blockedOwners
+        + "). No new batch was created; open that batch ID in Activity.");
     }
   }
   try {
@@ -17980,8 +17990,12 @@ async function factoryBatchGroupSubmitRoute(request,env,authorization,payload,ct
       const claim = await factoryOutputClaimReserve(env.STUDIO_MEDIA, {
         profileId, requestId, ids: outputIds,
       });
-      if (!claim.ok) throw new HttpError(409,
-        "Another submission claimed one or more outputs. No new batch was created; check Activity.");
+      if (!claim.ok) {
+        const owners = (claim.owners || []).slice(0, 3).join(", ") || "unknown";
+        throw new HttpError(409,
+          "Another submission claimed one or more outputs (" + owners
+          + "). No new batch was created; open that batch ID in Activity.");
+      }
     }
   } catch (error) {
     if (error instanceof HttpError) throw error;

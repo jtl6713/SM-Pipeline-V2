@@ -1027,3 +1027,4 @@ Deploy 2026-11-11 Worker 0.10.812-supabase-auth-reads: Dormant STUDIO_AUTH_READ_
 
 Deploy 2026-11-11 Worker 0.10.813-auth-prove: tenant_admin GET /api/ops/supabase/auth-prove compares Airtable vs Supabase authorization without flipping STUDIO_AUTH_READ_SOURCE. Hardens loader for missing extras densify + org-brand fallback. Gate probes auth-prove. Enable marker/workflow shipped but not triggered until prove PASSes. Phase 7 not started.
 Deploy 2026-11-11 merged PR #1812: bounded recovery of orphaned prepared video siblings without Remotion job. Exclude active renders, native photo routes and finished media; preserve Airtable write authority, review, approval, scheduling and publishing gates. Verify production Worker deployment and stalled-output job recovery.
+2026-11-11T13:01:46Z factory-overlap-empty-activity Worker 0.10.814-factory-overlap-activity
