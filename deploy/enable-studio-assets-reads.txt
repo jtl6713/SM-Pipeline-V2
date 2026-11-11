@@ -9,3 +9,6 @@ Supabase with Airtable fallback. Published library and Asset Manager writes
 stay on Airtable. Roll back by setting STUDIO_ASSETS_READ_SOURCE=airtable.
 Do not trigger until densify is confirmed on live media_assets rows.
 Phase 7 is not started.
+
+2026-11-11T14:35:00Z: Accidental enable on marker edit before full densify.
+Rollback STUDIO_ASSETS_READ_SOURCE=airtable now.
