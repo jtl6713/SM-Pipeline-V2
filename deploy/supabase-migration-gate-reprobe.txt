@@ -1,5 +1,4 @@
-2026-11-10 reprobe after Worker 0.10.808-supabase-media-not-null.
-GitHub schedule skipped the 03:05 UTC gate window. Push this marker (or the
-Worker production deploy marker) to run the read-only Supabase Migration Gate
-without workflow_dispatch. Expect last_sync.status=completed ok=true once the
-media NOT NULL backfill fix is live.
+2026-11-10 reprobe after Worker 0.10.809-supabase-auth-mirror deploy.
+Prior gate raced the Worker deploy and still read 0.10.808.
+Expect health.version=0.10.809-supabase-auth-mirror and last_sync completed+ok.
+auth_tables appears after the next half-hour sync under 809.
