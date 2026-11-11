@@ -11,6 +11,7 @@ import {
   studioFactoryOpsReadSource,
   studioHomeReadSource,
   studioMusicReadSource,
+  studioAuthReadSource,
   studioSupabaseConfigured,
   airtableShapedMusicFromSupabase,
   listSupabaseMusicRecords,
@@ -265,6 +266,31 @@ test("studioMusicReadSource restores music list only when its own flag is set", 
   assert.ok(STUDIO_SUPABASE_READ_ROUTES.includes("/api/music"));
   assert.ok(MEDIA_ASSET_SYNC_FIELDS.includes("Rights_Status"));
   assert.ok(MEDIA_ASSET_SYNC_FIELDS.includes("Studio_Transfer_ID"));
+});
+
+test("studioAuthReadSource stays airtable until its own flag is set", () => {
+  const configured = {
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "service-role",
+  };
+  assert.equal(studioAuthReadSource({}), "airtable");
+  assert.equal(studioAuthReadSource({ STUDIO_AUTH_READ_SOURCE: "supabase" }), "airtable");
+  assert.equal(studioAuthReadSource({ ...configured, STUDIO_AUTH_READ_SOURCE: "supabase" }), "supabase");
+  assert.equal(studioAuthReadSource({ ...configured, STUDIO_AUTH_READ_SOURCE: " Supabase " }), "supabase");
+  assert.equal(studioAuthReadSource({ ...configured, STUDIO_AUTH_READ_SOURCE: "airtable" }), "airtable");
+  assert.equal(
+    studioAuthReadSource({
+      ...configured,
+      STUDIO_READ_SOURCE: "supabase",
+      STUDIO_PIPELINE_READ_SOURCE: "supabase",
+      STUDIO_CONTENT_READ_SOURCE: "supabase",
+      STUDIO_HOME_READ_SOURCE: "supabase",
+      STUDIO_MUSIC_READ_SOURCE: "supabase",
+      STUDIO_WRITE_SOURCE: "supabase",
+    }),
+    "airtable",
+  );
+  assert.equal(studioMusicReadSource({ ...configured, STUDIO_AUTH_READ_SOURCE: "supabase" }), "airtable");
 });
 
 test("supabase circuit opens on repeated pool or statement timeouts", () => {
@@ -724,8 +750,10 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_write_source: studioWriteSource\(env\)/);
   assert.match(worker, /studioLegacyExportEnabled/);
   assert.match(worker, /studioSupabaseCommitOutputContentFirst/);
-  assert.match(worker, /0\.10\.811-sync-shrink-v1/);
+  assert.match(worker, /0\.10\.812-supabase-auth-reads/);
   assert.match(worker, /studio_auth_airtable_cache_v1: true/);
+  assert.match(worker, /studio_supabase_auth_reads_v1: true/);
+  assert.match(worker, /studio_auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(worker, /phase6_writes: "airtable_sor_write_through"/);
   assert.match(worker, /phase6_write_tables: \["production_requests", "media_assets", "studio_media_transfer_queue"\]/);
   assert.match(worker, /phase6_backfill: "media_and_queue"/);
@@ -765,7 +793,7 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /studio_supabase_music_read_routes: STUDIO_SUPABASE_MUSIC_READ_ROUTES/);
   const release = /version: "0\.10\.(\d+)-[^"]+"/.exec(worker);
   assert.ok(release, "Worker /health must identify a versioned release");
-  assert.ok(Number(release[1]) >= 811, "Sync shrink cannot regress behind Worker 0.10.811");
+  assert.ok(Number(release[1]) >= 812, "Auth reads cannot regress behind Worker 0.10.812");
   assert.match(
     await readFile(path.join(here, "worker-functions-03.mjs"), "utf8"),
     /auth_tables: result\?\.auth_tables/,
@@ -807,8 +835,9 @@ test("worker wires supabase phase4 reads behind the same flag", async () => {
   assert.match(worker, /schemaVersion: 6/);
   assert.match(worker, /ideaLimit: options\.ideaLimit \?\? 2000/);
   assert.match(worker, /studio_supabase_sync_shrink_v1: true/);
-  assert.match(worker, /0\.10\.811-sync-shrink-v1/);
+  assert.match(worker, /0\.10\.812-supabase-auth-reads/);
   assert.match(worker, /skipMediaAssetsBackfill: deferPhase6Catchup/);
+  assert.match(pipelineFns, /auth_read_source: studioAuthReadSource\(env\)/);
   assert.match(worker, /skipTransferQueueBackfill: deferPhase6Catchup/);
   assert.match(worker, /ideaLimit: 600/);
   assert.match(worker, /mediaLimit: 50/);

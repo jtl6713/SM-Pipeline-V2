@@ -261,6 +261,20 @@ export function studioMusicReadSource(env) {
 }
 
 /**
+ * Auth — resolveAuthorization only.
+ * Does not follow STUDIO_READ_SOURCE, Pipeline, Content, Factory/Ops, Home, or Music.
+ * A deploy leaves auth on Airtable until this secret is set.
+ * Opt-in: STUDIO_AUTH_READ_SOURCE=supabase. Roll back with airtable or unset.
+ * Mirror tables must be populated (half-hour auth mirror + extras densify) before enable.
+ */
+export function studioAuthReadSource(env) {
+  if (!studioSupabaseConfigured(env)) return "airtable";
+  return String(env?.STUDIO_AUTH_READ_SOURCE || "").trim().toLowerCase() === "supabase"
+    ? "supabase"
+    : "airtable";
+}
+
+/**
  * Phase 5 remainder write switch for Platform Outputs and Content Items.
  * Default remains Airtable-first write-through. When STUDIO_WRITE_SOURCE=supabase,
  * Output/Content updates commit to Supabase first and Airtable is a best-effort

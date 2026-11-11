@@ -11,6 +11,7 @@ import { isQueuedForPlatformDispatch } from "./overview-dispatch-counts.mjs";
 import { createProfileOnboarding } from "./profile-onboarding.mjs";
 import {
   studioReadSource,
+  studioAuthReadSource,
   studioSupabaseConfigured,
   supabaseCircuitOpen,
   listSupabasePipelineOutputs,
@@ -30,6 +31,7 @@ import {
   STUDIO_SUPABASE_PHASE4_READ_ROUTES,
   STUDIO_SUPABASE_READ_ROUTES,
 } from "./supabase-pipeline-reads.mjs";
+import { loadAuthorizationFromSupabase } from "./supabase-auth-mirror.mjs";
 import {
   DESK_SETTING_NAME,
   DESK_CAPS_SETTING_NAME,
@@ -829,9 +831,13 @@ export async function resolveAuthorization(request, env) {
   const cacheHit = Boolean(
     prior && prior.value !== undefined && (Date.now() - Number(prior.at || 0)) < ttlMs
   );
-  const cached = await studioReadCoalesce(cacheKey, ttlMs, () =>
-    loadAuthorizationFromAirtable(env, email, identity)
-  );
+  // Default remains Airtable. STUDIO_AUTH_READ_SOURCE=supabase opts into the
+  // mirrored tables only after extras densify + gate verification.
+  const cached = await studioReadCoalesce(cacheKey, ttlMs, () => (
+    studioAuthReadSource(env) === "supabase"
+      ? loadAuthorizationFromSupabase(env, email, identity, { rolePermissions: ROLE_PERMISSIONS })
+      : loadAuthorizationFromAirtable(env, email, identity)
+  ));
   const result = typeof structuredClone === "function"
     ? structuredClone(cached)
     : JSON.parse(JSON.stringify(cached));

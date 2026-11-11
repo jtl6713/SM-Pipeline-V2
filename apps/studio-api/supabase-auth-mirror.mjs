@@ -202,6 +202,190 @@ export function mapMembershipAuthRow(record, { userUuid, organizationUuid }) {
   };
 }
 
+function authExtrasBag(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function authLinkIds(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((row) => {
+    if (typeof row === "string") return text(row);
+    return text(row?.id);
+  }).filter(Boolean);
+}
+
+/**
+ * Dormant Supabase auth loader. Shape matches loadAuthorizationFromAirtable
+ * (record_id values stay Airtable rec ids). Only used when
+ * STUDIO_AUTH_READ_SOURCE=supabase. No silent Airtable fallback.
+ */
+export async function loadAuthorizationFromSupabase(env, email, identity, deps = {}) {
+  const rolePermissions = deps.rolePermissions || {};
+  const viewerPermissions = rolePermissions.Viewer || {};
+  const rest = deps.supabaseRest || supabaseRest;
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const base = {
+    authenticated: true,
+    authorized: false,
+    email: identity?.email,
+    identity_source: identity?.source,
+    jwt_present: identity?.jwt_present,
+    user: null,
+    membership: null,
+    organization: null,
+    brand: null,
+    allowed_brands: [],
+    role: null,
+    permissions: viewerPermissions,
+    authorization_error: null,
+    auth_cache: "miss",
+  };
+
+  if (!studioSupabaseConfigured(env)) {
+    base.authorization_error = "Supabase auth reads require SUPABASE_URL and service role";
+    return base;
+  }
+  if (!normalizedEmail) {
+    base.authorization_error = "Authenticated identity did not contain an email address";
+    return base;
+  }
+
+  const users = await rest(
+    env,
+    `studio_users?email=eq.${encodeURIComponent(normalizedEmail)}`
+      + `&select=id,airtable_record_id,email,display_name,user_status,active,user_key,extras&limit=5`,
+  );
+  const userRow = (users || []).find((row) =>
+    String(row?.email || "").trim().toLowerCase() === normalizedEmail
+  );
+  if (!userRow?.airtable_record_id) {
+    base.authorization_error = "Authenticated user is not registered in Studio Users";
+    return base;
+  }
+
+  const userStatus = String(userRow.user_status || "").trim();
+  const userActive = userRow.active !== false;
+  if (!userActive || userStatus.toLowerCase() !== "active") {
+    base.authorization_error = "Studio user is inactive";
+    return base;
+  }
+
+  const userExtras = authExtrasBag(userRow.extras);
+  base.user = {
+    record_id: userRow.airtable_record_id,
+    user_id: userRow.user_key || userExtras.User_ID || null,
+    display_name: userRow.display_name || userExtras.Display_Name || null,
+    email: userRow.email || userExtras.Email || normalizedEmail,
+    status: userStatus,
+  };
+
+  const memberships = await rest(
+    env,
+    `studio_memberships?user_id=eq.${encodeURIComponent(userRow.id)}`
+      + `&active=eq.true`
+      + `&select=id,airtable_record_id,user_id,organization_id,role,active,membership_status,membership_key,is_default,extras`
+      + `&limit=25`,
+  );
+  const activeMemberships = (memberships || []).filter((row) => {
+    const status = String(row?.membership_status || "").trim().toLowerCase();
+    return row?.airtable_record_id && row?.active !== false && status === "active";
+  });
+  if (!activeMemberships.length) {
+    base.authorization_error = "No active Studio Membership was found for this user";
+    return base;
+  }
+
+  const membershipRow =
+    activeMemberships.find((row) => row.is_default === true)
+    || activeMemberships.find((row) => authExtrasBag(row.extras).Is_Default === true)
+    || activeMemberships[0];
+  const membershipExtras = authExtrasBag(membershipRow.extras);
+  const organizationUuid = membershipRow.organization_id
+    || null;
+  const organizationAirtableFallback = authLinkIds(membershipExtras.Organization)[0] || null;
+  if (!organizationUuid && !organizationAirtableFallback) {
+    base.authorization_error = "Membership is not linked to an Organization";
+    return base;
+  }
+
+  const allowedBrandLinks = authLinkIds(membershipExtras.Allowed_Brands);
+  const defaultBrandLinks = authLinkIds(membershipExtras.Default_Brand);
+  const brandIds = [...new Set([...allowedBrandLinks, ...defaultBrandLinks].filter(Boolean))];
+
+  let organizationRow = null;
+  if (organizationUuid) {
+    const orgRows = await rest(
+      env,
+      `organizations?id=eq.${encodeURIComponent(organizationUuid)}`
+        + `&select=id,airtable_record_id,name,organization_key,extras&limit=1`,
+    );
+    organizationRow = (orgRows || [])[0] || null;
+  }
+  if (!organizationRow && organizationAirtableFallback) {
+    const orgRows = await rest(
+      env,
+      `organizations?airtable_record_id=eq.${encodeURIComponent(organizationAirtableFallback)}`
+        + `&select=id,airtable_record_id,name,organization_key,extras&limit=1`,
+    );
+    organizationRow = (orgRows || [])[0] || null;
+  }
+  if (!organizationRow?.airtable_record_id) {
+    base.authorization_error = "Membership is not linked to an Organization";
+    return base;
+  }
+
+  let brandRows = [];
+  if (brandIds.length) {
+    const quoted = brandIds.map((id) => encodeURIComponent(id)).join(",");
+    brandRows = await rest(
+      env,
+      `brands?airtable_record_id=in.(${quoted})`
+        + `&select=id,airtable_record_id,name,brand_key,extras&limit=${Math.min(50, brandIds.length)}`,
+    ) || [];
+  }
+
+  const orgExtras = authExtrasBag(organizationRow.extras);
+  const allowedBrandRecords = (brandRows || []).filter((row) => allowedBrandLinks.includes(row.airtable_record_id));
+  const defaultBrandRecord =
+    (brandRows || []).find((row) => defaultBrandLinks.includes(row.airtable_record_id))
+    || allowedBrandRecords[0]
+    || null;
+
+  base.membership = {
+    record_id: membershipRow.airtable_record_id,
+    membership_id: membershipRow.membership_key || membershipExtras.Membership_ID || null,
+    is_default: Boolean(membershipRow.is_default ?? membershipExtras.Is_Default),
+    status: membershipRow.membership_status || membershipExtras.Membership_Status || null,
+  };
+  base.organization = {
+    record_id: organizationRow.airtable_record_id,
+    organization_id: organizationRow.organization_key || orgExtras.Organization_ID || null,
+    name: organizationRow.name || orgExtras.Organization_Name || null,
+  };
+  base.allowed_brands = allowedBrandRecords.map((row) => {
+    const extras = authExtrasBag(row.extras);
+    return {
+      record_id: row.airtable_record_id,
+      brand_id: row.brand_key || extras.Brand_ID || null,
+      name: row.name || extras.Brand_Name || null,
+    };
+  });
+  base.brand = defaultBrandRecord
+    ? {
+        record_id: defaultBrandRecord.airtable_record_id,
+        brand_id: defaultBrandRecord.brand_key || authExtrasBag(defaultBrandRecord.extras).Brand_ID || null,
+        name: defaultBrandRecord.name || authExtrasBag(defaultBrandRecord.extras).Brand_Name || null,
+      }
+    : null;
+
+  const role = String(membershipRow.role || membershipExtras.Role || "Viewer").trim();
+  base.role = role;
+  base.permissions = rolePermissions[role] || viewerPermissions;
+  base.authorized = true;
+  base.authorization_error = null;
+  return base;
+}
+
 /**
  * Half-hour / manual auth mirror. Best-effort: missing auth tables skip ok;
  * upsert failures return ok:false but callers should not fail the whole sync.
