@@ -106,6 +106,7 @@ import {
   studioWriteSource,
   studioSupabaseConfigured,
   readSupabaseMaeOutput,
+  readSupabaseCreativeMasterContent,
   listSupabasePipelineOutputs,
   listSupabaseScheduleGrid,
   listSupabaseContentItems,
@@ -11732,7 +11733,13 @@ export async function factoryApproveOutput(env, id, actor, note, ctx = null, sch
     output_id:id,
     operations:{
       readOutput:id=>airtableFetch(env,env.AIRTABLE_OUTPUT_TABLE_ID,id),
-      readContent:id=>airtableFetch(env,"tblwzN9AXWvmKVKPs",id),
+      readContent:async (contentId)=>{
+        if (studioWriteSource(env)==="supabase" && studioSupabaseConfigured(env)) {
+          const copied = await readSupabaseCreativeMasterContent(env, contentId).catch(()=>null);
+          if (copied) return copied;
+        }
+        return airtableFetch(env,"tblwzN9AXWvmKVKPs",contentId);
+      },
       withOutputLock:(id,fn)=>withOutputApprovalLock(env.STUDIO_MEDIA,id,fn),
       patchOutput:(id,fields)=>studioAdoptCreativeMasterReviewMediaOnly(env,id,fields),
       syncOutput:row=>studioSupabaseWriteThroughOutput(env,row,
