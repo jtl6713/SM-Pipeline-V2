@@ -1,7 +1,10 @@
 """Allowlisted Airtable formula → PostgREST filters for runner Output/Content reads.
 
-Unsupported formulas (FIND/ARRAYJOIN/OR/views/unknown ops) return None so the
-caller keeps Airtable. Only Platform Outputs and Content Items are covered.
+Unsupported formulas (other FIND/ARRAYJOIN, OR, views, unknown ops) return None
+so the caller keeps Airtable. Only Platform Outputs and Content Items are covered.
+Three Studio produce Platform Output lookups are the exception: a content number
+or content record id inside Content_Item, and a record id stored on the
+Production_Request_Output link in the full-record bag.
 """
 
 from __future__ import annotations
@@ -26,6 +29,16 @@ _GT = re.compile(r"^\{([A-Za-z0-9_]+)\}>(\d+)$")
 _NOT_FIELD = re.compile(r"^NOT\(\{([A-Za-z0-9_]+)\}\)$")
 _AND = re.compile(r"^AND\((.*)\)$", re.DOTALL)
 _SAFE_FIELD = re.compile(r"^[A-Za-z0-9_]+$")
+_REC_ID = r"rec[A-Za-z0-9]{14}"
+_FIND_CONTENT_TOKEN = re.compile(
+    r'^FIND\(",([A-Za-z0-9]+),", "," & ARRAYJOIN\(\{Content_Item\}\) & ","\)>0$'
+)
+_FIND_CONTENT_ITEM = re.compile(
+    rf'^FIND\("({_REC_ID})", ARRAYJOIN\(\{{Content_Item\}}\)\)(?:>0)?$'
+)
+_FIND_REQUEST_OUTPUT = re.compile(
+    rf'^FIND\("({_REC_ID})", ARRAYJOIN\(\{{Production_Request_Output\}}\)\)(?:>0)?$'
+)
 
 
 def _columns(table_id: str) -> dict[str, str]:
@@ -150,6 +163,38 @@ def _predicate_filter(table_id: str, pred: str) -> str | None:
     return None
 
 
+def _link_param(query: str) -> str:
+    """A top-level PostgREST param. Embedded filters cannot sit inside and=()."""
+    return f"link:{query}"
+
+
+def _produce_link_filter(table_id: str, cleaned: str) -> str | None:
+    """The three Studio produce output lookups, and nothing else."""
+    if table_id != PLATFORM_OUTPUTS_TABLE:
+        return None
+    match = _FIND_CONTENT_TOKEN.match(cleaned)
+    if match:
+        token = match.group(1)
+        if token.isdigit():
+            return _link_param(f"content_items.content_number=eq.{token}")
+        if re.fullmatch(_REC_ID, token):
+            return _link_param(f"content_items.airtable_record_id=eq.{token}")
+        return None
+    match = _FIND_CONTENT_ITEM.match(cleaned)
+    if match:
+        return _link_param(f"content_items.airtable_record_id=eq.{match.group(1)}")
+    match = _FIND_REQUEST_OUTPUT.match(cleaned)
+    if match:
+        # Full-record rows store the linked Production Request Output rec ids
+        # on the bag. A token that is not in that array returns no rows, and
+        # the caller falls back to Airtable.
+        token = match.group(1)
+        return _link_param(
+            'error_messages=cs.{"Production_Request_Output":["' + token + '"]}'
+        )
+    return None
+
+
 def formula_to_postgrest_filter(table_id: str, formula: str | None) -> str | None:
     """Return a PostgREST `and=(...)` / single filter expression, or None."""
     if table_id not in (PLATFORM_OUTPUTS_TABLE, CONTENT_ITEMS_TABLE):
@@ -159,6 +204,9 @@ def formula_to_postgrest_filter(table_id: str, formula: str | None) -> str | Non
     cleaned = " ".join(str(formula).strip().split())
     if not cleaned:
         return None
+    linked = _produce_link_filter(table_id, cleaned)
+    if linked:
+        return linked
     # Hard reject patterns that need Airtable semantics we do not translate.
     upper = cleaned.upper()
     for token in ("FIND(", "ARRAYJOIN(", "OR(", "SEARCH(", "REGEX", "DATETIME_", "IS_AFTER", "IS_BEFORE"):
@@ -170,6 +218,8 @@ def formula_to_postgrest_filter(table_id: str, formula: str | None) -> str | Non
 def attach_formula_filter(path: str, formula_filter: str | None) -> str:
     if not formula_filter:
         return path
+    if formula_filter.startswith("link:"):
+        return f"{path}&{formula_filter[5:]}"
     # PostgREST `and=(...)` query param. Keep structural chars; encode values
     # already handled inside each predicate.
     safe = "(),.=*_->>"
