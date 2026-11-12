@@ -3,8 +3,9 @@
 Airtable stays the default. Each table has its own flag, so a global
 STUDIO_READ_SOURCE value cannot turn both on. STUDIO_WRITE_SOURCE does not
 turn these reads on. Allowlisted formulas translate to PostgREST filters;
-views, FIND/ARRAYJOIN/OR, unmapped sorts, unmapped requested fields, unmarked
-rows (when none remain), and Supabase errors stay on Airtable.
+views, other FIND/ARRAYJOIN/OR, unmapped sorts, unmapped requested fields,
+unmarked rows (when none remain), and Supabase errors stay on Airtable.
+Three Studio produce Platform Output link lookups are the FIND exception.
 """
 
 from __future__ import annotations
