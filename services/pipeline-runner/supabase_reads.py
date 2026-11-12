@@ -30,6 +30,14 @@ from supabase_pipeline import (
 
 logger = logging.getLogger("pipeline-runner.supabase-reads")
 
+# Empty lists and unmarked rows fall back to Airtable unless a table is listed
+# here. A table belongs here only when its Airtable count equals its Supabase
+# count and every Supabase row carries the runner marker. Compared 2026-11-12:
+# outputs 9208 vs 9916 (685 marked), content 1897 vs 1971 (212 marked),
+# requests 2035 vs 1362, media 22059 vs 22037, queue 18619 vs 1040.
+# None qualified, so this set stays empty and the fallback stays on.
+FALLBACK_STOPPED_TABLES: frozenset[str] = frozenset()
+
 _OUTPUT_FIELDS = {**OUTPUT_PATCH_COLUMNS, "Do_Not_Publish": "do_not_publish"}
 _CONTENT_FIELDS = dict(CONTENT_PATCH_COLUMNS)
 
@@ -136,8 +144,9 @@ def try_list_supabase_records(
     except Exception as error:
         logger.warning("supabase runner read failed for %s; using Airtable: %s", table_id, error)
         return None
+    stopped = table_id in FALLBACK_STOPPED_TABLES
     if not isinstance(payload, list) or not payload:
-        return None
+        return [] if stopped else None
     records = []
     for row in payload:
         if not isinstance(row, dict):
@@ -145,6 +154,7 @@ def try_list_supabase_records(
         shaped = _record_from_row(row, table_id)
         # Unmarked rows stay on Airtable. Skip them here; if none remain,
         # fall back so densify/backfill gaps cannot hide work forever.
+        # A table in FALLBACK_STOPPED_TABLES returns the marked rows only.
         if not shaped:
             continue
         if fields:
@@ -154,7 +164,7 @@ def try_list_supabase_records(
             }
         records.append(shaped)
     if not records:
-        return None
+        return [] if stopped else None
     return records[:limit]
 
 
@@ -209,6 +219,9 @@ def _record_from_row(row: dict, table_id: str) -> dict | None:
             shaped["fields"]["Content_Item"] = [content_id]
         if profile_id:
             shaped["fields"]["Content_Profile"] = [profile_id]
+        from publish_queue import apply_publish_queue_fields
+
+        apply_publish_queue_fields(shaped["fields"])
     else:
         profile_id = _linked(row, "content_profiles")
         if profile_id:

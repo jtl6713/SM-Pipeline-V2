@@ -58,6 +58,12 @@ TYPED_OUTPUT = {
     "Thumbnail_URL", "Final_File_URL", "Publish_Asset_URL", "Studio_Preview_URL", "Platform_Post_URL",
     "Scheduled_Post_Date", "Studio_Scheduled_At", "YouTube_Scheduled_Publish_At", "Published_At",
     "Remotion_Job_ID", "Selected_Clip_Count", "Content_Item", "Content_Profile",
+    "Publish_Next_Retry_At", "YouTube_Stage", "TikTok_Draft_Status", "Auto_Publish_Enabled",
+    "TikTok_Draft_Type", "Asset_Aspect_Family", "Image_Count", "Image_Output_Selected",
+    "FB_Publish_Status", "FB_Image_Publish_Mode", "Studio_Effective_Voiceover_Mode",
+    "Studio_Effective_Background_Music_Mode", "Publish_Retry_Eligible", "IG_Carousel_Status",
+    "IG_Carousel_Next_Retry_At", "IG_Carousel_Child_Count", "IG_Carousel_Children_Ready_Count",
+    "Assets_Ready_Count", "Asset_Set_Revision", "TikTok_9x16_Ready_Count", "FB_Resolved_Publish_Mode",
 }
 
 TYPED_CONTENT = {
@@ -92,6 +98,27 @@ OUTPUT_PATCH_COLUMNS = {
     "Remotion_Job_ID": "remotion_job_id",
     "Selected_Clip_Count": "selected_clip_count",
     "Test_Run_ID": "test_run_id",
+    "Publish_Next_Retry_At": "publish_next_retry_at",
+    "YouTube_Stage": "youtube_stage",
+    "TikTok_Draft_Status": "tiktok_draft_status",
+    "Auto_Publish_Enabled": "auto_publish_enabled",
+    "TikTok_Draft_Type": "tiktok_draft_type",
+    "Asset_Aspect_Family": "asset_aspect_family",
+    "Image_Count": "image_count",
+    "Image_Output_Selected": "image_output_selected",
+    "FB_Publish_Status": "fb_publish_status",
+    "FB_Image_Publish_Mode": "fb_image_publish_mode",
+    "Studio_Effective_Voiceover_Mode": "studio_effective_voiceover_mode",
+    "Studio_Effective_Background_Music_Mode": "studio_effective_background_music_mode",
+    "Publish_Retry_Eligible": "publish_retry_eligible",
+    "IG_Carousel_Status": "ig_carousel_status",
+    "IG_Carousel_Next_Retry_At": "ig_carousel_next_retry_at",
+    "IG_Carousel_Child_Count": "ig_carousel_child_count",
+    "IG_Carousel_Children_Ready_Count": "ig_carousel_children_ready_count",
+    "Assets_Ready_Count": "assets_ready_count",
+    "Asset_Set_Revision": "asset_set_revision",
+    "TikTok_9x16_Ready_Count": "tiktok_9x16_ready_count",
+    "FB_Resolved_Publish_Mode": "fb_resolved_publish_mode",
 }
 
 CONTENT_PATCH_COLUMNS = {
@@ -285,6 +312,8 @@ def _projection_bag(bag: dict, links: dict[str, str], *, complete: bool) -> dict
 
 
 def _output_row(record: dict, profile_uuid: str, content_uuid: str | None) -> dict:
+    from publish_queue import fb_resolved_publish_mode
+
     fields = record.get("fields") or {}
     content_airtable_id = _first_link(fields.get("Content_Item"))
     profile_airtable_id = _first_link(fields.get("Content_Profile"))
@@ -339,6 +368,48 @@ def _output_row(record: dict, profile_uuid: str, content_uuid: str | None) -> di
         "selected_clip_count": fields.get("Selected_Clip_Count"),
         "error_messages": _projection_bag(bag, links, complete=complete),
     }
+    optional = {
+        "Publish_Next_Retry_At": ("publish_next_retry_at", "time"),
+        "YouTube_Stage": ("youtube_stage", "select"),
+        "TikTok_Draft_Status": ("tiktok_draft_status", "select"),
+        "Auto_Publish_Enabled": ("auto_publish_enabled", "bool"),
+        "TikTok_Draft_Type": ("tiktok_draft_type", "select"),
+        "Asset_Aspect_Family": ("asset_aspect_family", "select"),
+        "Image_Count": ("image_count", "raw"),
+        "Image_Output_Selected": ("image_output_selected", "bool"),
+        "FB_Publish_Status": ("fb_publish_status", "select"),
+        "FB_Image_Publish_Mode": ("fb_image_publish_mode", "select"),
+        "Studio_Effective_Voiceover_Mode": ("studio_effective_voiceover_mode", "select"),
+        "Studio_Effective_Background_Music_Mode": ("studio_effective_background_music_mode", "select"),
+        "Publish_Retry_Eligible": ("publish_retry_eligible", "bool"),
+        "IG_Carousel_Status": ("ig_carousel_status", "select"),
+        "IG_Carousel_Next_Retry_At": ("ig_carousel_next_retry_at", "time"),
+        "IG_Carousel_Child_Count": ("ig_carousel_child_count", "raw"),
+        "IG_Carousel_Children_Ready_Count": ("ig_carousel_children_ready_count", "raw"),
+        "Assets_Ready_Count": ("assets_ready_count", "raw"),
+        "Asset_Set_Revision": ("asset_set_revision", "text"),
+        "TikTok_9x16_Ready_Count": ("tiktok_9x16_ready_count", "raw"),
+    }
+    for airtable_key, (column, kind) in optional.items():
+        if airtable_key not in fields:
+            continue
+        value = fields.get(airtable_key)
+        if kind == "bool":
+            value = bool(value)
+        elif kind == "select":
+            value = _select(value)
+        elif kind == "time":
+            value = value or None
+        elif kind == "text":
+            value = value or None
+        row[column] = value
+    if any(key in fields for key in (
+        "FB_Image_Publish_Mode", "Studio_Effective_Voiceover_Mode",
+        "Studio_Effective_Background_Music_Mode", "Image_Count",
+    )):
+        row["fb_resolved_publish_mode"] = fb_resolved_publish_mode(fields)
+    elif "FB_Resolved_Publish_Mode" in fields:
+        row["fb_resolved_publish_mode"] = _select(fields.get("FB_Resolved_Publish_Mode"))
     for airtable_key, column in OUTPUT_JSON_COLUMNS.items():
         if airtable_key not in fields:
             continue
@@ -384,8 +455,13 @@ def _partial_patch(record: dict, kind: str) -> dict:
             "Platform", "Format", "Platform_Output_Type", "Studio_Output_Type", "Aspect_Ratio",
             "Output_Status", "Render_Status", "Review_Status", "Publish_Status", "Publish_Method",
             "Content_Status", "Voiceover_Status",
+            "YouTube_Stage", "TikTok_Draft_Status", "TikTok_Draft_Type", "Asset_Aspect_Family",
+            "FB_Publish_Status", "FB_Image_Publish_Mode", "Studio_Effective_Voiceover_Mode",
+            "Studio_Effective_Background_Music_Mode", "IG_Carousel_Status", "FB_Resolved_Publish_Mode",
         }:
             value = _select(value)
+        elif airtable_key in {"Auto_Publish_Enabled", "Image_Output_Selected", "Publish_Retry_Eligible", "Do_Not_Publish"}:
+            value = bool(value)
         elif value == "":
             value = None
         body[column] = value

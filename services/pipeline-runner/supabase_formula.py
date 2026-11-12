@@ -259,6 +259,14 @@ def _predicate_filter(table_id: str, pred: str) -> str | None:
     match = _RECORD_ID.match(text)
     if match:
         return f"airtable_record_id.eq.{match.group(1)}"
+    due = re.match(
+        r"^\{(YouTube_Action_Due_Now|TikTok_Draft_Action_Due_Now|FB_Action_Due_Now|IG_Carousel_Due_Now|IG_Carousel_All_Children_Ready|Assets_Need_Resolution|TTD0_Asset_Route_Ready)\}=([01])$",
+        text,
+    )
+    if due:
+        from publish_queue import due_now_postgrest
+
+        return due_now_postgrest(due.group(1), due.group(2) == "1")
 
     match = _AND.match(text) or _OR.match(text)
     if match:
