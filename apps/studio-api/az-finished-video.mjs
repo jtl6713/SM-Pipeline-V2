@@ -25,7 +25,7 @@ export const AZ_HORIZONTAL_EXPECTED_OUTPUT_COUNT = FINISHED_HORIZONTAL_KEYS.leng
 
 /** Mode is an operator decision captured before finished-video ingest. */
 export function finishedPublishMode(notes) {
-  const match = /(?:^|[;\\n])\\s*az-publish-mode=(approval|immediate)(?=[;\\s]|$)/i.exec(String(notes || ""));
+  const match = /(?:^|[;\n])\s*az-publish-mode=(approval|immediate)(?=[;.\s]|$)/i.exec(String(notes || ""));
   return match ? match[1].toLowerCase() : "legacy";
 }
 
