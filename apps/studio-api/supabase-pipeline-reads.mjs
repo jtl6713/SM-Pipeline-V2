@@ -767,6 +767,11 @@ export function retainProjectionKeys(existing, next) {
   for (const [key, value] of Object.entries(existing)) {
     if (String(key).startsWith("_") && value != null) bag[key] = value;
   }
+  // The half-hour content copy never sends this registry. Keep the separate
+  // copy so a lean upsert does not wipe it or mark the row complete.
+  if (existing.Studio_Creative_Masters_JSON != null && incoming.Studio_Creative_Masters_JSON == null) {
+    bag.Studio_Creative_Masters_JSON = existing.Studio_Creative_Masters_JSON;
+  }
   return bag;
 }
 
@@ -1772,6 +1777,168 @@ export async function syncPlanScheduleCatalogToSupabase(env, deps = {}) {
   }, 120);
 }
 
+const RENDER_HEAL_COPY_FIELDS = [
+  "Render_Clip_List_JSON",
+  "Remotion_Props_JSON",
+  "Output_Filename",
+  "Render_Total_Frames",
+  "Final_File_Storage_Status",
+  "Timing_Status",
+  "Timing_Timeline_JSON",
+  "Voiceover_URL",
+  "Studio_Effective_Voiceover_Mode",
+];
+const RENDER_HEAL_COPY_FORMULA = 'AND({Test_Run_ID}=BLANK(),OR({Render_Status}="Blocked",{Render_Status}="Failed",{Render_Status}="Ready for Render",{Render_Status}="Ready to Render",{Render_Status}="Waiting in Render Queue",{Render_Status}="Rendering"))';
+const RENDER_HEAL_FIELD_KEYS = [
+  "Timing_Status",
+  "Timing_Timeline_JSON",
+  "Voiceover_URL",
+  "Studio_Effective_Voiceover_Mode",
+];
+
+/** Columns only. Does not write error_messages, so the lean projection marker stays unset. */
+export function mapRenderHealColumns(record) {
+  const id = String(record?.id || "").trim();
+  if (!/^rec[A-Za-z0-9]{14}$/.test(id)) return null;
+  const fields = record?.fields || {};
+  const row = { airtable_record_id: id };
+  const clips = jsonColumn(fields.Render_Clip_List_JSON);
+  const props = jsonColumn(fields.Remotion_Props_JSON);
+  if (clips != null) row.render_clip_list = clips;
+  if (props != null) row.remotion_props = props;
+  const filename = String(fields.Output_Filename || "").trim();
+  if (filename) row.output_filename = filename;
+  const frames = Number(fields.Render_Total_Frames);
+  if (Number.isFinite(frames) && frames > 0) row.render_total_frames = Math.round(frames);
+  const storage = String(fields.Final_File_Storage_Status || "").trim();
+  if (storage) row.final_file_storage_status = storage;
+  const healFields = {};
+  for (const key of RENDER_HEAL_FIELD_KEYS) {
+    const value = fields[key];
+    if (value != null && value !== "") healFields[key] = value;
+  }
+  if (Object.keys(healFields).length) row.render_heal_fields = healFields;
+  return Object.keys(row).length > 1 ? row : null;
+}
+
+async function patchRenderHealColumns(env, record) {
+  if (!studioSupabaseConfigured(env)) return { updated: 0 };
+  const row = mapRenderHealColumns(record);
+  if (!row) return { updated: 0 };
+  const { airtable_record_id: id, ...body } = row;
+  await supabaseRest(env, `platform_outputs?airtable_record_id=eq.${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body,
+    headers: { Prefer: "return=minimal" },
+  });
+  return { updated: 1 };
+}
+
+export async function syncRenderHealColumnRecords(env, records) {
+  let updated = 0;
+  for (const record of records || []) {
+    updated += (await patchRenderHealColumns(env, record)).updated || 0;
+  }
+  return { ok: true, updated };
+}
+
+export function creativeMasterExtraValue(fields = {}) {
+  if (!Object.prototype.hasOwnProperty.call(fields, "Studio_Creative_Masters_JSON")) return undefined;
+  const raw = fields.Studio_Creative_Masters_JSON;
+  if (raw == null || raw === "") return "";
+  return typeof raw === "string" ? raw : JSON.stringify(raw);
+}
+
+/** Merge the registry into extras. Does not stamp the lean projection marker. */
+export async function mergeCreativeMasterExtras(env, records, options = {}) {
+  if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured", ok: true, updated: 0 };
+  const rows = (records || []).filter((record) => /^rec[A-Za-z0-9]{14}$/.test(String(record?.id || "")));
+  let updated = 0;
+  for (let index = 0; index < rows.length; index += 40) {
+    const chunk = rows.slice(index, index + 40);
+    const ids = chunk.map((record) => encodeURIComponent(record.id)).join(",");
+    const existing = await supabaseRest(
+      env,
+      `content_items?airtable_record_id=in.(${ids})&select=airtable_record_id,extras`,
+    );
+    const byId = new Map((existing || []).map((row) => [row.airtable_record_id, row.extras]));
+    for (const record of chunk) {
+      const value = options.blankWhenMissing === true
+        ? (creativeMasterExtraValue(record.fields || {}) ?? "")
+        : creativeMasterExtraValue(record.fields || {});
+      if (value === undefined) continue;
+      const extras = isPlainObject(byId.get(record.id)) ? { ...byId.get(record.id) } : {};
+      if (extras.Studio_Creative_Masters_JSON === value) continue;
+      extras.Studio_Creative_Masters_JSON = value;
+      await supabaseRest(env, `content_items?airtable_record_id=eq.${encodeURIComponent(record.id)}`, {
+        method: "PATCH",
+        body: { extras },
+        headers: { Prefer: "return=minimal" },
+      });
+      updated += 1;
+    }
+  }
+  return { ok: true, updated };
+}
+
+export async function readSupabaseCreativeMasterContent(env, airtableId) {
+  const id = String(airtableId || "").trim();
+  if (!/^rec[A-Za-z0-9]{14}$/.test(id)) return null;
+  const rows = await supabaseRest(
+    env,
+    `content_items?airtable_record_id=eq.${encodeURIComponent(id)}&select=airtable_record_id,content_number,content_title,content_status,primary_location,voiceover_status,thumbnail_url,created_at,content_profile_airtable_id,extras&limit=1`,
+  );
+  const row = Array.isArray(rows) ? rows[0] : null;
+  if (!row || !Object.prototype.hasOwnProperty.call(row.extras || {}, "Studio_Creative_Masters_JSON")) return null;
+  return airtableShapedContentFromSupabase(row);
+}
+
+async function syncFilteredCatalog(env, deps, table, fields, filterFormula, onRecords, maxPages, sortField) {
+  const listRecordsPage = deps.listRecordsPage;
+  if (typeof listRecordsPage !== "function") {
+    return { skipped: true, reason: "listRecordsPage_missing", ok: true, updated: 0 };
+  }
+  let offset = null;
+  let updated = 0;
+  let pages = 0;
+  while (pages < maxPages) {
+    await deps.assertLease?.();
+    const page = await listRecordsPage(env, table, {
+      limit: 100,
+      offset,
+      fields: [...fields],
+      ...(filterFormula ? { filterFormula } : {}),
+      ...(sortField ? { sortField, sortDirection: "desc" } : {}),
+    });
+    if (!page?.valid) throw new Error(`${table} catalog page was not valid`);
+    const records = page.records || [];
+    if (records.length) updated += await onRecords(records);
+    pages += 1;
+    offset = page.offset || null;
+    if (!offset || !records.length) return { ok: true, updated, pages, done: true };
+  }
+  console.warn("Supabase catalog copy stopped at the page cap", table, maxPages);
+  return { ok: true, updated, pages, done: false };
+}
+
+export async function syncRenderHealCatalogToSupabase(env, deps = {}) {
+  if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured", ok: true };
+  const table = deps.outputTable || "Platform Outputs";
+  return syncFilteredCatalog(env, deps, table, RENDER_HEAL_COPY_FIELDS, RENDER_HEAL_COPY_FORMULA, async (records) => {
+    const saved = await syncRenderHealColumnRecords(env, records);
+    return saved.updated || 0;
+  }, 4, "Output_ID");
+}
+
+export async function syncCreativeMasterCatalogToSupabase(env, deps = {}) {
+  if (!studioSupabaseConfigured(env)) return { skipped: true, reason: "supabase_not_configured", ok: true };
+  const table = deps.contentTable || "Content Items";
+  return syncFilteredCatalog(env, deps, table, ["Studio_Creative_Masters_JSON"], "", async (records) => {
+    const saved = await mergeCreativeMasterExtras(env, records, { blankWhenMissing: true });
+    return saved.updated || 0;
+  }, 25, "");
+}
+
 function encodeDeskFilterValue(value) {
   return encodeURIComponent(String(value));
 }
@@ -1785,7 +1952,7 @@ function igOpenCarouselFilter() {
  * Candidate pages for desk heals that used to list Platform Outputs from Airtable.
  * Typed columns and the error-message bag are filtered here. The classifier still
  * decides whether a row is healed. The patch stays on the existing Airtable export.
- * Render heals that need excluded clip JSON stay on Airtable.
+ * Render heals read the clip-list columns. Those columns are not part of the lean row.
  */
 export function deskHealOutputFilter(kind, options = {}) {
   const quiet = "test_run_id=is.null&do_not_publish=eq.false";
@@ -1887,7 +2054,74 @@ export function deskHealOutputFilter(kind, options = {}) {
       + `or=(publish_status.eq.${encodeDeskFilterValue("Ready to Publish")},publish_status.eq.Publishing))`;
     return `${quiet}&published_at=is.null&or=(publish_status.eq.Failed,${message})`;
   }
+  if (kind === "render_vo") {
+    return "test_run_id=is.null&render_status=eq.Blocked&render_clip_list=not.is.null"
+      + `&error_messages->>Remotion_Error_Message.ilike.${encodeDeskFilterValue("*Spoken audio must never run past the video end*")}`;
+  }
+  if (kind === "render_private_drive") {
+    const msg = `or=(error_messages->>Remotion_Error_Message.ilike.${encodeDeskFilterValue("*PRIVATE_DRIVE_WATERMARK*")},`
+      + `error_messages->>Final_File_Error_Message.ilike.${encodeDeskFilterValue("*PRIVATE_DRIVE_WATERMARK*")},`
+      + `error_messages->>Remotion_Error_Message.ilike.${encodeDeskFilterValue("*watermark*")})`;
+    return "test_run_id=is.null&render_status=in.(Blocked,Failed)"
+      + `&or=(remotion_job_id.is.null,remotion_job_id.eq.)&or=(final_file_url.is.null,final_file_url.eq.)&${msg}`;
+  }
+  if (kind === "render_unfetchable") {
+    return `test_run_id=is.null&render_status=in.(${encodeDeskFilterValue("Ready for Render")},Failed)`
+      + "&or=(remotion_job_id.is.null,remotion_job_id.eq.)&or=(final_file_url.is.null,final_file_url.eq.)"
+      + "&render_clip_list=not.is.null";
+  }
+  if (kind === "render_ready_typo") {
+    return `test_run_id=is.null&render_status=eq.${encodeDeskFilterValue("Ready to Render")}`
+      + "&or=(remotion_job_id.is.null,remotion_job_id.eq.)&render_clip_list=not.is.null"
+      + "&output_filename=not.is.null&render_total_frames=gt.0"
+      + `&format=neq.Story&studio_output_type=neq.Story`
+      + "&and(error_messages->>Composition_ID.not.is.null,error_messages->>Composition_ID.neq.)";
+  }
+  if (kind === "render_queue") {
+    return `test_run_id=is.null&render_status=in.(${encodeDeskFilterValue("Ready for Render")},${encodeDeskFilterValue("Waiting in Render Queue")})`
+      + "&or=(remotion_job_id.is.null,remotion_job_id.eq.)&render_clip_list=not.is.null"
+      + "&output_filename=not.is.null&render_total_frames=gt.0&or=(final_file_url.is.null,final_file_url.eq.)"
+      + "&and(error_messages->>Composition_ID.not.is.null,error_messages->>Composition_ID.neq.)";
+  }
+  if (kind === "render_stale_final") {
+    return "test_run_id=is.null&published_at=is.null&do_not_publish=eq.false"
+      + `&render_status=in.(Rendering,${encodeDeskFilterValue("Ready for Render")},${encodeDeskFilterValue("Ready to Render")},${encodeDeskFilterValue("Waiting in Render Queue")})`
+      + "&and(remotion_job_id.not.is.null,remotion_job_id.neq.)"
+      + "&and(final_file_url.not.is.null,final_file_url.neq.)"
+      + "&final_file_storage_status=eq.Uploaded"
+      + `&output_status=in.(${encodeDeskFilterValue("In Production")},Rendering)`;
+  }
+  if (kind === "render_failed") {
+    return "test_run_id=is.null&render_status=eq.Failed"
+      + "&or=(remotion_job_id.is.null,remotion_job_id.eq.)&or=(final_file_url.is.null,final_file_url.eq.)";
+  }
   throw new Error("Unknown desk heal candidate list");
+}
+
+function deskHealSelect(kind) {
+  if (kind === "render_vo" || kind === "render_unfetchable") {
+    return `${OUTPUT_SELECT},render_clip_list,remotion_props`;
+  }
+  if (kind === "render_queue") return `${OUTPUT_SELECT},render_heal_fields`;
+  if (kind === "render_stale_final") return `${OUTPUT_SELECT},final_file_storage_status`;
+  return OUTPUT_SELECT;
+}
+
+function attachRenderHealFields(shaped, row) {
+  if (row.render_clip_list != null) {
+    shaped.fields.Render_Clip_List_JSON = typeof row.render_clip_list === "string"
+      ? row.render_clip_list
+      : JSON.stringify(row.render_clip_list);
+  }
+  if (row.remotion_props != null) {
+    shaped.fields.Remotion_Props_JSON = typeof row.remotion_props === "string"
+      ? row.remotion_props
+      : JSON.stringify(row.remotion_props);
+  }
+  if (row.output_filename) shaped.fields.Output_Filename = row.output_filename;
+  if (row.render_total_frames != null) shaped.fields.Render_Total_Frames = row.render_total_frames;
+  if (row.final_file_storage_status) shaped.fields.Final_File_Storage_Status = row.final_file_storage_status;
+  if (isPlainObject(row.render_heal_fields)) Object.assign(shaped.fields, row.render_heal_fields);
 }
 
 function shapeDeskHealRecord(row) {
@@ -1895,15 +2129,37 @@ function shapeDeskHealRecord(row) {
   if (!shaped.fields.Last_Modified && !shaped.fields.Updated_At && row.updated_at) {
     shaped.fields.Updated_At = row.updated_at;
   }
+  attachRenderHealFields(shaped, row);
   return shaped;
 }
 
-export async function listSupabaseDeskHealOutputs(env, { kind, limit = 30 } = {}) {
+export async function listSupabaseDeskHealOutputs(env, { kind, limit = 30, sortDirection = "desc" } = {}) {
   if (!studioSupabaseConfigured(env)) throw new Error("Supabase desk heal read is not configured");
   const capped = Math.max(1, Math.min(60, Number(limit) || 30));
+  const direction = String(sortDirection || "desc").toLowerCase() === "asc" ? "asc" : "desc";
+  const order = `order=output_number.${direction}.nullslast`;
+  const select = deskHealSelect(kind);
+  if (kind === "render_unfetchable") {
+    const matches = [];
+    const pageSize = 40;
+    for (let offset = 0; offset < 320 && matches.length < capped; offset += pageSize) {
+      const page = await supabaseRest(
+        env,
+        `platform_outputs?${deskHealOutputFilter(kind)}&select=${select}&${order}&limit=${pageSize}&offset=${offset}`,
+      );
+      const batch = Array.isArray(page) ? page : [];
+      for (const row of batch) {
+        if (!JSON.stringify(row?.render_clip_list || "").includes("/api/media-assets/")) continue;
+        matches.push(row);
+        if (matches.length >= capped) break;
+      }
+      if (batch.length < pageSize) break;
+    }
+    return matches.filter((row) => row?.airtable_record_id).map(shapeDeskHealRecord);
+  }
   const rows = await supabaseRest(
     env,
-    `platform_outputs?${deskHealOutputFilter(kind)}&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast&limit=${capped}`,
+    `platform_outputs?${deskHealOutputFilter(kind)}&select=${select}&${order}&limit=${capped}`,
   );
   return (Array.isArray(rows) ? rows : [])
     .filter((row) => row?.airtable_record_id)
@@ -1921,7 +2177,7 @@ export async function listSupabaseDeskHealPage(env, { kind, limit = 100, offset 
   }
   const rows = await supabaseRest(
     env,
-    `platform_outputs?${deskHealOutputFilter(kind, { cutoffIso })}&select=${OUTPUT_SELECT}&order=output_number.desc.nullslast&limit=${capped}&offset=${start}`,
+    `platform_outputs?${deskHealOutputFilter(kind, { cutoffIso })}&select=${deskHealSelect(kind)}&order=output_number.desc.nullslast&limit=${capped}&offset=${start}`,
   );
   const batch = Array.isArray(rows) ? rows : [];
   const records = batch.filter((row) => row?.airtable_record_id).map(shapeDeskHealRecord);
@@ -3333,12 +3589,18 @@ export async function syncAllProfilesPipelineToSupabase(env, profiles, deps = {}
   }
   let carouselSlides = null;
   let planSchedules = null;
+  let renderHealColumns = null;
+  let creativeMasters = null;
   if (!abortedForCircuit && !supabaseCircuitOpen()) {
     carouselSlides = await runPhaseBackfill("carousel_slides", () => syncCarouselSlideCatalogToSupabase(env, deps));
     planSchedules = await runPhaseBackfill("plan_schedules", () => syncPlanScheduleCatalogToSupabase(env, deps));
+    renderHealColumns = await runPhaseBackfill("render_heal_columns", () => syncRenderHealCatalogToSupabase(env, deps));
+    creativeMasters = await runPhaseBackfill("creative_masters", () => syncCreativeMasterCatalogToSupabase(env, deps));
   } else {
     carouselSlides = { skipped: true, reason: "supabase_circuit_open" };
     planSchedules = { skipped: true, reason: "supabase_circuit_open" };
+    renderHealColumns = { skipped: true, reason: "supabase_circuit_open" };
+    creativeMasters = { skipped: true, reason: "supabase_circuit_open" };
   }
   const phaseOk = (row) => row?.ok === true || row?.skipped === true;
   const ok = results.length > 0 && results.every((row) => row?.ok === true)
@@ -3356,6 +3618,8 @@ export async function syncAllProfilesPipelineToSupabase(env, profiles, deps = {}
     auth_tables: authTables,
     carousel_slides: carouselSlides,
     plan_schedules: planSchedules,
+    render_heal_columns: renderHealColumns,
+    creative_masters: creativeMasters,
   };
 }
 
@@ -3387,6 +3651,9 @@ export async function syncAirtableOutputRowToSupabase(env, record, options = {})
       fullRecord: false,
     });
     await upsertChunk(env, "platform_outputs", [row]);
+    await patchRenderHealColumns(env, record).catch((error) => {
+      console.warn("render heal column copy failed", error);
+    });
     return { ok: true, mode: "create" };
   }
 
@@ -3425,6 +3692,9 @@ export async function syncAirtableOutputRowToSupabase(env, record, options = {})
         headers: { Prefer: "return=minimal" },
       },
     );
+    await patchRenderHealColumns(env, record).catch((error) => {
+      console.warn("render heal column copy failed", error);
+    });
     return { ok: true, mode: "patch" };
   }
 
@@ -3449,6 +3719,9 @@ export async function syncAirtableOutputRowToSupabase(env, record, options = {})
     [row] = await applyStoredProjection(env, "platform_outputs", [row], "error_messages");
   }
   await upsertChunk(env, "platform_outputs", [row]);
+  await patchRenderHealColumns(env, record).catch((error) => {
+    console.warn("render heal column copy failed", error);
+  });
   return { ok: true, mode: "upsert" };
 }
 
@@ -3466,6 +3739,9 @@ export async function syncAirtableContentRowToSupabase(env, record, options = {}
     const profileUuid = profileAirtableId ? await resolveSupabaseProfileId(env, profileAirtableId) : null;
     const row = mapAirtableContentToSupabase(record, profileUuid || null, { fullRecord: false });
     await upsertChunk(env, "content_items", [row]);
+    await mergeCreativeMasterExtras(env, [record]).catch((error) => {
+      console.warn("creative master copy failed", error);
+    });
     return { ok: true, mode: "create" };
   }
   const fields = record.fields || {};
@@ -3480,6 +3756,9 @@ export async function syncAirtableContentRowToSupabase(env, record, options = {}
       [row] = await applyStoredProjection(env, "content_items", [row], "extras");
     }
     await upsertChunk(env, "content_items", [row]);
+    await mergeCreativeMasterExtras(env, [record]).catch((error) => {
+      console.warn("creative master copy failed", error);
+    });
     return { ok: true, mode: "upsert" };
   }
 
@@ -3508,6 +3787,9 @@ export async function syncAirtableContentRowToSupabase(env, record, options = {}
       headers: { Prefer: "return=minimal" },
     },
   );
+  await mergeCreativeMasterExtras(env, [record]).catch((error) => {
+    console.warn("creative master copy failed", error);
+  });
   return { ok: true, mode: "patch" };
 }
 

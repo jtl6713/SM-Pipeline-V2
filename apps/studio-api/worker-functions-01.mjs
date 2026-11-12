@@ -12170,7 +12170,7 @@ export function studioExtendClipsToCoverVoiceover(row) {
 export async function studioHealVoiceoverExceedsRender(env, options = {}) {
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const limit = Math.max(1, Math.min(8, Number(options.limit) || 4));
-  const rows = await listRecords(env, outputTable, {
+  const rows = await studioListDeskHealOutputs(env, "render_vo", {
     limit: Math.max(limit, 12),
     sortField: "Output_ID",
     sortDirection: "desc",
@@ -12226,7 +12226,7 @@ export async function healStuckStudioRenders(env, { skipR4Admission = false } = 
   // Google 403 / ERR_BLOCKED_BY_ORB. Do not blindly loop R4 while the old
   // renderer is still live. Once health advertises localization support, clear
   // the stale job and requeue a small batch each tick.
-  const privateDriveWatermarkRows = await listRecords(env, outputTable, {
+  const privateDriveWatermarkRows = await studioListDeskHealOutputs(env, "render_private_drive", {
     limit: 12,
     sortField: "Output_ID",
     sortDirection: "desc",
@@ -12265,7 +12265,7 @@ export async function healStuckStudioRenders(env, { skipR4Admission = false } = 
       pulses.push({ key: "R4_PRIVATE_DRIVE_WATERMARK", id: row.id, error: error instanceof Error ? error.message : String(error) });
     }
   }
-  const invalidSourceRows = await listRecords(env, outputTable, {
+  const invalidSourceRows = await studioListDeskHealOutputs(env, "render_unfetchable", {
     limit: 12,
     sortField: "Output_ID",
     sortDirection: "desc",
@@ -12288,7 +12288,7 @@ export async function healStuckStudioRenders(env, { skipR4Admission = false } = 
   // Orphan Airtable choice "Ready to Render" (FB slideshow wording) is not
   // matched by R4/T1 selectors which require "Ready for Render". Outputs
   // 1702–1705 Upper West Side parked for days with a complete package.
-  const readyToTypo = await listRecords(env, outputTable, {
+  const readyToTypo = await studioListDeskHealOutputs(env, "render_ready_typo", {
     limit: 8,
     sortField: "Output_ID",
     sortDirection: "desc",
@@ -12320,7 +12320,7 @@ export async function healStuckStudioRenders(env, { skipR4Admission = false } = 
   // Prep VO/timing for queue candidates, then admit at most one Remotion start.
   // Do not pulse R4 for every Ready row — that stamped many "Rendering" / Trying Again
   // labels while Remotion can only run one job.
-  const readyNoJob = await listRecords(env, outputTable, {
+  const readyNoJob = await studioListDeskHealOutputs(env, "render_queue", {
     limit: 24,
     sortField: "Output_ID",
     sortDirection: "asc",
@@ -12377,7 +12377,7 @@ export async function healStuckStudioRenders(env, { skipR4Admission = false } = 
   // only when a saved Remotion job AND an uploaded final MP4 already exist.
   // Keep the same file/job, do not touch approval, scheduling or Review_Status;
   // the RR1 workflow remains responsible for sending actual review mail.
-  const staleRenderingDone = await listRecords(env, outputTable, {
+  const staleRenderingDone = await studioListDeskHealOutputs(env, "render_stale_final", {
     limit: 12,
     sortField: "Output_ID",
     sortDirection: "asc",
@@ -12416,9 +12416,12 @@ export async function healStuckStudioRenders(env, { skipR4Admission = false } = 
       pulses.push({ key: "R5_LONG_RENDER", id: row.id, error: error instanceof Error ? error.message : String(error) });
     }
   }
-  const failedRenders = await scanOutstandingFailedOutputs(
-    (options) => listRecordsPage(env, outputTable, options),
-    { filterFormula: 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Failed",{Remotion_Job_ID}="",{Final_File_URL}="")' });
+  const failedRenders = await studioScanDeskHealOutputs(
+    env,
+    "render_failed",
+    outputTable,
+    { filterFormula: 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Failed",{Remotion_Job_ID}="",{Final_File_URL}="")' },
+  );
   let failedRenderRetries = 0;
   for (const row of failedRenders) {
     if (failedRenderRetries >= 6) break;
@@ -12607,7 +12610,11 @@ function studioDeskHealAutoPublishEnabled(record) {
 
 async function studioListDeskHealOutputs(env, kind, airtableList) {
   if (studioWriteSource(env) === "supabase" && studioSupabaseConfigured(env)) {
-    return listSupabaseDeskHealOutputs(env, { kind, limit: airtableList.limit });
+    return listSupabaseDeskHealOutputs(env, {
+      kind,
+      limit: airtableList.limit,
+      sortDirection: airtableList.sortDirection,
+    });
   }
   return listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, airtableList);
 }
